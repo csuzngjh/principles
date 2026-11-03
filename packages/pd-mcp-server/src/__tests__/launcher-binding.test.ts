@@ -133,13 +133,25 @@ function bindingFor({ host, runtime, workspace, overrides = {} }: BindingInput):
   };
 }
 
-function runLauncher(root: string): ReturnType<typeof spawnSync> {
+interface LaunchOptions {
+  /** Explicit OWNER declaration the launcher cross-checks against the binding. */
+  declareWorkspace?: string;
+}
+
+function runLauncher(root: string, options: LaunchOptions = {}): ReturnType<typeof spawnSync> {
   return spawnSync(process.execPath, [path.join(root, 'mcp', 'launcher.cjs')], {
     cwd: root,
     encoding: 'utf8',
     timeout: 20_000,
     env: {
       ...process.env,
+      // Isolate HOME so ambient PD config files cannot declare a workspace.
+      HOME: root,
+      USERPROFILE: root,
+      // The openclaw gate re-derives the declaration from env/config; an
+      // inherited value from the developer machine must not leak into the test.
+      PD_WORKSPACE_DIR: options.declareWorkspace ?? '',
+      OPENCLAW_WORKSPACE: '',
       // Neither value may reach the server: the binding is the only authority.
       PD_MCP_WORKSPACE_DIR: path.join(root, 'inherited-workspace-must-not-win'),
       PD_MCP_HOST: 'inherited-host-must-not-win',
@@ -166,7 +178,7 @@ describe.each(['codex', 'openclaw', 'workbuddy'] as const)('launcher valid bindi
     const workspace = makeWorkspace();
     writeBinding(root, bindingFor({ host, runtime, workspace }));
 
-    const result = runLauncher(root);
+    const result = runLauncher(root, host === 'openclaw' ? { declareWorkspace: workspace } : {});
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toBe('');
     expect(JSON.parse(String(result.stdout))).toEqual({ workspace, host });
@@ -357,7 +369,8 @@ describe('launcher binding rejection (fail-closed)', () => {
     const root = makePluginRoot('openclaw');
     const runtime = makeRuntime('openclaw');
     fs.writeFileSync(runtime.serverEntry, "'use strict';\nexports.notMain = 1;\n", 'utf8');
-    writeBinding(root, bindingFor({ host: 'openclaw', runtime, workspace: makeWorkspace() }));
-    expectFailure(runLauncher(root), 'server_entry_invalid');
+    const workspace = makeWorkspace();
+    writeBinding(root, bindingFor({ host: 'openclaw', runtime, workspace }));
+    expectFailure(runLauncher(root, { declareWorkspace: workspace }), 'server_entry_invalid');
   });
 });
