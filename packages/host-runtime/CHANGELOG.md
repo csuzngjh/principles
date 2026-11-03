@@ -1,5 +1,12 @@
 # @principles/host-runtime
 
+## 0.14.5
+
+### Patch Changes
+
+- Updated dependencies [5fa6fc9]
+  - @principles/core@2.0.0
+
 ## 0.14.4
 
 ### Patch Changes

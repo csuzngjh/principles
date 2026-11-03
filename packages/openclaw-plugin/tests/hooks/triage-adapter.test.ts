@@ -17,7 +17,6 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveSourceKind,
   buildToolFailureObservation,
-  buildLlmDetectionObservation,
   type RawObservation,
   evaluateEvidenceTriage,
   isHighConfidenceUnsafeAction,
@@ -162,18 +161,18 @@ describe('buildToolFailureObservation', () => {
   });
 });
 
-// ── buildLlmDetectionObservation ─────────────────────────────────────────────
+// ── Pain Phase 0: retired LLM detection builder mappings stay reachable ─────
+// buildLlmDetectionObservation was deleted (zero production callers); the
+// underlying resolveSourceKind mappings are pinned here via inline literals.
 
-describe('buildLlmDetectionObservation', () => {
-  it('builds observation for GFI-triggered detection', () => {
-    const obs = buildLlmDetectionObservation({ detectionSource: 'llm_some_rule', isGfiTriggered: true });
-    expect(obs.detectionSource).toBe('llm_some_rule');
-    expect(obs.isGfiTriggered).toBe(true);
+describe('Pain Phase 0: retired LLM detection builder mappings stay reachable inline', () => {
+  it('GFI-triggered detection still resolves to gfi_threshold', () => {
+    const obs: RawObservation = { observedAt: 't', detectionSource: 'llm_some_rule', isGfiTriggered: true };
     expect(resolveSourceKind(obs)).toBe('gfi_threshold');
   });
 
-  it('builds observation for llm_paralysis', () => {
-    const obs = buildLlmDetectionObservation({ detectionSource: 'llm_paralysis', isGfiTriggered: false });
+  it('llm_paralysis detection source still resolves to llm_paralysis', () => {
+    const obs: RawObservation = { observedAt: 't', detectionSource: 'llm_paralysis', isGfiTriggered: false };
     expect(resolveSourceKind(obs)).toBe('llm_paralysis');
   });
 });

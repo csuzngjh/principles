@@ -144,7 +144,7 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
   it('gates every version-producing step on ABSENT (idempotent skip, T22)', () => {
     const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ if?: string; name?: string }> } };
     const steps = doc.runs?.steps ?? [];
-    const gatedNames = ['Verify registry dependencies are published', 'Build target package', 'Publish exact committed version', 'Verify the packed installer tarball carries the product identity'];
+    const gatedNames = ['Verify registry dependencies are published', 'Build target package', 'Publish exact committed version', 'Pack and verify immutable installer candidate'];
     for (const name of gatedNames) {
       const step = steps.find((s) => s.name === name);
       expect(step, `step ${name}`).toBeDefined();
@@ -189,7 +189,33 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     expect(branch('create-principles-disciple')).toContain('npm run build --workspace=@principles/workbuddy-adapter');
   });
 
-  it('Verify package dry-run: a cosmetic head preview must never own the exit verdict', () => {
+  it('routes installer publication through the verified candidate and retains non-installer dry-run checks', () => {
+    const doc = loadWorkflow(rel) as {
+      runs?: { steps?: Array<{ id?: string; if?: string; name?: string; run?: string; env?: Record<string, unknown> }> };
+    };
+    const steps = doc.runs?.steps ?? [];
+    const dryRun = steps.find((s) => s.name === 'Verify non-installer package dry-run');
+    expect(dryRun?.if).toContain("inputs.pkg_dir != 'create-principles-disciple'");
+    expect(dryRun?.run).toContain('npm pack --dry-run');
+
+    const candidate = steps.find((s) => s.name === 'Pack and verify immutable installer candidate');
+    expect(candidate?.id).toBe('candidate');
+    expect(candidate?.if).toContain("inputs.pkg_dir == 'create-principles-disciple'");
+    expect(String(candidate?.env?.TOOLS_DIR)).toContain('inputs.tools_dir');
+    expect(candidate?.run).toContain('prepare-npm-candidate.mjs');
+    expect(candidate?.run).toContain('--cohort "$COHORT"');
+    expect(candidate?.run).toContain('--github-output "$GITHUB_OUTPUT"');
+    expect(candidate?.run).not.toContain('npm pack --dry-run');
+
+    const publish = steps.find((s) => s.name === 'Publish exact committed version');
+    expect(String(publish?.env?.CANDIDATE_TARBALL)).toContain('steps.candidate.outputs.tarball');
+    expect(String(publish?.env?.CANDIDATE_SHA512_HEX)).toContain('steps.candidate.outputs.sha512_hex');
+    expect(publish?.run).toContain('npm publish "$PUBLISH_TARGET" --provenance --access public');
+    expect(publish?.run).toContain('npm publish --provenance --access public');
+    expect(publish?.run).toContain('ACTUAL_SHA512_HEX');
+  });
+
+  it('non-installer package dry-run: a cosmetic head preview must never own the exit verdict', () => {
     // Cohort d6fa4055 aborted at 5/7 (principles-disciple) with the log
     // ending at "Build verification passed!" and NO npm error anywhere. Cause:
     // `npm pack --dry-run 2>&1 | head -50` — head closed the pipe after 50
@@ -199,7 +225,7 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     // failed release. The step must capture the real exit code first and
     // only then preview.
     const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ name?: string; run?: string }> } };
-    const dryRun = doc.runs?.steps?.find((s) => s.name === 'Verify package dry-run');
+    const dryRun = doc.runs?.steps?.find((s) => s.name === 'Verify non-installer package dry-run');
     expect(dryRun?.run).toBeDefined();
     const script = dryRun!.run!;
     expect(script).toContain('pack_status=$?');

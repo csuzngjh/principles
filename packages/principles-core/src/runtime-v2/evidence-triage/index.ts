@@ -25,12 +25,12 @@ export { evaluateTriage } from './triage-policy.js';
 export { RISKY_HIGH_SCORE_THRESHOLD, REPEATED_FAILURE_THRESHOLD } from './triage-policy.js';
 
 // Observation resolver — PRI-446 (migrated from plugin raw-observation-adapter)
+// Pain Phase 0: buildLlmDetectionObservation / buildEmpathyObservation removed
+// (zero production callers; live builders below keep their consumers).
 export type { RawObservation } from './observation-resolver.js';
 export {
   resolveSourceKind,
   buildToolFailureObservation,
-  buildLlmDetectionObservation,
-  buildEmpathyObservation,
   buildManualPainObservation,
 } from './observation-resolver.js';
 
@@ -46,20 +46,3 @@ export {
   isAdmittedOutcome,
   isSkippedOutcome,
 } from './trigger-controller.js';
-
-// Admission events — PEAT-B2
-export type {
-  AdmissionDecisionEvent,
-  DiagnosisTaskCreatedEvent,
-  EvidenceOnlyRecordedEvent,
-  SkippedRefusedEvent,
-  AdmissionEvent,
-} from './admission-events.js';
-export {
-  createAdmissionDecisionEvent,
-  createDiagnosisTaskCreatedEvent,
-  createEvidenceOnlyRecordedEvent,
-  createSkippedRefusedEvent,
-  serializeAdmissionEvent,
-  validateEventPrivacy,
-} from './admission-events.js';
