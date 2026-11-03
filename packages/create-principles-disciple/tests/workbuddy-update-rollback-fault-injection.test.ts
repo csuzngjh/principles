@@ -180,9 +180,17 @@ describe('WorkBuddy update-failure rollback (real fault injection)', () => {
     const oldRegistrySha = sha256File(registryPath);
 
     // 3. Publish a CHANGED same-version payload, then inject the fault: the
-    //    registry commit must fail (read-only file) AFTER the cache swap.
+    //    registry commit must fail AFTER the cache swap.
+    //    Cross-platform real OS failure, no mock seam:
+    //      - Windows: a read-only target file makes the atomic rename fail;
+    //      - POSIX: rename over a read-only file is legal, so the registry's
+    //        PARENT dir is made non-writable — the backup/temp step inside it
+    //        fails. The cache staging/swap lives in a deeper directory, so the
+    //        cache replacement still happens first.
     fs.writeFileSync(path.join(payloadRoot, 'workbuddy-adapter', 'plugin', 'scripts', 'wrapper.cjs'), '// wrapper v2 (changed payload)\n');
+    const pluginsDir = path.dirname(registryPath);
     fs.chmodSync(registryPath, 0o444);
+    fs.chmodSync(pluginsDir, 0o555);
 
     const second = await installer.install(installCtx());
     expect(second.success).toBe(false);
@@ -205,6 +213,7 @@ describe('WorkBuddy update-failure rollback (real fault injection)', () => {
     expect(leftovers).toEqual([]);
 
     // 7. Restore permissions before launching/cleanup.
+    fs.chmodSync(pluginsDir, 0o755);
     fs.chmodSync(registryPath, 0o644);
 
     // 8. REAL launcher from the restored cache: initialize, tools/list and a
@@ -250,7 +259,7 @@ describe('WorkBuddy update-failure rollback (real fault injection)', () => {
       expect(startup?.workspaceFingerprint).toBe(expected);
 
       console.log('[gate4-evidence]', JSON.stringify({
-        injectedFault: 'installed_plugins.json chmod 0o444 → registry commit fails after cache swap',
+        injectedFault: 'registry file read-only (Windows) + registry parent dir non-writable (POSIX) → registry commit fails after cache swap',
         installerReason: second.reason,
         cacheDigestBefore: oldCacheDigest,
         cacheDigestAfter: digestTree(cacheVersionDir()),
