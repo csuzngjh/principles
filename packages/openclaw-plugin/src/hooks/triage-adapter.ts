@@ -37,7 +37,7 @@ import {
  *
  * PRI-360 S1: All source-kind resolution now goes through this single entry point.
  */
-export { resolveSourceKind, buildToolFailureObservation, buildLlmDetectionObservation, type RawObservation } from './raw-observation-adapter.js';
+export { resolveSourceKind, buildToolFailureObservation, type RawObservation } from './raw-observation-adapter.js';
 // All callers should use resolveSourceKind with RawObservation.
 
 // ── Triage Evaluation ───────────────────────────────────────────────────────

@@ -5,9 +5,11 @@
  * migrated to principles-core (runtime-v2/evidence-triage/observation-resolver.ts).
  *
  * This file is now a thin re-export adapter. It preserves the original export
- * names (resolveSourceKind, buildToolFailureObservation, buildLlmDetectionObservation,
- * RawObservation) so all existing import sites and the source-string
- * characterization tests keep working without changes.
+ * names (resolveSourceKind, buildToolFailureObservation, RawObservation) so
+ * all existing import sites and the source-string characterization tests keep
+ * working without changes. Pain Phase 0 removed the retired
+ * buildLlmDetectionObservation / buildEmpathyObservation re-exports (zero
+ * production callers).
  *
  * ERR checklist:
  * - ERR-011: re-export adapter, not a local re-definition of migrated logic.
@@ -16,8 +18,6 @@
 export {
   resolveSourceKind,
   buildToolFailureObservation,
-  buildLlmDetectionObservation,
-  buildEmpathyObservation,
   buildManualPainObservation,
 } from '@principles/core/runtime-v2';
 

@@ -267,40 +267,6 @@ export function buildToolFailureObservation(options: {
 }
 
 /**
- * Build a RawObservation for an LLM detection context.
- */
-export function buildLlmDetectionObservation(options: {
-  detectionSource: string;
-  isGfiTriggered: boolean;
-}): RawObservation {
-  return {
-    observedAt: new Date().toISOString(),
-    detectionSource: options.detectionSource,
-    isGfiTriggered: options.isGfiTriggered,
-  };
-}
-
-/**
- * Build a RawObservation for an empathy/GFI-triggered context (PRI-454).
- *
- * Used by prompt.ts paths 2 and 3 (GFI threshold crossing + empathy keyword match).
- * When isGfiTriggered=true, resolveSourceKind returns 'gfi_threshold' (evidence_only).
- * When isGfiTriggered=false, resolveSourceKind returns 'empathy_inferred' (owner_confirm).
- */
-export function buildEmpathyObservation(options: {
-  detectionSource: string;
-  isGfiTriggered: boolean;
-  sessionId?: string;
-}): RawObservation {
-  return {
-    observedAt: new Date().toISOString(),
-    detectionSource: options.detectionSource,
-    isGfiTriggered: options.isGfiTriggered,
-    sessionId: options.sessionId,
-  };
-}
-
-/**
  * Build a RawObservation for a manual pain entry (PRI-454).
  *
  * Used by pain.ts path 5 (manual /pd-pain command).

@@ -214,59 +214,6 @@ export function listCorrectionSamples(
 }
 
 /**
- * Mirror of openclaw-plugin TrajectoryDatabase.recordCorrectionRejectedPain:
- * the two review surfaces (pd-cli and /pd-samples) must produce the same
- * correction_rejected pain event, otherwise Owner rejections recorded via the
- * CLI silently drop out of the pain pipeline. host_kind stays 'openclaw'
- * because correction samples are only mined from OpenClaw sessions.
- * Non-fatal: failures warn and leave the review result intact.
- */
-function recordCorrectionRejectedPain(
-  db: Database.Database,
-  record: {
-    sessionId: string;
-    qualityScore: number;
-    diffExcerpt: string;
-    principleIdsJson: string;
-    createdAt: string;
-  },
-): void {
-  try {
-    const painScore = Math.max(0, Math.min(100, Math.round(Number(record.qualityScore) || 0)));
-    const reason = `Correction rejected (quality ${record.qualityScore.toFixed(2)}). Principles: ${record.principleIdsJson}${record.diffExcerpt ? ` — ${record.diffExcerpt.slice(0, 120)}` : ''}`;
-    const severity = painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild';
-
-    db.transaction(() => {
-      db.prepare(`
-        INSERT INTO sessions (session_id, started_at, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
-      `).run(record.sessionId, record.createdAt, record.createdAt);
-
-      db.prepare(`
-        INSERT INTO pain_events (
-          session_id, source, score, reason, severity, origin, confidence, text, created_at, host_kind
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        record.sessionId,
-        'correction_rejected',
-        painScore,
-        reason,
-        severity,
-        'system_infer',
-        1,
-        record.diffExcerpt || null,
-        record.createdAt,
-        'openclaw',
-      );
-    })();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[PD:TrajectoryStore] Failed to record correction_rejected pain event: ${msg}`);
-  }
-}
-
-/**
  * Review a correction sample (approve or reject).
  *
  * @param sampleId - The sample ID to review
@@ -340,19 +287,10 @@ export function reviewCorrectionSample(
       throw new Error(`Sample not found after update: ${sampleId}`);
     }
 
-    // Rejection parity with the plugin writer (openclaw-plugin
-    // TrajectoryDatabase.recordCorrectionRejectedPain): a rejected correction
-    // feeds the pain pipeline as source 'correction_rejected'. Non-fatal by
-    // contract — the review result must survive a pain-write failure.
-    if (decision === 'rejected') {
-      recordCorrectionRejectedPain(db, {
-        sessionId: String(record.session_id),
-        qualityScore: Number(record.quality_score),
-        diffExcerpt: String(record.diff_excerpt ?? ''),
-        principleIdsJson: String(record.principle_ids_json ?? '[]'),
-        createdAt: String(record.created_at),
-      });
-    }
+    // Pain Phase 0 (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6.4):
+    // the correction_rejected pain event write was removed — sample rejection
+    // is learning-quality feedback, not host Pain. This mirrors the plugin
+    // writer (openclaw-plugin TrajectoryDatabase.reviewCorrectionSample).
 
     return {
       sampleId: String(record.sample_id),
