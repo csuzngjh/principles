@@ -119,10 +119,11 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     // authority module the real dynamic import in
     // verifyReleaseManagerAuthorityImports can load on ANY machine (never
     // the host's live runtime).
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       realFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
       realFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    realFs.writeFileSync(realPath.join(fixtureDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
     realFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
     realFs.writeFileSync(realPath.join(fixtureDir, 'pd-cli', 'dist', 'index.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });

@@ -79,6 +79,10 @@ function createFixtureInto(workDir: string): { inputDir: string } {
   if (fs.existsSync(path.resolve(__dirname, '..', '..', '..', 'packages', 'workbuddy-adapter', 'package.json'))) {
     components.push('workbuddy-adapter');
   }
+  // Gate 4: same conditional as build-release-asset.mjs.
+  if (fs.existsSync(path.resolve(__dirname, '..', '..', '..', 'packages', 'pd-mcp-server', 'package.json'))) {
+    components.push('pd-mcp-server');
+  }
   for (const component of components) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
     fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({
