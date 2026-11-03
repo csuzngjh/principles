@@ -50,7 +50,7 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
-import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
+import { resolveCommandWorkspaceDir, resolveExplicitPdWorkspaceDir, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime-v2';
 import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
@@ -157,6 +157,71 @@ export function shouldUseSharedHostRuntime(
   };
 }
 
+/**
+ * Gate 4 (PRI-1071): keep the host-wide launcher binding in lockstep with an
+ * EXPLICITLY DECLARED PD workspace only.
+ *
+ * The MCP server is one process per host and reads ONE `mcp-binding.json` beside
+ * the plugin payload, while OpenClaw may run several agents with different
+ * `ctx.workspaceDir`s. Binding whichever agent resolved first (or `main`) would
+ * serve that workspace's Pain evidence to every other agent — cross-workspace
+ * recall leakage. So:
+ *   - explicit PD workspace (PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE /
+ *     principles-disciple.json `workspace`) → bind it (idempotent);
+ *   - no explicit declaration → REMOVE the binding and let the launcher
+ *     fail closed (`binding_missing`). Never infer from `main`, `cwd`, `HOME`
+ *     or the host default (SPEC §3.5).
+ *
+ * Hooks are unaffected: per-event hook resolution keeps its existing chain.
+ * Never throws (G4-07: MCP unavailability must not break PD's other functions).
+ */
+export interface McpBindingSyncResult {
+  status: 'written' | 'unchanged' | 'invalidated' | 'unavailable';
+  reason: string;
+  nextAction: string;
+  workspaceDir?: string;
+  source?: string;
+}
+
+export function syncMcpBindingFromExplicitWorkspace(options: {
+  extensionRoot: string;
+  homeDir: string;
+  resolver?: () => { workspaceDir: string; source: string } | null;
+}): McpBindingSyncResult {
+  const explicit = options.resolver ? options.resolver() : resolveExplicitPdWorkspaceDir();
+  const declaredIsUsable = explicit !== null && validateWorkspaceDir(explicit.workspaceDir) === null;
+  if (explicit !== null && declaredIsUsable) {
+    const outcome = ensureMcpBinding(explicit.workspaceDir, options.extensionRoot, options.homeDir);
+    if (outcome.ok) {
+      return {
+        status: outcome.written ? 'written' : 'unchanged',
+        reason: `pd_workspace_explicit:${explicit.source}`,
+        nextAction: outcome.written
+          ? 'Restart the OpenClaw gateway so the pd-recall MCP server reads the new binding.'
+          : 'No change: the binding already matches the declared PD workspace.',
+        workspaceDir: explicit.workspaceDir,
+        source: explicit.source,
+      };
+    }
+    return {
+      status: 'unavailable',
+      reason: outcome.reason ?? 'mcp_binding_write_failed',
+      nextAction: 'Re-run the PD host setup so ~/.pd/runtime/pd-mcp-server is installed, then restart OpenClaw. pd-recall stays fail-closed until the binding exists.',
+    };
+  }
+  const invalidated = invalidateMcpBinding(options.extensionRoot);
+  const declaredReason = explicit === null
+    ? 'pd_workspace_not_explicit'
+    : 'pd_workspace_declaration_invalid';
+  return {
+    status: invalidated.ok ? 'invalidated' : 'unavailable',
+    reason: invalidated.ok ? declaredReason : (invalidated.reason ?? 'mcp_binding_remove_failed'),
+    nextAction:
+      'pd-recall MCP is fail-closed because the PD governance workspace is not explicitly configured; hooks keep their per-agent workspaces. ' +
+      'Declare ONE PD workspace (set PD_WORKSPACE_DIR, or add {"workspace":"<absolute dir>"} to ~/.openclaw/principles-disciple.json), then restart the OpenClaw gateway.',
+  };
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -165,47 +230,31 @@ const plugin = {
     api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir ?? '(unknown)'})`);
     PathResolver.setExtensionRoot(api.rootDir ?? '.');
 
-    // ── Startup Health Check: Verify workspaceDir resolution ──
-    // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
+    // ── Startup Health Check: MCP binding requires an EXPLICIT PD workspace ──
+    // Gate 4 (PRI-1071): this host-wide binding may only record an owner-declared
+    // workspace. Resolving `{ agentId: 'main' }` (or any ctx/cwd/HOME fallback)
+    // and writing it as THE binding leaks one agent's Pain evidence to every
+    // other agent. Without an explicit declaration the previous binding is
+    // removed so the launcher fails closed (SPEC §3.5).
     const healthCheckTimer = setTimeout(() => {
-      const testCtx = { agentId: 'main' };
-      const toolWorkspaceDir = resolveToolHookWorkspaceDirSafe(testCtx, api, 'startup.health_check');
-      const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
-      if (toolIssue) {
-        api.logger.error(`[PD:health] Tool hook workspaceDir is INVALID: "${toolWorkspaceDir}" - ${toolIssue}`);
-        api.logger.error(`[PD:health] Tool hook events will be written to the WRONG .state directory!`);
-        // SPEC §3.5: the launcher may only run against a CONFIRMED workspace.
-        // Leaving the previous binding on disk would keep serving the last
-        // resolved workspace's evidence, so remove it and let the launcher
-        // fail closed (binding_missing) until resolution succeeds again.
-        try {
-          const extensionRoot = PathResolver.getExtensionRoot() ?? process.cwd();
-          const invalidated = invalidateMcpBinding(extensionRoot);
-          if (invalidated.removed) {
-            api.logger.warn('[PD:health] removed stale mcp-binding.json: pd-recall MCP stays fail-closed until a workspace is confirmed');
-          } else if (!invalidated.ok) {
-            api.logger.warn(`[PD:health] mcp-binding removal failed: ${invalidated.reason}`);
-          }
-        } catch (err) {
-          api.logger.warn(`[PD:health] mcp-binding removal failed: ${String(err instanceof Error ? err.message : err)}`);
+      try {
+        const extensionRoot = PathResolver.getExtensionRoot() ?? process.cwd();
+        const decision = syncMcpBindingFromExplicitWorkspace({
+          extensionRoot,
+          homeDir: os.homedir(),
+        });
+        if (decision.status === 'written') {
+          api.logger.info(`[PD:health] mcp-binding.json updated for the pd-recall MCP server (${decision.reason}; restart the gateway to apply)`);
+        } else if (decision.status === 'invalidated') {
+          api.logger.warn(
+            `[PD:health] mcp-binding.json removed: pd-recall MCP stays fail-closed (${decision.reason}). ` +
+            `nextAction: ${decision.nextAction}`,
+          );
+        } else if (decision.status === 'unavailable') {
+          api.logger.warn(`[PD:health] mcp-binding unavailable (${decision.reason}). nextAction: ${decision.nextAction}`);
         }
-      } else {
-        api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
-        // Gate 4 (PRI-1071): keep the launcher binding in lockstep with the
-        // SAME resolved workspace the hooks use — written only when it
-        // changed; failure degrades to a warning (MCP stays fail-closed at
-        // launch, PD's other functions are unaffected).
-        try {
-          const extensionRoot = PathResolver.getExtensionRoot() ?? process.cwd();
-          const bindingOutcome = ensureMcpBinding(toolWorkspaceDir, extensionRoot, os.homedir());
-          if (bindingOutcome.ok && bindingOutcome.written) {
-            api.logger.info('[PD:health] mcp-binding.json updated for the pd-recall MCP server (restart the gateway to apply)');
-          } else if (!bindingOutcome.ok) {
-            api.logger.warn(`[PD:health] mcp-binding update skipped: ${bindingOutcome.reason}`);
-          }
-        } catch (err) {
-          api.logger.warn(`[PD:health] mcp-binding update failed: ${String(err instanceof Error ? err.message : err)}`);
-        }
+      } catch (err) {
+        api.logger.warn(`[PD:health] mcp-binding update failed: ${String(err instanceof Error ? err.message : err)}`);
       }
 
       // PRI-343: Check allowConversationAccess — auto-fix if missing/false, warn if fix fails.
