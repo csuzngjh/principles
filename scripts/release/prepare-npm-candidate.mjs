@@ -1,10 +1,20 @@
 #!/usr/bin/env node
 /**
- * Build and verify the immutable installer tarball candidate.
+ * Build and verify the immutable npm tarball candidate for ONE release leg.
  *
  * npm pack does not add gitHead. The release train overlays the resolved
  * cohort SHA into an unpacked candidate copy, deterministically repacks it,
- * verifies the final archive, and publishes that exact file.
+ * verifies the final archive, and publishes that exact file. The same contract
+ * applies to every train package (G3.1-A): the installer additionally carries
+ * a product-identity stamp, which `--product-version` opts into.
+ *
+ * The caller decides who owns the package's preparatory lifecycle:
+ *   - default: this script runs ONE `npm pack`, which executes prepack/prepare;
+ *   - `--skip-pack-scripts`: the caller has ALREADY executed the equivalent
+ *     build (see publish-npm-package/action.yml), so pack runs with
+ *     `--ignore-scripts`. That keeps "necessary build happens exactly once"
+ *     true for packages whose prepack would otherwise rebuild what the leg
+ *     just built (openclaw-plugin, pd-cli).
  */
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -31,33 +41,38 @@ function argValue(flag) {
 }
 
 function fail(message) {
-  throw new Error('Refusing immutable installer candidate: ' + message);
+  throw new Error('Refusing immutable npm candidate: ' + message);
 }
 
 const packageDirArg = argValue('--package-dir');
 const outputArg = argValue('--output');
 const cohort = argValue('--cohort');
+const packageNameArg = argValue('--package-name');
 const packageVersion = argValue('--package-version');
 const productVersion = argValue('--product-version');
 const githubOutputArg = argValue('--github-output');
+const skipPackScripts = process.argv.includes('--skip-pack-scripts');
 
 const strictVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 if (
   !packageDirArg ||
   !outputArg ||
   !githubOutputArg ||
+  !packageNameArg ||
   !/^[a-f0-9]{40}$/.test(cohort ?? '') ||
   !strictVersion.test(packageVersion ?? '') ||
-  !strictVersion.test(productVersion ?? '')
+  (productVersion !== undefined && !strictVersion.test(productVersion))
 ) {
-  console.error('usage: prepare-npm-candidate.mjs --package-dir <dir> --output <absolute-tgz> --cohort <sha> --package-version <x.y.z> --product-version <x.y.z> --github-output <path>');
+  console.error(
+    'usage: prepare-npm-candidate.mjs --package-dir <dir> --package-name <npm-name> --output <absolute-tgz> --cohort <sha> --package-version <x.y.z> [--product-version <x.y.z>] [--skip-pack-scripts] --github-output <path>'
+  );
   process.exit(2);
 }
 
 const packageDir = resolve(packageDirArg);
 const outputPath = resolve(outputArg);
 const githubOutputPath = resolve(githubOutputArg);
-const packageName = 'create-principles-disciple';
+const packageName = packageNameArg;
 const maxBuffer = 64 * 1024 * 1024;
 const run = (command, args, encoding = 'utf8') =>
   execFileSync(command, args, { encoding, maxBuffer });
@@ -117,7 +132,9 @@ function listArchiveFiles(archive) {
     return normalized;
   });
   if (new Set(entries).size !== entries.length) fail('tarball contains duplicate paths');
-  for (const required of ['package/package.json', 'package/_release/product-identity.json']) {
+  const requiredEntries = ['package/package.json'];
+  if (productVersion !== undefined) requiredEntries.push('package/_release/product-identity.json');
+  for (const required of requiredEntries) {
     if (!entries.includes(required)) fail('tarball is missing required entry ' + required);
   }
   const verbose = execFileSync('tar', ['-tvzf', archive], { cwd: tempRoot, encoding: 'utf8', maxBuffer }).split(/\r?\n/).filter(Boolean);
@@ -142,13 +159,17 @@ try {
   mkdirSync(packDir);
   mkdirSync(sourceDir);
 
-  // This is the one and only lifecycle-bearing pack for the installer leg.
+  // This is the one and only pack for this leg. When the leg has already
+  // executed the package's preparatory build (--skip-pack-scripts), pack must
+  // not repeat that lifecycle work; otherwise pack IS the lifecycle-bearing
+  // pack (prepack/prepare) and publish must never pack again.
   const npmCliJs = findNpmCliJs();
   if (!npmCliJs) fail('npm-cli.js not found next to the running Node binary');
-  execFileSync(process.execPath, [npmCliJs, 'pack', '--pack-destination', packDir], {
-    cwd: packageDir,
-    stdio: 'inherit',
-  });
+  execFileSync(
+    process.execPath,
+    [npmCliJs, 'pack', '--pack-destination', packDir, ...(skipPackScripts ? ['--ignore-scripts'] : [])],
+    { cwd: packageDir, stdio: 'inherit' }
+  );
   const packed = readdirSync(packDir).filter((name) => name.endsWith('.tgz'));
   if (packed.length !== 1) fail('expected exactly one npm pack tarball, found ' + JSON.stringify(packed));
   const rawTarball = 'pack/' + packed[0];
@@ -157,15 +178,19 @@ try {
   tarInWork(['--no-same-owner', '-xzf', rawTarball, '-C', 'source']);
   const packageRoot = join(sourceDir, 'package');
   const manifestPath = join(packageRoot, 'package.json');
-  const stampPath = join(packageRoot, '_release', 'product-identity.json');
   const manifest = parseObject(readFileSync(manifestPath, 'utf8'), 'package/package.json');
-  const stamp = parseObject(readFileSync(stampPath, 'utf8'), 'product identity stamp');
-
   if (manifest.name !== packageName || manifest.version !== packageVersion) {
     fail('packed package name/version do not match the exact release leg');
   }
-  if (stamp.schemaVersion !== 1 || stamp.productVersion !== productVersion || stamp.sourceCommit !== cohort) {
-    fail('product identity stamp does not match the resolved product version and cohort');
+
+  // Only the installer opts into the product-identity stamp contract.
+  let stamp;
+  if (productVersion !== undefined) {
+    const stampPath = join(packageRoot, '_release', 'product-identity.json');
+    stamp = parseObject(readFileSync(stampPath, 'utf8'), 'product identity stamp');
+    if (stamp.schemaVersion !== 1 || stamp.productVersion !== productVersion || stamp.sourceCommit !== cohort) {
+      fail('product identity stamp does not match the resolved product version and cohort');
+    }
   }
 
   const expectedManifest = { ...manifest };
@@ -215,21 +240,23 @@ try {
     tarInWork(['-xOf', 'candidate.final.tgz', 'package/package.json'], { encoding: 'utf8' }),
     'final tarball package.json',
   );
-  const finalStamp = parseObject(
-    tarInWork(['-xOf', 'candidate.final.tgz', 'package/_release/product-identity.json'], { encoding: 'utf8' }),
-    'final tarball product identity stamp',
-  );
   if (!isDeepStrictEqual(finalManifest, expectedManifest) || finalManifest.gitHead !== cohort) {
     fail('final tarball manifest identity verification failed');
   }
-  if (!isDeepStrictEqual(finalStamp, stamp)) fail('final tarball product identity stamp changed during repack');
+  if (productVersion !== undefined) {
+    const finalStamp = parseObject(
+      tarInWork(['-xOf', 'candidate.final.tgz', 'package/_release/product-identity.json'], { encoding: 'utf8' }),
+      'final tarball product identity stamp',
+    );
+    if (!isDeepStrictEqual(finalStamp, stamp)) fail('final tarball product identity stamp changed during repack');
+  }
 
   const hash = createHash('sha512');
   for await (const chunk of createReadStream(tempFinal)) hash.update(chunk);
   const sha512Hex = hash.digest('hex');
   renameSync(tempFinal, outputPath);
   appendFileSync(githubOutputPath, 'tarball=' + outputPath + '\nsha512_hex=' + sha512Hex + '\n');
-  console.log('Immutable installer candidate verified: ' + outputPath);
+  console.log('Immutable npm candidate verified: ' + outputPath);
   console.log('Candidate SHA-512 (hex): ' + sha512Hex);
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });
