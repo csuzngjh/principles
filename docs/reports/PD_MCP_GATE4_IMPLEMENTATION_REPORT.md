@@ -245,7 +245,7 @@ openclaw --profile <isolated> plugins add ./plugins/principles-disciple
 
 - rebase 前基线：`2f73090e6`；基线 main：`8e0cdc607`（`origin/main`）。
 - 已 `git rebase origin/main`，4 个重叠文件无冲突、无冲突标记；本地分支保留 25 个独立提交；**未推送**。
-- 最终 HEAD：`48eb2f9c0`（rebased）。
+- 代码整改最终 HEAD：`48eb2f9c0`（rebased）；本报告随后单独提交。
 - 定向/包级：MCP conflict 18/18、WorkBuddy 回滚注入 1/1、OpenClaw binding+launcher 15/15、pd-cli health 20/20、Codex plugin delivery 62/62、pd-mcp-server 85/85、release-workflows 45/45、release asset smoke 5/5。
 - 门禁：`lint` 12/12 包 ok；`build` 全包通过；`check:pipeline-contract`、`check:workspace-artifacts`、`check:release-artifact-hygiene`、`check:guard-contracts`、`check:runtime-contract`、`check:docs-structure`、`check:error-handbook`、`check:runtime-writers`、类型检查（core/pd-cli/install-layout/openclaw-plugin/pd-console/pd-companion）全部通过。
 - 发布可复现：两次独立构建 `asset.tar` SHA-256 完全相同（`323ddbb...`），`release-asset-smoke` 5/5。
