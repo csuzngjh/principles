@@ -4,7 +4,7 @@
 - 基线：`origin/main` = `ab4b0f2f5`
 - 分支：`ai/adhoc-20261103-installer-dependency-link-consolidation-39a366`（独立 worktree `D:\Code\_worktrees\principles\adhoc-20261103-installer-dependency-link-consolidation-39a366`）
 - 依据：`docs/specs/PD_Release_Delivery_SPEC_v1.2/SPEC-PD-RELEASE-ARCH-SIMPLIFICATION-001.md` §10 第 5 项（“G3 可证明等价的依赖链接/状态逻辑合并”）
-- 工单：**未能创建**——Linear 工作区触发 free issue limit，`create` 返回 `linear_graphql_error`（详见 §9）。PR 标题/正文中的工单号待 Owner 决定后补齐。
+- 工单：**PRI-1100** — <https://linear.app/principlesdisciple/issue/PRI-1100/p2-installer-兄弟依赖链接逻辑合并g3-105>（详见 §9）
 
 ## 结论（先行）
 
