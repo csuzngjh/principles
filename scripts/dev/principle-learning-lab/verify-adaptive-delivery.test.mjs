@@ -11,7 +11,7 @@ import { verifyAdaptiveDelivery } from './verify-adaptive-delivery.mjs';
 const body = 'Verify the existing acceptance evidence before claiming completion.';
 function fixture() {
   const expected = {
-    hookInvocationId: 'hook-1', requestId: 'request-1', sessionId: 'session-1',
+    hookInvocationId: 'hook-1', requestId: 'request-1', workspaceId: 'workspace-1', sessionId: 'session-1',
     activationId: 'activation-1', artifactId: 'artifact-1',
     contentSha256: createHash('sha256').update(body).digest('hex'),
     config: {
@@ -91,7 +91,7 @@ test('prepared inputs cannot be upgraded by trusting their producer', () => {
   assert.equal(verifyAdaptiveDelivery(input, pins(input)).reason, 'request_only_prepared');
 });
 
-for (const field of ['requestId', 'sessionId', 'activationId', 'artifactId', 'hookInvocationId']) {
+for (const field of ['requestId', 'workspaceId', 'sessionId', 'activationId', 'artifactId', 'hookInvocationId']) {
   test('a capture from a different ' + field + ' cannot borrow this receipt', () => {
     const input = fixture();
     input.requestCapture[field] = 'other';
@@ -173,6 +173,12 @@ test('untrusted and malformed inputs return explicit failures', () => {
     assert.equal(verifyAdaptiveDelivery(input, {}).ok, false);
   }
   assert.equal(verifyAdaptiveDelivery(fixture(), {}).ok, false);
+});
+
+test('legacy input without workspace binding is refused instead of borrowing a request from another workspace', () => {
+  const input = fixture();
+  delete input.expected.workspaceId;
+  assert.equal(verifyAdaptiveDelivery(input, pins(input)).reason, 'invalid_expected_binding');
 });
 
 test('CLI reads separate trust and input files and emits one redacted JSON result', () => {

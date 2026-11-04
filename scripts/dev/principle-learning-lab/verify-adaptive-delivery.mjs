@@ -6,13 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { hashOfCanonical } from './lib/challenge-freeze.mjs';
 import { validateAdaptiveDeliveryRecord } from './lib/adaptive-delivery-record.mjs';
+import { adaptiveConfigIdentity } from './lib/adaptive-config-identity.mjs';
 
 const bindingFields = [
-  'hookInvocationId', 'requestId', 'sessionId', 'artifactId', 'activationId',
-];
-const configFields = [
-  'host', 'hostVersion', 'runtimeMode', 'pluginVersion',
-  'effectiveHookSetFingerprint', 'evidenceCoverage',
+  'hookInvocationId', 'requestId', 'workspaceId', 'sessionId', 'artifactId', 'activationId',
 ];
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value) => typeof value === 'string' && value.trim().length > 0;
@@ -24,13 +21,13 @@ function validExpected(expected) {
   return object(expected)
     && bindingFields.every((key) => own(expected, key) && text(expected[key]))
     && sha256(expected.contentSha256)
-    && configFields.every((key) => own(expected.config, key) && text(expected.config[key]))
-    && ['complete', 'partial', 'unknown'].includes(expected.config.evidenceCoverage);
+    && adaptiveConfigIdentity(expected.config) !== null;
 }
 
 function matchesBinding(expected, capture) {
+  const config = adaptiveConfigIdentity(capture.config);
   return bindingFields.every((key) => own(capture, key) && capture[key] === expected[key])
-    && configFields.every((key) => own(capture.config, key) && capture.config[key] === expected.config[key]);
+    && config !== null && config.digest === adaptiveConfigIdentity(expected.config).digest;
 }
 
 function pinFor(trust, observation, kind) {
@@ -78,7 +75,8 @@ export function verifyAdaptiveDelivery(input, trust) {
   if (requestPin.provenance !== 'independent_request_boundary') {
     return { ...result, reason: 'request_source_unqualified' };
   }
-  if (!present) return { ...result, delivery: 'not_confirmed', reason: 'target_body_absent' };
+  if (!present) return { ...result, delivery: 'not_confirmed', reason: 'target_body_absent', evidenceLevel: 'L1',
+    references: [capture.reference] };
   if (input.receipt.execution !== 'completed' || input.receipt.selection !== 'selected'
     || !['returned', 'confirmed'].includes(input.receipt.payload)) {
     return { ...result, reason: 'request_receipt_conflict', references: [capture.reference] };
@@ -86,8 +84,7 @@ export function verifyAdaptiveDelivery(input, trust) {
   const delivered = {
     ...result, delivery: 'confirmed', reason: 'action_evidence_missing',
     evidenceLevel: 'L1', references: [capture.reference],
-    configurationCoverage: configFields.some((key) => expected.config[key] === 'unknown')
-      ? 'unknown' : expected.config.evidenceCoverage,
+    configurationCoverage: adaptiveConfigIdentity(expected.config).coverage,
   };
   if (!action) return delivered;
   const actionPin = pinFor(trust, action, 'action');
