@@ -119,12 +119,12 @@ describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evide
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     expect(invoke(ws, { prompt: '可能不太对', generation_id: 'native-learned-2' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    // 转述（词不在句首）→ 仍为零。
+    // 转述（词不在句首）→ 仍为零 Pain；P-5 退役后该句到达共享守卫，降级 ambiguous → abandoned。
     expect(invoke(ws, { prompt: '他说方向完全反了', generation_id: 'native-learned-3' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     // P0 seed 四词仍被识别，但同样没有持久化证据 → observation_only。
     expect(invoke(ws, { generation_id: 'native-learned-4' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(3);
+    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(4);
   });
 });
