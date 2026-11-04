@@ -7,7 +7,7 @@ describe('buildLlmPrompt', () => {
     expect(prompt).toContain('你又自作主张了，这是错的！');
     expect(prompt).toContain('JSON');
     expect(prompt).toContain('correction');
-    expect(prompt).toContain('empathy');
+    expect(prompt).not.toContain('empathy');
   });
 });
 

@@ -41,11 +41,6 @@ describe('P-3 confidence gate (SPEC v0.3 §3.3/§4.4)', () => {
     expect(gate.verdict).not.toBe('none');
   });
 
-  it('empathy keeps its existing OpenClaw meaning and is not a correction', () => {
-    expect(evaluateStage2ConfidenceGate(result({ type: 'empathy', confidence: 0.95 })).verdict).toBe('unclassified_empathy');
-    expect(evaluateStage2ConfidenceGate(result({ type: 'empathy', confidence: 0.55 })).verdict).toBe('unclassified_empathy');
-  });
-
   it('is_feedback=false cannot be a correction verdict', () => {
     expect(evaluateStage2ConfidenceGate(result({ is_feedback: false, type: 'correction', confidence: 0.95 })).verdict).toBe('none');
   });
