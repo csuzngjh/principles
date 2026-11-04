@@ -14,7 +14,7 @@
 | Event logging | `event-log.ts` | JSONL buffered writes (20 entries or 30s flush) |
 | Pain patterns | `dictionary.ts`, `dictionary-service.ts` | Regex + exact_match rules |
 | Detection funnel | `detection-funnel.ts`, `detection-service.ts` | Text input queue |
-| Session state | `session-tracker.ts` | GFI, token usage, stuck loop detection |
+| Session state | `session-tracker.ts` | Token usage, blocked attempts, injected principles, stuck loop detection |
 | Central facade | `workspace-context.ts` | `WorkspaceContext.fromHookContext(ctx)` — all services flow through here |
 | Path resolution | `paths.ts`, `path-resolver.ts` | `api.resolvePath()` is the only compliant entry |
 
