@@ -12,10 +12,21 @@
  * (reparse point) behavior, not a branch inside a helper.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { realpathSync } from 'fs';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describeRestoredStateGaps, installPluginToStaging, preparePluginInstallTarget } from '../src/installer.js';
+
+// PRI-1102 fail-closed contract: an UNREADABLE link must never be unlinked.
+// The real implementation stays the default; a test can force an errno.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    realpathSync: vi.fn((value: fs.PathLike) => actual.realpathSync(value)),
+  };
+});
 
 let fixtureRoot: string;
 
@@ -47,6 +58,33 @@ function runtimeTarget(): string {
 /** The runtime tree itself — the path the rollback health check inspects. */
 function runtimeTree(): string {
   return path.join(fixtureRoot, '.pd', 'runtime');
+}
+
+/**
+ * The pre-run state a healthy install leaves behind: every component entry the
+ * rollback health check demands (Console server + web index, PD CLI entry,
+ * runtime plugin bundle/manifest, OpenClaw extension entries).
+ */
+function writeHealthyInstallTree(): void {
+  const consoleDir = path.join(runtimeTree(), 'console', 'dist');
+  fs.mkdirSync(path.join(consoleDir, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(consoleDir, 'server.js'), '// console\n');
+  fs.writeFileSync(path.join(consoleDir, 'web', 'index.html'), '<html></html>\n');
+
+  const pdCliDir = path.join(runtimeTree(), 'pd-cli', 'dist');
+  fs.mkdirSync(pdCliDir, { recursive: true });
+  fs.writeFileSync(path.join(pdCliDir, 'index.js'), '// cli\n');
+
+  const runtimePluginDir = path.join(runtimeTree(), 'plugin');
+  fs.mkdirSync(path.join(runtimePluginDir, 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(runtimePluginDir, 'dist', 'bundle.js'), '// plugin\n');
+  fs.writeFileSync(path.join(runtimePluginDir, 'openclaw.plugin.json'), '{}');
+
+  const ext = extTarget();
+  fs.mkdirSync(path.join(ext, 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(ext, 'dist', 'bundle.js'), '// ext plugin\n');
+  fs.writeFileSync(path.join(ext, 'openclaw.plugin.json'), '{}');
+  fs.writeFileSync(path.join(ext, 'package.json'), '{}');
 }
 
 /**
@@ -143,6 +181,37 @@ describe('installPluginToStaging on a dirty install target', () => {
   });
 });
 
+describe('preparePluginInstallTarget fail-closed contract', () => {
+  it.each(['EACCES', 'EPERM'])('refuses to unlink a link whose resolution fails with %s', async (code) => {
+    const elsewhere = path.join(fixtureRoot, 'elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    const link = extTarget();
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    fs.symlinkSync(elsewhere, link, 'junction');
+
+    vi.mocked(realpathSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error(`${code}: operation not permitted, realpath '${link}'`), { code });
+    });
+
+    await expect(preparePluginInstallTarget(link)).rejects.toThrow(/Cannot resolve plugin install target/);
+    // The link AND its target must survive an unreadable resolution.
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(elsewhere)).toBe(true);
+    expect(fs.realpathSync(link)).toBe(fs.realpathSync(elsewhere));
+  });
+
+  it.runIf(process.platform === 'win32')('removes a real NTFS junction whose target was deleted', async () => {
+    createDanglingJunction(extTarget());
+    expect(fs.lstatSync(extTarget()).isSymbolicLink()).toBe(true);
+
+    await preparePluginInstallTarget(extTarget());
+
+    const after = fs.lstatSync(extTarget());
+    expect(after.isSymbolicLink()).toBe(false);
+    expect(after.isDirectory()).toBe(true);
+  });
+});
+
 describe('describeRestoredStateGaps', () => {
   it('reports a dangling extension link instead of treating the rollback as healthy', () => {
     createDanglingJunction(extTarget());
@@ -156,9 +225,66 @@ describe('describeRestoredStateGaps', () => {
     expect(gaps.some((gap) => gap.includes(runtimeTree()) && gap.includes('missing'))).toBe(true);
   });
 
+  it('reports a missing Console component even when the runtime root exists', () => {
+    writeHealthyInstallTree();
+    fs.rmSync(path.join(runtimeTree(), 'console'), { recursive: true, force: true });
+
+    const gaps = describeRestoredStateGaps();
+
+    const consoleDir = path.join(runtimeTree(), 'console');
+    expect(gaps.some((gap) => gap.includes(consoleDir) && gap.includes('missing'))).toBe(true);
+  });
+
+  it('reports a component directory that is not a directory', () => {
+    writeHealthyInstallTree();
+    const consoleDir = path.join(runtimeTree(), 'console');
+    fs.rmSync(consoleDir, { recursive: true, force: true });
+    fs.writeFileSync(consoleDir, 'not a directory');
+
+    const gaps = describeRestoredStateGaps();
+
+    expect(gaps.some((gap) => gap.includes(consoleDir) && gap.includes('not a directory'))).toBe(true);
+  });
+
+  it('reports a required Console entry that is missing from an existing component', () => {
+    writeHealthyInstallTree();
+    fs.rmSync(path.join(runtimeTree(), 'console', 'dist', 'web', 'index.html'));
+
+    const gaps = describeRestoredStateGaps();
+
+    expect(gaps.some((gap) => gap.
+      includes(path.join(runtimeTree(), 'console', 'dist', 'web', 'index.html'))
+      && gap.includes('missing'))).toBe(true);
+    // A missing entry is a gap; the sibling entry is still checked and healthy.
+    expect(gaps.some((gap) => gap.includes(path.join(runtimeTree(), 'console', 'dist', 'server.js')))).toBe(false);
+  });
+
+  it('reports a missing OpenClaw extension entry instead of trusting the directory', () => {
+    writeHealthyInstallTree();
+    fs.rmSync(path.join(extTarget(), 'dist', 'bundle.js'));
+
+    const gaps = describeRestoredStateGaps();
+
+    expect(gaps.some((gap) => gap.
+      includes(path.join(extTarget(), 'dist', 'bundle.js'))
+      && gap.includes('missing'))).toBe(true);
+  });
+
+  it('reports a required entry that is a directory, not a file', () => {
+    writeHealthyInstallTree();
+    const cliEntry = path.join(runtimeTree(), 'pd-cli', 'dist', 'index.js');
+    fs.rmSync(cliEntry, { force: true });
+    fs.mkdirSync(cliEntry, { recursive: true });
+
+    const gaps = describeRestoredStateGaps();
+
+    expect(gaps.some((gap) => gap.includes(cliEntry) && gap.includes('not a file'))).toBe(true);
+  });
+
   it('reports no gaps for a healthy tree (negative control)', async () => {
     const pluginDir = path.join(fixtureRoot, 'payload');
     writeShippedPayload(pluginDir);
+    writeHealthyInstallTree();
     await installPluginToStaging(pluginDir, 'en');
     expect(describeRestoredStateGaps()).toEqual([]);
   });
