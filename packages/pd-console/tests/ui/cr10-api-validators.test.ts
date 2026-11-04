@@ -629,9 +629,9 @@ describe('validateUpdateStatus', () => {
     expect(result).toMatchObject({ hasUpdate: false, error: 'Trust unavailable', reason: 'metadata_refresh_failed', nextAction: 'Repair trust metadata.' });
   });
 
-  // ── PR-C: active-release identity diagnostics (additive, backward-compatible)
+  // ── Update-check identity: only the active-release plane is reported
 
-  it('accepts governed-check identity diagnostics and passes them through', () => {
+  it('passes versionSource through and drops the retired cross-plane divergence field', () => {
     const result = validateUpdateStatus({
       ...validStatus,
       versionSource: 'active-release',
@@ -644,28 +644,13 @@ describe('validateUpdateStatus', () => {
     });
     expect(result).not.toBeNull();
     expect(result!.versionSource).toBe('active-release');
-    expect(result!.identityDivergence).toEqual({
-      activeVersion: '1.222.0',
-      pluginVersion: '1.999.0',
-      releaseId: 'r'.repeat(64),
-      generation: 2,
-    });
+    expect(Object.hasOwn(result!, 'identityDivergence')).toBe(false);
   });
 
   it('accepts the legacy body without identity fields (old installs stay valid)', () => {
     const result = validateUpdateStatus(validStatus);
     expect(result).not.toBeNull();
     expect(result!.versionSource).toBeUndefined();
-    expect(result!.identityDivergence).toBeUndefined();
-  });
-
-  it('drops a malformed identityDivergence instead of emitting an unvalidated object (EP-01)', () => {
-    const result = validateUpdateStatus({
-      ...validStatus,
-      identityDivergence: { activeVersion: 1, pluginVersion: 'x', releaseId: 'r', generation: 'two' },
-    });
-    expect(result).not.toBeNull();
-    expect(result!.identityDivergence).toBeUndefined();
   });
 
   it('drops an unknown versionSource value', () => {
