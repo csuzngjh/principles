@@ -201,7 +201,7 @@ export function deriveProductionCorrectionPainIdentity(fields: {
 
 const REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
-  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', gfi_before: 'REAL', gfi_after: 'REAL', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT', project_dir: 'TEXT' },
+  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT', project_dir: 'TEXT' },
   pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', host_kind: 'TEXT', created_at: 'TEXT' },
 };
 
@@ -250,7 +250,7 @@ function hasCanonicalSchema(db: Database.Database): boolean {
   db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?');
   db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?');
   db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
-  db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, params_json, result_preview, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   db.prepare('INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   return true;
 }
@@ -362,7 +362,7 @@ export function recordVerifiedToolOutcomes(args: {
       ? db.prepare('SELECT id, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ? AND host_kind = ? ORDER BY id LIMIT 1')
       : db.prepare('SELECT id, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ? ORDER BY id LIMIT 1');
     const upgradeUnknown = db.prepare("UPDATE tool_calls SET outcome = ?, exit_code = ?, result_preview = COALESCE(?, result_preview) WHERE id = ? AND outcome = 'unknown'");
-    const insertVerified = db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertVerified = db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, params_json, result_preview, created_at, tool_use_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const upsertSession = db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
     const createdAt = new Date().toISOString();
     db.transaction(() => {
@@ -519,8 +519,8 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
           return;
         }
         db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`).run(event.context.sessionId, createdAt, createdAt);
-        db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null, path.resolve(options.projectDir ?? event.context.workspaceDir), options.hostKind ?? null);
+        db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null, path.resolve(options.projectDir ?? event.context.workspaceDir), options.hostKind ?? null);
       })();
     } catch (error) {
       return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.outcome, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };

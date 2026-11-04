@@ -71,7 +71,7 @@ describe('PRI-774: canonical trajectory schema module', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'")
       .get();
     expect(tableExists).toBeDefined();
-    expect(TRAJECTORY_SCHEMA_VERSION).toBe(1);
+    expect(TRAJECTORY_SCHEMA_VERSION).toBe(2);
     db.close();
   });
 
@@ -139,6 +139,9 @@ describe('PRI-774: canonical trajectory schema module', () => {
 
     const columns = db.prepare('PRAGMA table_info(tool_calls)').all() as { name: string; notnull: number }[];
     expect(columns.some((column) => column.name === 'project_dir' && column.notnull === 0)).toBe(true);
+    // GFI complete removal: legacy gfi columns are dropped, historical rows preserved.
+    expect(columns.some((column) => column.name === 'gfi_before')).toBe(false);
+    expect(columns.some((column) => column.name === 'gfi_after')).toBe(false);
     const row = db.prepare('SELECT session_id, tool_name, project_dir FROM tool_calls WHERE session_id = ?').get('legacy-session');
     expect(row).toEqual({ session_id: 'legacy-session', tool_name: 'apply_patch', project_dir: null });
     db.close();
