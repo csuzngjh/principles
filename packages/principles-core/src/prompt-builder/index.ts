@@ -20,7 +20,6 @@ export type { FileArtifact, WorkingMemorySnapshot, FocusCompressionOptions, Focu
 export type { CoreLogger, ModelConfigObject } from './model-config.js';
 
 // Functions
-export { buildAttitudeDirective } from './attitude-directive.js';
 export { detectCorrectionCue } from './correction-cue.js';
 export { escapeXml } from './xml-escape.js';
 export { extractMessageContent } from './message-extraction.js';
