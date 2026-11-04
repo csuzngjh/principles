@@ -417,3 +417,53 @@
 - `SOURCE_DESCRIPTORS registry has exactly 12 registered descriptors`
 - `getSourceDescriptor has exactly 12 registered descriptors`
 
+---
+
+## 块 6 执行记录（G1 → P1 → D1）
+
+- 2026-11-04 / 前置：`better-sqlite3` 13.0.3，运行时 `sqlite_version = 3.53.4`（≥ 3.35，`ALTER TABLE ... DROP COLUMN` 可用）。实测命令：`node -e "const Db=require('better-sqlite3'); console.log(new Db(':memory:').prepare('select sqlite_version() v').get().v)"`。
+
+### G1 处置台账（19 条，逐条一行）
+
+> 依据：L7 `13c067e2f`（SPEC §3.7）、L12 `8acd1027d`（SPEC §4.3）、L13 `603af28d4`（SPEC §4.4）。全部只改测试文件，未改任何生产代码。
+
+| # | 层 | 用例（原文） | 处置 | 依据 / 新断言 |
+| --- | --- | --- | --- | --- |
+| 1 | L7 | `LLM says empathy → WEAK → trackFriction (no emit)` | 删除 | 夹具 `type:'empathy'` 已不在 `LlmClassificationResult`（`signal-collector/types.ts:type = 'correction'\|'none'`）；断言对象 `trackFriction` 与 WEAK 路由随 `13c067e2f` 删除（SPEC §3.7 L439–441/467–472） |
+| 2 | L7 | `LLM unavailable (degraded) → empathy ambiguous routed as WEAK (GFI accumulation preserved)` | 删除 | 同上；断言 `trackFriction(source:'user_empathy')` 的机制已删 |
+| 3 | L7 | `trackFriction throws → does not crash host` | 删除 | 被测对象 `trackFriction` 已删；等价幸存路径由同文件 `SIGNAL_CUE_FEEDBACK_FAIL ... learner broke` 用例覆盖（cueFeedbackRecorder 抛错不崩宿主） |
+| 4 | L7 | `keyword store with only empathy terms → empathy ambiguous routed as WEAK when LLM unavailable` | 删除 | 夹具 empathy-only 词表 + WEAK 断言；seed 词表已无 empathy 词（`signal-keyword-store.test.ts:118` 断言 `store.terms['搞什么'] === undefined`） |
+| 5 | L7 | `PRI-788 G2 ... LLM unavailable + empathy-only match → routed WEAK (GFI), NOT enqueued` | 删除 | 断言依赖 WEAK 分流；PRI-788 G2 的「非零命中候选不得静默丢弃」语义由同 describe 内其它入队用例覆盖（SPEC §3.7 L503） |
+| 6 | L7 | `PRI-2053: 仅命中 empathy ambiguous 词 + Stage2 判 correction → 消息确认，但 empathy 词不进入纠正词证据` | **(c) 改写** | 真实调用点：`signal-collector-host.ts:320`（`const correctionTerms = pending.output.matchedTerms`）→ `:323 emitCueFeedback(correctionTerms,true)` → `:329 writeBackConfirmedCorrection`。新断言：pain 1 次、`markUserTurnCorrection(11,'不对')`、`recorder(['不对'],true)`（只取 Stage1 命中词，不补词、不落 `llm:` 判词） |
+| 7 | L7 | `PRI-2053: 两个 ambiguous 词混合命中（correction + empathy）→ 只有 correction 词参与纠正词归因` | **(c) 改写** | 类别概念已删（`UnifiedKeyword.category` 随 `13c067e2f` 移除），词表层面不存在 empathy 词；新断言：`recorder(['不对','搞什么'],true)`、`markUserTurnCorrection(11,'不对, 搞什么')` —— 归因只取 Stage1 命中词快照 |
+| 8 | L7 | `PRI-2053: Stage2 判非 correction → 不为 empathy 词凭空产生纠正词证据` | **(c) 改写** | 真实调用点 `signal-collector-host.ts:333 emitCueFeedback(correctionTerms,false)`；新断言：`recorder(['搞什么'],false)`（只记 FP）、无 pain 事件 |
+| 9 | L7 | `PRI-2053: LLM 抛错入队时只持久化 correction 类命中词` | **(c) 改写** | 真实调用点 `signal-collector-host.ts:375 queueUnconfirmedForBatch`（`terms: matchedTerms`、`suggestedType:'correction'`）；新断言：`terms = ['不对','搞什么']`（检测时快照，不依赖恢复时词库） |
+| 10 | L7 | `PRI-687 回归 … 负向：纯宣泄脏话（无纠正语义）→ empathy/WEAK，不翻转标志位、不触发 pain` | 改写 | 夹具改 `type:'none'`（Stage2 只剩 correction/none）；保留三条精确断言：`markUserTurnCorrection` 未调用、`emitPainDetectedEvent` 未调用、`recorder(['什么狗屎'], false)` |
+| 11 | L7 | `Learn→Detect live refresh … LLM 关闭时 搞什么 仍路由 WEAK(GFI)` | 删除 | 引用已不存在的 `trackFriction` 标识符（ReferenceError）且 WEAK 已删；seed 词表已无 `搞什么` |
+| 12 | L12 | `runCanaryChecks GFI config warning degraded status → returns healthy when GFI disabled with no warnings` | 删除 | `gfi_snapshot` check 随 `8acd1027d` 删除（SPEC §4.3 L630–638） |
+| 13 | L12 | `… returns degraded when GFI disabled but config has warnings (malformed YAML)` | 删除 | 同上 |
+| 14 | L12 | `… returns degraded when GFI disabled but config has malformed override warning` | 删除 | 同上 |
+| 15 | L12 | `… runs GFI snapshot when flag enabled with no warnings` | 删除 | 同上（断言对象为已删的 `buildGfiSnapshot`） |
+| 16 | L12 | `… recommends session lifecycle review for GFI session issues (not config)` | 删除 | 同上（断言对象为已删的 `classifyGfiHealth`） |
+| 17 | L12 | `handleRuntimeHealthSnapshot includes compact GFI line in text output` | 改写 | 新断言为负向：`allOutput` 不含 `gfi:`，且仍含 `candidateLedger`（SPEC §4.3 L625） |
+| 18 | L12 | `handleRuntimeHealthSnapshot shows no active sessions in text when gfi.active is null` | 删除（并入 #17） | 断言对象「gfi.active 文本行」已随命令删除；新的负向断言已覆盖 |
+| 19 | L13 | `HealthCheckModel checkSystemHealth returns overall status when workspace is empty` | 改写（5→4） | GFI 健康项随 `603af28d4` 删除（SPEC §4.4 L652–671）；`expect(health.checks).toHaveLength(4)` |
+
+**G1 复测（修复后，逐组前台实测）**
+
+| 组 | 命令 | 结果 |
+| --- | --- | --- |
+| L7 plugin | `npx vitest run tests/core/signal-collector-host.test.ts tests/core/signal-keyword-store.test.ts` | **77/77 passed，exit=0** |
+| L12 pd-cli | `npx vitest run tests/commands/runtime-canary.test.ts tests/commands/runtime-health-snapshot.test.ts` | **23/23 passed，exit=0** |
+| L13 console | `npx vitest run tests/models/health-check-model.test.ts` | **18/18 passed，exit=0** |
+
+**PRI-2053 (c) 类能力证据（生产路径仍在）**
+
+- `packages/openclaw-plugin/src/core/signal-collector-host.ts:320` — `const correctionTerms = pending.output.matchedTerms;`（归因词集来自 Stage1 检测时快照）
+- 同文件 `:323` — `this.emitCueFeedback(correctionTerms, true)`（Stage2 确认 → TP）
+- 同文件 `:329` — `this.writeBackConfirmedCorrection(pending.userTurnRowid, 'user_correction', correctionTerms)`（消息级纠正事实）
+- 同文件 `:333` — `this.emitCueFeedback(correctionTerms, false)`（Stage2 非 correction → FP，不产生纠正证据）
+- 同文件 `:375` — `queueUnconfirmedForBatch({ terms: matchedTerms, suggestedType: 'correction' })`（入队持久化 Stage1 命中词）
+- empathy 类别不可达的结构证据：`13c067e2f` 删除 `UnifiedKeyword.category` / `correctionTermsOf` / `EMPATHY_SEED_OVERLAY`；`governance-signal-admission.ts` 的 `projectLearnedStore` 只产出纠正词；`signal-keyword-store.test.ts:118` 断言 seed 无 `搞什么`。
+
+

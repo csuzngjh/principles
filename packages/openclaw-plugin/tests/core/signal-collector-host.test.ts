@@ -281,21 +281,6 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     expect(callArg.data.reason).toContain('明确纠错');
   });
 
-  it('LLM says empathy → WEAK → trackFriction (no emit)', async () => {
-    const wctx = makeMockWctx();
-    const host = makeHost(wctx, {
-      keywordStore: testStore,
-      config: testConfig,
-      llmClassifier: async () => ({
-        is_feedback: true, type: 'empathy', confidence: 0.7, reason: '挫败情绪',
-      }),
-    });
-    host.detectSync('这个不对', 'sess-weak', 'user');
-    await flushAsync();
-    expect(trackFriction).toHaveBeenCalled();
-    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
-  });
-
   it('LLM says none → no emit, no friction', async () => {
     const wctx = makeMockWctx();
     const host = makeHost(wctx, {
@@ -319,28 +304,6 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     await flushAsync();
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
     expect(trackFriction).not.toHaveBeenCalled();
-  });
-
-  it('LLM unavailable (degraded) → empathy ambiguous routed as WEAK (GFI accumulation preserved)', async () => {
-    // 回归测试: 旧版 prompt.ts 的 empathy keyword matcher 在关键词命中时直接
-    // trackFriction 累积 GFI,不依赖 LLM。SignalCollectorHost 重构后,当 LLM
-    // 不可用(默认配置)时,empathy ambiguous 候选必须降级为 WEAK 信号路由,
-    // 保留 GFI 累积行为,避免 empathy 检测完全失效。
-    const wctx = makeMockWctx();
-    // llmClassifier = null → 降级纯关键词
-    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
-    host.detectSync('你搞什么啊', 'sess-empathy-degrade', 'user');
-    await flushAsync();
-    expect(trackFriction).toHaveBeenCalledTimes(1);
-    expect(trackFriction).toHaveBeenCalledWith(
-      'sess-empathy-degrade',
-      20,
-      expect.any(String),
-      '/tmp/test-ws',
-      { source: 'user_empathy' },
-    );
-    // STRONG 不触发(降级不触发诊断,仅累积 GFI)
-    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
   });
 
   it('LLM classifier throws exception → gracefully degraded to none', async () => {
@@ -380,22 +343,6 @@ describe('SignalCollectorHost async routing (LLM confirmation)', () => {
     expect(emitPainDetectedEvent).toHaveBeenCalled();
   });
 
-  it('trackFriction throws → does not crash host', async () => {
-    vi.mocked(trackFriction).mockImplementation(() => {
-      throw new Error('trackFriction failed');
-    });
-    const wctx = makeMockWctx();
-    const host = makeHost(wctx, {
-      keywordStore: testStore,
-      config: testConfig,
-      llmClassifier: async () => ({
-        is_feedback: true, type: 'empathy', confidence: 0.7, reason: 'frustration',
-      }),
-    });
-    host.detectSync('这个不对', 'sess-friction-fail', 'user');
-    await flushAsync();
-    expect(trackFriction).toHaveBeenCalled();
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -499,22 +446,6 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const host = makeHost(wctx, { keywordStore: emptyStore, config: testConfig });
     host.detectSync('这是错的', 'sess-empty-store', 'user');
     expect(wctx.trajectory.recordUserTurn).toHaveBeenCalled();
-  });
-
-  it('keyword store with only empathy terms → empathy ambiguous routed as WEAK when LLM unavailable', async () => {
-    const empathyOnlyStore: UnifiedKeywordStore = {
-      version: 1,
-      terms: {
-        '搞什么': { term: '搞什么', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-        '气死我了': { term: '气死我了', weight: 0.7, precision: 'high', source: 'seed' },
-      },
-    };
-    const wctx = makeMockWctx();
-    const host = makeHost(wctx, { keywordStore: empathyOnlyStore, config: testConfig });
-    host.detectSync('你搞什么啊', 'sess-empathy-only', 'user');
-    await flushAsync();
-    expect(trackFriction).toHaveBeenCalledTimes(1);
-    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
   });
 
   it('keyword store with only correction terms → correction ambiguous dropped when LLM unavailable', async () => {
@@ -769,21 +700,6 @@ describe('PRI-788 G2: LLM 不可用时候选持久化入队', () => {
     );
   });
 
-  it('LLM unavailable + empathy-only match → routed WEAK (GFI), NOT enqueued', async () => {
-    const wctx = makeWctxForQueue();
-    const host = makeHost(wctx, {
-      keywordStore: testStore,
-      config: testConfig,
-      llmClassifier: null,
-    });
-
-    host.detectSync('真是搞什么啊', 'sess-g2-empathy', 'user');
-    await flushAsync();
-
-    expect(trackFriction).toHaveBeenCalled();
-    expect(wctx.trajectory.enqueueSignalConfirmation).not.toHaveBeenCalled();
-  });
-
   it('zero keyword match → no enqueue (体量与噪声不可控)', async () => {
     const wctx = makeWctxForQueue();
     const host = makeHost(wctx, {
@@ -960,9 +876,10 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PRI-2053 — Stage2 归因不变量
 //
-// Stage2 确认「整条消息是纠正」只证明消息级事实，不把每个 Stage1 命中词升级为
-// 纠正词。empathy 命中词不得进入 correction_cue / TP / FP；当没有任何 correction
-// 类命中时，消息级纠正事实仍必须保留（llm: 判词 + pain 事件）。
+// Stage2 确认「整条消息是纠正」只证明消息级事实，归因词集必须取 Stage1 检测
+// 当时的命中词快照：不补词、不伪造、不落 llm: 判词；Stage2 判非 correction 时
+// 命中词只记 FP。GFI 移除后词库已不存在 empathy 类别（seed 只含纠正词，学习
+// 投影也只会产出纠正词），因此「empathy 词混入纠正证据」在词表层面不可达。
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('PRI-2053: Stage2 归因不变量', () => {
@@ -980,7 +897,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     is_feedback: true, type: 'correction' as const, confidence: 0.9, reason: '用户不满',
   });
 
-  it('仅命中 empathy ambiguous 词 + Stage2 判 correction → 消息确认，但 empathy 词不进入纠正词证据', async () => {
+  it('Stage2 判 correction + 只命中 ambiguous 词 → 消息确认，纠正词证据 = Stage1 命中词（不伪造）', async () => {
     const { wctx, trajectory } = makeWctxForAttribution();
     const recorder = vi.fn();
     const host = makeHost(wctx, {
@@ -990,17 +907,17 @@ describe('PRI-2053: Stage2 归因不变量', () => {
       cueFeedbackRecorder: recorder,
     });
 
-    host.detectSync('你搞什么啊', 'sess-p13-empathy', 'user');
+    host.detectSync('这个不对', 'sess-p13-ambiguous-only', 'user');
     await flushAsync();
 
     // 消息级纠正事实必须保留（这是真实发生的事件，不能因关键词过滤被丢）
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
-    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, 'llm:用户不满');
-    // 但 empathy 命中词不得获得纠正词 TP
-    expect(recorder).not.toHaveBeenCalled();
+    // stage2 corrected：归因词集只取 Stage1 检测当时的命中词，不补词、不落 llm: 判词
+    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, '不对');
+    expect(recorder).toHaveBeenCalledWith(['不对'], true);
   });
 
-  it('两个 ambiguous 词混合命中（correction + empathy）→ 只有 correction 词参与纠正词归因', async () => {
+  it('两个 ambiguous 词同时命中 → 两个命中词都参与纠正词归因（按命中顺序）', async () => {
     const { wctx, trajectory } = makeWctxForAttribution();
     const recorder = vi.fn();
     const host = makeHost(wctx, {
@@ -1010,13 +927,13 @@ describe('PRI-2053: Stage2 归因不变量', () => {
       cueFeedbackRecorder: recorder,
     });
 
-    // '不对'(correction, ambiguous) 与 '搞什么'(empathy, ambiguous) 同时命中。
-    // 刻意不用 high 精度词：high 会短路同步 STRONG 路径，证明不了混合 ambiguous。
-    host.detectSync('你搞什么啊，这个不对', 'sess-p13-mixed', 'user');
+    // '不对' 与 '搞什么' 同为 ambiguous 命中；刻意不用 high 精度词：
+    // high 会短路同步 STRONG 路径，证明不了异步确认路径的归因。
+    host.detectSync('这个不对，你搞什么啊', 'sess-p13-multi', 'user');
     await flushAsync();
 
-    expect(recorder).toHaveBeenCalledWith(['不对'], true);
-    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, '不对');
+    expect(recorder).toHaveBeenCalledWith(['不对', '搞什么'], true);
+    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, '不对, 搞什么');
   });
 
   it('仅命中 correction ambiguous 词 → 原有归因不变', async () => {
@@ -1036,7 +953,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, '不对');
   });
 
-  it('Stage2 判非 correction → 不为 empathy 词凭空产生纠正词证据', async () => {
+  it('Stage2 判非 correction → 命中词只记 FP，不产生纠正词证据', async () => {
     const { wctx } = makeWctxForAttribution();
     const recorder = vi.fn();
     const host = makeHost(wctx, {
@@ -1051,7 +968,8 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     host.detectSync('你搞什么啊', 'sess-p13-none', 'user');
     await flushAsync();
 
-    expect(recorder).not.toHaveBeenCalled();
+    // 命中词只作为 FP（wasCorrection=false）反馈，不升级为纠正词证据
+    expect(recorder).toHaveBeenCalledWith(['搞什么'], false);
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
   });
 
@@ -1088,14 +1006,14 @@ describe('PRI-2053: Stage2 归因不变量', () => {
     );
   });
 
-  it('LLM 抛错入队时只持久化 correction 类命中词（恢复侧无需历史快照）', async () => {
+  it('LLM 抛错入队时持久化 Stage1 命中词（恢复侧无需历史快照）', async () => {
     const { wctx, trajectory } = makeWctxForAttribution();
     trajectory.enqueueSignalConfirmation = vi.fn();
     const host = makeHost(wctx, {
       keywordStore: testStore,
       config: testConfig,
-      // LLM 存在但抛错：这条入队分支不做 empathy 短路，命中词会原样落库 ——
-      // 归因筛选必须在入队时完成，否则恢复侧只能拿到未分类的词。
+      // LLM 存在但抛错：入队分支把 Stage1 检测当时的命中词原样落库 ——
+      // 归因必须在入队时完成，否则恢复侧只能拿到未分类的词。
       llmClassifier: async () => { throw new Error('channel dead'); },
     });
 
@@ -1104,7 +1022,7 @@ describe('PRI-2053: Stage2 归因不变量', () => {
 
     expect(trajectory.enqueueSignalConfirmation).toHaveBeenCalledTimes(1);
     const arg = trajectory.enqueueSignalConfirmation.mock.calls[0][0];
-    expect(arg.terms).toEqual(['不对']); // empathy 命中词不进入纠正词证据
+    expect(arg.terms).toEqual(['不对', '搞什么']); // Stage1 命中词快照，不依赖恢复时词库
     expect(arg.suggestedType).toBe('correction');
   });
 });
@@ -1179,14 +1097,15 @@ describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
     expect(callArg.data.source).toBe('user_correction');
   });
 
-  it('负向：纯宣泄脏话（无纠正语义）→ empathy/WEAK，不翻转标志位、不触发 pain', async () => {
+  it('负向：纯宣泄脏话（无纠正语义）→ Stage2 判 none，不翻转标志位、不触发 pain', async () => {
     const wctx = makeWctxWithRowid(15);
     const recorder = vi.fn();
     const host = makeHost(wctx, {
       keywordStore: pri687LearnedStore,
       config: testConfig,
+      // GFI 移除后 Stage2 只有 correction / none 两态：纯宣泄归 none。
       llmClassifier: async () => ({
-        is_feedback: true, type: 'empathy', confidence: 0.8,
+        is_feedback: false, type: 'none', confidence: 0.8,
         reason: '纯宣泄情绪，未否定具体产出也未重述期望',
       }),
       cueFeedbackRecorder: recorder,
@@ -1198,8 +1117,7 @@ describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
     // 脏话 ≠ 纠正：不回写标志位、不发 pain
     expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalled();
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
-    // 仍累积 GFI 摩擦（WEAK 路由不变），且命中词记 FP（earned 证据的反向积累）
-    expect(trackFriction).toHaveBeenCalled();
+    // 命中词记 FP（earned 证据的反向积累）
     expect(recorder).toHaveBeenCalledWith(expect.arrayContaining(['什么狗屎']), false);
   });
 });

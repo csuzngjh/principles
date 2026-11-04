@@ -284,23 +284,6 @@ describe('Learn→Detect live refresh (无需重启)', () => {
     expect(HIGH_PRECISION_LEARNED_WEIGHT).toBe(0.7);
   });
 
-  it('empathy 降级路径不被破坏: LLM 关闭时 搞什么 仍路由 WEAK(GFI)', async () => {
-    saveCorrectionKeywordStore(stateDir, makeStore([]));
-    const wctx = makeMockWctx(stateDir);
-    const live = createLiveSignalKeywordStore(wctx as never);
-    const host = new SignalCollectorHost(wctx as never, {
-      keywordStoreProvider: () => live.resolve(),
-      config: noLlmConfig,
-      llmClassifier: null,
-    });
-
-    host.detectSync('搞什么啊', 'sess-j3d', 'user');
-    await flushAsync();
-
-    expect(trackFriction).toHaveBeenCalledTimes(1);
-    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
-  });
-
   it('storeVersion 漂移防护: resolve() 返回的快照在同一消息处理内一致', () => {
     saveCorrectionKeywordStore(stateDir, makeStore([]));
     const live = createLiveSignalKeywordStore(makeMockWctx(stateDir) as never);

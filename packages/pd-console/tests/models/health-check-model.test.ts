@@ -66,7 +66,8 @@ describe('HealthCheckModel', () => {
       expect(health).toBeDefined();
       expect(health.overall).toBeDefined();
       expect(['healthy', 'degraded', 'error']).toContain(health.overall);
-      expect(health.checks).toHaveLength(5);
+      // GFI 项随 GFI 移除一起删除：检查项由 5 项降为 4 项
+      expect(health.checks).toHaveLength(4);
       expect(health.pipeline).toBeDefined();
       expect(health.generatedAt).toBeDefined();
     } finally {

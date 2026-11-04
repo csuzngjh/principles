@@ -305,45 +305,15 @@ describe('handleRuntimeHealthSnapshot', () => {
     expect(jsonOutput.gfi.staleSessionCount).toBe(1);
   });
 
-  it('includes compact GFI line in text output', async () => {
-    const snapshot = {
-      ...healthySnapshot(),
-      gfi: {
-        active: {
-          currentGfi: 42,
-          stage: 'elevated',
-          dominantSource: 'tool_failure',
-          consecutiveErrors: 2,
-          dailyGfiPeak: 55,
-          consumers: {
-            attitudeMode: 'conciliatory',
-            painDiagnosticReason: 'high_gfi',
-          },
-        },
-        staleSessionCount: 0,
-        staleGfiRange: null,
-        totalSessionCount: 1,
-        activeSessionCount: 1,
-        generatedAt: '2026-05-03T12:00:00.000Z',
-      },
-    };
-    mockSnapshotFn.mockResolvedValue(snapshot);
-
-    await handleRuntimeHealthSnapshot({ workspace: WS, json: false });
-
-    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
-    expect(allOutput).toContain('gfi:');
-    expect(allOutput).toContain('elevated');
-    expect(allOutput).toContain('42');
-  });
-
-  it('shows no active sessions in text when gfi.active is null', async () => {
+  it('text 输出不再包含 GFI 行，其余健康摘要照常渲染', async () => {
     mockSnapshotFn.mockResolvedValue(healthySnapshot());
 
     await handleRuntimeHealthSnapshot({ workspace: WS, json: false });
 
     const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
-    expect(allOutput).toContain('no active sessions');
+    // GFI 行已随命令移除；健康摘要本身仍然存在
+    expect(allOutput).not.toContain('gfi:');
+    expect(allOutput).toContain('candidateLedger');
   });
 
   it('does not mark runtime unhealthy solely for missing GFI data', async () => {
