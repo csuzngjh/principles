@@ -153,7 +153,7 @@ pd.approval.pending_count
 pd.approval.avg_decision_latency_ms
 pd.runtime.adapter_call_failed_total
 pd.store.lease_conflict_total
-pd.gfi.workspace_friction_score
+pd.gfi.workspace_friction_score   # 已退役（GFI-COMPLETE-REMOVAL-001），仅存历史名
 ```
 
 ### 3.3 关键指标清单
@@ -214,14 +214,9 @@ pd.gfi.workspace_friction_score
 | `pd.store.sqlite_wal_size_bytes` | gauge | - | WAL 大小 |
 | `pd.store.ledger_size_bytes` | gauge | - | Ledger 文件大小 |
 
-#### 3.3.5 GFI 指标
+#### 3.3.5 GFI 指标 — 已退役
 
-| 指标 | 类型 | 标签 | 意义 |
-|------|-----|------|------|
-| `pd.gfi.workspace_friction_score` | gauge | - | 当前摩擦分数 |
-| `pd.gfi.session_friction_score` | gauge | session_id | 会话摩擦分数 |
-| `pd.gfi.stage` | gauge | - | 当前阶段（GFI Stage 编号）|
-| `pd.gfi.relief_applied_total` | counter | trigger | relief 触发次数 |
+GFI 已在 **GFI-COMPLETE-REMOVAL-001**（SPEC §2 / §4.4）中移除，`pd.gfi.workspace_friction_score`、`pd.gfi.session_friction_score`、`pd.gfi.stage`、`pd.gfi.relief_applied_total` 不再产生，Console 的 GFI 健康度视图一并删除。本节保留仅为历史对照，不描述当前行为。
 
 ### 3.4 指标聚合与查询
 
