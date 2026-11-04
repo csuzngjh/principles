@@ -272,7 +272,146 @@ describe('G3 §10.5 consolidated installed-component dependency links', () => {
   });
 });
 
-/** Directory link with the platform-appropriate primitive. */
+/**
+ * P1 (PR #2319 review): a dependency NAME becomes a path segment under
+ * node_modules, so "." / ".." / empty segments / separators must never reach
+ * path.join() — normalization would turn them into node_modules, the scope
+ * parent or the component root, and the physical-copy repair pass would
+ * recursively delete that directory. Every case below seeds sentinel files in
+ * exactly those directories and in an external tree, so the assertion is
+ * "nothing was deleted", not a string match.
+ */
+describe('P1 dependency-name boundary (real filesystem, no string assertions)', () => {
+  let savedEnv: Record<string, string | undefined>;
+  let sandboxRoot: string;
+  let runtimeDir: string;
+
+  const SENTINEL = 'sentinel-content-must-survive';
+  const MALICIOUS_NAMES: Array<[label: string, name: string]> = [
+    ['dot', '.'],
+    ['dot-dot', '..'],
+    ['scoped-dot', '@scope/.'],
+    ['scoped-dot-dot', '@scope/..'],
+    ['parent-escape', '../outside'],
+    ['scoped-parent-escape', '@scope/../../outside'],
+    ['empty-segment', '@scope//package'],
+    ['backslash', '..\\outside'],
+  ];
+
+  beforeEach(() => {
+    savedEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    sandboxRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g3-105-p1-')));
+    process.env.HOME = sandboxRoot;
+    process.env.USERPROFILE = sandboxRoot;
+    runtimeDir = path.join(sandboxRoot, '.pd', 'runtime');
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    writeSibling(runtimeDir, 'core', '@principles/core');
+    writeSibling(runtimeDir, 'host-runtime', '@principles/host-runtime');
+    fs.mkdirSync(path.join(sandboxRoot, 'outside'), { recursive: true });
+    fs.writeFileSync(path.join(sandboxRoot, 'outside', '.outside-sentinel'), SENTINEL);
+  });
+
+  afterEach(() => {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    if (sandboxRoot) fs.rmSync(sandboxRoot, { recursive: true, force: true, maxRetries: 10 });
+  });
+
+  const componentDir = () => path.join(runtimeDir, 'pd-cli');
+  const sentinelFiles = (): string[] => [
+    path.join(componentDir(), '.component-sentinel'),
+    path.join(componentDir(), 'node_modules', '.modules-sentinel'),
+    path.join(componentDir(), 'node_modules', '@principles', '.scope-sentinel'),
+    path.join(componentDir(), 'node_modules', '@scope', '.scope-sentinel'),
+  ];
+
+  function seedSentinels(): void {
+    fs.mkdirSync(path.join(componentDir(), 'node_modules', '@principles'), { recursive: true });
+    fs.mkdirSync(path.join(componentDir(), 'node_modules', '@scope'), { recursive: true });
+    for (const file of sentinelFiles()) fs.writeFileSync(file, SENTINEL);
+  }
+
+  function expectNothingDestroyed(): void {
+    expect(fs.lstatSync(componentDir()).isDirectory()).toBe(true);
+    expect(fs.lstatSync(path.join(componentDir(), 'node_modules')).isDirectory()).toBe(true);
+    for (const file of sentinelFiles()) {
+      expect(fs.existsSync(file), `${file} must still exist`).toBe(true);
+      expect(fs.readFileSync(file, 'utf8'), `${file} must be unchanged`).toBe(SENTINEL);
+    }
+    const outside = path.join(sandboxRoot, 'outside');
+    expect(fs.readdirSync(outside)).toEqual(['.outside-sentinel']);
+    expect(fs.readFileSync(path.join(outside, '.outside-sentinel'), 'utf8')).toBe(SENTINEL);
+  }
+
+  it.each(MALICIOUS_NAMES)('rejects the %s dependency name "%s" and destroys nothing', (_label, name) => {
+    seedSentinels();
+    writeComponent(runtimeDir, 'pd-cli', '@principles/pd-cli', { [name]: 'file:../core' }, ['@principles/core']);
+
+    expect(() => ensurePdCliResolution()).toThrow(/unsupported dependency name/i);
+    expectNothingDestroyed();
+  });
+
+  it('an invalid later entry aborts before ANY earlier valid link is materialized', () => {
+    seedSentinels();
+    writeComponent(
+      runtimeDir,
+      'pd-cli',
+      '@principles/pd-cli',
+      { '@principles/core': 'file:../core', '..': 'file:../host-runtime' },
+      ['@principles/core', '@principles/host-runtime'],
+    );
+
+    expect(() => ensurePdCliResolution()).toThrow(/unsupported dependency name/i);
+    expect(fs.existsSync(path.join(componentDir(), 'node_modules', '@principles', 'core')), 'no valid link may be created').toBe(false);
+    expect(fs.existsSync(path.join(componentDir(), 'node_modules', '@principles', 'host-runtime'))).toBe(false);
+    expectNothingDestroyed();
+  });
+
+  it('refuses a symlinked node_modules parent (a delete could escape the component)', () => {
+    writeComponent(runtimeDir, 'pd-cli', '@principles/pd-cli', { '@principles/core': 'file:../core' }, ['@principles/core']);
+    const externalNodeModules = path.join(sandboxRoot, 'outside', 'node_modules');
+    fs.mkdirSync(externalNodeModules, { recursive: true });
+    fs.writeFileSync(path.join(externalNodeModules, '.outside-sentinel'), SENTINEL);
+    fs.writeFileSync(path.join(componentDir(), '.component-sentinel'), SENTINEL);
+    createDirLink(externalNodeModules, path.join(componentDir(), 'node_modules'));
+
+    expect(() => ensurePdCliResolution()).toThrow(/must not be a symbolic link/i);
+    expect(fs.existsSync(path.join(externalNodeModules, '.outside-sentinel'))).toBe(true);
+    expect(fs.readFileSync(path.join(externalNodeModules, '.outside-sentinel'), 'utf8')).toBe(SENTINEL);
+    expect(fs.existsSync(path.join(componentDir(), '.component-sentinel'))).toBe(true);
+  });
+
+  it('refuses a symlinked scoped parent (the scope directory is not replaced or deleted through)', () => {
+    writeComponent(runtimeDir, 'pd-cli', '@principles/pd-cli', { '@principles/core': 'file:../core' }, ['@principles/core']);
+    fs.mkdirSync(path.join(componentDir(), 'node_modules'), { recursive: true });
+    fs.writeFileSync(path.join(componentDir(), 'node_modules', '.modules-sentinel'), SENTINEL);
+    const externalScope = path.join(sandboxRoot, 'outside', 'scope', '@principles');
+    fs.mkdirSync(path.join(externalScope, 'core'), { recursive: true });
+    fs.writeFileSync(path.join(externalScope, '.outside-sentinel'), SENTINEL);
+    fs.writeFileSync(path.join(externalScope, 'core', '.core-sentinel'), SENTINEL);
+    createDirLink(externalScope, path.join(componentDir(), 'node_modules', '@principles'));
+
+    expect(() => ensurePdCliResolution()).toThrow(/must not be a symbolic link/i);
+    expect(fs.existsSync(path.join(externalScope, '.outside-sentinel'))).toBe(true);
+    expect(fs.readFileSync(path.join(externalScope, 'core', '.core-sentinel'), 'utf8')).toBe(SENTINEL);
+    expect(fs.existsSync(path.join(componentDir(), 'node_modules', '.modules-sentinel'))).toBe(true);
+  });
+
+  it('refuses a sibling that resolves outside the runtime dir', () => {
+    writeComponent(runtimeDir, 'pd-cli', '@principles/pd-cli', { '@principles/core': 'file:../core' }, ['@principles/core']);
+    const outsideCore = path.join(sandboxRoot, 'outside', 'core');
+    fs.mkdirSync(outsideCore, { recursive: true });
+    fs.writeFileSync(path.join(outsideCore, '.outside-sentinel'), SENTINEL);
+    fs.rmSync(path.join(runtimeDir, 'core'), { recursive: true, force: true });
+    createDirLink(outsideCore, path.join(runtimeDir, 'core'));
+
+    expect(() => ensurePdCliResolution()).toThrow(/resolves outside the runtime dir/i);
+    expect(fs.existsSync(path.join(outsideCore, '.outside-sentinel'))).toBe(true);
+    expect(fs.readFileSync(path.join(outsideCore, '.outside-sentinel'), 'utf8')).toBe(SENTINEL);
+  });
+});
 function createDirLink(target: string, linkPath: string): void {
   if (process.platform === 'win32') fs.symlinkSync(target, linkPath, 'junction');
   else fs.symlinkSync(target, linkPath, 'dir');
