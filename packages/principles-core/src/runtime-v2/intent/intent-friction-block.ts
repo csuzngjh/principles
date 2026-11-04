@@ -30,8 +30,8 @@ import { escapeXml } from '../../prompt-builder/xml-escape.js';
  * still knows the doc was bounded.
  *
  * SPEC §12.2 requires bounded injection. 4000 chars is well within the
- * prompt hook size guard budget (9000 chars total) and leaves room for
- * other appendSystemContext blocks.
+ * prompt hook size guard fallback total (11000 chars at policy v2) and
+ * leaves room for other appendSystemContext blocks.
  */
 export const INTENT_INJECT_MAX_CHARS = 4000;
 

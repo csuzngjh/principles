@@ -20,10 +20,6 @@ import {
 } from '@principles/host-runtime';
 import type { GovernanceObservationInput } from '@principles/host-runtime';
 import type { PayloadFields } from './ingestion-fields.js';
-import { isRecord, own } from './ingestion-fields.js';
-
-/** The live host-event source used by the identity derivation (parity with the dispatch handler). */
-const CODEX_POST_TOOL_USE_SOURCE = 'codex:post_tool_use';
 
 export interface GovernanceAdmissionDegradation {
   readonly reason: string;
@@ -54,86 +50,28 @@ export function buildLiveCorrectionCandidate(args: {
   };
 }
 
-/** Live PostToolUse payload → tool-failure candidate (logical key mirrors the observation). */
-export function buildLiveToolCandidate(args: {
-  fields: PayloadFields;
-  rolloutIdentity: string;
-  projectDir?: string;
-}): GovernanceSignalCandidate | null {
-  const { fields } = args;
-  if (fields.turnId === null || fields.toolUseId === null) return null;
-  return {
-    kind: 'tool_failure',
-    hostKind: 'codex',
-    logicalObservationKey: `codex|${args.rolloutIdentity}|${fields.toolUseId}`,
-    rolloutIdentity: args.rolloutIdentity,
-    rootSessionId: fields.sessionId,
-    hostTurnId: fields.turnId,
-    toolName: fields.toolName ?? '',
-    source: CODEX_POST_TOOL_USE_SOURCE,
-    // Merge semantics (WorkBuddy × SPEC-CODEX-PAIN-CLOSURE-001): the same host
-    // `tool_use_id` feeds TWO consumers, so the candidate carries both views.
-    // I1 identity parity — the live handler derives the canonical pain from the
-    // same tool_use_id, so `toolCallId` must be present (one real call → one
-    // canonical pain across the admission + dispatch deliveries).
-    toolCallId: fields.toolUseId,
-    // CR-01 — `toolUseId` is recorded into tool_calls.tool_use_id and used for
-    // the admission dedup join against the live PostToolUse row.
-    toolUseId: fields.toolUseId,
-    ...(args.projectDir !== undefined ? { projectDir: args.projectDir } : {}),
-    ...(fields.toolInput !== undefined ? { toolInput: fields.toolInput } : {}),
-    ...(fields.toolResponse !== undefined ? { toolOutput: fields.toolResponse } : {}),
-    observedAt: new Date().toISOString(),
-  };
-}
-
 /**
- * Decoded transcript observations → candidates. User turns carry visibleText;
- * tool calls carry the CommandExecution facts projection. The logical keys are
- * the decoded ones, so a replay of an already-admitted live event is an
- * observation-level no-op (SPEC §10).
+ * Decoded transcript observations → candidates. Only user turns produce
+ * candidates: tool-call observations remain technical trajectory (recorded by
+ * the workflow's own writers), never a behavioral-deviation Pain by themselves.
+ * The logical keys are the decoded ones, so a replay of an already-admitted
+ * live event is an observation-level no-op (SPEC §10).
  */
 export function buildTranscriptCandidates(observations: readonly GovernanceObservationInput[]): readonly GovernanceSignalCandidate[] {
   const candidates: GovernanceSignalCandidate[] = [];
   for (const observation of observations) {
-    if (observation.kind === 'user_turn') {
-      if (observation.visibleText === undefined) continue;
-      candidates.push({
-        kind: 'user_correction',
-        hostKind: 'codex',
-        logicalObservationKey: observation.logicalObservationKey,
-        rolloutIdentity: observation.rolloutIdentity,
-        rootSessionId: observation.rootSessionId,
-        hostTurnId: observation.hostTurnId,
-        text: observation.visibleText,
-        observedAt: observation.observedAt,
-      });
-    } else if (observation.kind === 'tool_call') {
-      const facts = observation.toolFacts;
-      if (!isRecord(facts)) continue;
-      const toolName = own(facts, 'toolName');
-      const exitCode = own(facts, 'exitCode');
-      candidates.push({
-        kind: 'tool_failure',
-        hostKind: 'codex',
-        logicalObservationKey: observation.logicalObservationKey,
-        rolloutIdentity: observation.rolloutIdentity,
-        rootSessionId: observation.rootSessionId,
-        hostTurnId: observation.hostTurnId,
-        toolName: typeof toolName === 'string' ? toolName : '',
-        source: CODEX_POST_TOOL_USE_SOURCE,
-        // Merge semantics: both merged views of the same host tool_use_id.
-        // I1 identity parity — the decoded observation carries the same
-        // tool_use_id the live delivery derived its canonical pain from, so a
-        // transcript replay converges on that pain instead of a second one.
-        ...(typeof observation.toolUseId === 'string' && observation.toolUseId.length > 0 ? { toolCallId: observation.toolUseId } : {}),
-        // CR-01 — recorded into tool_calls.tool_use_id for the dedup join.
-        ...(observation.toolUseId !== undefined ? { toolUseId: observation.toolUseId } : {}),
-        toolInput: own(facts, 'command') ?? null,
-        ...(exitCode !== undefined ? { toolOutput: { exitCode, stdout: own(facts, 'stdout') ?? null, stderr: own(facts, 'stderr') ?? null } } : {}),
-        observedAt: observation.observedAt,
-      });
-    }
+    if (observation.kind !== 'user_turn') continue;
+    if (observation.visibleText === undefined) continue;
+    candidates.push({
+      kind: 'user_correction',
+      hostKind: 'codex',
+      logicalObservationKey: observation.logicalObservationKey,
+      rolloutIdentity: observation.rolloutIdentity,
+      rootSessionId: observation.rootSessionId,
+      hostTurnId: observation.hostTurnId,
+      text: observation.visibleText,
+      observedAt: observation.observedAt,
+    });
   }
   return candidates;
 }

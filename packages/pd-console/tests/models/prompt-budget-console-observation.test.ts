@@ -150,22 +150,22 @@ function budgetEventData(workspaceDir: string, extra: Record<string, unknown>): 
     principleIds: ['p1'],
     injectedCount: 1,
     injectedCharCount: 480,
-    budget: 2000,
+    budget: 4000,
     ...extra,
   };
 }
 
 const TRUSTED_256K = {
   hostKind: 'openclaw',
-  budget: 4000,
+  budget: 8000,
   budgetCapacitySource: 'host_effective_window',
   budgetCapacityStatus: 'confirmed',
   budgetContextWindowTokens: 256_000,
-  budgetPolicyVersion: 'model_aware_v1',
+  budgetPolicyVersion: 'model_aware_v2',
 } as const;
 
 describe('PRI-1017 A: production injection event → Console forecast (the data chain, end to end)', () => {
-  it('a real 256K dispatch is read back by the grouped console as a 4000-char budget with provenance + observation time', async () => {
+  it('a real 256K dispatch is read back by the grouped console as an 8000-char budget with provenance + observation time', async () => {
     const dir = makeWorkspace();
     await seedActivation(dir, 'cross-a1', '跨层验证原则：先确认事实，再行动。' + 'z'.repeat(80));
 
@@ -185,16 +185,16 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
       .map((line) => JSON.parse(line) as { type?: string; data?: Record<string, unknown> })
       .filter((entry) => entry.type === 'runtime_v2_prompt_activations_injected');
     expect(injected).toHaveLength(1);
-    expect(injected[0]?.data?.budget).toBe(4000);
+    expect(injected[0]?.data?.budget).toBe(8000);
     expect(injected[0]?.data?.budgetCapacitySource).toBe('host_effective_window');
 
     // The console now forecasts under the SAME budget fact.
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
     const promptInjection = grouped.promptInjection;
     expect(promptInjection).toBeDefined();
-    expect(promptInjection?.budget).toBe(4000);
+    expect(promptInjection?.budget).toBe(8000);
     expect(promptInjection?.usedChars).toBeGreaterThan(0);
-    expect(promptInjection?.usedChars).toBeLessThanOrEqual(4000);
+    expect(promptInjection?.usedChars).toBeLessThanOrEqual(8000);
     expect(promptInjection?.capacityStatus).toBe('confirmed');
     expect(promptInjection?.hostKind).toBe('codex');
     expect(promptInjection?.budgetCapacitySource).toBe('host_effective_window');
@@ -220,7 +220,7 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
 
     const activations = await new ActivationsConsoleModel(dir).getActivations('codex');
     const row = activations.activations.find((entry) => entry.promptInjection !== undefined);
-    expect(row?.promptInjection?.budget).toBe(4000);
+    expect(row?.promptInjection?.budget).toBe(8000);
     expect(row?.promptInjection?.status).toBe('injectable');
     expect(activations.promptInjectionRoute?.budgetObservedAt).toBeDefined();
     expect(activations.promptInjectionRoute?.status).toBe('confirmed');
@@ -229,7 +229,7 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
   it('a single-host workspace resolves its host from WORKSPACE FACTS (no ?host) and uses that host’s observation', async () => {
     // The common console load passes no target host. The route is still
     // confirmed (one declared host), so the forecast must use that host's
-    // observation instead of the parameterless 2000 fallback.
+    // observation instead of the parameterless 4000 fallback.
     const dir = makeWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'cross-a3', '单宿主工作区原则：先确认事实，再行动。' + 'z'.repeat(60));
     await dispatchProductionInjection(dir, {
@@ -241,7 +241,7 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
     expect(grouped.promptInjection?.capacityStatus).toBe('confirmed');
     expect(grouped.promptInjection?.hostKind).toBe('openclaw');
-    expect(grouped.promptInjection?.budget).toBe(4000);
+    expect(grouped.promptInjection?.budget).toBe(8000);
     expect(grouped.promptInjection?.budgetObservedAt).toBeDefined();
     expect(grouped.promptInjection?.budgetFallbackReason).toBeUndefined();
 
@@ -250,10 +250,10 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
     expect(activations.promptInjectionRoute?.budgetCapacityStatus).toBe('confirmed');
     expect(activations.promptInjectionRoute?.budgetContextWindowTokens).toBe(256_000);
     expect(activations.promptInjectionRoute?.budgetObservedAt).toBeDefined();
-    expect(activations.activations.find((entry) => entry.principleId === 'cross-a3')?.promptInjection?.budget).toBe(4000);
+    expect(activations.activations.find((entry) => entry.principleId === 'cross-a3')?.promptInjection?.budget).toBe(8000);
   });
 
-  it('C1: under the observed 4000 budget a mid-range entry is model_dependent (never a false injectable)', async () => {
+  it('C1: under the observed 8000 budget a mid-range entry is model_dependent (never a false injectable)', async () => {
     const dir = makeWorkspace();
     // ~852-char minimum entry (fits every tier) and a ~1664-char entry
     // (above the measured 1250 floor, inside the supported range → model
@@ -270,19 +270,19 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
     const byPrinciple = new Map(activations.activations.map((entry) => [entry.principleId, entry.promptInjection]));
     const small = byPrinciple.get('cross-small');
     const mid = byPrinciple.get('cross-mid');
-    expect(small?.budget).toBe(4000);
+    expect(small?.budget).toBe(8000);
     expect(small?.status).toBe('injectable');
-    expect(mid?.budget).toBe(4000);
+    expect(mid?.budget).toBe(8000);
     // The PR #2093 regression, locked at the console layer: an entry in
-    // (1250, 16000] is NEVER reported as an unconditional injectable, even
+    // (1250, 32000] is NEVER reported as an unconditional injectable, even
     // when it fits the current (observed) window.
     expect(mid?.status).toBe('model_dependent');
     expect(mid?.inCurrentWindow).toBe(true);
   });
 
-  it('C2: under the observed 4000 budget a >16K entry is still oversized (no model can inject it)', async () => {
+  it('C2: under the observed 8000 budget a >32K entry is still oversized (no model can inject it)', async () => {
     const dir = makeWorkspace();
-    await seedActivation(dir, 'cross-huge', 'z'.repeat(20_000));
+    await seedActivation(dir, 'cross-huge', 'z'.repeat(33_000));
     await dispatchProductionInjection(dir, {
       contextTokenBudget: 256_000,
       contextWindowSource: 'model',
@@ -291,11 +291,11 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
 
     const activations = await new ActivationsConsoleModel(dir).getActivations('codex');
     const huge = activations.activations.find((entry) => entry.principleId === 'cross-huge')?.promptInjection;
-    expect(huge?.budget).toBe(4000);
+    expect(huge?.budget).toBe(8000);
     expect(huge?.status).toBe('oversized');
   });
 
-  it('C3: the formula clamp boundaries (32K → 1250 floor, 1M → 15625) flow through unchanged', async () => {
+  it('C3: the formula clamp boundaries (32K → 1250 floor, 1M → 31250) flow through unchanged', async () => {
     const minDir = makeWorkspace();
     await seedActivation(minDir, 'cross-min', 'x'.repeat(86));
     await dispatchProductionInjection(minDir, {
@@ -322,12 +322,12 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
       modelId: 'claude-sonnet-4-5',
     });
     const maxGrouped = await new ApprovalsGroupedConsoleModel(maxDir).getApprovalsGrouped('codex');
-    // floor(2000 * 1_000_000 / 128_000) = 15625 — below the 16000 cap.
-    expect(maxGrouped.promptInjection?.budget).toBe(15_625);
+    // floor(4000 * 1_000_000 / 128_000) = 31250 — below the 32000 cap.
+    expect(maxGrouped.promptInjection?.budget).toBe(31_250);
     expect(maxGrouped.promptInjection?.budgetContextWindowTokens).toBe(1_000_000);
     const maxRow = (await new ActivationsConsoleModel(maxDir).getActivations('codex')).activations
       .find((entry) => entry.principleId === 'cross-max')?.promptInjection;
-    expect(maxRow?.budget).toBe(15_625);
+    expect(maxRow?.budget).toBe(31_250);
     expect(maxRow?.status).toBe('model_dependent');
     expect(maxRow?.inCurrentWindow).toBe(true);
   });
@@ -347,7 +347,7 @@ describe('PRI-1017 A: production injection event → Console forecast (the data 
     expect(row?.status).toBe('model_dependent');
     expect(row?.inCurrentWindow).toBe(false);
     // The tier verdict is about the entry, not the current window: bigger
-    // models (≤16000 budget) can still inject it, so it is never "oversized".
+    // models (≤32000 budget) can still inject it, so it is never "oversized".
     expect(row?.status).not.toBe('oversized');
   });
 });
@@ -357,7 +357,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     const dir = makeWorkspace();
     await seedActivation(dir, 'neg-b1', '无观测回退验证原则');
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.budgetCapacityStatus).toBe('unknown');
     expect(grouped.promptInjection?.budgetCapacitySource).toBe('legacy_fallback');
     expect(grouped.promptInjection?.budgetFallbackReason).toBe('host_capacity_absent');
@@ -369,7 +369,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     await seedActivation(dir, 'neg-b2', '过期观测回退验证原则');
     writeRawEvent(dir, '2026-10-19T04:00:00.000Z', budgetEventData(dir, TRUSTED_256K));
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('openclaw');
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.budgetCapacityStatus).toBe('unknown');
     expect(grouped.promptInjection?.budgetFallbackReason).toBe('runtime_budget_observation_stale');
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
@@ -380,7 +380,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     await seedActivation(dir, 'neg-b3', '宿主不匹配回退验证原则');
     writeRawEvent(dir, new Date().toISOString(), budgetEventData(dir, TRUSTED_256K));
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.hostKind).toBe('codex');
     expect(grouped.promptInjection?.budgetFallbackReason).toBe('host_capacity_absent');
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
@@ -391,14 +391,14 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     await seedActivation(dir, 'neg-b4', '不可信字段回退验证原则');
     writeRawEvent(dir, new Date().toISOString(), budgetEventData(dir, {
       hostKind: 'openclaw',
-      budget: 4000,
+      budget: 8000,
       budgetCapacitySource: 'not_a_real_source',
       budgetCapacityStatus: 'confirmed',
       budgetContextWindowTokens: 256_000,
-      budgetPolicyVersion: 'model_aware_v1',
+      budgetPolicyVersion: 'model_aware_v2',
     }));
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('openclaw');
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
   });
 
@@ -413,14 +413,14 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     const openclaw = perHost.find((entry) => entry.hostKind === 'openclaw');
     const codex = perHost.find((entry) => entry.hostKind === 'codex');
     const workbuddy = perHost.find((entry) => entry.hostKind === 'workbuddy');
-    // OpenClaw carries its own observed 4000-char basis with the observation time.
-    expect(openclaw?.budget).toBe(4000);
+    // OpenClaw carries its own observed 8000-char basis with the observation time.
+    expect(openclaw?.budget).toBe(8000);
     expect(openclaw?.budgetCapacitySource).toBe('host_effective_window');
     expect(openclaw?.budgetObservedAt).toBeDefined();
     // The other hosts keep their own honest fallback — no borrowed window.
-    expect(codex?.budget).toBe(2000);
+    expect(codex?.budget).toBe(4000);
     expect(codex?.budgetObservedAt).toBeUndefined();
-    expect(workbuddy?.budget).toBe(2000);
+    expect(workbuddy?.budget).toBe(4000);
     expect(workbuddy?.budgetObservedAt).toBeUndefined();
     // Each host carries its OWN reason; the headline must not inherit the
     // first host's reason (that would attribute one host's gap to another).
@@ -439,7 +439,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
     expect(grouped.promptInjection?.capacityStatus).toBe('confirmed');
     expect(grouped.promptInjection?.hostKind).toBe('openclaw');
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.budgetFallbackReason).toBe('runtime_budget_observation_stale');
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
   });
@@ -449,7 +449,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     await seedActivation(dir, 'neg-b7', '未来时间戳验证原则');
     writeRawEvent(dir, '2099-01-01T00:00:00.000Z', budgetEventData(dir, TRUSTED_256K));
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
     expect(grouped.promptInjection?.budgetCapacityStatus).toBe('unknown');
   });
@@ -462,7 +462,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
       budget: 2000,
     }));
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
-    expect(grouped.promptInjection?.budget).toBe(2000);
+    expect(grouped.promptInjection?.budget).toBe(4000);
     expect(grouped.promptInjection?.budgetCapacitySource).toBe('legacy_fallback');
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
   });
@@ -484,14 +484,14 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
 
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
     expect(grouped.promptInjection?.capacityStatus).toBe('confirmed');
-    expect(grouped.promptInjection?.budget).toBe(4000);
+    expect(grouped.promptInjection?.budget).toBe(8000);
     expect(grouped.promptInjection?.budgetObservedAt).toBeDefined();
   });
 
   it('B10: a usable observation that is ITSELF the runtime fallback is surfaced with its reason + observation time (not "console unbound")', async () => {
     // This is the shape the real installed WorkBuddy host emits (verified on
     // 2026-10-21): the host supplied no capacity, so the runtime honestly
-    // resolved 2000/catalog_no_match_for_model_id. The console DID observe the
+    // resolved 4000/catalog_no_match_for_model_id. The console DID observe the
     // runtime's budget basis — it must label it as such, not claim it has no
     // runtime binding.
     const dir = makeWorkspace({ declare: ['openclaw'] });
@@ -500,7 +500,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
       hostKind: 'openclaw',
       budgetCapacitySource: 'legacy_fallback',
       budgetCapacityStatus: 'unknown',
-      budgetPolicyVersion: 'model_aware_v1',
+      budgetPolicyVersion: 'model_aware_v2',
       budgetFallbackReason: 'catalog_no_match_for_model_id',
     }));
 
@@ -508,7 +508,7 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     const promptInjection = grouped.promptInjection;
     expect(promptInjection?.capacityStatus).toBe('confirmed');
     expect(promptInjection?.hostKind).toBe('openclaw');
-    expect(promptInjection?.budget).toBe(2000);
+    expect(promptInjection?.budget).toBe(4000);
     expect(promptInjection?.budgetCapacitySource).toBe('legacy_fallback');
     expect(promptInjection?.budgetCapacityStatus).toBe('unknown');
     expect(promptInjection?.budgetFallbackReason).toBe('catalog_no_match_for_model_id');
@@ -532,8 +532,8 @@ describe('PRI-1020: the Owner-declared basis backs console surfaces with no fres
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
     const promptInjection = grouped.promptInjection;
     expect(promptInjection).toBeDefined();
-    // No observation exists — the declaration is the basis. 400000 tokens → 6250 chars.
-    expect(promptInjection?.budget).toBe(6250);
+    // No observation exists — the declaration is the basis. 400000 tokens → 12500 chars.
+    expect(promptInjection?.budget).toBe(12500);
     expect(promptInjection?.capacityStatus).toBe('confirmed');
     expect(promptInjection?.budgetCapacitySource).toBe('operator_declared');
     expect(promptInjection?.budgetCapacityStatus).toBe('confirmed');
@@ -554,13 +554,13 @@ describe('PRI-1020: the Owner-declared basis backs console surfaces with no fres
     const codex = perHost.find((entry) => entry.hostKind === 'codex');
     const workbuddy = perHost.find((entry) => entry.hostKind === 'workbuddy');
     const openclaw = perHost.find((entry) => entry.hostKind === 'openclaw');
-    // Per-host override (400000 → 6250) vs global (262144 → 4096).
-    expect(codex?.budget).toBe(6250);
+    // Per-host override (400000 → 12500) vs global (262144 → 8192).
+    expect(codex?.budget).toBe(12500);
     expect(codex?.budgetCapacitySource).toBe('operator_declared');
     expect(codex?.budgetObservedAt).toBeUndefined();
-    expect(workbuddy?.budget).toBe(4096);
+    expect(workbuddy?.budget).toBe(8192);
     expect(workbuddy?.budgetCapacitySource).toBe('operator_declared');
-    expect(openclaw?.budget).toBe(4096);
+    expect(openclaw?.budget).toBe(8192);
     expect(openclaw?.budgetCapacitySource).toBe('operator_declared');
     // A declared basis is confirmed — no fallback reason may contradict it.
     expect(codex?.budgetFallbackReason).toBeUndefined();
@@ -582,7 +582,7 @@ describe('PRI-1020: the Owner-declared basis backs console surfaces with no fres
     writeRawEvent(dir, new Date().toISOString(), budgetEventData(dir, { ...TRUSTED_256K, hostKind: 'codex' }));
 
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
-    expect(grouped.promptInjection?.budget).toBe(4000);
+    expect(grouped.promptInjection?.budget).toBe(8000);
     expect(grouped.promptInjection?.budgetCapacitySource).toBe('host_effective_window');
     expect(grouped.promptInjection?.budgetObservedAt).toBeDefined();
 
@@ -600,7 +600,7 @@ describe('PRI-1020: the Owner-declared basis backs console surfaces with no fres
 
     const activations = await new ActivationsConsoleModel(dir).getActivations('codex');
     const row = activations.activations.find((entry) => entry.promptInjection !== undefined);
-    expect(row?.promptInjection?.budget).toBe(6250);
+    expect(row?.promptInjection?.budget).toBe(12500);
     expect(row?.promptInjection?.status).toBe('injectable');
     expect(activations.promptInjectionRoute?.budgetCapacitySource).toBe('operator_declared');
     expect(activations.promptInjectionRoute?.budgetCapacityStatus).toBe('confirmed');

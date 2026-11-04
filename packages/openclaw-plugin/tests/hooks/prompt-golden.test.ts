@@ -129,7 +129,6 @@ vi.mock('../../src/core/focus-history.js', () => ({
 
 vi.mock('../../src/hooks/pain.js', () => ({
   emitPainDetectedEvent: vi.fn().mockResolvedValue(undefined),
-  buildTrajectoryEvidence: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock('../../src/hooks/message-sanitize.js', () => ({

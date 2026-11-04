@@ -173,7 +173,10 @@ describe('PRI-537: activations-injected event pairs source arrays with the injec
       escapeXml,
       selectionPolicy === 'fair_rotation_v1' ? roundOrdinal : undefined,
     );
-    expect(principleIds).toEqual([...selectedBySelector.injectedIds]);
+    // The event pairs the arrays in CANDIDATE order (alignInjectedPrinciples
+    // filters dedupedV2 preserving its order), while trimToBudget chooses the
+    // SET in rotation order. Assert set equality plus per-index pairing.
+    expect(principleIds).toEqual(seededIds.filter((id) => selectedBySelector.injectedIds.has(id)));
     for (let i = 0; i < injectedCount; i++) {
       const pid = principleIds[i]!;
       expect(activationIds[i]).toBe(seededActivationById.get(pid));

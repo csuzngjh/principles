@@ -566,7 +566,7 @@ jobs:
   test-shared-runtime:
     name: Test shared runtime & adapters
     needs: impact
-    # Any of the five consolidated suites' scopes (parity needs plugin; the
+    # Any of the consolidated suites' scopes (parity needs plugin; the
     # scripts suite is covered by broad — root scripts/ changes broaden).
     if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.hostRuntime || fromJSON(needs.impact.outputs.impact).scopes.installLayout || fromJSON(needs.impact.outputs.impact).scopes.codexAdapter || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.companion) }}
     runs-on: ubuntu-latest
@@ -632,6 +632,45 @@ jobs:
       # binary is not needed on Linux.
       - name: Build and test pd-companion
         run: npm run build --workspace=@principles/pd-companion && npm test --workspace=@principles/pd-companion
+
+  # PRI-1066: workbuddy-adapter had a scope in the impact resolver but no job
+  # consumed it, so a v2 contract-test regression there could not fail CI.
+  # It cannot join the Ubuntu suite: its frozen host-contract fixtures are REAL
+  # Windows payloads (`D:\...` cwd) and the decoder deliberately rejects a
+  # non-absolute cwd, so the fixtures fail on Linux for platform reasons before
+  # any product assertion can run. Run the package on a Windows runner instead
+  # of weakening or skipping its evidence.
+  test-workbuddy-adapter:
+    name: Test workbuddy-adapter (Windows fixtures)
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.workbuddyAdapter) }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+
+      - name: Build dependencies
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/host-runtime
+
+      - name: Test workbuddy-adapter
+        run: npm test --workspace=@principles/workbuddy-adapter
 
   build-openclaw-plugin:
     name: Build OpenClaw Plugin

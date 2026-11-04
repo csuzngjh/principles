@@ -27,7 +27,6 @@ export interface OpenClawHostRuntimeOptions {
   ruleInputEnrichmentProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   onBeforeToolResult?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, result: HostEventResult): PluginHookBeforeToolCallResult | void;
   painEnrichmentProvider?(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): ProductionPainEnrichment | Promise<ProductionPainEnrichment>;
-  onAfterToolResult?(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext, result: HostEventResult): void | Promise<void>;
 }
 
 export interface OpenClawHostRuntime {
@@ -160,9 +159,8 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
         : enrichedValue };
     }
     if (payload.kind === 'after_tool_call' && !native) {
-      if (result.metadata?.outcome !== 'unavailable') {
-        await options.onAfterToolResult?.(payload.event, payload.context, result);
-      }
+      // Phase A: the shared after-tool kernel only records technical evidence
+      // now; no pain result needs a host-side continuation.
       return { kind: payload.kind, value: undefined };
     }
     if (!native || native.kind !== payload.kind) {

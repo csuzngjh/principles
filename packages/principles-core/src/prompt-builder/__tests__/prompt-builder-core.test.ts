@@ -12,6 +12,11 @@ import {
   isMinimalTrigger,
   truncateInjectionToBudget,
 } from '../index.js';
+import {
+  PROMPT_TOTAL_INJECTION_FALLBACK_CHARS,
+  promptBudgetCharsForContextWindow,
+  resolveTotalInjectionBudgetChars,
+} from '../../runtime-v2/activation/prompt-budget-policy.js';
 
 // ─── buildAttitudeDirective tests ─────────────────────────────────────────────
 
@@ -171,6 +176,11 @@ describe('isMinimalTrigger', () => {
 // ─── truncateInjectionToBudget tests ──────────────────────────────────────────
 
 describe('truncateInjectionToBudget', () => {
+  // Fixtures derive from the policy fallback total (unknown capacity), not a
+  // second hard-coded ceiling, so a policy recalibration cannot silently
+  // hollow out these stripping-order assertions.
+  const BUDGET = PROMPT_TOTAL_INJECTION_FALLBACK_CHARS;
+
   // Helper to create appendSystemContext with project_context
   const withProjectContext = (content: string) =>
     `<project_context>\n${content}\n</project_context>`;
@@ -198,8 +208,9 @@ describe('truncateInjectionToBudget', () => {
   it('strips project_context when over budget (normal mode)', () => {
     const ps = '<system>identity</system>';
     const pc = 'directive';
-    // 9000 budget - 25 (ps) - 9 (pc) = 8966 minimum; use 9100 to leave headroom
-    const projContent = 'x'.repeat(9100);
+    // Must exceed the fallback total: ps + pc overhead is tiny, so one
+    // BUDGET-sized block is already over.
+    const projContent = 'x'.repeat(BUDGET + 100);
     const ac = withProjectContext(projContent);
     const result = truncateInjectionToBudget(ps, pc, ac);
     expect(result.appendSystemContext).toContain('[stripped: project_context]');
@@ -210,8 +221,8 @@ describe('truncateInjectionToBudget', () => {
   it('strips project_context using exact content replacement when blocks provided', () => {
     const ps = '<system>identity</system>';
     const pc = 'directive';
-    // Must exceed budget: 9000 - 25 - 9 = 8966
-    const projContent = 'exact-content-here'.repeat(500); // ~6500 chars
+    // Must exceed the fallback total.
+    const projContent = 'exact-content-here'.repeat(800); // ~14400 chars
     const ac = withProjectContext(projContent);
     const result = truncateInjectionToBudget(ps, pc, ac, {
       blocks: { projectContextContent: projContent },
@@ -225,10 +236,9 @@ describe('truncateInjectionToBudget', () => {
   it('diagnosticianMode strips thinking_os when over budget', () => {
     const ps = '<system>identity</system>';
     const pc = 'directive';
-    // After stripping project_context, total must still be > 9000 to continue stripping.
-    // project_context stripped size ≈ 35 chars. So thinking_os must be > 9000 - 35 - 25 - 9 ≈ 8931.
-    // Use 9100 to be safe.
-    const ac = withThinkingOs('y'.repeat(9100)) + '\n' + withProjectContext('x'.repeat(9100));
+    // After stripping project_context, total must still be > BUDGET to continue
+    // stripping. Two BUDGET-sized blocks guarantee that.
+    const ac = withThinkingOs('y'.repeat(BUDGET + 100)) + '\n' + withProjectContext('x'.repeat(BUDGET + 100));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
     expect(result.appendSystemContext).toContain('[stripped: thinking_os]');
     expect(result.truncationLog).toContain('thinking_os');
@@ -241,10 +251,10 @@ describe('truncateInjectionToBudget', () => {
     // thinking_os is stripped too; that brings it back under budget, so the
     // guard exits and leaves the low-cost reflection_log untouched.
     const ac =
-      withThinkingOs('y'.repeat(8900)) +
+      withThinkingOs('y'.repeat(BUDGET)) +
       '\n' +
       '<reflection_log>\nreflections here\n</reflection_log>\n' +
-      withProjectContext('x'.repeat(9100));
+      withProjectContext('x'.repeat(BUDGET + 1500));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
     expect(result.truncationLog).toContain('thinking_os');
     expect(result.truncationLog).not.toContain('reflection_log');
@@ -256,16 +266,16 @@ describe('truncateInjectionToBudget', () => {
     // reason: prefix is 8 chars, so 200 + 8 = 208 total
     const longReason = 'a'.repeat(200);
     const pc = withLongReason(longReason);
-    // For reason truncation to trigger, total after all 4 strips must be > 9000.
+    // For reason truncation to trigger, total after all 4 strips must be > BUDGET.
     // After strips: ~35×4 + 45 = 185. pc = 233.
-    // Total after strips = 25 + 233 + 185 = 443 < 9000. Won't trigger!
-    // Need pc to be massive. Let's make pc > 9000 - 25 - 185 = 8790.
-    const bigPc = pc + '\n' + 'x'.repeat(9000);
+    // Total after strips = 25 + 233 + 185 = 443 < BUDGET. Won't trigger!
+    // Need pc to be massive. Let's make pc ~ BUDGET.
+    const bigPc = pc + '\n' + 'x'.repeat(BUDGET);
     const ac =
-      withThinkingOs('y'.repeat(9100)) +
+      withThinkingOs('y'.repeat(BUDGET)) +
       '\n' +
       '<reflection_log>\nreflections here\n</reflection_log>\n' +
-      withProjectContext('x'.repeat(9100));
+      withProjectContext('x'.repeat(BUDGET + 300));
     const result = truncateInjectionToBudget(ps, bigPc, ac, { diagnosticianMode: true });
     // Find the truncated line in prependContext
     const reasonLine = result.prependContext.split('\n').find((l) => l.startsWith('reason:'));
@@ -278,8 +288,8 @@ describe('truncateInjectionToBudget', () => {
   it('exits early after stripping project_context when within budget', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
-    // Total must exceed budget: 9000 - 11 - 5 = 8984 minimum
-    const ac = withProjectContext('x'.repeat(9100));
+    // Total must exceed BUDGET.
+    const ac = withProjectContext('x'.repeat(BUDGET + 100));
     const result = truncateInjectionToBudget(ps, pc, ac);
     expect(result.appendSystemContext).toContain('[stripped: project_context]');
     expect(result.truncationLog).toEqual(['project_context']);
@@ -287,10 +297,10 @@ describe('truncateInjectionToBudget', () => {
 
   it('fallback preserves prependSystemContext and prependContext', () => {
     const ps = '<system>identity</system>';
-    // For fallback to trigger, total after all 4 strips must be > 9000.
+    // For fallback to trigger, total after all 4 strips must be > BUDGET.
     // After all 4 strips: ~35×4 + 45 = 185 chars for ac.
-    // So pc must be > 9000 - 25 - 185 = 8790. Use 9000.
-    const pc = 'directive line' + 'x'.repeat(9000);
+    // So pc must be > BUDGET - 25 - 185. Use BUDGET.
+    const pc = 'directive line' + 'x'.repeat(BUDGET);
     const ac =
       withThinkingOs('x'.repeat(3000)) +
       '\n' +
@@ -307,7 +317,7 @@ describe('truncateInjectionToBudget', () => {
   it('returns non-empty appendSystemContext when all content stripped', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
-    const ac = withProjectContext('x'.repeat(10000));
+    const ac = withProjectContext('x'.repeat(BUDGET + 1000));
     const result = truncateInjectionToBudget(ps, pc, ac);
     expect(result.appendSystemContext.length).toBeGreaterThan(0);
     expect(result.truncated).toBe(true);
@@ -316,8 +326,8 @@ describe('truncateInjectionToBudget', () => {
   it('normal mode does NOT strip thinking_os', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
-    // 9000 - 11 - 5 = 8984 minimum, use 9100
-    const ac = withThinkingOs('content') + '\n' + withProjectContext('x'.repeat(9100));
+    // Must exceed BUDGET.
+    const ac = withThinkingOs('content') + '\n' + withProjectContext('x'.repeat(BUDGET + 100));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: false });
     expect(result.appendSystemContext).toContain('[stripped: project_context]');
     expect(result.appendSystemContext).not.toContain('[stripped: thinking_os]');
@@ -334,8 +344,8 @@ describe('truncateInjectionToBudget', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
     // After stripping project_context (~35 chars remain), intent_block must
-    // push total over 9000. intent_block content: 9100 chars.
-    const ac = withProjectContext('x'.repeat(100)) + '\n' + withIntentBlock('y'.repeat(9100));
+    // push total over BUDGET. intent_block content: BUDGET+100 chars.
+    const ac = withProjectContext('x'.repeat(100)) + '\n' + withIntentBlock('y'.repeat(BUDGET + 100));
     const result = truncateInjectionToBudget(ps, pc, ac);
     expect(result.appendSystemContext).toContain('[stripped: intent_block]');
     expect(result.appendSystemContext).not.toContain('<intent_anchor>');
@@ -346,8 +356,8 @@ describe('truncateInjectionToBudget', () => {
   it('PRI-467: strips intent_block using exact content replacement when intentBlockContent provided', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
-    // Must exceed budget: 9000 - 17 - 3 = 8980. Use ~9200 chars of intent content.
-    const intentContent = 'exact-intent-content-here'.repeat(400); // ~9200 chars
+    // Must exceed BUDGET.
+    const intentContent = 'exact-intent-content-here'.repeat(800); // ~18400 chars
     const intentBlock = withIntentBlock(intentContent);
     const ac = withProjectContext('x'.repeat(100)) + '\n' + intentBlock;
     const result = truncateInjectionToBudget(ps, pc, ac, {
@@ -361,7 +371,7 @@ describe('truncateInjectionToBudget', () => {
   it('PRI-467: does NOT strip intent_block when within budget', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
-    // Total well under 9000 — intent_block must be preserved
+    // Total well under BUDGET — intent_block must be preserved
     const ac = withIntentBlock('small intent content');
     const result = truncateInjectionToBudget(ps, pc, ac);
     expect(result.appendSystemContext).toContain('<intent_anchor>');
@@ -373,13 +383,13 @@ describe('truncateInjectionToBudget', () => {
   it('PRI-467: intent_block is stripped BEFORE thinking_os (priority order)', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
-    // intent_block is large (9100 chars) to push total over 9000 after
+    // intent_block is large (BUDGET+100 chars) to push total over BUDGET after
     // project_context strip. thinking_os is small (100 chars) so that after
     // intent_block strip, total is under budget — proving intent_block strips
     // first and thinking_os is preserved.
     const ac =
       withProjectContext('x'.repeat(100)) + '\n' +
-      withIntentBlock('y'.repeat(9100)) + '\n' +
+      withIntentBlock('y'.repeat(BUDGET + 100)) + '\n' +
       withThinkingOs('z'.repeat(100));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
     expect(result.truncationLog).toContain('project_context');
@@ -397,17 +407,22 @@ describe('truncateInjectionToBudget with totalBudgetChars (PRI-1065)', () => {
   const withProjectContext = (content: string) =>
     `<project_context>\n${content}\n</project_context>`;
 
+  // 1M-window total derives from the same production pair host-runtime uses,
+  // so this test cannot drift from the real ceiling.
+  const ONE_M_TOTAL = resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(1_000_000));
+
   it('a raised ceiling lets a 1M-window turn keep its background blocks', () => {
     // The audited failure: 720 governance + 5145 directives = 5865, plus a
-    // 3503-char CURRENT_FOCUS = 9368 > 9000 → the whole appendSystemContext
-    // was replaced. Under the reconciled ceiling (22625) the same turn fits.
+    // 3503-char CURRENT_FOCUS = 9368 > the old 9000 floor → the whole
+    // appendSystemContext was replaced. Under the reconciled 1M ceiling the
+    // same turn fits.
     const ps = 'g'.repeat(720 + 5145);
     const pc = '';
     const projContent = 'x'.repeat(3503);
     const ac = withProjectContext(projContent);
     expect(ps.length + pc.length + ac.length).toBeGreaterThan(9000);
 
-    const result = truncateInjectionToBudget(ps, pc, ac, { totalBudgetChars: 22_625 });
+    const result = truncateInjectionToBudget(ps, pc, ac, { totalBudgetChars: ONE_M_TOTAL });
     expect(result.truncated).toBe(false);
     expect(result.truncationLog).toEqual([]);
     expect(result.appendSystemContext).toBe(ac);
@@ -416,22 +431,23 @@ describe('truncateInjectionToBudget with totalBudgetChars (PRI-1065)', () => {
   it('the raised ceiling still guards: content over it is stripped as before', () => {
     const ps = 'g'.repeat(720);
     const pc = '';
-    const ac = withProjectContext('x'.repeat(30_000));
-    const result = truncateInjectionToBudget(ps, pc, ac, { totalBudgetChars: 22_625 });
+    const ac = withProjectContext('x'.repeat(ONE_M_TOTAL + 1_000));
+    const result = truncateInjectionToBudget(ps, pc, ac, { totalBudgetChars: ONE_M_TOTAL });
     expect(result.truncated).toBe(true);
     expect(result.truncationLog).toContain('project_context');
   });
 
-  it('absent totalBudgetChars keeps the legacy 9000 boundary intact', () => {
+  it('absent totalBudgetChars applies the policy fallback boundary', () => {
+    const BUDGET = PROMPT_TOTAL_INJECTION_FALLBACK_CHARS;
     const ps = 's';
     const pc = 'p';
     const overhead = ps.length + pc.length + '<project_context>\n\n</project_context>'.length;
-    // Exactly at the 9000 boundary fits; one char more trips the guard.
-    const fits = withProjectContext('x'.repeat(9000 - overhead));
-    expect(fits.length + ps.length + pc.length).toBe(9000);
+    // Exactly at the fallback boundary fits; one char more trips the guard.
+    const fits = withProjectContext('x'.repeat(BUDGET - overhead));
+    expect(fits.length + ps.length + pc.length).toBe(BUDGET);
     expect(truncateInjectionToBudget(ps, pc, fits).truncated).toBe(false);
 
-    const over = withProjectContext('x'.repeat(9000 - overhead + 1));
+    const over = withProjectContext('x'.repeat(BUDGET - overhead + 1));
     expect(truncateInjectionToBudget(ps, pc, over).truncated).toBe(true);
   });
 });

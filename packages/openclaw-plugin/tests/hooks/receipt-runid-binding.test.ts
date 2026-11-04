@@ -5,8 +5,8 @@ import * as path from 'path';
 import {
   handleFrictionTrackingForFailure,
   handleFrictionTrackingForSuccess,
-  resetTriggerCooldownForTest,
 } from '../../src/hooks/after-tool-call-helpers.js';
+import { resetSharedCooldownForTest } from '../../src/hooks/trigger-cooldown-tracker.js';
 import { clearSession } from '../../src/core/session-tracker.js';
 import type { ToolCallOutcome, ToolCallObservation } from '../../src/hooks/after-tool-call-types.js';
 
@@ -38,7 +38,7 @@ describe('PRI-750 receipt chain runId/toolCallId binding (OpenClaw after_tool_ca
       trajectory: { recordToolCall: vi.fn(), recordPainEvent: vi.fn() },
     };
     clearSession('s-runid');
-    resetTriggerCooldownForTest();
+    resetSharedCooldownForTest();
   });
 
   it('failure path writes runId + toolCallId into the tool event when the host supplies them', () => {

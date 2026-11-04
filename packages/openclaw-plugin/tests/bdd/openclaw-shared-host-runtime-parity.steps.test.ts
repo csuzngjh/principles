@@ -276,11 +276,10 @@ registry.when('OpenClaw reports a failed write to a risky path', async () => {
     { workspaceDir, sessionId: 'session-auto-pain-523', agentId: 'agent-openclaw-523' },
   );
 });
-registry.then('one lineaged automatic pain and its tool evidence are persisted', () => {
+registry.then('the failed tool call is recorded as trajectory evidence', () => {
   expect(fs.existsSync(path.join(workspaceDir, '.state', 'trajectory.db')), logMessages.join('\n')).toBe(true);
   const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
   const tools = db.prepare('SELECT id, session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls WHERE session_id = ?').all('session-auto-pain-523');
-  const pains = db.prepare('SELECT session_id, source, score, reason, origin, canonical_pain_id FROM pain_events WHERE session_id = ?').all('session-auto-pain-523');
   db.close();
   expect(tools).toHaveLength(1);
   expect(tools[0]).toEqual(expect.objectContaining({ session_id: 'session-auto-pain-523', tool_name: 'write_file', outcome: 'failure', exit_code: 1, error_message: 'EACCES permission denied' }));
@@ -288,10 +287,15 @@ registry.then('one lineaged automatic pain and its tool evidence are persisted',
   expect(JSON.parse(paramsJson)).toEqual({ content: 'unsafe', file_path: '<path:pd-shared-kernel>' });
   const replay = assembleHistoryFromRows([{ id: Number(Object.getOwnPropertyDescriptor(tools[0] as object, 'id')?.value), toolName: 'write_file', outcome: 'failure', paramsJson }], false, workspaceDir);
   expect(replay).toEqual(expect.objectContaining({ status: 'available', calls: [expect.objectContaining({ normalizedPath: '<path:pd-shared-kernel>' })] }));
-  expect(pains, JSON.stringify(result)).toHaveLength(1);
-  expect(pains[0]).toEqual(expect.objectContaining({ session_id: 'session-auto-pain-523', source: 'tool_failure', score: 70, origin: 'system_infer' }));
-  expect(String(Object.getOwnPropertyDescriptor(pains[0] as object, 'reason')?.value)).toContain('write_file');
-  expect(String(Object.getOwnPropertyDescriptor(pains[0] as object, 'canonical_pain_id')?.value)).toMatch(/^pain_host_/);
+});
+registry.then('no automatic Pain or admission marker is created', () => {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  const pains = db.prepare('SELECT session_id FROM pain_events WHERE session_id = ?').all('session-auto-pain-523');
+  const hasMarkerTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'governance_signal_admissions'").get() !== undefined;
+  const markers = hasMarkerTable ? db.prepare('SELECT logical_observation_key FROM governance_signal_admissions').all() : [];
+  db.close();
+  expect(pains, JSON.stringify(result)).toHaveLength(0);
+  expect(markers).toHaveLength(0);
 });
 
 defineFeature(
