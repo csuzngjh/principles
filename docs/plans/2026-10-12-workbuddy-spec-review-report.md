@@ -1,7 +1,7 @@
 # WorkBuddy 宿主适配器 SPEC — 独立评审与证据核查报告
 
 > **日期**：2026-10-12
-> **评审对象**：`docs/specs/workbuddy-host-adapter-spec.md`（DRAFT v0.1.0）及配套材料（四份调研文档 + 两份官方文档快照）
+> **评审对象**：`docs/archive/specs/workbuddy-host-adapter-spec.md`（DRAFT v0.1.0）及配套材料（四份调研文档 + 两份官方文档快照）
 > **评审方式**：两个相互独立的只读 AI 评审 agent（非 SPEC 作者），分别承担「架构评审」与「证据核查」；全部论断经实际阅读代码 / 比对官方快照 / 复验本机引擎得出
 > **关联工单**：[PRI-952](https://linear.app/principlesdisciple/issue/PRI-952)（实现工单，Phase A 即本报告的修订闭环）
 
@@ -180,7 +180,7 @@
 | 18 | 「0.5 天探针是 8-28 复核唯一未闭环项」（§0/§7.1） | ✅有据 | 取证文档 §5-1「未做端到端实测」+§6-1「约 0.5 天」 | 相符 |
 | 19 | 「PD 内部错误 fail-closed 的理由引用 8-28 复核 §3.1 原话」（§4.4） | ✅有据 | 取证文档 §3.1：「静默失效比不生效更糟」 | 原话相符 |
 | 20 | 「8 BDD/测试路径：docs/specs/features/story-a/ 存在、mvp-config.test.ts 存在」（§8） | ✅有据 | docs/specs/features/story-a/ 目录（含 codex-shared-host-runtime.feature）；packages/create-principles-disciple/tests/mvp-config.test.ts | 新建 workbuddy-shared-host-runtime.feature 与现有命名模式一致 |
-| 21 | 「既有本机噪音基线：health-check-model / workspace-lifecycle Windows EBUSY」（§8） | ❌无据 | 全仓 grep：无 health-check-model 命名基线；workspace-lifecycle 仅存在于 scripts/dev 与 WORKTREE_GOVERNANCE（非测试噪音基线） | EBUSY 噪音现象本身有据（docs/testing/test-archaeology-report.md:160、docs/specs/test-temp-lifecycle-management.md），但这两个具体基线名称无据 |
+| 21 | 「既有本机噪音基线：health-check-model / workspace-lifecycle Windows EBUSY」（§8） | ❌无据 | 全仓 grep：无 health-check-model 命名基线；workspace-lifecycle 仅存在于 scripts/dev 与 WORKTREE_GOVERNANCE（非测试噪音基线） | EBUSY 噪音现象本身有据（docs/testing/test-archaeology-report.md:160、docs/archive/specs/test-temp-lifecycle-management.md），但这两个具体基线名称无据 |
 | 22 | 「PRI-632 / PRI-673 / PRI-560（Done, archived）/ PR #1438 回写」（§10） | 无法验证 | 全仓 grep 仅命中 SPEC 自身；PRI-632/673/560 及 PR #1438 在仓库其他文档无记载（ADR-0020 §11 提及的是 PR #1437/#1440） | Linear/GitHub 外部系统状态，仓库内无法验证，明确标注 |
 
 ### 核查明细表（C. 调研文档补充核查）

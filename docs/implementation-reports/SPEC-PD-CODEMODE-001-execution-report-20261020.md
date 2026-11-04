@@ -204,9 +204,9 @@ New durable source of truth: NO；New persisted schema/state: NO；New subsystem
 | 文件 | SHA-256（前 16 位） |
 |---|---|
 | docs/specs/SPEC-PD-CODEMODE-001-v0.2.md | `ae400dd00fee5428` |
-| docs/specs/SPEC-PD-CODEMODE-001-zcode-execution-instructions.md | `08efcb6006f5568b` |
+| docs/archive/specs/SPEC-PD-CODEMODE-001-zcode-execution-instructions.md | `08efcb6006f5568b` |
 | docs/implementation-reports/SPEC-PD-CODEMODE-001-source-audit-20261020.md | `5f94894165924dfd` |
-| docs/specs/SPEC-PD-IAER-001-v1.0.md（含 +13 行附录传播；覆盖前 origin/main 版 SHA `ce2b73a8847c2847…`） | `c6d8f79ea329edce` |
+| docs/archive/specs/SPEC-PD-IAER-001-v1.0.md（含 +13 行附录传播；覆盖前 origin/main 版 SHA `ce2b73a8847c2847…`） | `c6d8f79ea329edce` |
 | docs/specs/SPEC-PD-PI12-COMPAT-001-v0.2.md（含 +13 行附录传播；覆盖前 origin/main 版 SHA `e759a2b4e57ad4d7…`） | `707a6bddcb5ebbf3` |
 
 ## 附录 B：与前置审计报告的关系

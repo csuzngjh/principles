@@ -121,7 +121,7 @@
 ## 5. 后续动作（不本任务执行）
 
 - **SPEC**：`painEvidenceAdmission(+Default)` 删除/退役选项（涉 pain pipeline protected zone；
-  既有 SPEC：`docs/specs/pain-admission-flag-contract-fix.md` 待 Owner 决策 A/B/C）。
+  既有 SPEC：`docs/archive/specs/pain-admission-flag-contract-fix.md` 待 Owner 决策 A/B/C）。
 - **配置卫生**（Owner 侧）：live config 未注册键 `model_training` / `trainer`；
   `code_rule_capability.category: quiet` 漂移（注册表 core 为准，无行为影响）。
 - **防膨胀 SPEC 候选**：Feature Flag Lifecycle Governance（owner / created reason / expiry /

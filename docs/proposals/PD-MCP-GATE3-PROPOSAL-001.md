@@ -4,7 +4,7 @@
 | 字段 | 内容 |
 |---|---|
 | 阶段 | Gate 3 — Architecture Proposal（设计交付，非实施） |
-| 核心上游 SPEC | `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft，基线 `3a2de95c8`） |
+| 核心上游 SPEC | `docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft，基线 `3a2de95c8`） |
 | 前置审计 | PD-MCP-ARCHITECTURE-DELTA-AUDIT-20261031（基线 `9f0888a16`） |
 | 前置实验 | PD-MCP-GATE2-001（72 运行，`GO_TO_GATE_3_PROPOSAL`） |
 | 前置验证 | PD-MCP-HOOK-INTEGRATION-VERIFICATION-001（`READY_FOR_GATE_3_PROPOSAL`） |
@@ -673,7 +673,7 @@ Hook Adapter 与 MCP Adapter 都是宿主侧机制，**互不调用、互不为�
 | 13 | 原型架构与调用形态 | `%TEMP%\pd-mcp-gate2\gate2-20261031\server\{server.mjs,package.json}`（SDK 1.32.2；`require(pd-cli/dist/services/pain-recall.js)`；`--workspace` argv；isError 两处） |
 | 14 | Gate 2 数字 | `PD-MCP-GATE2-EXPERIMENT-REPORT-20261031.md` × `.tmp/pd-mcp-gate2/analysis.json` 交叉一致（REPORT） |
 | 15 | Hook 六故障语义/审批/lying/sandbox | `PD-MCP-HOOK-INTEGRATION-VERIFICATION-001.md`（hook-verify worktree；15 实验目录在 %TEMP%\pd-hook-verify-001） |
-| 16 | 上游契约 | `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft）；`docs/specs/SPEC-PD-PAIN-RECALL-CLI-001.md`（CLI 契约意图真值） |
+| 16 | 上游契约 | `docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft）；`docs/archive/specs/SPEC-PD-PAIN-RECALL-CLI-001.md`（CLI 契约意图真值） |
 | 17 | 语义缺口诚实标注 | `ambiguous_principle` 未生产（`pain-recall.ts:77,172` vs `:206,864`）；实验报告"五项/七字段"笔误（§3.2 注） |
 
 ---

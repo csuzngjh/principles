@@ -7,7 +7,7 @@
 > Review: 第二轮报告保存在独立 private docs 的 `docs/reviews/2026-10-12-workbuddy-spec-second-review.md`。第一轮报告及旧调研是历史证据，不是当前验收结果。第三轮（third-remediation-review）、第四轮（fourth-…）、第五轮（fifth-…）评审与第六轮终审（round5-fix-review，APPROVE）均在私有 docs/reviews。
 > Authority: 本文不修改 ADR 或替 Owner 批准 OD；实现服从 AGENTS.md、ADR-0020、ADR-0027/0028。
 
-配套整改稿：[可行性](../plans/2026-08-workbuddy-plugin-feasibility.md)、[能力与机会](../plans/2026-08-28-workbuddy-capability-map-for-pd.md)、[历史取证及当前验证动作](../plans/2026-08-28-workbuddy-adapter-verification.md)。三份原始资料保留，本文链接指向同一隔离 worktree 内的修订稿。
+配套整改稿：[可行性](../../plans/2026-08-workbuddy-plugin-feasibility.md)、[能力与机会](../../plans/2026-08-28-workbuddy-capability-map-for-pd.md)、[历史取证及当前验证动作](../../plans/2026-08-28-workbuddy-adapter-verification.md)。三份原始资料保留，本文链接指向同一隔离 worktree 内的修订稿。
 
 配套 PLAN 位于独立私有仓库 `docs/plans/2026-10-12-workbuddy-host-adapter-implementation-plan.md`；Zcode 启动指令位于该仓库 `docs/operator/2026-10-12-zcode-workbuddy-start.md`。人类 Owner 实际发送启动指令后，其中明确的 OD 授权可用于解除本文对应的待批准条件；探针、实现和测试仍须实际完成，不能以授权替代验证。
 
