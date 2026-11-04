@@ -112,9 +112,16 @@ describe('install() release-manager dependency install + authority import smoke 
     // PRI-1102: the installer now inspects install targets with lstat (an
     // automock would answer `undefined` = "missing" for every path, which
     // contradicts the real seeded trees). Answer from the real filesystem so
-    // the harness keeps modelling an actual install.
-    vi.mocked(fs.lstatSync).mockImplementation(((value: fs.PathLike) =>
-      realFs.existsSync(String(value)) ? realFs.lstatSync(String(value)) : undefined) as unknown as typeof fs.lstatSync);
+    // the harness keeps modelling an actual install. `throwIfNoEntry: false`
+    // must return undefined for a truly absent path AND still report a link
+    // that exists but does not resolve (a dangling junction) — gating on
+    // existsSync would follow the link and erase it.
+    vi.mocked(fs.lstatSync).mockImplementation(((value: fs.PathLike, options?: fs.StatOptions) => {
+      if (options && typeof options === 'object' && options.throwIfNoEntry === false) {
+        return realFs.lstatSync(String(value), { throwIfNoEntry: false });
+      }
+      return realFs.lstatSync(String(value));
+    }) as unknown as typeof fs.lstatSync);
   });
 
   function seedPreviousInstall(): void {
@@ -123,6 +130,7 @@ describe('install() release-manager dependency install + authority import smoke 
       realFs.mkdirSync(originalDir, { recursive: true });
       realFs.writeFileSync(path.join(originalDir, 'previous-install.txt'), originalDir);
     }
+    seedHealthyComponentTree(getPdRuntimeDir(), getPluginExtDir());
     vi.mocked(fs.renameSync).mockImplementation((source, destination) => {
       if (!originalDirs.includes(String(source)) && !originalDirs.includes(String(destination))) return;
       realFs.mkdirSync(path.dirname(String(destination)), { recursive: true });
@@ -131,6 +139,31 @@ describe('install() release-manager dependency install + authority import smoke 
     vi.mocked(fs.rmSync).mockImplementation((target, options) => {
       if (originalDirs.includes(String(target))) realFs.rmSync(target, options);
     });
+  }
+
+  /**
+   * PRI-1102: a "restored" pre-run state is only usable when the component
+   * entries exist. Seed what a healthy previous install leaves on disk.
+   */
+  function seedHealthyComponentTree(runtimeDir: string, extDir: string): void {
+    const consoleDist = path.join(runtimeDir, 'console', 'dist');
+    realFs.mkdirSync(path.join(consoleDist, 'web'), { recursive: true });
+    realFs.writeFileSync(path.join(consoleDist, 'server.js'), '// console\n');
+    realFs.writeFileSync(path.join(consoleDist, 'web', 'index.html'), '<html></html>\n');
+
+    const cliDist = path.join(runtimeDir, 'pd-cli', 'dist');
+    realFs.mkdirSync(cliDist, { recursive: true });
+    realFs.writeFileSync(path.join(cliDist, 'index.js'), '// cli\n');
+
+    const runtimePlugin = path.join(runtimeDir, 'plugin');
+    realFs.mkdirSync(path.join(runtimePlugin, 'dist'), { recursive: true });
+    realFs.writeFileSync(path.join(runtimePlugin, 'dist', 'bundle.js'), '// plugin\n');
+    realFs.writeFileSync(path.join(runtimePlugin, 'openclaw.plugin.json'), '{}');
+
+    realFs.mkdirSync(path.join(extDir, 'dist'), { recursive: true });
+    realFs.writeFileSync(path.join(extDir, 'dist', 'bundle.js'), '// ext plugin\n');
+    realFs.writeFileSync(path.join(extDir, 'openclaw.plugin.json'), '{}');
+    realFs.writeFileSync(path.join(extDir, 'package.json'), '{}');
   }
 
   function expectPreviousInstallRestored(): void {
@@ -159,6 +192,7 @@ describe('install() release-manager dependency install + authority import smoke 
     vi.mocked(fs.readdirSync).mockReset();
     vi.mocked(fs.renameSync).mockReset();
     vi.mocked(fs.rmSync).mockReset();
+    vi.mocked(fs.realpathSync).mockReset();
     if (savedLegacyNpmInstall === undefined) delete process.env.PD_ALLOW_LEGACY_NPM_INSTALL;
     else process.env.PD_ALLOW_LEGACY_NPM_INSTALL = savedLegacyNpmInstall;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
@@ -266,5 +300,56 @@ describe('install() release-manager dependency install + authority import smoke 
     expect(result.error).toContain(getPluginExtDir());
     expectPreviousInstallRestored();
     expect(fs.existsSync).toHaveBeenCalledWith(path.join(componentDir, 'dist', 'update', 'console-surface.js'));
+  });
+
+  it('rolls back to an incomplete runtime and names missing Console + dangling extension (PRI-1102)', async () => {
+    const runtimeDir = getPdRuntimeDir();
+    const extDir = getPluginExtDir();
+    seedHealthyComponentTree(runtimeDir, extDir);
+    // Pre-run state: Console component never finished, extension copy is a
+    // dangling NTFS junction left by an interrupted install.
+    realFs.rmSync(path.join(runtimeDir, 'console'), { recursive: true, force: true });
+    realFs.rmSync(extDir, { recursive: true, force: true });
+    const ghost = path.join(tempHome, 'ghost-extension-target');
+    realFs.mkdirSync(ghost, { recursive: true });
+    realFs.symlinkSync(ghost, extDir, 'junction');
+    realFs.rmSync(ghost, { recursive: true, force: true });
+    expect(realFs.lstatSync(extDir).isSymbolicLink()).toBe(true);
+
+    const originalDirs = [runtimeDir, extDir];
+    vi.mocked(fs.renameSync).mockImplementation((source, destination) => {
+      if (!originalDirs.includes(String(source)) && !originalDirs.includes(String(destination))) return;
+      realFs.mkdirSync(path.dirname(String(destination)), { recursive: true });
+      realFs.renameSync(source, destination);
+    });
+    vi.mocked(fs.rmSync).mockImplementation((target, options) => {
+      if (originalDirs.includes(String(target))) realFs.rmSync(target, options);
+    });
+    // Only the extension link is resolved for real: the production link
+    // resolver must observe the dangling junction. Other paths keep the
+    // harness's automocked value (a full real resolver would not exist here).
+    vi.mocked(fs.realpathSync).mockImplementation(((value: fs.PathLike) => {
+      const s = String(value);
+      if (s === extDir) return realFs.realpathSync(s);
+      return undefined as unknown as string;
+    }) as unknown as typeof fs.realpathSync);
+
+    const result = await install(
+      { ...baseInstallOptions, workspaceDir: path.join(tempHome, 'workspace') },
+      path.join(tempHome, 'asset'),
+      { quiet: true },
+    );
+
+    expect(result.success).toBe(false);
+    // Acceptance: a rollback that lands on a state missing a key component
+    // must NEVER be reported as "Previous install has been restored".
+    expect(result.error).toContain('NOT usable — incomplete:');
+    expect(result.error).not.toContain('Previous install has been restored.');
+    expect(result.error).toContain(path.join(runtimeDir, 'console'));
+    expect(result.error).toContain(extDir);
+    expect(result.error).toContain('dangling link');
+    // The restored pre-run state is what it was — including the dirty junction.
+    expect(realFs.lstatSync(extDir).isSymbolicLink()).toBe(true);
+    expectPreviousInstallRestored();
   });
 });

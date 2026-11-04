@@ -1861,6 +1861,11 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   }
 }
 
+function filesystemErrorCode(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null || !Object.hasOwn(error, 'code')) return undefined;
+  return (error as Record<string, unknown>).code;
+}
+
 /**
  * PRI-1102: a target that exists as a DANGLING link (an interrupted install
  * left a reparse point whose target is gone) is not a directory the installer
@@ -1881,13 +1886,25 @@ export async function preparePluginInstallTarget(targetDir: string): Promise<voi
     throw new Error(`Cannot inspect plugin install target ${targetDir}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   if (stats !== undefined && stats.isSymbolicLink()) {
-    let resolves = true;
+    let targetAbsent = false;
     try {
       realpathSync(targetDir);
-    } catch {
-      resolves = false;
+    } catch (error) {
+      const code = filesystemErrorCode(error);
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+        // EACCES/EPERM/... means the link target may still be a live install
+        // this process cannot read. Removing the link would destroy it, so
+        // fail closed and let the caller report the refusal.
+        throw new Error(
+          `Cannot resolve plugin install target ${targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+      // Confirmed absent target (ENOENT/ENOTDIR) — the link itself is the
+      // residue of an interrupted install.
+      targetAbsent = true;
     }
-    if (!resolves) {
+    if (targetAbsent) {
       // fs-extra's remove unlinks the reparse point instead of traversing it.
       await fse.remove(targetDir);
       logger.warn(`Removed dangling link at ${targetDir} (target missing) — rebuilding the plugin install directory.`);
@@ -1898,31 +1915,116 @@ export async function preparePluginInstallTarget(targetDir: string): Promise<voi
 
 /**
  * PRI-1102: a rollback is only as good as the state it returns to. The
- * pre-run state can itself be incomplete (a component directory the previous
- * run never finished, a link whose target is gone), so "restored" must not be
- * reported as a healthy install without checking what the restored paths
- * actually resolve to.
+ * pre-run state can itself be incomplete (a component the previous run never
+ * finished, a link whose target is gone), so "restored" must not be reported
+ * as a healthy install without checking what the restored tree actually
+ * contains.
+ *
+ * A directory merely existing is not enough: every executable entry the
+ * Console/CLI/gateway consumes at runtime must resolve, and a directory that
+ * is a link must still resolve. Only then is the restored state usable.
  */
+interface RestoredTreeRequirement {
+  readonly dir: string;
+  readonly entries: readonly string[];
+  /** OpenClaw-only tree: a Codex-only install legitimately has no copy. */
+  readonly openClawOnly: boolean;
+}
+
+function restoredTreeRequirements(): RestoredTreeRequirement[] {
+  return [
+    // The runtime root itself (type + link resolution only).
+    { dir: getPdRuntimeDir(), entries: [], openClawOnly: false },
+    {
+      dir: getInstalledConsoleDir(),
+      entries: [path.join('dist', 'server.js'), path.join('dist', 'web', 'index.html')],
+      openClawOnly: false,
+    },
+    { dir: getInstalledPdCliDir(), entries: [path.join('dist', 'index.js')], openClawOnly: false },
+    { dir: getInstalledPluginDir(), entries: [path.join('dist', 'bundle.js'), 'openclaw.plugin.json'], openClawOnly: false },
+    {
+      dir: getPluginExtDir(),
+      entries: [path.join('dist', 'bundle.js'), 'openclaw.plugin.json', 'package.json'],
+      openClawOnly: true,
+    },
+  ];
+}
+
+function describeRestoredDirGap(dir: string, gaps: string[]): boolean {
+  let stats: Stats | undefined;
+  try {
+    stats = lstatSync(dir, { throwIfNoEntry: false });
+  } catch (error) {
+    gaps.push(`${dir} (unreadable: ${error instanceof Error ? error.message : String(error)})`);
+    return false;
+  }
+  if (stats === undefined) {
+    gaps.push(`${dir} (missing)`);
+    return false;
+  }
+  if (stats.isSymbolicLink()) {
+    try {
+      realpathSync(dir);
+    } catch (error) {
+      const code = filesystemErrorCode(error);
+      gaps.push(`${dir} (${code === 'ENOENT' || code === 'ENOTDIR' ? 'dangling link' : 'unresolvable link'})`);
+      return false;
+    }
+  } else if (!stats.isDirectory()) {
+    gaps.push(`${dir} (not a directory)`);
+    return false;
+  }
+  return true;
+}
+
+function describeRestoredEntryGap(entry: string, gaps: string[]): void {
+  let stats: Stats | undefined;
+  try {
+    stats = lstatSync(entry, { throwIfNoEntry: false });
+  } catch (error) {
+    gaps.push(`${entry} (unreadable: ${error instanceof Error ? error.message : String(error)})`);
+    return;
+  }
+  if (stats === undefined) {
+    gaps.push(`${entry} (missing)`);
+    return;
+  }
+  if (stats.isSymbolicLink()) {
+    try {
+      realpathSync(entry);
+    } catch (error) {
+      const code = filesystemErrorCode(error);
+      gaps.push(`${entry} (${code === 'ENOENT' || code === 'ENOTDIR' ? 'dangling link' : 'unresolvable link'})`);
+      return;
+    }
+    // realpath only proves the target EXISTS. The entry is consumed as a file
+    // at runtime, so a link to a directory is just as unusable as a missing
+    // file path. stat follows the link and reports the target type.
+    let targetStats: Stats;
+    try {
+      targetStats = statSync(entry);
+    } catch (error) {
+      const code = filesystemErrorCode(error);
+      gaps.push(`${entry} (${code === 'ENOENT' || code === 'ENOTDIR' ? 'dangling link' : 'unresolvable link'})`);
+      return;
+    }
+    if (!targetStats.isFile()) {
+      gaps.push(`${entry} (not a file)`);
+    }
+    return;
+  }
+  if (!stats.isFile()) {
+    gaps.push(`${entry} (not a file)`);
+  }
+}
+
 export function describeRestoredStateGaps(): string[] {
   const gaps: string[] = [];
-  for (const dir of [getPluginExtDir(), getPdRuntimeDir()]) {
-    let stats: Stats | undefined;
-    try {
-      stats = lstatSync(dir, { throwIfNoEntry: false });
-    } catch (error) {
-      gaps.push(`${dir} (unreadable: ${error instanceof Error ? error.message : String(error)})`);
-      continue;
-    }
-    if (stats === undefined) {
-      gaps.push(`${dir} (missing)`);
-      continue;
-    }
-    if (stats.isSymbolicLink()) {
-      try {
-        realpathSync(dir);
-      } catch {
-        gaps.push(`${dir} (dangling link)`);
-      }
+  for (const requirement of restoredTreeRequirements()) {
+    if (requirement.openClawOnly && !installsOpenClaw(activeHostTarget)) continue;
+    if (!describeRestoredDirGap(requirement.dir, gaps)) continue;
+    for (const entry of requirement.entries) {
+      describeRestoredEntryGap(path.join(requirement.dir, entry), gaps);
     }
   }
   return gaps;
