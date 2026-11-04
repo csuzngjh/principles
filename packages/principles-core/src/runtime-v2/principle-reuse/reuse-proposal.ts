@@ -10,7 +10,7 @@
  * - any Console page, new approval subsystem, or automated decision model
  * - any change to `derivedFromPainIds`, the ledger schema, or candidate status
  *
- * @see docs/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
+ * @see docs/archive/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
  */
 
 import type { ReuseCandidate, ReuseShortlist } from './reuse-domain.js';

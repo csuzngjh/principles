@@ -1,5 +1,5 @@
 /**
- * Test temp-resource lifecycle — SPEC docs/specs/test-temp-lifecycle-management.md.
+ * Test temp-resource lifecycle — SPEC docs/archive/specs/test-temp-lifecycle-management.md.
  *
  * WHY: per-file finally cleanup is provably unreliable on Windows (SQLite
  * EBUSY while handles are open, vitest worker kills), and 431 test files

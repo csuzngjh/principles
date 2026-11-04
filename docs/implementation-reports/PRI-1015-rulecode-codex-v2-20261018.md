@@ -1,6 +1,6 @@
 # PRI-1015 RuleCode / Codex V2 修复验收
 
-基线：aee5380128196cf164136f8d6d5d5f01b68acb7c。任务工作树：`D:/Code/_worktrees/principles/PRI-1015-rulecode-codex-v2`。对应实现约束：`docs/specs/SPEC-RULECODE-CODEX-V2-001-v0.1.md`。
+基线：aee5380128196cf164136f8d6d5d5f01b68acb7c。任务工作树：`D:/Code/_worktrees/principles/PRI-1015-rulecode-codex-v2`。对应实现约束：`docs/archive/specs/SPEC-RULECODE-CODEX-V2-001-v0.1.md`。
 
 ## 问题与修复
 

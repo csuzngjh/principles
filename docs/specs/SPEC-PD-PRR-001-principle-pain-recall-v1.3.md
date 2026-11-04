@@ -768,9 +768,9 @@ Owner review / next explicitly authorized phase:
 
 ### 12.1 内部依据
 
-- `docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.1.md`：原完整架构 SPEC，**保留不覆盖，供回溯**。
-- `docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.2.md`：v1.3 的直接基线（SHA256 `4422F14F2A6CBCD20F0AC50515E92622BAB77C0ABC0C819D06988CC89CEBD465`）。
-- `docs/specs/SPEC-PD-PRR-001-v1.2-reality-audit-corrections-20261017.md`：F-01～F-16 独立复核与执行校订（v1.3 §10.1 逐项定案）。
+- `docs/archive/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.1.md`：原完整架构 SPEC，**保留不覆盖，供回溯**。
+- `docs/archive/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.2.md`：v1.3 的直接基线（SHA256 `4422F14F2A6CBCD20F0AC50515E92622BAB77C0ABC0C819D06988CC89CEBD465`）。
+- `docs/archive/specs/SPEC-PD-PRR-001-v1.2-reality-audit-corrections-20261017.md`：F-01～F-16 独立复核与执行校订（v1.3 §10.1 逐项定案）。
 - `docs/implementation-reports/SPEC-PD-PRR-001-v1.2-gate-a-reality-audit-20261017.md`：Gate A 审计报告（A-01～A-07）。
 - `docs/specs/SPEC-PD-PRR-001-Gate-B-experiment-plan-20261017.md`：Gate B 最小真实数据实验方案。
 - `docs/specs/SPEC-PD-PRR-001-Gate-B-owner-decision-card-20261017.md`：Gate B Owner 授权决策卡（D-01～D-05）。

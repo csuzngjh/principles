@@ -3,7 +3,7 @@
 > 版本：v0.2（2026-10-21）
 > 状态：**Implemented / Owner Review**（随 PD 痛苦感知机制专项整改交付；未打开任何生产开关）
 > 基线：`origin/main@c754ef50e`
-> 前版：`docs/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.1.md`（2026-10-19，Draft/Owner Review）
+> 前版：`docs/archive/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.1.md`（2026-10-19，Draft/Owner Review）
 > 本文只记录 v0.1 → v0.2 的**增量**；未提及的 v0.1 条款全部沿用。
 
 ## 0. 变更摘要与授权链

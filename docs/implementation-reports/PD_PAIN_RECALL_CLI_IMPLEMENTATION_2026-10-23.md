@@ -4,7 +4,7 @@
 - **分支**：`ai/pain-recall-cli-zcode-pain-recall`（任务 worktree `D:\Code\_worktrees\principles\pain-recall-cli-zcode-pain-recall`，自 `main @ 0e421b1095f7196c7ea8d05be52892321b6d47c6` 创建；主检出的 worktree-guard 禁止实现提交，已按仓库治理改走任务 worktree 提交）
 - **提交**：`659a5ace5`
 - **PR**：https://github.com/csuzngjh/principles/pull/2128（OPEN，不自行合并）
-- **SPEC**：`docs/specs/SPEC-PD-PAIN-RECALL-CLI-001.md` v1.0
+- **SPEC**：`docs/archive/specs/SPEC-PD-PAIN-RECALL-CLI-001.md` v1.0
 - **状态**：功能与自动化测试达到 SPEC §9 验收标准；待 Owner 评审合并
 
 ---
