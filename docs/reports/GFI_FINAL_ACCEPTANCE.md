@@ -65,9 +65,62 @@
 2. **Owner 手动 Pain 是否仍然正常？** 是。`owner_reported` 仍为 `admit`；`pd-cli pain-explicit`、plugin `pain` 命令与 8 组相关组均通过。**注意**：本轮曾因 4.2 的迁移缺口让 v1 工作区的手动 Pain 100% 被拒（CI 抓到），已在 `openAdmissionStore` 接入既有迁移并加回归测试，`pain-explicit.test.ts` 7/7。
 3. **错误累积断路器是否仍然有效？** 是。生产路径仍调用 `evaluateTriggerController`（`packages/openclaw-plugin/src/hooks/pain.ts:450`），`gate-b-only-runtime-guard` 相关断言通过。
 4. **历史数据是否仍可读？** 是。D1：旧库打开即迁移（只删两列、只终止 pending empathy），v2 库不会被误判，迁移幂等，空库不抛，失败显式 `trajectory_migration_failed:<reason>` + `nextAction`。
-5. **有没有任何一处能力被悄悄削弱？** 没有发现能力削弱：8 组 568/568 与基线逐组相等；host-runtime 652/652；全包仅环境性失败。**但有两处交付限制**：① `packages/website` 用户文档仍宣传已移除的 GFI/`/pd-status`；② `empathy_engine` 配置面残留无消费者。
+5. **有没有任何一处能力被悄悄削弱？** 没有发现能力削弱：8 组 568/568 与基线逐组相等；host-runtime 652/652；全包仅环境性失败。owner 裁定后已补齐两项限制：① `packages/website` 的 19×2 过时文案已按实际命令行为重写；② `empathy_engine` 配置面保留读取兼容但删除默认值与模板条目，并注明无效果。仍存限制：`docs/architecture` 仅按裁定最小修改四篇，其余历史周边文档（README 索引、PRI 历史审计、GLOSSARY 等）不在本轮范围。
 
 ## 6. 门禁
 
-- `verify:merge`：**整链 `exit=0`**（27 个顶层命令，末项 `check:runtime-writers` PASS）。修复前的两处红因（缺 changeset、website CRLF）均已修复并复跑。
-- 结论：**PASS_WITH_LIMITATIONS**（能力无退化；限制为文档滞后 + 环境性测试失败，均与本任务无关且有证据）。
+- `verify:merge`：**整链 `exit=0`**（27 个顶层命令，末项 `check:runtime-writers` PASS）。修复前的两处红因（缺 changeset、website CRLF）均已修复并复跑；裁定后追加改动再次整链复跑。
+- 结论：**PASS_WITH_LIMITATIONS**（能力无退化；限制为历史文档残余 + 环境性测试失败，均与本任务无关且有证据）。
+
+## 7. 四项裁定的处置与证据（Owner 追加裁定）
+
+### 7.1 `/pd-rollback` 语义 — 不改回滚逻辑，写清风险
+
+**判定：现实现不是"整包版本回滚"，两条链路互不相干。**
+
+- 插件命令 `/pd-rollback`（`packages/openclaw-plugin/src/commands/rollback.ts`）只调用 `EventLog.rollbackEmpathyEvent`（`packages/openclaw-plugin/src/core/event-log.ts:705`），把**一条历史 empathy 事件**标记为已回滚并回显其分数；它不写评分、不触发诊断、不产生 Pain。移除后 empathy 事件已无生产方（`empathy-keyword-matcher` 仅在 `core/init.ts:10` 播种关键词库），命令退化为"回显历史/无事件"的只读清理入口。**保留，不改**——它不可能把自动 Pain 生产路径带回来。
+- 版本/运行时回滚只有 installer 的**失败恢复**：`restoreBackup`（`packages/create-principles-disciple/src/installer.ts:1326-1333`）对 extension/runtime 调用 `restoreTreeAside`（`:1271`）做**整目录置换**，调用点在 `installer.ts:4891-4893`。`update/rollback-policy.ts` 的 `decideHostCoordination`（自动回滚策略）**没有生产调用方**（仅测试/BDD）。
+
+**残余风险与处置**：安装失败恢复发生在激活前，此时新运行时尚未写过库，旧代码 + 未迁移库是自洽的。唯一的真实风险是"迁移已发生后 Owner 手动降级到含 GFI 的旧版本"——旧代码的 `insertVerified` 会带 `gfi_before/gfi_after` 字面列写 12 列表，SQLite 明确报 `no column named gfi_before`（失败可见，不静默）；旧版 `hasCanonicalSchema` 也会拒绝摄取。恢复方式：重新安装当前版本。**未新增"禁止降级"守卫**（属新能力，且无旧代码可自动迁移），仅记录限制。
+
+### 7.2 `empathy_engine` 配置面 — 保留读取、去掉"假装有效"
+
+- `packages/openclaw-plugin/src/core/config.ts`：类型保留（`empathy_engine?`）并注明"仅为旧配置文件可解析，无任何消费者"；**默认值整块删除**，避免新装用户看到"默认开启"的假象。
+- `packages/openclaw-plugin/templates/pain_settings.json`：条目删除（新安装不再生成该块）。
+- `packages/openclaw-plugin/src/hooks/prompt-types.ts`：类型保留并注明已退役。
+- 兼容验证：`config.test.ts > loads a legacy pain_settings.json ...` 增加 `empathy_engine.enabled` 断言（旧文件仍可读、不报错）。
+
+### 7.3 website 19×2 文案 — 已修（文案级 commit）
+
+- `packages/website/docs/slash-commands.md` / `user-guide.md` 与 `packages/website/zh/docs/` 同名文件：`/pd-status` 不再显示 GFI/心智模式/`reset`，改为真实的会话计数、工具/钩子/RuleHost 活动、轨迹与词典统计；`/pd-rollback` 改为"回滚一条历史情绪事件"；工作流与 FAQ 中"疲劳/清零/GFI 降不下来"整段替换为"GFI 已移除"说明。
+- 依据：`packages/openclaw-plugin/src/commands/pain.ts`（实际输出字段）与 `commands/rollback.ts`（实际行为）。改动前后对照见 PR 描述。
+
+### 7.4 `docs/architecture` 四篇 — 最小范围
+
+| 文件 | 过时段落 | 依据 |
+| --- | --- | --- |
+| `COMPONENTS.md` | §3.6 GFI 组件表（4 个已删组件）与组件总表 `GfiWorkspaceReadModel` 行 | SPEC §2；`runtime-v2/gfi/` 仅剩空 `__tests__` |
+| `OBSERVABILITY_ARCHITECTURE.md` | §3.3.5 四个 `pd.gfi.*` 指标与命名清单一行 | SPEC §2 / §4.4（Console GFI 健康度删除） |
+| `feature-flag-governance.md` | §3.1 `gfi` 复核结论、§1 表中 `gfi` 归入 OFF(quiet)、§3.2 "GFI/rollback 事件链"、§5 non-goal | SPEC §2 / §5.1；`feature-flag-contract.ts:235` gone 墓碑 |
+| `PD_SYSTEM_ARCHITECTURE.md` | `runtime-v2/gfi/` 目录树、`session-tracker.ts ← GFI plugin 适配器`、`pd-cli/runtime-gfi-snapshot.ts` | SPEC §2 / §3.2 / §4.3 |
+
+### 7.5 "是否还有第三处同类风险" — 所有打开 `trajectory.db` 的入口与收敛状态
+
+口径：`new Database(` 全仓 45 个命中文件逐一分类（测试/console/seed 脚本不计入生产写入链）。**严格 schema 判定（`hasCanonicalSchema` / `hasProductionPainSchema`）只有两处消费方，两处均已在判定前迁移**，因此不存在第三个同类断点。
+
+| 入口 | 文件:行 | 类型 | 是否迁移 | 结论 |
+| --- | --- | --- | --- | --- |
+| 插件主写入链 `TrajectoryDatabase` | `openclaw-plugin/src/core/trajectory.ts:204/322/1489` → `applyTrajectorySchemaBase` | 写 | ✅ `trajectory-schema.ts:242` 调 `migrateLegacyGfiSchema` | 收敛 |
+| hook 富化写入 | `host-runtime/src/production-pain-evidence.ts:477` | 写 | ✅ 判定前显式迁移（失败点名 `trajectory_migration_failed:*`） | 收敛 |
+| verified tool outcome 写入 | `host-runtime/src/production-pain-evidence.ts`（`recordVerifiedToolOutcomes` 打开链） | 写 | ✅ 同上 | 收敛 |
+| 治理信号准入 | `host-runtime/src/governance-signal-admission.ts:430` | 写 | ✅ 本轮补入（CI 抓到的第二处回归） | 收敛 |
+| 纠正样本复核 | `principles-core/src/trajectory-store.ts:243` | 写 | ❌ 不迁移 | **不受影响**：只写 `correction_samples`/`sample_reviews`，不碰 `tool_calls` 的 gfi 列 |
+| 轨迹只读 | `principles-core/src/trajectory-store.ts:96`（`openTrajectoryDbReadonly`） | 读 | 不适用 | 不受影响（只读、无 schema 判定） |
+| 观察证据写入 | `host-runtime/src/governance-observation-store.ts:338` | 写 | ❌ 不迁移 | **不受影响**：只写观察表，不读写 `tool_calls` gfi 列 |
+| 行为证据只读 | `host-runtime/src/workspace-behavior-evidence.ts:60/113` | 读 | 不适用 | 不受影响 |
+| 活跃度检查 | `host-runtime/src/host-liveness-contract.ts:152` | 读 | 不适用 | 不受影响 |
+| 产品遥测里程碑 | `host-runtime/src/product-telemetry/milestone-readers.ts:211` | 读 | 不适用 | 不受影响 |
+| CLI 评分卡 / 痛觉列表 / 证据构建 / 历史导入 | `pd-cli/src/services/quality-scorecard/data-extractor.ts`、`commands/pain-list.ts`、`commands/build-trajectory-evidence.ts`、`legacy/session-history-import.ts` | 读（导入写 `runs`） | 不适用 | 不受影响（均不选 gfi 列） |
+| Console 三个模型 | `pd-console/src/server/models/*.ts` | 读 | 不适用 | 不受影响（只读投影） |
+
+**结论：没有第三处同类风险。** 但有一处**主动选择不收敛**的入口（`reviewCorrectionSample` / `governance-observation-store`）：它们在不迁移的旧库上也能正确工作，强加迁移会扩大改动面且无收益，按 P3 保持现状。

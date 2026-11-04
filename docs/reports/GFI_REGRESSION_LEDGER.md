@@ -590,6 +590,17 @@
 | 验证 | ① 新增回归测试 `governance-signal-admission.test.ts > converges a v1 workspace carrying retired GFI columns before admitting`：v1 建表 + 插入 1 行 → 准入 `ok:true`、两列消失、原行仍在；② `governance-signal-admission.test.ts` 51/51；③ host-runtime 全包 652/652；④ `pain-explicit.test.ts` 7/7（本地由红转绿） |
 | 同类失败说明 | pd-cli 全量 2123/2125 中另 2 条是 5s 默认超时的环境性超时：`pain-explicit` 交错会话用例、`codex-consent` 幂等用例在本机 Windows 需 5.4–7.2s（CI Linux 1.1s）。以 `--testTimeout=20000` 复跑 6/6 通过；未改测试超时（不放宽断言）|
 
+### 6.13 四项 Owner 裁定后的改动（同一分支叠加，不改写历史）
+
+| 裁定 | 处置 | 文件 / 证据 |
+| --- | --- | --- |
+| ① `/pd-rollback` 语义 | **不改回滚逻辑**。判定：插件 `/pd-rollback` 只回滚历史 empathy 事件（`commands/rollback.ts` → `core/event-log.ts:705`），不产生 Pain；版本恢复是 installer 失败路径整目录置换（`installer.ts:1271/1326-1333`，调用点 `:4891-4893`），且 `decideHostCoordination` 自动回滚策略无生产调用方。残余风险（迁移后手动降级）写入 `GFI_FINAL_ACCEPTANCE.md §7.1` | 文档 |
+| ② `empathy_engine` | 保留类型读取兼容，删除默认值块与模板条目，注释明确"已无效果，仅兼容旧配置文件"；`config.test.ts` 旧文件兼容断言 | `core/config.ts`、`templates/pain_settings.json`、`hooks/prompt-types.ts`、`tests/core/config.test.ts` |
+| ③ website 19×2 | 按实际命令行为重写 `/pd-status`、`/pd-rollback`、工作流与 FAQ（en + zh） | `website/docs/{slash-commands,user-guide}.md`、`website/zh/docs/` 同名 |
+| ④ `docs/architecture` 四篇 | 只改描述已退役 GFI/自动 Pain 的段落：COMPONENTS §3.6 + 组件表、OBSERVABILITY §3.3.5 + 指标名、feature-flag-governance §3.1/§1/§3.2/§5、PD_SYSTEM_ARCHITECTURE 目录树三处 | 见 `GFI_FINAL_ACCEPTANCE.md §7.4` 对照表 |
+
+**第三处同类风险复核**：`new Database(` 45 个命中文件全部归类，严格 schema 判定仅两处消费方且均已前置迁移；另有 2 处写入口（`reviewCorrectionSample`、`governance-observation-store`）按 P3 主动不迁移，因为它们不触碰 `tool_calls` 的 gfi 列。详见 `GFI_FINAL_ACCEPTANCE.md §7.5`。
+
 
 
 
