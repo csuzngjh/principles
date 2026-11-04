@@ -250,15 +250,13 @@ describe('PRI-920 settled-install topology invariants', () => {
     // I1 drift — deployed bytes equal the payload bytes that were installed.
     expect(digestDirectory(layout.consoleDir)).toBe(digestDirectory(realPath.join(fixtureDir, 'console')));
     expect(digestDirectory(layout.coreDir)).toBe(digestDirectory(realPath.join(fixtureDir, 'core')));
-    // digestDirectory skips non-regular entries, so the two dependency links
-    // installConsole() creates under console/node_modules need explicit
-    // realpath checks — a link aimed at a wrong component is drift the
-    // digest cannot see. (coreDir has no such links; nothing to assert there.)
-    const consoleModules = realPath.join(layout.consoleDir, 'node_modules');
-    expect(realFs.realpathSync(realPath.join(consoleModules, 'principles-disciple')))
-      .toBe(realFs.realpathSync(layout.pluginDir));
-    expect(realFs.realpathSync(realPath.join(consoleModules, 'create-principles-disciple')))
-      .toBe(realFs.realpathSync(layout.releaseManagerDir));
+    // G3 §10.5: dependency links are now materialized from the BUNDLED
+    // manifest's file:../ refs by ensureConsoleResolution() /
+    // ensurePdCliResolution() rather than hand-rolled for two fixed names.
+    // This sandbox fixture declares no dependencies, so there is nothing to
+    // link here; the link contract (physical-copy correction, idempotency,
+    // missing-sibling fail-closed, real ESM resolution) is covered end-to-end
+    // by tests/dependency-link-consolidation.test.ts.
   }
 
   it('settled install satisfies canonical resolution, identity, zero-data and byte-drift invariants', async () => {
