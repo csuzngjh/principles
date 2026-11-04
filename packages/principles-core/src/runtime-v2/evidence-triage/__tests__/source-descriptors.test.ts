@@ -26,8 +26,8 @@ import { isSourceKind } from '../types.js';
 // ── Descriptor Registry Completeness ───────────────────────────────────────────
 
 describe('SOURCE_DESCRIPTORS registry', () => {
-  it('has exactly 13 registered descriptors', () => {
-    expect(SOURCE_DESCRIPTORS.size).toBe(13);
+  it('has exactly 12 registered descriptors', () => {
+    expect(SOURCE_DESCRIPTORS.size).toBe(12);
   });
 
   it('contains all valid SourceKinds', () => {
@@ -43,7 +43,6 @@ describe('SOURCE_DESCRIPTORS registry', () => {
       'semantic',
       'llm_paralysis',
       'subagent_error',
-      'gfi_threshold',
       'unknown',
     ];
 
@@ -83,7 +82,6 @@ describe('getSourceDescriptor', () => {
       'semantic',
       'llm_paralysis',
       'subagent_error',
-      'gfi_threshold',
       'unknown',
     ];
 
@@ -166,12 +164,6 @@ describe('Descriptor decision invariants', () => {
     expect(descriptor?.defaultDecision).toBe('evidence_only');
   });
 
-  it('gfi_threshold has defaultDecision=evidence_only (GFI alone cannot admit)', () => {
-    const descriptor = getSourceDescriptor('gfi_threshold');
-    expect(descriptor?.defaultDecision).toBe('evidence_only');
-    expect(descriptor?.defaultDecision).not.toBe('admit');
-  });
-
   it('unknown has defaultDecision=evidence_only (conservative default)', () => {
     const descriptor = getSourceDescriptor('unknown');
     expect(descriptor?.defaultDecision).toBe('evidence_only');
@@ -225,12 +217,6 @@ describe('Descriptor reason quality', () => {
       descriptor?.reason.toLowerCase().includes('owner') ||
       descriptor?.reason.includes('PRODUCT_IDENTITY')
     ).toBe(true);
-  });
-
-  it('gfi_threshold reason mentions GFI alone cannot create diagnosis', () => {
-    const descriptor = getSourceDescriptor('gfi_threshold');
-    expect(descriptor?.reason.toLowerCase()).toContain('gfi');
-    expect(descriptor?.reason.toLowerCase()).toContain('alone');
   });
 
   it('rulehost_block reason mentions evidence or correction', () => {
@@ -317,7 +303,6 @@ describe('Integration with isSourceKind', () => {
       'semantic',
       'llm_paralysis',
       'subagent_error',
-      'gfi_threshold',
       'unknown',
     ] as const;
 

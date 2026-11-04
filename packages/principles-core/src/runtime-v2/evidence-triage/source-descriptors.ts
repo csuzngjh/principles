@@ -108,12 +108,6 @@ export const SOURCE_DESCRIPTORS: ReadonlyMap<SourceKind, SourceDescriptor> = new
     reason: 'Subagent workflow failure. Not a behavior pattern by itself.',
     nextAction: 'store_as_evidence_for_later_correlation',
   }],
-  ['gfi_threshold', {
-    kind: 'gfi_threshold',
-    defaultDecision: 'evidence_only',
-    reason: 'Accumulated GFI. GFI alone cannot create diagnosis per acceptance criteria.',
-    nextAction: 'store_as_evidence_for_later_correlation',
-  }],
   ['unknown', {
     kind: 'unknown',
     defaultDecision: 'evidence_only',
