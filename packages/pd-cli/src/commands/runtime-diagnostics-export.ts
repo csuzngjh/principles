@@ -7,7 +7,6 @@ import {
   createInternalizationQueueReadModel,
   InternalizationChainIntegrityReadModel,
   auditCandidateLedgerConsistency,
-  buildGfiWorkspaceSnapshot,
 } from '@principles/core/runtime-v2';
 import { runCanaryChecks } from './runtime-canary.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -115,29 +114,6 @@ export async function exportDiagnosticsBundle(workspaceDir: string, outDir: stri
 
   await collectArtifact({ ...baseCtx, name: 'candidate-audit', fileName: 'candidate-audit.json', collector: async () => {
     return await auditCandidateLedgerConsistency(workspaceDir);
-  } });
-
-  await collectArtifact({ ...baseCtx, name: 'gfi-snapshot', fileName: 'gfi-snapshot.json', collector: () => {
-    const sessionDir = path.join(workspaceDir, '.state', 'sessions');
-    const sessions: { sessionId: string; currentGfi: number; lastActivityAt: number; consecutiveErrors: number }[] = [];
-    if (fs.existsSync(sessionDir)) {
-      for (const file of fs.readdirSync(sessionDir)) {
-        if (!file.endsWith('.json')) continue;
-        try {
-          const raw = fs.readFileSync(path.join(sessionDir, file), 'utf8');
-          const parsed = JSON.parse(raw);
-          if (parsed?.sessionId) {
-            sessions.push({
-              sessionId: parsed.sessionId,
-              currentGfi: parsed.currentGfi ?? 0,
-              lastActivityAt: parsed.lastActivityAt ?? parsed.lastControlActivityAt ?? 0,
-              consecutiveErrors: parsed.consecutiveErrors ?? 0,
-            });
-          }
-        } catch { /* skip malformed */ }
-      }
-    }
-    return buildGfiWorkspaceSnapshot({ sessions, nowMs: Date.now() });
   } });
 
   await collectArtifact({ ...baseCtx, name: 'pruning-orphans', fileName: 'pruning-orphans.json', collector: () => {

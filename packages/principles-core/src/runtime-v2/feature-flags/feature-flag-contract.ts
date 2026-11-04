@@ -229,7 +229,10 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // PRI-738: migration routing retired; gone tombstones reject stale overrides observably.
   { id: 'release_manager_shadow', category: 'gone', enabled: false, since: '2026-08-25', description: 'Retired PRI-738: signed ReleaseManager checks are unconditional; no legacy comparison.' },
   { id: 'release_manager_write_authority', category: 'gone', enabled: false, since: '2026-09-06', description: 'Retired PRI-738: ReleaseManager is the sole update authority; no alternate writer.' },
-  { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
+  // GFI retired 2026-11-04 (GFI-COMPLETE-REMOVAL-001): scoring kernel, session
+  // state and every observation surface were deleted, so the flag has no
+  // runtime owner. `gone` tombstone rejects stale overrides observably.
+  { id: 'gfi', category: 'gone', enabled: false, since: '2026-05-24', description: 'Retired 2026-11-04: Global Friction Index removed; no runtime owner remains.' },
   // PRI-752: worker code deleted in PRI-737; flag entry moved to `gone` here
   // (the "separate change" PRI-737 deferred). The census retirement window
   // (2026-12-01) was superseded — its subject, the quarantined worker, no

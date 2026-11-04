@@ -21,11 +21,11 @@ All commands start with `/pd-` (short aliases start with `/pd` + a single letter
 | [`/pd-bootstrap`](#pd-bootstrap) | `/pdb` | Setup | Scan local toolchain (rg/sg/fd, etc.) |
 | [`/pd-research`](#pd-research) | `/pdr` | Setup | Ask Agent to research tool upgrades |
 | [`/pd-help`](#pd-help) | `/pdh` | Setup | List commands in-session |
-| [`/pd-status`](#pd-status) | — | Monitoring | View GFI friction index and mental mode |
+| [`/pd-status`](#pd-status) | — | Monitoring | View session, tool/hook/RuleHost activity and trajectory stats |
 | [`/pd-pain`](#pd-pain) | — | Monitoring | Manually report a pain signal |
 | [`/pd-context`](#pd-context) | — | Config | Control context injection (Thinking OS / project focus) |
 | [`/pd-focus`](#pd-focus) | — | Config | Manage CURRENT_FOCUS.md (compress/rollback) |
-| [`/pd-rollback`](#pd-rollback) | — | Rollback | Rollback a misjudged empathy event penalty |
+| [`/pd-rollback`](#pd-rollback) | — | Rollback | Rollback a stored legacy empathy event |
 | [`/pd-principle-rollback`](#pd-principle-rollback) | — | Rollback | Rollback a principle and blacklist it |
 | [`/pd-export`](#pd-export) | — | Data | Export analytics or correction samples |
 | [`/pd-samples`](#pd-samples) | — | Data | View and review correction samples |
@@ -149,7 +149,7 @@ Can't remember the commands? Just type `/pdh` to see a quick reference table of 
 
 ### `/pd-status`
 
-View PD's system health. This is one of the commands you'll use most often.
+View PD's real system state: session counters, today's tool/hook/RuleHost totals, trajectory database size, and evolution dictionary stats. Every number is read from a persisted producer — none of it is synthesized.
 
 **Usage**
 
@@ -161,36 +161,35 @@ View PD's system health. This is one of the commands you'll use most often.
 
 | Subcommand | Description |
 |------------|-------------|
-| (none) | Show GFI friction index, mental mode, pain dictionary stats |
-| `empathy [--today\|--week\|--session]` | View empathy event stats (default: today) |
-| `reset` | Reset the current session's GFI to zero |
+| (none) | Show session counters, today's activity, trajectory and dictionary stats |
+| `empathy [--today\|--week\|--session]` | View empathy events stored before the empathy engine was retired |
 | `data` | View trajectory database stats (turns, tool calls, pain events, etc.) |
 
 **Example Output (default)**
 
 ```
-📊 Principles Disciple - System Health Monitor
+📊 Principles Disciple - System Status
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💊 Current Friction (GFI): [██████░░░░░░░░░] 35/100
-🧠 Current Mental Mode: 🤝 CONCILIATORY
-   ↳ Diagnosis: High Friction 🟡
+🧭 Session: 01a0…
+   ├─ LLM turns: 3
+   ├─ Injected principles: 2
+   ├─ Auto-corrects: 1
+   └─ Gate blocks: 0
+
+📅 Today (2026-11-04)
+   ├─ Tool calls: 12 (success 10 / failure 2)
+   ├─ Hook runs: 30 (success 29 / failure 1)
+   └─ RuleHost: evaluated 8 · blocked 2 · auto-corrected 1
+
+🗄 Trajectory DB: 161 tool calls · 3 pain events (use `/pd-status data` for details)
 
 🧠 Evolution Dictionary: 12 active rules
-   ↳ Successfully blocked 47 invalid operations
+   ↳ 47 cumulative rule hits (a hit is not a block)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**What is GFI?**
-
-GFI (Global Friction Index) is the current session's "fatigue index". Every time the Agent makes a mistake, gets corrected, or gets blocked, GFI accumulates. The higher the GFI, the more likely the Agent enters "conciliatory mode" — it becomes more cautious, slower, and more apologetic.
-
-- `0-20`: Healthy 🟢
-- `21-50`: Minor Issues 🟢
-- `51-80`: High Friction 🟡 (consider whether the context is messy)
-- `81-100`: Critical 🔴 (consider `/pd-status reset` or starting a new session)
-
-::: tip When to use `reset`
-When the Agent has accumulated too much "emotional baggage" and becomes overly cautious or apologetic, `/pd-status reset` clears the GFI so the Agent can start fresh. This doesn't "delete memory" — it only resets the friction accumulation.
+::: info GFI and mental mode are gone
+The friction index (GFI), the mental-mode display and `/pd-status reset` were removed in GFI-COMPLETE-REMOVAL-001. Session state is now summarized by real tool, hook and RuleHost activity.
 :::
 
 ---
@@ -341,7 +340,7 @@ PD's core promise is "reversibility". These commands let you undo PD's decisions
 
 ### `/pd-rollback`
 
-Rollback the penalty from an empathy event. When PD misjudges a "user frustration" and GFI rises incorrectly, use this command to undo it.
+Rollback a legacy empathy event that is still stored in the event log. The empathy engine that used to create these events was retired in GFI-COMPLETE-REMOVAL-001, so new sessions no longer produce them; the command remains for cleaning up events recorded by older releases.
 
 **Usage**
 
@@ -365,17 +364,17 @@ Rollback the penalty from an empathy event. When PD misjudges a "user frustratio
 
 **`last` vs `<event-id>`**
 
-- `last`: Rollback the most recent empathy event in the current session (most common)
+- `last`: Rollback the most recent stored empathy event in the current session
 - `<event-id>`: Rollback a specific event (get the ID from `/pd-status empathy` output)
 
 **What Happens After Rollback**
 
-1. The event's penalty score is subtracted from GFI
-2. The event is marked as "rolled back"
-3. The Agent's friction level decreases accordingly
+1. The event is marked as "rolled back" in the event log
+2. Its recorded penalty score is reported back to you
+3. Principles and activation state are not affected
 
 ::: warning
-`/pd-rollback` must be used in a chat session (depends on sessionId). It rolls back "empathy penalty", not "principles" — to rollback a principle, use `/pd-principle-rollback`.
+`/pd-rollback` must be used in a chat session (depends on sessionId). It rolls back a stored empathy event, not a principle — to rollback a principle, use `/pd-principle-rollback`.
 :::
 
 ---
@@ -408,7 +407,7 @@ Rollback a principle and add its pattern to the blacklist (preventing it from be
 
 | Command | Rollback Target | Effect |
 |---------|-----------------|--------|
-| `/pd-rollback` | One empathy event | GFI decreases, principles unaffected |
+| `/pd-rollback` | One stored empathy event | Event marked rolled back, principles unaffected |
 | `/pd-principle-rollback` | One principle | Principle deactivated + pattern blacklisted, prevents re-proposal |
 
 ---
@@ -507,28 +506,27 @@ Rejecting a sample isn't just "not approved" — it triggers a `correction_rejec
 
 ```
 1. /pd-pain Agent edited without reading the file first, overwrote my code
-2. /pd-status        # Check if GFI rose
+2. /pd-status        # Check today's tool failures / RuleHost evaluations
 3. (Wait for PD background diagnosis)
 ```
 
-### Workflow 3: Agent is Over-fatigued
+### Workflow 3: Confirm PD Is Actually Working
 
-When the Agent keeps apologizing and is overly cautious:
-
-```
-1. /pd-status        # Check GFI, confirm it's too high
-2. /pd-status reset  # Clear GFI
-3. (Continue working, Agent returns to efficient mode)
-```
-
-### Workflow 4: Rollback a Misjudgment
-
-PD misjudged a "user frustration" and GFI rose incorrectly:
+When output looks suspicious or a rule does not seem to fire:
 
 ```
-1. /pd-status empathy --session  # View current session's empathy events
-2. /pd-rollback last             # Rollback the most recent misjudgment
-3. /pd-status                    # Confirm GFI has decreased
+1. /pd-status        # Session counters, tool/hook failures, RuleHost evaluations
+2. /pd-status data   # Trajectory database size and last ingest time
+3. (If hooks report failures, check the logs under ~/.openclaw/workspace/memory/logs)
+```
+
+### Workflow 4: Rollback a Legacy Empathy Event
+
+Only needed when an older release stored an empathy event that you want to undo:
+
+```
+1. /pd-status empathy --session  # View stored empathy events for this session
+2. /pd-rollback last             # Mark the most recent event as rolled back
 ```
 
 ### Workflow 5: Review Correction Samples
@@ -565,11 +563,9 @@ PD misjudged a "user frustration" and GFI rose incorrectly:
 
 Edit your workspace's `.pd/config.yaml` and set `language: zh`. Or set it in the plugin config.
 
-### GFI won't go down?
+### Where did the friction score (GFI) go?
 
-- Use `/pd-status reset` to clear the current session's GFI
-- Check if there are persistent tool failures triggering pain (fix the root cause)
-- Consider `/clear` to start a new session
+It was removed in GFI-COMPLETE-REMOVAL-001 together with the mental-mode display and `/pd-status reset`. The session's friction state no longer exists, so there is nothing to reset; use `/pd-status` to inspect real tool, hook and RuleHost activity instead.
 
 ### How do I view all activated principles?
 

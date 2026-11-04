@@ -16,7 +16,7 @@ import {
 } from '../src/governance-signal-admission.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import { deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
-import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, invalidatePainSignalBridge, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
 
 /**
  * Slice B admission matrix (SPEC §18/§19, PRI-623): detector semantics,
@@ -28,7 +28,7 @@ import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core
 
 const BASELINE_DDL = [
   'CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
-  'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)',
+  'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)',
   'CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)',
   'CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL',
 ];
@@ -168,6 +168,38 @@ it('adds nullable tool-call project scope to legacy trajectory schema without as
   expect(withTrajectory((sqlite) => sqlite.prepare('PRAGMA table_info(tool_calls)').all()
     .some((row) => typeof row === 'object' && row !== null && Reflect.get(row, 'name') === 'project_dir')))
     .toBe(true);
+});
+
+/**
+ * GFI-COMPLETE-REMOVAL-001 regression: the additive governance open used to
+ * leave the retired GFI columns in place, so a v1 workspace was judged
+ * non-canonical and every Owner-visible admission was refused with
+ * trajectory_schema_invalid. The open must converge the same way the other raw
+ * open paths do, and existing tool-call rows must survive the column drop.
+ */
+it('converges a v1 workspace carrying retired GFI columns before admitting', () => {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  db.exec('ALTER TABLE tool_calls ADD COLUMN gfi_before REAL');
+  db.exec('ALTER TABLE tool_calls ADD COLUMN gfi_after REAL');
+  // A v1 workspace also still claims schema version 1.
+  db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
+  db.prepare('DELETE FROM schema_version').run();
+  db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
+  db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, gfi_before, gfi_after)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run('v1-session', 'apply_patch', 'success', '{}', NOW.toISOString(), 0.5, 0.7);
+  db.close();
+
+  const result = admit([correction()]);
+  expect(result.ok).toBe(true);
+  expect(withTrajectory((sqlite) => sqlite.prepare('PRAGMA table_info(tool_calls)').all()
+    .map((row) => (typeof row === 'object' && row !== null ? Reflect.get(row, 'name') : undefined))
+    .filter((name) => name === 'gfi_before' || name === 'gfi_after')))
+    .toEqual([]);
+  expect(withTrajectory((sqlite) => sqlite.prepare('SELECT version FROM schema_version LIMIT 1').get()))
+    .toEqual({ version: TRAJECTORY_SCHEMA_VERSION });
+  expect(withTrajectory((sqlite) => sqlite.prepare('SELECT tool_name FROM tool_calls WHERE session_id = ?').get('v1-session')))
+    .toEqual({ tool_name: 'apply_patch' });
 });
 
 /**

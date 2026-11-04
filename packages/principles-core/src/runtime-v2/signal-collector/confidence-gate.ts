@@ -8,10 +8,6 @@ import type { LlmClassificationResult } from './types.js';
  * - NONE 且 confidence ≥ θ_none → none（终态 resolved_none）；
  * - 低置信度 → pending_low_confidence（attempts+1 后回 pending，绝不伪装终态）；
  * - LLM 超时/异常/无结果 → pending_llm_error（绝不记为 NONE）。
- *
- * empathy 不属于 CORRECTION/NONE 二元契约。OpenClaw 的 WEAK/GFI 路径在 Phase B
- * 仍保留，因此这里把它原样标为 unclassified_empathy，由宿主决定既有行为；
- * Codex/WorkBuddy 的 pending 状态机会把未归类结果继续视为 pending。
  */
 export const STAGE2_CONFIRM_THRESHOLD = 0.7;
 export const STAGE2_NONE_THRESHOLD = 0.7;
@@ -21,7 +17,6 @@ export const PENDING_CANDIDATE_TTL_MS = 72 * 60 * 60 * 1000;
 export type Stage2GateVerdict =
   | 'correction'
   | 'none'
-  | 'unclassified_empathy'
   | 'pending_low_confidence'
   | 'pending_llm_error';
 
@@ -59,12 +54,6 @@ export function evaluateStage2ConfidenceGate(
     return confidence >= thresholds.confirm
       ? { verdict: 'correction', reason: result.reason, confidence }
       : { verdict: 'pending_low_confidence', reason: result.reason, confidence };
-  }
-
-  if (result.type === 'empathy' && result.is_feedback) {
-    // OpenClaw 的既有 WEAK/GFI 语义在 Phase B 保持；它既不是 correction，
-    // 也不构成高置信度的 none。
-    return { verdict: 'unclassified_empathy', reason: result.reason, confidence };
   }
 
   // `none`（以及 is_feedback=false 的伪 correction）只有在达到否定阈值时

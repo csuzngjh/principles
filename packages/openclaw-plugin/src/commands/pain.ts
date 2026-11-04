@@ -1,4 +1,4 @@
-import { resetFriction, getSession } from '../core/session-tracker.js';
+import { getSession } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { normalizeCommandArgs } from '../utils/io.js';
@@ -11,15 +11,6 @@ import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
 import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
-
-/**
- * Creates a visual progress bar (e.g., [██████░░░░])
- */
-function createProgressBar(value: number, max: number, length = 10): string {
-    const filledLength = Math.round((value / max) * length);
-    const emptyLength = length - filledLength;
-    return `[${'█'.repeat(filledLength)}${'░'.repeat(emptyLength)}]`;
-}
 
 /**
  * Creates a mini bar for daily trends
@@ -117,14 +108,6 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         return handleEmpathySubcommand(wctx, args, sessionId, isZh);
     }
 
-    if (args === 'reset') {
-        if (sessionId) {
-            resetFriction(sessionId);
-            return { text: isZh ? `✅ 当前会话的 GFI 阻力已强制归零。` : `✅ GFI for current session reset to 0.` };
-        }
-        return { text: isZh ? `❌ 无法识别当前会话。` : `❌ Session ID not found. Use /pd-status reset in a chat session.` };
-    }
-
     if (args === 'data') {
         const stats = wctx.trajectory.getDataStats();
         return {
@@ -134,54 +117,19 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         };
     }
 
-    // Default: Show status
+    // Default: source-backed status (GFI-COMPLETE-REMOVAL-001, SPEC §4.5).
+    // The friction score, mental mode and fatigue rating are intentionally
+    // gone. Every number below has a real producer; none of it is synthesized.
     const session = sessionId ? getSession(sessionId) : undefined;
-    const gfi = session ? session.currentGfi : 0;
     const {dictionary} = wctx;
     const stats = dictionary.getStats();
-    
-    const gfiBar = createProgressBar(gfi, 100, 15);
-    
-    // Determine Mental Mode (aligned with prompt.ts logic)
-     
-    const mentalMode = isZh
-        ? gfi >= 70 ? '🚑 救赎模式 (HUMBLE_RECOVERY)'
-        : gfi >= 40 ? '🤝 安抚模式 (CONCILIATORY)'
-        : '⚡ 高效模式 (EFFICIENT)'
-        : gfi >= 70 ? '🚑 HUMBLE_RECOVERY'
-        : gfi >= 40 ? '🤝 CONCILIATORY'
-        : '⚡ EFFICIENT';
-    
-    // Determine health status based on GFI
-     
-     
-    let healthLabel: string;
-    let suggestionText = '';
 
-    if (isZh) {
-        if (gfi > 80) {
-            healthLabel = '极度疲劳 🔴';
-            suggestionText = `
-💡 **建议 (系统检测到您当前遇到较大阻力)**:
-   1. 执行 \`/pd-status reset\` 清零疲劳值。
-   2. 如果当前上下文太乱，考虑使用 \`/clear\` 开启新会话。`;
-        }
-        else if (gfi > 50) healthLabel = '遇到阻力 🟡';
-        else if (gfi > 20) healthLabel = '轻微受挫 🟢';
-        else healthLabel = '运转良好 🟢';
-    } else {
-        if (gfi > 80) {
-            healthLabel = 'Critical 🔴';
-            suggestionText = `
-💡 **Suggestion (High friction detected)**:
-   1. Run \`/pd-status reset\` to clear friction.
-   2. Ask the AI to reflect deeply before continuing.
-   3. Consider starting a new session with \`/clear\`.`;
-        }
-        else if (gfi > 50) healthLabel = 'High Friction 🟡';
-        else if (gfi > 20) healthLabel = 'Minor Issues 🟢';
-        else healthLabel = 'Healthy 🟢';
-    }
+    const today = new Date().toISOString().split('T')[0] ?? '';
+    const daily = wctx.eventLog.getDailyStats(today);
+    const toolCalls = daily.tools;
+    const hooks = daily.hooks;
+    const evolution = daily.evolution;
+    const trajectory = wctx.trajectory.getDataStats();
 
     // Get session empathy stats for inline display
     const sessionEmpathy = sessionId ? wctx.eventLog.getEmpathyStats('session', sessionId) : null;
@@ -192,20 +140,27 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             : `\n🫀 **Empathy Events (Session)**: ${sessionEmpathy.totalEvents} (${sessionEmpathy.totalPenaltyScore}pts)`;
     }
 
+    const isEmptyWorkspace = stats.totalRules === 0 && stats.totalHits === 0;
+
     if (isZh) {
-        let text = `📊 **Principles Disciple - 系统健康度监控**\n`;
+        let text = `📊 **Principles Disciple - 系统状态**\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        text += `💊 **当前疲劳指数 (GFI)**: ${gfiBar} ${gfi}/100\n`;
-        text += `🧠 **当前心智模式**: ${mentalMode}\n`;
-        text += `   ↳ 状态诊断: ${healthLabel}\n`;
+        text += `🧭 **当前会话**: ${sessionId || '未识别'}\n`;
+        text += `   ├─ LLM 轮次: ${session?.llmTurns ?? 0}\n`;
+        text += `   ├─ 注入原则: ${session?.injectedPrincipleIds?.length ?? 0} 条\n`;
+        text += `   ├─ 自动纠正: ${session?.receiptAutoCorrects ?? 0} 次\n`;
+        text += `   └─ Gate 拦截: ${session?.blockedAttempts ?? 0} 次\n`;
         text += empathyInline;
-        text += `\n\n🧠 **痛苦进化词典**: 已吸收 ${stats.totalRules} 条规则\n`;
-        text += `   ↳ 累计帮您拦截了 ${stats.totalHits} 次无效操作\n`;
+        text += `\n📅 **今日 (${today})**\n`;
+        text += `   ├─ 工具调用: ${toolCalls.total} 次 (成功 ${toolCalls.success} / 失败 ${toolCalls.failure})\n`;
+        text += `   ├─ Hook 执行: ${hooks.total} 次 (成功 ${hooks.success} / 失败 ${hooks.failure})\n`;
+        text += `   └─ RuleHost: 评估 ${evolution.rulehostEvaluated} · 拦截 ${evolution.rulehostBlocked} · 自动纠正 ${evolution.rulehostAutoCorrectApplied}\n`;
+        text += `\n🗄 **轨迹库**: 工具调用 ${trajectory.toolCalls} · 痛感事件 ${trajectory.painEvents} (用 \`/pd-status data\` 查看详情)\n`;
+        text += `\n🧠 **痛苦进化词典**: 已吸收 ${stats.totalRules} 条规则\n`;
+        text += `   ↳ 累计规则命中 ${stats.totalHits} 次 (命中不等于拦截)\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        
-        if (suggestionText) {
-            text += suggestionText;
-        } else if (stats.totalRules === 0 && stats.totalHits === 0) {
+
+        if (isEmptyWorkspace) {
             // Fix-14 (P1-DESIGN-2): Empty-state onboarding guidance for fresh installs.
             // Merges Fix-13's welcome message here instead of injecting into the
             // before_prompt_build hook (avoids MVP-Core behavior change).
@@ -221,19 +176,24 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         }
         return { text };
     } else {
-        let text = `📊 **Principles Disciple - System Health Monitor**\n`;
+        let text = `📊 **Principles Disciple - System Status**\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        text += `💊 **Current Friction (GFI)**: ${gfiBar} ${gfi}/100\n`;
-        text += `🧠 **Current Mental Mode**: ${mentalMode}\n`;
-        text += `   ↳ Diagnosis: ${healthLabel}\n`;
+        text += `🧭 **Session**: ${sessionId || 'unknown'}\n`;
+        text += `   ├─ LLM turns: ${session?.llmTurns ?? 0}\n`;
+        text += `   ├─ Injected principles: ${session?.injectedPrincipleIds?.length ?? 0}\n`;
+        text += `   ├─ Auto-corrects: ${session?.receiptAutoCorrects ?? 0}\n`;
+        text += `   └─ Gate blocks: ${session?.blockedAttempts ?? 0}\n`;
         text += empathyInline;
-        text += `\n\n🧠 **Evolution Dictionary**: ${stats.totalRules} active rules\n`;
-        text += `   ↳ Successfully blocked ${stats.totalHits} invalid operations\n`;
+        text += `\n📅 **Today (${today})**\n`;
+        text += `   ├─ Tool calls: ${toolCalls.total} (success ${toolCalls.success} / failure ${toolCalls.failure})\n`;
+        text += `   ├─ Hook runs: ${hooks.total} (success ${hooks.success} / failure ${hooks.failure})\n`;
+        text += `   └─ RuleHost: evaluated ${evolution.rulehostEvaluated} · blocked ${evolution.rulehostBlocked} · auto-corrected ${evolution.rulehostAutoCorrectApplied}\n`;
+        text += `\n🗄 **Trajectory DB**: ${trajectory.toolCalls} tool calls · ${trajectory.painEvents} pain events (use \`/pd-status data\` for details)\n`;
+        text += `\n🧠 **Evolution Dictionary**: ${stats.totalRules} active rules\n`;
+        text += `   ↳ ${stats.totalHits} cumulative rule hits (a hit is not a block)\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-        
-        if (suggestionText) {
-            text += suggestionText;
-        } else if (stats.totalRules === 0 && stats.totalHits === 0) {
+
+        if (isEmptyWorkspace) {
             // Fix-14 (P1-DESIGN-2): Empty-state onboarding guidance for fresh installs.
             // Merges Fix-13's welcome message here instead of injecting into the
             // before_prompt_build hook (avoids MVP-Core behavior change).

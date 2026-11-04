@@ -160,9 +160,9 @@ function _handleRollbackImpl(
     // No previous active — degrade to hard-boundary gates (per Phase 12 D-08)
     restoredMessage = isZh
       ? `\n   \u26a0\ufe0f \u6ca1\u6709\u524d\u4e00\u4e2a\u6d3b\u8dc3\u5b9e\u73b0\uff0c\u8be5\u89c4\u5219\u6ca1\u6709\u6d3b\u8dc3\u5b9e\u73b0\u3002`
-        + `\n   GFI\u3001Progressive Gate\u7b49\u786c\u56fa\u62b1\u95e8\u4ecd\u7136\u6b63\u5e38\u8fd0\u884c\u3002`
+        + `\n   Progressive Gate\u7b49\u786c\u56fa\u62b1\u95e8\u4ecd\u7136\u6b63\u5e38\u8fd0\u884c\u3002`
       : `\n   \u26a0\ufe0f No previous active implementation. Rule has no active code implementation.`
-        + ` Existing hard-boundary gates (GFI, Progressive Gate) continue functioning normally.`;
+        + ` Existing hard-boundary gates (Progressive Gate) continue functioning normally.`;
   }
 
   // Store rollback record

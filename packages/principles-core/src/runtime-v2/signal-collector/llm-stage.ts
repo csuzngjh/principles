@@ -14,12 +14,11 @@ export const SIGNAL_CLASSIFIER_SYSTEM_PROMPT = '你是一个用户反馈分类�
 export function buildLlmPrompt(userMessage: string): string {
   return `判断下面这条用户消息是否表达对 AI 助手行为的不满或纠正。
 
-只输出 JSON，格式：{"is_feedback": bool, "type": "correction"|"empathy"|"none", "confidence": 0-1, "reason": "一句话理由"}
+只输出 JSON，格式：{"is_feedback": bool, "type": "correction"|"none", "confidence": 0-1, "reason": "一句话理由"}
 
 定义：
 - correction：用户明确指出 AI 做错了什么、应该改什么（如"这是错的""不要自作主张""应该先确认"）
-- empathy：用户表达挫败/不满情绪，但没明确指出 AI 错在哪（如"搞什么啊""又来了""算了"）
-- none：正常任务指令或闲聊
+- none：正常任务指令、闲聊，或只表达情绪但没指出 AI 错在哪（如"搞什么啊""又来了""算了"）
 
 用户消息：${userMessage}`;
 }
@@ -62,7 +61,7 @@ export interface PayloadResolveResult {
  * 解析 RuntimeAdapter fetchOutput 的 payload 为分类结果。
  *
  * Canonical path 是 structured object(分类器以 outputSchemaRef 请求
- * signal-classification-output-v1,adapter 完成 JSON extraction + schema
+ * signal-classification-output-v2,adapter 完成 JSON extraction + schema
  * validation + bounded repair)。string / {output: string} 仅是未实现 schema
  * ref 的 adapter 的 compatibility fallback——消费侧仍对 unknown payload 做
  * 类型守卫(rc-1/rc-2,纵深防御: producer contract 不替代 consumer 校验)。

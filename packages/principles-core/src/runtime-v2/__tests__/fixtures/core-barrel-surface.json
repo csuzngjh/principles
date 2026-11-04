@@ -1,6 +1,6 @@
 {
  "barrel": "src/index.ts",
- "count": 196,
+ "count": 195,
  "names": [
   "AGENT_IDS",
   "AcquireLeaseOptions",
@@ -161,7 +161,6 @@
   "WorkflowStage",
   "WorkingMemorySnapshot",
   "applyKeywordUpdates",
-  "buildAttitudeDirective",
   "compressFocusContent",
   "createDefaultKeywordStore",
   "detectCorrectionCue",

@@ -15,10 +15,9 @@
  * 3. isSubagentError → subagent_error
  * 4. isRateLimit → rate_limit / provider_failure
  * 5. toolName === 'pain' / 'skill:pain' → agent_on_owner_request / owner_reported
- * 6. isGfiTriggered → gfi_threshold
- * 7. failureSource → tool_failure / dispatch_error
- * 8. detectionSource → llm_paralysis / semantic / empathy_inferred / unknown
- * 9. Fallback → unknown
+ * 6. failureSource → tool_failure / dispatch_error
+ * 7. detectionSource → llm_paralysis / semantic / empathy_inferred / unknown
+ * 8. Fallback → unknown
  *
  * ERR checklist:
  * - ERR-001: Source kind resolved from runtime values, no `as` casts.
@@ -62,8 +61,6 @@ export interface RawObservation {
   // ── LLM Detection Fields ───────────────────────────────────────────────
   /** Detection source identifier */
   readonly detectionSource?: string;
-  /** Whether GFI threshold was crossed */
-  readonly isGfiTriggered?: boolean;
 
   // ── Provider Fields ───────────────────────────────────────────────────
   /** Whether the failure was a rate limit (429) */
@@ -112,7 +109,6 @@ export function resolveSourceKind(observation: RawObservation): SourceKind {
     isRateLimit,
     toolName,
     failureSource,
-    isGfiTriggered,
     detectionSource,
     nonZeroExit,
     timedOut,
@@ -153,12 +149,7 @@ export function resolveSourceKind(observation: RawObservation): SourceKind {
     return 'owner_reported';
   }
 
-  // Priority 6: GFI threshold (must check before failure source for LLM detection path)
-  if (isGfiTriggered) {
-    return 'gfi_threshold';
-  }
-
-  // Priority 7: Tool failure / dispatch error
+  // Priority 6: Tool failure / dispatch error
   if (failureSource) {
     // Match resolveSourceKindFromToolFailure behavior:
     // dispatch_error → dispatch_error, anything else → tool_failure

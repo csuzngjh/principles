@@ -1,11 +1,11 @@
-import type { UnifiedKeywordStore, KeywordCategory, MatchedPrecision } from './types.js';
+import type { UnifiedKeywordStore, MatchedPrecision } from './types.js';
 
 export interface KeywordScanResult {
   matched: boolean;
   matchedTerms: string[];
   matchedPrecision: MatchedPrecision;
   needsLlmConfirmation: boolean;
-  suggestedType: KeywordCategory | null;
+  suggestedType: 'correction' | null;
 }
 
 /**
@@ -122,8 +122,8 @@ export function scanKeywords(text: string, store: UnifiedKeywordStore): KeywordS
   const normalized = text.trim().toLowerCase();
   const quotedRanges = findQuotedRanges(normalized);
 
-  let highHit: { term: string; category: KeywordCategory } | null = null;
-  const ambiguousHits: { term: string; category: KeywordCategory }[] = [];
+  let highHit: { term: string } | null = null;
+  const ambiguousHits: { term: string }[] = [];
 
   for (const term of Object.keys(store.terms)) {
     if (!Object.hasOwn(store.terms, term)) continue;  // rc-5
@@ -135,14 +135,11 @@ export function scanKeywords(text: string, store: UnifiedKeywordStore): KeywordS
         .map((index) => classifyHighOccurrence(normalized, lowered, { index, quotedRanges }));
       const strong = dispositions.includes('strong');
       if (strong) {
-        // CodeRabbit #10: 不 break,遍历所有 high 命中,correction 优先于 empathy
-        // (避免结果依赖 terms 对象的键插入顺序)
-        if (!highHit || kw.category === 'correction') {
-          highHit = { term, category: kw.category };
-        }
+        // 不 break，遍历所有 high 命中。
+        highHit = { term };
       } else if (dispositions.includes('downgraded')) {
         // 第三人称/否定语境命中仍是候选，但必须经 Stage 2 确认。
-        ambiguousHits.push({ term, category: kw.category });
+        ambiguousHits.push({ term });
       }
       // quoted-only: 不进入任何结果（引号内不单独构成信号，也不消耗候选）。
       continue;
@@ -153,7 +150,7 @@ export function scanKeywords(text: string, store: UnifiedKeywordStore): KeywordS
     const hasOutsideQuotes = findOccurrences(normalized, lowered)
       .some((index) => !isInsideQuotes(index, index + lowered.length, quotedRanges));
     if (hasOutsideQuotes) {
-      ambiguousHits.push({ term, category: kw.category });
+      ambiguousHits.push({ term });
     }
   }
 
@@ -163,18 +160,17 @@ export function scanKeywords(text: string, store: UnifiedKeywordStore): KeywordS
       matchedTerms: [highHit.term],
       matchedPrecision: 'high',
       needsLlmConfirmation: false,
-      suggestedType: highHit.category,
+      suggestedType: 'correction',
     };
   }
 
   if (ambiguousHits.length > 0) {
-    const [first] = ambiguousHits;
     return {
       matched: true,
       matchedTerms: ambiguousHits.map((h) => h.term),
       matchedPrecision: 'ambiguous',
       needsLlmConfirmation: true,
-      suggestedType: first ? first.category : null,
+      suggestedType: 'correction',
     };
   }
 

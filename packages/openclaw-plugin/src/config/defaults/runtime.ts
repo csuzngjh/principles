@@ -52,14 +52,6 @@ export const THINKING_CHECKPOINT_DEFAULT_HIGH_RISK_TOOLS = [
   'move_file',
 ] as const;
 
-// ── GFI Gate Thresholds ───────────────────────────────────────────────────────
-
-/** Large change threshold for GFI gate adjustments */
-export const GFI_LARGE_CHANGE_LINES = 50;
-
-/** Agent spawn GFI threshold (critically high = no spawn) */
-export const AGENT_SPAWN_GFI_THRESHOLD = 90;
-
 // ── Session Tracker Settings ───────────────────────────────────────────────────
 
 export const SESSION_TOKEN_WARNING_THRESHOLD = 8000;

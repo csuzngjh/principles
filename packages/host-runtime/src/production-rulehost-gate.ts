@@ -125,7 +125,6 @@ export interface ProductionRuleContextRequest {
 
 export type RuleContextProvider = (request: ProductionRuleContextRequest) => unknown | Promise<unknown>;
 export interface RuleInputEnrichment {
-  currentGfi: number;
   epTier: number;
   bashRisk: 'safe' | 'normal' | 'dangerous' | 'unknown';
 }
@@ -185,7 +184,6 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     // so no approval-gate rule could ever exempt read-only investigation.
     // A wired provider remains the host truth and overrides the default.
     let enrichment: RuleInputEnrichment = {
-      currentGfi: 0,
       epTier: 0,
       bashRisk: classifyBashRisk(canonicalKind === 'execute', input.params),
     };
@@ -196,10 +194,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     if (options.ruleInputEnrichmentProvider) {
       try {
         const candidate: unknown = await withinGateDeadline(options.ruleInputEnrichmentProvider(request), startedAt);
-        if (isRecord(candidate) && typeof candidate.currentGfi === 'number' && Number.isFinite(candidate.currentGfi)
+        if (isRecord(candidate)
           && typeof candidate.epTier === 'number' && Number.isFinite(candidate.epTier)
           && (candidate.bashRisk === 'safe' || candidate.bashRisk === 'normal' || candidate.bashRisk === 'dangerous' || candidate.bashRisk === 'unknown')) {
-          enrichment = { currentGfi: candidate.currentGfi, epTier: candidate.epTier, bashRisk: candidate.bashRisk };
+          enrichment = { epTier: candidate.epTier, bashRisk: candidate.bashRisk };
         } else addWarning(warnings, 'rule_input_enrichment_invalid', 'repair the host enrichment provider');
       } catch (error: unknown) {
         addWarning(warnings, `rule_input_enrichment_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect the host enrichment provider');
@@ -558,7 +556,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       const hostInput: RuleHostInput = {
         action,
                 workspace: { isRiskPath: isSensitiveSystemPath(action.normalizedPath) },
-        session: { sessionId: event.context.sessionId, currentGfi: enrichment.currentGfi },
+        session: { sessionId: event.context.sessionId },
         evolution: { epTier: enrichment.epTier },
         derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }), bashRisk: enrichment.bashRisk },
         ...(context ? { context } : {}),

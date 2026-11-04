@@ -93,7 +93,7 @@ PD 系统有 5 类组件：
 | `EventLogReadModel` | 🟣 ReadModel | console | `pd-console/server/models/EventLogReadModel.ts` | filter | events[] | 无 | ✅ |
 | `ApprovalQueueReadModel` | 🟣 ReadModel | core | `runtime-v2/activation/approval-queue.ts` + store list APIs | filter | ApprovalRecord[] | 无 | ⚠️ 基础版 |
 | `ActivationStatusReadModel` | 🟣 ReadModel | core | `runtime-v2/activation/*activation-state-store.ts` | idempotencyKey | 激活状态 | 无 | ✅ |
-| `GfiWorkspaceReadModel` | 🟣 ReadModel | core | `runtime-v2/gfi/gfi-read-model.ts` | n/a | GFI 快照 | 无 | ✅ |
+| ~~`GfiWorkspaceReadModel`~~ | — | — | 已删除（GFI-COMPLETE-REMOVAL-001，SPEC §2） | — | — | — | ❌ 已退役 |
 
 ### 2.4 Util / Pure Functions
 
@@ -326,14 +326,9 @@ PD 系统有 5 类组件：
 - `SCHED-1`：MissionScheduler 调度决策必须可解释（reason 字段非空）
 - `SCHED-2`：调度入口必须由 PD 自有 config/SDK/operator 或 host-agnostic scheduler 驱动；不得依赖 OpenClaw idle/night 事件
 
-### 3.6 GFI（Global Friction Index）
+### 3.6 GFI（Global Friction Index）— 已退役
 
-| 组件 | 类型 | 包 | 文件 | 状态 |
-|------|-----|----|----|------|
-| `GfiKernel`（pure functions） | 🔧 Util | core | `runtime-v2/gfi/gfi-kernel.ts` | ✅ |
-| `GfiPolicy` | 📋 Schema | core | `runtime-v2/gfi/gfi-types.ts` | ✅ |
-| `GfiReadModel` | 🟣 ReadModel | core | `runtime-v2/gfi/gfi-read-model.ts` | ✅ |
-| `GfiSessionAdapter` | 🔴 Adapter | plugin | `core/session-tracker.ts` | ✅ |
+`runtime-v2/gfi/` 下的 `GfiKernel`、`GfiPolicy`、`GfiReadModel` 与 plugin 的 `GfiSessionAdapter`（`core/session-tracker.ts`）已在 **GFI-COMPLETE-REMOVAL-001**（SPEC §2 / §3.2）中删除，目录仅剩空的 `__tests__` 占位。当前没有任何生产消费方；`gfi` feature flag 仅以 `gone` 墓碑保留（`feature-flag-contract.ts`），不驱动行为。
 
 ### 3.7 Prompt Builder Primitives
 

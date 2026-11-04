@@ -227,10 +227,17 @@ describe('Gate Rule Host Only Pipeline', () => {
     });
   });
 
-  describe('Session GFI context', () => {
-    it('should pass current GFI to Rule Host', () => {
+  // GFI-COMPLETE-REMOVAL-001: 2bae37491 (SPEC §3.8) removed
+  // RuleHostInput.session.currentGfi, so GFI propagation can no longer be the
+  // protected object here. The surviving contract is that the production hook
+  // still forwards the host session identity into the rule VM. Enrichment
+  // parity (evolution.epTier / derived.bashRisk) is covered by
+  // tests/integration/rulehost-seed-mvp-e2e.test.ts and the host-runtime
+  // production-host-runtime.test.ts enrichment test.
+  describe('Session context', () => {
+    it('should pass the session identity to Rule Host', () => {
       _mockEvaluate = vi.fn().mockReturnValue(undefined);
-      vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 75 } as any);
+      vi.mocked(sessionTracker.getSession).mockReturnValue({ sessionId } as any);
 
       const event = {
         toolName: 'write',
@@ -241,7 +248,7 @@ describe('Gate Rule Host Only Pipeline', () => {
 
       expect(_mockEvaluate).toHaveBeenCalledWith(
         expect.objectContaining({
-          session: expect.objectContaining({ currentGfi: 75 }),
+          session: expect.objectContaining({ sessionId }),
         })
       );
     });

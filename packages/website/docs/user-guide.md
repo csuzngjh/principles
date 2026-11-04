@@ -121,9 +121,9 @@ Here's a quick overview of the most-used commands:
 | Command | Short | Purpose |
 |---------|-------|---------|
 | `/pd-init` | `/pdi` | Initialize workspace |
-| `/pd-status` | — | View GFI friction index and system health |
+| `/pd-status` | — | View session, tool/hook/RuleHost activity and trajectory stats |
 | `/pd-pain` | — | Report a pain signal from the current session |
-| `/pd-rollback` | — | Rollback a misjudged empathy event penalty |
+| `/pd-rollback` | — | Rollback a stored legacy empathy event |
 | `/pd-principle-rollback` | — | Rollback a principle and blacklist it |
 | `/pd-context` | — | Control context injection (Thinking OS / project focus) |
 | `/pd-help` | `/pdh` | Show command reference in-session |
@@ -218,10 +218,10 @@ The local console is your primary window into PD's activity.
 
 ### Rolling Back
 
-If an activated principle causes problems, you can rollback empathy event penalties or principles directly:
+If an activated principle causes problems, you can rollback it directly. `/pd-rollback` only applies to empathy events stored by older releases (the empathy engine was retired in GFI-COMPLETE-REMOVAL-001):
 
 ```bash
-/pd-rollback last             # Rollback the most recent empathy event penalty
+/pd-rollback last             # Mark a stored legacy empathy event as rolled back
 /pd-principle-rollback P_003  # Rollback a principle and blacklist it
 ```
 
