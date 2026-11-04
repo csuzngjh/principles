@@ -449,6 +449,15 @@
 | 18 | L12 | `handleRuntimeHealthSnapshot shows no active sessions in text when gfi.active is null` | 删除（并入 #17） | 断言对象「gfi.active 文本行」已随命令删除；新的负向断言已覆盖 |
 | 19 | L13 | `HealthCheckModel checkSystemHealth returns overall status when workspace is empty` | 改写（5→4） | GFI 健康项随 `603af28d4` 删除（SPEC §4.4 L652–671）；`expect(health.checks).toHaveLength(4)` |
 
+**G1 之后由 `verify:merge` / 全包测试追加发现的陈旧测试（2 条，均 (c) 类改写）**
+
+> 共同根因：`2bae37491`（SPEC §3.8）把 `session.currentGfi` 移出 `RuleHostInput`，但这两处断言仍引用它。两条都不在原 19 条观测集内（host-runtime 整包与 `check:pipeline-contract` 此前未纳入 8 组对照）。
+
+| # | 文件:行 | 原文断言 | 处置 | 依据 / 新断言 |
+| --- | --- | --- | --- | --- |
+| 20 | `packages/host-runtime/tests/production-host-runtime.test.ts:482` | `input.session.currentGfi === 523 && input.evolution.epTier === 7` → `decision:'deny'`, reason `HOST_ENRICHMENT_PARITY_523` | (c) 改写 | 生产仍转发 `evolution.epTier` / `derived.bashRisk`（`production-rulehost-gate.ts:556-563`）；新条件 `input.evolution.epTier === 7 && input.derived.bashRisk === 'normal'`，保留 `decision:'deny'` 精确断言 |
+| 21 | `packages/openclaw-plugin/tests/hooks/gate-rule-host-pipeline.test.ts:242` | `session: expect.objectContaining({ currentGfi: 75 })` | (c) 改写 | 幸存契约是「宿主 session 身份仍被转发」；新断言 `session: expect.objectContaining({ sessionId })`（`sessionId` 来自同一调用参数，非放宽）；enrichment 由 #20 覆盖 |
+
 **G1 复测（修复后，逐组前台实测）**
 
 | 组 | 命令 | 结果 |
@@ -468,9 +477,7 @@
 
 ---
 
-## 块 6 执行记录（G1 修复收尾 + P1 迁移 + verify:merge 转绿）
-
-### 6.1 G1 修复后 8 组累计对照（副本 `current-g1fix` = `51521ebfb`，逐组前台实测）
+### 6.4 G1 修复后 8 组累计对照（副本 `current-g1fix` = `51521ebfb`，逐组前台实测）
 
 | 组 | 包 | 结果 |
 | --- | --- | --- |
@@ -488,15 +495,17 @@
 | c8b | principles-core | 80 / 80 |
 | **合计** | | **568 / 568，0 failed（与基线逐组一致，无数字漂移）** |
 
-### 6.2 `verify:merge` 修复前后状态（实测，非推断）
+### 6.5 `verify:merge` 修复前后状态（实测，非推断）
 
 | 阶段 | 结果 | 证据 |
 | --- | --- | --- |
 | 修复前（`current-head4` = `3bb70c16d`） | **红** | 第一个失败步骤是 `RELEASE_INTENT_GUARD`：`mode=normal (base=35d12815bc head=51521ebfb6, reproduction rejected)` —— 分支 20 个提交未声明发版意图（缺 changeset）。日志 `.tmp/gfi-removal/verify-merge-before.log` |
 | 修复前，19 条陈旧测试是否造成红？ | **否（实测更正）** | `verify:merge` 不包含这 19 条所在测试文件；`current-head4` 副本四个 typecheck（core / pd-cli / openclaw-plugin / pd-console）全部 `exit=0`。此前把「19 条 → 门禁红」当作因果是**错的**，真实红因是 release intent。日志 `.tmp/gfi-removal/verify-typecheck-before.log` |
-| 修复后 | 待本轮提交后在工作树重跑（见 §6.4） | — |
+| 修复后（工作树 `e1e47b666`，干净） | **门禁内 33 个步骤：32 绿 / 1 环境性失败** | 逐步实测（日志 `.tmp/gfi-removal/verify-merge-after-rest.log`）：`check-pr-release-intent`（`RELEASE_INTENT_GUARD PASS … intent=@principles/core:major,@principles/host-runtime:major,principles-disciple:minor,@principles/pd-cli:minor,create-principles-disciple:patch`）、`check:generated-artifacts`、`check:error-handbook`、`check:telemetry-events --strict`、`check:repo-hygiene`、`check:runtime-contract`、`check:docs-structure`、`check:security-baseline`、`check:workspace-tools`、`test:guard-contracts`（fail 0）、installer release-target-matrix、core build、`lint`、`build`、pd-mcp-server、`check:pipeline-contract`、`check:workspace-artifacts`、`check:release-artifact-hygiene`、6 个 typecheck、`check-satellite-bundle-deps`、`check:runtime-writers` 全部 `exit=0` |
+| 唯一失败步骤：`test:website` → `test:contract` | **环境性 / 非本分支回归** | 断言 `published videos contain synchronized narration and scene-aligned captions` 失败。三个证据：① 该断言只读两个提交文件 `packages/website/public/homepage-demo-zh.vtt` 与 `video/homepage-demo/voiceover/scenes.json`，本分支对这两个文件零改动（`git diff origin/main..HEAD` 为空，与 `origin/main` 完全相同）；② `git ls-files --eol` 显示索引 LF / 工作树 CRLF（Windows checkout），vtt 每行带 `\r`，测试按行读取后未 trim 直接精确匹配；③ 探针实测：原始行 2 条失配，`trimEnd()` 后 **0 条失配**（`.tmp/gfi-removal/probe-vtt-crlf.mjs`）；把同一 `packages/website` 复制到 `.tmp/gfi-removal/website-lf` 并仅把 vtt 转 LF 后，`node --test tests/homepage-contract.test.mjs` → **exit=0**。即：Linux CI 上该步骤通过，Windows 检出必然失败，与 GFI 移除无关 |
+| 修复前 `check:pipeline-contract` | **红 → 绿** | 红因是 #21（`gate-rule-host-pipeline.test.ts:242` 断言已删的 `session.currentGfi`）；按 (c) 类改写后 `exit=0` |
 
-### 6.3 P1（老库未真正迁移）处置与新增发现
+### 6.6 P1（老库未真正迁移）处置与新增发现
 
 | 项 | 内容 |
 | --- | --- |
@@ -508,6 +517,20 @@
 | 新增发现（陈旧测试 #20） | `production-host-runtime.test.ts:482` 断言 `input.session.currentGfi`；`2bae37491`（SPEC §3.8）已把 `currentGfi` 移出 Rule Host 输入 → 按 (c) 类改写为 `evolution.epTier` + `derived.bashRisk`（生产仍转发，见 `production-rulehost-gate.ts:556-563`），保留 `decision:'deny'` 精确断言 |
 | 陈旧夹具（9 个 host-runtime 测试文件） | 因 `hasCanonicalSchema` 变严，v1 夹具（含 `gfi_before/gfi_after`）被判非法 → 夹具改为 canonical v2 形状（`recovery-dedup-host-attribution.test.ts` 两处 INSERT 同步去掉两列与两个 `null`）。不改生产代码语义 |
 | P1 复测 | `packages/host-runtime` 全包 **652 / 652 passed，exit=0**（修前该包 71 failed；never-in-scope 的 #20 亦清零） |
+
+### 6.7 D1 迁移证据（真实 `.state` 只读 → 隔离副本）
+
+详见 `docs/reports/GFI_MIGRATION_EVIDENCE.md`，摘要：
+
+| 项 | 实测 |
+| --- | --- |
+| 真实库 | `D:\Code\principles\.state\trajectory.db`（23 表 / `tool_calls` 161 行，**只读**，SQLite backup 取快照） |
+| ① 旧列消失 | `["gfi_before","gfi_after"]`，无其它列变化 |
+| ② pending empathy | 副本植入 3 行 → 仅 `empathy/pending` 变为 `abandoned` + `resolution=gfi_removal` + `resolved_at`；其余 2 行逐字段不变 |
+| ③ 其余表 | 21 张表行摘要（sha256 前 16 位）全部一致；无行数变化 |
+| ④ 幂等 | 二次迁移 `after == afterSecond`（字节级） |
+| ⑤ 缺表不抛 | 空库迁移 + `applyTrajectorySchemaBase` 均不抛 |
+| 判定 | **PASS**（脚本 `.tmp/gfi-removal/d1-migration-evidence.mjs` / `d1-class2.mjs`） |
 
 
 
