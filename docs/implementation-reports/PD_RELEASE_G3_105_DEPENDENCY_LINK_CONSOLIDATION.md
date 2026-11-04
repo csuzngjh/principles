@@ -5,6 +5,7 @@
 - 分支：`ai/adhoc-20261103-installer-dependency-link-consolidation-39a366`（独立 worktree `D:\Code\_worktrees\principles\adhoc-20261103-installer-dependency-link-consolidation-39a366`）
 - 依据：`docs/specs/PD_Release_Delivery_SPEC_v1.2/SPEC-PD-RELEASE-ARCH-SIMPLIFICATION-001.md` §10 第 5 项（“G3 可证明等价的依赖链接/状态逻辑合并”）
 - 工单：**PRI-1100** — <https://linear.app/principlesdisciple/issue/PRI-1100/p2-installer-兄弟依赖链接逻辑合并g3-105>（详见 §9）
+- 追加（2026-11-04）：PR #2319 review 发现的 P1 删除逃逸修复（§10）；本轮分支已对齐到含 `v2.5.0` 的 `origin/main`
 
 ## 结论（先行）
 
@@ -13,6 +14,7 @@
 3. 顺手修正了 `syncPdCli()` 中已被 G3-R4 实验否证的注释（“host-runtime 依赖可通过 plugin node_modules 向上解析”），该说法与实际解析链不符，已随链接块一并删除。
 4. 回归：新增独立布局的真实文件系统测试 **10/10 通过**（Windows 上真实 junction + 真实 Node ESM 子进程解析）；安装器 fast 套件 **88 文件 / 1030 通过 / 6 跳过 / 0 失败**；仓库 lint **0 error**（2+1 条既存 warning 位于无关包）。
 5. 未实施依赖裁剪、未建立全局共享 node_modules、未改 release-locks / runtime-version.json、未触碰 `~/.pd` / `~/.openclaw`、未发布/部署。
+6. **P1 状态（2026-11-04）**：PR #2319 已在修复完成前被合并，`origin/main` 仍存在 §10 描述的依赖名删除逃逸。修复已提交在原分支（`2bea2b7ff`），但**没有可追加的开放 PR**；是否开后续 PR 由 Owner 决定（本会话不自动创建、不自动合并）。详见 §10.G / §10.H。
 
 ---
 
@@ -103,7 +105,8 @@
 | `packages/create-principles-disciple/tests/mvp-config.test.ts` | `2114..2170` | 旧实现源码断言改为新契约断言（helper 复用、无手写块、顺序契约） |
 | `packages/create-principles-disciple/tests/installed-topology-invariants.test.ts` | `250..256` | 两条链接断言迁出（fixture 无依赖、helper 数据驱动无链接可断言），链接契约由新套件覆盖 |
 | `packages/create-principles-disciple/tests/release-upgrade-gate.test.ts` | `535..538` | 修正已过时的 `syncPdCli` 注释，不改断言 |
-| `.changeset/dependency-link-consolidation.md` | 新增 | `create-principles-disciple: patch` 发布意图声明 |
+| `.changeset/dependency-link-consolidation.md` | 新增 | `create-principles-disciple: patch` 发布意图声明（已被 `v2.5.0` 消费，main 中已删除） |
+| `.changeset/installer-dependency-link-path-boundary.md` | 新增 | P1 安全修复的独立 patch 发布意图（不复活已发布条目） |
 
 ---
 
@@ -295,36 +298,47 @@ tests/global-shim-lifecycle.test.ts           pass
 
 **TypeScript**：`npx tsc --noEmit -p packages/create-principles-disciple/tsconfig.json` PASS。
 
-**Lint**：`npx eslint` 对 `installer.ts` 与 3 个受影响测试文件 PASS（0 error）；仓库 `npm run lint` 修复后待全量复跑（见 §10.F）。
+**Lint**：`npx eslint` 对 `installer.ts` 与 3 个受影响测试文件 PASS（0 error）；仓库 `npm run lint` 已在对齐 main 的分支上复跑，12/12 packages ok（见 §10.F）。
 
-### F. 完整验证结果
+### F. 完整验证结果（本轮，基线与 `origin/main` 对齐后真跑）
 
-| 检查 | 命令 | 结果 |
-|---|---|---|
-| 定向回归 | `npx vitest run tests/dependency-link-consolidation.test.ts` | **22/22 PASS** |
-| 相邻套件 | `npx vitest run tests/installed-topology-invariants.test.ts tests/mvp-config.test.ts` | PASS |
-| 完整包测试 | `npm test`（`vitest run --reporter=dot`） | **92 files passed；1070 passed / 6 skipped（1076）；3519.67s**（含 release-asset-smoke、release-upgrade-gate、release-junction-lifecycle、packaged install smoke、workbuddy rollback fault injection 等重套件） |
-| TypeScript | `npx tsc --noEmit -p packages/create-principles-disciple/tsconfig.json` | PASS |
-| Lint | `npm run lint`（仓库根） | **12/12 packages ok，0 error**（输出中的 warning 为既存、与本改动无关） |
-| Verify Merge Gate | PR CI（推送后执行） | 结果见 PR #2319 checks；本报告不以“应该通过”替代真实结果 |
+| 检查 | 命令 | 结果 | 三栏归类 |
+|---|---|---|---|
+| 定向回归 | `npx vitest run tests/dependency-link-consolidation.test.ts tests/installed-topology-invariants.test.ts` | **26/26 PASS**（22 + 4），128.76s | 实际执行 · 通过 |
+| 完整包测试 | `npm test`（92 个测试文件） | **92 files passed；1070 passed / 6 skipped（1076）；3537.15s** | 实际执行 · 通过 |
+| Release asset smoke | 由 `npm test` 内含 `tests/release-asset-smoke.test.ts` | **5/5 PASS**（529.1s） | 实际执行 · 通过 |
+| Packaged install smoke | 由 `npm test` 内含 `tests/smoke-packaged-install.test.ts` | **15/15 PASS**（516.0s） | 实际执行 · 通过 |
+| 跳过用例 | 同上 6 个 skipped | 全部为既存平台条件跳过（`skipIf` 守卫），修复前基线同样为 6 skipped，与本改动无关 | 跳过（不计入通过） |
+| 失败用例 | — | **0** | 失败（无） |
+| TypeScript（tests） | `npm run typecheck:tests`（#2321 已合入 main） | PASS | 实际执行 · 通过 |
+| Lint | `npm run lint`（仓库根） | **12/12 packages ok，0 error**（warning 为既存、无关） | 实际执行 · 通过 |
+| Release intent | `node scripts/release/check-pr-release-intent.mjs` | `PASS mode=normal base=5c3371c393 head=2bea2b7ffb intent=create-principles-disciple:patch` | 实际执行 · 通过 |
+| Repo hygiene | `npm run check:repo-hygiene` | Passed | 实际执行 · 通过 |
+| Runtime contract | `npm run check:runtime-contract` | Passed — 0 new violations（`origin/main...HEAD`） | 实际执行 · 通过 |
+| Verify Merge Gate | PR CI | **未产生**：PR #2319 已合并，本轮无开放 PR 可触发 CI；本报告不以“预期通过”替代真实结果 | 未执行 |
 
-说明：`typecheck:tests`（PR #2321）当前**未合入 main**，按指示未 cherry-pick、未合并；本轮使用当前分支可用的 `tsc --noEmit` + 完整 `npm test` 覆盖同类风险（测试文件本身已被 vitest 编译执行）。
+说明：`typecheck:tests`（PR #2321）已随 `origin/main` 合入，本轮直接使用仓库脚本 `npm run typecheck:tests`，未 cherry-pick、未额外合并该 PR。
 
 ### G. Git 状态
 
-- 任务起点：PR #2319 head `97aea86a1`（另一会话已把 `origin/main` 合入本分支）。
-- 本轮基线：`97aea86a1`（先 `git fetch`，本地 fast-forward 到该提交；工作区干净、未覆盖任何他人提交）。
-- 新增提交：`fix(installer): harden sibling dependency link path boundaries (PRI-1100)`（见 PR #2319 提交列表）。
-- 本地与远端：`git push`（普通推送，无 force push）；最终 head 以 PR #2319 为准。
-- PR 状态：OPEN、非 draft、未自动合并；`mergeable` 以 GitHub 实时结果为准（见交付说明）。
-- Writer lease：本轮以 `trae/PRI-1100-security-fix` 取得，任务结束释放。
+- 任务起点：PR #2319 head `97aea86a1`（另一会话已把当时的 `origin/main` 合入本分支）。
+- **期间状态变化（关键）**：PR #2319 在 2026-11-04T01:46:17Z 被另一会话合并（合并提交 `b862b193e`，合并时分支 head `1311d0a61130d42f091c93c91a337f39a8aa68db`）。核对合并后的 `origin/main`：`installer.ts` 中 `parseDependencyName` / `assertStrictlyInside` / `assertRealParentDirectory` / `planComponentFileDependencyLinks` **全部不存在**，即 P1 修复**未随 PR 合入**。
+- 本轮提交（原分支增量，未重写历史）：
+  1. `efde2ed58` — `fix(installer): reject traversal dependency names before linking (PRI-1100)`
+  2. `64f2d5c92` — `chore(changeset): re-target the dependency-link fix after v2.5.0`（旧 changeset 已被 `v2.5.0` 消费并在 main 删除）
+  3. `2bea2b7ff` — `Merge remote-tracking branch 'origin/main' into ...`（把分支对齐到含 `v2.5.0` 的 main；无冲突）
+- 本地 HEAD = 远端分支 = `2bea2b7ffb502927ba165c590c8e267c799584d5`（`git rev-parse HEAD` 与 `origin/ai/...` 一致）。
+- 推送方式：普通 `git push`（无 `--force`、无 `--force-with-lease`）。PR #2319 合并时 GitHub 删除了该分支，本轮首次推送以 `[new branch]` 重建同名远端分支。
+- PR #2319 状态：**MERGED**（早于本轮修复完成）。因此该修复**没有可追加的开放 PR**；本会话**未创建**任何新 PR（遵守“不建重复 PR”），也未合并、未部署。
+- Writer lease：本轮以 `trae/PRI-1100-security-fix` 取得；任务结束释放。
 
 ### H. 裁定
 
-**PASS_WITH_LIMITATIONS**（若 CI 全绿则等价于 `READY_FOR_OWNER_REVIEW`）。
+**BLOCKED（交付车辆），代码与测试为 READY_FOR_OWNER_REVIEW。**
 
-- 合并阻塞：无。P1 删除逃逸已被真实文件系统回归覆盖，修复前负控制可复现 8/12 失败。
-- 生产安全阻塞：无已知项。残留限制仅为 §10.D 的 TOCTOU 理论窗口（未引入新机制）与旧版 npm-distributed 恢复路径未实跑（§7 / 报告 §5）。
-- 其它：`typecheck:tests` 依赖的 #2321 未合入，本轮用当前可用命令覆盖；完整结果见 §10.F。
+- 技术面：P1 删除逃逸已被真实文件系统回归覆盖；修复前负控制实测 8/12 失败，修复后定向套件 26/26 通过（`dependency-link-consolidation` 22 + `installed-topology-invariants` 4，均在合并后的 main 基线上复跑）。
+- 阻塞项（唯一）：PR #2319 已合并且**未包含**该修复，主分支仍带漏洞；Landing 需要一个新的后续 PR，而这与本次指令“不创建重复 PR / 只在原 PR 增补”在事实上冲突，须 Owner 裁定。
+- 生产安全：当前 `main` 上的已安装运行时仍存在该删除逃逸面（触发条件：被篡改/伪造的组件 `package.json` 声明恶意依赖名）。未部署、未触碰任何安装目录。
+- 其它：`typecheck:tests` 在 `origin/main` 已可用（#2321 已合并），本轮已真跑并通过；Verify Merge Gate 属于 PR CI，需在后续 PR 上产生真实结果，本报告不以“预期通过”替代。
 
 
