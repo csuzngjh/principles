@@ -4,7 +4,7 @@
 > 状态：**Draft / Owner Review；仅规格调查交付，未授权修改运行代码、安装产物或生产开关**
 > 源码审计基线：`origin/main@9f2184d6b533ae6eb1a42b8358efde3059d61815`（2026-10-19）
 > 适用：`@principles/core`、`@principles/host-runtime`、`@principles/codex-adapter`、`@principles/workbuddy-adapter`、CLI/安装器与测试
-> 关联已有契约：`docs/adr/0020-codex-cli-host-adapter.md`、`docs/specs/SPEC-CODEX-PAIN-CLOSURE-001-v0.2.md`、`docs/specs/SPEC-WORKBUDDY-PAIN-CLOSURE-001-v0.1.md`、`docs/specs/workbuddy-host-adapter-spec.md`
+> 关联已有契约：`docs/adr/0020-codex-cli-host-adapter.md`、`docs/archive/specs/SPEC-CODEX-PAIN-CLOSURE-001-v0.2.md`、`docs/archive/specs/SPEC-WORKBUDDY-PAIN-CLOSURE-001-v0.1.md`、`docs/archive/specs/workbuddy-host-adapter-spec.md`
 
 ## 0. 决策摘要
 

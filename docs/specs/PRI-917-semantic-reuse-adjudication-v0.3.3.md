@@ -3,7 +3,7 @@
 > **Status:** Approved for implementation (Owner directive, R6 sprint 2026-09-30)
 > **Date:** 2026-09-30
 > **Parent:**
-> - PRI-917 Reuse Before Create（主 SPEC `docs/specs/PRI-917-reuse-before-create-v0.1.md`，现内容 v0.2.1；PR #1900 已合并，baseline `0939eac0`）
+> - PRI-917 Reuse Before Create（主 SPEC `docs/archive/specs/PRI-917-reuse-before-create-v0.1.md`，现内容 v0.2.1；PR #1900 已合并，baseline `0939eac0`）
 > - Reality Audit：`docs/audit/PRI-917-v03-reality-audit-implementation-plan.md`（F1-F4 裁定已吸收）
 > - R5 验证：`docs/audit/PD_R5_PRINCIPLE_REUSE_VALIDATION_2026-09-30.md`（本修订的直接证据来源）
 >

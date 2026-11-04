@@ -10,9 +10,12 @@
  *
  * This verifier runs after `electron-builder --win nsis` and fails loudly:
  *   1. the Electron main entry (package.json main) exists inside app.asar;
- *   2. @principles/install-layout's executable JS (its package.json main)
+ *   2. the sandboxed renderer preload (dist/preload.cjs) exists inside app.asar
+ *      and is non-empty — without it window.pdCompanion is undefined and the
+ *      Console login form silently loses its bridge;
+ *   3. @principles/install-layout's executable JS (its package.json main)
  *      exists inside app.asar and is non-empty;
- *   3. the packaged main entry can actually RESOLVE and LOAD the module —
+ *   4. the packaged main entry can actually RESOLVE and LOAD the module —
  *      app.asar is extracted to a temp dir and module resolution runs from
  *      the extracted main entry, the same resolution shape Electron's asar
  *      transparent-FS layer performs at runtime.
@@ -30,6 +33,7 @@ import { assertInstallManifestCompat } from './bundled-parser-compat.mjs';
 
 export const RUNTIME_DEPENDENCY = '@principles/install-layout';
 export const MAIN_ENTRY = 'dist/main/main.js';
+export const PRELOAD_ENTRY = 'dist/preload.cjs';
 export const DEPENDENCY_ENTRY = 'node_modules/@principles/install-layout/dist/index.js';
 
 /** Locate app.asar under an electron-builder output directory (win-unpacked). */
@@ -59,14 +63,14 @@ function statArchiveEntry(appAsarPath, entry) {
   return undefined;
 }
 
-function assertArchiveEntry(appAsarPath, entry, what) {
+function assertArchiveEntry(appAsarPath, entry, what, hint) {
   const stats = statArchiveEntry(appAsarPath, entry);
   const size = Number(stats?.size ?? -1);
   if (stats === undefined) {
-    throw new Error(`Packaged app verification failed — ${what} is missing from ${appAsarPath}: ${entry}. The runtime dependency ${RUNTIME_DEPENDENCY} must be declared in dependencies (not devDependencies) so electron-builder includes its production node_modules.`);
+    throw new Error(`Packaged app verification failed — ${what} is missing from ${appAsarPath}: ${entry}. ${hint}`);
   }
   if (!Number.isFinite(size) || size <= 0) {
-    throw new Error(`Packaged app verification failed — ${what} is empty in ${appAsarPath}: ${entry} (${size} bytes).`);
+    throw new Error(`Packaged app verification failed — ${what} is empty in ${appAsarPath}: ${entry} (${size} bytes). ${hint}`);
   }
 }
 
@@ -78,8 +82,24 @@ export async function verifyPackagedApp(appAsarPath) {
   if (!fs.existsSync(appAsarPath)) {
     throw new Error(`Packaged app verification failed — app.asar not found: ${appAsarPath}. Run \`npm run dist --workspace=@principles/pd-companion\` first.`);
   }
-  assertArchiveEntry(appAsarPath, MAIN_ENTRY, 'the Electron main entry');
-  assertArchiveEntry(appAsarPath, DEPENDENCY_ENTRY, `the executable JS of ${RUNTIME_DEPENDENCY}`);
+  assertArchiveEntry(
+    appAsarPath,
+    MAIN_ENTRY,
+    'the Electron main entry',
+    'The compiled main process must be emitted to dist/main/main.js and included by electron-builder.',
+  );
+  assertArchiveEntry(
+    appAsarPath,
+    PRELOAD_ENTRY,
+    'the sandboxed renderer preload',
+    'The preload must be compiled to dist/preload.cjs and included by electron-builder; without it the sandboxed Console window has no window.pdCompanion bridge.',
+  );
+  assertArchiveEntry(
+    appAsarPath,
+    DEPENDENCY_ENTRY,
+    `the executable JS of ${RUNTIME_DEPENDENCY}`,
+    `The runtime dependency ${RUNTIME_DEPENDENCY} must be declared in dependencies (not devDependencies) so electron-builder includes its production node_modules.`,
+  );
 
   // Resolution check: extract and resolve from the packaged main entry —
   // the same lookup Electron performs through its asar transparent-FS layer.
@@ -164,6 +184,7 @@ if (isDirectRun) {
       console.log(`Packaged app verified: ${result.appAsar}`);
       console.log(`  app version          : ${result.appVersion}`);
       console.log(`  main entry           : ${MAIN_ENTRY}`);
+      console.log(`  renderer preload     : ${PRELOAD_ENTRY}`);
       console.log(`  runtime dependency   : ${RUNTIME_DEPENDENCY}`);
       console.log(`  bundled dep version  : ${result.bundledInstallLayoutVersion}`);
       console.log(`  resolved (extracted) : ${result.resolvedDependency}`);

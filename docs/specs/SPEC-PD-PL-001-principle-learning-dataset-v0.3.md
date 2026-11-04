@@ -3,7 +3,7 @@
 > **English:** Evidence-Dependent Principle Learning, Deployment & Net-Value Evaluation  
 > **状态：** Draft / Owner Review Required；**仅授权研究设计和离线核验，不代表正式研发、治理或实验实施授权**  
 > **日期：** 2026-10-14  
-> **基础版本：** [SPEC-PD-PL-001 v0.2](SPEC-PD-PL-001-principle-learning-dataset-v0.2.md)，保留原文  
+> **基础版本：** [SPEC-PD-PL-001 v0.2](../archive/specs/SPEC-PD-PL-001-principle-learning-dataset-v0.2.md)，保留原文  
 > **独立评审：** [REVIEW.md](../../.tmp/2026-10-14-pd-pl-independent-review/REVIEW.md)（项目内本地路径；该报告本身不是新实验证据）  
 > **本地核验基线：** D:/Code/principles，Git HEAD 39ebac3f56dc5394844284166c867d2266b159a7；既有未提交/未跟踪文件不改动  
 > **产品权威：** AGENTS.md、docs/product/PRODUCT_IDENTITY.md、适用且未被取代的 ADR、既有治理与事实权威  

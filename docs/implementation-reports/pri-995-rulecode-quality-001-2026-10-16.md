@@ -1,7 +1,7 @@
 # PRI-995 — SPEC-RULECODE-QUALITY-001 v0.2 实施报告（A + B1）
 
 日期：2026-10-16。分支 `codex/rulecode-quality-001`，基于 origin/main `807fcab90`（PR #2048/#2049 已并入，无堆叠依赖）。
-SPEC：`docs/specs/SPEC-RULECODE-QUALITY-001-v0.2.md`（验收契约）；评审核实：`docs/specs/SPEC-RULECODE-QUALITY-001-REVIEW-VERIFICATION.md`。
+SPEC：`docs/specs/SPEC-RULECODE-QUALITY-001-v0.2.md`（验收契约）；评审核实：`docs/archive/specs/SPEC-RULECODE-QUALITY-001-REVIEW-VERIFICATION.md`。
 敏感原始材料与完整运行证据保存在本机交付目录 `D:\Code\pd-deliveries\rulecode-quality-001-20261016\`（不入库）。
 
 ## 结论速览

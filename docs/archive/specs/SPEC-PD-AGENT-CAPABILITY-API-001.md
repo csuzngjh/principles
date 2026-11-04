@@ -678,7 +678,7 @@ Gate 0/1 的收口检查：
 3. Recall 实施报告：[PD-AGENT-CAPABILITY-API-001 backend round 1](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/implementation-reports/PD-AGENT-CAPABILITY-API-001-backend-round1-20261028.md)
 4. Recall 服务：[pain-recall.ts](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/packages/pd-cli/src/services/pain-recall.ts)
 5. Recall 只读测试：[pain-recall-readonly.test.ts](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/packages/pd-cli/tests/commands/pain-recall-readonly.test.ts)
-6. Pain Recall CLI SPEC：[SPEC-PD-PAIN-RECALL-CLI-001](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/specs/SPEC-PD-PAIN-RECALL-CLI-001.md)
+6. Pain Recall CLI SPEC：[SPEC-PD-PAIN-RECALL-CLI-001](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/archive/specs/SPEC-PD-PAIN-RECALL-CLI-001.md)
 7. Codex Adapter SPEC：[CODEX_CLI_ADAPTER_SPEC.md](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/architecture/CODEX_CLI_ADAPTER_SPEC.md)
 8. ADR-0020：[Codex CLI Host Adapter](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/adr/0020-codex-cli-host-adapter.md)
 9. 包职责导航：[CONTEXT-MAP.md](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/CONTEXT-MAP.md)

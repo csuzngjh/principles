@@ -1,6 +1,6 @@
 # PRI-1020 实施报告 — Owner 声明上下文窗口（operator_declared 预算档）
 
-日期：2026-10-22 ｜ SPEC：`docs/specs/SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001.md` ｜ Linear：PRI-1020
+日期：2026-10-22 ｜ SPEC：`docs/archive/specs/SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001.md` ｜ Linear：PRI-1020
 
 ## Owner Review Card
 

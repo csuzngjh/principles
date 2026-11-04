@@ -31,8 +31,8 @@
 
 | 文件 | 行数 | 说明 |
 |---|---|---|
-| `docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md` | 1511 | **权威 SPEC**（Status: Final Candidate for Owner approval，Date 2026-09-17，Baseline at review = `45e11536…` 与本报告 BASE_SHA **一致**） |
-| `docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_BACKEND_EXECUTION_INSTRUCTIONS.md` | 1115 | 后端单 Session 实施指令（含 Phase A–E、Fault Injection、STOP 条件） |
+| `docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md` | 1511 | **权威 SPEC**（Status: Final Candidate for Owner approval，Date 2026-09-17，Baseline at review = `45e11536…` 与本报告 BASE_SHA **一致**） |
+| `docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_BACKEND_EXECUTION_INSTRUCTIONS.md` | 1115 | 后端单 Session 实施指令（含 Phase A–E、Fault Injection、STOP 条件） |
 
 ⇒ §10 已**重写为直接对照该 SPEC 原文的兼容性复核**（不再依赖推断）。本报告其余章节（生产数据统计 / Consumer Map / A/B 原始结果 / Historical Defect Attribution）**未因该材料改动**——SPEC 原文未反驳其中任何一条结论。
 
@@ -540,8 +540,8 @@ B1b 的产物在**未修改的** `DefaultScribeValidator` 下 **12/12 失败**�
 ## 10. Safety Net Compatibility（Q10）— 已基于正式 SPEC 完成直接兼容性复核
 
 > **权威材料**（完整读取，已核对实际文件名）：
-> - `docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md`（1511 行；Status: *Final Candidate for Owner approval*；Date 2026-09-17；**Baseline at review = `45e115363a8ac1aed30a42f0c027ca07032af791`，与本报告 BASE_SHA 完全一致**）
-> - `docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_BACKEND_EXECUTION_INSTRUCTIONS.md`（1115 行；后端单 Session 实施指令）
+> - `docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md`（1511 行；Status: *Final Candidate for Owner approval*；Date 2026-09-17；**Baseline at review = `45e115363a8ac1aed30a42f0c027ca07032af791`，与本报告 BASE_SHA 完全一致**）
+> - `docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_BACKEND_EXECUTION_INSTRUCTIONS.md`（1115 行；后端单 Session 实施指令）
 >
 > **本节不再使用任何「等价资产推断」**；凡结论均给出 SPEC 原文位置。§0.2 记录了从「材料缺失」到「直接复核」的升级过程。
 
@@ -879,7 +879,7 @@ PrincipleFormation                     ← 一个 durable task / lease / retry /
 ## 15. Open Questions
 
 1. **B2（propose+critique+formalize 同 lifecycle）本次未实现**（任务书 §1 明确禁止）。其真实质量表现只在 §8 的**代理指标**上被间接覆盖：B2 的 formalize 步与 A 的 scribe 步**输入相同**（都收到 philosopher 产物），因此 §8.2 的 A 列就是 B2 的质量上界代理。**建议在实施前的首个 PR 内做一个真正的 B2 shadow 对照。**
-2. **~~`Pipeline Safety Net v1.2` 原文缺失~~ → 已关闭。** 正式 SPEC 已于 2026-09-17 就位并完整复核（`docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md`，1511 行，Baseline = 本报告 BASE_SHA；**当前为工作区未跟踪文件、尚未进入 `origin/main`**）。**结论：TRINITY VERDICT `UNCHANGED`；hard invariant 全部 PASS，无需削弱任何一条**（见 §10）。剩余动作已收窄为 SPEC 自己排定的下一步：**等 Safety Net 实施 PR 落地后做一次「实现态校验」**（检查代码是否偏离 SPEC），而**不是**重新评审 Trinity。
+2. **~~`Pipeline Safety Net v1.2` 原文缺失~~ → 已关闭。** 正式 SPEC 已于 2026-09-17 就位并完整复核（`docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md`，1511 行，Baseline = 本报告 BASE_SHA；**当前为工作区未跟踪文件、尚未进入 `origin/main`**）。**结论：TRINITY VERDICT `UNCHANGED`；hard invariant 全部 PASS，无需削弱任何一条**（见 §10）。剩余动作已收窄为 SPEC 自己排定的下一步：**等 Safety Net 实施 PR 落地后做一次「实现态校验」**（检查代码是否偏离 SPEC），而**不是**重新评审 Trinity。
 3. **Dreamer checkpoint 的持久化形态未定**：是否复用 `pi_artifacts`（新 `artifact_kind`）还是独立表？**SPEC 约束已收窄此问题**：必须复用现有存储、不得新增 DB/schema（§10.5-B 三条约束）；且 canonical bearer 判定应**按解析规则而非 `artifact_kind`**，否则会与 checkpoint 混淆。仍会影响 PRI-814 的修复顺序。
 4. **`philosopher.enabled` 开关的终局**：收敛后是删除该配置项，还是让它真正控制 critique 步骤（而非整链拒绝）？
 5. **诊断链（rootcause→distiller→router）是否应做同构收敛**？§6.1 显示其同构缺陷占 C 类 1/3。本 Spike 未评估，作为 follow-up 候选登记。
@@ -919,8 +919,8 @@ PrincipleFormation                     ← 一个 durable task / lease / retry /
 | A/B harness | `D:/pd-probe-815/ab-run2.cjs` → `ab2/*.json` | 12 组配对，原始输出与 usage |
 | 指标 + 盲评 | `D:/pd-probe-815/ab-judge.cjs` → `ab2/_metrics.json`、`ab2/_judge.json` | 确定性指标 + 原始 judgment |
 | 只读探针 | `D:/pd-probe-815/probe{1..5}.cjs` | 生产库只读盘点与链路重建 |
-| **Safety Net v1.2 权威 SPEC** | `docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md` | §10 直接复核对象（1511 行，Baseline = 本报告 BASE_SHA） |
-| **Safety Net v1.2 实施指令** | `docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_BACKEND_EXECUTION_INSTRUCTIONS.md` | §10.6 / §14.1 依据（1115 行） |
+| **Safety Net v1.2 权威 SPEC** | `docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md` | §10 直接复核对象（1511 行，Baseline = 本报告 BASE_SHA） |
+| **Safety Net v1.2 实施指令** | `docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_BACKEND_EXECUTION_INSTRUCTIONS.md` | §10.6 / §14.1 依据（1115 行） |
 
 > 全部 harness 位于 repo 外，未进入生产代码路径；`state.db` 全程以只读模式打开。
 > 增量复核（§10）只读了两份 SPEC + 一次针对「治理绑定落在哪个阶段」的确认性查询（`activations`/`approvals` join `pi_artifacts` join `tasks`），未重跑生产数据分析、未重做 A/B。
@@ -959,14 +959,14 @@ DURABLE_BOUNDARIES_AFTER  = 4；Principle formation 段 = 1（+2 非治理 check
 LINEAGE_COMPLEXITY      = BEFORE 6 命名身份字段 + 9 处 trace 复刻 + 1 durable 数组 + 459 行 BFS 遍历器 → AFTER 2 命名字段 + 1 provenance 数组
 RETRY_RECOVERY_COMPLEXITY = BEFORE 3 组阶段级 decision point → AFTER 1 组；⚠️ revision 机制不变（修订目标枚举本就不含 dreamer/philosopher）
 
-SAFETY_NET_COMPATIBILITY = **已基于正式 SPEC 直接复核（非推断）**：`docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md`
+SAFETY_NET_COMPATIBILITY = **已基于正式 SPEC 直接复核（非推断）**：`docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md`
                            （1511 行；Baseline at review = 45e11536… = 本报告 BASE_SHA；SPEC §17 有专门的 "Trinity Simplification Compatibility" 一节）
                            HARD_INVARIANTS_PRESERVED = YES（INV-01 Formation wiring / INV-02 Provenance / INV-03 Authorization / INV-04 Governance idempotency+recovery / INV-05 Runtime consumer boundary / INV-06 Revocation / C0 Test execution / §21 Claim boundary —— 八行全 PASS，无需削弱任何一条）
                            需要改的只有 test setup / fixture（3 项「锁错层」+ 4 项正常迁移），**被 SPEC §17 明文授权**（「可以修改 setup: runner-chain test fixture / current routing implementation / migration compatibility tests」）
                            PRODUCT_CONTRACT_CHANGES = NONE
                            ⚠️ SPEC 侧既存发现（与 Trinity 无关）：INV-02 禁止 title 作 silent fallback，而读侧身份解析第 4 步回退到 `principleDraft.title`（F-02）；`check:pipeline-contract` 当前尚未存在
 
-SAFETY_NET_SPEC            = docs/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md
+SAFETY_NET_SPEC            = docs/archive/specs/PD_PIPELINE_SAFETY_NET_V1_2_FINAL_CANDIDATE.md
 SAFETY_NET_COMPATIBILITY_RESULT = PASS
 TRINITY_VERDICT_REVIEW_RESULT   = UNCHANGED
 DREAMER_CHECKPOINT_GOVERNANCE   = NON_GOVERNANCE（实证：生产 activations 绑定 evaluator 2 / scribe 2，approvals 绑定 evaluator 3 / scribe 3，**dreamer 0、philosopher 0**）

@@ -37,6 +37,8 @@ async function buildAppAsar(
   {
     includeDependency = true,
     includeMain = true,
+    includePreload = true,
+    preloadJs = '// preload bridge\n',
     dependencyJs = [
       'import { isAbsolute } from "node:path";',
       'export const INSTALL_HOSTS = ["codex", "openclaw", "workbuddy"];',
@@ -55,7 +57,7 @@ async function buildAppAsar(
       'export function resolveInstallLayout(options) { return { mode: "canonical", paths: {}, manifest: options.manifest }; }',
       '',
     ].join('\n'),
-  }: { includeDependency?: boolean; includeMain?: boolean; dependencyJs?: string } = {},
+  }: { includeDependency?: boolean; includeMain?: boolean; includePreload?: boolean; preloadJs?: string; dependencyJs?: string } = {},
 ): Promise<string> {
   const appDir = path.resolve(root, fixtureName);
   if (appDir === root || !appDir.startsWith(root + path.sep)) {
@@ -65,6 +67,9 @@ async function buildAppAsar(
   fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: '@principles/pd-companion', version: '0.0.0-test', main: MAIN_ENTRY }));
   if (includeMain) {
     fs.writeFileSync(path.join(appDir, 'dist', 'main', 'main.js'), '// compiled main\n');
+  }
+  if (includePreload) {
+    fs.writeFileSync(path.join(appDir, 'dist', 'preload.cjs'), preloadJs);
   }
   if (includeDependency) {
     fs.mkdirSync(path.join(appDir, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
@@ -95,6 +100,16 @@ describe('packaged app verification', () => {
   it('rejects an app.asar missing the Electron main entry', async () => {
     const broken = await buildAppAsar('no-main', { includeDependency: false, includeMain: false });
     await expect(verifyPackagedApp(broken)).rejects.toThrow(/main/i);
+  });
+
+  it('rejects an app.asar missing the sandboxed renderer preload', async () => {
+    const broken = await buildAppAsar('no-preload', { includePreload: false });
+    await expect(verifyPackagedApp(broken)).rejects.toThrow(/preload/i);
+  });
+
+  it('rejects an app.asar whose preload is empty', async () => {
+    const broken = await buildAppAsar('empty-preload', { preloadJs: '' });
+    await expect(verifyPackagedApp(broken)).rejects.toThrow(/preload[\s\S]*empty/i);
   });
 
   it('rejects a missing archive with a next-action message', async () => {

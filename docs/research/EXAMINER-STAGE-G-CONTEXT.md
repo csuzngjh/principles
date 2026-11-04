@@ -18,7 +18,7 @@ NEXT_ACTION:             将 60 RV 匿名包转交 ChatGPT AI-only 盲评 → �
 
 ## 2. SPEC 与版本
 
-- 当前 Examiner SPEC：`docs/specs/SPEC-PD-EXAMINER-001-v0.4.md`（v0.3 增量修订，637 行，sha256 前缀 `a4691f7e…`）
+- 当前 Examiner SPEC：`docs/archive/specs/SPEC-PD-EXAMINER-001-v0.4.md`（v0.3 增量修订，637 行，sha256 前缀 `a4691f7e…`）
 - v0.3 保留为 Phase 1A 冻结基线引用（`input-manifest.json` 的 `specFileSha256=def15985…` 指向 v0.3 历史核验，不因 v0.4 失效）
 
 ## 3. 研究资产与冻结哈希
