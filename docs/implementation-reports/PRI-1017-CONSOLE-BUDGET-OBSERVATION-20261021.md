@@ -4,7 +4,7 @@
 **分支：** `ai/PRI-1017-console-budget-observation`
 **基线：** `origin/main` `808278e8c1325d5e7c4c715836034df78b93c33c`
 **工单：** PRI-1017
-**SPEC：** `docs/specs/SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001.md`（新增 §6.5 与 AC-14）
+**SPEC：** `docs/archive/specs/SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001.md`（新增 §6.5 与 AC-14）
 
 ## A. 根因（实际代码调用链）
 

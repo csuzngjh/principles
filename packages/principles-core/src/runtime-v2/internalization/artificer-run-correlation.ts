@@ -54,7 +54,7 @@
  * selection) — no unknown spreads, no raw tool output, no private
  * trajectories.
  *
- * Spec: docs/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-08, §12 AC-09
+ * Spec: docs/archive/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-08, §12 AC-09
  */
 
 /** FR-08 executionMode vocabulary, resolved per event by real semantics. */

@@ -16,7 +16,7 @@
 在本地找到 PD 仓库，以**只读方式**记录：当前时间、工作目录、`git status --short`、分支、HEAD SHA、origin/main SHA（若已能读取；不要求 fetch）、最近涉及 Console/治理的变更。不能清理/切换/覆盖用户已有工作树；不能假定历史基线 `b0f807b9` 就是当前版本。先阅读：
 
 1. `AGENTS.md`（权威）、`docs/product/PRODUCT_IDENTITY.md`；适用 ADR（检查状态、修订和 supersede）。
-2. `docs/specs/SPEC-PD-UIUX-001-website-console-upgrade-v1.0.md` 与对应实施/验收报告；确认哪些状态语义、移动端、证据与语言切换已有能力。
+2. `docs/archive/specs/SPEC-PD-UIUX-001-website-console-upgrade-v1.0.md` 与对应实施/验收报告；确认哪些状态语义、移动端、证据与语言切换已有能力。
 3. 私有情绪价值指南（按照 AGENTS.md 所述路径，仅阅读，不复制私有正文）；`ERROR_PATTERN_INDEX`、相关错误手册与测试/PR 纪律。
 4. v1.1 所列 E1～E15，逐条标 **VERIFIED / PARTIAL / OUTDATED / CONTRADICTED / UNKNOWN**。不要把截图、注释、报告或当前 `main` 自动当作安装运行版本证明。
 

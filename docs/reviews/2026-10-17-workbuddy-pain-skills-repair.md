@@ -5,7 +5,7 @@
 本轮修复插件缺技能和缺少 WorkBuddy 显式 Owner 登记入口，并补齐旧缓存升级。
 源代码交付不等于已发布，也不等于真实用户的安装已升级。未 push、建 PR、合并或发布。
 
-设计：`docs/specs/SPEC-WORKBUDDY-PAIN-CLOSURE-001-v0.1.md`。
+设计：`docs/archive/specs/SPEC-WORKBUDDY-PAIN-CLOSURE-001-v0.1.md`。
 基线：`d91b9e07e97a262298f3e41124a27e8087eeb7c7`。
 
 ## 实现

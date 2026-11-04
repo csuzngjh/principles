@@ -5,7 +5,7 @@
 | 审计类型 | 架构增量审计（只读；本轮不实现 MCP、不修改生产代码） |
 | 审计基准 | `csuzngjh/principles` origin/main `9f0888a168def3b57a5e85fbb6b88273e82fe3fe`（2026-10-31 fetch） |
 | 增量区间 | PR #2217 实际合并（`636fa62116fc56e93c64f39114e8a11f89007da5`，2026-10-30T00:16:05Z）→ origin/main `9f0888a16` |
-| 被审 SPEC | `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft，基线 `3a2de95c8` = PR #2214） |
+| 被审 SPEC | `docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft，基线 `3a2de95c8` = PR #2214） |
 | 交付物 | 本报告；为 SPEC v0.5 提供修订依据 |
 | 方法 | 只读 Git 操作 + 独立审计 worktree（`D:\Code\_worktrees\principles\adhoc-20261031-mcp-delta-audit-7b2b62` @ `9f0888a16`，--skip-bootstrap）；关键 PR 逐一阅读真实 diff；符号级 rg 溯源；本机 Codex CLI 非侵入式核查 |
 

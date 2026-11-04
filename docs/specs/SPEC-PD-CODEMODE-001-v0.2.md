@@ -131,7 +131,7 @@ Code Mode 的有效工作形态是：
 
 ## 8. 相关规范
 
-- [IAER v1.0](SPEC-PD-IAER-001-v1.0.md)：Owner Evidence、恢复和 RuleHost 的权威合同不变。
+- [IAER v1.0](../archive/specs/SPEC-PD-IAER-001-v1.0.md)：Owner Evidence、恢复和 RuleHost 的权威合同不变。
 - [Pi 1.2 兼容 v0.2](SPEC-PD-PI12-COMPAT-001-v0.2.md)：本研究不能替代原 SPEC 的真实 LLM E2E 验收。
 - [Code Mode 上游 README](https://github.com/earendil-works/pi/blob/v1.3.0/packages/codemode/README.md)、[1.3.0 changelog](https://github.com/earendil-works/pi/blob/v1.3.0/packages/codemode/CHANGELOG.md)、[嵌套工具示例](https://github.com/earendil-works/pi/blob/v1.3.0/packages/agent/examples/mcp-codemode/tools.ts)。
 - [本次源码复核报告](../implementation-reports/SPEC-PD-CODEMODE-001-source-audit-20261020.md)：记录基线、证据、限制和修正理由。

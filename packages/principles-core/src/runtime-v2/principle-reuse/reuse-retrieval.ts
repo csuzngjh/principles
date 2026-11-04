@@ -7,7 +7,7 @@
  * vector store, and no embedding service. It never writes: `derivedFromPainIds`,
  * the ledger schema, and `activation_decisions` are all untouched.
  *
- * @see docs/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
+ * @see docs/archive/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
  */
 
 import { existsSync, readFileSync } from 'fs';

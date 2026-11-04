@@ -42,7 +42,7 @@
  * does not guess channels (SPEC §4.2). A2 owns the authoritative wiring; this
  * ticket provides the judgment only.
  *
- * Spec: docs/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-01
+ * Spec: docs/archive/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-01
  */
 import { createHash } from 'node:crypto';
 import { validateBehaviorExamplePack, type BehaviorExamplePack } from './behavior-example-pack.js';

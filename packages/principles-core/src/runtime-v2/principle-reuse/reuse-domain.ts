@@ -10,7 +10,7 @@
  * surface (PRI-775) is a public contract, and this is an internal capability
  * until it is proven by production use.
  *
- * @see docs/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
+ * @see docs/archive/specs/PRI-917-reuse-before-create-v0.1.md (SPEC v0.2)
  */
 
 /** The candidate fields that carry a Principle's semantic claim. */
