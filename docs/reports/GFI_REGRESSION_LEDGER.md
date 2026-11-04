@@ -39,24 +39,60 @@
 | 0 | **基线** | `35d12815bc` | C1–C8b + P | 40 文件 / 571 用例 / 0 失败；schema v1、gfi 列 2 | 同左 | — | — | **基准** |
 | 1 | **累计 HEAD** | `0bb1bcc1e` | C1–C8b + P（同一命令，副本独立安装/build） | 40 文件 / 571 用例 / 571 通过 | 40 文件 / 571 用例 / **566 通过 / 5 失败**；schema v2、gfi 列 0；手动 Pain 实际值一致 | **-5 通过** | 5 个用例仍断言已删除的 GFI 行为；测试未随生产层更新（详见下方失败明细）。不是能力退化，但**测试层未完成** | **不通过** |
 | 1b | **累计 HEAD（块 4 修测试后）** | `3bb70c16d` | C1–C8b + P（同一命令、同一断言；前台分批，副本 `.tmp/gfi-removal/current-head4` 独立 `npm ci` + build，含 `.git` 隔离标记） | 40 文件 / 571 用例 / 0 失败 | 40 文件 / **568** 用例 / **568 通过 / 0 失败**；schema v2、gfi 列 0、INSERT 回读 1 行成功 | **-3 用例，0 失败** | 允许差异①：`llm-pain-source-retirement.test.ts` 的 GFI differential pin（describe 3 例）随 llm.ts GFI 健康度分支删除而移除（删除层 `dcf53fba1`；SPEC §3.5，§7.1 明确要求删除 GFI 专属测试与 fixture）。其余各组与基线逐项等量：C1 46、C2 35、C3 94、C4 10、C5 175、C6 50、C7 18（21−3）、C8 140 | **通过** |
-| 2 | L1 core（`runtime-v2/gfi/` 删除、schema/migration） | `4b3ea5421` | — | — | — | — | 累计 HEAD 未通过，按规则未执行逐层 | NOT_RUN（阻塞） |
-| 3 | L2 session tracker | `31a60e1e5` | — | — | — | — | 同上（静态归因：失败 #3 来自本层，未实测） | NOT_RUN（阻塞） |
-| 4 | L3 tool execution | `b7c17a692` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 5 | L4 manual pain | `fa86f0943` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 6 | L5 LLM/prompt hook | `dcf53fba1` | — | — | — | — | 同上（静态归因：失败 #4/#5 来自本层，未实测） | NOT_RUN（阻塞） |
-| 7 | L6 correction detection (core) | `782bf8aca` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 8 | L7 correction detection (host/plugin) | `13c067e2f` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 9 | L8 correction detection (triage) | `972664050` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 10 | L9 rule host | `2bae37491` | — | — | — | — | 同上（静态归因：失败 #2 来自本层，未实测） | NOT_RUN（阻塞） |
-| 11 | L10 event log | `36968fac4` | — | — | — | — | 同上（静态归因：失败 #1 来自本层，未实测） | NOT_RUN（阻塞） |
-| 12 | L11 operator health | `7c1325ea6` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 13 | L12 pd-cli | `8acd1027d` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 14 | L13 pd-console | `603af28d4` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 15 | L14 /pd-status | `3433204a1` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 16 | L15 flags/config + shipped template | `c7ab619e9` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 17 | L16 schema/migration | `62e2cab15` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 18 | L17 tests/fixtures | `f00c62f86` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
-| 19 | L18 docs | `60c44a346` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
+| 2 | L1 core（`runtime-v2/gfi/` 删除、schema/migration） | `4b3ea5421` | setup+build（C1–C8b 未跑） | build 通过 | **build exit=1** | — | 前缀不可构建：core `operator-health-read-model.ts:16` 仍 import 已删的 `./gfi/gfi-read-model.js`（由 L11 `7c1325ea6` 修）、`golden-trace.ts:218` 仍带 `currentGfi`（由 L14 修）、plugin `session-tracker.ts` 仍 import 8 个已删导出（由 L2 修） | **NOT_RUN（前缀不可构建）** |
+| 3 | L2 session tracker | `31a60e1e5` | setup+build | build 通过 | **build exit=1** | — | 同 L1（core 侧三处消费方未改；plugin 侧 `session-tracker` 本层已改） | **NOT_RUN（前缀不可构建）** |
+| 4 | L3 tool execution | `b7c17a692` | setup+build | build 通过 | **build exit=1** | — | 同 L1（errors: golden-trace / index.ts `SignalClassificationOutputV2*` / operator-health） | **NOT_RUN（前缀不可构建）** |
+| 5 | L4 manual pain | `fa86f0943` | setup+build | build 通过 | **build exit=1** | — | 同 L1 | **NOT_RUN（前缀不可构建）** |
+| 6 | L5 LLM/prompt hook | `dcf53fba1` | setup+build | build 通过 | **build exit=1** | — | 同 L1 | **NOT_RUN（前缀不可构建）** |
+| 7 | L6 correction detection (core) | `782bf8aca` | setup+build | build 通过 | **build exit=1** | — | `index.ts` 的 V2 导出已由本层修；还剩 `golden-trace.ts:218` currentGfi（L14）与 `operator-health-read-model.ts:16` gfi-read-model（L11） | **NOT_RUN（前缀不可构建）** |
+| 8 | L7 correction detection (host/plugin) | `13c067e2f` | setup+build | build 通过 | **build exit=1** | — | 同 L6 | **NOT_RUN（前缀不可构建）** |
+| 9 | L8 correction detection (triage) | `972664050` | setup+build | build 通过 | **build exit=1** | — | 同 L6 | **NOT_RUN（前缀不可构建）** |
+| 10 | L9 rule host | `2bae37491` | setup+build | build 通过 | **build exit=1** | — | `golden-trace.ts` 已修；还剩 `operator-health-read-model.ts:16-18` import 已删的 `./gfi/{gfi-read-model,gfi-types}.js`（L11） | **NOT_RUN（前缀不可构建）** |
+| 11 | L10 event log | `36968fac4` | setup+build | build 通过 | **build exit=1** | — | 同 L9 | **NOT_RUN（前缀不可构建）** |
+| 12 | L11 operator health | `7c1325ea6` | setup+build | build 通过 | **build exit=1** | — | core 已可编译；阻塞转移到 plugin `src/commands/pain.ts:1` 仍 import 已删的 `resetFriction`、`:139` 仍读 `currentGfi`（由 L14 `3433204a1` 修） | **NOT_RUN（前缀不可构建）** |
+| 13 | L12 pd-cli | `8acd1027d` | setup+build | build 通过 | **build exit=1** | — | 同上（core 可编译，plugin `commands/pain.ts` 仍阻塞） | **NOT_RUN（前缀不可构建）** |
+| 14 | L13 pd-console | `603af28d4` | setup+build | build 通过 | **build exit=1** | — | 同上 | **NOT_RUN（前缀不可构建）** |
+| 15 | L14 /pd-status | `3433204a1` | setup+build | build 通过 | **build exit=0** | — | 首个全绿前缀；测试未跑（块内按规则停在 L1，且该层测试树早于块 4 的 5 条修测试） | **NOT_RUN（测试未执行）** |
+| 16 | L15 flags/config + shipped template | `c7ab619e9` | setup+build | build 通过 | **build exit=0** | — | 同上 | **NOT_RUN（测试未执行）** |
+| 17 | L16 schema/migration | `62e2cab15` | setup+build | build 通过 | **build exit=0** | — | 同上 | **NOT_RUN（测试未执行）** |
+| 18 | L17 tests/fixtures | `f00c62f86` | setup+build | build 通过 | **build exit=0** | — | 同上 | **NOT_RUN（测试未执行）** |
+| 19 | L18 docs | `60c44a346` | setup+build | build 通过 | **build exit=0** | — | 同上；该层生产代码 = 累计 HEAD，测试结果已在 1b 行实测（568/568） | **NOT_RUN（测试未执行，结果见 1b）** |
+
+---
+
+## 块 5 前置实测：18 个层前缀能否构建（决定「逐层对照」是否可执行）
+
+> 逐层对照的前提是「该层 commit 的完整树能 build，否则测试无意义」。本前置实测直接判定该前提。
+
+**方法（实测，非推断）**：用同一个副本 `.tmp/gfi-removal/current-L1`（自带 `node_modules` + `.git` 隔离标记），按 18 个 commit 的**升序**逐个 `git archive <sha> -o L<n>.tar` → `tar -x -f … -C current-L1` 覆盖 → `npm run build --workspace=@principles/core --workspace=@principles/install-layout --workspace=@principles/host-runtime --workspace=principles-disciple`，逐层记 `$LASTEXITCODE`。
+（升序覆盖是安全的：某层删除的文件在更早的层已经不在盘上，不会残留。）
+
+**命令**：
+
+```powershell
+& .tmp/gfi-removal/probe-prefix-build.ps1 -From 2  -To 7
+& .tmp/gfi-removal/probe-prefix-build.ps1 -From 8  -To 13
+& .tmp/gfi-removal/probe-prefix-build.ps1 -From 14 -To 18
+```
+
+**证据**：`.tmp/gfi-removal/prefix-build-verdicts.log`（逐层 `build_exit` + 首个 `error TS`）与 `.tmp/gfi-removal/L1-build.log` … `L18-build.log`。
+
+**实测结果**：
+
+| 层范围 | 层数 | build exit | 结论 |
+| --- | --- | --- | --- |
+| L1–L13 | 13 | **全部 =1** | 前缀不可构建 → C1–C8b 无法执行 |
+| L14–L18 | 5 | **全部 =0** | 可构建（其中 L16–L18 生产代码与累计 HEAD 相同） |
+
+**为什么不可构建（三个未闭合的跨层消费方）**：
+
+1. `packages/principles-core/src/runtime-v2/operator-health-read-model.ts:16-18` 仍 `import './gfi/gfi-read-model.js'`、`'./gfi/gfi-types.js'`，而 `runtime-v2/gfi/` 在 L1 已删——该文件直到 **L11 `7c1325ea6`** 才改。
+2. `packages/principles-core/src/runtime-v2/golden-trace.ts:218` 仍依赖 `currentGfi` 必填签名——直到 **L14 `3433204a1`** 才改；L6 之前 `index.ts:2244/2269` 还导出已删的 `SignalClassificationOutputV2*`。
+3. `packages/openclaw-plugin/src/commands/pain.ts:1/:139` 仍 `import resetFriction` / 读 `currentGfi`——直到 **L14 `3433204a1`** 才改。
+
+**判定**：这是**构建顺序依赖**（18 个 commit 按「删除域」切分，被删符号的消费方在更靠后的层才处理），**不是能力退化**。最终树（= L18 生产代码 = 累计 HEAD `3bb70c16d`）已实测 **40 文件 / 568 用例 / 568 通过 / 0 失败**（1b 行）。
+
+**因此**：块 5 原定的「L1–L18 每层前缀跑测试」在该 commit 序列上**没有可执行的语义**（L1 起 13 层无法 build）。已按「任一层不通过即停在该层」规则停在 L1，等待 Owner 裁定替代验证方法（候选见 HANDOFF §3）。
 
 ---
 
@@ -117,3 +153,10 @@
 - 结果：40 文件 / 571 用例 / 566 通过 / 5 失败（逐条见上表）。
 - 结论：**不通过**（失败均为测试未随生产层更新，非核心能力退化）。按规则停止，未执行 L1–L18 逐层对照。
 - 下一步：先补齐 5 条测试断言（独立块，≤15 文件），重跑累计 HEAD；通过后再逐层对照。
+
+**2026-11-04 / 块 5 前置实测（18 层前缀可构建性）**
+- 命令：`probe-prefix-build.ps1 -From 2 -To 7 / -From 8 -To 13 / -From 14 -To 18`（前台，逐层 `$LASTEXITCODE`）。
+- 结果：**L1–L13 build exit=1（13/18 不可构建）；L14–L18 build exit=0（5/18 可构建）**。逐层首个 `error TS` 见 `.tmp/gfi-removal/prefix-build-verdicts.log`。
+- 根因：18 个 commit 按「删除域」切分，三个跨层消费方（core `operator-health-read-model.ts` → L11、core `golden-trace.ts` → L14、plugin `commands/pain.ts` → L14）在更靠后的层才闭合。
+- 结论：**不是能力退化**；原定「每层前缀跑 8 组」对 L1–L13 无执行语义。按规则停在 L1，等待 Owner 裁定替代方法。
+- 下一步（待裁定后执行）：见 `.tmp/gfi-removal/HANDOFF.md` §3 的候选 A/B/C。
