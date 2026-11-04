@@ -4,7 +4,7 @@
 **分支：** `ai/SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001-model-aware-prompt-budget`
 **基线：** `origin/main` `a57cc3e07ab860e4c646d8f5fc5366d49fc88e97`
 **PR：** #2093
-**SPEC：** `docs/specs/SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001.md`
+**SPEC：** `docs/archive/specs/SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001.md`
 
 ## A. 实际实现
 

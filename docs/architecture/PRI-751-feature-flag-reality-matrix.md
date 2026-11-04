@@ -3,7 +3,7 @@
 > 日期：2026-09-12 · 基线：`origin/main` `4dce7d942f00039113b698de2a5b27025b9a3fa6`
 > 性质：只读审计产出 + 收敛执行记录。事实优先级：Runtime 实际读取 > 生产代码消费者 > 当前配置 > Live workspace > 测试 > 文档 > 历史报告。
 > 前置线索（PRI-749 Phase 0 报告、PRI-731/736/737 审计、Linear 描述）均**重新验证**后才采信；验证中推翻/修正线索的处以「⚠ 修正」标注。
-> 配套 SPEC（protected zone）：`docs/specs/pain-admission-flag-contract-fix.md`。
+> 配套 SPEC（protected zone）：`docs/archive/specs/pain-admission-flag-contract-fix.md`。
 
 ---
 
@@ -92,7 +92,7 @@ Consumers 列只列**可执行门控点**（file:line）；"元数据"指注册�
 | evolution_worker | quiet/off 注册、census 声称 "quarantined heartbeat"、surface-registry ×2、guard 测试断言存在 | 注册表项在；全仓零可执行消费者（worker 已删 PRI-737；PRI-737 审计预规划本删除；census 文档标注 RETIRE-ready "deletion is a separate PR"）；runtime effect 无 | C→退役（执行既定程序；评审后按 census 契约改为 **gone 墓碑**——存量 enabled 覆盖被可观察拒绝） | PR #1622：contract（gone 墓碑）+census+surface×2+labels+测试+文档 | core 508 + plugin 61 测试 PASS；verify:merge exit 0 |
 | internalization_core_grounding | quiet/on 注册、census 声称 internaliz*/runner 消费者 | 注册表项在；三 runner `coreGrounding: true` 默认值无条件启用，flag ID 零读取；runtime effect 无 | C→退役（评审后改为 **gone 墓碑**） | PR #1624：contract（gone 墓碑）+census+labels+3 注释纠偏+测试+文档 | core 493 测试 PASS；verify:merge exit 0 |
 | empathy_observer | quiet/off 注册（live on）、census 声称 "observer wiring"、governance §3.2 已知旧消费点废弃 | 注册表项在；零可执行读取；empathy 检测无条件运行；真实控制面=internalAgents 绑定；governance §3.2 预告 MVP-Gone 波次 | C→退役（Owner 任务即该波次授权；评审后改为 **gone 墓碑**） | PR #1625：contract（gone 墓碑）+census+ADR-0016 示例+governance §3.2 更新+测试 fixture 换元（含评审补抓的 diag-chain-e2e）；label 保留（agent 显示名，CostHint 测试锁定） | 508+58+35+17 测试 PASS；verify:merge exit 0 |
-| painEvidenceAdmission(+Default) | quiet/on 注册、描述承诺"OFF 回滚 Gate A"、census 声称 production readers | 注册表项在；PRI-651-B1 特征测试锁定钩子**不读** flag；Gate A `@deprecated` 归档且零运行时调用方；alias 测试头注过期且自认 "silently dead kill switch"；runtime effect 无 | C→**SPEC**（涉 pain pipeline，protected zone 不直接改码） | `docs/specs/pain-admission-flag-contract-fix.md`（选项 A/B/C 待 Owner） | SPEC 附验证计划（pain 特征测试零改动为硬门） |
+| painEvidenceAdmission(+Default) | quiet/on 注册、描述承诺"OFF 回滚 Gate A"、census 声称 production readers | 注册表项在；PRI-651-B1 特征测试锁定钩子**不读** flag；Gate A `@deprecated` 归档且零运行时调用方；alias 测试头注过期且自认 "silently dead kill switch"；runtime effect 无 | C→**SPEC**（涉 pain pipeline，protected zone 不直接改码） | `docs/archive/specs/pain-admission-flag-contract-fix.md`（选项 A/B/C 待 Owner） | SPEC 附验证计划（pain 特征测试零改动为硬门） |
 
 ## 4. 配置面残留（注册表外，记录不动作）
 

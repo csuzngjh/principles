@@ -3,7 +3,7 @@
 - 版本：v0.2（Phase 1 实施修订；**取代 v0.1**，v0.1 按仓库惯例保留于同目录作为历史版本）
 - 日期：2026-10-17
 - 状态：实施 PR 就绪评审中。Phase 0 审计/实验/对抗复审已完成；Phase 1 已按本文档完成单一原子 PR（R6a）的全部内容与四层验证
-- 审计与证据：`docs/specs/SPEC-PD-PI12-COMPAT-001-pi-compat-audit-20261017.md`（差异矩阵全文，**已入库受版本控制**；`docs/audit/` 目录被 gitignore，不作为交付路径）、`docs/implementation-reports/pi12-compat-phase0-spike-2026-10-17.md`（E01–E05）
+- 审计与证据：`docs/archive/specs/SPEC-PD-PI12-COMPAT-001-pi-compat-audit-20261017.md`（差异矩阵全文，**已入库受版本控制**；`docs/audit/` 目录被 gitignore，不作为交付路径）、`docs/implementation-reports/pi12-compat-phase0-spike-2026-10-17.md`（E01–E05）
 - 实施分支：`ai/adhoc-20261017-pi12-compat-phase1-943ffc`（基于 origin/main `d91b9e07e`；Phase 0 迁移提交 `33c9bf5a` 已 cherry-pick 为 `edc9a01db` 并与新 main 的 PRI-1011 改动共存验证）
 
 ---
@@ -27,7 +27,7 @@
 
 ## 2. 0.85.1 → 1.2.0 差异（必改清单）
 
-完整矩阵见审计报告 §D（`docs/specs/SPEC-PD-PI12-COMPAT-001-pi-compat-audit-20261017.md`）。对 PD 有迁移动作的项：
+完整矩阵见审计报告 §D（`docs/archive/specs/SPEC-PD-PI12-COMPAT-001-pi-compat-audit-20261017.md`）。对 PD 有迁移动作的项：
 
 | # | 变化 | PD 必改点 |
 |---|---|---|

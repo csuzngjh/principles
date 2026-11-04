@@ -1,6 +1,6 @@
 # WorkBuddy host-contract fixtures (Phase 0 probe evidence)
 
-Origin: SPEC `docs/specs/workbuddy-host-adapter-spec.md` v0.3.0 §7.1 probes P01–P06, executed 2026-10-12 against the real WorkBuddy Desktop 5.8.1 install on this machine (engine `codebuddy-lite-wb.mjs` `--version` 2.161.0, SHA-256 `fd9d20c75264d20caf8878edc9cf374b333081113595486628d0bd8b8ca374ad`).
+Origin: SPEC `docs/archive/specs/workbuddy-host-adapter-spec.md` v0.3.0 §7.1 probes P01–P06, executed 2026-10-12 against the real WorkBuddy Desktop 5.8.1 install on this machine (engine `codebuddy-lite-wb.mjs` `--version` 2.161.0, SHA-256 `fd9d20c75264d20caf8878edc9cf374b333081113595486628d0bd8b8ca374ad`).
 
 ## How the evidence was captured (reproducible)
 

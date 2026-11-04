@@ -1,6 +1,6 @@
 # SPEC-PD-IAER-001 — 后端开发代理一次性实施指令
 
-> **目标：** 端到端实现 `docs/specs/SPEC-PD-IAER-001-v1.0.md`，包含 Phase A（P0 前置止血）、Phase B（P0 Owner 补证恢复）、Phase C（P1 遥测与历史只读审计）。  
+> **目标：** 端到端实现 `docs/archive/specs/SPEC-PD-IAER-001-v1.0.md`，包含 Phase A（P0 前置止血）、Phase B（P0 Owner 补证恢复）、Phase C（P1 遥测与历史只读审计）。  
 > **任务类型：** 工程实施、测试、独立复核及交付；不是设计讨论，也不是让 AI 自动补写 Owner 治理证据。  
 > **根目录：** `D:\Code\principles`  
 > **必须完成的结果：** 隔离分支上的可评审代码 + 自动/CLI 真实 SQLite E2E + 测试/实施报告 + 安全回滚说明。  

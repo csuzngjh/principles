@@ -1,7 +1,7 @@
 # SPEC-PD-IAER-001 Production Pilot 验收报告（2026-10-15）
 
 > 执行者：ZCode（任务书《IAER Production Pilot v1.0》）
-> SPEC：`docs/specs/SPEC-PD-IAER-001-v1.0.md`（PR #2041，合并提交 `eaf52c4a39a67f8897012aaec58081a5ac7c8e9c`）
+> SPEC：`docs/archive/specs/SPEC-PD-IAER-001-v1.0.md`（PR #2041，合并提交 `eaf52c4a39a67f8897012aaec58081a5ac7c8e9c`）
 > 验收性质：生产现实核查 + 受控端到端验证 + 数据验收 + 缺陷收口
 > 快照时间：2026-10-15 23:0x–23:4x 本地（UTC+8）；生产数据以各节标注时刻为准
 

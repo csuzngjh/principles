@@ -82,7 +82,7 @@ Pain Event（tool failure / llm / gate block / manual）
 | painEvidenceAdmission | **NEED SPEC**（不直接删码） | 零生产消费者 + 零 runtime effect + 零用户行为影响；但涉 pain pipeline protected zone → 按纪律走 SPEC |
 | painEvidenceAdmissionDefault | **NEED SPEC**（不直接删码） | 同上 |
 
-建议处置路径（承接既有 SPEC `docs/specs/pain-admission-flag-contract-fix.md` 选项 A）：
+建议处置路径（承接既有 SPEC `docs/archive/specs/pain-admission-flag-contract-fix.md` 选项 A）：
 1. 删除 contract 两条目 + lifecycle census 条目 + `FEATURE_FLAG_ALIASES` 两条（指向已删 ID 者是死键）
 2. Gate A：core policy 归档/删除前，需评估公共导出面（runtime-v2/index.ts:2027-2035）——本仓不可证明无下游消费者，须在实施 PR 中逐一列举导出面与已知下游
 3. plugin deprecated shim `pain-diagnostic-gate.ts` 删除前确认其保名调用方（已证全部为测试）

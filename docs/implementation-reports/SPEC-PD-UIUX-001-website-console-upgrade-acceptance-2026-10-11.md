@@ -1,6 +1,6 @@
 # SPEC-PD-UIUX-001 官网与 Web 控制台升级 — 实施与验收记录
 
-日期：2026-10-11 · 实施者：zcode · SPEC：`docs/specs/SPEC-PD-UIUX-001-website-console-upgrade-v1.0.md`
+日期：2026-10-11 · 实施者：zcode · SPEC：`docs/archive/specs/SPEC-PD-UIUX-001-website-console-upgrade-v1.0.md`
 分支：`ai/adhoc-20261011-uiux-upgrade-q7k2vp-spec-pd-uiux-001`（基于 origin/main 814d49d1）
 提交：`efed9dc3`（批次1 R1/R3/R4/R5/R6）→ `4baa8477`（批次2 R2）→ `7fe25095`（批次3 R7/R8/R9+验证基建）→ changeset + `f934e569`（R6 往返 e2e）
 

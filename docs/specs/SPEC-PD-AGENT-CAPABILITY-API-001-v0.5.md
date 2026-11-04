@@ -8,7 +8,7 @@
 | 状态 | **FROZEN — OG-1 已采信（2026-11-01），本 SPEC 是当前有效的 Gate 3 实施契约；Gate 3 已按 OG-2 实施完成并合并（PR #2270，merge `f15a5a6a6`，2026-11-01）。本 SPEC 不构成 Gate 4 授权。** |
 | 类型 | 架构与接口契约；**Gate 3 实施的直接规范**；不构成 MCP Server 实施授权 |
 | 调查基线 | csuzngjh/principles origin/main `0d0ea7eb560af15729f2a7f81b4e8a11a1bb0e8e`（2026-11-01） |
-| 版本沿革 | v0.2-draft（2026-10-28，`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`）→ v0.4-draft（基线 `3a2de95c8`，`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`）→ **本版**。v0.3 原件从未入主干（v0.4 已声明）。 |
+| 版本沿革 | v0.2-draft（2026-10-28，`docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`）→ v0.4-draft（基线 `3a2de95c8`，`docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`）→ **本版**。v0.3 原件从未入主干（v0.4 已声明）。 |
 | 本版上游证据 | ① PD-MCP-ARCHITECTURE-DELTA-AUDIT-20261031；② PD-MCP-GATE2-001（72 运行，`GO_TO_GATE_3_PROPOSAL`）；③ PD-MCP-HOOK-INTEGRATION-VERIFICATION-001（`READY_FOR_GATE_3_PROPOSAL`）；④ PD-MCP-GATE3-PROPOSAL-001（原版 + OPTIMIZED 评审版）；⑤ PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT（基线复核，2026-11-01） |
 | Owner 决策输入 | 2026-11-01 Owner 九项已决事项 + **OG-1（SPEC v0.5 采信）与 OG-2（Gate 3 实施授权）均已确认**（见 §14 决策记录） |
 | 本版目标 | 冻结 Gate 3 实施所需的全部契约：Read Model 迁移、Capability Facade（含 OD-A 披露策略）、CLI 兼容硬约束、MCP 边界（仅契约）、Hook 协作、测试与验收、停止条件 |
@@ -458,8 +458,8 @@ principle.text · unresolvedAssociations[].{painId,candidateId} · statusDetail�
 1. 基线复核与十项调查：`docs/implementation-reports/PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT.md`（本批交付）
 2. 实施机械清单：`docs/implementation-plans/PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md`（本批交付）
 3. 决策卡：`docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md`（本批交付）
-4. 上游提案：`docs/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`（974 行）+ `docs/proposals/PD-MCP-GATE3-PROPOSAL-001.md`（原版）
-5. v0.4：`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`；v0.2：`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`
+4. 上游提案：`docs/archive/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`（974 行）+ `docs/proposals/PD-MCP-GATE3-PROPOSAL-001.md`（原版）
+5. v0.4：`docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`；v0.2：`docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`
 6. Gate 2 工件：gate2 worktree `docs/implementation-reports/PD-MCP-GATE2-{PREREGISTRATION,EXPERIMENT-REPORT}-20261031.*`（sha256 锚定）+ `.tmp/pd-mcp-gate2/proto/project.mjs`
 7. Hook 验证：hook-verify worktree `docs/implementation-reports/PD-MCP-HOOK-INTEGRATION-VERIFICATION-001.md` + `%TEMP%\pd-hook-verify-001`
 8. 增量审计（前轮）：`docs/implementation-reports/PD-MCP-ARCHITECTURE-DELTA-AUDIT-20261031.md`
