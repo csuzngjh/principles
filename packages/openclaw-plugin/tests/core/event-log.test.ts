@@ -83,8 +83,9 @@ describe('EventLog', () => {
 
       // pain field removed (PRI-451 Wave 1.5): no live reader.
 
-      // GFI field
-      expect(stats.gfi).toBeDefined();
+      // gfi field removed (GFI-COMPLETE-REMOVAL-001, SPEC §4.1): the
+      // DailyStats.gfi aggregate had no live reader (verified: commands/pain.ts
+      // reads only tools/hooks/evolution; pd-console has no gfi usage).
       
       // Evolution field
       expect(stats.evolution).toBeDefined();

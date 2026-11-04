@@ -14,7 +14,6 @@
 
 // Prompt builder primitives — pure functions extracted from openclaw-plugin prompt hook (PRI-75)
 export {
-  buildAttitudeDirective,
   detectCorrectionCue,
   escapeXml,
   extractMessageContent,

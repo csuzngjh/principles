@@ -13,9 +13,6 @@ import type { PainChainTrace } from './pain-chain-read-model.js';
 import { PruningReadModel } from './pruning-read-model.js';
 import { auditCandidateLedgerConsistency } from './candidate-audit.js';
 import type { CandidateAuditResult } from './candidate-audit.js';
-import { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from './gfi/gfi-read-model.js';
-import type { GfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
-import type { GfiSource } from './gfi/gfi-types.js';
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
@@ -42,7 +39,6 @@ export interface OperatorHealthSnapshot {
     reviewCount: number;
     orphanDerivedCandidateCount: number;
   };
-  gfi: GfiWorkspaceSnapshot;
   overallStatus: OverallHealthStatus;
   recommendedActions: string[];
   /** Total number of tasks in the workspace DB. Used to distinguish cold-start (0 tasks) from real degradation (tasks exist but no successful chain). */
@@ -56,51 +52,6 @@ export interface OperatorHealthReadModelOptions {
 }
 
 // ── Read model ───────────────────────────────────────────────────────────────
-
-interface PersistedSession {
-  sessionId: string;
-  currentGfi: number;
-  gfiBySource?: Partial<Record<GfiSource, number>>;
-  lastErrorSource?: string;
-  consecutiveErrors: number;
-  lastGfiDecayAt?: number;
-  dailyGfiPeak?: number;
-  lastActivityAt: number;
-}
-
-function readPersistedSessions(workspaceDir: string): PersistedSession[] {
-  const sessionDir = path.join(workspaceDir, '.state', 'sessions');
-
-  if (!fs.existsSync(sessionDir)) {
-    return [];
-  }
-
-  const sessions: PersistedSession[] = [];
-
-  for (const file of fs.readdirSync(sessionDir)) {
-    if (!file.endsWith('.json')) continue;
-    try {
-      const raw = fs.readFileSync(path.join(sessionDir, file), 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed?.sessionId) {
-        sessions.push({
-          sessionId: parsed.sessionId ?? file.replace('.json', ''),
-          currentGfi: parsed.currentGfi ?? 0,
-          gfiBySource: parsed.gfiBySource,
-          lastErrorSource: parsed.lastErrorSource,
-          consecutiveErrors: parsed.consecutiveErrors ?? 0,
-          lastGfiDecayAt: parsed.lastGfiDecayAt,
-          dailyGfiPeak: parsed.dailyGfiPeak,
-          lastActivityAt: parsed.lastActivityAt ?? parsed.lastControlActivityAt ?? 0,
-        });
-      }
-    } catch {
-      // skip malformed session files
-    }
-  }
-
-  return sessions;
-}
 
 export class OperatorHealthReadModel {
   private readonly workspaceDir: string;
@@ -171,25 +122,7 @@ export class OperatorHealthReadModel {
       // Graceful — pruning section stays zeroed
     }
 
-    // ── GFI ───────────────────────────────────────────────────────────────
-    const gfi: GfiWorkspaceSnapshot = (() => {
-      try {
-        const sessions = readPersistedSessions(this.workspaceDir);
-        return buildGfiWorkspaceSnapshot({ sessions, nowMs: Date.now() });
-      } catch {
-        return {
-          active: null,
-          staleSessionCount: 0,
-          staleGfiRange: null,
-          totalSessionCount: 0,
-          activeSessionCount: 0,
-          generatedAt: new Date().toISOString(),
-        };
-      }
-    })();
-
     // ── Compute overallStatus ─────────────────────────────────────────────
-    const gfiHealth = classifyGfiWorkspaceHealth(gfi);
     let overallStatus: OverallHealthStatus = 'healthy';
 
     if (!dbExists || audit.status === 'error') {
@@ -199,7 +132,6 @@ export class OperatorHealthReadModel {
       || watchCount > 0
       || reviewCount > 0
       || orphanDerivedCandidateCount > ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD
-      || gfiHealth.status === 'degraded'
       || (lastSuccessfulChain === null && totalTaskCount > 0)
     ) {
       overallStatus = 'degraded';
@@ -226,10 +158,6 @@ export class OperatorHealthReadModel {
       recommendedActions.push(`High orphan-derived-candidate count (${orphanDerivedCandidateCount}) — run pruning to clean up.`);
     }
 
-    if (gfiHealth.status === 'degraded') {
-      recommendedActions.push(`GFI degraded: ${gfiHealth.reason} — run cleanup or investigate session lifecycle.`);
-    }
-
     if (lastSuccessfulChain === null && dbExists && totalTaskCount > 0) {
       recommendedActions.push('Run `pd runtime uat --workspace <path> --count 3` to establish baseline.');
     }
@@ -248,7 +176,6 @@ export class OperatorHealthReadModel {
         missingLedgerCount: audit.missingLedgerCount,
       },
       pruning: { watchCount, reviewCount, orphanDerivedCandidateCount },
-      gfi,
       overallStatus,
       recommendedActions,
       totalTaskCount,

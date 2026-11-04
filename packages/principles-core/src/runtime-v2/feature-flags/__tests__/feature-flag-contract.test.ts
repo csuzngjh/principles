@@ -160,7 +160,7 @@ describe('computeEffectiveFlags', () => {
 
   it('returns workspace_file source when user flags are provided', () => {
     const userFlags = {
-      gfi: { enabled: true, since: '2026-05-24' },
+      feedback_channel: { enabled: true, since: '2026-06-01' },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     expect(result.source).toBe('workspace_file');
@@ -168,14 +168,14 @@ describe('computeEffectiveFlags', () => {
 
   it('does not allow enabling quiet flags from malformed input', () => {
     const userFlags = {
-      gfi: { enabled: 'yes', since: '2026-05-24' },
+      diagnostician_async_cli: { enabled: 'yes', since: '2026-06-11' },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
-    const gfiFlag = result.flags.gfi;
-    expect(gfiFlag).toBeDefined();
+    const targetFlag = result.flags.diagnostician_async_cli;
+    expect(targetFlag).toBeDefined();
     // Malformed enabled field must NOT enable a quiet flag
-    if (gfiFlag) {
-      expect(gfiFlag.enabled).toBe(false);
+    if (targetFlag) {
+      expect(targetFlag.enabled).toBe(false);
     }
     expect(result.warnings.length).toBeGreaterThan(0);
   });
@@ -217,12 +217,12 @@ describe('computeEffectiveFlags', () => {
 
   it('allows explicit enable of quiet flag with valid input', () => {
     const userFlags = {
-      gfi: { enabled: true, since: '2026-05-24' },
+      diagnostician_async_cli: { enabled: true, since: '2026-06-11' },
     };
     const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
-    const gfiFlag = result.flags.gfi;
-    if (gfiFlag) {
-      expect(gfiFlag.enabled).toBe(true);
+    const targetFlag = result.flags.diagnostician_async_cli;
+    if (targetFlag) {
+      expect(targetFlag.enabled).toBe(true);
     }
   });
 
@@ -436,11 +436,11 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     }
   });
 
-  it('contains gfi quiet flag (default off)', () => {
+  it('keeps gfi as a gone tombstone (GFI removed 2026-11-04)', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'gfi');
     expect(flag).toBeDefined();
     if (flag) {
-      expect(flag.category).toBe('quiet');
+      expect(flag.category).toBe('gone');
       expect(flag.enabled).toBe(false);
     }
   });

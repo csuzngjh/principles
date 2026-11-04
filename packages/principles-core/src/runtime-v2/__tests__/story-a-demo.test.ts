@@ -256,7 +256,7 @@ describe('Story A\' pure helpers', () => {
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/etc/passwd', content: 'bad' } },
         workspace: { isRiskPath: false },
-        session: { currentGfi: 0 },
+        session: { sessionId: 'demo' },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
@@ -270,7 +270,7 @@ describe('Story A\' pure helpers', () => {
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/project/src/config.json', content: '{}' } },
         workspace: { isRiskPath: false },
-        session: { currentGfi: 0 },
+        session: { sessionId: 'demo' },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
@@ -284,7 +284,7 @@ describe('Story A\' pure helpers', () => {
       const input = {
         action: { toolName: 'write_file', normalizedPath: '/etc/passwd', paramsSummary: { path: '/project/../../etc/passwd', content: 'bad' } },
         workspace: { isRiskPath: false },
-        session: { currentGfi: 0 },
+        session: { sessionId: 'demo' },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;
@@ -302,7 +302,7 @@ describe('Story A\' pure helpers', () => {
       const input = {
         action: { toolName: 'write_file', normalizedPath: null, paramsSummary: {} },
         workspace: { isRiskPath: false },
-        session: { currentGfi: 0 },
+        session: { sessionId: 'demo' },
         evolution: { epTier: 0 },
         derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
       } as RuleHostInput;

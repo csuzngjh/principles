@@ -34,8 +34,8 @@ export function collectSync(
   if (scan.matched && scan.matchedPrecision === 'high' && scan.suggestedType) {
     return {
       isSignal: true,
-      type: scan.suggestedType,
-      strength: scan.suggestedType === 'correction' ? 'STRONG' : 'WEAK',
+      type: 'correction',
+      strength: 'STRONG',
       matchedTerms: scan.matchedTerms,
       matchedPrecision: 'high',
       detectionSource: 'keyword',
@@ -82,8 +82,8 @@ export function mapLlmResultToOutput(
 
   return {
     isSignal: true,
-    type: llm.type,
-    strength: llm.type === 'correction' ? 'STRONG' : 'WEAK',
+    type: 'correction',
+    strength: 'STRONG',
     matchedTerms: [],
     matchedPrecision: null,
     detectionSource: 'llm',

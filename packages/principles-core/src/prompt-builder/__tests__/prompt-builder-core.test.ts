@@ -6,7 +6,6 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  buildAttitudeDirective,
   detectCorrectionCue,
   extractMessageContent,
   isMinimalTrigger,
@@ -18,43 +17,8 @@ import {
   resolveTotalInjectionBudgetChars,
 } from '../../runtime-v2/activation/prompt-budget-policy.js';
 
-// ─── buildAttitudeDirective tests ─────────────────────────────────────────────
-
-describe('buildAttitudeDirective', () => {
-  it('GFI = 0 → EFFICIENT', () => {
-    const result = buildAttitudeDirective(0);
-    expect(result).toContain('EFFICIENT');
-    expect(result).toContain('GFI: 0');
-  });
-
-  it('GFI = 39 → EFFICIENT', () => {
-    const result = buildAttitudeDirective(39);
-    expect(result).toContain('EFFICIENT');
-  });
-
-  it('GFI = 40 → CONCILIATORY (boundary)', () => {
-    const result = buildAttitudeDirective(40);
-    expect(result).toContain('CONCILIATORY');
-    expect(result).toContain('GFI: 40');
-  });
-
-  it('GFI = 69 → CONCILIATORY', () => {
-    const result = buildAttitudeDirective(69);
-    expect(result).toContain('CONCILIATORY');
-  });
-
-  it('GFI = 70 → HUMBLE_RECOVERY (boundary)', () => {
-    const result = buildAttitudeDirective(70);
-    expect(result).toContain('HUMBLE_RECOVERY');
-    expect(result).toContain('GFI: 70');
-  });
-
-  it('GFI = 100 → HUMBLE_RECOVERY', () => {
-    const result = buildAttitudeDirective(100);
-    expect(result).toContain('HUMBLE_RECOVERY');
-    expect(result).toContain('GFI: 100');
-  });
-});
+// buildAttitudeDirective (GFI-driven attitude tiers) was deleted in
+// GFI-COMPLETE-REMOVAL-001; its tests were removed with it.
 
 // ─── detectCorrectionCue tests ────────────────────────────────────────────────
 

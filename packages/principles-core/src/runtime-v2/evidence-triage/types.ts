@@ -33,7 +33,6 @@ export type SourceKind =
   | 'semantic'                 // Keyword or detection service matched
   | 'llm_paralysis'            // Agent stuck in low-output loops
   | 'subagent_error'           // Subagent workflow failure
-  | 'gfi_threshold'            // Accumulated GFI crossed threshold
   | 'unknown';                 // Unclassified source
 
 // ── Triage Decision ─────────────────────────────────────────────────────────
@@ -104,7 +103,6 @@ const VALID_SOURCE_KINDS: ReadonlySet<string> = new Set<SourceKind>([
   'semantic',
   'llm_paralysis',
   'subagent_error',
-  'gfi_threshold',
   'unknown',
 ]);
 

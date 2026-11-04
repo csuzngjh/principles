@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+// PRI-750's invariant moved with the friction wrappers: commit fa86f0943
+// removed handleFrictionTrackingForFailure/Success, and the surviving
+// production path is recordToolCallFailure/recordToolCallSuccess in
+// src/hooks/after-tool-call-helpers.ts:239-250 / 291-298, which still forward
+// the host runId + toolCallId into EventLog.recordToolCall.
 import {
-  handleFrictionTrackingForFailure,
-  handleFrictionTrackingForSuccess,
+  recordToolCallFailure,
+  recordToolCallSuccess,
 } from '../../src/hooks/after-tool-call-helpers.js';
 import { resetSharedCooldownForTest } from '../../src/hooks/trigger-cooldown-tracker.js';
 import { clearSession } from '../../src/core/session-tracker.js';
@@ -19,7 +24,6 @@ const observation: ToolCallObservation = {
   errorType: 'Other',
   errorHash: 'hash-1',
   errorText: 'boom',
-  painScore: 0,
   traceId: 'trace-1',
 };
 
@@ -50,7 +54,7 @@ describe('PRI-750 receipt chain runId/toolCallId binding (OpenClaw after_tool_ca
       runId: 'run-abc',
       toolCallId: 'call-123',
     };
-    handleFrictionTrackingForFailure('s-runid', event as never, outcomeFailure, observation, 0, workspaceDir, mockWctx.config as never, mockWctx as never, { recordTrajectory: false });
+    recordToolCallFailure('s-runid', event as never, outcomeFailure, observation, workspaceDir, mockWctx as never, { recordTrajectory: false });
     expect(mockEventLog.recordToolCall).toHaveBeenCalledWith(
       's-runid',
       expect.objectContaining({ toolName: 'edit', runId: 'run-abc', toolCallId: 'call-123' }),
@@ -59,7 +63,7 @@ describe('PRI-750 receipt chain runId/toolCallId binding (OpenClaw after_tool_ca
 
   it('success path writes runId + toolCallId into the tool event when the host supplies them', () => {
     const event = { toolName: 'read', params: {}, result: { exitCode: 0 }, runId: 'run-abc', toolCallId: 'call-123' };
-    handleFrictionTrackingForSuccess('s-runid', event as never, outcomeSuccess, observation, 0, workspaceDir, mockWctx as never, { recordTrajectory: false });
+    recordToolCallSuccess('s-runid', event as never, outcomeSuccess, observation, workspaceDir, mockWctx as never, { recordTrajectory: false });
     expect(mockEventLog.recordToolCall).toHaveBeenCalledWith(
       's-runid',
       expect.objectContaining({ toolName: 'read', runId: 'run-abc', toolCallId: 'call-123' }),
@@ -75,7 +79,7 @@ describe('PRI-750 receipt chain runId/toolCallId binding (OpenClaw after_tool_ca
       runId: 'run-abc',
       toolUseId: 'alias-call-9',
     };
-    handleFrictionTrackingForFailure('s-runid', event as never, outcomeFailure, observation, 0, workspaceDir, mockWctx.config as never, mockWctx as never, { recordTrajectory: false });
+    recordToolCallFailure('s-runid', event as never, outcomeFailure, observation, workspaceDir, mockWctx as never, { recordTrajectory: false });
     expect(mockEventLog.recordToolCall).toHaveBeenCalledWith(
       's-runid',
       expect.objectContaining({ toolName: 'edit', runId: 'run-abc', toolCallId: 'alias-call-9' }),
@@ -84,7 +88,7 @@ describe('PRI-750 receipt chain runId/toolCallId binding (OpenClaw after_tool_ca
 
   it('stays compatible when the host supplies no runId/toolCallId', () => {
     const event = { toolName: 'edit', params: { file_path: 'x.txt' }, result: { exitCode: 1 }, error: 'boom' };
-    handleFrictionTrackingForFailure('s-runid', event as never, outcomeFailure, observation, 0, workspaceDir, mockWctx.config as never, mockWctx as never, { recordTrajectory: false });
+    recordToolCallFailure('s-runid', event as never, outcomeFailure, observation, workspaceDir, mockWctx as never, { recordTrajectory: false });
     expect(mockEventLog.recordToolCall).toHaveBeenCalledWith('s-runid', expect.objectContaining({ toolName: 'edit' }));
     const data = mockEventLog.recordToolCall.mock.calls[0][1] as Record<string, unknown>;
     expect(data.runId).toBeUndefined();

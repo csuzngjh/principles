@@ -87,11 +87,7 @@ const REQUIRED_SOURCE_FILES = [
   '../prompt-builder/empathy-types.ts',
   // PRI-81 Phase B
   '../prompt-builder/focus-compression.ts',
-  // PRI-76
-  'gfi/gfi-types.ts',
-  'gfi/gfi-policy.ts',
-  'gfi/gfi-kernel.ts',
-  'gfi/index.ts',
+  // GFI kernel deleted in GFI-COMPLETE-REMOVAL-001 (PRI-76/78/82 guards retired).
   // PRI-84
   'internalization/pi-artifact.ts',
   'internalization/pi-artifact-store.ts',
@@ -547,8 +543,7 @@ const REQUIRED_TEST_FILES = [
   '../../prompt-builder/__tests__/empathy-keyword-matching.test.ts',
   // PRI-81 Phase B
   '../../prompt-builder/__tests__/focus-compression.test.ts',
-  // PRI-76
-  '../gfi/__tests__/gfi-kernel.test.ts',
+  // PRI-76 test file deleted in GFI-COMPLETE-REMOVAL-001.
   // PRI-115
   'golden-trace-replay-validator.test.ts',
   // PRI-140
@@ -1852,7 +1847,7 @@ describe('PRI-87 DefaultDreamerValidator strict validation', () => {
 describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
   const files = [
     'prompt-builder/index.ts',
-    'prompt-builder/attitude-directive.ts',
+    // prompt-builder/attitude-directive.ts deleted in GFI-COMPLETE-REMOVAL-001.
     'prompt-builder/correction-cue.ts',
     'prompt-builder/message-extraction.ts',
     'prompt-builder/minimal-trigger.ts',
@@ -1884,7 +1879,6 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/index.ts'), 'utf-8');
     // Phase 1
-    expect(src).toContain('buildAttitudeDirective');
     expect(src).toContain('detectCorrectionCue');
     expect(src).toContain('extractMessageContent');
     expect(src).toContain('isMinimalTrigger');
@@ -2000,84 +1994,10 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
   });
 });
 
-// ── PRI-76: GFI core kernel boundary ───────────────────────────────────────
-
-describe('PRI-76 GFI core kernel boundary', () => {
-  const gfiFiles = [
-    'gfi/gfi-types.ts',
-    'gfi/gfi-policy.ts',
-    'gfi/gfi-kernel.ts',
-    'gfi/gfi-read-model.ts',
-    'gfi/index.ts',
-  ];
-
-  for (const file of gfiFiles) {
-    it(`${file} has zero infrastructure imports`, async () => {
-      const { readFileSync } = await import('node:fs');
-      const { resolve } = await import('node:path');
-      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
-      expect(src).not.toContain('node:fs');
-      expect(src).not.toContain('node:path');
-      expect(src).not.toContain('node:process');
-      expect(src).not.toContain('openclaw-plugin');
-      expect(src).not.toContain('node:crypto');
-      expect(src).not.toContain('node:async_hooks');
-    });
-  }
-
-  // PRI-82: gfi-kernel.ts must not call Date.now() — nowMs is injected by caller
-  it('gfi-kernel.ts does not call Date.now()', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'gfi/gfi-kernel.ts'), 'utf-8');
-    expect(src).not.toContain('Date.now()');
-  });
-
-  it('gfi/index.ts exports all public symbols', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'gfi/index.ts'), 'utf-8');
-    expect(src).toContain('applyFriction');
-    expect(src).toContain('applyDecay');
-    expect(src).toContain('applyRelief');
-    expect(src).toContain('classifyGfiStage');
-    expect(src).toContain('createGfiSnapshot');
-    expect(src).toContain('DEFAULT_GFI_POLICY');
-    expect(src).toContain('GfiState');
-    expect(src).toContain('GfiEvent');
-    expect(src).toContain('GfiPolicy');
-    expect(src).toContain('GfiStage');
-    expect(src).toContain('GfiSource');
-    expect(src).toContain('GfiSnapshot');
-    expect(src).toContain('buildGfiWorkspaceSnapshot');
-    expect(src).toContain('GfiReadModelInput');
-    expect(src).toContain('GfiWorkspaceSnapshot');
-  });
-});
-
-// ── PRI-78: GFI observability boundary ──────────────────────────────────────
-
-describe('PRI-78 GFI observability boundary', () => {
-  it('gfi-read-model.ts has zero infrastructure imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'gfi/gfi-read-model.ts'), 'utf-8');
-    expect(src).not.toContain('node:fs');
-    expect(src).not.toContain('node:path');
-    expect(src).not.toContain('node:process');
-    expect(src).not.toContain('openclaw-plugin');
-  });
-
-  it('pd-cli runtime-gfi-snapshot.ts imports from @principles/core/runtime-v2', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(
-      resolve(__dirname, '../../../../pd-cli/src/commands/runtime-gfi-snapshot.ts'),
-      'utf-8'
-    );
-    expect(src).toContain("from '@principles/core/runtime-v2'");
-  });
-});
+// ── PRI-76 / PRI-78 GFI boundary guards retired ─────────────────────────────
+// The GFI kernel (gfi/*.ts), its read model and the pd-cli runtime-gfi-snapshot
+// command were deleted in GFI-COMPLETE-REMOVAL-001, so the boundary guards that
+// protected them had no subject left. See docs/reports/GFI_REMOVAL_AUDIT_20261104.md.
 
 // ── PRI-111: ArtificerRunner boundary guards ──────────────────────────────────
 

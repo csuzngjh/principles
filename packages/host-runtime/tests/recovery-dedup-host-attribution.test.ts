@@ -22,7 +22,7 @@ afterEach(() => {
   rmSync(ws, { recursive: true, force: true });
 });
 
-const CREATE = `CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT, host_kind TEXT)`;
+const CREATE = `CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT, host_kind TEXT)`;
 
 interface Row { id: number; session_id: string; tool_name: string; outcome: string; exit_code: number | null; tool_use_id: string | null; host_kind: string | null }
 
@@ -37,7 +37,7 @@ function rows(sessionId: string): Row[] {
 
 function seedUnknownRow(sessionId: string, toolUseId: string, hostKind: string | null): void {
   const db = new Database(path.join(ws, '.state', 'trajectory.db'));
-  db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, 'Read', 'unknown', NULL, NULL, NULL, NULL, NULL, NULL, '{}', NULL, '2026-10-29T10:00:00.000Z', ?, NULL, ?)`).run(sessionId, toolUseId, hostKind);
+  db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, 'Read', 'unknown', NULL, NULL, NULL, NULL, '{}', NULL, '2026-10-29T10:00:00.000Z', ?, NULL, ?)`).run(sessionId, toolUseId, hostKind);
   db.close();
 }
 
@@ -121,7 +121,7 @@ describe('recordVerifiedToolOutcomes — host-scoped identity (review R3/P2)', (
     connB.pragma('busy_timeout = 5000');
     try {
       const insert = (conn: Database.Database, host: string, call: string) =>
-        conn.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, 'Read', 'unknown', NULL, NULL, NULL, NULL, NULL, NULL, '{}', NULL, ?, ?, NULL, ?)`)
+        conn.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, 'Read', 'unknown', NULL, NULL, NULL, NULL, '{}', NULL, ?, ?, NULL, ?)`)
           .run('sess-interleave', `2026-10-29T10:0${call}:00.000Z`, call, host);
       insert(connA, 'workbuddy', '1');
       insert(connB, 'codex', '2');

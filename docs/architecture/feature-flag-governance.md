@@ -45,26 +45,19 @@ entry absence ≠ capability disabled —— 缺失由 registry default 决定
 | **artificer_output_retry** | **ON（毕业）** | principles-core artificer-runner.ts permanentErrorCategories（PRI-621，2026-08-29 毕业：与其他 peer runner 的 output_invalid 重试语义对齐） | ✅ 已毕业 |
 | **rulecode_context_v2** | **ON（毕业）** | openclaw-plugin gate.ts buildRuleContextIfEnabled（双路径）、core rule-host-writer canActivate、pd-cli run-rulehost contextMode、pd-console/runtime-activation suspended_by_flag、codex-adapter pd-hook 声明（PRI-780，2026-09-13 毕业：Runtime Governance Context 成为默认治理路径；ADR 2026-06-28 amendment；显式 false = 迁移期熔断） | ✅ 已毕业 |
 | principle_receipt_self_report | OFF | prompt 注入 📝 行 + llm_output/before_message_write 捕获（PRI-532）；installer 与 registry 均保持关闭 | ✅ 实验性，保持默认关 |
-| correction_observer / signal_collector / l2_dreamer / intent_engineering / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence / gfi | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
+| correction_observer / signal_collector / l2_dreamer / intent_engineering / abstraction_layer_v1 / diagnostician_async_cli / pain_diagnosis_persistence | OFF (quiet) | 见 §3 两个重点案例与其余 quiet 待验证项 | ⚠️/✅ |
 | artifact_summary_redundancy / context_manifest_budget / progressive_evaluator | ~~OFF (quiet)~~ **RETIRED 2026-09-18 (PRI-819 R-06, Owner 决策)** | **已退役**：三个 dormant progressive-disclosure flag 的运行时读者与 Layer 0/1/2 门控分支同批删除（summary envelope 写入、manifest+budget 注入、双阶段 evaluator、CandidateLineage、context-trace CLI）；evaluator 恢复纯单阶段。flag 移入 gone 墓碑——存量 `enabled: true` 覆盖被 computeEffectiveFlags 可观察拒绝 | ✅ 正常退役 |
-| nocturnal / idle_trigger / evolution_worker / empathy_observer / internalization_core_grounding（PRI-751 墓碑化） | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝）。evolution_worker：worker 已于 PRI-737 删除，flag 2026-09-12 随 PRI-752 移入 gone（live 证据：flag=off、evolution_tasks/events 0 行；census 原 2026-12-01 隔离窗口因其主体（worker）已不存在而提前满足）。empathy_observer：随 #1625 退役（零可执行消费者，检测经 signal-collector-host 无条件运行）。internalization_core_grounding：随 #1624 退役——grounding 由 runner 默认值无条件启用，flag 从未有可执行消费者（PRI-752 复核一致确认） | ✅ 正常退役 |
+| nocturnal / idle_trigger / evolution_worker / empathy_observer / internalization_core_grounding / gfi（PRI-751 墓碑化） | gone | 无（禁止复活，computeEffectiveFlags 强制拒绝）。evolution_worker：worker 已于 PRI-737 删除，flag 2026-09-12 随 PRI-752 移入 gone（live 证据：flag=off、evolution_tasks/events 0 行；census 原 2026-12-01 隔离窗口因其主体（worker）已不存在而提前满足）。empathy_observer：随 #1625 退役（零可执行消费者，检测经 signal-collector-host 无条件运行）。internalization_core_grounding：随 #1624 退役——grounding 由 runner 默认值无条件启用，flag 从未有可执行消费者（PRI-752 复核一致确认）。gfi：2026-11-04 随 GFI-COMPLETE-REMOVAL-001 移入 gone，评分链路与只读展示同批删除 | ✅ 正常退役 |
 
 ## 3. 重点案例（本任务结论）
 
-### 3.1 `gfi` — "注册但无有效 consumer" 的复核结果
+### 3.1 `gfi` — 已随机制整体退役（2026-11-04）
 
-工单发现部分成立、部分过时：
+本节的历史结论（"注册但无有效 consumer"）已由 **GFI-COMPLETE-REMOVAL-001**（SPEC §2 / §5.1）取代：
 
-- **存在读取型 consumer**：`pd runtime health gfi` 快照命令（`runtime-gfi-snapshot.ts`）与
-  canary 检查（`runtime-canary.ts:156` 读 flag 决定是否跳过快照）。
-- **门控缺口属实**：openclaw-plugin 内的摩擦评分链路（session-tracker /
-  after-tool-call friction / prompt decay）**从不检查 gfi flag**——评分无条件运行。
-  翻转该 flag 不改变任何写入行为，只影响 CLI 只读展示。
-
-处置：**不删除、不擅自接线**。两条路都是行为变更（接线 = live 上 gfi:false 却一直评分的
-现状会改变；删除 = 存量 workspace config.yaml 里的 gfi 条目会触发 unknown-flag 告警），
-需 Owner 择一：①把评分写入纳入 flag 门控（推荐，恢复 quiet 语义）；②确认评分常开后删除 flag。
-→ 已建 follow-up 工单记录。
+- 评分链路（session-tracker / after-tool-call friction / prompt decay）与只读展示（`pd runtime health gfi`、`runtime-gfi-snapshot.ts`、canary 门控）已全部删除；
+- flag 本体保留为 `gone` 墓碑（`feature-flag-contract.ts:235`：`Retired 2026-11-04: Global Friction Index removed; no runtime owner remains.`），`computeEffectiveFlags` 对存量 `enabled: true` 覆盖可观察拒绝；
+- 原"接线或撤旗"的 Owner 二选一由此关闭，无需再决策。
 
 ### 3.2 `empathy_observer` — 断线控制（PRI-752 复核修正）；处置已执行（#1625）
 
@@ -97,7 +90,8 @@ Control Center 卡片/成本提示/localStorage ack）、'共情观察器' 显�
 （isEmpathyPrompt）。存量 config 中的 `agents.empathyObserver` 键走 PRI-772 式 tolerated
 no-op + warning（不再报 unknown-key 错误）。flag 墓碑本身保持不动：无 runtime reader，
 `features.empathy_observer` 存量键仍走 unknown-flag 告警。live 的 empathy 检测
-（empathy-keyword-matcher、signal-collector-host、DetectionService、GFI/rollback 事件链）不受影响。
+（empathy-keyword-matcher、signal-collector-host、DetectionService、rollback 事件链）不受影响；
+GFI 评分链路已随 GFI-COMPLETE-REMOVAL-001 整体删除。
 
 ### 3.3 installer 默认值快照 — 已按 PRI-645 收敛为 sparse shell
 
@@ -158,5 +152,5 @@ Owner-facing 控制面的已知例外**，sparse 语义由各自显式建模：
 ## 5. 明确不做（Non-goal）
 
 - 不统一两套 flag consumption API（重构）。
-- 不删除/接线 gfi、不合并 empathy_observer 双轨（行为变更，待 Owner 决策）。
+- 不合并 empathy_observer 双轨（行为变更，待 Owner 决策）；~~不删除/接线 gfi~~ 已于 2026-11-04 随 GFI-COMPLETE-REMOVAL-001 删除（见 §3.1）。
 - 不为"完整性"给 quiet-off flag 补 consumer（AGENTS.md 反模式触发器 antipattern-completeness）。

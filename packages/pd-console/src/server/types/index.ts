@@ -102,8 +102,7 @@ export interface GateBlockItem {
   toolName: string;
   filePath: string | null;
   reason: string;
-  gateType: 'gfi' | 'stage' | 'p03' | 'other';
-  gfi: number;
+  gateType: 'stage' | 'p03' | 'other';
   trustStage: number;
 }
 
@@ -113,7 +112,6 @@ export interface EmpathyEvent {
   score: number;
   reason: string;
   origin: string;
-  gfiAfter: number;
 }
 
 export interface SamplePreview {
@@ -199,12 +197,6 @@ export interface EmpathyEventLogEntry extends EventLogEntry {
 
 export interface OverviewHealthOutput {
   status: 'healthy' | 'degraded' | 'error';
-  gfi: {
-    current: number;
-    stage: string;
-    peakToday: number;
-    threshold: number;
-  };
   trust: {
     stage: number;
     score: number;

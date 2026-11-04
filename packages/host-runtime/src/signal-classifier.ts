@@ -6,7 +6,7 @@
  * consume this instead of re-implementing startRun/pollRun/fetchOutput.
  *
  * The classifier contract is core-owned: `buildLlmPrompt`,
- * `signal-classification-output-v1` and `resolveLlmClassificationPayload`
+ * `signal-classification-output-v2` and `resolveLlmClassificationPayload`
  * come from `@principles/core/runtime-v2`. This module only owns acquisition:
  * reading the signalCollector runtime profile and calling the adapter.
  *
@@ -55,6 +55,15 @@ export interface CreateSignalClassifierOptions {
   readonly timeoutMs?: number;
 }
 
+/**
+ * The Stage-2 structured-output contract this classifier requests. It MUST stay
+ * in sync with the registry key in
+ * packages/principles-core/src/runtime-v2/adapter/output-schema-registry.ts:
+ * the adapter fails loud (`output_invalid`) on an unregistered ref, and the
+ * catch below would silently degrade Stage 2 to "no classification".
+ */
+export const SIGNAL_CLASSIFICATION_SCHEMA_REF = 'signal-classification-output-v2';
+
 /** Build the classifier from an already-resolved profile (no config I/O). */
 export function createSignalLlmClassifier(
   profile: SignalClassifierProfile,
@@ -87,7 +96,7 @@ export function createSignalLlmClassifier(
         inputPayload: { prompt },
         contextItems: [],
         timeoutMs: effectiveTimeoutMs,
-        outputSchemaRef: 'signal-classification-output-v1',
+        outputSchemaRef: SIGNAL_CLASSIFICATION_SCHEMA_REF,
         systemPrompt: SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
       });
       let status = await adapter.pollRun(handle.runId);

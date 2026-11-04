@@ -218,11 +218,7 @@ runtime-v2/
 │       ├── skill-file-writer.ts
 │       ├── rule-host-writer.ts
 │       └── training-exporter.ts
-├── gfi/                             ← GFI 子模块
-│   ├── gfi-kernel.ts
-│   ├── gfi-types.ts
-│   ├── gfi-policy.ts
-│   └── gfi-read-model.ts
+├── gfi/                             ← 已删除（GFI-COMPLETE-REMOVAL-001，仅剩空 __tests__）
 └── cli/                             ← Diagnose / Probe CLI 接口（被 pd-cli 调用）
     ├── index.ts
     ├── diagnose-run.ts
@@ -270,7 +266,7 @@ packages/openclaw-plugin/src/
 ├── core/                            ← Plugin 内部业务（迁移中）
 │   ├── pain.ts                     ← 部分迁入 core
 │   ├── pain-context-extractor.ts
-│   ├── session-tracker.ts           ← GFI plugin 适配器
+│   ├── session-tracker.ts           ← 会话状态与持久化（GFI 摩擦状态已移除）
 │   ├── workspace-context.ts
 │   ├── path-resolver.ts
 │   ├── paths.ts
@@ -351,7 +347,6 @@ packages/pd-cli/src/
 │   │   ├── runtime-internalization-integrity.ts
 │   │   ├── runtime-internalization-integrity-repair.ts
 │   │   ├── runtime-health-snapshot.ts
-│   │   ├── runtime-gfi-snapshot.ts
 │   │   └── runtime-diagnostics-export.ts
 │   ├── activation.ts                ★ 待建（pd activation list/status）
 │   ├── remediation-output.ts

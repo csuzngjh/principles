@@ -56,8 +56,6 @@ export interface ToolCallObservation {
   readonly errorHash: string;
   /** Error text for logging */
   readonly errorText: string;
-  /** Pain score (only meaningful for write-tool failures on risky paths) */
-  readonly painScore: number;
   /** Trace ID for this observation chain */
   readonly traceId: string;
 }

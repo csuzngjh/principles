@@ -39,7 +39,8 @@ export interface SourceDescriptor {
  * - Manual/owner-reported pain has highest confidence.
  * - Tool failures are infrastructure noise (OpenClaw's job, not PD's).
  * - Empathy-inferred frustration must never silently create diagnosis.
- * - GFI alone cannot trigger diagnosis (it's a session health metric).
+ * - GFI was removed entirely (GFI-COMPLETE-REMOVAL-001); session health
+ *   signals alone cannot trigger diagnosis.
  */
 export const SOURCE_DESCRIPTORS: ReadonlyMap<SourceKind, SourceDescriptor> = new Map<SourceKind, SourceDescriptor>([
   ['owner_reported', {
@@ -99,19 +100,13 @@ export const SOURCE_DESCRIPTORS: ReadonlyMap<SourceKind, SourceDescriptor> = new
   ['llm_paralysis', {
     kind: 'llm_paralysis',
     defaultDecision: 'evidence_only',
-    reason: 'Session health signal. GFI alone cannot create diagnosis.',
+    reason: 'Session health signal. Not sufficient for diagnosis on its own.',
     nextAction: 'store_as_evidence_for_later_correlation',
   }],
   ['subagent_error', {
     kind: 'subagent_error',
     defaultDecision: 'evidence_only',
     reason: 'Subagent workflow failure. Not a behavior pattern by itself.',
-    nextAction: 'store_as_evidence_for_later_correlation',
-  }],
-  ['gfi_threshold', {
-    kind: 'gfi_threshold',
-    defaultDecision: 'evidence_only',
-    reason: 'Accumulated GFI. GFI alone cannot create diagnosis per acceptance criteria.',
     nextAction: 'store_as_evidence_for_later_correlation',
   }],
   ['unknown', {

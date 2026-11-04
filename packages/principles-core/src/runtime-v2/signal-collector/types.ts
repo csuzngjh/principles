@@ -2,12 +2,10 @@ import { Type, type Static } from '@sinclair/typebox';
 
 // ── Unified Keyword Store (合并后的统一词库,纯数据) ──
 
-export type KeywordCategory = 'correction' | 'empathy';
 export type TermSource = 'seed' | 'migrated' | 'owner_promoted' | 'llm_learned';
 
 export interface UnifiedKeyword {
   term: string;
-  category: KeywordCategory;
   weight: number;       // 0-1
   precision: 'high' | 'ambiguous';   // 评审意见4: 高精度 vs 歧义词
   source: TermSource;
@@ -42,7 +40,7 @@ export interface SignalCollectorConfig {
   discoveryRateLimitPerHour?: number;
 }
 
-export type SignalStrength = 'STRONG' | 'WEAK';
+export type SignalStrength = 'STRONG';
 export type DetectionSource = 'keyword' | 'llm' | 'none';
 export type MatchedPrecision = 'high' | 'ambiguous' | null;
 
@@ -53,7 +51,7 @@ export interface SignalEvidence {
 
 export interface SignalCollectorOutput {
   isSignal: boolean;
-  type: 'correction' | 'empathy' | null;
+  type: 'correction' | null;
   strength: SignalStrength | null;
   matchedTerms: string[];
   matchedPrecision: MatchedPrecision;
@@ -70,8 +68,8 @@ export const SignalCollectorOutputSchema = {
     if (typeof value !== 'object' || value === null) return false;
     const v = value as Record<string, unknown>;
     if (typeof v.isSignal !== 'boolean') return false;
-    if (v.type !== null && v.type !== 'correction' && v.type !== 'empathy') return false;
-    if (v.strength !== null && v.strength !== 'STRONG' && v.strength !== 'WEAK') return false;
+    if (v.type !== null && v.type !== 'correction') return false;
+    if (v.strength !== null && v.strength !== 'STRONG') return false;
     if (!Array.isArray(v.matchedTerms)) return false;
     if (v.matchedPrecision !== null && v.matchedPrecision !== 'high' && v.matchedPrecision !== 'ambiguous') return false;
     if (v.detectionSource !== 'keyword' && v.detectionSource !== 'llm' && v.detectionSource !== 'none') return false;
@@ -88,7 +86,7 @@ export const SignalCollectorOutputSchema = {
 
 export interface LlmClassificationResult {
   is_feedback: boolean;
-  type: 'correction' | 'empathy' | 'none';
+  type: 'correction' | 'none';
   confidence: number;   // 0-1
   reason: string;
 }
@@ -97,23 +95,23 @@ export function validateLlmClassification(value: unknown): value is LlmClassific
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v.is_feedback !== 'boolean') return false;
-  if (v.type !== 'correction' && v.type !== 'empathy' && v.type !== 'none') return false;
+  if (v.type !== 'correction' && v.type !== 'none') return false;
   if (typeof v.confidence !== 'number' || v.confidence < 0 || v.confidence > 1) return false;
   if (typeof v.reason !== 'string') return false;
   return true;
 }
 
-// ── Stage2 structured-output contract (signal-classification-output-v1) ──
+// ── Stage2 structured-output contract (signal-classification-output-v2) ──
 //
 // RuntimeAdapter 的 canonical 输出契约: 分类器以 outputSchemaRef 引用本 schema,
 // adapter 负责 JSON extraction + schema validation (+ bounded repair),分类器直接
 // 消费 validated structured payload (MVP_CORE_LOOP_CONTRACT INV-01)。
 // 字段名与 LlmClassificationResult 保持一致(snake_case 即 prompt 中的字面格式)。
 
-export const SignalClassificationOutputV1Schema = Type.Object({
+export const SignalClassificationOutputV2Schema = Type.Object({
   is_feedback: Type.Boolean(),
-  type: Type.Union([Type.Literal('correction'), Type.Literal('empathy'), Type.Literal('none')]),
+  type: Type.Union([Type.Literal('correction'), Type.Literal('none')]),
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
   reason: Type.String(),
 });
-export type SignalClassificationOutputV1 = Static<typeof SignalClassificationOutputV1Schema>;
+export type SignalClassificationOutputV2 = Static<typeof SignalClassificationOutputV2Schema>;

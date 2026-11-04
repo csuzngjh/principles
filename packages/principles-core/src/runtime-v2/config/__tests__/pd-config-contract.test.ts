@@ -178,7 +178,7 @@ describe('Scenario 2: Valid MVP config → effective config correct', () => {
     const effective = computeEffectivePdConfig(result.value);
     expect(effective.source).toBe('user_config');
     expect(nn(effective.config.features.prompt).enabled).toBe(true);
-    expect(nn(effective.config.features.gfi).enabled).toBe(false);
+    expect(nn(effective.config.features.diagnostician_async_cli).enabled).toBe(false);
   });
 
   it('effective config preserves runtime profiles', () => {
@@ -568,12 +568,12 @@ describe('Scenario 7: Feature flags from new config contract', () => {
 
   it('quiet flags can be toggled', () => {
     const raw = makeValidConfig();
-    raw.features.gfi = { category: 'quiet', enabled: true };
+    raw.features.diagnostician_async_cli = { category: 'quiet', enabled: true };
     const result = validatePdConfig(raw);
     if (!result.ok) throw new Error('Expected ok');
     const effective = computeEffectivePdConfig(result.value);
     const flags = computeFeatureFlagsFromConfig(effective);
-    expect(nn(flags.flags.gfi).enabled).toBe(true);
+    expect(nn(flags.flags.diagnostician_async_cli).enabled).toBe(true);
   });
 
   it('unknown flags are diagnosed but never become effective capabilities (PRI-609)', () => {

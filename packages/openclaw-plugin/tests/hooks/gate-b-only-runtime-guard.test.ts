@@ -3,9 +3,12 @@
  *
  * No runtime hook may enter Gate A (evaluatePainDiagnosticGate). Gate B
  * (TriggerController) is the only admission authority, and in Phase A it is
- * reached ONLY by Owner-driven paths:
- *  - pain.ts manual `/pd-pain` / explicit Pain Tool (`handleManualPain`),
- *  - llm.ts GFI health path (frozen until Phase C).
+ * reached ONLY by the Owner-driven manual pain path:
+ *  - pain.ts manual `/pd-pain` / explicit Pain Tool (`handleManualPain`).
+ *
+ * The llm.ts GFI health path was deleted with the GFI removal
+ * (GFI-COMPLETE-REMOVAL-001, SPEC §3.5 / audit #15), so llm.ts no longer
+ * reaches the TriggerController — that is intended, not a regression.
  *
  * Technical failures (after-tool-call-helpers) and RuleHost blocks
  * (gate-block-helper) MUST NOT consult admission at all.
@@ -58,8 +61,11 @@ describe('PRI-651-B1: runtime hooks are Gate B only (no Gate A fallback selectio
   }
 
   it('Owner-driven paths still reach the TriggerController', () => {
+    // Real production call site: packages/openclaw-plugin/src/hooks/pain.ts
+    //   import  : :31  (from principles-core runtime-v2)
+    //   call    : :450 (evaluateTriggerController inside handleManualPain)
+    // Verified by grep over packages/*/src: no other non-test caller exists.
     expect(hookSource('pain.ts')).toMatch(/evaluateTriggerController/);
-    expect(hookSource('llm.ts')).toMatch(/evaluateTriggerController/);
   });
 
   it('after-tool-call collection never consults admission (Phase A)', () => {

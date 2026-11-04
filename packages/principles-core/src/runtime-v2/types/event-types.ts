@@ -151,14 +151,7 @@ export interface ToolCallEventData {
   filePath?: string;
   error?: string;
   errorType?: string;
-  /** @deprecated use gfiBefore/gfiAfter instead */
-  gfi?: number;
-  consecutiveErrors?: number;
   exitCode?: number;
-  /** PRI-79: GFI value before this tool call */
-  gfiBefore?: number;
-  /** PRI-79: GFI value after this tool call (post-friction or post-relief) */
-  gfiAfter?: number;
   /** PRI-750: host run/turn id — DIRECT turn binding (OpenClaw `runId`; Codex `turn_id`). Optional: absent when the host supplies none. */
   runId?: string;
   /** PRI-750: host tool-call id (OpenClaw `toolCallId`; Codex `tool_use_id`). Optional: absent when the host supplies none. */
@@ -170,11 +163,7 @@ export const ToolCallEventDataSchema = Type.Object({
   filePath: Type.Optional(Type.String()),
   error: Type.Optional(Type.String()),
   errorType: Type.Optional(Type.String()),
-  gfi: Type.Optional(Type.Number()),
-  consecutiveErrors: Type.Optional(Type.Number()),
   exitCode: Type.Optional(Type.Number()),
-  gfiBefore: Type.Optional(Type.Number()),
-  gfiAfter: Type.Optional(Type.Number()),
   runId: Type.Optional(Type.String()),
   toolCallId: Type.Optional(Type.String()),
 });
@@ -1002,23 +991,6 @@ export const EmpathyEventStatsSchema = Type.Object({
 });
 export type EmpathyEventStatsStatic = Static<typeof EmpathyEventStatsSchema>;
 
-export interface GfiStats {
-  peak: number;
-  samples: number;
-  total: number;
-  resetCount: number;
-  hourlyDistribution: number[];
-}
-
-export const GfiStatsSchema = Type.Object({
-  peak: Type.Number(),
-  samples: Type.Number(),
-  total: Type.Number(),
-  resetCount: Type.Number(),
-  hourlyDistribution: Type.Array(Type.Number()),
-});
-export type GfiStatsStatic = Static<typeof GfiStatsSchema>;
-
 export interface EventEvolutionStats {
   tasksEnqueued: number;
   tasksCompleted: number;
@@ -1110,8 +1082,6 @@ export interface DailyStats {
   // pain: PainStats field removed (PRI-451 Wave 1.5): no live reader.
   /** Empathy Engine event statistics */
   empathy: EmpathyEventStats;
-  /** GFI statistics */
-  gfi: GfiStats;
   /** Evolution statistics */
   evolution: EvolutionStats;
   /** Hook execution statistics */
@@ -1131,7 +1101,6 @@ export const DailyStatsSchema = Type.Object({
   errors: ErrorStatsSchema,
   // pain: PainStatsSchema removed (PRI-451 Wave 1.5): no live reader.
   empathy: EmpathyEventStatsSchema,
-  gfi: GfiStatsSchema,
   evolution: EventEvolutionStatsSchema,
   hooks: HookStatsSchema,
 });
@@ -1195,13 +1164,6 @@ export function createEmptyDailyStats(date: string): DailyStats {
         low: 0,
       },
       dailyTrend: [],
-    },
-    gfi: {
-      peak: 0,
-      samples: 0,
-      total: 0,
-      resetCount: 0,
-      hourlyDistribution: new Array(24).fill(0),
     },
     evolution: {
       tasksEnqueued: 0,
