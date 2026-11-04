@@ -475,13 +475,13 @@ describe('Install success output exposes plugin/cli/console status', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
-    expect(result.components.plugin).toBe('verified');
-    expect(result.components.cli).toBe('verified');
-    expect(result.components.console).toBe('configured');
-    expect(result.components.consoleEntrypoint).toBe('http://localhost:3100');
+    expect(result.components!.plugin).toBe('verified');
+    expect(result.components!.cli).toBe('verified');
+    expect(result.components!.console).toBe('configured');
+    expect(result.components!.consoleEntrypoint).toBe('http://localhost:3100');
     expect(result.enabledChannels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
-    expect(result.verification.features).toBe('passed');
-    expect(result.verification.storyA).toBe('passed');
+    expect(result.verification!.features).toBe('passed');
+    expect(result.verification!.storyA).toBe('passed');
   });
 
   it('partial success (console skipped) returns success false', () => {
@@ -498,14 +498,14 @@ describe('Console delivery contract', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.components.console).toBe('skipped');
+    expect(result.components!.console).toBe('skipped');
   });
 
   it('configured console with entrypoint means success=true', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
-    expect(result.components.consoleEntrypoint).toBe('http://localhost:3100');
+    expect(result.components!.consoleEntrypoint).toBe('http://localhost:3100');
   });
 
   it('plugin failed means success=false regardless of console', () => {
@@ -561,7 +561,7 @@ describe('CLI verification contract', () => {
   it('cli: verified (global) — nextAction uses bare pd', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
-    expect(result.components.cli).toBe('verified');
+    expect(result.components!.cli).toBe('verified');
     expect(result.nextAction).toContain('pd runtime canary');
     expect(result.nextAction).not.toContain('global pd not on PATH');
   });
@@ -569,7 +569,7 @@ describe('CLI verification contract', () => {
   it('cli: verified_local_only — nextAction uses local shim path', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'skipped', cliLocalPath: '/home/.openclaw/extensions/principles-disciple/bin/pd' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
-    expect(result.components.cli).toBe('verified_local_only');
+    expect(result.components!.cli).toBe('verified_local_only');
     expect(result.nextAction).toContain('/home/.openclaw/extensions/principles-disciple/bin/pd');
     expect(result.nextAction).toContain('global pd not on PATH');
     expect(result.nextAction).not.toMatch(/"(?:pd|pd\.cmd)" runtime canary/);
@@ -796,10 +796,10 @@ describe('Bundle script required vs optional artifacts (Fix A)', () => {
     ];
     expect(consoleGateStarts[0], 'console gate loop missing').toBeGreaterThan(-1);
     expect(consoleGateStarts[1], 'expected exactly two CONSOLE_REQUIRED loops (gate + copy)').toBeGreaterThan(-1);
-    expect(content.indexOf('for (const item of CONSOLE_REQUIRED)', consoleGateStarts[1] + 1)).toBe(-1);
+    expect(content.indexOf('for (const item of CONSOLE_REQUIRED)', consoleGateStarts[1]! + 1)).toBe(-1);
 
-    expect(buildStart, 'console gate exits before the build can produce dist').toBeLessThan(consoleGateStarts[0]);
-    expect(consoleGateStarts[0]).toBeLessThan(consoleGateStarts[1]);
+    expect(buildStart!, 'console gate exits before the build can produce dist').toBeLessThan(consoleGateStarts[0]!);
+    expect(consoleGateStarts[0]!).toBeLessThan(consoleGateStarts[1]!);
 
     for (const dep of ['PLUGIN_REQUIRED', 'PD_CLI_REQUIRED', 'CORE_REQUIRED', 'HOST_RUNTIME_REQUIRED', 'CODEX_ADAPTER_REQUIRED']) {
       const depGateStart = content.indexOf(`for (const item of ${dep})`);
@@ -1128,9 +1128,9 @@ describe('Complete install success (F.6)', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
-    expect(result.components.plugin).toBe('verified');
-    expect(result.components.cli).toBe('verified');
-    expect(result.components.console).toBe('configured');
+    expect(result.components!.plugin).toBe('verified');
+    expect(result.components!.cli).toBe('verified');
+    expect(result.components!.console).toBe('configured');
   });
 
   it('plugin verified + cli verified_local_only + console configured = success true', () => {

@@ -504,7 +504,7 @@ describe('Real packaged install smoke test', () => {
       const skillDirs = new Set<string>();
       for (const line of listing.split('\n')) {
         const m = line.match(/^package\/plugin\/templates\/langs\/([^/]+)\/skills\/([^/]+)\//);
-        if (m && m[1] === lang) skillDirs.add(m[2]);
+        if (m && m[1] === lang) skillDirs.add(m[2]!);
       }
       expect([...skillDirs].sort(), `bundled plugin ${lang} skills`).toEqual([...APPROVED_SKILLS].sort());
     }

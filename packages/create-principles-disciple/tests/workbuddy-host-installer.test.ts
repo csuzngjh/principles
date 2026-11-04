@@ -256,7 +256,7 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     // installed_plugins.json v2 with scope user + cache installPath + version.
     const registry = readJson(registryPath(created));
     expect(registry.version).toBe(2);
-    const entry = (registry.plugins as Record<string, Record<string, unknown>>)[WORKBUDDY_PLUGIN_KEY];
+    const entry = (registry.plugins as Record<string, Record<string, unknown>>)[WORKBUDDY_PLUGIN_KEY]!;
     expect(entry.scope).toBe('user');
     expect(entry.version).toBe('0.3.0');
     expect(typeof entry.installedAt).toBe('string');
@@ -492,7 +492,7 @@ describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fal
 
     const registry = readJson(registryPath(created));
     expect(registry.version).toBe(2);
-    const entry = (registry.plugins as Record<string, Record<string, unknown>>)[WORKBUDDY_PLUGIN_KEY];
+    const entry = (registry.plugins as Record<string, Record<string, unknown>>)[WORKBUDDY_PLUGIN_KEY]!;
     expect(entry.scope).toBe('user');
     expect(entry.version).toBe('0.3.0');
     expect(typeof entry.installedAt).toBe('string');
@@ -623,7 +623,7 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
 
     // No explicit override → registry default (quiet, false) via computeEffectiveFlags.
     const effective = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, 'memory://installed-config');
-    expect(effective.flags['host.workbuddy'].enabled).toBe(false);
+    expect(effective.flags['host.workbuddy']!.enabled).toBe(false);
     expect(created.installer.detectDetails().flagOverride).toBe(true);
   });
 
@@ -648,7 +648,7 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
     // resolve through the frozen core flag contract (computeEffectiveFlags).
     const parsed = parseYaml(fs.readFileSync(governanceConfig, 'utf8')) as { features: Record<string, unknown> };
     const effective = computeEffectiveFlags(parsed.features, DEFAULT_FEATURE_FLAGS, governanceConfig);
-    expect(effective.flags['host.workbuddy'].enabled).toBe(true);
+    expect(effective.flags['host.workbuddy']!.enabled).toBe(true);
     expect(created.installer.detectDetails().flagOverride).toBe(true);
   });
 
@@ -662,7 +662,7 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
     const governanceConfig = path.join(created.home, '.workbuddy', 'pd-workspace', '.pd', 'config.yaml');
     const parsed = parseYaml(fs.readFileSync(governanceConfig, 'utf8')) as { features: Record<string, unknown> };
     const effective = computeEffectiveFlags(parsed.features, DEFAULT_FEATURE_FLAGS, governanceConfig);
-    expect(effective.flags['host.workbuddy'].enabled).toBe(false);
+    expect(effective.flags['host.workbuddy']!.enabled).toBe(false);
   });
 
   it('enable preserves comments and unrelated feature overrides in an existing config', async () => {
@@ -688,8 +688,8 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
     expect(text).toContain('enabled: true # keep me');
     expect(text).toContain('host.workbuddy:');
     const parsed = parseYaml(text) as { features: Record<string, Record<string, unknown>> };
-    expect(parsed.features.other_feature.enabled).toBe(true);
-    expect(parsed.features['host.workbuddy'].enabled).toBe(true);
+    expect(parsed.features.other_feature!.enabled).toBe(true);
+    expect(parsed.features['host.workbuddy']!.enabled).toBe(true);
   });
 
   it('enable keeps the line edit minimal on an existing entry and normalizes it with the registry-required category (R1)', () => {
@@ -737,8 +737,8 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
       const disable = setWorkbuddyGovernanceFlag(dir, false);
       expect(disable.ok).toBe(true);
       const reparsed = parseYaml(fs.readFileSync(configPath, 'utf8')) as { features: Record<string, Record<string, unknown>> };
-      expect(reparsed.features['host.workbuddy'].enabled).toBe(false);
-      expect(reparsed.features['host.workbuddy'].category).toBe('quiet');
+      expect(reparsed.features['host.workbuddy']!.enabled).toBe(false);
+      expect(reparsed.features['host.workbuddy']!.category).toBe('quiet');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -762,7 +762,7 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
       expect(outcome.ok).toBe(true);
       const text = fs.readFileSync(configPath, 'utf8');
       const parsed = parseYaml(text) as { features: Record<string, Record<string, unknown>> };
-      expect(parsed.features['host.workbuddy'].enabled).toBe(true);
+      expect(parsed.features['host.workbuddy']!.enabled).toBe(true);
       // No duplicate keys may be introduced.
       expect(text.match(/enabled: true/g)?.length).toBe(1);
       expect(text.match(/host\.workbuddy:/g)?.length).toBe(1);
@@ -886,9 +886,9 @@ describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => 
       const text = fs.readFileSync(configPath, 'utf8');
       expect(text).toContain('enabled: true # neighbor override');
       const parsed = parseYaml(text) as { features: Record<string, Record<string, unknown>> };
-      expect(parsed.features.signal_collector.enabled).toBe(true);
-      expect(parsed.features['host.workbuddy'].enabled).toBe(true);
-      expect(parsed.features['host.workbuddy'].source).toBe('owner');
+      expect(parsed.features.signal_collector!.enabled).toBe(true);
+      expect(parsed.features['host.workbuddy']!.enabled).toBe(true);
+      expect(parsed.features['host.workbuddy']!.source).toBe('owner');
       expect(readGovernanceFlagThroughProductionLoader(dir)).toBe(true);
       expect(readGovernanceFlagThroughProductionLoader(dir, 'signal_collector')).toBe(true);
     } finally {
@@ -1055,7 +1055,7 @@ describe('workbuddy adapter payload contract + installer wiring', () => {
     const workbuddy = getHostInstallers('workbuddy');
     expect(workbuddy).toHaveLength(1);
     expect(workbuddy[0]).toBeInstanceOf(WiredInstaller);
-    expect(workbuddy[0].hostId).toBe('workbuddy');
+    expect(workbuddy[0]!.hostId).toBe('workbuddy');
     const all = getHostInstallers('all');
     expect(all.map((i) => i.hostId).sort()).toEqual(['codex', 'openclaw']);
   });
@@ -1102,8 +1102,8 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.hostExplicitOff).toBe(false);
       expect(result.changed).toBe(true);
       const flags = readFlags(dir);
-      expect(flags['host.workbuddy'].enabled).toBe(true);
-      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(true);
+      expect(flags['host.workbuddy']!.enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -1116,8 +1116,8 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.ok).toBe(true);
       expect(result.hostExplicitOff).toBe(true);
       const flags = readFlags(dir);
-      expect(flags['host.workbuddy'].enabled).toBe(false);
-      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(true);
+      expect(flags['host.workbuddy']!.enabled).toBe(false);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -1130,8 +1130,8 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.ok).toBe(true);
       expect(result.keywordExplicitOff).toBe(true);
       const flags = readFlags(dir);
-      expect(flags['host.workbuddy'].enabled).toBe(true);
-      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(false);
+      expect(flags['host.workbuddy']!.enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

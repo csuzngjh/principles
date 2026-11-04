@@ -57,7 +57,7 @@ describe('same-platform dual-ABI assets', () => {
       productVersion: '2.0.0',
       sourceCommit,
       signingKeyPem,
-      previousState: null,
+      previous: null,
       archives: [
         { platform: process.platform, arch: process.arch, nodeAbi: '137', bytes: Buffer.from('abi137-bytes') },
         { platform: process.platform, arch: process.arch, nodeAbi: '147', bytes: Buffer.from('abi147-bytes') },

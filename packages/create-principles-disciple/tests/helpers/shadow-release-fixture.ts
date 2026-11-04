@@ -4,7 +4,7 @@
  * release-manager-authority tests exercise the exact same verified-metadata
  * chain (single fixture truth for the ReleaseManager surface).
  */
-import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
@@ -26,8 +26,6 @@ import { buildReleaseMetadata } from '../../src/update/release-metadata.js';
 import type { ChannelMetadata } from '../../src/update/channel-metadata.js';
 
 export const expiresFar = '2030-01-01T00:00:00Z';
-
-type KeyObject = ReturnType<typeof generateKeyPairSync>['privateKey'];
 
 function makeKeyMaterial(): { keyId: string; privateKey: KeyObject; key: Key } {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
