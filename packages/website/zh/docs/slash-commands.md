@@ -21,11 +21,11 @@ PD 通过 OpenClaw 斜杠命令与你交互。本文档列出所有可用的命�
 | [`/pd-bootstrap`](#pd-bootstrap) | `/pdb` | 设置 | 扫描本地工具链(rg/sg/fd 等) |
 | [`/pd-research`](#pd-research) | `/pdr` | 设置 | 让 Agent 调研工具升级方案 |
 | [`/pd-help`](#pd-help) | `/pdh` | 设置 | 在会话中查看命令列表 |
-| [`/pd-status`](#pd-status) | — | 监控 | 查看 GFI 疲劳指数和心智模式 |
+| [`/pd-status`](#pd-status) | — | 监控 | 查看会话、工具/钩子/RuleHost 活动与轨迹统计 |
 | [`/pd-pain`](#pd-pain) | — | 监控 | 手动报告一个痛觉信号 |
 | [`/pd-context`](#pd-context) | — | 配置 | 控制上下文注入(思维模型/项目焦点) |
 | [`/pd-focus`](#pd-focus) | — | 配置 | 管理 CURRENT_FOCUS.md(压缩/回滚) |
-| [`/pd-rollback`](#pd-rollback) | — | 回滚 | 回滚一次误判的情绪事件惩罚 |
+| [`/pd-rollback`](#pd-rollback) | — | 回滚 | 回滚一条已存储的历史情绪事件 |
 | [`/pd-principle-rollback`](#pd-principle-rollback) | — | 回滚 | 回滚一条原则并加黑名单 |
 | [`/pd-export`](#pd-export) | — | 数据 | 导出分析数据或纠错样本 |
 | [`/pd-samples`](#pd-samples) | — | 数据 | 查看和审核纠错样本 |
@@ -161,36 +161,35 @@ Capabilities saved to `.state/SYSTEM_CAPABILITIES.json`.
 
 | 子命令 | 说明 |
 |--------|------|
-| (无) | 显示 GFI 疲劳指数、心智模式、痛觉词典统计 |
-| `empathy [--today\|--week\|--session]` | 查看情绪事件统计(默认今天) |
-| `reset` | 清零当前会话的 GFI 阻力值 |
+| (无) | 显示会话计数、今日工具/钩子/RuleHost 活动、轨迹与词典统计 |
+| `empathy [--today\|--week\|--session]` | 查看情绪引擎退役前留下的历史情绪事件 |
 | `data` | 查看轨迹数据库统计(轮次、工具调用、痛觉事件等) |
 
 **输出示例(默认)**
 
 ```
-📊 Principles Disciple - 系统健康度监控
+📊 Principles Disciple - 系统状态
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💊 当前疲劳指数 (GFI): [██████░░░░░░░░░] 35/100
-🧠 当前心智模式: 🤝 安抚模式 (CONCILIATORY)
-   ↳ 状态诊断: 遇到阻力 🟡
+🧭 会话: 01a0…
+   ├─ LLM 轮次: 3
+   ├─ 注入原则: 2
+   ├─ 自动纠正: 1
+   └─ 拦截: 0
 
-🧠 痛苦进化词典: 已吸收 12 条规则
-   ↳ 累计帮您拦截了 47 次无效操作
+📅 今日 (2026-11-04)
+   ├─ 工具调用: 12(成功 10 / 失败 2)
+   ├─ 钩子运行: 30(成功 29 / 失败 1)
+   └─ RuleHost: 评估 8 · 拦截 2 · 自动纠正 1
+
+🗄 轨迹库: 161 条工具调用 · 3 个痛觉事件(详见 `/pd-status data`)
+
+🧠 痛苦进化词典: 12 条生效规则
+   ↳ 累计命中 47 次(命中不等于拦截)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**GFI 是什么?**
-
-GFI(Global Friction Index)是当前会话的"疲劳指数"。Agent 每次犯错、被纠正、被拦截都会累积 GFI。GFI 越高,Agent 越容易进入"安抚模式"——它会变得更谨慎、更慢、更倾向于道歉。
-
-- `0-20`:运转良好 🟢
-- `21-50`:轻微受挫 🟢
-- `51-80`:遇到阻力 🟡(建议反思上下文是否混乱)
-- `81-100`:极度疲劳 🔴(建议 `/pd-status reset` 或开新会话)
-
-::: tip 什么时候用 `reset`
-当 Agent 因为积累了太多"情绪包袱"而变得过度谨慎、反复道歉时,`/pd-status reset` 可以清零 GFI,让 Agent 重新轻装上阵。这不是"删除记忆",只是重置疲劳累积。
+::: info GFI 与心智模式已移除
+疲劳指数(GFI)、心智模式展示与 `/pd-status reset` 已在 GFI-COMPLETE-REMOVAL-001 中移除。会话状态改由真实的工具、钩子与 RuleHost 活动来呈现。
 :::
 
 ---
@@ -338,7 +337,7 @@ PD 的核心承诺是"可回滚"。以下命令让你撤销 PD 的决策。
 
 ### `/pd-rollback`
 
-回滚一次情绪事件(empathy event)的惩罚。当 PD 误判了一次"用户不满",导致 GFI 错误上升时,用这个命令撤销。
+回滚一条仍留在事件日志里的历史情绪事件。产生这类事件的情绪引擎已在 GFI-COMPLETE-REMOVAL-001 中退役,新会话不再产生它们;该命令保留用于清理旧版本留下的记录。
 
 **用法**
 
@@ -362,17 +361,17 @@ PD 的核心承诺是"可回滚"。以下命令让你撤销 PD 的决策。
 
 **`last` vs `<event-id>`**
 
-- `last`:回滚当前会话最近一次情绪事件(最常用)
+- `last`:回滚当前会话最近一条已存储的历史情绪事件
 - `<event-id>`:回滚指定事件(从 `/pd-status empathy` 输出中获取 ID)
 
 **回滚后会发生什么**
 
-1. 该事件的惩罚分数从 GFI 中扣除
-2. 事件标记为"已回滚"
-3. Agent 的疲劳度相应降低
+1. 该事件在事件日志中标记为"已回滚"
+2. 命令会把该事件记录的惩罚分数回显给你
+3. 原则与激活状态不受影响
 
 ::: warning
-`/pd-rollback` 必须在聊天会话中使用(依赖 sessionId)。回滚的是"情绪惩罚",不是"原则"——要回滚原则用 `/pd-principle-rollback`。
+`/pd-rollback` 必须在聊天会话中使用(依赖 sessionId)。回滚的是一条已存储的历史情绪事件,不是"原则"——要回滚原则用 `/pd-principle-rollback`。
 :::
 
 ---
@@ -405,7 +404,7 @@ PD 的核心承诺是"可回滚"。以下命令让你撤销 PD 的决策。
 
 | 命令 | 回滚对象 | 影响 |
 |------|---------|------|
-| `/pd-rollback` | 一次情绪事件 | GFI 降低,不影响原则 |
+| `/pd-rollback` | 一条历史情绪事件 | 标记为已回滚,不影响原则 |
 | `/pd-principle-rollback` | 一条原则 | 原则失效 + 模式黑名单,防止重新提议 |
 
 ---
@@ -504,28 +503,27 @@ PD 的核心承诺是"可回滚"。以下命令让你撤销 PD 的决策。
 
 ```
 1. /pd-pain Agent 没有先读文件就编辑,覆盖了我的代码
-2. /pd-status        # 查看 GFI 是否上升
+2. /pd-status        # 查看今日工具失败 / RuleHost 评估次数
 3. (等待 PD 后台诊断)
 ```
 
-### 工作流 3:Agent 疲劳过度
+### 工作流 3:确认 PD 是否真的在工作
 
-当 Agent 反复道歉、过度谨慎时:
-
-```
-1. /pd-status        # 查看 GFI,确认是否过高
-2. /pd-status reset  # 清零 GFI
-3. (继续工作,Agent 会恢复高效模式)
-```
-
-### 工作流 4:回滚误判
-
-PD 误判了一次"用户不满",GFI 错误上升:
+当输出可疑、或某条规则似乎没生效时:
 
 ```
-1. /pd-status empathy --session  # 查看当前会话的情绪事件
-2. /pd-rollback last             # 回滚最近一次误判
-3. /pd-status                    # 确认 GFI 已降低
+1. /pd-status        # 会话计数、工具/钩子失败、RuleHost 评估
+2. /pd-status data   # 轨迹库大小与最近写入
+3. (若钩子报失败,查看 ~/.openclaw/workspace/memory/logs 下的日志)
+```
+
+### 工作流 4:回滚历史情绪事件
+
+仅在旧版本存下过情绪事件、需要撤销时使用:
+
+```
+1. /pd-status empathy --session  # 查看该会话已存储的历史情绪事件
+2. /pd-rollback last             # 把最近一条标记为已回滚
 ```
 
 ### 工作流 5:审核纠错样本
@@ -562,11 +560,9 @@ PD 误判了一次"用户不满",GFI 错误上升:
 
 编辑工作区的 `.pd/config.yaml`,设置 `language: zh`。或在插件配置中设置。
 
-### GFI 一直降不下来?
+### 摩擦指数(GFI)去哪了?
 
-- 用 `/pd-status reset` 清零当前会话 GFI
-- 检查是否有持续触发痛觉的工具失败(修复根本问题)
-- 考虑 `/clear` 开新会话
+它已随心智模式展示与 `/pd-status reset` 一起在 GFI-COMPLETE-REMOVAL-001 中移除。会话的摩擦状态不再存在,因此没有可重置的东西;请用 `/pd-status` 查看真实的工具、钩子与 RuleHost 活动。
 
 ### 如何查看所有已激活的原则?
 

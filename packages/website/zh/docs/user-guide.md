@@ -122,9 +122,9 @@ PD 通过斜杠命令与 OpenClaw 集成。所有命令以 `/pd-` 开头(短别�
 | 命令 | 缩写 | 用途 |
 |------|------|------|
 | `/pd-init` | `/pdi` | 初始化工作区 |
-| `/pd-status` | — | 查看 GFI 疲劳指数和系统健康度 |
+| `/pd-status` | — | 查看会话、工具/钩子/RuleHost 活动与轨迹统计 |
 | `/pd-pain` | — | 从当前会话报告痛觉信号 |
-| `/pd-rollback` | — | 回滚误判的情绪事件惩罚 |
+| `/pd-rollback` | — | 回滚一条已存储的历史情绪事件 |
 | `/pd-principle-rollback` | — | 回滚原则并加黑名单 |
 | `/pd-context` | — | 控制上下文注入(思维模型/项目焦点) |
 | `/pd-help` | `/pdh` | 在会话中查看命令参考 |
@@ -214,10 +214,10 @@ pd console open --workspace "<你的工作区路径>"
 
 ### 回滚
 
-如果激活的原则导致了问题,你可以直接回滚情绪事件惩罚或原则:
+如果激活的原则导致了问题,你可以直接回滚原则。`/pd-rollback` 仅适用于旧版本存下的历史情绪事件(情绪引擎已在 GFI-COMPLETE-REMOVAL-001 中退役):
 
 ```bash
-/pd-rollback last             # 回滚最近一次情绪事件惩罚
+/pd-rollback last             # 把一条已存储的历史情绪事件标记为已回滚
 /pd-principle-rollback P_003  # 回滚原则并加黑名单
 ```
 
