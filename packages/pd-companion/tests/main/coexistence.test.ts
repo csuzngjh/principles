@@ -81,8 +81,22 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
   it('Console auth: token read endpoint is registered and exact-origin-guarded', () => {
     const source = src();
     expect(source).toContain("'pd-companion:get-console-token'");
-    expect(source).toContain('isSameConsoleOrigin');
+    expect(source).toContain('authorizeConsoleTokenSender');
     expect(source).toContain('event.senderFrame?.url');
+  });
+
+  it('Console auth: token configure endpoint uses the same sender+origin guard and passes the frame url', () => {
+    const source = src();
+    expect(source).toContain("'pd-companion:configure-console-token'");
+    expect(source).toContain('configureConsoleToken(event.sender.id, event.senderFrame?.url ??');
+    expect(source).toContain('authorizeConsoleTokenSender');
+  });
+
+  it('Console auth: a failed restore is reported and the ciphertext is never deleted', () => {
+    const source = src();
+    expect(source).toContain('reportConsoleTokenRestoreFailure');
+    expect(source).toContain('classifyConsoleTokenRestore');
+    expect(source).not.toContain('catch { delete state.encryptedConsoleToken; saveState();');
   });
 
   it('Console auth: token clear endpoint carries the same origin guard and refuses inherited env tokens', () => {
