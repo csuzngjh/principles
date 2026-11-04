@@ -107,10 +107,14 @@ const translations: Record<Language, Record<string, string>> = {
     // Install failure / rollback result strings (catch block). EP-11.
     rollback_no_changes: 'No changes were made — the existing install was not modified (no backup was created).',
     rollback_restored: 'Previous install has been restored.',
+    // PRI-1102: the rollback target itself can be incomplete — say so instead
+    // of reporting a restore that leaves the operator with a broken install.
+    rollback_restored_incomplete: 'Rolled back to the state that existed before this run, but that state is NOT usable — incomplete: {paths}.',
     rollback_failed: 'CRITICAL: Rollback also failed — installation state is uncertain. {restoreError} Resolve manually: check {extDir} and {backupDir}',
     next_no_changes_lock: 'A file lock blocked the backup (EPERM). Stop the OpenClaw gateway (openclaw gateway stop, or re-run with --stop-gateway) and retry.',
     next_no_changes_other: 'Fix the error above and re-run the installer. The existing install was not modified.',
     next_restored: 'Check the error above. Previous install has been restored. Fix the issue and re-run the installer.',
+    next_restored_incomplete: 'Check the error above. Rollback returned the pre-run state, but it is incomplete: {paths}. Re-run the installer so the missing components are rebuilt.',
     next_restore_failed: 'Installation and rollback both failed. Check {extDir} and {backupDir} manually. Error: {errorMsg}',
     // CP-6: fresh-install failure mid-deployment (no pre-existing install → no backup).
     rollback_fresh_cleaned: 'The install failed before activation — the partially deployed runtime files were removed. Nothing else was modified.',
@@ -227,10 +231,12 @@ const translations: Record<Language, Record<string, string>> = {
     // 安装失败 / 回滚结果字符串（catch 块）。EP-11。
     rollback_no_changes: '未做任何改动 —— 现有安装未被修改（未创建备份）。',
     rollback_restored: '已恢复到之前的安装。',
+    rollback_restored_incomplete: '已回滚到本次运行之前的状态，但该状态本身不可用 —— 不完整：{paths}。',
     rollback_failed: '严重：回滚也失败了 —— 安装状态不确定。{restoreError} 请手动处理：检查 {extDir} 和 {backupDir}',
     next_no_changes_lock: '文件锁阻塞了备份 (EPERM)。请停止 OpenClaw gateway（openclaw gateway stop，或用 --stop-gateway 重新运行）后重试。',
     next_no_changes_other: '请修复上方错误后重新运行安装器。现有安装未被修改。',
     next_restored: '请检查上方错误。已恢复到之前的安装。修复问题后重新运行安装器。',
+    next_restored_incomplete: '请检查上方错误。回滚返回的是本次运行之前的状态，但该状态不完整：{paths}。请重新运行安装器，让它重建缺失的组件。',
     next_restore_failed: '安装与回滚均失败。请手动检查 {extDir} 和 {backupDir}。错误：{errorMsg}',
     // CP-6：全新安装部署中途失败（无既有安装 → 无备份）。
     rollback_fresh_cleaned: '安装未激活即失败 —— 已移除本次部署的部分运行时文件。其余内容未被修改。',
