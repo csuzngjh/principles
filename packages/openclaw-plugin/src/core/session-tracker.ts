@@ -2,17 +2,9 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { atomicWriteFileSync } from '../utils/io.js';
-import type { PainConfig } from './config.js';
 import { SystemLogger } from './system-logger.js';
 import { TWO_HOURS_MS } from '../config/defaults/runtime.js';
-import {
-  applyFriction as coreApplyFriction,
-  applyDecay as coreApplyDecay,
-  applyRelief as coreApplyRelief,
-  classifyGfiStage,
-  DEFAULT_GFI_POLICY,
-} from '@principles/core/runtime-v2';
-import type { GfiState, GfiEvent, GfiSource } from '@principles/core/runtime-v2';
+import type { PainConfig } from './config.js';
 
 export interface TokenUsage {
     input?: number;
@@ -22,31 +14,7 @@ export interface TokenUsage {
     total?: number;
 }
 
-// ── GFI Core Kernel Adapter ──────────────────────────────────────────────────
-
-/** Convert SessionState GFI fields to GfiState for core kernel */
-function toGfiState(state: SessionState): GfiState {
-  return {
-    currentGfi: state.currentGfi ?? 0,
-    gfiBySource: (state.gfiBySource ?? {}) as Partial<Record<GfiSource, number>>,
-    lastErrorHash: state.lastErrorHash === '' ? undefined : state.lastErrorHash,
-    lastErrorSource: state.lastErrorSource || undefined,
-    consecutiveErrors: state.consecutiveErrors ?? 0,
-    lastGfiDecayAt: state.lastGfiDecayAt,
-    dailyGfiPeak: state.dailyGfiPeak,
-  };
-}
-
-/** Apply GfiState result back onto SessionState */
-function applyGfiResult(state: SessionState, result: GfiState): void {
-  state.currentGfi = result.currentGfi;
-  state.gfiBySource = { ...result.gfiBySource } as Record<string, number>;
-  state.lastErrorHash = result.lastErrorHash ?? '';
-  state.lastErrorSource = result.lastErrorSource ?? '';
-  state.consecutiveErrors = result.consecutiveErrors;
-  state.lastGfiDecayAt = result.lastGfiDecayAt;
-  state.dailyGfiPeak = result.dailyGfiPeak ?? state.dailyGfiPeak;
-}
+// GFI kernel adapter removed with GFI-COMPLETE-REMOVAL-001 (2026-11-04).
 
 export interface SessionState {
     sessionId: string;
@@ -63,20 +31,6 @@ export interface SessionState {
     cacheHits: number;
     // Track consecutive loops of similar lengths/ratios (paralysis)
     stuckLoops: number;
-    
-    // GFI - Track A: Empirical Friction
-    currentGfi: number;
-    gfiBySource?: Record<string, number>;
-    lastErrorSource?: string;
-    lastErrorHash: string;
-    consecutiveErrors: number;
-    lastGfiDecayAt?: number;  // Timestamp of last GFI decay (for time-based decay)
-    
-    // Daily statistics (persisted)
-    dailyToolCalls: number;
-    dailyToolFailures: number;
-    dailyPainSignals: number;
-    dailyGfiPeak: number;
     
 
     // PRI-534: per-session receipt summary surfaced by /pd-context status.
@@ -180,14 +134,6 @@ function persistSession(state: SessionState): void {
     
     try {
         atomicWriteFileSync(sessionPath, JSON.stringify(state, null, 2));
-        // Log successful persistence with GFI snapshot for debugging
-        if (state.currentGfi > 0) {
-            SystemLogger.log(
-                state.workspaceDir,
-                'GFI_PERSIST',
-                `Session ${state.sessionId.slice(0, 8)} persisted: GFI=${state.currentGfi.toFixed(1)}, sources=${JSON.stringify(state.gfiBySource)}`
-            );
-        }
     } catch (error) {
         logSessionTrackerWarning(`Failed to persist session ${state.sessionId}`, error);
     }
@@ -241,16 +187,6 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
             totalOutputTokens: 0,
             cacheHits: 0,
             stuckLoops: 0,
-            currentGfi: 0,
-            gfiBySource: {},
-            lastErrorSource: '',
-            lastErrorHash: '',
-            consecutiveErrors: 0,
-            lastGfiDecayAt: Date.now(),
-            dailyToolCalls: 0,
-            dailyToolFailures: 0,
-            dailyPainSignals: 0,
-            dailyGfiPeak: 0,
             injectedPrincipleIds: [],
             receiptAutoCorrects: 0,
         };
@@ -316,93 +252,12 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
 }
 
 /**
- * Tracks physical friction based on tool execution failures.
- * Delegates to core GFI kernel for scoring.
+ * Mark control activity (manual/rollback actions and successful tool outcomes)
+ * so the control plane can observe freshness without a friction score.
  */
-export function trackFriction(
-    sessionId: string,
-    deltaF: number,
-    hash: string,
-    workspaceDir?: string,
-    options?: { source?: string }
-): SessionState {
+export function trackSessionControlActivity(sessionId: string, workspaceDir?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
-
-    const source: GfiSource = (options?.source as GfiSource) ?? 'unknown';
-    const event: GfiEvent = {
-        source,
-        baseScore: deltaF,
-        hash: hash || undefined,
-    };
-
-    const coreState = toGfiState(state);
-    const nextCore = coreApplyFriction(coreState, event, DEFAULT_GFI_POLICY);
-
-    // Preserve composite source key for unattributed sources
-    if (!options?.source && hash) {
-        const val = nextCore.gfiBySource['unknown'];
-        if (val !== undefined) {
-            const s = nextCore.gfiBySource as Record<string, number>;
-            delete s['unknown'];
-            const key = `unattributed:${hash}`;
-            s[key] = (s[key] ?? 0) + val;
-        }
-    }
-
-    applyGfiResult(state, nextCore);
-
     touchActivity(state, 'control');
-
-    // Update daily stats
-    state.dailyToolFailures++;
-    state.dailyGfiPeak = Math.max(state.dailyGfiPeak, state.currentGfi);
-
-    // Schedule persistence
-    state.lastGfiDecayAt = Date.now();
-    schedulePersistence(state);
-
-    return state;
-}
-
-/**
- * Resets the friction index upon successful action.
- * Delegates to core GFI kernel for relief computation.
- */
-export function resetFriction(
-    sessionId: string,
-    workspaceDir?: string,
-    options?: { source?: string; amount?: number }
-): SessionState {
-    const state = getOrCreateSession(sessionId, workspaceDir);
-
-    if (options?.source) {
-        const coreState = toGfiState(state);
-        const nextCore = coreApplyRelief(coreState, { source: options.source, amount: options.amount ?? 0 }, Date.now(), DEFAULT_GFI_POLICY);
-        applyGfiResult(state, nextCore);
-
-        if (state.currentGfi > 0) {
-            SystemLogger.log(
-                state.workspaceDir,
-                'GFI_SLICE_RESET',
-                `Friction slice reset for ${options.source}: remaining GFI=${state.currentGfi.toFixed(1)}`
-            );
-        }
-        touchActivity(state, 'control');
-        schedulePersistence(state);
-        return state;
-    }
-
-    // Full reset via core kernel
-    const previousGfi = state.currentGfi;
-    const coreState = toGfiState(state);
-    const nextCore = coreApplyRelief(coreState, { source: 'all', amount: 100 }, Date.now(), DEFAULT_GFI_POLICY);
-    applyGfiResult(state, nextCore);
-
-    if (previousGfi > 0) {
-        SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${previousGfi.toFixed(1)}). Action successful.`);
-    }
-    touchActivity(state, 'control');
-
     schedulePersistence(state);
     return state;
 }
@@ -496,7 +351,6 @@ export function listSessions(workspaceDir?: string): SessionState[] {
         .map((state) => ({
             ...state,
             toolReadsByFile: { ...state.toolReadsByFile },
-            gfiBySource: state.gfiBySource ? { ...state.gfiBySource } : undefined,
             // PRI-899: the two paired arrays are cloned TOGETHER or not at all.
             // Pairing is by index, so handing out a live alias of one while
             // cloning the other lets a caller reorder the principle ids and
@@ -555,87 +409,4 @@ export function garbageCollectSessions(): void {
             }
         }
     }
-}
-
-/**
- * Get daily statistics summary for a session.
- */
-export function getDailySummary(sessionId: string): {
-    toolCalls: number;
-    toolFailures: number;
-    painSignals: number;
-    gfiPeak: number;
-} | null {
-    const state = sessions.get(sessionId);
-    if (!state) return null;
-    
-    return {
-        toolCalls: state.dailyToolCalls,
-        toolFailures: state.dailyToolFailures,
-        painSignals: state.dailyPainSignals,
-        gfiPeak: state.dailyGfiPeak,
-    };
-}
-
-/**
- * Reset daily statistics (call at midnight or on new day).
- */
-export function resetDailyStats(sessionId: string): void {
-    const state = sessions.get(sessionId);
-    if (state) {
-        state.dailyToolCalls = 0;
-        state.dailyToolFailures = 0;
-        state.dailyPainSignals = 0;
-        state.dailyGfiPeak = 0;
-        schedulePersistence(state);
-    }
-}
-
-/**
- * Apply time-based decay to GFI using stage-aware linear decay.
- * Delegates to core GFI kernel.
- *
- * @param sessionId - The session to decay
- * @param elapsedMinutes - Minutes since last decay
- * @returns Updated session state, or undefined if session not found or GFI is 0
- */
-export function decayGfi(sessionId: string, elapsedMinutes: number): SessionState | undefined {
-    const state = sessions.get(sessionId);
-    if (!state || state.currentGfi <= 0 || elapsedMinutes <= 0) return undefined;
-
-    const coreState = toGfiState(state);
-    const stage = classifyGfiStage(state.currentGfi, DEFAULT_GFI_POLICY);
-    const nextCore = coreApplyDecay(coreState, elapsedMinutes, DEFAULT_GFI_POLICY, stage, Date.now());
-    const previousGfi = state.currentGfi;
-    applyGfiResult(state, nextCore);
-
-    // Log if significant decay
-    const decayedAmount = previousGfi - state.currentGfi;
-    if (decayedAmount >= 1) {
-      SystemLogger.log(
-        state.workspaceDir,
-        'GFI_DECAY',
-        `GFI decayed by ${decayedAmount.toFixed(1)} (${elapsedMinutes}min). ${previousGfi.toFixed(1)} → ${state.currentGfi.toFixed(1)}`
-      );
-    }
-
-    schedulePersistence(state);
-    return state;
-}
-
-/**
- * Check if GFI decay should be applied and return elapsed minutes since last decay.
- * @param sessionId - The session to check
- * @returns Elapsed minutes since last decay, or 0 if no decay needed
- */
-export function getGfiDecayElapsed(sessionId: string): number {
-  const state = sessions.get(sessionId);
-  if (!state || state.currentGfi <= 0) return 0;
-  
-  const now = Date.now();
-  const lastDecay = state.lastGfiDecayAt || state.lastControlActivityAt || state.lastActivityAt || now;
-  const elapsedMs = now - lastDecay;
-  
-  // Return elapsed minutes (floor to whole minutes)
-  return Math.floor(elapsedMs / 60000);
 }
