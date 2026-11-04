@@ -552,6 +552,20 @@
 | 结论 | 该失败属 Windows 检出环境差异，非内容差异，已用负控证明 |
 | changeset | `packages/website` 为 private 包，`check-pr-release-intent` 只统计可发布包，本次测试基础设施改动不需要新增 changeset；发版意图由已有 `gfi-complete-removal` changeset 承担 |
 
+### 6.10 `verify:merge` 最终结果（本轮实测）
+
+整链 **`exit=0`**。该脚本是 `&&` 串联，末项 `check:runtime-writers` 已打印 `PASS`，因此链内每个顶层命令都以 0 退出。
+
+| 项 | 实测 |
+| --- | --- |
+| 顶层命令数 | 27（release-intent → generated-artifacts → error-handbook → telemetry-events → repo-hygiene → runtime-contract → docs-structure → security-baseline → workspace-tools → guard-contracts → installer release-target-matrix → core build → test:website → lint → build → pd-mcp-server → pipeline-contract → workspace-artifacts → release-artifact-hygiene → 6 个 typecheck → satellite-bundle-deps → runtime-writers） |
+| release intent | `PASS mode=normal (base=35d12815bc head=3c567ab961, intent=@principles/core:major,@principles/host-runtime:major,principles-disciple:minor,@principles/pd-cli:minor,create-principles-disciple:patch)` |
+| `test:website` | 通过（CRLF 归一化后；负控证明内容差异仍失败） |
+| `check:pipeline-contract` | 通过（#21 改写后） |
+| `check:runtime-writers` | `PASS`，1229 个一方生产文件，10 条 allowlisted |
+| 修复前状态 | ① 缺 changeset → `RELEASE_INTENT_GUARD` 红；② `test:website` 在 Windows CRLF 下红。两者均已修复并复跑 |
+| 日志 | `.tmp/gfi-removal/verify-merge-final.log`（不入库） |
+
 ### 6.11 Stage 8 追加发现（全量套件比 8 组更宽）
 
 `npm test -w <pkg>`（全量）比 8 组对照多出 8 个陈旧测试文件；逐条依据见 `docs/reports/GFI_RESIDUAL_SCAN.md` §6。要点：

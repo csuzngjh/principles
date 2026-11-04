@@ -60,5 +60,5 @@
 
 ## 6. 门禁
 
-- `verify:merge`：见台账 §6.10（33 步逐项结果）。
+- `verify:merge`：**整链 `exit=0`**（27 个顶层命令，末项 `check:runtime-writers` PASS）。修复前的两处红因（缺 changeset、website CRLF）均已修复并复跑。
 - 结论：**PASS_WITH_LIMITATIONS**（能力无退化；限制为文档滞后 + 环境性测试失败，均与本任务无关且有证据）。
