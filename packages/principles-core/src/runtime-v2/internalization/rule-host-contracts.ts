@@ -40,7 +40,6 @@ export interface RuleHostInput {
   };
   session: {
     sessionId?: string;
-    currentGfi: number;
   };
   evolution: {
     epTier: number;
