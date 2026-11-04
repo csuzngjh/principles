@@ -49,7 +49,7 @@
 | 31 | §4.5 `/pd-status` 指标全部来自真实数据源 | 当前 · `commands/pain.ts:120-141` | session 字段 / `eventLog.getDailyStats` / `trajectory.getDataStats` / `dictionary.getStats` / `getEmpathyStats` | **正确**【实测】（逐项见 §2.12） | — |
 | 32 | §4.5 不新增表/账本、不编造心理状态、命中≠拦截 | 当前 · `commands/pain.ts:120-150` 及后续输出 | 输出显式区分「规则命中」与「拦截」 | **正确**【实测】 | — |
 | 33 | §5.1 删除 GFI flag 与生命周期记录 | 基线 · `feature-flag-contract.ts:232`（`{id:'gfi',category:'quiet',enabled:false}`）；`create-principles-disciple/src/mvp-config.ts:10`（`MVP_QUIET_FLAGS=['gfi']`） | 已改为 `gone` tombstone；`MVP_QUIET_FLAGS=[]`，`MVP_GONE_FLAGS` 含 `gfi` | **部分正确（实施偏离）**【实测】 | SPEC 行 741「不保留 gone tombstone」非唯一方案；需 Owner 裁定（见 §2.11） |
-| 34 | §5.2 删除 `scores.tool_failure_friction / thresholds.pain_trigger / severity_thresholds.high` 与 `gfi_gate` | 基线 · `core/config.ts:43,57,64,83,116,127,134,153`；模板 `templates/pain_settings.json:70` | 已删除；`cognitive_paralysis_input` 保留 | **正确**【实测】 | — |
+| 34 | §5.2 删除 `scores.tool_failure_friction / thresholds.pain_trigger / severity_thresholds.high` 与 `gfi_gate` | 基线 · `core/config.ts:43,57,64,83,116,127,134,153`；模板 `templates/pain_settings.json:70` | 运行时代码已删除（`cognitive_paralysis_input` 保留）；**但 shipped 模板当时仍残留 4 组键**，于分批存档阶段发现，已由 `c7ab619e9`（flags/config 层）清理 | **正确（实施曾遗漏，已补）**【实测】 | 误判原因：审计当时只 grep 了 `src/`，未覆盖 `packages/openclaw-plugin/templates/`；此后审计须把 shipped 模板纳入检索范围 |
 | 35 | §5.3 清理真实工作区 `pain_settings.json` / `.pd/config.yaml` | 当前 worktree 无 `.state`、`.pd` 目录；任务书 §1 禁止修改 Owner 真实 `.state` | 未执行真实文件清理 | **错误（超范围）**【实测】 | 修订为「加载期容忍未知字段 + 文档提示」，删除对真实 state 的强制清理要求 |
 | 36 | §6.1 `TRAJECTORY_SCHEMA_VERSION = 1` → 2，DDL 去 gfi 列 | 基线 · `trajectory-schema.ts:39`（`=1`）、`:90`（DDL 含 `gfi_before/gfi_after`）；当前 · `:39`（`=2`）、`:119`（DDL 已无 gfi） | 已升 v2 并改 canonical DDL | **正确**【实测】 | — |
 | 37 | §6.1 幂等 GFI 列删除迁移，覆盖 Profile A / B / C | 当前 · `trajectory-schema.ts:86-105`（`migrateLegacyGfiSchema`，`pragma_table_info` 检查后 `DROP COLUMN`）、`:241`（仅由 `applyTrajectorySchemaBase` 调用） | 迁移本身幂等；**host-runtime 裸库路径只在「无 tool_calls 表」时才跑 base schema（`production-pain-evidence.ts:351-352`），未调用迁移** | **部分正确（实施缺口）**【实测】 | 见 §3 D1（P1）：在 host-runtime 裸库 open 链补一次 `migrateLegacyGfiSchema(db)`（下一块修，需 Owner 授权后才动生产代码） |
@@ -156,6 +156,7 @@
 | D4 | `GateBlockItem.gateType='gfi'` 无任何构造者/读取者 | 基线 · `pd-console/src/server/types/index.ts:105-106` 仅定义；全仓无引用 | **P3** | 删除安全（已删） |
 | D5 | 旧审计 §7.3「命令名不同」结论不成立 | SPEC 行 630 写 `pd runtime health gfi`；基线 · `pd-cli/src/index.ts:781` `.command('gfi')` 挂在该父命令下 | **P3（文档）** | 已在本文 #27 更正 |
 | D6 | `ToolCallObservation.painScore` 是死字段（非 GFI 字段） | 基线 · `after-tool-call-types.ts:60` 无读取者 | **P3** | 已随 `computePainScore` 删除 |
+| D7 | 审计证据范围曾漏掉 shipped 模板，导致 #34 误判「已删」 | 基线 · `packages/openclaw-plugin/templates/pain_settings.json:4,13,20-24,70-93` 实际残留；`git grep` 只覆盖 `src/` | **P2（流程）** | 已由 `c7ab619e9` 清理；后续审计默认检索 `src/` + `templates/` + `scripts/` |
 
 ---
 
