@@ -80,8 +80,9 @@ function tableExists(db: Database, name: string): boolean {
  * pending empathy confirmations that the retired correction collector created.
  *
  * Idempotent; safe on fresh databases. Called from applyTrajectorySchemaBase
- * (OpenClaw / core pain-record paths) and by the host-runtime raw-DB ensure
- * chain (Codex / WorkBuddy paths that never apply the base schema).
+ * and explicitly by the host-runtime raw-DB open chains
+ * (production-pain-evidence.ts), which historically opened trajectory.db
+ * without applying the base schema.
  */
 export function migrateLegacyGfiSchema(db: Database): void {
   if (tableExists(db, 'tool_calls')) {

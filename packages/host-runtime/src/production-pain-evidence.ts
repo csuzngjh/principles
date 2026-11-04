@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
   applyTrajectorySchemaBase,
+  migrateLegacyGfiSchema,
   sanitizeToolParams,
   sanitizeValue,
 } from '@principles/core/runtime-v2';
@@ -237,6 +238,11 @@ function hasCanonicalSchema(db: Database.Database): boolean {
     for (const [name, type] of Object.entries(required)) {
       if (actual.get(name) !== type) return false;
     }
+    // GFI-COMPLETE-REMOVAL-001: a v1 database still carrying the retired GFI
+    // columns is NOT canonical, even though every required column is present.
+    // Without this check the raw open path judged v1 as canonical and the
+    // physical schema stayed at v1 forever.
+    if (table === 'tool_calls' && (actual.has('gfi_before') || actual.has('gfi_after'))) return false;
   }
   const indexes: unknown[] = db.prepare('PRAGMA index_list(pain_events)').all();
   const canonical = indexes.find((row) => pragmaField(row, 'name') === 'idx_pain_events_canonical_pain_id');
@@ -316,7 +322,7 @@ export type VerifiedToolOutcomeStatus =
   | { status: 'updated'; id: number }
   | { status: 'inserted'; id: number }
   | { status: 'skipped_final'; id: number; reason: 'outcome_already_final' }
-  | { status: 'unavailable'; reason: 'trajectory_db_not_found' | 'trajectory_write_failed' | `trajectory_write_failed:${string}` };
+  | { status: 'unavailable'; reason: 'trajectory_db_not_found' | 'trajectory_write_failed' | `trajectory_write_failed:${string}` | `trajectory_migration_failed:${string}` };
 
 /**
  * SPEC-CODEX-PAIN-CLOSURE-001 CR-01: upgrade the live-hook observation of a
@@ -350,6 +356,17 @@ export function recordVerifiedToolOutcomes(args: {
     // with core's trajectory-schema).
     const hasToolCalls = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tool_calls'").get() !== undefined);
     if (!hasToolCalls) applyTrajectorySchemaBase(db);
+    // GFI-COMPLETE-REMOVAL-001: the raw open path never applied the canonical
+    // migration for a pre-existing (v1) tool_calls table. Fail LOUDLY here:
+    // returning statuses that look successful while the legacy GFI columns
+    // survive would hide the bug (rc-9).
+    try {
+      migrateLegacyGfiSchema(db);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      const reason: `trajectory_migration_failed:${string}` = `trajectory_migration_failed:${detail}`;
+      return args.outcomes.map(() => ({ status: 'unavailable', reason }));
+    }
     ensureToolCallsToolUseIdColumn(db);
     ensureToolCallsHostKindColumn(db);
     // Review R3/P2: a KNOWN host's call identity includes its attribution.
@@ -386,7 +403,12 @@ export function recordVerifiedToolOutcomes(args: {
         }
         upsertSession.run(args.sessionId, createdAt, createdAt);
         const sanitizedParams = sanitizeToolParams(input.params ?? {}, args.workspaceDir);
-        const info = insertVerified.run(args.sessionId, input.toolName, finalOutcome, null, input.exitCode, null, null, null, null, stable(sanitizedParams), boundedPreview, createdAt, input.toolUseId, args.hostKind ?? null);
+        // GFI-COMPLETE-REMOVAL-001 follow-up: commit 62e2cab15 dropped the two
+        // retired GFI columns from this INSERT but left their placeholder
+        // arguments behind, so every verified-outcome write threw
+        // "Too many parameter values were provided". Keep the values aligned
+        // with the 12 remaining columns.
+        const info = insertVerified.run(args.sessionId, input.toolName, finalOutcome, null, input.exitCode, null, null, stable(sanitizedParams), boundedPreview, createdAt, input.toolUseId, args.hostKind ?? null);
         results.push({ status: 'inserted', id: Number(info.lastInsertRowid) });
       }
     })();
@@ -448,6 +470,17 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       ensureToolCallsToolUseIdColumn(db);
       ensureToolCallsProjectDirColumn(db);
       ensureToolCallsHostKindColumn(db);
+      // GFI-COMPLETE-REMOVAL-001: v1 databases are migrated before the canonical
+      // verdict; a failed migration is reported by name and never downgraded
+      // into "canonical" (rc-9 — no silent fallback).
+      try {
+        migrateLegacyGfiSchema(db);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+        db.close();
+        db = undefined;
+        return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_migration_failed:${detail}`], metadata: { outcome: 'unavailable', duplicate: false, nextAction: 'repair the selected PD trajectory database (legacy GFI columns could not be dropped), then retry' } };
+      }
       if (!hasCanonicalSchema(db)) {
         db.close();
         db = undefined;

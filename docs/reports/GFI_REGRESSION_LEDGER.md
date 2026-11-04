@@ -466,4 +466,48 @@
 - 同文件 `:375` — `queueUnconfirmedForBatch({ terms: matchedTerms, suggestedType: 'correction' })`（入队持久化 Stage1 命中词）
 - empathy 类别不可达的结构证据：`13c067e2f` 删除 `UnifiedKeyword.category` / `correctionTermsOf` / `EMPATHY_SEED_OVERLAY`；`governance-signal-admission.ts` 的 `projectLearnedStore` 只产出纠正词；`signal-keyword-store.test.ts:118` 断言 seed 无 `搞什么`。
 
+---
+
+## 块 6 执行记录（G1 修复收尾 + P1 迁移 + verify:merge 转绿）
+
+### 6.1 G1 修复后 8 组累计对照（副本 `current-g1fix` = `51521ebfb`，逐组前台实测）
+
+| 组 | 包 | 结果 |
+| --- | --- | --- |
+| c1 | openclaw-plugin | 46 / 46 |
+| c2a | principles-core | 25 / 25 |
+| c2b | openclaw-plugin | 10 / 10 |
+| c3a | principles-core | 17 / 17 |
+| c3b | openclaw-plugin | 77 / 77 |
+| c4 | openclaw-plugin | 10 / 10 |
+| c5 | principles-core | 175 / 175 |
+| c6a | openclaw-plugin | 48 / 48 |
+| c6b | principles-core | 2 / 2 |
+| c7 | openclaw-plugin | 18 / 18 |
+| c8a | openclaw-plugin | 60 / 60 |
+| c8b | principles-core | 80 / 80 |
+| **合计** | | **568 / 568，0 failed（与基线逐组一致，无数字漂移）** |
+
+### 6.2 `verify:merge` 修复前后状态（实测，非推断）
+
+| 阶段 | 结果 | 证据 |
+| --- | --- | --- |
+| 修复前（`current-head4` = `3bb70c16d`） | **红** | 第一个失败步骤是 `RELEASE_INTENT_GUARD`：`mode=normal (base=35d12815bc head=51521ebfb6, reproduction rejected)` —— 分支 20 个提交未声明发版意图（缺 changeset）。日志 `.tmp/gfi-removal/verify-merge-before.log` |
+| 修复前，19 条陈旧测试是否造成红？ | **否（实测更正）** | `verify:merge` 不包含这 19 条所在测试文件；`current-head4` 副本四个 typecheck（core / pd-cli / openclaw-plugin / pd-console）全部 `exit=0`。此前把「19 条 → 门禁红」当作因果是**错的**，真实红因是 release intent。日志 `.tmp/gfi-removal/verify-typecheck-before.log` |
+| 修复后 | 待本轮提交后在工作树重跑（见 §6.4） | — |
+
+### 6.3 P1（老库未真正迁移）处置与新增发现
+
+| 项 | 内容 |
+| --- | --- |
+| 前置 1：SQLite 版本 | `better-sqlite3` 13.0.3 → `sqlite_version = 3.53.4`（≥ 3.35，`ALTER TABLE … DROP COLUMN` 可用） |
+| 修 1（导出） | `packages/principles-core/src/runtime-v2/index.ts` 新增 `migrateLegacyGfiSchema` / `TRAJECTORY_SCHEMA_VERSION` 等导出 |
+| 修 2（判定） | `production-pain-evidence.ts` `hasCanonicalSchema`：`tool_calls` 仍含 `gfi_before`/`gfi_after` 时返回 `false`（不能把 v1 库当 canonical） |
+| 修 3（两条裸库链） | `recordVerifiedToolOutcomes` 与 `createProductionPainEvidenceHandler` 在 `hasCanonicalSchema` 之前调用 `migrateLegacyGfiSchema`；失败返回 `trajectory_migration_failed:<reason>` + `nextAction`（链 A `status:'unavailable'`、链 B `decision:'observe'`）。**无静默降级** |
+| 新增发现（阻断级） | `62e2cab15` 从 `INSERT INTO tool_calls` 列清单删掉 `gfi_before/gfi_after`，但 `.run(...)` 仍多传两个 `null` → 生产 `recordVerifiedToolOutcomes` 每次写入都抛 `Too many parameter values were provided`。本块按 12 列对齐修正（P1 同日同文件内，属移除自身回归，非顺手改动） |
+| 新增发现（陈旧测试 #20） | `production-host-runtime.test.ts:482` 断言 `input.session.currentGfi`；`2bae37491`（SPEC §3.8）已把 `currentGfi` 移出 Rule Host 输入 → 按 (c) 类改写为 `evolution.epTier` + `derived.bashRisk`（生产仍转发，见 `production-rulehost-gate.ts:556-563`），保留 `decision:'deny'` 精确断言 |
+| 陈旧夹具（9 个 host-runtime 测试文件） | 因 `hasCanonicalSchema` 变严，v1 夹具（含 `gfi_before/gfi_after`）被判非法 → 夹具改为 canonical v2 形状（`recovery-dedup-host-attribution.test.ts` 两处 INSERT 同步去掉两列与两个 `null`）。不改生产代码语义 |
+| P1 复测 | `packages/host-runtime` 全包 **652 / 652 passed，exit=0**（修前该包 71 failed；never-in-scope 的 #20 亦清零） |
+
+
 

@@ -1762,6 +1762,7 @@ export type {
 
 export {
   applyTrajectorySchemaBase,
+  migrateLegacyGfiSchema,
   TRAJECTORY_SCHEMA_VERSION,
   TRAJECTORY_TABLES,
 } from './trajectory-schema.js';
