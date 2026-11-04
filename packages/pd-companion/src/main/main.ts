@@ -31,7 +31,12 @@ import {
   LaunchResultError,
   type ConsoleOpenResult,
 } from '../lib/launch-result.js';
-import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
+import { buildConsoleTokenStatus, type ConsoleTokenStatus } from '../lib/console-origin.js';
+import {
+  authorizeConsoleTokenSender,
+  classifyConsoleTokenRestore,
+  type ConsoleTokenRestoreDecision,
+} from '../lib/console-token-policy.js';
 import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
 import { judgeVersionChangeLaunch, killManagedServerAndWait, ownedManagedHandle, realProcessOps, type ManagedServerHandle } from '../lib/version-handover.js';
@@ -957,20 +962,78 @@ function restartFromTray(): boolean {
 }
 
 function restoreEncryptedConsoleToken(): void {
-  if (state.encryptedConsoleToken === undefined || !safeStorage.isEncryptionAvailable()) return;
-  try { process.env.PD_CONSOLE_TOKEN = safeStorage.decryptString(Buffer.from(state.encryptedConsoleToken, 'base64')); }
-  catch { delete state.encryptedConsoleToken; saveState(); log('console_token_restore_failed'); }
+  const decision = classifyConsoleTokenRestore({
+    encryptedToken: state.encryptedConsoleToken,
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    decrypt: (ciphertext) => safeStorage.decryptString(Buffer.from(ciphertext, 'base64')),
+  });
+  if (decision.status === 'restored' && decision.token !== undefined) {
+    process.env.PD_CONSOLE_TOKEN = decision.token;
+    return;
+  }
+  if (decision.status === 'encryption_unavailable' || decision.status === 'decrypt_failed') {
+    reportConsoleTokenRestoreFailure(decision);
+  }
+  // Every failure path keeps the ciphertext: it is the Owner's recovery
+  // evidence, never silently discarded.
+}
+
+let consoleTokenRestoreFailureReported = false;
+
+/**
+ * Owner-facing report for a saved token that could not be restored. Without
+ * this, a corrupt key store or undecryptable ciphertext would silently
+ * downgrade the console to no-auth. One notification per launch; the log
+ * record carries the reason either way.
+ */
+function reportConsoleTokenRestoreFailure(decision: ConsoleTokenRestoreDecision): void {
+  log('console_token_restore_failed', { reason: decision.status, detail: decision.detail ?? null });
+  if (consoleTokenRestoreFailureReported) return;
+  consoleTokenRestoreFailureReported = true;
+  if (!Notification.isSupported()) {
+    log('notification_unsupported', { event: 'console_token_restore_failed', reason: decision.status });
+    return;
+  }
+  const notification = new Notification({
+    title: 'PD Companion — Console token not restored',
+    body: decision.nextAction ?? 'The saved Console token could not be restored. The encrypted token was kept.',
+    icon: nativeImage.createFromPath(iconPath()),
+  });
+  notification.on('click', () => showWindow());
+  notification.show();
+  log('notified_console_token_restore_failed', { reason: decision.status });
 }
 
 interface ConsoleTokenConfigurationResult {
   persisted: boolean;
   restartRequested: boolean;
-  reason?: 'invalid_input' | 'encryption_unavailable' | 'encryption_failed' | 'state_save_failed' | 'external_console_attached';
+  reason?: 'invalid_sender' | 'invalid_input' | 'encryption_unavailable' | 'encryption_failed' | 'state_save_failed' | 'external_console_attached';
   nextAction?: string;
 }
 
-function configureConsoleToken(senderId: number, value: unknown): ConsoleTokenConfigurationResult {
-  if (senderId !== mainWindow?.webContents.id || typeof value !== 'string' || value.trim().length === 0) {
+/**
+ * Same sender + exact-origin guard as get/clear. A write path must never
+ * mutate the persisted token, the runtime env, or restart the console for a
+ * page that is not the console the supervisor currently serves.
+ */
+function configureConsoleToken(senderId: number, senderUrl: string, value: unknown): ConsoleTokenConfigurationResult {
+  const current = supervisor.getState();
+  const sender = authorizeConsoleTokenSender({
+    senderId,
+    mainWindowWebContentsId: mainWindow?.webContents.id,
+    senderUrl,
+    consoleRunning: current.kind === 'running',
+    consoleUrl: current.kind === 'running' ? current.url : undefined,
+  });
+  if (!sender.authorized) {
+    return {
+      persisted: false,
+      restartRequested: false,
+      reason: 'invalid_sender',
+      nextAction: 'Use the Console window opened by PD Companion.',
+    };
+  }
+  if (typeof value !== 'string' || value.trim().length === 0) {
     return { persisted: false, restartRequested: false, reason: 'invalid_input', nextAction: 'Enter a non-empty Console token.' };
   }
   if (!safeStorage.isEncryptionAvailable()) {
@@ -985,7 +1048,6 @@ function configureConsoleToken(senderId: number, value: unknown): ConsoleTokenCo
   }
   const previousEncryptedToken = state.encryptedConsoleToken;
   const previousProcessToken = process.env.PD_CONSOLE_TOKEN;
-  const current = supervisor.getState();
   state.encryptedConsoleToken = encryptedToken;
   if (!saveState()) {
     if (previousEncryptedToken === undefined) delete state.encryptedConsoleToken;
@@ -1020,9 +1082,15 @@ function configureConsoleToken(senderId: number, value: unknown): ConsoleTokenCo
  * senders get "no credential" and the login form falls back to manual entry.
  */
 function getConsoleToken(senderId: number, senderUrl: string): ConsoleTokenStatus {
-  if (senderId !== mainWindow?.webContents.id) return { available: false };
   const s = supervisor.getState();
-  if (s.kind !== 'running' || !isSameConsoleOrigin(senderUrl, s.url)) return { available: false };
+  const sender = authorizeConsoleTokenSender({
+    senderId,
+    mainWindowWebContentsId: mainWindow?.webContents.id,
+    senderUrl,
+    consoleRunning: s.kind === 'running',
+    consoleUrl: s.kind === 'running' ? s.url : undefined,
+  });
+  if (!sender.authorized) return { available: false };
   return buildConsoleTokenStatus(process.env.PD_CONSOLE_TOKEN);
 }
 
@@ -1054,11 +1122,15 @@ function inheritedEnvTokenActive(companionState: CompanionState, envToken: strin
  * that shares the window's webContents.
  */
 function clearConsoleToken(senderId: number, senderUrl: string): ConsoleTokenClearResult {
-  if (senderId !== mainWindow?.webContents.id) {
-    return { cleared: false, restartRequested: false, reason: 'invalid_sender', nextAction: 'Use the Console window opened by PD Companion.' };
-  }
   const current = supervisor.getState();
-  if (current.kind !== 'running' || !isSameConsoleOrigin(senderUrl, current.url)) {
+  const sender = authorizeConsoleTokenSender({
+    senderId,
+    mainWindowWebContentsId: mainWindow?.webContents.id,
+    senderUrl,
+    consoleRunning: current.kind === 'running',
+    consoleUrl: current.kind === 'running' ? current.url : undefined,
+  });
+  if (!sender.authorized) {
     return { cleared: false, restartRequested: false, reason: 'invalid_sender', nextAction: 'Use the Console window opened by PD Companion.' };
   }
   const previousEncryptedToken = state.encryptedConsoleToken;
@@ -1390,7 +1462,7 @@ if (!app.requestSingleInstanceLock()) {
     stateFilePath = path.join(userData, 'companion-state.json');
      loadState();
      restoreEncryptedConsoleToken();
-     ipcMain.handle('pd-companion:configure-console-token', (event, token: unknown) => configureConsoleToken(event.sender.id, token));
+     ipcMain.handle('pd-companion:configure-console-token', (event, token: unknown) => configureConsoleToken(event.sender.id, event.senderFrame?.url ?? '', token));
      ipcMain.handle('pd-companion:get-console-token', (event) => getConsoleToken(event.sender.id, event.senderFrame?.url ?? ''));
      ipcMain.handle('pd-companion:clear-console-token', (event) => clearConsoleToken(event.sender.id, event.senderFrame?.url ?? ''));
 
