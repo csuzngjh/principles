@@ -29,11 +29,11 @@ describe('Journey 12 — fresh install 默认面 (Outcome B)', () => {
     // PRI-797: signalCollector agent 默认启用——语义确认链不再依赖手工开闸；
     // 未配置 API 端点时降级为关键词-only 并以 WARN + doctor needs_setup 显性提醒。
     const agents = (parsed.internalAgents as { agents: Record<string, { enabled: boolean; runtimeProfile: string }> }).agents;
-    expect(agents.signalCollector.enabled).toBe(true);
+    expect(agents.signalCollector!.enabled).toBe(true);
     // 默认 profile 是 pi-ai 型且 provider 为空 → 该状态下 classifier needs_setup（WARN 可见）
     const profiles = parsed.runtimeProfiles as Record<string, { type: string; provider?: string }>;
-    expect(profiles['pd.default'].type).toBe('pi-ai');
-    expect(profiles['pd.default'].provider ?? '').toBe('');
+    expect(profiles['pd.default']!.type).toBe('pi-ai');
+    expect(profiles['pd.default']!.provider ?? '').toBe('');
 
     // installer 不显式禁用修复相关 flag → registry 默认生效 (层 2 证据:
     // principles-core feature-flag-contract.test.ts 断言三者默认 ON)
@@ -57,6 +57,6 @@ describe('Journey 12 — fresh install 默认面 (Outcome B)', () => {
     const parsed = yaml.load(yamlContent) as Record<string, unknown>;
     const agents = (parsed.internalAgents as { agents: Record<string, { enabled: boolean }> }).agents;
     // PRI-797: 默认启用——provider 就绪时语义确认链开箱即用，无需手工开闸
-    expect(agents.signalCollector.enabled).toBe(true);
+    expect(agents.signalCollector!.enabled).toBe(true);
   });
 });

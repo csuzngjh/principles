@@ -161,7 +161,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     expect(transitions.map((t) => t.to)).toEqual([
       'planned', 'downloaded', 'verified', 'staged', 'probed', 'activated', 'confirmed',
     ]);
-    expect(transitions[0].from).toBeNull();
+    expect(transitions[0]!.from).toBeNull();
     for (const t of transitions) {
       expect(t.transactionId).toBe(outcome.transactionId);
       expect(t.releaseId).toBe(fixture.releaseId);
@@ -175,7 +175,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
     // the fromVersion truth for Owner-facing history reconciliation. Later
     // transitions carry target identity only (the installer's writer never
     // re-states it).
-    expect(transitions[0].preUpdateProductVersion).toBe('1.222.0');
+    expect(transitions[0]!.preUpdateProductVersion).toBe('1.222.0');
     expect(transitions.slice(1).every((t) => t.preUpdateProductVersion === undefined)).toBe(true);
   });
 
@@ -255,7 +255,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
 
     const journalFiles = fs.readdirSync(path.join(fixture.pdHome, 'transactions')).filter((f) => f.startsWith('update-'));
     expect(journalFiles).toHaveLength(1);
-    const transitions = readTransactionJournal(path.join(fixture.pdHome, 'transactions', journalFiles[0]));
+    const transitions = readTransactionJournal(path.join(fixture.pdHome, 'transactions', journalFiles[0]!));
     expect(transitions.map((t) => t.to)).toEqual(['planned', 'downloaded', 'verified', 'staged', 'rolled_back']);
   });
 
@@ -276,7 +276,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
 
     const journalFiles = fs.readdirSync(path.join(fixture.pdHome, 'transactions')).filter((f) => f.startsWith('update-'));
     expect(journalFiles).toHaveLength(1);
-    const transitions = readTransactionJournal(path.join(fixture.pdHome, 'transactions', journalFiles[0]));
+    const transitions = readTransactionJournal(path.join(fixture.pdHome, 'transactions', journalFiles[0]!));
     expect(transitions.map((t) => t.to)).toEqual(['planned', 'downloaded', 'verified', 'failed']);
   });
 
@@ -322,12 +322,12 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
 
       const error = await manager.apply({ workspaceDir: fixture.pdHome }).then(
         () => { throw new Error('apply should have failed'); },
-        (e: unknown) => e as ReleaseManagerError,
+        (e: unknown) => e as unknown as ReleaseManagerError,
       );
       expect(error.reason).toBe('apply_failed');
       const journalFiles = fs.readdirSync(path.join(fixture.pdHome, 'transactions')).filter((f) => f.startsWith('update-'));
       expect(journalFiles).toHaveLength(1);
-      const transactionId = journalFiles[0].replace(/\.jsonl$/, '');
+      const transactionId = journalFiles[0]!.replace(/\.jsonl$/, '');
       expect(fs.existsSync(path.join(fixture.pdHome, 'staging', transactionId))).toBe(false);
     });
 
@@ -357,7 +357,7 @@ describe('ReleaseManager.apply — orchestration through installer + journal (PR
         ? fs.readdirSync(path.join(fixture.pdHome, 'staging'))
         : [];
       expect(stagingDirs.length).toBe(1);
-      expect(fs.existsSync(path.join(fixture.pdHome, 'staging', stagingDirs[0], 'release-asset.tar.gz'))).toBe(true);
+      expect(fs.existsSync(path.join(fixture.pdHome, 'staging', stagingDirs[0]!, 'release-asset.tar.gz'))).toBe(true);
     });
   });
 

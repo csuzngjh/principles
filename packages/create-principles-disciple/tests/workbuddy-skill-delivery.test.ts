@@ -188,7 +188,7 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     // move a release PR makes) and re-run the installer over the existing
     // cache. nextVersion stays within the whitelisted X.Y.Z shape.
     const parts = lab.shippedVersion.split('.').map((part) => Number(part));
-    const nextVersion = `${parts[0]}.${parts[1] + 1}.0`;
+    const nextVersion = `${parts[0]!}.${parts[1]! + 1}.0`;
     versionedCacheDir(lab.paths.cachePluginRoot, nextVersion); // validates the shape before it names a directory
     const manifest = JSON.parse(fs.readFileSync(lab.manifestPath, 'utf8')) as { version: string };
     manifest.version = nextVersion;

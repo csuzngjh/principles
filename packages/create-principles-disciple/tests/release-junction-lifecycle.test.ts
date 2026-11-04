@@ -47,7 +47,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { extract as extractTar } from 'tar';
-// @ts-expect-error - JSDoc-typed .mjs helper; the interface intent lives in the module
 import {
   gateBuildPublicationInternal,
   gateRestampPayload,

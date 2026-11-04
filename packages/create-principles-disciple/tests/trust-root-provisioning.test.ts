@@ -31,7 +31,7 @@ import { buildReleasePublication, verifySigningKeyMatchesPinnedRoot } from '../s
 import { ReleaseManager } from '../src/update/release-manager.js';
 import { ensurePdHomeLayout, resolvePdHomePaths, writeInstallConfig } from '../src/update/install-layout.js';
 import { writeActiveRecord } from '../src/update/transaction-journal.js';
-import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial, publicKeyPemOf } from './helpers/trust-material.js';
+import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial, publicKeyPemOf, type TestTrustMaterial } from './helpers/trust-material.js';
 
 const PUBLICATION_EXPIRY = '2030-01-01T00:00:00Z';
 
@@ -291,7 +291,7 @@ describe('provisioned anchor × real ReleaseManager verification (PRI-732 end-to
     const baseUrl = await servePublication(publication.files);
     const manager = new ReleaseManager({ pdHome: paths.home, metadataBaseUrl: baseUrl });
     const check = await manager.check('stable');
-    expect(check.candidate.productVersion).toBe('9.9.9');
+    expect(check.candidate!.productVersion).toBe('9.9.9');
   });
 
   it('refuses metadata signed by a different key than the pinned anchor', async () => {
