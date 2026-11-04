@@ -3,7 +3,7 @@ import {
   resolveLlmClassificationPayload,
   buildLlmPrompt,
 } from '../llm-stage.js';
-import { SignalClassificationOutputV1Schema } from '../types.js';
+import { SignalClassificationOutputV2Schema } from '../types.js';
 import { Value } from '@sinclair/typebox/value';
 
 /**
@@ -40,10 +40,10 @@ describe('resolveLlmClassificationPayload', () => {
 
   it('legacy: raw JSON string payload parses via legacy_string', () => {
     const result = resolveLlmClassificationPayload(
-      '{"is_feedback":true,"type":"empathy","confidence":0.8,"reason":"挫败情绪"}',
+      '{"is_feedback":true,"type":"correction","confidence":0.8,"reason":"纠正"}',
     );
     expect(result.path).toBe('legacy_string');
-    expect(result.value?.type).toBe('empathy');
+    expect(result.value?.type).toBe('correction');
   });
 
   it('legacy: {output: string} envelope parses via legacy_envelope', () => {
@@ -92,9 +92,9 @@ describe('resolveLlmClassificationPayload', () => {
   });
 });
 
-describe('SignalClassificationOutputV1Schema (registered as signal-classification-output-v1)', () => {
+describe('SignalClassificationOutputV2Schema (registered as signal-classification-output-v2)', () => {
   it('接受 prompt 承诺的精确形状', () => {
-    const ok = Value.Check(SignalClassificationOutputV1Schema, {
+    const ok = Value.Check(SignalClassificationOutputV2Schema, {
       is_feedback: true,
       type: 'correction',
       confidence: 0.97,
@@ -104,14 +104,14 @@ describe('SignalClassificationOutputV1Schema (registered as signal-classificatio
   });
 
   it('拒绝缺字段 / 错类型 / 越界 confidence', () => {
-    expect(Value.Check(SignalClassificationOutputV1Schema, { is_feedback: true })).toBe(false);
-    expect(Value.Check(SignalClassificationOutputV1Schema, {
+    expect(Value.Check(SignalClassificationOutputV2Schema, { is_feedback: true })).toBe(false);
+    expect(Value.Check(SignalClassificationOutputV2Schema, {
       is_feedback: 'true', type: 'correction', confidence: 0.5, reason: 'x',
     })).toBe(false);
-    expect(Value.Check(SignalClassificationOutputV1Schema, {
+    expect(Value.Check(SignalClassificationOutputV2Schema, {
       is_feedback: true, type: 'other', confidence: 0.5, reason: 'x',
     })).toBe(false);
-    expect(Value.Check(SignalClassificationOutputV1Schema, {
+    expect(Value.Check(SignalClassificationOutputV2Schema, {
       is_feedback: true, type: 'correction', confidence: 2, reason: 'x',
     })).toBe(false);
   });
@@ -120,7 +120,7 @@ describe('SignalClassificationOutputV1Schema (registered as signal-classificatio
     const valid = [
       { is_feedback: true, type: 'correction', confidence: 0.97, reason: 'a' },
       { is_feedback: false, type: 'none', confidence: 0, reason: '' },
-      { is_feedback: true, type: 'empathy', confidence: 1, reason: 'b' },
+      { is_feedback: false, type: 'none', confidence: 1, reason: 'b' },
     ];
     const invalid: unknown[] = [
       { is_feedback: true, type: 'correction', confidence: 1.5, reason: 'c' },
@@ -129,11 +129,11 @@ describe('SignalClassificationOutputV1Schema (registered as signal-classificatio
       { is_feedback: 'true', type: 'correction', confidence: 0.5, reason: 'x' },
     ];
     for (const s of valid) {
-      expect(Value.Check(SignalClassificationOutputV1Schema, s)).toBe(true);
+      expect(Value.Check(SignalClassificationOutputV2Schema, s)).toBe(true);
       expect(resolveLlmClassificationPayload(s).path).toBe('structured');
     }
     for (const s of invalid) {
-      expect(Value.Check(SignalClassificationOutputV1Schema, s)).toBe(false);
+      expect(Value.Check(SignalClassificationOutputV2Schema, s)).toBe(false);
       expect(resolveLlmClassificationPayload(s).path).not.toBe('structured');
     }
   });

@@ -14,7 +14,6 @@ import {
   createSharedCorrectionKeywordStore,
   HIGH_PRECISION_LEARNED_WEIGHT,
   HIGH_PRECISION_CORRECTION_OVERLAY,
-  EMPATHY_SEED_OVERLAY,
 } from '@principles/host-runtime';
 import { SystemLogger } from './system-logger.js';
 import type { WorkspaceContext } from './workspace-context.js';
@@ -22,7 +21,6 @@ import type { WorkspaceContext } from './workspace-context.js';
 export {
   HIGH_PRECISION_LEARNED_WEIGHT,
   HIGH_PRECISION_CORRECTION_OVERLAY,
-  EMPATHY_SEED_OVERLAY,
 };
 export type { SharedCorrectionKeywordStore as LiveKeywordStore } from '@principles/host-runtime';
 

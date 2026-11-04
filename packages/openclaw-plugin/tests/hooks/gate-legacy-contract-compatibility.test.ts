@@ -14,7 +14,7 @@
  *   - still fail closed with operator guidance to migrate/deactivate,
  *   - NOT enter the behavioral evidence chain:
  *       no rule_enforced, no gate_block event, no principle application receipt
- *       (kind=rule_blocked), no GFI/block tracking (trackBlock → blockedAttempts),
+ *       (kind=rule_blocked), no block tracking (trackBlock → blockedAttempts),
  *       no pain pipeline (no evolution stream pain_detected, no diagnostic task),
  *   - while a NORMAL RuleHost block keeps the full behavioral path intact.
  *
@@ -187,7 +187,7 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     const report = ruleHost.evaluateDetailed({
       action: { toolName: 'write', normalizedPath: '/etc/passwd', paramsSummary: { path: '/etc/passwd' } },
       workspace: { isRiskPath: false },
-      session: { sessionId: 'sess-a2', currentGfi: 0 },
+      session: { sessionId: 'sess-a2' },
       evolution: { epTier: 1 },
       derived: { estimatedLineChanges: 1, bashRisk: 'safe' as const },
     });
@@ -203,20 +203,18 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     ruleHost.dispose();
   });
 
-  it('Test B: compatibility block does NOT increase GFI / block tracking (real session state)', async () => {
-    seedSession('sess-b-gfi');
+  it('Test B: compatibility block does NOT increase block tracking (real session state)', async () => {
+    seedSession('sess-b-block');
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    const before = getSession('sess-b-gfi');
+    const before = getSession('sess-b-block');
     expect(before?.blockedAttempts).toBe(0);
-    expect(before?.currentGfi).toBe(0);
 
-    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-b-gfi')).toBeUndefined();
+    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-b-block')).toBeUndefined();
 
-    const after = getSession('sess-b-gfi');
+    const after = getSession('sess-b-block');
     expect(after?.blockedAttempts).toBe(0);
-    expect(after?.currentGfi).toBe(0);
 
     // recordGateBlockAndReturn was NOT entered: no gate_block event marker.
     expect(bufferedEvents().filter((e) => e.type === 'gate_block')).toHaveLength(0);

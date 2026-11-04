@@ -16,11 +16,7 @@ describe('PainConfig', () => {
     it('should load config from file if it exists', () => {
         const mockConfig = {
             thresholds: {
-                pain_trigger: 40,
                 cognitive_paralysis_input: 5000
-            },
-            scores: {
-                default_confusion: 25
             }
         };
 
@@ -33,9 +29,10 @@ describe('PainConfig', () => {
         const config = new PainConfig(stateDir);
         config.load();
 
-        expect(config.get('thresholds.pain_trigger')).toBe(40);
+        // c7ab619e9 removed the GFI-era scoring defaults (thresholds.pain_trigger,
+        // thresholds.severity_thresholds, scores.*) — SPEC §5.1/§5.2. The
+        // file-overrides-default invariant is asserted on the surviving key.
         expect(config.get('thresholds.cognitive_paralysis_input')).toBe(5000);
-        expect(config.get('scores.default_confusion')).toBe(25);
     });
 
     it('should return default values if file does not exist', () => {
@@ -44,22 +41,15 @@ describe('PainConfig', () => {
         const config = new PainConfig(stateDir);
         config.load();
 
-        // Check some defaults
-        expect(config.get('thresholds.pain_trigger')).toBe(40);
-        expect(config.get('scores.default_confusion')).toBe(30);
-    });
-
-    it('should return nested values using dot notation', () => {
-        const config = new PainConfig(stateDir);
-        // Using defaults
-        config.load();
-        expect(config.get('severity_thresholds.high')).toBe(70);
+        // c7ab619e9 deleted thresholds.pain_trigger and scores.*; the surviving
+        // default used here is thresholds.cognitive_paralysis_input (4000).
+        expect(config.get('thresholds.cognitive_paralysis_input')).toBe(4000);
     });
 
     it('should skip undefined values during merge', () => {
         const mockConfig = {
             thresholds: {
-                pain_trigger: undefined // Should NOT overwrite default
+                cognitive_paralysis_input: undefined // Should NOT overwrite default
             }
         };
 
@@ -69,7 +59,7 @@ describe('PainConfig', () => {
         const config = new PainConfig(stateDir);
         config.load();
 
-        expect(config.get('thresholds.pain_trigger')).toBe(40); // Default remains
+        expect(config.get('thresholds.cognitive_paralysis_input')).toBe(4000); // Default remains
     });
 
     it('tolerates retired interval keys from pre-PRI-737 config files without effect', () => {
@@ -118,6 +108,9 @@ describe('PainConfig', () => {
             },
             scores: {
                 paralysis: 99 // retired key from a pre-Phase-0 install
+            },
+            empathy_engine: {
+                enabled: true
             }
         };
 
@@ -138,6 +131,10 @@ describe('PainConfig', () => {
         // is synthesized for them and no consumer reads them anymore.
         expect(config.get('thresholds.stuck_loops_trigger')).toBe(2);
         expect(config.get('scores.paralysis')).toBe(99);
+        // The retired empathy engine block is accepted for compatibility only:
+        // the legacy value is carried through and nothing drives behavior from
+        // it, nor is a default synthesized when the file omits it.
+        expect(config.get('empathy_engine.enabled')).toBe(true);
     });
 
     it('cognitive_paralysis_input keeps its live consumer contract (session-tracker efficiency observation)', () => {

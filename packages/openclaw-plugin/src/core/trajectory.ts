@@ -449,8 +449,8 @@ export class TrajectoryDatabase {
       const result = this.db.prepare(`
         INSERT INTO tool_calls (
           session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message,
-          gfi_before, gfi_after, params_json, result_preview, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          params_json, result_preview, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.sessionId,
         input.toolName,
@@ -459,8 +459,6 @@ export class TrajectoryDatabase {
         input.exitCode ?? null,
         input.errorType ?? null,
         input.errorMessage ?? null,
-        input.gfiBefore ?? null,
-        input.gfiAfter ?? null,
         safeJson(input.paramsJson),
         input.resultPreview ?? null,
         createdAt,
@@ -884,14 +882,12 @@ export class TrajectoryDatabase {
     exitCode: number | null;
     errorType: string | null;
     errorMessage: string | null;
-    gfiBefore: number | null;
-    gfiAfter: number | null;
     resultPreview: string | null;
     createdAt: string;
   }[] {
     const rows = this.db.prepare(`
       SELECT id, tool_name, outcome, params_json, duration_ms, exit_code, error_type, error_message,
-             gfi_before, gfi_after, result_preview, created_at
+             result_preview, created_at
       FROM tool_calls
       WHERE session_id = ?
       ORDER BY id ASC
@@ -922,8 +918,6 @@ export class TrajectoryDatabase {
         exitCode: row.exit_code != null ? Number(row.exit_code) : null,
         errorType: row.error_type ? String(row.error_type) : null,
         errorMessage: row.error_message ? String(row.error_message) : null,
-        gfiBefore: row.gfi_before != null ? Number(row.gfi_before) : null,
-        gfiAfter: row.gfi_after != null ? Number(row.gfi_after) : null,
         resultPreview: row.result_preview != null ? String(row.result_preview) : null,
         createdAt: String(row.created_at),
       };

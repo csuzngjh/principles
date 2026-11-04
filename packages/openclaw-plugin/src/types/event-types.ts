@@ -32,7 +32,6 @@ export type {
   // Evolution Points stats type died with its subsystem; the live event-log
   // stats type is EventEvolutionStats from core's event types.
   EmpathyEventStats,
-  GfiStats,
   HookStats,
   DailyStats,
 } from '@principles/core/runtime-v2';

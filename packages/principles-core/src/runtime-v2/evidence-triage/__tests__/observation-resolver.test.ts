@@ -74,10 +74,6 @@ describe('resolveSourceKind: per-kind mapping', () => {
     expect(resolveSourceKind(obs({ toolName: 'exec', timedOut: true }))).toBe('tool_failure');
   });
 
-  it('isGfiTriggered → gfi_threshold', () => {
-    expect(resolveSourceKind(obs({ detectionSource: 'llm_x', isGfiTriggered: true }))).toBe('gfi_threshold');
-  });
-
   it("detectionSource 'llm_paralysis' → llm_paralysis", () => {
     expect(resolveSourceKind(obs({ detectionSource: 'llm_paralysis' }))).toBe('llm_paralysis');
   });
@@ -106,10 +102,6 @@ describe('resolveSourceKind: field precedence', () => {
 
   it('gate block takes precedence over tool failure', () => {
     expect(resolveSourceKind(obs({ isGateBlock: true, toolName: 'write', failureSource: 'tool_failure' }))).toBe('rulehost_block');
-  });
-
-  it('GFI triggered takes precedence over detection source prefix', () => {
-    expect(resolveSourceKind(obs({ detectionSource: 'llm_paralysis', isGfiTriggered: true }))).toBe('gfi_threshold');
   });
 
   it('subagent error takes precedence over tool failure', () => {
@@ -168,11 +160,7 @@ describe('buildToolFailureObservation', () => {
 
 describe('Pain Phase 0: retired observation builders stay removed', () => {
   it('llm detection mapping is still reachable via inline RawObservation (semantic)', () => {
-    expect(resolveSourceKind(obs({ detectionSource: 'llm_loop', isGfiTriggered: false }))).toBe('semantic');
-  });
-
-  it('GFI mapping is still reachable via inline RawObservation (gfi_threshold)', () => {
-    expect(resolveSourceKind(obs({ detectionSource: 'user_empathy', isGfiTriggered: true }))).toBe('gfi_threshold');
+    expect(resolveSourceKind(obs({ detectionSource: 'llm_loop' }))).toBe('semantic');
   });
 });
 

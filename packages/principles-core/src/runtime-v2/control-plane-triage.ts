@@ -3,7 +3,6 @@ export type TriageCategoryName =
   | 'sqlite_io_error'
   | 'broken_pd_shim'
   | 'candidate_audit_failed'
-  | 'gfi_unavailable_or_stale'
   | 'pruning_orphans_present'
   | 'internalization_queue_blocked'
   | 'internalization_chain_broken'
@@ -100,18 +99,6 @@ const CATEGORY_DEFINITIONS: Record<TriageCategoryName, Omit<TriageCategory, 'cat
     escalationRule: 'If orphan count is growing, investigate the candidate consumption path for write failures.',
     linearIssueTemplate: '## Candidate Audit Failed\n\n**Severity:** High\n**Symptom:** Candidate/ledger inconsistency\n**Orphan count:** [from audit]\n**Missing ledger:** [from audit]\n\n### Steps\n1. Run candidate audit\n2. Review orphan candidates\n3. Clean via pruning if safe',
   },
-  gfi_unavailable_or_stale: {
-    severity: 'medium',
-    symptom: 'GFI snapshot shows all sessions stale or no active sessions',
-    likelyRootCause: 'No recent PD activity, or session lifecycle not advancing.',
-    commandsToVerify: [
-      'pd runtime canary --workspace <path> --json',
-      'Check gfi_snapshot check details.',
-    ],
-    safeFirstRepair: 'Trigger a new session by running a PD command. If sessions remain stale, investigate session persistence.',
-    escalationRule: 'If GFI is consistently unavailable after activity, check session file write permissions.',
-    linearIssueTemplate: '## GFI Unavailable or Stale\n\n**Severity:** Medium\n**Symptom:** No active GFI sessions\n**Stale count:** [from canary]\n\n### Steps\n1. Trigger new session\n2. Verify session files are written\n3. Check file permissions',
-  },
   pruning_orphans_present: {
     severity: 'medium',
     symptom: 'Orphan derived candidates found in database',
@@ -203,9 +190,6 @@ export function classifyCanaryFindings(canaryOutput: CanaryOutputInput): TriageP
         break;
       case 'candidate_audit':
         findings.push({ category: 'candidate_audit_failed', ...CATEGORY_DEFINITIONS.candidate_audit_failed });
-        break;
-      case 'gfi_snapshot':
-        findings.push({ category: 'gfi_unavailable_or_stale', ...CATEGORY_DEFINITIONS.gfi_unavailable_or_stale });
         break;
       case 'pruning_orphans':
         findings.push({ category: 'pruning_orphans_present', ...CATEGORY_DEFINITIONS.pruning_orphans_present });

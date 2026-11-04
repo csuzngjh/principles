@@ -4,25 +4,6 @@ import * as path from 'path';
 import { atomicWriteFileSync } from '../utils/io.js';
 
 
-export interface GfiGateSettings {
-    enabled: boolean;
-    thresholds: {
-        low_risk_block: number;      // TIER 1 工具拦截阈值
-        high_risk_block: number;     // TIER 2 工具拦截阈值
-        large_change_block: number;  // 大规模修改警告阈值
-    };
-    large_change_lines: number;      // 触发规模衰减的行数
-    ep_tier_multipliers: {
-        '1': number;  // Seed
-        '2': number;  // Sprout
-        '3': number;  // Sapling
-        '4': number;  // Tree
-        '5': number;  // Forest
-    };
-    bash_safe_patterns: string[];      // 安全命令正则模式
-    bash_dangerous_patterns: string[]; // 危险命令正则模式
-}
-
 export interface DiagnosticianSettings {
     context: {
         time_window_minutes: number;   // 时间窗口（分钟），pain_timestamp 前后各多少分钟
@@ -40,7 +21,6 @@ export interface PainSettings {
     };
     diagnostician?: DiagnosticianSettings;
     thresholds: {
-        pain_trigger: number;
         cognitive_paralysis_input: number;
         // Pain Phase 0: stuck_loops_trigger retired with the LLM Paralysis
         // pain trigger (its only consumer); old pain_settings.json files
@@ -49,23 +29,10 @@ export interface PainSettings {
         promotion_count_threshold: number;
         promotion_similarity_threshold: number;
     };
-    scores: {
-        // Pain Phase 0: scores.paralysis retired with the LLM Paralysis pain
-        // trigger (its only consumer); old config files still load.
-        default_confusion: number;
-        default_loop: number;
-        tool_failure_friction: number;
-        exit_code_penalty: number;
-        spiral_penalty: number;
-        missing_test_command_penalty: number;
-        subagent_error_penalty: number;
-        subagent_timeout_penalty: number;
-    };
-    severity_thresholds: {
-        high: number;
-        medium: number;
-        low: number;
-    };
+    // GFI-COMPLETE-REMOVAL-001: the empathy engine was retired together with
+    // the GFI / automatic Pain scoring path. The shape is kept ONLY so old
+    // pain_settings.json files still load without an error; nothing reads it,
+    // so every value here has no effect.
     empathy_engine?: {
         enabled?: boolean;
         dedupe_window_ms?: number;
@@ -80,7 +47,6 @@ export interface PainSettings {
         };
         model_calibration?: Record<string, number>;
     };
-    gfi_gate?: GfiGateSettings;
     compression?: {
         /** 触发自动压缩的行数阈值 */
         line_threshold?: number;
@@ -113,77 +79,17 @@ export const DEFAULT_SETTINGS: PainSettings = {
         }
     },
     thresholds: {
-        pain_trigger: 40, // Increased tolerance before forcing a stop
         cognitive_paralysis_input: 4000,
-        // Pain Phase 0: stuck_loops_trigger / scores.paralysis defaults
-        // retired with the LLM Paralysis pain trigger (their only consumers).
+        // stuck_loops_trigger retired with the LLM Paralysis pain trigger (its
+        // only consumer); old pain_settings.json files carrying the key still
+        // load — unknown keys are ignored.
         semantic_min_score: 0.7,
         promotion_count_threshold: 3,
         promotion_similarity_threshold: 0.8
     },
-    scores: {
-        default_confusion: 30,
-        default_loop: 40,
-        tool_failure_friction: 15, // Reduced from 30. A failing tool shouldn't instantly cripple the AI
-        exit_code_penalty: 50, // Reduced from 70
-        spiral_penalty: 30,
-        missing_test_command_penalty: 20,
-        subagent_error_penalty: 60,
-        subagent_timeout_penalty: 50
-    },
-    severity_thresholds: {
-        high: 70,
-        medium: 40,
-        low: 20
-    },
-    empathy_engine: {
-        enabled: true,
-        dedupe_window_ms: 60000,
-        penalties: {
-            mild: 10,
-            moderate: 25,
-            severe: 40,
-        },
-        rate_limit: {
-            max_per_turn: 40,
-            max_per_hour: 120,
-        },
-        model_calibration: {}
-    },
-    gfi_gate: {
-        enabled: true,
-        thresholds: {
-            low_risk_block: 70,      // TIER 1: write, edit, spawn_agent
-            high_risk_block: 40,     // TIER 2: delete_file, move_file
-            large_change_block: 50,  // 大规模修改警告阈值
-        },
-        large_change_lines: 50,
-        ep_tier_multipliers: {
-            '1': 0.5,   // Seed: 更严格，阈值减半
-            '2': 0.75,  // Sprout: 阈值降低 25%
-            '3': 1.0,   // Sapling: 标准阈值
-            '4': 1.5,   // Tree: 更宽松
-            '5': 2.0,   // Forest: 最宽松
-        },
-        bash_safe_patterns: [
-            '^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b',
-            '^git\\s+(status|log|diff|branch|show|remote)\\b',
-            '^npm\\s+(run|test|build|start)\\b',
-            '^make\\s*$',  // 只允许纯 make 命令
-            '^make\\s+(-j\\d+|--jobs\\s*\\d+)$',  // 允许 make -j4 等
-            '^(gradle|mvn)\\s+(clean|build|test|compile)\\b',  // 只允许安全参数
-        ],
-        bash_dangerous_patterns: [
-            'rm\\s+(-[a-z]*r[a-z]*f|-rf)',
-            'del\\s+/s',
-            'rmdir\\s+/s',
-            'git\\s+(push\\s+.*--force|reset\\s+--hard|clean\\s+-fd)',
-            'npm\\s+publish',
-            'pip\\s+upload',
-            'docker\\s+push',
-            '(curl|wget).*\\|\\s*(ba)?sh',
-        ],
-    },
+    // empathy_engine has no default on purpose: the mechanism is retired and
+    // no consumer exists, so emitting defaults would falsely imply it works.
+    // Old config files may still carry the block; the type above accepts it.
     compression: {
         line_threshold: 100,           // 超过 100 行触发压缩
         size_threshold_kb: 15,         // 超过 15KB 触发压缩

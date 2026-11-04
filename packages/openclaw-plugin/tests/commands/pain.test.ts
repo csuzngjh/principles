@@ -52,7 +52,16 @@ describe('Pain Command', () => {
             byOrigin: { assistant_self_report: 0, user_manual: 0, system_infer: 0 },
             confidenceDistribution: { high: 0, medium: 0, low: 0 },
             dailyTrend: [],
-        })
+        }),
+        getDailyStats: vi.fn().mockReturnValue({
+            tools: { total: 7, success: 5, failure: 2 },
+            hooks: { total: 9, success: 8, failure: 1, byType: {} },
+            evolution: {
+                rulehostEvaluated: 4,
+                rulehostBlocked: 2,
+                rulehostAutoCorrectApplied: 1,
+            },
+        }),
     };
 
     const mockConfig = {
@@ -88,31 +97,57 @@ describe('Pain Command', () => {
         vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     });
 
-    it('should format a comprehensive pain report', () => {
-        vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 45 } as any);
-        
-        const result = handlePainCommand({ 
-            args: '', 
-            config: { workspaceDir, language: 'en' },
-            sessionId 
+    it('should report real session, daily and dictionary figures without any friction score', () => {
+        vi.mocked(sessionTracker.getSession).mockReturnValue({
+            llmTurns: 6,
+            blockedAttempts: 2,
+            injectedPrincipleIds: ['p1', 'p2'],
+            receiptAutoCorrects: 1,
         } as any);
 
-        expect(result.text).toContain('Friction (GFI)**: [');
-        expect(result.text).toContain('] 45/100');
+        const result = handlePainCommand({
+            args: '',
+            config: { workspaceDir, language: 'en' },
+            sessionId
+        } as any);
+
+        // GFI-COMPLETE-REMOVAL-001: no friction score / mental mode / fatigue.
+        expect(result.text).not.toContain('GFI');
+        expect(result.text).not.toContain('Friction');
+        expect(result.text).not.toContain('Mental Mode');
+
+        // Session Tracker facts.
+        expect(result.text).toContain('LLM turns: 6');
+        expect(result.text).toContain('Injected principles: 2');
+        expect(result.text).toContain('Auto-corrects: 1');
+        expect(result.text).toContain('Gate blocks: 2');
+
+        // EventLog daily facts.
+        expect(result.text).toContain('Tool calls: 7 (success 5 / failure 2)');
+        expect(result.text).toContain('Hook runs: 9 (success 8 / failure 1)');
+        expect(result.text).toContain('RuleHost: evaluated 4 · blocked 2');
+
+        // Trajectory facts.
+        expect(result.text).toContain('4 tool calls · 1 pain events');
+
+        // Dictionary facts — reported as rule hits, not as blocks.
         expect(result.text).toContain('Dictionary**: 10');
-        expect(result.text).toContain('blocked 5');
+        expect(result.text).toContain('5 cumulative rule hits');
+        expect(result.text).not.toContain('blocked 5');
     });
 
-    it('should show 🟢 status for low GFI', () => {
-        vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 10 } as any);
-        const result = handlePainCommand({ config: { workspaceDir }, sessionId } as any);
-        expect(result.text).toContain('10/100');
-    });
+    it('rejects the removed /pd-status reset subcommand instead of silently reporting status', () => {
+        const result = handlePainCommand({
+            args: 'reset',
+            config: { workspaceDir, language: 'en' },
+            sessionId
+        } as any);
 
-    it('should show 🔴 status for high GFI', () => {
-        vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 85 } as any);
-        const result = handlePainCommand({ config: { workspaceDir }, sessionId } as any);
-        expect(result.text).toContain('85/100');
+        // `reset` is no longer a subcommand; it falls through to the status view,
+        // which must not claim any reset happened.
+        expect(result.text).not.toContain('reset to 0');
+        expect(result.text).not.toContain('已强制归零');
+        expect(result.text).toContain('System Status');
     });
 
     it('shows trajectory data stats for the data subcommand', () => {
@@ -132,7 +167,7 @@ describe('Pain Command', () => {
 
     // Fix-14 (P1-DESIGN-2): empty-state onboarding guidance for fresh installs.
     it('shows English welcome + onboarding guidance when dictionary is empty', () => {
-        vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
+        vi.mocked(sessionTracker.getSession).mockReturnValue({} as any);
         mockDictionary.getStats.mockReturnValueOnce({ totalRules: 0, totalHits: 0 });
 
         const result = handlePainCommand({
@@ -148,7 +183,7 @@ describe('Pain Command', () => {
     });
 
     it('shows Chinese welcome + onboarding guidance when dictionary is empty (zh)', () => {
-        vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
+        vi.mocked(sessionTracker.getSession).mockReturnValue({} as any);
         mockDictionary.getStats.mockReturnValueOnce({ totalRules: 0, totalHits: 0 });
 
         const result = handlePainCommand({

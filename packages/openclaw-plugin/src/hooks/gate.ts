@@ -17,7 +17,7 @@ import { classifyBashRisk } from '@principles/core/runtime-v2/internalization/ba
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
-import { getSession, trackReceiptAutoCorrect } from '../core/session-tracker.js';
+import { trackReceiptAutoCorrect } from '../core/session-tracker.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
@@ -119,7 +119,6 @@ export function handleBeforeToolCall(
       },
       session: {
         sessionId: ctx.sessionId,
-        currentGfi: _getCurrentGfi(ctx.sessionId),
       },
       evolution: {
         epTier: _getEpTier(),
@@ -550,15 +549,6 @@ function evidenceToolIds(event: PluginHookBeforeToolCallEvent): { toolCallId?: s
   };
 }
 
-function _getCurrentGfi(sessionId?: string): number {
-  if (!sessionId) return 0;
-  try {
-    return getSession(sessionId)?.currentGfi ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 // epTier source retired with the legacy evolution engine (PRI-731/734): the
 // engine scorecard never persisted in any deployment, so the observed value was
 // always the initial tier. The RuleHost input contract field stays because
@@ -578,13 +568,8 @@ function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' |
   return classifyBashRisk(true, event.params);
 }
 
-export function buildOpenClawRuleInputEnrichment(
-  event: PluginHookBeforeToolCallEvent,
-  workspaceDir: string,
-  sessionId: string | undefined,
-) {
+export function buildOpenClawRuleInputEnrichment(event: PluginHookBeforeToolCallEvent) {
   return {
-    currentGfi: _getCurrentGfi(sessionId),
     epTier: _getEpTier(),
     bashRisk: _getBashRisk(event),
   };
@@ -766,8 +751,8 @@ export function handleSharedRuleHostResult(
  *
  * Both shared-handler deny branches (resolvable and unresolved target path)
  * funnel here: receipt-ledger effect row (flag-gated, failure-degrading —
- * parity with the legacy hook path) plus persistGateBlock (session GFI,
- * EventLog gate_block, trajectory gate_blocks with bounded retry). A null
+ * parity with the legacy hook path) plus persistGateBlock (session block
+ * tally, EventLog gate_block, trajectory gate_blocks with bounded retry). A null
  * filePath is accounted with a null trajectory file_path; the EventLog copy
  * carries an '<unresolved>' placeholder. Never throws into the caller;
  * every skip/failure warns with a reasonCode (rc-9).

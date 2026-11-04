@@ -77,14 +77,9 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Channel is part of the default product experience already; category stays quiet for per-workspace disable',
     retirementCriteria: 'Owner removes the feedback product surface',
   },
-  gfi: {
-    decision: 'KEEP_QUIET',
-    consumers: ['host-runtime/src/production-pain-evidence*'],
-    evidence: 'Global Friction Index session scoring surfaced in console/plugin (38 src references)',
-    decided: '2026-08-27',
-    graduationCriteria: 'GFI validated as an Owner-facing signal worth default-on surfacing',
-    retirementCriteria: 'Friction scoring superseded by telemetry milestones (anonymous_product_telemetry) with owner decision',
-  },
+  // gfi: RETIRED 2026-11-04 (GFI-COMPLETE-REMOVAL-001). Scoring kernel and all
+  // observation surfaces deleted; flag moved to `gone`. Gone flags carry no
+  // lifecycle entry (terminal state, enforced by feature-flag-lifecycle.test).
   // evolution_worker: RETIRED 2026-09-12 (PRI-752). Worker deleted in PRI-737;
   // flag moved to `gone` in feature-flag-contract.ts. Gone flags carry no
   // lifecycle entry (terminal state, enforced by feature-flag-lifecycle.test).

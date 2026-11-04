@@ -13,7 +13,7 @@
  * 异步路径 (fire-and-forget):
  *   - Stage2 LLM 确认 (后台,不阻塞 prompt hook)
  *   - LLM 不可用 → 降级:丢弃 ambiguous 候选 (不触发 STRONG,避免误判泛滥)
- *   - 按 strength 分流:STRONG → emitPainDetectedEvent (修断裂 ③);WEAK → trackFriction 累积 GFI
+ *   - 按 strength 分流:STRONG → emitPainDetectedEvent (修断裂 ③)
  *
  * 降级不静默 (rc-9):所有降级路径走 SystemLogger。
  */
@@ -34,7 +34,6 @@ import {
 } from '@principles/host-runtime';
 import { createHash } from 'node:crypto';
 import { emitPainDetectedEvent } from '../hooks/pain.js';
-import { trackFriction } from './session-tracker.js';
 import { SystemLogger } from './system-logger.js';
 import { createTraceId } from '../utils/trace-id.js';
 import { resolveObserverConfig } from './pd-config-loader.js';
@@ -73,30 +72,15 @@ export function isUserInteractionTrigger(trigger: string | undefined): boolean {
   return trigger === 'user' || trigger === 'api' || trigger === undefined;
 }
 
-/**
- * PRI-2053 归因不变量：Stage2 确认「整条消息是纠正」只证明消息级事实，不把每个
- * Stage1 命中词升级为纠正词。只有 Stage1 检测当时在快照里属于 `correction`
- * 类别的命中词才进入纠正词证据（correction_cue / TP / FP）；empathy 命中词不得
- * 借消息级确认混入纠正证据链。快照必须用检测当时那份（detectSync 的 store），
- * 不能用恢复时的当前词库代替。
- */
-function correctionTermsOf(
-  matchedTerms: readonly string[],
-  snapshot: UnifiedKeywordStore,
-): string[] {
-  return matchedTerms.filter((term) => snapshot.terms[term]?.category === 'correction');
-}
-
 export function buildDefaultKeywordStore(): UnifiedKeywordStore {
   const terms: UnifiedKeywordStore['terms'] = {
     // 高精度纠正短语 (命中即判 STRONG,不走 LLM)
-    '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不要自作主张': { term: '不要自作主张', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不应该这么做': { term: '不应该这么做', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
+    '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
+    '不要自作主张': { term: '不要自作主张', weight: 0.9, precision: 'high', source: 'seed' },
+    '不应该这么做': { term: '不应该这么做', weight: 0.9, precision: 'high', source: 'seed' },
     // 普通歧义词 (仅作 evidence 候选,强制过 Stage2 LLM 二次确认)
-    '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-    '错了': { term: '错了', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-    '搞什么': { term: '搞什么', category: 'empathy', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '错了': { term: '错了', weight: 0.5, precision: 'ambiguous', source: 'seed' },
   };
   return { version: 1, terms };
 }
@@ -121,8 +105,6 @@ interface PendingSignal {
   /** Stable occurrence identity for correction dedup (ADR-0020 §11.4). */
   occurrenceId: string;
   traceId: string;
-  /** Stage1 扫描时的词库快照(异步路径复用同一份,避免检测期间词库漂移) */
-  storeSnapshot: UnifiedKeywordStore;
   /** PRI-844: 回合锚点,确认后随 correctionEvidence 一起进 Pain 证据。 */
   turnIndex?: number;
   referencesAssistantTurnId?: number | null;
@@ -142,7 +124,7 @@ interface PendingSignal {
  * 以保持 host 可单测 (测试可注入 mock classifier)。
  */
 export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
-  Promise<{ is_feedback: boolean; type: 'correction' | 'empathy' | 'none'; confidence: number; reason: string } | null>;
+  Promise<{ is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string } | null>;
 
 export interface SignalCollectorHostOptions {
   keywordStore?: UnifiedKeywordStore;
@@ -265,7 +247,6 @@ export class SignalCollectorHost {
         text: userMessage,
         occurrenceId: this.resolveOccurrenceId(sessionId, userMessage, options),
         traceId: createTraceId(),
-        storeSnapshot: store,
         userTurnRowid,
         turnIndex: options?.turnIndex,
         referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
@@ -279,9 +260,8 @@ export class SignalCollectorHost {
    * ★ 异步路径 (fire-and-forget)。
    *
    * 1. Stage2 LLM 确认 (后台,不阻塞用户)
-   * 2. LLM 不可用 → 降级:empathy ambiguous 候选作为 WEAK 信号路由(保留旧版 GFI 累积);
-   *    correction ambiguous / 未命中候选丢弃(不触发 STRONG,避免误判泛滥)
-   * 3. 按 strength 分流:STRONG → emitPainDetectedEvent;WEAK → trackFriction 累积 GFI;none → 仅记录
+   * 2. LLM 不可用 → 降级:ambiguous / 未命中候选丢弃(不触发 STRONG,避免误判泛滥)
+   * 3. 按 strength 分流:STRONG → emitPainDetectedEvent;none → 仅记录
    */
   private async detectAsyncAndRoute(pending: PendingSignal): Promise<void> {
     // 1. Stage2 LLM 确认
@@ -323,35 +303,12 @@ export class SignalCollectorHost {
         return;
       }
     } else {
-      // LLM 不可用 → 降级:empathy ambiguous 候选作为 WEAK 信号路由(累积 GFI,不触发 STRONG)。
-      // 保留旧版 empathy keyword matcher 的 GFI 累积行为,避免 LLM 未配置(默认)时
-      // empathy 检测完全失效。correction ambiguous 候选仍然丢弃(旧版 correction cue
-      // 不触发 trackFriction,仅 recordUserTurn,已在 detectSync 中完成)。
-      //
+      // LLM 不可用 → 降级:丢弃 ambiguous 候选 (不触发 STRONG,避免误判泛滥)。
       // AUDIT-P2-01: 本降级分支没有执行任何 await —— async 函数体在首个 await 前
       // 同步执行，因此这里到达 queueUnconfirmedForBatch / countStage2Dropped 时仍在
       // detectSync（before_prompt_build）的同步调用栈上。健康计数写入已统一推迟到
       // 微任务；enqueueSignalConfirmation 的 SQLite 持久化保持同步（可靠性优先：
       // 候选落库不能被进程事件循环淘汰，AUDIT 整改明确禁止异步化队列记录）。
-      if (pending.output.matchedPrecision === 'ambiguous' && pending.output.matchedTerms.length > 0) {
-        const hasEmpathyMatch = pending.output.matchedTerms.some(
-          (term) => pending.storeSnapshot.terms[term]?.category === 'empathy',
-        );
-        if (hasEmpathyMatch) {
-          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED_WEAK',
-            'LLM unavailable, routing empathy ambiguous as WEAK (GFI accumulation, no STRONG trigger)');
-          const degradedOutput: SignalCollectorOutput = {
-            ...pending.output,
-            isSignal: true,
-            type: 'empathy',
-            strength: 'WEAK',
-            detectionSource: 'keyword',
-            needsLlmConfirmation: false,
-          };
-          this.routeWeak(degradedOutput, pending.sessionId);
-          return;
-        }
-      }
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LLM_DEGRADED',
         'LLM unavailable, dropping candidate (no STRONG trigger)');
       // PRI-788 G2: 丢弃改持久化——通道恢复后批量确认，不再"通道死=信号丢"。
@@ -360,9 +317,7 @@ export class SignalCollectorHost {
     }
 
     // 3. 按 strength 分流
-    // PRI-2053: 归因词集只取 Stage1 快照里属于 correction 类的命中词——消息级
-    // 确认不改变每个命中词当时的类别（empathy 命中词不得升级为纠正词证据）。
-    const correctionTerms = correctionTermsOf(pending.output.matchedTerms, pending.storeSnapshot);
+    const correctionTerms = pending.output.matchedTerms;
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
       // PRI-788 G3: LLM 确认是纠正 → 命中词记 TP（earned precision 证据）
       this.emitCueFeedback(correctionTerms, true);
@@ -378,12 +333,8 @@ export class SignalCollectorHost {
         s.lastStage2SuccessAt = new Date().toISOString();
       });
       this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
-    } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
-      // LLM 判为情绪/挫败而非纠正 → 命中的纠正词记 FP（同样只用 correction 类词）
-      this.emitCueFeedback(correctionTerms, false);
-      this.routeWeak(confirmed, pending.sessionId);
     } else {
-      // LLM 判为普通消息 → 命中词记 FP（同样只用 correction 类词）
+      // LLM 判为普通消息 → 命中词记 FP
       this.emitCueFeedback(correctionTerms, false);
     }
   }
@@ -420,10 +371,9 @@ export class SignalCollectorHost {
       return;
     }
     // PRI-2053: 归因必须在 Stage1 快照仍有效的此刻完成——批量恢复时 terms_json
-    // 只有词、没有当时的类别。持久化 correction 类命中词，suggestedType 与之一致
-    // （旧算式 some(category==='correction') 与本式等价，但只算一次，避免漂移）。
-    const correctionTerms = correctionTermsOf(pending.output.matchedTerms, pending.storeSnapshot);
-    const suggestedType = correctionTerms.length > 0 ? 'correction' : 'empathy';
+    // 只有词、没有当时的类别。持久化命中词，suggestedType 恒为 correction。
+    const correctionTerms = pending.output.matchedTerms;
+    const suggestedType = 'correction';
     try {
       this.wctx.trajectory?.enqueueSignalConfirmation?.({
         sessionId: pending.sessionId,
@@ -518,7 +468,7 @@ export class SignalCollectorHost {
    * PRI-788 G2: 批量确认一条持久化的待确认信号（CorrectionObserverService 每
    * 周期调用）。用调用方提供的 classifier（每 cycle 新鲜解析）重新分类：
    * correction → 回写标志 + 复用 realtime STRONG 分流（限流/身份派生一致）；
-   * WEAK → trackFriction；none → rejected；classifier 失败 → failed（调用方
+   * none → rejected；classifier 失败 → failed（调用方
    * attempts++，达上限转 abandoned）。
    */
   async confirmPendingSignal(
@@ -582,11 +532,6 @@ export class SignalCollectorHost {
         occurredAt: storedTurn?.occurredAt,
       });
       return { disposition: 'confirmed', detail: confirmed.llmReason ?? 'confirmed correction' };
-    }
-    if (confirmed.isSignal && confirmed.strength === 'WEAK') {
-      this.emitCueFeedback(correctionTerms, false);
-      this.routeWeak(confirmed, item.sessionId);
-      return { disposition: 'rejected', detail: 'weak/empathy at confirmation' };
     }
     this.emitCueFeedback(correctionTerms, false);
     return { disposition: 'rejected', detail: confirmed.llmReason ?? 'classified none' };
@@ -718,26 +663,6 @@ export class SignalCollectorHost {
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_EMIT_FAIL',
         `emitPainDetectedEvent failed: ${String(e)}`);
     });
-  }
-
-  /**
-   * WEAK 分流 → trackFriction 累积 GFI + 写 evidence (维持现状,spec §3.2)。
-   *
-   * WEAK 是 Layer 3 弱信号,用较小的摩擦分(20)累积,过 highGfi 阈值(70)才触发诊断。
-   * 不用 strongPainScore(70),因为 WEAK 单条不该直接顶满 GFI。
-   */
-  private routeWeak(output: SignalCollectorOutput, sessionId: string): void {
-    try {
-      const hash = createHash('sha256')
-        .update(`${output.evidence.detectedAt}:${sessionId}`)
-        .digest('hex')
-        .slice(0, 32);
-      trackFriction(sessionId, 20, hash, this.wctx.workspaceDir, {
-        source: 'user_empathy',
-      });
-    } catch (e) {
-      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_TRACK_FRICTION_FAIL', `trackFriction threw: ${String(e)}`);
-    }
   }
 
   /**

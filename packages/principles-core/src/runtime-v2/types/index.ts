@@ -115,7 +115,6 @@ export type {
   ErrorStats,
   // PainStats re-export removed (PRI-451 Wave 1.5): no live reader.
   EmpathyEventStats,
-  GfiStats,
   EventEvolutionStats,
   HookStats,
   DailyStats,
@@ -151,7 +150,6 @@ export {
   ErrorStatsSchema,
   // PainStatsSchema re-export removed (PRI-451 Wave 1.5): no live reader.
   EmpathyEventStatsSchema,
-  GfiStatsSchema,
   EventEvolutionStatsSchema,
   HookStatsSchema,
   DailyStatsSchema,

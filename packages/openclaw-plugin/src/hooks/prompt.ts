@@ -3,7 +3,7 @@
 import * as fs from 'fs';
 import { randomUUID } from 'node:crypto';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
-import { getSession, resetFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
+import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig } from '../types.js';
 // local-worker-routing module and its routing helpers removed entirely per PRI-448.
@@ -19,7 +19,6 @@ import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordInjectionPresence, alignActivationIds, alignInjectedPrinciples } from '../core/principle-application-ledger.js';
 import { recordPromptDeliveryEvidence } from '../core/intervention-evidence-recorder.js';
-import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { buildIntentFrictionBlock } from '@principles/core/runtime-v2';
@@ -333,8 +332,6 @@ export async function handleBeforePromptBuild(
   // Minimal mode: heartbeat and subagents skip most context to reduce tokens
   const isMinimalMode = isMinimalTrigger(trigger as string | undefined, sessionId as string | undefined);
 
-  const session = sessionId ? getSession(sessionId) : undefined;
-
   // ──── STRUCTURE (Optimized for WebUI UX + Prompt Caching) ────
   // prependSystemContext: Minimal identity (cacheable, ~15 lines)
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
@@ -345,10 +342,6 @@ export async function handleBeforePromptBuild(
   let prependSystemContext: string;
   let prependContext = '';
   let appendSystemContext = '';
-  // ──── 0. Manual Pain Clearance ────
-  if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
-    resetFriction(sessionId, workspaceDir);
-  }
 
   // ──── 1. prependSystemContext: Minimal Agent Identity ────
   // EvolutionWorker-era INTERNAL SYSTEM LAYOUT removed per PRI-294.
@@ -402,18 +395,6 @@ export async function handleBeforePromptBuild(
 
   // ──── 4. Heartbeat-specific checklist (also fires for cron-triggered sessions) ────
   if (trigger === 'heartbeat' || trigger === 'cron') {
-    // ──── 4a. GFI Time-based Decay ────
-    // Apply segmented exponential decay to GFI on each heartbeat
-    if (sessionId) {
-      const elapsedMinutes = getGfiDecayElapsed(sessionId);
-      if (elapsedMinutes >= 1) {
-        const decayedState = decayGfi(sessionId, elapsedMinutes);
-        if (decayedState) {
-          logger?.info?.(`[PD:GFI] Heartbeat decay applied: ${elapsedMinutes}min elapsed, GFI now ${decayedState.currentGfi.toFixed(1)}`);
-        }
-      }
-    }
-    
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
       try {
@@ -426,9 +407,8 @@ export async function handleBeforePromptBuild(
 
   }
 
-  // ──── 6. GFI score (for empathy/evidence path only — NOT for attitude/personality prompt)
-  // Attitude/personality prompt injection removed per PRI-291 (MVP diet).
-  // GFI scoring, trackFriction, and empathy pain emission remain active.
+  // ──── 6. Attitude/personality prompt injection removed per PRI-291 (MVP diet).
+  // GFI scoring and its prompt surface were removed in GFI-COMPLETE-REMOVAL-001.
 
   // ──── 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ────
   // NOTE: Principles is ALWAYS injected (not configurable)
