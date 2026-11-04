@@ -108,6 +108,9 @@ describe('PainConfig', () => {
             },
             scores: {
                 paralysis: 99 // retired key from a pre-Phase-0 install
+            },
+            empathy_engine: {
+                enabled: true
             }
         };
 
@@ -128,6 +131,10 @@ describe('PainConfig', () => {
         // is synthesized for them and no consumer reads them anymore.
         expect(config.get('thresholds.stuck_loops_trigger')).toBe(2);
         expect(config.get('scores.paralysis')).toBe(99);
+        // The retired empathy engine block is accepted for compatibility only:
+        // the legacy value is carried through and nothing drives behavior from
+        // it, nor is a default synthesized when the file omits it.
+        expect(config.get('empathy_engine.enabled')).toBe(true);
     });
 
     it('cognitive_paralysis_input keeps its live consumer contract (session-tracker efficiency observation)', () => {

@@ -29,6 +29,10 @@ export interface PainSettings {
         promotion_count_threshold: number;
         promotion_similarity_threshold: number;
     };
+    // GFI-COMPLETE-REMOVAL-001: the empathy engine was retired together with
+    // the GFI / automatic Pain scoring path. The shape is kept ONLY so old
+    // pain_settings.json files still load without an error; nothing reads it,
+    // so every value here has no effect.
     empathy_engine?: {
         enabled?: boolean;
         dedupe_window_ms?: number;
@@ -83,20 +87,9 @@ export const DEFAULT_SETTINGS: PainSettings = {
         promotion_count_threshold: 3,
         promotion_similarity_threshold: 0.8
     },
-    empathy_engine: {
-        enabled: true,
-        dedupe_window_ms: 60000,
-        penalties: {
-            mild: 10,
-            moderate: 25,
-            severe: 40,
-        },
-        rate_limit: {
-            max_per_turn: 40,
-            max_per_hour: 120,
-        },
-        model_calibration: {}
-    },
+    // empathy_engine has no default on purpose: the mechanism is retired and
+    // no consumer exists, so emitting defaults would falsely imply it works.
+    // Old config files may still carry the block; the type above accepts it.
     compression: {
         line_threshold: 100,           // 超过 100 行触发压缩
         size_threshold_kb: 15,         // 超过 15KB 触发压缩
