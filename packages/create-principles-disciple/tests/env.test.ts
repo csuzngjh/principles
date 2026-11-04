@@ -20,14 +20,14 @@ const mockExecFileSync = vi.mocked(childProcess.execFileSync);
  * 非 win32 直连（`openclaw --version`）。mock 按 "binary + args" 拼装后的子串
  * 路由，使同一断言在两平台都成立。
  */
-function joinedCall(call: unknown[]): string {
-  const [binary, args] = call as [string, string[]];
-  return [binary, ...args].join(' ');
+function joinedCall(call: readonly unknown[] | undefined): string {
+  const [binary, args] = (call ?? []) as [string, string[]?];
+  return [binary, ...(args ?? [])].join(' ');
 }
 
 function routeByCommand(
   binary: string,
-  args: string[],
+  args: readonly string[] = [],
   responses: Record<string, string | 'throw'>,
 ): string {
   const key = [binary, ...args].join(' ');
@@ -70,7 +70,7 @@ describe('environment detection utilities', () => {
 
   describe('checkEnvironment', () => {
     it('detects all tools when available', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'node -v': 'v22.0.0',
           'openclaw --version': 'OpenClaw 1.0.0',
@@ -92,7 +92,7 @@ describe('environment detection utilities', () => {
     });
 
     it('rejects Node.js below the native runtime minimum', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'node -v': 'v20.19.0',
         })
@@ -106,7 +106,7 @@ describe('environment detection utilities', () => {
     });
 
     it('detects clawd when openclaw is not available', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'node -v': 'v20.0.0',
           'openclaw --version': 'throw',
@@ -136,7 +136,7 @@ describe('environment detection utilities', () => {
 
   describe('OpenClaw readiness check', () => {
     it('Given OpenClaw is installed, When checkEnvironment runs, Then hasOpenClaw is true with version', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'openclaw --version': 'openclaw 1.2.0',
         })
@@ -147,7 +147,7 @@ describe('environment detection utilities', () => {
     });
 
     it('Given OpenClaw is missing, When checkEnvironment runs, Then hasOpenClaw is false and version is absent', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'openclaw --version': 'throw',
           'clawd --version': 'throw',
@@ -160,7 +160,7 @@ describe('environment detection utilities', () => {
     });
 
     it('Given only clawd alias is available, When checkEnvironment runs, Then hasOpenClaw is true via fallback', () => {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'openclaw --version': 'throw',
           'clawd --version': 'clawd 2.1.3',
@@ -212,7 +212,7 @@ describe('environment detection utilities', () => {
     it('detects existing workspace with principles', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
-      mockExistsSync.mockImplementation((p: string) => {
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) => {
         if (p.toString() === defaultWorkspace) return true;
         // Fix-8 (P1-BUG-2): installer creates THINKING_OS.md, not PRINCIPLES.md
         if (p.toString() === path.join(defaultWorkspace, '.principles', 'THINKING_OS.md')) return true;
@@ -228,7 +228,7 @@ describe('environment detection utilities', () => {
     it('detects existing workspace without principles but with core files', () => {
       delete process.env.OPENCLAW_WORKSPACE;
       delete process.env.PD_WORKSPACE_DIR;
-      mockExistsSync.mockImplementation((p: string) => {
+      mockExistsSync.mockImplementation((p: string | Buffer | URL) => {
         if (p.toString() === defaultWorkspace) return true;
         if (p.toString() === path.join(defaultWorkspace, '.principles', 'THINKING_OS.md')) return false;
         if (p.toString() === path.join(defaultWorkspace, 'AGENTS.md')) return true;
@@ -266,7 +266,7 @@ describe('environment detection utilities', () => {
       // a bare `gateway stop`; the installer only stops AFTER deciding to, so
       // the flag is always part of the literal argv.
       expect(joinedCall(mockExecFileSync.mock.calls[0])).toContain('--force');
-      expect(mockExecFileSync.mock.calls[0][2]).toMatchObject({ timeout: 15000 });
+      expect(mockExecFileSync.mock.calls[0]![2]).toMatchObject({ timeout: 15000 });
     });
 
     it('restartOpenClawGateway returns ok:true and invokes "openclaw gateway start"', async () => {
@@ -275,7 +275,7 @@ describe('environment detection utilities', () => {
       expect(res.ok).toBe(true);
       expect(mockExecFileSync).toHaveBeenCalledTimes(1);
       expect(joinedCall(mockExecFileSync.mock.calls[0])).toContain('openclaw gateway start');
-      expect(mockExecFileSync.mock.calls[0][2]).toMatchObject({ timeout: 15000 });
+      expect(mockExecFileSync.mock.calls[0]![2]).toMatchObject({ timeout: 15000 });
     });
 
     // rc-9: control helpers must NEVER throw — they degrade with a structured
@@ -320,7 +320,7 @@ describe('environment detection utilities', () => {
 
     /** The stop command itself fails — every case below starts from there. */
     function stopCommandFails() {
-      mockExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      mockExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, { 'gateway stop': 'throw' })
       );
     }
@@ -538,7 +538,7 @@ describe('environment detection utilities', () => {
     // PRI-605: win32 上 python.org 安装常只提供 python.exe，python3 不在 PATH。
     it('falls back to python when python3 is absent on win32', async () => {
       await loadWin32Env();
-      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      win32ExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'node -v': 'v20.0.0',
           'python3 --version': 'throw',
@@ -552,7 +552,7 @@ describe('environment detection utilities', () => {
 
     it('routes openclaw probes through cmd.exe on win32', async () => {
       await loadWin32Env();
-      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      win32ExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'node -v': 'v20.0.0',
           'openclaw --version': 'OpenClaw 1.0.0',
@@ -588,7 +588,7 @@ describe('environment detection utilities', () => {
       try {
         vi.mocked(win32Fs.existsSync).mockReturnValue(true);
         vi.mocked(win32Fs.readFileSync).mockReturnValue(JSON.stringify({ gateway: { port } }));
-        win32ExecFileSync.mockImplementation((binary: string, args: string[]) => {
+        win32ExecFileSync.mockImplementation((binary: string, args?: readonly string[]) => {
           if (joinedCall([binary, args]).includes('netstat.exe -ano -p tcp')) {
             return `  TCP    127.0.0.1:${port}   0.0.0.0:0   LISTENING   4242`;
           }
@@ -611,7 +611,7 @@ describe('environment detection utilities', () => {
       await loadWin32Env();
       const port = await bindAndRelease();
 
-      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      win32ExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'gateway stop': 'throw',
           'tasklist.exe': 'INFO: No tasks are running which match the specified criteria.',
@@ -635,7 +635,7 @@ describe('environment detection utilities', () => {
       await loadWin32Env();
       const port = await bindAndRelease();
 
-      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      win32ExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, { 'gateway stop': 'throw', 'tasklist.exe': 'throw' })
       );
 
@@ -652,7 +652,7 @@ describe('environment detection utilities', () => {
       await loadWin32Env();
       const port = await bindAndRelease();
 
-      win32ExecFileSync.mockImplementation((binary: string, args: string[]) =>
+      win32ExecFileSync.mockImplementation((binary: string, args?: readonly string[]) =>
         routeByCommand(binary, args, {
           'gateway stop': 'throw',
           'tasklist.exe': 'node.exe  4242 Console  1  12,340 K',

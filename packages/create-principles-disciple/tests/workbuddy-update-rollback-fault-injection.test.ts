@@ -219,11 +219,15 @@ describe('WorkBuddy update-failure rollback (real fault injection)', () => {
     // 8. REAL launcher from the restored cache: initialize, tools/list and a
     //    read-only tools/call on the OLD workspace.
     let stderr = '';
+    const childEnv: Record<string, string> = {};
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value !== undefined) childEnv[name] = value;
+    }
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [path.join(cacheVersionDir(), 'mcp', 'launcher.cjs')],
       cwd: cacheVersionDir(),
-      env: { ...process.env },
+      env: childEnv,
       stderr: 'pipe',
     });
     const stream = transport.stderr as Readable | undefined;

@@ -53,6 +53,11 @@ export interface InstallSuccessOutput {
    * this holds the URL the browser was opened to (ends with /welcome). Undefined
    * when auto-launch was not performed or failed. */
   consoleUrl?: string;
+  /** Failure detail. `buildSuccessOutput` never sets it on the success branch
+   * (the CLI JSON contract emits `reason` only when `success === false`), so it
+   * is optional here. Declared on both union members because callers may read
+   * `output.reason` before narrowing on `success`. */
+  reason?: string;
 }
 
 export interface InstallFailureOutput {
@@ -61,6 +66,12 @@ export interface InstallFailureOutput {
   nextAction: string;
   components?: Partial<ComponentStatus>;
   verification?: Partial<VerificationResult>;
+  /** Channels the installer attempted to enable. The real CLI JSON contract
+   * (`toInstallJsonOutput` over `InstallResult.enabledChannels`) always emits it,
+   * but `buildSuccessOutput`'s failure branch omits it, so it is optional here.
+   * Declared on both union members because callers may read
+   * `output.enabledChannels` before narrowing on `success`. */
+  enabledChannels?: MvpChannel[];
 }
 
 export type InstallOutput = InstallSuccessOutput | InstallFailureOutput;

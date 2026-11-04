@@ -315,7 +315,7 @@ describe('native release target matrix', () => {
     // clean `npm ci` leaves install-layout/dist absent, and host-runtime's
     // tsc imports its types entry — building host-runtime first fails with
     // TS2307 before any publish runs (reproduced locally; review P1 round 3).
-    const buildOrder = (text) => {
+    const buildOrder = (text: string) => {
       const core = text.indexOf('Build core');
       const install = text.indexOf('Build install layout');
       const host = text.indexOf('Build host runtime');

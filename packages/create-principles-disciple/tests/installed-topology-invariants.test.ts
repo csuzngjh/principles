@@ -189,10 +189,10 @@ describe('PRI-920 settled-install topology invariants', () => {
     if (sandboxRoot) realFs.rmSync(sandboxRoot, { recursive: true, force: true, maxRetries: 10 });
   });
 
-  async function settleInstalledRuntime(): Promise<{ coreDir: string; consoleDir: string; pdDir: string; runtimeDir: string }> {
+  async function settleInstalledRuntime(): Promise<ReturnType<typeof getInstallLayoutPaths>> {
     const result = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
     expect(result.success, `install must succeed: ${result.reason ?? result.error}`).toBe(true);
-    return getInstallLayoutPaths(sandboxRoot) as unknown as { coreDir: string; consoleDir: string; pdDir: string; runtimeDir: string };
+    return getInstallLayoutPaths(sandboxRoot);
   }
 
   /** Invariant battery — the SAME checks a future pd doctor would reuse. */
@@ -213,6 +213,9 @@ describe('PRI-920 settled-install topology invariants', () => {
       legacyExtensionExists: realFs.existsSync(layout.openClawExtensionDir),
     });
     expect(resolution.mode).toBe('canonical');
+    // Explicit narrowing: a settled install must resolve to a component dir
+    // source, never 'missing' (getPdCliEntry only accepts canonical/legacy).
+    if (resolution.mode === 'missing') throw new Error('expected canonical install layout, got missing');
     expect(realFs.existsSync(getPdCliEntry(resolution.paths, resolution.mode))).toBe(true);
     expect(realFs.existsSync(resolution.paths.consoleDir)).toBe(true);
     expect(realFs.existsSync(resolution.paths.coreDir)).toBe(true);

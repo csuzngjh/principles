@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
@@ -40,7 +40,7 @@ const temporaryDirectories: string[] = [];
 function signedBytes<T extends Root | Snapshot | Targets | Timestamp>(
   signed: T,
   keyId: string,
-  privateKey: ReturnType<typeof generateKeyPairSync>['privateKey'],
+  privateKey: KeyObject,
 ): Buffer {
   const metadata = new Metadata(signed);
   metadata.sign(
