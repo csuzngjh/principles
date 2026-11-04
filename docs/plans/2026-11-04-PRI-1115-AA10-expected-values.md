@@ -493,6 +493,7 @@
 | 部分 D 未知 | `D/T=lower_bound + value + unknown=n`；`unknownDelivery` 单列 | 把下界说成真值；把未知算作失败或成功 |
 | 全部 D 未知但 T/O 已知 | `D/T=lower_bound 0.000 + unknown=n`；明确不是"零送达" | 输出 0% 结论 |
 | 存在 unlinked 记录 | 已关联集合单独汇；`unlinkedRecords=n`；`completeness=unknown` | 把 unlinked 记录计成机会或成功 |
+| 弱关联记录 | 单列待核实；`weakLinkage=n`；不并入强关联分母 | 把弱关联当成已确认机会或成功（§6.3） |
 | 窗口关闭时仍有 open | 该机会 D=unknown；`pending=n`；比率为临时下界 | 把未决算成功或失败；静默丢弃 |
 | 同一批记录跨配置身份 | 按 `configSnapshot` 分组分别汇；旧证据只支持原范围 | 跨 hostVersion/pluginVersion/指纹合并分母（§5.2） |
 | 时钟/顺序不可比 | `D/T=unknown`；`timelinessUnknown=n` | 用墙钟相近补出"及时"（§4） |
