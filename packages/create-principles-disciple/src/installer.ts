@@ -1861,10 +1861,77 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   }
 }
 
+/**
+ * PRI-1102: a target that exists as a DANGLING link (an interrupted install
+ * left a reparse point whose target is gone) is not a directory the installer
+ * can copy into. `existsSync` follows the link and reports "missing", so the
+ * backup step never moves it, and `ensureDir` then treats it as present —
+ * the follow-up mkdir fails with ENOENT and aborts the whole install.
+ *
+ * Absent targets are created. A dangling link is removed (the link itself only,
+ * never a target), and the caller recreates the real directory. Everything
+ * else — a real directory, or a link that still resolves — is left untouched,
+ * so an existing install is never destroyed by this step.
+ */
+export async function preparePluginInstallTarget(targetDir: string): Promise<void> {
+  let stats: Stats | undefined;
+  try {
+    stats = lstatSync(targetDir, { throwIfNoEntry: false });
+  } catch (error) {
+    throw new Error(`Cannot inspect plugin install target ${targetDir}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  if (stats !== undefined && stats.isSymbolicLink()) {
+    let resolves = true;
+    try {
+      realpathSync(targetDir);
+    } catch {
+      resolves = false;
+    }
+    if (!resolves) {
+      // fs-extra's remove unlinks the reparse point instead of traversing it.
+      await fse.remove(targetDir);
+      logger.warn(`Removed dangling link at ${targetDir} (target missing) — rebuilding the plugin install directory.`);
+    }
+  }
+  await fse.ensureDir(targetDir);
+}
+
+/**
+ * PRI-1102: a rollback is only as good as the state it returns to. The
+ * pre-run state can itself be incomplete (a component directory the previous
+ * run never finished, a link whose target is gone), so "restored" must not be
+ * reported as a healthy install without checking what the restored paths
+ * actually resolve to.
+ */
+export function describeRestoredStateGaps(): string[] {
+  const gaps: string[] = [];
+  for (const dir of [getPluginExtDir(), getPdRuntimeDir()]) {
+    let stats: Stats | undefined;
+    try {
+      stats = lstatSync(dir, { throwIfNoEntry: false });
+    } catch (error) {
+      gaps.push(`${dir} (unreadable: ${error instanceof Error ? error.message : String(error)})`);
+      continue;
+    }
+    if (stats === undefined) {
+      gaps.push(`${dir} (missing)`);
+      continue;
+    }
+    if (stats.isSymbolicLink()) {
+      try {
+        realpathSync(dir);
+      } catch {
+        gaps.push(`${dir} (dangling link)`);
+      }
+    }
+  }
+  return gaps;
+}
+
 export async function installPluginToStaging(pluginDir: string, language: SkillLanguage): Promise<void> {
   const builtPluginDir = path.join(pluginDir, 'plugin');
   for (const targetDir of pluginInstallDirs()) {
-    await fse.ensureDir(targetDir);
+    await preparePluginInstallTarget(targetDir);
     // PRI-1037 payload fix: npm-era payloads carried a ~16k-file node_modules
     // (the whole pi-ai/openai/anthropic tree, dragged in through the plugin's
     // historical file:./core dependency) plus a `core` junction, in BOTH plugin
@@ -5068,6 +5135,10 @@ export async function install(
     // pre-date this run, so it is NOT wholesale-removed. Report its retention
     // honestly instead of claiming "nothing else was modified".
     const workspaceTouched = !hasBackup && mutationStarted && journal?.lastState !== 'planned';
+    // PRI-1102: `restored` describes the rollback operation, not the health of
+    // the state it returned to. Name the gaps so "restored" is never read as
+    // "usable install".
+    const restoredGaps = hasBackup && restoreResult.restored ? describeRestoredStateGaps() : [];
     const rollbackSuffix = !hasBackup
       ? freshCleanup
         ? freshCleanup.failed.length === 0
@@ -5075,7 +5146,9 @@ export async function install(
           : t('rollback_fresh_clean_failed').replace('{dirs}', freshCleanup.failed.map((f) => f.dir).join(', '))
         : t('rollback_no_changes')
       : restoreResult.restored
-        ? t('rollback_restored')
+        ? restoredGaps.length === 0
+          ? t('rollback_restored')
+          : t('rollback_restored_incomplete').replace('{paths}', restoredGaps.join(', '))
         : t('rollback_failed')
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
@@ -5092,7 +5165,9 @@ export async function install(
           ? t('next_no_changes_lock')
           : t('next_no_changes_other'))
       : restoreResult.restored
-        ? t('next_restored')
+        ? restoredGaps.length === 0
+          ? t('next_restored')
+          : t('next_restored_incomplete').replace('{paths}', restoredGaps.join(', '))
         : t('next_restore_failed')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '')
