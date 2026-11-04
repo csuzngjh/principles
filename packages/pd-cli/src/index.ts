@@ -33,7 +33,6 @@ import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningOrphans } from './commands/runtime-pruning.js';
 import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
-import { handleRuntimeGfiSnapshot } from './commands/runtime-gfi-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
@@ -775,15 +774,6 @@ workbuddyCmd
       status: opts.status === true,
       ...(intervalMs !== undefined && Number.isInteger(intervalMs) ? { intervalMs } : {}),
     });
-  });
-
-runtimeHealthCmd
-  .command('gfi')
-  .description('GFI workspace snapshot — active vs stale session breakdown')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handleRuntimeGfiSnapshot({ workspace: opts.workspace, json: opts.json });
   });
 
 const internalizationCmd = runtimeCmd

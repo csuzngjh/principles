@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { createRequire } from 'module';
-import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
-import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
+import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime-v2';
+import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 
@@ -69,15 +69,6 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
       case 'candidate_audit':
         actions.push('Run `pd candidate audit --workspace <path> --json` for details.');
         break;
-      case 'gfi_snapshot': {
-        const gfiDetails = check.details as { warnings?: string[]; configPath?: string } | undefined;
-        if (gfiDetails && gfiDetails.warnings && gfiDetails.warnings.length > 0) {
-          actions.push(`Review .pd/config.yaml and rerun \`pd runtime features --workspace <path> --json\`.`);
-        } else {
-          actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
-        }
-        break;
-      }
       case 'pruning_orphans':
         actions.push('Run `pd runtime pruning orphans --workspace <path> --dry-run` to inspect orphan candidates.');
         break;
@@ -112,7 +103,7 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
 export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutput> {
   const generatedAt = new Date().toISOString();
 
-  // Single canonical config load — shared across gfi_snapshot and internalization_queue checks (PRI-460).
+  // Single canonical config load — shared across the internalization queue check (PRI-460).
   const pdConfigResult = loadPdConfig(workspaceDir);
   const pdFlags = computeFlagsFromLoadResult(pdConfigResult);
 
@@ -149,59 +140,6 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
         };
       } catch (err) {
         return { name: 'candidate_audit', status: 'error', summary: 'Candidate audit check failed.', error: String(err) };
-      }
-    })(),
-    (async (): Promise<CanaryCheck> => {
-      try {
-        const gfiFlag = pdFlags.flags.gfi;
-        if (!gfiFlag || !gfiFlag.enabled) {
-          if (pdFlags.warnings.length > 0) {
-            return {
-              name: 'gfi_snapshot',
-              status: 'degraded',
-              summary: `GFI disabled but config has warnings: ${pdFlags.warnings.join('; ')}`,
-              details: { warnings: pdFlags.warnings, configPath: pdConfigResult.configPath },
-            };
-          }
-          return {
-            name: 'gfi_snapshot',
-            status: 'healthy',
-            summary: 'GFI feature flag disabled — skipping snapshot.',
-          };
-        }
-        const sessionDir = path.join(workspaceDir, '.state', 'sessions');
-        const fs = await import('fs');
-        const sessions: { sessionId: string; currentGfi: number; lastActivityAt: number; consecutiveErrors: number }[] = [];
-        if (fs.existsSync(sessionDir)) {
-          for (const file of fs.readdirSync(sessionDir)) {
-            if (!file.endsWith('.json')) continue;
-            try {
-              const raw = fs.readFileSync(path.join(sessionDir, file), 'utf8');
-              const parsed = JSON.parse(raw);
-              if (parsed?.sessionId) {
-                sessions.push({
-                  sessionId: parsed.sessionId,
-                  currentGfi: parsed.currentGfi ?? 0,
-                  lastActivityAt: parsed.lastActivityAt ?? parsed.lastControlActivityAt ?? 0,
-                  consecutiveErrors: parsed.consecutiveErrors ?? 0,
-                });
-              }
-            } catch { /* skip malformed */ }
-          }
-        }
-        const snapshot: GfiWorkspaceSnapshot = buildGfiWorkspaceSnapshot({ sessions, nowMs: Date.now() });
-        const health = classifyGfiWorkspaceHealth(snapshot);
-        const {status} = health;
-        return {
-          name: 'gfi_snapshot',
-          status,
-          summary: status === 'healthy'
-            ? `GFI snapshot OK. ${snapshot.activeSessionCount} active, ${snapshot.staleSessionCount} stale sessions.`
-            : `GFI degraded: ${health.reason}`,
-          details: { ...snapshot, healthAssessment: health },
-        };
-      } catch (err) {
-        return { name: 'gfi_snapshot', status: 'error', summary: 'GFI snapshot check failed.', error: String(err) };
       }
     })(),
     (async (): Promise<CanaryCheck> => {
