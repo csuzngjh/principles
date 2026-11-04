@@ -69,7 +69,24 @@
 | 4 | `tests/hooks/gate-b-only-runtime-guard.test.ts:62` > `Owner-driven paths still reach the TriggerController` | `llm.ts` 含 `evaluateTriggerController` | `llm.ts` 不再含该符号（GFI 健康度路径已删） | 该断言只保留 `pain.ts`（Owner 手动路径）；删除 `llm.ts` 断言 | L5 `dcf53fba1` | 审计表 #15（`hooks/llm.ts` highGfiThreshold/currentGfi 分支删除，SPEC §3.5） |
 | 5 | `tests/hooks/llm-pain-source-retirement.test.ts:161` > `GFI crossing the high threshold keeps its health-side pain writes` | `recordPainSignal` 调用 1 次 | 调用 0 次（`expected "vi.fn()" to be called 1 times, but got 0 times`） | 删除该用例（其前提「GFI 分支行为不变」已失效）；保留其它 Pain 来源退休断言 | L5 `dcf53fba1` | 审计表 #15（同 #4）；SPEC §7.1「GFI 专属测试与 Fixture」须删除 |
 
-## 不变量的实测通过项（累计 HEAD）
+## 块 4 判定台账（5 条过期断言，先判定后改测试）
+
+> 每条先答三问：① 原本保护什么（防哪种退化）；② 现在由谁承担（a/b/c）；③ 判定与删改一致。
+> 约束：本块只改测试，不改生产代码；不 skip / 不 todo / 不注释掉断言来变绿；一条一个 commit。
+
+| # | 用例 | ① 原本保护什么 | ② 现在由谁承担（a/b/c + 证据） | ③ 判定与改动 | commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `tests/core/event-log.test.ts:87` | `DailyStats` 结构契约里含 GFI 日聚合（防止日统计聚合被静默删掉/漏生成） | **(b) 保护对象已不存在**：`DailyStats` 接口/schema 已无 `gfi`（`event-types.ts:1065-1106`）；删除层 `36968fac4`。读端实测为 0：`commands/pain.ts:128` 只取 `tools/hooks/evolution`，event-log 内部聚合无 gfi，`packages/pd-console/src` 无 gfi 使用 | 删 `expect(stats.gfi).toBeDefined()`，留原位置注释说明字段已删 + 读端为空；其余 `tools/toolCalls/errors/evolution/hooks` 断言不动 | `2b23c0d60` |
+| 2 | `tests/hooks/gate-block-trajectory-persistence.test.ts:395` | tracker 抛错时降级**可观测**（带 reasonCode 的 warn）且轨迹行/事件日志仍落库（rc-9 + never-throws） | **(c) 保护仍需要且仍被承担**：生产 `gate-block-helper.ts:112` 输出 `reasonCode=block_track_failed`，改名层 `2bae37491` | 断言字符串改为 `block_track_failed`；用例标题与 fixture 名去 GFI（`s-gfi`→`s-block-track`）；`toHaveBeenCalledWith`、轨迹行数、`gate_block` 事件断言全部保留 | `28431f526` |
+| 3 | `tests/hooks/gate-legacy-contract-compatibility.test.ts:213/219` | compatibility guard 产生的 block **不进入行为证据链**：不涨 friction、不涨 blockedAttempts、不产出 gate_block | **(b)** `SessionState.currentGfi` 已删（`31a60e1e5`）；`RuleHostInput.session.currentGfi` 同属该字段删除（审计 #21 / SPEC §3.8）。同测试中 `blockedAttempts===0` 与「无 gate_block 事件」仍在原位承担该保护 | 删两处 `currentGfi` 断言 + `RuleHostInput` fixture 里的 `currentGfi: 0`；`blockedAttempts` 两处与 `gate_block` 零事件断言原样保留 | `cc23ee008` |
+| 4 | `tests/hooks/gate-b-only-runtime-guard.test.ts:62` | 只有 Owner 驱动路径能到 Gate B TriggerController；自动/失败路径不得进入 | **(a)+(b) 混合**：(a) TriggerController **仍在生产路径**——唯一非测试调用点为 `pain.ts:31`（import）+ `pain.ts:450`（`handleManualPain` 内调用），全仓 `packages/*/src` grep 无第二个调用者，故 `pain.ts` 断言保留并注明真实调用点；`llm.ts` 半条为 (b)：GFI 健康度路径 `dcf53fba1` 删除（审计 #15 / SPEC §3.5），`llm.ts` 已无该符号 | 保留 `pain.ts` 断言（迁注到 `:450` 真实调用点）；删 `llm.ts` 半条；头部 docstring 去掉「llm.ts GFI health path」并说明这是设计内移除；`DUAL_GATE_HOOKS` 三项的 Gate A/flag 负断言不动 | `e88511955` |
+| 5 | `tests/hooks/llm-pain-source-retirement.test.ts:161`（describe 3 例） | 用差分 pin 冻结当时 GFI 分支的 pain 写入（score clamp 60、`user_empathy`、canonicalPainId、evidence_only 不入 Gate B），防止 Phase 0 顺手改坏 GFI | **(b) 保护对象已不存在**：`llm.ts` 的 GFI 健康度分支 `dcf53fba1` 删除（审计 #15 / SPEC §3.5）；SPEC §7.1 明确要求删除 GFI 专属测试与 fixture。同文件 `Semantic Confusion / empathy tag / LLM Paralysis` 三条退休断言仍在承担非 GFI 保护 | 删整个 GFI differential pin describe（3 例）+ `currentGfi` fixture 三处；用例 7→4；保留断言逐条未动 | `4264d847d` |
+
+**块 4 结论**：5 条均判定为「测试未随生产层更新」，**无一条是能力退化**；其中 #4 的 TriggerController 有实测生产调用点证据。改动仅测试文件（5 个），未动生产代码。
+
+---
+
+## 不变量的实测通过项（累计 HEAD `0bb1bcc1e`，块 4 修复前）
 
 | 不变量 | 实际值 | 与基线比较 |
 | --- | --- | --- |
