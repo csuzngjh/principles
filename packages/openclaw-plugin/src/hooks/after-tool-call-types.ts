@@ -11,8 +11,6 @@
  * - EP-01: These types document boundaries, not runtime validation targets.
  */
 
-import type { SessionState } from '../core/session-tracker.js';
-
 // ── Tool Call Outcome Classification ────────────────────────────────────────
 
 /**
@@ -34,7 +32,7 @@ export interface ToolCallOutcome {
 /**
  * Normalized observation built from the tool call event and context.
  *
- * Used by friction tracking, event recording, and pain admission.
+ * Used by friction tracking, event log recording, and trajectory recording.
  * Constructed after classification, before any I/O.
  */
 export interface ToolCallObservation {
@@ -62,38 +60,4 @@ export interface ToolCallObservation {
   readonly painScore: number;
   /** Trace ID for this observation chain */
   readonly traceId: string;
-}
-
-// ── Pain Admission Decision ─────────────────────────────────────────────────
-
-/**
- * Result of evaluating whether a tool failure should trigger pain diagnosis.
- *
- * Encapsulates the single-gate trigger controller decision.
- */
-export interface PainAdmissionDecision {
-  /** Whether the tool failure should proceed to pain emission */
-  readonly admitted: boolean;
-  /** The admission stage that made the decision */
-  readonly stage: 'not_applicable' | 'trigger_admitted' | 'trigger_rejected';
-  /** Human-readable reason for the decision */
-  readonly reason: string;
-  /** Detail about the decision */
-  readonly detail: string;
-}
-
-// ── Friction Update Result ──────────────────────────────────────────────────
-
-/**
- * Result of friction tracking for a tool call.
- */
-export interface FrictionUpdateResult {
-  /** GFI before this update */
-  readonly gfiBefore: number;
-  /** GFI after this update */
-  readonly gfiAfter: number;
-  /** Updated session state (if failure) */
-  readonly sessionState: SessionState | undefined;
-  /** The error hash used for tracking */
-  readonly errorHash: string;
 }

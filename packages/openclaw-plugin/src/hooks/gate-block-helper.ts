@@ -10,20 +10,12 @@
  * had their own block persistence implementations.
  */
 
-import * as fs from 'fs';
-import { getSession, trackBlock } from '../core/session-tracker.js';
+import { trackBlock } from '../core/session-tracker.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { TrajectoryDatabase, TrajectoryGateBlockInput } from '../core/trajectory.js';
 import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
-import { emitPainDetectedEvent } from './pain.js';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { loadPrincipleReceiptMetadata, type PrincipleReceiptMetadata } from '../core/principle-receipt-metadata.js';
-import { evaluateEvidenceTriage } from './triage-adapter.js';
-import { evaluateTriggerController } from '@principles/core/runtime-v2';
-import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
-import { isRisky } from '../utils/io.js';
-import { normalizeProfile } from '../core/profile.js';
-import { SystemLogger } from '../core/system-logger.js';
 import {
   TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS,
   TRAJECTORY_GATE_BLOCK_MAX_RETRIES
@@ -173,7 +165,7 @@ export function recordGateBlockAndReturn(
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void; info?: (_message: string) => void }
    
 ): PluginHookBeforeToolCallResult {
-  const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
+  const { filePath, reason, toolName, blockSource } = blockCtx;
   // Legacy hook path always has a resolvable path (gate.ts returns before
   // calling this when none can be extracted); the coercion only satisfies
   // the widened BlockContext contract for display/risk-matching contexts.
@@ -191,92 +183,15 @@ export function recordGateBlockAndReturn(
   // bounded retry) are the authoritative persistence core shared by BOTH
   // enforcement paths — the legacy hook path here, and
   // handleSharedRuleHostResult's deny branch (PRI-569).
+  //
+  // Phase A: a correct RuleHost block is a real technical fact, not Owner
+  // behavioural-pain evidence. It persists gate_blocks and GFI health but
+  // never creates a Pain Event or Diagnostician task by itself. The Owner can
+  // still correct a wrong block explicitly, which flows through the shared
+  // correction detection instead.
   persistGateBlock(wctx, blockCtx, logger);
 
-  // 5. Record gate block pain context. Runtime V2 diagnosis is gated by GFI
-  // so one mild block does not start a long diagnostician run.
-  if (sessionId) {
-    const GATE_BLOCK_PAIN_SCORE = 45; // Must be >= pain_trigger (40) so single gate block can trigger diagnosis (PRI-274)
-    // PRI-453: Generate painId early. SDK observability path (emitPainDetectedEvent
-    // with default recordObservability: true) handles all writes: events_*.jsonl +
-    // evolution.jsonl + trajectory.db (with canonicalPainId for dedup). No separate
-    // legacy recordPainEvent call needed — avoids double-write to trajectory.db.
-    const gatePainId = `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
-    // PRI-651-B1: Unconditional Gate B — TriggerController is the only
-    // admission authority. Gate A fallback (PRI-454 rollback) removed.
-    const session = getSession(sessionId);
-    // Load profile with 1MB size guard, matching pain.ts pattern
-    const profilePath = wctx.resolve('PROFILE');
-    let profile = normalizeProfile({});
-    if (fs.existsSync(profilePath)) {
-      try {
-        const content = fs.readFileSync(profilePath, 'utf8');
-        if (content.length > 1024 * 1024) {
-          logger.warn?.('[PD_GATE] PROFILE.json exceeds 1 MB, skipping');
-          SystemLogger.log(wctx.workspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping — fallback to non-risky');
-        } else {
-          profile = normalizeProfile(JSON.parse(content));
-        }
-      } catch (e) {
-        logger.warn?.(`[PD_GATE] Failed to parse PROFILE.json: ${String(e)}`);
-        SystemLogger.log(wctx.workspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)} — fallback to non-risky`);
-      }
-    }
-    // Real judgment for rulehost blocks: if a principle blocked an action on a risky path,
-    // it IS a high-confidence unsafe action. The pain score (45) is the evidence friction
-    // weight, NOT the action risk severity. The rulehost principle already determined
-    // this action was important enough to block — that is the real signal.
-    const isUnsafe = isRisky(displayPath, profile.risk_paths);
-    // PRI-454 P2-1: Pass consecutiveErrors and isRisky to match Gate A's
-    // upgrade logic. Rule 3 (consecutiveErrors >= 4 → admit) was being
-    // dropped, so non-risky repeated gate blocks never triggered diagnosis.
-    const triage = evaluateEvidenceTriage('rulehost_block', GATE_BLOCK_PAIN_SCORE, {
-      isUnsafeHighConfidence: isUnsafe,
-      isRisky: isUnsafe,
-      consecutiveErrors: session?.consecutiveErrors,
-    });
-
-    if (triage.decision !== 'admit') {
-      logger.info?.(`[PD_GATE] Triage ${triage.decision}: ${triage.reason}`);
-    } else {
-      // PRI-454: Gate B path — TriggerController owns admission
-      const errorHash = `${toolName}:${displayPath}:${reason}`;
-      const cooldownActive = isSharedCooldownActive('rulehost_block', sessionId, errorHash);
-      const triggerDecision = evaluateTriggerController({
-        triageResult: triage,
-        isOwnerManual: false,
-        isCooldownActive: cooldownActive,
-        isValid: true,
-        score: GATE_BLOCK_PAIN_SCORE,
-        sessionId,
-      });
-      if (triggerDecision.shouldCreateDiagnosticTask) {
-        markSharedEpisodeAsDiagnosed('rulehost_block', sessionId, errorHash);
-        void emitPainDetectedEvent(wctx, {
-          ts: new Date().toISOString(),
-          type: 'pain_detected',
-          data: {
-            painId: gatePainId,
-            painType: 'user_frustration',
-            source: 'gate_blocked',
-            reason: `Gate blocked ${toolName} on ${displayPath}: ${reason}`,
-            score: GATE_BLOCK_PAIN_SCORE,
-            sessionId,
-            agentId: 'main',
-            hostKind: 'openclaw',
-          },
-        }).catch((emitErr) => {
-          logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
-        });
-      } else {
-        logger.info?.(`[PD_GATE] Gate B skipped: ${triggerDecision.reason}`);
-      }
-    }
-
-  }
-
-  // 6. Return consistent block result with contextual operator guidance
+  // 5. Return consistent block result with contextual operator guidance
   // PRI-530: when principle_receipt_block_copy is enabled and this block came
   // from RuleHost, enrich the copy with principle attribution (SPEC §5.1).
   let blockMessage: string;

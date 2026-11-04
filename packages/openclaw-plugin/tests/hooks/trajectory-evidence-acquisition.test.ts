@@ -2,10 +2,9 @@
  * PRI-642 Scope A — typed trajectory evidence acquisition API.
  *
  * SPEC §7.2: Scope A adds a typed acquisition API that returns the
- * discriminated available/unavailable result. The legacy array API
- * (`buildTrajectoryEvidence`) remains a compatibility wrapper for automatic
- * emitters and MUST keep its exact sentinel shapes (covered separately in
- * trajectory-evidence.test.ts).
+ * discriminated available/unavailable result. Phase A retired the legacy
+ * untyped array wrapper together with the last automatic emitter, so the
+ * typed API is the only remaining surface.
  *
  * These tests are negative-first: they fail before the typed API exists and
  * must pass after, with no placeholder evidence ever counted as available.

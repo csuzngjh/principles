@@ -7,7 +7,7 @@ import * as ioUtils from '../../src/utils/io.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { clearSession } from '../../src/core/session-tracker.js';
-import { resetTriggerCooldownForTest } from '../../src/hooks/after-tool-call-helpers.js';
+import { resetSharedCooldownForTest } from '../../src/hooks/trigger-cooldown-tracker.js';
 import { buildToolFailureObservation, resolveSourceKind } from '../../src/hooks/raw-observation-adapter.js';
 import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
 
@@ -153,7 +153,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     clearSession('s-success');
     clearSession('s-low-value-failure');
     clearSession('s-repeated-failure');
-    resetTriggerCooldownForTest();
+    resetSharedCooldownForTest();
   });
 
   afterEach(() => {
@@ -216,7 +216,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     }));
   });
 
-  it('emits Runtime V2 diagnosis after repeated same write failures', () => {
+  it('never emits diagnosis after repeated same write failures (Phase A)', () => {
     const mockCtx = { workspaceDir, sessionId: 's-repeated-failure', api: { logger: {} } };
     const mockEvent = {
         toolName: 'write',
@@ -229,25 +229,15 @@ describe('Post-Write Checks & Pain Hook', () => {
     vi.mocked(ioUtils.isRisky).mockReturnValue(false);
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
-    // PRI-363: trigger controller requires consecutiveErrors >= 4 for upgrade
-    handleAfterToolCall(mockEvent as any, mockCtx as any);
+    // Phase A: repeated technical failures never escalate into Pain or a
+    // Diagnostician task, no matter how many times they occur.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      handleAfterToolCall(mockEvent as any, mockCtx as any);
+    }
+
     expect(mockEmitSync).not.toHaveBeenCalled();
-
-    handleAfterToolCall(mockEvent as any, mockCtx as any);
-    expect(mockEmitSync).not.toHaveBeenCalled();
-
-    handleAfterToolCall(mockEvent as any, mockCtx as any);
-    expect(mockEmitSync).not.toHaveBeenCalled();
-
-    handleAfterToolCall(mockEvent as any, mockCtx as any);
-
-    expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'pain_detected',
-      data: expect.objectContaining({
-        painType: 'tool_failure',
-        source: 'write',
-      }),
-    }));
+    expect(mockEventLog.recordPainSignal).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordPainEvent).not.toHaveBeenCalled();
     expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 's-repeated-failure',
       toolName: 'write',
@@ -276,7 +266,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     }));
   });
 
-  it('should persist matched principle valueMetrics through the locked ledger owner without raw training-state writes', () => {
+  it('does not touch principle value metrics for a technical tool failure (Phase A)', () => {
     const mockCtx = { workspaceDir, sessionId: 's-metrics', api: { logger: {} } };
     const mockEvent = {
       toolName: 'write',
@@ -306,16 +296,16 @@ describe('Post-Write Checks & Pain Hook', () => {
       contextTags: ['write'],
     });
 
-    // PRI-363: risky high-score write triggers admission via trigger controller
-    // (isRisky=true + score >= 70 → risky_high_score upgrade → admit)
     handleAfterToolCall(mockEvent as any, mockCtx as any);
 
-    expect(mockUpdatePrincipleValueMetrics).toHaveBeenCalledWith(
-      'p-match',
-      expect.objectContaining({
-        painPreventedCount: 1,
-      }),
-    );
+    // Phase A: a failed tool call is trajectory evidence, not a prevented
+    // Owner Pain — no principle value metric is credited.
+    expect(mockUpdatePrincipleValueMetrics).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-metrics',
+      toolName: 'write',
+      outcome: 'failure',
+    }));
 
     const trainingStateWrites = vi
       .mocked(fs.writeFileSync)
@@ -549,9 +539,8 @@ describe('Post-Write Checks & Pain Hook', () => {
 import {
   classifyToolCallOutcome,
   buildToolCallObservation,
-  evaluatePainAdmissionForToolCall,
 } from '../../src/hooks/after-tool-call-helpers.js';
-import type { ToolCallOutcome, ToolCallObservation } from '../../src/hooks/after-tool-call-types.js';
+import type { ToolCallOutcome } from '../../src/hooks/after-tool-call-types.js';
 
 describe('PRI-326: classifyToolCallOutcome', () => {
   it('returns success for exitCode 0 with no error', () => {
@@ -630,75 +619,6 @@ describe('PRI-326: classifyToolCallOutcome', () => {
       error: undefined,
     } as any);
     expect(result.isFailure).toBe(false);
-  });
-});
-
-describe('PRI-326: evaluatePainAdmissionForToolCall', () => {
-  const workspaceDir = '/mock/workspace';
-  const mockConfig = { get: vi.fn().mockReturnValue(undefined) };
-  const baseOutcome: ToolCallOutcome = { isFailure: true, exitCode: 1, failureSource: 'tool_failure' };
-  const baseObservation: ToolCallObservation = {
-    params: { filePath: 'src/main.ts' },
-    relPath: 'src/main.ts',
-    isRisk: false,
-    errorType: 'Other',
-    errorHash: 'abc123',
-    errorText: 'Permission denied',
-    painScore: 10,
-    traceId: 'trace-123',
-  };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    resetTriggerCooldownForTest();
-    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
-  });
-
-  it('returns not_applicable for non-write tool', () => {
-    const result = evaluatePainAdmissionForToolCall(
-      { toolName: 'read' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
-    );
-    expect(result.stage).toBe('not_applicable');
-    expect(result.admitted).toBe(false);
-  });
-
-  it('returns not_applicable for success', () => {
-    const successOutcome: ToolCallOutcome = { isFailure: false, exitCode: 0, failureSource: undefined };
-    const result = evaluatePainAdmissionForToolCall(
-      { toolName: 'write' } as any, baseObservation, successOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
-    );
-    expect(result.stage).toBe('not_applicable');
-  });
-
-  it('returns trigger_rejected when tool_failure triage rejects', () => {
-    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: true, source: 'test' });
-
-    const result = evaluatePainAdmissionForToolCall(
-      { toolName: 'write' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
-    );
-    expect(result.stage).toBe('trigger_rejected');
-    expect(result.admitted).toBe(false);
-    expect(result.reason).toBeTruthy();
-  });
-
-  it('returns trigger_admitted when consecutive errors exceed repeatedFailure threshold', () => {
-    vi.mocked(loadFeatureFlagFromConfig).mockReturnValue({ enabled: false, source: 'test' });
-    // consecutiveErrors=5 >= default repeatedFailure threshold of 4 → trigger admits via repeated_failure
-    const highConsecutiveState = { currentGfi: 0, consecutiveErrors: 5, lastErrorHash: 'abc123' } as any;
-
-    const result = evaluatePainAdmissionForToolCall(
-      { toolName: 'write' } as any, baseObservation, baseOutcome, highConsecutiveState, undefined, 's-gate-admitted-test', workspaceDir, mockConfig
-    );
-    expect(result.stage).toBe('trigger_admitted');
-    expect(result.admitted).toBe(true);
-  });
-
-  it('includes reason and detail in every decision', () => {
-    const result = evaluatePainAdmissionForToolCall(
-      { toolName: 'read' } as any, baseObservation, baseOutcome, undefined, undefined, 's1', workspaceDir, mockConfig
-    );
-    expect(result.reason).toBeTruthy();
-    expect(result.detail).toBeTruthy();
   });
 });
 

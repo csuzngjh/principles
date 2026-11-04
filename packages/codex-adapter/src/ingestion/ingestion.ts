@@ -33,12 +33,10 @@ import { validateCodexTranscriptPath } from './transcript-path.js';
 import { classifyCodexVersion, CODEX_VERSION_NEXT_ACTION } from './codex-version.js';
 import { decodeTranscriptWindow, createNodeTranscriptPort, CODEX_INGESTION_MAX_BATCH_BYTES, TranscriptReplacedError, type TranscriptExpectedIdentity, type TranscriptPort } from './transcript-decoder.js';
 import { extractFields, type PayloadFields } from './ingestion-fields.js';
-import { buildLiveCorrectionCandidate, buildLiveToolCandidate, buildTranscriptCandidates } from './admission.js';
+import { buildLiveCorrectionCandidate, buildTranscriptCandidates } from './admission.js';
 
 export interface CodexIngestionOptions {
   readonly workspaceDir: string;
-  /** Native live-hook cwd; intentionally omitted for transcript catch-up. */
-  readonly projectDir?: string;
   readonly env?: { CODEX_HOME?: string | undefined };
   readonly now?: Date;
   readonly port?: TranscriptPort;
@@ -68,11 +66,10 @@ interface LiveObservationArgs {
   readonly fields: PayloadFields;
   readonly rolloutIdentity: string;
   readonly workspaceDir: string;
-  readonly projectDir?: string;
   readonly now: Date;
 }
 
-function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, projectDir, now }: LiveObservationArgs): CodexIngestionOutcome {
+function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: LiveObservationArgs): CodexIngestionOutcome {
   const nowIso = now.toISOString();
   let observation: GovernanceObservationInput | null = null;
   if (fields.turnId !== null && fields.prompt !== null) {
@@ -118,9 +115,11 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, projectD
   if (!result.ok) return { status: 'degraded', reason: result.reason ?? 'governance_write_failed', nextAction: result.nextAction ?? 'inspect the workspace trajectory database.', warnings: result.warnings };
   // Slice B: hand the live observation to the admission pass as a normalized
   // candidate (SPEC §12) — the caller (pd-hook) runs detection/admission.
+  // Phase A: tool-call observations stay technical trajectory only; they never
+  // become a behavioral-deviation Pain candidate by themselves.
   const candidate = observation.kind === 'user_turn'
     ? buildLiveCorrectionCandidate({ fields, rolloutIdentity })
-    : buildLiveToolCandidate({ fields, rolloutIdentity, ...(projectDir !== undefined ? { projectDir } : {}) });
+    : null;
   return {
     status: 'ok', inserted: result.inserted, enriched: result.enriched, duplicates: result.duplicates, warnings: result.warnings, lagBytes: 0,
     admissionCandidates: candidate !== null ? [candidate] : [],
@@ -327,7 +326,7 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
   const now = options.now ?? new Date();
 
   if (kind === 'before_prompt_build' || kind === 'after_tool_call') {
-    return ingestLiveObservation({ fields, rolloutIdentity: validated.rolloutIdentity, workspaceDir: options.workspaceDir, ...(options.projectDir !== undefined ? { projectDir: options.projectDir } : {}), now });
+    return ingestLiveObservation({ fields, rolloutIdentity: validated.rolloutIdentity, workspaceDir: options.workspaceDir, now });
   }
   return ingestTranscriptDelta({
     fallbackRootSessionId: fields.sessionId,

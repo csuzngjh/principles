@@ -4,37 +4,17 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
   applyTrajectorySchemaBase,
-  buildToolFailureObservation,
-  evaluateTriage,
-  evaluateTriggerController,
-  resolveSourceKind,
   sanitizeToolParams,
   sanitizeValue,
 } from '@principles/core/runtime-v2';
 import type { GovernanceHostKind } from '@principles/core/runtime-v2';
 import type { HostEvent, HostEventEmitter, HostEventResult } from '@principles/core/host';
 
-const WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace']);
-/** Shared with the governance admission path so both gate tool failures identically. */
-export const PRODUCTION_WRITE_TOOLS: ReadonlySet<string> = WRITE_TOOLS;
 const MAX_PREVIEW = 500;
-const PAIN_COOLDOWN_WINDOW_MS = 15 * 60 * 1000;
-const cooldowns = new Map<string, number>();
-
-export interface PainEvidenceEntry {
-  sourceRef: string;
-  note: string;
-}
 
 export interface ProductionPainEnrichment {
+  /** Stable host-supplied occurrence identity for the tool call. */
   eventId?: string;
-  painScore?: number;
-  isRisky?: boolean;
-  consecutiveErrors?: number;
-  relativePath?: string;
-  agentId?: string;
-  errorHash?: string;
-  evidence?: readonly PainEvidenceEntry[];
 }
 
 export type PainEnrichmentProvider = (event: HostEvent) => unknown | Promise<unknown>;
@@ -53,27 +33,6 @@ interface NormalizedOutcome {
   durationMs?: number;
   params: unknown;
   result: unknown;
-}
-
-/** Structural input accepted by the canonical derivations (HostEvent satisfies it without a cast). */
-export interface ProductionToolEventFields {
-  workspaceDir: string;
-  sessionId: string;
-  turnId?: string;
-  /**
-   * I1: the host's real per-call identity (Codex `tool_use_id`, WorkBuddy
-   * `call_id`). Two calls with the same session/generation/tool/params/result
-   * but DIFFERENT call ids are two real occurrences and must derive two
-   * identities; a redelivery of the SAME call id is one occurrence. Optional:
-   * hosts that supply no call id keep the historical content-derived identity
-   * (identical-content calls then cannot be distinguished — a documented
-   * limitation, never fabricated precision).
-   */
-  toolCallId?: string;
-  toolName?: string;
-  toolInput?: unknown;
-  toolOutput?: unknown;
-  source: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -100,8 +59,8 @@ function field(value: unknown, key: string): unknown {
  * Structured read tools (object/array results without an error field) are a
  * legitimate completion of the tool contract and stay success (SPEC §5.1).
  */
-function normalizeOutcome(event: Pick<HostEvent, 'context'> | ProductionToolEventFields): NormalizedOutcome {
-  const context = 'context' in event ? event.context : event;
+function normalizeOutcome(event: Pick<HostEvent, 'context'>): NormalizedOutcome {
+  const { context } = event;
   const envelope = context.toolOutput;
   const result = field(envelope, 'result') ?? envelope;
   const errorValue = field(envelope, 'error') ?? field(result, 'error');
@@ -145,41 +104,12 @@ function normalizeOutcome(event: Pick<HostEvent, 'context'> | ProductionToolEven
   };
 }
 
-function isEvidence(value: unknown): value is readonly PainEvidenceEntry[] {
-  return Array.isArray(value) && value.length <= 8 && value.every((entry) =>
-    isRecord(entry) && typeof field(entry, 'sourceRef') === 'string' && String(field(entry, 'sourceRef')).trim().length > 0
-      && String(field(entry, 'sourceRef')).length <= 300 && typeof field(entry, 'note') === 'string' && String(field(entry, 'note')).length <= 200);
-}
-
 function parseEnrichment(value: unknown): ProductionPainEnrichment | null {
   if (value === undefined) return {};
   if (!isRecord(value)) return null;
-  const painScore = field(value, 'painScore');
-  const isRisky = field(value, 'isRisky');
-  const consecutiveErrors = field(value, 'consecutiveErrors');
-  const evidence = field(value, 'evidence');
   const eventId = field(value, 'eventId');
-  const relativePath = field(value, 'relativePath');
-  const agentId = field(value, 'agentId');
-  const errorHash = field(value, 'errorHash');
-  if (painScore !== undefined && (typeof painScore !== 'number' || !Number.isFinite(painScore) || painScore < 0 || painScore > 100)) return null;
-  if (isRisky !== undefined && typeof isRisky !== 'boolean') return null;
-  if (consecutiveErrors !== undefined && (typeof consecutiveErrors !== 'number' || !Number.isInteger(consecutiveErrors) || consecutiveErrors < 0)) return null;
-  for (const key of ['eventId', 'relativePath', 'agentId', 'errorHash'] as const) {
-    const candidate = field(value, key);
-    if (candidate !== undefined && (typeof candidate !== 'string' || candidate.trim().length === 0 || candidate.length > 500)) return null;
-  }
-  if (evidence !== undefined && !isEvidence(evidence)) return null;
-  return {
-    ...(typeof eventId === 'string' ? { eventId } : {}),
-    ...(typeof painScore === 'number' ? { painScore } : {}),
-    ...(typeof isRisky === 'boolean' ? { isRisky } : {}),
-    ...(typeof consecutiveErrors === 'number' ? { consecutiveErrors } : {}),
-    ...(typeof relativePath === 'string' ? { relativePath } : {}),
-    ...(typeof agentId === 'string' ? { agentId } : {}),
-    ...(typeof errorHash === 'string' ? { errorHash } : {}),
-    ...(isEvidence(evidence) ? { evidence } : {}),
-  };
+  if (eventId !== undefined && (typeof eventId !== 'string' || eventId.trim().length === 0 || eventId.length > 500)) return null;
+  return typeof eventId === 'string' ? { eventId } : {};
 }
 
 function stable(value: unknown, seen = new WeakSet<object>()): string {
@@ -217,7 +147,7 @@ interface IdentityInput {
   sanitizedParams: Record<string, unknown>;
 }
 
-function ids(input: IdentityInput): { eventId: string; painId: string } {
+function ids(input: IdentityInput): { eventId: string } {
   const { outcome, sanitizedParams, canonicalEventId } = input;
   // The toolCallId key is included ONLY when the host supplied one, so the
   // canonical string of a no-call-id host is byte-identical to the historical
@@ -237,52 +167,7 @@ function ids(input: IdentityInput): { eventId: string; painId: string } {
     failure: outcome.failure,
   });
   const digest = createHash('sha256').update(canonical).digest('hex');
-  return { eventId: `host_${digest}`, painId: `pain_host_${digest}` };
-}
-
-export interface DerivedToolPainIdentity {
-  eventId: string;
-  painId: string;
-  outcome: NormalizedOutcome;
-  sanitizedParams: Record<string, unknown>;
-  paramsJson: string;
-  resultPreview: string | null;
-}
-
-/**
- * The canonical tool-pain identity derivation, exposed for the governance
- * admission path (Codex Governance Closure SPEC §10): the same normalized
- * fields fed to the live production handler derive the same deterministic
- * `pain_host_<sha256>` id, so live and observation-delivered admissions of one
- * tool call converge on one canonical pain.
- *
- * I1 parity obligation: when the host supplies a call id, BOTH paths must pass
- * the same `toolCallId` (Codex admission candidates carry it from the same
- * `tool_use_id` the live decoder required) — otherwise one real call would
- * derive two canonical pains.
- */
-export function deriveProductionToolPainIdentity(fields: ProductionToolEventFields & { canonicalEventId?: string }): DerivedToolPainIdentity {
-  const outcome = normalizeOutcome(fields);
-  const sanitizedParams = sanitizeToolParams(outcome.params, fields.workspaceDir);
-  const { eventId, painId } = ids({
-    workspaceDir: fields.workspaceDir,
-    sessionId: fields.sessionId,
-    ...(fields.turnId !== undefined ? { turnId: fields.turnId } : {}),
-    ...(fields.toolName !== undefined ? { toolName: fields.toolName } : {}),
-    source: fields.source,
-    ...(fields.canonicalEventId !== undefined ? { canonicalEventId: fields.canonicalEventId } : {}),
-    ...(fields.toolCallId !== undefined ? { toolCallId: fields.toolCallId } : {}),
-    outcome,
-    sanitizedParams,
-  });
-  return {
-    eventId,
-    painId,
-    outcome,
-    sanitizedParams,
-    paramsJson: stable(sanitizedParams),
-    resultPreview: preview({ eventId, result: sanitizeValue(outcome.result, 0, fields.workspaceDir) }),
-  };
+  return { eventId: `host_${digest}` };
 }
 
 /**
@@ -516,6 +401,13 @@ export function recordVerifiedToolOutcomes(args: {
 }
 
 /**
+ * Shared production tool-call evidence handler.
+ *
+ * Records the real host tool call in `trajectory.db` (tool_calls) and emits the
+ * receipt event. Phase A retired the legacy automatic Pain admission that used
+ * to ride on this path: a technical tool failure is trajectory + health
+ * evidence, never an Owner-pain by itself.
+ *
  * PRI-640: host attribution is supplied by the host adapter that constructs
  * this shared handler (OpenClaw / Codex adapters) — never guessed inside the
  * writer. Omitted -> NULL (unknown).
@@ -546,7 +438,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
 
     const dbPath = path.join(event.context.workspaceDir, '.state', 'trajectory.db');
     if (!fs.existsSync(dbPath)) {
-      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_db_not_found'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_db_not_found'], metadata: { outcome: 'unavailable', duplicate: false, nextAction: 'initialize the selected PD workspace before retrying the hook' } };
     }
 
     let db: Database.Database | undefined;
@@ -559,11 +451,11 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       if (!hasCanonicalSchema(db)) {
         db.close();
         db = undefined;
-        return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_schema_invalid'], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'run the supported PD workspace migration' } };
+        return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), 'trajectory_schema_invalid'], metadata: { outcome: 'unavailable', duplicate: false, nextAction: 'run the supported PD workspace migration' } };
       }
     } catch (error) {
       try { db?.close(); } catch { /* best-effort cleanup of an unusable handle */ }
-      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_database_unavailable:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect or repair the selected PD trajectory database' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_database_unavailable:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: 'unavailable', duplicate: false, nextAction: 'inspect or repair the selected PD trajectory database' } };
     }
 
     const warnings: string[] = [];
@@ -576,50 +468,13 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     }
     if (!enrichment) {
       try { db.close(); } catch { /* no business write occurred */ }
-      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), ...(warnings.length > 0 ? warnings : ['pain_enrichment_invalid'])], metadata: { outcome: 'unavailable', admitted: false, duplicate: false, nextAction: 'inspect host pain enrichment input' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), ...(warnings.length > 0 ? warnings : ['pain_enrichment_invalid'])], metadata: { outcome: 'unavailable', duplicate: false, nextAction: 'inspect host tool-call enrichment input' } };
     }
 
     const outcome = normalizeOutcome(event);
     const sanitizedParams = sanitizeToolParams(outcome.params, event.context.workspaceDir);
     const toolName = event.context.toolName ?? '';
-    const sourceObservation = buildToolFailureObservation({ toolName, error: outcome.error, exitCode: outcome.exitCode ?? undefined });
-    const nonZeroExit = outcome.exitCode !== null && outcome.exitCode !== 0;
-    const sourceKind = resolveSourceKind({
-      observedAt: new Date().toISOString(), workspaceId: event.context.workspaceDir,
-      sessionId: event.context.sessionId, toolName, failureSource: sourceObservation.failureSource,
-      toolNotFound: sourceObservation.toolNotFound, nonZeroExit,
-    });
-    const relativePath = enrichment.relativePath ?? String(field(outcome.params, 'file_path') ?? field(outcome.params, 'path') ?? 'unknown').slice(0, 500);
-    const isRisky = enrichment.isRisky ?? (path.isAbsolute(relativePath) && !path.resolve(relativePath).startsWith(`${path.resolve(event.context.workspaceDir)}${path.sep}`));
-    // Merged scoring semantics (WorkBuddy admission floor × CR-01): the 70
-    // failure base requires a VERIFIED non-zero exit code (branch review
-    // round: a thrown error with no exit evidence stays at the risky-path
-    // bonus only, honestly below the GOVERNANCE_STRONG_PAIN_SCORE floor, so
-    // unverified error shapes never spawn diagnostician work on their own).
-    // Classification and RECORDING remain main's three-way contract — the
-    // row still records outcome='failure' with exit_code NULL (never a
-    // fabricated 0).
-    const verifiedNonZeroExit = outcome.exitCode !== null && outcome.exitCode !== 0;
-    const painScore = enrichment.painScore ?? Math.min(100, (verifiedNonZeroExit ? 70 : 0) + (isRisky ? 20 : 0));
-    const errorHash = enrichment.errorHash ?? createHash('sha256').update(outcome.error ?? String(outcome.exitCode)).digest('hex');
-    // Cooldown is DEBOUNCE, not event identity (I1): the key deliberately has
-    // NO toolCallId. Repeated failures of the same failureSource+error within
-    // the window suppress the diagnostic trigger storm, while each real call
-    // still earns its own tool_calls evidence row through call-id-sensitive
-    // identity below.
-    const cooldownKey = `${path.resolve(event.context.workspaceDir)}:${event.context.sessionId}:${sourceObservation.failureSource}:${errorHash}`;
-    const last = cooldowns.get(cooldownKey);
-    const cooldownActive = last !== undefined && Date.now() - last < PAIN_COOLDOWN_WINDOW_MS;
-    const triage = evaluateTriage({ sourceKind, score: painScore, consecutiveErrors: enrichment.consecutiveErrors, isRisky });
-    const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: cooldownActive, isValid: true, score: painScore, sessionId: event.context.sessionId });
-    // Merged semantics (WorkBuddy × CR-01): the three-way classification from
-    // SPEC-CODEX-PAIN-CLOSURE-001 gates admission ('unknown' results are never
-    // pain), and WorkBuddy tool names are capitalized (Write/Edit — probe P03)
-    // while OpenClaw/Codex are lowercase; admission is about the tool FAMILY,
-    // so compare case-insensitively at this one boundary. tool_calls evidence
-    // above keeps the raw host name.
-    const admitted = outcome.outcome === 'failure' && WRITE_TOOLS.has(toolName.toLowerCase()) && trigger.shouldCreateDiagnosticTask;
-    const { eventId, painId } = ids({
+    const { eventId } = ids({
       workspaceDir: event.context.workspaceDir,
       sessionId: event.context.sessionId,
       ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
@@ -638,7 +493,6 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
     const paramsJson = stable(sanitizedParams);
     const resultPreview = preview({ eventId, result: sanitizeValue(outcome.result, 0, event.context.workspaceDir) });
     let duplicate = false;
-    let duplicateAdmitted = false;
 
     try {
       db.transaction(() => {
@@ -654,7 +508,6 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
             ? db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ? AND host_kind = ?').get(event.context.sessionId, event.context.toolCallId, options.hostKind)
             : db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ?').get(event.context.sessionId, event.context.toolCallId)) !== undefined) {
           duplicate = true;
-          duplicateAdmitted = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) !== undefined;
           return;
         }
         // Review R3/P2: the content-shape fallback dedup is host-scoped the
@@ -663,61 +516,26 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
           ? db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ? AND host_kind = ?').get(event.context.sessionId, toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview, options.hostKind)
           : db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?').get(event.context.sessionId, toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview)) !== undefined) {
           duplicate = true;
-          duplicateAdmitted = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) !== undefined;
           return;
         }
         db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`).run(event.context.sessionId, createdAt, createdAt);
         db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null, path.resolve(options.projectDir ?? event.context.workspaceDir), options.hostKind ?? null);
-        if (admitted) {
-          // Raw observation only (Pain Diagnosis Persistence SPEC §8): the
-          // pain row must record WHAT happened, not WHY. Attribution
-          // (People/Design/Assumption/Tooling) belongs to the Diagnostician.
-          // confidence stays null — no attribution confidence exists at
-          // detection time. origin remains 'system_infer' because origin is a
-          // declared enum (event-types.ts: who reported the pain), not an
-          // attribution claim.
-          const reason = `tool=${toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
-          db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .run(event.context.sessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, enrichment.evidence?.map((entry) => `${entry.sourceRef}: ${entry.note}`).join('\n') ?? null, painId, null, options.hostKind ?? null, createdAt);
-        }
       })();
-      if (admitted && !duplicate) {
-        const admittedAt = Date.now();
-        // Bound the module-level cooldown map in long-lived host processes
-        // (OpenClaw): keys carry sessionId + errorHash, so unbounded retention
-        // grows monotonically. Evict entries outside the cooldown window —
-        // they can never be consulted again.
-        for (const [staleKey, staleAt] of cooldowns) {
-          if (admittedAt - staleAt >= PAIN_COOLDOWN_WINDOW_MS) cooldowns.delete(staleKey);
-        }
-        cooldowns.set(cooldownKey, admittedAt);
-      }
     } catch (error) {
-      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.outcome, admitted: false, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };
+      return { decision: 'observe', source: event.source, warnings: [...(emissionWarning ? [emissionWarning] : []), `trajectory_write_failed:${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`], metadata: { outcome: outcome.outcome, duplicate: false, nextAction: 'inspect the workspace trajectory database and retry' } };
     } finally {
       try { db.close(); } catch { /* write result already determined; cleanup is best-effort */ }
     }
 
-    const effectiveAdmitted = admitted || duplicateAdmitted;
     return {
       decision: 'observe',
       source: event.source,
       ...(emissionWarning ? { warnings: [emissionWarning] } : {}),
       metadata: {
-        eventId, painId: effectiveAdmitted ? painId : null, outcome: outcome.outcome, ...(outcome.unknownReason !== undefined ? { outcomeReason: outcome.unknownReason } : {}), exitCode: outcome.exitCode, admitted: effectiveAdmitted, duplicate,
-        sourceKind, failureSource: sourceObservation.failureSource ?? null, triggerOutcome: trigger.outcome,
-        triggerReason: trigger.reason, painScore, isRisky, relativePath, agentId: enrichment.agentId ?? null,
-        evidence: enrichment.evidence ?? [],
+        eventId, outcome: outcome.outcome, ...(outcome.unknownReason !== undefined ? { outcomeReason: outcome.unknownReason } : {}), exitCode: outcome.exitCode, duplicate,
       } };
   };
 }
 
-export function resetProductionPainCooldownForTest(): void {
-  cooldowns.clear();
-}
-
-export function productionPainCooldownEntryCountForTest(): number {
-  return cooldowns.size;
-}
 export { hasCanonicalSchema as hasProductionPainSchema };

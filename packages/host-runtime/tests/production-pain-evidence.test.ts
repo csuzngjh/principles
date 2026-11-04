@@ -2,11 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
 import { extractFilePathFromParams } from '@principles/core/runtime-v2';
 import { createProductionHostRuntime } from '../src/index.js';
-import { deriveProductionToolPainIdentity, productionPainCooldownEntryCountForTest, resetProductionPainCooldownForTest } from '../src/production-pain-evidence.js';
 
 const workspaces: string[] = [];
 
@@ -42,13 +41,52 @@ function failedWrite(workspaceDir: string): HostEvent {
   };
 }
 
+function counts(workspaceDir: string, table: 'tool_calls' | 'pain_events'): number {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count?: number } | undefined;
+    return typeof row?.count === 'number' ? row.count : 0;
+  } finally {
+    db.close();
+  }
+}
+
 afterEach(() => {
   for (const workspaceDir of workspaces.splice(0)) {
     fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
   }
 });
 
-describe('production after-tool pain/evidence kernel', () => {
+describe('production after-tool evidence kernel — Phase A (no automatic Pain)', () => {
+  it('records a failed tool call as trajectory evidence and never creates Pain', async () => {
+    const workspaceDir = workspaceWithTrajectory();
+    const runtime = createProductionHostRuntime();
+
+    const result = await runtime.dispatch(failedWrite(workspaceDir));
+
+    expect(result).toEqual(expect.objectContaining({
+      decision: 'observe',
+      source: 'codex:post_tool_use',
+      metadata: expect.objectContaining({ outcome: 'failure', duplicate: false }),
+    }));
+    expect(result.metadata).not.toHaveProperty('admitted');
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const tool = db.prepare('SELECT session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls').get();
+      expect(tool).toEqual(expect.objectContaining({
+        session_id: 'session-523',
+        tool_name: 'write_file',
+        outcome: 'failure',
+        exit_code: 1,
+        error_message: 'EACCES permission denied',
+      }));
+      expect(JSON.parse(String(Object.getOwnPropertyDescriptor(tool as object, 'params_json')?.value))).toEqual({ content: 'blocked content', file_path: '<path:passwd>' });
+      expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it('keeps live evidence compatible with replay when project cwd differs from governance workspace', async () => {
     const workspaceDir = workspaceWithTrajectory();
     const projectDir = path.join(os.tmpdir(), 'pd-separate-project');
@@ -56,85 +94,19 @@ describe('production after-tool pain/evidence kernel', () => {
     event.context.toolInput = { file_path: path.join(projectDir, 'src', 'a.ts'), content: 'blocked' };
     const runtime = createProductionHostRuntime({ projectDir });
     await runtime.dispatch(event);
-    const replay = deriveProductionToolPainIdentity({ ...event.context, source: event.source });
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    try {
-      expect(db.prepare('SELECT params_json, result_preview FROM tool_calls').get()).toEqual({
-        params_json: replay.paramsJson,
-        result_preview: replay.resultPreview,
-      });
-      expect(db.prepare('SELECT canonical_pain_id FROM pain_events').get()).toEqual({ canonical_pain_id: replay.painId });
-      expect((await createProductionHostRuntime().dispatch(event)).metadata?.duplicate).toBe(true);
-      expect(db.prepare('SELECT count(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
-    } finally {
-      db.close();
-    }
-  });
-
-  it('persists one lineaged tool failure and admitted pain through the production runtime', async () => {
-    const workspaceDir = workspaceWithTrajectory();
-    const runtime = createProductionHostRuntime({
-      painEnrichmentProvider: () => ({ eventId: 'codex:tool-use-523', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd', agentId: 'codex' }),
-    });
-
-    const result = await runtime.dispatch(failedWrite(workspaceDir));
-
-    expect(result).toEqual(expect.objectContaining({
-      decision: 'observe', source: 'codex:post_tool_use',
-      metadata: expect.objectContaining({ outcome: 'failure', admitted: true, duplicate: false }),
-    }));
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    const tool = db.prepare('SELECT session_id, tool_name, outcome, exit_code, error_message, params_json FROM tool_calls').get();
-    const pain = db.prepare('SELECT session_id, source, score, reason, origin, confidence, canonical_pain_id FROM pain_events').get();
-    db.close();
-    expect(tool).toEqual(expect.objectContaining({ session_id: 'session-523', tool_name: 'write_file', outcome: 'failure', exit_code: 1, error_message: 'EACCES permission denied' }));
-    // Raw observation only (SPEC §8): the pain row records WHAT happened;
-    // attribution belongs to the Diagnostician. No attribution confidence is
-    // asserted at detection time (confidence stays null), and origin remains
-    // the declared who-reported enum value 'system_infer'.
-    expect(pain).toEqual(expect.objectContaining({ session_id: 'session-523', source: 'tool_failure', score: 90, origin: 'system_infer' }));
-    expect(Object.getOwnPropertyDescriptor(pain as object, 'confidence')?.value).toBeNull();
-    expect(String(Object.getOwnPropertyDescriptor(pain as object, 'reason')?.value)).toBe('tool=write_file; error=EACCES permission denied; path=/etc/passwd');
-    expect(String(Object.getOwnPropertyDescriptor(pain as object, 'reason')?.value)).not.toContain('diagnosticGate=');
-    expect(String(Object.getOwnPropertyDescriptor(pain as object, 'canonical_pain_id')?.value)).toMatch(/^pain_host_/);
-    expect(JSON.parse(String(Object.getOwnPropertyDescriptor(tool as object, 'params_json')?.value))).toEqual({ content: 'blocked content', file_path: '<path:passwd>' });
-  });
-
-  it('evicts expired cooldown entries so the module-level map stays bounded', async () => {
-    resetProductionPainCooldownForTest();
-    vi.useFakeTimers({ toFake: ['Date'] });
-    try {
-      const t0 = new Date('2026-08-14T00:00:00Z').getTime();
-      vi.setSystemTime(t0);
-      const workspaceDir = workspaceWithTrajectory();
-      const runtime = createProductionHostRuntime();
-      const failing = (error: string): HostEvent => ({
-        ...failedWrite(workspaceDir),
-        context: { ...failedWrite(workspaceDir).context, toolOutput: { error, result: { exitCode: 1 }, durationMs: 12 } },
-      });
-      await runtime.dispatch(failing('EACCES failure one'));
-      expect(productionPainCooldownEntryCountForTest()).toBe(1);
-      // 16 minutes later the first key is outside the 15-minute cooldown
-      // window: the new admission must sweep it instead of accumulating.
-      vi.setSystemTime(t0 + 16 * 60 * 1000);
-      await runtime.dispatch(failing('EACCES failure two'));
-      expect(productionPainCooldownEntryCountForTest()).toBe(1);
-    } finally {
-      vi.useRealTimers();
-      resetProductionPainCooldownForTest();
-    }
+    expect((await createProductionHostRuntime().dispatch(event)).metadata?.duplicate).toBe(true);
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(counts(workspaceDir, 'pain_events')).toBe(0);
   });
 
   it('deduplicates concurrent retries from the same canonical host event', async () => {
     const workspaceDir = workspaceWithTrajectory();
-    const runtime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'codex:retry-523', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd' }) });
-    const secondRuntime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'codex:retry-523', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd' }) });
+    const runtime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'codex:retry-523' }) });
+    const secondRuntime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'codex:retry-523' }) });
     const [first, second] = await Promise.all([runtime.dispatch(failedWrite(workspaceDir)), secondRuntime.dispatch(failedWrite(workspaceDir))]);
     expect([first.metadata?.duplicate, second.metadata?.duplicate].sort()).toEqual([false, true]);
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 1 });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
-    db.close();
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(counts(workspaceDir, 'pain_events')).toBe(0);
   });
 
   describe('host tool-call identity (I1: call_id participates when the host supplies it)', () => {
@@ -152,24 +124,14 @@ describe('production after-tool pain/evidence kernel', () => {
       const first = await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-a'));
       const second = await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-b'));
 
-      // Both real calls leave their own evidence row; the second is NOT a
-      // duplicate of the first (probe P03: the engine does not dedup calls).
       expect(first.metadata).toMatchObject({ duplicate: false });
       expect(second.metadata).toMatchObject({ duplicate: false });
       expect(first.metadata?.eventId).not.toBe(second.metadata?.eventId);
-      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-      try {
-        expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 2 });
-        // Cooldown is DEBOUNCE, not identity: the second independent failure
-        // shares failureSource+error with the first, so the diagnostic trigger
-        // stays suppressed within the window while the evidence row still lands.
-        expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
-      } finally {
-        db.close();
-      }
+      expect(counts(workspaceDir, 'tool_calls')).toBe(2);
+      expect(counts(workspaceDir, 'pain_events')).toBe(0);
     });
 
-    it('replay of the SAME call id (host redelivery) stays one event', async () => {
+    it('replay of the SAME call id (host redelivery) stays one evidence event', async () => {
       const workspaceDir = workspaceWithTrajectory();
       const runtime = createProductionHostRuntime();
 
@@ -177,38 +139,11 @@ describe('production after-tool pain/evidence kernel', () => {
       const replay = await runtime.dispatch(failedWriteWithCallId(workspaceDir, 'call-a'));
 
       expect(replay.metadata).toMatchObject({ duplicate: true });
-      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-      try {
-        expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 1 });
-        expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 1 });
-      } finally {
-        db.close();
-      }
+      expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+      expect(counts(workspaceDir, 'pain_events')).toBe(0);
     });
 
-    it('derives the same identity as the live handler for one call id (parity with the derivation export)', async () => {
-      const workspaceDir = workspaceWithTrajectory();
-      const event = failedWriteWithCallId(workspaceDir, 'call-a');
-      await createProductionHostRuntime().dispatch(event);
-      const replay = deriveProductionToolPainIdentity({ ...event.context, source: event.source });
-      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-      try {
-        expect(db.prepare('SELECT params_json, result_preview FROM tool_calls').get()).toEqual({
-          params_json: replay.paramsJson,
-          result_preview: replay.resultPreview,
-        });
-        expect(db.prepare('SELECT canonical_pain_id FROM pain_events').get()).toEqual({ canonical_pain_id: replay.painId });
-      } finally {
-        db.close();
-      }
-    });
-
-    it('legacy hosts without a call id keep the existing merged-identity behavior (documented limitation)', async () => {
-      // failedWrite() carries NO toolCallId: without a host call id two
-      // identical-content calls are indistinguishable, so they still merge.
-      // This is the preserved pre-I1 behavior — PD must not fabricate
-      // precision the host does not supply (rc-6: identity from the SAME
-      // authoritative fields).
+    it('legacy hosts without a call id keep content-shape dedup', async () => {
       const workspaceDir = workspaceWithTrajectory();
       const runtime = createProductionHostRuntime();
 
@@ -217,18 +152,13 @@ describe('production after-tool pain/evidence kernel', () => {
 
       expect(first.metadata).toMatchObject({ duplicate: false });
       expect(second.metadata).toMatchObject({ duplicate: true });
-      const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-      try {
-        expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 1 });
-      } finally {
-        db.close();
-      }
+      expect(counts(workspaceDir, 'tool_calls')).toBe(1);
     });
   });
 
   it('binds a supplied event ID to sanitized payload and outcome instead of letting it override identity', async () => {
     const workspaceDir = workspaceWithTrajectory();
-    const runtime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'host-reused-id', painScore: 90, isRisky: true, consecutiveErrors: 4 }) });
+    const runtime = createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'host-reused-id' }) });
     const first = failedWrite(workspaceDir);
     const differentPayload: HostEvent = { ...first, context: { ...first.context, toolInput: { file_path: '/etc/shadow' } } };
     const differentOutcome: HostEvent = { ...first, context: { ...first.context, toolOutput: { result: { exitCode: 0 } } } };
@@ -237,9 +167,8 @@ describe('production after-tool pain/evidence kernel', () => {
 
     expect(results.map((result) => result.metadata?.duplicate)).toEqual([false, false, false, true]);
     expect(new Set(results.slice(0, 3).map((result) => result.metadata?.eventId)).size).toBe(3);
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 3 });
-    db.close();
+    expect(counts(workspaceDir, 'tool_calls')).toBe(3);
+    expect(counts(workspaceDir, 'pain_events')).toBe(0);
   });
 
   it('stores bounded redacted top-level params that remain compatible with path replay', async () => {
@@ -266,11 +195,10 @@ describe('production after-tool pain/evidence kernel', () => {
     const event = failedWrite(workspaceDir);
     const success: HostEvent = { ...event, context: { ...event.context, toolInput: { file_path: path.join(workspaceDir, 'safe.txt') }, toolOutput: { result: { exitCode: 0 } } } };
     const result = await runtime.dispatch(success);
-    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'success', admitted: false }));
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT outcome FROM tool_calls').get()).toEqual({ outcome: 'success' });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 0 });
-    db.close();
+    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'success' }));
+    expect(result.metadata).not.toHaveProperty('admitted');
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(counts(workspaceDir, 'pain_events')).toBe(0);
   });
 
   it('deduplicates successful evidence retries as the same canonical event', async () => {
@@ -280,10 +208,9 @@ describe('production after-tool pain/evidence kernel', () => {
     const success: HostEvent = { ...event, context: { ...event.context, toolOutput: { result: { exitCode: 0 } } } };
     await runtime.dispatch(success);
     const duplicate = await runtime.dispatch(success);
-    expect(duplicate.metadata).toEqual(expect.objectContaining({ outcome: 'success', admitted: false, duplicate: true }));
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 1 });
-    db.close();
+    expect(duplicate.metadata).toEqual(expect.objectContaining({ outcome: 'success', duplicate: true }));
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(counts(workspaceDir, 'pain_events')).toBe(0);
   });
 
   it('does not accept an inherited host event ID as canonical identity', async () => {
@@ -297,9 +224,7 @@ describe('production after-tool pain/evidence kernel', () => {
     const result = await runtime.dispatch(second);
 
     expect(result.metadata?.duplicate).toBe(false);
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 2 });
-    db.close();
+    expect(counts(workspaceDir, 'tool_calls')).toBe(2);
   });
 
   it('fails open observably and does not bootstrap or partially write on missing state or invalid enrichment', async () => {
@@ -310,12 +235,10 @@ describe('production after-tool pain/evidence kernel', () => {
     expect(fs.existsSync(path.join(missing, '.state'))).toBe(false);
 
     const workspaceDir = workspaceWithTrajectory();
-    const invalidResult = await createProductionHostRuntime({ painEnrichmentProvider: () => ({ painScore: 900 }) }).dispatch(failedWrite(workspaceDir));
+    const invalidResult = await createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 900 }) }).dispatch(failedWrite(workspaceDir));
     expect(invalidResult.warnings).toContain('pain_enrichment_invalid');
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 0 });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 0 });
-    db.close();
+    expect(counts(workspaceDir, 'tool_calls')).toBe(0);
+    expect(counts(workspaceDir, 'pain_events')).toBe(0);
   });
 
   it('guards a corrupt database before enrichment side effects and never rejects or bootstraps', async () => {
@@ -331,7 +254,7 @@ describe('production after-tool pain/evidence kernel', () => {
     expect(result).toEqual(expect.objectContaining({
       decision: 'observe',
       warnings: [expect.stringMatching(/^trajectory_database_unavailable:/)],
-      metadata: expect.objectContaining({ admitted: false, nextAction: 'inspect or repair the selected PD trajectory database' }),
+      metadata: expect.objectContaining({ outcome: 'unavailable', nextAction: 'inspect or repair the selected PD trajectory database' }),
     }));
     expect(result.warnings?.[0].length).toBeLessThan(260);
     expect(fs.readFileSync(path.join(workspaceDir, '.state', 'trajectory.db'), 'utf8')).toBe('not sqlite');
@@ -348,10 +271,7 @@ describe('production after-tool pain/evidence kernel', () => {
 
     expect(enrichmentCalls).toBe(0);
     expect(result).toEqual(expect.objectContaining({ warnings: ['trajectory_schema_invalid'], metadata: expect.objectContaining({ nextAction: 'run the supported PD workspace migration' }) }));
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 0 });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM sessions').get()).toEqual({ count: 0 });
-    db.close();
+    expect(counts(workspaceDir, 'tool_calls')).toBe(0);
   });
 
   it('rejects the canonical index name when its partial predicate has different semantics', async () => {
@@ -364,11 +284,8 @@ describe('production after-tool pain/evidence kernel', () => {
     const result = await createProductionHostRuntime({ painEnrichmentProvider: () => { enrichmentCalls += 1; return {}; } }).dispatch(failedWrite(workspaceDir));
 
     expect(enrichmentCalls).toBe(0);
-    expect(result).toEqual(expect.objectContaining({ warnings: ['trajectory_schema_invalid'], metadata: expect.objectContaining({ admitted: false, nextAction: 'run the supported PD workspace migration' }) }));
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM sessions').get()).toEqual({ count: 0 });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 0 });
-    db.close();
+    expect(result).toEqual(expect.objectContaining({ warnings: ['trajectory_schema_invalid'], metadata: expect.objectContaining({ nextAction: 'run the supported PD workspace migration' }) }));
+    expect(counts(workspaceDir, 'tool_calls')).toBe(0);
   });
 
   it('fails open observably when the database factory throws before enrichment', async () => {
@@ -386,19 +303,6 @@ describe('production after-tool pain/evidence kernel', () => {
     expect(result.warnings?.[0].length).toBeLessThan(260);
     expect(result.metadata?.nextAction).toBe('inspect or repair the selected PD trajectory database');
   });
-
-  it('rolls back the tool evidence when the admitted pain write fails', async () => {
-    const workspaceDir = workspaceWithTrajectory();
-    const schema = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
-    schema.exec(`DROP INDEX idx_pain_events_canonical_pain_id; DROP TABLE pain_events; CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL CHECK(score < 0), reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL); CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;`);
-    schema.close();
-    const result = await createProductionHostRuntime({ painEnrichmentProvider: () => ({ eventId: 'codex:rollback-523', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd' }) }).dispatch(failedWrite(workspaceDir));
-    expect(result.warnings?.[0]).toMatch(/^trajectory_write_failed:/);
-    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM tool_calls').get()).toEqual({ count: 0 });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 0 });
-    db.close();
-  });
 });
 
 describe('PRI-640 host attribution through the shared production kernel (SPEC §13)', () => {
@@ -406,20 +310,21 @@ describe('PRI-640 host attribution through the shared production kernel (SPEC §
     ['openclaw', 'openclaw'],
     ['codex', 'codex'],
     [undefined, null],
-  ] as const)('hostKind=%p from the constructing adapter persists as host_kind=%p', async (hostKind, expected) => {
+  ] as const)('hostKind=%p from the constructing adapter persists as tool_calls.host_kind=%p', async (hostKind, expected) => {
     const workspaceDir = workspaceWithTrajectory();
     const runtime = createProductionHostRuntime({
       ...(hostKind ? { hostKind } : {}),
-      painEnrichmentProvider: () => ({ eventId: 'codex:tool-640', painScore: 90, isRisky: true, consecutiveErrors: 4, relativePath: '/etc/passwd' }),
+      painEnrichmentProvider: () => ({ eventId: 'codex:tool-640' }),
     });
 
     const result = await runtime.dispatch(failedWrite(workspaceDir));
-    expect(result.metadata).toMatchObject({ admitted: true, duplicate: false });
+    expect(result.metadata).toMatchObject({ duplicate: false });
 
     const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
     try {
-      const row = db.prepare('SELECT host_kind FROM pain_events').get() as { host_kind: string | null };
+      const row = db.prepare('SELECT host_kind FROM tool_calls').get() as { host_kind: string | null };
       expect(row.host_kind).toBe(expected);
+      expect(db.prepare('SELECT COUNT(*) AS count FROM pain_events').get()).toEqual({ count: 0 });
     } finally {
       db.close();
     }

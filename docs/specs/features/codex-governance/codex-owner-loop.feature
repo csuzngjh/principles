@@ -27,7 +27,7 @@ Feature: Codex governance owner loop — bounded observation, durable recovery, 
   Scenario: Live user and tool delivery plus transcript replay enrich rather than duplicate (§18-3)
     Given an isolated Codex Workspace with conversation ingestion enabled
     When a live tool failure is delivered and the same session is replayed from the transcript
-    Then the user turn exists once with transcript enrichment and the tool call exists once
+    Then the user turn exists once with transcript enrichment and the tool call exists once without any Pain
 
   Scenario: Two forks sharing a root session remain separate and correctly linked (§18-4)
     Given an isolated Codex Workspace with conversation ingestion enabled

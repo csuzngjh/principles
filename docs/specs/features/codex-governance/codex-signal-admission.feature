@@ -1,6 +1,6 @@
 Feature: Codex governance signal admission — one correction, one canonical pain, one task
   As a PD Owner using Codex
-  I want real owner corrections and governed tool failures to enter the PD learning loop exactly once
+  I want real owner corrections to enter the PD learning loop exactly once
   So the system learns from what actually matters without noise or duplicates
 
   Scenario: Ordinary conversation stays completely quiet
@@ -21,8 +21,8 @@ Feature: Codex governance signal admission — one correction, one canonical pai
     When Codex submits a high-precision owner correction through the production hook twice
     Then still exactly one canonical pain and one pending Diagnostician task exist
 
-  Scenario: One real tool failure resolves to one pain whether delivered live or via transcript
+  Scenario: One real tool failure stays technical evidence, live or via transcript
     Given an isolated Codex Workspace with conversation ingestion enabled
     When Codex reports a failed write tool through the production hook
     And the Stop transcript replay of the same tool call is ingested
-    Then exactly one tool pain and one pending Diagnostician task exist
+    Then exactly one tool-call evidence row exists and no pain or task was created
