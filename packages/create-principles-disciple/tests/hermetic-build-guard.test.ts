@@ -26,7 +26,10 @@ async function expectScriptRefusal(script: string, args: readonly string[], mess
     timeout: 60_000,
   }).then(() => undefined, (error: unknown) => error);
   expect(failure).toBeDefined();
-  if (typeof error === 'undefined') return;
+  // Narrowing guard only: `toBeDefined()` is not a TS type guard, so this
+  // keeps `failure` non-undefined for the stderr extraction below. It is a
+  // real check (execFileAsync rejects exactly when the script refuses).
+  if (!failure) return;
   const stderr = typeof (failure as { stderr?: unknown }).stderr === 'string'
     ? String((failure as { stderr: string }).stderr)
     : '';
@@ -35,7 +38,7 @@ async function expectScriptRefusal(script: string, args: readonly string[], mess
 
 describe('hermetic build guards (source tree immutability)', () => {
   it('refuses self-contained materialization without an explicit output root', async () => {
-    await expectScriptRefusal(BUNDLE_SCRIPT, ['--self-contained'], /requires an explicit --output-root/);
+    await expectScriptRefusal(BUNDLE_SCRIPT, ['--self-contained'], /require an explicit --output-root/);
   });
 
   it('refuses self-contained materialization targeting the source package', async () => {

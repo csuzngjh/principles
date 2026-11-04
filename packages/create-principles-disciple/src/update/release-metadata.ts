@@ -25,6 +25,18 @@ import {
 
 export const RELEASE_METADATA_SCHEMA_VERSION = 1;
 
+/**
+ * One published asset identity plus the signed location it is served from.
+ *
+ * PRI-854 (option A): `url` is optional on identity inputs but the consumer
+ * (`apply-payload.ts`) reads `asset.url` once the publication step has
+ * stamped it, so the producer side must be allowed to supply it as well.
+ */
+export type ReleaseMetadataAssetInput = ReleaseAssetIdentity & {
+  /** PRI-854 (option A): where the bytes are served from (signed). */
+  readonly url?: string;
+};
+
 export interface ReleaseMetadata {
   readonly schemaVersion: number;
   readonly productVersion: string;
@@ -34,10 +46,7 @@ export interface ReleaseMetadata {
   readonly minBootstrapVersion: string;
   readonly publicationSequence: number;
   readonly expiresAt: string;
-  readonly assets: readonly (ReleaseAssetIdentity & {
-    /** PRI-854 (option A): where the bytes are served from (signed). */
-    readonly url?: string;
-  })[];
+  readonly assets: readonly ReleaseMetadataAssetInput[];
   readonly compatibility: {
     readonly dataSchemaForwardReadableFrom: string;
   };
@@ -270,7 +279,7 @@ export function buildReleaseMetadata(input: {
   minBootstrapVersion: string;
   publicationSequence: number;
   expiresAt: string;
-  assets: readonly ReleaseAssetIdentity[];
+  assets: readonly ReleaseMetadataAssetInput[];
   dataSchemaForwardReadableFrom: string;
 }): ReleaseMetadata {
   const releaseId = deriveReleaseId(input);

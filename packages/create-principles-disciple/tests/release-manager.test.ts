@@ -160,7 +160,7 @@ describe('ReleaseManager shadow mode', () => {
     const transactionsDir = path.join(fixture.pdHome, 'transactions');
     const journalFiles = fs.readdirSync(transactionsDir).filter((name) => name.startsWith('update-'));
     expect(journalFiles).toHaveLength(1);
-    const transitions = readTransactionJournal(path.join(transactionsDir, journalFiles[0]));
+    const transitions = readTransactionJournal(path.join(transactionsDir, journalFiles[0]!));
     expect(transitions.map((t) => t.to)).toEqual(['planned', 'failed']);
   });
 });

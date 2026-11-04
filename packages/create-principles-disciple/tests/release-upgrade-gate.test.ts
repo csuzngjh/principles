@@ -49,7 +49,6 @@ import { extract as extractTar } from 'tar';
 import { buildReleasePublication, gzipReleaseArchive, type PublicationFile } from '../src/update/release-metadata-publisher.js';
 import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial } from './helpers/trust-material.js';
 import { previousReleaseVersion } from './helpers/n1-baseline.js';
-// @ts-expect-error - JSDoc-typed .mjs helper; the interface intent lives in the module
 import {
   gateBuildPublicationInternal,
   gateRestampPayload,
@@ -63,6 +62,12 @@ import { isReleaseReadPathContained } from './release-containment';
 import { cleanupReleaseSmokeRoot } from './release-smoke-cleanup';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
+
+/** `node:http` header values are `string | string[] | undefined`; the gate reads a single value. */
+function headerString(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 
 /**
  * PRI-874: total-duration budget for one Console /api/update/apply-full HTTP
@@ -331,8 +336,8 @@ async function postApplyFull(): Promise<{ status: number; authority: string | nu
           const body = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : envelope) as Record<string, unknown>;
           finish({
             status: response.statusCode ?? 0,
-            authority: response.headers['x-pd-mutation-authority'] ?? null,
-            fallbackReason: response.headers['x-pd-mutation-fallback-reason'] ?? null,
+            authority: headerString(response.headers['x-pd-mutation-authority']),
+            fallbackReason: headerString(response.headers['x-pd-mutation-fallback-reason']),
             body,
           });
         });
@@ -891,11 +896,11 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       // Single-archive fixture: assert the singular shape, then corrupt the
       // one artifact target this publication carries.
       expect(publicationBad.manifest.artifacts).toHaveLength(1);
-      const corruptedTargetPath = publicationBad.manifest.artifacts[0].artifactTargetPath;
+      const corruptedTargetPath = publicationBad.manifest.artifacts[0]!.artifactTargetPath;
       const corruptedServed = publicationBad.files.map((file) => {
         if (file.path === `targets/${corruptedTargetPath}`) {
           const bytes = Buffer.from(file.bytes);
-          bytes[bytes.length - 1] ^= 0xff;
+          bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 0xff;
           return { path: file.path, bytes };
         }
         return file;

@@ -469,6 +469,9 @@ jobs:
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
 
+      - name: Typecheck tests
+        run: npm run typecheck:tests --workspace=create-principles-disciple
+
       - name: Build and test (fast suite)
         working-directory: packages/create-principles-disciple
         run: npm run build && npm run test:fast
