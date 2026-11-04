@@ -240,7 +240,11 @@ describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUD
       rawEvent: nativeEvent({ prompt: '他说方向完全反了，你觉得呢', generation_id: 'wb-live-gen-5' }),
     });
     expect(result.ok).toBe(true);
-    expect(result.outcomes).toEqual([]);
+    // P-5 retired: the reported-speech phrase now reaches the shared guards,
+    // downgrades to ambiguous, and is abandoned at the evidence gate.
+    expect(result.outcomes).toMatchObject([
+      { disposition: 'abandoned', kind: 'user_correction', reason: 'evidence_invalid' },
+    ]);
     expect(painCount()).toBe(0);
   });
 });
