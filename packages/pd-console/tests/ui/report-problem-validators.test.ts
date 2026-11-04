@@ -439,7 +439,7 @@ describe('buildFeedbackDiagnostics', () => {
     const checks = [
       { id: 'sqlite', name: 'DB', status: 'healthy', message: 'ok', lastCheck: '2026-07-04T00:00:01.000Z' },
       { id: 'task_queue', name: 'Queue', status: 'warning', message: 'backlog', lastCheck: '2026-07-04T00:00:02.000Z' },
-      { id: 'gfi_health', name: 'GFI', status: 'error', message: 'too high', lastCheck: '2026-07-04T00:00:03.000Z' },
+      { id: 'principle_tree', name: 'Principles', status: 'error', message: 'tree unreadable', lastCheck: '2026-07-04T00:00:03.000Z' },
     ];
     const config = fulfilled({ success: true, data: { features: [] } });
     const lifecycle = fulfilled({ success: false, error: 'HTTP 404' });
@@ -454,7 +454,7 @@ describe('buildFeedbackDiagnostics', () => {
     expect(diag.recentEvents[0].severity).toBeUndefined(); // healthy → no severity
     expect(diag.recentEvents[1].type).toBe('task_queue');
     expect(diag.recentEvents[1].severity).toBe('warn'); // warning → 'warn'
-    expect(diag.recentEvents[2].type).toBe('gfi_health');
+    expect(diag.recentEvents[2].type).toBe('principle_tree');
     expect(diag.recentEvents[2].severity).toBe('error'); // error → 'error'
   });
 
