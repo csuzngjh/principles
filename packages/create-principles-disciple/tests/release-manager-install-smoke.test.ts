@@ -109,6 +109,12 @@ describe('install() release-manager dependency install + authority import smoke 
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
     });
     vi.mocked(fs.readdirSync).mockReturnValue([]);
+    // PRI-1102: the installer now inspects install targets with lstat (an
+    // automock would answer `undefined` = "missing" for every path, which
+    // contradicts the real seeded trees). Answer from the real filesystem so
+    // the harness keeps modelling an actual install.
+    vi.mocked(fs.lstatSync).mockImplementation(((value: fs.PathLike) =>
+      realFs.existsSync(String(value)) ? realFs.lstatSync(String(value)) : undefined) as unknown as typeof fs.lstatSync);
   });
 
   function seedPreviousInstall(): void {
@@ -253,7 +259,11 @@ describe('install() release-manager dependency install + authority import smoke 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/ReleaseManager authority module failed to load/);
     expect(result.error).toContain('fixture-missing-dependency.js');
-    expect(result.error).toContain('Previous install has been restored');
+    // PRI-1102: this fixture seeds only the runtime component tree — there is
+    // no extension tree to return to, so the rollback must name the gap
+    // instead of claiming a healthy "restored" install.
+    expect(result.error).toContain('but that state is NOT usable — incomplete:');
+    expect(result.error).toContain(getPluginExtDir());
     expectPreviousInstallRestored();
     expect(fs.existsSync).toHaveBeenCalledWith(path.join(componentDir, 'dist', 'update', 'console-surface.js'));
   });

@@ -801,20 +801,21 @@ pruneShippedPluginDependencies(join(PLUGIN_DEST, 'package.json'), ['better-sqlit
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/core', 'file:../core');
 // pd-cli depends on @principles/host-runtime at runtime (it statically imports
 // createProductionHostRuntime). Rewrite to a local file reference so the
-// bundled package is self-contained. The installer's syncPdCli() creates a
-// node_modules/@principles/host-runtime symlink to the installed host-runtime
-// directory. Without this rewrite + symlink, `pd --version` crashes with
-// ERR_MODULE_NOT_FOUND because pd-cli cannot resolve @principles/host-runtime.
+// bundled package is self-contained. The installer materializes the matching
+// node_modules/@principles/host-runtime link via ensurePdCliResolution()
+// AFTER the dependency stage. Without this rewrite + link, `pd --version`
+// crashes with ERR_MODULE_NOT_FOUND because pd-cli cannot resolve
+// @principles/host-runtime.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/host-runtime', 'file:../host-runtime');
 // pd-cli's `codex worker` / `codex ingest catch-up` commands import the
 // workspace worker cycle from @principles/codex-adapter (PRI-624). Same
 // self-contained pattern: bundle it as a sibling and rewrite the dep; the
-// installer's syncPdCli() creates the resolving symlink.
+// installer's ensurePdCliResolution() materializes the link.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/codex-adapter', 'file:../codex-adapter');
 // pd-cli's `workbuddy worker` command imports the WorkBuddy worker cycle from
 // @principles/workbuddy-adapter (SPEC workbuddy-host-adapter §5). Same
 // self-contained pattern: bundle it as a sibling and rewrite the dep; the
-// installer's syncPdCli() creates the resolving symlink. No-op when the
+// installer's ensurePdCliResolution() materializes the link. No-op when the
 // adapter payload is absent from this build.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/workbuddy-adapter', 'file:../workbuddy-adapter');
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/install-layout', 'file:../install-layout');
@@ -848,9 +849,10 @@ rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@princi
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/host-runtime', 'file:../host-runtime');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'principles-disciple', 'file:../plugin');
 // pd-cli also depends on principles-disciple (the plugin package). Rewrite to a local
-// file reference so the bundled package is self-contained. The installer's syncPdCli()
-// creates a node_modules/principles-disciple symlink to the installed plugin directory.
-// Without this rewrite + symlink, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
+// file reference so the bundled package is self-contained. The installer's
+// ensurePdCliResolution() materializes the node_modules/principles-disciple
+// link to the installed plugin directory.
+// Without this rewrite + link, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
 // because pd-cli statically imports initTrajectorySchema from it.
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'principles-disciple', 'file:../plugin');
 // PRI-672: console gains a runtime dependency on the ReleaseManager authority

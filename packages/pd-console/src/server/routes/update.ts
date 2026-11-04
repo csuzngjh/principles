@@ -7,7 +7,6 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
-import { readCurrentVersion, resolvePluginDir } from '../utils/installed-layout.js';
 import type * as authorityModule from 'create-principles-disciple/update-console';
 
 type AuthorityModule = typeof authorityModule;
@@ -33,12 +32,11 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
     && typeof installStatus.generation === 'number' && Number.isSafeInteger(installStatus.generation)
     ? { productVersion: installStatus.productVersion, releaseId: installStatus.releaseId, generation: installStatus.generation }
     : undefined;
-  // The plugin-directory copy is read-only (installed-layout P4 authority); a
-  // divergence is surfaced, never silently resolved (PR-C contract).
-  const pluginVersion = readCurrentVersion(resolvePluginDir(''));
-  const identityDivergence = activeIdentity !== undefined && pluginVersion !== undefined && pluginVersion !== activeIdentity.productVersion
-    ? { activeVersion: activeIdentity.productVersion, pluginVersion, releaseId: activeIdentity.releaseId, generation: activeIdentity.generation }
-    : undefined;
+  // The product version (signed active release) and the plugin package version
+  // are independent version planes (RELEASE_PROCESS.md, "The three version
+  // planes"): the installer ships the plugin payload while the product version
+  // advances on its own cadence. Comparing them is a false alarm on every
+  // healthy installation, so this check reports only the active-release identity.
   // PRI-848 (SPEC §12.1): one explicit state per check. A policy refusal is
   // `update_blocked` — the candidate EXISTS but a specific problem must be
   // resolved — never "up to date".
@@ -52,7 +50,6 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
     currentVersion: installStatus?.productVersion ?? 'unknown',
     latestVersion: check.candidate?.productVersion ?? '',
     ...(activeIdentity !== undefined ? { versionSource: 'active-release' as const } : {}),
-    ...(identityDivergence !== undefined ? { identityDivergence } : {}),
     ...(!decision.allowed ? { reason: decision.reason, message: decision.message } : {}),
   });
 }
