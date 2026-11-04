@@ -81,11 +81,11 @@ describe('PRI-645 category semantics under config absence', () => {
     expect(effective.config.features.feedback_channel).toEqual({ category: 'quiet', enabled: true });
   });
 
-  it('quiet OFF-default flag absence → registry default OFF (gfi)', () => {
+  it('quiet OFF-default flag absence → registry default OFF (diagnostician_async_cli)', () => {
     const effective = computeEffectivePdConfig(sparseConfig());
-    const def = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'gfi');
+    const def = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_async_cli');
     expect(def?.enabled).toBe(false);
-    expect(effective.config.features.gfi).toEqual({ category: 'quiet', enabled: false });
+    expect(effective.config.features.diagnostician_async_cli).toEqual({ category: 'quiet', enabled: false });
   });
 
   it('gone flag absence → gone behavior, and config cannot resurrect it', () => {
@@ -109,24 +109,24 @@ describe('PRI-645 registry authority — sparse config does not pin old defaults
     // parameter, so a graduation flip is simulated without rewriting the
     // production constant (no brittle source rewriting).
     const flippedRegistry = DEFAULT_FEATURE_FLAGS.map(f =>
-      f.id === 'gfi' ? { ...f, enabled: !f.enabled } : f,
+      f.id === 'diagnostician_async_cli' ? { ...f, enabled: !f.enabled } : f,
     );
-    const gfiDefaultBefore = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'gfi')?.enabled;
-    const gfiDefaultAfter = flippedRegistry.find(f => f.id === 'gfi')?.enabled;
-    expect(gfiDefaultAfter).toBe(!gfiDefaultBefore);
+    const flagDefaultBefore = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'diagnostician_async_cli')?.enabled;
+    const flagDefaultAfter = flippedRegistry.find(f => f.id === 'diagnostician_async_cli')?.enabled;
+    expect(flagDefaultAfter).toBe(!flagDefaultBefore);
 
     // Sparse fresh config follows the NEW registry default.
     const sparse = computeEffectiveFlags({}, flippedRegistry, 'sparse-test');
-    expect(sparse.flags.gfi?.enabled).toBe(gfiDefaultAfter);
+    expect(sparse.flags.diagnostician_async_cli?.enabled).toBe(flagDefaultAfter);
 
     // The pre-PRI-645 bootstrap shape (a materialized default snapshot)
     // would keep serving the OLD value after the flip — frozen default.
     const oldSnapshot = computeEffectiveFlags(
-      { gfi: { category: 'quiet', enabled: gfiDefaultBefore ?? false } },
+      { diagnostician_async_cli: { category: 'quiet', enabled: flagDefaultBefore ?? false } },
       flippedRegistry,
       'dense-test',
     );
-    expect(oldSnapshot.flags.gfi?.enabled).toBe(gfiDefaultBefore);
+    expect(oldSnapshot.flags.diagnostician_async_cli?.enabled).toBe(flagDefaultBefore);
   });
 });
 

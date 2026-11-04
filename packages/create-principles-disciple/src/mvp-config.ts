@@ -7,8 +7,10 @@ import { errnoCode } from './utils/config-file-io.js';
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
 
-export const MVP_QUIET_FLAGS = ['gfi'] as const;
-export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger'] as const;
+// GFI retired 2026-11-04 (GFI-COMPLETE-REMOVAL-001): its flag became a `gone`
+// tombstone, so no quiet flag remains.
+export const MVP_QUIET_FLAGS = [] as const;
+export const MVP_GONE_FLAGS = ['gfi', 'nocturnal', 'idle_trigger'] as const;
 
 /**
  * Product-level feedback defaults (PRI-543). The PD 控制台的"意见反馈"收集的是
