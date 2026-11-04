@@ -327,7 +327,7 @@ tests/global-shim-lifecycle.test.ts           pass
   1. `efde2ed58` — `fix(installer): reject traversal dependency names before linking (PRI-1100)`
   2. `64f2d5c92` — `chore(changeset): re-target the dependency-link fix after v2.5.0`（旧 changeset 已被 `v2.5.0` 消费并在 main 删除）
   3. `2bea2b7ff` — `Merge remote-tracking branch 'origin/main' into ...`（把分支对齐到含 `v2.5.0` 的 main；无冲突）
-- 本地 HEAD = 远端分支 = `2bea2b7ffb502927ba165c590c8e267c799584d5`（`git rev-parse HEAD` 与 `origin/ai/...` 一致）。
+- 本地 HEAD 与远端分支 `origin/ai/adhoc-20261103-installer-dependency-link-consolidation-39a366` 每次推送后都用 `git rev-parse` 核对一致：代码修复提交 `efde2ed58`、changeset 重定向 `64f2d5c92`、对齐 main 的合并 `2bea2b7ff`，其后还有一个仅改本报告的 docs 提交（因此分支 head 会比 `2bea2b7ff` 多一个文档提交，最终 SHA 以 `git rev-parse HEAD` / 远端分支为准）。
 - 推送方式：普通 `git push`（无 `--force`、无 `--force-with-lease`）。PR #2319 合并时 GitHub 删除了该分支，本轮首次推送以 `[new branch]` 重建同名远端分支。
 - PR #2319 状态：**MERGED**（早于本轮修复完成）。因此该修复**没有可追加的开放 PR**；本会话**未创建**任何新 PR（遵守“不建重复 PR”），也未合并、未部署。
 - Writer lease：本轮以 `trae/PRI-1100-security-fix` 取得；任务结束释放。
