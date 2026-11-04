@@ -1,32 +1,3 @@
-import { resolvePdPath } from './paths.js';
-import { ConfigService } from './config-service.js';
-
-export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
-  let score = Math.max(0, softScore || 0);
-
-  const stateDir = projectDir ? resolvePdPath(projectDir, 'STATE_DIR') : undefined;
-  const config = stateDir ? ConfigService.get(stateDir) : null;
-  const scoreSettings = config ? config.get('scores') : {
-    exit_code_penalty: 70,
-    spiral_penalty: 40,
-    missing_test_command_penalty: 30
-  };
-
-  if (rc !== 0) {
-    score += scoreSettings.exit_code_penalty;
-  }
-
-  if (isSpiral) {
-    score += scoreSettings.spiral_penalty;
-  }
-
-  if (missingTestCommand) {
-    score += scoreSettings.missing_test_command_penalty;
-  }
-
-  return Math.min(100, score);
-}
-
 /**
  * Track principle value metrics when a pain signal is written.
  * This is observation-only — it does NOT affect the pain flag write flow.

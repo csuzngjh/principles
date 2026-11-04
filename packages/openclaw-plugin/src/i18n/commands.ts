@@ -34,8 +34,8 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     en: 'Show all commands and usage guide'
   },
   'pd-status': {
-    zh: '查看系统状态（GFI、Pain 词典）',
-    en: 'View system status (GFI, Pain dictionary)'
+    zh: '查看系统状态（会话、规则词典）',
+    en: 'View system status (session, rule dictionary)'
   },
   'pd-context': {
     zh: '控制上下文注入 [status|thinking|reflection|focus|preset] - 输入 /pd-context help 查看详情',
