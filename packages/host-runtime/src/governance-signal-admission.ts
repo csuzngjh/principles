@@ -130,11 +130,6 @@ export const AMBIGUOUS_CORRECTION_OVERLAY: readonly (readonly [string, number])[
   ['都说了', 0.8],
 ];
 
-/** empathy seed overlay(检测行为不变) */
-export const EMPATHY_SEED_OVERLAY: readonly (readonly [string, number])[] = [
-  ['搞什么', 0.5],
-];
-
 interface LearnedKeywordShape {
   term: string;
   weight: number;
@@ -194,7 +189,6 @@ function projectLearnedStore(raw: unknown): { terms: UnifiedKeywordStore['terms'
     const weight = Math.max(0, Math.min(1, kw.weight));
     terms[term] = {
       term,
-      category: 'correction',
       weight,
       precision: precisionFor(kw.source, term, weight),
       source: mapLearnedSource(kw.source),
@@ -207,20 +201,16 @@ function projectLearnedStore(raw: unknown): { terms: UnifiedKeywordStore['terms'
 export function buildSharedSeedKeywordStore(): UnifiedKeywordStore {
   const terms: UnifiedKeywordStore['terms'] = {};
   for (const [term, weight] of HIGH_PRECISION_CORRECTION_OVERLAY) {
-    terms[term] = { term, category: 'correction', weight, precision: 'high', source: 'seed' };
-  }
-  for (const [term, weight] of EMPATHY_SEED_OVERLAY) {
-    terms[term] = { term, category: 'empathy', weight, precision: 'ambiguous', source: 'seed' };
+    terms[term] = { term, weight, precision: 'high', source: 'seed' };
   }
   for (const [term, weight] of AMBIGUOUS_CORRECTION_OVERLAY) {
     if (Object.hasOwn(terms, term)) continue;
-    terms[term] = { term, category: 'correction', weight, precision: 'ambiguous', source: 'seed' };
+    terms[term] = { term, weight, precision: 'ambiguous', source: 'seed' };
   }
   for (const kw of CORRECTION_SEED_KEYWORDS) {
     if (Object.hasOwn(terms, kw.term)) continue;
     terms[kw.term] = {
       term: kw.term,
-      category: 'correction',
       weight: kw.weight,
       precision: kw.weight >= HIGH_PRECISION_LEARNED_WEIGHT ? 'high' : 'ambiguous',
       source: 'seed',
@@ -784,7 +774,7 @@ function parsePendingReviewMeta(value: unknown): PendingReviewMeta | null {
   if (reviewRaw !== undefined) {
     if (!isRecord(reviewRaw)) return null;
     const verdict = own(reviewRaw, 'verdict');
-    if (verdict !== 'correction' && verdict !== 'none' && verdict !== 'unclassified_empathy'
+    if (verdict !== 'correction' && verdict !== 'none'
       && verdict !== 'pending_low_confidence' && verdict !== 'pending_llm_error') return null;
     const confidence = own(reviewRaw, 'confidence');
     if (confidence !== null && (typeof confidence !== 'number' || !Number.isFinite(confidence))) return null;
@@ -1907,14 +1897,17 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
 }
 
 
-/** P0: a four-term projection of existing canonical high-precision seeds. */
+/** P0: a four-term projection of existing canonical high-precision correction seeds. */
 const WORKBUDDY_AUTO_TERMS = new Set(['这是错的', '不要自作主张', '不应该这么做', '又搞错']);
 const WORKBUDDY_MAX_PROMPT_BYTES = 16 * 1024;
 function workbuddyP0KeywordStore(): UnifiedKeywordStore {
   const seed = buildSharedSeedKeywordStore();
   const terms: UnifiedKeywordStore['terms'] = {};
   for (const [term, def] of Object.entries(seed.terms)) {
-    if (WORKBUDDY_AUTO_TERMS.has(term) && def.category === 'correction' && def.precision === 'high') {
+    // The shared seed store only contains correction phrases (the empathy
+    // keyword store was retired with GFI-COMPLETE-REMOVAL-001), so the term
+    // membership + high precision is the whole filter.
+    if (WORKBUDDY_AUTO_TERMS.has(term) && def.precision === 'high') {
       terms[term] = def;
     }
   }

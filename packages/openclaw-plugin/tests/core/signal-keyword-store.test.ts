@@ -9,7 +9,7 @@ vi.mock('../../src/hooks/pain.js', () => ({
   emitPainDetectedEvent: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../../src/core/session-tracker.js', () => ({
-  trackFriction: vi.fn(),
+  trackSessionControlActivity: vi.fn(),
 }));
 vi.mock('../../src/core/system-logger.js', () => ({
   SystemLogger: { log: vi.fn() },
@@ -24,7 +24,7 @@ import {
   HIGH_PRECISION_LEARNED_WEIGHT,
 } from '../../src/core/signal-keyword-store.js';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
-import { trackFriction } from '../../src/core/session-tracker.js';
+import { trackSessionControlActivity } from '../../src/core/session-tracker.js';
 import { saveCorrectionKeywordStore, _resetCorrectionCueCache } from '../../src/core/correction-cue-learner.js';
 import type { CorrectionKeywordStore } from '@principles/core/runtime-v2';
 
@@ -93,10 +93,10 @@ describe('createLiveSignalKeywordStore (learned store projection)', () => {
     // (参与 Stage1 扫描 + Stage2 LLM 确认; deterministic STRONG 仅
     //  seed overlay 与 owner_promoted 可及)
     expect(store.terms['重大失误']).toMatchObject({
-      category: 'correction', precision: 'ambiguous', source: 'llm_learned', weight: 0.8,
+      precision: 'ambiguous', source: 'llm_learned', weight: 0.8,
     });
     expect(store.terms['不太对']).toMatchObject({
-      category: 'correction', precision: 'ambiguous', source: 'llm_learned', weight: 0.35,
+      precision: 'ambiguous', source: 'llm_learned', weight: 0.35,
     });
     // owner_promoted(用户显式加入)高权重 → 可确定性触发
     saveCorrectionKeywordStore(stateDir, makeStore([
@@ -107,7 +107,7 @@ describe('createLiveSignalKeywordStore (learned store projection)', () => {
     expect(store2.terms['别自作聪明']).toMatchObject({ precision: 'high', source: 'owner_promoted' });
   });
 
-  it('高精度 overlay 与 empathy seed 恒保留(learner store 不含它们)', () => {
+  it('高精度 overlay 恒保留(learner store 不含它们;empathy seed 已随 GFI 退役)', () => {
     saveCorrectionKeywordStore(stateDir, makeStore([]));
     const live = createLiveSignalKeywordStore(makeMockWctx(stateDir) as never);
     const store = live.resolve();
@@ -115,7 +115,7 @@ describe('createLiveSignalKeywordStore (learned store projection)', () => {
     expect(store.terms['这是错的']?.precision).toBe('high');
     expect(store.terms['不要自作主张']?.precision).toBe('high');
     expect(store.terms['不应该这么做']?.precision).toBe('high');
-    expect(store.terms['搞什么']).toMatchObject({ category: 'empathy', precision: 'ambiguous' });
+    expect(store.terms['搞什么']).toBeUndefined();
   });
 
   it('learner seed 词也进入检测面(之前 16 个 seed 词只活在死库里)', () => {

@@ -32,9 +32,9 @@ import { SystemLogger } from '../../src/core/system-logger.js';
 const testStore: UnifiedKeywordStore = {
   version: 1,
   terms: {
-    '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-    '搞什么': { term: '搞什么', category: 'empathy', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
+    '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '搞什么': { term: '搞什么', weight: 0.5, precision: 'ambiguous', source: 'seed' },
   },
 };
 
@@ -236,7 +236,7 @@ describe('SignalCollectorHost.detectSync', () => {
     const earnedHighStore: UnifiedKeywordStore = {
       version: 2,
       terms: {
-        '先确认再改': { term: '先确认再改', category: 'correction', weight: 0.5, precision: 'high', source: 'llm_learned' },
+        '先确认再改': { term: '先确认再改', weight: 0.5, precision: 'high', source: 'llm_learned' },
       },
     };
     const host = makeHost(wctx, { keywordStore: earnedHighStore, config: testConfig, llmClassifier, cueFeedbackRecorder });
@@ -505,8 +505,8 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const empathyOnlyStore: UnifiedKeywordStore = {
       version: 1,
       terms: {
-        '搞什么': { term: '搞什么', category: 'empathy', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-        '气死我了': { term: '气死我了', category: 'empathy', weight: 0.7, precision: 'high', source: 'seed' },
+        '搞什么': { term: '搞什么', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+        '气死我了': { term: '气死我了', weight: 0.7, precision: 'high', source: 'seed' },
       },
     };
     const wctx = makeMockWctx();
@@ -521,8 +521,8 @@ describe('SignalCollectorHost edge cases and error handling', () => {
     const correctionOnlyStore: UnifiedKeywordStore = {
       version: 1,
       terms: {
-        '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-        '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
+        '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+        '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
       },
     };
     const wctx = makeMockWctx();
@@ -1123,10 +1123,10 @@ const LIVE_TURN_TEXT = '什么狗屎，这个根本不是我们讨论的第二�
 const pri687LearnedStore: UnifiedKeywordStore = {
   version: 2,
   terms: {
-    '什么狗屎': { term: '什么狗屎', category: 'correction', weight: 0.9, precision: 'ambiguous', source: 'llm_learned' },
-    '根本不是': { term: '根本不是', category: 'correction', weight: 0.8, precision: 'ambiguous', source: 'llm_learned' },
-    '狗屁': { term: '狗屁', category: 'correction', weight: 0.85, precision: 'ambiguous', source: 'llm_learned' },
-    '哪里冒出来的': { term: '哪里冒出来的', category: 'correction', weight: 0.6, precision: 'ambiguous', source: 'llm_learned' },
+    '什么狗屎': { term: '什么狗屎', weight: 0.9, precision: 'ambiguous', source: 'llm_learned' },
+    '根本不是': { term: '根本不是', weight: 0.8, precision: 'ambiguous', source: 'llm_learned' },
+    '狗屁': { term: '狗屁', weight: 0.85, precision: 'ambiguous', source: 'llm_learned' },
+    '哪里冒出来的': { term: '哪里冒出来的', weight: 0.6, precision: 'ambiguous', source: 'llm_learned' },
   },
 };
 
