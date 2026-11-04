@@ -1,5 +1,4 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { resetFriction } from '../core/session-tracker.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
@@ -89,24 +88,14 @@ Usage:
         };
     }
 
-    // Reduce the GFI by the rolled back score
-    resetFriction(sessionId, workspaceDir, {
-        source: 'user_empathy',
-        amount: rolledBackScore,
-    });
-
     return {
         text: isZh
             ? `✅ 已回滚情绪事件
    📋 事件 ID: ${eventId}
-   💰 撤销分数: ${rolledBackScore} 分
-   
-💡 提示: 已重置当前会话的疲劳指数。`
+   💰 撤销分数: ${rolledBackScore} 分`
             : `✅ Empathy event rolled back successfully
    📋 Event ID: ${eventId}
-   💰 Score recovered: ${rolledBackScore} pts
-   
-💡 Hint: Session friction has been reset.`
+   💰 Score recovered: ${rolledBackScore} pts`
     };
 }
 
@@ -152,12 +141,6 @@ export function handleNaturalLanguageRollback(
             message: isZh ? '回滚失败，事件可能不存在' : 'Rollback failed, event may not exist'
         };
     }
-
-    // Reduce only the empathy slice instead of wiping the whole session GFI.
-    resetFriction(sessionId, wctx.workspaceDir, {
-        source: 'user_empathy',
-        amount: rolledBackScore,
-    });
 
     return {
         success: true,

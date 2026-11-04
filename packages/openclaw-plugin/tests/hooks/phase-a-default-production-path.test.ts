@@ -135,7 +135,7 @@ describe('Phase A default production path (abstraction_layer_v1 OFF)', () => {
     try {
       expect(tableExists(db, 'tool_calls')).toBe(true);
       const rows = db.prepare(
-        'SELECT tool_name, outcome, exit_code, error_message, gfi_before, gfi_after FROM tool_calls',
+        'SELECT tool_name, outcome, exit_code, error_message FROM tool_calls',
       ).all();
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
@@ -144,10 +144,6 @@ describe('Phase A default production path (abstraction_layer_v1 OFF)', () => {
         exit_code: 7,
         error_message: 'boom',
       });
-      // GFI health observation keeps moving on the same row.
-      const row = rows[0] as { gfi_before: number; gfi_after: number };
-      expect(row.gfi_before).toBeGreaterThanOrEqual(0);
-      expect(row.gfi_after).toBeGreaterThan(row.gfi_before);
 
       expect(countRows(db, 'pain_events')).toBe(0);
     } finally {

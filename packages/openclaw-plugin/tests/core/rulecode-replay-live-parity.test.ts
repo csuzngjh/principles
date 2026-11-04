@@ -15,14 +15,16 @@ import type { RuleHostHelpers, RuleHostInput, RuleHostResult } from '@principles
 import { loadRuleImplementationModule } from '../../src/core/rule-implementation-runtime.js';
 
 // PRI-809 review: the parity rule reads every dimension the replay/live
-// contract lists — canonicalKind echo, normalizedPath, context — so the
+// contract lists — canonicalKind echo, normalizedPath, evolution — so the
 // parity assertion covers decision + reason + those derived fields, not just
-// the decision enum.
+// the decision enum. (2bae37491 removed RuleHostInput.session.currentGfi —
+// SPEC §3.8 — so the session dimension is covered by evolution.epTier, which
+// both boundaries also echo.)
 const RULE = `
 export const meta = { name: 'parity-guard', version: '1', ruleId: 'R_PARITY', coversCondition: 'all' };
 export function evaluate(input, helpers) {
   var p = input.action.paramsSummary;
-  var echo = 'kind:' + String(input.action.canonicalKind) + '|path:' + String(input.action.normalizedPath) + '|gfi:' + String(input.session.currentGfi);
+  var echo = 'kind:' + String(input.action.canonicalKind) + '|path:' + String(input.action.normalizedPath) + '|eptier:' + String(input.evolution.epTier);
   if (helpers.getToolName() === 'edit' && p && p.filePath === '/etc/passwd') {
     return { decision: 'block', matched: true, reason: 'system path blocked ' + echo };
   }
@@ -55,7 +57,7 @@ describe('PRI-809 replay/live semantic parity', () => {
     expect(reasonOf(live)).toContain('safe path ');
     // Baseline synthetic input: canonicalKind absent, normalizedPath null —
     // both boundaries must observe the SAME echo (absent/null preserved).
-    expect(reasonOf(live)).toContain('kind:undefined|path:null|gfi:0');
+    expect(reasonOf(live)).toContain('kind:undefined|path:null|eptier:0');
     expect(reasonOf(live)).toBe(reasonOf(replay));
   });
 

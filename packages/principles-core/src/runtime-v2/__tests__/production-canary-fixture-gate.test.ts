@@ -12,7 +12,6 @@ import { SchemaConformanceReadModel } from '../schema-conformance-read-model.js'
 import { validateInternalizationTaskReady } from '../internalization/internalization-state-machine.js';
 import { hydratePITaskRecord } from '../internalization/pitask-metadata.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
-import { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '../gfi/gfi-read-model.js';
 import type { TaskRecord } from '../task-status.js';
 
 interface FixtureTaskSeed {
@@ -474,94 +473,6 @@ describe('PRI-102: Production canary fixture gate', () => {
 
       const mtimeAfter = await fixture.getDBWriteCount();
       expect(mtimeAfter).toBe(mtimeBefore);
-    });
-  });
-
-  describe('stale GFI low不degraded', () => {
-    it('stale sessions with low GFI are healthy', () => {
-      const snapshot = buildGfiWorkspaceSnapshot({
-        sessions: [
-          {
-            sessionId: 'stale-low-1',
-            currentGfi: 5,
-            consecutiveErrors: 0,
-            lastActivityAt: Date.now() - 3 * 60 * 60 * 1000,
-          },
-          {
-            sessionId: 'stale-low-2',
-            currentGfi: 10,
-            consecutiveErrors: 0,
-            lastActivityAt: Date.now() - 5 * 60 * 60 * 1000,
-          },
-        ],
-        nowMs: Date.now(),
-      });
-
-      const health = classifyGfiWorkspaceHealth(snapshot);
-      expect(health.status).toBe('healthy');
-      expect(health.reason).toContain('low GFI');
-    });
-
-    it('stale sessions with high GFI are degraded', () => {
-      const snapshot = buildGfiWorkspaceSnapshot({
-        sessions: [
-          {
-            sessionId: 'stale-high-1',
-            currentGfi: 80,
-            consecutiveErrors: 5,
-            lastActivityAt: Date.now() - 3 * 60 * 60 * 1000,
-          },
-        ],
-        nowMs: Date.now(),
-      });
-
-      const health = classifyGfiWorkspaceHealth(snapshot);
-      expect(health.status).toBe('degraded');
-      expect(health.reason).toContain('high GFI');
-    });
-
-    it('active session with GFI below threshold is healthy', () => {
-      const snapshot = buildGfiWorkspaceSnapshot({
-        sessions: [
-          {
-            sessionId: 'active-low-1',
-            currentGfi: 15,
-            consecutiveErrors: 0,
-            lastActivityAt: Date.now(),
-          },
-        ],
-        nowMs: Date.now(),
-      });
-
-      const health = classifyGfiWorkspaceHealth(snapshot);
-      expect(health.status).toBe('healthy');
-    });
-
-    it('active session with GFI at or above threshold is degraded', () => {
-      const snapshot = buildGfiWorkspaceSnapshot({
-        sessions: [
-          {
-            sessionId: 'active-high-1',
-            currentGfi: 45,
-            consecutiveErrors: 2,
-            lastActivityAt: Date.now(),
-          },
-        ],
-        nowMs: Date.now(),
-      });
-
-      const health = classifyGfiWorkspaceHealth(snapshot);
-      expect(health.status).toBe('degraded');
-    });
-
-    it('no sessions at all is healthy (cold start)', () => {
-      const snapshot = buildGfiWorkspaceSnapshot({
-        sessions: [],
-        nowMs: Date.now(),
-      });
-
-      const health = classifyGfiWorkspaceHealth(snapshot);
-      expect(health.status).toBe('healthy');
     });
   });
 

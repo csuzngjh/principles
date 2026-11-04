@@ -2,8 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { OperatorHealthReadModel, PruningReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
-import type { OperatorHealthSnapshot } from '@principles/core/runtime-v2';
+import { PruningReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
 import { HealthCheckModel } from '../../src/server/models/HealthCheckModel.js';
 import {
   createTestWorkspace,
@@ -67,7 +66,8 @@ describe('HealthCheckModel', () => {
       expect(health).toBeDefined();
       expect(health.overall).toBeDefined();
       expect(['healthy', 'degraded', 'error']).toContain(health.overall);
-      expect(health.checks).toHaveLength(5);
+      // GFI 项随 GFI 移除一起删除：检查项由 5 项降为 4 项
+      expect(health.checks).toHaveLength(4);
       expect(health.pipeline).toBeDefined();
       expect(health.generatedAt).toBeDefined();
     } finally {
@@ -175,7 +175,6 @@ describe('HealthCheckModel', () => {
       expect(checkIds).toContain('pain_chain_flow');
       expect(checkIds).toContain('task_queue');
       expect(checkIds).toContain('principle_tree');
-      expect(checkIds).toContain('gfi_health');
     } finally {
       model.dispose();
     }
@@ -247,26 +246,6 @@ describe('HealthCheckModel', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('checkGfiHealth returns error when getSnapshot throws', async () => {
-    ws = await createTestWorkspace();
-    const model = new HealthCheckModel(ws.workspaceDir);
-
-    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
-      .mockRejectedValue(new Error('DB connection lost'));
-
-    try {
-      const health = await model.checkSystemHealth();
-
-      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
-      expect(gfiCheck).toBeDefined();
-      expect(gfiCheck!.status).toBe('error');
-      expect(gfiCheck!.message).toContain('DB connection lost');
-    } finally {
-      spy.mockRestore();
-      model.dispose();
-    }
-  });
-
   it('getPipelineTimestamps returns lastPrincipleAdded with active principles', async () => {
     ws = await createTestWorkspace({
       trainingState: sampleTrainingState(),
@@ -319,147 +298,6 @@ describe('HealthCheckModel', () => {
       expect(treeCheck).toBeDefined();
       expect(treeCheck!.status).toBe('error');
       expect(treeCheck!.message).toContain('DB locked');
-    } finally {
-      spy.mockRestore();
-      model.dispose();
-    }
-  });
-
-  it('checkGfiHealth returns error when GFI exceeds critical threshold', async () => {
-    ws = await createTestWorkspace();
-    const model = new HealthCheckModel(ws.workspaceDir);
-
-    const mockSnapshot: OperatorHealthSnapshot = {
-      generatedAt: new Date().toISOString(),
-      workspace: 'test',
-      painChain: { lastSuccessfulChain: null, failureCategory: null },
-      candidateLedger: { auditStatus: 'ok', orphanCandidateCount: 0, missingLedgerCount: 0 },
-      pruning: { watchCount: 0, reviewCount: 0, orphanDerivedCandidateCount: 0 },
-      gfi: {
-        active: {
-          currentGfi: 90,
-          stage: 'elevated',
-          sources: {},
-          dominantSource: null,
-          consecutiveErrors: 0,
-          policy: { elevatedThreshold: 40, criticalThreshold: 70, saturatedThreshold: 100, repeatedFailureMultiplierMax: 3 },
-          consumers: { attitudeMode: 'efficient', painDiagnosticReason: 'none' },
-        },
-        staleSessionCount: 0,
-        staleGfiRange: null,
-        totalSessionCount: 1,
-        activeSessionCount: 1,
-        generatedAt: new Date().toISOString(),
-      },
-      overallStatus: 'degraded',
-      recommendedActions: [],
-      totalTaskCount: 0,
-    };
-
-    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
-      .mockResolvedValue(mockSnapshot);
-
-    try {
-      const health = await model.checkSystemHealth();
-
-      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
-      expect(gfiCheck).toBeDefined();
-      expect(gfiCheck!.status).toBe('error');
-      expect(gfiCheck!.message).toContain('GFI 过高中');
-    } finally {
-      spy.mockRestore();
-      model.dispose();
-    }
-  });
-
-  it('checkGfiHealth returns warning when GFI exceeds 80% of threshold', async () => {
-    ws = await createTestWorkspace();
-    const model = new HealthCheckModel(ws.workspaceDir);
-
-    const mockSnapshot: OperatorHealthSnapshot = {
-      generatedAt: new Date().toISOString(),
-      workspace: 'test',
-      painChain: { lastSuccessfulChain: null, failureCategory: null },
-      candidateLedger: { auditStatus: 'ok', orphanCandidateCount: 0, missingLedgerCount: 0 },
-      pruning: { watchCount: 0, reviewCount: 0, orphanDerivedCandidateCount: 0 },
-      gfi: {
-        active: {
-          currentGfi: 60,
-          stage: 'elevated',
-          sources: {},
-          dominantSource: null,
-          consecutiveErrors: 0,
-          policy: { elevatedThreshold: 40, criticalThreshold: 70, saturatedThreshold: 100, repeatedFailureMultiplierMax: 3 },
-          consumers: { attitudeMode: 'efficient', painDiagnosticReason: 'none' },
-        },
-        staleSessionCount: 0,
-        staleGfiRange: null,
-        totalSessionCount: 1,
-        activeSessionCount: 1,
-        generatedAt: new Date().toISOString(),
-      },
-      overallStatus: 'degraded',
-      recommendedActions: [],
-      totalTaskCount: 0,
-    };
-
-    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
-      .mockResolvedValue(mockSnapshot);
-
-    try {
-      const health = await model.checkSystemHealth();
-
-      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
-      expect(gfiCheck).toBeDefined();
-      expect(gfiCheck!.status).toBe('warning');
-      expect(gfiCheck!.message).toContain('GFI 偏高');
-    } finally {
-      spy.mockRestore();
-      model.dispose();
-    }
-  });
-
-  it('checkGfiHealth returns healthy when GFI is low', async () => {
-    ws = await createTestWorkspace();
-    const model = new HealthCheckModel(ws.workspaceDir);
-
-    const mockSnapshot: OperatorHealthSnapshot = {
-      generatedAt: new Date().toISOString(),
-      workspace: 'test',
-      painChain: { lastSuccessfulChain: null, failureCategory: null },
-      candidateLedger: { auditStatus: 'ok', orphanCandidateCount: 0, missingLedgerCount: 0 },
-      pruning: { watchCount: 0, reviewCount: 0, orphanDerivedCandidateCount: 0 },
-      gfi: {
-        active: {
-          currentGfi: 10,
-          stage: 'stable',
-          sources: {},
-          dominantSource: null,
-          consecutiveErrors: 0,
-          policy: { elevatedThreshold: 40, criticalThreshold: 70, saturatedThreshold: 100, repeatedFailureMultiplierMax: 3 },
-          consumers: { attitudeMode: 'efficient', painDiagnosticReason: 'none' },
-        },
-        staleSessionCount: 0,
-        staleGfiRange: null,
-        totalSessionCount: 1,
-        activeSessionCount: 1,
-        generatedAt: new Date().toISOString(),
-      },
-      overallStatus: 'healthy',
-      recommendedActions: [],
-      totalTaskCount: 0,
-    };
-
-    const spy = vi.spyOn(OperatorHealthReadModel.prototype, 'getSnapshot')
-      .mockResolvedValue(mockSnapshot);
-
-    try {
-      const health = await model.checkSystemHealth();
-
-      const gfiCheck = health.checks.find(c => c.id === 'gfi_health');
-      expect(gfiCheck).toBeDefined();
-      expect(gfiCheck!.status).toBe('healthy');
-      expect(gfiCheck!.message).toContain('正常');
     } finally {
       spy.mockRestore();
       model.dispose();

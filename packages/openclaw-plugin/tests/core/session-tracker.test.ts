@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+// 31a60e1e5 retired the friction state (trackFriction / resetFriction /
+// currentGfi / gfiBySource / per-source slice rollback) — SPEC §3.2. The
+// session tracker now only tracks reads, LLM turns, blocks and injected ids.
 import {
     trackToolRead,
     trackLlmOutput,
     getSession,
     clearSession,
-    trackFriction,
-    resetFriction,
     initPersistence,
     trackBlock,
     setInjectedPrincipleIds,
@@ -75,103 +76,16 @@ describe('Session Tracker', () => {
         expect(state?.stuckLoops).toBe(1); // decrements
     });
 
-    it('should accumulate friction and reset on success', () => {
-        const errorHash = 'abc-123';
-        
-        // 1st error
-        trackFriction(sessionId, 30, errorHash);
-        let state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(30);
-        expect(state?.consecutiveErrors).toBe(1);
-
-        // 2nd identical error (multiplier 1.5^1 = 1.5)
-        trackFriction(sessionId, 30, errorHash);
-        state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(30 + (30 * 1.5)); // 75
-        expect(state?.consecutiveErrors).toBe(2);
-
-        // 3rd identical error (multiplier 1.5^2 = 2.25)
-        trackFriction(sessionId, 30, errorHash);
-        state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(75 + (30 * 2.25)); // 75 + 67.5 = 142.5
-        expect(state?.consecutiveErrors).toBe(3);
-
-        // Success should reset GFI
-        resetFriction(sessionId);
-        state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(0);
-        expect(state?.consecutiveErrors).toBe(0);
-        expect(state?.gfiBySource).toEqual({});
-    });
-
-    it('should reset multiplier on different error hash', () => {
-        trackFriction(sessionId, 30, 'hash-1');
-        trackFriction(sessionId, 30, 'hash-2');
-        
-        let state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(60); // 30 + 30
-        expect(state?.consecutiveErrors).toBe(1); // reset to 1 for new hash
-    });
-
-    it('should rollback only the empathy source slice instead of wiping total gfi', () => {
-        trackFriction(sessionId, 30, 'tool_failure_hash');
-        trackFriction(sessionId, 20, 'user_empathy_moderate', undefined, { source: 'user_empathy' });
-
-        let state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(50);
-        expect(state?.gfiBySource).toEqual({
-            'unattributed:tool_failure_hash': 30,
-            user_empathy: 20,
-        });
-
-        resetFriction(sessionId, undefined, { source: 'user_empathy', amount: 20 });
-
-        state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(30);
-        expect(state?.gfiBySource).toEqual({
-            'unattributed:tool_failure_hash': 30,
-        });
-        expect(state?.consecutiveErrors).toBe(0);
-        expect(state?.lastErrorHash).toBe('');
-        expect(state?.lastErrorSource).toBe('');
-    });
-
-    it('should clamp slice rollback amount and preserve other source ledger entries', () => {
-        trackFriction(sessionId, 10, 'tool_failure_hash');
-        trackFriction(sessionId, 15, 'user_empathy_mild', undefined, { source: 'user_empathy' });
-        trackFriction(sessionId, 5, 'system_empathy_warn', undefined, { source: 'system_infer' });
-
-        resetFriction(sessionId, undefined, { source: 'user_empathy', amount: 999 });
-
-        const state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(15);
-        expect(state?.gfiBySource).toEqual({
-            'unattributed:tool_failure_hash': 10,
-            system_infer: 5,
-        });
-    });
-
-    it('should ignore slice rollback for a source that does not exist', () => {
-        trackFriction(sessionId, 12, 'tool_failure_hash');
-
-        resetFriction(sessionId, undefined, { source: 'user_empathy', amount: 7 });
-
-        const state = getSession(sessionId);
-        expect(state?.currentGfi).toBe(12);
-        expect(state?.gfiBySource).toEqual({
-            'unattributed:tool_failure_hash': 12,
-        });
-        expect(state?.consecutiveErrors).toBe(1);
-        expect(state?.lastErrorHash).toBe('tool_failure_hash');
-    });
-
     it('should persist multiple sessions independently instead of overwriting the previous debounce timer', () => {
         vi.useFakeTimers();
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-session-persist-'));
         initPersistence(tempDir);
 
-        trackFriction('session-a', 10, 'hash-a', tempDir);
-        trackFriction('session-b', 15, 'hash-b', tempDir);
+        // (c) 类：per-session debounce 不被覆盖这一不变量仍然有效，驱动点从
+        // 已删除的 trackFriction 迁到仍在生产的 trackBlock
+        // (src/core/session-tracker.ts:272-277，内部调用 schedulePersistence)。
+        trackBlock('session-a');
+        trackBlock('session-b');
 
         vi.advanceTimersByTime(1000);
 

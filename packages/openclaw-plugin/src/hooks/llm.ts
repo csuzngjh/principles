@@ -1,14 +1,9 @@
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
-import { trackLlmOutput, resetFriction, getInjectedPrincipleIds } from '../core/session-tracker.js';
+import { trackLlmOutput, getInjectedPrincipleIds } from '../core/session-tracker.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
-import { emitPainDetectedEvent } from './pain.js';
 import { recordSelfReportFromText } from '../core/principle-application-ledger.js';
-import { resolveSourceKind, type RawObservation } from './raw-observation-adapter.js';
-import { evaluateEvidenceTriage } from './triage-adapter.js';
-import { evaluateTriggerController } from '@principles/core/runtime-v2';
-import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -178,7 +173,7 @@ export function handleLlmOutput(
     const sessionId = (ctx as { sessionId?: string }).sessionId ?? 'unknown';
     const workspaceDir = (ctx as { workspaceDir?: string }).workspaceDir;
     const sessionKey = (ctx as { sessionKey?: string }).sessionKey ?? 'unknown';
-    const state = trackLlmOutput(sessionId, usage, config, workspaceDir, sessionKey, trigger);
+    trackLlmOutput(sessionId, usage, config, workspaceDir, sessionKey, trigger);
 
     // We need actual assistant text to analyze
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;
@@ -236,146 +231,19 @@ export function handleLlmOutput(
     // ── Pain emission (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001
     // Phase 0): the legacy Semantic Confusion detection path (DetectionService
     // funnel) was retired — error is not Pain. Its detection branch and Pain
-    // writes are gone; the shared write points below are now fed exclusively
-    // by the GFI branch (whose bounded retirement is Phase C).
-
-    let painScore = 0;
-    let source = '';
-    let matchedReason = '';
+    // writes are gone; GFI was removed entirely in GFI-COMPLETE-REMOVAL-001.
 
     // ═══ Natural Language Rollback Detection ═══
     const rollbackMatch = /^\s*\[EMPATHY_ROLLBACK_REQUEST\]\s*$/m.exec(text);
     if (rollbackMatch) {
         const eventId = eventLog.getLastEmpathyEventId(ctx.sessionId);
         if (eventId) {
-            const rolledBackScore = eventLog.rollbackEmpathyEvent(
+            eventLog.rollbackEmpathyEvent(
                 eventId,
                 ctx.sessionId,
                 'Natural language rollback request detected',
                 'natural_language'
             );
-            if (rolledBackScore > 0) {
-                // Reset GFI after successful rollback
-                resetFriction(ctx.sessionId, ctx.workspaceDir, {
-                    source: 'user_empathy',
-                    amount: rolledBackScore,
-                });
-            }
-        }
-    }
-
-    // Phase 0 retirement: the LLM Paralysis trigger (stuckLoops over
-    // threshold) previously assigned painScore/source here — removed for the
-    // same error-is-not-Pain reason as the Semantic branch above.
-
-    // If a pain threshold is crossed, only valuable episodes enter Runtime v2.
-    const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
-
-    // GFI-triggered pain: when accumulated friction crosses highGfi threshold,
-    // emit pain signal even if L1 detection didn't fire.
-    const highGfiThreshold = Math.max(config.get('severity_thresholds.high') || 70, painTriggerThreshold + 30);
-    let isGfiTriggered = false;
-    if (state.currentGfi >= highGfiThreshold && painScore < painTriggerThreshold) {
-        painScore = Math.min(state.currentGfi, 60);
-        source = 'user_empathy';
-        isGfiTriggered = true;
-        matchedReason = `Accumulated GFI (${state.currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Source: empathy keyword friction.`;
-    }
-
-    if (painScore >= painTriggerThreshold) {
-        // PRI-651-B1: Unconditional Gate B — TriggerController is the only
-        // admission authority. Gate A fallback (PRI-454 rollback) removed.
-        eventLog.recordPainSignal(ctx.sessionId, {
-            score: painScore,
-            source: source,
-            reason: matchedReason,
-            isRisky: false
-        });
-
-        // PRI-453: Generate painId early and write to trajectory.db via legacy
-        // recordPainEvent so that disabling SDK observability path does not lose
-        // trajectory coverage. canonicalPainId enables dedup.
-        const painId = `llm_${Date.now()}`;
-        wctx.trajectory?.recordPainEvent?.({
-            sessionId: ctx.sessionId || 'unknown',
-            source,
-            score: painScore,
-            reason: matchedReason,
-            origin: 'system_infer',
-            canonicalPainId: painId,
-            hostKind: 'openclaw',
-        });
-
-        // PRI-454: Gate B path — TriggerController owns admission
-        const rawObs: RawObservation = {
-            observedAt: new Date().toISOString(),
-            workspaceId: ctx.workspaceDir,
-            sessionId: ctx.sessionId,
-            detectionSource: source,
-            isGfiTriggered,
-        };
-        const sourceKind = resolveSourceKind(rawObs);
-        const triage = evaluateEvidenceTriage(sourceKind, painScore);
-        if (triage.decision !== 'admit') {
-            ctx.logger?.info?.(`[PD:LLM] Triage ${triage.decision}: ${triage.reason}`);
-        } else {
-            const cooldownActive = isSharedCooldownActive(sourceKind, ctx.sessionId, source);
-            const triggerDecision = evaluateTriggerController({
-                triageResult: triage,
-                isOwnerManual: false,
-                isCooldownActive: cooldownActive,
-                isValid: true,
-                score: painScore,
-                sessionId: ctx.sessionId,
-            });
-            if (triggerDecision.shouldCreateDiagnosticTask) {
-                markSharedEpisodeAsDiagnosed(sourceKind, ctx.sessionId, source);
-                emitPainDetectedEvent(wctx, {
-                    ts: new Date().toISOString(),
-                    type: 'pain_detected',
-                    data: {
-                        painId,
-                        painType: 'user_frustration' as const,
-                        source,
-                        reason: `${matchedReason}; trigger=${triggerDecision.outcome}`,
-                        score: painScore,
-                        sessionId: ctx.sessionId || 'unknown',
-                        agentId: ctx.agentId,
-                        // PRI-844: if the session contains a recent
-                        // correction (getLatestCorrectionTurn applies a
-                        // 30-min staleness window), attach the Owner's
-                        // verbatim words as first-class evidence instead of
-                        // letting only the triggering fragment reach the
-                        // diagnosis. Absent when there is none — never
-                        // fabricated (rc-9).
-                        correctionEvidence: (() => {
-                            try {
-                                const turn = wctx.trajectory.getLatestCorrectionTurn(ctx.sessionId || 'unknown');
-                                if (!turn) return undefined;
-                                return {
-                                    text: turn.text,
-                                    sessionId: ctx.sessionId || 'unknown',
-                                    ...(turn.turnIndex !== undefined ? { turnIndex: turn.turnIndex } : {}),
-                                    ...(turn.referencesAssistantTurnId !== null && turn.referencesAssistantTurnId !== undefined
-                                        ? { referencesAssistantTurnId: turn.referencesAssistantTurnId }
-                                        : {}),
-                                    occurredAt: turn.occurredAt,
-                                };
-                            } catch (error) {
-                                // PRI-844 review fix (P2): evidence LOSS must stay
-                                // observable (rc-9) — log a bounded reason and keep
-                                // the hook non-throwing, so a lookup failure is
-                                // distinguishable from a legitimate no-correction
-                                // state instead of silently reading as "no correction".
-                                ctx.logger?.warn?.(`[PD:LLM] correction evidence lookup failed: ${String(error).slice(0, 200)}`);
-                                return undefined;
-                            }
-                        })(),
-                    },
-                }, { recordObservability: false });
-            } else {
-                ctx.logger?.info?.(`[PD:LLM] Gate B skipped: ${triggerDecision.reason}`);
-            }
         }
     }
 

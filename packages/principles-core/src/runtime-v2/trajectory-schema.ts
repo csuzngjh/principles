@@ -12,9 +12,11 @@
  *   evolution_tasks column backfill, TRAJECTORY_SCHEMA_VERSION and
  *   TRAJECTORY_TABLES declarations.
  * - does NOT own: path resolution, directory creation, connection lifecycle,
- *   WAL/pragmas, schema_version ROW writes (TrajectoryDatabase.initSchema and
- *   initTrajectorySchema keep that), v_daily_metrics (plugin migrateSchema),
- *   governance_* tables (host-runtime stores).
+ *   WAL/pragmas, schema_version ROW creation/upgrade on the normal entry points
+ *   (TrajectoryDatabase.initSchema and initTrajectorySchema keep that), the
+ *   version-row convergence performed by migrateLegacyGfiSchema (see below),
+ *   v_daily_metrics (plugin migrateSchema), governance_* tables
+ *   (host-runtime stores).
  *
  * Zero pathways are abolished: both paths keep their exact pre-PRI-774
  * behavior; only the definition-text copies converge (SPEC v3, Owner-approved).
@@ -36,7 +38,7 @@ export interface TrajectorySchemaApplyResult {
 }
 
 /** trajectory.db schema version. Row writes stay with the two existing owner entry points. */
-export const TRAJECTORY_SCHEMA_VERSION = 1;
+export const TRAJECTORY_SCHEMA_VERSION = 2;
 
 /** Fresh-schema table list, in creation order (single derived source). */
 export const TRAJECTORY_TABLES = [
@@ -75,6 +77,67 @@ function tableExists(db: Database, name: string): boolean {
   return row !== undefined;
 }
 
+/**
+ * Bring an existing schema_version row up to TRAJECTORY_SCHEMA_VERSION.
+ * No-op on a v2 database (version already current) and on databases that do
+ * not have the table yet. A v1 row is upgraded in place.
+ */
+function convergeSchemaVersion(db: Database): void {
+  if (!tableExists(db, 'schema_version')) return;
+  const row = db
+    .prepare('SELECT version FROM schema_version LIMIT 1')
+    .get() as { version?: unknown } | undefined;
+  if (row === undefined) {
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(
+      TRAJECTORY_SCHEMA_VERSION,
+    );
+    return;
+  }
+  if (row.version !== TRAJECTORY_SCHEMA_VERSION) {
+    db.prepare('UPDATE schema_version SET version = ?').run(TRAJECTORY_SCHEMA_VERSION);
+  }
+}
+
+/**
+ * GFI-COMPLETE-REMOVAL-001: drop the retired GFI columns, terminalize the
+ * pending empathy confirmations that the retired correction collector created,
+ * and converge the schema_version row.
+ *
+ * Idempotent; safe on fresh databases. Called from applyTrajectorySchemaBase
+ * and explicitly by the host-runtime raw-DB open chains
+ * (production-pain-evidence.ts, governance-signal-admission.ts), which
+ * historically opened trajectory.db without applying the base schema.
+ *
+ * The version-row convergence belongs here because those raw open chains never
+ * go through TrajectoryDatabase.initSchema / initTrajectorySchema, so without
+ * it a migrated v1 database would keep claiming version 1 while its physical
+ * schema is v2 (the review finding "migration does not sync schema_version").
+ * It only touches an existing schema_version table; creating that table stays
+ * with the normal entry points.
+ */
+export function migrateLegacyGfiSchema(db: Database): void {
+  if (tableExists(db, 'tool_calls')) {
+    for (const column of ['gfi_before', 'gfi_after'] as const) {
+      const exists = db
+        .prepare("SELECT name FROM pragma_table_info('tool_calls') WHERE name = ?")
+        .get(column);
+      if (exists !== undefined) {
+        db.exec(`ALTER TABLE tool_calls DROP COLUMN ${column}`);
+      }
+    }
+  }
+
+  if (tableExists(db, 'signal_confirmations')) {
+    db
+      .prepare(
+        "UPDATE signal_confirmations SET status = 'abandoned', resolved_at = ?, resolution = ? WHERE status = 'pending' AND suggested_type = 'empathy'",
+      )
+      .run(new Date().toISOString(), 'gfi_removal');
+  }
+
+  convergeSchemaVersion(db);
+}
+
 export function applyTrajectorySchemaBase(
   db: Database,
   opts: { views?: boolean } = {},
@@ -87,7 +150,7 @@ export function applyTrajectorySchemaBase(
   db.exec('CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS assistant_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, raw_text TEXT, sanitized_text TEXT NOT NULL, usage_json TEXT NOT NULL, empathy_signal_json TEXT NOT NULL, blob_ref TEXT, raw_excerpt TEXT, stop_reason TEXT, thinking_blocks_count INTEGER, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, raw_text TEXT, blob_ref TEXT, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, correction_cue TEXT, references_assistant_turn_id INTEGER, created_at TEXT NOT NULL)');
-  db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, project_dir TEXT, host_kind TEXT)');
+  db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, project_dir TEXT, host_kind TEXT)');
   db.exec('CREATE TABLE IF NOT EXISTS pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS gate_blocks (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, tool_name TEXT NOT NULL, file_path TEXT, reason TEXT NOT NULL, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS trust_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, previous_score REAL NOT NULL, new_score REAL NOT NULL, delta REAL NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL)');
@@ -207,6 +270,9 @@ export function applyTrajectorySchemaBase(
       if (!isDuplicateColumnError(err)) throw err;
     }
   }
+
+  // GFI-COMPLETE-REMOVAL-001: retire legacy GFI columns/rows (idempotent).
+  migrateLegacyGfiSchema(db);
 
   // Secondary indexes (creation order preserved from the pre-convergence copy).
   db.exec('CREATE INDEX IF NOT EXISTS idx_assistant_turns_session_id ON assistant_turns(session_id)');

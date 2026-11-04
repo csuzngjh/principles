@@ -4,8 +4,9 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
-import { extractFilePathFromParams } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase, extractFilePathFromParams, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
 import { createProductionHostRuntime } from '../src/index.js';
+import { recordVerifiedToolOutcomes, type PainDatabaseFactory } from '../src/production-pain-evidence.js';
 
 const workspaces: string[] = [];
 
@@ -328,5 +329,169 @@ describe('PRI-640 host attribution through the shared production kernel (SPEC §
     } finally {
       db.close();
     }
+  });
+});
+
+// GFI-COMPLETE-REMOVAL-001: the raw production open path used to judge a v1
+// database as canonical, so `tool_calls.gfi_before/gfi_after` survived forever
+// and the retired pending empathy confirmations stayed pending. These tests
+// pin the physical migration, the fail-loud contract on a failed migration, and
+// the absence of false positives on an already-canonical (v2) database.
+function workspaceWithLegacyGfiTrajectory(): string {
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-legacy-'));
+  workspaces.push(workspaceDir);
+  const stateDir = path.join(workspaceDir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const db = new Database(path.join(stateDir, 'trajectory.db'));
+  db.exec(`
+    CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL);
+    CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL);
+    CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
+    CREATE TABLE signal_confirmations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_turn_rowid INTEGER NOT NULL UNIQUE, occurrence_id TEXT NOT NULL, excerpt TEXT NOT NULL, terms_json TEXT NOT NULL, suggested_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT);
+    CREATE TABLE schema_version (version INTEGER NOT NULL);
+  `);
+  db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
+  const insertSignal = db.prepare(`INSERT INTO signal_confirmations (id, session_id, user_turn_rowid, occurrence_id, excerpt, terms_json, suggested_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  insertSignal.run('empathy-1', 'session-523', 1, 'occ-1', '搞什么', '["搞什么"]', 'empathy', 'pending', 0, '2026-01-01T00:00:00.000Z');
+  insertSignal.run('correction-pending', 'session-523', 2, 'occ-2', '不对', '["不对"]', 'correction', 'pending', 0, '2026-01-01T00:00:00.000Z');
+  insertSignal.run('correction-confirmed', 'session-523', 3, 'occ-3', '错了', '["错了"]', 'correction', 'confirmed', 0, '2026-01-01T00:00:00.000Z');
+  db.close();
+  return workspaceDir;
+}
+
+function workspaceWithCanonicalTrajectory(): string {
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-canonical-'));
+  workspaces.push(workspaceDir);
+  const stateDir = path.join(workspaceDir, '.state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const db = new Database(path.join(stateDir, 'trajectory.db'));
+  applyTrajectorySchemaBase(db);
+  db.prepare(`INSERT INTO signal_confirmations (id, session_id, user_turn_rowid, occurrence_id, excerpt, terms_json, suggested_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run('correction-pending-v2', 'session-523', 1, 'occ-v2', '不对', '["不对"]', 'correction', 'pending', 0, '2026-01-01T00:00:00.000Z');
+  db.close();
+  return workspaceDir;
+}
+
+function columnsOf(workspaceDir: string, table: string): string[] {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
+    return rows.map((row) => String(row.name));
+  } finally {
+    db.close();
+  }
+}
+
+function schemaVersionOf(workspaceDir: string): unknown {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: unknown } | undefined;
+    return row?.version;
+  } finally {
+    db.close();
+  }
+}
+
+function signalRow(workspaceDir: string, id: string): { status?: string; resolution?: string | null; resolved_at?: string | null } {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    return db.prepare('SELECT status, resolution, resolved_at FROM signal_confirmations WHERE id = ?').get(id) as { status?: string; resolution?: string | null; resolved_at?: string | null };
+  } finally {
+    db.close();
+  }
+}
+
+/** A real database handle whose legacy-column DROP fails, so the migration fails mid-way. */
+function factoryFailingOnLegacyColumnDrop(): PainDatabaseFactory {
+  return (dbPath: string) => {
+    const db = new Database(dbPath);
+    const originalExec = db.exec.bind(db);
+    (db as unknown as { exec: (sql: string) => unknown }).exec = (sql: string) => {
+      if (/DROP\s+COLUMN/i.test(sql)) throw new Error('simulated_legacy_column_drop_failure');
+      return originalExec(sql);
+    };
+    return db;
+  };
+}
+
+describe('GFI-COMPLETE-REMOVAL-001 — legacy trajectory databases migrate on the raw open path', () => {
+  it('drops gfi_before/gfi_after and terminalizes only the pending empathy confirmation', async () => {
+    const workspaceDir = workspaceWithLegacyGfiTrajectory();
+    expect(columnsOf(workspaceDir, 'tool_calls')).toEqual(expect.arrayContaining(['gfi_before', 'gfi_after']));
+
+    const result = await createProductionHostRuntime().dispatch(failedWrite(workspaceDir));
+
+    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'failure', duplicate: false }));
+    expect(result.warnings ?? []).toEqual([]);
+    expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_before']));
+    expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_after']));
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(signalRow(workspaceDir, 'empathy-1')).toEqual(expect.objectContaining({ status: 'abandoned', resolution: 'gfi_removal' }));
+    expect(String(signalRow(workspaceDir, 'empathy-1').resolved_at)).not.toBe('');
+    expect(signalRow(workspaceDir, 'correction-pending')).toEqual(expect.objectContaining({ status: 'pending', resolution: null, resolved_at: null }));
+    expect(signalRow(workspaceDir, 'correction-confirmed')).toEqual(expect.objectContaining({ status: 'confirmed' }));
+    expect(schemaVersionOf(workspaceDir)).toBe(TRAJECTORY_SCHEMA_VERSION);
+  });
+
+  it('recordVerifiedToolOutcomes migrates the same legacy database before writing verified rows', () => {
+    const workspaceDir = workspaceWithLegacyGfiTrajectory();
+
+    const statuses = recordVerifiedToolOutcomes({
+      workspaceDir,
+      sessionId: 'session-523',
+      outcomes: [{ toolUseId: 'call-1', toolName: 'write_file', exitCode: 1 }],
+    });
+
+    expect(statuses).toEqual([{ status: 'inserted', id: expect.any(Number) }]);
+    expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_before']));
+    expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_after']));
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(schemaVersionOf(workspaceDir)).toBe(TRAJECTORY_SCHEMA_VERSION);
+  });
+
+  it('a canonical v2 database is not misjudged as legacy and stays idempotent', async () => {
+    const workspaceDir = workspaceWithCanonicalTrajectory();
+    expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_before']));
+
+    const first = await createProductionHostRuntime().dispatch(failedWrite(workspaceDir));
+    const second = await createProductionHostRuntime().dispatch(failedWrite(workspaceDir));
+
+    expect(first.warnings ?? []).toEqual([]);
+    expect(first.metadata).toEqual(expect.objectContaining({ outcome: 'failure', duplicate: false }));
+    expect(second.metadata?.duplicate).toBe(true);
+    expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(signalRow(workspaceDir, 'correction-pending-v2')).toEqual(expect.objectContaining({ status: 'pending', resolution: null, resolved_at: null }));
+  });
+
+  it('fails loud instead of pretending canonical when the legacy columns cannot be dropped (handler path)', async () => {
+    const workspaceDir = workspaceWithLegacyGfiTrajectory();
+
+    const result = await createProductionHostRuntime({ painDatabaseFactory: factoryFailingOnLegacyColumnDrop() }).dispatch(failedWrite(workspaceDir));
+
+    expect(result.decision).toBe('observe');
+    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'unavailable', duplicate: false }));
+    expect(result.metadata?.nextAction).toBe('repair the selected PD trajectory database (legacy GFI columns could not be dropped), then retry');
+    expect((result.warnings ?? []).some((warning) => warning.startsWith('trajectory_migration_failed:simulated_legacy_column_drop_failure'))).toBe(true);
+    // No disguised success: no verified row was written and the legacy columns are still there.
+    expect(counts(workspaceDir, 'tool_calls')).toBe(0);
+    expect(columnsOf(workspaceDir, 'tool_calls')).toEqual(expect.arrayContaining(['gfi_before', 'gfi_after']));
+  });
+
+  it('fails loud instead of reporting a successful write when the verified-writer migration fails', () => {
+    const workspaceDir = workspaceWithLegacyGfiTrajectory();
+
+    const statuses = recordVerifiedToolOutcomes({
+      workspaceDir,
+      sessionId: 'session-523',
+      outcomes: [{ toolUseId: 'call-1', toolName: 'write_file', exitCode: 1 }],
+      painDatabaseFactory: factoryFailingOnLegacyColumnDrop(),
+    });
+
+    expect(statuses).toEqual([
+      expect.objectContaining({ status: 'unavailable', reason: expect.stringMatching(/^trajectory_migration_failed:simulated_legacy_column_drop_failure/) }),
+    ]);
+    expect(counts(workspaceDir, 'tool_calls')).toBe(0);
+    expect(columnsOf(workspaceDir, 'tool_calls')).toEqual(expect.arrayContaining(['gfi_before', 'gfi_after']));
   });
 });

@@ -103,13 +103,13 @@ export function persistGateBlock(
   const logWarn = (msg: string) => logger.warn?.(msg);
   const logError = (msg: string) => logger.error?.(msg);
 
-  // 1. Track block for session-level GFI calculation. Guarded so the
+  // 1. Track the block on the session (blockedAttempts counter). Guarded so the
   // persistGateBlock never-throws invariant holds end to end.
   if (sessionId) {
     try {
       trackBlock(sessionId);
     } catch (error: unknown) {
-      logWarn(`[PD_GATE] Session GFI tracking skipped (reasonCode=gfi_track_failed): ${String(error)}`);
+      logWarn(`[PD_GATE] Session block tracking skipped (reasonCode=block_track_failed): ${String(error)}`);
     }
   }
 
@@ -147,7 +147,7 @@ export function persistGateBlock(
  * Single authoritative block helper.
  *
  * Responsibilities:
- * 1. Call trackBlock() for session-level GFI tracking
+ * 1. Call trackBlock() for the session block tally
  * 2. Record to EventLog for operator visibility
  * 3. Record to trajectory for analytics
  * 4. Handle retry logic for trajectory persistence failures
@@ -179,16 +179,16 @@ export function recordGateBlockAndReturn(
   const sourceTag = blockSource ? `[${blockSource}]` : '';
   logError(`[PD_GATE]${sourceTag} BLOCKED: ${displayPath}. Reason: ${reason}`);
 
-  // Steps 1-4 (session GFI tracking, EventLog row, trajectory row with
+  // Steps 1-4 (session block tally, EventLog row, trajectory row with
   // bounded retry) are the authoritative persistence core shared by BOTH
   // enforcement paths — the legacy hook path here, and
   // handleSharedRuleHostResult's deny branch (PRI-569).
   //
   // Phase A: a correct RuleHost block is a real technical fact, not Owner
-  // behavioural-pain evidence. It persists gate_blocks and GFI health but
-  // never creates a Pain Event or Diagnostician task by itself. The Owner can
-  // still correct a wrong block explicitly, which flows through the shared
-  // correction detection instead.
+  // behavioural-pain evidence. It persists gate_blocks but never creates a
+  // Pain Event or Diagnostician task by itself. The Owner can still correct a
+  // wrong block explicitly, which flows through the shared correction
+  // detection instead.
   persistGateBlock(wctx, blockCtx, logger);
 
   // 5. Return consistent block result with contextual operator guidance

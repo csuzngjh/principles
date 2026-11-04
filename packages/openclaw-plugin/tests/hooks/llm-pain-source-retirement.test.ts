@@ -4,10 +4,10 @@
  * SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 v0.3 §6/§9:
  * - Semantic Confusion (DetectionService funnel) no longer creates Pain.
  * - LLM Paralysis (stuckLoops) no longer creates Pain.
- * - The shared write points (eventLog.recordPainSignal + trajectory
- *   recordPainEvent) are now fed exclusively by the GFI branch, whose own
- *   bounded retirement is Phase C — the GFI differential cases below pin its
- *   CURRENT contract so this PR cannot silently change GFI behavior.
+ * - The GFI health-side branch that used to feed the shared write points
+ *   (eventLog.recordPainSignal + trajectory recordPainEvent) was deleted by
+ *   GFI-COMPLETE-REMOVAL-001 (SPEC §3.5/§7.1), so its differential pin is
+ *   removed along with the mechanism it froze.
  *
  * ERR checklist:
  * - ERR-009: fail-loud assertions on every retired write point.
@@ -56,7 +56,6 @@ vi.mock('../../src/core/workspace-context.js', () => ({
 let mockSessionState = {
   stuckLoops: 0,
   totalInputTokens: 0,
-  currentGfi: 0,
 };
 
 vi.mock('../../src/core/session-tracker.js', () => ({
@@ -104,7 +103,7 @@ function makeCtx() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockSessionState = { stuckLoops: 0, totalInputTokens: 0, currentGfi: 0 };
+  mockSessionState = { stuckLoops: 0, totalInputTokens: 0 };
 });
 
 describe('Pain Phase 0: Semantic Confusion text no longer creates Pain', () => {
@@ -138,7 +137,7 @@ describe('Pain Phase 0: Semantic Confusion text no longer creates Pain', () => {
 describe('Pain Phase 0: LLM Paralysis state no longer creates Pain', () => {
   it('stuck loops + huge input tokens produce zero pain writes', () => {
     // Pre-Phase-0 this state assigned score 40 / source llm_paralysis.
-    mockSessionState = { stuckLoops: 99, totalInputTokens: 9_999_999, currentGfi: 0 };
+    mockSessionState = { stuckLoops: 99, totalInputTokens: 9_999_999 };
 
     handleLlmOutput(makeEvent('tiny output'), makeCtx());
 
@@ -147,51 +146,5 @@ describe('Pain Phase 0: LLM Paralysis state no longer creates Pain', () => {
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
     // Assistant turn evidence still captured for the degraded episode.
     expect(mockRecordAssistantTurn).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('Pain Phase 0: GFI branch behavior is unchanged (differential pin)', () => {
-  it('GFI crossing the high threshold keeps its health-side pain writes', () => {
-    // highGfiThreshold = max(severity_thresholds.high=70, pain_trigger 30+30=60) = 70.
-    mockSessionState = { stuckLoops: 0, totalInputTokens: 0, currentGfi: 95 };
-
-    handleLlmOutput(makeEvent('some answer'), makeCtx());
-
-    // The two Phase-C-owned write points still fire for the GFI source.
-    expect(mockRecordPainSignal).toHaveBeenCalledTimes(1);
-    expect(mockRecordPainSignal.mock.calls[0][0]).toBe('sess-retire');
-    expect(mockRecordPainSignal.mock.calls[0][1]).toMatchObject({
-      score: 60, // min(currentGfi, 60) — unchanged clamp
-      source: 'user_empathy',
-      isRisky: false,
-    });
-    expect(mockRecordPainEvent).toHaveBeenCalledTimes(1);
-    expect(mockRecordPainEvent.mock.calls[0][0]).toMatchObject({
-      source: 'user_empathy',
-      score: 60,
-      origin: 'system_infer',
-      hostKind: 'openclaw',
-    });
-    expect(mockRecordPainEvent.mock.calls[0][0].canonicalPainId).toMatch(/^llm_\d+$/);
-  });
-
-  it('GFI below the high threshold produces zero pain writes', () => {
-    mockSessionState = { stuckLoops: 0, totalInputTokens: 0, currentGfi: 50 };
-
-    handleLlmOutput(makeEvent('some answer'), makeCtx());
-
-    expect(mockRecordPainSignal).not.toHaveBeenCalled();
-    expect(mockRecordPainEvent).not.toHaveBeenCalled();
-    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
-  });
-
-  it('GFI source stays evidence_only in triage — no diagnostician emit from this hook', () => {
-    mockSessionState = { stuckLoops: 0, totalInputTokens: 0, currentGfi: 95 };
-
-    handleLlmOutput(makeEvent('some answer'), makeCtx());
-
-    // gfi_threshold is evidence_only (cannot upgrade) — Gate B never admits it,
-    // so no pain_detected event (and thus no Diagnostician task) is created.
-    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
   });
 });

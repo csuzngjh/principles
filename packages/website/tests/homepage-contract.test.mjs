@@ -165,7 +165,13 @@ test('published videos contain synchronized narration and scene-aligned captions
     }
     // Longer scenes may split into multiple cues; every cue text must be a
     // piece of the narration manifest so captions cannot drift from speech.
+    // Windows checkouts carry CRLF in the working tree while the git index
+    // stores LF, so the same file yields different line text depending on the
+    // platform. Normalize line endings BEFORE the comparison: only the
+    // terminator changes, the cue text is still compared exactly against the
+    // narration manifest.
     const cueTexts = captions
+      .replace(/\r\n?/g, '\n')
       .split('\n')
       .filter((line) => line.trim() && !line.includes('-->') && !line.startsWith('WEBVTT'))
     const narration = voiceoverManifest.locales[locale].scenes.flatMap((scene) =>

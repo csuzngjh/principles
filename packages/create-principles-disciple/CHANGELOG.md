@@ -1,5 +1,12 @@
 # create-principles-disciple
 
+## 1.147.5
+
+### Patch Changes
+
+- 6e7b9d9: 安装器自愈脏环境：目标目录是悬空链接（上一次安装中断残留）时，不再以 ENOENT 中止安装。现在先判定目标形态——缺失则创建、悬空链接只删除链接本身后重建、真实目录与可解析链接原样保留——再执行写入。回滚文案也改为点名恢复状态中缺失/失效的路径，而不是声称「已恢复到之前的安装」。
+- 0094f08: Console update check: stop surfacing a "version divergence" between the active release product version and the plugin-directory package version. They are independent version planes (`RELEASE_PROCESS.md`, "The three version planes"), so the comparison flagged every healthy installation (product 2.8.0 vs plugin 2.5.0). The check now reports only the signed active-release identity; the plugin copy stays a diagnostic read.
+
 ## 1.147.4
 
 ### Patch Changes

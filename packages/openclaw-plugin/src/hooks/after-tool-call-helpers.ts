@@ -4,7 +4,7 @@
  * Extracted functions from handleAfterToolCall that implement
  * individual pipeline stages. Each function has a focused responsibility.
  *
- * Pipeline order: classify → record → friction tracking → hygiene
+ * Pipeline order: classify → record → hygiene
  *
  * ERR checklist:
  * - ERR-001: No `as` casts on untrusted runtime values.
@@ -15,8 +15,7 @@
 
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
-import { computePainScore } from '../core/pain.js';
-import { getSession, trackFriction, resetFriction, type SessionState } from '../core/session-tracker.js';
+import { trackSessionControlActivity, type SessionState } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { createTraceId } from '../utils/trace-id.js';
@@ -200,7 +199,6 @@ export function buildToolCallObservation(
   }
   const denoised = denoiseError(errorText);
   const hash = computeHash(denoised);
-  const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, workspaceDir);
 
   return {
     params: {
@@ -217,32 +215,25 @@ export function buildToolCallObservation(
     errorType: extractErrorType(event.error || errorText),
     errorHash: hash,
     errorText,
-    painScore,
     traceId: createTraceId(),
   };
 }
 
-// ── Stage 3: Friction + Recording ──────────────────────────────────────────
+// ── Stage 3: Recording ─────────────────────────────────────────────────────
 
 /**
- * Handle friction tracking for a tool failure.
- *
- * Updates GFI, records to event log and trajectory.
- * Returns the updated session state and friction info.
+ * Record a failed tool call and mark session activity.
  */
-export function handleFrictionTrackingForFailure(
+export function recordToolCallFailure(
   sessionId: string,
   event: PluginHookAfterToolCallEvent,
   outcome: ToolCallOutcome,
   observation: ToolCallObservation,
-  gfiBefore: number,
   workspaceDir: string,
-  config: { get: (key: string) => unknown },
   wctx: WorkspaceContext,
   options: { recordTrajectory?: boolean } = {},
 ): SessionState {
-  const deltaF = (config.get('scores.tool_failure_friction') as number) || 30;
-  const updatedState = trackFriction(sessionId, deltaF, observation.errorHash, workspaceDir, { source: outcome.failureSource });
+  const updatedState = trackSessionControlActivity(sessionId, workspaceDir);
 
   // Record tool call failure event
   wctx.eventLog.recordToolCall(sessionId, {
@@ -250,11 +241,7 @@ export function handleFrictionTrackingForFailure(
     filePath: observation.params.filePath,
     error: event.error ? String(event.error).substring(0, 200) : undefined,
     errorType: observation.errorType,
-    gfi: updatedState.currentGfi,
-    consecutiveErrors: updatedState.consecutiveErrors,
     exitCode: outcome.exitCode as number | undefined,
-    gfiBefore,
-    gfiAfter: updatedState.currentGfi,
     // PRI-750: host run/tool ids from the after_tool_call event — DIRECT
     // turn binding to assistant_turns.run_id. Absent when the host supplies
     // none (event stays compatible).
@@ -270,8 +257,6 @@ export function handleFrictionTrackingForFailure(
     exitCode: outcome.exitCode as number | undefined,
     errorType: observation.errorType,
     errorMessage: event.error ? String(event.error) : undefined,
-    gfiBefore,
-    gfiAfter: updatedState.currentGfi,
     paramsJson: sanitizeToolParamsForEvidence(event.params, workspaceDir),
     resultPreview: extractToolResultPreview(event.result),
   });
@@ -280,37 +265,18 @@ export function handleFrictionTrackingForFailure(
 }
 
 /**
- * Handle friction relief and recording for a tool success.
- *
- * Relieves both tool_failure and dispatch_error GFI sources proportionally.
+ * Record a successful tool call and mark session activity.
  */
-export function handleFrictionTrackingForSuccess(
+export function recordToolCallSuccess(
   sessionId: string,
   event: PluginHookAfterToolCallEvent,
   outcome: ToolCallOutcome,
   observation: ToolCallObservation,
-  gfiBefore: number,
   workspaceDir: string,
   wctx: WorkspaceContext,
   options: { recordTrajectory?: boolean } = {},
 ): SessionState {
-  const session = getSession(sessionId);
-  const toolFailureGfi = session?.gfiBySource?.tool_failure || 0;
-  const dispatchErrorGfi = session?.gfiBySource?.dispatch_error || 0;
-
-  let resetState: SessionState = session || resetFriction(sessionId, workspaceDir);
-  if (toolFailureGfi > 0) {
-    resetState = resetFriction(sessionId, workspaceDir, {
-      source: 'tool_failure',
-      amount: toolFailureGfi * 0.5,
-    });
-  }
-  if (dispatchErrorGfi > 0) {
-    resetState = resetFriction(sessionId, workspaceDir, {
-      source: 'dispatch_error',
-      amount: dispatchErrorGfi * 0.5,
-    });
-  }
+  const updatedState = trackSessionControlActivity(sessionId, workspaceDir);
 
   if (options.recordTrajectory !== false) wctx.trajectory?.recordToolCall?.({
     sessionId,
@@ -318,8 +284,6 @@ export function handleFrictionTrackingForSuccess(
     outcome: 'success',
     durationMs: event.durationMs,
     exitCode: outcome.exitCode,
-    gfiBefore,
-    gfiAfter: resetState.currentGfi,
     paramsJson: sanitizeToolParamsForEvidence(event.params, workspaceDir),
     resultPreview: extractToolResultPreview(event.result),
   });
@@ -327,16 +291,13 @@ export function handleFrictionTrackingForSuccess(
   wctx.eventLog.recordToolCall(sessionId, {
     toolName: event.toolName,
     filePath: observation.params.filePath,
-    gfi: resetState.currentGfi,
-    gfiBefore,
-    gfiAfter: resetState.currentGfi,
     // PRI-750: host run/tool ids from the after_tool_call event — DIRECT
     // turn binding to assistant_turns.run_id.
     runId: hostIdString(event.runId),
     toolCallId: hostToolIdString(event),
   });
 
-  return resetState;
+  return updatedState;
 }
 
 // ── Stage 4: Hygiene Tracking ───────────────────────────────────────────────

@@ -59,7 +59,7 @@ describe('getSourceDescriptor', () => {
     const kinds = [
       'owner_reported', 'agent_on_owner_request', 'tool_failure', 'dispatch_error',
       'provider_failure', 'rate_limit', 'rulehost_block', 'empathy_inferred',
-      'semantic', 'llm_paralysis', 'subagent_error', 'gfi_threshold', 'unknown',
+      'semantic', 'llm_paralysis', 'subagent_error', 'unknown',
     ] as const;
     for (const kind of kinds) {
       const desc = getSourceDescriptor(kind);
@@ -75,8 +75,8 @@ describe('getSourceDescriptor', () => {
     expect(getSourceDescriptor(fakeKind as SourceKind)).toBeUndefined();
   });
 
-  it('has exactly 13 registered descriptors', () => {
-    expect(SOURCE_DESCRIPTORS.size).toBe(13);
+  it('has exactly 12 registered descriptors', () => {
+    expect(SOURCE_DESCRIPTORS.size).toBe(12);
   });
 });
 
@@ -235,16 +235,6 @@ describe('subagent_error', () => {
   });
 });
 
-// ── GFI Threshold ───────────────────────────────────────────────────────────
-
-describe('gfi_threshold', () => {
-  it('defaults to evidence_only — GFI alone cannot create diagnosis', () => {
-    const result = evaluateTriage(makeInput({ sourceKind: 'gfi_threshold', score: 70 }));
-    expect(result.decision).toBe('evidence_only');
-    assertHasReasonAndNextAction(result);
-  });
-});
-
 // ── Unknown Source ───────────────────────────────────────────────────────────
 
 describe('unknown', () => {
@@ -272,7 +262,7 @@ describe('invariants', () => {
     const kinds = [
       'owner_reported', 'agent_on_owner_request', 'tool_failure', 'dispatch_error',
       'provider_failure', 'rate_limit', 'rulehost_block', 'empathy_inferred',
-      'semantic', 'llm_paralysis', 'subagent_error', 'gfi_threshold', 'unknown',
+      'semantic', 'llm_paralysis', 'subagent_error', 'unknown',
     ] as const;
     for (const kind of kinds) {
       const result = evaluateTriage(makeInput({ sourceKind: kind, score: 50 }));
@@ -292,13 +282,6 @@ describe('invariants', () => {
   it('empathy_inferred never admits directly', () => {
     for (const score of [0, 25, 50, 75, 100]) {
       const result = evaluateTriage(makeInput({ sourceKind: 'empathy_inferred', score }));
-      expect(result.decision).not.toBe('admit');
-    }
-  });
-
-  it('GFI never admits directly', () => {
-    for (const score of [0, 50, 80, 100]) {
-      const result = evaluateTriage(makeInput({ sourceKind: 'gfi_threshold', score }));
       expect(result.decision).not.toBe('admit');
     }
   });

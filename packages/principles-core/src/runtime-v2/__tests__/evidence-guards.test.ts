@@ -160,7 +160,7 @@ describe('shouldShortCircuitEmptyEvidence', () => {
     const allSources = [
       'tool_failure', 'subagent_error', 'dispatch_error', 'provider_failure',
       'rate_limit', 'rulehost_block', 'empathy_inferred', 'semantic',
-      'llm_paralysis', 'gfi_threshold', 'unknown', 'automatic', 'hook',
+      'llm_paralysis', 'agent_on_owner_request', 'unknown', 'automatic', 'hook',
     ];
 
     for (const source of bypassSources) {

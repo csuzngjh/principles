@@ -5,13 +5,13 @@ import type { UnifiedKeywordStore } from '../types.js';
 const store: UnifiedKeywordStore = {
   version: 1,
   terms: {
-    '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不要自作主张': { term: '不要自作主张', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不是让你': { term: '不是让你', category: 'correction', weight: 0.85, precision: 'high', source: 'seed' },
-    '我说的是': { term: '我说的是', category: 'correction', weight: 0.9, precision: 'ambiguous', source: 'seed' },
-    '都说了': { term: '都说了', category: 'correction', weight: 0.8, precision: 'ambiguous', source: 'seed' },
-    '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-    '垃圾': { term: '垃圾', category: 'empathy', weight: 0.6, precision: 'ambiguous', source: 'seed' },
+    '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
+    '不要自作主张': { term: '不要自作主张', weight: 0.9, precision: 'high', source: 'seed' },
+    '不是让你': { term: '不是让你', weight: 0.85, precision: 'high', source: 'seed' },
+    '我说的是': { term: '我说的是', weight: 0.9, precision: 'ambiguous', source: 'seed' },
+    '都说了': { term: '都说了', weight: 0.8, precision: 'ambiguous', source: 'seed' },
+    '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '垃圾': { term: '垃圾', weight: 0.6, precision: 'ambiguous', source: 'seed' },
   },
 };
 

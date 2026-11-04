@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import {
   applyTrajectorySchemaBase,
+  migrateLegacyGfiSchema,
   TRAJECTORY_SCHEMA_VERSION,
   TRAJECTORY_TABLES,
 } from '../trajectory-schema.js';
@@ -64,14 +65,34 @@ describe('PRI-774: canonical trajectory schema module', () => {
     withViews.close();
   });
 
-  it('TRAJECTORY_SCHEMA_VERSION matches the shipped schema_version value', () => {
+  it('migrateLegacyGfiSchema converges the real schema_version row (v1 → v2), idempotently', () => {
+    const readVersion = (db: Database.Database): unknown =>
+      (db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: unknown } | undefined)
+        ?.version;
+
     const db = new Database(':memory:');
     applyTrajectorySchemaBase(db);
-    const tableExists = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'")
-      .get();
-    expect(tableExists).toBeDefined();
-    expect(TRAJECTORY_SCHEMA_VERSION).toBe(1);
+    // Simulate a database created by the previous release: its physical schema
+    // is now v2-shaped, but the persisted version row still claims v1.
+    db.prepare('UPDATE schema_version SET version = ?').run(1);
+
+    migrateLegacyGfiSchema(db);
+    expect(readVersion(db)).toBe(TRAJECTORY_SCHEMA_VERSION);
+
+    // second run: no duplicate row, still current
+    migrateLegacyGfiSchema(db);
+    expect(readVersion(db)).toBe(TRAJECTORY_SCHEMA_VERSION);
+    expect((db.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c).toBe(1);
+    db.close();
+  });
+
+  it('migrateLegacyGfiSchema is a no-op on an already-v2 database', () => {
+    const db = new Database(':memory:');
+    applyTrajectorySchemaBase(db);
+    expect(TRAJECTORY_SCHEMA_VERSION).toBe(2);
+    migrateLegacyGfiSchema(db);
+    const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number };
+    expect(row.version).toBe(TRAJECTORY_SCHEMA_VERSION);
     db.close();
   });
 
@@ -139,6 +160,9 @@ describe('PRI-774: canonical trajectory schema module', () => {
 
     const columns = db.prepare('PRAGMA table_info(tool_calls)').all() as { name: string; notnull: number }[];
     expect(columns.some((column) => column.name === 'project_dir' && column.notnull === 0)).toBe(true);
+    // GFI complete removal: legacy gfi columns are dropped, historical rows preserved.
+    expect(columns.some((column) => column.name === 'gfi_before')).toBe(false);
+    expect(columns.some((column) => column.name === 'gfi_after')).toBe(false);
     const row = db.prepare('SELECT session_id, tool_name, project_dir FROM tool_calls WHERE session_id = ?').get('legacy-session');
     expect(row).toEqual({ session_id: 'legacy-session', tool_name: 'apply_patch', project_dir: null });
     db.close();

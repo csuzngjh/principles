@@ -359,7 +359,7 @@ const plugin = {
         context.sessionId,
         api.logger,
       ),
-      ruleInputEnrichmentProvider: (event, context) => buildOpenClawRuleInputEnrichment(event, context.workspaceDir ?? '', context.sessionId),
+      ruleInputEnrichmentProvider: (event) => buildOpenClawRuleInputEnrichment(event),
       onBeforeToolResult: (event, context, result) => {
         if (!context.workspaceDir) {
           api.logger.warn('[PD_GATE:RULE_HOST] shared result mapping skipped: workspaceDir missing; nextAction=inspect OpenClaw hook context');
@@ -779,7 +779,7 @@ const plugin = {
 ## 📊 状态与监控
 | 短命令 | 长命令 | 用途 |
 |--------|--------|------|
-|  | \`/pd-status\` | 查看系统状态（GFI、Pain 词典） |
+|  | \`/pd-status\` | 查看系统状态（会话、规则词典） |
 |  | \`/pd-pain\` | 从 OpenClaw 会话报告 pain |
 
 ## ⚙️ 配置与上下文
@@ -831,7 +831,7 @@ const plugin = {
 ## 📊 Status & Monitoring
 | Short | Full | Purpose |
 |-------|------|---------|
-|  | \`/pd-status\` | View system status (GFI, Pain dictionary) |
+|  | \`/pd-status\` | View system status (session, rule dictionary) |
 |  | \`/pd-pain\` | Report pain from OpenClaw session |
 
 ## ⚙️ Configuration & Context
