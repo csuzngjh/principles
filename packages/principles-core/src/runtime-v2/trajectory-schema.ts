@@ -12,9 +12,11 @@
  *   evolution_tasks column backfill, TRAJECTORY_SCHEMA_VERSION and
  *   TRAJECTORY_TABLES declarations.
  * - does NOT own: path resolution, directory creation, connection lifecycle,
- *   WAL/pragmas, schema_version ROW writes (TrajectoryDatabase.initSchema and
- *   initTrajectorySchema keep that), v_daily_metrics (plugin migrateSchema),
- *   governance_* tables (host-runtime stores).
+ *   WAL/pragmas, schema_version ROW creation/upgrade on the normal entry points
+ *   (TrajectoryDatabase.initSchema and initTrajectorySchema keep that), the
+ *   version-row convergence performed by migrateLegacyGfiSchema (see below),
+ *   v_daily_metrics (plugin migrateSchema), governance_* tables
+ *   (host-runtime stores).
  *
  * Zero pathways are abolished: both paths keep their exact pre-PRI-774
  * behavior; only the definition-text copies converge (SPEC v3, Owner-approved).
@@ -76,13 +78,42 @@ function tableExists(db: Database, name: string): boolean {
 }
 
 /**
- * GFI-COMPLETE-REMOVAL-001: drop the retired GFI columns and terminalize the
- * pending empathy confirmations that the retired correction collector created.
+ * Bring an existing schema_version row up to TRAJECTORY_SCHEMA_VERSION.
+ * No-op on a v2 database (version already current) and on databases that do
+ * not have the table yet. A v1 row is upgraded in place.
+ */
+function convergeSchemaVersion(db: Database): void {
+  if (!tableExists(db, 'schema_version')) return;
+  const row = db
+    .prepare('SELECT version FROM schema_version LIMIT 1')
+    .get() as { version?: unknown } | undefined;
+  if (row === undefined) {
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(
+      TRAJECTORY_SCHEMA_VERSION,
+    );
+    return;
+  }
+  if (row.version !== TRAJECTORY_SCHEMA_VERSION) {
+    db.prepare('UPDATE schema_version SET version = ?').run(TRAJECTORY_SCHEMA_VERSION);
+  }
+}
+
+/**
+ * GFI-COMPLETE-REMOVAL-001: drop the retired GFI columns, terminalize the
+ * pending empathy confirmations that the retired correction collector created,
+ * and converge the schema_version row.
  *
  * Idempotent; safe on fresh databases. Called from applyTrajectorySchemaBase
  * and explicitly by the host-runtime raw-DB open chains
- * (production-pain-evidence.ts), which historically opened trajectory.db
- * without applying the base schema.
+ * (production-pain-evidence.ts, governance-signal-admission.ts), which
+ * historically opened trajectory.db without applying the base schema.
+ *
+ * The version-row convergence belongs here because those raw open chains never
+ * go through TrajectoryDatabase.initSchema / initTrajectorySchema, so without
+ * it a migrated v1 database would keep claiming version 1 while its physical
+ * schema is v2 (the review finding "migration does not sync schema_version").
+ * It only touches an existing schema_version table; creating that table stays
+ * with the normal entry points.
  */
 export function migrateLegacyGfiSchema(db: Database): void {
   if (tableExists(db, 'tool_calls')) {
@@ -103,6 +134,8 @@ export function migrateLegacyGfiSchema(db: Database): void {
       )
       .run(new Date().toISOString(), 'gfi_removal');
   }
+
+  convergeSchemaVersion(db);
 }
 
 export function applyTrajectorySchemaBase(

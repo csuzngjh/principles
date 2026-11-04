@@ -4,7 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
-import { applyTrajectorySchemaBase, extractFilePathFromParams } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase, extractFilePathFromParams, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
 import { createProductionHostRuntime } from '../src/index.js';
 import { recordVerifiedToolOutcomes, type PainDatabaseFactory } from '../src/production-pain-evidence.js';
 
@@ -349,7 +349,9 @@ function workspaceWithLegacyGfiTrajectory(): string {
     CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL);
     CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
     CREATE TABLE signal_confirmations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_turn_rowid INTEGER NOT NULL UNIQUE, occurrence_id TEXT NOT NULL, excerpt TEXT NOT NULL, terms_json TEXT NOT NULL, suggested_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, resolved_at TEXT, resolution TEXT);
+    CREATE TABLE schema_version (version INTEGER NOT NULL);
   `);
+  db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
   const insertSignal = db.prepare(`INSERT INTO signal_confirmations (id, session_id, user_turn_rowid, occurrence_id, excerpt, terms_json, suggested_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   insertSignal.run('empathy-1', 'session-523', 1, 'occ-1', '搞什么', '["搞什么"]', 'empathy', 'pending', 0, '2026-01-01T00:00:00.000Z');
   insertSignal.run('correction-pending', 'session-523', 2, 'occ-2', '不对', '["不对"]', 'correction', 'pending', 0, '2026-01-01T00:00:00.000Z');
@@ -376,6 +378,16 @@ function columnsOf(workspaceDir: string, table: string): string[] {
   try {
     const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
     return rows.map((row) => String(row.name));
+  } finally {
+    db.close();
+  }
+}
+
+function schemaVersionOf(workspaceDir: string): unknown {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: unknown } | undefined;
+    return row?.version;
   } finally {
     db.close();
   }
@@ -419,6 +431,7 @@ describe('GFI-COMPLETE-REMOVAL-001 — legacy trajectory databases migrate on th
     expect(String(signalRow(workspaceDir, 'empathy-1').resolved_at)).not.toBe('');
     expect(signalRow(workspaceDir, 'correction-pending')).toEqual(expect.objectContaining({ status: 'pending', resolution: null, resolved_at: null }));
     expect(signalRow(workspaceDir, 'correction-confirmed')).toEqual(expect.objectContaining({ status: 'confirmed' }));
+    expect(schemaVersionOf(workspaceDir)).toBe(TRAJECTORY_SCHEMA_VERSION);
   });
 
   it('recordVerifiedToolOutcomes migrates the same legacy database before writing verified rows', () => {
@@ -434,6 +447,7 @@ describe('GFI-COMPLETE-REMOVAL-001 — legacy trajectory databases migrate on th
     expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_before']));
     expect(columnsOf(workspaceDir, 'tool_calls')).not.toEqual(expect.arrayContaining(['gfi_after']));
     expect(counts(workspaceDir, 'tool_calls')).toBe(1);
+    expect(schemaVersionOf(workspaceDir)).toBe(TRAJECTORY_SCHEMA_VERSION);
   });
 
   it('a canonical v2 database is not misjudged as legacy and stays idempotent', async () => {

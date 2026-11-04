@@ -16,7 +16,7 @@ import {
 } from '../src/governance-signal-admission.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import { deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
-import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, invalidatePainSignalBridge, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
 
 /**
  * Slice B admission matrix (SPEC §18/§19, PRI-623): detector semantics,
@@ -181,6 +181,10 @@ it('converges a v1 workspace carrying retired GFI columns before admitting', () 
   const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
   db.exec('ALTER TABLE tool_calls ADD COLUMN gfi_before REAL');
   db.exec('ALTER TABLE tool_calls ADD COLUMN gfi_after REAL');
+  // A v1 workspace also still claims schema version 1.
+  db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
+  db.prepare('DELETE FROM schema_version').run();
+  db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
   db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, gfi_before, gfi_after)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run('v1-session', 'apply_patch', 'success', '{}', NOW.toISOString(), 0.5, 0.7);
@@ -192,6 +196,8 @@ it('converges a v1 workspace carrying retired GFI columns before admitting', () 
     .map((row) => (typeof row === 'object' && row !== null ? Reflect.get(row, 'name') : undefined))
     .filter((name) => name === 'gfi_before' || name === 'gfi_after')))
     .toEqual([]);
+  expect(withTrajectory((sqlite) => sqlite.prepare('SELECT version FROM schema_version LIMIT 1').get()))
+    .toEqual({ version: TRAJECTORY_SCHEMA_VERSION });
   expect(withTrajectory((sqlite) => sqlite.prepare('SELECT tool_name FROM tool_calls WHERE session_id = ?').get('v1-session')))
     .toEqual({ tool_name: 'apply_patch' });
 });

@@ -24,7 +24,6 @@ import {
   HIGH_PRECISION_LEARNED_WEIGHT,
 } from '../../src/core/signal-keyword-store.js';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
-import { trackSessionControlActivity } from '../../src/core/session-tracker.js';
 import { saveCorrectionKeywordStore, _resetCorrectionCueCache } from '../../src/core/correction-cue-learner.js';
 import type { CorrectionKeywordStore } from '@principles/core/runtime-v2';
 
