@@ -187,19 +187,6 @@ describe('resolveSourceKind: rulehost_block', () => {
   });
 });
 
-// ── LLM Detection: gfi_threshold ─────────────────────────────────────────
-
-describe('resolveSourceKind: gfi_threshold', () => {
-  it('maps GFI triggered to gfi_threshold', () => {
-    const obs: RawObservation = {
-      observedAt: new Date().toISOString(),
-      detectionSource: 'llm_some_rule',
-      isGfiTriggered: true,
-    };
-    expect(resolveSourceKind(obs)).toBe('gfi_threshold');
-  });
-});
-
 // ── LLM Detection: llm_paralysis ─────────────────────────────────────────
 
 describe('resolveSourceKind: llm_paralysis', () => {
@@ -207,7 +194,6 @@ describe('resolveSourceKind: llm_paralysis', () => {
     const obs: RawObservation = {
       observedAt: new Date().toISOString(),
       detectionSource: 'llm_paralysis',
-      isGfiTriggered: false,
     };
     expect(resolveSourceKind(obs)).toBe('llm_paralysis');
   });
@@ -220,14 +206,12 @@ describe('resolveSourceKind: semantic', () => {
     const obs1: RawObservation = {
       observedAt: new Date().toISOString(),
       detectionSource: 'llm_repetition',
-      isGfiTriggered: false,
     };
     expect(resolveSourceKind(obs1)).toBe('semantic');
 
     const obs2: RawObservation = {
       observedAt: new Date().toISOString(),
       detectionSource: 'llm_loop',
-      isGfiTriggered: false,
     };
     expect(resolveSourceKind(obs2)).toBe('semantic');
   });
@@ -240,7 +224,6 @@ describe('resolveSourceKind: empathy_inferred', () => {
     const obs: RawObservation = {
       observedAt: new Date().toISOString(),
       detectionSource: 'user_empathy',
-      isGfiTriggered: false,
     };
     expect(resolveSourceKind(obs)).toBe('empathy_inferred');
   });
@@ -265,7 +248,6 @@ describe('resolveSourceKind: unknown', () => {
     const obs: RawObservation = {
       observedAt: new Date().toISOString(),
       detectionSource: 'something_else',
-      isGfiTriggered: false,
     };
     expect(resolveSourceKind(obs)).toBe('unknown');
   });
@@ -281,15 +263,6 @@ describe('resolveSourceKind: unknown', () => {
 // ── Priority Tests (field precedence) ─────────────────────────────────────
 
 describe('resolveSourceKind: field precedence', () => {
-  it('GFI triggered takes precedence over detection source prefix', () => {
-    const obs: RawObservation = {
-      observedAt: new Date().toISOString(),
-      detectionSource: 'llm_paralysis',
-      isGfiTriggered: true,
-    };
-    expect(resolveSourceKind(obs)).toBe('gfi_threshold');
-  });
-
   it('manual entry takes precedence over other fields', () => {
     const obs: RawObservation = {
       observedAt: new Date().toISOString(),

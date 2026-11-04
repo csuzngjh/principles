@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1957,
+  "count": 1958,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1812,6 +1812,7 @@
     "maxEvidencePreviewLength",
     "mergeDecisions",
     "mergePITaskMetadata",
+    "migrateLegacyGfiSchema",
     "mintObservationKey",
     "normalizeDiagnosticianTaskId",
     "normalizeFeatureFlagOverrides",

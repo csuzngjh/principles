@@ -532,5 +532,38 @@
 | ⑤ 缺表不抛 | 空库迁移 + `applyTrajectorySchemaBase` 均不抛 |
 | 判定 | **PASS**（脚本 `.tmp/gfi-removal/d1-migration-evidence.mjs` / `d1-class2.mjs`） |
 
+### 6.8 范围外 #20 / #21 补手续（Owner 裁定：保留，不回退）
+
+保留理由：回退会让 `check:pipeline-contract` 重新变红；两条改写都属 (c) 类（不变量仍需保护，只换了落点）。未 rebase / 未 amend / 未 force push，历史保持原样（两条与 D1 同在 `4bb791e7e` / `e1e47b666`）。
+
+| 项 | 断言原文 | 原本防哪种退化 | 为什么归 (c) | 新断言落点（真实转发点） | 精确断言（未放宽） |
+| --- | --- | --- | --- | --- | --- |
+| #20 `production-host-runtime.test.ts`（`preserves host-owned session and evolution enrichment through a neutral port`） | `if (input.session.currentGfi === 523 && input.evolution.epTier === 7)`，provider `() => ({ currentGfi: 523, epTier: 7, bashRisk: 'normal' })` | 宿主注入的 session / evolution enrichment 在 neutral port 之后丢失（`HOST_ENRICHMENT_PARITY_523` parity 回归） | `2bae37491` 删掉了 `RuleHostInput.session.currentGfi`（SPEC §3.8），但"enrichment 必须穿过 neutral port 到达规则 VM"仍需要保护 | `packages/host-runtime/src/production-rulehost-gate.ts:559-561`（`session:{sessionId}` / `evolution:{epTier}` / `derived:{bashRisk}` 的真实构造点） | `input.evolution.epTier === 7 && input.derived.bashRisk === 'normal'`；`decision:'deny'` 与 `reason` 含 `HOST_ENRICHMENT_PARITY_523` 均保留 |
+| #21 `gate-rule-host-pipeline.test.ts`（describe `Session GFI context`） | `vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 75 } as any)` 与 `session: expect.objectContaining({ currentGfi: 75 })` | hook 未把会话上下文转发进 Rule Host，规则 VM 拿不到 session | 同一删除（`2bae37491`）；"session 身份仍被转发"仍需要 | `packages/openclaw-plugin/src/hooks/gate.ts:120-122`（`session: { sessionId: ctx.sessionId }`） | `session: expect.objectContaining({ sessionId })`；仍是对象精确包含键值断言，未放宽为 `expect.anything()` |
+
+### 6.9 `test:website` CRLF 归一化（本轮修复）
+
+| 项 | 内容 |
+| --- | --- |
+| 失败原文 | `caption text is not part of the narration manifest: 只让它修按钮，却又改了整页。` |
+| 根因 | Windows 工作树 CRLF、git index LF；`captions.split('\n')` 后 cue 文本尾部残留 `\r`，`narration.includes(cueText)` 失败 |
+| 修法 | 比较前 `captions.replace(/\r\n?/g, '\n')`，只归一换行；内容比对、期望字符串、断言强度均未改 |
+| 负控（内容差异必须仍被抓到） | 把 `public/homepage-demo-zh.vtt` 中 `只让它修按钮` 改为 `只让它改按钮` → 归一化后**仍失败**：`caption text is not part of the narration manifest: 只让它改按钮，却又改了整页。`；恢复文件后 7/7 通过，文件哈希回到 `9BC4A22B…` |
+| 结论 | 该失败属 Windows 检出环境差异，非内容差异，已用负控证明 |
+| changeset | `packages/website` 为 private 包，`check-pr-release-intent` 只统计可发布包，本次测试基础设施改动不需要新增 changeset；发版意图由已有 `gfi-complete-removal` changeset 承担 |
+
+### 6.11 Stage 8 追加发现（全量套件比 8 组更宽）
+
+`npm test -w <pkg>`（全量）比 8 组对照多出 8 个陈旧测试文件；逐条依据见 `docs/reports/GFI_RESIDUAL_SCAN.md` §6。要点：
+
+| 类型 | 数量 | 处置 |
+| --- | --- | --- |
+| (b) 被测对象已删 | 5 条删除 + 2 条删除（triage / raw-observation）+ 5 条删除（session-tracker） | 删断言，台账逐文件写明删除 commit |
+| (c) 不变量仍需保护 | 4 处：session 持久化防抖、config 文件覆盖默认值、replay/live parity、PRI-750 runId 绑定 | 迁到存活真实调用点（`trackBlock`、`thresholds.cognitive_paralysis_input`、`evolution.epTier`、`recordToolCallFailure/Success`） |
+| (a) 已被新断言覆盖 | 1 条（config dot-notation） | 删除并注明覆盖点 |
+| 冻结面 | `runtime-v2-barrel-surface.json` 1957→1958 | 仅新增 `migrateLegacyGfiSchema`（Owner 授权 b） |
+
+环境性、非本任务导致的失败（有证据，不在本 PR 修）：BDD ledger 的 `afterEach` EPERM（该模块本分支 diff 0 行）、2 个 perf 在并行下超预算（单独运行通过）、`principle-compiler-core` 1 条并行抖动（单独运行通过）。
+
 
 

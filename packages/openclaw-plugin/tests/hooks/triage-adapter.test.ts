@@ -55,25 +55,21 @@ describe('resolveSourceKind: tool failure path', () => {
 // ── resolveSourceKind: LLM Detection Path ────────────────────────────────────
 
 describe('resolveSourceKind: LLM detection path', () => {
-  it('maps gfi triggered to gfi_threshold', () => {
-    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_some_rule', isGfiTriggered: true })).toBe('gfi_threshold');
-  });
-
   it('maps llm_paralysis to llm_paralysis', () => {
-    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_paralysis', isGfiTriggered: false })).toBe('llm_paralysis');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_paralysis' })).toBe('llm_paralysis');
   });
 
   it('maps llm_* detection rules to semantic', () => {
-    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_repetition', isGfiTriggered: false })).toBe('semantic');
-    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_loop', isGfiTriggered: false })).toBe('semantic');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_repetition' })).toBe('semantic');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'llm_loop' })).toBe('semantic');
   });
 
   it('maps user_empathy to empathy_inferred', () => {
-    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'user_empathy', isGfiTriggered: false })).toBe('empathy_inferred');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'user_empathy' })).toBe('empathy_inferred');
   });
 
   it('maps unknown source to unknown', () => {
-    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'something_else', isGfiTriggered: false })).toBe('unknown');
+    expect(resolveSourceKind({ observedAt: 't', detectionSource: 'something_else' })).toBe('unknown');
   });
 });
 
@@ -165,13 +161,8 @@ describe('buildToolFailureObservation', () => {
 // underlying resolveSourceKind mappings are pinned here via inline literals.
 
 describe('Pain Phase 0: retired LLM detection builder mappings stay reachable inline', () => {
-  it('GFI-triggered detection still resolves to gfi_threshold', () => {
-    const obs: RawObservation = { observedAt: 't', detectionSource: 'llm_some_rule', isGfiTriggered: true };
-    expect(resolveSourceKind(obs)).toBe('gfi_threshold');
-  });
-
   it('llm_paralysis detection source still resolves to llm_paralysis', () => {
-    const obs: RawObservation = { observedAt: 't', detectionSource: 'llm_paralysis', isGfiTriggered: false };
+    const obs: RawObservation = { observedAt: 't', detectionSource: 'llm_paralysis' };
     expect(resolveSourceKind(obs)).toBe('llm_paralysis');
   });
 });
@@ -244,12 +235,6 @@ describe('evidence-only cooldown contract', () => {
     expect(result.decision).not.toBe('admit');
   });
 
-  it('gfi_threshold returns evidence_only — no admit', () => {
-    const result = evaluateEvidenceTriage('gfi_threshold', 70);
-    expect(result.decision).toBe('evidence_only');
-    expect(result.decision).not.toBe('admit');
-  });
-
   it('empathy_inferred returns owner_confirm — no admit', () => {
     const result = evaluateEvidenceTriage('empathy_inferred', 80);
     expect(result.decision).toBe('owner_confirm');
@@ -273,7 +258,6 @@ describe('evidence-only cooldown contract', () => {
     const llmSources = [
       { kind: 'semantic' as const, score: 55 },
       { kind: 'llm_paralysis' as const, score: 40 },
-      { kind: 'gfi_threshold' as const, score: 70 },
       { kind: 'empathy_inferred' as const, score: 80 },
     ];
     for (const { kind, score } of llmSources) {
