@@ -1992,8 +1992,24 @@ function describeRestoredEntryGap(entry: string, gaps: string[]): void {
   if (stats.isSymbolicLink()) {
     try {
       realpathSync(entry);
-    } catch {
-      gaps.push(`${entry} (dangling link)`);
+    } catch (error) {
+      const code = filesystemErrorCode(error);
+      gaps.push(`${entry} (${code === 'ENOENT' || code === 'ENOTDIR' ? 'dangling link' : 'unresolvable link'})`);
+      return;
+    }
+    // realpath only proves the target EXISTS. The entry is consumed as a file
+    // at runtime, so a link to a directory is just as unusable as a missing
+    // file path. stat follows the link and reports the target type.
+    let targetStats: Stats;
+    try {
+      targetStats = statSync(entry);
+    } catch (error) {
+      const code = filesystemErrorCode(error);
+      gaps.push(`${entry} (${code === 'ENOENT' || code === 'ENOTDIR' ? 'dangling link' : 'unresolvable link'})`);
+      return;
+    }
+    if (!targetStats.isFile()) {
+      gaps.push(`${entry} (not a file)`);
     }
     return;
   }

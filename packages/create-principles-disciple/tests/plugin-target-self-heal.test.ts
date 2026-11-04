@@ -20,11 +20,18 @@ import { describeRestoredStateGaps, installPluginToStaging, preparePluginInstall
 
 // PRI-1102 fail-closed contract: an UNREADABLE link must never be unlinked.
 // The real implementation stays the default; a test can force an errno.
+let realpathFailure: { path: string; code: string } | undefined;
+
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return {
     ...actual,
-    realpathSync: vi.fn((value: fs.PathLike) => actual.realpathSync(value)),
+    realpathSync: vi.fn((value: fs.PathLike) => {
+      if (realpathFailure !== undefined && String(value) === realpathFailure.path) {
+        throw Object.assign(new Error(`forced ${realpathFailure.code}`), { code: realpathFailure.code });
+      }
+      return actual.realpathSync(value);
+    }),
   };
 });
 
@@ -102,6 +109,19 @@ function createDanglingJunction(linkPath: string): void {
   expect(() => fs.realpathSync(linkPath)).toThrow();
 }
 
+/**
+ * A link that RESOLVES, but to a directory — unusable at a path the runtime
+ * consumes as a file. Windows uses a real NTFS junction; POSIX uses a dir link.
+ */
+function createResolvingDirectoryLink(linkPath: string, targetDir: string): void {
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+  fs.rmSync(linkPath, { force: true });
+  fs.symlinkSync(targetDir, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+  expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(true);
+  expect(fs.realpathSync(linkPath)).toBe(fs.realpathSync(targetDir));
+}
+
 beforeEach(() => {
   fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri1102-dirty-'));
   vi.stubEnv('HOME', fixtureRoot);
@@ -109,6 +129,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  realpathFailure = undefined;
   vi.unstubAllEnvs();
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
@@ -279,6 +300,30 @@ describe('describeRestoredStateGaps', () => {
     const gaps = describeRestoredStateGaps();
 
     expect(gaps.some((gap) => gap.includes(cliEntry) && gap.includes('not a file'))).toBe(true);
+  });
+
+  it('reports a required entry that resolves to a directory through a link (P1)', () => {
+    writeHealthyInstallTree();
+    const entry = path.join(runtimeTree(), 'console', 'dist', 'server.js');
+    createResolvingDirectoryLink(entry, path.join(fixtureRoot, 'entry-dir-target'));
+
+    const gaps = describeRestoredStateGaps();
+
+    // realpath alone would have treated this as healthy; the target type must
+    // be a file because the runtime executes this path.
+    expect(gaps.some((gap) => gap.includes(entry) && gap.includes('not a file'))).toBe(true);
+  });
+
+  it.each(['EACCES', 'EPERM'])('reports an entry link that cannot be resolved with %s as unresolvable, not dangling', (code) => {
+    writeHealthyInstallTree();
+    const entry = path.join(runtimeTree(), 'console', 'dist', 'server.js');
+    createResolvingDirectoryLink(entry, path.join(fixtureRoot, `denied-${code}`));
+    realpathFailure = { path: entry, code };
+
+    const gaps = describeRestoredStateGaps();
+
+    expect(gaps.some((gap) => gap.includes(entry) && gap.includes('unresolvable link'))).toBe(true);
+    expect(gaps.some((gap) => gap.includes(entry) && gap.includes('dangling link'))).toBe(false);
   });
 
   it('reports no gaps for a healthy tree (negative control)', async () => {
