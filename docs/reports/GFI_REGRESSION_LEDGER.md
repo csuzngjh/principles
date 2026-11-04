@@ -38,6 +38,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | **基线** | `35d12815bc` | C1–C8b + P | 40 文件 / 571 用例 / 0 失败；schema v1、gfi 列 2 | 同左 | — | — | **基准** |
 | 1 | **累计 HEAD** | `0bb1bcc1e` | C1–C8b + P（同一命令，副本独立安装/build） | 40 文件 / 571 用例 / 571 通过 | 40 文件 / 571 用例 / **566 通过 / 5 失败**；schema v2、gfi 列 0；手动 Pain 实际值一致 | **-5 通过** | 5 个用例仍断言已删除的 GFI 行为；测试未随生产层更新（详见下方失败明细）。不是能力退化，但**测试层未完成** | **不通过** |
+| 1b | **累计 HEAD（块 4 修测试后）** | `3bb70c16d` | C1–C8b + P（同一命令、同一断言；前台分批，副本 `.tmp/gfi-removal/current-head4` 独立 `npm ci` + build，含 `.git` 隔离标记） | 40 文件 / 571 用例 / 0 失败 | 40 文件 / **568** 用例 / **568 通过 / 0 失败**；schema v2、gfi 列 0、INSERT 回读 1 行成功 | **-3 用例，0 失败** | 允许差异①：`llm-pain-source-retirement.test.ts` 的 GFI differential pin（describe 3 例）随 llm.ts GFI 健康度分支删除而移除（删除层 `dcf53fba1`；SPEC §3.5，§7.1 明确要求删除 GFI 专属测试与 fixture）。其余各组与基线逐项等量：C1 46、C2 35、C3 94、C4 10、C5 175、C6 50、C7 18（21−3）、C8 140 | **通过** |
 | 2 | L1 core（`runtime-v2/gfi/` 删除、schema/migration） | `4b3ea5421` | — | — | — | — | 累计 HEAD 未通过，按规则未执行逐层 | NOT_RUN（阻塞） |
 | 3 | L2 session tracker | `31a60e1e5` | — | — | — | — | 同上（静态归因：失败 #3 来自本层，未实测） | NOT_RUN（阻塞） |
 | 4 | L3 tool execution | `b7c17a692` | — | — | — | — | 同上 | NOT_RUN（阻塞） |
