@@ -388,14 +388,6 @@ export class EventLog {
       stats.tools.total++;
       if (entry.category === 'success') stats.tools.success++;
       else stats.tools.failure++;
-
-      const tcData = entry.data as unknown as ToolCallEventData;
-      const observedGfi = tcData.gfiAfter ?? tcData.gfi;
-      if (observedGfi !== undefined) {
-        stats.gfi.samples++;
-        stats.gfi.total += observedGfi;
-        stats.gfi.peak = Math.max(stats.gfi.peak, observedGfi);
-      }
     } else if (entry.type === 'pain_signal') {
       const data = entry.data as unknown as PainSignalEventData;
       // stats.pain.* counters removed (PRI-451 Wave 1.5): no live reader.

@@ -2282,7 +2282,7 @@
         "commandsIntro": "Here are 7 core commands. Type /pd-help for the full list.",
         "commandDescriptions": {
           "pdInit": "Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.)",
-          "pdStatus": "View system status (GFI, Pain dictionary)",
+          "pdStatus": "View system status (session, daily counters, Pain dictionary)",
           "pdPain": "Report pain from OpenClaw session",
           "pdHelp": "Show all commands and usage guide",
           "pdContext": "Control context injection",

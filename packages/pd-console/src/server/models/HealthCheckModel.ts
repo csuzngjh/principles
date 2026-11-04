@@ -58,7 +58,6 @@ export class HealthCheckModel {
     checks.push(await this.checkPainChainFlow());
     checks.push(await this.checkTaskQueue());
     checks.push(await this.checkPrincipleTree());
-    checks.push(await this.checkGfiHealth());
 
     const hasError = checks.some(c => c.status === 'error');
     const hasWarning = checks.some(c => c.status === 'warning');
@@ -269,64 +268,6 @@ export class HealthCheckModel {
         name: '原则树',
         status: 'error',
         message: `访问失败: ${(e as Error).message}`,
-        lastCheck: new Date().toISOString(),
-      };
-    }
-  }
-
-  private async checkGfiHealth(): Promise<HealthCheckResult> {
-    try {
-      const health = await this.getOperatorHealth();
-      const snapshot = await health.getSnapshot();
-      const { gfi } = snapshot;
-      const { active } = gfi;
-
-      if (!active) {
-        return {
-          id: 'gfi_health',
-          name: 'GFI 健康度',
-          status: 'warning',
-          message: 'GFI 数据不可用',
-          lastCheck: new Date().toISOString(),
-        };
-      }
-
-      const currentGfi = active.currentGfi ?? 0;
-      const threshold = active.policy?.criticalThreshold ?? 80;
-
-      if (currentGfi >= threshold) {
-        return {
-          id: 'gfi_health',
-          name: 'GFI 健康度',
-          status: 'error',
-          message: `GFI 过高中: ${currentGfi}/${threshold}`,
-          lastCheck: new Date().toISOString(),
-        };
-      }
-
-      if (currentGfi >= threshold * 0.8) {
-        return {
-          id: 'gfi_health',
-          name: 'GFI 健康度',
-          status: 'warning',
-          message: `GFI 偏高: ${currentGfi}/${threshold}`,
-          lastCheck: new Date().toISOString(),
-        };
-      }
-
-      return {
-        id: 'gfi_health',
-        name: 'GFI 健康度',
-        status: 'healthy',
-        message: `正常: ${currentGfi}/${threshold}`,
-        lastCheck: new Date().toISOString(),
-      };
-    } catch (e) {
-      return {
-        id: 'gfi_health',
-        name: 'GFI 健康度',
-        status: 'error',
-        message: `检查失败: ${(e as Error).message}`,
         lastCheck: new Date().toISOString(),
       };
     }

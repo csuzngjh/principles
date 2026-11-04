@@ -5,6 +5,7 @@ import {
   buildLlmPrompt,
   resolveLlmClassificationPayload,
 } from '@principles/core/runtime-v2';
+import { SIGNAL_CLASSIFICATION_SCHEMA_REF } from '@principles/host-runtime';
 
 /**
  * P0-A E2E: 真实 PiAiRuntimeAdapter × llama.cpp × typed structured output
@@ -80,7 +81,7 @@ describe('Signal Stage2 × real PiAiRuntimeAdapter (E2E, llama.cpp)', () => {
       const { status, payload } = await runClassification(
         adapter,
         SEMANTIC_CORRECTION,
-        'signal-classification-output-v1',
+        SIGNAL_CLASSIFICATION_SCHEMA_REF,
       );
 
       expect(status).toBe('succeeded');
@@ -112,7 +113,7 @@ describe('Signal Stage2 × real PiAiRuntimeAdapter (E2E, llama.cpp)', () => {
   it('unavailable runtime: 连接失败 → run failed, 不产生有效 classification', { timeout: 30_000 }, async () => {
     const adapter = makeAdapter('http://127.0.0.1:9/v1', 5_000);
     await expect(
-      runClassification(adapter, SEMANTIC_CORRECTION, 'signal-classification-output-v1'),
+      runClassification(adapter, SEMANTIC_CORRECTION, SIGNAL_CLASSIFICATION_SCHEMA_REF),
     ).rejects.toThrow();
   });
 
@@ -126,7 +127,7 @@ describe('Signal Stage2 × real PiAiRuntimeAdapter (E2E, llama.cpp)', () => {
       // CI 无 llama → skip: 该场景的"运行时不可用 → 抛错降级"分支已由上面的
       // unavailable-runtime 测试覆盖(连接失败/api key 缺失路径确定性覆盖)。
       await expect(
-        runClassification(adapter, SEMANTIC_CORRECTION, 'signal-classification-output-v1', 1),
+        runClassification(adapter, SEMANTIC_CORRECTION, SIGNAL_CLASSIFICATION_SCHEMA_REF, 1),
       ).rejects.toThrow(/timed out|timeout/i);
     },
   );

@@ -10,10 +10,8 @@
  * Shows the most recent TRIGGER_DECISION log entries.
  *
  * Note: TRIGGER_DECISION entries are pain-signal admission gate decisions
- * (Gate B / TriggerController). These are distinct from GFI (General
- * Friction Index) friction events like GFI_SLICE_RESET, which track
- * session-level tool-friction resets and are NOT pain signals. This command
- * does not surface GFI events; use `pd runtime health gfi` for GFI state.
+ * (Gate B / TriggerController). They are not pain signals themselves — this
+ * command surfaces only the gate's decision log.
  */
 
 import * as fs from 'fs';

@@ -79,7 +79,7 @@ describe('PRI-637 override provenance — resolution precedence', () => {
   });
 
   it('system override respects its enabled value and keeps source', () => {
-    const id = 'gfi';
+    const id = 'diagnostician_async_cli';
     const effective = computeEffectivePdConfig(mkConfig({
       [id]: { category: 'quiet', enabled: true, source: 'system' },
     }));
@@ -185,7 +185,7 @@ describe('PRI-637 system is an origin hint, never an auto-delete license', () =>
   // value in place, leaving source untouched. Provenance must never gate the
   // value — the current `enabled` always wins regardless of label.
   it('an Owner hand-edit on a system-origin entry is honored (system does not pin the value)', () => {
-    const id = 'gfi';
+    const id = 'diagnostician_async_cli';
     expect(DEFAULT_FEATURE_FLAGS[id]?.enabled).toBe(false);
     // Simulate: installer wrote { enabled: false, source: 'system' }, then the
     // Owner hand-edited enabled → true directly in config.yaml.

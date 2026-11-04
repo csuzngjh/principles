@@ -5,8 +5,8 @@ import type { UnifiedKeywordStore, SignalCollectorConfig } from '../types.js';
 const store: UnifiedKeywordStore = {
   version: 1,
   terms: {
-    '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
+    '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
   },
 };
 
@@ -65,41 +65,44 @@ describe('collectSync', () => {
     expect(out.needsLlmConfirmation).toBe(true);
   });
 
-  it('high-precision empathy term → WEAK, no LLM', () => {
-    const empathyStore: UnifiedKeywordStore = {
+  it('high-precision mutually-exclusive terms stay STRONG (single category)', () => {
+    const localStore: UnifiedKeywordStore = {
       version: 1,
       terms: {
-        '我很难过': { term: '我很难过', category: 'empathy', weight: 0.9, precision: 'high', source: 'seed' },
+        '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
       },
     };
-    const out = collectSync('我很难过', 'sess1', empathyStore, config, FIXED_TS);
+    const out = collectSync('这是错的', 'sess1', localStore, config, FIXED_TS);
     expect(out.isSignal).toBe(true);
-    expect(out.strength).toBe('WEAK');
-    expect(out.type).toBe('empathy');
+    expect(out.strength).toBe('STRONG');
+    expect(out.type).toBe('correction');
     expect(out.detectionSource).toBe('keyword');
     expect(out.needsLlmConfirmation).toBe(false);
   });
 
-  it('correction high-precision takes priority over empathy high-precision', () => {
+  it('multiple high-precision terms resolve deterministically to correction', () => {
     const mixedStore: UnifiedKeywordStore = {
       version: 1,
       terms: {
-        '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-        '我很生气': { term: '我很生气', category: 'empathy', weight: 0.9, precision: 'high', source: 'seed' },
+        '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
+        '我很生气': { term: '我很生气', weight: 0.9, precision: 'high', source: 'seed' },
       },
     };
     const out = collectSync('这是错的，我很生气', 'sess1', mixedStore, config, FIXED_TS);
     expect(out.isSignal).toBe(true);
     expect(out.strength).toBe('STRONG');
     expect(out.type).toBe('correction');
-    expect(out.matchedTerms).toContain('这是错的');
+    expect(out.matchedTerms).toHaveLength(1);
+    // Deterministic: repeated evaluation returns the same term for the same store.
+    const again = collectSync('这是错的，我很生气', 'sess1', mixedStore, config, FIXED_TS);
+    expect(again.matchedTerms).toEqual(out.matchedTerms);
   });
 
   it('keyword matching is case-insensitive', () => {
     const caseStore: UnifiedKeywordStore = {
       version: 1,
       terms: {
-        'Wrong': { term: 'Wrong', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
+        'Wrong': { term: 'Wrong', weight: 0.9, precision: 'high', source: 'seed' },
       },
     };
     const outLower = collectSync('this is wrong', 'sess1', caseStore, config, FIXED_TS);
@@ -133,8 +136,8 @@ describe('collectSync', () => {
     const multiAmbiguousStore: UnifiedKeywordStore = {
       version: 1,
       terms: {
-        '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-        '错了': { term: '错了', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+        '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+        '错了': { term: '错了', weight: 0.5, precision: 'ambiguous', source: 'seed' },
       },
     };
     const out = collectSync('这个不对，错了', 'sess1', multiAmbiguousStore, config, FIXED_TS);
@@ -154,14 +157,6 @@ describe('mapLlmResultToOutput', () => {
     expect(out.strength).toBe('STRONG');
     expect(out.llmReason).toBe('明确纠错');
     expect(out.detectionSource).toBe('llm');
-  });
-
-  it('LLM says empathy → WEAK', () => {
-    const out = mapLlmResultToOutput(
-      { is_feedback: true, type: 'empathy', confidence: 0.7, reason: '挫败情绪' },
-      'text', 'sess1', config, FIXED_TS,
-    );
-    expect(out.strength).toBe('WEAK');
   });
 
   it('LLM says none → not a signal', () => {
@@ -192,28 +187,12 @@ describe('mapLlmResultToOutput', () => {
     expect(out.type).toBe('correction');
   });
 
-  it('LLM empathy with high confidence → WEAK', () => {
-    const out = mapLlmResultToOutput(
-      { is_feedback: true, type: 'empathy', confidence: 0.99, reason: '强烈挫败感' },
-      'text', 'sess1', config, FIXED_TS,
-    );
-    expect(out.isSignal).toBe(true);
-    expect(out.strength).toBe('WEAK');
-    expect(out.type).toBe('empathy');
-  });
-
   it('LLM output includes llmReason for all results', () => {
     const correctionOut = mapLlmResultToOutput(
       { is_feedback: true, type: 'correction', confidence: 0.9, reason: 'correction reason' },
       'text', 'sess1', config, FIXED_TS,
     );
     expect(correctionOut.llmReason).toBe('correction reason');
-
-    const empathyOut = mapLlmResultToOutput(
-      { is_feedback: true, type: 'empathy', confidence: 0.7, reason: 'empathy reason' },
-      'text', 'sess1', config, FIXED_TS,
-    );
-    expect(empathyOut.llmReason).toBe('empathy reason');
 
     const noneOut = mapLlmResultToOutput(
       { is_feedback: false, type: 'none', confidence: 0.95, reason: 'none reason' },

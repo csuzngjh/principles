@@ -481,16 +481,22 @@ describe('shared production RuleHost gate kernel', () => {
 
   it('preserves host-owned session and evolution enrichment through a neutral port', async () => {
     const workspaceDir = tempWorkspace();
+    // GFI-COMPLETE-REMOVAL-001: 2bae37491 (SPEC §3.8) removed
+    // RuleHostInput.session.currentGfi. The surviving parity contract is that
+    // host-supplied enrichment still reaches the rule VM through the neutral
+    // port — asserted here on evolution.epTier + derived.bashRisk, which the
+    // production gate still forwards (production-rulehost-gate.ts: structures
+    // both into hostInput).
     await seedLiveRule(workspaceDir, `
       function evaluate(input) {
-        if (input.session.currentGfi === 523 && input.evolution.epTier === 7) {
+        if (input.evolution.epTier === 7 && input.derived.bashRisk === 'normal') {
           return { decision: 'block', matched: true, reason: 'HOST_ENRICHMENT_PARITY_523' };
         }
         return { decision: 'allow', matched: false, reason: 'host enrichment absent' };
       }
     `);
     const runtime = createProductionHostRuntime({
-      ruleInputEnrichmentProvider: () => ({ currentGfi: 523, epTier: 7, bashRisk: 'normal' }),
+      ruleInputEnrichmentProvider: () => ({ epTier: 7, bashRisk: 'normal' }),
       afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
     });
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/safe/project.txt'))).resolves.toMatchObject({

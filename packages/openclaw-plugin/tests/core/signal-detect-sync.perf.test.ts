@@ -42,9 +42,9 @@ import { TrajectoryDatabase } from '../../src/core/trajectory.js';
 const store: UnifiedKeywordStore = {
   version: 1,
   terms: {
-    '这是错的': { term: '这是错的', category: 'correction', weight: 0.9, precision: 'high', source: 'seed' },
-    '不对': { term: '不对', category: 'correction', weight: 0.5, precision: 'ambiguous', source: 'seed' },
-    '搞什么': { term: '搞什么', category: 'empathy', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '这是错的': { term: '这是错的', weight: 0.9, precision: 'high', source: 'seed' },
+    '不对': { term: '不对', weight: 0.5, precision: 'ambiguous', source: 'seed' },
+    '搞什么': { term: '搞什么', weight: 0.5, precision: 'ambiguous', source: 'seed' },
   },
 };
 

@@ -93,7 +93,6 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'correction_observer': '纠正观察器',
     'internalization_auto_consumer': '内化自动消费器',
     'feedback_channel': '反馈通道',
-    'gfi': '全局摩擦指数',
     'evolution_worker': '进化工作器',
     'diagnostician_async_cli': '诊断器异步 CLI',
     'diagnostician_core_grounding': '诊断器核心锚定',

@@ -3,13 +3,13 @@
  *
  * After-tool-call hook. Phase A retired every automatic Pain admission that
  * was triggered by a technical tool failure: failures are still classified,
- * recorded in the trajectory, and tracked for GFI health, but they never
- * create a Pain Event or a Diagnostician task by themselves.
+ * recorded in the trajectory, and recorded as events, but they never create
+ * a Pain Event or a Diagnostician task by themselves.
  *
  * Remaining stages (delegated to after-tool-call-helpers):
  *   1. classifyToolCallOutcome    — determine failure/success + source
  *   2. buildToolCallObservation   — normalize event into observation
- *   3. handleFrictionTracking     — GFI, event log, trajectory recording
+ *   3. recordToolCallFailure/Success — event log + trajectory recording
  *
  * The manual pain path (toolName === 'pain') remains inline because it
  * has a different control flow (early return, Owner-explicit admission).
@@ -17,7 +17,7 @@
 
 import * as fs from 'fs';
 import { normalizeProfile } from '../core/profile.js';
-import { getSession, trackFriction } from '../core/session-tracker.js';
+import { trackSessionControlActivity } from '../core/session-tracker.js';
 import { computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -37,8 +37,8 @@ import type { ProductionPainEnrichment } from '@principles/host-runtime';
 import {
   classifyToolCallOutcome,
   buildToolCallObservation,
-  handleFrictionTrackingForFailure,
-  handleFrictionTrackingForSuccess,
+  recordToolCallFailure,
+  recordToolCallSuccess,
   recordHygieneTracking,
 } from './after-tool-call-helpers.js';
 
@@ -305,10 +305,7 @@ export function handleAfterToolCall(
   }
 
   const wctx = WorkspaceContext.fromHookContextExplicit({ ...ctx, workspaceDir: effectiveWorkspaceDir });
-  const { config } = wctx;
   const sessionId = ctx.sessionId || 'unknown';
-  const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
-  const gfiBefore = sessionState?.currentGfi ?? 0;
 
   // ── Profile Loading (once per call) ──
   const profilePath = wctx.resolve('PROFILE');
@@ -339,14 +336,14 @@ export function handleAfterToolCall(
   const observation = buildToolCallObservation(event, outcome, effectiveWorkspaceDir, profile);
 
   if (outcome.isFailure) {
-    // ── Stage 3a: Friction + Recording (Failure) ──
-    handleFrictionTrackingForFailure(
-      sessionId, event, outcome, observation, gfiBefore, effectiveWorkspaceDir, config, wctx
+    // ── Stage 3a: Recording (Failure) ──
+    recordToolCallFailure(
+      sessionId, event, outcome, observation, effectiveWorkspaceDir, wctx
     );
   } else {
-    // ── Stage 3b: Friction + Recording (Success) ──
-    handleFrictionTrackingForSuccess(
-      sessionId, event, outcome, observation, gfiBefore, effectiveWorkspaceDir, wctx
+    // ── Stage 3b: Recording (Success) ──
+    recordToolCallSuccess(
+      sessionId, event, outcome, observation, effectiveWorkspaceDir, wctx
     );
 
     // ── Stage 3c: Hygiene Tracking (Success only) ──
@@ -356,7 +353,7 @@ export function handleAfterToolCall(
 
 /**
  * OpenClaw-owned enrichment for the shared ordinary after-tool kernel.
- * Session/GFI, event-log, PROFILE and hygiene behavior stays here;
+ * Session/event-log, PROFILE and hygiene behavior stays here;
  * the shared runtime owns classification/admission and the atomic trajectory write.
  */
 export function prepareOrdinaryAfterToolCallForSharedRuntime(
@@ -365,8 +362,7 @@ export function prepareOrdinaryAfterToolCallForSharedRuntime(
 ): ProductionPainEnrichment {
   const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
   const sessionId = ctx.sessionId || 'unknown';
-  const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
-  const gfiBefore = sessionState?.currentGfi ?? 0;
+
   const profilePath = wctx.resolve('PROFILE');
   let profile = normalizeProfile({});
   if (fs.existsSync(profilePath)) {
@@ -384,9 +380,9 @@ export function prepareOrdinaryAfterToolCallForSharedRuntime(
     : Object.hasOwn(event, 'toolCallId') ? event.toolCallId
     : undefined;
   if (outcome.isFailure) {
-    handleFrictionTrackingForFailure(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx.config, wctx, { recordTrajectory: false });
+    recordToolCallFailure(sessionId, event, outcome, observation, ctx.workspaceDir, wctx, { recordTrajectory: false });
   } else {
-    handleFrictionTrackingForSuccess(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx, { recordTrajectory: false });
+    recordToolCallSuccess(sessionId, event, outcome, observation, ctx.workspaceDir, wctx, { recordTrajectory: false });
     recordHygieneTracking(event, observation, wctx);
   }
   // The shared kernel still owns the atomic tool_calls row. Phase A retired
@@ -402,7 +398,6 @@ export function prepareOrdinaryAfterToolCallForSharedRuntime(
  *
  * This path is separate because:
  * - It always records pain at score 100
- * - It uses a different GFI track (manual_pain)
  * - It has its own cooldown
  * - It does NOT go through evidence triage
  */
@@ -421,8 +416,8 @@ function handleManualPain(
   const reason = params.input || params.arguments || 'Manual intervention';
   const traceId = createTraceId();
 
-  // Track friction at max score
-  trackFriction(sessionId, 100, 'manual_pain', workspaceDir, { source: 'manual_pain' });
+  // Mark control activity for the manual Owner intervention
+  trackSessionControlActivity(sessionId, workspaceDir);
   SystemLogger.log(workspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
 
   wctx.eventLog.recordPainSignal(sessionId, {

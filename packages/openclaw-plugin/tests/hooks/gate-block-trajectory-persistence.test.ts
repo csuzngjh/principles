@@ -37,7 +37,7 @@ import { persistGateBlock, recordGateBlockAndReturn } from '../../src/hooks/gate
 import { accountSharedDeny, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import { trackBlock } from '../../src/core/session-tracker.js';
 
-// Session tracker is partially mocked so the gfi_track_failed degradation
+// Session tracker is partially mocked so the block_track_failed degradation
 // branch is reachable; everything else (session listing) stays real.
 vi.mock(import('../../src/core/session-tracker.js'), async (importOriginal) => {
   const actual = await importOriginal();
@@ -380,20 +380,20 @@ describe('PRI-569 gate-block trajectory persistence', () => {
     expect(typesOf(readJsonlEvents(dir))).toContain('gate_block');
   });
 
-  it('T8: session GFI tracking failure degrades with reasonCode, persistence unaffected', () => {
+  it('T8: session block tracking failure degrades with reasonCode, persistence unaffected', () => {
     const dir = makeWorkspace();
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir: dir });
     const logger = makeLogger();
 
     expect(() => persistGateBlock(
       wctx,
-      { filePath: 'c.txt', reason: 'pri569-gfi', toolName: 'Write', sessionId: 's-gfi', blockSource: 'rule-host-shared' },
+      { filePath: 'c.txt', reason: 'pri569-block-track', toolName: 'Write', sessionId: 's-block-track', blockSource: 'rule-host-shared' },
       logger,
     )).not.toThrow();
 
     const warns = logger.lines.filter((l) => l.startsWith('[warn]')).join('\n');
-    expect(warns).toContain('gfi_track_failed');
-    expect(vi.mocked(trackBlock)).toHaveBeenCalledWith('s-gfi');
+    expect(warns).toContain('block_track_failed');
+    expect(vi.mocked(trackBlock)).toHaveBeenCalledWith('s-block-track');
     // trajectory row + event log still land despite tracker failure
     const rows = readGateBlocks(dir);
     expect(rows).toHaveLength(1);

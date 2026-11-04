@@ -58,8 +58,6 @@ export interface TrajectoryToolCallInput {
   exitCode?: number | null;
   errorType?: string | null;
   errorMessage?: string | null;
-  gfiBefore?: number | null;
-  gfiAfter?: number | null;
   paramsJson?: unknown;
   resultPreview?: string | null;
   createdAt?: string;
