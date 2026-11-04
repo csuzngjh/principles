@@ -45,15 +45,24 @@
 
 ## 4. 自己引入又自己抓到的回归（完整交代）
 
+### 4.1 `recordVerifiedToolOutcomes` 参数错位（host-runtime 测试抓到）
+
 - **怎么发现**：P1 迁移实现后跑 `packages/host-runtime` 全包，`recordVerifiedToolOutcomes` 全部报 `Too many parameter values were provided`。
 - **影响面**：`insertVerified` 是 verified tool outcome 的唯一写入语句。只要是走 `recordVerifiedToolOutcomes` 的路径（host-runtime 生产 verified-outcome 写入、codex-adapter 消费）**每次写入都 100% 失败**，属真实生产回归，不是测试问题。
 - **怎么修**：`62e2cab15` 删掉 `gfi_before/gfi_after` 两列时漏删两个 `null` 占位参数（14 值 vs 12 列）。删掉多余两个 `null`，使 12 值与 12 列对齐，并加注释说明。
 - **用什么测**：`tests/production-pain-evidence.test.ts` 24/24（含 5 条迁移/负控用例）；host-runtime 全包 652/652。
 
+### 4.2 v1 workspace 的治理写入被拒（PR #2332 CI 抓到）
+
+- **怎么发现**：CI `Test pd-cli` 红，`pain-explicit.test.ts` 两条 `expected 1 to be +0`；本地同红，隔离工作区直跑真实 CLI 得到 `nextAction=trajectory_schema_invalid: run the supported PD workspace migration before enabling conversation ingestion`。
+- **影响面**：`hasCanonicalSchema` 新增"旧 GFI 列不存在"判定后，`governance-signal-admission.ts` 的 `openAdmissionStore` 仍只做加列、不跑迁移，于是**任何 v1 工作区**的 `pd pain explicit`、Codex 实时 hook 纠正摄取、WorkBuddy 摄入判定全部被拒。这是 Owner 手动 Pain 路径的真实回归。
+- **怎么修**：`openAdmissionStore` 在 `ensureGovernanceAdmissionSchema` 后调用既有 `migrateLegacyGfiSchema`（幂等，v2 no-op），与另两条裸库 open 链统一收敛路径，不新建抽象。
+- **用什么测**：新增 `governance-signal-admission.test.ts > converges a v1 workspace carrying retired GFI columns before admitting`（准入 ok、两列消失、原行保留）；该文件 51/51；host-runtime 652/652；`pain-explicit.test.ts` 7/7 由红转绿。
+
 ## 5. 五问回答
 
 1. **旧机制是否真的不再产生自动 Pain？** 是。生产代码中已无 GFI 打分/阈值/阶段/WEAK 路由；`gfi_threshold` 源类型不存在（`resolveSourceKind` 不再产生该 kind）；8 组行为对照与基线逐组相等。
-2. **Owner 手动 Pain 是否仍然正常？** 是。`owner_reported` 仍为 `admit`；`pd-cli pain-explicit`、plugin `pain` 命令与 8 组相关组均通过。
+2. **Owner 手动 Pain 是否仍然正常？** 是。`owner_reported` 仍为 `admit`；`pd-cli pain-explicit`、plugin `pain` 命令与 8 组相关组均通过。**注意**：本轮曾因 4.2 的迁移缺口让 v1 工作区的手动 Pain 100% 被拒（CI 抓到），已在 `openAdmissionStore` 接入既有迁移并加回归测试，`pain-explicit.test.ts` 7/7。
 3. **错误累积断路器是否仍然有效？** 是。生产路径仍调用 `evaluateTriggerController`（`packages/openclaw-plugin/src/hooks/pain.ts:450`），`gate-b-only-runtime-guard` 相关断言通过。
 4. **历史数据是否仍可读？** 是。D1：旧库打开即迁移（只删两列、只终止 pending empathy），v2 库不会被误判，迁移幂等，空库不抛，失败显式 `trajectory_migration_failed:<reason>` + `nextAction`。
 5. **有没有任何一处能力被悄悄削弱？** 没有发现能力削弱：8 组 568/568 与基线逐组相等；host-runtime 652/652；全包仅环境性失败。**但有两处交付限制**：① `packages/website` 用户文档仍宣传已移除的 GFI/`/pd-status`；② `empathy_engine` 配置面残留无消费者。

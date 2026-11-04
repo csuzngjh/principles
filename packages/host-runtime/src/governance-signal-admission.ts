@@ -49,6 +49,7 @@ import {
   MAX_EVIDENCE_VALUE_CHARS,
   evaluateStage2ConfidenceGate,
   evaluatePainIngress,
+  migrateLegacyGfiSchema,
   STAGE2_MAX_ATTEMPTS,
   PENDING_CANDIDATE_TTL_MS,
   type GovernanceHostKind,
@@ -424,6 +425,11 @@ function openAdmissionStore(workspaceDir: string, factory?: ObservationDatabaseF
     db.pragma('busy_timeout = 5000');
     db.pragma('journal_mode = WAL');
     ensureGovernanceAdmissionSchema(db);
+    // GFI-COMPLETE-REMOVAL-001: the additive governance open does not retire
+    // the GFI columns, so a v1 workspace would be judged non-canonical by
+    // hasProductionPainSchema and refused. Converge it here with the SAME
+    // migration the other raw open paths use (idempotent, no-op on v2).
+    migrateLegacyGfiSchema(db);
     // The reconciliation pass reads observation-owned tables (promotion
     // tails): one open makes the whole governance schema ready.
     ensureGovernanceSchema(db);

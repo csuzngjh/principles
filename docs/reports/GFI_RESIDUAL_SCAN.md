@@ -7,7 +7,7 @@
 
 | 层 | 扫描口径 | 命中 | 处置 |
 | --- | --- | --- | --- |
-| L1 可执行生产代码 | `packages/**/src/**`，排除 `__tests__` | 40 处 / 12 文件 | 见 §2，全部为迁移器、墓碑或说明性注释；本轮改掉 1 处语义字符串 |
+| L1 可执行生产代码 | `packages/**/src/**`，排除 `__tests__` | 44 处 / 12 文件 | 见 §2，全部为迁移器、墓碑或说明性注释；本轮改掉 1 处语义字符串，另在 `openAdmissionStore` 补 4 处迁移调用（§6.12） |
 | L2 测试夹具 | `packages/**/tests/**` | 261 处 / 83 文件（修复前 303 / 84） | 保留：这些列/字段是"旧形状仍可被读取"的覆盖面 |
 | L3 src 内测试 | `packages/**/src/**/__tests__/**` | 41 处 / 10 文件 | 保留：功能开关墓碑契约、trajectory 迁移、冻结 barrel 面 |
 | L4 历史数据兼容读取 | 真实 `.state/trajectory.db` 隔离副本 | 23 表；`tool_calls` 16→14 列 | 保留 `migrateLegacyGfiSchema`（唯一写入方） |
@@ -15,7 +15,7 @@
 | L6 用户可见网站文档 | `packages/website/**/*.md` | 48 处 / 8 文件 | 待更新（见 §4 风险） |
 | L7 开发脚本/探针 | `scripts/**` | 74 处 / 9 文件 | 保留（历史 schema 形状探针）；1 处提示文本待后续 |
 
-## 2. L1 生产代码逐文件处置（12 文件 / 40 处）
+## 2. L1 生产代码逐文件处置（12 文件 / 44 处）
 
 | 文件 | 处数 | 性质 | 处置 |
 | --- | --- | --- | --- |
@@ -29,7 +29,7 @@
 | `packages/openclaw-plugin/src/hooks/llm.ts` | 2 | 移除说明注释 | 保留 |
 | `packages/openclaw-plugin/src/core/session-tracker.ts` | 2 | 移除说明注释 | 保留 |
 | `packages/openclaw-plugin/src/commands/pain.ts` | 1 | SPEC §4.5 说明注释 | 保留 |
-| `packages/host-runtime/src/governance-signal-admission.ts` | 1 | 关键词库退役说明注释 | 保留 |
+| `packages/host-runtime/src/governance-signal-admission.ts` | 5 | 关键词库退役说明注释 1 + 打开即收敛迁移调用（`migrateLegacyGfiSchema` 导入/调用/注释）4 | 保留（§6.12 回归修复，与另两条裸库 open 链同一迁移入口） |
 | `packages/principles-core/src/runtime-v2/evidence-triage/source-descriptors.ts` | 2 → 1 | 1 条设计说明 + 1 条运行时 `reason` 文案 | 运行时文案改为 `Session health signal. Not sufficient for diagnosis on its own.`；设计说明保留为历史注记 |
 
 结论：生产代码中不存在任何 GFI 打分、阈值、Mental Mode、fatigue、`currentGfi` 的可执行逻辑。

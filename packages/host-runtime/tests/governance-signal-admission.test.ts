@@ -171,6 +171,32 @@ it('adds nullable tool-call project scope to legacy trajectory schema without as
 });
 
 /**
+ * GFI-COMPLETE-REMOVAL-001 regression: the additive governance open used to
+ * leave the retired GFI columns in place, so a v1 workspace was judged
+ * non-canonical and every Owner-visible admission was refused with
+ * trajectory_schema_invalid. The open must converge the same way the other raw
+ * open paths do, and existing tool-call rows must survive the column drop.
+ */
+it('converges a v1 workspace carrying retired GFI columns before admitting', () => {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  db.exec('ALTER TABLE tool_calls ADD COLUMN gfi_before REAL');
+  db.exec('ALTER TABLE tool_calls ADD COLUMN gfi_after REAL');
+  db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, gfi_before, gfi_after)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run('v1-session', 'apply_patch', 'success', '{}', NOW.toISOString(), 0.5, 0.7);
+  db.close();
+
+  const result = admit([correction()]);
+  expect(result.ok).toBe(true);
+  expect(withTrajectory((sqlite) => sqlite.prepare('PRAGMA table_info(tool_calls)').all()
+    .map((row) => (typeof row === 'object' && row !== null ? Reflect.get(row, 'name') : undefined))
+    .filter((name) => name === 'gfi_before' || name === 'gfi_after')))
+    .toEqual([]);
+  expect(withTrajectory((sqlite) => sqlite.prepare('SELECT tool_name FROM tool_calls WHERE session_id = ?').get('v1-session')))
+    .toEqual({ tool_name: 'apply_patch' });
+});
+
+/**
  * Slice A promotion substrate: ingest the rollout PLUS its triggering user turn
  * so evidence promotion can succeed. promoteGovernanceEvidence requires BOTH
  * the governance_rollouts row and the trigger observation row

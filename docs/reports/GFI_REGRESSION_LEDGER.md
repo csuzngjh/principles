@@ -579,5 +579,17 @@
 
 环境性、非本任务导致的失败（有证据，不在本 PR 修）：BDD ledger 的 `afterEach` EPERM（该模块本分支 diff 0 行）、2 个 perf 在并行下超预算（单独运行通过）、`principle-compiler-core` 1 条并行抖动（单独运行通过）。
 
+### 6.12 自己引入、CI 抓到的第二个回归：v1 workspace 的治理写入被拒（本轮修复）
+
+| 项 | 内容 |
+| --- | --- |
+| 怎么发现 | PR #2332 CI `Test pd-cli` 红：`pain-explicit.test.ts` 2 条 `expected 1 to be +0`。本地复跑同样红（非环境差异），用隔离工作区直接跑真实 CLI，得到 `reason=continuation_failed`、`nextAction=trajectory_schema_invalid: run the supported PD workspace migration before enabling conversation ingestion` |
+| 根因 | P1 修 `hasCanonicalSchema` 时新增"旧 GFI 列不存在"判定；但 `governance-signal-admission.ts` 的 `openAdmissionStore` 只做加列（`tool_use_id` / `project_dir`），从不调用 `migrateLegacyGfiSchema`。于是任何 v1 工作区（真实老用户 `trajectory.db`）被判非 canonical，Owner 手动 Pain / Codex 会话摄取 100% 被拒 |
+| 影响面 | 所有走 `admitGovernanceSignals` 的写入：`pd pain explicit`、Codex 实时 hook 纠正摄取、WorkBuddy 摄入判定。不是测试夹具问题，是真实用户工作区升级路径被切断 |
+| 修法 | `openAdmissionStore` 在 `ensureGovernanceAdmissionSchema(db)` 之后调用同一个 `migrateLegacyGfiSchema(db)`（幂等，v2 为 no-op），与 `production-pain-evidence.ts` 两条裸库 open 链保持同一收敛路径（Connection Before Creation，未新建抽象） |
+| 验证 | ① 新增回归测试 `governance-signal-admission.test.ts > converges a v1 workspace carrying retired GFI columns before admitting`：v1 建表 + 插入 1 行 → 准入 `ok:true`、两列消失、原行仍在；② `governance-signal-admission.test.ts` 51/51；③ host-runtime 全包 652/652；④ `pain-explicit.test.ts` 7/7（本地由红转绿） |
+| 同类失败说明 | pd-cli 全量 2123/2125 中另 2 条是 5s 默认超时的环境性超时：`pain-explicit` 交错会话用例、`codex-consent` 幂等用例在本机 Windows 需 5.4–7.2s（CI Linux 1.1s）。以 `--testTimeout=20000` 复跑 6/6 通过；未改测试超时（不放宽断言）|
+
+
 
 
