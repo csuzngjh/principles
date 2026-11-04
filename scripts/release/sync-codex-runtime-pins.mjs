@@ -47,8 +47,14 @@ export function assertNoDowngrade(current, target) {
   }
 }
 
-/** PRI-1067: propagation budget for the maintenance leg (2s after publish is real). */
-export const PUBLISH_WAIT_TIMEOUT_MS = 60_000;
+/**
+ * PRI-1067: propagation budget for the maintenance leg (2s after publish is
+ * real). PRI-1094 (Owner decision, 2026-11-04): the last train leg has been
+ * observed to take longer than 60s to become registry-visible, so the default
+ * is 180s. This constant stays the single authority; callers may still pass a
+ * tighter `timeoutMs` explicitly.
+ */
+export const PUBLISH_WAIT_TIMEOUT_MS = 180_000;
 export const PUBLISH_WAIT_INTERVAL_MS = 5_000;
 
 function sleepSync(ms) {

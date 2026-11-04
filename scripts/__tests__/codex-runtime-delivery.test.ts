@@ -6,6 +6,7 @@ import {
   assertNoDowngrade,
   checkMetadata,
   nextPins,
+  PUBLISH_WAIT_TIMEOUT_MS,
   waitForPublishedCohort,
 } from '../release/sync-codex-runtime-pins.mjs';
 
@@ -102,6 +103,62 @@ describe('Codex runtime delivery authority and discoverability', () => {
       expect(message).toContain('nextAction');
       // It really consumed the whole budget: 4 reads at t=0/5/10/15s.
       expect(calls).toBe(4);
+      expect(clock).toBe(15_000);
+    });
+
+    // PRI-1094: propagate the Owner decision (60s -> 180s) through the real
+    // default path, not just the exported constant's source text.
+    it('PRI-1094: the default propagation budget is 180s, not 60s', () => {
+      expect(PUBLISH_WAIT_TIMEOUT_MS).toBe(180_000);
+    });
+
+    it('PRI-1094: the default budget drives the real wait loop and its failure text', () => {
+      let clock = 0;
+      let calls = 0;
+      let caught: unknown;
+      try {
+        waitForPublishedCohort({
+          sha,
+          now: () => clock,
+          sleep: (ms: number) => {
+            clock += ms;
+          },
+          resolve: () => {
+            calls += 1;
+            return incomplete;
+          },
+        });
+      } catch (error) {
+        caught = error;
+      }
+      const message = caught instanceof Error ? caught.message : String(caught);
+      expect(message).toContain('after 180000ms');
+      expect(message).toContain('@principles/core@1.297.0');
+      // 37 reads at t=0/5/.../180s; the default budget really was consumed.
+      expect(calls).toBe(37);
+      expect(clock).toBe(180_000);
+    });
+
+    it('PRI-1094: an explicit timeoutMs wins over the default budget', () => {
+      let clock = 0;
+      let caught: unknown;
+      try {
+        waitForPublishedCohort({
+          sha,
+          timeoutMs: 15_000,
+          intervalMs: 5_000,
+          now: () => clock,
+          sleep: (ms: number) => {
+            clock += ms;
+          },
+          resolve: () => incomplete,
+        });
+      } catch (error) {
+        caught = error;
+      }
+      const message = caught instanceof Error ? caught.message : String(caught);
+      expect(message).toContain('after 15000ms');
+      expect(message).not.toContain('180000ms');
       expect(clock).toBe(15_000);
     });
 
