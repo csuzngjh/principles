@@ -147,7 +147,7 @@ export function main() {
     schema: 'challenge-preregistration.v1',
     studyId: STUDY,
     status: 'DRAFT-NOT-IN-FORCE',
-    authority: 'docs/specs/CEB-002-DELIVERY-PACK.md §2 (preregistration section) — the sole specification document',
+    authority: 'docs/archive/specs/CEB-002-DELIVERY-PACK.md §2 (preregistration section) — the sole specification document',
     design: {
       positioning: 'EXPLORATORY',
       repetitions: 2,

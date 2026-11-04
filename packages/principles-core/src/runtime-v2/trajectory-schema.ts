@@ -1,6 +1,6 @@
 /**
  * Canonical trajectory.db schema definition (PRI-774; SPEC:
- * docs/specs/trajectory-data-plane-single-truth.md).
+ * docs/archive/specs/trajectory-data-plane-single-truth.md).
  *
  * Single source of truth for the schema applied by BOTH build paths:
  * - openclaw-plugin applyTrajectorySchema() → Profile B/C (views: true)

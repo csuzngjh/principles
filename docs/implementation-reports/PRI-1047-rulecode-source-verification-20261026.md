@@ -1,6 +1,6 @@
 # PRI-1047 实现报告：RuleCode 草案来源核验统一与定点 source-correction 恢复
 
-日期：2026-10-26。分支 `ai/PRI-1047-rulecode-source-correction`（worktree `D:\Code\_worktrees\principles\PRI-1047-rulecode-source-correction`）。设计文档：`docs/specs/SPEC-PRI-1047-RULECODE-SOURCE-VERIFICATION-v0.1.md`。
+日期：2026-10-26。分支 `ai/PRI-1047-rulecode-source-correction`（worktree `D:\Code\_worktrees\principles\PRI-1047-rulecode-source-correction`）。设计文档：`docs/archive/specs/SPEC-PRI-1047-RULECODE-SOURCE-VERIFICATION-v0.1.md`。
 
 ## Owner Review Card
 

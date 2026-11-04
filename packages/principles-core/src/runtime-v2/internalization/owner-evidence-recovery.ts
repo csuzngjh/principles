@@ -53,7 +53,7 @@
  * preconditions fail loudly with stable reasons + nextAction (rc-9). rc-8:
  * telemetry payloads carry bounded references only.
  *
- * Spec: docs/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-03, FR-06, §6.1-§6.3
+ * Spec: docs/archive/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-03, FR-06, §6.1-§6.3
  */
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';

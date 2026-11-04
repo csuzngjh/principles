@@ -7,7 +7,7 @@
 ## 1. 固定核查上下文与未实施事实
 
 - 本地仓库：`D:\\Code\\principles`；本地 HEAD `39ebac3f56dc5394844284166c867d2266b159a7`，当前状态为 `main` 落后且有用户既有未提交文件，必须保护。
-- 用户本地 SPEC：`docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.2.md`，SHA256 `4422F14F2A6CBCD20F0AC50515E92622BAB77C0ABC0C819D06988CC89CEBD465`（文件原样保留）。
+- 用户本地 SPEC：`docs/archive/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.2.md`，SHA256 `4422F14F2A6CBCD20F0AC50515E92622BAB77C0ABC0C819D06988CC89CEBD465`（文件原样保留）。
 - v1.2/独立评审原代码基线 `f7d47ae0`，2026-10-17 核实时 `origin/main` 和 `git ls-remote origin refs/heads/main` 均为 `702d922339851f54579a4f159a91c801af9810b2`。Zcode 启动时需重新核实；不能以此处 SHA 永久替代最新 HEAD。
 - v1.2 是本地**未跟踪文件**，`origin/main` 不包含它。**隔离 worktree 不能假设存在该相对路径**。Zcode 必须先从原主工作区绝对路径只读加载并校验 SHA，然后可在自己的审计工作区使用经检验的只读副本。
 - 本轮只做审计与指令核对，**没有运行真实宿主 E2E、真实私人数据库扫描或付费 Agent A/C 实验**。证据覆盖率、披露授权和行为收益仍然是 NOT_MEASURED / OWNER_DECISION_REQUIRED / UNPROVEN，不准假装已证明。

@@ -7,8 +7,8 @@
 | 审计基线 | origin/main `0d0ea7eb560af15729f2a7f81b4e8a11a1bb0e8e`（2026-11-01 09:34 +0800 fetch） |
 | 对照基线 | 原 Proposal 基线 `796000a101fd93e5b74c9301e2cd41dfbb150313`（2026-10-31） |
 | 审计 worktree | `D:\Code\_worktrees\principles\adhoc-20261101-mcp-gate3-audit2-7fd2e0`（@ `0d0ea7eb5`，writer=zcode 租约） |
-| 上游输入 | `docs/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`（974 行，Owner 提供的优化版提案） |
-| 核心依据 SPEC | `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft，在 HEAD 未变，695 行） |
+| 上游输入 | `docs/archive/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`（974 行，Owner 提供的优化版提案） |
+| 核心依据 SPEC | `docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`（v0.4-draft，在 HEAD 未变，695 行） |
 | 下游交付 | 本报告 + `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` + `PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md` + `PD-MCP-GATE3-OWNER-DECISION-CARD.md` |
 | 执行边界 | 只读审计/读历史 PR/写上述四份设计文档；零生产源码/测试/package.json/lockfile/Hook/CLI 改动；零 PR/push/merge |
 
@@ -16,7 +16,7 @@
 
 **结论标记约定**：每项结论标注 CONFIRMED（本轮在 `0d0ea7eb5` 直证）/ CHANGED（与对照基线相比有变化）/ OBSOLETE（前轮结论已失效）/ NOT_VERIFIED。所有行号为**本轮工作区现测**，未沿用旧报告行号。
 
-**基线保护记录**：主 checkout 既有未提交修改（6 删除跟踪文件 + 多个未跟踪路径，含 `docs/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`、`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`、`docs/proposals/` 等）本轮零触碰；两个前置 worktree（gate2 / hook-verify）只读访问；%TEMP% 证据只读 + 哈希计算；代码调查全部在独立审计 worktree。
+**基线保护记录**：主 checkout 既有未提交修改（6 删除跟踪文件 + 多个未跟踪路径，含 `docs/archive/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`、`docs/archive/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`、`docs/proposals/` 等）本轮零触碰；两个前置 worktree（gate2 / hook-verify）只读访问；%TEMP% 证据只读 + 哈希计算；代码调查全部在独立审计 worktree。
 
 ---
 

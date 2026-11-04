@@ -72,7 +72,7 @@ Owner 不应回答「这段抽象哲理说得对不对」，而应能判断：
 | --- | --- | --- |
 | AGENTS.md P1–P8 | 当前工程宪章 | Reality Audit、Connection Before Creation、单一事实源、最小更改、验证优先 |
 | docs/product/PRODUCT_IDENTITY.md | Active | Owner-governed、MVP-first、无通用任务重试/模型输出修复 |
-| docs/specs/OWNER_DECISION_EXPERIENCE_V1.md | 既有设计 | 复用来源分类、只读 Decision Projection、真实动作和渐进披露 |
+| docs/archive/specs/OWNER_DECISION_EXPERIENCE_V1.md | 既有设计 | 复用来源分类、只读 Decision Projection、真实动作和渐进披露 |
 | Principle Governance Projection Contract（2026-08-20） | Phase 0 Design Frozen | Console 只读派生，不新建运行时治理事实源 |
 | IntentContractV1（PRI-703） | 已实现 | ownerIntent、targetBehavior、forbiddenBehavior、evidenceSource、validationExpectation 是既有语义锚 |
 | PRI-917 Semantic Reuse v0.3.3 | 已批准实施的 SPEC | 复用推荐≠Owner 裁决；自动路径评估失败可观测地继续 CREATE |
@@ -546,7 +546,7 @@ PR-04、05 先在固定 fixtures 和显式受控工作区执行。Shadow 不能�
 
 ## 16. 关联文档与事实核查入口
 
-- docs/specs/OWNER_DECISION_EXPERIENCE_V1.md
+- docs/archive/specs/OWNER_DECISION_EXPERIENCE_V1.md
 - docs/superpowers/specs/2026-08-20-principle-governance-projection-contract.md
 - docs/specs/PRI-917-semantic-reuse-adjudication-v0.3.3.md
 - docs/specs/PD_CORE_VALUE_PIPELINE_GOVERNANCE_SPEC.md

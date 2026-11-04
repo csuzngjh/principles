@@ -669,7 +669,7 @@ Owner review / next explicitly authorized phase:
 
 ### 12.1 内部依据
 
-- `docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.1.md`：原完整架构 SPEC，**保留不覆盖，供回溯**。
+- `docs/archive/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.1.md`：原完整架构 SPEC，**保留不覆盖，供回溯**。
 - `.tmp/prr-spec-review-20261016/REVIEW.md`：独立评审及其 `evidence/` 固定源码快照（与 f7d47ae0 对应）。
 - `activation/ledger-identity.ts`、`activation/activation-dispatcher.ts`、`principle-tree-ledger.ts`、`pain-chain-read-model.ts`、`governance-observation-store.ts`、`trajectory-store.ts` 和宿主插件打包文件：PR-00 需重新验证的源码权威。
 

@@ -1,7 +1,7 @@
 # EXAMINER v0.7 实施映射 · Phase 0 交付
 
 日期：2026-10-31 · 分支：`ai/adhoc-20261031-examiner-v07-1bfaa768-examiner-v07-offline`
-SPEC：`docs/specs/SPEC-PD-EXAMINER-001-v0.7.md`（本分支首个提交保留 `PROPOSED_FOR_OWNER_REVIEW` 原文；后续提交按 Owner 2026-10-30 端到端指令记录为 `APPROVED_OFFLINE_IMPLEMENTATION_ONLY`——仅离线实施，不含真实实验授权）。
+SPEC：`docs/archive/specs/SPEC-PD-EXAMINER-001-v0.7.md`（本分支首个提交保留 `PROPOSED_FOR_OWNER_REVIEW` 原文；后续提交按 Owner 2026-10-30 端到端指令记录为 `APPROVED_OFFLINE_IMPLEMENTATION_ONLY`——仅离线实施，不含真实实验授权）。
 代码基线：`origin/main = 288ed6eff28b737ecb158e42f6e9042b4569ca96`（= SPEC §15 代码核查基线；本地主 checkout main 落后 3 个提交，实施以 origin/main 为准）。
 
 ---

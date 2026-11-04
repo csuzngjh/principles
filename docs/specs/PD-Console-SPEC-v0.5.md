@@ -10,7 +10,7 @@
 - **状态**：`READY_FOR_OWNER_REVIEW`
 - **替代范围**：替代 v0.3 中”默认展示候选、由 Owner
   搜索并选择规则归属”的主路径；v0.3 的候选浏览能力仅保留为异常处理能力。
-- **相关治理规范**：`docs/specs/SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md`（Owner
+- **相关治理规范**：`docs/archive/specs/SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md`（Owner
   于 2026-10-25 已同意 A+B 实施）。
 - **重要授权边界**：本 SPEC 提议修改已批准规范中”直接 rule 候选必须由
   Owner
@@ -88,10 +88,10 @@
 | 提交器为每条 recommendation 分配独立随机 `candidateId`，并保存 `source_recommendation_json`                     | [`diagnostician-committer.ts`](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/runtime-v2/store/commit/diagnostician-committer.ts)                                                                                                                                                                 | 新关系应引用 artifact 内的稳定局部 `recommendationRef`，不能要求模型预知数据库 UUID |
 | 只有 `recommendation_kind === 'principle'` 才可进入 Principle Ledger                                            | [`candidate-intake-service.ts`](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/runtime-v2/candidate-intake-service.ts)                                                                                                                                                                            | 不能将 `rule` 偷换成 `principle`，也不能为填身份而自动创建 Principle                |
 | Principle 的 `derivedFromPainIds` 在实际 intake 路径中承担 source Candidate 关联/幂等用途；其历史语义还存在混用 | [`principle-tree-ledger-adapter.ts`](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/runtime-v2/adapter/principle-tree-ledger-adapter.ts)                                                                                                                                                          | 不得把 rule 归属塞入 `derivedFromPainIds`                                           |
-| Principle reuse 的权威关联保存在 `reuseEvidence[]`，其目标是外层 Principle                                      | [`PRI-917-reuse-before-create-v0.1.md`](https://github.com/csuzngjh/principles/blob/main/docs/specs/PRI-917-reuse-before-create-v0.1.md)                                                                                                                                                                                         | 复用现有身份解析，不复制或污染 reuse 事实                                           |
+| Principle reuse 的权威关联保存在 `reuseEvidence[]`，其目标是外层 Principle                                      | [`PRI-917-reuse-before-create-v0.1.md`](https://github.com/csuzngjh/principles/blob/main/docs/archive/specs/PRI-917-reuse-before-create-v0.1.md)                                                                                                                                                                                         | 复用现有身份解析，不复制或污染 reuse 事实                                           |
 | 当前 rule 身份解析只接受显式 `ruleCandidateBindings`；绑定记录是 Owner 治理事实                                 | [`rule-candidate-binding.ts`](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/runtime-v2/types/rule-candidate-binding.ts)、[`principle-tree-ledger-adapter.ts`](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/runtime-v2/adapter/principle-tree-ledger-adapter.ts) | 新的系统关联必须与 Owner 决策分型，不能伪造 Owner 身份或把自动关系写成 Owner 决定   |
 | 绑定审阅当前使用 bounded substring search，最多 20 条                                                           | [`principle-tree-ledger.ts`](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/principle-tree-ledger.ts)                                                                                                                                                                                             | 搜索只保留为异常处置的辅助工具                                                      |
-| 已批准的 RuleCode 治理规范明确要求身份关联、规则审批、shadow/live 决策相互独立                                  | [`SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md`](https://github.com/csuzngjh/principles/blob/main/docs/specs/SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md)                                                                                                                                                                       | 自动关联不能扩展为自动审批、自动激活或生产授权                                      |
+| 已批准的 RuleCode 治理规范明确要求身份关联、规则审批、shadow/live 决策相互独立                                  | [`SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md`](https://github.com/csuzngjh/principles/blob/main/docs/archive/specs/SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md)                                                                                                                                                                       | 自动关联不能扩展为自动审批、自动激活或生产授权                                      |
 
 ### 2.1 不能混为一谈的身份
 
@@ -891,9 +891,9 @@ Principle”。若未来需要一条规则正式落实多条原则，应单独�
 - [Principle tree ledger
   adapter](https://github.com/csuzngjh/principles/blob/main/packages/principles-core/src/runtime-v2/adapter/principle-tree-ledger-adapter.ts)
 - [RuleCode governance closure
-  SPEC](https://github.com/csuzngjh/principles/blob/main/docs/specs/SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md)
+  SPEC](https://github.com/csuzngjh/principles/blob/main/docs/archive/specs/SPEC-RULECODE-GOVERNANCE-CLOSURE-003-v0.1.md)
 - [Principle reuse
-  SPEC](https://github.com/csuzngjh/principles/blob/main/docs/specs/PRI-917-reuse-before-create-v0.1.md)
+  SPEC](https://github.com/csuzngjh/principles/blob/main/docs/archive/specs/PRI-917-reuse-before-create-v0.1.md)
 - [Rule candidate binding Console
   model](https://github.com/csuzngjh/principles/blob/main/packages/pd-console/src/server/models/RuleCandidateBindingConsoleModel.ts)
 - [Rule candidate binding

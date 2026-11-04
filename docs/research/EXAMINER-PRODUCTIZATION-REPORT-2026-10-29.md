@@ -38,7 +38,7 @@
 | 新文件 | 内容 |
 |---|---|
 | [审计](EXAMINER-PRODUCTIZATION-AUDIT-2026-10-29.md) | 当前基线、逐题表、历史影响、精确证据入口、冻结与授权边界 |
-| [v0.5-draft](../specs/SPEC-PD-EXAMINER-001-v0.5-draft.md) | PROPOSED_NOT_APPROVED；RQ-A/B/C、最小文件面、调用链、输入输出、成本/失败/回滚、指标与验收 |
+| [v0.5-draft](../archive/specs/SPEC-PD-EXAMINER-001-v0.5-draft.md) | PROPOSED_NOT_APPROVED；RQ-A/B/C、最小文件面、调用链、输入输出、成本/失败/回滚、指标与验收 |
 | 本报告 | 已完成、未完成、准入判断与 Owner 决策 |
 | [冻结证据快照](examiner-productization-20261029/baseline-freeze-verification.json) | 3 研究四哈希、59 个文件原文 SHA-256；派生快照，不替代原研究权威 |
 | [Gold 离线诊断](examiner-productization-20261029/gold-audit-offline.json) | 字节比较、192 个运行来源/hash/行号、4 次原 env/scorer 内存演算 |

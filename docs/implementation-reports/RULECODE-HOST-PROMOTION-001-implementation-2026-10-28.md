@@ -1,7 +1,7 @@
 # SPEC-RULECODE-HOST-PROMOTION-001 v0.1 — Implementation Report (A→B→C)
 
 - Date: 2026-10-28
-- SPEC: `docs/specs/SPEC-RULECODE-HOST-PROMOTION-001-v0.1.md` (§11 R1 second-source review takes precedence and is honored throughout)
+- SPEC: `docs/archive/specs/SPEC-RULECODE-HOST-PROMOTION-001-v0.1.md` (§11 R1 second-source review takes precedence and is honored throughout)
 - Worktree: `D:\Code\_worktrees\principles\adhoc-20261028-rulecode-host-impl-f03f89` (branch `ai/adhoc-20261028-rulecode-host-impl-f03f89`, base `origin/main` `cca1d47a2`)
 - Scope: engineering implementation + tests + regressions. **Not** a rule approval, not a live promotion, no production governance fact was created or edited.
 

@@ -2,7 +2,7 @@
 
 **日期:** 2026-11-02
 **性质:** 只读架构审查 / SPEC 证伪尝试
-**被审对象:** `docs/specs/SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.1.md`（未跟踪文件，未入库）
+**被审对象:** `docs/archive/specs/SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.1.md`（未跟踪文件，未入库）
 **审查基线:** `main@457bbf0fcd8df85c069b78ce60858acf742fe970`（== `origin/main`，同基线）
 **方法:** 5 个并行子代理沿真实源码调用链调查（OpenClaw 管线 / Codex+WorkBuddy 采集链 / 队列与准入 / 旧机制依赖普查 / 外部宿主源码与运行环境），全部结论要求 文件:行号 证据。
 **证据等级约定:** Static = 源码静态证据；Test = 测试钉住；Runtime = 真实工作区只读检查（`D:\.openclaw\workspace\.pd\`）；Deployment = 安装目录只读检查。无法验证标 UNVERIFIED。
