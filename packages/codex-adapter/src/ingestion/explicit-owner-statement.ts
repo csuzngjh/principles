@@ -125,7 +125,7 @@ export async function recordExplicitOwnerStatement(args: {
   if (outcome === undefined || !('disposition' in outcome)) {
     return { status: 'rejected', reason: 'continuation_failed', nextAction: 'The governance admission returned no disposition; nothing was recorded.' };
   }
-  if (outcome.disposition === 'not_a_signal' || outcome.disposition === 'not_admitted') {
+  if (outcome.disposition === 'not_a_signal') {
     return { status: 'rejected', reason: 'continuation_failed', nextAction: 'reason' in outcome ? String(outcome.reason) : 'the signal was not admitted' };
   }
   if (outcome.disposition === 'rate_limited') {

@@ -25,7 +25,7 @@ import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
-import { handleAfterToolCall, handleSharedPainEvidenceResult, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
+import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
@@ -381,10 +381,6 @@ const plugin = {
         workspaceDir: context.workspaceDir ?? '',
         pluginConfig: api.pluginConfig ?? {},
       }),
-      onAfterToolResult: (event, context, result) => handleSharedPainEvidenceResult(event, {
-        ...context,
-        workspaceDir: context.workspaceDir ?? '',
-      }, result),
     });
 
     // ── Hook: Prompt Building ──

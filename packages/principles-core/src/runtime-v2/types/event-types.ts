@@ -691,7 +691,7 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
    */
   budgetPolicyVersion?: string;
   /** Which fact produced the budget (owner declaration / host window / catalog / legacy fallback). */
-  budgetCapacitySource?: 'operator_declared' | 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+  budgetCapacitySource?: 'operator_declared' | 'host_effective_window' | 'pi_catalog_exact' | 'pi_catalog_model_id' | 'legacy_fallback';
   /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
   budgetCapacityStatus?: 'confirmed' | 'unknown';
   /** The context window the budget was derived from; present only when confirmed. */
@@ -750,6 +750,7 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
     Type.Literal('operator_declared'),
     Type.Literal('host_effective_window'),
     Type.Literal('pi_catalog_exact'),
+    Type.Literal('pi_catalog_model_id'),
     Type.Literal('legacy_fallback'),
   ])),
   budgetCapacityStatus: Type.Optional(Type.Union([Type.Literal('confirmed'), Type.Literal('unknown')])),

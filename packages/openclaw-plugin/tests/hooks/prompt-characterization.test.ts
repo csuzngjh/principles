@@ -13,7 +13,7 @@
  * - GFI < 40 → EFFICIENT attitude
  * - Correction cue detection
  * - Minimal trigger skips project context
- * - Size guard never exceeds 9000 chars
+ * - Size guard never exceeds the derived total ceiling (11000 at the v2 fallback)
  *
  * NOT IN SCOPE (Phase 1+):
  * - Empathy keyword matching (hybrid, needs I/O separation)
@@ -436,8 +436,8 @@ describe('Minimal trigger skips project context', () => {
 
 // ─── Tests: Size Guard ─────────────────────────────────────────────────────
 
-describe('Size guard: never exceeds 9000 chars', () => {
-  it('returns result within MAX_INJECTION_SIZE with empty mocks', async () => {
+describe('Size guard: never exceeds the derived total ceiling (11000)', () => {
+  it('returns result within the derived ceiling with empty mocks', async () => {
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
@@ -448,10 +448,10 @@ describe('Size guard: never exceeds 9000 chars', () => {
       (result?.prependSystemContext?.length ?? 0) +
       (result?.prependContext?.length ?? 0) +
       (result?.appendSystemContext?.length ?? 0);
-    expect(totalSize).toBeLessThanOrEqual(9000);
+    expect(totalSize).toBeLessThanOrEqual(11_000);
   });
 
-  it('size guard strips content to stay under 9000 with large prependContext', async () => {
+  it('size guard strips content to stay under the derived ceiling with large prependContext', async () => {
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
 
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
@@ -494,7 +494,7 @@ describe('Size guard: never exceeds 9000 chars', () => {
       (result?.prependSystemContext?.length ?? 0) +
       (result?.prependContext?.length ?? 0) +
       (result?.appendSystemContext?.length ?? 0);
-    expect(totalSize).toBeLessThanOrEqual(9000);
+    expect(totalSize).toBeLessThanOrEqual(11_000);
   });
 
   it('size guard does not throw — returns defined result even with huge content', async () => {

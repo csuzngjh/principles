@@ -105,7 +105,7 @@ export interface TriggerControllerInput {
 function buildOperatorNote(descriptor: SourceDescriptor | undefined, input: TriggerControllerInput): string {
   const parts: string[] = [];
   if (descriptor) {
-    parts.push(`canUpgrade=${descriptor.canUpgrade}`);
+    parts.push(`kind=${descriptor.kind}`);
   }
   parts.push(`score=${input.score}`);
   if (input.sessionId) {

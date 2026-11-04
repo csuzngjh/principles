@@ -139,6 +139,18 @@ describe('validatePromptInjectionBudgetStatus — PRI-1017 budget observation fi
     expect(v?.budgetObservedAt).toBe('2026-10-21T04:00:00.000Z');
   });
 
+  it('accepts the v0.3 name-only catalog tier in the closed source set', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      budget: 6400,
+      budgetCapacitySource: 'pi_catalog_model_id',
+      budgetCapacityStatus: 'confirmed',
+      budgetContextWindowTokens: 204_800,
+    });
+    expect(v?.budgetCapacitySource).toBe('pi_catalog_model_id');
+    expect(v?.budgetContextWindowTokens).toBe(204_800);
+  });
+
   it('keeps the console-side stale reason code alongside the closed core reason set', () => {
     const stale = validatePromptInjectionBudgetStatus({
       ...baseStatus(),

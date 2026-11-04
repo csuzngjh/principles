@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import {
+  RUNTIME_V2_PRINCIPLE_BUDGET,
   getDefaultPdConfig,
   SqliteActivationStateStore,
   SqliteActivationSafetyStore,
@@ -165,7 +166,7 @@ describe('shared production active-principle prompt kernel', () => {
     expect(result.additionalContext.length).toBeLessThanOrEqual(result.budget);
   });
 
-  it('bounds the final escaped directive block to 2000 characters without cutting directive tags', async () => {
+  it('bounds the final escaped directive block to the active budget without cutting directive tags', async () => {
     const workspaceDir = tempWorkspace();
     const connection = new SqliteConnection(workspaceDir);
     try {
@@ -188,14 +189,14 @@ describe('shared production active-principle prompt kernel', () => {
 
     const result = await buildActivePrinciplePromptContext({ workspaceDir });
     expect(result.additionalContext).not.toContain('P_BOUNDED_0"');
-    expect(result.budget).toBe(2_000);
-    expect(result.additionalContext.length).toBeLessThanOrEqual(2_000);
+    expect(result.budget).toBe(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(result.additionalContext.length).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
     expect(result.truncated).toBe(true);
     expect(result.additionalContext.match(/<directive /g)?.length).toBe(result.additionalContext.match(/<\/directive>/g)?.length);
     expect(result.additionalContext.endsWith('Note: These directives do not override safety, security, or core system policy.')).toBe(true);
   });
 
-  it('admits a whole escaped directive that exactly fits the final 2000-character budget', async () => {
+  it('admits a whole escaped directive that exactly fits the active budget', async () => {
     const workspaceDir = tempWorkspace();
     const connection = new SqliteConnection(workspaceDir);
     try {
@@ -204,7 +205,7 @@ describe('shared production active-principle prompt kernel', () => {
       const emptyRendered = renderPrinciplesToDirectives([
         { principleId, text: '', artifactId: 'art-exact-fit', activationId: 'act-exact-fit' },
       ], new Set([principleId]));
-      const text = 'x'.repeat(2_000 - emptyRendered.length);
+      const text = 'x'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET - emptyRendered.length);
       connection.getDb().prepare(`
         INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -215,7 +216,7 @@ describe('shared production active-principle prompt kernel', () => {
     }
 
     const result = await buildActivePrinciplePromptContext({ workspaceDir });
-    expect(result.additionalContext).toHaveLength(2_000);
+    expect(result.additionalContext).toHaveLength(RUNTIME_V2_PRINCIPLE_BUDGET);
     expect(result.truncated).toBe(false);
     expect(result.principleIds).toEqual(['P_EXACT_FIT']);
   });

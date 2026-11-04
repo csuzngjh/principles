@@ -176,6 +176,7 @@ const BUDGET_CAPACITY_SOURCES: ReadonlySet<string> = new Set([
   'operator_declared',
   'host_effective_window',
   'pi_catalog_exact',
+  'pi_catalog_model_id',
   'legacy_fallback',
 ]);
 
@@ -242,8 +243,9 @@ function narrowObservation(parsed: unknown, workspaceDir: string, nowMs: number)
     // PRI-1020: operator_declared joins the confirmed set — a declared window
     // is a real window (the Owner's explicit cap), so its observations carry
     // the window and the exact formula budget like the other confirmed
-    // sources.
-    if (rawSource !== 'operator_declared' && rawSource !== 'host_effective_window' && rawSource !== 'pi_catalog_exact') return null;
+    // sources. v0.3: pi_catalog_model_id is the weaker name-only catalog tier
+    // (still a real window claim, own source label).
+    if (rawSource !== 'operator_declared' && rawSource !== 'host_effective_window' && rawSource !== 'pi_catalog_exact' && rawSource !== 'pi_catalog_model_id') return null;
     if (!isValidContextWindowTokens(rawWindow)) return null;
     if (budget !== promptBudgetCharsForContextWindow(rawWindow)) return null;
     if (rawReason !== undefined) return null;

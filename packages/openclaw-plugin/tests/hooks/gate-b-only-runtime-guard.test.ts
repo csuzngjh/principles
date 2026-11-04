@@ -1,11 +1,14 @@
 /**
- * PRI-651-B1 — Runtime Gate A fallback removal guard.
+ * PRI-651-B1 / Phase A — runtime admission guard.
  *
- * Regression guard per the PRI-651-A design (docs/audit/pd-gate-a-retirement-design-2026-09.md §R1):
- * no runtime hook may enter Gate A (evaluatePainDiagnosticGate) via the retired
- * feature flags. If Gate A routing is ever resurrected on a hook path, this test
- * fails, preventing silent behavior divergence while Gate A modules are still
- * archived (their deletion is PRI-651-B2, flag retirement PRI-651-B3).
+ * No runtime hook may enter Gate A (evaluatePainDiagnosticGate). Gate B
+ * (TriggerController) is the only admission authority, and in Phase A it is
+ * reached ONLY by Owner-driven paths:
+ *  - pain.ts manual `/pd-pain` / explicit Pain Tool (`handleManualPain`),
+ *  - llm.ts GFI health path (frozen until Phase C).
+ *
+ * Technical failures (after-tool-call-helpers) and RuleHost blocks
+ * (gate-block-helper) MUST NOT consult admission at all.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -45,9 +48,24 @@ describe('PRI-651-B1: runtime hooks are Gate B only (no Gate A fallback selectio
         expect(source).not.toMatch(/pain_evidence_admission/);
       });
 
-      it('relies on the Gate B TriggerController for admission', () => {
-        expect(source).toMatch(/evaluateTriggerController/);
+      it('never invokes admission from the retired automatic paths', () => {
+        if (file === 'gate-block-helper.ts') {
+          expect(source).not.toMatch(/evaluateTriggerController/);
+          expect(source).not.toMatch(/evaluateEvidenceTriage/);
+        }
       });
     });
   }
+
+  it('Owner-driven paths still reach the TriggerController', () => {
+    expect(hookSource('pain.ts')).toMatch(/evaluateTriggerController/);
+    expect(hookSource('llm.ts')).toMatch(/evaluateTriggerController/);
+  });
+
+  it('after-tool-call collection never consults admission (Phase A)', () => {
+    const source = fs.readFileSync(path.join(repoRoot, 'packages/openclaw-plugin/src/hooks/after-tool-call-helpers.ts'), 'utf8');
+    expect(source).not.toMatch(/evaluateTriggerController/);
+    expect(source).not.toMatch(/evaluatePainAdmissionForToolCall/);
+    expect(source).not.toMatch(/emitPainDetectedEvent/);
+  });
 });

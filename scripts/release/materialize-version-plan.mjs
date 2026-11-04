@@ -7,7 +7,9 @@
  *
  *   changeset version          (consume pending changesets, bump versions,
  *                               internal dependency ranges, CHANGELOGs)
- *   component mirror sync      (openclaw.plugin.json <- plugin version)
+ *   component mirror sync      (COMPONENT_MIRRORS declarations: plugin
+ *                               manifest <- plugin version, pd-mcp-server
+ *                               SERVER_VERSION <- package version)
  *   lockfile materialization   (npm install --package-lock-only)
  *
  * PRI-879 verified `changeset version` performs no install, no lifecycle,
@@ -24,8 +26,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readPendingChangesets,
   runChangesetVersion,
-  syncMcpServerVersionMirror,
-  syncPluginVersionMirror,
+  syncComponentVersionMirrors,
 } from './lib/version-plan.mjs';
 
 function argValue(flag) {
@@ -54,12 +55,10 @@ if (versionRun.status !== 0) {
   process.exit(versionRun.status ?? 1);
 }
 
-if (syncPluginVersionMirror(repoRoot)) {
-  console.log('Synced component mirror: packages/openclaw-plugin/openclaw.plugin.json');
-}
-
-if (syncMcpServerVersionMirror(repoRoot)) {
-  console.log('Synced component mirror: packages/pd-mcp-server/src/version.ts');
+// Component mirror sync — driven by the COMPONENT_MIRRORS declarations, so
+// the Version-PR allowlist and the reproduction read the same authority.
+for (const target of syncComponentVersionMirrors(repoRoot)) {
+  console.log(`Synced component mirror: ${target}`);
 }
 
 // Lockfile materialization (SPEC §13). npm is npm.cmd on Windows, and

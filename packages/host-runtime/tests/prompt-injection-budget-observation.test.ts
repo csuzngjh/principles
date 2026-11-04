@@ -74,7 +74,7 @@ function baseData(extra: Record<string, unknown> = {}): Record<string, unknown> 
     principleIds: ['p1'],
     injectedCount: 1,
     injectedCharCount: 480,
-    budget: 2000,
+    budget: 4000,
     ...extra,
   };
 }
@@ -93,11 +93,11 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.note).toContain('UNKNOWN');
   });
 
-  it('a trusted 256K host-window event yields the 4000-char observation with full provenance', () => {
+  it('a trusted 256K host-window event yields the 8000-char observation with full provenance', () => {
     const dir = workspaceWith({
       hostKind: 'openclaw',
       eventId: 'evt-1',
-      budget: 4000,
+      budget: 8000,
       budgetCapacitySource: 'host_effective_window',
       budgetCapacityStatus: 'confirmed',
       budgetContextWindowTokens: 256_000,
@@ -109,7 +109,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(observation).toMatchObject({
       workspaceDir: dir,
       hostKind: 'openclaw',
-      budgetChars: 4000,
+      budgetChars: 8000,
       capacitySource: 'host_effective_window',
       capacityStatus: 'confirmed',
       contextWindowTokens: 256_000,
@@ -122,7 +122,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
   it('a fallback event keeps its bounded reason (the runtime itself fell back — traceable)', () => {
     const dir = workspaceWith({
       hostKind: 'codex',
-      budget: 2000,
+      budget: 4000,
       budgetCapacitySource: 'legacy_fallback',
       budgetCapacityStatus: 'unknown',
       budgetFallbackReason: 'host_capacity_absent',
@@ -130,7 +130,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     });
     const [observation] = readRuntimePromptBudgetObservations({ workspaceDir: dir }).observations;
     expect(observation).toMatchObject({
-      budgetChars: 2000,
+      budgetChars: 4000,
       capacitySource: 'legacy_fallback',
       capacityStatus: 'unknown',
       fallbackReason: 'host_capacity_absent',
@@ -144,29 +144,29 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
       injectedEvent({ ts: '2026-10-20T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 1250, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 32_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ ts: '2026-10-21T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ ts: '2026-10-21T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const [observation] = readRuntimePromptBudgetObservations({ workspaceDir: dir }).observations;
-    expect(observation?.budgetChars).toBe(4000);
+    expect(observation?.budgetChars).toBe(8000);
     expect(observation?.observedAt).toBe('2026-10-21T04:00:00.000Z');
   });
 
   it('observations are host-bucketed: OpenClaw’s window is never Codex’s fact', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 2000, budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown', budgetFallbackReason: 'model_identity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4000, budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown', budgetFallbackReason: 'model_identity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const byHost = new Map(readRuntimePromptBudgetObservations({ workspaceDir: dir }).observations.map((o) => [o.hostKind, o]));
-    expect(byHost.get('openclaw')?.budgetChars).toBe(4000);
-    expect(byHost.get('codex')?.budgetChars).toBe(2000);
+    expect(byHost.get('openclaw')?.budgetChars).toBe(8000);
+    expect(byHost.get('codex')?.budgetChars).toBe(4000);
     expect(byHost.get('codex')?.fallbackReason).toBe('model_identity_absent');
   });
 
   it('events bound to another workspace are not this workspace’s fact', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: '/some/other/workspace', hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: '/some/other/workspace', hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toEqual([]);
@@ -176,11 +176,11 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
   it('workspace binding tolerates separator/trailing-slash variance (path.resolve, like the console CLI)', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: `${dir}${path.sep}`, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: `${dir}${path.sep}`, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toHaveLength(1);
-    expect(report.observations[0]?.budgetChars).toBe(4000);
+    expect(report.observations[0]?.budgetChars).toBe(8000);
   });
 
   it('pre-policy events (no provenance fields) are skipped and counted, never reinterpreted', () => {
@@ -220,10 +220,10 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.legacyEventsSkipped).toBe(1);
   });
 
-  it('a budget that does not match the shared formula is incoherent and dropped (budget === floor(2000*W/128000) clamped)', () => {
+  it('a budget that does not match the shared formula is incoherent and dropped (budget === floor(4000*W/128000) clamped)', () => {
     const dir = workspaceWith({
       hostKind: 'openclaw',
-      budget: 2000,
+      budget: 4000,
       budgetCapacitySource: 'host_effective_window',
       budgetCapacityStatus: 'confirmed',
       budgetContextWindowTokens: 256_000,
@@ -266,27 +266,27 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
   it('a future timestamp beyond clock skew is dropped and does not shadow a valid older observation', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ ts: '2026-10-21T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ ts: '2026-10-21T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
       injectedEvent({ ts: '2099-01-01T00:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 1250, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 32_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir, now: new Date('2026-10-21T12:00:00.000Z') });
     expect(report.observations).toHaveLength(1);
     expect(report.observations[0]?.observedAt).toBe('2026-10-21T04:00:00.000Z');
-    expect(report.observations[0]?.budgetChars).toBe(4000);
+    expect(report.observations[0]?.budgetChars).toBe(8000);
     expect(report.legacyEventsSkipped).toBe(1);
   });
 
   it('the min and max clamp boundaries are accepted exactly as the shared formula computes them', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      // 32K → floor(2000*32000/128000)=500 → clamped to the 1250 floor.
+      // 32K → floor(4000*32000/128000)=1000 → clamped to the 1250 floor.
       injectedEvent({ ts: '2026-10-21T01:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 1250, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 32_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
-      // 1M → 15625, below the 16000 ceiling.
-      injectedEvent({ ts: '2026-10-21T02:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 15_625, budgetCapacitySource: 'pi_catalog_exact', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 1_000_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      // 1M → 31250, below the 32000 ceiling.
+      injectedEvent({ ts: '2026-10-21T02:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 31_250, budgetCapacitySource: 'pi_catalog_exact', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 1_000_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const byHost = new Map(readRuntimePromptBudgetObservations({ workspaceDir: dir, now: new Date('2026-10-21T12:00:00.000Z') }).observations.map((o) => [o.hostKind, o]));
     expect(byHost.get('openclaw')?.budgetChars).toBe(1250);
-    expect(byHost.get('codex')?.budgetChars).toBe(15_625);
+    expect(byHost.get('codex')?.budgetChars).toBe(31_250);
   });
 
   it('on Windows the workspace binding is case-insensitive, like the OS path semantics', () => {
@@ -296,7 +296,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     // Only meaningful when the temp path actually contains letters to flip.
     if (upper === dir) return;
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: upper, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: upper, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toHaveLength(1);
@@ -314,7 +314,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
       // implausible window
       injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 7, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
       // unknown host bucket
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'gemini', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'gemini', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toEqual([]);
@@ -324,15 +324,15 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
   it('PRI-1020: an operator_declared observation is a confirmed fact (declared window + exact formula budget)', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.pd/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4096, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 8192, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toHaveLength(1);
-    expect(report.observations[0]?.budgetChars).toBe(4096);
+    expect(report.observations[0]?.budgetChars).toBe(8192);
     expect(report.observations[0]?.capacitySource).toBe('operator_declared');
     const resolution = runtimeBudgetObservationToResolution(report.observations[0]!);
     expect(resolution).toMatchObject({
-      budgetChars: 4096,
+      budgetChars: 8192,
       capacitySource: 'operator_declared',
       capacityStatus: 'confirmed',
       contextWindowTokens: 262_144,
@@ -345,9 +345,9 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
       // declared source but the budget is NOT what the formula derives
       injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 2000, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
       // declared source claiming unknown status (unknown belongs to legacy_fallback only)
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4096, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'unknown', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 8192, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'unknown', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
       // declared source carrying a fallback reason (confirmed sources never do)
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4096, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetFallbackReason: 'host_capacity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 8192, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetFallbackReason: 'host_capacity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toEqual([]);
@@ -359,7 +359,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     fs.mkdirSync(path.join(dir, '.state', 'logs'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.state', 'logs', 'events_2026-10-21.jsonl'), [
       '{not json',
-      JSON.stringify(injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } })),
+      JSON.stringify(injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } })),
     ].join('\n') + '\n', 'utf8');
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.parseFailures).toBe(1);
@@ -370,17 +370,17 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     const dir = tempWorkspace();
     // Legacy convention: .state/logs (v1 EventLog writer).
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     // Newer convention: .pd/logs.
     writeEvents(dir, '.pd/logs', '2026-10-21', [
-      injectedEvent({ ts: '2026-10-21T05:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 3125, budgetCapacitySource: 'pi_catalog_exact', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 200_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ ts: '2026-10-21T05:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 6250, budgetCapacitySource: 'pi_catalog_exact', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 200_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS).toEqual(['.pd/logs', '.state/logs']);
     // Latest across both directories wins.
     expect(report.observations).toHaveLength(1);
-    expect(report.observations[0]?.budgetChars).toBe(3125);
+    expect(report.observations[0]?.budgetChars).toBe(6250);
     expect(report.filesRead.length).toBe(2);
   });
 
@@ -402,12 +402,12 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     });
     // Both conventions carry 9 daily files — more than the cap.
     for (const date of dates) {
-      writeEvents(dir, '.pd/logs', date, [event('codex', `${date}T04:00:00.000Z`, 4000, 256_000)]);
-      writeEvents(dir, '.state/logs', date, [event('openclaw', `${date}T05:00:00.000Z`, 3125, 200_000)]);
+      writeEvents(dir, '.pd/logs', date, [event('codex', `${date}T04:00:00.000Z`, 8000, 256_000)]);
+      writeEvents(dir, '.state/logs', date, [event('openclaw', `${date}T05:00:00.000Z`, 6250, 200_000)]);
     }
     // A workbuddy observation that exists ONLY in the oldest file of the first
     // directory: beyond the per-directory cap, so it must be dropped.
-    writeEvents(dir, '.pd/logs', '2026-10-01', [event('workbuddy', '2026-10-01T04:30:00.000Z', 4000, 256_000)]);
+    writeEvents(dir, '.pd/logs', '2026-10-01', [event('workbuddy', '2026-10-01T04:30:00.000Z', 8000, 256_000)]);
 
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir, now: new Date('2026-10-09T12:00:00.000Z') });
     const expectedTotal = RUNTIME_BUDGET_OBSERVATION_MAX_FILES * RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS.length;
@@ -417,7 +417,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.filesRead).toHaveLength(expectedTotal);
     const hosts = report.observations.map((observation) => observation.hostKind).sort();
     expect(hosts).toEqual(['codex', 'openclaw']);
-    expect(report.observations.find((observation) => observation.hostKind === 'openclaw')?.budgetChars).toBe(3125);
+    expect(report.observations.find((observation) => observation.hostKind === 'openclaw')?.budgetChars).toBe(6250);
   });
 
   it('an in-logs symlink cannot redirect the read outside the workspace log root', () => {
@@ -426,7 +426,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     // The outside file claims THIS workspace, so if containment were broken
     // the observation would be accepted — a real negative control.
     writeEvents(outside, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     fs.mkdirSync(path.join(dir, '.state', 'logs'), { recursive: true });
     try {
@@ -460,7 +460,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
         ...baseData(),
         workspaceDir: dir,
         hostKind: 'openclaw',
-        budget: 4000,
+        budget: 8000,
         budgetCapacitySource: 'host_effective_window',
         budgetCapacityStatus: 'confirmed',
         budgetContextWindowTokens: 256_000,
@@ -473,7 +473,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.parseFailures).toBe(0);
     expect(report.lines).toBeLessThan(fillerCount);
     expect(report.observations).toHaveLength(1);
-    expect(report.observations[0]).toMatchObject({ hostKind: 'openclaw', budgetChars: 4000 });
+    expect(report.observations[0]).toMatchObject({ hostKind: 'openclaw', budgetChars: 8000 });
   });
 
   it('an observation only present in the skipped prefix is NOT resurrected — absence stays UNKNOWN', () => {
@@ -487,7 +487,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
         ...baseData(),
         workspaceDir: dir,
         hostKind: 'openclaw',
-        budget: 4000,
+        budget: 8000,
         budgetCapacitySource: 'host_effective_window',
         budgetCapacityStatus: 'confirmed',
         budgetContextWindowTokens: 256_000,
@@ -510,7 +510,7 @@ describe('PRI-1017: selectRuntimeBudgetObservation (freshness)', () => {
   const fresh = {
     workspaceDir: 'ws-a',
     hostKind: 'openclaw' as const,
-    budgetChars: 4000,
+    budgetChars: 8000,
     capacitySource: 'host_effective_window' as const,
     capacityStatus: 'confirmed' as const,
     contextWindowTokens: 256_000,
@@ -549,17 +549,17 @@ describe('PRI-1017: selectConsoleRuntimeBudgetFacts', () => {
   it('selected/stale/per-host split for a target host', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
-      injectedEvent({ ts: '2026-10-18T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 2000, budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown', budgetFallbackReason: 'host_capacity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ ts: '2026-10-18T04:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4000, budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown', budgetFallbackReason: 'host_capacity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const openclawFacts = selectConsoleRuntimeBudgetFacts({ workspaceDir: dir, targetHost: 'openclaw', now });
-    expect(openclawFacts.selected?.budgetChars).toBe(4000);
+    expect(openclawFacts.selected?.budgetChars).toBe(8000);
     expect(openclawFacts.stale).toBeUndefined();
     expect([...openclawFacts.perHost.keys()]).toEqual(['openclaw']);
 
     const codexFacts = selectConsoleRuntimeBudgetFacts({ workspaceDir: dir, targetHost: 'codex', now });
     expect(codexFacts.selected).toBeUndefined();
-    expect(codexFacts.stale?.budgetChars).toBe(2000);
+    expect(codexFacts.stale?.budgetChars).toBe(4000);
     // A stale codex observation is NOT a per-host budget basis either.
     expect(codexFacts.perHost.has('codex')).toBe(false);
   });
@@ -567,7 +567,7 @@ describe('PRI-1017: selectConsoleRuntimeBudgetFacts', () => {
   it('no target host → per-host bases only; never a single selected fact', () => {
     const dir = tempWorkspace();
     writeEvents(dir, '.state/logs', '2026-10-21', [
-      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 8000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 256_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const facts = selectConsoleRuntimeBudgetFacts({ workspaceDir: dir, now });
     expect(facts.selected).toBeUndefined();
@@ -581,7 +581,7 @@ describe('PRI-1017: runtimeBudgetObservationToResolution', () => {
     const resolution = runtimeBudgetObservationToResolution({
       workspaceDir: 'ws-a',
       hostKind: 'openclaw',
-      budgetChars: 4000,
+      budgetChars: 8000,
       capacitySource: 'host_effective_window',
       capacityStatus: 'confirmed',
       contextWindowTokens: 256_000,
@@ -590,7 +590,7 @@ describe('PRI-1017: runtimeBudgetObservationToResolution', () => {
       observedAt: '2026-10-21T04:00:00.000Z',
     });
     expect(resolution).toEqual({
-      budgetChars: 4000,
+      budgetChars: 8000,
       capacitySource: 'host_effective_window',
       capacityStatus: 'confirmed',
       contextWindowTokens: 256_000,
@@ -603,7 +603,7 @@ describe('PRI-1017: runtimeBudgetObservationToResolution', () => {
     const resolution = runtimeBudgetObservationToResolution({
       workspaceDir: 'ws-a',
       hostKind: 'codex',
-      budgetChars: 2000,
+      budgetChars: 4000,
       capacitySource: 'legacy_fallback',
       capacityStatus: 'unknown',
       contextWindowTokens: null,
@@ -612,6 +612,6 @@ describe('PRI-1017: runtimeBudgetObservationToResolution', () => {
       observedAt: '2026-10-21T04:00:00.000Z',
     });
     expect(resolution.fallbackReason).toBe('catalog_ambiguous_model_id');
-    expect(resolution.budgetChars).toBe(2000);
+    expect(resolution.budgetChars).toBe(4000);
   });
 });

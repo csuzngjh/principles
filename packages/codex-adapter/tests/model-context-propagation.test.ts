@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { decodeCodexInput } from '../src/codec/index.js';
-import { getPromptModelCatalog, resolvePromptBudget } from '@principles/core/runtime-v2';
+import { getPromptModelCatalog, promptBudgetCharsForContextWindow, resolvePromptBudget } from '@principles/core/runtime-v2';
 
 /**
  * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §5.2 (Codex): the decoder keeps the
@@ -54,12 +54,12 @@ describe('Codex decoder carries model identity for the model-aware budget', () =
       modelIdentity: { modelId: event.context.modelContext?.modelId },
       catalog: getPromptModelCatalog(),
     });
-    expect(resolution.budgetChars).toBe(2000);
+    expect(resolution.budgetChars).toBe(4000);
     expect(resolution.capacitySource).toBe('legacy_fallback');
     expect(resolution.fallbackReason).toBe('catalog_ambiguous_model_id');
   });
 
-  it('v0.2 trust amendment: even a catalog-unanimous model id without a provider falls back (custom-endpoint risk)', () => {
+  it('v0.3 derivation: a catalog-unanimous model id without a provider uses the derived window (own source label)', () => {
     const payload = fixture('02-user-prompt-submit.json') as Record<string, unknown>;
     payload.model = 'glm-4.7';
     const event = decodeCodexInput(payload);
@@ -67,12 +67,15 @@ describe('Codex decoder carries model identity for the model-aware budget', () =
       modelIdentity: { modelId: event.context.modelContext?.modelId },
       catalog: getPromptModelCatalog(),
     });
-    // glm-4.7 exists only under provider zai (contextWindow 204800), but the
-    // Codex hook contract carries NO provider identity — a name-only match
-    // cannot prove the deployment is not a custom endpoint, so the budget
-    // stays the honest fixed fallback (never a guessed dynamic capacity).
-    expect(resolution.capacitySource).toBe('legacy_fallback');
-    expect(resolution.fallbackReason).toBe('catalog_provider_absent');
-    expect(resolution.budgetChars).toBe(2000);
+    // glm-4.7 exists only under provider zai (contextWindow 204800). The Codex
+    // hook contract carries NO provider identity, so this is the weaker
+    // `pi_catalog_model_id` tier: the catalog has exactly one answer, the
+    // source label records the weaker basis, and the Owner's tier-0
+    // declaration remains the override for a custom endpoint.
+    expect(resolution.capacitySource).toBe('pi_catalog_model_id');
+    expect(resolution.capacityStatus).toBe('confirmed');
+    expect(resolution.contextWindowTokens).toBe(204800);
+    expect(resolution.budgetChars).toBe(promptBudgetCharsForContextWindow(204800));
+    expect(resolution.fallbackReason).toBeUndefined();
   });
 });

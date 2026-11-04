@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
-  admitBareHostPains,
   admitGovernanceSignals,
   buildSharedSeedKeywordStore,
   createSharedCorrectionKeywordStore,
@@ -14,10 +13,9 @@ import {
   GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
   reconcileGovernanceContinuation,
   type GovernanceCorrectionCandidate,
-  type GovernanceToolFailureCandidate,
 } from '../src/governance-signal-admission.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
-import { createProductionPainEvidenceHandler, deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
+import { deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
 import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
 
 /**
@@ -101,25 +99,6 @@ function correction(overrides: Partial<GovernanceCorrectionCandidate> = {}): Gov
   };
 }
 
-function toolFailure(overrides: Partial<GovernanceToolFailureCandidate> = {}): GovernanceToolFailureCandidate {
-  return {
-    kind: 'tool_failure',
-    hostKind: 'codex',
-    logicalObservationKey: 'codex|rollout-1|exec-tool-1',
-    rolloutIdentity: 'rollout-1',
-    rootSessionId: 'root-session-1',
-    hostTurnId: 'turn-1',
-    toolName: 'write_file',
-    source: 'codex:post_tool_use',
-    // Absolute path outside the workspace → risky high-score tool failure,
-    // the triage rule that reaches 'admit' (mirrors the handler's fixture).
-    toolInput: { file_path: path.join(path.parse(workspaceDir).root, 'etc', 'passwd'), content: 'x' },
-    toolOutput: { exitCode: 1, error: 'EACCES: permission denied' },
-    observedAt: NOW.toISOString(),
-    ...overrides,
-  };
-}
-
 /**
  * Production precondition: Codex admission only receives a correction after
  * ingestion has persisted the triggering user observation. Seed the same
@@ -156,7 +135,7 @@ function seedCodexEvidence(candidate: GovernanceCorrectionCandidate): void {
   seededObservationKeys.add(candidate.logicalObservationKey);
 }
 
-function admit(candidates: readonly (GovernanceCorrectionCandidate | GovernanceToolFailureCandidate)[], now: Date = NOW) {
+function admit(candidates: readonly GovernanceCorrectionCandidate[], now: Date = NOW) {
   for (const candidate of candidates) {
     if (candidate.kind === 'user_correction') seedCodexEvidence(candidate);
   }
@@ -165,7 +144,7 @@ function admit(candidates: readonly (GovernanceCorrectionCandidate | GovernanceT
 
 /** Same production precondition, but with an explicit keyword store (rule-version tests). */
 function admitDirect(
-  candidates: readonly (GovernanceCorrectionCandidate | GovernanceToolFailureCandidate)[],
+  candidates: readonly GovernanceCorrectionCandidate[],
   keywordStore?: ReturnType<typeof buildSharedSeedKeywordStore>,
   now: Date = NOW,
 ) {
@@ -663,137 +642,6 @@ describe('persisted STRONG rate-limit bucket (SPEC §12 / ADR-0020 §11.3)', () 
   });
 });
 
-describe('tool failure admission (SPEC §10/§12)', () => {
-  it('derives the SAME canonical pain id as the live production handler (identity parity)', async () => {
-    const candidate = toolFailure();
-    const result = admit([candidate]);
-    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
-
-    const handler = createProductionPainEvidenceHandler();
-    const hostEvent = {
-      kind: 'after_tool_call',
-      context: {
-        workspaceDir,
-        sessionId: candidate.rootSessionId,
-        turnId: candidate.hostTurnId,
-        toolName: candidate.toolName,
-        toolInput: candidate.toolInput,
-        toolOutput: candidate.toolOutput,
-      },
-      rawPayload: {},
-      source: candidate.source,
-    } as never;
-    const handled = await handler(hostEvent);
-    const handlerPainId = (handled.metadata as { painId?: string | null }).painId;
-    const admittedPainId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
-    expect(handlerPainId).toBe(admittedPainId);
-    // And exactly one pain row exists: the handler found the admission's
-    // tool_calls row and no-oped (duplicate probe).
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 1 });
-  });
-
-  it('I1 identity parity holds with a host call id: same call_id converges, distinct call_id is a new event', async () => {
-    const candidate = toolFailure({ toolCallId: 'toolu_par_1' });
-    const result = admit([candidate]);
-    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
-
-    // Same call id on the live handler → the same canonical pain, and the
-    // handler's duplicate probe no-ops on the admission's tool_calls row.
-    const handler = createProductionPainEvidenceHandler();
-    const hostEventFor = (toolCallId: string) => ({
-      kind: 'after_tool_call',
-      context: {
-        workspaceDir,
-        sessionId: candidate.rootSessionId,
-        turnId: candidate.hostTurnId,
-        toolName: candidate.toolName,
-        toolCallId,
-        toolInput: candidate.toolInput,
-        toolOutput: candidate.toolOutput,
-      },
-      rawPayload: {},
-      source: candidate.source,
-    } as never);
-    const handled = await handler(hostEventFor('toolu_par_1'));
-    const handlerPainId = (handled.metadata as { painId?: string | null }).painId;
-    const admittedPainId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
-    expect(handlerPainId).toBe(admittedPainId);
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 1 });
-
-    // A DIFFERENT real call (distinct tool_use_id, identical content) is a new
-    // event: its own evidence row, its own identity (the handler does not
-    // merge it into the first call's pain).
-    const second = await handler(hostEventFor('toolu_par_2'));
-    expect((second.metadata as { duplicate?: boolean }).duplicate).toBe(false);
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 2 });
-    const distinctPains = withTrajectory((db) => db.prepare('SELECT COUNT(DISTINCT canonical_pain_id) AS n FROM pain_events').get()) as { n: number };
-    expect(distinctPains.n).toBeGreaterThanOrEqual(1);
-  });
-
-  it('records only a supplied absolute host project cwd on a newly admitted live tool call', () => {
-    const result = admit([toolFailure({ projectDir: workspaceDir, toolUseId: 'exec-tool-1' })]);
-    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
-    expect(withTrajectory((db) => db.prepare('SELECT project_dir FROM tool_calls WHERE tool_use_id = ?').get('exec-tool-1')))
-      .toEqual({ project_dir: path.resolve(workspaceDir) });
-  });
-
-  it('rejects successful calls and non-write tools (conservative gate)', () => {
-    const success = admit([toolFailure({ toolOutput: { exitCode: 0 } })]);
-    expect(success.outcomes?.[0]).toMatchObject({ disposition: 'not_admitted' });
-    const nonWrite = admit([toolFailure({ toolName: 'shell' })]);
-    expect(nonWrite.outcomes?.[0]).toMatchObject({ disposition: 'not_admitted' });
-    expect(withTrajectory((db) => {
-      return {
-        pains: db.prepare('SELECT COUNT(*) AS n FROM pain_events').get(),
-        markers: db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get(),
-      };
-    })).toEqual({ pains: { n: 0 }, markers: { n: 0 } });
-  });
-
-  it('replay of the same tool call never creates a second pain or tool_calls row', () => {
-    admit([toolFailure()]);
-    const replay = admit([toolFailure()]);
-    expect(replay.outcomes?.[0]).toMatchObject({ disposition: 'already_admitted' });
-    expect(withTrajectory((db) => {
-      return {
-        pains: db.prepare('SELECT COUNT(*) AS n FROM pain_events').get(),
-        calls: db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get(),
-      };
-    })).toEqual({ pains: { n: 1 }, calls: { n: 1 } });
-  });
-
-  it('transcript-only tool facts without a risky path stay evidence-only (conservative), and marker loss still converges', () => {
-    // Transcript CommandExecution facts carry a command ARRAY (no file_path):
-    // no risk signal → triage keeps evidence_only → no pain. Conservative by
-    // design (SPEC §22 少而准): live delivery or a risky path admits.
-    const commandArrayFacts = toolFailure({
-      toolInput: ['node', '--check', 'missing-file.mjs'],
-      toolOutput: { exitCode: 2, stdout: null, stderr: 'node: cannot find module' },
-    });
-    expect(admit([commandArrayFacts]).outcomes?.[0]).toMatchObject({ disposition: 'not_admitted' });
-
-    // With risky params (what the live payload carries), admission succeeds
-    // and stays deterministic even if the marker write is lost.
-    const risky = toolFailure({
-      logicalObservationKey: 'codex|rollout-1|exec-tool-9',
-      toolOutput: { exitCode: 2, error: 'ENOENT: no such file' },
-    });
-    const first = admit([risky]);
-    const painId = (first.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
-    expect(painId).toMatch(/^pain_host_[0-9a-f]{64}$/);
-    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
-    try {
-      wdb.prepare('DELETE FROM governance_signal_admissions').run();
-    } finally {
-      wdb.close();
-    }
-    const replay = admit([risky]);
-    expect((replay.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId).toBe(painId);
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
-  });
-});
-
 describe('diagnostician continuation (SPEC §13)', () => {
   it('creates exactly one pending diagnostician task per admitted pain and is idempotent on retry', async () => {
     const result = admit([correction()]);
@@ -1288,17 +1136,12 @@ describe('P1-3 correction occurrence identity (SPEC §10)', () => {
 });
 
 describe('PRI-640 host attribution (codex pain_events.host_kind)', () => {
-  it('admitted correction and tool-failure pains carry host_kind=codex (SPEC §12)', () => {
+  it('admitted correction pains carry host_kind=codex (SPEC §12)', () => {
     const corrected = admit([correction()]);
     expect(corrected.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
     const correctionPainId = (corrected.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
     expect(String(correctionPainId)).toMatch(/^pain_host_/);
     expect(withTrajectory((db) => db.prepare('SELECT host_kind FROM pain_events WHERE canonical_pain_id = ?').get(String(correctionPainId)))).toEqual({ host_kind: 'codex' });
-
-    const tooled = admit([toolFailure()]);
-    expect(tooled.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
-    const toolPainId = (tooled.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId;
-    expect(withTrajectory((db) => db.prepare('SELECT host_kind FROM pain_events WHERE canonical_pain_id = ?').get(String(toolPainId)))).toEqual({ host_kind: 'codex' });
   });
 
   it('live + transcript replay stays ONE pain with host_kind=codex (SPEC §15)', () => {
@@ -1345,185 +1188,42 @@ describe('PRI-640 host attribution (codex pain_events.host_kind)', () => {
   });
 });
 
-// ─── Bare WorkBuddy pain admission (review R2/P1, 2026-10-13) ────────────────
+// ─── Phase A: bare host pains stay evidence-only ─────────────────────────────
 
 /**
- * The WorkBuddy hook writes bare pain rows (host_kind='workbuddy',
- * runtime_task_id NULL, canonical_pain_id set) through the shared production
- * pain handler, but no Codex-style inline admission exists on that host —
- * the worker must be able to admit these bare pains into the ONE existing
- * governance admission table. Policy: only failures at/above the Codex
- * tool_failure admission floor (70, GOVERNANCE_STRONG_PAIN_SCORE) are queued;
- * lower-scored failures stay evidence-only in pain_events/tool_calls.
+ * Phase A retired `admitBareHostPains`. A WorkBuddy tool failure is recorded as
+ * trajectory evidence (tool_calls + pain_events rows written by the previous
+ * handler generation), but it must never be swept into an admission marker or a
+ * diagnostician task: technical failures are not Owner behavioral deviation.
  */
-describe('bare WorkBuddy pain admission (R2/P1)', () => {
-  let barePainSeq = 0;
-
-  function fieldOf(row: Record<string, unknown>, key: string): unknown {
-    return Object.hasOwn(row, key) ? row[key] : undefined;
-  }
-
-  /** Seed one bare workbuddy pain row exactly as the shared production handler writes it. */
-  function seedBarePain(overrides: {
-    canonicalPainId?: string;
-    sessionId?: string;
-    source?: string;
-    score?: number;
-    reason?: string | null;
-    runtimeTaskId?: string;
-  } = {}): string {
-    barePainSeq += 1;
-    const painId = overrides.canonicalPainId ?? `pain_host_wbbare${barePainSeq.toString().padStart(58, '0')}`;
+describe('bare WorkBuddy pains are evidence-only in Phase A', () => {
+  function seedBarePain(painId: string): void {
     const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
     try {
       db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
-        VALUES (?, ?, ?, ?, ?, 'system_infer', NULL, NULL, ?, ?, 'workbuddy', ?)`)
-        .run(
-          overrides.sessionId ?? 'wb-session-1',
-          overrides.source ?? 'tool_failure',
-          overrides.score ?? 90,
-          overrides.reason === undefined ? `tool=Write; error=EACCES: permission denied; path=unknown` : overrides.reason,
-          (overrides.score ?? 90) >= 70 ? 'severe' : 'moderate',
-          painId,
-          overrides.runtimeTaskId ?? null,
-          NOW.toISOString(),
-        );
+        VALUES ('wb-session-1', 'tool_failure', 90, 'tool=Write; error=EACCES', 'severe', 'system_infer', NULL, NULL, ?, NULL, 'workbuddy', ?)`)
+        .run(painId, NOW.toISOString());
     } finally {
       db.close();
     }
-    return painId;
   }
 
-  it('admits a high-score bare pain: one marker + one diagnostician task with a workbuddy payload', async () => {
-    const painId = seedBarePain();
-    const result = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    expect(result).toMatchObject({ ok: true, admitted: 1, ensured: 1, skippedLowScore: 0, skippedInvalid: 0 });
+  it('reconcile never promotes a bare pain into a marker or a diagnostician task', async () => {
+    seedBarePain('pain_host_wbbare1');
 
-    const marker = withTrajectory((db) => db.prepare('SELECT * FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(painId)) as Record<string, unknown> | undefined;
-    expect(marker).toBeDefined();
-    expect(marker && {
-      host_kind: fieldOf(marker, 'host_kind'),
-      logical_observation_key: fieldOf(marker, 'logical_observation_key'),
-      rollout_identity: fieldOf(marker, 'rollout_identity'),
-      root_session_id: fieldOf(marker, 'root_session_id'),
-      signal_kind: fieldOf(marker, 'signal_kind'),
-      decision: fieldOf(marker, 'decision'),
-    }).toEqual({
-      host_kind: 'workbuddy',
-      logical_observation_key: `workbuddy|wb-session-1|${painId}`,
-      rollout_identity: 'wb-session-1',
-      root_session_id: 'wb-session-1',
-      signal_kind: 'tool_failure',
-      decision: 'admitted',
-    });
-    // The payload is the SAME shape as the Codex tool_failure payload, with the
-    // workbuddy attribution and the pain's own facts (tool from the reason,
-    // pain score) — the Diagnostician must see the real host.
-    const payload = JSON.parse(String(fieldOf(marker, 'task_payload_json'))) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      painType: 'tool_failure',
-      source: 'Write',
-      score: 90,
-      sessionId: 'wb-session-1',
-      hostKind: 'workbuddy',
-    });
-
-    // Exactly one pending diagnostician task, and the diagnostician sees
-    // hostKind 'workbuddy' (never the hardcoded codex attribution).
-    const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
-    try {
-      const tasks = state.prepare("SELECT task_id, status, diagnostic_json FROM tasks WHERE task_kind = 'diagnostician'").all() as { task_id: string; status: string; diagnostic_json: string }[];
-      expect(tasks).toHaveLength(1);
-      expect(tasks[0]?.task_id).toBe(`diagnosis_${painId}`);
-      expect(tasks[0]?.status).toBe('pending');
-      const diagnosticJson = JSON.parse(tasks[0]?.diagnostic_json ?? '{}') as Record<string, unknown>;
-      expect(diagnosticJson.hostKind).toBe('workbuddy');
-      expect(diagnosticJson.source).toBe('Write');
-      // buildDiagnosticJson projects the pain score as severity (one projection
-      // for every host); the raw score lives on the marker's task_payload_json.
-      expect(diagnosticJson.severity).toBe('severe');
-    } finally {
-      state.close();
-    }
-  });
-
-  it('low-score bare failures stay evidence-only (below the tool_failure admission floor, never queued)', async () => {
-    seedBarePain({ canonicalPainId: 'pain_host_wblow0', score: 40 });
-    const result = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    expect(result).toMatchObject({ ok: true, admitted: 0, ensured: 0, skippedLowScore: 1 });
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 0 });
-    // The evidence row itself is untouched — evidence-only means evidence kept.
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
-  });
-
-  it('re-admitting the same bare pain is a no-op: one marker, one task (idempotent sweeps)', async () => {
-    const painId = seedBarePain();
-    const first = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    expect(first).toMatchObject({ ok: true, admitted: 1, ensured: 1 });
-    const second = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    expect(second).toMatchObject({ ok: true, admitted: 0, ensured: 0 });
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 1 });
-    const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
-    try {
-      expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
-    } finally {
-      state.close();
-    }
-    void painId;
-  });
-
-  it('bounded limit admits the OLDEST bare pains first; the rest wait for the next pass', async () => {
-    const first = seedBarePain({ canonicalPainId: 'pain_host_wblimit1' });
-    seedBarePain({ canonicalPainId: 'pain_host_wblimit2' });
-    const result = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', limit: 1, now: NOW });
-    expect(result).toMatchObject({ ok: true, admitted: 1, ensured: 1 });
-    expect(withTrajectory((db) => db.prepare('SELECT canonical_pain_id FROM governance_signal_admissions').get()))
-      .toEqual({ canonical_pain_id: first });
-    const secondPass = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', limit: 1, now: NOW });
-    expect(secondPass).toMatchObject({ ok: true, admitted: 1 });
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 2 });
-  });
-
-  it('malformed bare rows are counted and skipped, never silently dropped (rc-3)', async () => {
-    seedBarePain({ canonicalPainId: 'pain_host_wbbad1', sessionId: '' });
-    const result = await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    expect(result).toMatchObject({ ok: true, admitted: 0, ensured: 0, skippedInvalid: 1 });
-    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 0 });
-  });
-
-  it('reconcile leaves workbuddy markers healthy: no codex promotion substrate, no rollout degradation', async () => {
-    // R2 follow-on: a workbuddy marker has task+link but NO governance_rollouts
-    // row (the promotion substrate is Codex-transcript-specific and the
-    // WorkBuddy MVP excludes transcript ingestion). Reconcile must NOT spin on
-    // rollout_not_found for it.
-    seedBarePain();
-    await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
     const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
+
     expect(reconciled.ok).toBe(true);
-    expect(reconciled.degradations).toEqual([]);
     expect(reconciled.tasksEnsured).toBe(0);
-    expect(reconciled.linksRepaired).toBe(0);
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 0 });
+    expect(withTrajectory((db) => db.prepare('SELECT runtime_task_id FROM pain_events WHERE canonical_pain_id = ?').get('pain_host_wbbare1')))
+      .toEqual({ runtime_task_id: null });
   });
 
-  it('crash recovery: a lost marker task link is repaired by reconcile without a second task', async () => {
-    seedBarePain({ canonicalPainId: 'pain_host_wbcrash1' });
-    await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
-    try {
-      wdb.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = NULL').run();
-    } finally {
-      wdb.close();
-    }
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
-    expect(reconciled.ok).toBe(true);
-    expect(reconciled.linksRepaired).toBe(1);
-    expect(reconciled.tasksEnsured).toBe(0);
-    const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
-    try {
-      expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
-    } finally {
-      state.close();
-    }
+  it('keeps the historical pain row readable (evidence preserved, no mutation)', () => {
+    seedBarePain('pain_host_wbbare1');
+    const row = withTrajectory((db) => db.prepare('SELECT source, score, host_kind FROM pain_events WHERE canonical_pain_id = ?').get('pain_host_wbbare1'));
+    expect(row).toEqual({ source: 'tool_failure', score: 90, host_kind: 'workbuddy' });
   });
 });
 
