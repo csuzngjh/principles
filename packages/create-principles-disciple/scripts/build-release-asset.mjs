@@ -142,6 +142,43 @@ function assertRuntimeDependenciesComplete(component, directory) {
   }
 }
 
+// A release payload must contain every file the manifest it ships declares as
+// an MCP entrypoint. bundle-plugin.mjs stages the plugin tree and
+// openclaw.plugin.json travels with it, so their agreement can only be checked
+// here, where both exist. The published 2.8.0 defect shipped a manifest whose
+// mcpServers argv pointed at ./mcp/launcher.cjs while the payload had no mcp/
+// tree — OpenClaw then fails closed and pd_recall never appears.
+function assertDeclaredMcpEntriesExist(pluginDirectory) {
+  const manifestPath = join(pluginDirectory, 'openclaw.plugin.json');
+  if (!existsSync(manifestPath)) return;
+  let pluginManifest;
+  try {
+    pluginManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Release payload has an unreadable plugin/openclaw.plugin.json: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const mcpServers = typeof pluginManifest === 'object' && pluginManifest !== null && Object.hasOwn(pluginManifest, 'mcpServers')
+    ? pluginManifest.mcpServers
+    : undefined;
+  if (mcpServers === undefined) return;
+  if (typeof mcpServers !== 'object' || mcpServers === null || Array.isArray(mcpServers)) {
+    throw new Error('Release payload plugin/openclaw.plugin.json has a malformed mcpServers object');
+  }
+  for (const [serverName, server] of Object.entries(mcpServers)) {
+    const args = typeof server === 'object' && server !== null && Object.hasOwn(server, 'args') ? server.args : undefined;
+    if (args === undefined) continue;
+    if (!Array.isArray(args)) {
+      throw new Error(`Release payload plugin/openclaw.plugin.json mcpServers.${serverName}.args is not an array`);
+    }
+    for (const arg of args) {
+      if (typeof arg !== 'string' || !arg.startsWith('./')) continue;
+      if (!existsSync(join(pluginDirectory, arg))) {
+        throw new Error(`Release payload is missing plugin/${arg}: openclaw.plugin.json declares mcpServers.${serverName} → ${args.join(' ')}, so the archive would ship a manifest pointing at a file the payload does not contain. bundle-plugin.mjs must stage it (PLUGIN_REQUIRED).`);
+      }
+    }
+  }
+}
+
 async function listPayloadFiles(assetDirectory) {
   const paths = [];
   const visit = (directory) => {
@@ -257,6 +294,9 @@ async function main() {
     removeBuildOnlyBinTrees(outputComponent);
     assertSafeSourceTree(outputComponent);
   }
+  // Checked before the signed manifest and deterministic archive are produced,
+  // so a broken payload is never described as a release.
+  assertDeclaredMcpEntriesExist(join(outputDirectory, 'plugin'));
   // SPEC-P0: prune foreign-platform better-sqlite3 prebuilds from the staged
   // tree BEFORE the manifest is computed, so the signed per-file manifest and
   // the deterministic archive always describe the pruned payload (never edit
