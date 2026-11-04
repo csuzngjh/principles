@@ -9,18 +9,18 @@
 
 ## 0. 结论（先说）
 
-**六个字段没有任何一个是“现成、单一权威、可直接读”的画像字段。** 全部需要新建装配，且其中 5 个存在多个互不等价的候选来源：
+**当前没有现成的六字段统一画像，但已有字段来源可以复用。** 本表审计的是所列仓库代码，不能据此断言宿主 API 不具备相关能力。每份运行证据的 host 应来自当前执行它的适配器；工作区支持多个宿主不妨碍单条事件具有明确归属。其余字段须按各自语义连接现有来源，缺失保留 partial/unknown。
 
 | 字段 | 来源是否单一 | 歧义点 |
 | --- | --- | --- |
-| `host` | 否 | 安装清单 `hosts[]`（可多宿主）／workspace 声明文件／各适配器硬编码字面量／DB 事件列；单数取值在合法的多宿主 workspace 里**无唯一答案**（已有测试明确要求 fail-closed） |
+| `host` | 否 | 安装清单 `hosts[]`（可多宿主）／workspace 声明文件／各适配器硬编码字面量／DB 事件列；仅凭多宿主 workspace 清单无法选出单值；当前执行适配器的 hostKind 可提供本次事件归属，liveness 的歧义规则不外推到事件画像 |
 | `hostVersion` | 否 | Codex 转录 `cli_version`（真实值）／安装期 `openclaw --version` 探测（不持久化）／`package.json` 声明兼容版本／liveness 契约的 `hostRuntimeVersion`（**不是宿主版本**，易误用） |
 | `runtimeMode` | **代码中不存在该符号** | 3 个候选语义：注入 route（`legacy_trim`/`shared_render`）／共享宿主运行时 gate（on/off）／安装布局 mode（`canonical`/`legacy`）。SPEC §7 的“嵌入 vs Gateway / headless vs TUI / Desktop”**在代码里没有任何表示** |
 | `pluginVersion` | 否 | 已安装根 `package.json.version`（运行期）／安装状态 `installStatus.productVersion`／更新流 registry `latestVersion`。前者读取失败静默变 `'unknown'` |
 | `effectiveHookSetFingerprint` | 否 | 至少 5 个候选产生点；OpenClaw 有 registry↔`api.on` 一致性守卫，**跨宿主 hooks.json 模板与部署文件没有守卫**，会发散 |
-| `evidenceCoverage` | 否（且不可完整计算） | 只能由 5 个 loader 的 ok/warnings 拼装；其中插件 `package.json` 读取**静默吞错**，无法区分“缺失”与“不可读”，因此该来源永远无法判定 complete |
+| `evidenceCoverage` | 否（且不可完整计算） | 只能由 5 个 loader 的 ok/warnings 拼装；其中插件 `package.json` 读取**静默吞错**，无法区分“缺失”与“不可读”，因此不能仅凭该旧 getter 对配置来源宣称 complete；其他受控观测来源仍可另行核实 |
 
-**需要主助手裁决的两个歧义（详见 §4）**：`host` 的复数/单数语义、`hostVersion` 的四种候选含义。
+**实施口径（详见 §4）**：host 指本次执行宿主，hostVersion 指实际宿主版本；兼容声明、PD 契约号和产品版本不能代用。尚未接入的来源继续记未知。
 
 ---
 
@@ -67,8 +67,8 @@
 2. **consumer**
    - 生产：`resolvePromotionHostLiveness`（`host-liveness-contract.ts:284`）把 `hostRuntimeVersion` 放进 liveness 结果；Codex 版本分类器（`codex-version.ts`）。
    - 测试：`host-runtime/tests/host-liveness-contract.test.ts:67-258`（断言的是 `hostRuntimeVersion` = 契约版本，不是宿主版本）。
-3. **已有 getter**：`readGovernanceCheckpoint(args).cliVersion`（`governance-observation-store.ts:681,694`）—— **仅 Codex**。OpenClaw / WorkBuddy 在运行期没有任何 getter。
-4. **测试**：Codex 版本分类有 `codex-version` 单测；OpenClaw hostVersion 无测试（因为不存在该数据）。
+3. **已有 getter**：`readGovernanceCheckpoint(args).cliVersion`（`governance-observation-store.ts:681,694`）—— **仅 Codex**。本次所列 PD 仓库路径未发现 OpenClaw / WorkBuddy 的运行期版本 getter；宿主自身 API 是否提供该信息仍为未知。
+4. **测试**：Codex 版本分类有 `codex-version` 单测；本次未找到 OpenClaw hostVersion 的消费与对应测试（不等于宿主不存在该数据）。
 
 ### 2.3 `runtimeMode`
 
@@ -123,9 +123,9 @@
 
 ## 3. 已验证事实（可与主助手共享）
 
-1. **多宿主是受支持且被测试保护的真实状态**：`resolvePromotionHostLiveness` 在 `codex.json+workbuddy.json` 同时存在时**故意 fail-closed**（`host-liveness-contract.test.ts:139,151`）。因此任何“单数 `host`”字段都不能假设唯一。
+1. **多宿主是受支持且被测试保护的真实状态**：`resolvePromotionHostLiveness` 在 `codex.json+workbuddy.json` 同时存在时**故意 fail-closed**（`host-liveness-contract.test.ts:139,151`）。因此不能从工作区清单猜选当前执行宿主；运行证据应使用本次适配器的明确归属。
 2. **`hostRuntimeVersion` ≠ 宿主版本**：它取的是 PD 契约常量（`'openclaw-legacy@1'` 等），见 `host-liveness-contract.ts:8-9,311,354`。
-3. **OpenClaw 运行期拿不到宿主版本**：唯一来源是安装期 `--version` 探测，且只进日志（`env.ts:87-91` → `index.ts:152`）。
+3. **所列 PD 仓库路径未提供 OpenClaw 运行期宿主版本 getter**：本次找到的版本探测来源是安装期 `--version` 探测，且只进日志（`env.ts:87-91` → `index.ts:152`）。
 4. **Codex 的宿主版本只存在于转录**：hook payload 明确无版本字段（`codex-version.ts:11-14`），且需要转录摄取后才落库。
 5. **`effectiveHookSetFingerprint` 的跨宿主来源不可比**：OpenClaw 是进程内 `api.on`（有 registry 守卫），Codex/WorkBuddy 是宿主 JSON 文件（无守卫，部署后可漂移）。
 6. **插件版本读取失败是静默的**：`readJsonFile` 吞异常（`:267-273`），最终 `'unknown'`；无法区分“文件缺失”“JSON 损坏”“权限不足”。
@@ -137,8 +137,8 @@
 
 ### A. `host`：单数 vs 复数
 - 现状：workspace 级 getter 返回 `hostKinds: string[]`；多宿主被显式支持并 fail-closed。
-- **最小反例**：同一 workspace 同时存在 `.pd/host-tool-semantics/openclaw.json` 与 `codex.json` → `hostKinds = ['codex','openclaw']`；SPEC 的单个 `host` 字段无法取值。
-- 需要裁决：`config_identity.host` 是 (a) 单值并规定多宿主时取哪一条（需新规则），还是 (b) 改为 `hosts[]`（与 SPEC 字段名冲突），还是 (c) 仅在单宿主时产出、多宿主时 `evidenceCoverage=partial/unknown`。
+- **最小反例**：同一 workspace 同时存在 `.pd/host-tool-semantics/openclaw.json` 与 `codex.json` → `hostKinds = ['codex','openclaw']`；工作区清单无法独立确定这次请求由谁执行；但本次 OpenClaw 适配器可为该条证据提供 host=openclaw。
+- 实施结论：保持单值 host，绑定本次执行适配器；仅当当前事件缺少可信归属时记 unknown。不把安装清单改造成第二个运行宿主权威。
 
 ### B. `hostVersion`：四种候选
 - **最小反例**（同一 OpenClaw 机器，同一时刻）：
@@ -147,7 +147,7 @@
   3. `package.json` 声明 → `'2026.4.4'`
   4. 若改用 Codex 路径 → `cli_version` 实值
   四个值互不相等。SPEC 只说“宿主版本”，未指定采用哪一个。
-- 需要裁决：以“宿主上报的真实版本”为准（则 OpenClaw 必须在运行期新增来源，或用安装期落盘），还是以“声明兼容版本”为准（则丧失真实性）。
+- 实施结论：只接受与本次实际运行实例绑定的宿主版本；声明兼容版本和 PD 契约版本不得代用。可复用的宿主 API/实例清单仍待核实，缺证写 unknown；安装时版本不能自动代表升级后的运行实例。
 
 ### C. `runtimeMode`：3 个候选 + 1 个缺失
 - 候选 A（shared vs legacy 注入路径）与 B（`legacy_trim`/`shared_render`）**在同一进程内可以同时成立且不一致**：A 以 workspace 的 flag 决策为准，B 还接受调用方 `flagEnabled` 参数。示例：同一 workspace，A 判 shared 开启，而某调用点传 `flagEnabled=false` → B 判 `legacy_trim`。
@@ -170,11 +170,11 @@
 | U1 | OpenClaw 是否有可在 hook 进程内获得的版本 API（除安装期 probe） | 需读 OpenClaw 官方插件 API 文档或真实宿主实验；本轮禁止运行实验 |
 | U2 | WorkBuddy 是否有任何宿主版本信号（源码中 0 命中） | 需 WorkBuddy 插件 API 文档或真实宿主上报样本 |
 | U3 | OpenClaw 是否也支持文件式 hooks 声明（而非仅进程内 `api.on`） | 需 OpenClaw 安装目录真实文件清单；本轮禁止安装/探针 |
-| U4 | `runtimeMode` 在 SPEC §7 的确切所指（嵌入/Gateway 等） | 需 Owner/主助手对 SPEC §7 的书面澄清；代码无对应表示 |
+| U4 | `runtimeMode` 在 SPEC §7 的确切所指（嵌入/Gateway 等） | SPEC §7 已定义宿主运行模式维度；需核实所选入口能否提供相应事实，不用注入 route 或安装布局代替 |
 | U5 | `installStatus.productVersion` 的上游写入方 | 需读 `update-authority` / 安装状态写入路径；本轮未展开（避免越界到 PRI-1106 范围） |
 | U6 | 部署后的 `~/.codex/hooks.json` 与仓库模板是否一致 | 需真实部署机器上的文件；本轮禁止访问生产/安装目录 |
 | U7 | `before_message_write` 在非 OpenClaw 宿主是否存在对应事件 | 需 Codex/WorkBuddy 钩子事件文档 |
-| U8 | `evidenceCoverage` 的枚举是否与 `ReceiptValidationStatus`（`valid/partial/malformed`）同构 | 需 SPEC 或 G0 澄清；当前 SPEC 用 `complete/partial/unknown`，与 receipt 三值不同 |
+| U8 | `evidenceCoverage` 的枚举是否与 `ReceiptValidationStatus`（`valid/partial/malformed`）同构 | 已确定为不同语义：配置来源用 complete/partial/unknown，receipt 继续使用自身状态，不作枚举转换 |
 
 ---
 
@@ -183,3 +183,7 @@
 - 仅静态源码阅读 + 既有测试阅读；**未运行任何测试、未运行宿主实验、未读取 `~/.pd` / `~/.openclaw` / 生产库**。
 - 未修改主工作区；未触碰其他会话 worktree；未开 PR、未合并。
 - 本文件为唯一交付物，未改动任何生产代码。
+
+## 7. 主助手审查修订
+
+本表是给定基线的静态源码定位，未运行测试。审查修正了两项推断越界：工作区多宿主不等于运行事件无宿主归属；未发现 PD getter 不等于宿主运行时 API 不可用。现有适配器身份和读取逻辑优先复用，不因缺少统一画像而新建配置平台。声明完整配置仍须具备与本次实例绑定的来源覆盖证据。
