@@ -96,8 +96,10 @@
 | 同上 | `+2637..2662` | 新增 `ensurePdCliResolution()` / `ensureConsoleResolution()`（薄包装，复用 helper） |
 | 同上 | `+4447..4450` | `install()`：`await installPdCliDependencies()` 之后调用 `ensurePdCliResolution()` |
 | 同上 | `+4481..4484` | `install()`：`await installConsoleDependencies()` 之后调用 `ensureConsoleResolution()` |
+| 同上 | `2571..2666` | **P1 安全修复**：名称结构化解析（`isSafeNameSegment` / `parseDependencyName`）、严格后代判定（`assertStrictlyInside`）、父目录符号链接拒绝（`assertRealParentDirectory`）、两阶段规划（`planComponentFileDependencyLinks`） |
+| 同上 | `2689..2777` | **P1 安全修复**：`ensureComponentFileDependencyLinks()` 改为“先全量规划、后执行”，删除前只接受 `node_modules` 严格后代；`node_modules` / scoped 父目录作真实目录断言 |
 | `packages/create-principles-disciple/scripts/bundle-plugin.mjs` | `804..818`、`852..855` | 注释从 `syncPdCli()` 改为 `ensurePdCliResolution()`，与实际实现一致 |
-| `packages/create-principles-disciple/tests/dependency-link-consolidation.test.ts` | 新增 | 10 个真实文件系统/真实子进程回归用例 |
+| `packages/create-principles-disciple/tests/dependency-link-consolidation.test.ts` | 新增 | 22 个真实文件系统/真实子进程用例（10 个 G3 §10.5 回归 + 12 个 P1 安全回归，见 §10） |
 | `packages/create-principles-disciple/tests/mvp-config.test.ts` | `2114..2170` | 旧实现源码断言改为新契约断言（helper 复用、无手写块、顺序契约） |
 | `packages/create-principles-disciple/tests/installed-topology-invariants.test.ts` | `250..256` | 两条链接断言迁出（fixture 无依赖、helper 数据驱动无链接可断言），链接契约由新套件覆盖 |
 | `packages/create-principles-disciple/tests/release-upgrade-gate.test.ts` | `535..538` | 修正已过时的 `syncPdCli` 注释，不改断言 |
@@ -130,6 +132,8 @@ npx vitest run tests/dependency-link-consolidation.test.ts --reporter=verbose
  Test Files  1 passed (1)
       Tests  10 passed (10)
 ```
+
+> 注：P1 安全修复（§10）在同一个套件追加了 12 个用例，当前该文件为 **22/22 通过**；上面这一段保留为 G3 §10.5 原始 10 项证据。
 
 | 要求 | 实现方式 | 证据 |
 |---|---|---|
@@ -217,3 +221,110 @@ tests/global-shim-lifecycle.test.ts           pass
 - 首次 `create` 曾返回 `linear_graphql_error`（工作区 free issue limit）；重试后成功。
 - 已检索既有工单：无对应 G3 §10.5 工单（PRI-912/913 是 `@principles/core` canonical junction 及其生命周期，属上游而非本任务）。
 - PR 标题含 `(PRI-1100)`，正文第一行 `Fixes PRI-1100`。
+
+---
+
+## 10. P1 安全修复（PR #2319 review）
+
+### A. 根因
+
+`ensureComponentFileDependencyLinks()` 原名称校验是一条单正则：
+
+```ts
+/^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/
+```
+
+字符类包含 `.`，因此放行了 `.`、`..`、`@scope/.`、`@scope/..`。这些名称随后进入 `path.join(componentDir, 'node_modules', name)`，被规范化成：
+
+| 恶意名称 | `path.join` 结果 | 修复前的递归删除目标 |
+|---|---|---|
+| `.` | `<component>/node_modules` | 整个 `node_modules` |
+| `..` | `<component>` | 整个组件目录 |
+| `@scope/.` | `<component>/node_modules/@scope` | scoped 父目录 |
+| `@scope/..` | `<component>/node_modules` | 整个 `node_modules` |
+
+实体副本纠正路径本来就是 `rmSync(..., { recursive: true })`，所以这是**可利用的删除**，不是理论风险。
+
+### B. 修前 / 修后
+
+| 维度 | 修前 | 修后 |
+|---|---|---|
+| 名称校验 | 单正则，放行 `.` / `..` | 结构化解析：非 scoped 恰好 1 段，scoped 恰好 2 段；段必须非空、非 `.`/`..`、仅 `A-Za-z0-9._-`（`\` 天然拒绝） |
+| 最终路径 | 无边界校验 | `path.relative(nodeModules, linkPath)` 必须是严格后代（`''` / `..` / `../…` / 绝对路径全部拒绝），且段数必须等于声明段数 |
+| 真实目录边界 | 无 | `realpath(node_modules)` 必须在 `realpath(componentDir)` 内；scoped 父目录必须在其内 |
+| 父级符号链接 | 跟随 | `node_modules` 或 scoped 父目录是符号链接 → 抛错（不跟随、不删除） |
+| 兄弟目标 | 只查存在 | 另要求 `realpath(sibling)` 恰为 `<runtime>/<siblingName>`，重定向到 runtime 外 → 抛错 |
+| 执行顺序 | 边校验边删除（前几条已生效） | 两阶段：先 `planComponentFileDependencyLinks()` 全量校验，全部通过后才创建/替换/清理 |
+| 失败拓扑 | 可能留下前几条已链接、后一条报错 | 校验阶段不触碰文件系统，失败不留半链接 |
+
+### C. 父级符号链接与边界保护机制
+
+- `assertRealParentDirectory()`：`lstat` 判定父目录必须是**真实目录**（符号链接、普通文件、缺失都抛错）。`node_modules` 与 `<node_modules>/@scope` 各检查一次；缺失的 scoped 父目录用 `mkdirSync` 创建后再断言。
+- `assertStrictlyInside()`：对词法 `linkPath`、`realpath(node_modules)`、`realpath(scope)` 统一使用严格后代判定。
+- 两阶段规划保证 "先验后动"：恶意名称在**任何** `mkdir/rm/symlink` 之前就被拒绝。
+- 合法名称不误拒：`@principles/core`（scoped）与 `better-sqlite3`（普通）继续通过；现有 10 个 G3 §10.5 用例（含真实 6 条 pd-cli / 5 条 console 依赖、ESM 解析）全部保持通过。
+
+### D. TOCTOU 与残留风险
+
+- 校验与删除之间仍存在理论 TOCTOU 窗口（`lstat` → `rmSync`）。缓解：两阶段校验、每次 mutation 前重新 `lstat` 父目录、符号链接一律拒绝。Node 没有跨平台的 dirfd/`unlinkat` API，彻底消除需要引入新机制，按"只修有真实证据的 P1/P2"原则**未引入**。
+- 安装器以当前用户身份运行，威胁模型不是多进程特权并发；报告中记录该残留窗口。
+- 反斜杠、重复 `/`、空段、多余段全部被结构校验拒绝（不会进入 `path.join`）。
+
+### E. 测试证据（真实文件系统，不是字符串断言）
+
+新增 12 个用例，全部在隔离 `mkdtemp` HOME 中构造真实布局；每个恶意用例都在 `component root` / `node_modules` / `@principles` / `@scope` 四个位置写 sentinel，并另建外部 `outside/` 目录。
+
+| 恶意输入 | 结果 | sentinel / 目录完整性 |
+|---|---|---|
+| `.` | 拒绝（`unsupported dependency name`） | 组件根、`node_modules`、两个 scope 目录、外部目录全部原样 |
+| `..` | 拒绝 | 同上 |
+| `@scope/.` | 拒绝 | 同上 |
+| `@scope/..` | 拒绝 | 同上 |
+| `../outside` | 拒绝 | 同上 |
+| `@scope/../../outside` | 拒绝 | 同上 |
+| `@scope//package` | 拒绝 | 同上 |
+| `..\outside`（反斜杠） | 拒绝 | 同上 |
+| 合法 `@principles/core` + 非法 `..`（同一 manifest） | 整体拒绝 | **没有任何**合法链接被提前创建 |
+| `node_modules` 是符号链接 | 拒绝（`must not be a symbolic link`） | 外部 `node_modules` sentinel 未删 |
+| `node_modules/@principles` 是符号链接 | 拒绝 | 外部 scope 与其中 `core/.core-sentinel` 未删 |
+| `runtime/core` 重定向到 runtime 外 | 拒绝（`resolves outside the runtime dir`） | 外部 `core/.outside-sentinel` 未删 |
+
+**Pre-fix 负控制（真跑）**：把 `installer.ts` 临时替换为 `HEAD` 的修复前版本后运行同一组 P1 用例，12 个中有 8 个失败、4 个通过。失败的正是 `.`、`..`、`@scope/.`、`@scope/..`、`@scope//package`、反斜杠、`node_modules` 符号链接、scoped 父目录符号链接等旧实现漏洞；通过的 4 个是旧正则本来就会拒绝的输入（`../outside`、`@scope/../../outside` 等）。随后恢复修复版本，12/12 通过。
+
+**正向回归**：原有 10 个用例（实体副本替换、错误目标、悬空链接、缺失兄弟 fail-closed、目标/名称穿越、Windows junction / POSIX 相对 symlink、真实 ESM 解析、失败只触及组件子树）全部保持通过；当前套件 **22/22**。
+
+**TypeScript**：`npx tsc --noEmit -p packages/create-principles-disciple/tsconfig.json` PASS。
+
+**Lint**：`npx eslint` 对 `installer.ts` 与 3 个受影响测试文件 PASS（0 error）；仓库 `npm run lint` 修复后待全量复跑（见 §10.F）。
+
+### F. 完整验证结果
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| 定向回归 | `npx vitest run tests/dependency-link-consolidation.test.ts` | **22/22 PASS** |
+| 相邻套件 | `npx vitest run tests/installed-topology-invariants.test.ts tests/mvp-config.test.ts` | PASS |
+| 完整包测试 | `npm test`（`vitest run --reporter=dot`） | **92 files passed；1070 passed / 6 skipped（1076）；3519.67s**（含 release-asset-smoke、release-upgrade-gate、release-junction-lifecycle、packaged install smoke、workbuddy rollback fault injection 等重套件） |
+| TypeScript | `npx tsc --noEmit -p packages/create-principles-disciple/tsconfig.json` | PASS |
+| Lint | `npm run lint`（仓库根） | **12/12 packages ok，0 error**（输出中的 warning 为既存、与本改动无关） |
+| Verify Merge Gate | PR CI（推送后执行） | 结果见 PR #2319 checks；本报告不以“应该通过”替代真实结果 |
+
+说明：`typecheck:tests`（PR #2321）当前**未合入 main**，按指示未 cherry-pick、未合并；本轮使用当前分支可用的 `tsc --noEmit` + 完整 `npm test` 覆盖同类风险（测试文件本身已被 vitest 编译执行）。
+
+### G. Git 状态
+
+- 任务起点：PR #2319 head `97aea86a1`（另一会话已把 `origin/main` 合入本分支）。
+- 本轮基线：`97aea86a1`（先 `git fetch`，本地 fast-forward 到该提交；工作区干净、未覆盖任何他人提交）。
+- 新增提交：`fix(installer): harden sibling dependency link path boundaries (PRI-1100)`（见 PR #2319 提交列表）。
+- 本地与远端：`git push`（普通推送，无 force push）；最终 head 以 PR #2319 为准。
+- PR 状态：OPEN、非 draft、未自动合并；`mergeable` 以 GitHub 实时结果为准（见交付说明）。
+- Writer lease：本轮以 `trae/PRI-1100-security-fix` 取得，任务结束释放。
+
+### H. 裁定
+
+**PASS_WITH_LIMITATIONS**（若 CI 全绿则等价于 `READY_FOR_OWNER_REVIEW`）。
+
+- 合并阻塞：无。P1 删除逃逸已被真实文件系统回归覆盖，修复前负控制可复现 8/12 失败。
+- 生产安全阻塞：无已知项。残留限制仅为 §10.D 的 TOCTOU 理论窗口（未引入新机制）与旧版 npm-distributed 恢复路径未实跑（§7 / 报告 §5）。
+- 其它：`typecheck:tests` 依赖的 #2321 未合入，本轮用当前可用命令覆盖；完整结果见 §10.F。
+
+
