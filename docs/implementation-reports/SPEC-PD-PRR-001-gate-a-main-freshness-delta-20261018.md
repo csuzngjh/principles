@@ -209,7 +209,7 @@ A/C 对照结构、任务三类型、B0 预注册、STOP 条件均不因本差�
 - 本轮工作树：`ai/PRI-1000-gate-a-freshness-delta`（base f2539e07e），审计产物 `.tmp/pri-1000/`（夹具副本、mirror、运行日志与结果 JSON，gitignored，不入库）；
 - 原审计报告（历史证据，未改动）：`docs/implementation-reports/SPEC-PD-PRR-001-v1.2-gate-a-reality-audit-20261017.md`；
 - WorkBuddy 交付 review（含隔离事件披露）：`docs/reviews/2026-10-17-workbuddy-pain-skills-repair.md`；
-- WorkBuddy 设计 SPEC：`docs/specs/SPEC-WORKBUDDY-PAIN-CLOSURE-001-v0.1.md`；
+- WorkBuddy 设计 SPEC：`docs/archive/specs/SPEC-WORKBUDDY-PAIN-CLOSURE-001-v0.1.md`；
 - 测试证据文件（本仓库测试，f2539e07e 实跑）：`packages/workbuddy-adapter/tests/explicit-owner-statement.test.ts`（23）、`packages/workbuddy-adapter/tests/plugin-skeleton.test.ts`（10）、`packages/codex-adapter/tests/codex-explicit-owner-statement.test.ts`（9）。
 
 **SPEC-PD-PRR-001 Gate A main-freshness delta 复核报告 END**

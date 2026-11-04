@@ -35,8 +35,15 @@
 ### runbooks/
 用户操作手册:USER_GUIDE(中英)、VALUE_PROPOSITION(中英,已归档,见文件顶部 ARCHIVED 标注)
 
+### specs/
+在办 SPEC 与可执行行为规约:
+- 顶层 `.md` — 仍未实现、部分实现或仍是现行权威的 SPEC
+- `features/` — 26 个可执行 `.feature` BDD 规约(被各包 `tests/bdd/*.steps.ts` 消费,勿当文档搬走)
+- `PD_Release_Delivery_SPEC_v1.2/` — 发布交付 SPEC 族
+
 ### archive/
 历史归档:
+- `specs/` — 已交付完成或已被同族新版取代的 SPEC(53 篇),台账见 [`archive/specs/INDEX.md`](archive/specs/INDEX.md)
 - `LEGACY_ENTRYPOINT_CENSUS.md`
 - `architecture-audit-2026-06.md`
 - `post-commit-bug-analysis/2026-06-28-report.md`

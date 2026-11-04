@@ -100,8 +100,8 @@
 ## 4. 修订文件
 
 - docs/specs/SPEC-PD-CODEMODE-001-v0.2.md：更新基线；纠正 Node 约束；不再默认优先 Artificer；增加 U-01–U-05 场景准入门；明确当前生产接入 NO-GO；说明官方 Agent 示例与 PD runAgentLoop 的适配差异；增加同轮提交冲突和宿主级资源预算要求。
-- docs/specs/SPEC-PD-CODEMODE-001-zcode-execution-instructions.md：将任务改为资格门优先；没有候选时禁止安装依赖/写运行时代码/运行 P0/P1 集成 PoC；只有 U 门全部通过才进入隔离测试。
-- docs/specs/SPEC-PD-IAER-001-v1.0.md 与 SPEC-PD-PI12-COMPAT-001-v0.2.md：更新到 v0.2 链接，并保持既有治理/兼容验收边界不变。
+- docs/archive/specs/SPEC-PD-CODEMODE-001-zcode-execution-instructions.md：将任务改为资格门优先；没有候选时禁止安装依赖/写运行时代码/运行 P0/P1 集成 PoC；只有 U 门全部通过才进入隔离测试。
+- docs/archive/specs/SPEC-PD-IAER-001-v1.0.md 与 SPEC-PD-PI12-COMPAT-001-v0.2.md：更新到 v0.2 链接，并保持既有治理/兼容验收边界不变。
 
 ## 5. 实际执行与限制
 

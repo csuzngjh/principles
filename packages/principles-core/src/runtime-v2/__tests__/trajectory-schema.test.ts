@@ -10,7 +10,7 @@ import {
 /**
  * PRI-774 guard: the canonical schema module (Profile A/B/C) is the single
  * DDL authority for trajectory.db. SPEC:
- * docs/specs/trajectory-data-plane-single-truth.md
+ * docs/archive/specs/trajectory-data-plane-single-truth.md
  */
 
 describe('PRI-774: canonical trajectory schema module', () => {

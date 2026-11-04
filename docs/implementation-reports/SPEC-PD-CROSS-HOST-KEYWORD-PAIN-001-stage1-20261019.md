@@ -5,7 +5,7 @@
 - Base: `origin/main@9f2184d6b533ae6eb1a42b8358efde3059d61815`
 - Branch: `ai/cross-host-keyword-pain-20261019`
 - Worktree: `D:\Code\_worktrees\pd-cross-host-keyword-pain`（原仓库的脏工作区未覆盖）
-- 原始 SPEC: `docs/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.1.md`
+- 原始 SPEC: `docs/archive/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.1.md`
 
 ## A. 已交付代码
 

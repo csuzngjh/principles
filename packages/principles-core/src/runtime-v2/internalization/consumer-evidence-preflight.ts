@@ -45,7 +45,7 @@
  * rc-8: failure details are bounded before they enter payloads.
  * rc-9: every non-ready outcome carries reasonCode + nextAction.
  *
- * Spec: docs/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-02, §6.1/§6.2
+ * Spec: docs/archive/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-02, §6.1/§6.2
  */
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import {
