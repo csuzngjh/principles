@@ -2563,6 +2563,119 @@ function installBundledCodexAdapter(pluginDir: string): void {
 }
 
 /**
+ * P1: structural package-name validation. Unscoped names have exactly one
+ * segment; scoped names exactly `@scope/pkg`. This is deliberately NOT one
+ * regex: "." / ".." pass a character-class test, yet path.join() normalizes
+ * them onto node_modules / the scope parent / the component root.
+ */
+function isSafeNameSegment(segment: string): boolean {
+  return segment.length > 0 && segment !== '.' && segment !== '..' && /^[A-Za-z0-9._-]+$/.test(segment);
+}
+
+function parseDependencyName(name: string): string[] | undefined {
+  const scoped = name.startsWith('@');
+  const raw = (scoped ? name.slice(1) : name).split('/');
+  if (scoped ? raw.length !== 2 : raw.length !== 1) return undefined;
+  if (!raw.every(isSafeNameSegment)) return undefined;
+  if (!scoped) return raw;
+  const [scope, packageName] = raw;
+  return scope !== undefined && packageName !== undefined ? [`@${scope}`, packageName] : undefined;
+}
+
+/**
+ * P1: `target` must be a STRICT descendant of `root` (never root itself, never
+ * `..`, never an absolute escape). Applied to the lexical link path, the real
+ * node_modules directory (which must stay inside the component) and any
+ * symlinked ancestor we are about to create or delete through.
+ */
+function assertStrictlyInside(root: string, target: string, componentLabel: string): void {
+  const relative = path.relative(root, target);
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(
+      `Installed ${componentLabel} dependency link path escapes the install tree (${target} is not strictly inside ${root}).`,
+    );
+  }
+}
+
+/** P1: an existing path used as a link parent must be a real directory, not a symlink. */
+function assertRealParentDirectory(dir: string, componentLabel: string): void {
+  let stat: Stats;
+  try {
+    stat = lstatSync(dir);
+  } catch (error) {
+    throw new Error(
+      `Installed ${componentLabel} dependency link parent is missing (${dir}): ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(`Installed ${componentLabel} dependency link parent must not be a symbolic link (${dir}).`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`Installed ${componentLabel} dependency link parent must be a directory (${dir}).`);
+  }
+}
+
+interface ComponentFileDependencyLink {
+  segments: string[];
+  siblingReal: string;
+  linkPath: string;
+}
+
+/**
+ * P1 two-phase planning: resolve + validate every `file:../` dependency and
+ * its final link path without mutating anything. Only a fully valid plan is
+ * returned, so an invalid later entry cannot leave earlier links half-applied.
+ */
+function planComponentFileDependencyLinks(
+  componentDir: string,
+  componentLabel: string,
+  dependencies: Record<string, unknown>,
+): ComponentFileDependencyLink[] {
+  const runtimeDir = getPdRuntimeDir();
+  const runtimeDirReal = realpathSync(runtimeDir);
+  const nodeModulesDir = path.join(componentDir, 'node_modules');
+  const operations: ComponentFileDependencyLink[] = [];
+
+  for (const [name, ref] of Object.entries(dependencies)) {
+    if (typeof ref !== 'string' || !ref.startsWith('file:../')) continue;
+    const siblingName = ref.slice('file:../'.length);
+    // rc-1: only a single ordinary sibling segment; "." / ".." and separators
+    // must not resolve the ref outside the runtime dir.
+    if (!isSafeNameSegment(siblingName)) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported file dependency ref "${ref}" for ${name}.`);
+    }
+    const segments = parseDependencyName(name);
+    if (segments === undefined) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported dependency name "${name}".`);
+    }
+
+    const siblingDir = path.join(runtimeDir, siblingName);
+    if (!existsSync(siblingDir)) {
+      throw new Error(`${componentLabel} depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
+    }
+    const siblingReal = realpathSync(siblingDir);
+    // The sibling must resolve to exactly <runtime>/<siblingName>: a symlink
+    // that redirects the link target outside the runtime is not a sibling.
+    if (path.relative(runtimeDirReal, siblingReal) !== siblingName) {
+      throw new Error(`Installed ${componentLabel} declares a file dependency ref that resolves outside the runtime dir: "${ref}".`);
+    }
+
+    const linkPath = path.join(nodeModulesDir, ...segments);
+    // Lexical boundary + segment-count: path.join() collapses "." / ".." and
+    // repeated separators, so the normalized path must still have exactly the
+    // declared number of segments and be a strict descendant of node_modules.
+    const relative = path.relative(nodeModulesDir, linkPath);
+    if (relative.split(path.sep).length !== segments.length) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported dependency name "${name}".`);
+    }
+    assertStrictlyInside(nodeModulesDir, linkPath, componentLabel);
+    operations.push({ segments, siblingReal, linkPath });
+  }
+  return operations;
+}
+
+/**
  * PRI-711 (generalized for ADR-0020 host adapters): materialize node_modules
  * links for an INSTALLED runtime component so its declared `file:../<component>`
  * dependencies resolve under ESM realpath rules. Data-driven from the deployed
@@ -2590,25 +2703,40 @@ function ensureComponentFileDependencyLinks(componentDir: string, componentLabel
   if (manifest.dependencies !== undefined && !isRecord(manifest.dependencies)) {
     throw new Error(`Installed ${componentLabel} package.json dependencies must be an object (${manifestPath}).`);
   }
-  const runtimeDir = getPdRuntimeDir();
-  for (const [name, ref] of Object.entries(manifest.dependencies ?? {})) {
-    if (typeof ref !== 'string' || !ref.startsWith('file:../')) continue;
-    const siblingName = ref.slice('file:../'.length);
-    // rc-1: the manifest is untrusted input — only accept single-path segment
-    // siblings so a crafted ref cannot escape the runtime dir.
-    if (!/^[A-Za-z0-9._-]+$/.test(siblingName) || siblingName === '.' || siblingName === '..') {
-      throw new Error(`Installed ${componentLabel} declares an unsupported file dependency ref "${ref}" for ${name}.`);
+  // P1: validate EVERYTHING before touching the filesystem. A manifest is
+  // untrusted input, and a name that normalizes to node_modules / the scope
+  // parent / the component root must never reach a recursive delete.
+  const operations = planComponentFileDependencyLinks(componentDir, componentLabel, manifest.dependencies ?? {});
+  if (operations.length === 0) return;
+
+  const componentDirReal = realpathSync(componentDir);
+  const nodeModulesDir = path.join(componentDir, 'node_modules');
+  // P1: node_modules itself must be a real directory inside the component —
+  // a symlinked parent would redirect every link/delete outside the install.
+  mkdirSync(nodeModulesDir, { recursive: true });
+  assertRealParentDirectory(nodeModulesDir, componentLabel);
+  const nodeModulesReal = realpathSync(nodeModulesDir);
+  assertStrictlyInside(componentDirReal, nodeModulesReal, componentLabel);
+
+  for (const operation of operations) {
+    const { segments, siblingReal, linkPath } = operation;
+    if (segments.length === 2) {
+      // scoped parent: create only when absent; never replace an existing
+      // real directory (npm may legitimately share it) and never follow a
+      // symlinked parent.
+      const scopeSegment = segments[0] as string;
+      const scopeDir = path.join(nodeModulesDir, scopeSegment);
+      let scopeStat: Stats | undefined;
+      try {
+        scopeStat = lstatSync(scopeDir);
+      } catch {
+        scopeStat = undefined;
+      }
+      if (scopeStat === undefined) mkdirSync(scopeDir);
+      assertRealParentDirectory(scopeDir, componentLabel);
+      assertStrictlyInside(nodeModulesReal, realpathSync(scopeDir), componentLabel);
     }
-    const siblingDir = path.join(runtimeDir, siblingName);
-    if (!existsSync(siblingDir)) {
-      throw new Error(`${componentLabel} depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
-    }
-    // rc-1: the dependency NAME is manifest input too — it becomes a path
-    // segment under node_modules, so a crafted name must not escape it.
-    if (!/^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/.test(name)) {
-      throw new Error(`Installed ${componentLabel} declares an unsupported dependency name "${name}".`);
-    }
-    const linkPath = path.join(componentDir, 'node_modules', name);
+
     let stat: Stats | undefined;
     try {
       stat = lstatSync(linkPath);
@@ -2618,18 +2746,20 @@ function ensureComponentFileDependencyLinks(componentDir: string, componentLabel
     if (stat !== undefined) {
       if (stat.isSymbolicLink()) {
         try {
-          if (realpathSync(linkPath) === realpathSync(siblingDir)) continue;
+          if (realpathSync(linkPath) === siblingReal) continue;
         } catch {
           // Unreadable link target — fall through to replace.
         }
       }
+      // linkPath was proven to be a strict descendant of node_modules during
+      // planning, and both parent levels were re-verified as real directories
+      // above, so the only recursive delete stays inside the component tree.
       rmSync(linkPath, { recursive: stat.isDirectory() && !stat.isSymbolicLink(), force: true });
     }
-    mkdirSync(path.dirname(linkPath), { recursive: true });
     if (isWindows()) {
-      symlinkSync(siblingDir, linkPath, 'junction');
+      symlinkSync(siblingReal, linkPath, 'junction');
     } else {
-      symlinkSync(path.relative(path.dirname(linkPath), siblingDir), linkPath, 'dir');
+      symlinkSync(path.relative(path.dirname(linkPath), siblingReal), linkPath, 'dir');
     }
   }
 }
