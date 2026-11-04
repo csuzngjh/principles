@@ -1,5 +1,90 @@
 # create-principles-disciple
 
+## 1.147.5
+
+### Patch Changes
+
+- 6e7b9d9: 安装器自愈脏环境：目标目录是悬空链接（上一次安装中断残留）时，不再以 ENOENT 中止安装。现在先判定目标形态——缺失则创建、悬空链接只删除链接本身后重建、真实目录与可解析链接原样保留——再执行写入。回滚文案也改为点名恢复状态中缺失/失效的路径，而不是声称「已恢复到之前的安装」。
+- 0094f08: Console update check: stop surfacing a "version divergence" between the active release product version and the plugin-directory package version. They are independent version planes (`RELEASE_PROCESS.md`, "The three version planes"), so the comparison flagged every healthy installation (product 2.8.0 vs plugin 2.5.0). The check now reports only the signed active-release identity; the plugin copy stays a diagnostic read.
+
+## 1.147.4
+
+### Patch Changes
+
+- 64f2d5c: Security (P1, follow-up of the PR #2319 review): installed sibling dependency
+  links no longer accept path-traversal package names. Names are parsed
+  structurally (unscoped = exactly one segment, scoped = exactly `@scope/pkg`)
+  and `.`, `..`, empty segments, repeated `/` and `\` are rejected before any
+  filesystem mutation, so `path.join()` can no longer normalize a name onto
+  `node_modules`, the scoped parent or the component root that the physical-copy
+  repair pass would recursively delete. Every entry is validated before any
+  link is created, replaced or removed, the normalized link path must be a
+  strict descendant of the component's real `node_modules`, and a symlinked
+  `node_modules`/scoped parent or a sibling resolving outside the runtime
+  directory is refused instead of followed. No dependency trimming,
+  release-lock, runtime pin or user install directory is touched.
+
+## 1.147.3
+
+### Patch Changes
+
+- b6aad62: G3 §10.5 (SPEC-PD-RELEASE-ARCH-SIMPLIFICATION-001 §10 item 5): the installed
+  pd-cli and pd-console sibling dependency links are now materialized through the
+  shared `ensureComponentFileDependencyLinks` helper, after the component
+  dependency stage. The previous hand-rolled blocks short-circuited on
+  `existsSync()`, so an npm-materialized physical copy silently won over the
+  intended runtime sibling; the consolidated pass corrects physical copies,
+  wrong-target and dangling links, and fails closed when a declared sibling is
+  missing. No dependency trimming, release-lock, runtime pin or user install
+  directory is touched.
+
+## 1.147.2
+
+### Patch Changes
+
+- dc1addd: **BREAKING CHANGE** — Pain Phase A: Legacy Retirement (SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 v0.3, Phase A).
+  
+  A technical tool failure is now trajectory and health evidence only. It can no longer become an Owner behavioral-deviation Pain on its own; the only automatic admission left is Phase B shared correction detection, and explicit Owner manual Pain is unchanged.
+  
+  Retired automatic Pain entry points:
+  
+  - OpenClaw legacy `after_tool_call` admission/emit (`handleAfterToolCall` Stage 5/6, `evaluatePainAdmissionForToolCall`, `emitPainIfAdmitted`) and the shared-host `onAfterToolResult` / `handleSharedPainEvidenceResult` path.
+  - Shared Production Pain Evidence tool-failure Pain writing and diagnosis admission; the writer now records verified `tool_calls` (outcome, exit code, raw trajectory) only.
+  - Codex live/transcript tool-call admission (`buildLiveToolCandidate` and the `tool_call` branch of `buildTranscriptCandidates`).
+  - Repeated-failure escalation (`REPEATED_FAILURE_THRESHOLD` / `consecutiveErrors >= 4` upgrade rules). No replacement error-count escalation was introduced; host error counters stay untouched.
+  - RuleHost block automatic Pain (`gate-block-helper.ts` Step 5). The block itself, `gate_blocks`, EventLog, blocked-attempt health counting and the Owner correction entry are unchanged.
+  - WorkBuddy `admitBareHostPains` sweep, its worker call, its `admission` report field and the bare-pain `painEnrichmentProvider` sourceRef synthesis. WorkBuddy automatic correction stays fail-closed/observation_only; no `pain_event:<canonicalPainId>` synthetic evidence, no PainIngress bypass, no restored compensation.
+  
+  Removed public exports:
+  
+  - `@principles/core/runtime-v2`: `RISKY_HIGH_SCORE_THRESHOLD`, `REPEATED_FAILURE_THRESHOLD` (the upgrade rules they gated are gone; descriptor evaluation is terminal).
+  - `@principles/host-runtime`: `admitBareHostPains`, `AdmitBareHostPainsInput`, `AdmitBareHostPainsResult`, `GovernanceToolFailureCandidate` (and the tool-failure variant of `GovernanceSignalCandidate`), `PRODUCTION_WRITE_TOOLS`, `PainEvidenceEntry`, `ProductionToolEventFields`, `DerivedToolPainIdentity`, `deriveProductionToolPainIdentity`, `resetProductionPainCooldownForTest`, `productionPainCooldownEntryCountForTest`.
+  
+  Retained on purpose: Owner manual `/pd-pain` and the explicit Pain tool (`buildManualPainObservation` → `evaluateEvidenceTriage` → `evaluateTriggerController`), `TriggerController`, `admission-gate.ts`, canonical Pain identity, idempotency/cooldown semantics, `correctionEvidence`/lineage, Diagnostician task creation, and the whole Phase C GFI surface (`hooks/llm.ts` health branch, `/pd-pain` GFI line, Console GFI health, `pd runtime gfi`, `tool_calls.gfi_before/gfi_after`, Session Tracker and receipt chain). No new tables, migrations, feature flags, workers or queues; historical `pain_events` rows remain readable.
+
+## 1.147.1
+
+### Patch Changes
+
+- f02aa73: PRI-1066 recalibrates the model-aware prompt injection budget (`model_aware_v1` → `model_aware_v2`): the baseline doubles from 2000 to 4000 chars at the 128K reference window (hard ceiling 16000 → 32000, fallback 2000 → 4000, total ceiling derived per model), so an Owner-approved principle set stops filling the injection slot after a handful of principles. It also adds the `pi_catalog_model_id` tier (a provider-less model id that the installed catalog answers unanimously derives a real window instead of silently using the fixed fallback), records policy-version-skewed events as `foreignPolicyEventsSkipped` instead of dropping them silently, and removes the standing Focus-page "budget full" nag: `truncated` is the normal rotation state, so the notice now appears only when a host cannot fit even one principle and carries an actionable next step.
+
+## 1.147.0
+
+### Minor Changes
+
+- b37c67f: Gate 4-F (PRI-1071): the installer bundles and deploys `@principles/pd-mcp-server` as a runtime sibling component (release-locks, release asset, npm-distributed components and files manifest all carry it). The WorkBuddy host installer writes the MCP launcher binding during marketplace materialization. Payloads older than the component deploy unaffected — the MCP server then fails closed with an honest missing-entry state.
+
+### Patch Changes
+
+- d825694: Gate 4 (PRI-1071) third remediation round — context isolation, real rollback acceptance, and registration-conflict safety:
+  
+  - OpenClaw: the host-wide `mcp-binding.json` is written only from an explicitly declared PD workspace (`PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` / `principles-disciple.json`). Without one, the stale binding is removed and `pd-recall` fails closed (`binding_missing`) instead of binding the `main` agent's workspace for every agent. Per-agent hooks keep their existing workspace resolution.
+  - WorkBuddy installer: unchanged transaction semantics, now proven by a real fault injection — a read-only `installed_plugins.json` fails the registration commit after the cache swap, and the previous cache/binding/settings/registry are restored byte-for-byte, after which the real launcher still completes initialize / tools/list / tools/call.
+  - All three hosts: a same-name MCP registration owned by another server stops the install/setup BEFORE any config, binding, or cache write; a PD-owned same-name entry is reused idempotently; different names coexist; malformed or unattributable configs fail closed. `pd health` reports `CONFIG_DRIFT` with `mcp_same_name_conflict` / `mcp_registration_unverifiable`.
+  - `pd-mcp-server` startup logs a workspace fingerprint (SHA-256 prefix, never the path) so operators and acceptance runs can prove which workspace a process bound.
+- Updated dependencies [fb70a87]
+  - @principles/install-layout@0.4.1
+
 ## 1.146.10
 
 ### Patch Changes

@@ -475,13 +475,13 @@ describe('Install success output exposes plugin/cli/console status', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
-    expect(result.components.plugin).toBe('verified');
-    expect(result.components.cli).toBe('verified');
-    expect(result.components.console).toBe('configured');
-    expect(result.components.consoleEntrypoint).toBe('http://localhost:3100');
+    expect(result.components!.plugin).toBe('verified');
+    expect(result.components!.cli).toBe('verified');
+    expect(result.components!.console).toBe('configured');
+    expect(result.components!.consoleEntrypoint).toBe('http://localhost:3100');
     expect(result.enabledChannels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
-    expect(result.verification.features).toBe('passed');
-    expect(result.verification.storyA).toBe('passed');
+    expect(result.verification!.features).toBe('passed');
+    expect(result.verification!.storyA).toBe('passed');
   });
 
   it('partial success (console skipped) returns success false', () => {
@@ -498,14 +498,14 @@ describe('Console delivery contract', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.components.console).toBe('skipped');
+    expect(result.components!.console).toBe('skipped');
   });
 
   it('configured console with entrypoint means success=true', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
-    expect(result.components.consoleEntrypoint).toBe('http://localhost:3100');
+    expect(result.components!.consoleEntrypoint).toBe('http://localhost:3100');
   });
 
   it('plugin failed means success=false regardless of console', () => {
@@ -561,7 +561,7 @@ describe('CLI verification contract', () => {
   it('cli: verified (global) — nextAction uses bare pd', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
-    expect(result.components.cli).toBe('verified');
+    expect(result.components!.cli).toBe('verified');
     expect(result.nextAction).toContain('pd runtime canary');
     expect(result.nextAction).not.toContain('global pd not on PATH');
   });
@@ -569,7 +569,7 @@ describe('CLI verification contract', () => {
   it('cli: verified_local_only — nextAction uses local shim path', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'skipped', cliLocalPath: '/home/.openclaw/extensions/principles-disciple/bin/pd' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
-    expect(result.components.cli).toBe('verified_local_only');
+    expect(result.components!.cli).toBe('verified_local_only');
     expect(result.nextAction).toContain('/home/.openclaw/extensions/principles-disciple/bin/pd');
     expect(result.nextAction).toContain('global pd not on PATH');
     expect(result.nextAction).not.toMatch(/"(?:pd|pd\.cmd)" runtime canary/);
@@ -796,10 +796,10 @@ describe('Bundle script required vs optional artifacts (Fix A)', () => {
     ];
     expect(consoleGateStarts[0], 'console gate loop missing').toBeGreaterThan(-1);
     expect(consoleGateStarts[1], 'expected exactly two CONSOLE_REQUIRED loops (gate + copy)').toBeGreaterThan(-1);
-    expect(content.indexOf('for (const item of CONSOLE_REQUIRED)', consoleGateStarts[1] + 1)).toBe(-1);
+    expect(content.indexOf('for (const item of CONSOLE_REQUIRED)', consoleGateStarts[1]! + 1)).toBe(-1);
 
-    expect(buildStart, 'console gate exits before the build can produce dist').toBeLessThan(consoleGateStarts[0]);
-    expect(consoleGateStarts[0]).toBeLessThan(consoleGateStarts[1]);
+    expect(buildStart!, 'console gate exits before the build can produce dist').toBeLessThan(consoleGateStarts[0]!);
+    expect(consoleGateStarts[0]!).toBeLessThan(consoleGateStarts[1]!);
 
     for (const dep of ['PLUGIN_REQUIRED', 'PD_CLI_REQUIRED', 'CORE_REQUIRED', 'HOST_RUNTIME_REQUIRED', 'CODEX_ADAPTER_REQUIRED']) {
       const depGateStart = content.indexOf(`for (const item of ${dep})`);
@@ -1128,9 +1128,9 @@ describe('Complete install success (F.6)', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
-    expect(result.components.plugin).toBe('verified');
-    expect(result.components.cli).toBe('verified');
-    expect(result.components.console).toBe('configured');
+    expect(result.components!.plugin).toBe('verified');
+    expect(result.components!.cli).toBe('verified');
+    expect(result.components!.console).toBe('configured');
   });
 
   it('plugin verified + cli verified_local_only + console configured = success true', () => {
@@ -2111,68 +2111,61 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
   });
 });
 
-describe('PRI-442 P0: principles-disciple symlink in installer.ts syncPdCli (Bug-B-004)', () => {
+describe('PRI-442 P0 / G3 §10.5: pd-cli sibling dependency links', () => {
   const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
   const content = fs.readFileSync(installerPath, 'utf-8');
 
-  it('syncPdCli creates node_modules/principles-disciple symlink', () => {
-    // Must create a principles-disciple symlink in pd-cli's node_modules
-    expect(content).toContain("'principles-disciple'");
-    // The symlink path must be under node_modules
-    const pdLinkIdx = content.indexOf("pdLinkPath");
-    expect(pdLinkIdx).toBeGreaterThan(0);
-    const symlinkSection = content.substring(pdLinkIdx, pdLinkIdx + 500);
-    expect(symlinkSection).toContain('node_modules');
-    expect(symlinkSection).toContain('symlinkSync');
+  it('pd-cli sibling links are materialized through the shared helper', () => {
+    const start = content.indexOf('export function ensurePdCliResolution');
+    const end = content.indexOf('export function ensureConsoleResolution', start);
+    expect(start).toBeGreaterThan(0);
+    const section = content.substring(start, end);
+    expect(section).toContain(
+      "ensureComponentFileDependencyLinks(getInstalledPdCliDir(), '@principles/pd-cli')",
+    );
   });
 
-  it('principles-disciple symlink target is getPluginExtDir() (the installed plugin root)', () => {
-    // The plugin (principles-disciple package) is installed at <ext-dir>/ root
-    const pdLinkTargetIdx = content.indexOf('pdLinkTarget');
-    expect(pdLinkTargetIdx).toBeGreaterThan(0);
-    const targetSection = content.substring(pdLinkTargetIdx, pdLinkTargetIdx + 200);
-    expect(targetSection).toContain('installedPluginDir()');
+  it('installer no longer hand-rolls per-dependency pd-cli link blocks', () => {
+    // The old blocks short-circuited on existsSync() and silently kept
+    // npm-materialized physical copies; the shared helper corrects them.
+    for (const legacyIdentifier of ['coreLinkPath', 'hostRuntimeLinkPath', 'codexAdapterLinkPath', 'pdLinkPath']) {
+      expect(content).not.toContain(legacyIdentifier);
+    }
   });
 
-  it('syncPdCli creates symlink on Windows using junction', () => {
-    // Windows must use junction (no elevated privileges)
-    // Extract from pdLinkDir to the tryUpgradePdCliFromNpm *call* (not the function definition)
-    const pdLinkStart = content.indexOf('const pdLinkDir');
-    const upgradeCallIdx = content.indexOf('tryUpgradePdCliFromNpm(installedPdCliDir)', pdLinkStart);
-    expect(upgradeCallIdx).toBeGreaterThan(pdLinkStart);
-    const pdLinkSection = content.substring(pdLinkStart, upgradeCallIdx);
-    expect(pdLinkSection).toContain("isWindows()");
-    expect(pdLinkSection).toContain("'junction'");
-  });
-
-  it('syncPdCli creates symlink on Unix using relative path ../../', () => {
-    // Unix must use relative symlink for portability (2 levels up: node_modules → pd-cli → ext)
-    const pdLinkStart = content.indexOf('const pdLinkDir');
-    const upgradeCallIdx = content.indexOf('tryUpgradePdCliFromNpm(installedPdCliDir)', pdLinkStart);
-    expect(upgradeCallIdx).toBeGreaterThan(pdLinkStart);
-    const pdLinkSection = content.substring(pdLinkStart, upgradeCallIdx);
-    expect(pdLinkSection).toContain("'../../'");
-  });
-
-  it('syncPdCli still creates @principles/core symlink (regression guard)', () => {
-    // The existing core symlink must still be present
-    expect(content).toContain('coreLinkDir');
-    expect(content).toContain('coreLinkTarget');
-    expect(content).toContain("'../../../core'");
+  it('link materialization runs AFTER the component dependency stage (ordering contract)', () => {
+    const pdCliDepsIdx = content.indexOf('await installPdCliDependencies();');
+    const pdCliLinksIdx = content.indexOf('ensurePdCliResolution();', pdCliDepsIdx);
+    expect(pdCliDepsIdx).toBeGreaterThan(0);
+    expect(pdCliLinksIdx).toBeGreaterThan(pdCliDepsIdx);
+    const consoleDepsIdx = content.indexOf('await installConsoleDependencies();');
+    const consoleLinksIdx = content.indexOf('ensureConsoleResolution();', consoleDepsIdx);
+    expect(consoleDepsIdx).toBeGreaterThan(0);
+    expect(consoleLinksIdx).toBeGreaterThan(consoleDepsIdx);
   });
 });
 
-describe('PRI-566: principles-disciple resolution in installed console', () => {
+describe('PRI-566 / G3 §10.5: principles-disciple resolution in installed console', () => {
   const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
   const content = fs.readFileSync(installerPath, 'utf-8');
 
-  it('installConsole creates node_modules/principles-disciple pointing at the plugin root', () => {
-    const start = content.indexOf('function installConsole');
-    const end = content.indexOf('function getInstalledCoreDir', start);
+  it('console sibling links are materialized through the shared helper', () => {
+    const start = content.indexOf('export function ensureConsoleResolution');
+    expect(start).toBeGreaterThan(0);
+    const section = content.substring(start, start + 300);
+    expect(section).toContain(
+      "ensureComponentFileDependencyLinks(getInstalledConsoleDir(), '@principles/pd-console')",
+    );
+  });
+
+  it('the helper keeps the Windows junction / Unix relative-symlink contract', () => {
+    const start = content.indexOf('function ensureComponentFileDependencyLinks');
+    const end = content.indexOf('export function ensurePdCliResolution', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
     const section = content.substring(start, end);
-    expect(section).toContain("path.join(consoleDest, 'node_modules', 'principles-disciple')");
-    expect(section).toContain('installedPluginDir()');
-    expect(section).toContain('symlinkSync');
+    expect(section).toContain("'junction'");
+    expect(section).toContain("'dir'");
   });
 });
 

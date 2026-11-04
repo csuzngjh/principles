@@ -82,7 +82,7 @@ describe('terminateAndJoinChild (P0-2)', () => {
       // contract is covered by the stub case below instead.
       return;
     }
-    const child = await launchChild(ALIVE_IGNORE, { stdio: 'ipc' });
+    const child = await launchChild(ALIVE_IGNORE);
     // Wait for the fixture's IPC readiness signal — its SIGTERM handler is
     // guaranteed registered once received (no fixed-sleep race).
     await new Promise<void>((resolve, reject) => {

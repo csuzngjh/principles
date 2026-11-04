@@ -127,15 +127,15 @@ const WINDOW_32K: PromptBudgetResolution = resolvePromptBudget({
 });
 
 describe('resolution sanity at this boundary', () => {
-  it('the reference tiers resolve as the SPEC table states (v0.2: 32K/64K clamp up to the measured floor)', () => {
-    expect(WINDOW_256K.budgetChars).toBe(4000);
+  it('the reference tiers resolve as the SPEC table states (v0.3: 32K/64K clamp up to the measured floor)', () => {
+    expect(WINDOW_256K.budgetChars).toBe(8000);
     expect(WINDOW_32K.budgetChars).toBe(PROMPT_BUDGET_MIN_CHARS);
     expect(FIXED_FALLBACK.budgetChars).toBe(PROMPT_BUDGET_FALLBACK_CHARS);
     expect(FIXED_FALLBACK.capacitySource).toBe('legacy_fallback');
-    // 64K raw = 1000 — below the measured floor, clamped up.
-    expect(promptBudgetCharsForContextWindow(64_000)).toBe(PROMPT_BUDGET_MIN_CHARS);
-    // 1M → 15625 (cap is an upper bound, not a target).
-    expect(promptBudgetCharsForContextWindow(1_000_000)).toBe(15625);
+    // 64K raw = 2000 — above the measured floor.
+    expect(promptBudgetCharsForContextWindow(64_000)).toBe(2000);
+    // 1M → 31250 (cap is an upper bound, not a target).
+    expect(promptBudgetCharsForContextWindow(1_000_000)).toBe(31250);
   });
 });
 
@@ -169,23 +169,23 @@ describe('THE 32K zero-injection regression (Owner fix round)', () => {
 });
 
 describe('AC-07: one resolution flows through injection, projection, precheck, status', () => {
-  it('shared route: a 4000-char budget (256K window) injects strictly more than the fixed 2000', async () => {
+  it('shared route: an 8000-char budget (256K window) injects strictly more than the fixed 4000', async () => {
     const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
-    for (let i = 0; i < 14; i += 1) {
+    for (let i = 0; i < 60; i += 1) {
       await seedActivation(dir, `p-${String(i).padStart(2, '0')}`, `principle text ${i} ${'x'.repeat(40)}`);
     }
     const fixed = await buildActivePrinciplePromptContext({ workspaceDir: dir });
     const wide = await buildActivePrinciplePromptContext({ workspaceDir: dir, promptBudget: WINDOW_256K });
-    expect(fixed.budget).toBe(2000);
+    expect(fixed.budget).toBe(4000);
     expect(fixed.budgetCapacitySource).toBe('legacy_fallback');
     expect(fixed.budgetCapacityStatus).toBe('unknown');
-    expect(wide.budget).toBe(4000);
+    expect(wide.budget).toBe(8000);
     expect(wide.budgetCapacitySource).toBe('host_effective_window');
     expect(wide.budgetCapacityStatus).toBe('confirmed');
     expect(wide.budgetContextWindowTokens).toBe(256_000);
     expect(wide.principleIds.length).toBeGreaterThan(fixed.principleIds.length);
-    expect(wide.additionalContext.length).toBeLessThanOrEqual(4000);
-    expect(fixed.additionalContext.length).toBeLessThanOrEqual(2000);
+    expect(wide.additionalContext.length).toBeLessThanOrEqual(8000);
+    expect(fixed.additionalContext.length).toBeLessThanOrEqual(4000);
   });
 
   it('projection runs the SAME resolution on both routes and reports its provenance', async () => {
@@ -194,21 +194,21 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
       await seedActivation(dir, `q-${String(i).padStart(2, '0')}`, `principle text ${i} ${'y'.repeat(40)}`);
     }
     const legacyDefault = await buildLivePromptInjectionProjection({ workspaceDir: dir, targetHost: 'openclaw' });
-    expect(legacyDefault.budget).toBe(2000);
+    expect(legacyDefault.budget).toBe(4000);
     expect(legacyDefault.budgetCapacitySource).toBe('legacy_fallback');
     expect(legacyDefault.budgetCapacityStatus).toBe('unknown');
 
     const legacyWide = await buildLivePromptInjectionProjection({ workspaceDir: dir, targetHost: 'openclaw', promptBudget: WINDOW_256K });
-    expect(legacyWide.budget).toBe(4000);
+    expect(legacyWide.budget).toBe(8000);
     expect(legacyWide.budgetCapacitySource).toBe('host_effective_window');
-    expect(legacyWide.usedChars).toBeLessThanOrEqual(4000);
+    expect(legacyWide.usedChars).toBeLessThanOrEqual(8000);
     if (legacyWide.truncated || legacyDefault.truncated) {
       expect(legacyWide.injectedPrincipleIds.length).toBeGreaterThanOrEqual(legacyDefault.injectedPrincipleIds.length);
     }
 
     const sharedWide = await buildLivePromptInjectionProjection({ workspaceDir: dir, targetHost: 'codex', promptBudget: WINDOW_256K });
     expect(sharedWide.route).toBe('shared_render');
-    expect(sharedWide.budget).toBe(4000);
+    expect(sharedWide.budget).toBe(8000);
     expect(sharedWide.budgetCapacitySource).toBe('host_effective_window');
   });
 
@@ -222,7 +222,7 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
     // exceeds the floor, so realistic single items land in model_dependent.
     const dir = tempWorkspace({ declare: ['codex'] });
     const mid = 'm'.repeat(900);
-    const huge = 'h'.repeat(17000);
+    const huge = 'h'.repeat(33_000);
     const midArt = seedArtifact(dir, 'tier-mid', mid);
     const hugeArt = seedArtifact(dir, 'tier-huge', huge);
 
@@ -265,20 +265,20 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
   });
 
   it('single-item fit respects an explicit budget and defaults to the fixed fallback', () => {
-    const principle = { principleId: 'p', text: 'x'.repeat(2800), artifactId: 'a', activationId: 'act' };
+    const principle = { principleId: 'p', text: 'x'.repeat(5000), artifactId: 'a', activationId: 'act' };
     const fallback = computePromptSingleItemFit({ principle, route: 'shared_render', selfReportEnabled: false });
-    expect(fallback.costChars).toBeGreaterThan(2000);
+    expect(fallback.costChars).toBeGreaterThan(4000);
     expect(fallback.fits).toBe(false);
-    const wide = computePromptSingleItemFit({ principle, route: 'shared_render', selfReportEnabled: false, budget: 4000 });
+    const wide = computePromptSingleItemFit({ principle, route: 'shared_render', selfReportEnabled: false, budget: 8000 });
     expect(wide.fits).toBe(true);
     expect(wide.costChars).toBe(fallback.costChars);
   });
 
-  it('activation statuses: mid-band misses are model_dependent; only >4000 is oversized (AC-08)', async () => {
+  it('activation statuses: mid-band misses are model_dependent; only >32000 is oversized (AC-08)', async () => {
     const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
     await seedActivation(dir, 'fits', 'tiny rule');
-    await seedActivation(dir, 'mid', 'm'.repeat(2800));
-    await seedActivation(dir, 'huge', 'h'.repeat(17000));
+    await seedActivation(dir, 'mid', 'm'.repeat(4500));
+    await seedActivation(dir, 'huge', 'h'.repeat(33_000));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir, targetHost: 'codex' });
     expect(report.route.status).toBe('confirmed');
     const byId = new Map(report.statuses.map((s) => [s.principleId, s]));
@@ -286,8 +286,8 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
     const mid = byId.get('mid');
     const huge = byId.get('huge');
     expect(fits?.status).toBe('injectable');
-    expect(fits?.budget).toBe(2000);
-    // 'mid' does not fit the fixed 2000 projection budget but is within the
+    expect(fits?.budget).toBe(4000);
+    // 'mid' does not fit the fixed 4000 projection budget but is within the
     // supported range — model-dependent, NOT oversized, NOT permanent refusal.
     expect(mid?.status).toBe('model_dependent');
     expect(mid?.reason).toContain('model_dependent_capacity');
@@ -334,12 +334,12 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     expect(result.decision).toBe('modify');
     expect(injected.length).toBe(1);
     const event = injected[0];
-    expect(event.budget).toBe(4000);
+    expect(event.budget).toBe(8000);
     expect(event.budgetCapacitySource).toBe('host_effective_window');
     expect(event.budgetCapacityStatus).toBe('confirmed');
     expect(event.budgetContextWindowTokens).toBe(256_000);
-    expect(event.budgetPolicyVersion).toBe('model_aware_v1');
-    expect(event.injectedCharCount).toBeLessThanOrEqual(4000);
+    expect(event.budgetPolicyVersion).toBe('model_aware_v2');
+    expect(event.injectedCharCount).toBeLessThanOrEqual(8000);
     // The recorded event validates against the TypeBox wire schema.
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, event)).toBe(true);
   });
@@ -361,11 +361,11 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
       modelId: 'claude-sonnet-4-5',
     }));
     const event = injected[0];
-    expect(event.budget).toBe(6250);
+    expect(event.budget).toBe(12_500);
     expect(event.budgetCapacitySource).toBe('operator_declared');
     expect(event.budgetCapacityStatus).toBe('confirmed');
     expect(event.budgetContextWindowTokens).toBe(400_000);
-    expect(event.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(event.budgetPolicyVersion).toBe('model_aware_v2');
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, event)).toBe(true);
   });
 
@@ -380,7 +380,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     const runtime = createProductionHostRuntime({ hostKind: 'workbuddy', events });
     await runtime.dispatch(promptEvent(dir));
     const event = injected[0];
-    expect(event.budget).toBe(4096);
+    expect(event.budget).toBe(8192);
     expect(event.budgetCapacitySource).toBe('operator_declared');
     expect(event.budgetCapacityStatus).toBe('confirmed');
     expect(event.budgetContextWindowTokens).toBe(262_144);
@@ -397,11 +397,11 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
       modelId: 'no-such-model-in-catalog',
     }));
     const event = injected[0];
-    expect(event.budget).toBe(2000);
+    expect(event.budget).toBe(4000);
     expect(event.budgetCapacitySource).toBe('legacy_fallback');
     expect(event.budgetCapacityStatus).toBe('unknown');
     expect(event.budgetContextWindowTokens).toBeUndefined();
-    // SPEC §7 v0.2: the SPECIFIC bounded reason rides the event — the
+    // SPEC §7 v0.3: the SPECIFIC bounded reason rides the event — the
     // untrusted 'default' source is the primary failure (the unknown model
     // name could not rescue it, but that is secondary detail).
     expect(event.budgetFallbackReason).toBe('host_capacity_source_untrusted');
@@ -415,35 +415,36 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     await runtime.dispatch(promptEvent(dir));
     const event = injected[0];
     expect(event.hostKind).toBe('workbuddy');
-    expect(event.budget).toBe(2000);
+    expect(event.budget).toBe(4000);
     expect(event.budgetCapacitySource).toBe('legacy_fallback');
     expect(event.budgetCapacityStatus).toBe('unknown');
     expect(event.budgetFallbackReason).toBe('host_capacity_absent');
   });
 
-  it('model identity alone resolves via the installed catalog only on an exact match (AC-03/AC-05)', async () => {
+  it('model identity alone resolves via the installed catalog (exact match, then unanimous name-only)', async () => {
     const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
     await seedActivation(dir, 'mi-1', 'model identity principle');
     const { events, injected } = captureEmitter();
     const runtime = createProductionHostRuntime({ hostKind: 'codex', events });
     // exact provider+model → catalog metadata (not maxTokens, not a guess)
     await runtime.dispatch(promptEvent(dir, { modelProviderId: 'anthropic', modelId: 'claude-sonnet-4-5' }));
-    expect(injected[0]?.budget).toBe(3125); // 200000-token window
+    expect(injected[0]?.budget).toBe(6250); // 200000-token window
     expect(injected[0]?.budgetCapacitySource).toBe('pi_catalog_exact');
-    // ambiguous bare model id → honest fallback with the bounded reason code
+    // conflicting bare model id → honest fallback with the bounded reason code
     await runtime.dispatch(promptEvent(dir, { modelId: 'gpt-5' }));
-    expect(injected[1]?.budget).toBe(2000);
+    expect(injected[1]?.budget).toBe(4000);
     expect(injected[1]?.budgetCapacitySource).toBe('legacy_fallback');
     expect(injected[1]?.budgetFallbackReason).toBe('catalog_ambiguous_model_id');
     // custom provider id never inherits another provider capacity (AC-05)
     await runtime.dispatch(promptEvent(dir, { modelProviderId: 'my-private-proxy', modelId: 'claude-sonnet-4-5' }));
-    expect(injected[2]?.budget).toBe(2000);
+    expect(injected[2]?.budget).toBe(4000);
     expect(injected[2]?.budgetCapacitySource).toBe('legacy_fallback');
     expect(injected[2]?.budgetFallbackReason).toBe('catalog_no_exact_match');
-    // v0.2: a provider-less UNANIMOUS name is still not confirmed.
+    // v0.3: a provider-less UNANIMOUS name derives its window (weaker tier).
     await runtime.dispatch(promptEvent(dir, { modelId: 'glm-4.7' }));
-    expect(injected[3]?.budget).toBe(2000);
-    expect(injected[3]?.budgetFallbackReason).toBe('catalog_provider_absent');
+    expect(injected[3]?.budget).toBe(6400); // 204800-token window
+    expect(injected[3]?.budgetCapacitySource).toBe('pi_catalog_model_id');
+    expect(injected[3]?.budgetCapacityStatus).toBe('confirmed');
   });
 });
 

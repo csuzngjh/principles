@@ -39,10 +39,6 @@ import {
   collectSync,
   computeFeatureFlagsFromConfig,
   CORRECTION_SEED_KEYWORDS,
-  buildToolFailureObservation,
-  evaluateTriage,
-  evaluateTriggerController,
-  resolveSourceKind,
   PainToPrincipleService,
   PrincipleTreeLedgerAdapter,
   RuntimeStateManager,
@@ -67,9 +63,7 @@ import {
 } from '@principles/core/runtime-v2';
 import {
   deriveProductionCorrectionPainIdentity,
-  deriveProductionToolPainIdentity,
   hasProductionPainSchema,
-  PRODUCTION_WRITE_TOOLS,
 } from './production-pain-evidence.js';
 import { promoteGovernanceEvidence, ensureGovernanceSchema, type ObservationDatabaseFactory } from './governance-observation-store.js';
 import { loadPdConfigForPlugin } from './pd-config.js';
@@ -390,8 +384,8 @@ const ADMISSION_CREATE_STATEMENTS = [
 function ensureGovernanceAdmissionSchema(db: Database.Database): void {
   db.transaction(() => {
     for (const statement of ADMISSION_CREATE_STATEMENTS) db.exec(statement);
-    // SPEC-CODEX-PAIN-CLOSURE-001 CR-01: this store also writes tool_calls
-    // (admitToolFailure); make sure the host tool-use-id join column exists on
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-01: trajectory evidence writers persist
+    // tool_calls; make sure the host tool-use-id join column exists on
     // workspaces whose base schema predates it (idempotent additive ALTER —
     // only when the table itself exists: governance-only databases without a
     // tool_calls table are a valid pre-existing state, not an error).
@@ -484,39 +478,12 @@ export interface GovernanceCorrectionCandidate {
   readonly explicitChannel?: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
 }
 
-export interface GovernanceToolFailureCandidate {
-  readonly kind: 'tool_failure';
-  readonly hostKind: 'codex';
-  readonly logicalObservationKey: string;
-  readonly rolloutIdentity: string;
-  readonly rootSessionId: string;
-  readonly hostTurnId: string;
-  readonly toolName: string;
-  /** Host event source (e.g. `codex:post_tool_use`) — identity parity with the live handler. */
-  readonly source: string;
-  /**
-   * I1 identity parity: the host's real per-call id (`tool_use_id`). The live
-   * handler's canonical derivation includes it, so candidate builders MUST
-   * supply it when the host provided one — a candidate without it would derive
-   * a second canonical pain for a call the live path already recorded.
-   */
-  readonly toolCallId?: string;
-  /** Host tool-call id (SPEC-CODEX-PAIN-CLOSURE-001 CR-01) — same id the live PostToolUse path records into tool_calls.tool_use_id for the dedup join. */
-  readonly toolUseId?: string;
-  /** Native host cwd, when supplied by a live hook; absent for transcript catch-up. */
-  readonly projectDir?: string;
-  readonly toolInput?: unknown;
-  readonly toolOutput?: unknown;
-  readonly observedAt: string;
-}
-
-export type GovernanceSignalCandidate = GovernanceCorrectionCandidate | GovernanceToolFailureCandidate;
+export type GovernanceSignalCandidate = GovernanceCorrectionCandidate;
 
 export type GovernanceAdmissionOutcome =
   | { disposition: 'admitted'; kind: GovernanceSignalKind; logicalObservationKey: string; canonicalPainId: string; duplicate: boolean; ruleVersion: number | null }
   | { disposition: 'already_admitted'; kind: GovernanceSignalKind; logicalObservationKey: string; canonicalPainId: string; diagnosticianTaskId: string | null }
   | { disposition: 'not_a_signal'; kind: 'user_correction'; logicalObservationKey: string }
-  | { disposition: 'not_admitted'; kind: 'tool_failure'; logicalObservationKey: string; reason: string }
   | { disposition: 'rate_limited'; kind: 'user_correction'; logicalObservationKey: string }
   /** Ambiguous Stage-1 candidate persisted for Stage 2 review (SPEC §4.4.8). */
   | { disposition: 'pending_llm_review'; kind: 'user_correction'; logicalObservationKey: string; duplicate: boolean }
@@ -627,39 +594,6 @@ interface GovernanceTaskSubmissionPayload {
 }
 
 /**
- * ONE builder for the tool_failure task payload shape — the Codex inline
- * admission path and the WorkBuddy bare-pain sweep must produce the SAME
- * shape, differing only in the attributed host and the pain facts.
- */
-function buildToolFailureTaskPayload(fields: {
-  hostKind: GovernanceHostKind;
-  logicalObservationKey: string;
-  sessionId: string;
-  toolName: string;
-  reason: string;
-  score: number;
-  workspaceDir: string;
-}): GovernanceTaskSubmissionPayload {
-  // P1-1 privacy (review round 2): sanitize the FULL text before any
-  // truncation — a token crossing the 200-char boundary must be redacted, not
-  // split into a fragment that survives verbatim. sanitizeString bounds itself.
-  const payload: GovernanceTaskSubmissionPayload = {
-    painType: 'tool_failure',
-    source: fields.toolName,
-    reason: fields.reason || `tool=${fields.toolName}`,
-    score: fields.score,
-    sessionId: fields.sessionId,
-    hostKind: fields.hostKind,
-    evidence: [{ sourceRef: `governance_observation:${fields.logicalObservationKey}`, note: sanitizeString(fields.reason || fields.toolName, fields.workspaceDir) }],
-  };
-  return payload;
-}
-
-function toolFailureTaskPayload(fields: Parameters<typeof buildToolFailureTaskPayload>[0]): string {
-  return JSON.stringify(buildToolFailureTaskPayload(fields));
-}
-
-/**
  * P1 (review round 3): a `behavior_trace` may only name a row that EXISTS in
  * trajectory.db with the SAME lineage tuple. WorkBuddy currently has no
  * observation writer, so an automatic WorkBuddy correction usually has no
@@ -690,49 +624,38 @@ function persistedBehaviorTraceEvidence(args: {
   }];
 }
 
-function buildTaskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; db: Database.Database }): GovernanceTaskSubmissionPayload {
+function buildTaskSubmissionPayload(candidate: GovernanceCorrectionCandidate, workspaceDir: string, details: { reason: string; db: Database.Database }): GovernanceTaskSubmissionPayload {
   const {reason,db} = details;
-  if (candidate.kind === 'user_correction') {
-    // P1-1 privacy (review round 2): sanitize the FULL text before any
-    // truncation — a token crossing the 200-char boundary must be redacted, not
-    // split into a fragment that survives verbatim. sanitizeString bounds itself.
-    const payload: GovernanceTaskSubmissionPayload = {
-      painType: 'user_frustration',
-      source: 'user_correction',
-      reason: reason || 'User correction detected',
-      score: GOVERNANCE_STRONG_PAIN_SCORE,
-      sessionId: candidate.rootSessionId,
-      hostKind: candidate.hostKind,
-      evidence: persistedBehaviorTraceEvidence({
-        db,
-        hostKind: candidate.hostKind,
-        logicalObservationKey: candidate.logicalObservationKey,
-        rolloutIdentity: candidate.rolloutIdentity,
-        rootSessionId: candidate.rootSessionId,
-        hostTurnId: candidate.hostTurnId,
-        text: candidate.text,
-        workspaceDir,
-      }),
-      // SPEC-CODEX-PAIN-CLOSURE-001 CR-02 (merged from main): an explicit
-      // Owner statement rides as classified correction evidence — never
-      // summarized by an AI, never inside evidence[] pseudo-trace entries.
-      ...(candidate.explicitOwnerStatement === true
-        ? { correctionEvidence: candidate.hostKind === 'workbuddy'
-          ? { text: boundCorrectionEvidenceText({ text: candidate.text, classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' }, workspaceDir).text, classification: 'owner_statement' as const, channel: 'workbuddy_explicit_prefix' as const }
-          : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: candidate.explicitChannel === 'codex_explicit_agent' ? 'codex_explicit_agent' as const : 'codex_explicit_prefix' as const } }
-        : {}),
-    };
-    return payload;
-  }
-  return buildToolFailureTaskPayload({
-    hostKind: candidate.hostKind,
-    logicalObservationKey: candidate.logicalObservationKey,
+  // P1-1 privacy (review round 2): sanitize the FULL text before any
+  // truncation — a token crossing the 200-char boundary must be redacted, not
+  // split into a fragment that survives verbatim. sanitizeString bounds itself.
+  const payload: GovernanceTaskSubmissionPayload = {
+    painType: 'user_frustration',
+    source: 'user_correction',
+    reason: reason || 'User correction detected',
+    score: GOVERNANCE_STRONG_PAIN_SCORE,
     sessionId: candidate.rootSessionId,
-    toolName: candidate.toolName,
-    reason,
-    score: 70,
-    workspaceDir,
-  });
+    hostKind: candidate.hostKind,
+    evidence: persistedBehaviorTraceEvidence({
+      db,
+      hostKind: candidate.hostKind,
+      logicalObservationKey: candidate.logicalObservationKey,
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      text: candidate.text,
+      workspaceDir,
+    }),
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-02 (merged from main): an explicit
+    // Owner statement rides as classified correction evidence — never
+    // summarized by an AI, never inside evidence[] pseudo-trace entries.
+    ...(candidate.explicitOwnerStatement === true
+      ? { correctionEvidence: candidate.hostKind === 'workbuddy'
+        ? { text: boundCorrectionEvidenceText({ text: candidate.text, classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' }, workspaceDir).text, classification: 'owner_statement' as const, channel: 'workbuddy_explicit_prefix' as const }
+        : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: candidate.explicitChannel === 'codex_explicit_agent' ? 'codex_explicit_agent' as const : 'codex_explicit_prefix' as const } }
+      : {}),
+  };
+  return payload;
 }
 
 function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; db: Database.Database }): string {
@@ -1395,114 +1318,6 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
   return { disposition: 'admitted', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId, duplicate, ruleVersion: detection?.ruleVersion ?? null };
 }
 
-interface AdmitToolFailureArgs {
-  db: Database.Database;
-  candidate: GovernanceToolFailureCandidate;
-  workspaceDir: string;
-  nowIso: string;
-}
-
-function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFailureArgs): GovernanceAdmissionOutcome {
-  const identity = deriveProductionToolPainIdentity({
-    workspaceDir,
-    sessionId: candidate.rootSessionId,
-    turnId: candidate.hostTurnId,
-    toolName: candidate.toolName,
-    source: candidate.source,
-    // I1 identity parity: same call id the live handler derived from (the
-    // candidate builder forwards the host `tool_use_id`).
-    ...(candidate.toolCallId !== undefined ? { toolCallId: candidate.toolCallId } : {}),
-    ...(candidate.toolInput !== undefined ? { toolInput: candidate.toolInput } : {}),
-    ...(candidate.toolOutput !== undefined ? { toolOutput: candidate.toolOutput } : {}),
-  });
-  const { outcome, sanitizedParams, paramsJson, resultPreview, painId } = identity;
-
-  // Admission gate — identical semantics to the live production handler on a
-  // fresh process (ADR-0020 accepts cold in-memory cooldowns for Codex;
-  // canonical idempotency is the guard).
-  const sourceObservation = buildToolFailureObservation({ toolName: candidate.toolName, error: outcome.error, exitCode: outcome.exitCode ?? undefined });
-  const sourceKind = resolveSourceKind({
-    observedAt: nowIso,
-    workspaceId: workspaceDir,
-    sessionId: candidate.rootSessionId,
-    toolName: candidate.toolName,
-    failureSource: sourceObservation.failureSource,
-    toolNotFound: sourceObservation.toolNotFound,
-    nonZeroExit: outcome.exitCode !== null && outcome.exitCode !== 0,
-  });
-  // Risk evaluation mirrors the production handler: it reads the RAW params
-  // (sanitized params replace paths with placeholders and would lose the
-  // absolute-path risk signal). Identity still uses sanitized params.
-  const rawFile = isRecord(outcome.params) ? (own(outcome.params, 'file_path') ?? own(outcome.params, 'path')) : undefined;
-  const relativePath = String(rawFile ?? 'unknown').slice(0, 500);
-  const isRisky = path.isAbsolute(relativePath) && !path.resolve(relativePath).startsWith(`${workspaceDir}${path.sep}`);
-  const painScore = Math.min(100, (outcome.failure ? 70 : 0) + (isRisky ? 20 : 0));
-  const triage = evaluateTriage({ sourceKind, score: painScore, isRisky });
-  const trigger = evaluateTriggerController({ triageResult: triage, isOwnerManual: false, isCooldownActive: false, isValid: true, score: painScore, sessionId: candidate.rootSessionId });
-  const gateAdmitted = outcome.failure && PRODUCTION_WRITE_TOOLS.has(candidate.toolName) && trigger.shouldCreateDiagnosticTask;
-  void sanitizedParams;
-  if (!gateAdmitted) {
-    return { disposition: 'not_admitted', kind: 'tool_failure', logicalObservationKey: candidate.logicalObservationKey, reason: trigger.reason };
-  }
-
-  let duplicate = false;
-  let duplicateWithoutPain = false;
-  let reason = '';
-  db.transaction(() => {
-    // Same duplicate probes as the production handler: the host tool-call id
-    // (CR-01) is the stable join key; the content-shape probe stays the
-    // fallback for hosts/candidates without ids.
-    // Review R3/P2: admission dedup is host-scoped — a colliding row from
-    // another host is not this candidate's duplicate.
-    if (candidate.toolUseId !== undefined
-      && (candidate.hostKind !== undefined
-        ? db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ? AND host_kind = ?').get(candidate.rootSessionId, candidate.toolUseId, candidate.hostKind)
-        : db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ?').get(candidate.rootSessionId, candidate.toolUseId)) !== undefined) {
-      duplicate = true;
-      duplicateWithoutPain = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) === undefined;
-    } else if ((candidate.hostKind !== undefined
-      ? db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ? AND host_kind = ?')
-        .get(candidate.rootSessionId, candidate.toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview, candidate.hostKind)
-      : db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?')
-        .get(candidate.rootSessionId, candidate.toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview)) !== undefined) {
-      duplicate = true;
-      duplicateWithoutPain = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) === undefined;
-    } else {
-      db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`)
-        .run(candidate.rootSessionId, nowIso, nowIso);
-      const projectDir = typeof candidate.projectDir === 'string' && path.isAbsolute(candidate.projectDir)
-        ? path.resolve(candidate.projectDir)
-        : null;
-      db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(candidate.rootSessionId, candidate.toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, nowIso, candidate.toolUseId ?? null, projectDir, candidate.hostKind);
-      reason = `tool=${candidate.toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
-      db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(candidate.rootSessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, null, painId, null, candidate.hostKind, nowIso);
-    }
-    // PRI-640 §17: enrich unknown → codex on the already-admitted duplicate
-    // pain row; the IS NULL guard keeps any durable attribution.
-    db.prepare('UPDATE pain_events SET host_kind = ? WHERE canonical_pain_id = ? AND host_kind IS NULL').run(candidate.hostKind, painId);
-    if (!duplicateWithoutPain) {
-      insertAdmissionMarker({
-        db,
-        identity: { hostKind: candidate.hostKind, logicalObservationKey: candidate.logicalObservationKey, rolloutIdentity: candidate.rolloutIdentity, rootSessionId: candidate.rootSessionId, signalKind: candidate.kind },
-        canonicalPainId: painId,
-        ruleVersion: null,
-        reason: sanitizeString(reason, workspaceDir),
-        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason, db }),
-        nowIso,
-      });
-    }
-    // A duplicate call row without an admitted pain mirrors the production
-    // handler (no pain insert on duplicates) and records no marker, so a later
-    // delivery whose gate reaches threshold can still admit.
-  })();
-  if (duplicateWithoutPain) {
-    return { disposition: 'not_admitted', kind: 'tool_failure', logicalObservationKey: candidate.logicalObservationKey, reason: 'duplicate_tool_call_without_admitted_pain' };
-  }
-  return { disposition: 'admitted', kind: 'tool_failure', logicalObservationKey: candidate.logicalObservationKey, canonicalPainId: painId, duplicate, ruleVersion: null };
-}
-
 interface AdmitOneArgs {
   db: Database.Database;
   candidate: GovernanceSignalCandidate;
@@ -1547,10 +1362,7 @@ function admitOne({ db, candidate, workspaceDir, now, nowIso, keywordStore, onDe
   }
 
   try {
-    if (candidate.kind === 'user_correction') {
-      return admitCorrection({ db, candidate, workspaceDir, now, nowIso, ...(keywordStore ? { keywordStore } : {}), ...(onDegradation ? { onDegradation } : {}) });
-    }
-    return admitToolFailure({ db, candidate, workspaceDir, nowIso });
+    return admitCorrection({ db, candidate, workspaceDir, now, nowIso, ...(keywordStore ? { keywordStore } : {}), ...(onDegradation ? { onDegradation } : {}) });
   } catch (error) {
     // RateLimitedSignal never reaches here — admitCorrection converts it to a
     // rate_limited outcome internally. A store-level failure (e.g. the loser
@@ -2609,160 +2421,6 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
       return { ok: false, reason: promoted.reason, nextAction: promoted.nextAction, taskId: ensured.taskId, taskCreated: ensured.created, linkRepaired: ensured.linkRepaired };
     }
     return { ok: true, taskId: ensured.taskId, taskCreated: ensured.created, linkRepaired: ensured.linkRepaired, promoted: promoted?.promoted ?? 0, tailState: promoted?.tailState ?? 'skipped' };
-  } finally {
-    close();
-  }
-}
-
-// ─── Bare host pain admission (review R2/P1, WorkBuddy worker sweep) ────────
-
-export interface AdmitBareHostPainsInput {
-  readonly workspaceDir: string;
-  /** The bare-pain host to sweep. Only the WorkBuddy worker uses this seam today. */
-  readonly hostKind: 'workbuddy';
-  /** Bounded work per pass (default 5, aligned with the worker's candidate limit). */
-  readonly limit?: number;
-  readonly now?: Date;
-  readonly databaseFactory?: ObservationDatabaseFactory;
-}
-
-export interface AdmitBareHostPainsResult {
-  readonly ok: boolean;
-  readonly reason?: string;
-  readonly nextAction?: string;
-  /** Bare pains that got an admission marker in THIS pass. */
-  readonly admitted: number;
-  /** Diagnostician tasks actually created in THIS pass (crash-safe ensure). */
-  readonly ensured: number;
-  /** Bare pains below the admission floor — evidence-only by policy. */
-  readonly skippedLowScore: number;
-  /** Rows that failed the required-field guard (rc-3: counted, never silent). */
-  readonly skippedInvalid: number;
-  readonly degradations: readonly string[];
-}
-
-/**
- * Admit bare host pains — failure rows the shared production pain handler
- * already persisted (host_kind set, canonical_pain_id set, runtime_task_id
- * NULL) but that no inline admission exists for. The WorkBuddy hook is the
- * only evidence producer on that host (SPEC workbuddy-host-adapter §1: no
- * transcript reads), so these rows would otherwise stay stranded as
- * evidence-only forever: reconcile only continues ADMITTED markers, and no
- * WorkBuddy admission step existed (review R2/P1).
- *
- * Policy: only failures scoring at/above the Codex tool_failure admission
- * floor (GOVERNANCE_STRONG_PAIN_SCORE = 70) are queued for diagnosis — that
- * floor is the existing signal-quality boundary for write-tool failures, and
- * lower-scored failures stay evidence-only in pain_events/tool_calls rather
- * than diluting the diagnostician queue. Idempotency reuses the ONE existing
- * authorities: the unique admission marker (canonical_pain_id probe +
- * UNIQUE logical key) and the deterministic task id, so repeated sweeps and
- * crash restarts never mint a second task. Task creation reuses
- * `ensureGovernanceDiagnosticianTask` unchanged (including its Case-B link
- * repair). Evidence promotion is deliberately NOT attempted here: the
- * promotion substrate (governance_rollouts/observations) is fed by transcript
- * ingestion, which the WorkBuddy MVP excludes.
- */
-export async function admitBareHostPains(input: AdmitBareHostPainsInput): Promise<AdmitBareHostPainsResult> {
-  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
-  if (!('db' in opened)) {
-    return { ok: false, reason: opened.reason, nextAction: opened.nextAction, admitted: 0, ensured: 0, skippedLowScore: 0, skippedInvalid: 0, degradations: [opened.reason] };
-  }
-  const { db, close } = opened;
-  if (!hasProductionPainSchema(db)) {
-    close();
-    return { ok: false, reason: 'trajectory_schema_invalid', nextAction: 'run the supported PD workspace migration before enabling the worker', admitted: 0, ensured: 0, skippedLowScore: 0, skippedInvalid: 0, degradations: ['trajectory_schema_invalid'] };
-  }
-  const nowIso = (input.now ?? new Date()).toISOString();
-  const workspaceDir = path.resolve(input.workspaceDir);
-  const limit = Math.min(Math.max(input.limit ?? 5, 1), 50);
-
-  // Bare pains of this host that no admission marker covers yet. A marker is
-  // the durable "already handled" fact; runtime_task_id additionally excludes
-  // pains that reached a task through another path.
-  const barePainPredicate = `
-    FROM pain_events p
-    WHERE p.host_kind = ?
-      AND p.runtime_task_id IS NULL
-      AND p.canonical_pain_id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = p.canonical_pain_id)`;
-
-  try {
-    const lowScoreRow = db.prepare(`SELECT COUNT(*) AS n ${barePainPredicate} AND p.score < ?`).get(input.hostKind, GOVERNANCE_STRONG_PAIN_SCORE);
-    const skippedLowScore = typeof rowField(lowScoreRow, 'n') === 'number' ? (rowField(lowScoreRow, 'n') as number) : 0;
-
-    const rows = db.prepare(`SELECT p.canonical_pain_id, p.session_id, p.source, p.score, p.reason ${barePainPredicate} AND p.score >= ? ORDER BY p.id LIMIT ?`)
-      .all(input.hostKind, GOVERNANCE_STRONG_PAIN_SCORE, limit);
-
-    let admitted = 0;
-    let ensured = 0;
-    let skippedInvalid = 0;
-    const degradations: string[] = [];
-    const freshMarkers: { logicalObservationKey: string; canonicalPainId: string }[] = [];
-
-    for (const row of rows) {
-      const painId = rowField(row, 'canonical_pain_id');
-      const sessionId = rowField(row, 'session_id');
-      const score = rowField(row, 'score');
-      if (typeof painId !== 'string' || painId.length === 0 || typeof sessionId !== 'string' || sessionId.length === 0
-        || typeof score !== 'number' || !Number.isFinite(score)) {
-        skippedInvalid += 1;
-        continue;
-      }
-      const logicalObservationKey = `${input.hostKind}|${sessionId}|${painId}`;
-      const reason = typeof rowField(row, 'reason') === 'string' ? (rowField(row, 'reason') as string) : '';
-      const source = typeof rowField(row, 'source') === 'string' ? (rowField(row, 'source') as string) : 'tool_failure';
-      // The pain row carries the tool name only inside its reason prefix
-      // (`tool=<name>; ...` — the production writer's format); the row's
-      // source column is the failure class, used as the fallback.
-      const toolName = /^tool=([^;]{1,120});/.exec(reason)?.[1] ?? source;
-
-      const inserted = db.transaction((): boolean => {
-        // Re-probe inside the transaction: a concurrent sweep or live admission
-        // may have marked this pain between the scan and this write.
-        if (db.prepare('SELECT 1 FROM governance_signal_admissions WHERE canonical_pain_id = ?').get(painId) !== undefined) return false;
-        insertAdmissionMarker({
-          db,
-          identity: { hostKind: input.hostKind, logicalObservationKey, rolloutIdentity: sessionId, rootSessionId: sessionId, signalKind: 'tool_failure' },
-          canonicalPainId: painId,
-          ruleVersion: null,
-          reason,
-          payloadJson: toolFailureTaskPayload({ hostKind: input.hostKind, logicalObservationKey, sessionId, toolName, reason, score, workspaceDir }),
-          nowIso,
-        });
-        return true;
-      })();
-      if (inserted) {
-        admitted += 1;
-        freshMarkers.push({ logicalObservationKey, canonicalPainId: painId });
-      }
-    }
-
-    // Reuse the crash-safe ensure semantics unchanged: deterministic task id,
-    // task-store PK idempotency, Case-B link repair.
-    for (const marker of freshMarkers) {
-      const continuation = await ensureGovernanceDiagnosticianTask({
-        workspaceDir,
-        logicalObservationKey: marker.logicalObservationKey,
-        canonicalPainId: marker.canonicalPainId,
-        ...(input.databaseFactory ? { databaseFactory: input.databaseFactory } : {}),
-      });
-      if (continuation.ok) {
-        if (continuation.created) ensured += 1;
-      } else {
-        degradations.push(`${marker.logicalObservationKey}:${continuation.reason}`);
-      }
-    }
-
-    return {
-      ok: degradations.length === 0,
-      ...(degradations.length > 0 ? { reason: 'bare_pain_admission_degradations', nextAction: 'inspect the per-item degradations; the admitted pains and markers remain durable and reconcile retries task creation' } : {}),
-      admitted, ensured, skippedLowScore, skippedInvalid,
-      degradations: degradations.slice(0, 10),
-    };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
-    return { ok: false, reason: `bare_pain_admission_failed:${detail}`, nextAction: 'inspect the workspace trajectory database and retry; committed markers remain durable', admitted: 0, ensured: 0, skippedLowScore: 0, skippedInvalid: 0, degradations: [`bare_pain_admission_failed:${detail}`] };
   } finally {
     close();
   }

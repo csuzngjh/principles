@@ -7,10 +7,9 @@
  * Pure data extraction — reads from trajectory DB, sanitizes, returns evidence entries.
  *
  * PRI-642 Scope A adds the typed acquisition API `acquireTrajectoryEvidence`
- * (discriminated available/unavailable, SPEC §7.2). The legacy array API
- * `buildTrajectoryEvidence` remains as a compatibility wrapper for automatic
- * emitters and MUST keep its exact sentinel shapes until Scope B migrates
- * those consumers (frozen decision #3).
+ * (discriminated available/unavailable, SPEC §7.2). Phase A retired the last
+ * automatic emitter, so the legacy untyped array wrapper was removed: the
+ * Owner manual pain path is the only consumer and it uses the typed API.
  */
 
 import { sanitizeAssistantText } from './message-sanitize.js';
@@ -180,20 +179,4 @@ export function acquireTrajectoryEvidence(
     reasonCode: 'empty_trajectory',
     detail: 'trajectory_available_but_empty: no user correction, assistant turns, or failed tool calls found',
   };
-}
-
-/**
- * Legacy array API (compatibility wrapper, PRI-642 frozen decision #3).
- * Automatic emitters still consume this shape; Scope B migrates them to the
- * typed API one family at a time before this wrapper may be removed.
- */
-export function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: string): PainEvidenceEntry[] {
-  if (!wctx.trajectory || sessionId === 'unknown') {
-    return [{
-      sourceRef: 'owner_message:unavailable',
-      note: `trajectory_unavailable: ${!wctx.trajectory ? 'no_trajectory_db' : 'unknown_session'}`,
-    }];
-  }
-
-  return collectTrajectoryEvidence(wctx, sessionId).entries;
 }

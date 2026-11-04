@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-08T03:29:58.281Z",
-  "budget": 2000,
+  "generatedAt": "2026-11-03T13:19:43.161Z",
+  "budget": 4000,
   "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
   "pdTokenCost": null,
   "pdTokenCostReason": "no tokenizer/model binding held by this measurement; whole-request usage cannot be attributed to PD output (SPEC §6) — recorded as null, never approximated by chars",
@@ -78,23 +78,23 @@
       "selfReport": false,
       "candidates": 12,
       "aborted": false,
-      "avgInjected": 9,
-      "avgUsedChars": 1855,
-      "avgFullRenderChars": 3812,
+      "avgInjected": 8.65,
+      "avgUsedChars": 3480,
+      "avgFullRenderChars": 5383,
       "oversized": 0,
       "policy": "fair_rotation_v1",
       "roundKeySource": "controlled_simulation",
-      "templateOverheadChars": 1957
+      "templateOverheadChars": 1903
     },
     {
       "name": "mid-12/shared/selfReport=false",
       "route": "shared",
       "selfReport": false,
       "candidates": 12,
-      "fifoInjected": 6,
-      "fifoUsedChars": 1980,
+      "fifoInjected": 9,
+      "fifoUsedChars": 3812,
       "oversized": 0,
-      "avgInjectedForcedRotation": 4.5,
+      "avgInjectedForcedRotation": 7.13,
       "evidenceRows": null,
       "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
@@ -105,23 +105,23 @@
       "selfReport": true,
       "candidates": 12,
       "aborted": false,
-      "avgInjected": 9,
-      "avgUsedChars": 1855,
-      "avgFullRenderChars": 4167,
+      "avgInjected": 8.65,
+      "avgUsedChars": 3480,
+      "avgFullRenderChars": 5738,
       "oversized": 0,
       "policy": "fair_rotation_v1",
       "roundKeySource": "controlled_simulation",
-      "templateOverheadChars": 2312
+      "templateOverheadChars": 2258
     },
     {
       "name": "mid-12/shared/selfReport=true",
       "route": "shared",
       "selfReport": true,
       "candidates": 12,
-      "fifoInjected": 4,
-      "fifoUsedChars": 1873,
+      "fifoInjected": 8,
+      "fifoUsedChars": 2797,
       "oversized": 0,
-      "avgInjectedForcedRotation": 4,
+      "avgInjectedForcedRotation": 6.5,
       "evidenceRows": null,
       "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
@@ -131,8 +131,8 @@
       "route": "list-fifo",
       "policy": "legacy_fifo_prefix_v1 (lost turn source / restart degrade)",
       "candidates": 12,
-      "injected": 9,
-      "usedChars": 1855,
+      "injected": 10,
+      "usedChars": 3070,
       "oversized": 0
     },
     {
@@ -141,23 +141,23 @@
       "selfReport": false,
       "candidates": 40,
       "aborted": false,
-      "avgInjected": 18.05,
-      "avgUsedChars": 1888,
-      "avgFullRenderChars": 5248,
-      "oversized": 8,
+      "avgInjected": 18.85,
+      "avgUsedChars": 3889,
+      "avgFullRenderChars": 7373,
+      "oversized": 0,
       "policy": "fair_rotation_v1",
       "roundKeySource": "controlled_simulation",
-      "templateOverheadChars": 3360
+      "templateOverheadChars": 3484
     },
     {
       "name": "growth-40/shared/selfReport=false",
       "route": "shared",
       "selfReport": false,
       "candidates": 40,
-      "fifoInjected": 6,
-      "fifoUsedChars": 1980,
-      "oversized": 8,
-      "avgInjectedForcedRotation": 5,
+      "fifoInjected": 14,
+      "fifoUsedChars": 3828,
+      "oversized": 0,
+      "avgInjectedForcedRotation": 9.07,
       "evidenceRows": null,
       "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
@@ -168,23 +168,23 @@
       "selfReport": true,
       "candidates": 40,
       "aborted": false,
-      "avgInjected": 18.05,
-      "avgUsedChars": 1888,
-      "avgFullRenderChars": 5603,
-      "oversized": 8,
+      "avgInjected": 18.85,
+      "avgUsedChars": 3889,
+      "avgFullRenderChars": 7728,
+      "oversized": 0,
       "policy": "fair_rotation_v1",
       "roundKeySource": "controlled_simulation",
-      "templateOverheadChars": 3715
+      "templateOverheadChars": 3839
     },
     {
       "name": "growth-40/shared/selfReport=true",
       "route": "shared",
       "selfReport": true,
       "candidates": 40,
-      "fifoInjected": 4,
-      "fifoUsedChars": 1873,
-      "oversized": 8,
-      "avgInjectedForcedRotation": 4,
+      "fifoInjected": 13,
+      "fifoUsedChars": 3952,
+      "oversized": 0,
+      "avgInjectedForcedRotation": 8.32,
       "evidenceRows": null,
       "forcedRoundKeySource": "controlled_simulation",
       "fifoPolicy": "legacy_fifo_prefix_v1"
@@ -194,16 +194,16 @@
       "route": "list-fifo",
       "policy": "legacy_fifo_prefix_v1 (lost turn source / restart degrade)",
       "candidates": 40,
-      "injected": 24,
-      "usedChars": 1856,
-      "oversized": 8
+      "injected": 25,
+      "usedChars": 3071,
+      "oversized": 0
     }
   ],
   "sharedPathWithEvents": {
     "promptBuildsDriven": 5,
     "eventsEmitted": 5,
     "promptBuildsWithInjection": 5,
-    "evidenceRows": 6,
+    "evidenceRows": 7,
     "evidenceAllRunBound": false,
     "evidenceAllHostBound": true,
     "evidenceAllEventBound": true,
@@ -212,9 +212,9 @@
   },
   "budgetCandidateReplay": {
     "scenario": "controlled simulation only: same persisted 16 candidates (14 × 60 chars, 2 × 1200 chars), same FIFO order, 40 forced round keys",
-    "listRouteAvgInjected": 11.5,
-    "sharedForcedRotationAvgInjected": 5.5,
-    "sharedFifoInjected": 6
+    "listRouteAvgInjected": 16,
+    "sharedForcedRotationAvgInjected": 10.5,
+    "sharedFifoInjected": 14
   },
-  "decision": "defaults unchanged: both routes keep their existing 2000 budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)"
+  "decision": "defaults unchanged: both routes keep their existing 4000 budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)"
 }

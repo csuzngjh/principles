@@ -197,10 +197,6 @@ function installsWorkbuddy(host: HostTarget): boolean {
   return host === 'workbuddy' || host === 'all';
 }
 
-function installedPluginDir(): string {
-  return getInstalledPluginDir();
-}
-
 function pluginInstallDirs(): string[] {
   return installsOpenClaw(activeHostTarget)
     ? [getInstalledPluginDir(), getPluginExtDir()]
@@ -1865,10 +1861,77 @@ export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   }
 }
 
+/**
+ * PRI-1102: a target that exists as a DANGLING link (an interrupted install
+ * left a reparse point whose target is gone) is not a directory the installer
+ * can copy into. `existsSync` follows the link and reports "missing", so the
+ * backup step never moves it, and `ensureDir` then treats it as present —
+ * the follow-up mkdir fails with ENOENT and aborts the whole install.
+ *
+ * Absent targets are created. A dangling link is removed (the link itself only,
+ * never a target), and the caller recreates the real directory. Everything
+ * else — a real directory, or a link that still resolves — is left untouched,
+ * so an existing install is never destroyed by this step.
+ */
+export async function preparePluginInstallTarget(targetDir: string): Promise<void> {
+  let stats: Stats | undefined;
+  try {
+    stats = lstatSync(targetDir, { throwIfNoEntry: false });
+  } catch (error) {
+    throw new Error(`Cannot inspect plugin install target ${targetDir}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  if (stats !== undefined && stats.isSymbolicLink()) {
+    let resolves = true;
+    try {
+      realpathSync(targetDir);
+    } catch {
+      resolves = false;
+    }
+    if (!resolves) {
+      // fs-extra's remove unlinks the reparse point instead of traversing it.
+      await fse.remove(targetDir);
+      logger.warn(`Removed dangling link at ${targetDir} (target missing) — rebuilding the plugin install directory.`);
+    }
+  }
+  await fse.ensureDir(targetDir);
+}
+
+/**
+ * PRI-1102: a rollback is only as good as the state it returns to. The
+ * pre-run state can itself be incomplete (a component directory the previous
+ * run never finished, a link whose target is gone), so "restored" must not be
+ * reported as a healthy install without checking what the restored paths
+ * actually resolve to.
+ */
+export function describeRestoredStateGaps(): string[] {
+  const gaps: string[] = [];
+  for (const dir of [getPluginExtDir(), getPdRuntimeDir()]) {
+    let stats: Stats | undefined;
+    try {
+      stats = lstatSync(dir, { throwIfNoEntry: false });
+    } catch (error) {
+      gaps.push(`${dir} (unreadable: ${error instanceof Error ? error.message : String(error)})`);
+      continue;
+    }
+    if (stats === undefined) {
+      gaps.push(`${dir} (missing)`);
+      continue;
+    }
+    if (stats.isSymbolicLink()) {
+      try {
+        realpathSync(dir);
+      } catch {
+        gaps.push(`${dir} (dangling link)`);
+      }
+    }
+  }
+  return gaps;
+}
+
 export async function installPluginToStaging(pluginDir: string, language: SkillLanguage): Promise<void> {
   const builtPluginDir = path.join(pluginDir, 'plugin');
   for (const targetDir of pluginInstallDirs()) {
-    await fse.ensureDir(targetDir);
+    await preparePluginInstallTarget(targetDir);
     // PRI-1037 payload fix: npm-era payloads carried a ~16k-file node_modules
     // (the whole pi-ai/openai/anthropic tree, dragged in through the plugin's
     // historical file:./core dependency) plus a `core` junction, in BOTH plugin
@@ -2253,77 +2316,13 @@ function syncPdCli(pluginDir: string): { ok: boolean; globalShim: GlobalPdShimRe
     cpSync(bundledNodeModules, path.join(installedPdCliDir, 'node_modules'), { recursive: true });
   }
 
-  // Create node_modules/@principles/core symlink so pd-cli can resolve
-  // its @principles/core dependency (rewritten to "file:../core" by bundle-plugin.mjs).
-  // Without this, `node dist/index.js --version` fails because static imports
-  // from @principles/core/runtime-v2 cannot be resolved.
-  const coreLinkDir = path.join(installedPdCliDir, 'node_modules', '@principles');
-  const coreLinkTarget = path.join(getPdRuntimeDir(), 'core');
-  mkdirSync(coreLinkDir, { recursive: true });
-  const coreLinkPath = path.join(coreLinkDir, 'core');
-  if (!existsSync(coreLinkPath)) {
-    if (isWindows()) {
-      // On Windows, use a junction (directory symlink) which doesn't require elevated privileges
-      symlinkSync(coreLinkTarget, coreLinkPath, 'junction');
-    } else {
-      // On Unix, use a relative symlink for portability
-      symlinkSync('../../../core', coreLinkPath, 'dir');
-    }
-  }
-
-  // Create node_modules/@principles/host-runtime symlink so pd-cli can resolve
-  // its @principles/host-runtime dependency (rewritten to "file:../host-runtime"
-  // by bundle-plugin.mjs). Without this, `pd --version` crashes with
-  // ERR_MODULE_NOT_FOUND because pd-cli statically imports createProductionHostRuntime.
-  // host-runtime's own better-sqlite3 / js-yaml / @principles/core dependencies
-  // resolve through the plugin's <ext>/node_modules/ (shared via Node's upward
-  // module resolution), so no separate npm install is needed.
-  const hostRuntimeLinkTarget = path.join(getPdRuntimeDir(), 'host-runtime');
-  const hostRuntimeLinkPath = path.join(coreLinkDir, 'host-runtime');
-  if (!existsSync(hostRuntimeLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(hostRuntimeLinkTarget, hostRuntimeLinkPath, 'junction');
-    } else {
-      symlinkSync('../../../host-runtime', hostRuntimeLinkPath, 'dir');
-    }
-  }
-
-  // Create node_modules/@principles/codex-adapter symlink so pd-cli can resolve
-  // its @principles/codex-adapter dependency (rewritten to
-  // "file:../codex-adapter" by bundle-plugin.mjs). Without this, `pd codex
-  // worker` crashes with ERR_MODULE_NOT_FOUND (PRI-624).
-  const codexAdapterLinkTarget = path.join(getPdRuntimeDir(), 'codex-adapter');
-  const codexAdapterLinkPath = path.join(coreLinkDir, 'codex-adapter');
-  if (!existsSync(codexAdapterLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(codexAdapterLinkTarget, codexAdapterLinkPath, 'junction');
-    } else {
-      symlinkSync('../../../codex-adapter', codexAdapterLinkPath, 'dir');
-    }
-  }
-
-  // Create node_modules/principles-disciple symlink so pd-cli can resolve
-  // its principles-disciple dependency (the plugin package, rewritten to
-  // "file:../plugin" by bundle-plugin.mjs). The plugin is installed at the
-  // extension dir root (getPluginExtDir()), so the symlink target is the
-  // ext dir itself — Node resolves `import 'principles-disciple'` via the
-  // plugin's package.json exports field.
-  // Without this, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
-  // because runtime-init.ts statically imports initTrajectorySchema.
-  const pdLinkDir = path.join(installedPdCliDir, 'node_modules');
-  const pdLinkTarget = installedPluginDir();
-  mkdirSync(pdLinkDir, { recursive: true });
-  const pdLinkPath = path.join(pdLinkDir, 'principles-disciple');
-  if (!existsSync(pdLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(pdLinkTarget, pdLinkPath, 'junction');
-    } else {
-      // Relative from <ext>/pd-cli/node_modules/ to <ext>/: go up twice
-      // (node_modules → pd-cli → ext)
-      symlinkSync('../../', pdLinkPath, 'dir');
-    }
-  }
-
+  // G3 §10.5: the pd-cli sibling links (core / host-runtime / codex-adapter /
+  // workbuddy-adapter / install-layout / principles-disciple) are NO LONGER
+  // hand-rolled here. install() materializes them via
+  // ensurePdCliResolution() AFTER installPdCliDependencies(), so a physical
+  // copy produced by the dependency stage can never be silently kept — this
+  // block used to short-circuit on existsSync() and leave npm-materialized
+  // copies in place.
   tryUpgradePdCliFromNpm(installedPdCliDir);
 
   const installedBinDir = getInstalledBinDir();
@@ -2509,28 +2508,11 @@ function installConsole(consoleDir: string): void {
   rmSync(consoleDest, { recursive: true, force: true });
   cpSync(consoleSrc, consoleDest, { recursive: true });
 
-  const pluginLinkPath = path.join(consoleDest, 'node_modules', 'principles-disciple');
-  mkdirSync(path.dirname(pluginLinkPath), { recursive: true });
-  if (!existsSync(pluginLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(installedPluginDir(), pluginLinkPath, 'junction');
-    } else {
-      symlinkSync(path.relative(path.dirname(pluginLinkPath), installedPluginDir()), pluginLinkPath, 'dir');
-    }
-  }
-
-  // PRI-672: console resolves its create-principles-disciple dependency (the
-  // ReleaseManager authority module, rewritten to file:../release-manager by
-  // bundle-plugin.mjs) through this link into ~/.pd/runtime.
-  const releaseManagerLinkPath = path.join(consoleDest, 'node_modules', 'create-principles-disciple');
-  if (!existsSync(releaseManagerLinkPath)) {
-    mkdirSync(path.dirname(releaseManagerLinkPath), { recursive: true });
-    if (isWindows()) {
-      symlinkSync(getInstalledReleaseManagerDir(), releaseManagerLinkPath, 'junction');
-    } else {
-      symlinkSync(path.relative(path.dirname(releaseManagerLinkPath), getInstalledReleaseManagerDir()), releaseManagerLinkPath, 'dir');
-    }
-  }
+  // G3 §10.5: the console's sibling links (core / host-runtime / install-layout
+  // / principles-disciple / create-principles-disciple) are materialized by
+  // ensureConsoleResolution() AFTER installConsoleDependencies() — see
+  // ensurePdCliResolution() for why the old existsSync() short-circuit was
+  // removed instead of kept.
 }
 
 function getInstalledCoreDir(): string {
@@ -2648,6 +2630,119 @@ function installBundledCodexAdapter(pluginDir: string): void {
 }
 
 /**
+ * P1: structural package-name validation. Unscoped names have exactly one
+ * segment; scoped names exactly `@scope/pkg`. This is deliberately NOT one
+ * regex: "." / ".." pass a character-class test, yet path.join() normalizes
+ * them onto node_modules / the scope parent / the component root.
+ */
+function isSafeNameSegment(segment: string): boolean {
+  return segment.length > 0 && segment !== '.' && segment !== '..' && /^[A-Za-z0-9._-]+$/.test(segment);
+}
+
+function parseDependencyName(name: string): string[] | undefined {
+  const scoped = name.startsWith('@');
+  const raw = (scoped ? name.slice(1) : name).split('/');
+  if (scoped ? raw.length !== 2 : raw.length !== 1) return undefined;
+  if (!raw.every(isSafeNameSegment)) return undefined;
+  if (!scoped) return raw;
+  const [scope, packageName] = raw;
+  return scope !== undefined && packageName !== undefined ? [`@${scope}`, packageName] : undefined;
+}
+
+/**
+ * P1: `target` must be a STRICT descendant of `root` (never root itself, never
+ * `..`, never an absolute escape). Applied to the lexical link path, the real
+ * node_modules directory (which must stay inside the component) and any
+ * symlinked ancestor we are about to create or delete through.
+ */
+function assertStrictlyInside(root: string, target: string, componentLabel: string): void {
+  const relative = path.relative(root, target);
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(
+      `Installed ${componentLabel} dependency link path escapes the install tree (${target} is not strictly inside ${root}).`,
+    );
+  }
+}
+
+/** P1: an existing path used as a link parent must be a real directory, not a symlink. */
+function assertRealParentDirectory(dir: string, componentLabel: string): void {
+  let stat: Stats;
+  try {
+    stat = lstatSync(dir);
+  } catch (error) {
+    throw new Error(
+      `Installed ${componentLabel} dependency link parent is missing (${dir}): ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(`Installed ${componentLabel} dependency link parent must not be a symbolic link (${dir}).`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`Installed ${componentLabel} dependency link parent must be a directory (${dir}).`);
+  }
+}
+
+interface ComponentFileDependencyLink {
+  segments: string[];
+  siblingReal: string;
+  linkPath: string;
+}
+
+/**
+ * P1 two-phase planning: resolve + validate every `file:../` dependency and
+ * its final link path without mutating anything. Only a fully valid plan is
+ * returned, so an invalid later entry cannot leave earlier links half-applied.
+ */
+function planComponentFileDependencyLinks(
+  componentDir: string,
+  componentLabel: string,
+  dependencies: Record<string, unknown>,
+): ComponentFileDependencyLink[] {
+  const runtimeDir = getPdRuntimeDir();
+  const runtimeDirReal = realpathSync(runtimeDir);
+  const nodeModulesDir = path.join(componentDir, 'node_modules');
+  const operations: ComponentFileDependencyLink[] = [];
+
+  for (const [name, ref] of Object.entries(dependencies)) {
+    if (typeof ref !== 'string' || !ref.startsWith('file:../')) continue;
+    const siblingName = ref.slice('file:../'.length);
+    // rc-1: only a single ordinary sibling segment; "." / ".." and separators
+    // must not resolve the ref outside the runtime dir.
+    if (!isSafeNameSegment(siblingName)) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported file dependency ref "${ref}" for ${name}.`);
+    }
+    const segments = parseDependencyName(name);
+    if (segments === undefined) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported dependency name "${name}".`);
+    }
+
+    const siblingDir = path.join(runtimeDir, siblingName);
+    if (!existsSync(siblingDir)) {
+      throw new Error(`${componentLabel} depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
+    }
+    const siblingReal = realpathSync(siblingDir);
+    // The sibling must resolve to exactly <runtime>/<siblingName>: a symlink
+    // that redirects the link target outside the runtime is not a sibling.
+    if (path.relative(runtimeDirReal, siblingReal) !== siblingName) {
+      throw new Error(`Installed ${componentLabel} declares a file dependency ref that resolves outside the runtime dir: "${ref}".`);
+    }
+
+    const linkPath = path.join(nodeModulesDir, ...segments);
+    // Lexical boundary + segment-count: path.join() collapses "." / ".." and
+    // repeated separators, so the normalized path must still have exactly the
+    // declared number of segments and be a strict descendant of node_modules.
+    const relative = path.relative(nodeModulesDir, linkPath);
+    if (relative.split(path.sep).length !== segments.length) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported dependency name "${name}".`);
+    }
+    assertStrictlyInside(nodeModulesDir, linkPath, componentLabel);
+    operations.push({ segments, siblingReal, linkPath });
+  }
+  return operations;
+}
+
+/**
  * PRI-711 (generalized for ADR-0020 host adapters): materialize node_modules
  * links for an INSTALLED runtime component so its declared `file:../<component>`
  * dependencies resolve under ESM realpath rules. Data-driven from the deployed
@@ -2675,20 +2770,40 @@ function ensureComponentFileDependencyLinks(componentDir: string, componentLabel
   if (manifest.dependencies !== undefined && !isRecord(manifest.dependencies)) {
     throw new Error(`Installed ${componentLabel} package.json dependencies must be an object (${manifestPath}).`);
   }
-  const runtimeDir = getPdRuntimeDir();
-  for (const [name, ref] of Object.entries(manifest.dependencies ?? {})) {
-    if (typeof ref !== 'string' || !ref.startsWith('file:../')) continue;
-    const siblingName = ref.slice('file:../'.length);
-    // rc-1: the manifest is untrusted input — only accept single-path segment
-    // siblings so a crafted ref cannot escape the runtime dir.
-    if (!/^[A-Za-z0-9._-]+$/.test(siblingName) || siblingName === '.' || siblingName === '..') {
-      throw new Error(`Installed ${componentLabel} declares an unsupported file dependency ref "${ref}" for ${name}.`);
+  // P1: validate EVERYTHING before touching the filesystem. A manifest is
+  // untrusted input, and a name that normalizes to node_modules / the scope
+  // parent / the component root must never reach a recursive delete.
+  const operations = planComponentFileDependencyLinks(componentDir, componentLabel, manifest.dependencies ?? {});
+  if (operations.length === 0) return;
+
+  const componentDirReal = realpathSync(componentDir);
+  const nodeModulesDir = path.join(componentDir, 'node_modules');
+  // P1: node_modules itself must be a real directory inside the component —
+  // a symlinked parent would redirect every link/delete outside the install.
+  mkdirSync(nodeModulesDir, { recursive: true });
+  assertRealParentDirectory(nodeModulesDir, componentLabel);
+  const nodeModulesReal = realpathSync(nodeModulesDir);
+  assertStrictlyInside(componentDirReal, nodeModulesReal, componentLabel);
+
+  for (const operation of operations) {
+    const { segments, siblingReal, linkPath } = operation;
+    if (segments.length === 2) {
+      // scoped parent: create only when absent; never replace an existing
+      // real directory (npm may legitimately share it) and never follow a
+      // symlinked parent.
+      const scopeSegment = segments[0] as string;
+      const scopeDir = path.join(nodeModulesDir, scopeSegment);
+      let scopeStat: Stats | undefined;
+      try {
+        scopeStat = lstatSync(scopeDir);
+      } catch {
+        scopeStat = undefined;
+      }
+      if (scopeStat === undefined) mkdirSync(scopeDir);
+      assertRealParentDirectory(scopeDir, componentLabel);
+      assertStrictlyInside(nodeModulesReal, realpathSync(scopeDir), componentLabel);
     }
-    const siblingDir = path.join(runtimeDir, siblingName);
-    if (!existsSync(siblingDir)) {
-      throw new Error(`${componentLabel} depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
-    }
-    const linkPath = path.join(componentDir, 'node_modules', name);
+
     let stat: Stats | undefined;
     try {
       stat = lstatSync(linkPath);
@@ -2698,20 +2813,48 @@ function ensureComponentFileDependencyLinks(componentDir: string, componentLabel
     if (stat !== undefined) {
       if (stat.isSymbolicLink()) {
         try {
-          if (realpathSync(linkPath) === realpathSync(siblingDir)) continue;
+          if (realpathSync(linkPath) === siblingReal) continue;
         } catch {
           // Unreadable link target — fall through to replace.
         }
       }
+      // linkPath was proven to be a strict descendant of node_modules during
+      // planning, and both parent levels were re-verified as real directories
+      // above, so the only recursive delete stays inside the component tree.
       rmSync(linkPath, { recursive: stat.isDirectory() && !stat.isSymbolicLink(), force: true });
     }
-    mkdirSync(path.dirname(linkPath), { recursive: true });
     if (isWindows()) {
-      symlinkSync(siblingDir, linkPath, 'junction');
+      symlinkSync(siblingReal, linkPath, 'junction');
     } else {
-      symlinkSync(path.relative(path.dirname(linkPath), siblingDir), linkPath, 'dir');
+      symlinkSync(path.relative(path.dirname(linkPath), siblingReal), linkPath, 'dir');
     }
   }
+}
+
+/**
+ * G3 §10.5: materialize the INSTALLED pd-cli's `file:../` sibling links
+ * (core / host-runtime / codex-adapter / workbuddy-adapter / install-layout /
+ * principles-disciple) through the shared helper. Replaces the hand-rolled
+ * per-dependency blocks that used to live in syncPdCli(): those short-circuited
+ * on existsSync(), so an npm-materialized physical copy silently won over the
+ * intended runtime sibling.
+ *
+ * Ordering contract: MUST run after installPdCliDependencies() (the dependency
+ * stage is what can (re)materialize node_modules) AND after every sibling is
+ * deployed. A missing sibling fails the install loud (the helper).
+ */
+export function ensurePdCliResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledPdCliDir(), '@principles/pd-cli');
+}
+
+/**
+ * G3 §10.5: same contract for the INSTALLED pd-console (core / host-runtime /
+ * install-layout / principles-disciple / create-principles-disciple). Runs
+ * after installConsoleDependencies() so npm-materialized copies are corrected
+ * instead of silently kept.
+ */
+export function ensureConsoleResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledConsoleDir(), '@principles/pd-console');
 }
 
 /**
@@ -4498,6 +4641,10 @@ export async function install(
     const pdCliSync = syncPdCli(pluginDir);
     if (pdCliSync.globalShim !== null) globalShimRecord = pdCliSync.globalShim;
     await installPdCliDependencies();
+    // G3 §10.5: materialize the sibling links AFTER the dependency stage — every
+    // sibling component is already deployed at this point, and a physical copy
+    // the dependency stage produced is now corrected rather than silently kept.
+    ensurePdCliResolution();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for pd-cli...');
@@ -4528,6 +4675,10 @@ export async function install(
 
     if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled console dependencies...');
     await installConsoleDependencies();
+    // G3 §10.5: same ordering contract as pd-cli — links after the dependency
+    // stage, with every console sibling (plugin / release-manager / core /
+    // host-runtime / install-layout) already deployed.
+    ensureConsoleResolution();
     stepIndex++;
 
     // PRI-912 (SPEC-P1′-A): dedup the plugin's bundled @principles/core copy
@@ -4984,6 +5135,10 @@ export async function install(
     // pre-date this run, so it is NOT wholesale-removed. Report its retention
     // honestly instead of claiming "nothing else was modified".
     const workspaceTouched = !hasBackup && mutationStarted && journal?.lastState !== 'planned';
+    // PRI-1102: `restored` describes the rollback operation, not the health of
+    // the state it returned to. Name the gaps so "restored" is never read as
+    // "usable install".
+    const restoredGaps = hasBackup && restoreResult.restored ? describeRestoredStateGaps() : [];
     const rollbackSuffix = !hasBackup
       ? freshCleanup
         ? freshCleanup.failed.length === 0
@@ -4991,7 +5146,9 @@ export async function install(
           : t('rollback_fresh_clean_failed').replace('{dirs}', freshCleanup.failed.map((f) => f.dir).join(', '))
         : t('rollback_no_changes')
       : restoreResult.restored
-        ? t('rollback_restored')
+        ? restoredGaps.length === 0
+          ? t('rollback_restored')
+          : t('rollback_restored_incomplete').replace('{paths}', restoredGaps.join(', '))
         : t('rollback_failed')
           .replace('{restoreError}', restoreResult.error ?? '')
           .replace('{extDir}', extDir)
@@ -5008,7 +5165,9 @@ export async function install(
           ? t('next_no_changes_lock')
           : t('next_no_changes_other'))
       : restoreResult.restored
-        ? t('next_restored')
+        ? restoredGaps.length === 0
+          ? t('next_restored')
+          : t('next_restored_incomplete').replace('{paths}', restoredGaps.join(', '))
         : t('next_restore_failed')
           .replace('{extDir}', extDir)
           .replace('{backupDir}', backupDir ?? runtimeBackupDir ?? '')

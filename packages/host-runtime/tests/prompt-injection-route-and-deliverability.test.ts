@@ -348,7 +348,7 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     expect(overMin.status).toBe('model_dependent');
     if (overMin.status === 'model_dependent') expect(overMin.costChars).toBe(PROMPT_BUDGET_MIN_CHARS + 2);
 
-    // Exactly at the MAX supported tier (16000, Owner target): model_dependent, not refused.
+    // Exactly at the MAX supported tier (32000, policy ceiling): model_dependent, not refused.
     const atMax = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(PROMPT_BUDGET_MAX_CHARS)) });
     expect(atMax.status).toBe('model_dependent');
     if (atMax.status === 'model_dependent') expect(atMax.costChars).toBe(PROMPT_BUDGET_MAX_CHARS);
@@ -368,7 +368,7 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text }), validationStatus: 'validated' as const };
     const listDir = tempWorkspace({ declare: ['openclaw'] });
     const listResult = await checkPromptArtifactDeliverability({ workspaceDir: listDir, artifact });
-    // 1292 serialized chars sit inside the supported 1250..16000 range but above
+    // 1292 serialized chars sit inside the supported 1250..32000 range but above
     // the min tier — model-dependent on the list route.
     expect(listResult.status).toBe('model_dependent');
     if (listResult.status === 'model_dependent') expect(listResult.costChars).toBe(1292);
@@ -405,9 +405,9 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(codexResult.costChars).toBe(result.costChars);
     }
 
-    // 超出最大支持档位才不可投递（共享路由完整渲染计费；17000 字符正文在
-    // 共享路由 ≈17763 > 16000 上限，在列表路由 ≈17041 同样超限）
-    const hugeArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-3', text: 'S'.repeat(17000) }) };
+    // 超出最大支持档位才不可投递（共享路由完整渲染计费；34000 字符正文在
+    // 共享路由 ≈34763 > 32000 上限，在列表路由 ≈34041 同样超限）
+    const hugeArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-3', text: 'S'.repeat(34000) }) };
     const undeliverable = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact: hugeArtifact });
     expect(undeliverable.status).toBe('undeliverable');
     if (undeliverable.status === 'undeliverable') {
@@ -418,21 +418,21 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     }
   });
 
-  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (15759 → 16114)', async () => {
-    // The footer costs +355 chars (measured). Scale the text to 15000 so the
-    // plain render (15759) stays inside the 16000 max tier while the footer
-    // render (16114) crosses it — the footer alone flips the verdict.
-    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(15000) }), validationStatus: 'validated' as const };
+  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (31759 → 32114)', async () => {
+    // The footer costs +355 chars (measured). Scale the text to 31000 so the
+    // plain render (31759) stays inside the 32000 max tier while the footer
+    // render (32114) crosses it — the footer alone flips the verdict.
+    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(31000) }), validationStatus: 'validated' as const };
     const plainDir = tempWorkspace({ declare: ['codex'] });
     const plain = await checkPromptArtifactDeliverability({ workspaceDir: plainDir, artifact });
     expect(plain.status).toBe('model_dependent');
-    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(15759);
+    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(31759);
 
     const selfReportDir = tempWorkspace({ declare: ['codex'], selfReport: true });
     const withFooter = await checkPromptArtifactDeliverability({ workspaceDir: selfReportDir, artifact });
     expect(withFooter.status).toBe('undeliverable');
     if (withFooter.status === 'undeliverable') {
-      expect(withFooter.costChars).toBe(16114);
+      expect(withFooter.costChars).toBe(32114);
       expect(withFooter.overByChars).toBe(114);
     }
   });
@@ -487,10 +487,11 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     const dir = tempWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'K-1', '第一条短原则');
     await seedActivation(dir, 'K-2', '第二条短原则');
-    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 v0.2: 单条超出最大支持档位(16000)才是
-    // oversized；2000 字符正文(列表计费 ≈2042)落在支持区间内 → model_dependent。
+    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 v0.3: 单条超出最大支持档位(32000)才是
+    // oversized；2000 字符正文(列表计费 ≈2042)落在支持区间内 → model_dependent，
+    // 且在 4000 的兜底投影窗口内。
     await seedActivation(dir, 'K-BIG', 'Z'.repeat(2000));
-    await seedActivation(dir, 'K-HUGE', 'Z'.repeat(17000));
+    await seedActivation(dir, 'K-HUGE', 'Z'.repeat(33000));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
     expect(report.route.status).toBe('confirmed');
     const byId = new Map(report.statuses.map((s) => [s.activationId, s]));
@@ -498,7 +499,7 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     expect(byId.get('act-K-1')?.inCurrentWindow).toBe(true);
     expect(byId.get('act-K-1')?.costChars).toBeGreaterThan(0);
     expect(byId.get('act-K-BIG')?.status).toBe('model_dependent');
-    expect(byId.get('act-K-BIG')?.inCurrentWindow).toBe(false);
+    expect(byId.get('act-K-BIG')?.inCurrentWindow).toBe(true);
     expect(byId.get('act-K-BIG')?.reason).toContain('model_dependent_capacity');
     expect(byId.get('act-K-HUGE')?.status).toBe('oversized');
     expect(byId.get('act-K-HUGE')?.inCurrentWindow).toBe(false);
@@ -507,7 +508,7 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
 
   it('SPEC §6.3 consistency: an entry in (1250, 2000] that fits the fallback estimate is model_dependent — never an unconditional injectable (CodeRabbit review)', async () => {
     // 1500-char statement → list-route cost ≈1574: fits the console's
-    // fallback projection budget (2000), sits IN the current window, yet
+    // fallback projection budget (4000), sits IN the current window, yet
     // exceeds the measured floor — on a 32K/64K model (budget = floor) it
     // would NOT inject. The status surface must tell the Owner exactly what
     // the approval-time precheck tells them: model_dependent.
@@ -528,11 +529,11 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const header = 'Runtime V2 activated principles:';
     const bigLen = RUNTIME_V2_PRINCIPLE_BUDGET - header.length - 1 - '- [W-1] '.length - 1;
-    await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满（成本 1999 ∈ (1250,2000] 中带）
+    await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满（成本 3999 ∈ (1250,4000] 当前投影窗口）
     await seedActivation(dir, 'W-2', '第二条原则');
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
     const byId = new Map(report.statuses.map((s) => [s.activationId, s]));
-    // Tier-first (SPEC §6.3): the 1999-char filler exceeds the measured floor,
+    // Tier-first (SPEC §6.3): the 3999-char filler exceeds the measured floor,
     // so it is model_dependent — but keeps the POSITIVE window fact (it does
     // sit in this fallback-budget projection).
     expect(byId.get('act-W-1')?.status).toBe('model_dependent');

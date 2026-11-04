@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { logger, setQuietMode, banner } from '../src/utils/logger.js';
 
 describe('logger utilities', () => {
-  let mockLog: ReturnType<typeof vi.fn>;
+  let mockLog: typeof console.log;
 
   beforeEach(() => {
     mockLog = vi.fn();

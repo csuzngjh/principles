@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
@@ -28,7 +28,7 @@ const expiresFar = '2030-01-01T00:00:00Z';
 
 interface KeyMaterial {
   keyId: string;
-  privateKey: ReturnType<typeof generateKeyPairSync>['privateKey'];
+  privateKey: KeyObject;
   key: Key;
 }
 

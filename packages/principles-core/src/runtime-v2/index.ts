@@ -2159,8 +2159,6 @@ export {
   SOURCE_DESCRIPTORS,
   getSourceDescriptor,
   evaluateTriage,
-  RISKY_HIGH_SCORE_THRESHOLD,
-  REPEATED_FAILURE_THRESHOLD,
   resolveSourceKind,
   buildToolFailureObservation,
   buildManualPainObservation,

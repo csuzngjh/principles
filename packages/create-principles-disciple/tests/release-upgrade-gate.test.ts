@@ -49,7 +49,6 @@ import { extract as extractTar } from 'tar';
 import { buildReleasePublication, gzipReleaseArchive, type PublicationFile } from '../src/update/release-metadata-publisher.js';
 import { buildSignedRoot, FAR_EXPIRY, makeTrustMaterial } from './helpers/trust-material.js';
 import { previousReleaseVersion } from './helpers/n1-baseline.js';
-// @ts-expect-error - JSDoc-typed .mjs helper; the interface intent lives in the module
 import {
   gateBuildPublicationInternal,
   gateRestampPayload,
@@ -63,6 +62,12 @@ import { isReleaseReadPathContained } from './release-containment';
 import { cleanupReleaseSmokeRoot } from './release-smoke-cleanup';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
+
+/** `node:http` header values are `string | string[] | undefined`; the gate reads a single value. */
+function headerString(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
 
 /**
  * PRI-874: total-duration budget for one Console /api/update/apply-full HTTP
@@ -331,8 +336,8 @@ async function postApplyFull(): Promise<{ status: number; authority: string | nu
           const body = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : envelope) as Record<string, unknown>;
           finish({
             status: response.statusCode ?? 0,
-            authority: response.headers['x-pd-mutation-authority'] ?? null,
-            fallbackReason: response.headers['x-pd-mutation-fallback-reason'] ?? null,
+            authority: headerString(response.headers['x-pd-mutation-authority']),
+            fallbackReason: headerString(response.headers['x-pd-mutation-fallback-reason']),
             body,
           });
         });
@@ -532,11 +537,10 @@ function countPayloadFiles(dir: string): number {
  * pd-cli. The rename-never-followed-a-junction proof now uses the
  * codex-adapter core slot — the ONE slot the installer guarantees as a
  * canonical LINK (expectCanonicalRuntimeLayout's documented invariant). The
- * pd-cli `@principles/core` slot is a PHYSICAL copy by construction
- * (self-contained payloads materialize file:../core via npm ci
- * --install-links; syncPdCli then copies node_modules wholesale, so the
- * post-copy link creation is skipped) AND this scenario additionally injects
- * the PRI-665 physical duplicate into exactly that slot — asserting
+ * pd-cli `@principles/core` slot is a PHYSICAL copy in this upgrade path
+ * (/apply-full deploys the payload tree verbatim; the fresh-install path's
+ * ensurePdCliResolution() link pass does not run here) AND this scenario
+ * additionally injects the PRI-665 physical duplicate into exactly that slot — asserting
  * link-ness there was self-defeating and failed the publish release matrix
  * (ubuntu-24.04, node 22.22.2; the test is excluded from test:fast so the
  * PR never ran it). The physical slot instead proves the complementary
@@ -891,11 +895,11 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       // Single-archive fixture: assert the singular shape, then corrupt the
       // one artifact target this publication carries.
       expect(publicationBad.manifest.artifacts).toHaveLength(1);
-      const corruptedTargetPath = publicationBad.manifest.artifacts[0].artifactTargetPath;
+      const corruptedTargetPath = publicationBad.manifest.artifacts[0]!.artifactTargetPath;
       const corruptedServed = publicationBad.files.map((file) => {
         if (file.path === `targets/${corruptedTargetPath}`) {
           const bytes = Buffer.from(file.bytes);
-          bytes[bytes.length - 1] ^= 0xff;
+          bytes[bytes.length - 1] = bytes[bytes.length - 1]! ^ 0xff;
           return { path: file.path, bytes };
         }
         return file;

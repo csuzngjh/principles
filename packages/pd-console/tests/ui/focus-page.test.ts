@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * FocusPage tests — PRI-319 Governance Focus page
  *
@@ -10,9 +11,16 @@
  * - three-layer info structure (conclusion → why → full trajectory collapsed)
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
+import { createElement } from "react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { PromptCapacitySection } from "../../src/ui/pages/focus/PromptCapacitySection.js";
+import type {
+  PromptInjectionBudgetStatus,
+  PromptInjectionTargetHostName,
+} from "../../src/shared/prompt-injection-contract.js";
 // PRI-940: exercise the REAL page validator (the local replicas below predate
 // it and only cover legacy shapes). focus-validation.ts imports api.js as
 // types only, so loading it here never pulls in React.
@@ -38,6 +46,17 @@ vi.mock("../../src/ui/api.js", () => ({
   fetchOwnerDecisions: vi.fn().mockResolvedValue({ success: true, data: { items: [], total: 0, generatedAt: "2026-08-30T00:00:00.000Z" } }),
   fetchAllActivations: vi.fn().mockResolvedValue({ success: true, data: { activations: [], status: "ok" } }),
 }));
+
+// PRI-1066 P1-2: the rendering assertions below mount the REAL component. The
+// copy is irrelevant to reachability, so resolve keys to their defaultValue —
+// that keeps the test independent of i18n bootstrap.
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
+  }),
+}));
+
+afterEach(cleanup);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -920,13 +939,47 @@ describe("SPEC-PD-UIUX-001 R2: Focus page reading order contract", () => {
 // ── PRI-1017: budget observation → Focus surface contract ────────────────────
 // The console now forecasts under the runtime's most recent OBSERVATION. The
 // payload shape is covered by prompt-capacity-validators.test.ts; this suite
-// pins what the Owner is actually shown (no jsdom here, matching the existing
-// source-assertion style above).
+// pins what the Owner is actually shown. PRI-1066 moved the capacity section
+// into its own component, so the reachability guarantees are asserted by
+// MOUNTING it (jsdom), not by grepping the page source.
 describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
   const focusSrc = fs.readFileSync(
     nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
+  const capacitySrc = fs.readFileSync(
+    nodePath.resolve(__dirname, "../../src/ui/pages/focus/PromptCapacitySection.tsx"), "utf-8");
   const enFocus = loadFocusI18n("../../src/ui/i18n/en.json");
   const zhFocus = loadFocusI18n("../../src/ui/i18n/zh-CN.json");
+  /** Unconfirmed (the default `abstraction_layer_v1` OFF state) with rotation only. */
+  const unconfirmedStatus: PromptInjectionBudgetStatus = {
+    budget: 4000,
+    usedChars: 3080,
+    truncated: true,
+    capacityStatus: "unconfirmed",
+    perHost: [
+      { hostKind: "openclaw", route: "legacy_trim", usedChars: 3080, truncated: true, budget: 4000 },
+      { hostKind: "codex", route: "shared_render", usedChars: 3899, truncated: true, budget: 4000 },
+      { hostKind: "workbuddy", route: "shared_render", usedChars: 3899, truncated: true, budget: 4000 },
+    ],
+  };
+  const starvedStatus: PromptInjectionBudgetStatus = {
+    budget: 4000,
+    usedChars: 0,
+    truncated: true,
+    capacityStatus: "unconfirmed",
+    perHost: [
+      { hostKind: "openclaw", route: "legacy_trim", usedChars: 3080, truncated: true, budget: 4000 },
+      { hostKind: "codex", route: "shared_render", usedChars: 0, truncated: true, budget: 4000 },
+    ],
+  };
+  // This file is `.ts` (the vitest include only matches `.test.ts`), so mount
+  // the component with createElement instead of JSX.
+  function renderSection(
+    promptInjection: PromptInjectionBudgetStatus,
+    onChangeHost: (host: PromptInjectionTargetHostName | null) => void = () => {},
+    promptTargetHost: PromptInjectionTargetHostName | null = null,
+  ) {
+    return render(createElement(PromptCapacitySection, { promptInjection, promptTargetHost, onChangeHost }));
+  }
   const allReasonCodes = [
     "host_capacity_absent",
     "host_capacity_source_untrusted",
@@ -962,11 +1015,12 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
     expect(approvalReaderSource).toMatch(/promptInjection\.budgetCapacityStatus === ['"]confirmed['"] && promptInjection\.budgetContextWindowTokens !== undefined/);
     expect(approvalReaderSource).not.toContain("promptInjection.budgetContextWindowTokens ?? 0");
     expect(focusSrc).not.toContain("promptInjection.budgetContextWindowTokens ?? 0");
+    expect(capacitySrc).not.toContain("promptInjection.budgetContextWindowTokens ?? 0");
   });
 
   it("per-host lists render each host's OWN budget, observation and reason", () => {
-    expect(focusSrc).toContain("budget: entry.budget ?? unconfirmed.budget");
-    expect(focusSrc).toContain('data-testid={`prompt-capacity-perhost-reason-${entry.hostKind}`}');
+    expect(capacitySrc).toContain("budget: entry.budget ?? promptInjection.budget");
+    expect(capacitySrc).toContain('data-testid={`prompt-capacity-perhost-reason-${entry.hostKind}`}');
     for (const focus of [enFocus, zhFocus]) {
       const reasons = getOwnRecord(focus, "budgetFallbackReason");
       expect(reasons).toBeDefined();
@@ -975,6 +1029,70 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
         expect(typeof copy, code).toBe("string");
         expect((copy ?? "").length, code).toBeGreaterThan(2);
       }
+    }
+  });
+
+  // PRI-1066: the banner was a standing nag — every Focus load (no state
+  // change) listed three "（已满）" lines. `truncated` is the NORMAL rotation
+  // state, so it can never be the trigger; only a host that cannot fit even
+  // one principle (zero chars injected while candidates exist) is a real,
+  // actionable starvation.
+  it("PRI-1066: the capacity banner appears only when a host is genuinely starved", () => {
+    renderSection(unconfirmedStatus);
+    expect(screen.queryByTestId("prompt-capacity-unconfirmed-banner")).toBeNull();
+
+    cleanup();
+    renderSection(starvedStatus);
+    expect(screen.getByTestId("prompt-capacity-unconfirmed-banner")).toBeTruthy();
+    // Rotation must NOT be a trigger (the pre-PRI-1066 nag).
+    expect(capacitySrc).not.toContain("const fullHosts = perHost.filter((entry) => entry.truncated);");
+  });
+
+  // PRI-1066 P1-2: the old assertion grepped `data-testid={`prompt-capacity-pick-${host}`}`
+  // out of the page source, so it stayed green while the picker was in fact
+  // unreachable: two early returns (`starvedHosts.length === 0`) fired BEFORE
+  // it in the default `abstraction_layer_v1` OFF state, and the approval route
+  // answers 422 without a chosen host. Mount the real component and click.
+  it("PRI-1066: the host picker is reachable and clickable when the route is unconfirmed and no host is starved", () => {
+    const onChangeHost = vi.fn();
+    renderSection(unconfirmedStatus, onChangeHost);
+    expect(screen.queryByTestId("prompt-capacity-unconfirmed-banner")).toBeNull();
+    expect(screen.getByTestId("prompt-capacity-host-picker")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("prompt-capacity-pick-openclaw"));
+    expect(onChangeHost).toHaveBeenCalledWith("openclaw");
+  });
+
+  it("PRI-1066: a genuinely starved host shows ONE summary line, opt-in details, and keeps the picker", () => {
+    renderSection(starvedStatus);
+    expect(screen.getAllByTestId("prompt-capacity-summary")).toHaveLength(1);
+    expect(screen.getByTestId("prompt-capacity-details-toggle")).toBeTruthy();
+    expect(screen.getByTestId("prompt-capacity-pick-codex")).toBeTruthy();
+    for (const focus of [enFocus, zhFocus]) {
+      expect(getOwnString(focus, "promptCapacityStarved") ?? "").toContain("{{count}}");
+      expect(getOwnString(focus, "promptCapacityDetails") ?? "").not.toBe("");
+      expect(getOwnString(focus, "promptCapacityPickHint") ?? "").not.toBe("");
+      // The rotation-nag copy must be gone from both locales.
+      expect(getOwnString(focus, "promptCapacityAllFull")).toBeUndefined();
+      expect(getOwnString(focus, "promptCapacitySomeFull")).toBeUndefined();
+    }
+  });
+
+  it("PRI-1066: a confirmed route renders neither the picker nor the starvation banner", () => {
+    renderSection({ ...unconfirmedStatus, capacityStatus: "confirmed", hostKind: "openclaw" });
+    expect(screen.queryByTestId("prompt-capacity-host-picker")).toBeNull();
+    expect(screen.queryByTestId("prompt-capacity-unconfirmed-banner")).toBeNull();
+  });
+
+  it("PRI-1066: per-host truncation never renders as a permanent 「已满」", () => {
+    // The rotating list route queues the entries that did not fit for later
+    // turns; only the non-rotating shared render may say "not all entered".
+    expect(capacitySrc).toContain('entry.route === "legacy_trim"');
+    expect(capacitySrc).toContain('t("pages.focus.promptCapacityPerHostRotating")');
+    for (const focus of [enFocus, zhFocus]) {
+      expect(getOwnString(focus, "promptCapacityPerHostFull") ?? "").not.toContain("已满");
+      expect(getOwnString(focus, "promptCapacityPerHostFull") ?? "").not.toContain("full");
+      const rotating = getOwnString(focus, "promptCapacityPerHostRotating") ?? "";
+      expect(rotating.length).toBeGreaterThan(10);
     }
   });
 

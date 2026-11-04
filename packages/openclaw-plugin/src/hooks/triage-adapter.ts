@@ -14,6 +14,10 @@
  * (TriggerController) is the only admission authority.
  * Core only sees SourceKind and TriageResult.
  *
+ * Phase A: the context-driven upgrade flags (unsafe-high-confidence,
+ * risky-high-score, repeated-failure) are retired. A descriptor decision is
+ * final; technical failures and RuleHost blocks never self-admit as Pain.
+ *
  * ERR checklist:
  * - ERR-001: Source kind derived from runtime values with guards, not `as` casts.
  * - ERR-002: Every triage result carries reason + nextAction.
@@ -43,10 +47,10 @@ export { resolveSourceKind, buildToolFailureObservation, type RawObservation } f
 // ── Triage Evaluation ───────────────────────────────────────────────────────
 
 /**
- * Evaluate evidence triage for a given source kind and context.
+ * Evaluate evidence triage for a given source kind and score.
  *
  * This is the main entry point for hooks. It calls the pure triage policy
- * from principles-core and returns the result.
+ * from principles-core and returns the descriptor decision unchanged.
  *
  * PRI-752 reality check: the painEvidenceAdmission flag is NOT consulted by
  * any caller on this path — Gate B admission is unconditional. This doc block
@@ -55,44 +59,7 @@ export { resolveSourceKind, buildToolFailureObservation, type RawObservation } f
 export function evaluateEvidenceTriage(
   sourceKind: SourceKind,
   score: number,
-  options?: {
-    isUnsafeHighConfidence?: boolean;
-    provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
-    consecutiveErrors?: number;
-    isRisky?: boolean;
-  },
 ): TriageResult {
-  // PRI-446: the risky high-score and repeated-failure upgrade rules now live
-  // in core triage-policy.ts (single source of truth). The adapter passes the
-  // context flags straight through; core decides whether to upgrade.
-  const input: TriageInput = {
-    sourceKind,
-    score,
-    isUnsafeHighConfidence: options?.isUnsafeHighConfidence,
-    provenance: options?.provenance,
-    isRisky: options?.isRisky,
-    consecutiveErrors: options?.consecutiveErrors,
-  };
-
+  const input: TriageInput = { sourceKind, score };
   return evaluateTriage(input);
-}
-
-// ── High-Confidence Unsafe Action Detection ──────────────────────────────────
-
-/**
- * Determine if a gate-blocked action is a high-confidence unsafe action.
- *
- * This is a heuristic that the plugin adapter owns. Core does not know about
- * these heuristics — it only receives the boolean flag.
- *
- * Criteria for high-confidence unsafe:
- * - Score >= 70 (high severity)
- * - Tool is in the risky write set
- * - Action would be irreversible (file deletion, force push, etc.)
- */
-export function isHighConfidenceUnsafeAction(
-  score: number,
-  isRisky: boolean,
-): boolean {
-  return isRisky && score >= 70;
 }

@@ -150,7 +150,7 @@ function isPromptBudgetFallbackReason(value: unknown): value is PromptBudgetFall
 }
 
 function isPromptBudgetCapacitySource(value: unknown): value is PromptBudgetCapacitySourceWire {
-  return value === 'operator_declared' || value === 'host_effective_window' || value === 'pi_catalog_exact' || value === 'legacy_fallback';
+  return value === 'operator_declared' || value === 'host_effective_window' || value === 'pi_catalog_exact' || value === 'pi_catalog_model_id' || value === 'legacy_fallback';
 }
 
 function isPromptBudgetCapacityStatus(value: unknown): value is PromptBudgetCapacityStatusWire {
@@ -1636,14 +1636,7 @@ export interface UpdateStatusData {
   reason?: string;
   nextAction?: string;
   /** PR-C: present on governed checks — the reported currentVersion comes from the active release identity. */
-  versionSource?: 'active-release' | 'plugin-package';
-  /** PR-C: the plugin-directory copy disagrees with the signed active release. Surfaced, never silently resolved. */
-  identityDivergence?: {
-    activeVersion: string;
-    pluginVersion: string;
-    releaseId: string;
-    generation: number;
-  };
+  versionSource?: 'active-release';
 }
 
 const UPDATE_STATES = ['up_to_date', 'update_available', 'update_blocked', 'check_failed'] as const;
@@ -1667,24 +1660,8 @@ export function validateUpdateStatus(v: unknown): UpdateStatusData | null {
   if (Object.hasOwn(v, 'message') && isString(v.message)) result.message = v.message;
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
-  if (Object.hasOwn(v, 'versionSource') && (v.versionSource === 'active-release' || v.versionSource === 'plugin-package')) {
+  if (Object.hasOwn(v, 'versionSource') && v.versionSource === 'active-release') {
     result.versionSource = v.versionSource;
-  }
-  if (Object.hasOwn(v, 'identityDivergence') && isObject(v.identityDivergence)) {
-    const divergence: Record<string, unknown> = v.identityDivergence;
-    if (
-      Object.hasOwn(divergence, 'activeVersion') && isString(divergence.activeVersion)
-      && Object.hasOwn(divergence, 'pluginVersion') && isString(divergence.pluginVersion)
-      && Object.hasOwn(divergence, 'releaseId') && isString(divergence.releaseId)
-      && Object.hasOwn(divergence, 'generation') && typeof divergence.generation === 'number'
-    ) {
-      result.identityDivergence = {
-        activeVersion: divergence.activeVersion,
-        pluginVersion: divergence.pluginVersion,
-        releaseId: divergence.releaseId,
-        generation: divergence.generation,
-      };
-    }
   }
   return result;
 }

@@ -90,7 +90,7 @@ describe('tool failure', () => {
 
     expect(decision.outcome).toBe('evidence_only');
     expect(decision.shouldCreateDiagnosticTask).toBe(false);
-    expect(decision.reason).toContain('infrastructure');
+    expect(decision.reason.toLowerCase()).toContain('technical');
     expect(decision.nextAction).toBeTruthy();
   });
 
@@ -139,20 +139,16 @@ describe('rulehost block', () => {
     expect(decision.shouldCreateDiagnosticTask).toBe(false);
   });
 
-  it('creates diagnosis when triage upgrades to admit (high-confidence unsafe)', () => {
-    // The triage adapter calls evaluateTriage with isUnsafeHighConfidence=true
-    // which upgrades rulehost_block from evidence_only to admit
-    const triage: TriageResult = {
-      decision: 'admit',
-      sourceKind: 'rulehost_block',
-      reason: 'RuleHost blocked a high-confidence unsafe action (score=80). Upgrading to direct diagnosis.',
-      nextAction: 'none',
-    };
-    const input = makeInput({ triageResult: triage, score: 80 });
-    const decision = evaluateTriggerController(input);
-
-    expect(decision.outcome).toBe('diagnosis_created');
-    expect(decision.shouldCreateDiagnosticTask).toBe(true);
+  it('never creates diagnosis for a RuleHost block (Phase A)', () => {
+    // RuleHost blocks are technical facts. A correct block is not Owner pain;
+    // a wrong block reaches correction detection instead of self-admitting.
+    for (const score of [0, 45, 70, 80, 100]) {
+      const triage = triageForKind('rulehost_block', score);
+      const input = makeInput({ triageResult: triage, score });
+      const decision = evaluateTriggerController(input);
+      expect(decision.outcome).toBe('evidence_only');
+      expect(decision.shouldCreateDiagnosticTask).toBe(false);
+    }
   });
 });
 

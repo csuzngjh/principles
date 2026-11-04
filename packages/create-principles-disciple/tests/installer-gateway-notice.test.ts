@@ -267,7 +267,7 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     expect(result.gatewayNotice!.startsWith(t('gateway_restart_failed'))).toBe(true);
     expect(result.gatewayNotice).toContain('spawn openclaw ENOENT');
     expect(restartOpenClawGateway).toHaveBeenCalledTimes(1);
-  }, 60_000);
+  });
 
   it('update commits, gateway restart succeeds → no gatewayNotice (no fake warning)', { timeout: 60_000 }, async () => {
     vi.mocked(restartOpenClawGateway).mockResolvedValue({ ok: true });

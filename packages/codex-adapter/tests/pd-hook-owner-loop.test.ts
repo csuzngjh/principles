@@ -155,10 +155,13 @@ registry.when('a live tool failure is delivered and the same session is replayed
   const stop = await invokeHook(ws, stopPayload(ws));
   expect(stop.status).toBe(0);
 });
-registry.then('the user turn exists once with transcript enrichment and the tool call exists once', () => {
+registry.then('the user turn exists once with transcript enrichment and the tool call exists once without any Pain', () => {
   const db = trajectoryOf(ws.root);
-  expect(db.prepare('SELECT COUNT(*) AS n FROM pain_events').get()).toEqual({ n: 1 });
+  // Phase A: the failed tool call is technical trajectory evidence that live
+  // delivery + transcript replay converge on one row; it never becomes Pain.
+  expect(db.prepare('SELECT COUNT(*) AS n FROM pain_events').get()).toEqual({ n: 0 });
   expect(db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE kind = 'tool_call'").get()).toEqual({ n: 1 });
+  expect(db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get()).toEqual({ n: 1 });
   const userTurns = db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE kind = 'user_turn'").get() as { n: number };
   const transcriptUserTurns = db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE kind = 'user_turn' AND source = 'transcript'").get() as { n: number };
   db.close();

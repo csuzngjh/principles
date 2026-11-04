@@ -113,8 +113,8 @@ describe('OpenClawHostInstaller.install — host-owned install index boundary', 
     const plugins = readConfig().plugins as Record<string, unknown>;
     expect(plugins.allow).toContain('principles-disciple');
     const entries = plugins.entries as Record<string, Record<string, unknown>>;
-    expect(entries['principles-disciple'].enabled).toBe(true);
-    const hooks = entries['principles-disciple'].hooks as Record<string, unknown>;
+    expect(entries['principles-disciple']!.enabled).toBe(true);
+    const hooks = entries['principles-disciple']!.hooks as Record<string, unknown>;
     expect(hooks.allowConversationAccess).toBe(true);
   });
 

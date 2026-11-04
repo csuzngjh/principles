@@ -156,10 +156,10 @@ describe('release publication contract', () => {
     // Artifact digest binding: the served artifact bytes are exactly what the
     // signed metadata declares.
     const artifactBytes = paths.get(`targets/releases/${publication.releaseMetadata.releaseId}/release-asset-win32-x64-abi147.tar.gz`)!;
-    expect(createHash('sha256').update(artifactBytes).digest('hex')).toBe(metadataPayload.assets[0].archiveSha256);
-    expect(artifactBytes.length).toBe(metadataPayload.assets[0].archiveSizeBytes);
+    expect(createHash('sha256').update(artifactBytes).digest('hex')).toBe(metadataPayload.assets[0]!.archiveSha256);
+    expect(artifactBytes.length).toBe(metadataPayload.assets[0]!.archiveSizeBytes);
     expect(publication.manifest.artifacts).toHaveLength(1);
-    expect(publication.manifest.artifacts[0].artifactSha256).toBe(metadataPayload.assets[0].archiveSha256);
+    expect(publication.manifest.artifacts[0]!.artifactSha256).toBe(metadataPayload.assets[0]!.archiveSha256);
   });
 
   it('publishes one release covering every matrix platform with sorted assets and targets', () => {
@@ -371,7 +371,7 @@ describe('digest and gzip helpers', () => {
 describe('signature verification through the real TUF client', () => {
   it('accepts the emitted chain and rejects tampered metadata and payload bytes', async () => {
     const publication = buildReleasePublication(publicationInput());
-    const [artifactTargetPath] = publication.manifest.artifacts.map((a) => a.artifactTargetPath);
+    const artifactTargetPath = publication.manifest.artifacts[0]!.artifactTargetPath;
     const baseUrl = await serveFiles(fileMap(publication));
 
     const trusted = await resolveTrustedReleaseTarget({
@@ -497,7 +497,7 @@ describe('ReleaseManager integration over a served publication', () => {
       transactionId: 'txn-publisher-test',
     });
     const downloadedBytes = fs.readFileSync(downloaded.archivePath);
-    expect(createHash('sha256').update(downloadedBytes).digest('hex')).toBe(publication.manifest.artifacts[0].artifactSha256);
+    expect(createHash('sha256').update(downloadedBytes).digest('hex')).toBe(publication.manifest.artifacts[0]!.artifactSha256);
   });
 
   it('serves every matrix platform to the matching runtime asset', async () => {

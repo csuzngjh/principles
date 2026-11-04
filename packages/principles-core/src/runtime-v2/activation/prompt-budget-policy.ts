@@ -1,5 +1,5 @@
 /**
- * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 (v0.2): model-context-aware prompt
+ * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 (v0.3): model-context-aware prompt
  * injection budget policy.
  *
  * Single authority for translating a model's effective context window
@@ -9,7 +9,7 @@
  * without patching module state, and production callers share one catalog
  * binding (`getPromptModelCatalog` in adapter/pi-ai-catalog.ts).
  *
- * Priority chain (SPEC §4.3 v0.2, amended by
+ * Priority chain (SPEC §4.3 v0.3, amended by
  * SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001):
  *   0. operator_declared — the Owner's explicit per-workspace capacity
  *      declaration (`.pd/config.yaml` promptBudget, per-host override over a
@@ -21,16 +21,24 @@
  *      sources are NOT trusted);
  *   2. pi_catalog_exact — the host DECLARED the provider id and the exact
  *      provider+modelId pair exists in the installed catalog;
- *   3. legacy_fallback — everything else (no trusted capacity), status
+ *   3. pi_catalog_model_id — the host declared ONLY a model id, and every
+ *      installed catalog entry for that id reports the SAME context window,
+ *      so there is exactly one catalogue answer to infer from;
+ *   4. legacy_fallback — everything else (no trusted capacity), status
  *      unknown, with a bounded machine-readable fallback reason.
  *
- * v0.2 trust amendment: the former `pi_catalog_unambiguous` tier (same
- * modelId unanimous across providers, no provider identity) was REMOVED.
- * A name-only match — however unanimous — cannot prove the deployment is
- * not a custom endpoint/proxy with different limits, so it can never be
- * `confirmed` (SPEC §4.3 rule: only capacity bound to the RUNNING model or
- * its effective cap may be confirmed). Provider-less lookups fall back;
- * the ambiguity probe is kept purely for the diagnostic reason code.
+ * v0.3 amendment (PRI-1066, Owner directive "能推算就推算"): the v0.2
+ * removal of name-only matching left every provider-less host (Codex,
+ * WorkBuddy) on the fixed fallback even when the installed catalog had one
+ * unambiguous answer (e.g. `glm-4.7`: one provider, 204800 tokens;
+ * `deepseek-v4.1-flash`: five providers, all 1000000 tokens). The Owner's
+ * requirement is that a derivable window is USED, not discarded. Tier 3
+ * therefore derives from a unanimous name-only match. It is a weaker tier
+ * than `pi_catalog_exact` (it cannot prove the deployment is not a proxy
+ * with different limits), so it carries its own source label, and the
+ * Owner's tier-0 declaration remains the override for an unusual deployment.
+ * Names whose catalog entries DISAGREE still fall back with
+ * `catalog_ambiguous_model_id` — never pick a provider by guess.
  *
  * Measured floors (real production serializers, see the 2026-10-20 fix
  * round): the shared route's full directive render of one minimum viable
@@ -46,10 +54,22 @@
  */
 import { RUNTIME_V2_PRINCIPLE_BUDGET } from './prompt-activation-reader-contract.js';
 
-export const PROMPT_BUDGET_POLICY_VERSION = 'model_aware_v1' as const;
+export const PROMPT_BUDGET_POLICY_VERSION = 'model_aware_v2' as const;
 
-/** Baseline budget at the reference context window (SPEC §4.1). */
-export const PROMPT_BUDGET_BASE_CHARS = 2000;
+/**
+ * Baseline budget at the reference context window (SPEC §4.1).
+ *
+ * v2 recalibration (PRI-1066, 2026-11-03): the Owner reported that activating
+ * a handful of principles already filled the budget on every host. The v1
+ * baseline was a conservative opening value, never a measured optimum; at
+ * 2000 chars a 128K window fitted ~15 list entries or ~2 shared-route
+ * directives. Doubling the baseline makes the same window fit twice as many
+ * while staying a tiny fraction of the model's window (~1% of 128K tokens
+ * for Chinese text). 128K remains the policy anchor: it is the smallest
+ * common production window, and moving it down would SHRINK budgets on
+ * 128K models.
+ */
+export const PROMPT_BUDGET_BASE_CHARS = 4000;
 /** Policy anchor: the context window that maps to the baseline budget. */
 export const PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS = 128000;
 /**
@@ -60,12 +80,21 @@ export const PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS = 128000;
  */
 export const PROMPT_BUDGET_MIN_CHARS = 1250;
 /**
- * Dynamic budget hard ceiling (Owner target): a 1M-token window maps to
- * floor(2000 × 1_000_000 / 128_000) = 15625 — the cap is an upper bound,
- * not a value the formula must reach; windows ≥ 1.024M tokens hit 16000.
+ * Dynamic budget hard ceiling — a POLICY ANCHOR (an upper bound for output
+ * sanity), not a value the formula must reach: a 1M-token window maps to
+ * floor(4000 × 1_000_000 / 128_000) = 31250; windows ≥ 1.024M tokens hit
+ * 32000 (still ~3% of a 1M window, and the total ceiling stays below ~4%).
+ * It exists so no malformed/huge window can ask the prompt builder for an
+ * unbounded render; raising it is a deliberate policy change.
  */
-export const PROMPT_BUDGET_MAX_CHARS = 16000;
-/** Unknown/untrusted capacity: keep the historical budget (rollback target). */
+export const PROMPT_BUDGET_MAX_CHARS = 32000;
+/**
+ * Unknown/untrusted capacity: the policy baseline, NOT a second hard-coded
+ * value. This is a deliberate fallback anchor (see SPEC §4.1 / §7): hosts
+ * that expose no capacity fact still get the reference-window budget, and
+ * every such injection carries `legacy_fallback` + a reason code so the
+ * Owner can see WHY it was used. It tracks BASE so the two can never drift.
+ */
 export const PROMPT_BUDGET_FALLBACK_CHARS = RUNTIME_V2_PRINCIPLE_BUDGET;
 
 /**
@@ -77,11 +106,21 @@ export const PROMPT_BUDGET_FALLBACK_CHARS = RUNTIME_V2_PRINCIPLE_BUDGET;
  * constant — the former 9000 size guard left a 1M-window model only 9000-5145
  * chars for background and stripped every block in one turn.
  *
- * 7000 keeps the historical total of 9000 at the reference window
- * (2000 principle budget + 7000 = 9000), so existing 128K behavior is
- * byte-identical; a 1M window resolves to 15625 + 7000.
+ * 7000 is kept from PRI-1065 (it was sized so the reference window's total
+ * stayed at the historical 9000 when the baseline was 2000). With the v2
+ * baseline of 4000 the reference total is 11000 and a 1M window resolves to
+ * 31250 + 7000 = 38250 — the allowance protects the same background blocks
+ * without pinning the total.
  */
 const PROMPT_BACKGROUND_ALLOWANCE_CHARS = 7000;
+
+/**
+ * Total injection ceiling when the host capacity is unknown. Derived, not a
+ * second hard-coded number: the prompt-builder size guard falls back to this
+ * when a caller does not resolve a model-aware total (PRI-1066).
+ */
+export const PROMPT_TOTAL_INJECTION_FALLBACK_CHARS =
+  PROMPT_BUDGET_FALLBACK_CHARS + PROMPT_BACKGROUND_ALLOWANCE_CHARS;
 
 /**
  * Total character ceiling for the assembled injection (prependSystemContext +
@@ -119,13 +158,18 @@ export type PromptBudgetCapacitySource =
   | 'operator_declared'
   | 'host_effective_window'
   | 'pi_catalog_exact'
+  | 'pi_catalog_model_id'
   | 'legacy_fallback';
 
 /**
- * Bounded machine-readable reason for the legacy fallback (SPEC §7 v0.2).
+ * Bounded machine-readable reason for the legacy fallback (SPEC §7 v0.3).
  * Closed set — events carry this code verbatim, never free-form detail;
  * `PromptBudgetResolution.fallbackDetail` holds the non-sensitive context
  * (provider/model ids) for logs only.
+ *
+ * `catalog_provider_absent` is retained for reading v0.2-era events: v0.3
+ * derives from a unanimous name-only match instead of emitting it, but old
+ * records keep their code and must stay readable.
  */
 export type PromptBudgetFallbackReason =
   | 'host_capacity_absent'
@@ -257,8 +301,9 @@ function nonEmptyString(value: unknown): string | undefined {
 
 /**
  * Catalog stage of the priority chain. Exact provider+modelId (the host
- * DECLARED the provider) may confirm; a provider-less same-name match may
- * not — see the v0.2 trust amendment in the module header.
+ * DECLARED the provider) confirms directly; a provider-less same-name match
+ * confirms only when every catalog entry agrees on the window — see the
+ * v0.3 amendment in the module header.
  */
 function resolveFromCatalog(input: ResolvePromptBudgetInput | undefined, hostStage: { skipReason: PromptBudgetFallbackReason | null; detail: string }): PromptBudgetResolution {
   const detailPrefix = hostStage.skipReason === null
@@ -308,25 +353,37 @@ function resolveFromCatalog(input: ResolvePromptBudgetInput | undefined, hostSta
       policyVersion: PROMPT_BUDGET_POLICY_VERSION,
     };
   }
-  // No provider identity: NEVER confirmed (v0.2). Diagnose why the name
-  // alone cannot be used, then fall back honestly.
+  // No provider identity (v0.3): a name-only match may be used ONLY when the
+  // installed catalog gives exactly one answer for the window. Disagreeing
+  // entries stay ambiguous — never pick a provider by guess.
   const matches = catalog.byModelId(modelId);
   if (matches.length === 0) {
     return primary('catalog_no_match_for_model_id', modelId);
   }
   const [first] = matches;
-  if (first === undefined || !isValidContextWindowTokens(first.contextWindowTokens)) {
+  // Any invalid context window is a metadata defect regardless of ENTRY ORDER:
+  // "[valid, invalid]" must not be reported as `catalog_ambiguous_model_id`
+  // while "[invalid, valid]" reports `catalog_metadata_invalid` (rc-3 — never
+  // let a malformed fact survive as a weaker verdict just because a good
+  // entry happened to come first).
+  if (first === undefined || !matches.every((entry) => isValidContextWindowTokens(entry.contextWindowTokens))) {
     return primary('catalog_metadata_invalid', modelId);
   }
-  const unanimous = matches.every(
-    (entry) => entry.contextWindowTokens === first.contextWindowTokens && isValidContextWindowTokens(entry.contextWindowTokens),
-  );
+  const unanimous = matches.every((entry) => entry.contextWindowTokens === first.contextWindowTokens);
   if (!unanimous) {
     return primary('catalog_ambiguous_model_id', modelId);
   }
-  // Unanimous on paper, still unproven for THIS deployment (custom
-  // endpoint/proxy risk) — the name is not evidence of the running limit.
-  return primary('catalog_provider_absent', modelId);
+  // One catalog answer, but a weaker tier than `pi_catalog_exact`: the id is
+  // bound to the running model, while the provider (and any proxy rewrite)
+  // is not. The source label records the weaker basis; tier-0 declaration
+  // remains the Owner's override for an unusual deployment.
+  return {
+    budgetChars: promptBudgetCharsForContextWindow(first.contextWindowTokens),
+    capacitySource: 'pi_catalog_model_id',
+    capacityStatus: 'confirmed',
+    contextWindowTokens: first.contextWindowTokens,
+    policyVersion: PROMPT_BUDGET_POLICY_VERSION,
+  };
 }
 
 /**

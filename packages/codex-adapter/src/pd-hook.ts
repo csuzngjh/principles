@@ -167,16 +167,15 @@ function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefin
 // Runs only when BOTH host.codex and codex_conversation_ingestion are
 // enabled — the flag gate below happens BEFORE any transcript path
 // validation or filesystem I/O, so flag-off means the transcript boundary
-// receives zero calls (SPEC §10 hard privacy invariant). Admission runs
-// BEFORE dispatch so a live tool failure is admitted through the same
-// canonical derivation first and the production handler's duplicate probe
-// then converges to a no-op (exactly one pain per real tool call).
-async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; projectDir?: string; env: EnvMap; suppressCorrectionCandidate?: boolean }): Promise<string[]> {
-  const { rawPayload, kind, workspaceDir, projectDir, env } = args;
+// receives zero calls (SPEC §10 hard privacy invariant). Admission covers
+// Owner corrections only: tool-call facts stay technical trajectory and never
+// become a behavioral-deviation Pain by themselves (Phase A).
+async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap; suppressCorrectionCandidate?: boolean }): Promise<string[]> {
+  const { rawPayload, kind, workspaceDir, env } = args;
   if (kind !== 'turn_complete' && kind !== 'before_prompt_build' && kind !== 'after_tool_call') return [];
   const diagnostics: string[] = [];
   try {
-    const outcome = ingestCodexConversation(rawPayload, kind, { workspaceDir, ...(projectDir !== undefined ? { projectDir } : {}), env });
+    const outcome = ingestCodexConversation(rawPayload, kind, { workspaceDir, env });
     if (outcome.status === 'degraded') {
       diagnostics.push(diagnostic(outcome.reason, outcome.nextAction));
     } else {
@@ -343,7 +342,6 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         rawPayload: parsed,
         kind: event.kind,
         workspaceDir: resolution.workspaceDir,
-        projectDir: requestedCwd,
         env: _env,
         // CR-07: the prefix parse above already decided this turn's user
         // prompt belongs to the explicit path — suppress the generic
