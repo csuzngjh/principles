@@ -1,5 +1,24 @@
 # @principles/pd-cli
 
+## 1.164.0
+
+### Minor Changes
+
+- 46cbdab: Remove the Global Friction Index (GFI) mechanism end to end (SPEC `GFI_COMPLETE_REMOVAL_SPEC`).
+  
+  - BREAKING: friction scoring, mental mode / fatigue state, `GFI_SLICE_RESET` and the `tool_calls.gfi_before` / `gfi_after` columns are gone. `trajectory.db` is migrated when PD opens it: the two legacy columns are dropped and pending empathy confirmations are closed as `abandoned` / `gfi_removal`. A database whose legacy columns cannot be dropped now fails loudly (`trajectory_migration_failed:<reason>`) instead of being silently treated as canonical.
+  - BREAKING: Rule Host input no longer carries `session.currentGfi`; `evolution.epTier` and `derived.bashRisk` enrichment are unchanged.
+  - Owner-visible GFI surfaces are removed: `/pd-status reset`, `pd runtime health gfi`, the Console GFI health check and GFI status rows. Existing workspaces keep working after the automatic schema migration.
+
+### Patch Changes
+
+- Updated dependencies [46cbdab]
+  - @principles/core@4.0.0
+  - @principles/host-runtime@2.0.0
+  - principles-disciple@2.6.0
+  - @principles/codex-adapter@0.8.1
+  - @principles/workbuddy-adapter@0.5.1
+
 ## 1.163.2
 
 ### Patch Changes
