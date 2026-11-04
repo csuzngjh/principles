@@ -49,12 +49,23 @@ export function assertNoDowngrade(current, target) {
 
 /**
  * PRI-1067: propagation budget for the maintenance leg (2s after publish is
- * real). PRI-1094 (Owner decision, 2026-11-04): the last train leg has been
- * observed to take longer than 60s to become registry-visible, so the default
- * is 180s. This constant stays the single authority; callers may still pass a
- * tighter `timeoutMs` explicitly.
+ * real). PRI-1094 (Owner decision, 2026-11-04): a cohort package can stay
+ * registry-invisible longer than 60s. Measured 2026-11-04: the
+ * installer leg took ~4 minutes (publish finished 02:54:50Z, the registry only
+ * reported 1.147.3 at 02:59:00Z), which also outlived the 180s budget.
+ *
+ * This budget is therefore the single authority, and it is sized for the
+ * observed long tail with two distinct phases:
+ *   * main wait: 300s — covers the 4-minute tail measured on the installer;
+ *   * one independent recheck round: derived from the same budget (1/3 = 100s,
+ *     inside the required 60-120s), because any fixed window can be exceeded
+ *     again and hard-failing at the first deadline would be avoidable noise.
+ *
+ * Callers may still pass an explicit `timeoutMs`/`recheckMs`; no other magic
+ * number is allowed to appear in the workflow.
  */
-export const PUBLISH_WAIT_TIMEOUT_MS = 180_000;
+export const PUBLISH_WAIT_TIMEOUT_MS = 300_000;
+export const PUBLISH_RECHECK_TIMEOUT_MS = PUBLISH_WAIT_TIMEOUT_MS / 3;
 export const PUBLISH_WAIT_INTERVAL_MS = 5_000;
 
 function sleepSync(ms) {
@@ -68,36 +79,52 @@ function sleepSync(ms) {
  * A registry QUERY failure must not be retried as "not published": the resolver
  * exits non-zero for that case and `resolve()` throws, so the error propagates
  * immediately. Only a successful resolve that reports `publishComplete:false`
- * is retried, within an explicit interval and total budget. On budget
- * exhaustion the error names every package still missing, never a generic
- * "not the current cohort".
+ * is retried, within an explicit interval and total budget. Once the main
+ * budget is exhausted, ONE independent recheck round runs before failing, so a
+ * long-tail package that appears a few minutes late is still accepted.
+ *
+ * On exhaustion the error reports the MEASURED elapsed time (not just the
+ * configured budget) and names every package still missing. When the recheck
+ * round rescues the cohort, the measured delay is logged, so the next train can
+ * be sized from evidence instead of guesses.
  */
 export function waitForPublishedCohort({
   sha,
   resolve,
   timeoutMs = PUBLISH_WAIT_TIMEOUT_MS,
+  recheckMs = PUBLISH_RECHECK_TIMEOUT_MS,
   intervalMs = PUBLISH_WAIT_INTERVAL_MS,
   now = () => Date.now(),
   sleep = sleepSync,
 }) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('cohort must be an exact 40-character SHA');
-  const deadline = now() + timeoutMs;
+  const startedAt = now();
+  const mainDeadline = startedAt + Math.max(0, timeoutMs);
+  const recheckDeadline = mainDeadline + Math.max(0, recheckMs);
+  let latest = resolve();
   for (;;) {
-    const latest = resolve();
     if (latest?.cohort !== true || latest.sha !== sha) {
       throw new Error(`target is not the current release cohort (expected ${sha}, got ${latest?.sha ?? 'none'})`);
     }
-    if (latest.publishComplete === true) return latest;
+    if (latest.publishComplete === true) {
+      const elapsed = now() - startedAt;
+      if (elapsed > Math.max(0, timeoutMs)) {
+        console.log(`published cohort became visible after ${elapsed}ms (main budget ${timeoutMs}ms exhausted; recovered by ${recheckMs}ms recheck)`);
+      }
+      return latest;
+    }
     const missing = (Array.isArray(latest.packages) ? latest.packages : [])
       .filter(pkg => pkg?.published !== true)
       .map(pkg => `${String(pkg?.name)}@${String(pkg?.version)}`);
-    const remaining = deadline - now();
-    if (remaining <= 0) {
+    const nowMs = now();
+    if (nowMs >= recheckDeadline) {
       throw new Error(
-        `published cohort incomplete after ${timeoutMs}ms; missing: ${missing.length > 0 ? missing.join(', ') : 'registry did not report any package state'}; nextAction: retry the current release train once npm registry propagation completes`,
+        `published cohort incomplete after ${nowMs - startedAt}ms (main budget ${timeoutMs}ms + ${recheckMs}ms recheck); missing: ${missing.length > 0 ? missing.join(', ') : 'registry did not report any package state'}; nextAction: retry the current release train once npm registry propagation completes`,
       );
     }
-    sleep(Math.min(intervalMs, remaining));
+    const phaseDeadline = nowMs < mainDeadline ? mainDeadline : recheckDeadline;
+    sleep(Math.min(intervalMs, phaseDeadline - nowMs));
+    latest = resolve();
   }
 }
 

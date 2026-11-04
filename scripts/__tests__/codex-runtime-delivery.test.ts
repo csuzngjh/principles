@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +6,7 @@ import {
   assertNoDowngrade,
   checkMetadata,
   nextPins,
+  PUBLISH_RECHECK_TIMEOUT_MS,
   PUBLISH_WAIT_TIMEOUT_MS,
   waitForPublishedCohort,
 } from '../release/sync-codex-runtime-pins.mjs';
@@ -99,20 +100,33 @@ describe('Codex runtime delivery authority and discoverability', () => {
       expect(caught).toBeInstanceOf(Error);
       const message = caught instanceof Error ? caught.message : String(caught);
       expect(message).toContain('@principles/core@1.297.0');
-      expect(message).toContain('15000ms');
+      expect(message).toContain('after 115000ms');
+      expect(message).toContain('main budget 15000ms');
       expect(message).toContain('nextAction');
-      // It really consumed the whole budget: 4 reads at t=0/5/10/15s.
-      expect(calls).toBe(4);
-      expect(clock).toBe(15_000);
+      // It really consumed the main budget and the default recheck round:
+      // 24 reads at t=0/5/.../115s.
+      expect(calls).toBe(24);
+      expect(clock).toBe(115_000);
     });
 
-    // PRI-1094: propagate the Owner decision (60s -> 180s) through the real
-    // default path, not just the exported constant's source text.
-    it('PRI-1094: the default propagation budget is 180s, not 60s', () => {
-      expect(PUBLISH_WAIT_TIMEOUT_MS).toBe(180_000);
+    // Measured 2026-11-04: the installer became registry-visible
+    // ~4 minutes after its upload finished, so a 300s main budget plus one
+    // independent recheck round is required — and the budget must stay a
+    // single source, not drift into the workflow.
+    it('PRI-1067 long-tail: the default budget covers the measured 4-minute tail with a derived recheck round', () => {
+      expect(PUBLISH_WAIT_TIMEOUT_MS).toBe(300_000);
+      expect(PUBLISH_RECHECK_TIMEOUT_MS).toBe(PUBLISH_WAIT_TIMEOUT_MS / 3);
+      expect(PUBLISH_RECHECK_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+      expect(PUBLISH_RECHECK_TIMEOUT_MS).toBeLessThanOrEqual(120_000);
+      const train = fs.readFileSync(path.join(root, '.github/workflows/publish-npm.yml'), 'utf8');
+      expect(train).not.toContain('--timeout');
+      const source = fs.readFileSync(path.join(root, 'scripts/release/sync-codex-runtime-pins.mjs'), 'utf8');
+      // Only the exported constants carry the numbers; no inline default literal.
+      expect(source).not.toMatch(/timeoutMs\s*=\s*\d/);
+      expect(source).not.toMatch(/recheckMs\s*=\s*\d/);
     });
 
-    it('PRI-1094: the default budget drives the real wait loop and its failure text', () => {
+    it('PRI-1067 long-tail: the default budget drives the real wait loop and its failure text', () => {
       let clock = 0;
       let calls = 0;
       let caught: unknown;
@@ -132,11 +146,62 @@ describe('Codex runtime delivery authority and discoverability', () => {
         caught = error;
       }
       const message = caught instanceof Error ? caught.message : String(caught);
-      expect(message).toContain('after 180000ms');
+      expect(message).toContain('after 400000ms');
+      expect(message).toContain('main budget 300000ms');
       expect(message).toContain('@principles/core@1.297.0');
-      // 37 reads at t=0/5/.../180s; the default budget really was consumed.
-      expect(calls).toBe(37);
-      expect(clock).toBe(180_000);
+      // 81 reads at t=0/5/.../400s; the whole default budget (300s + 100s) was
+      // consumed before failing, so the default really is the last line of defence.
+      expect(calls).toBe(81);
+      expect(clock).toBe(400_000);
+    });
+
+    it('PRI-1067 long-tail: a package visible only after the main budget is accepted by the recheck round', () => {
+      let clock = 0;
+      let calls = 0;
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        const result = waitForPublishedCohort({
+          sha,
+          now: () => clock,
+          sleep: (ms: number) => {
+            clock += ms;
+          },
+          resolve: () => {
+            calls += 1;
+            return clock >= 350_000 ? complete : incomplete;
+          },
+        });
+        expect(result.publishComplete).toBe(true);
+        expect(log).toHaveBeenCalledTimes(1);
+        expect(String(log.mock.calls[0]?.[0])).toContain('became visible after 350000ms');
+      } finally {
+        log.mockRestore();
+      }
+      // t=0/5/.../350s: the main budget (300s) really expired first.
+      expect(calls).toBe(71);
+      expect(clock).toBe(350_000);
+    });
+
+    it('PRI-1067 long-tail negative control: visibility beyond the recheck round still fails and reports the measured delay', () => {
+      let clock = 0;
+      let caught: unknown;
+      try {
+        waitForPublishedCohort({
+          sha,
+          now: () => clock,
+          sleep: (ms: number) => {
+            clock += ms;
+          },
+          resolve: () => (clock >= 450_000 ? complete : incomplete),
+        });
+      } catch (error) {
+        caught = error;
+      }
+      const message = caught instanceof Error ? caught.message : String(caught);
+      expect(message).toContain('after 400000ms');
+      expect(message).toContain('@principles/core@1.297.0');
+      expect(message).toContain('100000ms recheck');
+      expect(clock).toBe(400_000);
     });
 
     it('PRI-1094: an explicit timeoutMs wins over the default budget', () => {
@@ -146,6 +211,7 @@ describe('Codex runtime delivery authority and discoverability', () => {
         waitForPublishedCohort({
           sha,
           timeoutMs: 15_000,
+          recheckMs: 0,
           intervalMs: 5_000,
           now: () => clock,
           sleep: (ms: number) => {
@@ -158,7 +224,7 @@ describe('Codex runtime delivery authority and discoverability', () => {
       }
       const message = caught instanceof Error ? caught.message : String(caught);
       expect(message).toContain('after 15000ms');
-      expect(message).not.toContain('180000ms');
+      expect(message).not.toContain('300000ms');
       expect(clock).toBe(15_000);
     });
 
