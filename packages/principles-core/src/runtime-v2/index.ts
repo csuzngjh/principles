@@ -124,7 +124,7 @@ export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, Pri
 // Hygiene types schemas
 export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
 // Event types schemas
-export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
+export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
 export { DiscriminatedEventLogEntrySchema } from './types/event-payload.js';
 
@@ -1675,30 +1675,6 @@ export type {
   ArtifactDigestCheck,
 } from './activation/index.js';
 
-// ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
-
-export {
-  DEFAULT_GFI_POLICY,
-  applyFriction,
-  applyDecay,
-  applyRelief,
-  classifyGfiStage,
-  createGfiSnapshot,
-} from './gfi/index.js';
-export type {
-  GfiState,
-  GfiEvent,
-  GfiPolicy,
-  GfiStage,
-  GfiSource,
-  GfiSnapshot,
-} from './gfi/index.js';
-
-// ── GFI Workspace Read Model (PRI-78) ──────────────────────────────────────
-
-export { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from './gfi/index.js';
-export type { GfiReadModelInput, GfiWorkspaceSnapshot, GfiWorkspaceHealthAssessment } from './gfi/index.js';
-
 // ── Schema Conformance Read Model (PRI-95) ──────────────────────────────────
 
 export { SchemaConformanceReadModel } from './schema-conformance-read-model.js';
@@ -1938,7 +1914,6 @@ export type {
   ErrorStats,
   // PainStats export removed (PRI-451 Wave 1.5): no live reader.
   EmpathyEventStats,
-  GfiStats,
   EventEvolutionStats,
   HookStats,
   DailyStats,
@@ -2259,14 +2234,14 @@ export type {
   TrajectoryAssistantTurn,
 } from './store/context/trajectory-turn-reader.js';
 
-// SignalCollector — 统一信号采集层 (correction + empathy 上游融合)
+// SignalCollector — 统一信号采集层 (correction 上游融合)
 export {
   scanKeywords,
   buildLlmPrompt,
   SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   parseLlmClassification,
   resolveLlmClassificationPayload,
-  SignalClassificationOutputV1Schema,
+  SignalClassificationOutputV2Schema,
   collectSync,
   mapLlmResultToOutput,
   buildEvidence,
@@ -2277,7 +2252,6 @@ export {
   evaluateStage2ConfidenceGate,
 } from './signal-collector/index.js';
 export type {
-  KeywordCategory,
   TermSource,
   UnifiedKeyword,
   UnifiedKeywordStore,
@@ -2292,7 +2266,7 @@ export type {
   ParseResult,
   PayloadResolveResult,
   ClassifierPayloadPath,
-  SignalClassificationOutputV1,
+  SignalClassificationOutputV2,
   Stage2GateVerdict,
   Stage2GateResult,
   Stage2Thresholds,

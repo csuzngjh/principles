@@ -216,7 +216,6 @@ export function createSyntheticRuleHostInput(
       ...overrides.workspace,
     },
     session: {
-      currentGfi: 0,
       ...overrides.session,
     },
     evolution: {
