@@ -110,4 +110,4 @@
 - `docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256` 属于**逐行复验清单**（`run-examiner-v09-acceptance.mjs verifyHistoricalBaseline()` 与 v09 回归测试都要求每条路径存在且 sha256 相符），故该条目路径必须随移动更新，摘要保持不变。
 - **冻结字节例外**：`SPEC-PD-EXAMINER-001-v0.7.md` 已归档，但它的字节被同一份 baseline 钉住，因此本次只改清单里的路径行，正文一字未动（`git show HEAD:docs/specs/… > docs/archive/specs/…` 复原后实测 sha256 = `f7d8dbbd…1d9af` 相符）。代价是该文 §「本版本基于以下仓库材料」里的 4 处 `docs/specs/…v0.4 / v0.5-draft` 指针（含 2 条 GitHub blob 链接）在合并后会指向旧位置，属已知的、有意保留的失真——冻结契约优先于导航洁癖。全仓除此之外不存在指向已归档文件的 `docs/specs/` 残留指针（`git grep -F -f` 实测：docs/archive 外 0 处）。
 - `docs/implementation-reports/SPEC-PD-CODEMODE-001-execution-report-20261020.md:182-188` 是一段**当时的链接核验记录**（内联代码而非链接，逐条写"存在"）。其中 2 条 `../specs/…` 现在已失效。未改写：改它等于篡改历史证据，而它本身不是导航入口。
-- `scripts/ci/impact.mjs` 只 glob `docs/specs/features/**`，本次未触碰 27 个可执行 `.feature` 规约，CI 影响面映射不受影响。
+- `scripts/ci/impact.mjs` 只 glob `docs/specs/features/**`，本次未触碰 `features/` 下 26 个可执行 `.feature` 规约（`git ls-files docs/specs/features | grep -c '\.feature$'` = 26，即全仓 `.feature` 总数），CI 影响面映射不受影响。

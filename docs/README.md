@@ -38,7 +38,7 @@
 ### specs/
 在办 SPEC 与可执行行为规约:
 - 顶层 `.md` — 仍未实现、部分实现或仍是现行权威的 SPEC
-- `features/` — 27 个可执行 `.feature` BDD 规约(被各包 `tests/bdd/*.steps.ts` 消费,勿当文档搬走)
+- `features/` — 26 个可执行 `.feature` BDD 规约(被各包 `tests/bdd/*.steps.ts` 消费,勿当文档搬走)
 - `PD_Release_Delivery_SPEC_v1.2/` — 发布交付 SPEC 族
 
 ### archive/
