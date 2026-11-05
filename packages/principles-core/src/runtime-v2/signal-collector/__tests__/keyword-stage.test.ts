@@ -132,3 +132,44 @@ describe('P-1 semantic guards (SPEC v0.3 §3.2.2)', () => {
     }
   });
 });
+
+/**
+ * SPEC P-5 的假阴性缺口：句首预过滤退役后，假设/条件语境也进入了高精度路径。
+ * 「如果这是错的」是假设，不是 Owner 的事实断言 → 不得直达 STRONG。
+ */
+describe('conditional / hypothetical context is downgraded (P-1b)', () => {
+  const directionalStore: UnifiedKeywordStore = {
+    version: 1,
+    terms: {
+      ...store.terms,
+      '方向反了': { term: '方向反了', weight: 0.9, precision: 'high', source: 'seed' },
+    },
+  };
+
+  it('hypothetical markers downgrade a high-precision correction to ambiguous', () => {
+    for (const text of ['如果这是错的，请告诉我', '要是这是错的呢', '假设这是错的', '万一这是错的']) {
+      const result = scanKeywords(text, store);
+      expect(result.matched).toBe(true);
+      expect(result.matchedPrecision).toBe('ambiguous');
+      expect(result.needsLlmConfirmation).toBe(true);
+      expect(result.matchedTerms).toContain('这是错的');
+    }
+    const directional = scanKeywords('假如方向反了怎么办', directionalStore);
+    expect(directional.matched).toBe(true);
+    expect(directional.matchedPrecision).toBe('ambiguous');
+    expect(directional.needsLlmConfirmation).toBe(true);
+  });
+
+  it('positive control: a real correction without a hypothetical marker still hits STRONG', () => {
+    for (const text of ['这是错的，重新做', '这是错的，请按我说的改']) {
+      const result = scanKeywords(text, store);
+      expect(result.matched).toBe(true);
+      expect(result.matchedPrecision).toBe('high');
+      expect(result.needsLlmConfirmation).toBe(false);
+    }
+    // 假设标记只作用于它所在的小句：后一小句的事实断言仍是 STRONG。
+    const scoped = scanKeywords('如果方向反了，这是错的', directionalStore);
+    expect(scoped.matchedPrecision).toBe('high');
+    expect(scoped.needsLlmConfirmation).toBe(false);
+  });
+});

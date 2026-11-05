@@ -12,10 +12,12 @@ export interface KeywordScanResult {
  * SPEC v0.3 §3.2.2 P-1 位置/引用防护。
  *
  * 关键词匹配仍是「裸子串」语义（不引入 NLP 框架），但命中能否直达 STRONG
- * 由三个确定性条件共同决定：
+ * 由四个确定性条件共同决定：
  * - 引号内：不单独构成 STRONG，也不作为候选上报（零命中 discovery 保留）；
  * - 第三人称转述前缀（他说 / 据说 / 文档写着…）：降级 ambiguous；
- * - 否定前置（并不是 / 没让你 / 我不是让你…）：降级 ambiguous。
+ * - 否定前置（并不是 / 没让你 / 我不是让你…）：降级 ambiguous；
+ * - 假设/条件前置（如果 / 假如 / 要是 / 假设 / 万一…）：降级 ambiguous——
+ *   「如果这是错的」陈述的是假设，不是 Owner 的事实断言。
  *
  * 降级词表（我说的是 / 都说了）由词库 precision 负责（单一真理源），这里
  * 不重复判断。
@@ -41,6 +43,8 @@ const CLAUSE_BOUNDARIES = new Set([
 const THIRD_PERSON_PREFIX = /(?:他|她|它|有人|别人|旁人|同事|朋友|领导|客户|网友|用户)(?:说|说过|称|提到|认为|表示)|(?:文档|注释|日志|报错|错误信息|README)(?:里|上面|中)?(?:说|写着|写道|提到)|(?:据说|听说)/u;
 
 const NEGATION_ENDING = /(?:并不是|不是|没有|没|别|不|非)$/u;
+/** 假设/条件标记必须位于当前小句句首：`要不是这是错的` 不构成假设语境。 */
+const HYPOTHETICAL_PREFIX = /^(?:如果|假如|要是|假设|万一)/u;
 const PRONOUN_ENDING = /(?:我|你|他|她|我们|你们|他们|并|也|都|就|可|但|而|却|还|又)$/u;
 const NEGATION_INITIAL_TERM = /^(?:不是|没|没有|别让)/u;
 
@@ -81,6 +85,10 @@ function hasNegationPrefix(prefix: string, term: string): boolean {
   return PRONOUN_ENDING.test(prefix) && NEGATION_INITIAL_TERM.test(term);
 }
 
+function hasHypotheticalPrefix(prefix: string): boolean {
+  return HYPOTHETICAL_PREFIX.test(prefix);
+}
+
 function findOccurrences(haystack: string, needle: string): number[] {
   const positions: number[] = [];
   if (needle.length === 0) return positions;
@@ -107,6 +115,7 @@ function classifyHighOccurrence(
   const prefix = clausePrefix(normalizedText, index);
   if (hasThirdPersonPrefix(prefix)) return 'downgraded';
   if (hasNegationPrefix(prefix, term)) return 'downgraded';
+  if (hasHypotheticalPrefix(prefix)) return 'downgraded';
   return 'strong';
 }
 
