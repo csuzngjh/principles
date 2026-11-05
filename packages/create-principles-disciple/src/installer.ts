@@ -3987,46 +3987,157 @@ function assertUsableWorkspaceDir(workspaceDir: string): void {
   );
 }
 
-async function createConfigFile(workspaceDir: string, channels: string[]): Promise<void> {
-  const configDir = getOpenClawDir();
-  const configPath = path.join(configDir, 'principles-disciple.json');
+/**
+ * Where the OpenClaw plugin (and therefore the MCP launcher) reads the
+ * Owner-declared governance workspace. The gateway process, hook processes and
+ * MCP children all run with different environments, and the MCP child has its
+ * environment sanitized by the host (PD_WORKSPACE_DIR / HOME are stripped), so
+ * this FILE is the only signal every one of them can see.
+ */
+const OPENCLAW_PD_CONFIG_FILENAME = 'principles-disciple.json';
 
+export interface OpenClawWorkspaceDeclarationInspection {
+  readonly configPath: string;
+  /**
+   * absent      — no declaration yet (first install writes it)
+   * compatible  — the existing declaration names this workspace (no write)
+   * conflict    — the existing declaration names a DIFFERENT workspace
+   * invalid     — the file exists but cannot be trusted as a declaration
+   * unreadable  — the file exists but could not be read
+   */
+  readonly state: 'absent' | 'compatible' | 'conflict' | 'invalid' | 'unreadable';
+  readonly declaredWorkspace?: string;
+  readonly reason?: string;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Same-directory identity for a workspace pointer (Windows is case-insensitive). */
+function sameWorkspaceTarget(left: string, right: string): boolean {
+  const normalize = (value: string): string => {
+    const resolved = path.resolve(value);
+    const trimmed = resolved.length > 1 ? resolved.replace(/[\\/]+$/, '') : resolved;
+    return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+  };
+  return normalize(left) === normalize(right);
+}
+
+/**
+ * Read the existing declaration as UNTRUSTED input (it is a plain file on disk)
+ * and classify it. Never overwrites and never silently repairs anything.
+ */
+export function inspectOpenClawWorkspaceDeclaration(workspaceDir: string): OpenClawWorkspaceDeclarationInspection {
+  const configPath = path.join(getOpenClawDir(), OPENCLAW_PD_CONFIG_FILENAME);
+  if (!existsSync(configPath)) return { configPath, state: 'absent' };
+
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, 'utf-8');
+  } catch (e) {
+    return { configPath, state: 'unreadable', reason: describeError(e) };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { configPath, state: 'invalid', reason: `it is not valid JSON (${describeError(e)})` };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { configPath, state: 'invalid', reason: 'the root value is not a JSON object' };
+  }
+  const declaredRaw = Object.hasOwn(parsed, 'workspace') ? Reflect.get(parsed, 'workspace') : undefined;
+  if (typeof declaredRaw !== 'string' || declaredRaw.trim().length === 0) {
+    return { configPath, state: 'invalid', reason: 'it has no non-empty string "workspace" field' };
+  }
+  const declared = declaredRaw.trim();
+  if (!isUsableWorkspacePointer(declared)) {
+    return {
+      configPath,
+      state: 'invalid',
+      declaredWorkspace: declared,
+      reason: 'the "workspace" value does not name one fixed absolute directory',
+    };
+  }
+  if (!sameWorkspaceTarget(declared, workspaceDir)) {
+    return { configPath, state: 'conflict', declaredWorkspace: declared };
+  }
+  return { configPath, state: 'compatible', declaredWorkspace: declared };
+}
+
+function throwOnIncompatibleDeclaration(inspection: OpenClawWorkspaceDeclarationInspection, workspaceDir: string): void {
+  if (inspection.state === 'absent' || inspection.state === 'compatible') return;
+  if (inspection.state === 'conflict') {
+    throw new Error(
+      'An existing OpenClaw PD config declares a DIFFERENT workspace; it was left unchanged.\n' +
+      `  Config:    ${inspection.configPath}\n` +
+      `  Declared:  ${JSON.stringify(inspection.declaredWorkspace)}\n` +
+      `  Requested: ${JSON.stringify(path.resolve(workspaceDir))}\n` +
+      'The pd-recall MCP server can only serve the workspace declared in this file, so the installer\n' +
+      'never overwrites it. Otherwise the host would report a successful install while recall served\n' +
+      'another workspace.\n' +
+      `  To keep the existing workspace, re-run with --workspace ${JSON.stringify(inspection.declaredWorkspace)}.\n` +
+      `  To switch deliberately, back up ${inspection.configPath}, remove it, then re-run for the new workspace.`,
+    );
+  }
+  throw new Error(
+    `The existing OpenClaw PD config cannot be verified and was left unchanged (${inspection.reason}).\n` +
+    `  Config: ${inspection.configPath}\n` +
+    'Expected a JSON object with an absolute "workspace" string.\n' +
+    '  Fix it manually, or back it up and remove it, then re-run the installer.',
+  );
+}
+
+/**
+ * Read-only preflight: refuse BEFORE any runtime mutation when the existing
+ * declaration points somewhere else (or cannot be trusted). This is the check
+ * that keeps an install from "succeeding" while pd-recall serves a different
+ * workspace.
+ */
+export function assertOpenClawWorkspaceDeclarationCompatible(workspaceDir: string): void {
+  throwOnIncompatibleDeclaration(inspectOpenClawWorkspaceDeclaration(workspaceDir), workspaceDir);
+}
+
+export interface OpenClawWorkspaceDeclarationWriteResult {
+  readonly configPath: string;
+  readonly action: 'created' | 'unchanged';
+}
+
+/**
+ * Ensure the OpenClaw plugin can locate the governance workspace through the
+ * file declaration. Idempotent: a compatible existing declaration is left
+ * byte-identical (no rewrite, no installedAt churn). A conflicting/invalid one
+ * fails loud and is never overwritten.
+ */
+export async function ensureOpenClawWorkspaceDeclaration(
+  workspaceDir: string,
+  channels: string[],
+): Promise<OpenClawWorkspaceDeclarationWriteResult> {
   // Defense in depth: the same refusal the install entry makes, kept here
   // because this is the only writer of the pointer the plugin reads on every
   // hook, and other callers reach it without passing through install().
   assertUsableWorkspaceDir(workspaceDir);
 
-  let existingChannels: string[] | null = null;
-  let existingFeatures: string[] | null = null;
-
-  if (existsSync(configPath)) {
-    const existingRaw = readFileSync(configPath, 'utf-8');
-    const existing: unknown = JSON.parse(existingRaw);
-    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
-      const existingObj = existing as Record<string, unknown>;
-      if (Object.hasOwn(existingObj, 'channels') && Array.isArray(existingObj.channels)) {
-        existingChannels = (existingObj.channels as unknown[]).filter((c): c is string => typeof c === 'string');
-      }
-      if (Object.hasOwn(existingObj, 'features') && Array.isArray(existingObj.features)) {
-        existingFeatures = (existingObj.features as unknown[]).filter((f): f is string => typeof f === 'string');
-      }
-    }
+  const inspection = inspectOpenClawWorkspaceDeclaration(workspaceDir);
+  throwOnIncompatibleDeclaration(inspection, workspaceDir);
+  if (inspection.state === 'compatible') {
+    return { configPath: inspection.configPath, action: 'unchanged' };
   }
 
+  const resolvedWorkspace = path.resolve(workspaceDir);
   const config: Record<string, unknown> = {
-    workspace: workspaceDir,
-    state: path.join(workspaceDir, '.state'),
-    channels: existingChannels ?? channels,
+    workspace: resolvedWorkspace,
+    state: path.join(resolvedWorkspace, '.state'),
+    channels,
     installedAt: new Date().toISOString(),
     mvpFirst: true,
   };
 
-  if (existingFeatures) {
-    config.features = existingFeatures;
-  }
-
-  await fse.ensureDir(configDir);
-  await fse.writeJson(configPath, config, { spaces: 2 });
+  await fse.ensureDir(path.dirname(inspection.configPath));
+  await fse.writeJson(inspection.configPath, config, { spaces: 2 });
+  return { configPath: inspection.configPath, action: 'created' };
 }
 
 export interface InstallResult {
@@ -4604,6 +4715,15 @@ export async function install(
     // below instead of rejecting the install() promise (P1 review finding).
     await fse.ensureDir(path.resolve(options.workspaceDir));
 
+    // OpenClaw only: the MCP launcher re-derives the governance workspace from
+    // this PD-owned file, because the host strips PD_WORKSPACE_DIR / HOME from
+    // MCP children. An existing declaration for a DIFFERENT workspace must
+    // refuse the install BEFORE any runtime mutation — otherwise the install
+    // would report success while pd-recall served another workspace.
+    if (installsOpenClaw(options.host)) {
+      assertOpenClawWorkspaceDeclarationCompatible(options.workspaceDir);
+    }
+
     if (spinner) updateProgress(spinner, stepIndex, 'Checking built plugin...');
     await checkBuiltPlugin(pluginDir);
     verification.manifestActivation = 'verified';
@@ -4850,7 +4970,9 @@ export async function install(
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Creating config...');
-    await createConfigFile(options.workspaceDir, options.channels);
+    if (installsOpenClaw(options.host)) {
+      await ensureOpenClawWorkspaceDeclaration(options.workspaceDir, options.channels);
+    }
     stepIndex++;
 
     // PRI-686 Fix C: after pinning PD canonical, check OpenClaw's resolved

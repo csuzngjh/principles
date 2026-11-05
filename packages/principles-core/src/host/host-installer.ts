@@ -117,6 +117,21 @@ export interface HostInstallResult {
     readonly keywordPainEnabled?: boolean;
     readonly configPath?: string;
   };
+  /**
+   * SPEC §6.4 (install ≠ enable): the states an install can leave behind are
+   * NOT equivalent. `registered` comes from the host registry
+   * (`installed_plugins.json`), `enabled` from `settings.json`'s
+   * `enabledPlugins` entry, and neither may be inferred from the other or from
+   * the governance flag. Only hosts with an explicit enablement gate set this.
+   */
+  readonly pluginState?: {
+    /** Host registry carries the plugin entry (currently installed). */
+    readonly registered: boolean;
+    /** False when the registry could not be read — "installed" must NOT be claimed. */
+    readonly registryReadable: boolean;
+    /** `enabledPlugins[key]`; null when absent or unreadable (activation unknown). */
+    readonly enabled: boolean | null;
+  };
 }
 
 export interface HostUninstallResult {
