@@ -1,5 +1,19 @@
 # Adaptive Activation 离线交付核验
 
+## 隔离的本地传输探针
+
+`probe-local-transport.mjs` 是显式运行的实验入口，不在测试或安装过程中自动启动真实宿主：
+
+```powershell
+node scripts/dev/principle-learning-lab/probe-local-transport.mjs --run --openclaw-cli <absolute-openclaw.mjs>
+```
+
+它在工作区 `.tmp/aa-local-transport/run-*` 保留独立用户目录、配置、state、原始请求和输出。仅配置回环假 provider，关闭插件和工具，不继承认证/代理环境。配置校验上限 25 秒，单次 agent exec 外层上限 60 秒；超时终止所启动进程树，并保持失败。禁止将宿主 JSON 的 ok 当成进程正常退出。成功要求退出码 0、唯一目标请求、user 消息包含固定非原则标记，以及结构化返回正确的固定回复。宿主可能添加时间/运行上下文，因此标记匹配不是整条 user 消息相等。
+
+原始请求按接收到的字节留存并计算 SHA-256；它包含本机运行元数据，不加入版本库。标准输出只返回摘要和本地目录。运行本探针须有相应的隔离宿主调用授权；不连接付费模型、不写正式安装/治理。调用者须使用经核实的本机 OpenClaw CLI。它不建立操作系统网络隔离，也不授予任何真实调用或安装授权。
+
+本探针证明的是回环请求与响应及正常退出。PD 插件被禁用，`pdPrincipleDelivery` 与 `behavioralImprovement` 始终为 `not_tested`，不能生成原则 confirmed 或覆盖率 D。`probe-local-transport.test.mjs` 使用假 CLI 验证隔离和实际 HTTP 字节捕获；这属于 fixture 测试，不作为真实宿主证据。
+
 对应 PRI-1112 与 PRI-1109 的离线准备部分。脚本只读给定证据，不调用模型、不采集宿主、不修改治理或安装。既有 Receipt/Evidence 仍是运行事实的归属。
 
 ## 运行

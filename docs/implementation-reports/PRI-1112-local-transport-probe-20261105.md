@@ -1,0 +1,56 @@
+# PRI-1112 隔离本地传输实验
+
+2026-11-05。首次批准实验的结果为 **最终请求取证成立，完整进程退出验收失败**。后续 Owner 要求继续推进，已在相同本地假端点/隔离范围诊断及复验；最新修正版探针 **完成请求、响应及正常退出**。首次失败记录保留，尚未确认其根因。
+
+## 范围与隔离
+
+宿主为本机 OpenClaw 2026.10.10。运行入口为 agent exec；使用单独的 config、state、workspace、HOME、USERPROFILE、APPDATA、LOCALAPPDATA 和临时目录。子进程环境采用白名单，不继承 provider key、代理或正式配置环境。配置仅列 aa-local/aa-probe，端点为 127.0.0.1 随机端口，凭据为固定假 key，plugins.enabled=false，tools.deny 为全部，未设置 fallback 或 deliver。
+
+预检发现 --config 与 --auth-env-only 互斥。因此未使用无效组合，采用明确配置与空用户目录/白名单环境隔离；启动前 config validate --json 返回 valid=true、warnings=[]。没有加载 PD 插件或目标原则。没有修改正式配置、安装面或治理记录。
+
+## 已观测结果
+
+| 项目 | 本次事实 |
+|---|---|
+| 宿主调用 | 1 次，未重跑 |
+| 本地服务接到的请求 | 1 次 POST /v1/chat/completions，model=aa-probe |
+| 固定标记 | AA_TRANSPORT_PROBE_NONPRINCIPLE_20261105 出现在实际请求的 user 消息中 |
+| 请求 SHA-256 | 2b3fc40ca3080dac68d53cacb77273dc3c1a777f86e37f3c8890e6f74ac421a5 |
+| 宿主 JSON 输出 | ok=true、status=ok；final 为本地服务固定回复 AA_LOCAL_STUB_RESPONSE_20261105 |
+| 输出中的模型身份 | provider=aa-local、model=aa-probe；assistantTurns=1，bridgeCalls 全为 0 |
+| 外层进程 | 60 秒仍未退出；按执行卡终止进程树。含终止开销实测 60.312 秒，退出码 1 |
+| 退出后的核对 | 未发现命令行含本次 run 目录的 node/OpenClaw 残留进程 |
+
+stderr 含 stopReason=stop 与 agent database clean-close receipt: written，但不能据此判定宿主整个进程已正常退出。根因未定位，当前只确认外层期限触发终止。不是模型请求失败，也不能包装成全链路 PASS。
+
+## 本地证据
+
+受控实验目录为 .tmp/aa-local-transport-20261105/run-lhftwjwv/，相对于本任务 worktree。summary.json 留存结果；request-1.json 是服务端实际收到的正文，validation.stdout/stderr、host.stdout/stderr 分别保存配置校验及宿主输出。执行脚本为同上级目录的 probe.py。原始请求未加入版本库。
+
+该本地服务在收取请求后才记录正文，独立于 PD callback/receipt，因而证明了本次固定用户文本实际进入最终模型请求。正文原始字节的 SHA-256 已复核；此处仅展示摘要与固定测试标记，避免复制完整系统提示。临时服务在 finally 中关闭，所有实验状态保留供审阅。
+
+## 结论边界与下一步
+
+本次验证了隔离宿主可以连接本地假模型端点，并可由服务端捕获实际请求，再由宿主收到固定响应。它没有验证 PD 的授权读取、原则装配、system/developer 指令位置、真实机会与请求身份、及时交付、行为遵循或行为改善，不能计入这些指标的成功样本。
+
+下一步先根据已有进程/生命周期证据定位未退出原因，完成可限时终结的实验 harness，再设计接入选定 PD 路径的有界实验。重跑真实宿主或扩大到插件、原则、真实任务、外部 provider 时遵守相应授权范围，不消耗本次已结束的单次授权额度。
+
+## 后续诊断与复验（Owner 已要求持续推进）
+
+本段保留全部后续宿主尝试，不只记录成功样本。以下仍全部禁用插件、工具并使用本地假 provider。诊断没有修改已安装 OpenClaw。
+
+| 目录末段 | 实际结果 |
+|---|---|
+| aa-local-transport-20261105/run-ycb1srlm | 加载临时诊断 preload；35.328 秒截止终止，0 请求。20 秒快照有两个引用中的 MessagePort，不能据此断定泄漏或首次超时根因。 |
+| aa-local-transport-20261105/run-lvs4f5p9 | 加载同一诊断 preload；20.484 秒异常退出 3221226356，0 请求。诊断调用 process.report.getReport 与异常同时发生，因果未知；后续停用此诊断方法。 |
+| aa-local-transport-20261105/run-n099ncw9 | 无 preload 的原始探针；1 请求，收到固定回复，36.453 秒正常退出 0。正文 SHA-256 da1064dc7a0c10e2eda98eaccbbd094a39d2882351bc6e498990142a05d3b8ad。 |
+| aa-local-transport/run-32BzD8 | 新版 Node 探针首测；1 请求、回复正确、55.546 秒正常退出 0。探针误用整条 user 消息相等，报告 ok=false；该次不追改为 PASS。宿主实际附加时间和运行上下文，已修正匹配并补测试。 |
+| aa-local-transport/run-wnVO2J | 修正版 Node 探针；1 请求、正确回复、57.935 秒正常退出 0，摘要 ok=true。原始请求和摘要保留于该目录。 |
+
+加上首次运行，共 6 次真实宿主调用，4 次到达本地请求端点。单元集成测试中的假 CLI 另列 fixture，不算真实宿主调用。没有付费模型调用。
+
+工具已固化在 scripts/dev/principle-learning-lab/probe-local-transport.mjs。仅显式 --run 才启动宿主；子进程环境白名单、独立配置与目录、预检、真实请求字节捕获、固定响应、60 秒截止及进程树终止保持一致。判定纯函数同时要求配置通过、唯一目标请求、正确结构化回复和正常退出，超时不能被宿主 ok 覆盖。此标记只证明非原则用户输入传输，不证明指令角色。
+
+验证：工作区依赖安装、完整 npm run build 和 readiness 均成功；60 项针对性 Node 测试通过，失败/取消/跳过均为 0。新增测试包含独立假 CLI 到 HTTP 服务的实际传输、环境不继承、正文原始字节摘要，以及缺请求/重复请求/超时/错误模型/错误回复反例。没有进行 PD 插件接线、目标原则注入或行为实验。
+
+当前结论：独立最终请求观察入口和可重复工具已建立；进程启动/结束耗时仍有明显波动，最新 57.935 秒接近 60 秒上限，不能声称宿主生命周期问题已修复。下一工作为隔离 PD 路径的授权读取与指令角色捕获，另行核实真实请求/机会绑定；G0/G1、覆盖率 D 和真实行为收益均保持未验证。
