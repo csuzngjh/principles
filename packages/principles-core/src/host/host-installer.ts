@@ -117,6 +117,14 @@ export interface HostInstallResult {
     readonly keywordPainEnabled?: boolean;
     readonly configPath?: string;
   };
+  /**
+   * SPEC §6.4 (install ≠ enable): the ACTUAL `enabledPlugins[pluginKey]` value
+   * left behind by this install — the Owner's explicit choice when one exists,
+   * otherwise the plugin manifest's declared default. Only hosts whose plugin
+   * carries an explicit enablement gate set this. When false the plugin's hooks
+   * do not run, so the summary must not imply PD is already working.
+   */
+  readonly pluginEnabled?: boolean;
 }
 
 export interface HostUninstallResult {

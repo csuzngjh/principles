@@ -1588,6 +1588,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
+      pluginEnabled: registration.enabledValue,
       governance: governanceDefaults === null
         ? undefined
         : {
@@ -1684,7 +1685,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     details: WorkbuddyDetectDetails,
     version: string,
     declaredDefaultEnabled: boolean,
-  ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string } | { ok: false; reason: string; nextAction: string } {
+  ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string; enabledValue: boolean } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
 
     // A registered old plugin can still be hook-only, even at the same
@@ -1701,7 +1702,14 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // enabled state is the OWNER's choice — install/upgrade/reinstall must not
     // flip it in either direction (install ≠ enable, SPEC §6.4).
     if (details.registered && existsSync(p.cachePluginRoot)) {
-      return { ok: true, mode: 'already-registered', settingsAction: 'preserved' };
+      // The install summary must state the ACTUAL installed value, not an
+      // assumption: read settings.json (Owner choice wins, manifest default
+      // otherwise) rather than reusing the pre-install detection.
+      const cachedEnabled = this.resolveInstalledEnabledValue(declaredDefaultEnabled);
+      if (!cachedEnabled.ok) {
+        return { ok: false, reason: cachedEnabled.reason, nextAction: cachedEnabled.nextAction };
+      }
+      return { ok: true, mode: 'already-registered', settingsAction: 'preserved', enabledValue: cachedEnabled.value };
     }
 
     // Engine path (preferred — real marketplace/cache/settings chain).
@@ -1718,7 +1726,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         if (details.registered) {
           // Already installed: engine marketplace re-add is enough; installing
           // again is not idempotent-tested, so preserve the existing entry.
-          return { ok: true, mode: 'engine', settingsAction: 'preserved' };
+          return { ok: true, mode: 'engine', settingsAction: 'preserved', enabledValue: installedEnabled.value };
         }
         const install = this.runEngine(['plugin', 'install', WORKBUDDY_PLUGIN_KEY]);
         if (install !== undefined && install.status === 0 && PLUGIN_INSTALL_OK.test(install.stdout + install.stderr)) {
@@ -1737,6 +1745,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
               settingsAction: details.settingsExisted
                 ? (installedEnabled.fromOwnerChoice ? 'preserved' : 'updated')
                 : 'created',
+              enabledValue: installedEnabled.value,
             };
           }
           return {
@@ -1839,7 +1848,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     details: WorkbuddyDetectDetails,
     version: string,
     options: { declaredDefaultEnabled: boolean; engineNote: string },
-  ): { ok: true; mode: 'direct-write'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote: string } | { ok: false; reason: string; nextAction: string } {
+  ): { ok: true; mode: 'direct-write'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote: string; enabledValue: boolean } | { ok: false; reason: string; nextAction: string } {
     const { declaredDefaultEnabled, engineNote } = options;
     const p = this.paths();
     const cacheVersionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
@@ -2001,7 +2010,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (!registryWrite.ok) return rollbackCommit(registryWrite);
     // The new installation is now committed; cleanup must not invalidate it.
     try { rmSync(backupDir, { recursive: true, force: true }); } catch { /* orphan backup is recoverable, not a failed registration */ }
-    return { ok: true, mode: 'direct-write', settingsAction, engineNote };
+    return { ok: true, mode: 'direct-write', settingsAction, engineNote, enabledValue: installedEnabled };
   }
 
   // ─── enable / disable (explicit, user-visible — OD-03) ─────────────────────

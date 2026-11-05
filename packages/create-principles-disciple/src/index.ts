@@ -16,6 +16,7 @@ import {
   isValidHttpBaseUrl,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
+import { formatHostPluginEnablementLine } from './install-summary.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
 
 export { isLanguage } from './i18n.js';
@@ -427,6 +428,12 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
           const edits = disabledFlags.map((flag) => `${flag}: {enabled: true}`).join(' or ');
           console.log(`             to enable: in ${target}, inside the existing "features:" block set ${edits}`);
         }
+        // SPEC §6.4 (install ≠ enable): "governance ON" says nothing about
+        // whether the plugin itself loads. A registered-but-disabled plugin
+        // runs no hooks, and the manual "PD记录痛苦：" intake arrives through
+        // those hooks — so state the ACTUAL enabledPlugins value.
+        const pluginLine = formatHostPluginEnablementLine(hr);
+        if (pluginLine !== undefined) console.log(pluginLine);
       }
       console.log();
       console.log(t('ready'));

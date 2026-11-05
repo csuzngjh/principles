@@ -42,6 +42,7 @@ import {
   runWorkbuddyEarlyPreflight,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
+import { formatHostPluginEnablementLine } from '../src/install-summary.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
@@ -521,6 +522,9 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
     const first = await created.installer.install(installCtx(created));
     expect(first.success, first.reason).toBe(true);
     expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+    // The summary line is driven by the ACTUAL post-install value.
+    expect(first.pluginEnabled).toBe(false);
+    expect(formatHostPluginEnablementLine(first)).toContain('installed but NOT enabled');
 
     // The Owner explicitly enables the plugin through the host (not the installer).
     const settings = readJson(settingsPath(created));
@@ -533,6 +537,9 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
       const rerun = await created.installer.install(installCtx(created));
       expect(rerun.success, `reinstall ${attempt} failed: ${rerun.reason}`).toBe(true);
       expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+      // The summary must report the preserved Owner enable, not the manifest default.
+      expect(rerun.pluginEnabled).toBe(true);
+      expect(formatHostPluginEnablementLine(rerun)).toContain('the only Pain intake is the explicit');
     }
   });
 
@@ -542,6 +549,7 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
     const result = await created.installer.install(installCtx(created));
     expect(result.success, result.reason).toBe(true);
     expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect(result.pluginEnabled).toBe(true);
   });
 
   it('preserves an Owner disable that predates the first install', async () => {
@@ -550,6 +558,7 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
     const result = await created.installer.install(installCtx(created));
     expect(result.success, result.reason).toBe(true);
     expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+    expect(result.pluginEnabled).toBe(false);
   });
 });
 
