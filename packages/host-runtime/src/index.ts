@@ -15,6 +15,7 @@ import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type Pai
 import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime-v2';
 
 export * from './active-principle-prompt.js';
+export * from './prompt-activation-authority.js';
 export * from './prompt-injection-projection.js';
 // SPEC PD_PROMPT_CAPACITY_V1: route-aware single-artifact deliverability
 // precheck (B1 write gate + A candidate fit) and the per-live-activation

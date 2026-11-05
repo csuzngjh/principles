@@ -263,6 +263,32 @@ function insertValidatedPrincipleArtifact(overrides: {
 }
 
 describe('Runtime V2 prompt activation injection', () => {
+  it('shared authority reader preserves owner approval and approver identity', async () => {
+    const artifactId = 'art-v2-authority-001';
+    const principleId = 'princ-v2-authority-001';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+    const now = new Date().toISOString();
+    sqliteConn.getDb().prepare(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at, decided_at, decided_by)
+      VALUES (?, ?, 'prompt', 'low', 'approved', ?, ?, ?)
+    `).run('approval-v2-authority-001', artifactId, now, now, 'owner-authority-1');
+
+    const result = await new PromptActivationReader(tempWorkspaceDir).readActivatedPrinciples();
+    expect(result.principles[0]).toMatchObject({ authority: 'owner', approvedBy: 'owner-authority-1' });
+  });
+
+  it('absence of an approved row remains system-policy authority', async () => {
+    const artifactId = 'art-v2-authority-002';
+    const principleId = 'princ-v2-authority-002';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const result = await new PromptActivationReader(tempWorkspaceDir).readActivatedPrinciples();
+    expect(result.principles[0]).toMatchObject({ authority: 'system_policy' });
+    expect(result.principles[0]?.approvedBy).toBeUndefined();
+  });
+
   it('owner-approved activated principle changes future prompt', async () => {
     const artifactId = 'art-v2-prompt-001';
     const principleId = 'princ-v2-001';

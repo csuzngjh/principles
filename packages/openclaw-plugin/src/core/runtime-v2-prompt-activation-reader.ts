@@ -1,5 +1,6 @@
 import { SqliteConnection, SqliteActivationStateStore, computeFeatureFlagsFromConfig, filterPromptActivations, resolvePrincipleFromArtifact } from '@principles/core/runtime-v2';
 import type { FeatureFlagsResult, ActivatedPrinciple, PromptActivationReaderResult } from '@principles/core/runtime-v2';
+import { readPromptActivationAuthority } from '@principles/host-runtime';
 import { loadPdConfigForPlugin } from './pd-config-loader.js';
 
 export { RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
@@ -117,20 +118,7 @@ export class PromptActivationReader {
     channel: string,
   ): { authority?: 'owner' | 'system_policy'; approvedBy?: string } {
     try {
-      const db = sqliteConn.getDb();
-      const row: unknown = db.prepare(`
-        SELECT decided_by FROM approvals
-        WHERE artifact_id = ? AND channel = ? AND status = 'approved'
-        ORDER BY decided_at DESC LIMIT 1
-      `).get(artifactId, channel);
-      if (row !== null && typeof row === 'object' && Object.hasOwn(row, 'decided_by')) {
-        const decidedBy = (row as Record<string, unknown>).decided_by;
-        return {
-          authority: 'owner',
-          approvedBy: typeof decidedBy === 'string' && decidedBy.length > 0 ? decidedBy : undefined,
-        };
-      }
-      return { authority: 'system_policy' };
+      return readPromptActivationAuthority(sqliteConn, artifactId, channel);
     } catch {
       // 查询失败 (旧库无 approvals 表等) — 不阻塞注入, authority 不标注
       this.deps.logger?.warn?.(`[PD:RuntimeV2] authority derivation failed for artifactId=${artifactId}; rendering without authority attribute`);

@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
+import { readPromptActivationAuthority } from './prompt-activation-authority.js';
 
 /** PRI-904 SPEC §10: bounded diagnostic id lists (mirrors the core selector's cap of 16). */
 export const MAX_SHARED_DIAGNOSTIC_IDS = 16;
@@ -69,6 +70,8 @@ export interface PromptActivationCandidates {
  */
 export async function readPromptActivationCandidates(input: {
   workspaceDir: string;
+  /** Opt in for revalidation; default route keeps its historical prompt bytes. */
+  includeAuthority?: boolean;
 }): Promise<PromptActivationCandidates> {
   const warnings: string[] = [];
   const principles: ActivatedPrinciple[] = [];
@@ -119,6 +122,16 @@ export async function readPromptActivationCandidates(input: {
       if (!resolved.ok) {
         warnings.push(resolved.warning);
         continue;
+      }
+      if (input.includeAuthority === true) {
+        try {
+          const authority = readPromptActivationAuthority(connection, artifact.artifactId, 'prompt');
+          if (authority.authority) resolved.principle.authority = authority.authority;
+          if (authority.approvedBy) resolved.principle.approvedBy = authority.approvedBy;
+        } catch {
+          // Approval lookup failure is unknown, never inferred as owner or policy.
+          warnings.push(`prompt_activation_authority_unavailable: artifactId=${artifact.artifactId}`);
+        }
       }
       principles.push(resolved.principle);
     }
