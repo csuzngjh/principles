@@ -44,3 +44,9 @@ Two-axis independent review used Luna agents (read-only, no API calls). Spec axi
 Owner approved one identical free request only. The same payload hash returned HTTP400 with a specific provider constraint: Respan accepts a string state (or its narrow input/output message object), not the generic array envelope we used. See `PD-AA-PRI-1141-DECISIONS-ROOT-CAUSE-20261106.md` and the independent `2026-11-05T23-27-54-181Z-one-diagnostic/results.json`.
 
 The main builder now sends the identical context as a JSON string. A regression first failed with the old array, then 25 tests passed with the fix. Real calls remain cumulative decision2 / GLM0; no successful live acceptance is claimed. The separate one-diagnostic command deliberately reconstructs the original array payload and cannot be rerun under its consumed claim. A corrected continuation requires approval; proposed remaining scope is dev-01..04, max4 decision +8 GLM, not a reset of the original budget.
+
+## Final bounded run completed
+
+Owner approved the remaining 3 Decisions +6 GLM attempts for dev-02..04 and catalog-proven canonical aliases. The `--execute-approved-final-three` run completed: all nine requests HTTP200; C and D made identical choices, each matching 2/3 of the frozen allowed sets. Cumulative attempts remain decision6 / GLM6, including prior failures. No further real calls are authorized by these consumed flags/claims.
+
+See `PD-AA-PRI-1141-FINAL-DIAGNOSTIC-20261106.md` and the immutable `2026-11-05T23-45-11-762Z/results.json` plus `analysis.json`. The canonical model comes from the selected free catalog row, not guessed suffixes. No generalized accuracy, behavioral improvement, gating savings or production activation claim follows from this small synthetic diagnostic.

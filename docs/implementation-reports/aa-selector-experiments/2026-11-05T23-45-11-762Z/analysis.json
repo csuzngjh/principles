@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "pd-aa-selector-diagnostic-analysis/v1",
+  "source": "results.json",
+  "sourceSha256": "6c833a97e820f9ab4a78168ed3e14252f13e4c236ea9ff84e5e5c4ea307ebe4f",
+  "scope": "dev-02..04 synthetic development selection; not behavior",
+  "cumulativeAttempts": {
+    "decision": 6,
+    "glm": 6
+  },
+  "thisRunAttempts": {
+    "decision": 3,
+    "glm": 6
+  },
+  "validDecisionResponses": 3,
+  "validGlmOutputs": 6,
+  "elapsedMs": 25640,
+  "arms": {
+    "C": {
+      "samples": 3,
+      "allowedSetHits": 2,
+      "glmRequests": 3,
+      "decisionRequests": 0,
+      "glmInputTokens": 1346,
+      "glmOutputTokens": 670,
+      "glmRequestLatencyMs": 10189,
+      "decisionRequestLatencyMs": 0
+    },
+    "D": {
+      "samples": 3,
+      "allowedSetHits": 2,
+      "glmRequests": 3,
+      "decisionRequests": 3,
+      "glmInputTokens": 1500,
+      "glmOutputTokens": 656,
+      "glmRequestLatencyMs": 10904,
+      "decisionRequestLatencyMs": 4111
+    }
+  },
+  "allSelectionsIdentical": true,
+  "cases": [
+    {
+      "id": "dev-02",
+      "scores": {
+        "new_task": 0.9593863,
+        "goal_shift": 0.95651996,
+        "phase_shift": 0.070776805,
+        "insufficient_context": 0.1962395
+      },
+      "allowed": [
+        "none_applicable"
+      ],
+      "C": {
+        "status": "selected",
+        "id": "fixture_explicit_goal",
+        "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+        "withinPrewrittenAllowedSet": false
+      },
+      "D": {
+        "status": "selected",
+        "id": "fixture_explicit_goal",
+        "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+        "withinPrewrittenAllowedSet": false
+      }
+    },
+    {
+      "id": "dev-03",
+      "scores": {
+        "new_task": 0.049620405,
+        "goal_shift": 0.995775,
+        "phase_shift": 0.20682019,
+        "insufficient_context": 0.13750939
+      },
+      "allowed": [
+        "fixture_explicit_goal",
+        "fixture_preserve"
+      ],
+      "C": {
+        "status": "selected",
+        "id": "fixture_explicit_goal",
+        "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+        "withinPrewrittenAllowedSet": true
+      },
+      "D": {
+        "status": "selected",
+        "id": "fixture_explicit_goal",
+        "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+        "withinPrewrittenAllowedSet": true
+      }
+    },
+    {
+      "id": "dev-04",
+      "scores": {
+        "new_task": 0.06244897,
+        "goal_shift": 0.03399504,
+        "phase_shift": 0.9887885,
+        "insufficient_context": 0.2668238
+      },
+      "allowed": [
+        "fixture_verify"
+      ],
+      "C": {
+        "status": "selected",
+        "id": "fixture_verify",
+        "digest": "dc463914b5a1215f1a8cccc6545e0bc979b386d244aba3a2938a84965a4486e6",
+        "withinPrewrittenAllowedSet": true
+      },
+      "D": {
+        "status": "selected",
+        "id": "fixture_verify",
+        "digest": "dc463914b5a1215f1a8cccc6545e0bc979b386d244aba3a2938a84965a4486e6",
+        "withinPrewrittenAllowedSet": true
+      }
+    }
+  ],
+  "decisionProviderReportedCost": 0,
+  "glmMonetaryCost": null,
+  "limitations": [
+    "Three development cases only, no heldout/actor/host/task-outcome evidence",
+    "Alternating C/D order, not randomized; one execution each",
+    "dev-02 oracle applicability is debatable; frozen mismatch retained",
+    "No unchanged-task or missing-context successful case; no calibrated gate/false-skip measurement"
+  ]
+}
