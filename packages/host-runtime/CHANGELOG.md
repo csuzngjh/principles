@@ -1,5 +1,16 @@
 # @principles/host-runtime
 
+## 2.1.0
+
+### Minor Changes
+
+- 6696ca6: PRI-1109: add a read-only adaptive-delivery journal reconciler and the thin `pd activation journal` command. The command pairs recorded open/terminal states conservatively, reports coverage and truncation explicitly, and never writes logs or runs a model. `@principles/core` only gains a public export of the existing `canonicalStringify` (no behavior change).
+
+### Patch Changes
+
+- Updated dependencies [6696ca6]
+  - @principles/core@4.1.0
+
 ## 2.0.2
 
 ### Patch Changes
