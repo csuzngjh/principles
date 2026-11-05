@@ -14,7 +14,7 @@
 - 共享入口漏接问题经独立复查发现并修复：正式OpenClaw注册→shared dispatch→priority provider→既有packer→正常prompt hook完整接线，本地回退路径也保留。共享packer给返回边界携带精确目标正文、授权快照和Native基线；最终重验失败剔除目标，关闭/过期映射恢复基线。未匹配、策略未执行和选择不可用在journal中分别保留，不用合法空集掩盖错误。
 - 调用journal复用现有EventLog的adaptive_delivery事件，不新增表或DB事务。共享priority打包之前立即写open，终态沿同一hookInvocationId写closed，结构化注入事件也关联该ID；prepared不是confirmed，submission始终unknown。无法从API取得的宿主版本、插件版本和Hook指纹明确unknown，配置证据coverage=partial，不能继承旧版本的完整验证结论。持久化失败只告警，不改变有效提示。
 - 修复新增重验的同步锁等待：真实SQLite排他锁反例修前等待约7.39秒、未满足1秒测试上限；修后遇锁立即返回unknown/失效回退，整份测试3项通过。readonly连接现在采用既有busyTimeoutMs选项，普通默认仍为5000，额外authority重验指定0；原有只读无建库/迁移/pragma写入测试保留。
-- 最终集成验证：插件10文件163项、host-runtime 7文件75项、core 6文件55项、Node工具8文件66项，均0失败/0跳过，共359项不重叠测试；最新全仓npm run build通过。提交7c84f20f1、01bed8750、3e81b1115、8b8160ca2、679f6833a及后续调用ID贯穿修订均为本地开发证据，不能当作远端CI或已安装启用。
+- 最终集成验证：插件10文件163项、host-runtime 7文件75项、core 6文件55项、Node工具8文件66项，均0失败/0跳过，共359项不重叠测试；全仓npm run build通过。随后独立复查发现配置A→B切换会把A调用错误关联B目标，已固定关闭事实归属原始打包目标并增加1项反例；相应文件61项通过，插件构建复核通过。因此目前已验证360项不重叠案例（增补后没有重复执行整个360项组合）。提交7c84f20f1、01bed8750、3e81b1115、8b8160ca2、679f6833a及后续调用ID贯穿修订均为本地开发证据，不能当作远端CI或已安装启用。未捕获的意外异常可留下open，不能据此断言宿主kill；历史中断对账仍待实现。
 - 这只实现固定场景的Principle Intervention Loop；即使后续正例成功，也不能宣称通用Adaptive Selector、自动语义选择或多原则动态组合已验证。
 - 独立送达验证器、配置投影、覆盖率统计和本地传输工具已经实现。Node工具66项通过；core原有及新核心/解析测试54项通过，正式回执9项、host重验7项分别通过；不要将重叠回归套件相加宣传。
 - 全仓npm run build曾在正式core合入后通过；后续变更需最后一次完整集成构建和适用测试。

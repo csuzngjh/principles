@@ -335,8 +335,10 @@ export async function handleBeforePromptBuild(
       logger?.warn?.(`[PD:AA] Invocation journal unavailable: ${String(error)}`);
     }
   };
-  const journalTarget = adaptiveMapping ?? (preparedPacking?.targetArtifactId
-    ? { artifactId: preparedPacking.targetArtifactId, activationId: preparedPacking.targetActivationId } : undefined);
+  // A config reload may replace the mapping after packing. The terminal record
+  // still belongs to the invocation's original target, never the replacement.
+  const journalTarget = preparedPacking?.hookInvocationId && preparedPacking.targetArtifactId
+    ? { artifactId: preparedPacking.targetArtifactId, activationId: preparedPacking.targetActivationId } : adaptiveMapping ?? undefined;
   const adaptiveJournalContext = adaptiveJournalFacts(ctx, journalTarget, sharedActivePrinciplePrompt ? 'shared' : 'plugin_local');
   // PRI-647: trajectory session recording and assistant-turn anchoring are
   // observability side-effects only. A closed/disposed trajectory connection

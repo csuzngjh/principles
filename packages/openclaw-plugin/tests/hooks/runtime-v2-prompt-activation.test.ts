@@ -408,6 +408,21 @@ describe('Adaptive activation — actual local prompt entry', () => {
     expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
   });
 
+  it('a configuration change cannot close the original invocation under a different target', async () => {
+    const { target, packed } = await sharedPrepared();
+    const original = { artifactId: `art-${target}`, activationId: `act_prompt_${target}` };
+    const { beginAdaptivePromptInvocation, handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const hookInvocationId = beginAdaptivePromptInvocation(configured(target), original, 'shared');
+    if (!packed.adaptivePacking) throw new Error('requires prepared packing');
+    packed.adaptivePacking.hookInvocationId = hookInvocationId;
+    const replacement = target === 'AA-00' ? 'AA-01' : 'AA-00';
+    await handleBeforePromptBuild(admitted(), configured(replacement), packed);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal).toHaveBeenCalledTimes(2);
+    expect(journal.mock.calls[1]![1]).toMatchObject({ hookInvocationId, receiptState: 'closed', ...original, payload: 'none' });
+  });
+
   it('journal storage failure does not remove an otherwise valid intervention', async () => {
     insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
     await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
