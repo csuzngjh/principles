@@ -18,6 +18,7 @@ import {
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 import { formatHostStateSummary } from './install-summary.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
+import { readWorkbuddyHostState } from './installers/workbuddy-host-installer.js';
 
 export { isLanguage } from './i18n.js';
 
@@ -519,6 +520,15 @@ async function showStatus(options: Record<string, unknown>): Promise<void> {
     logger.warn(t('pd_not_installed'));
     console.log(`\n  ${t('install_hint')}:`);
     console.log('  npx create-principles-disciple');
+  }
+
+  // SPEC §6.4: the status entry renders the SAME host-state authority the
+  // install summary uses (readWorkbuddyHostState + formatHostStateSummary).
+  // Registration, enablement and the governance gates are three independent
+  // facts; an unreadable source prints UNKNOWN/UNREADABLE instead of a guess.
+  console.log();
+  for (const line of formatHostStateSummary([readWorkbuddyHostState(getHomeDir())], true)) {
+    console.log(line);
   }
 }
 

@@ -25,6 +25,9 @@ export interface HostGovernanceSummary {
   readonly explicitOptOut: boolean;
   readonly keywordPainEnabled?: boolean;
   readonly configPath?: string;
+  /** False when the governance config could not be read/parsed — never guess. */
+  readonly readable?: boolean;
+  readonly unreadableReason?: string;
 }
 
 export interface HostStateSummaryResult {
@@ -45,6 +48,7 @@ function pluginStateText(state: HostPluginStateSummary): string {
 }
 
 function governanceText(governance: HostGovernanceSummary, withDefaultNote: boolean): string {
+  if (governance.readable === false) return 'UNKNOWN (config unreadable)';
   return governance.enabled
     ? `ON${withDefaultNote && !governance.explicitOptOut ? ' (default)' : ''}`
     : 'OFF (your explicit opt-out was preserved)';
@@ -55,14 +59,17 @@ function workbuddyLines(host: HostStateSummaryResult, state: HostPluginStateSumm
 
   if (host.governance !== undefined) {
     lines.push(`  WorkBuddy governance ............. ${governanceText(host.governance, false)}`);
-    if (host.governance.keywordPainEnabled !== undefined) {
+    if (host.governance.readable !== false && host.governance.keywordPainEnabled !== undefined) {
       lines.push(`  Automatic keyword Pain ........... ${host.governance.keywordPainEnabled ? 'ON' : 'OFF'}`);
     }
     // Manual entry is a SEPARATE fact from automatic detection: the prefix is
     // available regardless of the keyword gate, but only once the plugin (and
     // therefore the hook that delivers the prompt) is enabled.
     lines.push(`  Manual PD记录痛苦：............... ${state.enabled === true ? 'available' : 'available once the plugin is enabled'}`);
-    if (!host.governance.enabled) {
+    if (host.governance.readable === false) {
+      lines.push(`             reason: ${host.governance.unreadableReason ?? 'the governance config could not be read'}`);
+    }
+    if (host.governance.readable !== false && !host.governance.enabled) {
       const target = host.governance.configPath ?? 'the governance workspace .pd/config.yaml';
       lines.push(`             to enable: in ${target}, inside the existing "features:" block set host.workbuddy: {enabled: true}`);
     }
@@ -93,10 +100,15 @@ function workbuddyLines(host: HostStateSummaryResult, state: HostPluginStateSumm
 
 /** Legacy per-host governance block (hosts without an enablement gate). */
 function governanceLines(hostId: string, governance: HostGovernanceSummary): string[] {
-  const keywordPart = governance.keywordPainEnabled === undefined
-    ? ''
-    : `, keyword Pain: ${governance.keywordPainEnabled ? 'ON' : 'OFF'}`;
-  const lines = [`  ${hostId} governance ............. ${governanceText(governance, true)}${keywordPart}`];
+  const lines = [`  ${hostId} governance ............. ${governanceText(governance, true)}${
+    governance.readable === false || governance.keywordPainEnabled === undefined
+      ? ''
+      : `, keyword Pain: ${governance.keywordPainEnabled ? 'ON' : 'OFF'}`
+  }`];
+  if (governance.readable === false) {
+    lines.push(`             reason: ${governance.unreadableReason ?? 'the governance config could not be read'}`);
+    return lines;
+  }
   const disabledFlags: string[] = [];
   if (!governance.enabled) disabledFlags.push('host.workbuddy');
   if (governance.keywordPainEnabled === false) disabledFlags.push('workbuddy_live_keyword_pain');
