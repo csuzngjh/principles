@@ -120,14 +120,19 @@ function findInvocation(report: AdaptiveJournalReport, id: string) {
 function hashTree(root: string): Record<string, string> {
   const result: Record<string, string> = {};
   const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir).sort()) {
-      const absolute = path.join(dir, entry);
-      const stat = fs.statSync(absolute);
-      if (stat.isDirectory()) {
+    const entries = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
         result[`dir:${path.relative(root, absolute)}`] = 'dir';
         walk(absolute);
       } else {
-        result[`file:${path.relative(root, absolute)}`] = crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');
+        result[`file:${path.relative(root, absolute)}`] = crypto
+          .createHash('sha256')
+          .update(fs.readFileSync(absolute))
+          .digest('hex');
       }
     }
   };

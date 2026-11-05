@@ -605,27 +605,29 @@ function selectDateFiles(options: {
 }
 
 function readBoundedLines(filePath: string, maxBytes: number): BoundedReadResult {
-  const { size } = fs.statSync(filePath);
-  const bytesToRead = Math.min(size, maxBytes);
-  let text: string;
-  if (size <= maxBytes) {
-    text = fs.readFileSync(filePath, 'utf8');
-  } else {
-    const handle = fs.openSync(filePath, 'r');
-    try {
-      const buffer = Buffer.allocUnsafe(bytesToRead);
-      fs.readSync(handle, buffer, 0, bytesToRead, size - bytesToRead);
-      text = buffer.toString('utf8');
+  const handle = fs.openSync(filePath, 'r');
+  try {
+    const stats = fs.fstatSync(handle);
+    if (!stats.isFile()) throw new Error('not a regular file');
+    const { size } = stats;
+    const truncated = size > maxBytes;
+    const bytesToRead = truncated ? maxBytes : size;
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    if (bytesToRead > 0) {
+      fs.readSync(handle, buffer, 0, bytesToRead, truncated ? size - bytesToRead : 0);
+    }
+    let text = buffer.toString('utf8');
+    if (truncated) {
       const firstNewline = text.indexOf('\n');
       text = firstNewline === -1 ? '' : text.slice(firstNewline + 1);
-    } finally {
-      fs.closeSync(handle);
     }
+    const lines = text
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+    return { lines, bytesRead: bytesToRead, truncated };
+  } finally {
+    fs.closeSync(handle);
   }
-  const lines = text
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0);
-  return { lines, bytesRead: bytesToRead, truncated: size > maxBytes };
 }
 
 function projectionKey(record: ParsedJournalRecord): string {
