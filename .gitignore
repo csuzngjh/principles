@@ -165,6 +165,14 @@ overview-light.png
 .full-review/
 .pnpm-store/
 
+# Package manager unification (PR #969): npm is the only supported installer.
+# An accidental `pnpm install` regenerates these files (ERR-068); the preinstall
+# guard at scripts/dev/check-package-manager.mjs blocks that install. These
+# entries only keep a stray file from being staged — check:repo-hygiene still
+# flags the files themselves, because it does not honour .gitignore.
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
+
 graphify-out/
 /ops/
 
