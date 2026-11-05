@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1972,
+  "count": 1973,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1577,6 +1577,7 @@
     "candidateShow",
     "canonicalHumanReviewReasonCode",
     "canonicalJson",
+    "canonicalStringify",
     "canonicalizeToolKind",
     "checkAgentRuntimeReadiness",
     "checkForbiddenPatterns",

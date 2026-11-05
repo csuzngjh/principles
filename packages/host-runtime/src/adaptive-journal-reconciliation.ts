@@ -666,12 +666,11 @@ function canonicalJournalDataInner(value: unknown): string {
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
   if (typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJournalDataInner).join(',')}]`;
-  if (typeof value === 'object') {
-    const source = value as Record<string, unknown>;
-    const keys = Object.keys(source).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  if (isRecord(value)) {
+    const keys = Object.keys(value).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
     const parts: string[] = [];
     for (const key of keys) {
-      const entry = source[key];
+      const entry = value[key];
       if (entry === undefined) continue;
       parts.push(`${JSON.stringify(key)}:${canonicalJournalDataInner(entry)}`);
     }
