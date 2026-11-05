@@ -112,7 +112,10 @@ export async function readPromptActivationCandidates(input: {
     return { principles, warnings, aborted: true, selfReportEnabled, abstractionLayerEnabled };
   }
   try {
-    connection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true, bootstrapIfMissing: false });
+    connection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true, bootstrapIfMissing: false,
+      // Additional adaptive reads must not hold the host behind SQLite's synchronous busy wait.
+      ...(input.includeAuthority === true ? { busyTimeoutMs: 0 } : {}),
+    });
     const activations = filterPromptActivations(await new SqliteActivationStateStore(connection).listPromptActivations());
     const artifactStore = new SqlitePIArtifactStore(connection);
     for (const activation of activations) {

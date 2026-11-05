@@ -49,6 +49,27 @@ afterEach(() => {
 });
 
 describe('prompt activation authority shared read', () => {
+  it('does not spend the host soft budget waiting for a locked database during revalidation', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedOwnerApprovedPrompt(workspaceDir);
+    const expected = (await readPromptActivationCandidates({ workspaceDir, includeAuthority: true })).principles[0]!;
+    const connection = new SqliteConnection(workspaceDir);
+    const db = connection.getDb();
+    db.pragma('journal_mode = DELETE');
+    db.exec('BEGIN EXCLUSIVE');
+    const started = performance.now();
+    let valid: boolean;
+    try {
+      valid = await revalidateAdaptivePrinciple(workspaceDir, expected, new AbortController().signal);
+    } finally {
+      db.exec('ROLLBACK');
+      connection.close();
+    }
+    expect(valid).toBe(false);
+    // A soft timer cannot interrupt synchronous SQLite's default five-second busy wait.
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it('opt-in authority makes owner approval observable to revalidation while default prompt bytes stay unchanged', async () => {
     const workspaceDir = tempWorkspace();
     await seedOwnerApprovedPrompt(workspaceDir);
