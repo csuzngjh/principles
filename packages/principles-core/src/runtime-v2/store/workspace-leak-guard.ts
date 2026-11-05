@@ -46,10 +46,16 @@ import * as os from 'os';
  * Match either forward-slash or backslash form so the same pattern works
  * on both Unix (test source uses '/fake/workspace') and Windows
  * (path.resolve produces 'D:\fake\workspace').
+ *
+ * The trailing `([/\\]|$)` alternative also matches a *bare* mock root such
+ * as '/fake' or 'D:\fake'. That form is not hypothetical: signal-health.ts
+ * reports write failures via `SystemLogger.log(path.dirname(stateDir))`, so a
+ * leaked '/fake/state' becomes '/fake' — the old patterns missed it, and the
+ * failure log landed at D:\fake\memory\logs\SYSTEM_*.log on Windows.
  */
 const MOCK_LEAK_PATTERNS = [
-  /(^|[/\\])fake[/\\]/i,
-  /(^|[/\\])mock[/\\]/i,
+  /(^|[/\\])fake([/\\]|$)/i,
+  /(^|[/\\])mock([/\\]|$)/i,
   /(^|[/\\])tmp[/\\]fake-/i,
 ];
 

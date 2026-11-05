@@ -41,6 +41,13 @@ describe('workspace-leak-guard', () => {
       expect(isMockLeakPath('/tmp/fake-workspace-abc')).toBe(true);
     });
 
+    it('detects a bare mock root (dirname of /fake/state, from failure logging)', () => {
+      expect(isMockLeakPath('/fake')).toBe(true);
+      expect(isMockLeakPath('/mock')).toBe(true);
+      expect(isMockLeakPath('D:\\fake')).toBe(true);
+      expect(isMockLeakPath('C:\\fake')).toBe(true);
+    });
+
     it('returns false for legitimate workspace paths', () => {
       expect(isMockLeakPath('/home/user/project')).toBe(false);
       expect(isMockLeakPath('C:\\Users\\dev\\project')).toBe(false);
@@ -62,6 +69,12 @@ describe('workspace-leak-guard', () => {
 
     it('redirects /mock/workspace to os.tmpdir()/.pd-test-quarantine/', () => {
       const result = guardWorkspaceLeak('/mock/workspace');
+      expect(result).toContain('.pd-test-quarantine');
+      expect(result.startsWith(os.tmpdir())).toBe(true);
+    });
+
+    it('redirects a bare /fake root as well (dirname of /fake/state)', () => {
+      const result = guardWorkspaceLeak('/fake');
       expect(result).toContain('.pd-test-quarantine');
       expect(result.startsWith(os.tmpdir())).toBe(true);
     });
