@@ -1,0 +1,253 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T104048Z-trae",
+  "previousCheckpoint": "20261105T101154Z-trae",
+  "generatedAt": "2026-11-05T10:40:48Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "按协调者裁决完成只读准备：复核设计引用、输出 10 条勘误与 5 组待改条目、记录真实日志格式、给出 37 个测试骨架用例名、判定 #2358 收尾与合并顺序；未写实现代码、未跑实现测试、未改设计正文。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+    "branch": "ai/PRI-1109-conservative-reconcile",
+    "baseCommit": "c6ba18fe9",
+    "headCommit": "7097f8715",
+    "dirtyPaths": [
+      "docs/implementation-reports/aa-handoff/20261105T104048Z-trae.md",
+      "docs/implementation-reports/aa-handoff/20261105T104048Z-trae.json",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "pushedCommit": "7097f8715",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2358",
+    "remoteChecks": "PASS at 7097f8715 (PR #2358, run 42010745033, Verify Merge Gate success 2m16s); 本检查点提交为 docs-only 元数据，推送后需按 PR #2358 新 head 重新核验，当前未声明为绿"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1109",
+      "scope": "Owner 设计批准前的只读准备：引用复核、勘误、待改条目、样本格式、测试骨架、PR #2358 收尾",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/aa-handoff/"
+      ],
+      "commits": [],
+      "acceptance": [
+        {
+          "criterion": "复核设计引用的真实日志路径、保留期常量、validateAdaptiveDeliveryRecord 签名与消费者，并逐条给文件:行号",
+          "result": "PASS",
+          "evidenceRefs": ["code-facts", "design-doc"]
+        },
+        {
+          "criterion": "与代码不符处单独成节列出勘误，且不改设计正文",
+          "result": "PASS",
+          "evidenceRefs": ["checkpoint-md"]
+        },
+        {
+          "criterion": "把形态、默认窗口、上限截断三项裁决落成精确待改条目（章节/原文/改后文本）",
+          "result": "PASS",
+          "evidenceRefs": ["checkpoint-md"]
+        },
+        {
+          "criterion": "给出真实日志样本格式说明与隔离临时目录测试骨架清单（仅用例名）",
+          "result": "PASS",
+          "evidenceRefs": ["checkpoint-md", "real-log"]
+        },
+        {
+          "criterion": "确认 #2358 收尾内容、是否需等设计批准、与实现 PR 的合并顺序",
+          "result": "PASS",
+          "evidenceRefs": ["pr-2358"]
+        },
+        {
+          "criterion": "不写实现代码、不跑实现测试、不声称已获 Owner 设计批准",
+          "result": "PASS",
+          "evidenceRefs": ["checkpoint-md"]
+        },
+        {
+          "criterion": "Owner 对设计（含三项裁决）的明确批准",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        },
+        {
+          "criterion": "实现代码、代码测试、远端 CI、真实宿主证据",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "Owner 明确批准设计（三项裁决已由协调者定稿，但仍属待批准内容）",
+        "批准后按待改条目 A–E 一次性更新设计文档并记录新哈希",
+        "设计落定后从最新 origin/main 新建工作树实现并跑测试",
+        "PRI-1107 解除阻塞后再按 Linear 规则进入 In Progress"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "errata-line-check",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "Read/Grep: adaptive-delivery-record.ts, event-log.ts, prompt.ts, receipt-coverage.ts, prompt-injection-budget-observation.ts, runtime-activation.ts, event-types.ts, core package.json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["code-facts"]
+    },
+    {
+      "id": "real-log-scan",
+      "cwd": "C:\\Users\\Administrator\\.openclaw\\workspace\\.state\\logs",
+      "command": "node -e \"scan events_*.jsonl for type=adaptive_delivery and print envelope/data keys\"",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["real-log"]
+    },
+    {
+      "id": "readonly-boundary",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "git status --short; read-only reads of packages/; no implementation files created",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["code-facts"]
+    },
+    {
+      "id": "pr-2358-state",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "gh pr view 2358 --json state,mergeable,statusCheckRollup,files",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2358"]
+    },
+    {
+      "id": "implementation-tests",
+      "cwd": null,
+      "command": "n/a — 未获批，按协调者要求不运行实现测试",
+      "result": "SKIPPED",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "checkpoint-md",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\implementation-reports\\aa-handoff\\20261105T104048Z-trae.md",
+      "observedAt": "2026-11-05T10:40:48Z",
+      "sha256": "b345567f9e51acc6397c504847275ac6198063c7d0f179fc8640714b5df32082",
+      "supports": "勘误 E1–E10、待改条目 A–E、真实日志格式、37 个测试骨架用例名、#2358 收尾与只读验证方法",
+      "limitations": "仅为只读准备与建议文本，不是设计批准，也不是实现"
+    },
+    {
+      "id": "design-doc",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\specs\\PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.1.md",
+      "observedAt": "2026-11-05T10:40:48Z",
+      "sha256": "e54cd9539937fca33c3d9c9b3a207b9c1a06cfc42d81cfb584957e8687bd5756",
+      "supports": "待审设计正文未改动；其引用位置用于逐条复核",
+      "limitations": "未获 Owner 批准，不能据此实施"
+    },
+    {
+      "id": "code-facts",
+      "kind": "CODE",
+      "locator": "packages/principles-core/src/runtime-v2/activation/adaptive-delivery-record.ts; packages/principles-core/src/runtime-v2/receipt-coverage.ts; packages/openclaw-plugin/src/core/event-log.ts; packages/openclaw-plugin/src/hooks/prompt.ts; packages/host-runtime/src/prompt-injection-budget-observation.ts; packages/pd-cli/src/commands/runtime-activation.ts; packages/principles-core/src/runtime-v2/types/event-types.ts",
+      "observedAt": "2026-11-05T10:40:48Z",
+      "sha256": null,
+      "supports": "校验器签名 66-161；保留期常量 :22；写侧与读取先例行号；信封 schema 导出 :127",
+      "limitations": "行号对应当前 origin/main；分支落后 main 6 个提交，但被引文件内容与 main 无差异"
+    },
+    {
+      "id": "real-log",
+      "kind": "CODE",
+      "locator": "C:\\Users\\Administrator\\.openclaw\\workspace\\.state\\logs\\events_2026-09-18.jsonl",
+      "observedAt": "2026-11-05T10:40:48Z",
+      "sha256": "7f5038e58e38cf8d4203271fddaad2d9bff50b8d8b5bafa55baaaa824c954d3f",
+      "supports": "真实信封字段 ts/date/type/category/sessionId/data；首行 ts=2026-09-17T23:59:59.650Z 与文件名 09-18 相差一天；全库 adaptive_delivery=0 条",
+      "limitations": "无 adaptive_delivery 真实样本；格式只能由写侧代码与单测推导"
+    },
+    {
+      "id": "pr-2358",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2358",
+      "observedAt": "2026-11-05T10:40:48Z",
+      "sha256": null,
+      "supports": "OPEN/MERGEABLE；仅 2 个 docs 提交、2 个检查点文件；Verify Merge Gate success 2m16s",
+      "limitations": "新检查点提交推送后需重新核验该 head 的 CI"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "design-approval",
+      "issue": "PRI-1109",
+      "reason": "对账读模型仍缺 Owner 明确设计批准；协调者三项裁决不是 Owner 批准",
+      "evidenceRefs": ["design-doc"],
+      "neededFrom": "Owner",
+      "unblockAction": "Owner 审阅设计 v0.1 与待改条目 A–E 并明确批准或提出修订",
+      "independentWork": "已完成只读复核、样本格式与测试骨架；无剩余不依赖批准的只读准备"
+    },
+    {
+      "id": "linear-blocker-pri-1107",
+      "issue": "PRI-1109",
+      "reason": "PRI-1107 处于 Backlog 且 blocks PRI-1109",
+      "evidenceRefs": [],
+      "neededFrom": "PRI-1107",
+      "unblockAction": "PRI-1107 完成设计确认并解除 blocks 关系",
+      "independentWork": "设计审阅与批准前准备；不得提前进入 In Progress"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1109",
+      "action": "Owner 明确批准设计（含默认 7 天、1000 条显式截断、极薄 CLI 三项），批准来源与版本写入下一检查点",
+      "dependsOn": ["design-approval"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 明确批准或给出修订意见"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1109",
+      "action": "批准后按待改条目 A–E 一次性修改设计文档，记录新 SHA-256 与 diff",
+      "dependsOn": ["design-approval"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "设计正文更新并有单一 docs 提交"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1109",
+      "action": "设计落定后从最新 origin/main 新建工作树实现，按测试骨架跑隔离目录测试与只读字节比较",
+      "dependsOn": ["design-approval", "linear-blocker-pri-1107"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "实现 + 测试 + 新检查点，且未合并 PR"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1109",
+      "action": "确认 #2358 先于实现 PR 合并，或在其被取代时关闭",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "Owner 合并 #2358 或明确关闭并由实现检查点取代"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "implementationCodeWritten": false,
+    "implementationTestsRun": false,
+    "designBodyModified": false,
+    "authorizationRefs": [
+      "协调者 2026-11-05 消息：批准前只做不依赖批准结果的只读准备；三项裁决记录为协调者裁决，不是 Owner 设计批准"
+    ]
+  }
+}
