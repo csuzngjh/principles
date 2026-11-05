@@ -387,7 +387,9 @@ describe('recallPrinciplePainsCapability: ALLOW set and parity', () => {
       { name: 'trajectoryDb', status: raw.sources.trajectoryDb },
       { name: 'stateDb', status: raw.sources.stateDb },
     ]);
-    expect(envelope.warnings).toEqual([]);
+    // W6/W7/F6: an unresolved association must never look like a clean result.
+    expect(envelope.warnings.map((w) => w.code)).toEqual(['derived_from_candidate_ids']);
+    expect(envelope.nextAction?.code).toBe('inspect_unresolved_associations');
 
     // Completeness: every leaf the fixture can populate IS present — the
     // projection may not silently narrow either.
@@ -439,12 +441,18 @@ describe('recallPrinciplePainsCapability: ALLOW set and parity', () => {
       'data.unresolvedAssociations[].reason',
       'disclosureProfile',
       'error',
-      'nextAction',
+      // W6/W7/F6: `warnings[]` and `nextAction` are now POPULATED for an
+      // unresolved recall. Both leaves were already in the frozen od-a-v1
+      // whitelist (see FROZEN_ALLOWED_PATHS); no new path was introduced.
+      'nextAction.code',
+      'nextAction.message',
       'provenance.sources[].name',
       'provenance.sources[].status',
       'provenance.workspaceBinding',
       'schemaVersion',
       'status',
+      'warnings[].code',
+      'warnings[].message',
     ]);
     expect(envelope.disclosureProfile).toBe(OD_A_DISCLOSURE_PROFILE);
   });

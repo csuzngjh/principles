@@ -402,6 +402,54 @@ describe('recallPains: association graph', () => {
     expect(lineage).toBeDefined();
     expect(lineage!.association.confidence).toBe('lineage_verified'); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- guarded by toBeDefined above
   });
+
+  it('split-pipeline candidate input_ref (diagnosis_<pain>) normalizes to the canonical pain id (assoc-12)', async () => {
+    // Production shape: split-diagnostician-runner names sub-tasks
+    // `diag_router-diagnosis_<pain>` and their input_ref is `diagnosis_<pain>`.
+    // Reading that ref verbatim produced a phantom pain id and an empty result.
+    const splitTaskId = `diag_router-diagnosis_${PAIN_LINEAGE}`;
+    const spec = standardSpec();
+    spec.tasks = [
+      { taskId: splitTaskId, inputRef: `diagnosis_${PAIN_LINEAGE}` },
+      { taskId: `diagnosis_${PAIN_LINEAGE}`, inputRef: PAIN_LINEAGE },
+    ];
+    spec.candidates = [{ candidateId: CAND_A, taskId: splitTaskId }];
+    const ws = await makeWorkspace(spec);
+    const result = await recallPains(ws, { requestedPrincipleId: P1, limit: 10 });
+    const lineage = result.results.find((r) => r.painId === PAIN_LINEAGE);
+    expect(lineage).toBeDefined();
+    expect(lineage!.association.confidence).toBe('lineage_verified'); // eslint-disable-line @typescript-eslint/no-non-null-assertion -- guarded by toBeDefined above
+    expect(result.results.map((r) => r.painId)).not.toContain(`diagnosis_${PAIN_LINEAGE}`);
+  });
+
+  it('a verified association whose pain lives only in state.db is reported, not silently empty (assoc-13)', async () => {
+    // Unbound CLI registration deliberately skips the trajectory projection
+    // (SPEC §7.4), so the pain has no pain_events row. The association still
+    // exists in state.db via the diagnosis task payload.
+    const MANUAL_PAIN = 'manual_1792226109787_ye92vtko';
+    const splitTaskId = `diag_router-diagnosis_${MANUAL_PAIN}`;
+    const spec: WorkspaceSpec = {
+      principles: [{ id: P1, text: 'Verify evidence before acting', derivedFromPainIds: [CAND_A] }],
+      pains: [],
+      tasks: [
+        { taskId: splitTaskId, inputRef: `diagnosis_${MANUAL_PAIN}` },
+        {
+          taskId: `diagnosis_${MANUAL_PAIN}`,
+          inputRef: MANUAL_PAIN,
+          diagnosticJson: JSON.stringify({ sourcePainId: MANUAL_PAIN }),
+        },
+      ],
+      candidates: [{ candidateId: CAND_A, taskId: splitTaskId }],
+      diagnoses: [],
+    };
+    const ws = await makeWorkspace(spec);
+    const result = await recallPains(ws, { requestedPrincipleId: P1, limit: 10 });
+    expect(result.status).toBe('partial');
+    expect(result.results).toHaveLength(0);
+    expect(result.unresolvedAssociations).toEqual([
+      expect.objectContaining({ painId: MANUAL_PAIN, reason: 'pain_event_only_in_state_db' }),
+    ]);
+  });
 });
 
 // ── Availability semantics ────────────────────────────────────────────────────

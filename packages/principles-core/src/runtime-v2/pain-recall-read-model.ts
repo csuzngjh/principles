@@ -258,6 +258,45 @@ function safeParseRecord(json: string): Record<string, unknown> | null {
   }
 }
 
+const DIAGNOSIS_TASK_PREFIX = 'diagnosis_';
+
+/**
+ * `tasks.input_ref` of a split-pipeline sub-run is the diagnosis task id
+ * (`diagnosis_<painId>`), not the canonical pain id: split-diagnostician-runner
+ * names the router task `diag_router-diagnosis_<painId>` and every sub-task's
+ * input_ref points at its parent diagnosis task. Strip exactly ONE
+ * `diagnosis_` prefix; ambiguous remainders stay unchanged (same rule as the
+ * canonical retry pain id derivation in evidence-chain-contract.ts).
+ */
+function canonicalPainIdFromTaskRef(ref: string): string {
+  if (!ref.startsWith(DIAGNOSIS_TASK_PREFIX)) return ref;
+  const remainder = ref.slice(DIAGNOSIS_TASK_PREFIX.length);
+  if (remainder.length === 0 || remainder.startsWith(DIAGNOSIS_TASK_PREFIX)) return ref;
+  return remainder;
+}
+
+/**
+ * True when state.db still holds the diagnosed pain even though trajectory.db
+ * has no pain_events row. Unbound CLI registrations deliberately skip the
+ * trajectory projection (SPEC-PD-PAIN-RECALL-CLI-001 §7.4), so their pain text
+ * exists only in the `diagnosis_<painId>` task payload. Distinguishing this
+ * shape from "no association at all" makes the empty result judgeable: the
+ * association WAS verified, but its pain event was never persisted to
+ * trajectory.db.
+ */
+async function stateDbHoldsPainDiagnosis(manager: RuntimeStateManager, painId: string): Promise<boolean> {
+  try {
+    const task = await manager.getTask(`${DIAGNOSIS_TASK_PREFIX}${painId}`);
+    if (task === null || typeof task.diagnosticJson !== 'string') return false;
+    const payload = safeParseRecord(task.diagnosticJson);
+    return payload !== null && ownString(payload, 'sourcePainId') === painId;
+  } catch {
+    // A failed probe can only withhold the more specific reason; the
+    // association stays unresolved either way, so no failure becomes success.
+    return false;
+  }
+}
+
 // ── WAL-aware readonly open planning (strict read-only contract) ────────────
 
 type ReadonlyOpenPlan = 'direct' | 'stage' | 'unverifiable';
@@ -641,12 +680,18 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
             const inputRef = task !== null && typeof task.inputRef === 'string' && task.inputRef.length > 0
               ? task.inputRef
               : null;
-            painId = inputRef;
+            painId = inputRef === null ? null : canonicalPainIdFromTaskRef(inputRef);
           } catch {
             painId = null;
           }
-          if (painId === null && candidateTaskId.startsWith('diagnosis_') && candidateTaskId.length > 'diagnosis_'.length) {
-            painId = candidateTaskId.slice('diagnosis_'.length); // authoritative task-id spelling fallback
+          if (painId === null) {
+            // Authoritative task-id spelling fallback: `diagnosis_<pain>` and
+            // split-pipeline `diag_router-diagnosis_<pain>` both embed the pain id.
+            const taskRef = candidateTaskId.startsWith('diag_router-')
+              ? candidateTaskId.slice('diag_router-'.length)
+              : candidateTaskId;
+            const derived = canonicalPainIdFromTaskRef(taskRef);
+            if (derived !== taskRef) painId = derived;
           }
           if (painId === null) {
             unresolved.push({ candidateId, reason: 'pain_unresolvable_from_candidate' });
@@ -681,7 +726,10 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
       for (const painId of [...merged.keys()]) {
         const row = selectPain.get(painId);
         if (!isRecord(row)) {
-          unresolved.push({ painId, reason: 'pain_event_not_found' });
+          const reason = manager !== null && (await stateDbHoldsPainDiagnosis(manager, painId))
+            ? 'pain_event_only_in_state_db'
+            : 'pain_event_not_found';
+          unresolved.push({ painId, reason });
           merged.delete(painId);
         } else {
           painRows.set(painId, row);
@@ -692,11 +740,16 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
       if (query.painId !== undefined) {
         if (!merged.has(query.painId)) {
           const exists = isRecord(selectPain.get(query.painId) ?? null);
+          const reason = exists
+            ? 'not_associated'
+            : manager !== null && (await stateDbHoldsPainDiagnosis(manager, query.painId))
+              ? 'pain_event_only_in_state_db'
+              : 'pain_event_not_found';
           return emptyResult({
             query,
             status: 'pain_not_found',
             sources: { ledger: 'ok', trajectoryDb: 'ok', stateDb },
-            overwrites: { statusDetail: exists ? 'not_associated' : 'pain_event_not_found' },
+            overwrites: { statusDetail: reason },
           });
         }
         for (const painId of [...merged.keys()]) {
