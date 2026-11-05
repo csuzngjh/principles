@@ -14,6 +14,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  vi.unstubAllEnvs();
 });
 
 function makeStateDir(): string {
@@ -84,5 +85,22 @@ describe('signal-health (PRI-788 G4)', () => {
     const stateDir = path.join(makeStateDir(), 'not-a-dir', 'deeper');
     expect(() => updateSignalHealth(stateDir, (s) => { s.stage1Strong += 1; })).not.toThrow();
     spy.mockRestore();
+  });
+
+  it('mock-leak stateDirs never write to the filesystem root', () => {
+    // Regression: hooks tests mock WorkspaceContext with stateDir '/fake/state'.
+    // On Windows path.resolve('/fake/state') is D:\fake\state, and the recursive
+    // mkdir in updateSignalHealth recreated that dir after every manual deletion.
+    // The guard must redirect both the read and the write to os.tmpdir().
+    vi.stubEnv('NODE_ENV', 'test');
+    const leaked = '/fake/state';
+    const rootFile = path.join(path.resolve(leaked), 'signal-health.json');
+    const mtimeBefore = fs.existsSync(rootFile) ? fs.statSync(rootFile).mtimeMs : null;
+
+    updateSignalHealth(leaked, (s) => { s.stage1Strong += 1; });
+
+    expect(readSignalHealth(leaked)?.stage1Strong).toBeGreaterThanOrEqual(1);
+    const mtimeAfter = fs.existsSync(rootFile) ? fs.statSync(rootFile).mtimeMs : null;
+    expect(mtimeAfter).toBe(mtimeBefore);
   });
 });
