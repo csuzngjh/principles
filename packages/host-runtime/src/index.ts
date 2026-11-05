@@ -247,6 +247,18 @@ export function createProductionHostRuntime(
     projectDir?: string;
     /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
     toolSemantics?: ToolSemanticRegistry;
+    /** Optional, already-scoped single prompt target from the host adapter. Errors fail closed to Native. */
+    adaptivePriorityProvider?: (event: HostEvent) => {
+      artifactId: string;
+      activationId: string;
+      signal?: AbortSignal;
+      deadlineAt?: number;
+    } | undefined | Promise<{
+      artifactId: string;
+      activationId: string;
+      signal?: AbortSignal;
+      deadlineAt?: number;
+    } | undefined>;
     /**
      * PRI-750: optional event emission port. When present, the shared-path
      * handlers record injection/tool events carrying the host's natural
@@ -299,8 +311,31 @@ export function createProductionHostRuntime(
       const declaredWindow = promptBudgetHostKind === undefined
         ? undefined
         : operatorDeclaredContextWindow(loadPdConfigForPlugin(event.context.workspaceDir).effective.config.promptBudget, promptBudgetHostKind);
+      let adaptivePriority: Awaited<ReturnType<NonNullable<typeof options.adaptivePriorityProvider>>>;
+      if (options.adaptivePriorityProvider) {
+        try {
+          adaptivePriority = await options.adaptivePriorityProvider(event);
+          if (adaptivePriority && (typeof adaptivePriority.artifactId !== 'string' || !adaptivePriority.artifactId.trim()
+            || typeof adaptivePriority.activationId !== 'string' || !adaptivePriority.activationId.trim()
+            || (adaptivePriority.deadlineAt !== undefined && !Number.isFinite(adaptivePriority.deadlineAt)))) {
+            adaptivePriority = undefined;
+          }
+          if (adaptivePriority?.signal?.aborted
+            || (adaptivePriority?.deadlineAt !== undefined && Date.now() >= adaptivePriority.deadlineAt)) {
+            adaptivePriority = undefined;
+          }
+        } catch {
+          // An optional adaptive provider can never alter the ordinary Native path on failure.
+          adaptivePriority = undefined;
+        }
+      }
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
+        ...(adaptivePriority ? {
+          adaptivePriority: { artifactId: adaptivePriority.artifactId, activationId: adaptivePriority.activationId },
+          ...(adaptivePriority.signal ? { signal: adaptivePriority.signal } : {}),
+          ...(adaptivePriority.deadlineAt !== undefined ? { deadlineAt: adaptivePriority.deadlineAt } : {}),
+        } : {}),
         promptBudget: resolvePromptBudget({
           // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve ONCE per request
           // from the host's own hook facts (OpenClaw effective window /

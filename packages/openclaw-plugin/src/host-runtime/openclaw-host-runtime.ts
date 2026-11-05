@@ -23,6 +23,17 @@ type NativeResult =
 
 export interface OpenClawHostRuntimeOptions {
   beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
+  adaptivePriorityProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): {
+    artifactId: string;
+    activationId: string;
+    signal?: AbortSignal;
+    deadlineAt?: number;
+  } | undefined | Promise<{
+    artifactId: string;
+    activationId: string;
+    signal?: AbortSignal;
+    deadlineAt?: number;
+  } | undefined>;
   ruleContextProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   ruleInputEnrichmentProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   onBeforeToolResult?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, result: HostEventResult): PluginHookBeforeToolCallResult | void;
@@ -100,6 +111,11 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     // the OpenClaw registry (not the core baseline) — production hints and
     // action.canonicalKind then agree with the plugin hook path and replay.
     toolSemantics: OPENCLAW_TOOL_SEMANTICS,
+    adaptivePriorityProvider(event) {
+      const payload = payloadFor(event);
+      if (payload.kind !== 'before_prompt_build') return undefined;
+      return options.adaptivePriorityProvider?.(payload.event, payload.context);
+    },
     ruleContextProvider(request) {
       if (typeof request.rawPayload !== 'object' || request.rawPayload === null) throw new Error('OpenClaw rule context request is missing its native payload');
       const token = Reflect.get(request.rawPayload, 'nativeToken');

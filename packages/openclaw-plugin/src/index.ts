@@ -54,6 +54,10 @@ import { resolveCommandWorkspaceDir, resolveExplicitPdWorkspaceDir, resolveHookW
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime-v2';
 import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
+import { readAdaptiveActivationConfig } from './hooks/adaptive-activation-config.js';
+import { resolveCurrentUserMessage } from './hooks/prompt-helpers.js';
+import { isUserInteractionTrigger } from './core/signal-collector-host.js';
+import { isMinimalTrigger } from '@principles/core/prompt-builder';
 
 // Track started workspaces — one-time init per workspace
 const startedWorkspaces = new Set<string>();
@@ -348,6 +352,33 @@ const plugin = {
     // every install that never set plugin config language (ERR-075 family).
     const language = (api.pluginConfig?.language as string) || 'zh';
     const sharedHostRuntime = createOpenClawHostRuntime({
+      adaptivePriorityProvider: (event, context) => {
+        const startedAt = Date.now();
+        const workspaceDir = context.workspaceDir;
+        const sessionId = context.sessionId;
+        const ownValue = (value: unknown, key: string): unknown => {
+          if (!value || typeof value !== 'object') return undefined;
+          return Object.getOwnPropertyDescriptor(value, key)?.value;
+        };
+        const currentMessage = ownValue(event, 'currentUserMessage');
+        const currentMessageId = ownValue(event, 'currentUserMessageId');
+        if (!workspaceDir || !sessionId?.trim() || typeof currentMessage !== 'string'
+          || typeof currentMessageId !== 'string' || !currentMessageId.trim()
+          || !isUserInteractionTrigger(context.trigger) || isMinimalTrigger(context.trigger, sessionId)) return undefined;
+        const resolved = resolveCurrentUserMessage(event, sessionId);
+        if (resolved.isAgentToAgent || currentMessage.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return undefined;
+        const mapping = readAdaptiveActivationConfig(ownValue(api, 'pluginConfig'), workspaceDir, startedAt);
+        if (!mapping) return undefined;
+        const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs <= 0) return undefined;
+        return {
+          artifactId: mapping.artifactId,
+          activationId: mapping.activationId,
+          signal: AbortSignal.timeout(remainingMs),
+          deadlineAt,
+        };
+      },
       beforePromptBuild: async (event, context, activePrinciplePrompt) =>
         handleBeforePromptBuild(event, {
           ...context,
