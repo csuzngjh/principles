@@ -109,12 +109,13 @@ export async function probeLocalTransport(cliPath) {
     hostStarted = start;
     const host = await runChild([cli, 'agent', 'exec', '--config', configPath, '--state-dir', path.join(root, 'state'),
       '--cwd', options.cwd, '--model', 'aa-local/aa-probe', '--thinking', 'off', '--timeout', '45', '--json', marker],
-    { ...options, deadlineMs: 60000, started: start });
+    { ...options, deadlineMs: 120000, started: start });
     await fs.writeFile(path.join(root, 'host.stdout'), host.stdout);
     await fs.writeFile(path.join(root, 'host.stderr'), host.stderr);
     report = { ...classifyLocalTransport({ validationExit: validation.exit, hostExit: host.exit,
       deadlineExceeded: host.deadlineExceeded, requests, stdout: host.stdout, marker, reply, timings: host.timings }),
       elapsedSeconds: (performance.now() - start) / 1000, timings: host.timings,
+      hostDeadlineMs: 120000, agentTimeoutSeconds: 45,
       requests, hostInvocations: 1, paidModelCalls: 0 };
   } catch (error) { report = { ok: false, failure: error.message, pdPrincipleDelivery: 'not_tested', behavioralImprovement: 'not_tested' }; }
   finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }

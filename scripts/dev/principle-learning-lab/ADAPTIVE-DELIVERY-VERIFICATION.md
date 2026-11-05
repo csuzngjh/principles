@@ -8,13 +8,13 @@
 node scripts/dev/principle-learning-lab/probe-local-transport.mjs --run --openclaw-cli <absolute-openclaw.mjs>
 ```
 
-它在工作区 `.tmp/aa-local-transport/run-*` 保留独立用户目录、配置、state、原始请求和输出。仅配置回环假 provider，关闭插件和工具，不继承认证/代理环境。配置校验上限 25 秒，单次 agent exec 外层上限 60 秒；超时终止所启动进程树，并保持失败。禁止将宿主 JSON 的 ok 当成进程正常退出。成功要求退出码 0、唯一目标请求、user 消息包含固定非原则标记，以及结构化返回正确的固定回复。宿主可能添加时间/运行上下文，因此标记匹配不是整条 user 消息相等。
+它在工作区 `.tmp/aa-local-transport/run-*` 保留独立用户目录、配置、state、原始请求和输出。仅配置回环假 provider，关闭插件和工具，不继承认证/代理环境。配置校验上限 25 秒，单次 agent exec 外层上限 120 秒；超时终止所启动进程树，并保持失败。禁止将宿主 JSON 的 ok 当成进程正常退出。成功要求退出码 0、唯一目标请求、user 消息包含固定非原则标记，以及结构化返回正确的固定回复。宿主可能添加时间/运行上下文，因此标记匹配不是整条 user 消息相等。
 
 原始请求按接收到的字节留存并计算 SHA-256；它包含本机运行元数据，不加入版本库。标准输出只返回摘要和本地目录。运行本探针须有相应的隔离宿主调用授权；不连接付费模型、不写正式安装/治理。调用者须使用经核实的本机 OpenClaw CLI。它不建立操作系统网络隔离，也不授予任何真实调用或安装授权。
 
 本探针证明的是回环请求与响应及正常退出。PD 插件被禁用，`pdPrincipleDelivery` 与 `behavioralImprovement` 始终为 `not_tested`，不能生成原则 confirmed 或覆盖率 D。`probe-local-transport.test.mjs` 使用假 CLI 验证隔离和实际 HTTP 字节捕获；这属于 fixture 测试，不作为真实宿主证据。
 
-每次运行另外记录同一单调时钟原点下的请求收取、首个 stdout、完整结果 JSON、根进程 exit 和输出管道 close 时间。`deadlinePhase` 区分 before_request_capture、after_request_capture、after_result_output 和 waiting_for_output_pipes；它描述截止时的已观测阶段，不自动诊断死锁。外层 60 秒包含启动/准备、请求、输出及清理；内层 `--timeout 45` 不能视为整个 CLI 从启动到退出的保证。阶段记录不延长期限，也不把任何超时重新标为通过。
+每次运行另外记录同一单调时钟原点下的请求收取、首个 stdout、完整结果 JSON、根进程 exit 和输出管道 close 时间。`deadlinePhase` 区分 before_request_capture、after_request_capture、after_result_output 和 waiting_for_output_pipes；它描述截止时的已观测阶段，不自动诊断死锁。外层 120 秒包含启动/准备、请求、输出及清理；内层 `--timeout 45` 不能视为整个 CLI 从启动到退出的保证。阶段记录不延长期限，也不把任何超时重新标为通过。
 
 对应 PRI-1112 与 PRI-1109 的离线准备部分。脚本只读给定证据，不调用模型、不采集宿主、不修改治理或安装。既有 Receipt/Evidence 仍是运行事实的归属。
 
@@ -78,3 +78,5 @@ study.json 的 schemaVersion 为 aa-coverage-input.v1。顶层必填 windowId、
 OpenClaw 安装包 2026.10.10 的公共类型定义含 currentUserMessage/currentUserMessageId，但实际 producer 有模式差异。agent-harness-runtime-BeEWzwHa.mjs 的 resolveAgentHarnessBeforePromptBuildResult 从 currentUserMessage 对象取 content/idempotencyKey；agentsapi-attempt-DNXcbiXG.mjs 传入 admittedMessage 或字符串回退。没有 admitted identity 时仍不能假定该 ID 存在。
 
 当前 embedded 的 attempt-system-prompt-prepare-BFRZxKas.mjs 使用 context-engine-maintenance-Cgkf_lx3.mjs::resolvePromptBuildHookResult，后者向 before_prompt_build 只传 prompt/messages。这是本机静态源码观察，未进行真实请求实验。不能将另一运行模式的类型或字段直接当作当前 embedded 已可用能力。
+
+Owner 要求加快主线推进后，将外层实验时限从60秒放宽到120秒，内层Agent期限保留45秒，报告显式记录两者。此前60秒实验的原始结果保持不变。此调整仅为隔离实验留出启动与收尾余量，不宣称宿主性能已修复，不新增模型调用或自动重试；宿主性能优化不再阻塞原则接线。

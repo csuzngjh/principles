@@ -33,6 +33,8 @@ test('isolated runner captures the actual HTTP body and receives the stub withou
     const result = await probeLocalTransport(fixture);
     assert.equal(result.ok, true);
     assert.equal(result.requestCount, 1);
+    assert.equal(result.hostDeadlineMs, 120000);
+    assert.equal(result.agentTimeoutSeconds, 45);
     assert.equal(result.pdPrincipleDelivery, 'not_tested');
     assert.equal(result.deadlinePhase, null);
     assert.ok(result.requests[0].receivedMs >= 0);
