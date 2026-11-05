@@ -61,6 +61,8 @@ export interface AdaptivePackingReport {
   status: 'target_present' | 'prioritized' | 'unavailable';
   reason?: string;
   targetActivationId: string;
+  targetArtifactId?: string;
+  hookInvocationId?: string;
   displacedActivationIds: string[];
   /** Internal return-boundary checks; these snapshots are not delivery evidence. */
   targetSnapshot?: ActivatedPrinciple;
@@ -185,6 +187,7 @@ export async function buildActivePrinciplePromptContext(input: {
   /** Request cancellation forwarded to the final read-only target revalidation. */
   signal?: AbortSignal;
   deadlineAt?: number;
+  hookInvocationId?: string;
 }): Promise<ActivePrinciplePromptResult> {
   // One resolution per request (SPEC §6.1): the caller's pre-resolved budget
   // or the fixed-fallback default — never a per-line constant read.
@@ -197,6 +200,11 @@ export async function buildActivePrinciplePromptContext(input: {
       additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
       budget: budgetChars, truncated: false,
       selectionPolicy: 'legacy_fifo_prefix_v1', eligibleCount: 0,
+      ...(input.adaptivePriority ? { adaptivePacking: {
+        status: 'unavailable' as const, reason: 'reader_aborted',
+        targetActivationId: input.adaptivePriority.activationId, targetArtifactId: input.adaptivePriority.artifactId,
+        displacedActivationIds: [], ...(input.hookInvocationId ? { hookInvocationId: input.hookInvocationId } : {}),
+      } } : {}),
       budgetCapacitySource: promptBudget.capacitySource,
       budgetCapacityStatus: promptBudget.capacityStatus,
       budgetContextWindowTokens: promptBudget.contextWindowTokens,
@@ -299,6 +307,8 @@ export async function buildActivePrinciplePromptContext(input: {
     status,
     ...(reason ? { reason } : {}),
     targetActivationId: typeof priority.activationId === 'string' ? priority.activationId : '',
+    targetArtifactId: typeof priority.artifactId === 'string' ? priority.artifactId : '',
+    ...(input.hookInvocationId ? { hookInvocationId: input.hookInvocationId } : {}),
     displacedActivationIds,
   });
   const nativeTargetMatches = principles.filter((principle) =>

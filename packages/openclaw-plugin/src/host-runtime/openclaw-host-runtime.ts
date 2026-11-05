@@ -26,11 +26,13 @@ export interface OpenClawHostRuntimeOptions {
   adaptivePriorityProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): {
     artifactId: string;
     activationId: string;
+    hookInvocationId?: string;
     signal?: AbortSignal;
     deadlineAt?: number;
   } | undefined | Promise<{
     artifactId: string;
     activationId: string;
+    hookInvocationId?: string;
     signal?: AbortSignal;
     deadlineAt?: number;
   } | undefined>;

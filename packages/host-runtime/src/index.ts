@@ -251,11 +251,13 @@ export function createProductionHostRuntime(
     adaptivePriorityProvider?: (event: HostEvent) => {
       artifactId: string;
       activationId: string;
+      hookInvocationId?: string;
       signal?: AbortSignal;
       deadlineAt?: number;
     } | undefined | Promise<{
       artifactId: string;
       activationId: string;
+      hookInvocationId?: string;
       signal?: AbortSignal;
       deadlineAt?: number;
     } | undefined>;
@@ -312,6 +314,7 @@ export function createProductionHostRuntime(
         ? undefined
         : operatorDeclaredContextWindow(loadPdConfigForPlugin(event.context.workspaceDir).effective.config.promptBudget, promptBudgetHostKind);
       let adaptivePriority: Awaited<ReturnType<NonNullable<typeof options.adaptivePriorityProvider>>>;
+      let skippedPriority: typeof adaptivePriority;
       if (options.adaptivePriorityProvider) {
         try {
           adaptivePriority = await options.adaptivePriorityProvider(event);
@@ -322,6 +325,7 @@ export function createProductionHostRuntime(
           }
           if (adaptivePriority?.signal?.aborted
             || (adaptivePriority?.deadlineAt !== undefined && Date.now() >= adaptivePriority.deadlineAt)) {
+            skippedPriority = adaptivePriority;
             adaptivePriority = undefined;
           }
         } catch {
@@ -335,6 +339,7 @@ export function createProductionHostRuntime(
           adaptivePriority: { artifactId: adaptivePriority.artifactId, activationId: adaptivePriority.activationId },
           ...(adaptivePriority.signal ? { signal: adaptivePriority.signal } : {}),
           ...(adaptivePriority.deadlineAt !== undefined ? { deadlineAt: adaptivePriority.deadlineAt } : {}),
+          ...(adaptivePriority.hookInvocationId ? { hookInvocationId: adaptivePriority.hookInvocationId } : {}),
         } : {}),
         promptBudget: resolvePromptBudget({
           // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve ONCE per request
@@ -359,6 +364,10 @@ export function createProductionHostRuntime(
           catalog: getPromptModelCatalog(),
         }),
       });
+      if (skippedPriority?.hookInvocationId) prompt.adaptivePacking = {
+        status: 'unavailable', reason: 'deadline', targetActivationId: skippedPriority.activationId,
+        targetArtifactId: skippedPriority.artifactId, hookInvocationId: skippedPriority.hookInvocationId, displacedActivationIds: [],
+      };
       // PRI-750: record the injection event on the shared path with the host
       // turn id (Codex turn_id → runId) so receipt events carry a turn-level
       // anchor in the same events_*.jsonl format as the OpenClaw path. The

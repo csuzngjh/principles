@@ -62,7 +62,7 @@ vi.mock('@principles/host-runtime', async (importOriginal) => {
   });
   return { ...actual, createProductionHostRuntime };
 });
-vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild }));
+vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild, beginAdaptivePromptInvocation: vi.fn(() => 'test-shared-invocation') }));
 vi.mock('../src/hooks/gate.js', () => ({ handleBeforeToolCall }));
 vi.mock('../src/hooks/pain.js', () => ({ handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime }));
 vi.mock('../src/core/pd-config-loader.js', async (importOriginal) => {

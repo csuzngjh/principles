@@ -420,6 +420,50 @@ describe('Adaptive activation — actual local prompt entry', () => {
     expect(result?.prependSystemContext).toContain('AA-only-body');
     expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('Invocation journal unavailable'));
   });
+
+  it('runs shared dispatch through real packing and final assembly with one invocation journal', async () => {
+    await seed();
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const baseline = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`).find(id => !baseline.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside Native');
+    const ctx = configured(target);
+    const { beginAdaptivePromptInvocation, handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { createOpenClawHostRuntime } = await import('../../src/host-runtime/openclaw-host-runtime.js');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const mapping = { artifactId: `art-${target}`, activationId: `act_prompt_${target}` };
+    const runtime = createOpenClawHostRuntime({
+      adaptivePriorityProvider: () => ({ ...mapping, deadlineAt: Date.now() + 15000,
+        hookInvocationId: beginAdaptivePromptInvocation(ctx, mapping, 'shared') }),
+      beforePromptBuild: (event, context, prompt) => {
+        expect(journal).toHaveBeenCalledTimes(1);
+        expect(journal.mock.calls[0]![1]).toMatchObject({ receiptState: 'open' });
+        return handleBeforePromptBuild(event, { ...context, api: ctx.api }, prompt);
+      },
+    });
+    const result = await runtime.dispatchBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext).toContain(`${target}-body-`);
+    expect(journal).toHaveBeenCalledTimes(2);
+    expect(journal.mock.calls[1]![1]).toMatchObject({ hookInvocationId: journal.mock.calls[0]![1].hookInvocationId,
+      receiptState: 'closed', payload: 'prepared', selection: 'selected', submission: 'unknown' });
+  });
+
+  it.each([
+    ['ordinary request', 'none_applicable', 'completed'],
+    ['[PD-AA:delivery-review:v1]\nReview', 'unavailable', 'degraded'],
+  ])('distinguishes a completed scene assessment from missing shared preparation: %s', async (currentUserMessage, selection, execution) => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const native = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild({ ...admitted(), currentUserMessage }, configured('AA-only'), native);
+    expect(result?.prependSystemContext).toContain('AA-only-body');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal.mock.calls[1]![1]).toMatchObject({ selection, execution, payload: 'none', submission: 'unknown' });
+  });
 });
 
 describe('Runtime V2 prompt activation injection', () => {

@@ -23,7 +23,7 @@ export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccess
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
-import { handleBeforePromptBuild } from './hooks/prompt.js';
+import { handleBeforePromptBuild, beginAdaptivePromptInvocation } from './hooks/prompt.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
@@ -375,6 +375,7 @@ const plugin = {
         return {
           artifactId: mapping.artifactId,
           activationId: mapping.activationId,
+          hookInvocationId: beginAdaptivePromptInvocation({ ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] }, mapping, 'shared'),
           signal: AbortSignal.timeout(remainingMs),
           deadlineAt,
         };

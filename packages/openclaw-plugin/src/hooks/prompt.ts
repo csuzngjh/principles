@@ -280,6 +280,27 @@ function resolveCoreAxiomLanguage(
   }
 }
 
+function adaptiveJournalFacts(ctx: PluginHookAgentContext, target: { artifactId: string; activationId: string } | undefined, runtimeMode: string) {
+  return target ? {
+    host: 'openclaw', runtimeMode, workspaceDir: ctx.workspaceDir,
+    ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}), ...(ctx.runId ? { runId: ctx.runId } : {}),
+    artifactId: target.artifactId, activationId: target.activationId,
+    hostVersion: 'unknown', pluginVersion: 'unknown', effectiveHookSetFingerprint: 'unknown', evidenceCoverage: 'partial',
+  } : {};
+}
+
+/** Called before shared priority packing, or at the local entry before its work begins. */
+export function beginAdaptivePromptInvocation(ctx: PluginHookAgentContext & { api?: PromptHookApi }, target: { artifactId: string; activationId: string }, runtimeMode: string): string {
+  const hookInvocationId = randomUUID();
+  try {
+    WorkspaceContext.fromHookContext(ctx).eventLog.recordAdaptiveDelivery(ctx.sessionId, {
+      ...adaptiveJournalFacts(ctx, target, runtimeMode), hookInvocationId,
+      receiptState: 'open', execution: 'unknown', payload: 'unknown', selection: 'unavailable', selectionPending: true, submission: 'unknown',
+    });
+  } catch (error) { ctx.api?.logger?.warn?.(`[PD:AA] Invocation journal unavailable: ${String(error)}`); }
+  return hookInvocationId;
+}
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi },
@@ -307,21 +328,16 @@ export async function handleBeforePromptBuild(
     || preparedPacking.targetSnapshot?.artifactId !== adaptiveMapping.artifactId)) {
     sharedActivePrinciplePrompt = preparedPacking.nativeBaseline;
   }
-  const adaptiveInvocationId = adaptiveMapping ? randomUUID() : undefined;
+  const adaptiveInvocationId = preparedPacking?.hookInvocationId
+    ?? (adaptiveMapping ? beginAdaptivePromptInvocation(ctx, adaptiveMapping, sharedActivePrinciplePrompt ? 'shared' : 'plugin_local') : undefined);
   const recordAdaptive = (record: AdaptiveDeliveryRecord) => {
     try { wctx.eventLog.recordAdaptiveDelivery(sessionId, record); } catch (error) {
       logger?.warn?.(`[PD:AA] Invocation journal unavailable: ${String(error)}`);
     }
   };
-  const adaptiveJournalContext = adaptiveMapping ? {
-    host: 'openclaw', runtimeMode: sharedActivePrinciplePrompt ? 'shared' : 'plugin_local',
-    workspaceDir, ...(sessionId ? { sessionId } : {}), ...(runId ? { runId } : {}),
-    artifactId: adaptiveMapping.artifactId, activationId: adaptiveMapping.activationId,
-    // The hook API does not attest these identities. Unknown is not a cached installation claim.
-    hostVersion: 'unknown', pluginVersion: 'unknown', effectiveHookSetFingerprint: 'unknown', evidenceCoverage: 'partial',
-  } : {};
-  if (adaptiveInvocationId) recordAdaptive({ ...adaptiveJournalContext, hookInvocationId: adaptiveInvocationId,
-    receiptState: 'open', execution: 'unknown', payload: 'unknown', selection: 'unavailable', selectionPending: true, submission: 'unknown' });
+  const journalTarget = adaptiveMapping ?? (preparedPacking?.targetArtifactId
+    ? { artifactId: preparedPacking.targetArtifactId, activationId: preparedPacking.targetActivationId } : undefined);
+  const adaptiveJournalContext = adaptiveJournalFacts(ctx, journalTarget, sharedActivePrinciplePrompt ? 'shared' : 'plugin_local');
   // PRI-647: trajectory session recording and assistant-turn anchoring are
   // observability side-effects only. A closed/disposed trajectory connection
   // (plugin service stop during config hot-reload) must never abort the prompt
@@ -607,6 +623,15 @@ export async function handleBeforePromptBuild(
           targetBodySha256: createHash('sha256').update(packing.targetBody, 'utf8').digest('hex') };
       } else if (adaptiveMapping && packing) {
         adaptiveOutcome = { text: sharedActivePrinciplePrompt.additionalContext, reason: packing.reason ?? 'target_unavailable', addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
+      } else if (adaptiveMapping && isUserInteraction && !isAgentToAgent && !isMinimalMode) {
+        const text = getOwnValue(event, 'currentUserMessage');
+        const id = getOwnValue(event, 'currentUserMessageId');
+        if (typeof text === 'string' && typeof id === 'string' && id.trim() && sessionId) {
+          adaptiveAdmissionId = id;
+          adaptiveOutcome = { text: sharedActivePrinciplePrompt.additionalContext,
+            reason: text.split(/\r?\n/, 1)[0] === '[PD-AA:delivery-review:v1]' ? 'shared_priority_unavailable' : 'scene_not_matched',
+            addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
+        }
       }
       runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
       for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
