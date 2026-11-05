@@ -5,20 +5,20 @@
   "generatedAt": "2026-11-05T15:50:39Z",
   "agent": "trae",
   "overallStatus": "READY_FOR_REVIEW",
-  "summary": "PRI-1110 子范围完成：AA 调用 journal 现在携带最小生效配置身份。调用开始时构建一次冻结六字段快照，terminal 记录复用，不再重采；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度，不改变提示内容。已接到真实 open/terminal 与 index.ts 的 8 个 Hook 注册路径；只读对账器兼容新增字段与旧日志。分支已 rebase 到最新 origin/main 5ad4b6e11。PR #2370 已推送，未合并、未发版、未安装启用、未跑真实 Agent 回合。",
+  "summary": "PRI-1110 子范围完成：AA 调用 journal 现在携带最小生效配置身份。调用开始时构建一次冻结六字段快照，terminal 记录复用，不再重采；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度，不改变提示内容。已接到真实 open/terminal 与 index.ts 的 8 个 Hook 注册路径；只读对账器兼容新增字段与旧日志。分支已 rebase 到最新 origin/main 5ad4b6e11。PR #2370 已推送，CI 与 CodeQL 全绿；未合并、未发版、未安装启用、未跑真实 Agent 回合。",
   "git": {
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
     "branch": "ai/PRI-1110-host-profile-identity",
     "baseCommit": "5ad4b6e116e71777d010d535cec34dc0de3cd6f8",
-    "headCommit": "440aa6354a5ec3090e65598f726ec23d0808108e",
+    "headCommit": "8b00ab8f4dfe201dedf72034097eb56a94636195",
     "dirtyPaths": [
       "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.md",
       "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.json",
       "docs/implementation-reports/aa-handoff/LATEST.json"
     ],
-    "pushedCommit": "440aa6354a5ec3090e65598f726ec23d0808108e",
+    "pushedCommit": "8b00ab8f4dfe201dedf72034097eb56a94636195",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2370",
-    "remoteChecks": "UNKNOWN — rebase 到 5ad4b6e11 后 CI（CI / CodeQL / Release Reproducibility / pd-console E2E）重新运行中，尚未完成；轻量 PR Checks / Repo Health 已 pass"
+    "remoteChecks": "PASS — CI 42061320970 success（含 Test OpenClaw Plugin 2m42s、Lint、Verify Merge Gate、packaged install smoke、release asset smoke、shared runtime、pd-cli、pd-console、e2e、quick-check）；CodeQL 42061321048 success；codecov/patch pass。skipped 任务为 Impact Gate 判定不相关（principles-core / pd-mcp-server / create-principles-disciple 的独立任务）"
   },
   "configIdentityFields": [
     {
@@ -84,9 +84,13 @@
         "packages/openclaw-plugin/tests/core-anti-growth.test.ts",
         "packages/openclaw-plugin/tests/hooks/subagent-hook-deletion.test.ts",
         "packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts",
+        "packages/openclaw-plugin/tests/integration/mvp-surface-registry-guard.test.ts",
         ".changeset/pri-1110-effective-config-identity.md"
       ],
-      "commits": ["440aa6354a5ec3090e65598f726ec23d0808108e"],
+      "commits": [
+        "440aa6354a5ec3090e65598f726ec23d0808108e",
+        "8b00ab8f4dfe201dedf72034097eb56a94636195"
+      ],
       "acceptance": [
         {
           "criterion": "host 与 runtimeMode 来自本次实际执行路径",
@@ -257,14 +261,37 @@
       "evidenceRefs": ["prompt-test-source"]
     },
     {
+      "id": "full-suite-local-env-fail",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx vitest run（默认配置，全插件单测+集成+BDD）",
+      "result": "ENVIRONMENT_FAIL",
+      "exitCode": 1,
+      "passed": 2237,
+      "failed": 2,
+      "skipped": 0,
+      "failure": "tests/bdd/principle-application-ledger.steps.test.ts:214 清理 .pd-test-temp 临时目录 EPERM（Windows 文件占用）；同一测试在 CI Test OpenClaw Plugin 全绿，属本地环境问题，与本次 diff 无关",
+      "evidenceRefs": ["pr-2370"]
+    },
+    {
+      "id": "surface-guard",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx vitest run tests/integration/mvp-surface-registry-guard.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["surface-guard-source"]
+    },
+    {
       "id": "remote-ci",
       "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
-      "command": "gh pr checks 2370",
-      "result": "NOT_RUN",
-      "exitCode": null,
+      "command": "gh run watch 42061320970 / 42061321048 (CI + CodeQL, head 8b00ab8f4)",
+      "result": "PASS",
+      "exitCode": 0,
       "passed": null,
-      "failed": null,
-      "skipped": null,
+      "failed": 0,
+      "skipped": 3,
       "evidenceRefs": ["pr-2370"]
     }
   ],
@@ -333,6 +360,15 @@
       "limitations": null
     },
     {
+      "id": "surface-guard-source",
+      "kind": "LOCAL_TEST",
+      "locator": "packages/openclaw-plugin/tests/integration/mvp-surface-registry-guard.test.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": null,
+      "supports": "PRI-289 surface guard 识别 recorder 注册形式；断言未弱化（仍要求 guardHook 包裹与 registry 归类，总数等于 registry hook 数）",
+      "limitations": null
+    },
+    {
       "id": "changeset",
       "kind": "CODE",
       "locator": ".changeset/pri-1110-effective-config-identity.md",
@@ -347,19 +383,19 @@
       "locator": "https://github.com/csuzngjh/principles/pull/2370",
       "observedAt": "2026-11-05T15:50:39Z",
       "sha256": null,
-      "supports": "OPEN；业务 head 440aa6354a（rebase 后）；未合并、未发版",
-      "limitations": "远端检查重跑中"
+      "supports": "OPEN；head 8b00ab8f4d；全部必需检查 pass；未合并、未发版",
+      "limitations": "尚无 Owner 审批"
     }
   ],
   "blockers": [
     {
-      "id": "remote-ci-pending",
+      "id": "owner-review-merge",
       "issue": "PRI-1110",
-      "reason": "PR #2370 刚创建，远端检查结果未知",
+      "reason": "AI 不合并 PR；等待 Owner 评审与合并决定",
       "evidenceRefs": ["pr-2370"],
-      "neededFrom": "CI",
-      "unblockAction": "读取 gh pr checks 2370；仅修真实失败并在同 PR 推送",
-      "independentWork": "本地 targeted 测试、构建、lint、守卫均已通过"
+      "neededFrom": "OWNER",
+      "unblockAction": "Owner 评审 PR #2370 并决定合并或要求修订",
+      "independentWork": "实现、测试与 CI 均已完成"
     },
     {
       "id": "real-host-enablement",
@@ -375,16 +411,16 @@
     {
       "order": 1,
       "issue": "PRI-1110",
-      "action": "读取 PR #2370 远端检查并处理真实失败",
-      "dependsOn": ["remote-ci-pending"],
+      "action": "跟踪 PR #2370 评审/检查意见并在同 PR 修复（若出现真实失败）",
+      "dependsOn": [],
       "authorization": "WITHIN_APPROVED_SCOPE",
-      "doneWhen": "必需检查结果全部明确（pass 或已定位 pre-existing）"
+      "doneWhen": "必需检查保持 pass 且无未处理的有效 blocker"
     },
     {
       "order": 2,
       "issue": "PRI-1110",
       "action": "PR 评审收敛；Owner 决定合并（AI 不合并）",
-      "dependsOn": [],
+      "dependsOn": ["owner-review-merge"],
       "authorization": "NEEDS_OWNER",
       "doneWhen": "Owner 合并或要求修订"
     },
