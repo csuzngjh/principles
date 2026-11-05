@@ -172,8 +172,9 @@ function assertDeclaredMcpEntriesExist(pluginDirectory) {
     }
     for (const arg of args) {
       if (typeof arg !== 'string' || !arg.startsWith('./')) continue;
+      const declaredRelativePath = arg.replace(/^\.\//, '');
       if (!existsSync(join(pluginDirectory, arg))) {
-        throw new Error(`Release payload is missing plugin/${arg}: openclaw.plugin.json declares mcpServers.${serverName} → ${args.join(' ')}, so the archive would ship a manifest pointing at a file the payload does not contain. bundle-plugin.mjs must stage it (PLUGIN_REQUIRED).`);
+        throw new Error(`Release payload is missing plugin/${declaredRelativePath}: openclaw.plugin.json declares mcpServers.${serverName} → ${args.join(' ')}, so the archive would ship a manifest pointing at a file the payload does not contain. bundle-plugin.mjs must stage it (PLUGIN_REQUIRED).`);
       }
     }
   }
