@@ -1,5 +1,15 @@
 # create-principles-disciple
 
+## 1.147.9
+
+### Patch Changes
+
+- 485894e: Connect bounded Adaptive Activation to OpenClaw prompt builds with explicit
+  core exports, final authorization checks, invocation journals and safe Native
+  fallbacks. Keep independent AA lab tools outside the historical EXM v4 module
+  scan; preserve the original frozen assets and Owner review provenance.
+- c3ef84b: `status` now reports the real WorkBuddy host state instead of only the static path checklist. It reads the three independent sources (installed_plugins.json registration, settings.json enabledPlugins, and the governance config's `host.workbuddy` / `workbuddy_live_keyword_pain` flags) and renders them through the same authority the install summary uses. An unreadable source prints UNKNOWN/UNREADABLE rather than a guessed value, and the status path never writes.
+
 ## 1.147.8
 
 ### Patch Changes

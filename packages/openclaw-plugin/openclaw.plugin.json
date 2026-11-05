@@ -2,7 +2,7 @@
   "id": "principles-disciple",
   "name": "Principles Disciple",
   "description": "Principles Disciple is an AI Agent Governance System. Stop correcting the same AI behavior across sessions. Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles.",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "activation": {
     "onStartup": true,
     "onCapabilities": [
@@ -30,12 +30,31 @@
         "additionalProperties": false,
         "description": "Optional expiring single-principle delivery-review mapping. Disabled by default; does not grant principle authorization.",
         "properties": {
-          "enabled": { "type": "boolean", "default": false },
-          "workspaceDir": { "type": "string", "minLength": 1 },
-          "artifactId": { "type": "string", "minLength": 1 },
-          "activationId": { "type": "string", "minLength": 1 },
-          "expiresAt": { "type": "string", "format": "date-time" },
-          "softTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 15000 }
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "workspaceDir": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifactId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "activationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "softTimeoutMs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15000
+          }
         }
       },
       "language": {
