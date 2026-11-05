@@ -1,0 +1,418 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T155039Z-trae",
+  "previousCheckpoint": "20261105T130723Z-trae",
+  "generatedAt": "2026-11-05T15:50:39Z",
+  "agent": "trae",
+  "overallStatus": "READY_FOR_REVIEW",
+  "summary": "PRI-1110 子范围完成：AA 调用 journal 现在携带最小生效配置身份。调用开始时构建一次冻结六字段快照，terminal 记录复用，不再重采；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度，不改变提示内容。已接到真实 open/terminal 与 index.ts 的 8 个 Hook 注册路径；只读对账器兼容新增字段与旧日志。分支已 rebase 到最新 origin/main 5ad4b6e11。PR #2370 已推送，未合并、未发版、未安装启用、未跑真实 Agent 回合。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
+    "branch": "ai/PRI-1110-host-profile-identity",
+    "baseCommit": "5ad4b6e116e71777d010d535cec34dc0de3cd6f8",
+    "headCommit": "440aa6354a5ec3090e65598f726ec23d0808108e",
+    "dirtyPaths": [
+      "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.md",
+      "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.json",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "pushedCommit": "440aa6354a5ec3090e65598f726ec23d0808108e",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2370",
+    "remoteChecks": "UNKNOWN — rebase 到 5ad4b6e11 后 CI（CI / CodeQL / Release Reproducibility / pd-console E2E）重新运行中，尚未完成；轻量 PR Checks / Repo Health 已 pass"
+  },
+  "configIdentityFields": [
+    {
+      "field": "host",
+      "source": "本次实际执行路径常量 openclaw（packages/openclaw-plugin/src/hooks/prompt.ts -> adaptive-config-identity.ts）",
+      "state": "confirmed",
+      "reason": null
+    },
+    {
+      "field": "hostVersion",
+      "source": "无可信宿主运行接口：OpenClawPluginApi 的 runtime 无 version 字段，也没有版本 getter；不使用源码检出、npm 全局包或配置文件版本",
+      "state": "unknown",
+      "reason": "hostVersion:no_runtime_interface"
+    },
+    {
+      "field": "runtimeMode",
+      "source": "本次实际执行路径：sharedActivePrinciplePrompt 为真记 shared，否则 plugin_local；其它值降级 unknown",
+      "state": "confirmed（shared / plugin_local）",
+      "reason": "SPEC §7 的 embedded/gateway 维度在当前插件 API 不可观测，仅以 evidenceCoverage=partial 诚实表达"
+    },
+    {
+      "field": "pluginVersion",
+      "source": "从执行模块自身 import.meta.url 目录向上定位 name=principles-disciple 的 package.json（兼容 src/dist/bundle），与宿主 rootDir 清单交叉校验",
+      "state": "confirmed（本轮实测 2.6.2）",
+      "reason": "清单缺失/非法/超限/与 rootDir 冲突时降级 unknown 并给 reason code"
+    },
+    {
+      "field": "effectiveHookSetFingerprint",
+      "source": "index.ts 的 8 个 api.on 实际注册经 recorder 记录（surfaceId/event/isSurfaceEnabled(enabled)），排序后 sha256",
+      "state": "partial",
+      "reason": "host_dispatch_not_observable：宿主 dispatch 过滤、宿主配置声明与其他扩展 Hook 不可观测；无注册时为 unknown/no_registered_hooks，不造 digest"
+    },
+    {
+      "field": "evidenceCoverage",
+      "source": "由 confirmed/partial/missing 计数推导；逐项清单在 configIdentityCoverage",
+      "state": "本轮真实路径为 partial（hostVersion 与 Hook 指纹不完整）",
+      "reason": "confirmed=0 -> unknown；无缺失/部分 -> complete"
+    }
+  ],
+  "producerConsumer": {
+    "producers": [
+      "packages/openclaw-plugin/src/index.ts：createAdaptiveHookRegistrationRecorder(api) 记录 8 个 Hook 实际注册并 setAdaptiveHookSet",
+      "packages/openclaw-plugin/src/hooks/prompt.ts：beginAdaptivePromptInvocation 构建 + remember 快照，写入 open 记录"
+    ],
+    "consumers": [
+      "packages/openclaw-plugin/src/hooks/prompt.ts：terminal 记录按 hookInvocationId 复用快照，写后 forget",
+      "packages/host-runtime/src/adaptive-journal-reconciliation.ts：只读消费新增字段（未改逻辑）"
+    ]
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1110",
+      "scope": "Owner 2026-11-05 批准的 OpenClaw 路径子范围：采集六字段最小生效配置身份并接入既有 AA journal / 证据",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "packages/openclaw-plugin/src/core/adaptive-config-identity.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/src/hooks/prompt-types.ts",
+        "packages/openclaw-plugin/src/index.ts",
+        "packages/openclaw-plugin/tests/core/adaptive-config-identity.test.ts",
+        "packages/openclaw-plugin/tests/hooks/runtime-v2-prompt-activation.test.ts",
+        "packages/openclaw-plugin/tests/core-anti-growth.test.ts",
+        "packages/openclaw-plugin/tests/hooks/subagent-hook-deletion.test.ts",
+        "packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts",
+        ".changeset/pri-1110-effective-config-identity.md"
+      ],
+      "commits": ["440aa6354a5ec3090e65598f726ec23d0808108e"],
+      "acceptance": [
+        {
+          "criterion": "host 与 runtimeMode 来自本次实际执行路径",
+          "result": "PASS",
+          "evidenceRefs": ["implementation-source", "prompt-integration-tests"]
+        },
+        {
+          "criterion": "hostVersion 仅取可信运行接口；取不到保持 unknown，不用其他来源冒充",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests", "implementation-source"]
+        },
+        {
+          "criterion": "pluginVersion 对应实际执行插件产物，并与宿主声明清单交叉校验，冲突降级 unknown",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests", "prompt-integration-tests"]
+        },
+        {
+          "criterion": "Hook 指纹只覆盖实际注册集合；无法确认完整集合时保持 partial/unknown，不造指纹",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests", "implementation-source"]
+        },
+        {
+          "criterion": "稳定规范化：字段顺序变化身份不变；版本/模式/有效 Hook 集合变化身份不同",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests"]
+        },
+        {
+          "criterion": "每次调用引用不可变快照：开始后环境变化不改写本调用终态，下次调用才用新快照",
+          "result": "PASS",
+          "evidenceRefs": ["prompt-integration-tests"]
+        },
+        {
+          "criterion": "来源全未知时明确身份不可用，不产生随机值或伪指纹",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests"]
+        },
+        {
+          "criterion": "身份采集失败只降低证据完整度：不拖掉原则、不阻塞、不改 Native 提示内容",
+          "result": "PASS",
+          "evidenceRefs": ["prompt-integration-tests"]
+        },
+        {
+          "criterion": "输出白名单：notes 为固定 reason code，不含路径、密钥、认证头、配置正文或提示正文",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests", "implementation-source"]
+        },
+        {
+          "criterion": "正常入口确实引用该快照（非测试手工模拟记录）",
+          "result": "PASS",
+          "evidenceRefs": ["prompt-integration-tests"]
+        },
+        {
+          "criterion": "只读对账工具兼容新增字段，旧日志保持原有未知语义",
+          "result": "PASS",
+          "evidenceRefs": ["reconciliation-tests"]
+        },
+        {
+          "criterion": "#2362 的跨午夜、冲突、完整记录去重与只读测试保留",
+          "result": "PASS",
+          "evidenceRefs": ["reconciliation-tests"]
+        },
+        {
+          "criterion": "构建、类型检查、lint、release intent、测试现实性",
+          "result": "PASS",
+          "evidenceRefs": ["build", "lint", "release-intent", "test-reality"]
+        },
+        {
+          "criterion": "真实安装启用 / 宿主发布 / 真实 Agent 回合 / 旧证据认证",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "等待 PR #2370 远端检查结果并处理真实失败",
+        "真实安装启用与真实宿主证据（需 Owner 另行授权）",
+        "SPEC v0.6 整票其余范围（PRI-1111 等）",
+        "hostVersion 可信运行接口与宿主 dispatch 可观测性（需宿主变更，未授权）"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "plugin-unit",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 1810,
+      "failed": 0,
+      "skipped": 3,
+      "evidenceRefs": ["identity-unit-tests", "prompt-integration-tests"]
+    },
+    {
+      "id": "identity-unit-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx vitest run --config vitest.unit.config.ts tests/core/adaptive-config-identity.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["identity-tests-source"]
+    },
+    {
+      "id": "prompt-integration-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx vitest run --config vitest.unit.config.ts tests/hooks/runtime-v2-prompt-activation.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 63,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["prompt-test-source"]
+    },
+    {
+      "id": "reconciliation-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\host-runtime",
+      "command": "npx vitest run tests/adaptive-journal-reconciliation.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["reconciliation-test-source"]
+    },
+    {
+      "id": "build",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npm run build (tsc -p tsconfig.build.json + check-dist-hygiene)",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["implementation-source"]
+    },
+    {
+      "id": "lint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx eslint \"src/**/*.ts\"",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["implementation-source"]
+    },
+    {
+      "id": "release-intent",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
+      "command": "node scripts/release/check-pr-release-intent.mjs (base=9f477a9fc8 head=c0fbb07e57)",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["changeset"]
+    },
+    {
+      "id": "test-reality",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
+      "command": "npm run advisory:test-reality",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": 0,
+      "skipped": null,
+      "evidenceRefs": ["prompt-test-source"]
+    },
+    {
+      "id": "remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
+      "command": "gh pr checks 2370",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2370"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "owner-approval",
+      "kind": "OWNER_AUTHORIZATION",
+      "locator": "Owner 2026-11-05 指令：接续 PD Adaptive Activation v0.6 / PRI-1110，逐字段规定来源与降级规则；批准来源=SPEC v0.6 §5.2 + 本指令",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": null,
+      "supports": "在本轮范围内实现六字段采集与接线，无需再要求 Owner 在架构间选择",
+      "limitations": "不覆盖真实安装启用、真实 Agent 回合、发版或合并；生效配置采集此前不在 PRI-1107 离线批准范围内"
+    },
+    {
+      "id": "implementation-source",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/core/adaptive-config-identity.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": "1360597428258790d51466b760388f264d8bcfaa73e4bafe273457f4b31e44d8",
+      "supports": "快照构建、执行产物版本读取、指纹规范化、coverage 推导、有界快照 Map、注册 recorder",
+      "limitations": "hostVersion 恒 unknown；指纹恒 partial"
+    },
+    {
+      "id": "prompt-source",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/hooks/prompt.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": "e3bf553f199ce56de6d9480201ec406dbab57f831330d7d6eaebab5b6d30e3df",
+      "supports": "open 时构建/记住快照，terminal 复用并写后清理；采集失败降级",
+      "limitations": null
+    },
+    {
+      "id": "index-source",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/index.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": "9e1ad2c4234d96d15b88cf2e55a54c8f3d8f98e68e7e58ea43cd4e51f243795b",
+      "supports": "8 个 Hook 实际注册经 recorder 记录后冻结集合",
+      "limitations": null
+    },
+    {
+      "id": "identity-tests-source",
+      "kind": "LOCAL_TEST",
+      "locator": "packages/openclaw-plugin/tests/core/adaptive-config-identity.test.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": "2bf6998803b13a0447c9361549f1ae27b390f7b802778e054f3b6581fe4a692c",
+      "supports": "完整/部分/全未知、顺序无关、变化产生新身份、冻结、白名单",
+      "limitations": null
+    },
+    {
+      "id": "prompt-test-source",
+      "kind": "LOCAL_TEST",
+      "locator": "packages/openclaw-plugin/tests/hooks/runtime-v2-prompt-activation.test.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": null,
+      "supports": "真实 dispatch 路径 builder 仅一次、open/closed 一致、mid-invocation 环境变化不改写、采集失败提示一致",
+      "limitations": null
+    },
+    {
+      "id": "reconciliation-test-source",
+      "kind": "LOCAL_TEST",
+      "locator": "packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": "294e503f6c5fe931f99949fb553380d045eee5759ae973bd474fb8d5eaf9b6a3",
+      "supports": "含 configIdentityCoverage 的记录可配对；缺 identity 字段的旧记录仍可配对且零 rejected",
+      "limitations": null
+    },
+    {
+      "id": "changeset",
+      "kind": "CODE",
+      "locator": ".changeset/pri-1110-effective-config-identity.md",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": "9b1bbca3be10ccc81bf3bd07597613f5aaa11ccc01b5a82d19d6a81b82353276",
+      "supports": "principles-disciple + create-principles-disciple patch 声明",
+      "limitations": null
+    },
+    {
+      "id": "pr-2370",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2370",
+      "observedAt": "2026-11-05T15:50:39Z",
+      "sha256": null,
+      "supports": "OPEN；业务 head 440aa6354a（rebase 后）；未合并、未发版",
+      "limitations": "远端检查重跑中"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "remote-ci-pending",
+      "issue": "PRI-1110",
+      "reason": "PR #2370 刚创建，远端检查结果未知",
+      "evidenceRefs": ["pr-2370"],
+      "neededFrom": "CI",
+      "unblockAction": "读取 gh pr checks 2370；仅修真实失败并在同 PR 推送",
+      "independentWork": "本地 targeted 测试、构建、lint、守卫均已通过"
+    },
+    {
+      "id": "real-host-enablement",
+      "issue": "PRI-1110",
+      "reason": "真实安装启用、真实 Agent 回合与旧证据认证不在本轮授权范围",
+      "evidenceRefs": ["owner-approval"],
+      "neededFrom": "Owner",
+      "unblockAction": "Owner 另开授权轮次并给出实验卡",
+      "independentWork": "子范围实现与验证已完成"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1110",
+      "action": "读取 PR #2370 远端检查并处理真实失败",
+      "dependsOn": ["remote-ci-pending"],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "必需检查结果全部明确（pass 或已定位 pre-existing）"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1110",
+      "action": "PR 评审收敛；Owner 决定合并（AI 不合并）",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 合并或要求修订"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1110",
+      "action": "真实安装启用 / 真实宿主证据需 Owner 单独授权",
+      "dependsOn": ["real-host-enablement"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 授权并产出真实宿主证据"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "databaseModified": false,
+    "journalFilesModified": false,
+    "forcePushed": false,
+    "merged": false,
+    "released": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "realHostEvidenceRun": false,
+    "implementationCodeWritten": true,
+    "implementationTestsRun": true,
+    "authorizationRefs": [
+      "Owner 2026-11-05 PRI-1110 实施指令（逐字段来源/降级规则）",
+      "SPEC v0.6 §5.2 运行证据必须携带/引用不可变配置身份快照"
+    ]
+  }
+}
