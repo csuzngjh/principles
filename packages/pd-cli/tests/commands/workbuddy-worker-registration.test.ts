@@ -131,6 +131,30 @@ describe('workbuddy worker handler (functional)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('--status --json keeps the documented single-object contract and reports the default-OFF keyword gate', async () => {
+    const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
+    // beforeEach config: host.workbuddy=true, workbuddy_live_keyword_pain absent
+    // → its contract default is OFF. The JSON contract must stay unchanged.
+    await handleWorkbuddyWorker({ workspace: workspaceDir, status: true, json: true });
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as {
+      host: string;
+      mode: string;
+      keywordPain: { enabled: boolean; mode: string; source: string };
+    };
+    expect(report.host).toBe('workbuddy');
+    expect(report.keywordPain).toEqual({ enabled: false, mode: 'off', source: expect.any(String) });
+    expect(Object.keys(report)).toEqual(expect.arrayContaining([
+      'generatedAt',
+      'host',
+      'workspace',
+      'mode',
+      'registeredInInstallManifest',
+      'keywordPain',
+    ]));
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
   it('host.workbuddy=false → paused with the WorkBuddy-specific reason (no Codex borrowing)', { timeout: 20_000 }, async () => {
     const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
     const config = getDefaultPdConfig();

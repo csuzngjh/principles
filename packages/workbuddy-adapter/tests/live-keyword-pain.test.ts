@@ -29,6 +29,19 @@ function rows(workspace: string, sql: string) {
   const db = new Database(path.join(workspace, '.state', 'trajectory.db'), { readonly: true });
   try { return db.prepare(sql).all() as Record<string, unknown>[]; } finally { db.close(); }
 }
+/**
+ * `governance_signal_admissions` is created lazily on the first admission.
+ * "Nothing was admitted" must therefore treat a missing table as 0 — not as
+ * a test crash.
+ */
+function admissionCount(workspace: string): number {
+  const db = new Database(path.join(workspace, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='governance_signal_admissions'").get();
+    if (exists === undefined) return 0;
+    return (db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get() as { n: number }).n;
+  } finally { db.close(); }
+}
 function invoke(ws: ReturnType<typeof setup>, overrides: Record<string, unknown> = {}) {
   return runEntry(ws.home, JSON.stringify({ ...ws.payload, ...overrides }), 'UserPromptSubmit');
 }
@@ -125,6 +138,58 @@ describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evide
     } else {
       expect(fs.existsSync(statePath)).toBe(false);
     }
+  });
+
+  // 2026-11-05 (Owner decision): the keyword gate is OFF in WorkBuddy and
+  // automatic detection is unavailable. Manual marking (the explicit prefix)
+  // MUST keep working independently, and switching the gate off must never
+  // delete or rewrite historical Pain evidence.
+  describe('manual Pain marking is independent of the keyword gate', () => {
+    it('gate OFF + explicit prefix still creates Pain, an admission and a Diagnostician task', () => {
+      const ws = setup(false);
+      const result = invoke(ws, { prompt: 'PD记录痛苦：这是错的' });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('status=received');
+      expect(rows(ws.workspace, 'SELECT canonical_pain_id FROM pain_events')).toHaveLength(1);
+      const markers = rows(ws.workspace, 'SELECT decision, diagnostician_task_id FROM governance_signal_admissions');
+      expect(markers).toHaveLength(1);
+      expect(markers[0]!.diagnostician_task_id).not.toBeNull();
+    });
+
+    it('gate OFF + ordinary text creates no Pain and no admission', () => {
+      const ws = setup(false);
+      expect(invoke(ws, { prompt: '帮我把这个函数改个名字' }).status).toBe(0);
+      expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+      expect(admissionCount(ws.workspace)).toBe(0);
+    });
+
+    it('gate OFF + pain-shaped words without the prefix creates nothing (no automatic detection)', () => {
+      const ws = setup(false);
+      // fixture prompt: '这是错的，应该先确认用户要求'
+      expect(invoke(ws).status).toBe(0);
+      expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+      expect(admissionCount(ws.workspace)).toBe(0);
+    });
+
+    it('turning the gate OFF preserves historical Pain rows and their admission markers', () => {
+      const ws = setup(true);
+      expect(invoke(ws, { prompt: 'PD记录痛苦：未核对调用方就改了接口' }).status).toBe(0);
+      const painBefore = rows(ws.workspace, 'SELECT * FROM pain_events');
+      const markersBefore = rows(ws.workspace, 'SELECT * FROM governance_signal_admissions');
+      expect(painBefore).toHaveLength(1);
+
+      const configPath = path.join(ws.workspace, '.pd', 'config.yaml');
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+        features: Record<string, { enabled: boolean; category: string }>;
+      };
+      config.features.workbuddy_live_keyword_pain = { enabled: false, category: 'quiet' };
+      fs.writeFileSync(configPath, JSON.stringify(config));
+
+      // An automatic-shaped candidate arrives after the gate was switched off.
+      expect(invoke(ws, { prompt: '这是错的，应该先确认用户要求', generation_id: 'after-gate-off' }).status).toBe(0);
+      expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toEqual(painBefore);
+      expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toEqual(markersBefore);
+    });
   });
 
   // SPEC v0.3 §3.2.3 (D5 reverse): learned keywords are Stage-2 candidates only.
