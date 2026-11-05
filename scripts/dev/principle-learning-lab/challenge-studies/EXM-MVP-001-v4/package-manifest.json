@@ -10,6 +10,38 @@
         "sha256": "30ed5c55616f3c490811385b7965b7d87ee05e0ba3edaa7bd0602362ea0ac77e"
       },
       {
+        "name": "adaptive-activation-coverage.mjs",
+        "sha256": "a9afe6fb287813cda00aae0e36fc07e9e1beb6c8b3adace7cfc5e9b92cd3caae"
+      },
+      {
+        "name": "adaptive-activation-coverage.test.mjs",
+        "sha256": "01be54444f676067713de415727767f95cf15204db9beff79793ae1a53ee20be"
+      },
+      {
+        "name": "adaptive-config-identity.mjs",
+        "sha256": "5ed5a5e132335596bbe03f2ef0c55e9434a06535ca9c09b8e6d01612b4fda07a"
+      },
+      {
+        "name": "adaptive-config-identity.test.mjs",
+        "sha256": "047561162e971a9d6068eeafaa932b95a4f8ec2ce461a69e1e53e266fea86669"
+      },
+      {
+        "name": "adaptive-delivery-record.mjs",
+        "sha256": "48ccafd5625b8af8ebf998250d2ba8dab4436c9d8edf81c547a4b7f8b5c5798a"
+      },
+      {
+        "name": "adaptive-delivery-record.test.mjs",
+        "sha256": "62cb55393846de80b3a43c1b5f91727422538284841c958df82dbebe0339d03a"
+      },
+      {
+        "name": "adaptive-packing-comparison.mjs",
+        "sha256": "3765d7de35211296d3c1b365841b7494a30619c6100912c70264a24e9c92a503"
+      },
+      {
+        "name": "adaptive-packing-comparison.test.mjs",
+        "sha256": "d2356c394a648fc3219ae1e8346f6267503b09ad6d04cca7fb1c834d053b7e1a"
+      },
+      {
         "name": "ceb002-cli.mjs",
         "sha256": "86412e6060b7ae9eb70cbe305f8a23e8af1ec2426bd23f5161e0d19be4e25c78"
       },
@@ -158,6 +190,14 @@
         "sha256": "3b254fad8fd02406707695a213d6b25779f74d0ea446afe078b1c6f0ccc30526"
       },
       {
+        "name": "local-transport-result.mjs",
+        "sha256": "b96384420d0a1a9467034ac4e0dc41ebeb33e7f3d54ae3369c98cfb44a047204"
+      },
+      {
+        "name": "local-transport-result.test.mjs",
+        "sha256": "3eb0cb70a6be10c3e7b45f6b122f02f945f08e833c7c05694a4213233e558c14"
+      },
+      {
         "name": "oracle.mjs",
         "sha256": "b8bea688b89369a03502567c60e0abd353a15338d73e9a15e282a75204194b3f"
       },
@@ -210,7 +250,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "97de69338f3be4008f2b17f5ebce36f918cfa1fa908530f42a41f072987b8275"
+      "sha256": "716ddbaeefb3e49bda622067f1636e4788484b9068579e008d1f8525b283836f"
     },
     {
       "path": "blind-review/review-form.json",
@@ -218,7 +258,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "12aef14c31c43219a83840df5d4c725e32cc8fa869c61e2fb9857e7f51902e57"
+      "sha256": "0991a6c5e4d4ac5bc74fc584182b96859a994595761e24d3f5ca67f020f85278"
     },
     {
       "path": "gold-review.json",
@@ -262,7 +302,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "d01028655150c66ce9bc97a35d8543080b25c29cd3b1fc9a3c96d7460c596a48"
+      "sha256": "4dacb7c0cbdcc1567458a769cfd952c3558e2774601afee6e09d23528aa50d4f"
     },
     {
       "path": "revision.json",
@@ -277,5 +317,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "39e6a4a12f6a44e3bbeb5fccd85eac6df80ea69266e534c49b5f805e6d731623"
+  "packageHash": "e3b1c37fa29472a67d90685c032d67da1e825eee74991303f90d02c007a00963"
 }

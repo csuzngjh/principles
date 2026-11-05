@@ -2353,4 +2353,9 @@ export type { ApprovalReviewGuard } from './activation/approval-review-guard.js'
 
 export { prepareAdaptiveIntervention, type AdaptiveInterventionInput, type AdaptiveInterventionDeps, type AdaptiveInterventionResult } from './activation/adaptive-principle-intervention.js';
 
-export * from './activation/adaptive-delivery-record.js';
+export { ADAPTIVE_DELIVERY_RECORD_ENUMS, validateAdaptiveDeliveryRecord } from './activation/adaptive-delivery-record.js';
+export type {
+  AdaptiveDeliveryEvidence, AdaptiveDeliveryExecution, AdaptiveDeliveryPayload,
+  AdaptiveDeliveryReceiptState, AdaptiveDeliveryRecord, AdaptiveDeliveryRecordValidation,
+  AdaptiveDeliverySelection, AdaptiveDeliverySubmission,
+} from './activation/adaptive-delivery-record.js';
