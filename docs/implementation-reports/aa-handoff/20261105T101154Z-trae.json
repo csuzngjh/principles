@@ -10,11 +10,11 @@
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
     "branch": "ai/PRI-1109-conservative-reconcile",
     "baseCommit": "08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
-    "headCommit": "c95ad3eeb",
+    "headCommit": "ebba9ed19",
     "dirtyPaths": [],
-    "pushedCommit": "c95ad3eeb",
+    "pushedCommit": "ebba9ed19",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2357",
-    "remoteChecks": "PASS — Verify Merge Gate pass (2m33s), package jobs skipped by docs-only impact gate"
+    "remoteChecks": "PASS — PR #2357 CI success on merge ref d7a6e229 (branch head ebba9ed19); Verify Merge Gate pass 2m33s, package jobs skipped by docs-only impact gate"
   },
   "tasks": [
     {
@@ -149,8 +149,8 @@
       "locator": "https://github.com/csuzngjh/principles/actions/runs/42009555238",
       "observedAt": "2026-11-05T10:21:38Z",
       "sha256": null,
-      "supports": "PR #2357 在 head c95ad3eeb 上全部检查绿：Verify Merge Gate pass 2m33s；docs-only 影响面使包测试任务跳过",
-      "limitations": "仅覆盖当时 head；后续纯检查点提交会重新触发的同一 docs-only 门禁未单独声明"
+      "supports": "PR #2357 在 merge ref d7a6e229（分支 head ebba9ed19）上全部检查绿：Verify Merge Gate pass 2m33s；docs-only 影响面使包测试任务跳过",
+      "limitations": "记录检查点的 docs-only 元数据提交本身不改代码，由同一门禁在 PR 上覆盖；包测试未在本 PR 运行"
     }
   ],
   "blockers": [
