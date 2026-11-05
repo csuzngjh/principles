@@ -38,7 +38,8 @@ export interface AdaptiveInterventionResult {
 
 /** One bounded intervention; no governance writes, model calls, caches or delivery assertions. */
 export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInput, deps: AdaptiveInterventionDeps): Promise<AdaptiveInterventionResult> {
-  const fallback = (reason: string): AdaptiveInterventionResult => ({ text: input.nativeText, reason, addedTarget: false, displacedActivationIds: [] });
+  let excludeUncertainTarget = false;
+  const fallback = (reason: string): AdaptiveInterventionResult => ({ text: excludeUncertainTarget ? input.nativeWithoutTargetText : input.nativeText, reason, addedTarget: false, displacedActivationIds: [] });
   try {
     if (![input.currentUserMessageId, input.requestId, input.sessionId].every(v => typeof v === 'string' && v.trim())) return fallback('request_identity_unavailable');
     if (input.currentUserMessage?.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return fallback('scene_not_matched');
@@ -51,6 +52,7 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
     if (matches.length !== 1) return fallback('target_unavailable');
     const [target] = matches;
     if (!target) return fallback('target_unavailable');
+    excludeUncertainTarget = true;
     const rendered = renderPrinciplesToDirectives([target], new Set([target.principleId]), { escapeFn: escapeXml, selfReportInstruction: input.selfReportInstruction });
     const body = rendered.slice(rendered.indexOf('<directive '), rendered.indexOf('</directive>') + '</directive>'.length);
     const unchanged = input.nativeText.includes(body);
@@ -79,7 +81,7 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
       ]);
     } finally { clearTimeout(timer); controller.abort(); }
     if (validation === 'deadline') return fallback('deadline');
-    if (!validation) return { ...fallback('target_changed'), text: unchanged ? input.nativeWithoutTargetText : input.nativeText };
+    if (!validation) return fallback('target_changed');
     if (deps.now() >= input.deadlineAt) return fallback('deadline');
     return { text, reason: unchanged ? 'native_already_contains_target' : 'target_prioritized', addedTarget: !unchanged,
       displacedActivationIds, targetBodySha256: createHash('sha256').update(body, 'utf8').digest('hex') };
