@@ -199,6 +199,10 @@ export interface OpenClawPluginApi {
 
 export interface PluginHookBeforePromptBuildEvent {
   prompt: string;
+  /** Explicit admitted input on supporting host paths; omission is legacy, not an empty request. */
+  currentUserMessage?: string;
+  /** Native admission identity across rebuilds, not a provider request ID or external channel message ID. */
+  currentUserMessageId?: string;
   messages: unknown[];
 }
 

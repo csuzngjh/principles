@@ -400,3 +400,5 @@ export * from './explicit-owner-statement-prefix.js';
 export { listObservedDesignGateSessions } from './workspace-behavior-evidence.js';
 export { readDesignGateSpecSnapshot, describeCodexRuleContextFact } from './design-gate-facts.js';
 export { createCodexArtificerTrustedFactsPort } from './codex-artificer-trusted-facts.js';
+
+export { revalidateAdaptivePrinciple, createAdaptivePrincipleRevalidator, type AdaptivePrincipleReader } from './adaptive-principle-revalidation.js';

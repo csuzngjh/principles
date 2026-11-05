@@ -8,16 +8,15 @@ export type AdaptivePrincipleReader = (input: { workspaceDir: string }) => Promi
 
 /**
  * Rechecks the rendered principle's identity, body, and authorization at the
- * adaptive-intervention return boundary. This does not bind artifact metadata
- * that is absent from ActivatedPrinciple (including content_json metadata-only
- * revisions); full artifact-digest revalidation remains a separate gap.
+ * adaptive-intervention return boundary. A full artifact digest is required;
+ * legacy snapshots without it cannot certify a stable artifact revision.
  */
 async function revalidateWithReader(
   input: { workspaceDir: string; expected: ActivatedPrinciple; signal: AbortSignal },
   reader: AdaptivePrincipleReader,
 ): Promise<boolean> {
   const { workspaceDir, expected, signal } = input;
-  if (signal.aborted) return false;
+  if (signal.aborted || !expected.artifactContentSha256 || !/^[a-f0-9]{64}$/.test(expected.artifactContentSha256)) return false;
 
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<null>((resolve) => {
@@ -40,6 +39,7 @@ async function revalidateWithReader(
     // Duplicate principle identity is ambiguous even if one activation pair matches.
     if (result.principles.filter((candidate) => candidate.principleId === expected.principleId).length !== 1) return false;
     return current.principleId === expected.principleId
+      && current.artifactContentSha256 === expected.artifactContentSha256
       && current.text === expected.text
       && current.authority === expected.authority
       && current.approvedBy === expected.approvedBy;

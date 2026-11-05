@@ -11,6 +11,7 @@ const expected: ActivatedPrinciple = {
   text: 'Keep the delivery evidence bounded.',
   artifactId: 'artifact-1',
   activationId: 'activation-1',
+  artifactContentSha256: 'a'.repeat(64),
   authority: 'owner',
   approvedBy: 'owner-1',
 };
@@ -82,5 +83,13 @@ describe('revalidateAdaptivePrinciple', () => {
   it('uses the real readPromptActivationCandidates reader by default', async () => {
     await expect(revalidateAdaptivePrinciple('missing-workspace', expected, new AbortController().signal))
       .resolves.toBe(false);
+  });
+});
+
+describe('artifact revision binding', () => {
+  it('rejects a metadata-only revision and a legacy snapshot missing the digest', async () => {
+    const revised = readResult([{ ...expected, artifactContentSha256: 'b'.repeat(64) }]);
+    await expect(revalidatorOf(revised)('workspace', expected, new AbortController().signal)).resolves.toBe(false);
+    await expect(revalidatorOf(readResult())('workspace', { ...expected, artifactContentSha256: undefined }, new AbortController().signal)).resolves.toBe(false);
   });
 });

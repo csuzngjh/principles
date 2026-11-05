@@ -456,3 +456,16 @@ describe('prompt-activation-reader-contract', () => {
     });
   });
 });
+
+describe('exact artifact content revision', () => {
+  it('retains distinct digests for metadata-only changes with identical directive text', () => {
+    const first = resolvePrincipleFromArtifact(makeArtifactRow({ content_json: JSON.stringify({ principleId: 'same', text: 'same body', revisionNote: 'first' }) }), makeActivation());
+    const second = resolvePrincipleFromArtifact(makeArtifactRow({ content_json: JSON.stringify({ principleId: 'same', text: 'same body', revisionNote: 'second' }) }), makeActivation());
+    expect(first.ok && second.ok).toBe(true);
+    if (first.ok && second.ok) {
+      expect(first.principle.text).toBe(second.principle.text);
+      expect(first.principle.artifactContentSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(first.principle.artifactContentSha256).not.toBe(second.principle.artifactContentSha256);
+    }
+  });
+});
