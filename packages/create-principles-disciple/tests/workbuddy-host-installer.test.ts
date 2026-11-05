@@ -77,7 +77,7 @@ function writePluginSkeleton(pluginDir: string, version = '0.3.0'): void {
   fs.mkdirSync(path.join(pluginDir, '.codebuddy-plugin'), { recursive: true });
   fs.writeFileSync(
     path.join(pluginDir, '.codebuddy-plugin', 'plugin.json'),
-    JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version, description: 'Principles Disciple (test skeleton)' }, null, 2),
+    JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version, description: 'Principles Disciple (test skeleton)', defaultEnabled: false }, null, 2),
   );
   // hooks/hooks.json at the plugin ROOT with a representative multi-event
   // baseline shape (frozen manifest-facts hooksJsonShape; the installer copies
@@ -244,11 +244,11 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(result.reason).toContain('via engine');
     expect(result.configAction).toBe('updated');
 
-    // settings.json: enabledPlugins["principles-disciple@principles-disciple-market"]=true,
-    // everything else preserved (frozen enabledPluginsFormat).
+    // settings.json: install ≠ enable — the manifest's defaultEnabled=false is
+    // what lands; everything else preserved (frozen enabledPluginsFormat).
     const settings = readJson(settingsPath(created));
     const enabledPlugins = settings.enabledPlugins as Record<string, unknown>;
-    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false);
     expect(enabledPlugins['workbuddy-sheetagent@workbuddy-builtin']).toBe(true);
     expect(settings.theme).toBe('dark');
     expect(settings.hooks).toBeDefined();
@@ -486,7 +486,7 @@ describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fal
 
     const settings = readJson(settingsPath(created));
     const enabledPlugins = settings.enabledPlugins as Record<string, unknown>;
-    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false); // install ≠ enable
     expect(enabledPlugins['other@other-market']).toBe(true); // other plugins preserved
     expect((settings.customKey as Record<string, unknown>).nested).toBe(true); // unknown fields preserved
 
@@ -509,7 +509,47 @@ describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fal
     expect(result.reason).toContain('direct-write');
     expect(result.reason).toContain('engine marketplace add failed');
     const settings = readJson(settingsPath(created));
-    expect((settings.enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect((settings.enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+  });
+});
+
+// ─── install ≠ enable + idempotency ──────────────────────────────────────────
+
+describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', () => {
+  it('fresh install leaves the declared default (disabled), and 3 reinstalls never overwrite an Owner enable', async () => {
+    const created = lab();
+    const first = await created.installer.install(installCtx(created));
+    expect(first.success, first.reason).toBe(true);
+    expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+
+    // The Owner explicitly enables the plugin through the host (not the installer).
+    const settings = readJson(settingsPath(created));
+    fs.writeFileSync(settingsPath(created), JSON.stringify({
+      ...settings,
+      enabledPlugins: { ...(settings.enabledPlugins as Record<string, unknown>), [WORKBUDDY_PLUGIN_KEY]: true },
+    }, null, 2));
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const rerun = await created.installer.install(installCtx(created));
+      expect(rerun.success, `reinstall ${attempt} failed: ${rerun.reason}`).toBe(true);
+      expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    }
+  });
+
+  it('preserves an Owner enable that predates the first install', async () => {
+    const created = lab();
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: true } }, null, 2));
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+  });
+
+  it('preserves an Owner disable that predates the first install', async () => {
+    const created = lab();
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: false } }, null, 2));
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
   });
 });
 
@@ -966,6 +1006,13 @@ describe('WorkBuddyHostInstaller.uninstall', () => {
     const created = lab();
     await created.installer.install(installCtx(created));
     seedNeighbors(created);
+    // Install ≠ enable, so the Owner enables the plugin first — then uninstall
+    // must still disable BEFORE uninstalling.
+    const beforeUninstall = readJson(settingsPath(created));
+    fs.writeFileSync(settingsPath(created), JSON.stringify({
+      ...beforeUninstall,
+      enabledPlugins: { ...(beforeUninstall.enabledPlugins as Record<string, unknown>), [WORKBUDDY_PLUGIN_KEY]: true },
+    }, null, 2));
 
     const result = await created.installer.uninstall({ language: 'en', force: true });
 

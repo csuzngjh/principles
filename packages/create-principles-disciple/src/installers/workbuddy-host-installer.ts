@@ -465,6 +465,11 @@ export function writeHostJsonFileProtected(filePath: string, content: string): {
 export interface WorkbuddyPluginPayload {
   pluginDir: string;
   version: string;
+  /**
+   * Manifest-declared default. Only an explicit `defaultEnabled: true` counts
+   * as enabled-on-install; PD declares `false` (install ≠ enable, SPEC §6.4).
+   */
+  defaultEnabled: boolean;
 }
 
 export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir: string): { payload?: WorkbuddyPluginPayload; reason?: string } {
@@ -506,7 +511,7 @@ export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir:
       return { reason: `workbuddy_plugin_control_missing: ${root} must ship scripts/pd-control.cjs for the pd-disable skill.` };
     }
     const { version } = manifest;
-    return { payload: { pluginDir: root, version } };
+    return { payload: { pluginDir: root, version, defaultEnabled: manifest.defaultEnabled === true } };
   }
   return {
     reason: `workbuddy_adapter_payload_missing: no WorkBuddy plugin skeleton found (looked for workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json under the installer payload and ${runtimeAdapterDir}). The @principles/workbuddy-adapter component is not part of this installer build.`,
@@ -1483,7 +1488,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const mcpBinding = writeWorkbuddyMcpBinding(p.marketplaceRoot, this.deps.homeDir());
 
     // 5. Register: engine commands first; observable direct-write fallback.
-    const registration = this.registerPlugin(details, payload.version);
+    const registration = this.registerPlugin(details, payload.version, payload.defaultEnabled);
     if (!registration.ok) {
       return {
         success: false,
@@ -1678,6 +1683,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   private registerPlugin(
     details: WorkbuddyDetectDetails,
     version: string,
+    declaredDefaultEnabled: boolean,
   ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
 
@@ -1685,16 +1691,28 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // manifest version. Reuse the installer-owned registration/cache writer
     // rather than reporting a stale cache as an idempotent successful install.
     if (details.registered && !this.pluginCacheMatchesPayload(version)) {
-      return this.directWriteRegistration(details, version, 'registered plugin cache differs from the current bundled payload; refreshed by installer');
+      return this.directWriteRegistration(details, version, {
+        declaredDefaultEnabled,
+        engineNote: 'registered plugin cache differs from the current bundled payload; refreshed by installer',
+      });
     }
 
-    // Idempotent fast path: already registered AND enabled AND cached.
-    if (details.registered && details.pluginEnabled && existsSync(p.cachePluginRoot)) {
+    // Idempotent fast path: already registered AND cached. The installed
+    // enabled state is the OWNER's choice — install/upgrade/reinstall must not
+    // flip it in either direction (install ≠ enable, SPEC §6.4).
+    if (details.registered && existsSync(p.cachePluginRoot)) {
       return { ok: true, mode: 'already-registered', settingsAction: 'preserved' };
     }
 
     // Engine path (preferred — real marketplace/cache/settings chain).
     if (details.engineFound) {
+      // Resolve the installed enabled value BEFORE the engine runs: an engine
+      // install must not enable the plugin, and a pre-existing Owner choice
+      // (true or false) must survive the install.
+      const installedEnabled = this.resolveInstalledEnabledValue(declaredDefaultEnabled);
+      if (!installedEnabled.ok) {
+        return { ok: false, reason: installedEnabled.reason, nextAction: installedEnabled.nextAction };
+      }
       const add = this.runEngine(['plugin', 'marketplace', 'add', p.marketplaceRoot]);
       if (add !== undefined && add.status === 0 && MARKETPLACE_ADD_OK.test(add.stdout + add.stderr)) {
         if (details.registered) {
@@ -1704,28 +1722,26 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         }
         const install = this.runEngine(['plugin', 'install', WORKBUDDY_PLUGIN_KEY]);
         if (install !== undefined && install.status === 0 && PLUGIN_INSTALL_OK.test(install.stdout + install.stderr)) {
-          let after = this.detectDetails();
-          if (after.registered && !after.pluginEnabled) {
-            // Engine-version reality (observed on 2.161.0, 2026-10-13): the
-            // engine honors the payload manifest's `defaultEnabled` and
-            // installs hooks-carrying plugins with enabledPlugins[key]=false.
-            // The installer contract (P01 frozen facts + this installer's own
-            // direct-write path) is installed ⇒ enabledPlugins[key]=true —
-            // the explicit host-level act of installing. PD governance stays
-            // OFF either way (OD-03: features.host.workbuddy is a separate,
-            // later, user-visible enable).
-            const enabled = this.enableRegisteredPlugin();
-            if (!enabled.ok) {
-              return { ok: false, reason: enabled.reason, nextAction: enabled.nextAction };
+          const after = this.detectDetails();
+          if (after.registered) {
+            // Converge the settings entry onto the resolved value. This covers
+            // engines that would force-enable on install while still preserving
+            // an Owner-chosen true/false from before the install.
+            const applied = this.applyInstalledEnabledValue(installedEnabled.value);
+            if (!applied.ok) {
+              return { ok: false, reason: applied.reason, nextAction: applied.nextAction };
             }
-            after = this.detectDetails();
-          }
-          if (after.registered && after.pluginEnabled) {
-            return { ok: true, mode: 'engine', settingsAction: after.settingsExisted ? 'updated' : 'created' };
+            return {
+              ok: true,
+              mode: 'engine',
+              settingsAction: details.settingsExisted
+                ? (installedEnabled.fromOwnerChoice ? 'preserved' : 'updated')
+                : 'created',
+            };
           }
           return {
             ok: false,
-            reason: `workbuddy_engine_install_unverified: engine reported success but the frozen-format state (enabledPlugins + installed_plugins.json) does not carry ${WORKBUDDY_PLUGIN_KEY} afterwards.`,
+            reason: `workbuddy_engine_install_unverified: engine reported success but installed_plugins.json does not carry ${WORKBUDDY_PLUGIN_KEY} afterwards.`,
             nextAction: `Run "node <engine> plugin list" to inspect the host state, then re-run the installer.`,
           };
         }
@@ -1740,14 +1756,17 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       const note = add !== undefined
         ? `engine marketplace add failed: ${((add.stderr || add.stdout).trim().slice(0, 200) || `exit ${add.status}`)}`
         : 'engine invocation failed';
-      const direct = this.directWriteRegistration(details, version, note);
+      const direct = this.directWriteRegistration(details, version, { declaredDefaultEnabled, engineNote: note });
       if (direct.ok) return direct;
       return { ok: false, reason: direct.reason, nextAction: direct.nextAction };
     }
 
     // Engine unreachable: direct-write path, strictly aligned with the frozen
     // formats, and always reported as a distinct mode.
-    const direct = this.directWriteRegistration(details, version, 'engine binary not found');
+    const direct = this.directWriteRegistration(details, version, {
+      declaredDefaultEnabled,
+      engineNote: 'engine binary not found',
+    });
     if (direct.ok) return direct;
     return { ok: false, reason: direct.reason, nextAction: direct.nextAction };
   }
@@ -1774,36 +1793,54 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   }
 
   /**
-   * Set enabledPlugins[OUR_KEY]=true in settings.json, preserving every other
-   * key (same protected write discipline as the direct-write registration).
-   * Converges the engine install path (which honors the payload manifest's
-   * defaultEnabled) onto the installer's frozen installed ⇒ enabled contract.
+   * The value an install should leave behind: an explicit boolean already in
+   * settings.json is the Owner's choice and always wins; otherwise the plugin
+   * manifest's `defaultEnabled` applies. Install never enables by itself.
    */
-  private enableRegisteredPlugin(): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  private resolveInstalledEnabledValue(declaredDefaultEnabled: boolean):
+    { ok: true; value: boolean; fromOwnerChoice: boolean } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
     const settings = readHostJsonFile(p.settingsPath);
     if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
+    const current = isRecord(settings.value?.enabledPlugins)
+      ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
+      : undefined;
+    if (typeof current === 'boolean') return { ok: true, value: current, fromOwnerChoice: true };
+    return { ok: true, value: declaredDefaultEnabled, fromOwnerChoice: false };
+  }
+
+  /** Write enabledPlugins[OUR_KEY]=value, preserving every other key. */
+  private applyInstalledEnabledValue(value: boolean): { ok: true; changed: boolean } | { ok: false; reason: string; nextAction: string } {
+    const p = this.paths();
+    const settings = readHostJsonFile(p.settingsPath);
+    if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
+    const current = isRecord(settings.value?.enabledPlugins)
+      ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
+      : undefined;
+    if (typeof current === 'boolean' && current === value) return { ok: true, changed: false };
     const nextSettings: Record<string, unknown> = { ...(settings.value ?? {}) };
     const enabledPlugins = isRecord(nextSettings.enabledPlugins) ? { ...nextSettings.enabledPlugins } : {};
-    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = true;
+    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = value;
     nextSettings.enabledPlugins = enabledPlugins;
     const write = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
     if (!write.ok) return { ok: false, reason: write.reason, nextAction: write.nextAction };
-    return { ok: true };
+    return { ok: true, changed: true };
   }
 
   /**
    * Direct-write registration for engine-unreachable machines, aligned with the
-   * frozen P01 formats: enabledPlugins[key]=true in settings.json (other keys
-   * and other plugins preserved), installed_plugins.json v2 user registration
+   * frozen P01 formats: enabledPlugins[key] carries the manifest default or the
+   * Owner's existing choice (install never enables by itself; other keys and
+   * other plugins preserved), installed_plugins.json v2 user registration
    * (native scope array or legacy object), and the versioned cache
    * copy under plugins/cache/<marketplace>/<plugin>/<version>/.
    */
   private directWriteRegistration(
     details: WorkbuddyDetectDetails,
     version: string,
-    engineNote: string,
+    options: { declaredDefaultEnabled: boolean; engineNote: string },
   ): { ok: true; mode: 'direct-write'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote: string } | { ok: false; reason: string; nextAction: string } {
+    const { declaredDefaultEnabled, engineNote } = options;
     const p = this.paths();
     const cacheVersionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
     if (cacheVersionDir === undefined) {
@@ -1826,9 +1863,15 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // settings.json merge — computed here, WRITTEN after the cache lands (see
     // below): a failed payload must leave no registration state behind.
+    // Install ≠ enable (SPEC §6.4): an explicit Owner choice is preserved;
+    // otherwise the manifest's defaultEnabled applies.
+    const currentEnabled = isRecord(settings.value?.enabledPlugins)
+      ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
+      : undefined;
+    const installedEnabled = typeof currentEnabled === 'boolean' ? currentEnabled : declaredDefaultEnabled;
     const nextSettings: Record<string, unknown> = { ...(settings.value ?? {}) };
     const enabledPlugins = isRecord(nextSettings.enabledPlugins) ? { ...nextSettings.enabledPlugins } : {};
-    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = true;
+    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = installedEnabled;
     nextSettings.enabledPlugins = enabledPlugins;
     const settingsAction = settings.existed ? 'updated' : 'created';
 

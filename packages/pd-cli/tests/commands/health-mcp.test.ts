@@ -363,6 +363,95 @@ describe('assessMcpHealth — workbuddy layout', () => {
   });
 });
 
+describe('assessMcpHealth — declared entry integrity (PRI-1130)', () => {
+  it('openclaw: a declared launcher that is missing is HOST_RUNTIME_NOT_VERIFIED, not HEALTHY', () => {
+    withHome((home) => {
+      const fixture = makeSharedFixture(home, 'openclaw');
+      const launcher = path.join(fixture.payloadRoot, 'mcp', 'launcher.cjs');
+      const healthy = assessMcpHealth({ host: 'openclaw', homeDir: home });
+      expect(healthy.status).toBe('HEALTHY');
+      expect(healthy.declaredEntries.checked).toBeGreaterThan(0);
+      expect(healthy.declaredEntries.missing).toEqual([]);
+
+      fs.rmSync(launcher);
+      const broken = assessMcpHealth({ host: 'openclaw', homeDir: home });
+
+      // The manifest still declares the launcher, so the config layer stays
+      // "registered"; only the real-file check can expose the broken install.
+      expect(broken.hostConfig.registered).toBe(true);
+      expect(broken.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(broken.reason).toBe('declared_entry_missing');
+      expect(broken.declaredEntries.missing.map((entry) => path.resolve(String(entry.resolved)))).toContain(path.resolve(launcher));
+    });
+  });
+
+  it('workbuddy: a missing declared hook script is caught without hardcoding launcher.cjs', () => {
+    withHome((home) => {
+      const fixture = makeSharedFixture(home, 'workbuddy');
+      const wrapper = path.join(fixture.payloadRoot, 'scripts', 'wrapper.cjs');
+      fs.mkdirSync(path.dirname(wrapper), { recursive: true });
+      fs.writeFileSync(wrapper, '// pd hook wrapper\n');
+      writeJson(path.join(fixture.payloadRoot, 'hooks', 'hooks.json'), {
+        hooks: {
+          PreToolUse: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: 'node "${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs" PreToolUse' }],
+          }],
+        },
+      });
+
+      const healthy = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(healthy.status).toBe('HEALTHY');
+      expect(healthy.declaredEntries.missing).toEqual([]);
+
+      fs.rmSync(wrapper);
+      const broken = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(broken.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(broken.reason).toBe('declared_entry_missing');
+      const missingDeclarations = broken.declaredEntries.missing.map((entry) => entry.declaration);
+      expect(missingDeclarations.some((declaration) => declaration.includes('hooks/hooks.json#hooks.PreToolUse'))).toBe(true);
+      expect(broken.declaredEntries.missing.map((entry) => path.resolve(String(entry.resolved)))).toContain(path.resolve(wrapper));
+    });
+  });
+
+  it('openclaw: a missing declared skill directory is caught by the same universal rule', () => {
+    withHome((home) => {
+      const fixture = makeSharedFixture(home, 'openclaw');
+      const manifestPath = path.join(fixture.payloadRoot, 'openclaw.plugin.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+      manifest.skills = ['skills/core'];
+      writeJson(manifestPath, manifest);
+      const skillDir = path.join(fixture.payloadRoot, 'skills', 'core');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# core\n');
+
+      expect(assessMcpHealth({ host: 'openclaw', homeDir: home }).status).toBe('HEALTHY');
+
+      fs.rmSync(skillDir, { recursive: true, force: true });
+      const broken = assessMcpHealth({ host: 'openclaw', homeDir: home });
+      expect(broken.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(broken.reason).toBe('declared_entry_missing');
+      expect(broken.declaredEntries.missing.map((entry) => entry.declaration)).toContain('openclaw.plugin.json#skills[0]');
+    });
+  });
+
+  it('unknown plugin-root variables are unverifiable, never reported healthy', () => {
+    withHome((home) => {
+      const fixture = makeSharedFixture(home, 'workbuddy');
+      writeJson(path.join(fixture.payloadRoot, 'hooks', 'hooks.json'), {
+        hooks: {
+          PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'node "${UNKNOWN_PLUGIN_ROOT}/scripts/wrapper.cjs" PreToolUse' }] }],
+        },
+      });
+      const section = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(section.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(section.reason).toBe('declared_entry_unverifiable');
+      expect(section.declaredEntries.unverifiable).toHaveLength(1);
+      expect(section.declaredEntries.unverifiable[0]?.resolved).toBeNull();
+    });
+  });
+});
+
 describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3)', () => {
   it('codex: user-tier pd-recall owned by another server degrades to CONFIG_DRIFT', () => {
     withHome((home) => {

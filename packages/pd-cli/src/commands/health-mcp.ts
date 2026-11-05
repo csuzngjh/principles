@@ -43,6 +43,16 @@ export type McpHealthStatus =
 
 export type McpTri = boolean | 'unverified';
 
+export interface McpDeclaredEntry {
+  /** Declaration surface and field, e.g. `openclaw.plugin.json#mcpServers.pd-recall.args[0]`. */
+  declaration: string;
+  /** Path token exactly as declared (variable placeholders preserved). */
+  token: string;
+  /** Absolute path after expanding known plugin-root variables; null when a variable is unknown. */
+  resolved: string | null;
+  exists: McpTri;
+}
+
 export interface McpHealthSection {
   host: McpHealthHost;
   status: McpHealthStatus;
@@ -75,6 +85,16 @@ export interface McpHealthSection {
     path: string;
     registered: McpTri;
     launcher: string | null;
+  };
+  /**
+   * Every file path declared by the installed plugin payload (MCP command/args,
+   * skills, hook commands). A declaration that points at a missing file is an
+   * install-integrity failure, not a healthy state.
+   */
+  declaredEntries: {
+    checked: number;
+    missing: McpDeclaredEntry[];
+    unverifiable: McpDeclaredEntry[];
   };
   workspace: { dir: string | null; exists: McpTri };
   /**
@@ -278,6 +298,175 @@ function assessHostConfig(hostConfigPath: string): McpHealthSection['hostConfig'
   const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : [];
   const launcher = args.find((arg) => path.basename(arg) === 'launcher.cjs') ?? null;
   return { path: hostConfigPath, registered: launcher !== null, launcher };
+}
+
+/**
+ * Declaration surfaces every host payload may carry. They are enumerated here
+ * as SURFACES (manifest/config/hooks files), never as specific expected paths,
+ * so a new declared entry (skill, hook, launcher, cwd) is validated without
+ * touching this function again.
+ */
+const DECLARED_ENTRY_SURFACES: string[][] = [
+  ['openclaw.plugin.json'],
+  ['.codex-plugin', 'plugin.json'],
+  ['.codebuddy-plugin', 'plugin.json'],
+  ['.mcp.json'],
+  ['hooks', 'hooks.json'],
+];
+
+/** Plugin-root variables a host expands inside declared command/args tokens. */
+const PLUGIN_ROOT_VARIABLES = new Set([
+  'CODEBUDDY_PLUGIN_ROOT',
+  'CLAUDE_PLUGIN_ROOT',
+  'PLUGIN_ROOT',
+  'PD_PLUGIN_ROOT',
+]);
+
+function unquoteToken(raw: string): string {
+  const token = raw.trim();
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
+/**
+ * A token is a declared file reference when it is a rooted path, a relative
+ * path (contains a separator), or a file name with a known script/data
+ * extension. Bare commands (`node`) and flags (`--stdio`) are not entries.
+ */
+function looksLikeEntryPath(raw: string): boolean {
+  const token = unquoteToken(raw);
+  if (token.length === 0 || token.startsWith('-')) return false;
+  if (token.includes('${')) return true;
+  return token === '.'
+    || token.startsWith('./')
+    || token.startsWith('../')
+    || path.isAbsolute(token)
+    || /^[A-Za-z]:[\\/]/.test(token)
+    || token.includes('/')
+    || token.includes('\\')
+    || /^[A-Za-z0-9._-]+\.(?:cjs|mjs|js|json|sh|exe|cmd|bat|ps1)$/i.test(token);
+}
+
+/** Resolve a declared token against the payload root; unknown variables stay unverifiable. */
+function resolveDeclaredToken(raw: string, payloadRoot: string): string | null {
+  const token = unquoteToken(raw);
+  let unknownVariable = false;
+  const expanded = token.replace(/\$\{([A-Za-z0-9_]+)\}/g, (_match, name: string) => {
+    if (PLUGIN_ROOT_VARIABLES.has(name)) return payloadRoot;
+    unknownVariable = true;
+    return '';
+  });
+  if (unknownVariable) return null;
+  return token.includes('${') || path.isAbsolute(expanded)
+    ? path.normalize(expanded)
+    : path.resolve(payloadRoot, expanded);
+}
+
+function declaredEntryExists(target: string): McpTri {
+  try {
+    fs.statSync(target);
+    return true;
+  } catch (error) {
+    const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? false : 'unverified';
+  }
+}
+
+/** Extract path tokens from a hook `command` string without executing anything. */
+function commandPathTokens(command: string): string[] {
+  const tokens: string[] = [];
+  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command)) !== null) {
+    const token = match[1] ?? match[2] ?? match[3] ?? '';
+    if (looksLikeEntryPath(token)) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * Read every declaration surface of the installed payload and verify that each
+ * declared file path actually exists. This is the universal install-integrity
+ * rule behind `declared_entry_missing` (PRI-1130).
+ */
+function collectDeclaredEntries(payloadRoot: string): McpHealthSection['declaredEntries'] {
+  const entries: McpDeclaredEntry[] = [];
+  const seen = new Set<string>();
+  const add = (declaration: string, rawToken: string): void => {
+    if (!looksLikeEntryPath(rawToken)) return;
+    const token = unquoteToken(rawToken);
+    const resolved = resolveDeclaredToken(token, payloadRoot);
+    const key = resolved ?? `${declaration}\u0000${token}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({
+      declaration,
+      token,
+      resolved,
+      exists: resolved === null ? 'unverified' : declaredEntryExists(resolved),
+    });
+  };
+
+  for (const segments of DECLARED_ENTRY_SURFACES) {
+    const file = path.join(payloadRoot, ...segments);
+    const declarationFile = segments.join('/');
+    const record = readJsonRecord(file);
+    if (record === null) continue;
+
+    // MCP server entries: `mcpServers` may be inline or a path to another file.
+    const servers = record.mcpServers;
+    if (typeof servers === 'string') {
+      add(`${declarationFile}#mcpServers`, servers);
+    } else if (isRecord(servers)) {
+      for (const [name, rawServer] of Object.entries(servers)) {
+        if (!isRecord(rawServer)) continue;
+        const base = `${declarationFile}#mcpServers.${name}`;
+        const { command } = rawServer;
+        if (typeof command === 'string') add(`${base}.command`, command);
+        if (Array.isArray(rawServer.args)) {
+          rawServer.args.forEach((arg, index) => {
+            if (typeof arg === 'string') add(`${base}.args[${index}]`, arg);
+          });
+        }
+        const { cwd } = rawServer;
+        if (typeof cwd === 'string') add(`${base}.cwd`, cwd);
+      }
+    }
+
+    // Skill directories declared by the plugin manifest.
+    const { skills } = record;
+    if (typeof skills === 'string') {
+      add(`${declarationFile}#skills`, skills);
+    } else if (Array.isArray(skills)) {
+      skills.forEach((skill, index) => {
+        if (typeof skill === 'string') add(`${declarationFile}#skills[${index}]`, skill);
+      });
+    }
+
+    // Hook command strings (`hooks/<event>[...].hooks[...].command`).
+    if (isRecord(record.hooks)) {
+      for (const [event, blocks] of Object.entries(record.hooks)) {
+        if (!Array.isArray(blocks)) continue;
+        blocks.forEach((block, blockIndex) => {
+          if (!isRecord(block) || !Array.isArray(block.hooks)) return;
+          block.hooks.forEach((hook, hookIndex) => {
+            if (!isRecord(hook) || typeof hook.command !== 'string') return;
+            for (const token of commandPathTokens(hook.command)) {
+              add(`${declarationFile}#hooks.${event}[${blockIndex}].hooks[${hookIndex}].command`, token);
+            }
+          });
+        });
+      }
+    }
+  }
+
+  return {
+    checked: entries.length,
+    missing: entries.filter((entry) => entry.exists === false),
+    unverifiable: entries.filter((entry) => entry.exists === 'unverified'),
+  };
 }
 
 type ConflictVerdict = McpHealthSection['registrationConflict']['verdict'];
@@ -572,6 +761,7 @@ function baseSection({ host, layout, homeDir, env, status, reason, nextAction }:
       versionMatchesInstalled: 'unverified',
     },
     hostConfig: assessHostConfig(layout.hostConfigPath),
+    declaredEntries: { checked: 0, missing: [], unverifiable: [] },
     workspace: { dir: null, exists: 'unverified' },
     registrationConflict: {
       configPath: registrationConfigPath(host, homeDir, env),
@@ -689,6 +879,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   };
 
   const hostConfig = assessHostConfig(layout.hostConfigPath);
+  const declaredEntries = collectDeclaredEntries(layout.payloadRoot);
   const server: McpHealthSection['server'] = {
     runtimeDir,
     entry,
@@ -710,6 +901,29 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
       nextAction = action;
     }
   };
+
+  // Check the declaration itself before ownership/config reasoning: a manifest
+  // that names a file which does not exist is the most specific diagnosis, and
+  // it must not be masked by a downstream "registration unverifiable" verdict.
+  if (declaredEntries.missing.length > 0) {
+    const missing = declaredEntries.missing
+      .map((missingEntry) => missingEntry.resolved ?? `${missingEntry.declaration}=${missingEntry.token}`)
+      .join(', ');
+    degrade(
+      'HOST_RUNTIME_NOT_VERIFIED',
+      'declared_entry_missing',
+      `The plugin declaration references files that do not exist: ${missing}. Reinstall the PD plugin payload so every declared entry is present (a declaration alone is not evidence the file exists).`,
+    );
+  } else if (declaredEntries.unverifiable.length > 0) {
+    const unverifiable = declaredEntries.unverifiable
+      .map((unverifiableEntry) => `${unverifiableEntry.declaration}=${unverifiableEntry.token}`)
+      .join(', ');
+    degrade(
+      'HOST_RUNTIME_NOT_VERIFIED',
+      'declared_entry_unverifiable',
+      `The plugin declaration references paths whose root variable cannot be resolved: ${unverifiable}. Inspect the payload manually or reinstall it.`,
+    );
+  }
 
   if (registrationConflict === 'conflict') {
     degrade(
@@ -777,6 +991,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     server,
     binding,
     hostConfig,
+    declaredEntries,
     workspace,
     registrationConflict: { configPath: conflictConfigPath, verdict: registrationConflict },
     restart,
@@ -806,6 +1021,9 @@ export function formatMcpHealthLines(section: McpHealthSection): string[] {
     `mcp.binding.versionMatchesInstalled: ${tri(section.binding.versionMatchesInstalled)}`,
     `mcp.hostConfig.path: ${section.hostConfig.path}`,
     `mcp.hostConfig.registered: ${tri(section.hostConfig.registered)}`,
+    `mcp.declaredEntries.checked: ${section.declaredEntries.checked}`,
+    `mcp.declaredEntries.missing: ${section.declaredEntries.missing.length === 0 ? 'none' : section.declaredEntries.missing.map((entry) => entry.resolved ?? entry.token).join(', ')}`,
+    `mcp.declaredEntries.unverifiable: ${section.declaredEntries.unverifiable.length === 0 ? 'none' : section.declaredEntries.unverifiable.map((entry) => `${entry.declaration}=${entry.token}`).join(', ')}`,
     `mcp.registrationConflict.path: ${section.registrationConflict.configPath}`,
     `mcp.registrationConflict.verdict: ${section.registrationConflict.verdict}`,
     `mcp.workspace.exists: ${tri(section.workspace.exists)}`,
