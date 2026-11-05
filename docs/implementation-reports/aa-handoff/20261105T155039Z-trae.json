@@ -5,20 +5,19 @@
   "generatedAt": "2026-11-05T15:50:39Z",
   "agent": "trae",
   "overallStatus": "READY_FOR_REVIEW",
-  "summary": "PRI-1110 子范围完成：AA 调用 journal 现在携带最小生效配置身份。调用开始时构建一次冻结六字段快照，terminal 记录复用，不再重采；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度，不改变提示内容。已接到真实 open/terminal 与 index.ts 的 8 个 Hook 注册路径；只读对账器兼容新增字段与旧日志。分支已 rebase 到最新 origin/main 5ad4b6e11。PR #2370 已推送，CI 与 CodeQL 全绿；未合并、未发版、未安装启用、未跑真实 Agent 回合。",
+  "summary": "PRI-1110 子范围完成：AA 调用 journal 现在携带最小生效配置身份。调用开始时构建一次冻结六字段快照，terminal 记录复用，不再重采；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度，不改变提示内容。已接到真实 open/terminal 与 index.ts 的 8 个 Hook 注册路径；只读对账器兼容新增字段与旧日志。分支已 rebase 到最新 origin/main 5ad4b6e11。PR #2370 已推送；首轮 CodeQL 报出 js/file-system-race（statSync 后 readFileSync 的 TOCTOU），已改为单次读取 + 读后字节上限，最终 head 5b47fcebb 上 CI 42064043112 与 CodeQL 127377529702 均 pass。未合并、未发版、未安装启用、未跑真实 Agent 回合。",
   "git": {
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
     "branch": "ai/PRI-1110-host-profile-identity",
     "baseCommit": "5ad4b6e116e71777d010d535cec34dc0de3cd6f8",
-    "headCommit": "8b00ab8f4dfe201dedf72034097eb56a94636195",
+    "headCommit": "5b47fcebbf9918a6963884bb3f6267dfeb69f93c",
     "dirtyPaths": [
-      "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.md",
       "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.json",
-      "docs/implementation-reports/aa-handoff/LATEST.json"
+      "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.md"
     ],
-    "pushedCommit": "8b00ab8f4dfe201dedf72034097eb56a94636195",
+    "pushedCommit": "5b47fcebbf9918a6963884bb3f6267dfeb69f93c",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2370",
-    "remoteChecks": "PASS — CI 42061320970 success（含 Test OpenClaw Plugin 2m42s、Lint、Verify Merge Gate、packaged install smoke、release asset smoke、shared runtime、pd-cli、pd-console、e2e、quick-check）；CodeQL 42061321048 success；codecov/patch pass。skipped 任务为 Impact Gate 判定不相关（principles-core / pd-mcp-server / create-principles-disciple 的独立任务）"
+    "remoteChecks": "PASS — CI 42064043112 success（Test OpenClaw Plugin、Lint、Verify Merge Gate、packaged install smoke、release asset smoke、shared runtime、pd-cli、pd-console、e2e、quick-check 等）；CodeQL 127377529702 success（首轮 js/file-system-race 已修复）；codecov/patch pass。skipped 任务为 Impact Gate 判定不相关（principles-core / pd-mcp-server / create-principles-disciple 的独立任务）"
   },
   "configIdentityFields": [
     {
@@ -89,7 +88,10 @@
       ],
       "commits": [
         "440aa6354a5ec3090e65598f726ec23d0808108e",
-        "8b00ab8f4dfe201dedf72034097eb56a94636195"
+        "cf250f5cc",
+        "8b00ab8f4dfe201dedf72034097eb56a94636195",
+        "cb7e5d147",
+        "5b47fcebbf9918a6963884bb3f6267dfeb69f93c"
       ],
       "acceptance": [
         {
@@ -241,7 +243,7 @@
     {
       "id": "release-intent",
       "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
-      "command": "node scripts/release/check-pr-release-intent.mjs (base=9f477a9fc8 head=c0fbb07e57)",
+      "command": "node scripts/release/check-pr-release-intent.mjs (base=5ad4b6e116 head=5b47fcebbf)",
       "result": "PASS",
       "exitCode": 0,
       "passed": null,
@@ -286,7 +288,7 @@
     {
       "id": "remote-ci",
       "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
-      "command": "gh run watch 42061320970 / 42061321048 (CI + CodeQL, head 8b00ab8f4)",
+      "command": "gh run watch 42064043112 + CodeQL check-run 127377529702 (head 5b47fcebb)",
       "result": "PASS",
       "exitCode": 0,
       "passed": null,
@@ -310,7 +312,7 @@
       "kind": "CODE",
       "locator": "packages/openclaw-plugin/src/core/adaptive-config-identity.ts",
       "observedAt": "2026-11-05T15:50:39Z",
-      "sha256": "1360597428258790d51466b760388f264d8bcfaa73e4bafe273457f4b31e44d8",
+      "sha256": "01646f8a5b8ca62bfd8dd93f07d564be4fb5eee2c7947a6a46f1bbd548102c30",
       "supports": "快照构建、执行产物版本读取、指纹规范化、coverage 推导、有界快照 Map、注册 recorder",
       "limitations": "hostVersion 恒 unknown；指纹恒 partial"
     },
@@ -383,7 +385,7 @@
       "locator": "https://github.com/csuzngjh/principles/pull/2370",
       "observedAt": "2026-11-05T15:50:39Z",
       "sha256": null,
-      "supports": "OPEN；head 8b00ab8f4d；全部必需检查 pass；未合并、未发版",
+      "supports": "OPEN；head 5b47fcebbf；全部必需检查 pass（含 CodeQL）；未合并、未发版",
       "limitations": "尚无 Owner 审批"
     }
   ],
