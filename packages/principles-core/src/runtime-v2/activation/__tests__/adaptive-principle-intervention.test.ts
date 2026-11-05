@@ -18,3 +18,21 @@ describe('bounded single-principle intervention',()=>{
  it('bounds a revalidation that never resolves and aborts its signal',async()=>{let signal:AbortSignal|undefined;const r=await prepareAdaptiveIntervention({...input(),deadlineAt:Date.now()+30},{...deps(),revalidate:async(_,s)=>{signal=s;return new Promise(()=>{ /* Deliberately unresolved Reader for the deadline regression. */ });}});expect(r.reason).toBe('deadline');expect(signal?.aborted).toBe(true);});
  it('returns Native on dependency failure, expiry, unavailable identity and insufficient budget',async()=>{for(const patch of [{deadlineAt:0},{selectionBudget:1},{target:{artifactId:'missing',activationId:'act-b'}},{principles:[p('b'),p('b')]}]){expect((await prepareAdaptiveIntervention({...input(),...patch},deps())).text).toBe(Object.hasOwn(patch,'selectionBudget') ? 'safe native without target' : 'native unchanged');}expect((await prepareAdaptiveIntervention(input(),{...deps(),revalidate:async()=>{throw new Error('database');}})).reason).toBe('dependency_failed');});
 });
+
+describe('operator-controlled admission keeps identities distinct', () => {
+  it('accepts a bound input without inventing native message/request IDs', async () => {
+    const { createHash } = await import('node:crypto');
+    const i = input();
+    delete i.currentUserMessageId;
+    delete i.requestId;
+    i.controlledAdmission = { admissionId: 'operator-invocation', inputSha256: createHash('sha256').update(i.currentUserMessage ?? '', 'utf8').digest('hex'), manifestSha256: 'a'.repeat(64) };
+    expect((await prepareAdaptiveIntervention(i, deps())).addedTarget).toBe(true);
+    i.controlledAdmission.inputSha256 = 'b'.repeat(64);
+    expect((await prepareAdaptiveIntervention(i, deps())).reason).toBe('request_identity_unavailable');
+  });
+  it('rejects a manifest token mixed into native identity fields', async () => {
+    const i = input();
+    i.controlledAdmission = { admissionId: 'operator-invocation', inputSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) };
+    expect((await prepareAdaptiveIntervention(i, deps())).reason).toBe('ambiguous_admission');
+  });
+});

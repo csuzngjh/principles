@@ -12,6 +12,8 @@ export interface AdaptiveInterventionInput {
   currentUserMessage?: string;
   currentUserMessageId?: string;
   requestId?: string;
+  /** Operator-controlled single-turn evidence, never presented as a native message/request ID. */
+  controlledAdmission?: { admissionId: string; inputSha256: string; manifestSha256: string };
   sessionId?: string;
   selectionBudget: number;
   roundKey?: number;
@@ -41,7 +43,14 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
   let excludeUncertainTarget = false;
   const fallback = (reason: string): AdaptiveInterventionResult => ({ text: excludeUncertainTarget ? input.nativeWithoutTargetText : input.nativeText, reason, addedTarget: false, displacedActivationIds: [] });
   try {
-    if (![input.currentUserMessageId, input.requestId, input.sessionId].every(v => typeof v === 'string' && v.trim())) return fallback('request_identity_unavailable');
+    const nonempty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+    const admission = input.controlledAdmission;
+    if (admission && (input.currentUserMessageId !== undefined || input.requestId !== undefined)) return fallback('ambiguous_admission');
+    const controlled = admission && nonempty(admission.admissionId)
+      && /^[a-f0-9]{64}$/.test(admission.inputSha256) && /^[a-f0-9]{64}$/.test(admission.manifestSha256)
+      && typeof input.currentUserMessage === 'string'
+      && createHash('sha256').update(input.currentUserMessage, 'utf8').digest('hex') === admission.inputSha256;
+    if (!nonempty(input.sessionId) || !(controlled || (!admission && nonempty(input.currentUserMessageId) && nonempty(input.requestId)))) return fallback('request_identity_unavailable');
     if (input.currentUserMessage?.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return fallback('scene_not_matched');
     if (!Number.isFinite(input.deadlineAt) || deps.now() >= input.deadlineAt) return fallback('deadline');
     if (!Number.isSafeInteger(input.selectionBudget) || input.selectionBudget < 0
