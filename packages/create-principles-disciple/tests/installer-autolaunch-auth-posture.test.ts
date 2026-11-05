@@ -243,6 +243,9 @@ describe('install() — console auto-launch inherits the authentication posture 
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
+      // The PD workspace declaration is a real file the install preflight
+      // reads/never overwrites: answer from the throwaway HOME, not `true`.
+      if (s.endsWith('principles-disciple.json')) return realFs.existsSync(s);
       if (s.startsWith(payloadDir)) return realFs.existsSync(s);
       return true;
     });
@@ -255,6 +258,8 @@ describe('install() — console auto-launch inherits the authentication posture 
       if (filePath.endsWith('install.json')) {
         return JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['openclaw'], workspaces: [], channel: 'stable', autoCheck: false });
       }
+      // Only reached when the real throwaway HOME actually holds the file.
+      if (filePath.endsWith('principles-disciple.json')) return realFs.readFileSync(filePath, 'utf8');
       // The generated config is read back on the success path.
       if (filePath.endsWith('config.yaml')) return 'features: {}\n';
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
