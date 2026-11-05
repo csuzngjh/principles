@@ -772,3 +772,62 @@ describe('recallPrinciplePainsCapability: OUTER_STATUS mapping', () => {
     expect(sourceMissing.error?.code).toBe('source_missing');
   });
 });
+
+// ── Unresolved-reason warnings / next action (§7.6) ─────────────────────────
+
+describe('recallPrinciplePainsCapability: unresolved-reason warnings', () => {
+  it('a state.db-only pain emits both warnings and the state-db next action', async () => {
+    const MANUAL_PAIN = 'manual_1792226109787_ye92vtko';
+    const splitTaskId = `diag_router-diagnosis_${MANUAL_PAIN}`;
+    const ws = await makeWorkspace({
+      principles: [{ id: P1, derivedFromPainIds: [CAND_A] }],
+      pains: [],
+      tasks: [
+        { taskId: splitTaskId, inputRef: `diagnosis_${MANUAL_PAIN}` },
+        { taskId: `diagnosis_${MANUAL_PAIN}`, inputRef: MANUAL_PAIN, diagnosticJson: JSON.stringify({ sourcePainId: MANUAL_PAIN }) },
+      ],
+      candidates: [{ candidateId: CAND_A, taskId: splitTaskId }],
+      diagnoses: [],
+    });
+    const envelope = await recallPrinciplePainsCapability({ workspaceDir: ws, principleId: P1, limit: 10 });
+    expect(envelope.status).toBe('partial');
+    expect(envelope.warnings.map((w) => w.code)).toEqual([
+      'derived_from_candidate_ids',
+      'pain_event_only_in_state_db',
+    ]);
+    expect(envelope.nextAction?.code).toBe('inspect_state_db_pain_diagnosis');
+  });
+
+  it('an unresolved non-lineage association emits the generic warning', async () => {
+    const ws = await makeWorkspace({
+      principles: [{ id: P1, reuseEvidence: [{ painId: 'pain-nowhere-777', candidateId: CAND_B }] }],
+      pains: [],
+    });
+    const envelope = await recallPrinciplePainsCapability({ workspaceDir: ws, principleId: P1, limit: 10 });
+    expect(envelope.status).toBe('partial');
+    expect(envelope.warnings.map((w) => w.code)).toEqual(['unresolved_associations']);
+    expect(envelope.nextAction?.code).toBe('inspect_unresolved_associations');
+  });
+
+  it('a multiple_paths association counts as candidate lineage for the warning', async () => {
+    const ws = await makeWorkspace({
+      principles: [
+        {
+          id: P1,
+          derivedFromPainIds: [CAND_A, 'cand-missing-zzzz'],
+          reuseEvidence: [{ painId: PAIN_LINEAGE, candidateId: CAND_B }],
+        },
+      ],
+      pains: [{ canonical: PAIN_LINEAGE, reason: 'r', created: '2026-10-01T10:00:00.000Z' }],
+      tasks: [{ taskId: `diagnosis_${PAIN_LINEAGE}`, inputRef: PAIN_LINEAGE }],
+      candidates: [{ candidateId: CAND_A, taskId: `diagnosis_${PAIN_LINEAGE}` }],
+      diagnoses: [],
+    });
+    const envelope = await recallPrinciplePainsCapability({ workspaceDir: ws, principleId: P1, limit: 10 });
+    expect(envelope.status).toBe('ok');
+    const data = unwrapData(envelope);
+    expect(data.results[0]?.association.type).toBe('multiple_paths');
+    expect(envelope.warnings.map((w) => w.code)).toEqual(['derived_from_candidate_ids']);
+    expect(envelope.nextAction?.code).toBe('inspect_unresolved_associations');
+  });
+});
