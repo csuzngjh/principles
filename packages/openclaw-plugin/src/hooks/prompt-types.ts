@@ -27,6 +27,7 @@ export interface EmpathySessionState {
 
 /** API surface exposed to the prompt hook by the plugin runtime. */
 export interface PromptHookApi {
+  pluginConfig?: Record<string, unknown>;
   config?: {
     // Retired with the empathy engine (GFI-COMPLETE-REMOVAL-001); accepted so
     // legacy settings still parse, but no behavior depends on it.

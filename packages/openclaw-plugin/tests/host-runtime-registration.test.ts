@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import type { OpenClawPluginApi } from '../src/openclaw-sdk.js';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
 
 // PRI-523: the after_tool_call route drives the real production pain-evidence
 // kernel, which short-circuits (and skips the enrichment provider) when the
@@ -61,7 +62,7 @@ vi.mock('@principles/host-runtime', async (importOriginal) => {
   });
   return { ...actual, createProductionHostRuntime };
 });
-vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild }));
+vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild, beginAdaptivePromptInvocation: vi.fn(() => 'test-shared-invocation') }));
 vi.mock('../src/hooks/gate.js', () => ({ handleBeforeToolCall }));
 vi.mock('../src/hooks/pain.js', () => ({ handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime }));
 vi.mock('../src/core/pd-config-loader.js', async (importOriginal) => {
@@ -197,6 +198,69 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     expect(dispatch).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledWith(expect.stringContaining('abstraction_layer_v1_disabled'));
     expect(info).toHaveBeenCalledWith(expect.stringContaining('openclaw_legacy'));
+  });
+
+  it('forwards an explicit scoped adaptive mapping through the shared prompt dispatch and leaves unconfigured Native unchanged', async () => {
+    const { api, hooks } = createApi();
+    const workspaceDir = workspaceWithTrajectory();
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      const now = new Date().toISOString();
+      connection.getDb().prepare(`
+        INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+        VALUES ('artifact-target', 'principle', 'task-target', 'P_TARGET', '[]', 'validated', ?, ?, ?)
+      `).run(JSON.stringify({ principleId: 'P_TARGET', text: 'Shared provider target principle.' }), now, now);
+      await new SqliteActivationStateStore(connection).recordActivation({
+        activationId: 'activation-target', idempotencyKey: 'target::prompt', artifactId: 'artifact-target',
+        channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://P_TARGET', activatedAt: now, deactivatedAt: null,
+      });
+      connection.getDb().prepare(`
+        INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
+        VALUES ('approval-target', 'artifact-target', 'prompt', 'low', 'approved', 1, ?, ?, 'owner-1')
+      `).run(now, now);
+    } finally {
+      connection.close();
+    }
+    Object.assign(api, {
+      pluginConfig: {
+        language: 'en',
+        adaptiveActivation: {
+          enabled: true,
+          workspaceDir,
+          artifactId: 'artifact-target',
+          activationId: 'activation-target',
+          softTimeoutMs: 1_000,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      },
+    });
+    let sharedPrompt: unknown;
+    handleBeforePromptBuild.mockImplementation(async (_event, _context, prompt) => {
+      sharedPrompt = prompt;
+      return undefined;
+    });
+    plugin.register(api);
+    await hooks.get('before_prompt_build')?.({
+      prompt: '[PD-AA:delivery-review:v1]\nReview this delivery.',
+      currentUserMessage: '[PD-AA:delivery-review:v1]\nReview this delivery.',
+      currentUserMessageId: 'native-message-1',
+      messages: [],
+    }, { workspaceDir, sessionId: 'session-1', agentId: 'agent-1', trigger: 'user' });
+    expect(sharedPrompt).toMatchObject({
+      adaptivePacking: { status: 'target_present', targetActivationId: 'activation-target' },
+    });
+
+    const unconfigured = createApi();
+    let nativePrompt: unknown;
+    handleBeforePromptBuild.mockImplementationOnce(async (_event, _context, prompt) => {
+      nativePrompt = prompt;
+      return undefined;
+    });
+    plugin.register(unconfigured.api);
+    await unconfigured.hooks.get('before_prompt_build')?.({ prompt: 'ordinary user input', messages: [] }, {
+      workspaceDir, sessionId: 'session-2', agentId: 'agent-1', trigger: 'user',
+    });
+    expect(nativePrompt).not.toHaveProperty('adaptivePacking');
   });
 
   it('PRI-819: surfaces a shared-runtime dispatch failure observably instead of crashing the hook', async () => {

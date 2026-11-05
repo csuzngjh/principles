@@ -1,0 +1,280 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T071650Z-trae",
+  "previousCheckpoint": null,
+  "generatedAt": "2026-11-05T07:16:50Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "接手核对发现交接提交 a8df2d6d2 的远端 CI 有 3 项失败。已修复两类真实缺陷：PRI-775 通配导出与 barrel fixture 漂移，以及 EXM-MVP-001-v4 冻结绑定漂移（含 Windows CRLF 导致的二次不良绑定）。代码 head 1f86fd09c 已推送同一 PR 分支，上一轮已使 Test principles-core 转绿。Verify Merge Gate 因 release-intent 守门要求 changeset 仍红，受本次禁止改动 changesets 目录的边界限制，需要 Owner/发布线裁决。",
+  "git": {
+    "repo": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+    "branch": "ai/PRI-1112-aa-delivery-verifier",
+    "baseCommit": "a8df2d6d25cab878b758e9b55246d11c05263ae6",
+    "headCommit": "1f86fd09cff0f487a670816db0a7b97a193461bb",
+    "dirtyPaths": [],
+    "pushedCommit": "1f86fd09cff0f487a670816db0a7b97a193461bb",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2353",
+    "remoteChecks": "run 41986091330: only Verify Merge Gate FAIL (release-intent guard); all other required checks PASS"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1112",
+      "scope": "PR #2353 交接核对与远端 CI 缺陷修复（交接文档步骤 1）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "packages/principles-core/src/runtime-v2/index.ts",
+        "packages/principles-core/src/runtime-v2/__tests__/fixtures/runtime-v2-barrel-surface.json",
+        "scripts/dev/principle-learning-lab/lib/adaptive-delivery-record.mjs",
+        "scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/",
+        "docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256",
+        "docs/research/EXAMINER-v4-OFFLINE-ACCEPTANCE.md",
+        "docs/research/examiner-productization-20261029/owner-content-review/",
+        "docs/research/examiner-productization-20261029/v4-evidence/",
+        "docs/research/examiner-productization-20261029/GOLD-BLIND-REVIEW-v4.zip"
+      ],
+      "commits": ["40f140e43", "1f86fd09c"],
+      "acceptance": [
+        {
+          "criterion": "说明并修复 barrel 导出面与 EXM 冻结绑定两类真实漂移",
+          "result": "PASS",
+          "evidenceRefs": ["ev-1", "ev-2", "ev-3", "ev-5"]
+        },
+        {
+          "criterion": "修复后必需 CI 项转绿，或把边界外失败记录为阻塞",
+          "result": "PASS",
+          "evidenceRefs": ["ev-8"]
+        }
+      ],
+      "remaining": [
+        "等 Owner/发布线决定 changeset 归属后使 Verify Merge Gate 转绿"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-core-arch",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core",
+      "command": "npx vitest run src/runtime-v2/__tests__/architecture-regression.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 478,
+      "failed": 0,
+      "skipped": null,
+      "evidenceRefs": ["ev-5"]
+    },
+    {
+      "id": "check-scripts-freeze",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts",
+      "command": "npx vitest run __tests__/principle-learning-lab-frozen-package.test.ts __tests__/principle-learning-lab-human-review-intake.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 13,
+      "failed": 0,
+      "skipped": null,
+      "evidenceRefs": ["ev-4"]
+    },
+    {
+      "id": "check-scripts-evidence",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts",
+      "command": "npx vitest run __tests__/principle-learning-lab-frozen-package.test.ts __tests__/principle-learning-lab-human-review-intake.test.ts __tests__/principle-learning-lab-examiner-v09.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 99,
+      "failed": 0,
+      "skipped": null,
+      "evidenceRefs": ["ev-4", "ev-9"]
+    },
+    {
+      "id": "check-aa-node",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+      "command": "node --test scripts/dev/principle-learning-lab/lib/adaptive-activation-coverage.test.mjs scripts/dev/principle-learning-lab/lib/adaptive-config-identity.test.mjs scripts/dev/principle-learning-lab/lib/adaptive-delivery-record.test.mjs scripts/dev/principle-learning-lab/lib/adaptive-packing-comparison.test.mjs scripts/dev/principle-learning-lab/lib/local-transport-result.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 34,
+      "failed": 0,
+      "skipped": null,
+      "evidenceRefs": ["ev-6"]
+    },
+    {
+      "id": "check-core-build",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core",
+      "command": "npm run build",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["ev-1"]
+    },
+    {
+      "id": "check-rebind",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+      "command": "node scripts/dev/principle-learning-lab/rebind-exm-v4-freeze.mjs --record-evidence",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["ev-3", "ev-9"]
+    },
+    {
+      "id": "check-scripts-full",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts",
+      "command": "npx vitest run",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": null,
+      "failed": 3,
+      "skipped": null,
+      "evidenceRefs": ["ev-11"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-1",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/index.ts",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": "e1bc295f8dde8cc3b6c3254e772f590b10eb43af1a925ae67ee45a0ca7aa6225",
+      "supports": "adaptive-delivery-record 的通配导出已替换为显式导出，PRI-775 守卫与 core build 均通过。",
+      "limitations": "未证明 barrel 导出面在所有下游消费方均被使用。"
+    },
+    {
+      "id": "ev-2",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/__tests__/fixtures/runtime-v2-barrel-surface.json",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": "1b6468ca536cf54fcd1c0ba51dd22e82cf53a73b95ccea78db924e3c6b16f4f5",
+      "supports": "补入 adaptive delivery record 与 adaptive intervention 导出名，count 从 1958 变为 1972。",
+      "limitations": "fixture 变更仍需 PR 中的 PRI 标签理由。"
+    },
+    {
+      "id": "ev-3",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/docs/research/examiner-productization-20261029/v4-evidence/post-review-fix-freeze.txt",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "记录第二次 rebind：executions=9、executionsHash 与 gold 哈希未变、packageHash 与 zipSha256 更新。",
+      "limitations": "由工具自动生成；gold 审核仍待 Owner 人工完成。"
+    },
+    {
+      "id": "ev-4",
+      "kind": "LOCAL_TEST",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts/__tests__/principle-learning-lab-frozen-package.test.ts",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "LF 绑定后 EXM v4 冻结包与人工审核入口本地通过（13 项）。",
+      "limitations": "本地 Windows 运行，远端 Linux CI 为权威。"
+    },
+    {
+      "id": "ev-5",
+      "kind": "LOCAL_TEST",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/__tests__/architecture-regression.test.ts",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "barrel 导出面守卫本地 478 项通过；上一轮远端 Test principles-core 已转绿。",
+      "limitations": "远端转绿证据见 ev-8；本地运行不是远端替代。"
+    },
+    {
+      "id": "ev-6",
+      "kind": "LOCAL_TEST",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts/dev/principle-learning-lab/lib/adaptive-delivery-record.test.mjs",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "AA 新增 5 个 Node 测试文件共 34 项通过。",
+      "limitations": "仅覆盖 AA 新增工具，不替代完整 Node tools 套件。"
+    },
+    {
+      "id": "ev-7",
+      "kind": "REMOTE_CI",
+      "locator": "https://github.com/csuzngjh/principles/actions/runs/41980307185",
+      "observedAt": "2026-11-05T07:00:00Z",
+      "sha256": null,
+      "supports": "a8df2d6d2 上 Test principles-core、Test shared runtime & adapters、Verify Merge Gate 三项失败，交接时远端并非全绿。",
+      "limitations": "日志仅代表修复前状态。"
+    },
+    {
+      "id": "ev-8",
+      "kind": "REMOTE_CI",
+      "locator": "https://github.com/csuzngjh/principles/actions/runs/41986091330",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "1f86fd09c 的 CI：Test principles-core 与 Test shared runtime & adapters 均 PASS，仅 Verify Merge Gate 因 release-intent 守卫失败。",
+      "limitations": "Verify Merge Gate 的修复需要 changeset，落在本次禁止改动范围。"
+    },
+    {
+      "id": "ev-9",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": "de05eeb8dc74047c4cdbc95d33f7174ecf670a6df54a81f8ebdbc1bb6e97b40a",
+      "supports": "刷新 4 项因受认可 rebind 而变化的 v4 资产哈希，examiner-v09 基线校验通过。",
+      "limitations": "只更新本次 rebind 实际改变的资产。"
+    },
+    {
+      "id": "ev-10",
+      "kind": "OWNER_AUTHORIZATION",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/docs/implementation-reports/PD-AA-LOCAL-AGENT-HANDOFF.md",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "授权在 PR 分支上核对、最小修复并推送同一 PR（文档提交 a8df2d6d2）。",
+      "limitations": "不包含合并、推送 main 或发布的授权。"
+    },
+    {
+      "id": "ev-11",
+      "kind": "LOCAL_TEST",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts/__tests__/workspace-lifecycle.test.ts",
+      "observedAt": "2026-11-05T07:16:50Z",
+      "sha256": null,
+      "supports": "全量 scripts 套件中 prr-ac-lab、prr-linear-resolver、workspace-lifecycle 并行失败，逐文件单独重跑均通过。",
+      "limitations": "Windows 本机并发/临时目录环境抖动，不构成代码缺陷结论；以远端 Linux CI 为准。"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "B1",
+      "issue": "PRI-1112",
+      "reason": "Verify Merge Gate 的 release-intent 守卫要求 core/host-runtime/openclaw-plugin 变更附带 changeset；当前任务边界明确禁止改动 changesets 目录。",
+      "evidenceRefs": ["ev-7", "ev-8"],
+      "neededFrom": "coordinator/Owner（发布线负责人）",
+      "unblockAction": "由发布线决定该 PR 的 changeset 归属与措辞，或显式授权本任务添加空 changeset。",
+      "independentWork": "PRI-1109/1110/1114/1115 的只读准备可继续。"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1112",
+      "action": "确认 run 41986091330 的结果，核实 Test shared runtime & adapters 转绿，且仅 Verify Merge Gate 因发布守门失败。",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "gh pr checks 显示除 Verify Merge Gate 外所有必需项通过。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1112",
+      "action": "向协调者报告 changeset 阻塞并等待裁决。",
+      "dependsOn": ["1"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "获得 changeset 归属决定或空 changeset 授权。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1109",
+      "action": "按交接文档进入历史中断对账的只读准备，产出最小可评审方案。",
+      "dependsOn": ["1"],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "形成只读对账结论与最小实现方案，并作为下一检查点提交。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "docs/implementation-reports/PD-AA-LOCAL-AGENT-HANDOFF.md@a8df2d6d2"
+    ]
+  }
+}

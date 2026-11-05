@@ -1,4 +1,5 @@
 import type { ActivationStatusRecord } from './activation-types.js';
+import { createHash } from 'node:crypto';
 
 /**
  * Reference principle budget for a 128K-token window (UTF-16 code units).
@@ -18,6 +19,8 @@ export interface ActivatedPrinciple {
   text: string;
   artifactId: string;
   activationId: string;
+  /** Exact governed artifact content_json bytes, separate from rendered directive hash. */
+  artifactContentSha256?: string;
   /**
    * 谁授权了这条激活 (INV-05, P0-G):
    * - owner: 经 approvals 队列 approve (derived join on artifact_id+channel)
@@ -117,6 +120,7 @@ export function resolvePrincipleFromArtifact(
     principle: {
       principleId: resolvedPrincipleId,
       text: resolvedText,
+      artifactContentSha256: createHash('sha256').update(raw_content_json, 'utf8').digest('hex'),
       artifactId: activation.artifactId,
       activationId: activation.activationId,
     },

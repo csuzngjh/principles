@@ -141,6 +141,107 @@ describe('shared production active-principle prompt kernel', () => {
     });
   });
 
+  it('applies an optional adaptive priority provider on shared dispatch and fails back to Native on provider errors', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = new SqliteConnection(workspaceDir);
+    try {
+      const now = new Date().toISOString();
+      const insert = connection.getDb().prepare(`
+        INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+        VALUES (?, 'principle', ?, ?, NULL, '[]', 'validated', ?, ?, ?)
+      `);
+      insert.run('art-priority-filler', 'task-priority-filler', 'P_PRIORITY_FILLER', JSON.stringify({
+        principleId: 'P_PRIORITY_FILLER', text: 'f'.repeat(2200),
+      }), now, now);
+      insert.run('art-priority-target', 'task-priority-target', 'P_PRIORITY_TARGET', JSON.stringify({
+        principleId: 'P_PRIORITY_TARGET', text: 't'.repeat(2200),
+      }), now, now);
+      const store = new SqliteActivationStateStore(connection);
+      await store.recordActivation({
+        activationId: 'act-priority-filler', idempotencyKey: 'priority-filler::prompt', artifactId: 'art-priority-filler',
+        channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://P_PRIORITY_FILLER', activatedAt: now, deactivatedAt: null,
+      });
+      await store.recordActivation({
+        activationId: 'act-priority-target', idempotencyKey: 'priority-target::prompt', artifactId: 'art-priority-target',
+        channel: 'prompt', action: 'prompt_activate', targetRef: 'ledger://P_PRIORITY_TARGET', activatedAt: now, deactivatedAt: null,
+      });
+      connection.getDb().prepare(`
+        INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
+        VALUES ('approval-priority-target', 'art-priority-target', 'prompt', 'low', 'approved', 1, ?, ?, 'owner-1')
+      `).run(now, now);
+    } finally {
+      connection.close();
+    }
+
+    const event = {
+      kind: 'before_prompt_build' as const,
+      context: { workspaceDir, sessionId: 'session-adaptive-priority' },
+      rawPayload: {},
+      source: 'test:adaptive-priority',
+    };
+    let nativePrompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>> | undefined;
+    const nativeRuntime = createProductionHostRuntime({
+      beforePromptBuild: async (_event, prompt) => {
+        nativePrompt = prompt;
+        return { decision: 'modify', source: event.source, additionalContext: prompt.additionalContext };
+      },
+    });
+    await nativeRuntime.dispatch(event);
+    expect(nativePrompt?.activationIds).toContain('act-priority-filler');
+    expect(nativePrompt?.activationIds).not.toContain('act-priority-target');
+
+    let adaptivePrompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>> | undefined;
+    const priorityDeadline = Date.now() + 5_000;
+    const provider = vi.fn(() => ({ artifactId: 'art-priority-target', activationId: 'act-priority-target', deadlineAt: priorityDeadline }));
+    const adaptiveRuntime = createProductionHostRuntime({
+      adaptivePriorityProvider: provider,
+      beforePromptBuild: async (_event, prompt) => {
+        adaptivePrompt = prompt;
+        return { decision: 'modify', source: event.source, additionalContext: prompt.additionalContext };
+      },
+    });
+    await adaptiveRuntime.dispatch(event);
+    expect(provider).toHaveBeenCalledOnce();
+    expect(adaptivePrompt?.adaptivePacking).toMatchObject({ status: 'prioritized', targetActivationId: 'act-priority-target', deadlineAt: priorityDeadline });
+    expect(adaptivePrompt?.activationIds[0]).toBe('act-priority-target');
+
+    let failedProviderPrompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>> | undefined;
+    const failedProviderRuntime = createProductionHostRuntime({
+      adaptivePriorityProvider: () => { throw new Error('optional provider unavailable'); },
+      beforePromptBuild: async (_event, prompt) => {
+        failedProviderPrompt = prompt;
+        return { decision: 'modify', source: event.source, additionalContext: prompt.additionalContext };
+      },
+    });
+    await failedProviderRuntime.dispatch(event);
+    expect(failedProviderPrompt).toEqual(nativePrompt);
+
+    let expiredProviderPrompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>> | undefined;
+    const expiredProviderRuntime = createProductionHostRuntime({
+      adaptivePriorityProvider: () => ({ artifactId: 'art-priority-target', activationId: 'act-priority-target', deadlineAt: Date.now() - 1 }),
+      beforePromptBuild: async (_event, prompt) => {
+        expiredProviderPrompt = prompt;
+        return { decision: 'modify', source: event.source, additionalContext: prompt.additionalContext };
+      },
+    });
+    await expiredProviderRuntime.dispatch(event);
+    expect(expiredProviderPrompt).toEqual(nativePrompt);
+
+    let invalidProviderPrompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>> | undefined;
+    const invalidProviderRuntime = createProductionHostRuntime({
+      adaptivePriorityProvider: () => ({
+        get artifactId(): string { throw new Error('invalid provider result'); },
+        activationId: 'act-priority-target',
+      }),
+      beforePromptBuild: async (_event, prompt) => {
+        invalidProviderPrompt = prompt;
+        return { decision: 'modify', source: event.source, additionalContext: prompt.additionalContext };
+      },
+    });
+    await invalidProviderRuntime.dispatch(event);
+    expect(invalidProviderPrompt).toEqual(nativePrompt);
+  });
+
   it('omits invalid artifacts with an observable warning and bounds rendered output', async () => {
     const workspaceDir = tempWorkspace();
     const connection = new SqliteConnection(workspaceDir);

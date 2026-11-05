@@ -13,6 +13,7 @@ export type EventType =
   | 'rule_promotion'
   | 'governance_action'
   | 'hook_execution'
+  | 'adaptive_delivery'
   | 'gate_block'
   | 'gate_bypass'
   | 'evolution_task'
@@ -45,6 +46,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rule_promotion'),
   Type.Literal('governance_action'),
   Type.Literal('hook_execution'),
+  Type.Literal('adaptive_delivery'),
   Type.Literal('gate_block'),
   Type.Literal('gate_bypass'),
   Type.Literal('evolution_task'),
@@ -624,6 +626,8 @@ export type RuleHostAutoCorrectAppliedEventDataStatic = Static<typeof RuleHostAu
  * index-aligned and each length equals injectedCount.
  */
 export interface RuntimeV2PromptActivationsInjectedEventData {
+  /** Invocation journal identity, distinct from admission and model request IDs. */
+  hookInvocationId?: string;
   sessionId: string;
   workspaceDir: string;
   principleIds: string[];
@@ -704,6 +708,7 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
 }
 
 export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
+  hookInvocationId: Type.Optional(Type.String()),
   sessionId: Type.String(),
   workspaceDir: Type.String(),
   principleIds: Type.Array(Type.String()),
