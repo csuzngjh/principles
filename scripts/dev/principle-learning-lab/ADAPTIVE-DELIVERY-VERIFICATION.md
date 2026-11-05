@@ -80,3 +80,5 @@ OpenClaw 安装包 2026.10.10 的公共类型定义含 currentUserMessage/curren
 当前 embedded 的 attempt-system-prompt-prepare-BFRZxKas.mjs 使用 context-engine-maintenance-Cgkf_lx3.mjs::resolvePromptBuildHookResult，后者向 before_prompt_build 只传 prompt/messages。这是本机静态源码观察，未进行真实请求实验。不能将另一运行模式的类型或字段直接当作当前 embedded 已可用能力。
 
 Owner 要求加快主线推进后，将外层实验时限从60秒放宽到120秒，内层Agent期限保留45秒，报告显式记录两者。此前60秒实验的原始结果保持不变。此调整仅为隔离实验留出启动与收尾余量，不宣称宿主性能已修复，不新增模型调用或自动重试；宿主性能优化不再阻塞原则接线。
+
+回执契约现由正式core的轻量子路径`@principles/core/runtime-v2/adaptive-delivery-record`提供，实验室入口仅转导出。运行前需完成本worktree的依赖准备及core构建；没有新增外部服务或模型依赖。生产与离线验证共用状态校验，旧反例继续执行。
