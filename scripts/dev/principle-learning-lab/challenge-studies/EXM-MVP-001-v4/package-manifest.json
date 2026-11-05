@@ -27,7 +27,7 @@
       },
       {
         "name": "adaptive-delivery-record.mjs",
-        "sha256": "48ccafd5625b8af8ebf998250d2ba8dab4436c9d8edf81c547a4b7f8b5c5798a"
+        "sha256": "0b82ac8442276f74104b1f3a420ad20685821ad85057d620d8a3b80da54d2b54"
       },
       {
         "name": "adaptive-delivery-record.test.mjs",
@@ -250,7 +250,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "716ddbaeefb3e49bda622067f1636e4788484b9068579e008d1f8525b283836f"
+      "sha256": "eb6fb7cb535eb53c95b97102265129774e59c86c9073235d50658d55122e263b"
     },
     {
       "path": "blind-review/review-form.json",
@@ -258,7 +258,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "0991a6c5e4d4ac5bc74fc584182b96859a994595761e24d3f5ca67f020f85278"
+      "sha256": "2b2bbfb6b74cdacfc6d6eb942fe4ab349e52df86fdcf770e7979c85d28df8e27"
     },
     {
       "path": "gold-review.json",
@@ -302,7 +302,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "4dacb7c0cbdcc1567458a769cfd952c3558e2774601afee6e09d23528aa50d4f"
+      "sha256": "7ad74de3931ffbe326290796bc05df86f01f3a0d4994abcc308f9d7839f52316"
     },
     {
       "path": "revision.json",
@@ -317,5 +317,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "e3b1c37fa29472a67d90685c032d67da1e825eee74991303f90d02c007a00963"
+  "packageHash": "e990ef3ea5887290358a613269c50f703f9abe2d55d6d9bc726a0f2cd8068b08"
 }
