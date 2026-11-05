@@ -2,6 +2,7 @@
 "@principles/pd-mcp-server": minor
 "@principles/pd-cli": minor
 "principles-disciple": patch
+"create-principles-disciple": patch
 "@principles/workbuddy-adapter": patch
 ---
 
