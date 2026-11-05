@@ -28,7 +28,11 @@ import {
   detectPromptReplacementTarget,
 } from '@principles/core/runtime-v2';
 import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime-v2';
-import { checkPromptArtifactDeliverabilityById, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS } from '@principles/host-runtime';
+import {
+  checkPromptArtifactDeliverabilityById,
+  RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
+  reconcileAdaptiveJournal,
+} from '@principles/host-runtime';
 
 /**
  * I3 upgrade (Owner review of PR #1856, P1): ledger-aware identity deps for
@@ -1885,6 +1889,99 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
         ...(typeof opts.targetHost === 'string' && opts.targetHost.length > 0 ? { targetHost: opts.targetHost } : {}),
         retryActivation: opts.retryActivation === true,
         confirmIntent: opts.confirmIntent === true,
+      });
+    });
+}
+
+export interface RuntimeActivationJournalOptions {
+  workspace?: string;
+  since?: string;
+  until?: string;
+  host?: string;
+  maxInvocations?: string;
+  maxDateFiles?: string;
+  maxFileBytes?: string;
+  maxTerminalVariants?: string;
+}
+
+/**
+ * PRI-1109: thin CLI wrapper over the read-only reconciler in
+ * @principles/host-runtime. All semantic decisions live in the library; this
+ * handler only parses options, prints the library's single JSON document to
+ * stdout, routes diagnostics to stderr, and sets the exit code.
+ */
+export async function handleRuntimeActivationJournal(opts: RuntimeActivationJournalOptions): Promise<void> {
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  const limits: {
+    maxInvocations?: number;
+    maxDateFilesPerDir?: number;
+    maxFileBytes?: number;
+    maxTerminalVariantsPerInvocation?: number;
+  } = {};
+  if (opts.maxInvocations !== undefined) limits.maxInvocations = Number(opts.maxInvocations);
+  if (opts.maxDateFiles !== undefined) limits.maxDateFilesPerDir = Number(opts.maxDateFiles);
+  if (opts.maxFileBytes !== undefined) limits.maxFileBytes = Number(opts.maxFileBytes);
+  if (opts.maxTerminalVariants !== undefined) limits.maxTerminalVariantsPerInvocation = Number(opts.maxTerminalVariants);
+
+  const result = reconcileAdaptiveJournal({
+    workspaceDir,
+    ...(opts.since !== undefined ? { since: opts.since } : {}),
+    ...(opts.until !== undefined ? { until: opts.until } : {}),
+    ...(opts.host !== undefined ? { host: opts.host } : {}),
+    limits,
+  });
+
+  if (!result.ok) {
+    // cli-1-strict-json: stdout carries exactly one machine-readable document.
+    console.log(JSON.stringify(result, null, 2));
+    console.error(`[activation journal] ${result.error.code}: ${result.error.message}`);
+    console.error(`[activation journal] nextAction: ${result.error.nextAction}`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const {report} = result;
+  console.log(JSON.stringify(report, null, 2));
+  console.error(
+    `[activation journal] effective window: ${report.request.window.start} ~ ${report.request.window.end}`
+      + ` (endIsNow=${report.request.window.endIsNow}, clampedByRetention=${report.request.window.clampedByRetention})`,
+  );
+  console.error(
+    `[activation journal] coverage=${report.coverage.status} filesRead=${report.coverage.filesRead}`
+      + ` invocations=${report.totals.uniqueInvocations ?? 'unknown'}`,
+  );
+  if (report.coverage.status === 'unavailable') {
+    console.error('[activation journal] no readable log directory: result is unknown, not zero invocations');
+    process.exitCode = 3;
+    return;
+  }
+  if (report.outputTruncated) {
+    console.error('[activation journal] output truncated: reported counts are lower bounds');
+  }
+}
+
+export function registerRuntimeActivationJournalCommand(parent: Command): Command {
+  return parent
+    .command('journal')
+    .description('Read-only reconciliation of adaptive_delivery journal records (never writes, never runs a model)')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--since <iso>', 'Explicit window start (ISO timestamp; default: 7 days before the window end)')
+    .option('--until <iso>', 'Explicit window end (ISO timestamp; default: now)')
+    .option('--host <host>', 'Host identity to reconcile', 'openclaw')
+    .option('--max-invocations <n>', 'Maximum invocations emitted (default: 1000)')
+    .option('--max-date-files <n>', 'Maximum date files read per log directory (default: 8)')
+    .option('--max-file-bytes <n>', 'Maximum bytes read per file (default: 4194304)')
+    .option('--max-terminal-variants <n>', 'Maximum terminal variants per invocation (default: 5)')
+    .action(async (opts) => {
+      await handleRuntimeActivationJournal({
+        workspace: opts.workspace,
+        since: opts.since,
+        until: opts.until,
+        host: opts.host,
+        maxInvocations: opts.maxInvocations,
+        maxDateFiles: opts.maxDateFiles,
+        maxFileBytes: opts.maxFileBytes,
+        maxTerminalVariants: opts.maxTerminalVariants,
       });
     });
 }
