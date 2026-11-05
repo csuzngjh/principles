@@ -293,7 +293,7 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(governanceConfig.version).toBe(1);
     expect(governanceConfig.features).toMatchObject({
       'host.workbuddy': { enabled: true, category: 'quiet' },
-      workbuddy_live_keyword_pain: { enabled: true, category: 'quiet' },
+      workbuddy_live_keyword_pain: { enabled: false, category: 'quiet' },
     });
     expect(created.installer.detectDetails().flagOverride).toBe(true);
     expect(created.installer.detectDetails().governanceInitialized).toBe(true);
@@ -1188,7 +1188,7 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
     return parseYaml(fs.readFileSync(path.join(dir, '.pd', 'config.yaml'), 'utf8')).features as Record<string, { enabled?: boolean }>;
   }
 
-  it('enables both gates on a sparse config (failed-install residue no longer keeps governance off)', () => {
+  it('enables the governance gate and leaves keyword auto-detection OFF on a sparse config (failed-install residue no longer keeps governance off)', () => {
     const { dir } = seedGovernance('features: {}\n');
     try {
       const result = ensureWorkbuddyGovernanceEnabled(dir);
@@ -1197,13 +1197,13 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.changed).toBe(true);
       const flags = readFlags(dir);
       expect(flags['host.workbuddy']!.enabled).toBe(true);
-      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('PRESERVES an explicit host opt-out while still enabling the keyword gate', () => {
+  it('PRESERVES an explicit host opt-out and keeps keyword auto-detection OFF', () => {
     const { dir } = seedGovernance('features:\n  host.workbuddy:\n    enabled: false\n    category: quiet\n');
     try {
       const result = ensureWorkbuddyGovernanceEnabled(dir);
@@ -1211,18 +1211,17 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.hostExplicitOff).toBe(true);
       const flags = readFlags(dir);
       expect(flags['host.workbuddy']!.enabled).toBe(false);
-      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('PRESERVES an explicit keyword opt-out while still enabling the governance gate', () => {
-    const { dir } = seedGovernance('features:\n  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n');
+  it('keeps the keyword flag OFF even when an old config had it enabled', () => {
+    const { dir } = seedGovernance('features:\n  workbuddy_live_keyword_pain:\n    enabled: true\n    category: quiet\n');
     try {
       const result = ensureWorkbuddyGovernanceEnabled(dir);
       expect(result.ok).toBe(true);
-      expect(result.keywordExplicitOff).toBe(true);
       const flags = readFlags(dir);
       expect(flags['host.workbuddy']!.enabled).toBe(true);
       expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
@@ -1232,7 +1231,7 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
   });
 
   it('leaves an already-correct config byte-identical (changed=false, no rewrite)', () => {
-    const correct = 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n  workbuddy_live_keyword_pain:\n    enabled: true\n    category: quiet\n';
+    const correct = 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n';
     const { dir, configPath } = seedGovernance(correct);
     try {
       const before = fs.readFileSync(configPath, 'utf8');
@@ -1257,33 +1256,68 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
   });
 });
 
-// PRI-1064 review: the install summary derived the whole sentence from the
-// host gate, so an explicit keyword-Pain opt-out was reported as "keyword Pain
-// detection ... ON". These cases pin each gate to its own clause.
-describe('describeGovernanceDefaults (PRI-1064 review)', () => {
-  it('never reports keyword Pain as ON when the Owner explicitly disabled it', () => {
-    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: true, changed: true }, 'C:/ws');
-    expect(note).toContain('four-term keyword Pain detection is OFF');
+// 2026-11-05 (Owner decision): WorkBuddy automatic Pain detection is
+// UNSUPPORTED (no persisted observation writer), so install copy must state
+// manual marking instead of reporting a keyword gate.
+describe('describeGovernanceDefaults (WorkBuddy manual marking only)', () => {
+  const MANUAL = 'Automatic Pain detection is not available in WorkBuddy';
+  const PREFIX = 'PD记录痛苦：';
+
+  it('states governance ON and names the explicit marking path', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
+    expect(note).toContain('enabled by this install');
+    expect(note).toContain(MANUAL);
+    expect(note).toContain(PREFIX);
     expect(note).not.toContain('keyword Pain detection is ON');
-    expect(note).toContain('features.workbuddy_live_keyword_pain.enabled=false');
   });
 
-  it('states the host gate OFF and the keyword gate ON when only the host was opted out', () => {
+  it('preserves an explicit host opt-out and still names the explicit marking path', () => {
     const note = describeGovernanceDefaults({ hostExplicitOff: true, keywordExplicitOff: false, changed: false }, 'C:/ws');
     expect(note).toContain('WorkBuddy governance is OFF');
     expect(note).toContain('features.host.workbuddy.enabled=false');
-    expect(note).toContain('four-term keyword Pain detection is ON');
+    expect(note).toContain('keyword Pain detection is OFF');
+    expect(note).toContain(MANUAL);
+    expect(note).toContain(PREFIX);
   });
 
-  it('reports the default-ON state with its install attribution and the plugin-disabled caveat', () => {
+  it('reports the default governance state with install attribution and the plugin-disabled caveat', () => {
     const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
     expect(note).toContain('enabled by this install');
     expect(note).toContain('has no effect until the plugin is enabled');
-    expect(note).toContain('four-term keyword Pain detection is ON (configured only — it cannot run while the plugin is disabled)');
+    expect(note).toContain('four-term keyword Pain detection is OFF');
+    expect(note).not.toContain('keyword Pain detection is ON');
   });
 
   it('names the missing governance config as UNKNOWN rather than claiming a state', () => {
     expect(describeGovernanceDefaults(null, 'C:/ws')).toContain('UNKNOWN');
+  });
+});
+
+// Guard (2026-11-05 Owner decision): every WorkBuddy user-facing surface must
+// say that automatic detection is unavailable and name the explicit prefix.
+// This fails if a future edit restores the old "keyword Pain detection is ON"
+// copy or silently drops the manual-marking instruction.
+describe('WorkBuddy user-facing copy guard', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../../..');
+  const surfaces = [
+    'packages/create-principles-disciple/src/installers/workbuddy-host-installer.ts',
+    'packages/create-principles-disciple/src/index.ts',
+    'packages/create-principles-disciple/src/prompts.ts',
+    'packages/pd-cli/src/commands/workbuddy-worker.ts',
+    'packages/website/.vitepress/theme/components/InstallGuide.vue',
+    'packages/website/docs/getting-started.md',
+    'packages/website/zh/docs/getting-started.md',
+    'packages/workbuddy-adapter/plugin/skills/pd-pain-signal/SKILL.md',
+    'packages/workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json',
+  ];
+
+  it('names the explicit PD记录痛苦 prefix and never claims automatic keyword detection', () => {
+    for (const relativePath of surfaces) {
+      const text = fs.readFileSync(path.join(REPO_ROOT, relativePath), 'utf8');
+      expect(text, `${relativePath} must name the explicit prefix`).toContain('PD记录痛苦');
+      expect(text, `${relativePath} must not claim keyword Pain detection is ON`).not.toContain('keyword Pain detection is ON');
+      expect(text, `${relativePath} must not claim auto keyword Pain`).not.toContain('auto keyword Pain');
+    }
   });
 });
 

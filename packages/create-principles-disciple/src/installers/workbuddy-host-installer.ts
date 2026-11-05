@@ -654,60 +654,64 @@ export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolea
  * skipped with host.workbuddy_disabled.
  * Both entries are validated and atomically committed in one file write;
  * an already-correct config is left byte-identical (no rewrite).
+ *
+ * 2026-11-05 (Owner decision): `workbuddy_live_keyword_pain` is written
+ * `enabled: false` unconditionally. WorkBuddy has no persisted observation
+ * writer, so the automatic keyword path can only end as `observation_only`
+ * (an abandoned marker, never a Pain row). Leaving the flag ON made install
+ * output claim an automatic capability that does not exist. The flag id stays
+ * (it is part of the feature-flag contract and may exist in old configs), but
+ * the installer never turns it on.
  */
 export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOverrideResult & {
   hostExplicitOff: boolean;
-  keywordExplicitOff: boolean;
   changed: boolean;
 } {
   const configPath = path.join(governanceDir, '.pd', 'config.yaml');
   let raw: unknown;
   try { raw = yaml.load(readFileSync(configPath, 'utf-8')); }
-  catch { return { ok: false, reason: 'fresh_workbuddy_config_unreadable', nextAction: 'Repair governance config and retry.', hostExplicitOff: false, keywordExplicitOff: false, changed: false }; }
+  catch { return { ok: false, reason: 'fresh_workbuddy_config_unreadable', nextAction: 'Repair governance config and retry.', hostExplicitOff: false, changed: false }; }
   if (!isRecord(raw) || !isRecord(raw.features)) {
-    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.', hostExplicitOff: false, keywordExplicitOff: false, changed: false };
+    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.', hostExplicitOff: false, changed: false };
   }
   const oldHost = raw.features['host.workbuddy'];
   const oldKeyword = raw.features.workbuddy_live_keyword_pain;
   const hostExplicitOff = isRecord(oldHost) && oldHost.enabled === false;
-  const keywordExplicitOff = isRecord(oldKeyword) && oldKeyword.enabled === false;
   const features = {
     ...raw.features,
     'host.workbuddy': { ...(isRecord(oldHost) ? oldHost : {}), enabled: !hostExplicitOff, category: WORKBUDDY_FLAG_CATEGORY },
-    workbuddy_live_keyword_pain: { ...(isRecord(oldKeyword) ? oldKeyword : {}), enabled: !keywordExplicitOff, category: WORKBUDDY_FLAG_CATEGORY },
+    workbuddy_live_keyword_pain: { ...(isRecord(oldKeyword) ? oldKeyword : {}), enabled: false, category: WORKBUDDY_FLAG_CATEGORY },
   };
   const next = yaml.dump({ ...raw, features }, { lineWidth: -1, noRefs: true });
   const alreadyCorrect = isRecord(oldHost) && oldHost.enabled === !hostExplicitOff && oldHost.category === WORKBUDDY_FLAG_CATEGORY
-    && isRecord(oldKeyword) && oldKeyword.enabled === !keywordExplicitOff && oldKeyword.category === WORKBUDDY_FLAG_CATEGORY;
+    && isRecord(oldKeyword) && oldKeyword.enabled === false && oldKeyword.category === WORKBUDDY_FLAG_CATEGORY;
   if (alreadyCorrect) {
-    return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, changed: false };
+    return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, changed: false };
   }
   try {
     const verify: unknown = yaml.load(next);
     if (!isRecord(verify) || !isRecord(verify.features) ||
       !isRecord(verify.features['host.workbuddy']) || verify.features['host.workbuddy'].enabled !== !hostExplicitOff ||
-      !isRecord(verify.features.workbuddy_live_keyword_pain) || verify.features.workbuddy_live_keyword_pain.enabled !== !keywordExplicitOff) {
-      return { ok: false, reason: 'fresh_workbuddy_flags_verification_failed', nextAction: 'No changes written.', hostExplicitOff, keywordExplicitOff, changed: false };
+      !isRecord(verify.features.workbuddy_live_keyword_pain) || verify.features.workbuddy_live_keyword_pain.enabled !== false) {
+      return { ok: false, reason: 'fresh_workbuddy_flags_verification_failed', nextAction: 'No changes written.', hostExplicitOff, changed: false };
     }
     atomicReplaceTextFile(configPath, next);
   } catch {
-    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, keywordExplicitOff, changed: false };
+    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, changed: false };
   }
-  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, changed: true };
+  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, changed: true };
 }
 
 /**
- * PRI-1064 review: the install summary must state BOTH gates.
+ * PRI-1064 review: the install summary must state the governance gate
+ * truthfully.
  *
- * The first version derived the whole sentence from `hostExplicitOff` alone,
- * so a config with `workbuddy_live_keyword_pain.enabled: false` was reported as
- * "governance and four-term keyword Pain detection are ON" — a false summary
- * of exactly the kind this change set out to remove. Each gate is now stated
- * on its own, and an OFF state always names the flag the Owner wrote.
- *
- * Inherited verbatim by the PRI-1063 copy work, which keeps the flag ids
- * dotted (they ARE the flat keys) but replaces the prose with paste-ready
- * snippets.
+ * 2026-11-05 (Owner decision): WorkBuddy has no persisted observation writer,
+ * so automatic Pain detection is UNSUPPORTED there — every keyword candidate
+ * ends as `observation_only` and is never persisted. The summary therefore
+ * NEVER reports keyword Pain as ON; it states the actual intake path (the
+ * explicit `PD记录痛苦：` prefix) instead. Reporting the keyword gate as ON was
+ * a false capability claim of exactly the kind this change set out to remove.
  */
 export function describeGovernanceDefaults(
   state: { hostExplicitOff: boolean; keywordExplicitOff: boolean; changed: boolean } | null,
@@ -716,14 +720,15 @@ export function describeGovernanceDefaults(
   if (state === null) {
     return ` Governance flag state is UNKNOWN — no governance config exists at ${governanceDir} (run "pd runtime init --workspace ${governanceDir}", then re-run the installer).`;
   }
+  const manualIntake = 'Automatic Pain detection is not available in WorkBuddy; record pain with the explicit prefix "PD记录痛苦：".';
   if (state.hostExplicitOff) {
-    return ' WorkBuddy governance is OFF — your explicit opt-out (features.host.workbuddy.enabled=false) was preserved; four-term keyword Pain detection is ON (configured only — it cannot run while the plugin is disabled).';
+    return ` WorkBuddy governance is OFF — your explicit opt-out (features.host.workbuddy.enabled=false) was preserved; four-term keyword Pain detection is OFF${state.keywordExplicitOff ? ' (the OFF setting was preserved)' : ' (automatic detection is unavailable in WorkBuddy, so it is kept OFF)'}. ${manualIntake}`;
   }
   const hostState = ` WorkBuddy governance is ON${state.changed ? ' (enabled by this install)' : ' (already enabled)'} — this flag only acts through the plugin/hook channel, so it has no effect until the plugin is enabled in WorkBuddy`;
   const keywordState = state.keywordExplicitOff
-    ? 'four-term keyword Pain detection is OFF — your explicit opt-out (features.workbuddy_live_keyword_pain.enabled=false) was preserved'
-    : 'four-term keyword Pain detection is ON (configured only — it cannot run while the plugin is disabled)';
-  return `${hostState}; ${keywordState}.`;
+    ? 'four-term keyword Pain detection is OFF — the OFF setting was preserved (an explicit Owner opt-out is never overridden)'
+    : 'four-term keyword Pain detection is OFF — automatic detection is unavailable in WorkBuddy, so it is kept OFF';
+  return `${hostState}; ${keywordState}. ${manualIntake}`;
 }
 
 export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boolean): FlagOverrideResult {
@@ -1594,7 +1599,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         : {
             enabled: !governanceDefaults.hostExplicitOff,
             explicitOptOut: governanceDefaults.hostExplicitOff,
-            keywordPainEnabled: !governanceDefaults.keywordExplicitOff,
+            // 2026-11-05: always false — WorkBuddy has no persisted observation
+            // writer, so the keyword path cannot produce a Pain row.
+            keywordPainEnabled: false,
             configPath: governanceDefaults.configPath,
           },
       reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}${mcpBinding.ok ? ' pd-recall MCP binding written.' : ` pd-recall MCP binding skipped (${mcpBinding.reason ?? 'unknown'}).`}`,
@@ -1602,7 +1609,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       // main; the "Existing workspaces retain their prior settings" sentence is
       // deliberately dropped — PRI-1064 turns governance ON for those
       // workspaces, so keeping it would state the opposite of what happens.
-      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable, edit ${path.join(p.governanceDir, '.pd', 'config.yaml')} — each flag id is ONE flat key (not nested). In the existing "features:" block set workbuddy_live_keyword_pain: {enabled: false} to disable keyword Pain only, or host.workbuddy: {enabled: false} to disable all WorkBuddy governance.${pendingRebindNote}`,
+      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable, edit ${path.join(p.governanceDir, '.pd', 'config.yaml')} — each flag id is ONE flat key (not nested). In the existing "features:" block set host.workbuddy: {enabled: false} to disable all WorkBuddy governance. Automatic Pain detection is unavailable in WorkBuddy; record pain only through the explicit "PD记录痛苦：" prefix.${pendingRebindNote}`,
     };
   }
 

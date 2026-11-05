@@ -117,6 +117,20 @@ describe('workbuddy worker handler (functional)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('--status human output says automatic Pain detection is unavailable and names the explicit prefix', async () => {
+    const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
+    const config = getDefaultPdConfig();
+    config.features['host.workbuddy'].enabled = true;
+    config.features.internalization_auto_consumer.enabled = true;
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    await handleWorkbuddyWorker({ workspace: workspaceDir, status: true, json: false });
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(output).toContain('automatic Pain detection: NOT AVAILABLE in WorkBuddy');
+    expect(output).toContain('PD记录痛苦：');
+    expect(output).not.toContain('auto keyword Pain');
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
   it('host.workbuddy=false → paused with the WorkBuddy-specific reason (no Codex borrowing)', { timeout: 20_000 }, async () => {
     const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
     const config = getDefaultPdConfig();

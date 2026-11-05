@@ -19,7 +19,7 @@ You're always in control. Nothing activates without your approval.
 
 **Prerequisites**: Node.js ≥ 22 | OpenClaw CLI installed | an LLM API key you are willing to give PD
 
-> **Other hosts**: this guide walks the OpenClaw path. Codex uses the [plugin marketplace](/install?host=codex). WorkBuddy Desktop is supported too — its install command ships with the next release; see the [WorkBuddy install path](/install?host=workbuddy). One WorkBuddy-specific difference: all PD commands below take `--workspace <path>`, and for WorkBuddy that is always the shared governance workspace `~/.workbuddy/pd-workspace`, not a project directory.
+> **Other hosts**: this guide walks the OpenClaw path. Codex uses the [plugin marketplace](/install?host=codex). WorkBuddy Desktop is supported too — its install command ships with the next release; see the [WorkBuddy install path](/install?host=workbuddy). Two WorkBuddy-specific differences: all PD commands below take `--workspace <path>`, and for WorkBuddy that is always the shared governance workspace `~/.workbuddy/pd-workspace`, not a project directory; and WorkBuddy has **no automatic pain detection/correction** (the host has no persisted observation-evidence writer), so record pain with the explicit prefix "PD记录痛苦：" in your message.
 
 ### 1. Install
 

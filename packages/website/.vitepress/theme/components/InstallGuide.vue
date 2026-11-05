@@ -261,6 +261,13 @@
             : 'Set it back to false to turn governance off again (reversible; while off, hooks skip silently and behavior stays neutral). All WorkBuddy projects share this one authorization state — the governance workspace is separate from project directories, which are only used for tool-path decisions.'
           }}
         </p>
+        <p class="step-desc">
+          <strong>{{ isZh ? '痛苦登记方式：' : 'How to record pain:' }}</strong>
+          {{ isZh
+            ? 'WorkBuddy 中自动痛苦识别/自动纠正不可用：宿主侧没有持久化的观测证据写入方，自动候选只会被标记为 observation_only，不会进入痛苦数据库。唯一入口是在当前会话显式提交「PD记录痛苦：<你的原话>」。'
+            : 'Automatic pain detection/correction is NOT available in WorkBuddy: the host has no persisted observation-evidence writer, so automatic candidates are marked observation_only and never reach the pain database. The only intake is the explicit prefix "PD记录痛苦：" in your current message.'
+          }}
+        </p>
       </section>
 
       <section class="guide-step">
@@ -303,7 +310,7 @@
           <tbody>
             <tr>
               <td>{{ isZh ? '模型未配置（needs_setup）' : 'Model not configured (needs_setup)' }}</td>
-              <td>{{ isZh ? '痛苦信号仍会被捕捉，但诊断/提案不会运行' : 'Pain signals are still captured, but diagnosis/proposals will not run' }}</td>
+              <td>{{ isZh ? '显式标记的痛苦仍会被捕捉，但诊断/提案不会运行' : 'Explicitly marked pain is still captured, but diagnosis/proposals will not run' }}</td>
               <td>{{ isZh ? '重跑安装命令补 --provider/--api-key-env，或在治理工作区 config.yaml 补 runtimeProfiles' : 'Re-run the install command with --provider/--api-key-env, or add runtimeProfiles in the governance config.yaml' }}</td>
             </tr>
             <tr>
@@ -332,6 +339,10 @@
           <li>
             <strong>{{ isZh ? '已验证：' : 'Verified:' }}</strong>
             {{ isZh ? '原则注入（每轮 UserPromptSubmit 新鲜注入）、工具治理阻断（PreToolUse deny，超时 fail-closed）、真实失败证据入链、Owner 撤回（撤回即停注入）。' : 'principle injection (fresh every UserPromptSubmit round), tool-governance blocking (PreToolUse deny, fail-closed on timeout), real failure evidence into the evidence chain, and Owner withdrawal (withdrawal stops injection).' }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '不支持：' : 'Not supported:' }}</strong>
+            {{ isZh ? '自动痛苦识别/自动纠正。WorkBuddy 没有持久化的观测证据写入方，自动关键词候选只会被标记为 observation_only，不会入库；唯一登记方式是显式提交「PD记录痛苦：<你的原话>」。' : 'automatic pain detection/correction. WorkBuddy has no persisted observation-evidence writer, so automatic keyword candidates are marked observation_only and never stored; the only intake is the explicit prefix "PD记录痛苦：" in your message.' }}
           </li>
           <li>
             <strong>{{ isZh ? '受限：' : 'Restricted:' }}</strong>

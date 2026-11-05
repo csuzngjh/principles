@@ -6,6 +6,12 @@
 > 前版：`docs/archive/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.1.md`（2026-10-19，Draft/Owner Review）
 > 本文只记录 v0.1 → v0.2 的**增量**；未提及的 v0.1 条款全部沿用。
 
+> **实现现状（2026-11-05 审计）**：本文描述的词表与判定逻辑已实现，但 WorkBuddy
+> 的 ingress 证据门没有 observation writer，自动候选恒为 `observation_only`
+> （只落 abandoned marker，不写 `pain_events`）。因此对 Owner 而言 **WorkBuddy
+> 自动痛苦识别不可用**，唯一入口是显式前缀「PD记录痛苦：」。安装器不再默认启用
+> `workbuddy_live_keyword_pain`；本 SPEC 不代表 WorkBuddy 已具备自动 Pain 产出。
+
 ## 0. 变更摘要与授权链
 
 v0.1 §3.1 规定 WorkBuddy P0 仅四词白名单，且"后续扩大白名单须依据真实 TP/FP

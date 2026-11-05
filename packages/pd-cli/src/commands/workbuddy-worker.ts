@@ -92,10 +92,11 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     return;
   }
   const lines = [
-    '  auto keyword Pain: ' + report.keywordPain.mode + ' (source=' + report.keywordPain.source + ')',
     `WorkBuddy governance worker status (${workspace})`,
     `  mode: ${report.mode}`,
     `  registered in install manifest: ${registered}`,
+    '  automatic Pain detection: NOT AVAILABLE in WorkBuddy — record pain with the explicit "PD记录痛苦：" prefix',
+    `  keyword flag: ${report.keywordPain.mode} (source=${report.keywordPain.source}; has no effect in WorkBuddy)`,
   ];
   if (report.reason !== undefined) lines.push(`  reason: ${report.reason}`);
   if (report.nextAction !== undefined) lines.push(`  next action: ${report.nextAction}`);
