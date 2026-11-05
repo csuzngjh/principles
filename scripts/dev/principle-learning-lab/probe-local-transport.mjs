@@ -8,14 +8,25 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { classifyLocalTransport } from './lib/local-transport-result.mjs';
 
-async function runChild(args, { env, cwd, deadlineMs }) {
+async function runChild(args, { env, cwd, deadlineMs, started = performance.now() }) {
   return await new Promise((resolve) => {
     const child = spawn(process.execPath, args, { env, cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', deadlineExceeded = false, killExit;
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    let firstStdoutMs = null, resultEnvelopeMs = null, nativeExitMs = null, deadlineReachedMs = null;
+    child.stdout.on('data', (chunk) => {
+      firstStdoutMs ??= performance.now() - started;
+      stdout += chunk;
+      try {
+        const envelope = JSON.parse(stdout);
+        if (typeof envelope?.ok === 'boolean' && ['ok', 'error', 'timeout'].includes(envelope.status)) {
+          resultEnvelopeMs ??= performance.now() - started;
+        }
+      } catch { /* A partial chunk does not establish an output boundary. */ }
+    });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     const timer = setTimeout(() => {
       deadlineExceeded = true;
+      deadlineReachedMs = performance.now() - started;
       if (process.platform === 'win32') {
         const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
         killer.on('error', () => { child.kill('SIGKILL'); });
@@ -23,7 +34,12 @@ async function runChild(args, { env, cwd, deadlineMs }) {
       } else child.kill('SIGKILL');
     }, deadlineMs);
     child.on('error', (error) => { clearTimeout(timer); resolve({ exit: null, stdout, stderr: stderr + error.message, deadlineExceeded }); });
-    child.on('close', (exit) => { clearTimeout(timer); resolve({ exit, stdout, stderr, deadlineExceeded, killExit }); });
+    child.on('exit', () => { nativeExitMs = performance.now() - started; });
+    child.on('close', (exit) => {
+      clearTimeout(timer);
+      resolve({ exit, stdout, stderr, deadlineExceeded, killExit,
+        timings: { firstStdoutMs, resultEnvelopeMs, nativeExitMs, deadlineReachedMs, pipesClosedMs: performance.now() - started } });
+    });
   });
 }
 
@@ -36,6 +52,7 @@ export async function probeLocalTransport(cliPath) {
   const marker = 'AA_TRANSPORT_PROBE_NONPRINCIPLE_V1';
   const reply = 'AA_LOCAL_STUB_RESPONSE_V1';
   const requests = [];
+  let hostStarted;
   const server = http.createServer(async (req, res) => {
     try {
       if (req.method !== 'POST' || req.url !== '/v1/chat/completions' || requests.length >= 3) {
@@ -51,7 +68,8 @@ export async function probeLocalTransport(cliPath) {
       const body = Buffer.concat(chunks);
       const payload = JSON.parse(body);
       const order = requests.length + 1;
-      requests.push({ order, model: payload.model, bodySha256: createHash('sha256').update(body).digest('hex'),
+      requests.push({ order, receivedMs: hostStarted === undefined ? null : performance.now() - hostStarted,
+        model: payload.model, bodySha256: createHash('sha256').update(body).digest('hex'),
         userMarkerPresent: Array.isArray(payload.messages) && payload.messages.some((m) =>
           m.role === 'user' && typeof m.content === 'string' && m.content.includes(marker)) });
       await fs.writeFile(path.join(root, `request-${order}.json`), body);
@@ -88,14 +106,16 @@ export async function probeLocalTransport(cliPath) {
     try { validationEnvelope = JSON.parse(validation.stdout); } catch { /* Must have explicit validation. */ }
     if (validation.exit !== 0 || validation.deadlineExceeded || validationEnvelope?.valid !== true) throw new Error('configuration_validation_failed');
     const start = performance.now();
+    hostStarted = start;
     const host = await runChild([cli, 'agent', 'exec', '--config', configPath, '--state-dir', path.join(root, 'state'),
       '--cwd', options.cwd, '--model', 'aa-local/aa-probe', '--thinking', 'off', '--timeout', '45', '--json', marker],
-    { ...options, deadlineMs: 60000 });
+    { ...options, deadlineMs: 60000, started: start });
     await fs.writeFile(path.join(root, 'host.stdout'), host.stdout);
     await fs.writeFile(path.join(root, 'host.stderr'), host.stderr);
     report = { ...classifyLocalTransport({ validationExit: validation.exit, hostExit: host.exit,
-      deadlineExceeded: host.deadlineExceeded, requests, stdout: host.stdout, marker, reply }),
-      elapsedSeconds: (performance.now() - start) / 1000, requests, hostInvocations: 1, paidModelCalls: 0 };
+      deadlineExceeded: host.deadlineExceeded, requests, stdout: host.stdout, marker, reply, timings: host.timings }),
+      elapsedSeconds: (performance.now() - start) / 1000, timings: host.timings,
+      requests, hostInvocations: 1, paidModelCalls: 0 };
   } catch (error) { report = { ok: false, failure: error.message, pdPrincipleDelivery: 'not_tested', behavioralImprovement: 'not_tested' }; }
   finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
   report.artifactDirectory = root;

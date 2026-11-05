@@ -38,3 +38,17 @@ test('textual stub mentions, malformed output and a failed envelope are not a re
     assert.equal(classifyLocalTransport({ ...valid(), stdout }).ok, false);
   }
 });
+
+test('a deadline records the observed phase without equating a late result with an exit hang', () => {
+  const timed = { ...valid(), deadlineExceeded: true, hostExit: 1 };
+  for (const [changes, expected] of [
+    [{ requests: [], timings: { resultEnvelopeMs: null, nativeExitMs: null } }, 'before_request_capture'],
+    [{ timings: { resultEnvelopeMs: null, nativeExitMs: 60100 } }, 'after_request_capture'],
+    [{ timings: { resultEnvelopeMs: 59900, nativeExitMs: 60100 } }, 'after_result_output'],
+    [{ timings: { resultEnvelopeMs: 59000, nativeExitMs: 59500, deadlineReachedMs: 60000 } }, 'waiting_for_output_pipes'],
+  ]) {
+    const result = classifyLocalTransport({ ...timed, ...changes });
+    assert.equal(result.ok, false);
+    assert.equal(result.deadlinePhase, expected);
+  }
+});

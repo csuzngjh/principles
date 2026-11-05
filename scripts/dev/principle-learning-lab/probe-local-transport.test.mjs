@@ -34,6 +34,11 @@ test('isolated runner captures the actual HTTP body and receives the stub withou
     assert.equal(result.ok, true);
     assert.equal(result.requestCount, 1);
     assert.equal(result.pdPrincipleDelivery, 'not_tested');
+    assert.equal(result.deadlinePhase, null);
+    assert.ok(result.requests[0].receivedMs >= 0);
+    assert.ok(result.timings.resultEnvelopeMs >= result.requests[0].receivedMs);
+    assert.ok(result.timings.nativeExitMs >= result.timings.resultEnvelopeMs);
+    assert.ok(result.timings.pipesClosedMs >= result.timings.nativeExitMs);
     const request = await fs.readFile(path.join(result.artifactDirectory, 'request-1.json'));
     const { createHash } = await import('node:crypto');
     assert.equal(createHash('sha256').update(request).digest('hex'), result.requests[0].bodySha256);

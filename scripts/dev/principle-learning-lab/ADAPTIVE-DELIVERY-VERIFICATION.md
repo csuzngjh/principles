@@ -14,6 +14,8 @@ node scripts/dev/principle-learning-lab/probe-local-transport.mjs --run --opencl
 
 本探针证明的是回环请求与响应及正常退出。PD 插件被禁用，`pdPrincipleDelivery` 与 `behavioralImprovement` 始终为 `not_tested`，不能生成原则 confirmed 或覆盖率 D。`probe-local-transport.test.mjs` 使用假 CLI 验证隔离和实际 HTTP 字节捕获；这属于 fixture 测试，不作为真实宿主证据。
 
+每次运行另外记录同一单调时钟原点下的请求收取、首个 stdout、完整结果 JSON、根进程 exit 和输出管道 close 时间。`deadlinePhase` 区分 before_request_capture、after_request_capture、after_result_output 和 waiting_for_output_pipes；它描述截止时的已观测阶段，不自动诊断死锁。外层 60 秒包含启动/准备、请求、输出及清理；内层 `--timeout 45` 不能视为整个 CLI 从启动到退出的保证。阶段记录不延长期限，也不把任何超时重新标为通过。
+
 对应 PRI-1112 与 PRI-1109 的离线准备部分。脚本只读给定证据，不调用模型、不采集宿主、不修改治理或安装。既有 Receipt/Evidence 仍是运行事实的归属。
 
 ## 运行
