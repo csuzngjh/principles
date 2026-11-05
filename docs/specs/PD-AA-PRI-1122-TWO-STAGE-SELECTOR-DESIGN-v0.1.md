@@ -2,6 +2,8 @@
 
 修订：2026-11-05 自评修正。阶段一不判断原则价值；首个无复用状态试点不宣称门控节费。模型来源与剩余缺口见同目录 PD-AA-PRI-1122-MODEL-FEASIBILITY-SELF-REVIEW.md。
 
+当前模型协议补充：Owner 指定 OpenRouter 专用 Decisions 免费模型 + ZAI GLM-5.3-Flash；以 `PD-AA-PRI-1122-DECISIONS-GLM-EXPERIMENT-CARD-v0.1.md` 为阶段一模型输入输出的最新提案。专用概率输出不生成摘要，先前生成模型摘要/引用契约在此路径不适用。具体变更待批准。
+
 日期：2026-11-05。代码调查基线：`9f477a9fc8cfa59204ce7aa4018637fbacdbb7a5`。
 
 状态：设计提案，待 Owner 对具体实现与实验方案确认。Owner 本轮原话“可以，启动这块的工作吧”批准的是并行设计和对照准备；本文件不是生产实现、模型调用或启用授权。
