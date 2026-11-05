@@ -140,7 +140,7 @@ async function promptHost(defaultHost: HostTarget = 'openclaw'): Promise<HostTar
       {
         name: 'WorkBuddy',
         value: 'workbuddy' as const,
-        description: 'Registers the PD plugin into WorkBuddy\'s marketplace (~/.pd/workbuddy-marketplace → engine plugin install). New installs enable WorkBuddy governance and keyword Pain detection; existing settings are preserved.',
+        description: 'Registers the PD plugin into WorkBuddy\'s marketplace (~/.pd/workbuddy-marketplace → engine plugin install). New installs enable WorkBuddy governance; existing settings are preserved. Automatic Pain detection is NOT available in WorkBuddy (no persisted observation evidence source) — record pain with the explicit "PD记录痛苦：" prefix.',
       },
       {
         name: 'All hosts',

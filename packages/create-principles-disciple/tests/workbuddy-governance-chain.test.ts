@@ -197,7 +197,10 @@ describe.skipIf(!PD_CLI_AVAILABLE)('R1 chain: real install → enable → real w
     const installed = loadPdConfigForPlugin(lab.governance);
     expect(installed.ok, `installed config must validate: ${JSON.stringify(installed.errors)}`).toBe(true);
     expect(computeFeatureFlagsFromConfig(installed.effective).flags['host.workbuddy']?.enabled).toBe(true);
-    expect(computeFeatureFlagsFromConfig(installed.effective).flags.workbuddy_live_keyword_pain?.enabled).toBe(true);
+    // 2026-11-05 (Owner decision): WorkBuddy has no persisted observation
+    // writer, so automatic keyword Pain detection is unsupported and the
+    // installer never enables the flag.
+    expect(computeFeatureFlagsFromConfig(installed.effective).flags.workbuddy_live_keyword_pain?.enabled).toBe(false);
     // Exercise legacy disabled-workspace behavior explicitly after testing the new-install default.
     expect(lab.installer.disableGovernance().ok).toBe(true);
 

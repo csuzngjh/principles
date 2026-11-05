@@ -404,7 +404,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // (zero filesystem calls at the transcript boundary) and no observations are
   // written — prompt injection, RuleHost, and existing tool evidence are
   // unchanged. Broader Codex kill switch remains host.codex.
-  { id: 'workbuddy_live_keyword_pain', category: 'quiet', enabled: false, since: '2026-10-19', description: 'Opt-in live current-user high precision keyword Pain intake for WorkBuddy; no transcript or LLM.' },
+  { id: 'workbuddy_live_keyword_pain', category: 'quiet', enabled: false, since: '2026-10-19', description: 'UNSUPPORTED in WorkBuddy (2026-11-05 audit): the ingress evidence gate has no persisted observation writer, so automatic candidates are always observation_only and never become Pain rows. Keep off; the only intake is the explicit "PD记录痛苦：" prefix.' },
   { id: 'codex_conversation_ingestion', category: 'quiet', enabled: false, since: '2026-08-29', description: 'Codex Governance Closure Slice A — bounded governance-observation ingestion from the authenticated Codex Stop-hook transcript (visible user/assistant/tool facts only, ≤32 turns/≤7 days operational window, promotion substrate). Default off; flag-off = zero transcript reads, no observation writes, existing Codex behavior unchanged.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },

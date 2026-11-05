@@ -245,11 +245,54 @@
       </section>
 
       <section class="guide-step">
-        <h2 class="step-title">{{ isZh ? '步骤 3 · 显式启用治理（默认关闭）' : 'Step 3 · Enable governance explicitly (off by default)' }}</h2>
+        <h2 class="step-title">{{ isZh ? '步骤 3 · 安装状态与治理（五个独立事实）' : 'Step 3 · Install state and governance (five separate facts)' }}</h2>
         <p class="step-desc">
           {{ isZh
-            ? '安装完成后 PD 治理默认关闭：安装只注册插件与治理工作区，不会自动改变 Agent 行为。启用入口是治理工作区的 config.yaml（~/.workbuddy/pd-workspace/.pd/config.yaml）：'
-            : 'After install, PD governance is OFF by default: installing only registers the plugin and the governance workspace — agent behavior is never changed automatically. The enable entry point is the governance workspace config.yaml (~/.workbuddy/pd-workspace/.pd/config.yaml):'
+            ? '「插件安装」「插件启用」「治理开启」「自动识别关闭」「手动入口可用」是五件独立的事，逐条确认，不要混为一谈：'
+            : '"Plugin installed", "plugin enabled", "governance ON", "automatic detection OFF" and "manual entry available" are five separate facts — check each one:'
+          }}
+        </p>
+        <ul class="scope-list">
+          <li>
+            <strong>{{ isZh ? '插件安装：' : 'Plugin installed:' }}</strong>
+            {{ isZh
+              ? '安装器把插件注册进 WorkBuddy 的插件清单与市场，并在 ~/.workbuddy/pd-workspace 建立治理工作区（不在项目目录）。'
+              : 'the installer registers the plugin in WorkBuddy\'s plugin registry/marketplace and creates the governance workspace at ~/.workbuddy/pd-workspace (not in a project directory).'
+            }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '插件启用：' : 'Plugin enabled:' }}</strong>
+            {{ isZh
+              ? '安装器同时把 settings.json 的 enabledPlugins["principles-disciple@<marketplace>"] 写成 true——装完即启用，新会话生效。插件清单里的 defaultEnabled=false 只对「不走 PD 安装器」的宿主安装方式生效。'
+              : 'the installer also writes enabledPlugins["principles-disciple@<marketplace>"] = true in settings.json — installed means enabled, effective in a new session. The manifest\'s defaultEnabled=false applies only when a host installs the plugin WITHOUT the PD installer.'
+            }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '治理开启：' : 'Governance ON:' }}</strong>
+            {{ isZh
+              ? '安装器把治理工作区 config.yaml 的 features.host.workbuddy 写成 enabled: true（默认开启）。如果你显式写过 enabled: false，安装器会保留这个 opt-out，不会替你打开。'
+              : 'the installer writes features.host.workbuddy with enabled: true in the governance config.yaml (ON by default). If you explicitly wrote enabled: false, the installer preserves that opt-out and never turns it on for you.'
+            }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '自动识别关闭：' : 'Automatic detection OFF:' }}</strong>
+            {{ isZh
+              ? 'WorkBuddy 没有持久化的观测证据写入方，自动关键词候选只会被标记为 observation_only，永不进入痛苦数据库；安装器始终把 workbuddy_live_keyword_pain 写成 enabled: false。'
+              : 'WorkBuddy has no persisted observation-evidence writer, so automatic keyword candidates are marked observation_only and never reach the pain database; the installer always writes workbuddy_live_keyword_pain with enabled: false.'
+            }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '手动入口可用：' : 'Manual entry available:' }}</strong>
+            {{ isZh
+              ? '唯一登记方式是在当前会话显式提交「PD记录痛苦：<你的原话>」；它与上面的自动识别开关无关，自动识别关闭也不影响手动登记。'
+              : 'the only intake is the explicit prefix "PD记录痛苦：" in your current message. It is independent of the automatic-detection flag: turning automatic detection off does not disable manual marking.'
+            }}
+          </li>
+        </ul>
+        <p class="step-desc">
+          {{ isZh
+            ? '安装器默认写入的治理开关（治理工作区 config.yaml，~/.workbuddy/pd-workspace/.pd/config.yaml）：'
+            : 'The governance flag the installer writes by default (governance config.yaml, ~/.workbuddy/pd-workspace/.pd/config.yaml):'
           }}
         </p>
         <pre class="yaml-block"><code>features:
@@ -257,8 +300,8 @@
     enabled: true</code></pre>
         <p class="step-desc">
           {{ isZh
-            ? '改回 false 即关闭（可逆，关闭后钩子静默跳过、行为中性）。所有 WorkBuddy 项目共享这一份授权状态——治理工作区与项目目录是分开的，项目路径只用于工具路径判定。'
-            : 'Set it back to false to turn governance off again (reversible; while off, hooks skip silently and behavior stays neutral). All WorkBuddy projects share this one authorization state — the governance workspace is separate from project directories, which are only used for tool-path decisions.'
+            ? '显式改回 false 即关闭（可逆，关闭后钩子静默跳过、行为中性）。所有 WorkBuddy 项目共享这一份授权状态——治理工作区与项目目录是分开的，项目路径只用于工具路径判定。'
+            : 'Set it back to false explicitly to turn governance off again (reversible; while off, hooks skip silently and behavior stays neutral). All WorkBuddy projects share this one authorization state — the governance workspace is separate from project directories, which are only used for tool-path decisions.'
           }}
         </p>
       </section>
@@ -303,7 +346,7 @@
           <tbody>
             <tr>
               <td>{{ isZh ? '模型未配置（needs_setup）' : 'Model not configured (needs_setup)' }}</td>
-              <td>{{ isZh ? '痛苦信号仍会被捕捉，但诊断/提案不会运行' : 'Pain signals are still captured, but diagnosis/proposals will not run' }}</td>
+              <td>{{ isZh ? '显式标记的痛苦仍会被捕捉，但诊断/提案不会运行' : 'Explicitly marked pain is still captured, but diagnosis/proposals will not run' }}</td>
               <td>{{ isZh ? '重跑安装命令补 --provider/--api-key-env，或在治理工作区 config.yaml 补 runtimeProfiles' : 'Re-run the install command with --provider/--api-key-env, or add runtimeProfiles in the governance config.yaml' }}</td>
             </tr>
             <tr>
@@ -332,6 +375,10 @@
           <li>
             <strong>{{ isZh ? '已验证：' : 'Verified:' }}</strong>
             {{ isZh ? '原则注入（每轮 UserPromptSubmit 新鲜注入）、工具治理阻断（PreToolUse deny，超时 fail-closed）、真实失败证据入链、Owner 撤回（撤回即停注入）。' : 'principle injection (fresh every UserPromptSubmit round), tool-governance blocking (PreToolUse deny, fail-closed on timeout), real failure evidence into the evidence chain, and Owner withdrawal (withdrawal stops injection).' }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '不支持：' : 'Not supported:' }}</strong>
+            {{ isZh ? '自动痛苦识别/自动纠正。WorkBuddy 没有持久化的观测证据写入方，自动关键词候选只会被标记为 observation_only，不会入库；唯一登记方式是显式提交「PD记录痛苦：<你的原话>」。' : 'automatic pain detection/correction. WorkBuddy has no persisted observation-evidence writer, so automatic keyword candidates are marked observation_only and never stored; the only intake is the explicit prefix "PD记录痛苦：" in your message.' }}
           </li>
           <li>
             <strong>{{ isZh ? '受限：' : 'Restricted:' }}</strong>

@@ -117,6 +117,44 @@ describe('workbuddy worker handler (functional)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('--status human output says automatic Pain detection is unavailable and names the explicit prefix', async () => {
+    const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
+    const config = getDefaultPdConfig();
+    config.features['host.workbuddy'].enabled = true;
+    config.features.internalization_auto_consumer.enabled = true;
+    fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+    await handleWorkbuddyWorker({ workspace: workspaceDir, status: true, json: false });
+    const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(output).toContain('automatic Pain detection: NOT AVAILABLE in WorkBuddy');
+    expect(output).toContain('PD记录痛苦：');
+    expect(output).not.toContain('auto keyword Pain');
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('--status --json keeps the documented single-object contract and reports the default-OFF keyword gate', async () => {
+    const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
+    // beforeEach config: host.workbuddy=true, workbuddy_live_keyword_pain absent
+    // → its contract default is OFF. The JSON contract must stay unchanged.
+    await handleWorkbuddyWorker({ workspace: workspaceDir, status: true, json: true });
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const report = JSON.parse(logSpy.mock.calls[0]?.[0] as string) as {
+      host: string;
+      mode: string;
+      keywordPain: { enabled: boolean; mode: string; source: string };
+    };
+    expect(report.host).toBe('workbuddy');
+    expect(report.keywordPain).toEqual({ enabled: false, mode: 'off', source: expect.any(String) });
+    expect(Object.keys(report)).toEqual(expect.arrayContaining([
+      'generatedAt',
+      'host',
+      'workspace',
+      'mode',
+      'registeredInInstallManifest',
+      'keywordPain',
+    ]));
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
   it('host.workbuddy=false → paused with the WorkBuddy-specific reason (no Codex borrowing)', { timeout: 20_000 }, async () => {
     const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
     const config = getDefaultPdConfig();
