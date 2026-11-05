@@ -146,6 +146,29 @@ describe('status — WorkBuddy plugin state is read, not inferred', () => {
     expect(lines.join('\n')).not.toContain('INSTALLED / ENABLED');
   });
 
+  it('reports an unset governance flag as OFF, never the install-time ON projection', () => {
+    writeRegistry(true);
+    writeSettings(true);
+    writeRaw(configPath(), 'version: 1\nfeatures: {}\n');
+
+    const lines = statusLines();
+
+    expect(lines).toContain('  WorkBuddy governance ............. OFF');
+    expect(lines).toContain('  Automatic keyword Pain ........... OFF');
+    expect(lines.join('\n')).not.toContain('explicit opt-out');
+  });
+
+  it('reports an explicit governance opt-out as OFF and names it', () => {
+    writeRegistry(true);
+    writeSettings(true);
+    writeGovernanceConfig(false, false);
+
+    const lines = statusLines();
+
+    expect(lines).toContain('  WorkBuddy governance ............. OFF (your explicit opt-out was preserved)');
+    expect(lines.join('\n')).toContain('             to enable: in ');
+  });
+
   it('reads the keyword gate from the config: ON when the config says ON', () => {
     writeRegistry(true);
     writeSettings(true);

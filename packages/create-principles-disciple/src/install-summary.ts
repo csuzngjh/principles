@@ -49,9 +49,8 @@ function pluginStateText(state: HostPluginStateSummary): string {
 
 function governanceText(governance: HostGovernanceSummary, withDefaultNote: boolean): string {
   if (governance.readable === false) return 'UNKNOWN (config unreadable)';
-  return governance.enabled
-    ? `ON${withDefaultNote && !governance.explicitOptOut ? ' (default)' : ''}`
-    : 'OFF (your explicit opt-out was preserved)';
+  if (governance.enabled) return `ON${withDefaultNote && !governance.explicitOptOut ? ' (default)' : ''}`;
+  return governance.explicitOptOut ? 'OFF (your explicit opt-out was preserved)' : 'OFF';
 }
 
 function workbuddyLines(host: HostStateSummaryResult, state: HostPluginStateSummary): string[] {
@@ -59,6 +58,9 @@ function workbuddyLines(host: HostStateSummaryResult, state: HostPluginStateSumm
 
   if (host.governance !== undefined) {
     lines.push(`  WorkBuddy governance ............. ${governanceText(host.governance, false)}`);
+    if (host.governance.readable === false) {
+      lines.push(`             reason: ${host.governance.unreadableReason ?? 'the governance config could not be read'}`);
+    }
     if (host.governance.readable !== false && host.governance.keywordPainEnabled !== undefined) {
       lines.push(`  Automatic keyword Pain ........... ${host.governance.keywordPainEnabled ? 'ON' : 'OFF'}`);
     }
@@ -66,9 +68,6 @@ function workbuddyLines(host: HostStateSummaryResult, state: HostPluginStateSumm
     // available regardless of the keyword gate, but only once the plugin (and
     // therefore the hook that delivers the prompt) is enabled.
     lines.push(`  Manual PD记录痛苦：............... ${state.enabled === true ? 'available' : 'available once the plugin is enabled'}`);
-    if (host.governance.readable === false) {
-      lines.push(`             reason: ${host.governance.unreadableReason ?? 'the governance config could not be read'}`);
-    }
     if (host.governance.readable !== false && !host.governance.enabled) {
       const target = host.governance.configPath ?? 'the governance workspace .pd/config.yaml';
       lines.push(`             to enable: in ${target}, inside the existing "features:" block set host.workbuddy: {enabled: true}`);

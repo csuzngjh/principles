@@ -1017,10 +1017,14 @@ export function ensureWorkbuddyGovernanceEnabled(
   const hostExplicitOff = isRecord(oldHost) && oldHost.enabled === false;
   const keywordExplicitOff = isRecord(oldKeyword) && oldKeyword.enabled === false;
   // Read-only mode (`status`): report the gates the config ACTUALLY holds and
-  // never write. The install path keeps its PRI-1064/PRI-1065 migration below.
+  // never write. A flag that is absent is OFF (the registry default), never the
+  // install-time projection — guessing ON would misreport a config that does
+  // not set the gate. The install path keeps its migration below.
   if (!persist) {
     return {
-      ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff,
+      ok: true, configPath,
+      enabled: isRecord(oldHost) && oldHost.enabled === true,
+      hostExplicitOff, keywordExplicitOff,
       keywordPainEnabled: isRecord(oldKeyword) && oldKeyword.enabled === true, changed: false,
     };
   }
