@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T153650Z-codex-selector",
+  "previousCheckpoint": null,
+  "generatedAt": "2026-11-05T15:36:50Z",
+  "agent": "codex-selector",
+  "overallStatus": "READY_FOR_REVIEW",
+  "summary": "两阶段选择器设计与四臂对照协议已准备，未实施或运行模型实验",
+  "git": {
+    "baseCommit": "9f477a9fc8cfa59204ce7aa4018637fbacdbb7a5",
+    "prUrl": null,
+    "dirtyPaths": [
+      "docs/specs/PD-AA-PRI-1122-TWO-STAGE-SELECTOR-DESIGN-v0.1.md",
+      "docs/implementation-reports/aa-handoff/20261105T153650Z-codex-selector.md",
+      "docs/implementation-reports/aa-handoff/20261105T153650Z-codex-selector.json",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "remoteChecks": "NOT_RUN",
+    "headCommit": "9f477a9fc8cfa59204ce7aa4018637fbacdbb7a5",
+    "branch": "ai/PRI-1122-two-stage-selector-design",
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1122-two-stage-selector-design",
+    "pushedCommit": null
+  },
+  "tasks": [
+    {
+      "owner": "codex-selector",
+      "status": "READY_FOR_REVIEW",
+      "issue": "PRI-1122",
+      "commits": [],
+      "remaining": [
+        "具体方案待评审；PRI-1140/1141 未启动"
+      ],
+      "scope": "并行设计与对照准备，不含后续实现和模型执行",
+      "writePaths": [
+        "docs/specs/PD-AA-PRI-1122-TWO-STAGE-SELECTOR-DESIGN-v0.1.md",
+        "docs/implementation-reports/aa-handoff"
+      ],
+      "acceptance": [
+        {
+          "result": "PASS",
+          "evidenceRefs": [
+            "design"
+          ],
+          "criterion": "当前代码调查与最小方案、四臂对照及后续票据"
+        }
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "failed": null,
+      "result": "NOT_RUN",
+      "skipped": null,
+      "id": "runtime",
+      "exitCode": null,
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1122-two-stage-selector-design",
+      "passed": null,
+      "command": "代码测试/构建/宿主实验",
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "limitations": "不是实现、实际送达或行为改善证据",
+      "kind": "CODE",
+      "observedAt": "2026-11-05T15:36:50Z",
+      "sha256": "45080a426a98f4d3b682287cc5fdc8d7548b7de665f621b57910ccf6312657f9",
+      "id": "design",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1122-two-stage-selector-design/docs/specs/PD-AA-PRI-1122-TWO-STAGE-SELECTOR-DESIGN-v0.1.md",
+      "supports": "可审阅的设计与对照协议"
+    }
+  ],
+  "blockers": [],
+  "nextActions": [
+    {
+      "action": "评审设计与隔离实现范围",
+      "doneWhen": "具体实现范围、预算和模型配置明确",
+      "order": 1,
+      "dependsOn": [
+        "PRI-1122设计批准"
+      ],
+      "issue": "PRI-1140",
+      "authorization": "NEEDS_OWNER"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "paidCallsThisRun": 0,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "authorizationRefs": [
+      "当前 Owner 消息：可以，启动这块的工作吧；选中的是并行设计和对照实验准备"
+    ]
+  }
+}
