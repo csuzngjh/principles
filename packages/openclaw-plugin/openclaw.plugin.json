@@ -25,6 +25,19 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "adaptiveActivation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional expiring single-principle delivery-review mapping. Disabled by default; does not grant principle authorization.",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "workspaceDir": { "type": "string", "minLength": 1 },
+          "artifactId": { "type": "string", "minLength": 1 },
+          "activationId": { "type": "string", "minLength": 1 },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "softTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 15000 }
+        }
+      },
       "language": {
         "type": "string",
         "enum": [

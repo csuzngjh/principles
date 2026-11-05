@@ -8,7 +8,7 @@ const deps = (): AdaptiveInterventionDeps => ({ renderAndGuard:ids=>renderPrinci
 describe('bounded single-principle intervention',()=>{
  it('prioritizes a qualified target and records the optional displaced activation',async()=>{const r=await prepareAdaptiveIntervention(input(),deps());expect(r.reason).toBe('target_prioritized');expect(r.displacedActivationIds).toEqual(['act-a']);expect(r.targetBodySha256).toMatch(/^[a-f0-9]{64}$/);});
  it('preserves Native bytes and zero increment when the full directive is already present',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));const r=await prepareAdaptiveIntervention(i,deps());expect(r.text).toBe(i.nativeText);expect(r.addedTarget).toBe(false);});
- it('never triggers from missing message identity or a quoted/history marker',async()=>{for(const patch of [{currentUserMessageId:undefined},{currentUserMessage:'quoted\n[PD-AA:delivery-review:v1]'},{requestId:undefined},{sessionId:undefined}]){const r=await prepareAdaptiveIntervention({...input(),...patch},deps());expect(r.text).toBe('native unchanged');expect(r.addedTarget).toBe(false);}});
+ it('never triggers from missing message identity or a quoted/history marker',async()=>{for(const patch of [{currentUserMessageId:undefined},{currentUserMessage:'quoted\n[PD-AA:delivery-review:v1]'},{sessionId:undefined}]){const r=await prepareAdaptiveIntervention({...input(),...patch},deps());expect(r.text).toBe('native unchanged');expect(r.addedTarget).toBe(false);}});
  it('does not displace a mandatory constraint',async()=>{expect((await prepareAdaptiveIntervention({...input(),mandatoryPrincipleIds:['a']},deps())).reason).toBe('mandatory_constraint_displaced');});
  it('rejects final size-guard truncation instead of treating selection as delivery',async()=>{expect((await prepareAdaptiveIntervention(input(),{...deps(),renderAndGuard:()=>'<directive id="b">partial'})).reason).toBe('final_target_incomplete');});
  it('rejects revoked or changed targets at the last revalidation',async()=>{expect((await prepareAdaptiveIntervention(input(),{...deps(),revalidate:async()=>false})).reason).toBe('target_changed');});
@@ -35,4 +35,14 @@ describe('operator-controlled admission keeps identities distinct', () => {
     i.controlledAdmission = { admissionId: 'operator-invocation', inputSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) };
     expect((await prepareAdaptiveIntervention(i, deps())).reason).toBe('ambiguous_admission');
   });
+});
+
+it('can select from admitted user identity while model request identity remains unknown', async () => {
+  const i = input();
+  delete i.requestId;
+  i.nativePrincipleIds = ['a'];
+  const r = await prepareAdaptiveIntervention(i, deps());
+  expect(r.reason).toBe('target_prioritized');
+  expect(r.selectedPrincipleIds).toEqual(['b']);
+  expect(Object.hasOwn(r, 'delivery')).toBe(false);
 });

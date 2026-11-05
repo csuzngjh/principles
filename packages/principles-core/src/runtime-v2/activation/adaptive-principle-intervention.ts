@@ -4,6 +4,7 @@ import { trimToBudget, renderPrinciplesToDirectives, type ActivatedPrinciple } f
 
 export interface AdaptiveInterventionInput {
   nativeText: string;
+  nativePrincipleIds?: string[];
   /** Existing host render with the target excluded, used on known revocation/revision change. */
   nativeWithoutTargetText: string;
   principles: ActivatedPrinciple[];
@@ -35,13 +36,16 @@ export interface AdaptiveInterventionResult {
   reason: string;
   addedTarget: boolean;
   displacedActivationIds: string[];
+  selectedPrincipleIds?: string[];
   targetBodySha256?: string;
 }
 
 /** One bounded intervention; no governance writes, model calls, caches or delivery assertions. */
 export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInput, deps: AdaptiveInterventionDeps): Promise<AdaptiveInterventionResult> {
   let excludeUncertainTarget = false;
-  const fallback = (reason: string): AdaptiveInterventionResult => ({ text: excludeUncertainTarget ? input.nativeWithoutTargetText : input.nativeText, reason, addedTarget: false, displacedActivationIds: [] });
+  let targetPrincipleId: string | undefined;
+  const fallback = (reason: string): AdaptiveInterventionResult => ({ text: excludeUncertainTarget ? input.nativeWithoutTargetText : input.nativeText, reason, addedTarget: false, displacedActivationIds: [],
+    ...(input.nativePrincipleIds ? { selectedPrincipleIds: input.nativePrincipleIds.filter(id => !excludeUncertainTarget || id !== targetPrincipleId) } : {}) });
   try {
     const nonempty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
     const admission = input.controlledAdmission;
@@ -50,7 +54,8 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
       && /^[a-f0-9]{64}$/.test(admission.inputSha256) && /^[a-f0-9]{64}$/.test(admission.manifestSha256)
       && typeof input.currentUserMessage === 'string'
       && createHash('sha256').update(input.currentUserMessage, 'utf8').digest('hex') === admission.inputSha256;
-    if (!nonempty(input.sessionId) || !(controlled || (!admission && nonempty(input.currentUserMessageId) && nonempty(input.requestId)))) return fallback('request_identity_unavailable');
+    // Model-request identity belongs to later delivery evidence, not input admission.
+    if (!nonempty(input.sessionId) || !(controlled || (!admission && nonempty(input.currentUserMessageId)))) return fallback('request_identity_unavailable');
     if (input.currentUserMessage?.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return fallback('scene_not_matched');
     if (!Number.isFinite(input.deadlineAt) || deps.now() >= input.deadlineAt) return fallback('deadline');
     if (!Number.isSafeInteger(input.selectionBudget) || input.selectionBudget < 0
@@ -61,17 +66,20 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
     if (matches.length !== 1) return fallback('target_unavailable');
     const [target] = matches;
     if (!target) return fallback('target_unavailable');
+    targetPrincipleId = target.principleId;
     excludeUncertainTarget = true;
     const rendered = renderPrinciplesToDirectives([target], new Set([target.principleId]), { escapeFn: escapeXml, selfReportInstruction: input.selfReportInstruction });
     const body = rendered.slice(rendered.indexOf('<directive '), rendered.indexOf('</directive>') + '</directive>'.length);
     const unchanged = input.nativeText.includes(body);
     let text = input.nativeText;
     let displacedActivationIds: string[] = [];
+    let selectedPrincipleIds = input.nativePrincipleIds;
     if (!unchanged) {
       const n = input.principles.length;
       const start = input.roundKey === undefined ? 0 : ((input.roundKey % n) + n) % n;
       const ring = input.principles.slice(start).concat(input.principles.slice(0, start));
       const selected = trimToBudget([target, ...ring.filter(p => p !== target)], input.selectionBudget, escapeXml, 0);
+      selectedPrincipleIds = [...selected.injectedIds];
       if (!selected.injectedIds.has(target.principleId)) return fallback('target_does_not_fit');
       if (input.mandatoryPrincipleIds.some(id => !selected.injectedIds.has(id))) return fallback('mandatory_constraint_displaced');
       text = deps.renderAndGuard(selected.injectedIds);
@@ -93,6 +101,7 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
     if (!validation) return fallback('target_changed');
     if (deps.now() >= input.deadlineAt) return fallback('deadline');
     return { text, reason: unchanged ? 'native_already_contains_target' : 'target_prioritized', addedTarget: !unchanged,
+      ...(selectedPrincipleIds ? { selectedPrincipleIds } : {}),
       displacedActivationIds, targetBodySha256: createHash('sha256').update(body, 'utf8').digest('hex') };
   } catch { return fallback('dependency_failed'); }
 }

@@ -8,7 +8,9 @@
 - ActivatedPrinciple携带完整artifactContentSha256，纯resolver计算原始content_json UTF8摘要，metadata-only变更也能识别。
 - host-runtime只读重验器已合入，身份/正文/摘要/authority/approvedBy、取消和Reader错误均fail closed；shared与local Reader授权推导一致性修复由Luna在独立worktree推进。
 - 回执数据契约已提升到正式core，lab入口转导出轻量package子路径，生产/离线不再各自校验。尚未把journal与新阶段写入实际hook/统一evidence入口。
-- PD SDK补齐新版可选currentUserMessage/currentUserMessageId。prompt接线改为优先显式当前输入，空/无效显式值不回退旧历史，缺字段保留旧Native。此项最新86项相关测试通过；不等于OpenClaw embedded生产者已修。
+- PD SDK补齐新版可选currentUserMessage/currentUserMessageId。prompt接线改为优先显式当前输入，空/无效显式值不回退旧历史，缺字段保留旧Native；不等于OpenClaw embedded生产者已修。
+- 正常本地before_prompt_build现已接入正式干预核心。显式启用、限定工作区且未过期的单条映射，仅在真实当前准入文本首行匹配场景标记且有宿主消息身份时执行；不要求尚未产生的模型请求ID。复用Native正文、最终正文完整性、返回边界只读重验、失效/超时剔除目标、最终集合再记证据。配置默认关闭，未写入用户安装或生产配置。
+- 本批真实入口SQLite测试5项与配置边界8项通过；含既有回归的两文件60项通过，另外6文件61项回归通过；核心/解析55项通过。core、host-runtime、OpenClaw插件构建和所改插件源码lint通过。以上只证明开发代码路径，不证明已安装启用、独立送达或行为改善。
 - 独立送达验证器、配置投影、覆盖率统计和本地传输工具已经实现。Node工具66项通过；core原有及新核心/解析测试54项通过，正式回执9项、host重验7项分别通过；不要将重叠回归套件相加宣传。
 - 全仓npm run build曾在正式core合入后通过；后续变更需最后一次完整集成构建和适用测试。
 
@@ -17,10 +19,10 @@
 | 工单 | 实际状态 |
 |---|---|
 | PRI-1106/1107 | 场景与批准范围记录已有；G1补充卡获书面批准，不代表生产启用 |
-| PRI-1108 | 正式核心实现已有，正常宿主入口端到端仍未验收 |
+| PRI-1108 | 正式核心与本地正常hook接线及SQLite集成测试已有；实际宿主正例未验收 |
 | PRI-1109 | 正式状态契约已合入，运行journal/ingress接线待做 |
 | PRI-1110 | 纯配置身份和来源文档已完成，生效profile自动采集待做 |
-| PRI-1111 | SDK与当前输入消费修复已有；Adaptive宿主正式接线仍待做 |
+| PRI-1111 | SDK、显式当前输入消费、本地正常hook干预已实现；未安装启用，embedded缺消息身份时保持Native |
 | PRI-1112 | 独立验证器与普通真实请求捕获已有；原则真实正例未通过 |
 | PRI-1113 | 案例判据文档已合入，仍为草案/未完成行为评价校准 |
 | PRI-1114 | 生产读模型/真实机会和后续行动关联未完成 |
@@ -39,7 +41,7 @@ Owner补充卡允许一次正例及一次Native对照，最多两次本地假模
 
 第二次插件采用bundle而非首个未打包源码，构建产物不同且首个未到请求阶段，不能将两者作为公平的行为/性能因果对照。原始目录不改写。尚未执行第三次实际宿主调用。
 
-临时生成manifest遗漏了真实PD manifest已有的activation.onStartup/onCapabilities声明。Luna基于OpenClaw跟踪源码发现缺声明会影响lazy startup规划；这对“未观察到callback”是有代码支持的解释，尚未通过本次运行确认因果。可先在不启动宿主的情况下修正夹具/检查装载；额外实际调用须有新的有界授权，不因此前失败而自动追加。
+随后仅用官方plugins inspect --runtime做只读装载诊断（没有Agent/模型回合），在独立复制目录.tmp/aa-controlled/inspect-rowyk0t_中确认插件已import但hookCount=0，明确诊断为缺少plugins.entries.aa-controlled-intervention.hooks.allowConversationAccess=true，因此before_prompt_build注册被阻止。这是本次夹具的权限遗漏；真实PD默认配置和安装器已有该权限。先前关于manifest缺activation声明导致CLI未回调的解释未成立：CLI注册路径没有使用Gateway lazy startup规划，不能保留为已确认根因。原始失败记录不改写，额外实际Agent调用仍须新的有界授权。
 
 ## OpenClaw ID调查
 

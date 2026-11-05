@@ -262,6 +262,86 @@ function insertValidatedPrincipleArtifact(overrides: {
   );
 }
 
+describe('Adaptive activation — actual local prompt entry', () => {
+  async function seed() {
+    // More qualified principles than Native can pack: the intervention must
+    // change the real final prompt, not merely report a successful selection.
+    for (let i = 0; i < 20; i++) {
+      const principleId = `AA-${String(i).padStart(2, '0')}`;
+      insertValidatedPrincipleArtifact({ artifactId: `art-${principleId}`, principleId, text: `${principleId}-body-${'Z'.repeat(300)}` });
+      await insertPromptActivation({ artifactId: `art-${principleId}`, principleId });
+    }
+  }
+
+  function configured(principleId: string) {
+    const ctx = makeCtx();
+    if (!ctx.api) throw new Error('test requires plugin API');
+    ctx.api.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, artifactId: `art-${principleId}`,
+      activationId: `act_prompt_${principleId}`, expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    return ctx;
+  }
+
+  const admitted = () => ({ ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview delivery', currentUserMessageId: 'host-admission-1' });
+
+  it('prioritizes an omitted authorized target and records only final selected IDs', async () => {
+    await seed();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const native = await handleBeforePromptBuild(admitted(), makeCtx());
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`)
+      .find(id => !native?.prependSystemContext?.includes(`${id}-body-`));
+    expect(target).toBeDefined();
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+    const ctx = configured(target!);
+    const result = await handleBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext).toContain(`${target}-body-`);
+    expect(result?.prependSystemContext?.split(`${target}-body-`)).toHaveLength(2);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const payload = spy.mock.calls[0]![0] as { principleIds: string[] };
+    expect(payload.principleIds).toContain(target);
+    for (const id of payload.principleIds) expect(result?.prependSystemContext).toContain(`${id}-body-`);
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":true'));
+  });
+
+  it('reuses a Native target without duplicating or claiming a new contribution', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const ctx = configured('AA-only');
+    const result = await handleBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext?.split('AA-only-body')).toHaveLength(2);
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":false'));
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('native_already_contains_target'));
+  });
+
+  it('preserves Native when the current native message identity is unavailable', async () => {
+    await seed();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = { ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview' };
+    const native = await handleBeforePromptBuild(event, makeCtx());
+    const result = await handleBeforePromptBuild(event, configured('AA-19'));
+    expect(result).toEqual(native);
+  });
+
+  it('does not interpret a quoted scene marker as a current request', async () => {
+    await seed();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = { ...admitted(), currentUserMessage: 'Quoted example:\n[PD-AA:delivery-review:v1]' };
+    const native = await handleBeforePromptBuild(event, makeCtx());
+    expect(await handleBeforePromptBuild(event, configured('AA-19'))).toEqual(native);
+  });
+
+  it('does not inject a configured artifact without an active authorized candidate', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-inactive', principleId: 'AA-inactive', text: 'INACTIVE-MUST-NOT-APPEAR' });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured('AA-inactive'));
+    expect(JSON.stringify(result)).not.toContain('INACTIVE-MUST-NOT-APPEAR');
+  });
+});
+
 describe('Runtime V2 prompt activation injection', () => {
   it('shared authority reader preserves owner approval and approver identity', async () => {
     const artifactId = 'art-v2-authority-001';

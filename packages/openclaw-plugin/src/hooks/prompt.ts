@@ -12,10 +12,12 @@ import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingM
 import { PathResolver } from '../core/path-resolver.js';
 import { RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, resolveTotalInjectionBudgetChars, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
 import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
+import { prepareAdaptiveIntervention, type ActivatedPrinciple, type AdaptiveInterventionResult } from '@principles/core/runtime-v2';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
-import type { ActivePrinciplePromptResult } from '@principles/host-runtime';
+import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
+import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordInjectionPresence, alignActivationIds, alignInjectedPrinciples } from '../core/principle-application-ledger.js';
 import { recordPromptDeliveryEvidence } from '../core/intervention-evidence-recorder.js';
@@ -284,6 +286,7 @@ export async function handleBeforePromptBuild(
   sharedActivePrinciplePrompt?: ActivePrinciplePromptResult,
 ): Promise<PluginHookBeforePromptBuildResult | void> {
   const {workspaceDir} = ctx;
+  const adaptiveStartedAt = Date.now();
   const logger = ctx.api?.logger;
   logger?.info?.(`[PD:Prompt] handleBeforePromptBuild called: workspaceDir=${!!workspaceDir}, trigger=${ctx.trigger}, sessionId=${ctx.sessionId?.substring(0, 20)}`);
   if (!workspaceDir) {
@@ -515,6 +518,15 @@ export async function handleBeforePromptBuild(
 
 
   let runtimeV2PrinciplesContent = '';
+  let adaptiveDirectiveText: string | undefined;
+  let adaptiveOutcome: AdaptiveInterventionResult | undefined;
+  let adaptiveAdmissionId: string | undefined;
+  let adaptiveExpectedTarget: ActivatedPrinciple | undefined;
+  let adaptiveDeadlineAt = 0;
+  let adaptiveBaseline: { text: string; ids: string[] } | undefined;
+  let adaptiveSafeFallback: { text: string; ids: string[] } | undefined;
+  let adaptivePrefix = '';
+  let commitRuntimeV2Evidence: (() => void) | undefined;
   const runtimeV2PrincipleIds = new Set<string>();
   let v2Truncated: boolean | undefined;
   // PRI-904: fair-rotation selection diagnostics, hoisted for the event below.
@@ -633,8 +645,60 @@ export async function handleBeforePromptBuild(
         runtimeV2PrincipleIds.add(id);
       }
       runtimeV2PrinciplesContent = lines.join('\n');
+      const mapping = readAdaptiveActivationConfig(api?.pluginConfig, workspaceDir, adaptiveStartedAt);
+      const admittedText = getOwnValue(event, 'currentUserMessage');
+      const admittedId = getOwnValue(event, 'currentUserMessageId');
+      if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode
+        && typeof admittedText === 'string' && typeof admittedId === 'string' && admittedId.trim() && sessionId) {
+        const selfReport = loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled;
+        const render = (ids: Set<string>) => renderPrinciplesToDirectives(dedupedV2, ids, { escapeFn: escapeXml, selfReportInstruction: selfReport });
+        const target = dedupedV2.find(p => p.artifactId === mapping.artifactId && p.activationId === mapping.activationId);
+        const withoutTarget = new Set(injectedIds);
+        if (target) withoutTarget.delete(target.principleId);
+        adaptiveDeadlineAt = Math.min(adaptiveStartedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
+        const intervention = await prepareAdaptiveIntervention({
+          nativeText: render(injectedIds), nativeWithoutTargetText: render(withoutTarget),
+          nativePrincipleIds: [...injectedIds], principles: dedupedV2, target: mapping,
+          currentUserMessage: admittedText, currentUserMessageId: admittedId, sessionId,
+          selectionBudget: v2PromptBudget.budgetChars, roundKey: v2RoundKey,
+          mandatoryPrincipleIds: [], selfReportInstruction: selfReport,
+          deadlineAt: adaptiveDeadlineAt,
+        }, {
+          now: Date.now,
+          revalidate: (expected, signal) => revalidateAdaptivePrinciple(workspaceDir, expected, signal),
+          renderAndGuard: ids => {
+            const text = render(ids);
+            return text.length <= resolveTotalInjectionBudgetChars(v2PromptBudget?.budgetChars ?? RUNTIME_V2_PRINCIPLE_BUDGET) ? text : '';
+          },
+        });
+        adaptiveDirectiveText = intervention.text;
+        adaptiveOutcome = intervention;
+        adaptiveAdmissionId = admittedId;
+        adaptiveExpectedTarget = target;
+        adaptiveSafeFallback = { text: render(withoutTarget), ids: [...withoutTarget] };
+        if (intervention.addedTarget) adaptiveBaseline = { text: render(injectedIds), ids: [...injectedIds] };
+        if (intervention.selectedPrincipleIds) {
+          const changed = intervention.selectedPrincipleIds.length !== runtimeV2PrincipleIds.size
+            || intervention.selectedPrincipleIds.some(id => !runtimeV2PrincipleIds.has(id));
+          runtimeV2PrincipleIds.clear();
+          for (const id of intervention.selectedPrincipleIds) runtimeV2PrincipleIds.add(id);
+          if (changed) {
+            // The original rotation diagnostics describe the baseline, not the intervened selection.
+            v2SelectionPolicy = undefined;
+            v2RotationStartIndex = undefined;
+            v2RoundOrdinal = undefined;
+            v2DroppedActivationIds = undefined;
+            v2OversizedActivationIds = undefined;
+            v2Truncated = runtimeV2PrincipleIds.size < dedupedV2.length;
+          }
+        }
+        runtimeV2PrinciplesContent = intervention.text;
+      } else if (mapping) {
+        logger?.info?.('[PD:AA] Native preserved: trusted current admission or supported user entry unavailable');
+      }
     }
 
+    commitRuntimeV2Evidence = () => {
     // ── Emit structured observability event ──
     try {
       const eventLog = wctx.eventLog;
@@ -771,6 +835,7 @@ export async function handleBeforePromptBuild(
     } catch (evidenceErr) {
       logger?.warn?.(`[PD:RuntimeV2] Evidence delivery recording failed: ${String(evidenceErr)}`);
     }
+    };
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
   }
@@ -817,7 +882,8 @@ export async function handleBeforePromptBuild(
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
-    const directiveText = sharedActivePrinciplePrompt?.additionalContext
+    if (adaptiveOutcome) adaptivePrefix = prependSystemContext;
+    const directiveText = adaptiveDirectiveText ?? sharedActivePrinciplePrompt?.additionalContext
       ?? renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, {
           escapeFn: escapeXml,
           // PRI-532: self-report instruction on the fallback render path (the
@@ -840,6 +906,7 @@ export async function handleBeforePromptBuild(
   // directives were rendered under plus a fixed background allowance — a
   // large-window model must not have its background blocks squeezed out by a
   // constant total (the former hard-coded 9000 did exactly that).
+  const beforeSizeGuard = { prependContext, appendSystemContext };
   const result = truncateInjectionToBudget(
     prependSystemContext,
     prependContext,
@@ -867,6 +934,57 @@ export async function handleBeforePromptBuild(
         `[PD:Prompt] Injection size exceeded budget, truncated: ${logEntry || 'none'}.`
       );
     }
+  }
+
+  if (adaptiveOutcome?.targetBodySha256 && adaptiveExpectedTarget && adaptiveSafeFallback) {
+    const restore = (fallback: { text: string; ids: string[] }, reason: string) => {
+      const guarded = truncateInjectionToBudget(adaptivePrefix + fallback.text, beforeSizeGuard.prependContext, beforeSizeGuard.appendSystemContext, {
+        totalBudgetChars: resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget)),
+        blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
+      });
+      prependSystemContext = guarded.prependSystemContext;
+      prependContext = guarded.prependContext;
+      appendSystemContext = guarded.appendSystemContext;
+      runtimeV2PrincipleIds.clear();
+      for (const id of fallback.ids) runtimeV2PrincipleIds.add(id);
+      runtimeV2PrinciplesContent = fallback.text;
+      v2SelectionPolicy = undefined;
+      v2RotationStartIndex = undefined;
+      v2RoundOrdinal = undefined;
+      v2DroppedActivationIds = undefined;
+      v2OversizedActivationIds = undefined;
+      adaptiveOutcome = { text: fallback.text, reason, addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: fallback.ids };
+    };
+    const expected = renderPrinciplesToDirectives([adaptiveExpectedTarget], new Set([adaptiveExpectedTarget.principleId]), { escapeFn: escapeXml });
+    const body = expected.slice(expected.indexOf('<directive '), expected.indexOf('</directive>') + '</directive>'.length);
+    if (!prependSystemContext.includes(body)) {
+      restore(adaptiveSafeFallback, 'final_target_incomplete');
+    } else if (Date.now() >= adaptiveDeadlineAt) {
+      restore(adaptiveSafeFallback, 'deadline');
+    } else {
+      const signal = AbortSignal.timeout(Math.max(1, Math.min(adaptiveDeadlineAt - Date.now(), 15000)));
+      const valid = await revalidateAdaptivePrinciple(workspaceDir, adaptiveExpectedTarget, signal);
+      if (!valid || Date.now() >= adaptiveDeadlineAt) {
+        restore(adaptiveSafeFallback, signal.aborted || Date.now() >= adaptiveDeadlineAt ? 'deadline' : 'target_changed');
+      } else if (adaptiveOutcome?.addedTarget && adaptiveBaseline
+        && prependSystemContext.length + prependContext.length + appendSystemContext.length
+          > resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget))) {
+        restore(adaptiveBaseline, 'final_budget_exceeded');
+      }
+    }
+  }
+
+  // Commit only the final selection, including a late deadline/revision/budget fallback.
+  try { commitRuntimeV2Evidence?.(); } catch (error) {
+    logger?.warn?.(`[PD:RuntimeV2] Final prompt evidence unavailable: ${String(error)}`);
+  }
+  if (adaptiveOutcome) {
+    logger?.info?.(`[PD:AA] ${JSON.stringify({
+      hookInvocationId: randomUUID(), sessionId, nativeAdmissionId: adaptiveAdmissionId,
+      reason: adaptiveOutcome.reason, addedTarget: adaptiveOutcome.addedTarget,
+      payload: adaptiveOutcome.targetBodySha256 ? 'prepared' : 'none',
+      targetBodySha256: adaptiveOutcome.targetBodySha256, submission: 'unknown',
+    })}`);
   }
 
   return {
