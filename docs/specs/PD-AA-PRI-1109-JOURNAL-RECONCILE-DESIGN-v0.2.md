@@ -120,7 +120,8 @@
     "filesOmitted": [],
     "truncatedFiles": ["<abs path>"],
     "errors": [{"logDir": ".state/logs", "file": "events_2026-11-05.jsonl",
-                "code": "read_failed | stat_failed | outside_workspace", "message": "<bounded>"}]
+                "code": "read_failed | stat_failed | outside_workspace", "message": "<bounded>"}],
+    "identityComparisonLimited": false
   },
   "totals": {
     "linesRead": 10, "adaptiveRecords": 8, "nonAdaptiveLines": 2,
@@ -203,6 +204,7 @@
 ## 8. 去重、冲突、缺失与窗口截断
 
 - 同目录同文件内逐字段相同的行：计 `duplicatesExact`，保留最早 `ts`。
+- 去重身份按**规范化后的完整原始 `data`** 比较（对象键顺序无关），不按展示投影比较：证据引用、正文摘要、准入身份等实际不同的字段一律不得因展示相同而去重；规范化内容超出比较预算时**保守判为不同**（绝不判为完全重复），并置 `coverage.identityComparisonLimited=true`、在 `q5` 说明该限制。
 - 跨候选目录完全相同的行：按 `.pd/logs` 优先去重（沿用 127-153 的语义），不把同一行算两次调用。
 - 同键多终态/多开始：`conflicted`，`terminalVariants` 保留至每调用上限（见 §9），省略量计入 `terminalVariantsOmitted`，不推断哪一个"真实"。
 - 缺开始：`terminal_only`，`q5` 明确"start unknown"。

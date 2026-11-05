@@ -24,6 +24,15 @@ export const ADAPTIVE_JOURNAL_SCHEMA_VERSION = 'pd-aa-journal-reconciliation/v1'
 export const ADAPTIVE_JOURNAL_CANDIDATE_DIRS = ['.pd/logs', '.state/logs'] as const;
 export const ADAPTIVE_JOURNAL_MAX_DATE_FILES_PER_DIR = 9;
 export const ADAPTIVE_JOURNAL_MAX_FILE_BYTES = 4 * 1024 * 1024;
+/**
+ * Character budget for the full-content duplicate identity comparison. A record
+ * comes from a file capped at ADAPTIVE_JOURNAL_MAX_FILE_BYTES, so on the default
+ * read path its canonical form fits this budget. A caller that raises
+ * maxFileBytes far enough can exceed it: such records are then treated as
+ * DISTINCT (never as exact duplicates) and the limitation is reported via
+ * coverage.identityComparisonLimited.
+ */
+const IDENTITY_COMPARISON_MAX_CHARS = ADAPTIVE_JOURNAL_MAX_FILE_BYTES;
 export const ADAPTIVE_JOURNAL_MAX_INVOCATIONS = 1000;
 export const ADAPTIVE_JOURNAL_MAX_TERMINAL_VARIANTS = 5;
 export const ADAPTIVE_JOURNAL_SUPPORTED_HOST = 'openclaw';
@@ -101,6 +110,12 @@ export interface AdaptiveJournalCoverage {
   filesOmitted: string[];
   truncatedFiles: string[];
   errors: AdaptiveJournalCoverageError[];
+  /**
+   * True when at least one record's canonical full content exceeded the identity
+   * comparison budget. Those records were conservatively treated as distinct:
+   * exact duplication was never asserted for them.
+   */
+  identityComparisonLimited: boolean;
 }
 
 export interface AdaptiveJournalTotals {
@@ -269,7 +284,8 @@ interface BoundedReadResult {
 }
 
 interface ParsedJournalRecord {
-  identityKey: string;
+  /** Normalized full record data; null when the comparison budget was exceeded. */
+  identityKey: string | null;
   ts: string;
   tsMs: number;
   state: 'open' | 'closed' | 'reconciled';
@@ -364,6 +380,7 @@ function emptyCoverage(): AdaptiveJournalCoverage {
     filesOmitted: [],
     truncatedFiles: [],
     errors: [],
+    identityComparisonLimited: false,
   };
 }
 
@@ -637,13 +654,63 @@ function readBoundedLines(filePath: string, maxBytes: number): BoundedReadResult
   }
 }
 
-function identityKey(record: ParsedJournalRecord): string {
+/**
+ * Full canonical serialization of journal record data for duplicate identity.
+ * Never truncated: journal data comes from `JSON.parse`, so only JSON values
+ * occur, and object keys are sorted exactly like canonicalStringify while array
+ * order is preserved.
+ */
+function canonicalJournalDataInner(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
+  if (typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJournalDataInner).join(',')}]`;
+  if (typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    const keys = Object.keys(source).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    const parts: string[] = [];
+    for (const key of keys) {
+      const entry = source[key];
+      if (entry === undefined) continue;
+      parts.push(`${JSON.stringify(key)}:${canonicalJournalDataInner(entry)}`);
+    }
+    return `{${parts.join(',')}}`;
+  }
+  return 'null';
+}
+
+/**
+ * Returns the full canonical text, or null when it exceeds
+ * IDENTITY_COMPARISON_MAX_CHARS — the caller must then treat the record as
+ * DISTINCT and report the limitation instead of asserting equality.
+ */
+function canonicalJournalData(value: unknown): string | null {
+  const text = canonicalJournalDataInner(value);
+  return text.length > IDENTITY_COMPARISON_MAX_CHARS ? null : text;
+}
+
+function identityKey(record: ParsedJournalRecord): string | null {
   // Exact duplication is decided on the whole normalized record data, not on
   // the display projection: two terminals that differ only in evidence reference
   // or target digest are different observations and must stay conflicted.
   const canonical = canonicalStringify(record.data);
-  if (canonical.truncated) return `${record.ts}|${canonical.text}`;
-  return canonical.text;
+  // canonicalStringify documents its output as a marked PREFIX once the data
+  // exceeds its own limit, so truncated text can never certify equality. Fall
+  // back to the full local canonicalization and report a conservative distinct.
+  if (!canonical.truncated) return canonical.text;
+  return canonicalJournalData(record.data);
+}
+
+function countDistinctIdentities(records: ParsedJournalRecord[]): number {
+  const keys = new Set<string>();
+  let limited = 0;
+  for (const record of records) {
+    if (record.identityKey === null) limited += 1;
+    else keys.add(record.identityKey);
+  }
+  // Budget-limited records can never be proven equal to anything.
+  return keys.size + limited;
 }
 
 function buildProjection(data: Record<string, unknown>, fallbackTs: string): AdaptiveJournalRecordProjection {
@@ -711,12 +778,12 @@ function classifyGroup(options: {
   let duplicateOpen = 0;
   let duplicateTerminal = 0;
   for (const record of group.records) {
-    if (seen.has(record.identityKey)) {
+    if (record.identityKey !== null && seen.has(record.identityKey)) {
       if (record.state === 'open') duplicateOpen += 1;
       else duplicateTerminal += 1;
       continue;
     }
-    seen.add(record.identityKey);
+    if (record.identityKey !== null) seen.add(record.identityKey);
     deduped.push(record);
   }
 
@@ -748,8 +815,7 @@ function classifyGroup(options: {
     reasonCodes.push(group.invalidReason);
     unknowns.push('存在无法归属或未通过校验的记录，该调用不能作为配对证据');
   } else if (opens.length === 0 && terminals.length > 0) {
-    const distinctTerminalKeys = new Set(terminals.map((record) => record.identityKey));
-    if (distinctTerminalKeys.size > 1) {
+    if (countDistinctIdentities(terminals) > 1) {
       classification = 'conflicted';
       reasonCodes.push('conflicting_terminal_states');
     } else {
@@ -758,8 +824,7 @@ function classifyGroup(options: {
     reasonCodes.push('start_not_visible_in_range');
     unknowns.push('开始记录在当前范围内不可见');
   } else if (opens.length > 0 && terminals.length === 0) {
-    const distinctOpenKeys = new Set(opens.map((record) => record.identityKey));
-    if (distinctOpenKeys.size > 1) {
+    if (countDistinctIdentities(opens) > 1) {
       classification = 'conflicted';
       reasonCodes.push('multiple_starts_conflict');
     } else {
@@ -773,13 +838,11 @@ function classifyGroup(options: {
     classification = 'invalid';
     unknowns.push('该调用没有任何可归属的记录');
   } else {
-    const distinctOpenKeys = new Set(opens.map((record) => record.identityKey));
-    const distinctTerminalKeys = new Set(terminals.map((record) => record.identityKey));
-    if (distinctOpenKeys.size > 1) {
+    if (countDistinctIdentities(opens) > 1) {
       classification = 'conflicted';
       reasonCodes.push('multiple_starts_conflict');
     }
-    if (distinctTerminalKeys.size > 1) {
+    if (countDistinctIdentities(terminals) > 1) {
       classification = 'conflicted';
       reasonCodes.push('conflicting_terminal_states');
     }
@@ -1133,6 +1196,7 @@ export function reconcileAdaptiveJournal(input: ReconcileAdaptiveJournalInput): 
         fromTruncatedFile: read.truncated,
       };
       record.identityKey = identityKey(record);
+      if (record.identityKey === null) coverage.identityComparisonLimited = true;
 
       const group = getGroup({
         hookInvocationId,
@@ -1232,6 +1296,10 @@ export function reconcileAdaptiveJournal(input: ReconcileAdaptiveJournalInput): 
     suggestions.push('缩小窗口后重试（单文件超过 4 MiB 只读取了尾部）');
     nextAction.push(`覆盖不完整：${coverage.truncatedFiles.length} 个文件只读取了尾部，统计为下界。`);
   }
+  if (coverage.identityComparisonLimited) {
+    suggestions.push('缩小单条记录内容或降低 maxFileBytes 后重试');
+    nextAction.push('重复判定受限：部分记录的规范化内容超出比较预算，已保守地按不同记录处理，不能据此确认完全重复。');
+  }
 
   const confirmedFacts: string[] = [];
   if (coverage.filesRead === 0) {
@@ -1253,6 +1321,7 @@ export function reconcileAdaptiveJournal(input: ReconcileAdaptiveJournalInput): 
   if (coverage.limitCode !== null) unknowns.push('日期文件读取达到上限，部分相交日期文件未纳入。');
   if (coverage.truncatedFiles.length > 0) unknowns.push('存在被截断的文件，更早的记录可能不可见。');
   if (coverage.errors.length > 0) unknowns.push('存在无法读取或越界的日志目录，覆盖不完整。');
+  if (coverage.identityComparisonLimited) unknowns.push('存在超出比较预算的记录：完全相同性未被证明，已保守地按不同记录处理。');
   if (q2Items.length > 0) unknowns.push(`${q2Items.length} 个调用在当前范围内未找到终态。`);
   unknowns.push('本工具不重新认证记录中的独立验证标志，只按记录原样转录。');
 
@@ -1263,6 +1332,7 @@ export function reconcileAdaptiveJournal(input: ReconcileAdaptiveJournalInput): 
   if (windowResult.resolved.window.clampedByRetention) notes.push('请求的 --since 早于日志保留边界，已截断到保留边界。');
   if (outputTruncated) notes.push('输出被截断，结论仅为已输出子集；计数为下界。');
   if (coverage.status === 'partial') notes.push('覆盖不完整：结论与计数仅为当前读取范围的下界。');
+  if (coverage.identityComparisonLimited) notes.push('重复判定受限：部分记录规范化内容超出比较预算，完全相同性未被证明，已保守地按不同记录处理（coverage.identityComparisonLimited=true）。');
 
   const report: AdaptiveJournalReport = {
     schemaVersion: ADAPTIVE_JOURNAL_SCHEMA_VERSION,

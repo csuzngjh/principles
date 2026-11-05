@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ADAPTIVE_JOURNAL_MAX_FILE_BYTES,
   ADAPTIVE_JOURNAL_SCHEMA_VERSION,
   type AdaptiveJournalReport,
   reconcileAdaptiveJournal,
@@ -754,6 +755,97 @@ describe('reconcileAdaptiveJournal — duplicate identity', () => {
     const found = findInvocation(report, invocation);
     expect(found.classification).toBe('conflicted');
     expect(found.duplicates.terminal).toBe(0);
+  });
+
+  it('does not treat records as duplicates when the difference lies beyond the canonical prefix limit', () => {
+    const dir = workspace();
+    const invocation = 'inv-long-prefix';
+    // 262 144 is CANONICAL_JSON_MAX_CHARS: beyond it canonicalStringify keeps
+    // only a marked prefix. The evidence reference sits AFTER the padding key,
+    // so this difference is invisible to any prefix-only comparison.
+    const padding = 'x'.repeat(262_150);
+    const lineA = adaptiveLine({
+      state: 'closed',
+      hookInvocationId: invocation,
+      evidence: { reference: 'capture-A', independentlyVerified: false, padding },
+    }, dir);
+    const lineB = adaptiveLine({
+      state: 'closed',
+      hookInvocationId: invocation,
+      evidence: { reference: 'capture-B', independentlyVerified: false, padding },
+    }, dir);
+    expect(lineA.length).toBeLessThan(ADAPTIVE_JOURNAL_MAX_FILE_BYTES);
+    expect(lineB.length).toBeLessThan(ADAPTIVE_JOURNAL_MAX_FILE_BYTES);
+    writeEvents(dir, '2026-11-05', [lineA, lineB]);
+
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('conflicted');
+    expect(found.reasonCodes).toContain('conflicting_terminal_states');
+    expect(found.duplicates.terminal).toBe(0);
+    expect(report.totals.duplicatesExact).toBe(0);
+    expect(report.coverage.identityComparisonLimited).toBe(false);
+  });
+
+  it('deduplicates fully identical oversized records', () => {
+    const dir = workspace();
+    const invocation = 'inv-long-identical';
+    const padding = 'x'.repeat(262_150);
+    const evidence = { reference: 'capture-A', independentlyVerified: false, padding };
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({ state: 'closed', hookInvocationId: invocation, ts: '2026-11-05T09:00:00.000Z', evidence }, dir),
+      adaptiveLine({ state: 'closed', hookInvocationId: invocation, ts: '2026-11-05T09:01:00.000Z', evidence }, dir),
+    ]);
+
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('terminal_only');
+    expect(found.duplicates.terminal).toBe(1);
+    expect(report.totals.duplicatesExact).toBe(1);
+  });
+
+  it('deduplicates oversized records that differ only in object key order', () => {
+    const dir = workspace();
+    const invocation = 'inv-long-key-order';
+    const padding = 'x'.repeat(262_150);
+    const line = adaptiveLine({
+      state: 'closed',
+      hookInvocationId: invocation,
+      evidence: { reference: 'capture-A', independentlyVerified: false, padding },
+    }, dir);
+    const reordered = JSON.stringify(reverseKeys(JSON.parse(line)));
+    writeEvents(dir, '2026-11-05', [line, reordered]);
+
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('terminal_only');
+    expect(found.duplicates.terminal).toBe(1);
+  });
+
+  it('treats records beyond the identity comparison budget as distinct and reports the limitation', () => {
+    const dir = workspace();
+    const invocation = 'inv-over-budget';
+    const padding = 'x'.repeat((4 * 1024 * 1024) + 1024);
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        evidence: { reference: 'capture-A', independentlyVerified: false, padding },
+      }, dir),
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        evidence: { reference: 'capture-B', independentlyVerified: false },
+      }, dir),
+    ]);
+
+    const report = run(dir, { limits: { maxFileBytes: 8 * 1024 * 1024 } });
+    const found = findInvocation(report, invocation);
+    expect(report.coverage.identityComparisonLimited).toBe(true);
+    expect(found.classification).toBe('conflicted');
+    expect(found.reasonCodes).toContain('conflicting_terminal_states');
+    expect(found.duplicates.terminal).toBe(0);
+    expect(report.answers.q5.notes.join('|')).toContain('比较预算');
   });
 
   it('deduplicates records that are byte-identical', () => {
