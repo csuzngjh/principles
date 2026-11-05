@@ -1,0 +1,1508 @@
+{
+  "runId": "acceptance-20260704-1f1ea076",
+  "date": "2026-07-04T15:18:10.725Z",
+  "provider": "sensenova",
+  "workspace": "D:/.openclaw/workspace",
+  "overallStatus": "FAIL",
+  "passCount": 2,
+  "failCount": 4,
+  "skipCount": 4,
+  "matrix": {
+    "1-capture": {
+      "status": "SKIP",
+      "evidence": "Agent drives skipped",
+      "details": {}
+    },
+    "2-principle": {
+      "status": "FAIL",
+      "evidence": "Production pipeline did not produce an evaluator-approved candidate",
+      "details": {}
+    },
+    "3-approve": {
+      "status": "SKIP",
+      "evidence": "Agent drives skipped",
+      "details": {}
+    },
+    "4-activation": {
+      "status": "SKIP",
+      "evidence": "Agent drives skipped",
+      "details": {}
+    },
+    "5-lineage": {
+      "status": "FAIL",
+      "evidence": "Correlated lineage incomplete",
+      "details": {}
+    },
+    "6-enforce": {
+      "status": "FAIL",
+      "evidence": "Runtime evidence: danger 0/5 blocked, safe 0/5 allowed",
+      "details": {
+        "dangerVerified": 0,
+        "safeVerified": 0
+      }
+    },
+    "7-restart": {
+      "status": "SKIP",
+      "evidence": "No activations to verify persistence",
+      "details": {}
+    },
+    "8-deactivate": {
+      "status": "FAIL",
+      "evidence": "Deactivation behavior not verified",
+      "details": {}
+    },
+    "9-unhealthy": {
+      "status": "PASS",
+      "evidence": "Runtime-invalid rules emit persistent unhealthy evidence and never execute",
+      "details": {}
+    },
+    "10-secrets": {
+      "status": "PASS",
+      "evidence": "All invoked JSON contracts were runtime-validated; report contains no secret values",
+      "details": {
+        "secretsChecked": [
+          "apiKey",
+          "password",
+          "token",
+          "secret"
+        ]
+      }
+    }
+  },
+  "phaseResults": {
+    "phase0": {
+      "ok": true,
+      "testWs": "D:\\.openclaw\\workspace\\acceptance-gate\\run-acceptance-20260704-1f1ea076",
+      "runId": "acceptance-20260704-1f1ea076"
+    },
+    "testWs": "D:\\.openclaw\\workspace\\acceptance-gate\\run-acceptance-20260704-1f1ea076",
+    "phase1": {
+      "ok": true,
+      "error": "",
+      "details": {
+        "pdCliVersion": "1.74.1",
+        "consoleStatus": {
+          "success": true,
+          "data": {
+            "overall": "error",
+            "checks": [
+              {
+                "id": "sqlite",
+                "name": "数据库连接",
+                "status": "healthy",
+                "message": "连接正常",
+                "lastCheck": "2026-07-04T15:17:55.290Z"
+              },
+              {
+                "id": "pain_chain_flow",
+                "name": "Pain Chain 流动",
+                "status": "error",
+                "message": "超过 26769 分钟无活动",
+                "lastCheck": "2026-07-04T15:17:55.295Z"
+              },
+              {
+                "id": "task_queue",
+                "name": "任务队列",
+                "status": "error",
+                "message": "失败任务过多: 37 个",
+                "lastCheck": "2026-07-04T15:17:55.295Z"
+              },
+              {
+                "id": "principle_tree",
+                "name": "原则树",
+                "status": "healthy",
+                "message": "总计 115 个原则",
+                "lastCheck": "2026-07-04T15:17:55.298Z"
+              },
+              {
+                "id": "gfi_health",
+                "name": "GFI 健康度",
+                "status": "warning",
+                "message": "GFI 数据不可用",
+                "lastCheck": "2026-07-04T15:17:55.336Z"
+              }
+            ],
+            "pipeline": {
+              "lastPainSignal": null,
+              "lastTaskCreated": "2026-06-16T01:08:48.652Z",
+              "lastCandidateGenerated": "2026-06-16T03:10:33.163Z",
+              "lastPrincipleAdded": "2026-04-21T06:26:32.396Z"
+            },
+            "generatedAt": "2026-07-04T15:17:55.341Z",
+            "versions": {
+              "pd": "unknown",
+              "core": "1.74.1",
+              "node": "24.14.0"
+            },
+            "platform": {
+              "os": "win32",
+              "arch": "x64",
+              "nodeVersion": "24.14.0"
+            }
+          }
+        },
+        "openclawStatus": "│\n◇  Doctor warnings ───────────────────────────────────────────────────────╮\n│                                                                         │\n│  - Left migrated plugin install index in pla",
+        "provider": "sensenova"
+      }
+    },
+    "phase2": {
+      "canary": {
+        "overallStatus": "degraded",
+        "checks": [
+          {
+            "name": "schema_conformance",
+            "status": "healthy",
+            "summary": "All tables and columns conform to expected schema.",
+            "details": {
+              "overallStatus": "ok",
+              "checkedDatabasePath": "D:\\.openclaw\\workspace\\.pd\\state.db",
+              "tables": {
+                "tasks": {
+                  "exists": true,
+                  "missingColumns": []
+                },
+                "runs": {
+                  "exists": true,
+                  "missingColumns": []
+                },
+                "artifacts": {
+                  "exists": true,
+                  "missingColumns": []
+                },
+                "commits": {
+                  "exists": true,
+                  "missingColumns": []
+                },
+                "principle_candidates": {
+                  "exists": true,
+                  "missingColumns": []
+                },
+                "pi_artifacts": {
+                  "exists": true,
+                  "missingColumns": []
+                }
+              },
+              "indexes": {
+                "missingIndexes": []
+              },
+              "migrationsNeeded": [],
+              "generatedAt": "2026-07-04T15:18:04.833Z"
+            }
+          },
+          {
+            "name": "candidate_audit",
+            "status": "degraded",
+            "summary": "Audit status: degraded. Orphan candidates: 4, Missing ledger: 4",
+            "details": {
+              "status": "degraded",
+              "consumedCount": 49,
+              "orphanCandidateCount": 4,
+              "missingLedgerCount": 4
+            }
+          },
+          {
+            "name": "gfi_snapshot",
+            "status": "degraded",
+            "summary": "GFI disabled but config has warnings: feature 'model_training': unknown flag accepted; feature 'trainer': unknown flag accepted",
+            "details": {
+              "warnings": [
+                "feature 'model_training': unknown flag accepted",
+                "feature 'trainer': unknown flag accepted"
+              ],
+              "configPath": "D:\\.openclaw\\workspace\\.pd\\config.yaml"
+            }
+          },
+          {
+            "name": "pruning_orphans",
+            "status": "healthy",
+            "summary": "No orphan derived candidates found.",
+            "details": {
+              "orphanDerivedCandidateCount": 0,
+              "dbReadable": true,
+              "samples": []
+            }
+          },
+          {
+            "name": "internalization_queue",
+            "status": "healthy",
+            "summary": "Queue OK. 5 ready, 4 pending, 1 retry_wait (14 suppressed non-MVP).",
+            "details": {
+              "pendingCount": 4,
+              "retryWaitCount": 1,
+              "countsByTaskKind": {
+                "philosopher": 4,
+                "artificer": 1
+              },
+              "countsByChannel": {
+                "code_tool_hook": 2,
+                "prompt": 3
+              },
+              "invalidMetadataCount": 0,
+              "sampleInvalidTaskIds": [],
+              "blockedSummary": {
+                "count": 0,
+                "samples": []
+              },
+              "dependencyFailedSummary": {
+                "count": 0,
+                "samples": []
+              },
+              "leaseConflictSummary": {
+                "count": 0,
+                "samples": [],
+                "sampleTaskIds": []
+              },
+              "retryWaitPendingSummary": {
+                "count": 0,
+                "samples": []
+              },
+              "unresolvableSummary": {
+                "count": 0,
+                "samples": []
+              },
+              "readyTasks": [
+                {
+                  "taskId": "philosopher-dreamer-1c536ecc-5d64-42d8-a139-e9da97d4d092-code_tool_hook-code_tool_hook",
+                  "taskKind": "philosopher",
+                  "channel": "code_tool_hook"
+                },
+                {
+                  "taskId": "philosopher-dreamer-0a9ae703-74b7-4a89-ad2c-b5bf3ef92ef1-code_tool_hook-code_tool_hook",
+                  "taskKind": "philosopher",
+                  "channel": "code_tool_hook"
+                },
+                {
+                  "taskId": "philosopher-dreamer-9189466b-f317-4321-8786-9b0550cf62e3-prompt-prompt",
+                  "taskKind": "philosopher",
+                  "channel": "prompt"
+                },
+                {
+                  "taskId": "philosopher-dreamer-c85c68d0-777a-456e-af5f-a72c63e83287-prompt-prompt",
+                  "taskKind": "philosopher",
+                  "channel": "prompt"
+                },
+                {
+                  "taskId": "artificer-scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt-prompt",
+                  "taskKind": "artificer",
+                  "channel": "prompt"
+                }
+              ],
+              "noReadyTasks": null,
+              "suppressedTasks": [
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781572787813_3jetbtig",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "rollout_reviewer-evaluator-artificer-scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook-code_tool_hook-code_tool_hook-code_tool_hook",
+                  "taskKind": "rollout_reviewer",
+                  "channel": "code_tool_hook",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "rollout_reviewer-evaluator-artificer-scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt-prompt-prompt-prompt",
+                  "taskKind": "rollout_reviewer",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "rollout_reviewer-evaluator-artificer-scribe-philosopher-dreamer-b6fbadcd-d1d0-40f1-bbf4-0adb3553c38c-prompt-prompt-prompt-prompt-prompt-prompt",
+                  "taskKind": "rollout_reviewer",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781525232835_va394ait",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781572128574_j3bwn9na",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781573120127_4uvlkrbb",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781573584311_fyuk3bwx",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781573971831_ixeyx197",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781574594305_mb60kv4q",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781575248718_mweid65m",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781576788912_6byg00u2",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_rootcause-diagnosis_manual_1781582834003_3l06f0pi",
+                  "taskKind": "diag_rootcause",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                },
+                {
+                  "taskId": "diag_router-diagnosis_manual_1781598430481_ifbhu02p",
+                  "taskKind": "diag_router",
+                  "channel": "prompt",
+                  "reason": "task_kind_not_mvp_actionable"
+                }
+              ]
+            }
+          },
+          {
+            "name": "runtime_health",
+            "status": "degraded",
+            "summary": "Runtime health: degraded. Actions: Run `pd candidate audit --workspace <path> --json` for details.; Run `pd runtime pruning report --workspace <path> --json` for lifecycle signals.; GFI degraded: No active sessions, 107 stale sessions with high GFI (max: 63.779296875873115) — run cleanup or investigate session lifecycle.; Run `pd runtime uat --workspace <path> --count 3` to establish baseline.",
+            "details": {
+              "generatedAt": "2026-07-04T15:18:04.855Z",
+              "workspace": "D:\\.openclaw\\workspace",
+              "painChain": {
+                "lastSuccessfulChain": null,
+                "failureCategory": null
+              },
+              "candidateLedger": {
+                "auditStatus": "degraded",
+                "orphanCandidateCount": 4,
+                "missingLedgerCount": 4
+              },
+              "pruning": {
+                "watchCount": 14,
+                "reviewCount": 0,
+                "orphanDerivedCandidateCount": 0
+              },
+              "gfi": {
+                "active": null,
+                "staleSessionCount": 107,
+                "staleGfiRange": {
+                  "min": 0,
+                  "max": 63.779296875873115
+                },
+                "totalSessionCount": 107,
+                "activeSessionCount": 0,
+                "generatedAt": "2026-07-04T15:18:04.882Z"
+              },
+              "overallStatus": "degraded",
+              "recommendedActions": [
+                "Run `pd candidate audit --workspace <path> --json` for details.",
+                "Run `pd runtime pruning report --workspace <path> --json` for lifecycle signals.",
+                "GFI degraded: No active sessions, 107 stale sessions with high GFI (max: 63.779296875873115) — run cleanup or investigate session lifecycle.",
+                "Run `pd runtime uat --workspace <path> --count 3` to establish baseline."
+              ],
+              "totalTaskCount": 252
+            }
+          },
+          {
+            "name": "pd_shim_info",
+            "status": "healthy",
+            "summary": "PD CLI accessible at D:\\Code\\principles\\packages\\pd-cli\\dist\\index.js",
+            "details": {
+              "cliPath": "D:\\Code\\principles\\packages\\pd-cli\\dist\\index.js",
+              "exists": true,
+              "version": "0.1.0"
+            }
+          }
+        ],
+        "recommendedNextActions": [
+          "Run `pd candidate audit --workspace <path> --json` for details.",
+          "Review .pd/config.yaml and rerun `pd runtime features --workspace <path> --json`.",
+          "Run `pd runtime uat --workspace <path> --count 3` to establish baseline."
+        ],
+        "generatedAt": "2026-07-04T15:18:04.828Z",
+        "internalizationQueueSummary": {
+          "readyCount": 5,
+          "retryWaitCount": 1,
+          "pendingCount": 4,
+          "nextReadyTaskKind": "philosopher",
+          "nextReadyTaskId": "philosopher-dreamer-1c536ecc-5d64-42d8-a139-e9da97d4d092-code_tool_hook-code_tool_hook",
+          "noReadyReason": null
+        }
+      },
+      "integrity": {
+        "overallStatus": "error",
+        "brokenLinks": [
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "b1779c82-65ef-4fa3-8979-0ca430377aa6",
+            "reason": "Consumed candidate b1779c82-65ef-4fa3-8979-0ca430377aa6 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "8d4a423e-9357-4001-9372-d3094c0475c4",
+            "reason": "Consumed candidate 8d4a423e-9357-4001-9372-d3094c0475c4 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "0e7c66a5-6333-4371-bbc4-fb5d276360c5",
+            "reason": "Consumed candidate 0e7c66a5-6333-4371-bbc4-fb5d276360c5 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "bac37528-869d-4a1b-9f0e-38a1637176a9",
+            "reason": "Consumed candidate bac37528-869d-4a1b-9f0e-38a1637176a9 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "806cd52c-d275-413b-bd48-339b407dd5f7",
+            "reason": "Consumed candidate 806cd52c-d275-413b-bd48-339b407dd5f7 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "dd5fac46-9ca6-48b9-81f2-762f9797f096",
+            "reason": "Consumed candidate dd5fac46-9ca6-48b9-81f2-762f9797f096 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "e02f7d4f-3c7c-4c32-9a74-c2b9b645f36b",
+            "reason": "Consumed candidate e02f7d4f-3c7c-4c32-9a74-c2b9b645f36b has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "f3964e5d-0537-4810-8595-1b2a4e3e062f",
+            "reason": "Consumed candidate f3964e5d-0537-4810-8595-1b2a4e3e062f has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "a80f0470-8235-4e99-8166-de2d3bd161a6",
+            "reason": "Consumed candidate a80f0470-8235-4e99-8166-de2d3bd161a6 has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "1177d274-6619-4a8b-9b0f-f926c682842b",
+            "reason": "Consumed candidate 1177d274-6619-4a8b-9b0f-f926c682842b has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_task",
+            "severity": "warning",
+            "candidateId": "281c9b82-257f-485b-8afb-3b547831f90f",
+            "reason": "Consumed candidate 281c9b82-257f-485b-8afb-3b547831f90f has no corresponding dreamer task",
+            "recommendedAction": "Seed a dreamer task via `pd candidate internalize --candidate-id <id>`."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt",
+            "reason": "Succeeded dreamer task dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook",
+            "reason": "Succeeded dreamer task dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt",
+            "reason": "Succeeded dreamer task dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt",
+            "reason": "Succeeded dreamer task dreamer-fce8976d-bfa3-4a5f-9208-8b7ea382f9b3-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt",
+            "reason": "Succeeded dreamer task dreamer-745acb85-c14d-4ad6-98e7-3b063eaa5678-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt",
+            "reason": "Succeeded dreamer task dreamer-06cebaad-3912-42f1-ae69-3e9a17663075-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt",
+            "reason": "Succeeded dreamer task dreamer-705b5c4a-4cfa-4b3a-9f3d-00a6e5325645-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook",
+            "reason": "Succeeded dreamer task dreamer-8cadc518-1b7c-42fd-91ce-7cd479d2c194-code_tool_hook has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt",
+            "reason": "Succeeded dreamer task dreamer-2023ee7c-ed0e-43fc-99fb-3f25addefb90-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt",
+            "reason": "Succeeded dreamer task dreamer-d8e0b046-64a2-4f72-a417-652d1a5cba69-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt",
+            "reason": "Succeeded dreamer task dreamer-351f9550-c851-40c8-a06e-02dac61b91dd-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt",
+            "reason": "Succeeded dreamer task dreamer-a52732e0-ffe6-4b89-8db8-bb7b130d8305-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook",
+            "reason": "Succeeded dreamer task dreamer-b96e538d-6c6e-4163-8992-01412470fa0c-code_tool_hook has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt",
+            "reason": "Succeeded dreamer task dreamer-514fe63b-e15d-4884-8ee7-fac3b1264c06-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt",
+            "reason": "Succeeded dreamer task dreamer-9dc84b6f-cf48-4704-a57d-bd8917576ca6-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt",
+            "reason": "Succeeded dreamer task dreamer-a2db537b-a757-454d-9e16-316cfefdf6cc-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt",
+            "reason": "Succeeded dreamer task dreamer-619c3bd5-450f-4a6f-bf03-c69f90ff3eb6-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt",
+            "reason": "Succeeded dreamer task dreamer-6a680845-f1f2-48b4-91f8-73bdc7a4bb00-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook",
+            "reason": "Succeeded dreamer task dreamer-b115449e-ec98-462c-857c-09719151d9a1-code_tool_hook has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt",
+            "reason": "Succeeded dreamer task dreamer-54bb7e9e-8c40-49b9-aedd-5a30fec6e404-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook",
+            "reason": "Succeeded dreamer task dreamer-660e73ea-a44b-4ccb-8404-8b78896e12b4-code_tool_hook has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt",
+            "reason": "Succeeded dreamer task dreamer-a16273cd-cb87-460d-ae99-841ac23d325a-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt",
+            "reason": "Succeeded dreamer task dreamer-e330ab24-d170-4571-8ebc-410301fec40b-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt",
+            "reason": "Succeeded dreamer task dreamer-2c4c3b7b-1e34-4af4-8ac6-7db18ec2062b-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "missing_dreamer_pi_artifact",
+            "severity": "error",
+            "taskId": "dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt",
+            "reason": "Succeeded dreamer task dreamer-be138cba-3703-4821-82d7-c7291e1284af-prompt has no principle artifact",
+            "recommendedAction": "Re-run the dreamer task or investigate artifact commit failure."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781525232835_va394ait",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781525232835_va394ait in retry_wait for ~459h (updated_at=2026-06-15T12:07:14.245Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781572128574_j3bwn9na",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781572128574_j3bwn9na in retry_wait for ~445h (updated_at=2026-06-16T01:19:26.332Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781573120127_4uvlkrbb",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781573120127_4uvlkrbb in retry_wait for ~445h (updated_at=2026-06-16T01:30:31.082Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781573584311_fyuk3bwx",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781573584311_fyuk3bwx in retry_wait for ~445h (updated_at=2026-06-16T01:38:16.104Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781573971831_ixeyx197",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781573971831_ixeyx197 in retry_wait for ~445h (updated_at=2026-06-16T01:44:48.613Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781574594305_mb60kv4q",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781574594305_mb60kv4q in retry_wait for ~445h (updated_at=2026-06-16T02:00:01.708Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781575248718_mweid65m",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781575248718_mweid65m in retry_wait for ~444h (updated_at=2026-06-16T02:20:56.281Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781576788912_6byg00u2",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781576788912_6byg00u2 in retry_wait for ~444h (updated_at=2026-06-16T02:46:37.192Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "artificer-scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt-prompt",
+            "reason": "Task artificer-scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt-prompt in retry_wait for ~419h (updated_at=2026-06-17T03:31:56.269Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_rootcause-diagnosis_manual_1781582834003_3l06f0pi",
+            "reason": "Task diag_rootcause-diagnosis_manual_1781582834003_3l06f0pi in retry_wait for ~443h (updated_at=2026-06-16T04:07:25.324Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "retry_wait_stale",
+            "severity": "warning",
+            "taskId": "diag_router-diagnosis_manual_1781598430481_ifbhu02p",
+            "reason": "Task diag_router-diagnosis_manual_1781598430481_ifbhu02p in retry_wait for ~437h (updated_at=2026-06-16T09:18:25.063Z), exceeding stale TTL of 24h",
+            "recommendedAction": "Investigate stuck recovery sweep or persistent transient failure. Consider manual recovery: pd runtime internalization integrity-repair --workspace <workspace> --confirm, or force-fail the task."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1781963577195_ir5bx36d",
+            "reason": "Task diagnosis_manual_1781963577195_ir5bx36d is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1781964158958_d1gj1w7r",
+            "reason": "Task diagnosis_manual_1781964158958_d1gj1w7r is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1781964836911_htz4ltvi",
+            "reason": "Task diagnosis_manual_1781964836911_htz4ltvi is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1781965295572_8v4g6s1o",
+            "reason": "Task diagnosis_manual_1781965295572_8v4g6s1o is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1781970379703_kklqs19g",
+            "reason": "Task diagnosis_manual_1781970379703_kklqs19g is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1782056122044_kpamrz4j",
+            "reason": "Task diagnosis_manual_1782056122044_kpamrz4j is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1782056292595_k7nfvjac",
+            "reason": "Task diagnosis_manual_1782056292595_k7nfvjac is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "task_succeeded_no_succeeded_run",
+            "severity": "error",
+            "taskId": "diagnosis_manual_1782723482022_0pcncb0b",
+            "reason": "Task diagnosis_manual_1782723482022_0pcncb0b is succeeded but has no succeeded run",
+            "recommendedAction": "Investigate task/run state inconsistency. Consider recovery sweep."
+          },
+          {
+            "type": "mainline_contract_candidate_lineage",
+            "severity": "error",
+            "reason": "[painId=manual_1783074843352_giuprq3l] Candidate 9189466b-f317-4321-8786-9b0550cf62e3 lineage mismatch: sourceTaskId=diag_router-diagnosis_manual_1783074843352_giuprq3l (expected diagnosis_manual_1783074843352_giuprq3l), sourceArtifactId=d939583b-4596-41a4-aa1b-77e02021a1a7 (expected d939583b-4596-41a4-aa1b-77e02021a1a7).",
+            "recommendedAction": "Lineage fields must come from the diagnosis task/artifact that produced the candidate (EP-07)."
+          },
+          {
+            "type": "mainline_contract_auto_consumption",
+            "severity": "error",
+            "reason": "[painId=manual_1783074843352_giuprq3l] 19 consumed candidate(s) have no dreamer task: ff664254-2583-4ee6-971a-6ceddcb78eee, b1779c82-65ef-4fa3-8979-0ca430377aa6, 8d4a423e-9357-4001-9372-d3094c0475c4, 826a129b-2990-4e23-b172-74cde01289f6, 0e7c66a5-6333-4371-bbc4-fb5d276360c5, ….",
+            "recommendedAction": "Run \"pd candidate internalize --candidate-id <id>\" for each, and fix the auto-consumer so consumption always seeds a dreamer task."
+          }
+        ],
+        "chainSummaries": {
+          "totalCandidates": 49,
+          "totalDreamerTasks": 32,
+          "totalPhilosopherTasks": 32,
+          "totalPIArtifacts": 32,
+          "chainsWithBrokenLinks": 55
+        },
+        "generatedAt": "2026-07-04T15:18:05.452Z"
+      },
+      "smoke": {
+        "ok": false,
+        "verdict": {
+          "overall": "violation",
+          "painId": "manual_1783074843352_giuprq3l",
+          "stages": [
+            {
+              "stage": "config_source_alignment",
+              "status": "ok",
+              "reason": "doctor and probe agree on \"pi-ai.sensenova\" from .pd/config.yaml."
+            },
+            {
+              "stage": "diagnostician_readiness",
+              "status": "ok",
+              "reason": "Diagnostician passed readiness probe."
+            },
+            {
+              "stage": "pain_record",
+              "status": "ok",
+              "reason": "Canonical painId \"manual_1783074843352_giuprq3l\" present."
+            },
+            {
+              "stage": "diagnosis_task",
+              "status": "ok",
+              "reason": "Diagnosis task diagnosis_manual_1783074843352_giuprq3l succeeded with a succeeded run."
+            },
+            {
+              "stage": "diagnostician_artifact",
+              "status": "ok",
+              "reason": "Artifact d939583b-4596-41a4-aa1b-77e02021a1a7 traces to pain \"manual_1783074843352_giuprq3l\"."
+            },
+            {
+              "stage": "candidate_lineage",
+              "status": "violation",
+              "reason": "Candidate 9189466b-f317-4321-8786-9b0550cf62e3 lineage mismatch: sourceTaskId=diag_router-diagnosis_manual_1783074843352_giuprq3l (expected diagnosis_manual_1783074843352_giuprq3l), sourceArtifactId=d939583b-4596-41a4-aa1b-77e02021a1a7 (expected d939583b-4596-41a4-aa1b-77e02021a1a7).",
+              "nextAction": "Lineage fields must come from the diagnosis task/artifact that produced the candidate (EP-07)."
+            },
+            {
+              "stage": "dreamer_task_lineage",
+              "status": "skipped",
+              "reason": "Upstream stage \"candidate_lineage\" not satisfied — cannot evaluate."
+            },
+            {
+              "stage": "dreamer_context",
+              "status": "skipped",
+              "reason": "Upstream stage \"candidate_lineage\" not satisfied — cannot evaluate."
+            },
+            {
+              "stage": "successor",
+              "status": "skipped",
+              "reason": "Upstream stage \"candidate_lineage\" not satisfied — cannot evaluate."
+            },
+            {
+              "stage": "owner_reviewable_principle",
+              "status": "skipped",
+              "reason": "Upstream stage \"candidate_lineage\" not satisfied — cannot evaluate."
+            },
+            {
+              "stage": "auto_consumption",
+              "status": "violation",
+              "reason": "19 consumed candidate(s) have no dreamer task: ff664254-2583-4ee6-971a-6ceddcb78eee, b1779c82-65ef-4fa3-8979-0ca430377aa6, 8d4a423e-9357-4001-9372-d3094c0475c4, 826a129b-2990-4e23-b172-74cde01289f6, 0e7c66a5-6333-4371-bbc4-fb5d276360c5, ….",
+              "nextAction": "Run \"pd candidate internalize --candidate-id <id>\" for each, and fix the auto-consumer so consumption always seeds a dreamer task."
+            }
+          ],
+          "generatedAt": "2026-07-04T15:18:06.037Z"
+        },
+        "warnings": [
+          "feature 'model_training': unknown flag accepted as-is",
+          "feature 'trainer': unknown flag accepted as-is",
+          "runtime profile 'pd.default' not found in config, using default",
+          "Legacy config files detected (2): D:\\.openclaw\\workspace\\.pd\\feature-flags.yaml, D:\\.openclaw\\workspace\\.state\\workflows.yaml. PD now uses .pd/config.yaml."
+        ],
+        "resolvedPainId": "manual_1783074843352_giuprq3l"
+      },
+      "queue": {
+        "pendingCount": 4,
+        "retryWaitCount": 1,
+        "countsByTaskKind": {
+          "philosopher": 4,
+          "artificer": 1
+        },
+        "countsByChannel": {
+          "code_tool_hook": 2,
+          "prompt": 3
+        },
+        "invalidMetadataCount": 0,
+        "sampleInvalidTaskIds": [],
+        "blockedSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "dependencyFailedSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "leaseConflictSummary": {
+          "count": 0,
+          "samples": [],
+          "sampleTaskIds": []
+        },
+        "retryWaitPendingSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "unresolvableSummary": {
+          "count": 0,
+          "samples": []
+        },
+        "readyTasks": [
+          {
+            "taskId": "philosopher-dreamer-1c536ecc-5d64-42d8-a139-e9da97d4d092-code_tool_hook-code_tool_hook",
+            "taskKind": "philosopher",
+            "channel": "code_tool_hook"
+          },
+          {
+            "taskId": "philosopher-dreamer-0a9ae703-74b7-4a89-ad2c-b5bf3ef92ef1-code_tool_hook-code_tool_hook",
+            "taskKind": "philosopher",
+            "channel": "code_tool_hook"
+          },
+          {
+            "taskId": "philosopher-dreamer-9189466b-f317-4321-8786-9b0550cf62e3-prompt-prompt",
+            "taskKind": "philosopher",
+            "channel": "prompt"
+          },
+          {
+            "taskId": "philosopher-dreamer-c85c68d0-777a-456e-af5f-a72c63e83287-prompt-prompt",
+            "taskKind": "philosopher",
+            "channel": "prompt"
+          },
+          {
+            "taskId": "artificer-scribe-philosopher-dreamer-086a9a75-f1ad-46f0-b104-93af4e40b9cf-prompt-prompt-prompt-prompt",
+            "taskKind": "artificer",
+            "channel": "prompt"
+          }
+        ],
+        "noReadyTasks": null,
+        "suppressedTasks": [
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781572787813_3jetbtig",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "rollout_reviewer-evaluator-artificer-scribe-philosopher-dreamer-9e9081a2-0086-4d70-b2ab-5b2ccf3b3b26-code_tool_hook-code_tool_hook-code_tool_hook-code_tool_hook-code_tool_hook-code_tool_hook",
+            "taskKind": "rollout_reviewer",
+            "channel": "code_tool_hook",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "rollout_reviewer-evaluator-artificer-scribe-philosopher-dreamer-d650b0c7-e2cc-42da-81b5-020632a2140b-prompt-prompt-prompt-prompt-prompt-prompt",
+            "taskKind": "rollout_reviewer",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "rollout_reviewer-evaluator-artificer-scribe-philosopher-dreamer-b6fbadcd-d1d0-40f1-bbf4-0adb3553c38c-prompt-prompt-prompt-prompt-prompt-prompt",
+            "taskKind": "rollout_reviewer",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781525232835_va394ait",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781572128574_j3bwn9na",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781573120127_4uvlkrbb",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781573584311_fyuk3bwx",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781573971831_ixeyx197",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781574594305_mb60kv4q",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781575248718_mweid65m",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781576788912_6byg00u2",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_rootcause-diagnosis_manual_1781582834003_3l06f0pi",
+            "taskKind": "diag_rootcause",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          },
+          {
+            "taskId": "diag_router-diagnosis_manual_1781598430481_ifbhu02p",
+            "taskKind": "diag_router",
+            "channel": "prompt",
+            "reason": "task_kind_not_mvp_actionable"
+          }
+        ],
+        "consumerStatus": "auto_consumer_enabled"
+      },
+      "activations": {
+        "activations": [
+          {
+            "activationId": "act_prompt_demo-principle-story-a-1783130516336-oozwsd",
+            "idempotencyKey": "story-a-story-a-1783130516336-oozwsd::prompt",
+            "artifactId": "art-demo-principle-story-a-1783130516336-oozwsd",
+            "channel": "prompt",
+            "action": "prompt_activate",
+            "targetRef": "ledger://demo-principle-story-a-1783130516336-oozwsd",
+            "activatedAt": "2026-07-04T02:01:56.347Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783130516336-oozwsd",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_code_demo-rule-story-a-1783130516336-oozwsd",
+            "idempotencyKey": "story-a-story-a-1783130516336-oozwsd::code_tool_hook::post-approval",
+            "artifactId": "art-demo-rule-story-a-1783130516336-oozwsd",
+            "channel": "code_tool_hook",
+            "action": "code_tool_hook_shadow_activate",
+            "targetRef": "impl://demo-rule-story-a-1783130516336-oozwsd",
+            "activatedAt": "2026-07-04T02:01:56.350Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783130516336-oozwsd",
+            "mode": "shadow",
+            "status": "active",
+            "contextVersion": "v1",
+            "nextAction": "pd activation promote --activation-id act_code_demo-rule-story-a-1783130516336-oozwsd --confirm"
+          },
+          {
+            "activationId": "act_archive_demo-principle-story-a-1783130516336-oozwsd",
+            "idempotencyKey": "story-a-story-a-1783130516336-oozwsd::defer_archive",
+            "artifactId": "art-demo-principle-story-a-1783130516336-oozwsd",
+            "channel": "defer_archive",
+            "action": "defer_archive",
+            "targetRef": "ledger://demo-principle-story-a-1783130516336-oozwsd#archived",
+            "activatedAt": "2026-07-04T02:01:56.350Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783130516336-oozwsd",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_prompt_demo-principle-story-a-1783130676886-az5dx5",
+            "idempotencyKey": "story-a-story-a-1783130676886-az5dx5::prompt",
+            "artifactId": "art-demo-principle-story-a-1783130676886-az5dx5",
+            "channel": "prompt",
+            "action": "prompt_activate",
+            "targetRef": "ledger://demo-principle-story-a-1783130676886-az5dx5",
+            "activatedAt": "2026-07-04T02:04:36.902Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783130676886-az5dx5",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_code_demo-rule-story-a-1783130676886-az5dx5",
+            "idempotencyKey": "story-a-story-a-1783130676886-az5dx5::code_tool_hook::post-approval",
+            "artifactId": "art-demo-rule-story-a-1783130676886-az5dx5",
+            "channel": "code_tool_hook",
+            "action": "code_tool_hook_shadow_activate",
+            "targetRef": "impl://demo-rule-story-a-1783130676886-az5dx5",
+            "activatedAt": "2026-07-04T02:04:36.904Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783130676886-az5dx5",
+            "mode": "shadow",
+            "status": "active",
+            "contextVersion": "v1",
+            "nextAction": "pd activation promote --activation-id act_code_demo-rule-story-a-1783130676886-az5dx5 --confirm"
+          },
+          {
+            "activationId": "act_archive_demo-principle-story-a-1783130676886-az5dx5",
+            "idempotencyKey": "story-a-story-a-1783130676886-az5dx5::defer_archive",
+            "artifactId": "art-demo-principle-story-a-1783130676886-az5dx5",
+            "channel": "defer_archive",
+            "action": "defer_archive",
+            "targetRef": "ledger://demo-principle-story-a-1783130676886-az5dx5#archived",
+            "activatedAt": "2026-07-04T02:04:36.904Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783130676886-az5dx5",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_prompt_demo-principle-story-a-1783166361779-pghw86",
+            "idempotencyKey": "story-a-story-a-1783166361779-pghw86::prompt",
+            "artifactId": "art-demo-principle-story-a-1783166361779-pghw86",
+            "channel": "prompt",
+            "action": "prompt_activate",
+            "targetRef": "ledger://demo-principle-story-a-1783166361779-pghw86",
+            "activatedAt": "2026-07-04T11:59:21.791Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783166361779-pghw86",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_code_demo-rule-story-a-1783166361779-pghw86",
+            "idempotencyKey": "story-a-story-a-1783166361779-pghw86::code_tool_hook::post-approval",
+            "artifactId": "art-demo-rule-story-a-1783166361779-pghw86",
+            "channel": "code_tool_hook",
+            "action": "code_tool_hook_shadow_activate",
+            "targetRef": "impl://demo-rule-story-a-1783166361779-pghw86",
+            "activatedAt": "2026-07-04T11:59:21.793Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783166361779-pghw86",
+            "mode": "shadow",
+            "status": "active",
+            "contextVersion": "v1",
+            "nextAction": "pd activation promote --activation-id act_code_demo-rule-story-a-1783166361779-pghw86 --confirm"
+          },
+          {
+            "activationId": "act_archive_demo-principle-story-a-1783166361779-pghw86",
+            "idempotencyKey": "story-a-story-a-1783166361779-pghw86::defer_archive",
+            "artifactId": "art-demo-principle-story-a-1783166361779-pghw86",
+            "channel": "defer_archive",
+            "action": "defer_archive",
+            "targetRef": "ledger://demo-principle-story-a-1783166361779-pghw86#archived",
+            "activatedAt": "2026-07-04T11:59:21.793Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783166361779-pghw86",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_prompt_demo-principle-story-a-1783176059831-mqjl7j",
+            "idempotencyKey": "story-a-story-a-1783176059831-mqjl7j::prompt",
+            "artifactId": "art-demo-principle-story-a-1783176059831-mqjl7j",
+            "channel": "prompt",
+            "action": "prompt_activate",
+            "targetRef": "ledger://demo-principle-story-a-1783176059831-mqjl7j",
+            "activatedAt": "2026-07-04T14:40:59.849Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783176059831-mqjl7j",
+            "status": "active",
+            "contextVersion": "v1"
+          },
+          {
+            "activationId": "act_code_demo-rule-story-a-1783176059831-mqjl7j",
+            "idempotencyKey": "story-a-story-a-1783176059831-mqjl7j::code_tool_hook::post-approval",
+            "artifactId": "art-demo-rule-story-a-1783176059831-mqjl7j",
+            "channel": "code_tool_hook",
+            "action": "code_tool_hook_shadow_activate",
+            "targetRef": "impl://demo-rule-story-a-1783176059831-mqjl7j",
+            "activatedAt": "2026-07-04T14:40:59.852Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783176059831-mqjl7j",
+            "mode": "shadow",
+            "status": "active",
+            "contextVersion": "v1",
+            "nextAction": "pd activation promote --activation-id act_code_demo-rule-story-a-1783176059831-mqjl7j --confirm"
+          },
+          {
+            "activationId": "act_archive_demo-principle-story-a-1783176059831-mqjl7j",
+            "idempotencyKey": "story-a-story-a-1783176059831-mqjl7j::defer_archive",
+            "artifactId": "art-demo-principle-story-a-1783176059831-mqjl7j",
+            "channel": "defer_archive",
+            "action": "defer_archive",
+            "targetRef": "ledger://demo-principle-story-a-1783176059831-mqjl7j#archived",
+            "activatedAt": "2026-07-04T14:40:59.852Z",
+            "promotedAt": null,
+            "deactivatedAt": null,
+            "principleId": "demo-principle-story-a-1783176059831-mqjl7j",
+            "status": "active",
+            "contextVersion": "v1"
+          }
+        ],
+        "status": "ok"
+      }
+    },
+    "phase3": {
+      "dangerResults": [],
+      "safeResults": [],
+      "skipped": true
+    },
+    "phase4": {
+      "activationsPersist": false,
+      "details": {
+        "reason": "missing_phase3_activation"
+      }
+    },
+    "phase5": {
+      "deactivated": false,
+      "otherRulesStillEnforce": true,
+      "behaviorRestored": false,
+      "details": {
+        "remainingActive": 12,
+        "execution": {
+          "toolAttempted": false,
+          "blocked": false,
+          "allowed": false,
+          "reason": "not run"
+        }
+      }
+    },
+    "phase6": {
+      "unhealthyVisible": true,
+      "neverExecutes": true,
+      "details": {
+        "test": "rule-host-unhealthy-visibility.test.ts"
+      }
+    }
+  },
+  "log": [
+    {
+      "ts": "15:17:54.643",
+      "level": "INFO",
+      "phase": "0",
+      "msg": "Setting up test workspace..."
+    },
+    {
+      "ts": "15:17:54.660",
+      "level": "INFO",
+      "phase": "0",
+      "msg": "Copied .pd config from main workspace"
+    },
+    {
+      "ts": "15:17:54.660",
+      "level": "PASS",
+      "phase": "0",
+      "msg": "Test workspace: D:\\.openclaw\\workspace\\acceptance-gate\\run-acceptance-20260704-1f1ea076"
+    },
+    {
+      "ts": "15:17:54.660",
+      "level": "INFO",
+      "phase": "1",
+      "msg": "Probing environment..."
+    },
+    {
+      "ts": "15:17:54.660",
+      "level": "INFO",
+      "phase": "1",
+      "msg": "Checking pd CLI availability..."
+    },
+    {
+      "ts": "15:17:55.272",
+      "level": "PASS",
+      "phase": "1",
+      "msg": "pd CLI: 1.74.1"
+    },
+    {
+      "ts": "15:17:55.272",
+      "level": "INFO",
+      "phase": "1",
+      "msg": "Checking Console at http://127.0.0.1:3100..."
+    },
+    {
+      "ts": "15:17:55.347",
+      "level": "PASS",
+      "phase": "1",
+      "msg": "Console API reachable"
+    },
+    {
+      "ts": "15:17:55.347",
+      "level": "INFO",
+      "phase": "1",
+      "msg": "Checking OpenClaw status..."
+    },
+    {
+      "ts": "15:18:04.256",
+      "level": "PASS",
+      "phase": "1",
+      "msg": "OpenClaw reachable"
+    },
+    {
+      "ts": "15:18:04.256",
+      "level": "INFO",
+      "phase": "1",
+      "msg": "Provider: sensenova (skipping direct check — relies on OpenClaw config)"
+    },
+    {
+      "ts": "15:18:04.257",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Capturing baseline..."
+    },
+    {
+      "ts": "15:18:04.257",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Running pd runtime canary..."
+    },
+    {
+      "ts": "15:18:04.906",
+      "level": "FAIL",
+      "phase": "2",
+      "msg": "Canary: {\"overallStatus\":\"degraded\",\"checks\":[{\"name\":\"schema_conformance\",\"status\":\"healthy\",\"summary\":\"All tables and columns conform to expected schema.\",\"details\":{\"overallStatus\":\"ok\",\"checkedDatabasePath\":\"D:\\\\.openclaw\\\\workspace\\\\.pd\\\\state.db\",\"tables\":{\"tasks\":{\"exists\":true,\"missingColumns\":[]},\"runs\":{\"exists\":true,\"missingColumns\":[]},\"artifacts\":{\"exists\":true,\"missingColumns\":[]},\"commits\":{\"exists\":true,\"missingColumns\":[]},\"principle_candidates\":{\"exists\":true,\"missingColumns\":[]},\"pi_a"
+    },
+    {
+      "ts": "15:18:04.906",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Running pd runtime internalization integrity..."
+    },
+    {
+      "ts": "15:18:05.480",
+      "level": "FAIL",
+      "phase": "2",
+      "msg": "Integrity: {\"overallStatus\":\"error\",\"brokenLinks\":[{\"type\":\"missing_dreamer_task\",\"severity\":\"warning\",\"candidateId\":\"b1779c82-65ef-4fa3-8979-0ca430377aa6\",\"reason\":\"Consumed candidate b1779c82-65ef-4fa3-8979-0ca430377aa6 has no corresponding dreamer task\",\"recommendedAction\":\"Seed a dreamer task via `pd candidate internalize --candidate-id <id>`.\"},{\"type\":\"missing_dreamer_task\",\"severity\":\"warning\",\"candidateId\":\"8d4a423e-9357-4001-9372-d3094c0475c4\",\"reason\":\"Consumed candidate 8d4a423e-9357-4001-9372-d"
+    },
+    {
+      "ts": "15:18:05.480",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Running pd mvp smoke..."
+    },
+    {
+      "ts": "15:18:06.055",
+      "level": "FAIL",
+      "phase": "2",
+      "msg": "MVP smoke: violation"
+    },
+    {
+      "ts": "15:18:06.056",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Running pd runtime internalization queue..."
+    },
+    {
+      "ts": "15:18:06.616",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Queue: 0 items"
+    },
+    {
+      "ts": "15:18:06.616",
+      "level": "INFO",
+      "phase": "2",
+      "msg": "Running pd runtime activation list..."
+    },
+    {
+      "ts": "15:18:07.177",
+      "level": "INFO",
+      "phase": "3",
+      "msg": "Running full production loop..."
+    },
+    {
+      "ts": "15:18:07.177",
+      "level": "SKIP",
+      "phase": "3",
+      "msg": "Agent drives skipped (--skip-agent)"
+    },
+    {
+      "ts": "15:18:07.177",
+      "level": "INFO",
+      "phase": "4",
+      "msg": "Verifying restart persistence..."
+    },
+    {
+      "ts": "15:18:07.177",
+      "level": "INFO",
+      "phase": "4",
+      "msg": "Verifying restart persistence..."
+    },
+    {
+      "ts": "15:18:07.177",
+      "level": "FAIL",
+      "phase": "4",
+      "msg": "No correlated activation from Phase 3"
+    },
+    {
+      "ts": "15:18:07.177",
+      "level": "INFO",
+      "phase": "5",
+      "msg": "Testing deactivate rollback..."
+    },
+    {
+      "ts": "15:18:07.178",
+      "level": "INFO",
+      "phase": "5",
+      "msg": "Testing deactivate rollback..."
+    },
+    {
+      "ts": "15:18:07.766",
+      "level": "SKIP",
+      "phase": "5",
+      "msg": "No active activations to deactivate"
+    },
+    {
+      "ts": "15:18:08.324",
+      "level": "FAIL",
+      "phase": "5",
+      "msg": "Post-deactivation behavior was not restored: {\"toolAttempted\":false,\"blocked\":false,\"allowed\":false,\"reason\":\"not run\"}"
+    },
+    {
+      "ts": "15:18:08.324",
+      "level": "INFO",
+      "phase": "6",
+      "msg": "Testing unhealthy rule visibility..."
+    },
+    {
+      "ts": "15:18:08.324",
+      "level": "INFO",
+      "phase": "6",
+      "msg": "Testing unhealthy rule visibility..."
+    },
+    {
+      "ts": "15:18:10.723",
+      "level": "PASS",
+      "phase": "6",
+      "msg": "Production RuleHost unhealthy-event regression test passed"
+    },
+    {
+      "ts": "15:18:10.723",
+      "level": "INFO",
+      "phase": "7",
+      "msg": "Generating evidence report..."
+    },
+    {
+      "ts": "15:18:10.723",
+      "level": "INFO",
+      "phase": "7",
+      "msg": "Generating evidence report..."
+    }
+  ]
+}

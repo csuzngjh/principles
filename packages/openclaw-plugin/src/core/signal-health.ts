@@ -13,10 +13,14 @@
  *  - 文件缺失/损坏按默认值重建，读取方（doctor）自行 unknown 呈现。
  *  - AUDIT-P2-02：stage2Invocations/stage2BatchSkipped 为新增字段，升级前的
  *    旧文件缺这两个键仍合法（读作 0）；写路径始终写入完整新格式。
+ *  - 所有 I/O 路径先经 guardWorkspaceLeak：测试里 mock 的 '/fake/state' 在
+ *    Windows 会被 resolve 成盘根 D:\fake\state，必须和其它 I/O 入口一样重定向
+ *    到 os.tmpdir()，否则每次跑测试都在文件系统根重建目录（含 mkdir）。
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
 import { SystemLogger } from './system-logger.js';
 
 const SIGNAL_HEALTH_FILE = 'signal-health.json';
@@ -179,7 +183,7 @@ function loadState(stateDir: string, now: Date): SignalHealthState {
  */
 export function readSignalHealth(stateDir: string): SignalHealthState | null {
   try {
-    const raw = fs.readFileSync(healthFilePath(stateDir), 'utf-8');
+    const raw = fs.readFileSync(healthFilePath(guardWorkspaceLeak(stateDir)), 'utf-8');
     const parsed: unknown = JSON.parse(raw);
     return parseSignalHealthState(parsed);
   } catch {
@@ -192,21 +196,25 @@ export function readSignalHealth(stateDir: string): SignalHealthState | null {
  * 任何失败都不抛出——旁路观测不阻塞检测管线。
  */
 export function updateSignalHealth(stateDir: string, mutate: (state: SignalHealthState) => void): void {
+  // Guard BEFORE the mkdir — a leaked '/fake/state' must not recreate
+  // D:\fake\state on Windows. loadState / healthFilePath receive the same
+  // guarded dir, so read and write always agree on one location.
+  const safeStateDir = guardWorkspaceLeak(stateDir);
   try {
     const now = new Date();
-    const state = loadState(stateDir, now);
+    const state = loadState(safeStateDir, now);
     mutate(state);
     state.updatedAt = now.toISOString();
     state.day = now.toISOString().slice(0, 10);
-    fs.mkdirSync(stateDir, { recursive: true });
-    atomicWriteFileSync(healthFilePath(stateDir), JSON.stringify(state, null, 2));
+    fs.mkdirSync(safeStateDir, { recursive: true });
+    atomicWriteFileSync(healthFilePath(safeStateDir), JSON.stringify(state, null, 2));
   } catch (err) {
     // SystemLogger.log 对 falsy workspaceDir 直接 return——之前传 undefined 等于把
     // "健康文件写失败"这件事本身也静默吞掉了，违反本模块"旁路失败必须留痕"的契约。
     // stateDir 形如 <workspace>/.state，取父目录即工作区根；无 stateDir 时无法
     // 归属到任何工作区，此时保持静默（不往 cwd 写）。
-    if (stateDir) {
-      SystemLogger.log(path.dirname(stateDir), 'SIGNAL_HEALTH_WRITE_FAIL', String(err));
+    if (safeStateDir) {
+      SystemLogger.log(path.dirname(safeStateDir), 'SIGNAL_HEALTH_WRITE_FAIL', String(err));
     }
   }
 }
