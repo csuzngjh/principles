@@ -25,6 +25,17 @@ import { handleHealthCodex } from './health-codex.js';
 import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
 import type { McpHealthSection } from './health-mcp.js';
 
+/**
+ * MCP statuses that describe an absent host rather than a broken one. Every
+ * other non-HEALTHY status is a real install/config defect and must fail
+ * `pd health` by exit code (PRI-1130).
+ */
+const MCP_EXIT_NEUTRAL_STATUSES: ReadonlySet<McpHealthSection['status']> = new Set([
+  'HEALTHY',
+  'HOST_NOT_FOUND',
+  'NOT_INSTALLED',
+]);
+
 interface LastSuccessfulChain {
   painId?: string;
   taskId: string;
@@ -96,10 +107,12 @@ interface WorkspaceHealth {
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
   reliability: ReliabilityHealth;
   /**
-   * PRI-1071 Gate 4: shared MCP lifecycle diagnostics (binding, install,
-   * version, host config, restart) for the selected host. Read-only and
-   * independent of the ledger — an MCP problem never changes the exit code
-   * here; Codex reporting escalates it via warnings.
+   * PRI-1071 Gate 4 / PRI-1130: shared MCP lifecycle diagnostics (binding,
+   * install, version, host config, declared-entry integrity, restart) for the
+   * selected host. Read-only and independent of the ledger, but a broken host
+   * install IS a health failure: a non-HEALTHY MCP section sets exit code 1 so
+   * exit-code-only automation cannot mistake a missing payload file for success.
+   * HOST_NOT_FOUND / NOT_INSTALLED stay exit-code neutral (not a defect).
    */
   mcp: McpHealthSection;
   /**
@@ -240,10 +253,11 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
 
   function writeHealth(): void {
     const health = buildHealth();
+    const mcpFailed = !MCP_EXIT_NEUTRAL_STATUSES.has(health.mcp.status);
 
     if (opts.json) {
       console.log(JSON.stringify(health, null, 2));
-      if (health.candidateLedgerConsistency.status === 'degraded') process.exit(1);
+      if (health.candidateLedgerConsistency.status === 'degraded' || mcpFailed) process.exit(1);
       return;
     }
 
@@ -294,6 +308,11 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
     if (health.candidateLedgerConsistency.status === 'degraded') {
       console.warn('⚠️  Candidate/ledger consistency is DEGRADED. Run: pd candidate audit --workspace "' + workspaceDir + '" --json');
       console.warn('   To repair missing entries: pd candidate repair --candidate-id <id> --workspace "' + workspaceDir + '" --json');
+      process.exit(1);
+    }
+    if (mcpFailed) {
+      console.warn(`⚠️  MCP host health is ${health.mcp.status} (${health.mcp.reason ?? 'unspecified'}).`);
+      if (health.mcp.nextAction !== undefined) console.warn(`   nextAction: ${health.mcp.nextAction}`);
       process.exit(1);
     }
   }

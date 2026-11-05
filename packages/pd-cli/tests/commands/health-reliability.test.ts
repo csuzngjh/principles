@@ -8,6 +8,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
+
+// PRI-1130: this file proves the reliability section against REAL declaration
+// files. The MCP host section is covered by health.test.ts / health-mcp.test.ts;
+// without this seam the assertions would also depend on the machine's own host
+// install (where a broken payload now legitimately fails `pd health` by exit 1).
+vi.mock('../../src/commands/health-mcp.js', () => ({
+  assessMcpHealth: () => ({ host: 'openclaw', status: 'HEALTHY' }),
+  formatMcpHealthLines: () => [],
+}));
+
 import { handleHealth } from '../../src/commands/health.js';
 
 const dirs: string[] = [];
