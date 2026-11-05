@@ -50,6 +50,7 @@ import { handleRuntimeInternalizationIntegrity } from './commands/runtime-intern
 import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
+import { handleMcpLogsExport } from './commands/mcp-logs-export.js';
 import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
@@ -1314,6 +1315,42 @@ qualityCmd
   .action(async (opts) => {
     const { handleQualityScorecard } = await import('./commands/quality-scorecard.js');
     await handleQualityScorecard(opts);
+  });
+
+// ─── PD MCP durable logs (observability export) ───────────────────
+// One command that turns the on-disk MCP JSONL logs into a single bounded zip
+// the Owner can send to an agent for offline analysis.
+const mcpCmd = program
+  .command('mcp')
+  .description('PD MCP server operations');
+
+const mcpLogsCmd = mcpCmd
+  .command('logs')
+  .description('Inspect durable PD MCP logs');
+
+mcpLogsCmd
+  .command('export')
+  .description('Bundle the last N days of PD MCP logs into one zip (≤20 MiB, sanitized)')
+  .option('--days <n>', 'Days of history to include (1-365)', '7')
+  .option('-o, --out <path>', 'Output .zip path, or a directory to write the default file name into')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const parsedDays = Number.parseInt(opts.days, 10);
+    if (!Number.isInteger(parsedDays) || parsedDays < 1 || parsedDays > 365) {
+      console.error('--days must be an integer between 1 and 365');
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      await handleMcpLogsExport({
+        days: parsedDays,
+        out: opts.out,
+        json: opts.json === true,
+      });
+    } catch (error) {
+      console.error(`MCP log export failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
   });
 
 if (!handleVersionFlag(process.argv.slice(2))) {
