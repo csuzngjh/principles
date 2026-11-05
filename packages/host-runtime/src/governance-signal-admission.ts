@@ -1943,8 +1943,8 @@ export type WorkbuddyCorrectionCandidateKind = 'strong' | 'ambiguous' | 'none';
 /**
  * Shared WorkBuddy Stage-1 assessment. `strong` may admit inline (no LLM);
  * `ambiguous` persists a pending Stage-2 candidate (zero LLM in the hook);
- * `none` writes nothing. The startsWith pre-filter (SPEC P-5) is retained
- * until the cross-host negative matrix authorizes its retirement.
+ * `none` writes nothing. Detection delegates position safety to the shared
+ * keyword-stage guards (quotes / third person / negation / conditional context).
  */
 export function assessWorkbuddyCorrectionCandidate(
   text: string,
@@ -1958,10 +1958,6 @@ export function assessWorkbuddyCorrectionCandidate(
     return { kind: 'none', reason: 'prompt_too_large' };
   }
   const resolved = store ?? workbuddyP0KeywordStore();
-  // Prefer precision to recall: reject quoted/embedded/reported phrases.
-  if (!Object.keys(resolved.terms).some(term => text.trimStart().toLowerCase().startsWith(term.toLowerCase()))) {
-    return { kind: 'none', reason: 'not_a_signal' };
-  }
   const out = collectSync(text, sessionId, resolved, SYNC_DETECTION_CONFIG, new Date().toISOString());
   const strong = out.isSignal && out.strength === 'STRONG' &&
     out.type === 'correction' && out.matchedPrecision === 'high';

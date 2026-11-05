@@ -104,6 +104,29 @@ describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evide
     expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toHaveLength(6);
   });
 
+  // SPEC P-5 退役后的正向路径：句中出现 high 精度纠正词不再被句首预过滤静默丢弃。
+  // 落点仍是 abandoned/evidence_invalid——这是证据闸门的结果，不是检测没工作。
+  it('mid-sentence high-precision correction reaches the evidence gate through the real hook', () => {
+    const ws = setup();
+    const r = invoke(ws, { prompt: '我早说了，这是错的', generation_id: 'native-positive-1' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    const markers = rows(ws.workspace, 'SELECT decision, reason FROM governance_signal_admissions');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ decision: 'abandoned', reason: 'evidence_invalid' });
+    // Pain 与 Diagnostician Task 增量均为 0：证据闸门拒绝，不是检测未命中。
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    const statePath = path.join(ws.workspace, '.pd', 'state.db');
+    if (fs.existsSync(statePath)) {
+      const state = new Database(statePath, { readonly: true });
+      try {
+        expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind='diagnostician'").get()).toEqual({ n: 0 });
+      } finally { state.close(); }
+    } else {
+      expect(fs.existsSync(statePath)).toBe(false);
+    }
+  });
+
   // SPEC v0.3 §3.2.3 (D5 reverse): learned keywords are Stage-2 candidates only.
   // Without persisted trust evidence they now settle as observation_only.
   it('learned terms never trigger live Pain; P0 seed terms also need real evidence', () => {
@@ -119,12 +142,12 @@ describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evide
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     expect(invoke(ws, { prompt: '可能不太对', generation_id: 'native-learned-2' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    // 转述（词不在句首）→ 仍为零。
+    // 转述（词不在句首）→ 仍为零 Pain；P-5 退役后该句到达共享守卫，降级 ambiguous → abandoned。
     expect(invoke(ws, { prompt: '他说方向完全反了', generation_id: 'native-learned-3' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     // P0 seed 四词仍被识别，但同样没有持久化证据 → observation_only。
     expect(invoke(ws, { generation_id: 'native-learned-4' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(3);
+    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(4);
   });
 });

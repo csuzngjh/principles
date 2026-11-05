@@ -302,8 +302,9 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
           typeof prompt === 'string' && !explicitReserved) {
         // AUDIT-P3-01: 预检与 admitTrustedWorkbuddyLiveCorrection 内部使用同一份
         // 共享 live 词库（seed ∪ learned）——预检不会漏掉学习词，也不会比准入
-        // 更宽。startsWith 预过滤保持（SPEC P-5）；歧义候选只落 pending，
-        // 同步 hook 内零 LLM。
+        // 更宽。P-5 退役后不再做句首 startsWith 预过滤，位置安全交给共享守卫
+        // （引号 / 第三人称 / 否定 / 条件语境）；歧义候选只落候选，同步 hook
+        // 内零 LLM。
         const matched = assessWorkbuddyCorrectionCandidate(
           prompt,
           event.context.sessionId,
