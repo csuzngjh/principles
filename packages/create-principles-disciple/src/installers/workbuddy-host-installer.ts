@@ -465,6 +465,11 @@ export function writeHostJsonFileProtected(filePath: string, content: string): {
 export interface WorkbuddyPluginPayload {
   pluginDir: string;
   version: string;
+  /**
+   * Manifest-declared default. Only an explicit `defaultEnabled: true` counts
+   * as enabled-on-install; PD declares `false` (install ≠ enable, SPEC §6.4).
+   */
+  defaultEnabled: boolean;
 }
 
 export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir: string): { payload?: WorkbuddyPluginPayload; reason?: string } {
@@ -506,7 +511,7 @@ export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir:
       return { reason: `workbuddy_plugin_control_missing: ${root} must ship scripts/pd-control.cjs for the pd-disable skill.` };
     }
     const { version } = manifest;
-    return { payload: { pluginDir: root, version } };
+    return { payload: { pluginDir: root, version, defaultEnabled: manifest.defaultEnabled === true } };
   }
   return {
     reason: `workbuddy_adapter_payload_missing: no WorkBuddy plugin skeleton found (looked for workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json under the installer payload and ${runtimeAdapterDir}). The @principles/workbuddy-adapter component is not part of this installer build.`,
@@ -606,10 +611,7 @@ function removeWorkbuddyFromInstallManifestHosts(manifestPath: string): void {
 // ─── Feature flag override (config.yaml line-targeted edit) ─────────────────
 
 const FEATURES_LINE = /^features:\s*(?:#.*)?$/;
-const FEATURES_EMPTY_MAPPING_LINE = /^features:\s*\{\}\s*(?:#.*)?$/;
-const WORKBUDDY_KEY_LINE = /^ {2}host\.workbuddy:\s*(?:#.*)?$/;
-const WORKBUDDY_ENABLED_LINE = /^ {4}enabled:\s*(?:true|false)\s*(?:#.*)?$/;
-const WORKBUDDY_CATEGORY_LINE = /^ {4}category:(?:\s.*)?(?:#.*)?$/;
+const FEATURES_EMPTY_MAPPING_LINE = /^features:\s*\{\s*\}\s*(?:#.*)?$/;
 
 /**
  * Registry-required category for the host.workbuddy flag entry. SSoT:
@@ -627,8 +629,318 @@ function stripYamlComment(line: string): string {
   return (hash === -1 ? line : line.slice(0, hash)).trim();
 }
 
-function isEmptyFeaturesMapping(line: string): boolean {
-  return stripYamlComment(line).replace(/\s+/g, '') === 'features:' + String.fromCharCode(123, 125);
+function leadingSpaces(line: string): number {
+  return /^ +/.exec(line)?.[0].length ?? 0;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const FLAG_EDIT_MANUAL_GUIDANCE =
+  'Edit the governance config.yaml by hand: keep the block-style mapping and change only features.<key>.enabled (or add the key under the top-level features: mapping). The installer refuses whole-file rewrites so Owner comments and unknown fields survive.';
+
+type LineEditResult = { ok: true; next: string } | { ok: false; reason: string; nextAction: string };
+
+/** Half-open line range: [start, end). */
+type LineRange = { start: number; end: number };
+
+type FlagEditRequest = { flagId: string; enabled: boolean; category: string; configPath: string };
+
+function failLineEdit(configPath: string, code: string, detail: string): LineEditResult {
+  return {
+    ok: false,
+    reason: `${code}: ${detail} (${configPath}). No write was performed.`,
+    nextAction: `${FLAG_EDIT_MANUAL_GUIDANCE} Affected file: ${configPath}.`,
+  };
+}
+
+function inspectFeaturesHeader(lines: string[]): { index: number; style: 'block' | 'empty' | 'flow' } | null {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string' || !/^features:/.test(line)) continue;
+    if (FEATURES_LINE.test(line)) return { index, style: 'block' };
+    if (FEATURES_EMPTY_MAPPING_LINE.test(line)) return { index, style: 'empty' };
+    return { index, style: 'flow' };
+  }
+  return null;
+}
+
+function findUnsafeYamlConstruct(lines: string[], start: number): { line: number; kind: string } | null {
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') break;
+    const body = stripYamlComment(line);
+    if (index > start && body.trim() === '') continue;
+    if (index > start && !/^\s/.test(line)) break;
+    if (/^\s*<<:/.test(body)) return { line: index, kind: 'YAML merge key (<<:)' };
+    if (/(?:^|\s)&[A-Za-z0-9_]/.test(body)) return { line: index, kind: 'YAML anchor (&)' };
+    if (/(?:^|\s)\*[A-Za-z0-9_]/.test(body)) return { line: index, kind: 'YAML alias (*)' };
+  }
+  return null;
+}
+
+function featuresBlockEnd(lines: string[], start: number): number {
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') return index;
+    const body = line.trim();
+    if (body === '' || body.startsWith('#')) continue;
+    if (!/^\s/.test(line)) return index;
+  }
+  return lines.length;
+}
+
+function findKeyLineIndexes(lines: string[], range: LineRange, flagId: string): number[] {
+  const indexes: number[] = [];
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') break;
+    if (stripYamlComment(line).trim() === `${flagId}:`) indexes.push(index);
+  }
+  return indexes;
+}
+
+/**
+ * Detect a flag entry written inline (`flagId: { enabled: true }` or
+ * `flagId: [ ... ]`) inside the features block. Such an entry has no
+ * independent `enabled:` line to rewrite, so it is refused explicitly rather
+ * than reported as an unparsable rewrite after a duplicate key is inserted.
+ */
+function findInlineFlagEntry(lines: string[], range: LineRange, flagId: string): number | null {
+  const pattern = new RegExp(`^${escapeRegExp(flagId)}:\\s*[\\[{]`);
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') break;
+    if (pattern.test(stripYamlComment(line).trim())) return index;
+  }
+  return null;
+}
+
+function flagBlockEnd(lines: string[], keyIndex: number, keyIndent: number): number {
+  for (let index = keyIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') return index;
+    const body = line.trim();
+    if (body === '' || body.startsWith('#')) continue;
+    if (leadingSpaces(line) <= keyIndent) return index;
+  }
+  return lines.length;
+}
+
+function childIndentOf(lines: string[], keyIndex: number, options: { end: number; keyIndent: number }): number {
+  for (let index = keyIndex + 1; index < options.end; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') continue;
+    const body = line.trim();
+    if (body === '' || body.startsWith('#')) continue;
+    const indent = leadingSpaces(line);
+    if (indent > options.keyIndent) return indent;
+  }
+  return options.keyIndent + 2;
+}
+
+/**
+ * Infer the child indentation used by an existing features block, so a
+ * missing flag is inserted in the file's own style (2, 4, 6 spaces …) instead
+ * of a guessed `key + 2`. Returns null when the block has no nested content to
+ * learn from.
+ */
+function inferChildIndent(lines: string[], range: LineRange, keyIndent: number): number | null {
+  let parentIndent: number | null = null;
+  for (let index = range.start; index < range.end; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') continue;
+    const body = line.trim();
+    if (body === '' || body.startsWith('#')) continue;
+    const indent = leadingSpaces(line);
+    if (parentIndent !== null && indent > parentIndent) return indent;
+    parentIndent = indent === keyIndent ? indent : null;
+  }
+  return null;
+}
+
+function findFieldIndexes(lines: string[], range: LineRange, options: { field: string; indent: number }): number[] {
+  const pattern = new RegExp(`^ {${options.indent}}${escapeRegExp(options.field)}:(\\s|$)`);
+  const indexes: number[] = [];
+  for (let index = range.start; index < range.end; index += 1) {
+    const line = lines[index];
+    if (typeof line !== 'string') continue;
+    if (pattern.test(line)) indexes.push(index);
+  }
+  return indexes;
+}
+
+function rewriteScalarLine(line: string, field: string, value: string): string | null {
+  const match = new RegExp(`^(\\s*)${escapeRegExp(field)}:(\\s*)(.*)$`).exec(line);
+  if (!match) return null;
+  const remainder = match[3] ?? '';
+  const hash = remainder.indexOf('#');
+  const comment = hash === -1 ? '' : remainder.slice(hash);
+  const valuePart = hash === -1 ? remainder : remainder.slice(0, hash);
+  const trailing = /\s*$/.exec(valuePart)?.[0] ?? '';
+  const rawValue = valuePart.trim();
+  if (rawValue === '') return null;
+  if (/^(?:~|null|Null|NULL)$/.test(rawValue)) return null;
+  const quoted = /^(['"])([^'"]*)(['"])$/.exec(rawValue);
+  const quote = quoted ? quoted[1] : '';
+  return `${match[1]}${field}:${match[2]}${quote}${value}${quote}${trailing}${comment}`;
+}
+
+/**
+ * Locate `features.<flagId>` in block-style YAML and rewrite ONLY its
+ * `enabled` line (plus, when missing, its registry `category` line). Every
+ * byte outside the flag block is verified unchanged before writing; anything
+ * the editor cannot locate safely fails closed instead of falling back to a
+ * whole-file `yaml.dump` (which would drop Owner comments).
+ *
+ * KNOWN LIMITATIONS (all fail closed, never rewritten; the first two are
+ * rejected by the YAML parse that runs before any edit):
+ * - tab-based indentation (invalid YAML);
+ * - any config that does not parse;
+ * - `features:` or the flag entry written in flow style (`{ ... }` / `[ ... ]`);
+ * - YAML anchors, aliases or merge keys (`&`, `*`, `<<:`) inside features;
+ * - a flag appearing twice, or the same field twice inside one flag block;
+ * - a field that is not a scalar (`enabled`/`category` written as a nested map).
+ */
+function applyFeatureFlagLineEdit(raw: string, request: FlagEditRequest): LineEditResult {
+  const { flagId, enabled, category, configPath } = request;
+  // Preserve the file's own line ending: inserting "\n" into a CRLF config
+  // would change every following byte's neighbourhood (mixed EOL).
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  const lines = raw.split(eol);
+
+  const header = inspectFeaturesHeader(lines);
+  if (header?.style === 'flow') {
+    return failLineEdit(configPath, 'config_features_flow_style', 'the top-level features: mapping is written inline (flow style)');
+  }
+  if (header) {
+    const unsafe = findUnsafeYamlConstruct(lines, header.index);
+    if (unsafe !== null) {
+      return failLineEdit(configPath, 'config_yaml_anchor_or_merge_key', `${unsafe.kind} at line ${unsafe.line + 1}`);
+    }
+  }
+
+  const featuresStart = header?.index ?? lines.length;
+  const featuresEnd = header ? featuresBlockEnd(lines, header.index) : lines.length;
+  const featuresRange: LineRange = { start: featuresStart, end: featuresEnd };
+  if (header) {
+    const inline = findInlineFlagEntry(lines, featuresRange, flagId);
+    if (inline !== null) {
+      return failLineEdit(configPath, 'config_flag_flow_style', `features.${flagId} is written inline at line ${inline + 1}`);
+    }
+  }
+  const keyIndexes = header ? findKeyLineIndexes(lines, featuresRange, flagId) : [];
+  if (keyIndexes.length > 1) {
+    return failLineEdit(configPath, 'config_flag_block_ambiguous', `features.${flagId} appears ${keyIndexes.length} times`);
+  }
+
+  let working: string[];
+  let allowedStart: number;
+  let allowedEnd: number;
+
+  if (keyIndexes.length === 1) {
+    const [keyIndex] = keyIndexes;
+    const keyLine = keyIndex === undefined ? undefined : lines[keyIndex];
+    if (keyIndex === undefined || keyLine === undefined) {
+      return failLineEdit(configPath, 'config_flag_block_ambiguous', `features.${flagId} could not be located`);
+    }
+    const keyIndent = leadingSpaces(keyLine);
+    const blockEnd = flagBlockEnd(lines, keyIndex, keyIndent);
+    const childIndent = childIndentOf(lines, keyIndex, { end: blockEnd, keyIndent });
+    working = [...lines];
+
+    const enabledIndexes = findFieldIndexes(working, { start: keyIndex + 1, end: blockEnd }, { field: 'enabled', indent: childIndent });
+    if (enabledIndexes.length > 1) {
+      return failLineEdit(configPath, 'config_flag_field_duplicate', `features.${flagId}.enabled appears ${enabledIndexes.length} times`);
+    }
+    const [existingEnabled] = enabledIndexes;
+    let enabledIndex: number;
+    if (existingEnabled !== undefined) {
+      const enabledLine = working[existingEnabled];
+      const rewritten = typeof enabledLine === 'string' ? rewriteScalarLine(enabledLine, 'enabled', String(enabled)) : null;
+      if (rewritten === null) {
+        return failLineEdit(configPath, 'config_flag_field_unsupported', `features.${flagId}.enabled is not a scalar boolean`);
+      }
+      working[existingEnabled] = rewritten;
+      enabledIndex = existingEnabled;
+    } else {
+      enabledIndex = keyIndex + 1;
+      working.splice(enabledIndex, 0, `${' '.repeat(childIndent)}enabled: ${enabled}`);
+    }
+
+    const blockEndAfterInsert = flagBlockEnd(working, keyIndex, keyIndent);
+    const categoryIndexes = findFieldIndexes(working, { start: keyIndex + 1, end: blockEndAfterInsert }, { field: 'category', indent: childIndent });
+    if (categoryIndexes.length > 1) {
+      return failLineEdit(configPath, 'config_flag_field_duplicate', `features.${flagId}.category appears ${categoryIndexes.length} times`);
+    }
+    const [existingCategory] = categoryIndexes;
+    if (existingCategory !== undefined) {
+      const categoryLine = working[existingCategory];
+      const rewritten = typeof categoryLine === 'string' ? rewriteScalarLine(categoryLine, 'category', category) : null;
+      if (rewritten === null) {
+        return failLineEdit(configPath, 'config_flag_field_unsupported', `features.${flagId}.category is not a scalar string`);
+      }
+      working[existingCategory] = rewritten;
+    } else {
+      working.splice(enabledIndex + 1, 0, `${' '.repeat(childIndent)}category: ${category}`);
+    }
+
+    allowedStart = keyIndex;
+    allowedEnd = blockEnd;
+  } else if (header === null) {
+    working = [
+      ...lines,
+      'features:',
+      `  ${flagId}:`,
+      `    enabled: ${enabled}`,
+      `    category: ${category}`,
+    ];
+    allowedStart = lines.length;
+    allowedEnd = lines.length;
+  } else {
+    working = [...lines];
+    let keyIndent = 2;
+    const firstChild = working.slice(header.index + 1, featuresEnd).find((line) => {
+      if (typeof line !== 'string') return false;
+      const body = line.trim();
+      return body !== '' && !body.startsWith('#');
+    });
+    if (typeof firstChild === 'string') keyIndent = leadingSpaces(firstChild);
+    const childIndent = inferChildIndent(working, { start: header.index + 1, end: featuresEnd }, keyIndent) ?? keyIndent + 2;
+    const insertAt = header.index + 1;
+    if (header.style === 'empty') working[header.index] = 'features:';
+    working.splice(
+      insertAt,
+      0,
+      `${' '.repeat(keyIndent)}${flagId}:`,
+      `${' '.repeat(childIndent)}enabled: ${enabled}`,
+      `${' '.repeat(childIndent)}category: ${category}`,
+    );
+    allowedStart = header.style === 'empty' ? header.index : insertAt;
+    allowedEnd = header.style === 'empty' ? header.index + 1 : insertAt;
+  }
+
+  const next = working.join(eol);
+  const prefix = lines.slice(0, allowedStart).join(eol);
+  const suffix = lines.slice(allowedEnd).join(eol);
+  if (!next.startsWith(prefix) || !next.endsWith(suffix)) {
+    return failLineEdit(configPath, 'config_edit_out_of_scope', `bytes outside features.${flagId} would change`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(next);
+  } catch {
+    return failLineEdit(configPath, 'config_rewrite_invalid', `the edited YAML no longer parses`);
+  }
+  const features = isRecord(parsed) ? parsed.features : undefined;
+  const entry = isRecord(features) ? features[flagId] : undefined;
+  if (!isRecord(entry) || entry.enabled !== enabled || entry.category !== category) {
+    return failLineEdit(configPath, 'config_rewrite_verification_failed', `features.${flagId} did not round-trip to enabled=${String(enabled)}, category=${category}`);
+  }
+
+  return { ok: true, next };
 }
 
 export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolean } | { ok: false; reason: string; nextAction: string };
@@ -649,60 +961,108 @@ export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolea
  * skipped with host.workbuddy_disabled.
  * Both entries are validated and atomically committed in one file write;
  * an already-correct config is left byte-identical (no rewrite).
+ *
+ * 2026-11-05 (Owner decision): `workbuddy_live_keyword_pain` is written
+ * `enabled: false` unconditionally. WorkBuddy has no persisted observation
+ * writer, so the automatic keyword path can only end as `observation_only`
+ * (an abandoned marker, never a Pain row). Leaving the flag ON made install
+ * output claim an automatic capability that does not exist. The flag id stays
+ * (it is part of the feature-flag contract and may exist in old configs), but
+ * the installer never turns it on.
  */
 export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOverrideResult & {
   hostExplicitOff: boolean;
   keywordExplicitOff: boolean;
+  /** The keyword gate as it actually reads back after the migration. */
+  keywordPainEnabled: boolean;
   changed: boolean;
 } {
   const configPath = path.join(governanceDir, '.pd', 'config.yaml');
+  let rawText: string;
+  try { rawText = readFileSync(configPath, 'utf-8'); }
+  catch {
+    return {
+      ok: false,
+      reason: 'fresh_workbuddy_config_unreadable',
+      nextAction: `Fix the YAML by hand (the installer never rewrites the whole file), then retry. Affected file: ${configPath}.`,
+      hostExplicitOff: false,
+      keywordExplicitOff: false,
+      keywordPainEnabled: false,
+      changed: false,
+    };
+  }
   let raw: unknown;
-  try { raw = yaml.load(readFileSync(configPath, 'utf-8')); }
-  catch { return { ok: false, reason: 'fresh_workbuddy_config_unreadable', nextAction: 'Repair governance config and retry.', hostExplicitOff: false, keywordExplicitOff: false, changed: false }; }
+  try { raw = yaml.load(rawText); }
+  catch {
+    return {
+      ok: false,
+      reason: 'fresh_workbuddy_config_unreadable',
+      nextAction: `Fix the YAML by hand (the installer never rewrites the whole file), then retry. Affected file: ${configPath}.`,
+      hostExplicitOff: false,
+      keywordExplicitOff: false,
+      keywordPainEnabled: false,
+      changed: false,
+    };
+  }
   if (!isRecord(raw) || !isRecord(raw.features)) {
-    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.', hostExplicitOff: false, keywordExplicitOff: false, changed: false };
+    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.', hostExplicitOff: false, keywordExplicitOff: false, keywordPainEnabled: false, changed: false };
   }
   const oldHost = raw.features['host.workbuddy'];
   const oldKeyword = raw.features.workbuddy_live_keyword_pain;
   const hostExplicitOff = isRecord(oldHost) && oldHost.enabled === false;
   const keywordExplicitOff = isRecord(oldKeyword) && oldKeyword.enabled === false;
-  const features = {
-    ...raw.features,
-    'host.workbuddy': { ...(isRecord(oldHost) ? oldHost : {}), enabled: !hostExplicitOff, category: WORKBUDDY_FLAG_CATEGORY },
-    workbuddy_live_keyword_pain: { ...(isRecord(oldKeyword) ? oldKeyword : {}), enabled: !keywordExplicitOff, category: WORKBUDDY_FLAG_CATEGORY },
-  };
-  const next = yaml.dump({ ...raw, features }, { lineWidth: -1, noRefs: true });
   const alreadyCorrect = isRecord(oldHost) && oldHost.enabled === !hostExplicitOff && oldHost.category === WORKBUDDY_FLAG_CATEGORY
-    && isRecord(oldKeyword) && oldKeyword.enabled === !keywordExplicitOff && oldKeyword.category === WORKBUDDY_FLAG_CATEGORY;
+    && isRecord(oldKeyword) && oldKeyword.enabled === false && oldKeyword.category === WORKBUDDY_FLAG_CATEGORY;
   if (alreadyCorrect) {
-    return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, changed: false };
+    return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled: false, changed: false };
   }
-  try {
-    const verify: unknown = yaml.load(next);
-    if (!isRecord(verify) || !isRecord(verify.features) ||
-      !isRecord(verify.features['host.workbuddy']) || verify.features['host.workbuddy'].enabled !== !hostExplicitOff ||
-      !isRecord(verify.features.workbuddy_live_keyword_pain) || verify.features.workbuddy_live_keyword_pain.enabled !== !keywordExplicitOff) {
-      return { ok: false, reason: 'fresh_workbuddy_flags_verification_failed', nextAction: 'No changes written.', hostExplicitOff, keywordExplicitOff, changed: false };
+
+  // Line-targeted edits: only the two flag blocks change; every comment,
+  // unknown feature and unrelated byte outside them is verified unchanged.
+  const edits: { flagId: string; enabled: boolean }[] = [
+    { flagId: 'host.workbuddy', enabled: !hostExplicitOff },
+    { flagId: 'workbuddy_live_keyword_pain', enabled: false },
+  ];
+  let next = rawText;
+  for (const edit of edits) {
+    const outcome = applyFeatureFlagLineEdit(next, {
+      flagId: edit.flagId,
+      enabled: edit.enabled,
+      category: WORKBUDDY_FLAG_CATEGORY,
+      configPath,
+    });
+    if (!outcome.ok) {
+      return { ok: false, reason: outcome.reason, nextAction: outcome.nextAction, hostExplicitOff, keywordExplicitOff, keywordPainEnabled: false, changed: false };
     }
+    ({ next } = outcome);
+  }
+
+  // The summary must report the gate that the config ACTUALLY holds, not the
+  // value we intended to write. `applyFeatureFlagLineEdit` has already parsed
+  // `next` successfully, so this read only feeds the summary.
+  const finalParsed: unknown = yaml.load(next);
+  const finalFeatures = isRecord(finalParsed) ? finalParsed.features : undefined;
+  const finalKeyword = isRecord(finalFeatures) ? finalFeatures.workbuddy_live_keyword_pain : undefined;
+  const keywordPainEnabled = isRecord(finalKeyword) && finalKeyword.enabled === true;
+
+  try {
     atomicReplaceTextFile(configPath, next);
   } catch {
-    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, keywordExplicitOff, changed: false };
+    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: false };
   }
-  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, changed: true };
+  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: true };
 }
 
 /**
- * PRI-1064 review: the install summary must state BOTH gates.
+ * PRI-1064 review: the install summary must state the governance gate
+ * truthfully.
  *
- * The first version derived the whole sentence from `hostExplicitOff` alone,
- * so a config with `workbuddy_live_keyword_pain.enabled: false` was reported as
- * "governance and four-term keyword Pain detection are ON" — a false summary
- * of exactly the kind this change set out to remove. Each gate is now stated
- * on its own, and an OFF state always names the flag the Owner wrote.
- *
- * Inherited verbatim by the PRI-1063 copy work, which keeps the flag ids
- * dotted (they ARE the flat keys) but replaces the prose with paste-ready
- * snippets.
+ * 2026-11-05 (Owner decision): WorkBuddy has no persisted observation writer,
+ * so automatic Pain detection is UNSUPPORTED there — every keyword candidate
+ * ends as `observation_only` and is never persisted. The summary therefore
+ * NEVER reports keyword Pain as ON; it states the actual intake path (the
+ * explicit `PD记录痛苦：` prefix) instead. Reporting the keyword gate as ON was
+ * a false capability claim of exactly the kind this change set out to remove.
  */
 export function describeGovernanceDefaults(
   state: { hostExplicitOff: boolean; keywordExplicitOff: boolean; changed: boolean } | null,
@@ -711,17 +1071,27 @@ export function describeGovernanceDefaults(
   if (state === null) {
     return ` Governance flag state is UNKNOWN — no governance config exists at ${governanceDir} (run "pd runtime init --workspace ${governanceDir}", then re-run the installer).`;
   }
+  const manualIntake = 'Automatic Pain detection is not available in WorkBuddy; record pain with the explicit prefix "PD记录痛苦：".';
   if (state.hostExplicitOff) {
-    return ' WorkBuddy governance is OFF — your explicit opt-out (features.host.workbuddy.enabled=false) was preserved; four-term keyword Pain detection is ON.';
+    return ` WorkBuddy governance is OFF — your explicit opt-out (features.host.workbuddy.enabled=false) was preserved; four-term keyword Pain detection is OFF${state.keywordExplicitOff ? ' (the OFF setting was preserved)' : ' (automatic detection is unavailable in WorkBuddy, so it is kept OFF)'}. ${manualIntake}`;
   }
-  const hostState = ` WorkBuddy governance is ON${state.changed ? ' (enabled by this install)' : ' (already enabled)'}`;
+  const hostState = ` WorkBuddy governance is ON${state.changed ? ' (enabled by this install)' : ' (already enabled)'} — this flag only acts through the plugin/hook channel, so it has no effect until the plugin is enabled in WorkBuddy`;
   const keywordState = state.keywordExplicitOff
-    ? 'four-term keyword Pain detection is OFF — your explicit opt-out (features.workbuddy_live_keyword_pain.enabled=false) was preserved'
-    : 'four-term keyword Pain detection is ON';
-  return `${hostState}; ${keywordState}.`;
+    ? 'four-term keyword Pain detection is OFF — the OFF setting was preserved (an explicit Owner opt-out is never overridden)'
+    : 'four-term keyword Pain detection is OFF — automatic detection is unavailable in WorkBuddy, so it is kept OFF';
+  return `${hostState}; ${keywordState}. ${manualIntake}`;
 }
 
-export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boolean): FlagOverrideResult {
+/**
+ * Generic line-targeted flag editor (flag id + registry category are
+ * parameters). Writes only the flag's `enabled`/`category` lines, keeps every
+ * other byte intact, and fails closed when the block cannot be located safely.
+ */
+export function setWorkbuddyFeatureFlag(
+  governanceDir: string,
+  flag: { flagId: string; enabled: boolean; category: string },
+): FlagOverrideResult {
+  const { flagId, enabled, category } = flag;
   const configDir = path.join(governanceDir, '.pd');
   const configPath = path.join(configDir, 'config.yaml');
   let raw: string;
@@ -738,106 +1108,27 @@ export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boole
       return {
         ok: false,
         reason: `config_unparsable: ${configPath} is not valid YAML (${error instanceof Error ? error.message : String(error)}). No write was performed.`,
-        nextAction: 'Fix or delete the malformed config.yaml, then retry the enable.',
+        nextAction: 'Fix or delete the malformed config.yaml by hand, then retry.',
       };
     }
   } else {
     raw = generateConfigYamlContent();
   }
 
-  const lines = raw.split('\n');
-  let keyIndex = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (typeof line === 'string' && WORKBUDDY_KEY_LINE.test(line)) { keyIndex = i; break; }
-  }
-  if (keyIndex >= 0) {
-    // Remediation (review 2026-10-13 §3 P2 + round-3 P2): locate the existing
-    // `enabled` and `category` fields WITHIN the flag's mapping block. The
-    // block boundary is INDENTATION, not field identity: it spans every
-    // non-blank line indented ≥ 4 spaces after the 2-space `host.workbuddy:`
-    // key, plus the comments/blank lines interleaved with them, and ends at
-    // the first structural line indented < 4 spaces (dedent / next key) or
-    // EOF. Legal entry fields other than the two we manage — e.g. `source:`
-    // (PRI-637 provenance, FeatureFlagEntry source?: 'owner' | 'system') —
-    // live INSIDE the block and must NEVER end the scan: the previous
-    // first-unrecognized-line break mistook `source: owner` for the block end
-    // and spliced duplicate keys above it, so the rewrite verification threw
-    // (config_rewrite_invalid) and enable/disable was refused with the stale
-    // value preserved.
-    let enabledIndex = -1;
-    let categoryIndex = -1;
-    for (let i = keyIndex + 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (typeof line !== 'string') break; // EOF — block ended
-      if (line.trim() === '' || /^\s*#/.test(line)) continue; // blank / comment — transparent, inside the block
-      if (!/^ {4}/.test(line)) break; // dedent — mapping entry ended
-      if (WORKBUDDY_ENABLED_LINE.test(line)) { enabledIndex = i; continue; }
-      if (WORKBUDDY_CATEGORY_LINE.test(line)) { categoryIndex = i; continue; }
-      // Any other legal field (source: …) or nested content — inside the
-      // block: keep scanning, never touch it.
-    }
-    if (enabledIndex >= 0) {
-      // In-place flip; nothing else in the block moves.
-      lines[enabledIndex] = `    enabled: ${enabled}`;
-    } else {
-      // No enabled field anywhere in the block: insert it under the key line.
-      lines.splice(keyIndex + 1, 0, `    enabled: ${enabled}`);
-      if (categoryIndex > keyIndex) categoryIndex += 1;
-    }
-    // R1 write contract: EVERY entry this function writes carries the
-    // schema-required category (production validator requirement). Insert it
-    // only when the block has none — never alongside an existing one.
-    if (categoryIndex >= 0) {
-      lines[categoryIndex] = `    category: ${WORKBUDDY_FLAG_CATEGORY}`;
-    } else if (enabledIndex >= 0) {
-      lines.splice(enabledIndex + 1, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
-    } else {
-      lines.splice(keyIndex + 2, 0, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
-    }
-  } else {
-    // Match BOTH an existing mapping header (`features:`) and the empty flow
-    // mapping the installer template writes (`features: {}`) — appending a
-    // SECOND features block instead would create a duplicate YAML key.
-    const featuresIndex = lines.findIndex((line) => FEATURES_LINE.test(line) || FEATURES_EMPTY_MAPPING_LINE.test(line));
-    if (featuresIndex >= 0) {
-      const featuresLine = lines[featuresIndex];
-      if (typeof featuresLine === 'string' && isEmptyFeaturesMapping(featuresLine)) {
-        lines[featuresIndex] = 'features:';
-      }
-      lines.splice(featuresIndex + 1, 0, `  host.workbuddy:`, `    enabled: ${enabled}`, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
-    } else {
-      // No features: mapping at all — append a block at the end.
-      lines.push('features:', `  host.workbuddy:`, `    enabled: ${enabled}`, `    category: ${WORKBUDDY_FLAG_CATEGORY}`);
-    }
-  }
-
-  const next = lines.join('\n');
-  // Round-trip verification: the rewritten config must parse with the flag at
-  // the intended value AND the registry-required category before it is
-  // committed (same discipline as codex-setup).
-  let verify: unknown;
-  try {
-    verify = yaml.load(next);
-  } catch (error) {
-    return { ok: false, reason: `config_rewrite_invalid: verification parse failed (${error instanceof Error ? error.message : String(error)}). Nothing was written.`, nextAction: 'Report this failure — the flag edit produced invalid YAML.' };
-  }
-  const flagOk = isRecord(verify)
-    && isRecord(verify.features)
-    && isRecord(verify.features['host.workbuddy'])
-    && verify.features['host.workbuddy'].enabled === enabled
-    && verify.features['host.workbuddy'].category === WORKBUDDY_FLAG_CATEGORY;
-  if (!flagOk) {
-    return { ok: false, reason: 'config_rewrite_mismatch: round-trip verification did not observe the intended flag value + category. Nothing was written.', nextAction: 'Report this failure with the config.yaml content.' };
-  }
+  const outcome = applyFeatureFlagLineEdit(raw, { flagId, enabled, category, configPath });
+  if (!outcome.ok) return outcome;
 
   try {
     mkdirSync(configDir, { recursive: true });
-    atomicReplaceTextFile(configPath, next);
+    atomicReplaceTextFile(configPath, outcome.next);
   } catch (error) {
     return { ok: false, reason: `config_write_failed: ${configPath} (${error instanceof Error ? error.message : String(error)})`, nextAction: 'Fix permissions/free the file and retry.' };
   }
   return { ok: true, configPath, enabled };
+}
+
+export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boolean): FlagOverrideResult {
+  return setWorkbuddyFeatureFlag(governanceDir, { flagId: 'host.workbuddy', enabled, category: WORKBUDDY_FLAG_CATEGORY });
 }
 
 /** Read the explicit host.workbuddy override state (null = no explicit override → registry default OFF). */
@@ -1483,7 +1774,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const mcpBinding = writeWorkbuddyMcpBinding(p.marketplaceRoot, this.deps.homeDir());
 
     // 5. Register: engine commands first; observable direct-write fallback.
-    const registration = this.registerPlugin(details, payload.version);
+    const registration = this.registerPlugin(details, payload.version, payload.defaultEnabled);
     if (!registration.ok) {
       return {
         success: false,
@@ -1583,12 +1874,15 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
+      pluginState: this.readInstalledPluginState(),
       governance: governanceDefaults === null
         ? undefined
         : {
             enabled: !governanceDefaults.hostExplicitOff,
             explicitOptOut: governanceDefaults.hostExplicitOff,
-            keywordPainEnabled: !governanceDefaults.keywordExplicitOff,
+            // Read back from the config after the migration (OFF by contract),
+            // never inferred from the Owner opt-out flag.
+            keywordPainEnabled: governanceDefaults.keywordPainEnabled,
             configPath: governanceDefaults.configPath,
           },
       reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}${mcpBinding.ok ? ' pd-recall MCP binding written.' : ` pd-recall MCP binding skipped (${mcpBinding.reason ?? 'unknown'}).`}`,
@@ -1596,7 +1890,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       // main; the "Existing workspaces retain their prior settings" sentence is
       // deliberately dropped — PRI-1064 turns governance ON for those
       // workspaces, so keeping it would state the opposite of what happens.
-      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable, edit ${path.join(p.governanceDir, '.pd', 'config.yaml')} — each flag id is ONE flat key (not nested). In the existing "features:" block set workbuddy_live_keyword_pain: {enabled: false} to disable keyword Pain only, or host.workbuddy: {enabled: false} to disable all WorkBuddy governance.${pendingRebindNote}`,
+      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable, edit ${path.join(p.governanceDir, '.pd', 'config.yaml')} — each flag id is ONE flat key (not nested). In the existing "features:" block set host.workbuddy: {enabled: false} to disable all WorkBuddy governance. Automatic Pain detection is unavailable in WorkBuddy; record pain only through the explicit "PD记录痛苦：" prefix.${pendingRebindNote}`,
     };
   }
 
@@ -1678,6 +1972,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   private registerPlugin(
     details: WorkbuddyDetectDetails,
     version: string,
+    declaredDefaultEnabled: boolean,
   ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
 
@@ -1685,16 +1980,28 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // manifest version. Reuse the installer-owned registration/cache writer
     // rather than reporting a stale cache as an idempotent successful install.
     if (details.registered && !this.pluginCacheMatchesPayload(version)) {
-      return this.directWriteRegistration(details, version, 'registered plugin cache differs from the current bundled payload; refreshed by installer');
+      return this.directWriteRegistration(details, version, {
+        declaredDefaultEnabled,
+        engineNote: 'registered plugin cache differs from the current bundled payload; refreshed by installer',
+      });
     }
 
-    // Idempotent fast path: already registered AND enabled AND cached.
-    if (details.registered && details.pluginEnabled && existsSync(p.cachePluginRoot)) {
+    // Idempotent fast path: already registered AND cached. The installed
+    // enabled state is the OWNER's choice — install/upgrade/reinstall must not
+    // flip it in either direction (install ≠ enable, SPEC §6.4).
+    if (details.registered && existsSync(p.cachePluginRoot)) {
       return { ok: true, mode: 'already-registered', settingsAction: 'preserved' };
     }
 
     // Engine path (preferred — real marketplace/cache/settings chain).
     if (details.engineFound) {
+      // Resolve the installed enabled value BEFORE the engine runs: an engine
+      // install must not enable the plugin, and a pre-existing Owner choice
+      // (true or false) must survive the install.
+      const installedEnabled = this.resolveInstalledEnabledValue(declaredDefaultEnabled);
+      if (!installedEnabled.ok) {
+        return { ok: false, reason: installedEnabled.reason, nextAction: installedEnabled.nextAction };
+      }
       const add = this.runEngine(['plugin', 'marketplace', 'add', p.marketplaceRoot]);
       if (add !== undefined && add.status === 0 && MARKETPLACE_ADD_OK.test(add.stdout + add.stderr)) {
         if (details.registered) {
@@ -1704,28 +2011,26 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         }
         const install = this.runEngine(['plugin', 'install', WORKBUDDY_PLUGIN_KEY]);
         if (install !== undefined && install.status === 0 && PLUGIN_INSTALL_OK.test(install.stdout + install.stderr)) {
-          let after = this.detectDetails();
-          if (after.registered && !after.pluginEnabled) {
-            // Engine-version reality (observed on 2.161.0, 2026-10-13): the
-            // engine honors the payload manifest's `defaultEnabled` and
-            // installs hooks-carrying plugins with enabledPlugins[key]=false.
-            // The installer contract (P01 frozen facts + this installer's own
-            // direct-write path) is installed ⇒ enabledPlugins[key]=true —
-            // the explicit host-level act of installing. PD governance stays
-            // OFF either way (OD-03: features.host.workbuddy is a separate,
-            // later, user-visible enable).
-            const enabled = this.enableRegisteredPlugin();
-            if (!enabled.ok) {
-              return { ok: false, reason: enabled.reason, nextAction: enabled.nextAction };
+          const after = this.detectDetails();
+          if (after.registered) {
+            // Converge the settings entry onto the resolved value. This covers
+            // engines that would force-enable on install while still preserving
+            // an Owner-chosen true/false from before the install.
+            const applied = this.applyInstalledEnabledValue(installedEnabled.value);
+            if (!applied.ok) {
+              return { ok: false, reason: applied.reason, nextAction: applied.nextAction };
             }
-            after = this.detectDetails();
-          }
-          if (after.registered && after.pluginEnabled) {
-            return { ok: true, mode: 'engine', settingsAction: after.settingsExisted ? 'updated' : 'created' };
+            return {
+              ok: true,
+              mode: 'engine',
+              settingsAction: details.settingsExisted
+                ? (installedEnabled.fromOwnerChoice ? 'preserved' : 'updated')
+                : 'created',
+            };
           }
           return {
             ok: false,
-            reason: `workbuddy_engine_install_unverified: engine reported success but the frozen-format state (enabledPlugins + installed_plugins.json) does not carry ${WORKBUDDY_PLUGIN_KEY} afterwards.`,
+            reason: `workbuddy_engine_install_unverified: engine reported success but installed_plugins.json does not carry ${WORKBUDDY_PLUGIN_KEY} afterwards.`,
             nextAction: `Run "node <engine> plugin list" to inspect the host state, then re-run the installer.`,
           };
         }
@@ -1740,14 +2045,17 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       const note = add !== undefined
         ? `engine marketplace add failed: ${((add.stderr || add.stdout).trim().slice(0, 200) || `exit ${add.status}`)}`
         : 'engine invocation failed';
-      const direct = this.directWriteRegistration(details, version, note);
+      const direct = this.directWriteRegistration(details, version, { declaredDefaultEnabled, engineNote: note });
       if (direct.ok) return direct;
       return { ok: false, reason: direct.reason, nextAction: direct.nextAction };
     }
 
     // Engine unreachable: direct-write path, strictly aligned with the frozen
     // formats, and always reported as a distinct mode.
-    const direct = this.directWriteRegistration(details, version, 'engine binary not found');
+    const direct = this.directWriteRegistration(details, version, {
+      declaredDefaultEnabled,
+      engineNote: 'engine binary not found',
+    });
     if (direct.ok) return direct;
     return { ok: false, reason: direct.reason, nextAction: direct.nextAction };
   }
@@ -1774,36 +2082,78 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   }
 
   /**
-   * Set enabledPlugins[OUR_KEY]=true in settings.json, preserving every other
-   * key (same protected write discipline as the direct-write registration).
-   * Converges the engine install path (which honors the payload manifest's
-   * defaultEnabled) onto the installer's frozen installed ⇒ enabled contract.
+   * The value an install should leave behind: an explicit boolean already in
+   * settings.json is the Owner's choice and always wins; otherwise the plugin
+   * manifest's `defaultEnabled` applies. Install never enables by itself.
    */
-  private enableRegisteredPlugin(): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  private resolveInstalledEnabledValue(declaredDefaultEnabled: boolean):
+    { ok: true; value: boolean; fromOwnerChoice: boolean } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
     const settings = readHostJsonFile(p.settingsPath);
     if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
+    const current = isRecord(settings.value?.enabledPlugins)
+      ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
+      : undefined;
+    if (typeof current === 'boolean') return { ok: true, value: current, fromOwnerChoice: true };
+    return { ok: true, value: declaredDefaultEnabled, fromOwnerChoice: false };
+  }
+
+  /** Write enabledPlugins[OUR_KEY]=value, preserving every other key. */
+  private applyInstalledEnabledValue(value: boolean): { ok: true; changed: boolean } | { ok: false; reason: string; nextAction: string } {
+    const p = this.paths();
+    const settings = readHostJsonFile(p.settingsPath);
+    if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
+    const current = isRecord(settings.value?.enabledPlugins)
+      ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
+      : undefined;
+    if (typeof current === 'boolean' && current === value) return { ok: true, changed: false };
     const nextSettings: Record<string, unknown> = { ...(settings.value ?? {}) };
     const enabledPlugins = isRecord(nextSettings.enabledPlugins) ? { ...nextSettings.enabledPlugins } : {};
-    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = true;
+    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = value;
     nextSettings.enabledPlugins = enabledPlugins;
     const write = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
     if (!write.ok) return { ok: false, reason: write.reason, nextAction: write.nextAction };
-    return { ok: true };
+    return { ok: true, changed: true };
+  }
+
+  /**
+   * Read the two INDEPENDENT post-install facts straight from the host:
+   *   - registration  → installed_plugins.json (host registry);
+   *   - enablement    → settings.json enabledPlugins[our key].
+   * Neither may be inferred from the other, from the governance flag, or from
+   * the engine's exit status. An unreadable registry must NOT be reported as
+   * "installed" (rc-9).
+   */
+  private readInstalledPluginState(): { registered: boolean; registryReadable: boolean; enabled: boolean | null } {
+    const p = this.paths();
+    const registry = readHostJsonFile(p.registryPath);
+    const registered = registry.ok && registry.existed && isRecord(registry.value.plugins)
+      ? Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)
+      : false;
+    const settings = readHostJsonFile(p.settingsPath);
+    const enabledPlugins = settings.ok && isRecord(settings.value?.enabledPlugins) ? settings.value.enabledPlugins : undefined;
+    const raw = enabledPlugins === undefined ? undefined : enabledPlugins[WORKBUDDY_PLUGIN_KEY];
+    return {
+      registered,
+      registryReadable: registry.ok,
+      enabled: typeof raw === 'boolean' ? raw : null,
+    };
   }
 
   /**
    * Direct-write registration for engine-unreachable machines, aligned with the
-   * frozen P01 formats: enabledPlugins[key]=true in settings.json (other keys
-   * and other plugins preserved), installed_plugins.json v2 user registration
+   * frozen P01 formats: enabledPlugins[key] carries the manifest default or the
+   * Owner's existing choice (install never enables by itself; other keys and
+   * other plugins preserved), installed_plugins.json v2 user registration
    * (native scope array or legacy object), and the versioned cache
    * copy under plugins/cache/<marketplace>/<plugin>/<version>/.
    */
   private directWriteRegistration(
     details: WorkbuddyDetectDetails,
     version: string,
-    engineNote: string,
+    options: { declaredDefaultEnabled: boolean; engineNote: string },
   ): { ok: true; mode: 'direct-write'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote: string } | { ok: false; reason: string; nextAction: string } {
+    const { declaredDefaultEnabled, engineNote } = options;
     const p = this.paths();
     const cacheVersionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
     if (cacheVersionDir === undefined) {
@@ -1826,9 +2176,15 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // settings.json merge — computed here, WRITTEN after the cache lands (see
     // below): a failed payload must leave no registration state behind.
+    // Install ≠ enable (SPEC §6.4): an explicit Owner choice is preserved;
+    // otherwise the manifest's defaultEnabled applies.
+    const currentEnabled = isRecord(settings.value?.enabledPlugins)
+      ? settings.value.enabledPlugins[WORKBUDDY_PLUGIN_KEY]
+      : undefined;
+    const installedEnabled = typeof currentEnabled === 'boolean' ? currentEnabled : declaredDefaultEnabled;
     const nextSettings: Record<string, unknown> = { ...(settings.value ?? {}) };
     const enabledPlugins = isRecord(nextSettings.enabledPlugins) ? { ...nextSettings.enabledPlugins } : {};
-    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = true;
+    enabledPlugins[WORKBUDDY_PLUGIN_KEY] = installedEnabled;
     nextSettings.enabledPlugins = enabledPlugins;
     const settingsAction = settings.existed ? 'updated' : 'created';
 

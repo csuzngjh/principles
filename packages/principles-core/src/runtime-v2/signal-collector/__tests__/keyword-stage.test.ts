@@ -132,3 +132,73 @@ describe('P-1 semantic guards (SPEC v0.3 §3.2.2)', () => {
     }
   });
 });
+
+/**
+ * SPEC P-5 的假阴性缺口：句首预过滤退役后，假设/条件语境也进入了高精度路径。
+ * 「如果这是错的」是假设，不是 Owner 的事实断言 → 不得直达 STRONG。
+ */
+describe('conditional / hypothetical context is downgraded (P-1b)', () => {
+  const directionalStore: UnifiedKeywordStore = {
+    version: 1,
+    terms: {
+      ...store.terms,
+      '方向反了': { term: '方向反了', weight: 0.9, precision: 'high', source: 'seed' },
+      '方案有问题': { term: '方案有问题', weight: 0.9, precision: 'high', source: 'seed' },
+      '不行': { term: '不行', weight: 0.8, precision: 'high', source: 'seed' },
+    },
+  };
+
+  it('hypothetical markers downgrade a high-precision correction to ambiguous', () => {
+    for (const text of ['如果这是错的，请告诉我', '要是这是错的呢', '假设这是错的', '万一这是错的']) {
+      const result = scanKeywords(text, store);
+      expect(result.matched).toBe(true);
+      expect(result.matchedPrecision).toBe('ambiguous');
+      expect(result.needsLlmConfirmation).toBe(true);
+      expect(result.matchedTerms).toContain('这是错的');
+    }
+    const directional = scanKeywords('假如方向反了怎么办', directionalStore);
+    expect(directional.matched).toBe(true);
+    expect(directional.matchedPrecision).toBe('ambiguous');
+    expect(directional.needsLlmConfirmation).toBe(true);
+  });
+
+  it('positive control: a real correction without a hypothetical marker still hits STRONG', () => {
+    for (const text of ['这是错的，重新做', '这是错的，请按我说的改']) {
+      const result = scanKeywords(text, store);
+      expect(result.matched).toBe(true);
+      expect(result.matchedPrecision).toBe('high');
+      expect(result.needsLlmConfirmation).toBe(false);
+    }
+  });
+
+  it('防回退的条件复句：条件约束整句，后置小句的高精度纠正词降级为 ambiguous', () => {
+    // 中文条件复句里条件约束前后两个小句：前半句是假设，后半句就不是事实断言。
+    for (const text of ['如果方向反了，这是错的', '假如方案有问题，这是错的', '万一不行，这是错的']) {
+      const result = scanKeywords(text, directionalStore);
+      expect(result.matched).toBe(true);
+      expect(result.matchedTerms).toContain('这是错的');
+      expect(result.matchedPrecision).toBe('ambiguous');
+      expect(result.needsLlmConfirmation).toBe(true);
+    }
+  });
+
+  it('条件语境只回溯到本句：句末标点之后仍判 STRONG', () => {
+    const crossSentence = scanKeywords('如果方向反了。这是错的', directionalStore);
+    expect(crossSentence.matchedPrecision).toBe('high');
+    expect(crossSentence.needsLlmConfirmation).toBe(false);
+  });
+
+  it('语义边界：条件在后、或者高精度词本身在条件小句内，都不会被误判为 STRONG', () => {
+    // 纠正在前、条件在后：不是条件语境，保持 STRONG（未做特殊处理，作为边界记录）。
+    for (const text of ['这是错的，如果要改就改', '这是错的，如果是那样的话']) {
+      const result = scanKeywords(text, store);
+      expect(result.matchedPrecision).toBe('high');
+      expect(result.needsLlmConfirmation).toBe(false);
+    }
+    // 高精度词本身位于条件小句内：只能降级，不可能是 STRONG。
+    const insideCondition = scanKeywords('如果方向反了，请重做', directionalStore);
+    expect(insideCondition.matchedTerms).toContain('方向反了');
+    expect(insideCondition.matchedPrecision).toBe('ambiguous');
+    expect(insideCondition.needsLlmConfirmation).toBe(true);
+  });
+});

@@ -61,3 +61,26 @@ deactivate（保留历史）、archive、`pd activation ...` 系列 CLI——用
 - **2026-08-24 停机窗口**: llamacpp 关闭期间 consumer 继续拾取任务导致
   40 条 failed。→ 教训：停 LLM 后端时应同时暂停 auto-consumer
   （或接受 retry_wait 自愈成本）。
+- **2026-11-05 真实 profile 误写**: OpenClaw MCP 端到端验证中，AI 助手用
+  PowerShell `$home`（只读自动变量）拼目标路径；赋值失败后变量仍指向真实
+  用户目录，`Copy-Item` 因此覆盖了真实 `~/.openclaw/principles-disciple.json`
+  与 `~/.openclaw/extensions/principles-disciple/mcp-binding.json`。
+  → 直接催生下面第五节。
+
+## 五、写入路径隔离硬约束（AI 助手，含恢复动作）
+
+本节对**所有写类操作**生效：复制、移动、删除、重定向写出、格式化写入，
+以及事故**恢复/回滚**动作本身（恢复也是写）。
+
+1. **禁止二义路径来源**: 不得用 `$home` / `$HOME` / `~` / `%USERPROFILE%`
+   等"可能赋值失败或随 shell 不同解析"的变量拼目标路径。隔离目录一律用
+   写死的绝对常量，或从显式配置读取的绝对路径。
+2. **写前打印目标**: 执行前先打印完整目标绝对路径（不得只打印文件名）。
+3. **写前断言隔离**: 目标路径必须通过"不属于真实用户目录前缀"断言
+   （例如 PowerShell：`$target -notlike "$env:USERPROFILE*"` 且
+   `$target -notlike "C:\Users\*"` 且 `$target -notlike "D:\.openclaw*"`）；
+   断言失败立即中止，不写盘。
+4. **赋值失败即硬错误**: 路径变量赋值失败视为致命错误（可用
+   `Set-StrictMode -Version Latest` 或写前断言兜底），不得继续执行后续写操作。
+5. **恢复脚本同样适用**: 先打印目标、再断言隔离、最后写入；恢复动作不得因为
+   "着急修复"而跳过检查。

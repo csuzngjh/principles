@@ -1,5 +1,38 @@
 # create-principles-disciple
 
+## 1.147.8
+
+### Patch Changes
+
+- a710e8a: PD MCP now writes durable, sanitized JSONL evidence by default to `~/.pd/logs/mcp`
+  (one file per process, 2 MiB/file, 64 MiB/directory, 14 days). Set `PD_MCP_LOG=0`
+  to disable it with zero writes.
+  
+  Events: `launcher_start`, `startup`, `initialize`, `tools_list`, `tool_call`,
+  `shutdown` and `startup_failure` (a pre-handshake exit now leaves PD-side
+  evidence). Logging failures are swallowed: tool results, stdout protocol purity,
+  the 32 KiB budget and the 10 s deadline are unchanged.
+  
+  New export command: `pd mcp logs export [--days 7] [--out <zip|dir>]` bundles the
+  recent logs plus a README/manifest into one zip ≤20 MiB for offline analysis.
+- 1132c11: PRI-1129: release payloads now ship `plugin/mcp/launcher.cjs` — the entry `openclaw.plugin.json` declares — and the build fails closed when a declared MCP entry is missing; `release-asset-smoke` asserts the extracted payload still contains it.
+  
+  The installer now also guarantees the other half of the same user-visible path: OpenClaw sanitizes the MCP child's environment (`PD_WORKSPACE_DIR` / `HOME` are stripped), so `pd-recall` can only locate the governance workspace through `~/.openclaw/principles-disciple.json`. The installer writes that PD-owned declaration on first install, leaves a compatible one byte-identical (idempotent), and refuses before any runtime mutation when an existing declaration names a different workspace or cannot be trusted (no silent overwrite, no cross-workspace recall).
+  
+  Correction to the earlier diagnosis: OpenClaw 2026.10.10 DOES materialize plugin-manifest `mcpServers`; it loads them lazily on the first agent turn. The real blockers were the missing payload entry and the unreachable workspace declaration.
+- efae469: PRI-1130: `pd health` now verifies that every file entry declared by the installed plugin payload actually exists — across OpenClaw/Codex/WorkBuddy manifests, `.mcp.json` and `hooks/hooks.json` (including the legal `hooks` field form that points to a custom hooks JSON file) — and reports `declared_entry_missing` with the concrete missing paths instead of trusting the declaration. Any non-neutral MCP status (`CONFIG_MISSING`, `CONFIG_DRIFT`, `VERSION_MISMATCH`, `RESTART_REQUIRED`, `HOST_RUNTIME_NOT_VERIFIED`) now exits non-zero, so exit-code-only automation can no longer treat a broken host install as healthy; `HOST_NOT_FOUND` and `NOT_INSTALLED` stay exit-code neutral.
+  
+  The WorkBuddy installer no longer enables the plugin on install: `enabledPlugins[key]` follows the manifest's declared `defaultEnabled` (PD declares `false`), an existing explicit Owner `true`/`false` always survives upgrade/reinstall/Repair, and the installer never overwrites the Owner's choice.
+  
+  The install summary now presents the THREE independent post-install facts separately, sourced from the host itself: registration (`installed_plugins.json`), host enablement (`settings.json` → `enabledPlugins`) and governance (`host.workbuddy`). `HostInstallResult.pluginState` carries those raw facts; the summary prints e.g. `WorkBuddy plugin … INSTALLED / DISABLED` alongside `WorkBuddy governance … ON` and states that hooks stay inactive and `PD记录痛苦：` is not delivered until the Owner enables the plugin. An unreadable registry is reported as `REGISTRY UNREADABLE / NOT VERIFIED` (never `INSTALLED`), and a failed install prints no success lines at all.
+- 1c1b91f: WorkBuddy: automatic Pain detection/correction is unsupported (the ingress evidence gate has no persisted observation writer, so automatic candidates never become Pain rows). The installer no longer enables `workbuddy_live_keyword_pain`, and install/status/docs copy now points to the explicit `PD记录痛苦：` prefix only.
+
+## 1.147.7
+
+### Patch Changes
+
+- f3f5250: PRI-1102: the installer now verifies the restored runtime component tree (Console server + Console web entry, pd-cli entry, plugin bundle, OpenClaw plugin entries) instead of only the runtime root, and reports an honest "NOT usable — incomplete" rollback state naming the missing components. A dangling plugin link is removed only when the missing target is confirmed (ENOENT/ENOTDIR); any other filesystem error fails closed and preserves the link.
+
 ## 1.147.6
 
 ### Patch Changes

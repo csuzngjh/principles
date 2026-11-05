@@ -273,9 +273,9 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
   workbuddy_live_keyword_pain: {
     decision: 'KEEP_QUIET',
     consumers: ['workbuddy-adapter/src/pd-hook.ts', 'host-runtime/src/governance-signal-admission.ts'],
-    evidence: 'SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001 P0; Owner opt-in; live current user only; no transcript reads',
+    evidence: 'SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001 P0; Owner opt-in; live current user only; no transcript reads. 2026-11-05 audit: WorkBuddy ingress has no persisted observation writer, so automatic candidates always end as observation_only (never a Pain row) — the capability is UNSUPPORTED in WorkBuddy; the explicit "PD记录痛苦：" prefix is the only intake.',
     decided: '2026-10-19',
-    graduationCriteria: 'Live host E2E + latency + explicit Owner default-on decision',
+    graduationCriteria: 'A persisted WorkBuddy observation writer + Live host E2E + latency + explicit Owner default-on decision',
     retirementCriteria: 'Feature removed or replaced with explicitly approved migration',
   },
   'host.workbuddy': {

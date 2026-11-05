@@ -36,12 +36,14 @@ import {
   readHostJsonFile,
   writeHostJsonFileProtected,
   setWorkbuddyGovernanceFlag,
+  setWorkbuddyFeatureFlag,
   findWorkbuddyPluginPayload,
   ensureWorkbuddyGovernanceEnabled,
   describeGovernanceDefaults,
   runWorkbuddyEarlyPreflight,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
+import { formatHostStateSummary } from '../src/install-summary.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
@@ -77,7 +79,7 @@ function writePluginSkeleton(pluginDir: string, version = '0.3.0'): void {
   fs.mkdirSync(path.join(pluginDir, '.codebuddy-plugin'), { recursive: true });
   fs.writeFileSync(
     path.join(pluginDir, '.codebuddy-plugin', 'plugin.json'),
-    JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version, description: 'Principles Disciple (test skeleton)' }, null, 2),
+    JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME, version, description: 'Principles Disciple (test skeleton)', defaultEnabled: false }, null, 2),
   );
   // hooks/hooks.json at the plugin ROOT with a representative multi-event
   // baseline shape (frozen manifest-facts hooksJsonShape; the installer copies
@@ -244,11 +246,11 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(result.reason).toContain('via engine');
     expect(result.configAction).toBe('updated');
 
-    // settings.json: enabledPlugins["principles-disciple@principles-disciple-market"]=true,
-    // everything else preserved (frozen enabledPluginsFormat).
+    // settings.json: install ≠ enable — the manifest's defaultEnabled=false is
+    // what lands; everything else preserved (frozen enabledPluginsFormat).
     const settings = readJson(settingsPath(created));
     const enabledPlugins = settings.enabledPlugins as Record<string, unknown>;
-    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false);
     expect(enabledPlugins['workbuddy-sheetagent@workbuddy-builtin']).toBe(true);
     expect(settings.theme).toBe('dark');
     expect(settings.hooks).toBeDefined();
@@ -292,7 +294,7 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(governanceConfig.version).toBe(1);
     expect(governanceConfig.features).toMatchObject({
       'host.workbuddy': { enabled: true, category: 'quiet' },
-      workbuddy_live_keyword_pain: { enabled: true, category: 'quiet' },
+      workbuddy_live_keyword_pain: { enabled: false, category: 'quiet' },
     });
     expect(created.installer.detectDetails().flagOverride).toBe(true);
     expect(created.installer.detectDetails().governanceInitialized).toBe(true);
@@ -486,7 +488,7 @@ describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fal
 
     const settings = readJson(settingsPath(created));
     const enabledPlugins = settings.enabledPlugins as Record<string, unknown>;
-    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect(enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false); // install ≠ enable
     expect(enabledPlugins['other@other-market']).toBe(true); // other plugins preserved
     expect((settings.customKey as Record<string, unknown>).nested).toBe(true); // unknown fields preserved
 
@@ -509,7 +511,93 @@ describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fal
     expect(result.reason).toContain('direct-write');
     expect(result.reason).toContain('engine marketplace add failed');
     const settings = readJson(settingsPath(created));
-    expect((settings.enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect((settings.enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+  });
+});
+
+// ─── install ≠ enable + idempotency ──────────────────────────────────────────
+
+describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', () => {
+  it('fresh install summary says INSTALLED / DISABLED (governance ON never implies hooks run)', async () => {
+    const created = lab();
+    const first = await created.installer.install(installCtx(created));
+    expect(first.success, first.reason).toBe(true);
+    expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+    // The summary is driven by the ACTUAL post-install host files, not internals.
+    expect(first.pluginState).toEqual({ registered: true, registryReadable: true, enabled: false });
+
+    const summary = formatHostStateSummary([first], first.success);
+    expect(summary).toContain('  WorkBuddy plugin ................. INSTALLED / DISABLED');
+    expect(summary).toContain('  WorkBuddy governance ............. ON');
+    expect(summary.join('\n')).not.toContain('INSTALLED / ENABLED');
+    expect(summary).toContain('Enable Principles Disciple in WorkBuddy plugin management.');
+    expect(summary).toContain('Then start a new session or run /reload-plugins.');
+    // Governance ON + plugin DISABLED must explicitly say the hooks are inactive.
+    expect(summary).toContain('Hooks stay INACTIVE while the plugin is disabled, so "PD记录痛苦：" is not delivered.');
+  });
+
+  it('Owner-enabled install summary says INSTALLED / ENABLED and drops the activation guidance', async () => {
+    const created = lab();
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: true } }, null, 2));
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect(result.pluginState).toEqual({ registered: true, registryReadable: true, enabled: true });
+
+    const summary = formatHostStateSummary([result], result.success).join('\n');
+    expect(summary).toContain('  WorkBuddy plugin ................. INSTALLED / ENABLED');
+    expect(summary).not.toContain('Next action:');
+    expect(summary).not.toContain('Hooks stay INACTIVE');
+  });
+
+  it('3 reinstalls never overwrite an Owner enable, and every summary reflects the real value', async () => {
+    const created = lab();
+    const first = await created.installer.install(installCtx(created));
+    expect(first.success, first.reason).toBe(true);
+    expect(first.pluginState?.enabled).toBe(false);
+
+    // The Owner explicitly enables the plugin through the host (not the installer).
+    const settings = readJson(settingsPath(created));
+    fs.writeFileSync(settingsPath(created), JSON.stringify({
+      ...settings,
+      enabledPlugins: { ...(settings.enabledPlugins as Record<string, unknown>), [WORKBUDDY_PLUGIN_KEY]: true },
+    }, null, 2));
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const rerun = await created.installer.install(installCtx(created));
+      expect(rerun.success, `reinstall ${attempt} failed: ${rerun.reason}`).toBe(true);
+      expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+      // The summary must report the preserved Owner enable, not the manifest default.
+      expect(rerun.pluginState).toEqual({ registered: true, registryReadable: true, enabled: true });
+      expect(formatHostStateSummary([rerun], rerun.success)).toContain('  WorkBuddy plugin ................. INSTALLED / ENABLED');
+    }
+  });
+
+  it('preserves an Owner enable that predates the first install', async () => {
+    const created = lab();
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: true } }, null, 2));
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
+    expect(result.pluginState?.enabled).toBe(true);
+  });
+
+  it('preserves an Owner disable that predates the first install', async () => {
+    const created = lab();
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: false } }, null, 2));
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
+    expect(result.pluginState?.enabled).toBe(false);
+  });
+
+  it('a failed install prints NO summary lines (no success claim)', async () => {
+    const created = lab({ engine: 'unreachable' });
+    fs.mkdirSync(path.dirname(registryPath(created)), { recursive: true });
+    fs.writeFileSync(registryPath(created), '{ "plugins": ');
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success).toBe(false);
+    expect(result.pluginState).toBeUndefined();
+    expect(formatHostStateSummary([result], result.success)).toEqual([]);
   });
 });
 
@@ -966,6 +1054,13 @@ describe('WorkBuddyHostInstaller.uninstall', () => {
     const created = lab();
     await created.installer.install(installCtx(created));
     seedNeighbors(created);
+    // Install ≠ enable, so the Owner enables the plugin first — then uninstall
+    // must still disable BEFORE uninstalling.
+    const beforeUninstall = readJson(settingsPath(created));
+    fs.writeFileSync(settingsPath(created), JSON.stringify({
+      ...beforeUninstall,
+      enabledPlugins: { ...(beforeUninstall.enabledPlugins as Record<string, unknown>), [WORKBUDDY_PLUGIN_KEY]: true },
+    }, null, 2));
 
     const result = await created.installer.uninstall({ language: 'en', force: true });
 
@@ -1094,7 +1189,7 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
     return parseYaml(fs.readFileSync(path.join(dir, '.pd', 'config.yaml'), 'utf8')).features as Record<string, { enabled?: boolean }>;
   }
 
-  it('enables both gates on a sparse config (failed-install residue no longer keeps governance off)', () => {
+  it('enables the governance gate and leaves keyword auto-detection OFF on a sparse config (failed-install residue no longer keeps governance off)', () => {
     const { dir } = seedGovernance('features: {}\n');
     try {
       const result = ensureWorkbuddyGovernanceEnabled(dir);
@@ -1103,13 +1198,13 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.changed).toBe(true);
       const flags = readFlags(dir);
       expect(flags['host.workbuddy']!.enabled).toBe(true);
-      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('PRESERVES an explicit host opt-out while still enabling the keyword gate', () => {
+  it('PRESERVES an explicit host opt-out and keeps keyword auto-detection OFF', () => {
     const { dir } = seedGovernance('features:\n  host.workbuddy:\n    enabled: false\n    category: quiet\n');
     try {
       const result = ensureWorkbuddyGovernanceEnabled(dir);
@@ -1117,18 +1212,17 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
       expect(result.hostExplicitOff).toBe(true);
       const flags = readFlags(dir);
       expect(flags['host.workbuddy']!.enabled).toBe(false);
-      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('PRESERVES an explicit keyword opt-out while still enabling the governance gate', () => {
-    const { dir } = seedGovernance('features:\n  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n');
+  it('keeps the keyword flag OFF even when an old config had it enabled', () => {
+    const { dir } = seedGovernance('features:\n  workbuddy_live_keyword_pain:\n    enabled: true\n    category: quiet\n');
     try {
       const result = ensureWorkbuddyGovernanceEnabled(dir);
       expect(result.ok).toBe(true);
-      expect(result.keywordExplicitOff).toBe(true);
       const flags = readFlags(dir);
       expect(flags['host.workbuddy']!.enabled).toBe(true);
       expect(flags.workbuddy_live_keyword_pain!.enabled).toBe(false);
@@ -1138,7 +1232,7 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
   });
 
   it('leaves an already-correct config byte-identical (changed=false, no rewrite)', () => {
-    const correct = 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n  workbuddy_live_keyword_pain:\n    enabled: true\n    category: quiet\n';
+    const correct = 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n';
     const { dir, configPath } = seedGovernance(correct);
     try {
       const before = fs.readFileSync(configPath, 'utf8');
@@ -1163,32 +1257,302 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
   });
 });
 
-// PRI-1064 review: the install summary derived the whole sentence from the
-// host gate, so an explicit keyword-Pain opt-out was reported as "keyword Pain
-// detection ... ON". These cases pin each gate to its own clause.
-describe('describeGovernanceDefaults (PRI-1064 review)', () => {
-  it('never reports keyword Pain as ON when the Owner explicitly disabled it', () => {
-    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: true, changed: true }, 'C:/ws');
-    expect(note).toContain('four-term keyword Pain detection is OFF');
-    expect(note).not.toContain('keyword Pain detection is ON');
-    expect(note).toContain('features.workbuddy_live_keyword_pain.enabled=false');
+// 2026-11-05 (Owner decision): the config migration MUST preserve Owner
+// comments, unknown fields and unrelated feature entries. The contract pinned
+// here is byte-level: only the target line(s) may differ, everything else is
+// identical before/after. A shape the editor cannot locate safely fails closed
+// with manual guidance and performs NO write.
+describe('line-targeted flag editing (comment-preserving migration)', () => {
+  function seed(config: string, eol = '\n'): { dir: string; configPath: string } {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-line-edit-'));
+    const configPath = path.join(dir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, config.replace(/\n/g, eol), 'utf8');
+    return { dir, configPath };
+  }
+
+  /**
+   * The assertion the Owner asked for: compute the differing span between the
+   * before/after text. Prefix and suffix are byte-identical by construction,
+   * so the returned slices are the ONLY changed region.
+   */
+  function changedSpan(before: string, after: string): { before: string; after: string } {
+    const b = before.split('\n');
+    const a = after.split('\n');
+    let head = 0;
+    while (head < b.length && head < a.length && b[head] === a[head]) head += 1;
+    let tail = 0;
+    while (tail < b.length - head && tail < a.length - head && b[b.length - 1 - tail] === a[a.length - 1 - tail]) tail += 1;
+    return {
+      before: b.slice(head, b.length - tail).join('\n'),
+      after: a.slice(head, a.length - tail).join('\n'),
+    };
+  }
+
+  it('migrates workbuddy_live_keyword_pain true→false touching ONLY that line (comments and unknown flags intact)', () => {
+    const beforeText = [
+      'version: 1',
+      '# Owner note: never rewrite this file',
+      'features:',
+      '  host.workbuddy:',
+      '    enabled: true',
+      '    category: quiet',
+      '  workbuddy_live_keyword_pain:',
+      '    enabled: true # I turned this on in the old config',
+      '    category: quiet',
+      '  owner_private_flag:',
+      '    enabled: false # hands off',
+      'runtimeProfiles: {}',
+      'internalAgents: {}',
+      '',
+    ].join('\n');
+    const { dir, configPath } = seed(beforeText);
+
+    const result = ensureWorkbuddyGovernanceEnabled(dir);
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+
+    const afterText = fs.readFileSync(configPath, 'utf8');
+    const span = changedSpan(beforeText, afterText);
+    expect(span.before).toBe('    enabled: true # I turned this on in the old config');
+    expect(span.after).toBe('    enabled: false # I turned this on in the old config');
+    // The bytes before and after the changed line are identical.
+    expect(afterText.slice(0, afterText.indexOf(span.after)))
+      .toBe(beforeText.slice(0, beforeText.indexOf(span.before)));
+    expect(afterText.slice(afterText.indexOf(span.after) + span.after.length))
+      .toBe(beforeText.slice(beforeText.indexOf(span.before) + span.before.length));
+
+    expect(afterText).toContain('# Owner note: never rewrite this file');
+    expect(afterText).toContain('enabled: false # hands off');
+    const flags = parseYaml(afterText).features as Record<string, Record<string, unknown>>;
+    expect(flags['host.workbuddy']).toEqual({ enabled: true, category: 'quiet' });
+    expect(flags.workbuddy_live_keyword_pain).toEqual({ enabled: false, category: 'quiet' });
+    expect(flags.owner_private_flag).toEqual({ enabled: false });
   });
 
-  it('states the host gate OFF and the keyword gate ON when only the host was opted out', () => {
+  it('inserts a missing flag in the file own indentation style and changes nothing else', () => {
+    const beforeText = [
+      'version: 1',
+      'features:',
+      '   host.workbuddy:',
+      '      enabled: true',
+      '      category: quiet',
+      'runtimeProfiles: {}',
+      '',
+    ].join('\n');
+    const { dir, configPath } = seed(beforeText);
+
+    const result = ensureWorkbuddyGovernanceEnabled(dir);
+    expect(result.ok).toBe(true);
+
+    const afterText = fs.readFileSync(configPath, 'utf8');
+    const span = changedSpan(beforeText, afterText);
+    expect(span.before).toBe('');
+    expect(span.after).toBe([
+      '   workbuddy_live_keyword_pain:',
+      '      enabled: false',
+      '      category: quiet',
+    ].join('\n'));
+    expect(afterText).toBe([
+      'version: 1',
+      'features:',
+      '   workbuddy_live_keyword_pain:',
+      '      enabled: false',
+      '      category: quiet',
+      '   host.workbuddy:',
+      '      enabled: true',
+      '      category: quiet',
+      'runtimeProfiles: {}',
+      '',
+    ].join('\n'));
+  });
+
+  it('the generic editor works for any flag id (not just host.workbuddy)', () => {
+    const beforeText = [
+      'features:',
+      '  signal_collector:',
+      '    enabled: true # neighbor',
+      '    category: core',
+      '',
+    ].join('\n');
+    const { dir, configPath } = seed(beforeText);
+    const outcome = setWorkbuddyFeatureFlag(dir, { flagId: 'signal_collector', enabled: false, category: 'core' });
+    expect(outcome.ok).toBe(true);
+    const afterText = fs.readFileSync(configPath, 'utf8');
+    expect(afterText).toBe('features:\n  signal_collector:\n    enabled: false # neighbor\n    category: core\n');
+  });
+
+  it('tolerates quoted values, trailing spaces and reversed key order, preserving quote style', () => {
+    const beforeText = [
+      'features:',
+      '    host.workbuddy:',
+      '        category: "quiet"   ',
+      '        enabled: true',
+      '    workbuddy_live_keyword_pain:   ',
+      '        category: "quiet"   ',
+      '        enabled: true   # owner wrote it on one line',
+      '',
+    ].join('\n');
+    const { dir, configPath } = seed(beforeText);
+
+    expect(ensureWorkbuddyGovernanceEnabled(dir).ok).toBe(true);
+    const afterText = fs.readFileSync(configPath, 'utf8');
+    const span = changedSpan(beforeText, afterText);
+    expect(span.before).toBe('        enabled: true   # owner wrote it on one line');
+    expect(span.after).toBe('        enabled: false   # owner wrote it on one line');
+    expect(afterText).toBe([
+      'features:',
+      '    host.workbuddy:',
+      '        category: "quiet"   ',
+      '        enabled: true',
+      '    workbuddy_live_keyword_pain:   ',
+      '        category: "quiet"   ',
+      '        enabled: false   # owner wrote it on one line',
+      '',
+    ].join('\n'));
+  });
+
+  it('preserves CRLF line endings when rewriting a line (no mixed EOL)', () => {
+    const beforeText = 'features:\r\n  host.workbuddy:\r\n    enabled: true\r\n    category: quiet\r\n  workbuddy_live_keyword_pain:\r\n    enabled: true\r\n    category: quiet\r\n';
+    const { dir, configPath } = seed(beforeText);
+
+    expect(ensureWorkbuddyGovernanceEnabled(dir).ok).toBe(true);
+    const afterText = fs.readFileSync(configPath, 'utf8');
+    expect(afterText).toContain('    enabled: false\r\n');
+    expect(afterText).not.toMatch(/[^\r]\n/);
+  });
+
+  it.each([
+    ['flow-style features mapping', 'features: {host.workbuddy: {enabled: true}}\n', 'config_features_flow_style'],
+    ['flow-style flag entry', 'features:\n  workbuddy_live_keyword_pain: {enabled: true, category: quiet}\n', 'config_flag_flow_style'],
+    ['YAML anchor/merge key', 'defaults: &defaults\n  category: quiet\nfeatures:\n  host.workbuddy:\n    <<: *defaults\n    enabled: true\n', 'config_yaml_anchor_or_merge_key'],
+  ])('%s fails closed with manual guidance and performs no write', (name, beforeText, code) => {
+    const { dir, configPath } = seed(beforeText);
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok, name).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain(code);
+        expect(result.reason).toContain('No write was performed');
+        expect(result.nextAction).toContain('Edit the governance config.yaml by hand');
+        expect(result.nextAction).toContain(configPath);
+      }
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(beforeText);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tab indentation is invalid YAML: refused before any edit, file untouched, manual fix named', () => {
+    const beforeText = 'features:\n\thost.workbuddy:\n\t\tenabled: true\n';
+    const { dir, configPath } = seed(beforeText);
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain('fresh_workbuddy_config_unreadable');
+        expect(result.nextAction).toContain('Fix the YAML by hand');
+        expect(result.nextAction).toContain(configPath);
+      }
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(beforeText);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// 2026-11-05 (Owner decision): WorkBuddy automatic Pain detection is
+// UNSUPPORTED (no persisted observation writer), so install copy must state
+// manual marking instead of reporting a keyword gate.
+describe('describeGovernanceDefaults (WorkBuddy manual marking only)', () => {
+  const MANUAL = 'Automatic Pain detection is not available in WorkBuddy';
+  const PREFIX = 'PD记录痛苦：';
+
+  it('states governance ON and names the explicit marking path', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
+    expect(note).toContain('enabled by this install');
+    expect(note).toContain(MANUAL);
+    expect(note).toContain(PREFIX);
+    expect(note).not.toContain('keyword Pain detection is ON');
+  });
+
+  it('preserves an explicit host opt-out and still names the explicit marking path', () => {
     const note = describeGovernanceDefaults({ hostExplicitOff: true, keywordExplicitOff: false, changed: false }, 'C:/ws');
     expect(note).toContain('WorkBuddy governance is OFF');
     expect(note).toContain('features.host.workbuddy.enabled=false');
-    expect(note).toContain('four-term keyword Pain detection is ON');
+    expect(note).toContain('keyword Pain detection is OFF');
+    expect(note).toContain(MANUAL);
+    expect(note).toContain(PREFIX);
   });
 
-  it('reports the default-ON state with its install attribution', () => {
+  it('reports the default governance state with install attribution and the plugin-disabled caveat', () => {
     const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
     expect(note).toContain('enabled by this install');
-    expect(note).toContain('four-term keyword Pain detection is ON');
+    expect(note).toContain('has no effect until the plugin is enabled');
+    expect(note).toContain('four-term keyword Pain detection is OFF');
+    expect(note).not.toContain('keyword Pain detection is ON');
   });
 
   it('names the missing governance config as UNKNOWN rather than claiming a state', () => {
     expect(describeGovernanceDefaults(null, 'C:/ws')).toContain('UNKNOWN');
+  });
+});
+
+// Guard (2026-11-05 Owner decision): every WorkBuddy user-facing surface must
+// say that automatic detection is unavailable and name the explicit prefix.
+// This fails if a future edit restores the old "keyword Pain detection is ON"
+// copy or silently drops the manual-marking instruction.
+describe('WorkBuddy user-facing copy guard', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../../..');
+  const surfaces = [
+    'packages/create-principles-disciple/src/installers/workbuddy-host-installer.ts',
+    // #2349 moved the rendered install summary into install-summary.ts, which
+    // is now the surface that must name the manual prefix (index.ts only calls
+    // formatHostStateSummary).
+    'packages/create-principles-disciple/src/install-summary.ts',
+    'packages/create-principles-disciple/src/prompts.ts',
+    'packages/pd-cli/src/commands/workbuddy-worker.ts',
+    'packages/website/.vitepress/theme/components/InstallGuide.vue',
+    'packages/website/docs/getting-started.md',
+    'packages/website/zh/docs/getting-started.md',
+    'packages/workbuddy-adapter/plugin/skills/pd-pain-signal/SKILL.md',
+    'packages/workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json',
+  ];
+
+  it('names the explicit PD记录痛苦 prefix and never claims automatic keyword detection', () => {
+    for (const relativePath of surfaces) {
+      const text = fs.readFileSync(path.join(REPO_ROOT, relativePath), 'utf8');
+      expect(text, `${relativePath} must name the explicit prefix`).toContain('PD记录痛苦');
+      expect(text, `${relativePath} must not claim keyword Pain detection is ON`).not.toContain('keyword Pain detection is ON');
+      expect(text, `${relativePath} must not claim auto keyword Pain`).not.toContain('auto keyword Pain');
+    }
+  });
+
+  // 2026-11-05 Owner decision: installation, plugin enablement, governance,
+  // automatic detection and the manual entry are five different questions.
+  // Each must be asserted separately in the guide — never collapsed into one
+  // "inactive until host.workbuddy is enabled" sentence.
+  it('InstallGuide states install / enable / governance / auto-detection / manual entry as five separate facts', () => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, 'packages/website/.vitepress/theme/components/InstallGuide.vue'), 'utf8');
+    for (const marker of ['插件安装', '插件启用', '治理开启', '自动识别关闭', '手动入口可用']) {
+      expect(text, `InstallGuide must state ${marker} as its own fact`).toContain(marker);
+    }
+    for (const marker of ['Plugin installed:', 'Plugin enabled:', 'Governance ON:', 'Automatic detection OFF:', 'Manual entry available:']) {
+      expect(text, `InstallGuide must state "${marker}" as its own fact`).toContain(marker);
+    }
+    // The Owner decision is host.workbuddy = ON by default; the old
+    // "governance off by default" claim must never come back.
+    expect(text, 'InstallGuide must not claim governance is off by default').not.toContain('治理默认关闭');
+    expect(text, 'InstallGuide must not claim governance is off by default').not.toContain('governance is OFF by default');
+    expect(text, 'InstallGuide must show the default ON value').toContain('enabled: true');
+  });
+
+  it('plugin manifest separates installed / enabled / governance and drops the "inactive until" conflation', () => {
+    const text = fs.readFileSync(path.join(REPO_ROOT, 'packages/workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json'), 'utf8');
+    expect(text).toContain('installed means enabled');
+    expect(text).toContain('governance is ON by default at install');
+    expect(text).toContain('automatic pain detection/correction is NOT available');
+    expect(text).not.toContain('inactive until');
   });
 });
 

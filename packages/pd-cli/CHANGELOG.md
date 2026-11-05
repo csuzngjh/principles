@@ -1,5 +1,39 @@
 # @principles/pd-cli
 
+## 1.165.0
+
+### Minor Changes
+
+- a710e8a: PD MCP now writes durable, sanitized JSONL evidence by default to `~/.pd/logs/mcp`
+  (one file per process, 2 MiB/file, 64 MiB/directory, 14 days). Set `PD_MCP_LOG=0`
+  to disable it with zero writes.
+  
+  Events: `launcher_start`, `startup`, `initialize`, `tools_list`, `tool_call`,
+  `shutdown` and `startup_failure` (a pre-handshake exit now leaves PD-side
+  evidence). Logging failures are swallowed: tool results, stdout protocol purity,
+  the 32 KiB budget and the 10 s deadline are unchanged.
+  
+  New export command: `pd mcp logs export [--days 7] [--out <zip|dir>]` bundles the
+  recent logs plus a README/manifest into one zip ≤20 MiB for offline analysis.
+
+### Patch Changes
+
+- efae469: PRI-1130: `pd health` now verifies that every file entry declared by the installed plugin payload actually exists — across OpenClaw/Codex/WorkBuddy manifests, `.mcp.json` and `hooks/hooks.json` (including the legal `hooks` field form that points to a custom hooks JSON file) — and reports `declared_entry_missing` with the concrete missing paths instead of trusting the declaration. Any non-neutral MCP status (`CONFIG_MISSING`, `CONFIG_DRIFT`, `VERSION_MISMATCH`, `RESTART_REQUIRED`, `HOST_RUNTIME_NOT_VERIFIED`) now exits non-zero, so exit-code-only automation can no longer treat a broken host install as healthy; `HOST_NOT_FOUND` and `NOT_INSTALLED` stay exit-code neutral.
+  
+  The WorkBuddy installer no longer enables the plugin on install: `enabledPlugins[key]` follows the manifest's declared `defaultEnabled` (PD declares `false`), an existing explicit Owner `true`/`false` always survives upgrade/reinstall/Repair, and the installer never overwrites the Owner's choice.
+  
+  The install summary now presents the THREE independent post-install facts separately, sourced from the host itself: registration (`installed_plugins.json`), host enablement (`settings.json` → `enabledPlugins`) and governance (`host.workbuddy`). `HostInstallResult.pluginState` carries those raw facts; the summary prints e.g. `WorkBuddy plugin … INSTALLED / DISABLED` alongside `WorkBuddy governance … ON` and states that hooks stay inactive and `PD记录痛苦：` is not delivered until the Owner enables the plugin. An unreadable registry is reported as `REGISTRY UNREADABLE / NOT VERIFIED` (never `INSTALLED`), and a failed install prints no success lines at all.
+- 1c1b91f: WorkBuddy: automatic Pain detection/correction is unsupported (the ingress evidence gate has no persisted observation writer, so automatic candidates never become Pain rows). The installer no longer enables `workbuddy_live_keyword_pain`, and install/status/docs copy now points to the explicit `PD记录痛苦：` prefix only.
+- Updated dependencies [a710e8a]
+- Updated dependencies [2a7aec5]
+- Updated dependencies [efae469]
+- Updated dependencies [c1e7e1f]
+- Updated dependencies [1c1b91f]
+  - principles-disciple@2.6.1
+  - @principles/workbuddy-adapter@0.5.2
+  - @principles/host-runtime@2.0.1
+  - @principles/core@4.0.1
+
 ## 1.164.0
 
 ### Minor Changes

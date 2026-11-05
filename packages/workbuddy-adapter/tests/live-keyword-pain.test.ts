@@ -29,6 +29,19 @@ function rows(workspace: string, sql: string) {
   const db = new Database(path.join(workspace, '.state', 'trajectory.db'), { readonly: true });
   try { return db.prepare(sql).all() as Record<string, unknown>[]; } finally { db.close(); }
 }
+/**
+ * `governance_signal_admissions` is created lazily on the first admission.
+ * "Nothing was admitted" must therefore treat a missing table as 0 — not as
+ * a test crash.
+ */
+function admissionCount(workspace: string): number {
+  const db = new Database(path.join(workspace, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='governance_signal_admissions'").get();
+    if (exists === undefined) return 0;
+    return (db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get() as { n: number }).n;
+  } finally { db.close(); }
+}
 function invoke(ws: ReturnType<typeof setup>, overrides: Record<string, unknown> = {}) {
   return runEntry(ws.home, JSON.stringify({ ...ws.payload, ...overrides }), 'UserPromptSubmit');
 }
@@ -104,6 +117,81 @@ describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evide
     expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toHaveLength(6);
   });
 
+  // SPEC P-5 退役后的正向路径：句中出现 high 精度纠正词不再被句首预过滤静默丢弃。
+  // 落点仍是 abandoned/evidence_invalid——这是证据闸门的结果，不是检测没工作。
+  it('mid-sentence high-precision correction reaches the evidence gate through the real hook', () => {
+    const ws = setup();
+    const r = invoke(ws, { prompt: '我早说了，这是错的', generation_id: 'native-positive-1' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    const markers = rows(ws.workspace, 'SELECT decision, reason FROM governance_signal_admissions');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ decision: 'abandoned', reason: 'evidence_invalid' });
+    // Pain 与 Diagnostician Task 增量均为 0：证据闸门拒绝，不是检测未命中。
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    const statePath = path.join(ws.workspace, '.pd', 'state.db');
+    if (fs.existsSync(statePath)) {
+      const state = new Database(statePath, { readonly: true });
+      try {
+        expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind='diagnostician'").get()).toEqual({ n: 0 });
+      } finally { state.close(); }
+    } else {
+      expect(fs.existsSync(statePath)).toBe(false);
+    }
+  });
+
+  // 2026-11-05 (Owner decision): the keyword gate is OFF in WorkBuddy and
+  // automatic detection is unavailable. Manual marking (the explicit prefix)
+  // MUST keep working independently, and switching the gate off must never
+  // delete or rewrite historical Pain evidence.
+  describe('manual Pain marking is independent of the keyword gate', () => {
+    it('gate OFF + explicit prefix still creates Pain, an admission and a Diagnostician task', () => {
+      const ws = setup(false);
+      const result = invoke(ws, { prompt: 'PD记录痛苦：这是错的' });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('status=received');
+      expect(rows(ws.workspace, 'SELECT canonical_pain_id FROM pain_events')).toHaveLength(1);
+      const markers = rows(ws.workspace, 'SELECT decision, diagnostician_task_id FROM governance_signal_admissions');
+      expect(markers).toHaveLength(1);
+      expect(markers[0]!.diagnostician_task_id).not.toBeNull();
+    });
+
+    it('gate OFF + ordinary text creates no Pain and no admission', () => {
+      const ws = setup(false);
+      expect(invoke(ws, { prompt: '帮我把这个函数改个名字' }).status).toBe(0);
+      expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+      expect(admissionCount(ws.workspace)).toBe(0);
+    });
+
+    it('gate OFF + pain-shaped words without the prefix creates nothing (no automatic detection)', () => {
+      const ws = setup(false);
+      // fixture prompt: '这是错的，应该先确认用户要求'
+      expect(invoke(ws).status).toBe(0);
+      expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+      expect(admissionCount(ws.workspace)).toBe(0);
+    });
+
+    it('turning the gate OFF preserves historical Pain rows and their admission markers', () => {
+      const ws = setup(true);
+      expect(invoke(ws, { prompt: 'PD记录痛苦：未核对调用方就改了接口' }).status).toBe(0);
+      const painBefore = rows(ws.workspace, 'SELECT * FROM pain_events');
+      const markersBefore = rows(ws.workspace, 'SELECT * FROM governance_signal_admissions');
+      expect(painBefore).toHaveLength(1);
+
+      const configPath = path.join(ws.workspace, '.pd', 'config.yaml');
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
+        features: Record<string, { enabled: boolean; category: string }>;
+      };
+      config.features.workbuddy_live_keyword_pain = { enabled: false, category: 'quiet' };
+      fs.writeFileSync(configPath, JSON.stringify(config));
+
+      // An automatic-shaped candidate arrives after the gate was switched off.
+      expect(invoke(ws, { prompt: '这是错的，应该先确认用户要求', generation_id: 'after-gate-off' }).status).toBe(0);
+      expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toEqual(painBefore);
+      expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toEqual(markersBefore);
+    });
+  });
+
   // SPEC v0.3 §3.2.3 (D5 reverse): learned keywords are Stage-2 candidates only.
   // Without persisted trust evidence they now settle as observation_only.
   it('learned terms never trigger live Pain; P0 seed terms also need real evidence', () => {
@@ -119,12 +207,12 @@ describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evide
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     expect(invoke(ws, { prompt: '可能不太对', generation_id: 'native-learned-2' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    // 转述（词不在句首）→ 仍为零。
+    // 转述（词不在句首）→ 仍为零 Pain；P-5 退役后该句到达共享守卫，降级 ambiguous → abandoned。
     expect(invoke(ws, { prompt: '他说方向完全反了', generation_id: 'native-learned-3' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     // P0 seed 四词仍被识别，但同样没有持久化证据 → observation_only。
     expect(invoke(ws, { generation_id: 'native-learned-4' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(3);
+    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(4);
   });
 });

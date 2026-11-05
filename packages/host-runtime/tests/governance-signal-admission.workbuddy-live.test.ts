@@ -6,8 +6,9 @@
  * `observation_only`：不产生 Pain、不建 Task、不消耗额度，也不再用
  * `pain_event:<canonicalPainId>` 伪造 behavior_trace。
  *
- * 本文件仍覆盖词表契约（D5 学习词不直通、startsWith 预过滤、原生事件门、
- * 双 flag、幂等）——只是准入结果从 admitted/pending 变为 abandoned。
+ * 本文件仍覆盖词表契约（D5 学习词不直通、共享位置守卫（引号 / 第三人称 /
+ * 否定 / 条件语境）、原生事件门、双 flag、幂等）——只是准入结果从
+ * admitted/pending 变为 abandoned。
  */
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -17,6 +18,7 @@ import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime-v2';
 import {
   admitTrustedWorkbuddyLiveCorrection,
+  assessWorkbuddyCorrectionCandidate,
   assessWorkbuddyLiveKeyword,
   resolveSharedCorrectionKeywordStoreForDetection,
 } from '../src/governance-signal-admission.js';
@@ -125,7 +127,7 @@ describe('assessWorkbuddyLiveKeyword — 共享词库参数（AUDIT-P3-01）', (
     // 降级词无论来源都只能作候选（§3.2.1）。
     expect(assessWorkbuddyLiveKeyword('我说的是另一个文件', 's', store).matched).toBe(false);
     expect(store.terms['我说的是']?.precision).toBe('ambiguous');
-    // 学习词同样受 startsWith 预过滤约束（转述不触发）。
+    // 学习词同样受共享第三人称守卫约束：转述句降级 ambiguous，不直通。
     expect(assessWorkbuddyLiveKeyword('他说方向完全反了', 's', store).matched).toBe(false);
     // 真实 seed high 词仍走确定性路径（现有能力不回退）。
     expect(assessWorkbuddyLiveKeyword('这是错的', 's', store).matched).toBe(true);
@@ -133,6 +135,15 @@ describe('assessWorkbuddyLiveKeyword — 共享词库参数（AUDIT-P3-01）', (
 });
 
 describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUDIT-P3-01/P3-04）', () => {
+  it('P-5 退役后的正向控制：句中的 high 精度纠正词仍是 strong 候选', () => {
+    // 句首预过滤退役前，该句被 startsWith 静默丢弃。
+    expect(assessWorkbuddyCorrectionCandidate('我早说了，这是错的', 's')).toMatchObject({
+      kind: 'strong',
+      reason: 'matched',
+    });
+    expect(assessWorkbuddyLiveKeyword('我早说了，这是错的', 's').matched).toBe(true);
+  });
+
   it('学习词与 seed high 词都不再产生 Pain：无持久化行为证据 → observation_only', () => {
     writeLearnedStore([
       { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
@@ -240,7 +251,11 @@ describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUD
       rawEvent: nativeEvent({ prompt: '他说方向完全反了，你觉得呢', generation_id: 'wb-live-gen-5' }),
     });
     expect(result.ok).toBe(true);
-    expect(result.outcomes).toEqual([]);
+    // P-5 retired: the reported-speech phrase now reaches the shared guards,
+    // downgrades to ambiguous, and is abandoned at the evidence gate.
+    expect(result.outcomes).toMatchObject([
+      { disposition: 'abandoned', kind: 'user_correction', reason: 'evidence_invalid' },
+    ]);
     expect(painCount()).toBe(0);
   });
 });

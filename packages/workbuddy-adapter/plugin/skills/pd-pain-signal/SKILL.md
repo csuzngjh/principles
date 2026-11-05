@@ -5,6 +5,10 @@ description: 当 Owner 要求记录 WorkBuddy 智能体的行为错误、痛苦�
 
 # PD Pain Signal（WorkBuddy）
 
+WorkBuddy **没有自动识别/自动纠正通道**：宿主侧缺少持久化的观测证据写入方，
+自动关键词候选只会被标记为 `observation_only`，不会写入痛苦数据库。因此不要
+声称、暗示或期待自动检测生效；唯一入口就是下面的显式标记。
+
 ## 唯一的正常入口
 
 Owner 在当前 WorkBuddy 会话中提交：
