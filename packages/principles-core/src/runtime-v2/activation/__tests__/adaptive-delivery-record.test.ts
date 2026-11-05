@@ -88,10 +88,10 @@ describe('validateAdaptiveDeliveryRecord', () => {
 
   it('rejects invalid identifiers, enum values, and malformed optional evidence', () => {
     rejected(base({ hookInvocationId: '  ' }));
-    const missingInvocationId = base();
+    const missingInvocationId: Record<string, unknown> = base();
     delete missingInvocationId.hookInvocationId;
     rejected(missingInvocationId);
-    const missingEnum = base();
+    const missingEnum: Record<string, unknown> = base();
     delete missingEnum.receiptState;
     rejected(missingEnum);
     rejected(base({ requestId: '' }));
