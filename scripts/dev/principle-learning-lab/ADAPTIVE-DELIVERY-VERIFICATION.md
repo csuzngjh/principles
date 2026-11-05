@@ -24,7 +24,7 @@ node scripts/dev/principle-learning-lab/probe-local-transport.mjs --run --opencl
 
 ```powershell
 node scripts/dev/principle-learning-lab/verify-adaptive-delivery.mjs --input <input.json> --trust <operator-trust.json>
-node --test scripts/dev/principle-learning-lab/verify-adaptive-delivery.test.mjs scripts/dev/principle-learning-lab/lib/adaptive-delivery-record.test.mjs
+node --test scripts/dev/principle-learning-lab/verify-adaptive-delivery.test.mjs scripts/dev/principle-learning-lab/lib/adaptive/adaptive-delivery-record.test.mjs
 ```
 
 标准输出为一个 JSON，只有及时送达确认时退出 0。缺证、fixture、迟到、错误参数等均退出 1，并用 reason 区分。退出 0 不表示授权、行为遵循、行为改善或 G1 通过。
@@ -35,7 +35,7 @@ input 含 expected、receipt、可选 requestCapture/actionCapture。expected �
 
 expected 必填 hookInvocationId、requestId、workspaceId、sessionId、artifactId、activationId、contentSha256；config 包括 host、hostVersion、runtimeMode、pluginVersion、effectiveHookSetFingerprint、evidenceCoverage。旧输入缺少 workspaceId 时明确拒绝，不从路径或 Session 猜造绑定。缺项与 unknown 分开；coverage 仅取 complete、partial、unknown。现有原则资格和授权由前置 Reader/场景验证；本工具不重新授予权限。
 
-receipt 为目标专属的四维状态记录，使用 §5.1 枚举和 journal 状态。仅 selected/returned 且 completed 的目标可与独立请求证据一致确认。普通 Native 回退不能代替目标 payload。字段规则由 lib/adaptive-delivery-record.mjs 唯一校验。
+receipt 为目标专属的四维状态记录，使用 §5.1 枚举和 journal 状态。仅 selected/returned 且 completed 的目标可与独立请求证据一致确认。普通 Native 回退不能代替目标 payload。字段规则由 lib/adaptive/adaptive-delivery-record.mjs 唯一校验。
 
 requestCapture 包含相同绑定字段与 config，并有 sourceId、reference、boundary、directiveBodies。boundary 必须是 final_model_request；prepared 输入保持未知。directiveBodies 由最终请求边界的受控观察者分离得到，按完整字节匹配，不能由受测 Agent 自报。工具比较所有绑定及配置快照，不把旧版本确认借给新请求。
 
@@ -53,7 +53,7 @@ delivery 与 timely 分开。配置 partial/unknown 原样报告，它不否定�
 
 ## 配置身份与覆盖率汇总
 
-lib/adaptive-config-identity.mjs 将上述六个字段投影为不引用原对象的快照，并复用实验室已有 canonical hash 生成身份。字段顺序无影响；任一值或来源覆盖变化都会改变摘要。partial/unknown 保留原义；缺字段、getter、非法枚举或未纳入契约的额外配置字段会拒绝。此函数只规范化给定事实，尚未实现宿主生效配置的自动采集，也不凭摘要证明来源完整。指纹来源仍按 PRI-1110 定位表由选定 Adapter 取证。
+lib/adaptive/adaptive-config-identity.mjs 将上述六个字段投影为不引用原对象的快照，并复用实验室已有 canonical hash 生成身份。字段顺序无影响；任一值或来源覆盖变化都会改变摘要。partial/unknown 保留原义；缺字段、getter、非法枚举或未纳入契约的额外配置字段会拒绝。此函数只规范化给定事实，尚未实现宿主生效配置的自动采集，也不凭摘要证明来源完整。指纹来源仍按 PRI-1110 定位表由选定 Adapter 取证。
 
 汇总入口在同一进程调用 verifyAdaptiveDelivery，保留工作区、Session、配置及请求绑定；不接受预先填好的 D 或 verifierResult。运行方式如下。
 

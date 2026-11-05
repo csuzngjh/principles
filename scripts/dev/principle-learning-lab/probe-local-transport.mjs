@@ -6,7 +6,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { classifyLocalTransport } from './lib/local-transport-result.mjs';
+import { classifyLocalTransport } from './lib/adaptive/local-transport-result.mjs';
 
 async function runChild(args, { env, cwd, deadlineMs, started = performance.now() }) {
   return await new Promise((resolve) => {

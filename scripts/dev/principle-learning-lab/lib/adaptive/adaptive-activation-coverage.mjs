@@ -1,4 +1,4 @@
-import { hashOfCanonical } from './challenge-freeze.mjs';
+import { hashOfCanonical } from '../challenge-freeze.mjs';
 
 const LAYERS = ['T', 'V', 'O'];
 const STATES = new Set([true, false, 'unknown']);

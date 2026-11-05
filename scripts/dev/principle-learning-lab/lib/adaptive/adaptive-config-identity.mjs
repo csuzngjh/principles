@@ -1,4 +1,4 @@
-import { hashOfCanonical } from './challenge-freeze.mjs';
+import { hashOfCanonical } from '../challenge-freeze.mjs';
 
 export const ADAPTIVE_CONFIG_FIELDS = [
   'host', 'hostVersion', 'runtimeMode', 'pluginVersion',

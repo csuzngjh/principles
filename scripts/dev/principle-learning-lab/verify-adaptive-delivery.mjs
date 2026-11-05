@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { hashOfCanonical } from './lib/challenge-freeze.mjs';
-import { validateAdaptiveDeliveryRecord } from './lib/adaptive-delivery-record.mjs';
-import { adaptiveConfigIdentity } from './lib/adaptive-config-identity.mjs';
+import { validateAdaptiveDeliveryRecord } from './lib/adaptive/adaptive-delivery-record.mjs';
+import { adaptiveConfigIdentity } from './lib/adaptive/adaptive-config-identity.mjs';
 
 const bindingFields = [
   'hookInvocationId', 'requestId', 'workspaceId', 'sessionId', 'artifactId', 'activationId',

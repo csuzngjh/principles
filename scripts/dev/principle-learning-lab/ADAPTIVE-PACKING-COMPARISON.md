@@ -1,6 +1,6 @@
 # AA 单目标装配离线比较准备
 
-对应PRI-1108的实验准备，基线accc988f7。入口lib/adaptive-packing-comparison.mjs，协议为本地函数参数；不是生产选择器，也未接入prompt hook。
+对应PRI-1108的实验准备，基线accc988f7。入口lib/adaptive/adaptive-packing-comparison.mjs，协议为本地函数参数；不是生产选择器，也未接入prompt hook。
 
 输入为调用者已从现有Reader取得的候选、精确Artifact/Activation目标、选择预算、可用于原则正文的最终预算及可选轮次。复用现有trimToBudget、XML escape和renderer。先算原Native；目标完整指令已出现则字节原样复用，addedTarget=false。否则目标优先，其他候选保留原轮转相对次序；最终完整正文或容量检查失败返回原Native，成功记录挤出的activation。返回preparationOnly=true及delivery=not_tested，不创建授权或送达事实。
 

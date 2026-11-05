@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashOfCanonical } from './lib/challenge-freeze.mjs';
-import { adaptiveConfigIdentity } from './lib/adaptive-config-identity.mjs';
+import { adaptiveConfigIdentity } from './lib/adaptive/adaptive-config-identity.mjs';
 import { verifyAdaptiveDelivery } from './verify-adaptive-delivery.mjs';
-import { summarizeAdaptiveCoverage } from './lib/adaptive-activation-coverage.mjs';
+import { summarizeAdaptiveCoverage } from './lib/adaptive/adaptive-activation-coverage.mjs';
 
 const nonEmpty = (value) => typeof value === 'string' && value.trim().length > 0;
 
