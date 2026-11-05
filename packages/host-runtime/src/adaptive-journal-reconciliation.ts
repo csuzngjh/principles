@@ -337,6 +337,12 @@ function isInside(parent: string, child: string): boolean {
   return childComparable === parentComparable || childComparable.startsWith(`${parentComparable}${path.sep}`);
 }
 
+function nodeErrorCode(error: unknown): string | null {
+  if (error === null || typeof error !== 'object' || !Object.hasOwn(error, 'code')) return null;
+  const value = Reflect.get(error, 'code');
+  return typeof value === 'string' ? value : null;
+}
+
 function realpathOrNull(target: string): string | null {
   try {
     return fs.realpathSync(target);
@@ -532,7 +538,15 @@ function selectDateFiles(options: {
     let entries: string[];
     try {
       entries = fs.readdirSync(absoluteDir);
-    } catch {
+    } catch (error) {
+      const errnoCode = nodeErrorCode(error);
+      if (errnoCode === 'ENOENT' || errnoCode === 'ENOTDIR') return;
+      coverage.errors.push({
+        logDir,
+        file: null,
+        code: 'read_failed',
+        message: `log directory is not readable${errnoCode === null ? '' : ` (${errnoCode})`}`,
+      });
       return;
     }
     coverage.sourceDirsFound += 1;
