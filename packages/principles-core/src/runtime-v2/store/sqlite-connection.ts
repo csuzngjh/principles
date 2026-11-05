@@ -121,7 +121,7 @@ export class SqliteConnection {
     }
 
     this.db = this.readonlyMode
-      ? new Database(this.dbPath, { readonly: true, fileMustExist: true })
+      ? new Database(this.dbPath, { readonly: true, fileMustExist: true, timeout: this.busyTimeoutMs })
       : new Database(this.dbPath);
 
     if (!this.readonlyMode) {

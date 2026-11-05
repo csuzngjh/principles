@@ -1,0 +1,59 @@
+import { describe, it, expect } from 'vitest';
+import { prepareAdaptiveIntervention, type AdaptiveInterventionInput, type AdaptiveInterventionDeps } from '../adaptive-principle-intervention.js';
+import { renderPrinciplesToDirectives } from '../prompt-activation-reader-contract.js';
+import { escapeXml } from '../../../prompt-builder/xml-escape.js';
+const p = (id: string) => ({ principleId:id,artifactId:'art-'+id,activationId:'act-'+id,text:'x'.repeat(100) });
+const input = (): AdaptiveInterventionInput => ({ nativeText:'native unchanged',nativeWithoutTargetText:'safe native without target',principles:[p('a'),p('b')],target:{artifactId:'art-b',activationId:'act-b'},currentUserMessage:'[PD-AA:delivery-review:v1]\nReview',currentUserMessageId:'message',requestId:'request',sessionId:'session',selectionBudget:160,roundKey:0,mandatoryPrincipleIds:[],selfReportInstruction:false,deadlineAt:Date.now()+10000 });
+const deps = (): AdaptiveInterventionDeps => ({ renderAndGuard:ids=>renderPrinciplesToDirectives(input().principles,ids,{escapeFn:escapeXml}),revalidate:async()=>true,now:Date.now });
+describe('bounded single-principle intervention',()=>{
+ it('prioritizes a qualified target and records the optional displaced activation',async()=>{const r=await prepareAdaptiveIntervention(input(),deps());expect(r.reason).toBe('target_prioritized');expect(r.displacedActivationIds).toEqual(['act-a']);expect(r.targetBodySha256).toMatch(/^[a-f0-9]{64}$/);});
+ it('preserves Native bytes and zero increment when the full directive is already present',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));const r=await prepareAdaptiveIntervention(i,deps());expect(r.text).toBe(i.nativeText);expect(r.addedTarget).toBe(false);});
+ it('never triggers from missing message identity or a quoted/history marker',async()=>{for(const patch of [{currentUserMessageId:undefined},{currentUserMessage:'quoted\n[PD-AA:delivery-review:v1]'},{sessionId:undefined}]){const r=await prepareAdaptiveIntervention({...input(),...patch},deps());expect(r.text).toBe('native unchanged');expect(r.addedTarget).toBe(false);}});
+ it('does not displace a mandatory constraint',async()=>{expect((await prepareAdaptiveIntervention({...input(),mandatoryPrincipleIds:['a']},deps())).reason).toBe('mandatory_constraint_displaced');});
+ it('rejects final size-guard truncation instead of treating selection as delivery',async()=>{expect((await prepareAdaptiveIntervention(input(),{...deps(),renderAndGuard:()=>'<directive id="b">partial'})).reason).toBe('final_target_incomplete');});
+ it('rejects revoked or changed targets at the last revalidation',async()=>{expect((await prepareAdaptiveIntervention(input(),{...deps(),revalidate:async()=>false})).reason).toBe('target_changed');});
+ it('does not resurrect a revoked target through the cached Native baseline',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));const r=await prepareAdaptiveIntervention(i,{...deps(),revalidate:async()=>false});expect(r.text).toBe(i.nativeWithoutTargetText);expect(r.text).not.toContain('<directive');});
+ it('excludes an old cached revision when the new revision fails revalidation',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));i.principles=i.principles.map(candidate=>({...candidate,text:'new revision'}));const r=await prepareAdaptiveIntervention(i,{...deps(),renderAndGuard:ids=>renderPrinciplesToDirectives(i.principles,ids,{escapeFn:escapeXml}),revalidate:async()=>false});expect(r.text).toBe(i.nativeWithoutTargetText);});
+ it('does not restore cached target content when revalidation times out',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));i.deadlineAt=Date.now()+30;const r=await prepareAdaptiveIntervention(i,{...deps(),revalidate:async()=>new Promise(()=>{ /* Deliberately pending. */ })});expect(r.reason).toBe('deadline');expect(r.text).toBe(i.nativeWithoutTargetText);});
+ it('bounds a revalidation that never resolves and aborts its signal',async()=>{let signal:AbortSignal|undefined;const r=await prepareAdaptiveIntervention({...input(),deadlineAt:Date.now()+30},{...deps(),revalidate:async(_,s)=>{signal=s;return new Promise(()=>{ /* Deliberately unresolved Reader for the deadline regression. */ });}});expect(r.reason).toBe('deadline');expect(signal?.aborted).toBe(true);});
+ it('returns Native on dependency failure, expiry, unavailable identity and insufficient budget',async()=>{for(const patch of [{deadlineAt:0},{selectionBudget:1},{target:{artifactId:'missing',activationId:'act-b'}},{principles:[p('b'),p('b')]}]){expect((await prepareAdaptiveIntervention({...input(),...patch},deps())).text).toBe((Object.hasOwn(patch,'selectionBudget') || Object.hasOwn(patch,'deadlineAt')) ? 'safe native without target' : 'native unchanged');}expect((await prepareAdaptiveIntervention(input(),{...deps(),revalidate:async()=>{throw new Error('database');}})).reason).toBe('dependency_failed');});
+});
+
+describe('operator-controlled admission keeps identities distinct', () => {
+  it('accepts a bound input without inventing native message/request IDs', async () => {
+    const { createHash } = await import('node:crypto');
+    const i = input();
+    delete i.currentUserMessageId;
+    delete i.requestId;
+    i.controlledAdmission = { admissionId: 'operator-invocation', inputSha256: createHash('sha256').update(i.currentUserMessage ?? '', 'utf8').digest('hex'), manifestSha256: 'a'.repeat(64) };
+    expect((await prepareAdaptiveIntervention(i, deps())).addedTarget).toBe(true);
+    i.controlledAdmission.inputSha256 = 'b'.repeat(64);
+    expect((await prepareAdaptiveIntervention(i, deps())).reason).toBe('request_identity_unavailable');
+  });
+  it('rejects a manifest token mixed into native identity fields', async () => {
+    const i = input();
+    i.controlledAdmission = { admissionId: 'operator-invocation', inputSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) };
+    expect((await prepareAdaptiveIntervention(i, deps())).reason).toBe('ambiguous_admission');
+  });
+});
+
+it('can select from admitted user identity while model request identity remains unknown', async () => {
+  const i = input();
+  delete i.requestId;
+  i.nativePrincipleIds = ['a'];
+  const r = await prepareAdaptiveIntervention(i, deps());
+  expect(r.reason).toBe('target_prioritized');
+  expect(r.selectedPrincipleIds).toEqual(['b']);
+  expect(Object.hasOwn(r, 'delivery')).toBe(false);
+});
+
+it('does not retain a cached target when the scene is admitted after its deadline', async () => {
+  const i = input();
+  i.nativePrincipleIds = ['a', 'b'];
+  i.nativeText = deps().renderAndGuard(new Set(['a', 'b']));
+  i.deadlineAt = 0;
+  const r = await prepareAdaptiveIntervention(i, deps());
+  expect(r.reason).toBe('deadline');
+  expect(r.text).toBe(i.nativeWithoutTargetText);
+  expect(r.selectedPrincipleIds).toEqual(['a']);
+});

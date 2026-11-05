@@ -55,6 +55,7 @@ vi.mock('../../src/core/event-log.js', () => ({
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
       recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordAdaptiveDelivery: vi.fn(),
     }),
   },
 }));
@@ -262,7 +263,251 @@ function insertValidatedPrincipleArtifact(overrides: {
   );
 }
 
+describe('Adaptive activation — actual local prompt entry', () => {
+  async function seed() {
+    // More qualified principles than Native can pack: the intervention must
+    // change the real final prompt, not merely report a successful selection.
+    for (let i = 0; i < 20; i++) {
+      const principleId = `AA-${String(i).padStart(2, '0')}`;
+      insertValidatedPrincipleArtifact({ artifactId: `art-${principleId}`, principleId, text: `${principleId}-body-${'Z'.repeat(300)}` });
+      await insertPromptActivation({ artifactId: `art-${principleId}`, principleId });
+    }
+  }
+
+  function configured(principleId: string) {
+    const ctx = makeCtx();
+    if (!ctx.api) throw new Error('test requires plugin API');
+    ctx.api.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, artifactId: `art-${principleId}`,
+      activationId: `act_prompt_${principleId}`, expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    return ctx;
+  }
+
+  const admitted = () => ({ ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview delivery', currentUserMessageId: 'host-admission-1' });
+
+  it('prioritizes an omitted authorized target and records only final selected IDs', async () => {
+    await seed();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const native = await handleBeforePromptBuild(admitted(), makeCtx());
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`)
+      .find(id => !native?.prependSystemContext?.includes(`${id}-body-`));
+    expect(target).toBeDefined();
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+    const ctx = configured(target!);
+    const result = await handleBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext).toContain(`${target}-body-`);
+    expect(result?.prependSystemContext?.split(`${target}-body-`)).toHaveLength(2);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const payload = spy.mock.calls[0]![0] as { principleIds: string[] };
+    expect(payload.principleIds).toContain(target);
+    for (const id of payload.principleIds) expect(result?.prependSystemContext).toContain(`${id}-body-`);
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":true'));
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal).toHaveBeenCalledTimes(2);
+    const start = journal.mock.calls[0]![1] as Record<string, unknown>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(start).toMatchObject({ receiptState: 'open', execution: 'unknown', selectionPending: true, submission: 'unknown' });
+    expect(end).toMatchObject({ hookInvocationId: start.hookInvocationId, receiptState: 'closed', execution: 'completed', payload: 'prepared', selection: 'selected', submission: 'unknown' });
+    expect(end).not.toHaveProperty('requestId');
+    expect(spy.mock.calls[0]![0]).toHaveProperty('hookInvocationId', start.hookInvocationId);
+  });
+
+  it('reuses a Native target without duplicating or claiming a new contribution', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const ctx = configured('AA-only');
+    const result = await handleBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext?.split('AA-only-body')).toHaveLength(2);
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":false'));
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('native_already_contains_target'));
+  });
+
+  it('preserves Native when the current native message identity is unavailable', async () => {
+    await seed();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = { ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview' };
+    const native = await handleBeforePromptBuild(event, makeCtx());
+    const result = await handleBeforePromptBuild(event, configured('AA-19'));
+    expect(result).toEqual(native);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal.mock.calls[1]![1]).toMatchObject({ selection: 'skipped', payload: 'none', submission: 'unknown' });
+  });
+
+  it('does not interpret a quoted scene marker as a current request', async () => {
+    await seed();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const event = { ...admitted(), currentUserMessage: 'Quoted example:\n[PD-AA:delivery-review:v1]' };
+    const native = await handleBeforePromptBuild(event, makeCtx());
+    expect(await handleBeforePromptBuild(event, configured('AA-19'))).toEqual(native);
+  });
+
+  it('does not inject a configured artifact without an active authorized candidate', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-inactive', principleId: 'AA-inactive', text: 'INACTIVE-MUST-NOT-APPEAR' });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured('AA-inactive'));
+    expect(JSON.stringify(result)).not.toContain('INACTIVE-MUST-NOT-APPEAR');
+  });
+
+  async function sharedPrepared(deadlineAt = Date.now() + 15000) {
+    await seed();
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const native = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`)
+      .find(id => !native.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside the Native pack');
+    const packed = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir,
+      adaptivePriority: { artifactId: `art-${target}`, activationId: `act_prompt_${target}` }, deadlineAt });
+    expect(packed.adaptivePacking?.status).toBe('prioritized');
+    return { native, target, packed };
+  }
+
+  it('carries shared packing through final prompt assembly with exact target bytes', async () => {
+    const { target, packed } = await sharedPrepared();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext?.split(`${target}-body-`)).toHaveLength(2);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    expect(spy.mock.calls[0]![0]).toMatchObject({ principleIds: packed.principleIds, activationIds: packed.activationIds, artifactIds: packed.artifactIds });
+  });
+
+  it('removes a shared target whose artifact changes between packing and final assembly', async () => {
+    const { target, packed } = await sharedPrepared();
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify({ principleId: target, text: 'changed after pack' }), `art-${target}`);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+    expect(result?.prependSystemContext).not.toContain('changed after pack');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    const payload = spy.mock.calls[0]![0] as { principleIds: string[]; activationIds: string[] };
+    expect(payload.principleIds).not.toContain(target);
+    expect(payload.activationIds).not.toContain(`act_prompt_${target}`);
+    for (const id of payload.principleIds) expect(result?.prependSystemContext).toContain(`${id}-body-`);
+  });
+
+  it('removes the shared contribution when its deadline has elapsed', async () => {
+    const { target, packed } = await sharedPrepared(Date.now() - 1);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+  });
+
+  it('disabling the mapping restores the exact shared Native baseline', async () => {
+    const { native, target, packed } = await sharedPrepared();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const expected = await handleBeforePromptBuild(admitted(), makeCtx(), native);
+    const result = await handleBeforePromptBuild(admitted(), makeCtx(), packed);
+    expect(result).toEqual(expected);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+  });
+
+  it('a configuration change cannot close the original invocation under a different target', async () => {
+    const { target, packed } = await sharedPrepared();
+    const original = { artifactId: `art-${target}`, activationId: `act_prompt_${target}` };
+    const { beginAdaptivePromptInvocation, handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const hookInvocationId = beginAdaptivePromptInvocation(configured(target), original, 'shared');
+    if (!packed.adaptivePacking) throw new Error('requires prepared packing');
+    packed.adaptivePacking.hookInvocationId = hookInvocationId;
+    const replacement = target === 'AA-00' ? 'AA-01' : 'AA-00';
+    await handleBeforePromptBuild(admitted(), configured(replacement), packed);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal).toHaveBeenCalledTimes(2);
+    expect(journal.mock.calls[1]![1]).toMatchObject({ hookInvocationId, receiptState: 'closed', ...original, payload: 'none' });
+  });
+
+  it('journal storage failure does not remove an otherwise valid intervention', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    journal.mockImplementationOnce(() => { throw new Error('storage unavailable'); });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const ctx = configured('AA-only');
+    const result = await handleBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext).toContain('AA-only-body');
+    expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('Invocation journal unavailable'));
+  });
+
+  it('runs shared dispatch through real packing and final assembly with one invocation journal', async () => {
+    await seed();
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const baseline = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`).find(id => !baseline.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside Native');
+    const ctx = configured(target);
+    const { beginAdaptivePromptInvocation, handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { createOpenClawHostRuntime } = await import('../../src/host-runtime/openclaw-host-runtime.js');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const mapping = { artifactId: `art-${target}`, activationId: `act_prompt_${target}` };
+    const runtime = createOpenClawHostRuntime({
+      adaptivePriorityProvider: () => ({ ...mapping, deadlineAt: Date.now() + 15000,
+        hookInvocationId: beginAdaptivePromptInvocation(ctx, mapping, 'shared') }),
+      beforePromptBuild: (event, context, prompt) => {
+        expect(journal).toHaveBeenCalledTimes(1);
+        expect(journal.mock.calls[0]![1]).toMatchObject({ receiptState: 'open' });
+        return handleBeforePromptBuild(event, { ...context, api: ctx.api }, prompt);
+      },
+    });
+    const result = await runtime.dispatchBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext).toContain(`${target}-body-`);
+    expect(journal).toHaveBeenCalledTimes(2);
+    expect(journal.mock.calls[1]![1]).toMatchObject({ hookInvocationId: journal.mock.calls[0]![1].hookInvocationId,
+      receiptState: 'closed', payload: 'prepared', selection: 'selected', submission: 'unknown' });
+  });
+
+  it.each([
+    ['ordinary request', 'none_applicable', 'completed'],
+    ['[PD-AA:delivery-review:v1]\nReview', 'unavailable', 'degraded'],
+  ])('distinguishes a completed scene assessment from missing shared preparation: %s', async (currentUserMessage, selection, execution) => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const native = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild({ ...admitted(), currentUserMessage }, configured('AA-only'), native);
+    expect(result?.prependSystemContext).toContain('AA-only-body');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal.mock.calls[1]![1]).toMatchObject({ selection, execution, payload: 'none', submission: 'unknown' });
+  });
+});
+
 describe('Runtime V2 prompt activation injection', () => {
+  it('shared authority reader preserves owner approval and approver identity', async () => {
+    const artifactId = 'art-v2-authority-001';
+    const principleId = 'princ-v2-authority-001';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+    const now = new Date().toISOString();
+    sqliteConn.getDb().prepare(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at, decided_at, decided_by)
+      VALUES (?, ?, 'prompt', 'low', 'approved', ?, ?, ?)
+    `).run('approval-v2-authority-001', artifactId, now, now, 'owner-authority-1');
+
+    const result = await new PromptActivationReader(tempWorkspaceDir).readActivatedPrinciples();
+    expect(result.principles[0]).toMatchObject({ authority: 'owner', approvedBy: 'owner-authority-1' });
+  });
+
+  it('absence of an approved row remains system-policy authority', async () => {
+    const artifactId = 'art-v2-authority-002';
+    const principleId = 'princ-v2-authority-002';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const result = await new PromptActivationReader(tempWorkspaceDir).readActivatedPrinciples();
+    expect(result.principles[0]).toMatchObject({ authority: 'system_policy' });
+    expect(result.principles[0]?.approvedBy).toBeUndefined();
+  });
+
   it('owner-approved activated principle changes future prompt', async () => {
     const artifactId = 'art-v2-prompt-001';
     const principleId = 'princ-v2-001';

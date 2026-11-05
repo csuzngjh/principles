@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractUserMessageFromPrompt,
+  resolveCurrentUserMessage,
   buildGovernanceContext,
   buildEmpathySilenceConstraint,
   assembleHeartbeatChecklist,
@@ -286,3 +287,24 @@ describe('assembleAppendSystemContext', () => {
   });
 });
 
+
+describe('resolveCurrentUserMessage admission boundary', () => {
+  it('uses the explicit admitted input instead of a composed prompt containing stale history', () => {
+    expect(resolveCurrentUserMessage({ prompt: 'old correction and history', currentUserMessage: 'current task' }, 'session').message).toBe('current task');
+  });
+  it('does not revive history when the host explicitly has no textual request', () => {
+    for (const currentUserMessage of ['', undefined, null, 42]) {
+      expect(resolveCurrentUserMessage({ prompt: 'old correction', currentUserMessage }, 'session').message).toBe('');
+    }
+  });
+  it('preserves the legacy prompt parser only when the field is omitted', () => {
+    expect(resolveCurrentUserMessage({ prompt: 'legacy task' }, 'session')).toEqual(extractUserMessageFromPrompt('legacy task', 'session'));
+  });
+  it('does not execute a host-event accessor or fall back to stale history', () => {
+    let touched = false;
+    const event = { prompt: 'old correction' };
+    Object.defineProperty(event, 'currentUserMessage', { get: () => { touched = true; return 'unsafe'; } });
+    expect(resolveCurrentUserMessage(event, 'session').message).toBe('');
+    expect(touched).toBe(false);
+  });
+});

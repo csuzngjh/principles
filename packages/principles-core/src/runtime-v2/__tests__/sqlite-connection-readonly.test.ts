@@ -96,7 +96,7 @@ describe('SqliteConnection readonly mode', () => {
     conn.close();
 
     expect(Database).toHaveBeenCalledTimes(1);
-    expect(Database).toHaveBeenCalledWith(expect.any(String), { readonly: true, fileMustExist: true });
+    expect(Database).toHaveBeenCalledWith(expect.any(String), { readonly: true, fileMustExist: true, timeout: 5000 });
     expect(mockMkdirSync).not.toHaveBeenCalled();
     expect(mockExec).not.toHaveBeenCalled();
     expect(mockPragma).not.toHaveBeenCalled();

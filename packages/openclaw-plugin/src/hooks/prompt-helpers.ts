@@ -23,6 +23,16 @@ import type {
   AppendSystemContextParts,
 } from './prompt-types.js';
 
+/** Prefer the host's admitted request; explicit empty/invalid input must not revive prompt history. */
+export function resolveCurrentUserMessage(
+  event: { prompt: string; currentUserMessage?: unknown },
+  sessionId?: string,
+): ExtractedUserMessage {
+  const supplied = Object.getOwnPropertyDescriptor(event, 'currentUserMessage');
+  const text = supplied ? (typeof supplied.value === 'string' ? supplied.value : '') : event.prompt;
+  return extractUserMessageFromPrompt(text, sessionId);
+}
+
 // ---------------------------------------------------------------------------
 // Block F: User message extraction (boot check + Feishu format parsing)
 // ---------------------------------------------------------------------------

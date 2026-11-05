@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T093402Z-codex",
+  "previousCheckpoint": "20261105T085800Z-trae",
+  "generatedAt": "2026-11-05T09:34:02.276628+00:00",
+  "agent": "codex-with-luna",
+  "overallStatus": "IN_PROGRESS",
+  "summary": "Frozen provenance repaired; full local merge gate passed; latest remote checks pending. SPEC remains incomplete.",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1112-aa-delivery-verifier",
+    "branch": "ai/PRI-1112-aa-delivery-verifier",
+    "baseCommit": "51140e895fc67a89a28444886ef5a475a6c48687",
+    "headCommit": "60ac565466247a21945929f2d06a6c19a80972b0",
+    "dirtyPaths": [],
+    "pushedCommit": "60ac565466247a21945929f2d06a6c19a80972b0",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2353",
+    "remoteChecks": "PENDING at checkpoint creation; query current GitHub checks"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1112",
+      "scope": "PR2353 frozen provenance and latest-main repair",
+      "status": "READY_FOR_REVIEW",
+      "owner": "codex-with-luna",
+      "writePaths": [
+        "scripts/dev/principle-learning-lab/lib/adaptive/",
+        "docs/implementation-reports/aa-handoff/"
+      ],
+      "commits": [
+        "f1133719c",
+        "60ac565466247a21945929f2d06a6c19a80972b0"
+      ],
+      "acceptance": [
+        {
+          "criterion": "Historical artifacts restored, AA tools isolated, original EXM hash verified",
+          "result": "PASS",
+          "evidenceRefs": [
+            "repair-proof"
+          ]
+        },
+        {
+          "criterion": "Full local merge gate",
+          "result": "PASS",
+          "evidenceRefs": [
+            "gate-log"
+          ]
+        },
+        {
+          "criterion": "Current remote checks",
+          "result": "UNKNOWN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "Wait for current-head CI; Owner review and merge"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "local-gate",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1112-aa-delivery-verifier",
+      "command": "PR_BASE_SHA=51140e895fc67a89a28444886ef5a475a6c48687 npm run verify:merge",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": [
+        "repair-proof"
+      ]
+    },
+    {
+      "id": "aa-tools",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1112-aa-delivery-verifier",
+      "command": "node --test scripts/dev/principle-learning-lab/verify-adaptive-delivery.test.mjs scripts/dev/principle-learning-lab/summarize-adaptive-coverage.test.mjs scripts/dev/principle-learning-lab/probe-local-transport.test.mjs scripts/dev/principle-learning-lab/lib/adaptive/*.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 66,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "repair-proof"
+      ]
+    },
+    {
+      "id": "luna-offline",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1112-aa-delivery-verifier",
+      "command": "npx vitest run scripts/__tests__/principle-learning-lab-frozen-package.test.ts scripts/__tests__/principle-learning-lab-examiner-v09.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 94,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "repair-proof"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "repair-proof",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1112-aa-delivery-verifier\\docs\\implementation-reports\\aa-handoff\\20261105T093402Z-codex-historical-preservation.json",
+      "observedAt": "2026-11-05T09:34:02.276628+00:00",
+      "sha256": "924320c18e3eda15db1cecd247b4304bcd74dfd32c2bc1d56cc38bd4efcc65ce",
+      "supports": "11 protected artifacts match exact base bytes; new AA modules excluded from historical scan",
+      "limitations": "Independent host delivery and behavioral value not established"
+    },
+    {
+      "id": "gate-log",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1112-aa-delivery-verifier\\.tmp\\aa-pr-repair-verify-merge.log",
+      "observedAt": "2026-11-05T09:34:02.276628+00:00",
+      "sha256": "39ce330d594d1e9b5e0270b7fc7608aac9ceb70da9b5dab506306efe9d22351d",
+      "supports": "Local full merge gate exit 0",
+      "limitations": "Local untracked log; remote CI must be checked separately"
+    }
+  ],
+  "blockers": [],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1112",
+      "action": "Check current PR head CI and remaining reviews; repair genuine failures",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "All required current-head checks pass and findings resolved"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1109",
+      "action": "Owner decision on documented minimal reconciliation design",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Explicit design approval or revision request"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner requested subagent repair of findings and merge readiness in current conversation"
+    ]
+  }
+}

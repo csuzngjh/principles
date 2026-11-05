@@ -1,0 +1,355 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T074100Z-trae",
+  "previousCheckpoint": "20261105T071650Z-trae",
+  "generatedAt": "2026-11-05T07:41:00Z",
+  "agent": "trae",
+  "overallStatus": "IN_PROGRESS",
+  "summary": "按 Owner 裁决未新增 changeset、未改功能代码规避，PR 描述已写明等待发版结束后补 changeset。本轮无业务代码改动，另将一次 GitHub API 503 导致的 Check PR Size 失败重跑恢复；PR 上仅 Verify Merge Gate 因 release-intent 守卫保持红色。完成 PRI-1109 只读对账与最小方案准备，未实现任何写入。复核结论：EXM v4 重绑只移动派生物哈希，9 次执行、gold 哈希与 16/19 zip 条目未变；显式导出 10/10 完整，无隐式 barrel 消费方。",
+  "git": {
+    "repo": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+    "branch": "ai/PRI-1112-aa-delivery-verifier",
+    "baseCommit": "a8df2d6d25cab878b758e9b55246d11c05263ae6",
+    "headCommit": "1f86fd09cff0f487a670816db0a7b97a193461bb",
+    "dirtyPaths": [
+      "docs/implementation-reports/aa-handoff/20261105T074100Z-trae.json",
+      "docs/implementation-reports/aa-handoff/20261105T074100Z-trae.md",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "pushedCommit": "a2203aa1fb53018251b026da7485d1a3971d7327",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2353",
+    "remoteChecks": "run 41986091330 (code head 1f86fd09c): all test/build/lint jobs PASS; run 41987279519 (PR head a2203aa1f): only Verify Merge Gate FAIL (N-3 missing changeset for @principles/core, @principles/host-runtime, principles-disciple); run 41987279615 Check PR Size failed by GitHub API 503 and PASSED after rerun"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1112",
+      "scope": "PR #2353 交接核对与 CI 缺陷修复；本轮执行门禁裁决并保持红色",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "packages/principles-core/src/runtime-v2/index.ts",
+        "packages/principles-core/src/runtime-v2/__tests__/fixtures/runtime-v2-barrel-surface.json",
+        "scripts/dev/principle-learning-lab/lib/adaptive-delivery-record.mjs",
+        "scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/",
+        "docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256",
+        "docs/research/examiner-productization-20261029/",
+        "docs/implementation-reports/aa-handoff/"
+      ],
+      "commits": ["40f140e43", "1f86fd09c", "a2203aa1f"],
+      "acceptance": [
+        {
+          "criterion": "说明并修复 barrel 导出面与 EXM 冻结绑定两类真实漂移",
+          "result": "PASS",
+          "evidenceRefs": ["ev-1", "ev-2", "ev-3", "ev-4", "ev-5", "ev-6", "ev-7", "ev-8"]
+        },
+        {
+          "criterion": "修复后测试类必需 CI 项转绿",
+          "result": "PASS",
+          "evidenceRefs": ["ev-10"]
+        },
+        {
+          "criterion": "按 Owner 裁决保留 Verify Merge Gate 红色并在 PR 描述写明原因，不加 changeset、不改功能代码规避",
+          "result": "PASS",
+          "evidenceRefs": ["ev-9", "ev-15"]
+        },
+        {
+          "criterion": "发版结束后补 changeset 使 Verify Merge Gate 转绿",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "等待发版收尾通知后补 changeset，本地跑 checks/scripts/release/check-pr-release-intent.mjs 到 PASS 再推"
+      ]
+    },
+    {
+      "issue": "PRI-1109",
+      "scope": "历史中断对账：只读现实核对与最小方案准备（本轮不实现）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [],
+      "commits": [],
+      "acceptance": [
+        {
+          "criterion": "完成只读对账核对并形成最小可评审方案",
+          "result": "PASS",
+          "evidenceRefs": ["ev-11", "ev-12", "ev-13", "ev-14"]
+        },
+        {
+          "criterion": "实现历史中断对账（需 Owner 设计批准）",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "向 Owner 提交最小方案并取得设计批准后方可实现",
+        "实现前需明确同一 hookInvocationId 跨日、重复 open 与缺失 open 的处理语义"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-pr-checks",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+      "command": "gh pr checks 2353 --repo csuzngjh/principles",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": null,
+      "failed": 1,
+      "skipped": null,
+      "evidenceRefs": ["ev-9"]
+    },
+    {
+      "id": "check-pr-size-rerun",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+      "command": "gh run rerun 41987279615 --repo csuzngjh/principles --failed",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["ev-16"]
+    },
+    {
+      "id": "check-baseline-diff",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+      "command": "git diff --unified=0 a8df2d6d2 HEAD -- docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256 scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/expected-replay.json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["ev-4", "ev-6"]
+    },
+    {
+      "id": "check-freeze-numstat",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier",
+      "command": "git diff --numstat a8df2d6d2 HEAD -- scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/ scripts/dev/principle-learning-lab/lib/ docs/implementation-reports/examiner-v09/ docs/research/examiner-productization-20261029/",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["ev-5", "ev-6", "ev-8"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-1",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/index.ts",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "e1bc295f8dde8cc3b6c3254e772f590b10eb43af1a925ae67ee45a0ca7aa6225",
+      "supports": "第 2356-2361 行以 10 个显式名（2 个值 + 8 个类型）替换原来的 export *，覆盖 adaptive-delivery-record.ts 的全部 10 个声明。",
+      "limitations": "不代表根 barrel 或其它 sub-barrel 的导出策略。"
+    },
+    {
+      "id": "ev-2",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/__tests__/fixtures/runtime-v2-barrel-surface.json",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "1b6468ca536cf54fcd1c0ba51dd22e82cf53a73b95ccea78db924e3c6b16f4f5",
+      "supports": "冻结面 count 1958→1972，新增 10 个 delivery-record 名与 4 个此前未登记的 intervention 名。",
+      "limitations": "fixture 由本 PR 更新，本身不自证合理性；需配合 ev-10 的生产消费方编译结果。"
+    },
+    {
+      "id": "ev-3",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts/dev/principle-learning-lab/rebind-exm-v4-freeze.mjs",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "b5bb89e10e7bce9adc80072893e9a3f3249f20ba9899139fd8164a8e4525a94e",
+      "supports": "第 315-324 行硬门禁：文件集变化、非派生物移动、executions 内容移动、报告行移动、mapping 哈希移动、gold 哈希移动都会 throw。",
+      "limitations": "是重绑工具自身的约束，不等于独立第三方审计。"
+    },
+    {
+      "id": "ev-4",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/expected-replay.json",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "2b2bbfb6b74cdacfc6d6eb942fe4ab349e52df86fdcf770e7979c85d28df8e27",
+      "supports": "相对 a8df2d6d2 只改 reportHash 与一条 implementationHash；executionsHash 仍为 97e2d4e78710616a18945fcbb9d823420a3cd716d2e58de67e1c817d15844751，9 次执行与逐例 caseHash 未变。",
+      "limitations": "该文件由重绑工具生成，需与 ev-3 的守卫一起解读。"
+    },
+    {
+      "id": "ev-5",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/package-manifest.json",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "d832ccb71ccde3305ae6dad7999419feefb9f53a2e39f9f2e27d7effa60946d2",
+      "supports": "implementation.files 仅新增 10 个 AA 实验模块；既有实现文件哈希未变；挑战资产仅 receipts.template.json、expected-replay.json、review-subject.json 三个派生物更新。",
+      "limitations": "packageHash 因上述变化整体重算，不能与新 packageHash 直接比对旧值。"
+    },
+    {
+      "id": "ev-6",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "de05eeb8dc74047c4cdbc95d33f7174ecf670a6df54a81f8ebdbc1bb6e97b40a",
+      "supports": "相对 a8df2d6d2 仅 4 条派生物条目变化；blind-review/cases.json、mapping.json、observed-traces.json、gold-review.json、inputs.json、real-source/* 等条目哈希未变。",
+      "limitations": "基线文件在本次 PR 内刷新；可信度锚点是未变的 gold 与执行内容，而非基线文件自身。"
+    },
+    {
+      "id": "ev-7",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/docs/research/examiner-productization-20261029/v4-evidence/post-review-fix-freeze.txt",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "aa1d175917e2412f7dbf7df0fbb92781fda88479f0ba7ecb0fd509707241ac79",
+      "supports": "第 21-24 行记录：executions identical=true；report rows identical（仅 implementationHash 位移）；subjectHash 与 receipts 一致；zip sha256 6e6d3fc0…（19 项）。",
+      "limitations": "由工具自动生成，非人工复核结论。"
+    },
+    {
+      "id": "ev-8",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/docs/research/examiner-productization-20261029/GOLD-BLIND-REVIEW-v4.zip",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "6e6d3fc0df9e51af9f3107243f2e923df3c5777da3d1e6bb43866e0f52dc83c4",
+      "supports": "对 a8df2d6d2 与新 zip 逐项解压比对：19 项对 19 项，仅 receipts.template.json、review-subject.json、SHA256SUMS.json 变化，16 项逐字节相同（含 gold-review.json）。",
+      "limitations": "比对脚本为本次会话内联执行、未持久化；结论可由重新解压复核，但无脚本文件留存。"
+    },
+    {
+      "id": "ev-9",
+      "kind": "REMOTE_CI",
+      "locator": "https://github.com/csuzngjh/principles/actions/runs/41987279519/job/127110902377",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": null,
+      "supports": "Verify Merge Gate 在 a2203aa1f 上唯一失败，日志为 N-3：三个包缺 changeset；失败步骤为 Release intent guard。",
+      "limitations": "日志只说明守卫结论，不证明变更是否真正影响发布。"
+    },
+    {
+      "id": "ev-10",
+      "kind": "REMOTE_CI",
+      "locator": "https://github.com/csuzngjh/principles/actions/runs/41986091330",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": null,
+      "supports": "业务代码 head 1f86fd09c 上 Test principles-core、Test shared runtime & adapters、Test OpenClaw Plugin、Lint、Build OpenClaw Plugin 等全部 PASS，证明显式导出的全部消费方可编译。",
+      "limitations": "该 run 对应 1f86fd09c；a2203aa1f 仅多出检查点文档，测试类 job 亦全绿。"
+    },
+    {
+      "id": "ev-11",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/openclaw-plugin/src/core/event-log.ts",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "5024d41f86cb5934e836fcfa65a0e004c3a8f8b3da92b0a68819f6005734989c",
+      "supports": "第 143-150 行是 adaptive_delivery 唯一写入点；第 41 行保留期 7 天；第 539-556 行 readPersistedEvents 只读当天文件，无跨日读取 API。",
+      "limitations": "不覆盖外部脚本自行读取 JSONL 的场景。"
+    },
+    {
+      "id": "ev-12",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/openclaw-plugin/src/hooks/prompt.ts",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "2ea37fca4ccb73ce10fa387e6dc15367ad4e99853b712b662c9f572f7cfad754",
+      "supports": "第 293-302 行写 open（try/catch 仅告警）；第 1073-1084 行写 closed；无 reconciled 生产写入。",
+      "limitations": "open 写入失败被吞掉，缺失 open 不能反证调用未发生。"
+    },
+    {
+      "id": "ev-13",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/host-runtime/src/intervention-evidence-ingress.ts",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "8edaa98141adfad331203150d1e0b318785c66ae4272503f792cb4baac121257",
+      "supports": "单一规范化证据入口存在，sourceKind 含 openclaw_plugin_event_log；注释称原始源可支持 bounded replay，但仓内无 replay/reconciliation 实现。",
+      "limitations": "注释是意图说明，不是实现证据。"
+    },
+    {
+      "id": "ev-14",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/activation/adaptive-delivery-record.ts",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "996c4d2a8a242eae653f65bed1041dfdba92465fb9623e7d73cd7c219ab1a07c",
+      "supports": "schema 允许 reconciled；validator 要求 open 的 execution/payload/submission=unknown 且 selectionPending=true，终态禁止 selectionPending=true；confirmed/known submission/timeout 需独立证据，且从不推断送达成功。",
+      "limitations": "只定义结构约束，不定义对账写入者。"
+    },
+    {
+      "id": "ev-15",
+      "kind": "OWNER_AUTHORIZATION",
+      "locator": "https://github.com/csuzngjh/principles/pull/2353",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": null,
+      "supports": "PR 描述已记录裁决：Verify Merge Gate 将保持红色直到在飞发版结束，之后补 changeset，且仅声明真实受影响包。",
+      "limitations": "裁决由协调会话转达并记录在 PR 描述，非 Owner 亲笔签字文件。"
+    },
+    {
+      "id": "ev-16",
+      "kind": "REMOTE_CI",
+      "locator": "https://github.com/csuzngjh/principles/actions/runs/41987279615",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": null,
+      "supports": "Check PR Size 首次失败日志为 GitHub API curl 503；重跑后该工作流全部 job PASS，且此前 1f86fd09c 同工作流为 success。",
+      "limitations": "仅说明该次失败为基础设施抖动，不评价 PR 体积策略本身。"
+    },
+    {
+      "id": "ev-17",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/src/runtime-v2/__tests__/fixtures/core-barrel-surface.json",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "9f8e77d2d4a206bdf15b527ac125abe1eff65608753a8835356b70b357048d08",
+      "supports": "根 barrel src/index.ts 冻结面 195 名，零 adaptive 名，未暴露 delivery record，说明无根 barrel 隐式依赖。",
+      "limitations": "只证明导出面，不证明运行期未使用。"
+    },
+    {
+      "id": "ev-18",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1112-aa-delivery-verifier/packages/principles-core/package.json",
+      "observedAt": "2026-11-05T07:41:00Z",
+      "sha256": "09259193db43455639a3af1a7f9c14edb48b5e1fae794297f63e32897f8354a6",
+      "supports": "第 37-39 行声明 ./runtime-v2/adaptive-delivery-record 子路径，event-log.ts 可直接导入而不依赖 barrel。",
+      "limitations": "子路径导出与 barrel 导出是两条独立契约。"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "B1",
+      "issue": "PRI-1112",
+      "reason": "Verify Merge Gate 的 release-intent 守卫要求 changeset；Owner 裁决在在飞发版结束前不添加，以免版本平面漂移。",
+      "evidenceRefs": ["ev-9", "ev-15"],
+      "neededFrom": "coordinator（发版收尾通知）",
+      "unblockAction": "收到发版完成通知后，按真实受影响包添加 changeset，本地运行 checks/scripts/release/check-pr-release-intent.mjs 到 PASS 再推送。",
+      "independentWork": "PRI-1109 只读对账与方案准备已完成；PRI-1110/1114/1115 只读准备可继续。"
+    },
+    {
+      "id": "B2",
+      "issue": "PRI-1109",
+      "reason": "历史中断对账需要新增对账写入与跨日读取语义，属于非简单设计选择，须先获 Owner 设计批准。",
+      "evidenceRefs": ["ev-11", "ev-12", "ev-14"],
+      "neededFrom": "Owner",
+      "unblockAction": "审阅本检查点中的最小方案（只读扫描 + 结构化分类，不推断成功）并给出批准或修改意见。",
+      "independentWork": "PRI-1110 配置身份、PRI-1114 读模型、PRI-1115 统计的只读准备。"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1112",
+      "action": "等待发版收尾通知；收到后添加 changeset 并本地验证 release-intent 守卫。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "check-pr-release-intent.mjs 本地 PASS，推送后 Verify Merge Gate 转绿。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1109",
+      "action": "把最小对账方案提交 Owner 设计审批，明确跨日 hookInvocationId、重复 open、缺失 open 三类语义。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "获得书面批准或修改意见。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1110",
+      "action": "在不触碰配置写入语义的前提下，完成配置身份实现的只读核对与差异清单。",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "形成只读结论与最小方案检查点。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "docs/implementation-reports/PD-AA-LOCAL-AGENT-HANDOFF.md@a8df2d6d2"
+    ]
+  }
+}

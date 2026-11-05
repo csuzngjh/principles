@@ -15,6 +15,7 @@ import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type Pai
 import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime-v2';
 
 export * from './active-principle-prompt.js';
+export * from './prompt-activation-authority.js';
 export * from './prompt-injection-projection.js';
 // SPEC PD_PROMPT_CAPACITY_V1: route-aware single-artifact deliverability
 // precheck (B1 write gate + A candidate fit) and the per-live-activation
@@ -246,6 +247,20 @@ export function createProductionHostRuntime(
     projectDir?: string;
     /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
     toolSemantics?: ToolSemanticRegistry;
+    /** Optional, already-scoped single prompt target from the host adapter. Errors fail closed to Native. */
+    adaptivePriorityProvider?: (event: HostEvent) => {
+      artifactId: string;
+      activationId: string;
+      hookInvocationId?: string;
+      signal?: AbortSignal;
+      deadlineAt?: number;
+    } | undefined | Promise<{
+      artifactId: string;
+      activationId: string;
+      hookInvocationId?: string;
+      signal?: AbortSignal;
+      deadlineAt?: number;
+    } | undefined>;
     /**
      * PRI-750: optional event emission port. When present, the shared-path
      * handlers record injection/tool events carrying the host's natural
@@ -298,8 +313,34 @@ export function createProductionHostRuntime(
       const declaredWindow = promptBudgetHostKind === undefined
         ? undefined
         : operatorDeclaredContextWindow(loadPdConfigForPlugin(event.context.workspaceDir).effective.config.promptBudget, promptBudgetHostKind);
+      let adaptivePriority: Awaited<ReturnType<NonNullable<typeof options.adaptivePriorityProvider>>>;
+      let skippedPriority: typeof adaptivePriority;
+      if (options.adaptivePriorityProvider) {
+        try {
+          adaptivePriority = await options.adaptivePriorityProvider(event);
+          if (adaptivePriority && (typeof adaptivePriority.artifactId !== 'string' || !adaptivePriority.artifactId.trim()
+            || typeof adaptivePriority.activationId !== 'string' || !adaptivePriority.activationId.trim()
+            || (adaptivePriority.deadlineAt !== undefined && !Number.isFinite(adaptivePriority.deadlineAt)))) {
+            adaptivePriority = undefined;
+          }
+          if (adaptivePriority?.signal?.aborted
+            || (adaptivePriority?.deadlineAt !== undefined && Date.now() >= adaptivePriority.deadlineAt)) {
+            skippedPriority = adaptivePriority;
+            adaptivePriority = undefined;
+          }
+        } catch {
+          // An optional adaptive provider can never alter the ordinary Native path on failure.
+          adaptivePriority = undefined;
+        }
+      }
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
+        ...(adaptivePriority ? {
+          adaptivePriority: { artifactId: adaptivePriority.artifactId, activationId: adaptivePriority.activationId },
+          ...(adaptivePriority.signal ? { signal: adaptivePriority.signal } : {}),
+          ...(adaptivePriority.deadlineAt !== undefined ? { deadlineAt: adaptivePriority.deadlineAt } : {}),
+          ...(adaptivePriority.hookInvocationId ? { hookInvocationId: adaptivePriority.hookInvocationId } : {}),
+        } : {}),
         promptBudget: resolvePromptBudget({
           // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve ONCE per request
           // from the host's own hook facts (OpenClaw effective window /
@@ -323,6 +364,10 @@ export function createProductionHostRuntime(
           catalog: getPromptModelCatalog(),
         }),
       });
+      if (skippedPriority?.hookInvocationId) prompt.adaptivePacking = {
+        status: 'unavailable', reason: 'deadline', targetActivationId: skippedPriority.activationId,
+        targetArtifactId: skippedPriority.artifactId, hookInvocationId: skippedPriority.hookInvocationId, displacedActivationIds: [],
+      };
       // PRI-750: record the injection event on the shared path with the host
       // turn id (Codex turn_id → runId) so receipt events carry a turn-level
       // anchor in the same events_*.jsonl format as the OpenClaw path. The
@@ -400,3 +445,5 @@ export * from './explicit-owner-statement-prefix.js';
 export { listObservedDesignGateSessions } from './workspace-behavior-evidence.js';
 export { readDesignGateSpecSnapshot, describeCodexRuleContextFact } from './design-gate-facts.js';
 export { createCodexArtificerTrustedFactsPort } from './codex-artificer-trusted-facts.js';
+
+export { revalidateAdaptivePrinciple, createAdaptivePrincipleRevalidator, type AdaptivePrincipleReader } from './adaptive-principle-revalidation.js';
