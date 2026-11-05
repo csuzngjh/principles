@@ -122,8 +122,14 @@ export function errorProjection(value, keys) {
   return safe;
 }
 
+export function continuationPlan(previous) {
+  if (previous?.status !== 'STOPPED' || previous.counts?.decision !== 2 || previous.counts?.glm !== 0) reject('UNEXPECTED_PREVIOUS_RUN');
+  return { inheritedCounts: { decision: 2, glm: 0 }, caseIds: ['dev-01', 'dev-02', 'dev-03', 'dev-04'],
+    maxCounts: { decision: 6, glm: 8 }, claim: 'APPROVAL-20261106-FOUR-CASE-CONTINUATION.json' };
+}
+
 export function createBoundary({ ledger, persist, keys, fetchImpl = globalThis.fetch, now = Date.now,
-  requestMs = 30000, endAt = now() + 600000 }) {
+  requestMs = 30000, endAt = now() + 600000, maxCounts = { decision: 6, glm: 12 } }) {
   // A new closure per model invocation also blocks hidden SDK retries before send.
   return (kind, caseId, arm) => {
     let used = false;
@@ -133,7 +139,7 @@ export function createBoundary({ ledger, persist, keys, fetchImpl = globalThis.f
       const payload = JSON.parse(body);
       if (!Object.hasOwn(URLS, kind) || url !== URLS[kind] || init.method?.toUpperCase() !== 'POST' ||
           payload.model !== MODELS[kind]) reject('REQUEST_NOT_ALLOWLISTED');
-      if (used || now() >= endAt || ledger.counts[kind] >= (kind === 'decision' ? 6 : 12)) reject('REQUEST_BUDGET_EXHAUSTED');
+      if (used || now() >= endAt || ledger.counts[kind] >= maxCounts[kind]) reject('REQUEST_BUDGET_EXHAUSTED');
       const prompt = kind === 'decision' ? JSON.stringify({ state: payload.state, questions: payload.questions }) : JSON.stringify(payload.messages);
       if (prompt.length > (kind === 'decision' ? 6000 : 12000)) reject('INPUT_TOO_LARGE');
       if (Object.values(keys).some(secret => secret && body.includes(secret))) reject('SECRET_IN_PAYLOAD');
@@ -205,8 +211,14 @@ export async function glmSelection({ PiAiRuntimeAdapter, fetch, payload, candida
 
 async function main() {
   const runStarted = Date.now();
-  if (process.argv.length !== 3 || process.argv[2] !== '--execute-approved-20261106') reject('EXPLICIT_APPROVED_RUN_FLAG_REQUIRED');
+  const continuing = process.argv[2] === '--execute-approved-four-case-continuation';
+  if (process.argv.length !== 3 || (!continuing && process.argv[2] !== '--execute-approved-20261106')) reject('EXPLICIT_APPROVED_RUN_FLAG_REQUIRED');
   const fixture = loadFixture();
+  const previousPath = path.join(ROOT, 'docs/implementation-reports/aa-selector-experiments/2026-11-05T23-27-54-181Z-one-diagnostic/results.json');
+  const previousBytes = continuing ? fs.readFileSync(previousPath) : null;
+  const plan = continuing ? continuationPlan(JSON.parse(previousBytes.toString('utf8'))) : {
+    inheritedCounts: { decision: 0, glm: 0 }, caseIds: fixture.cases.map(c => c.id),
+    maxCounts: { decision: 6, glm: 12 }, claim: 'APPROVAL-20261106-CLAIM.json' };
   const keys = { decision: process.env.OPENROUTER_API_KEY, glm: process.env.ZAI_CODING_CN_API_KEY || process.env.ZAI_API_KEY };
   if (!keys.decision || !keys.glm) reject('MISSING_CREDENTIAL_REFERENCE');
   process.env.ZAI_CODING_CN_API_KEY = keys.glm;
@@ -221,23 +233,27 @@ async function main() {
   const out = path.join(ROOT, 'docs/implementation-reports/aa-selector-experiments', new Date().toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   // This approval authorizes ONE run, not a fresh budget each CLI invocation.
-  fs.writeFileSync(path.join(path.dirname(out), 'APPROVAL-20261106-CLAIM.json'),
-    JSON.stringify({ out, maxAttempts: { decision: 6, glm: 12 }, claimedAt: new Date().toISOString() }), { flag: 'wx' });
+  fs.writeFileSync(path.join(path.dirname(out), plan.claim),
+    JSON.stringify({ out, maxCumulativeCounts: plan.maxCounts, inheritedCounts: plan.inheritedCounts,
+      caseIds: plan.caseIds, claimedAt: new Date().toISOString() }), { flag: 'wx', flush: true });
   fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, 'RUN-LOCK'), 'Single non-resumable run; do not rerun without accounting for prior calls.\n', { flag: 'wx' });
   const ledger = { schemaVersion: 'pd-aa-selector-diagnostic/v1', startedAt: new Date().toISOString(),
-    approval: 'Owner 2026-11-06: 批准，开始实验吧；card PD-AA-PRI-1122-DECISIONS-GLM-EXPERIMENT-CARD-v0.1.md',
+    approval: continuing ? 'Owner 2026-11-06: 批准，尽快完成这次实验；对应新增最多4次decision+8次GLM、前4冻结样本的续行提议'
+      : 'Owner 2026-11-06: 批准，开始实验吧；card PD-AA-PRI-1122-DECISIONS-GLM-EXPERIMENT-CARD-v0.1.md',
     fixtureHash: hash(fs.readFileSync(path.join(ROOT, FIXTURE))),
     codeHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
     sourceHash: hash(fs.readFileSync(fileURLToPath(import.meta.url))),
     systemPromptHash: hash(SYSTEM), candidateHash: hash(JSON.stringify(fixture.candidates)), modelConfig: MODELS,
-    catalog: { id: model.id, pricing: model.pricing }, counts: { decision: 0, glm: 0 },
+    catalog: { id: model.id, pricing: model.pricing }, counts: { ...plan.inheritedCounts },
+    inheritedCounts: plan.inheritedCounts, maxCumulativeCounts: plan.maxCounts, plannedCaseIds: plan.caseIds,
+    previousEvidenceHash: previousBytes ? hash(previousBytes) : null,
     status: 'RUNNING', requests: [], results: [], limitation: 'Synthetic development selection diagnostic; no actor/host/behavior/heldout evidence.' };
   const persist = () => fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(ledger, null, 2) + '\n', { flush: true });
   persist();
-  const boundary = createBoundary({ ledger, persist, keys, endAt: runStarted + 600000 });
+  const boundary = createBoundary({ ledger, persist, keys, endAt: runStarted + 600000, maxCounts: plan.maxCounts });
   try {
-    for (const [index, sample] of fixture.cases.entries()) {
+    for (const [index, sample] of fixture.cases.filter(c => plan.caseIds.includes(c.id)).entries()) {
       ledger.activeStage = { caseId: sample.id, kind: 'decision', arm: 'D' };
       const input = buildInputs(sample, fixture);
       const response = await boundary('decision', sample.id, 'D')(URLS.decision, { method: 'POST',
@@ -264,6 +280,9 @@ async function main() {
     ledger.failedStage = ledger.activeStage;
     process.exitCode = 1;
   } finally {
+    ledger.thisRunAttempts = { decision: ledger.counts.decision - plan.inheritedCounts.decision,
+      glm: ledger.counts.glm - plan.inheritedCounts.glm };
+    ledger.previousEvidenceUnchanged = previousBytes ? hash(fs.readFileSync(previousPath)) === ledger.previousEvidenceHash : null;
     ledger.endedAt = new Date().toISOString(); persist();
     console.log(JSON.stringify({ status: ledger.status, counts: ledger.counts, evidence: out, reason: ledger.stopReason ?? null }));
   }

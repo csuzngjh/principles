@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createBoundary, MODELS, URLS, validateDecision, validateSelection, hash,
-  buildInputs, buildDecisionRequest, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, ROOT, FIXTURE } from './diagnostic.mjs';
+  buildInputs, buildDecisionRequest, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, continuationPlan, ROOT, FIXTURE } from './diagnostic.mjs';
 
 const fixture = loadFixture();
 const keys = { decision: 'fake-decision+secret/=', glm: 'fake-glm+secret/=' };
@@ -96,6 +96,20 @@ test('global sixth decision limit covers independent invocation closures', async
   for (let i = 0; i < 6; i++) await s.boundary('decision', `dev-${i}`, 'D')(URLS.decision, request());
   await assert.rejects(s.boundary('decision', 'extra', 'D')(URLS.decision, request()), /BUDGET/);
   assert.equal(s.sends.length, 6);
+});
+test('approved continuation inherits two failed attempts, narrows scope and cannot reset quota', async () => {
+  const plan = continuationPlan({ status: 'STOPPED', counts: { decision: 2, glm: 0 } });
+  assert.deepEqual(plan.caseIds, ['dev-01', 'dev-02', 'dev-03', 'dev-04']);
+  assert.deepEqual(plan.maxCounts, { decision: 6, glm: 8 });
+  assert.throws(() => continuationPlan({ status: 'STOPPED', counts: { decision: 0, glm: 0 } }), /UNEXPECTED/);
+  const s = setup({ maxCounts: plan.maxCounts }); s.ledger.counts = { ...plan.inheritedCounts };
+  for (const id of plan.caseIds) await s.boundary('decision', id, 'D')(URLS.decision, request());
+  await assert.rejects(s.boundary('decision', 'extra', 'D')(URLS.decision, request()), /BUDGET/);
+  assert.equal(s.sends.length, 4); assert.equal(s.ledger.counts.decision, 6);
+  s.ledger.counts.glm = 8;
+  await assert.rejects(s.boundary('glm', 'extra', 'C')(URLS.glm, { method: 'POST',
+    body: JSON.stringify({ model: MODELS.glm, messages: [], max_tokens: 512 }) }), /BUDGET/);
+  assert.equal(s.sends.length, 4);
 });
 test('endpoint/model/fallback/input/secret failures send zero requests', async () => {
   for (const [url, body] of [
