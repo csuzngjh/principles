@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createBoundary, MODELS, URLS, validateDecision, validateSelection, hash,
-  buildInputs, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, ROOT, FIXTURE } from './diagnostic.mjs';
+  buildInputs, buildDecisionRequest, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, ROOT, FIXTURE } from './diagnostic.mjs';
 
 const fixture = loadFixture();
 const keys = { decision: 'fake-decision+secret/=', glm: 'fake-glm+secret/=' };
@@ -33,6 +33,25 @@ test('frozen fixture and prompt projection exclude gold and principles from deci
   assert.equal(JSON.stringify(input.glm).includes('expectedDecision'), false);
   assert.equal(JSON.stringify(input.glm).includes('forbidden'), false);
   assert.equal(input.glm.untrustedAuxiliaryMeasurements, undefined);
+});
+test('Respan rejects the original array envelope but accepts the same task context as a string', async () => {
+  const state = buildInputs(fixture.cases[0], fixture).state;
+  const fakeRespan = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return typeof body.state === 'string' ? Response.json(decision())
+      : Response.json({ error: { code: 400, message: 'Respan state must be a string' } }, { status: 400 });
+  };
+  const old = setup({ fetchImpl: fakeRespan });
+  await assert.rejects(old.boundary('decision', 'dev-01', 'D')(URLS.decision,
+    request({ state: [JSON.stringify(state)] })), /HTTP_400/);
+  assert.equal(old.ledger.counts.decision, 1);
+  const fixedBody = buildDecisionRequest(state, fixture.questions);
+  assert.equal(typeof fixedBody.state, 'string');
+  assert.deepEqual(JSON.parse(fixedBody.state), state);
+  const fixed = setup({ fetchImpl: fakeRespan });
+  const response = await fixed.boundary('decision', 'dev-01', 'D')(URLS.decision,
+    { method: 'POST', body: JSON.stringify(fixedBody) });
+  assert.equal(response.status, 200); assert.equal(fixed.ledger.counts.decision, 1);
 });
 test('valid overlapping probabilities are not normalized into fake exclusive labels', () => {
   const d = decision(); d.answers.new_task.noul = 0.9; d.answers.goal_shift.noul = 0.9;

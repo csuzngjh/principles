@@ -38,3 +38,9 @@ Official API documentation accepts JSON/array state and noul questions and warns
 Added one isolated thin native Decisions client and local research evidence/one-run claim. Reused existing pi-ai completion and HTTP-fetch injection. No new production backend, public package export, database, worker, runtime flag or host behavior. Remove the research CLI to remove the capability; retain frozen evidence.
 
 Two-axis independent review used Luna agents (read-only, no API calls). Spec axis found no acceptance blocker; Standards axis found missing error explanation and swallowed local reason. Both have fixes and regression coverage. Current diagnostic is an engineering delivery, not proof of selection quality, model-visible delivery or real behavioral improvement.
+
+## Identical follow-up diagnosis (2026-11-06)
+
+Owner approved one identical free request only. The same payload hash returned HTTP400 with a specific provider constraint: Respan accepts a string state (or its narrow input/output message object), not the generic array envelope we used. See `PD-AA-PRI-1141-DECISIONS-ROOT-CAUSE-20261106.md` and the independent `2026-11-05T23-27-54-181Z-one-diagnostic/results.json`.
+
+The main builder now sends the identical context as a JSON string. A regression first failed with the old array, then 25 tests passed with the fix. Real calls remain cumulative decision2 / GLM0; no successful live acceptance is claimed. The separate one-diagnostic command deliberately reconstructs the original array payload and cannot be rerun under its consumed claim. A corrected continuation requires approval; proposed remaining scope is dev-01..04, max4 decision +8 GLM, not a reset of the original budget.
