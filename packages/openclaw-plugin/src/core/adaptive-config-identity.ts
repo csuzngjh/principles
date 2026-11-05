@@ -15,7 +15,7 @@
  * - The next invocation builds a new snapshot.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isSurfaceEnabled } from '@principles/core/runtime-v2';
@@ -93,14 +93,13 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function readManifestFile(filePath: string): { manifest?: ParsedManifest; reason?: string } {
   try {
-    const stats = statSync(filePath);
-    if (!stats.isFile()) {
-      return { reason: 'manifest_not_a_file' };
-    }
-    if (stats.size > MAX_MANIFEST_BYTES) {
+    // Read once and bound the in-memory value: stat-then-read would be a
+    // TOCTOU race (CodeQL js/file-system-race) and buys nothing here.
+    const raw = readFileSync(filePath, 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > MAX_MANIFEST_BYTES) {
       return { reason: 'manifest_too_large' };
     }
-    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
+    const parsed: unknown = JSON.parse(raw);
     if (!isPlainRecord(parsed)) {
       return { reason: 'manifest_invalid_shape' };
     }
