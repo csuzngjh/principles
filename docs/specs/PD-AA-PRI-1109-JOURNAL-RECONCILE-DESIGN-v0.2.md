@@ -57,7 +57,7 @@
 - 工作区：`data.workspaceDir` 规范化后必须等于本次请求工作区；不等 → `foreign_workspace`，排除并计数；缺失 → `workspace_identity_unknown`，归入 `workspaceDir:null` 分组，**不与已验证工作区分组合并**（覆盖"不同工作区恰好同号"）。
 - 时间窗口：UTC ISO；默认 `until = now`、`since = now - retentionDays`（完整 7×24 小时，与 `INTERVENTION_SHORT_SOURCE_RETENTION_DAYS` 同源）；闭区间 `[start, end]`。`since` 早于保留边界时截断到保留边界并置 `clampedByRetention=true`；`until > now` 或 `end < start` 为参数错误（退出码 2）。窗口可由 `--since`/`--until` 显式指定，输出回显实际生效的 `start`/`end` 与 `requestedStart`。事件时间用信封 `ts`，不用文件名或 mtime。
 - **默认 7 天而不是 24 小时的理由**：open 与终态可能跨午夜、跨工作时段；24 小时窗口会系统性排除仍可配对的记录，并把"实际有结尾"误报成"只有开头"（`open_only`），这是错误的保守结论。7 天与日志保留期一致，是当前证据的完整上界；成本上限见 §9。窗口不是证据完整性声明：保留期清理、文件缺失、tail 截断都会使结论成为下界，必须由 `coverage` 与 `countsAreLowerBounds` 表达。
-- **日期文件覆盖**：7×24 小时闭区间最多与 **8 个 UTC 日期文件**相交（例如 start 10-29T10:00Z、end 11-05T10:00Z 对应 10-29…11-05）。读取按"文件名日期与窗口相交"选择文件，不按"最近 N 个文件"截断；文件数上限与不足时的显式标记见 §9。
+- **日期文件覆盖**：7×24 小时闭区间最多与 **8 个 UTC 日期文件**相交（例如 start 10-29T10:00Z、end 11-05T10:00Z 对应 10-29…11-05）。EventLog 在 flush 时按当时日期选择文件、而记录的 `ts/date` 在创建时固定，因此缓冲跨午夜时窗口末尾的记录可能写入**次日**文件；候选集需追加 1 个溢出日期，共最多 **9 个**。读取按"文件名日期与窗口相交（含次日溢出）"选择文件，不按"最近 N 个文件"截断；事件是否纳入仍由信封 `ts` 判定。文件数上限与不足时的显式标记见 §9。
 - 只读：输入文件前后 `sha256` 必须一致（测试断言），工作区目录列表前后不得新增文件。
 
 ## 5. 身份与配对规则
@@ -120,7 +120,8 @@
     "filesOmitted": [],
     "truncatedFiles": ["<abs path>"],
     "errors": [{"logDir": ".state/logs", "file": "events_2026-11-05.jsonl",
-                "code": "read_failed | stat_failed | outside_workspace", "message": "<bounded>"}]
+                "code": "read_failed | stat_failed | outside_workspace", "message": "<bounded>"}],
+    "identityComparisonLimited": false
   },
   "totals": {
     "linesRead": 10, "adaptiveRecords": 8, "nonAdaptiveLines": 2,
@@ -203,6 +204,7 @@
 ## 8. 去重、冲突、缺失与窗口截断
 
 - 同目录同文件内逐字段相同的行：计 `duplicatesExact`，保留最早 `ts`。
+- 去重身份按**规范化后的完整原始 `data`** 比较（对象键顺序无关），不按展示投影比较：证据引用、正文摘要、准入身份等实际不同的字段一律不得因展示相同而去重；规范化内容超出比较预算时**保守判为不同**（绝不判为完全重复），并置 `coverage.identityComparisonLimited=true`、在 `q5` 说明该限制。
 - 跨候选目录完全相同的行：按 `.pd/logs` 优先去重（沿用 127-153 的语义），不把同一行算两次调用。
 - 同键多终态/多开始：`conflicted`，`terminalVariants` 保留至每调用上限（见 §9），省略量计入 `terminalVariantsOmitted`，不推断哪一个"真实"。
 - 缺开始：`terminal_only`，`q5` 明确"start unknown"。
@@ -211,12 +213,12 @@
 - 窗口截断：文件超过 4 MiB 只读尾部，丢弃半行，记 `truncatedFiles`；受影响的组加 `record_before_coverage_start`，`countsAreLowerBounds=true`。
 - 保留期：窗口不可能超过 7 天；早于保留期的记录已不可见，`clampedByRetention` 必须显式。保留期清理只在写入时发生，读侧看到的文件集可能比常量推定的更旧，`coverage` 必须按实际文件记录。
 - 普通事件：`type` 缺失或不等于 `adaptive_delivery` → `non_adaptive_event`，跳过并计入 `nonAdaptiveLines`；**不得计入无效/异常统计**。
-- 日期文件：读取全部与窗口相交的日期文件（默认 7×24h 最多 8 个）；超出每目录上限时按 §9 显式标记覆盖不完整。
+- 日期文件：读取全部与窗口相交的日期文件（默认 7×24h 最多 8 个），并追加窗口终点次日的溢出文件作为候选（最多 9 个）；超出每目录上限时按 §9 显式标记覆盖不完整。
 
 ## 9. 读取上限、错误处理与成本
 
-- 文件选择：按文件名日期与窗口相交选取，**默认窗口最多 8 个日期文件/候选目录**；每文件最多 4 MiB；两个候选目录最坏 8 × 2 × 4 MiB = **64 MiB**；顺序读取，不并发、不重试。
-- 文件数上限：若相交文件数超过每目录上限（默认 8），读取最新的上限数量，置 `coverage.status="partial"`、`coverage.limitCode="coverage_file_limit_reached"`、`filesOmitted` 列出被跳过文件、`countsAreLowerBounds=true`。**不得静默截断**。
+- 文件选择：按文件名日期与窗口相交（含终点次日溢出）选取，**默认窗口最多 9 个日期文件/候选目录**；每文件最多 4 MiB；两个候选目录最坏 9 × 2 × 4 MiB = **72 MiB**；顺序读取，不并发、不重试。
+- 文件数上限：若候选文件数超过每目录上限（默认 9），读取最新的上限数量，置 `coverage.status="partial"`、`coverage.limitCode="coverage_file_limit_reached"`、`filesOmitted` 列出被跳过文件、`countsAreLowerBounds=true`。**不得静默截断**。
 - 目录不存在/不可读：`coverage.status` 降级并记错误；**不得把不可读当零事件**（ERR-002）。
 - 单行错误不影响其余行；校验器异常已被其自身捕获，读取层不再抛。
 - 输出上限：`invocations` 最多 1000 条；每个调用的终态变体最多 5 条（`terminal` + `terminalVariants` 合计），超出部分计入 `terminalVariantsOmitted`。任何截断都必须显式：
@@ -227,13 +229,13 @@
   - `truncation.omittedByClassification.conflicted` 必须保留冲突结论的遗漏量；
   - `nextAction` 必须包含缩小窗口或按 host/session 分片的提示。
 - 禁止静默截断：没有 `truncation` 对象而 `invocations` 恰好 1000 条，或终态变体超过 5 条却无 `terminalVariantsOmitted`，视为实现缺陷。
-- 成本：零模型调用、零数据库、零新增依赖、零常驻进程；一次人工触发的有界文件扫描（最坏 64 MiB）。
+- 成本：零模型调用、零数据库、零新增依赖、零常驻进程；一次人工触发的有界文件扫描（最坏 72 MiB）。
 
 ## 10. 验收与回滚
 
 验收（隔离临时目录 + 真实 JSONL 行格式）：
 
-1. 正常 open→closed 配对；2. 只有 open；3. 只有终态；4. 完全相同重复去重并计数；5. 冲突终态/多次开始；6. 非法 JSON、非法四维、缺身份、非法信封；7. open 在窗口内/终态在窗口外（只允许 `window_end_explicit_not_now` + `terminal_not_visible_in_range`，不得出现"终态发生在窗口后"的结论或旧原因码）；8. 跨工作区同 `hookInvocationId` 不合并、外工作区记录被排除；9. 跨宿主不合并；10. 目录/文件读取失败产生 `partial`/`unavailable` 且退出码非 0；11. 输入文件前后 `sha256` 相同、工作区无新增文件；12. CLI stdout 单个合法 JSON、诊断仅 stderr；退出码 0（完成，含异常发现）、2（参数错误）、3（partial/unavailable）；13. 源码不依赖 fs 写接口、SQLite、模型；14. **同一文件混有普通事件**：`nonAdaptiveLines` 计数，`invalidEnvelopeRecords=0`，q3 不受影响；15. **默认 7×24h 跨 8 个日期文件**：全部读取；人为把上限降到 7 时置 `partial` + `coverage_file_limit_reached` + `filesOmitted`；16. **同一 `hookInvocationId` 但 `artifactId`/`activationId` 不同**：`conflicted` + `target_identity_mismatch`，不得判正常配对；17. **超过 1000 条调用**：`outputTruncated=true`、`truncation.limit=1000`、`omitted>0`、`omittedByClassification.conflicted` 可读、`countBasis=lower_bound`、`nextAction` 含缩小窗口/分片提示；18. **某调用 6 个以上终态变体**：只输出 5 个，`terminalVariantsOmitted>0`，`classification` 仍为 `conflicted`；19. **证据字段**：原记录有 `evidence.independentlyVerified=true` 时输出 `evidenceIndependentlyVerifiedAsRecorded=true`，且 q5 不得写成"已独立验证/已送达"。
+1. 正常 open→closed 配对；2. 只有 open；3. 只有终态；4. 完全相同重复去重并计数；5. 冲突终态/多次开始；6. 非法 JSON、非法四维、缺身份、非法信封；7. open 在窗口内/终态在窗口外（只允许 `window_end_explicit_not_now` + `terminal_not_visible_in_range`，不得出现"终态发生在窗口后"的结论或旧原因码）；8. 跨工作区同 `hookInvocationId` 不合并、外工作区记录被排除；9. 跨宿主不合并；10. 目录/文件读取失败产生 `partial`/`unavailable` 且退出码非 0；11. 输入文件前后 `sha256` 相同、工作区无新增文件；12. CLI stdout 单个合法 JSON、诊断仅 stderr；退出码 0（完成，含异常发现）、2（参数错误）、3（partial/unavailable）；13. 源码不依赖 fs 写接口、SQLite、模型；14. **同一文件混有普通事件**：`nonAdaptiveLines` 计数，`invalidEnvelopeRecords=0`，q3 不受影响；15. **默认 7×24h：8 个相交日期文件 + 1 个次日溢出候选（共 9 个）**：全部读取；人为把上限降到 8 时置 `partial` + `coverage_file_limit_reached` + `filesOmitted`；16. **同一 `hookInvocationId` 但 `artifactId`/`activationId` 不同**：`conflicted` + `target_identity_mismatch`，不得判正常配对；17. **超过 1000 条调用**：`outputTruncated=true`、`truncation.limit=1000`、`omitted>0`、`omittedByClassification.conflicted` 可读、`countBasis=lower_bound`、`nextAction` 含缩小窗口/分片提示；18. **某调用 6 个以上终态变体**：只输出 5 个，`terminalVariantsOmitted>0`，`classification` 仍为 `conflicted`；19. **证据字段**：原记录有 `evidence.independentlyVerified=true` 时输出 `evidenceIndependentlyVerifiedAsRecorded=true`，且 q5 不得写成"已独立验证/已送达"。
 
 验证命令：上述两个 vitest 文件、`npm run build`、`npm run lint`，以及按改动适用的仓库门禁。
 
@@ -262,12 +264,12 @@
 - `submission` 的独立确认、真实请求正文证据、行动前/后时序；
 - 统一证据读模型（PRI-1114）、配置身份（PRI-1110）、真实行为评价；
 - 真实 Agent/模型实验、安装启用、Shadow/Live、发布；
-- PRI-1109 整票关闭（仍被 PRI-1107 阻塞；Linear 的 `Done` 状态不构成验收证据）。
+- PRI-1109 整票关闭（仍被 PRI-1107 阻塞；Linear 状态不构成验收证据）。
 
 ## 13. 待 Owner 批准的范围（已定稿）
 
 1. 形态：host-runtime 只读逻辑模块 + 极薄 CLI（`pd activation journal`）；不提供纯库或独立服务并列方案。
-2. 窗口：默认最近 7×24 小时（与 `INTERVENTION_SHORT_SOURCE_RETENTION_DAYS` 同源），可由 `--since`/`--until` 显式覆盖；7×24h 最多跨 8 个日期文件。
+2. 窗口：默认最近 7×24 小时（与 `INTERVENTION_SHORT_SOURCE_RETENTION_DAYS` 同源），可由 `--since`/`--until` 显式覆盖；7×24h 最多跨 8 个相交日期文件，外加 1 个次日溢出候选（共 9 个）。
 3. 输出上限：1000 条调用 + 每调用最多 5 个终态变体；截断必须显式并保留冲突结论、遗漏量与覆盖限制信息。
 
 仍需 Owner：明确批准本修订稿 v0.2（含上述范围与五点修订）；批准来源与版本写入检查点。批准前不写实现代码。

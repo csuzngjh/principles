@@ -447,3 +447,5 @@ export { readDesignGateSpecSnapshot, describeCodexRuleContextFact } from './desi
 export { createCodexArtificerTrustedFactsPort } from './codex-artificer-trusted-facts.js';
 
 export { revalidateAdaptivePrinciple, createAdaptivePrincipleRevalidator, type AdaptivePrincipleReader } from './adaptive-principle-revalidation.js';
+
+export * from './adaptive-journal-reconciliation.js';

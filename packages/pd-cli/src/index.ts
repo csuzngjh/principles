@@ -63,6 +63,7 @@ import {
   registerRuntimeActivationPromoteCommand,
   registerRuntimeActivationDeactivateCommand,
   registerRuntimeActivationListCommand,
+  registerRuntimeActivationJournalCommand,
   registerRuntimeActivationDispatchCommand,
   registerRuntimeActivationApproveCommand,
 } from './commands/runtime-activation.js';
@@ -517,6 +518,9 @@ const activationTopCmd = program
   .description('Activation management — list active activations, deactivate (Story A\' Steps 5-6)');
 
 registerRuntimeActivationListCommand(activationTopCmd);
+
+// PRI-1109: read-only journal reconciliation (no writes, no model runs).
+registerRuntimeActivationJournalCommand(activationTopCmd);
 
 registerRuntimeActivationDeactivateCommand(activationTopCmd);
 
