@@ -1,0 +1,61 @@
+{
+  "baseCommit": "51140e895fc67a89a28444886ef5a475a6c48687",
+  "headCommit": "60ac565466247a21945929f2d06a6c19a80972b0",
+  "files": [
+    {
+      "path": "docs/implementation-reports/examiner-v09/HISTORICAL_FROZEN_ASSET_BASELINE.sha256",
+      "sha256": "353d94d9c32eeb27122b152d1755e1a2a1bdb6eabc224dd0040f9043a3cfab4e",
+      "matchesBase": true
+    },
+    {
+      "path": "docs/research/EXAMINER-v4-OFFLINE-ACCEPTANCE.md",
+      "sha256": "26df9ab3f3f9e0f3b1ccff71549ffc4a17419d2b77d1137ba89e33404df6adaf",
+      "matchesBase": true
+    },
+    {
+      "path": "docs/research/examiner-productization-20261029/GOLD-BLIND-REVIEW-v4.zip",
+      "sha256": "9c68b93f3b62ce6ce7d7537ad029c5e59ca0424e98acb6ba35b8490ded728d59",
+      "matchesBase": true
+    },
+    {
+      "path": "docs/research/examiner-productization-20261029/owner-content-review/SHA256SUMS.json",
+      "sha256": "132ed3e985640f89a77055104507cd3b001b7f1176bc1f6c8e2494a2aa8c84ad",
+      "matchesBase": true
+    },
+    {
+      "path": "docs/research/examiner-productization-20261029/owner-content-review/records.v1.json",
+      "sha256": "696498ac10fda8dec1fa92460b1f9bc3ae4fd6f75710486af75bdd3127591f0f",
+      "matchesBase": true
+    },
+    {
+      "path": "docs/research/examiner-productization-20261029/v4-evidence/SHA256SUMS.json",
+      "sha256": "8ea724d8417149b148ce8b566197c6da299535d3c2d615afb88bbd96339b939c",
+      "matchesBase": true
+    },
+    {
+      "path": "docs/research/examiner-productization-20261029/v4-evidence/post-review-fix-freeze.txt",
+      "sha256": "226cc14ad9338101f5f92648f3cc02f6ef02e0c3a4eeb302aa0e1666786e2b52",
+      "matchesBase": true
+    },
+    {
+      "path": "scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/receipts.template.json",
+      "sha256": "97de69338f3be4008f2b17f5ebce36f918cfa1fa908530f42a41f072987b8275",
+      "matchesBase": true
+    },
+    {
+      "path": "scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/expected-replay.json",
+      "sha256": "12aef14c31c43219a83840df5d4c725e32cc8fa869c61e2fb9857e7f51902e57",
+      "matchesBase": true
+    },
+    {
+      "path": "scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/package-manifest.json",
+      "sha256": "3e7b4d876f43b5873a4c4b9b3308780c16e838309b699fe50f1f2cd056bd34fb",
+      "matchesBase": true
+    },
+    {
+      "path": "scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/review-subject.json",
+      "sha256": "d01028655150c66ce9bc97a35d8543080b25c29cd3b1fc9a3c96d7460c596a48",
+      "matchesBase": true
+    }
+  ]
+}
