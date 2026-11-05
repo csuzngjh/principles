@@ -1944,7 +1944,7 @@ export type WorkbuddyCorrectionCandidateKind = 'strong' | 'ambiguous' | 'none';
  * Shared WorkBuddy Stage-1 assessment. `strong` may admit inline (no LLM);
  * `ambiguous` persists a pending Stage-2 candidate (zero LLM in the hook);
  * `none` writes nothing. Detection delegates position safety to the shared
- * keyword-stage guards (quotes / third person / negation).
+ * keyword-stage guards (quotes / third person / negation / conditional context).
  */
 export function assessWorkbuddyCorrectionCandidate(
   text: string,
