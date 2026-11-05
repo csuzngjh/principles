@@ -10,10 +10,10 @@
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
     "branch": "ai/PRI-1109-conservative-reconcile",
     "baseCommit": "08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
-    "headCommit": "08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
+    "headCommit": "a7f910848",
     "dirtyPaths": [],
-    "pushedCommit": null,
-    "prUrl": null,
+    "pushedCommit": "a7f910848",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2357",
     "remoteChecks": "UNKNOWN"
   },
   "tasks": [
@@ -26,7 +26,7 @@
         "docs/specs/PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.1.md",
         "docs/implementation-reports/aa-handoff/"
       ],
-      "commits": [],
+      "commits": ["a7f910848"],
       "acceptance": [
         {
           "criterion": "核实仓库/Linear/交接记录中是否存在覆盖本对账方案的后续有效批准",
