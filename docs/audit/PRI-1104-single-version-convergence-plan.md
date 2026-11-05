@@ -48,7 +48,7 @@
 | `model_aware_v2` | 历史事件 `budgetPolicyVersion` 值 |
 | `/api/v1/` 旧路径 | 外部集成可能仍在调用，PR-6 后作为 deprecated alias 保留 ≥2 发布周期 |
 
-这些值只清掉周围「看起来像代际」的命名与注释，不改值；已登记在 `packages/principles-core/io-seam-registry.json` 的 `namingPolicy.frozenWireLiterals`，是命名守门豁免的单一权威来源。
+这些值只清掉周围「看起来像代际」的命名与注释，不改值。**上表（含读写点）才是 Frozen Wire Literals 的事实清单**；`io-seam-registry.json` 的 `namingPolicy.frozenWireLiterals` 只是观察脚本 `check-naming-policy.mjs` 的行级豁免输入，不是「单一豁免权威」，也不宣称门禁语义（PR #2367 独立评审后的修正，见 §11）。
 
 ## 5. 六个子票与顺序
 
@@ -69,9 +69,10 @@
 1. `output-schema-registry.ts`：新增 `CONTRACT_REF_PAIRS` / `OUTPUT_SCHEMA_REF_ALIASES`，**双向**登记 13 组「中性 ref ↔ 版本 ref」；`resolveOutputSchema` 精确命中优先、未命中走 alias。写入侧 13 个 key 完全不变。该表从 PR-1 建立后不再修改，PR-6 切 key 后旧 ref 自动反向解析，revert 也安全。
 2. 新增 `__tests__/output-schema-ref-alias.test.ts`：13 组双向解析、registry 大小不变、退役 `signal-classification-output-v1` 仍不可解析、未知/空 ref 仍 `undefined`。
 3. `prompt-injection-budget-observation.ts`：`ACCEPTED_BUDGET_POLICY_VERSIONS` 读取白名单双读（`narrowObservation` 与事件循环两处），当前两个值相同 → 零行为变更；PR-6 切 `model_aware` 后历史 `model_aware_v2` 事件仍被识别。
-4. `io-seam-registry.json` 新增 `namingPolicy` 段（冻结字面量 / 豁免路径 / 豁免文件），作为守门唯一豁免来源。
-5. 新增 `scripts/check-naming-policy.mjs`：实时扫描 `runtime-v2` import、带 `-vN` 的 `outputSchemaRef`、`/api/v1` 路由字面量；PR-1 **warn-only**（恒定 exit 0），`--strict` 供 PR-3 翻 error，`--json` 供报告取基线。
-6. 本文。
+4. `io-seam-registry.json` 新增 `namingPolicy` 段（`frozenWireLiterals` 行级豁免 + `exemptFiles`）。它是**观察脚本的配置**，不是门禁权威；无效的 `exemptPaths` 已在评审后删除（§11）。
+5. 新增 `scripts/check-naming-policy.mjs`：**PR-1 观察者脚本，未接入任何 CI / npm script / hook**。扫描 `packages/*` 源码中的 `runtime-v2` import、带 `-vN` 的 `outputSchemaRef`（两级 gated 规则）与 `/api/v1` 路由字面量（**inventory-only**，旧 alias 是冻结字面量）。退出契约：`--strict` 在**任何输出模式**下遇 gated finding 或扫描 I/O 错误即 exit 1；无 `--strict` 恒 exit 0 并打印告警。`--strict` 只是 PR-3 门禁的预览，**PR-3 前必须重新设计扫描面并显式接线**。
+6. 新增 `scripts/__tests__/check-naming-policy.test.mjs`：4 项退出契约回归测试（§11 含 mutation 证据）。
+7. 本文。
 
 **调整 1（假测试已修复，不做无意义改动）**：计划里的 `trajectory-schema.test.ts:67-76` 假测试在当前基线**已经是真测试**——`migrateLegacyGfiSchema converges the real schema_version row (v1 → v2), idempotently` 用真实 SQLite 读 `SELECT version FROM schema_version` 并断言收敛与幂等，即审计报告 T1/T2 要求。T3（裸路径版本断言）属 PR-2 范围。本票只复核记录，不改测试。
 
@@ -92,3 +93,55 @@
 ## 9. 明确不在本次范围
 
 历史 ADR / 审计文档文件名与内容、各包 `CHANGELOG.md`、测试造数名与 `retired` 守卫列表、两条 prompt 策略分支、三个单功能 flag、`DiagnosticianOutputV1/V2` 与 `EvaluatorOutputV1/V2` 类型名（去后缀会撞名且破坏生产）、`/api/v1` 旧 alias 的删除、他人未跟踪文件、安装器专属目录（`~/.pd/runtime/` 等）。
+
+## 10. §13 Complexity Delta Gate（PR #2367 独立评审后补报）
+
+```text
+Complexity Delta
+New durable source of truth:        YES
+New persisted schema/state:         NO
+New subsystem/service/process:      YES
+New public abstraction/interface:   YES
+New runtime feature flag:           NO
+New cross-package dependency:       NO
+New host/platform-specific behavior NO
+New external/network capability:    NO
+```
+
+**YES ① `io-seam-registry.json:namingPolicy`（durable config）**：① 现有 `seams` 只描述 I/O 豁免，无法承载「哪些命名/字面量在收敛期被豁免」；② 它把豁免从脚本内硬编码收敛为一份声明，隐藏的是扫描规则的边界判断；③ 更小的做法是脚本内写死豁免，但那会在 PR-3 接线时形成影子清单（P4）；④ 由 `architecture-regression.test.ts` 的 registry 有效性用例 + `check-naming-policy.test.mjs` 验证；⑤ 删除该段并让脚本回退到空豁免即可，无持久化数据、单 PR revert。**注意**：它是观察脚本配置，不是门禁权威，也不冻结任何生产行为。
+
+**YES ② `scripts/check-naming-policy.mjs`（观察者脚本）**：① 现有 merge gate 没有任何命名层检查，PR-3 改名前需要一个可重复的存量度量；② 隐藏的是递归扫描、豁免与正则匹配；③ 只靠人工 grep 无法给出「改动前后收敛到 0」的可复现数字；④ 四种模式退出码由新增 4 项回归测试钉住，扫描结果写入 §11；⑤ **PR-1 未接任何 CI/npm script/hook**，删除该文件不影响任何运行路径。这是本 PR 最需要警惕的一项：若 PR-3/PR-6 不做，它就是零消费者的投机资产，应在 PR-3 决策时重新评估或删除。
+
+**YES ③ `OUTPUT_SCHEMA_REF_ALIASES` + `resolveOutputSchema` 行为扩展（public interface）**：① 现有 registry 只认 13 个带版本 key，无法满足「PR-6 写入侧切换后旧 ref 仍可读、且 PR-6 可独立 revert」；② 隐藏的是双向映射与精确命中优先；③ 只在 PR-6 同一 PR 内改表也能做到，但会让那个高风险 PR 同时承担「切 key + 改 alias + 迁移消费者」，回滚面更大；④ 30 项契约测试（含精确 key 集合断言）验证；⑤ 删除该导出与 alias 分支即恢复原行为，registry 13 key 从未改变，单 PR revert。
+
+## 11. PR #2367 独立评审与修复证据
+
+三个只读子代理从不同角度独立评审（行为兼容性 / 全量回归 / 门禁规范），**一致结论：生产改动不会损坏现有功能**。子代理 B 实跑 1591 个断言全通过；子代理 A 逐值证明 `resolveOutputSchema` 对现有输入零变化、`budgetPolicyVersion` 两处分支 21 个输入前后等价；子代理 C 实测 `Verify Merge Gate` pass、`RELEASE_INTENT_GUARD PASS`、`isValidRegistry` 478/478。
+
+| 发现 | 级别 | 处置 |
+| --- | --- | --- |
+| `--strict --json` 静默绕过（旧实现把失败判定放在非 JSON 输出分支内；实测 `strict=1` / `strict+json=0`，findings=242） | Major | **已修**：失败判定移到输出格式选择之前，统一 `process.exitCode=1`；新增 4 项退出契约回归测试 |
+| 扫描 I/O 异常被静默吞掉，strict 可能假绿 | Major | **已修**：`scanErrors` 收集 readdir/readFile 失败；strict 下计入失败，warn 下打印 WARN |
+| `frozenWireLiterals` 未被消费、`exemptPaths` 7 项全无效、description 自称「单一豁免权威」与实现不符 | Major | **已修**：删除 `exemptPaths`；`frozenWireLiterals` 成为 `runtime-v2-import` 规则的行级豁免输入；`api-v1-route` 降级为 inventory-only（旧 alias 本就是冻结字面量）；description 改为「观察脚本配置，PR-3 前须重设计并接线」 |
+| 守门脚本误报（`vitest.config.ts` 23 次、`packages/*/scripts/**`）与正则边界问题 | Major | **部分修**：排除 `vitest.config.*` 与 `packages/*/scripts/`（对齐 eslint ignores），正则加反引号与词边界；**扫描面仍只覆盖 `packages/*` 源码**，全文 consumer 清单见 §8，PR-3 接线前必须重设计 |
+| 新增 alias 测试漏 `size===26` 断言，误加全新 alias 会悄悄扩张 fail-loud 集合 | Minor | **已修**：补精确 key 集合断言，测试 29→30 项 |
+| `architecture-regression.test.ts` 的源码文本断言因 alias 表复制字面量出现假阳性路径 | Minor | **移交 PR-3/PR-6**：改为对 `OUTPUT_SCHEMA_REGISTRY.has()` 的运行时断言；当前 478/478 全绿，不构成功能回归 |
+| `signal-classification-schema-registry.test.ts` 扫描守卫语义放宽（新通过路径） | Minor | 属 expand 设计意图；当前生产 16 处写入全为版本化 ref，无实际漏报；PR-6 需复核 |
+| §13 未申报 / eslint 规则替换未披露 / 「验证全绿」措辞 | Minor | **已修**：见 §10、本节末尾 |
+
+**Mutation 证据**：把 strict 判定临时改回「仅非 JSON 分支生效」后，`scripts/__tests__/check-naming-policy.test.mjs` 出现 **2 条失败**（`plain.status=1` vs `json.status=0`；`expected +0 to be 1`），直接探测 `strict EXIT=1 / strict+json EXIT=0` 精确复现旧缺陷；恢复后 4/4 全绿、`strict+json EXIT=1`。
+
+**修复后验证**：守门四模式 `warn=0 / json=0 / strict=1 / strict+json=1`；`check-naming-policy.test.mjs` 4/4；core `output-schema-ref-alias` 30 + `signal-classification-schema-registry` 5 + `architecture-regression` 478 = **513/513**；eslint 0；`node --check` 与 registry JSON 解析通过；`tsc --noEmit` 两包 0 错误。守门基线更新为 **`runtime-v2-import=434 / versioned-output-ref=16 / api-v1-route=16`**（原 478/16/10，变化原因：排除 vitest.config 与包内 scripts、正则覆盖反引号与词边界；它们是「packages 源码子集」的存量，**不等于 §8 的全仓 consumer 数**）。
+
+**措辞修正**：① 「零行为变更」应精确为「**对现有输入零变更；读取侧有意扩张 13 个中性 ref**」——这是 expand 阶段的设计本身，不是回归，但也不该被表述成完全无变化。② 「验证全绿」应精确为「本 PR 相关套件全绿 + CI 29 SUCCESS / 1 SKIPPED / CodeRabbit 仍 IN_PROGRESS」，§7 的三类已知红灯基线依然存在，不得把 pending 标绿。③ **调整 3（评审后补披露）**：原计划承诺「在 `eslint.config.js` 与 `check-pipeline-contract.mjs` 加命名规则」，实际改为独立 `scripts/check-naming-policy.mjs`。理由：`check-pipeline-contract.mjs` 自述「deliberately NOT a scanner framework」，塞入静态扫描会违背其设计边界；warn-only 阶段挂进 eslint 会产生 800+ 条既有告警淹没输出。该替换此前只在 registry description 间接提及，现补记于此。
+
+**规范张力（待 Owner 裁决）**：`.gitignore:266` 忽略 `/docs/audit/`，同段注释记录 2026-10-07 Owner ruling「published record 是 PR + Linear evidence，不是 committed report；新增需 `-f` + stated reason」。本文用 `git add -f` 入库，stated reason 是「作为收敛链路的伴随基线」。这与 ruling 意图存在张力，且形成「被忽略目录中的已跟踪孤岛」：后续新增 `docs/audit/` 文件默认 `git add` 不会收。**建议**：要么 Owner 明确批准本例外，要么从 PR-2 起把状态报告迁到 PR 描述 + Linear 子票，并把本文移出仓库。本 PR 未擅自移动。
+
+## 12. 剩余风险与后续动作
+
+1. **PR-3 接线前必须重设计守门脚本**：当前扫描面只覆盖 `packages/*` 源码，不含根 `scripts/`、`package.json` exports（54+51）、`io-seam-registry` 路径（19）、`.gitleaksignore` 指纹（10）、`check-pipeline-contract` filters（6）、docs（约 300 文件）。若直接翻 error 会同时假绿与误伤。
+2. `architecture-regression.test.ts` 三处源码文本断言改运行时 `has()`，随 PR-3/PR-6 一起做。
+3. PR-2（PRI-1135）需等 PR-1 合并后基于新 main 开工；PR-6（PRI-1139）另需 8 条前置条件全部签收。
+4. CodeRabbit 评审在 PR #2367 上仍 `IN_PROGRESS`（当前只有占位摘要，无实际 findings）；合并前应等其结果，不要把「0 条行内意见」误当「评审通过」。
+5. 若 PR-3/PR-6 不做，26 条双向 alias 映射、观察者脚本与 `namingPolicy` 配置会成为无消费者资产，应按 §10 的回滚路径清理。
+

@@ -39,6 +39,15 @@ describe('PRI-1104 output schema ref aliases', () => {
     }
   });
 
+  it('the alias table has exactly one forward and one reverse entry per contract — no stray refs', () => {
+    // Regression (PR #2367 review M2): without the exact-key assertion, adding
+    // a brand-new alias pair silently widens the set of accepted refs and
+    // weakens the fail-loud `Unknown outputSchemaRef` contract.
+    expect(OUTPUT_SCHEMA_REF_ALIASES.size).toBe(CONTRACTS.length * 2);
+    const expectedKeys = new Set(CONTRACTS.flatMap(([neutral, versioned]) => [neutral, versioned]));
+    expect(new Set(OUTPUT_SCHEMA_REF_ALIASES.keys())).toEqual(expectedKeys);
+  });
+
   for (const [neutral, versioned] of CONTRACTS) {
     it(`resolves ${neutral} to the same schema as ${versioned}`, () => {
       const expected = resolveOutputSchema(versioned);

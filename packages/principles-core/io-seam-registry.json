@@ -88,7 +88,7 @@
     }
   ],
   "namingPolicy": {
-    "description": "PRI-1104 single-version convergence. Derived by scripts/check-naming-policy.mjs and consumed by the naming guard from PR-3 onward. Keep this as the single exemption authority; do not hand-maintain a shadow list in eslint config or CI. Phase: warn-only in PR-1, error from PR-3.",
+    "description": "PRI-1104 Stage 0 observer config consumed by scripts/check-naming-policy.mjs. PR-1: warn-only and NOT wired into any CI workflow, npm script or hook; --strict is a preview, not a gate. Before PR-3 turns it into a merge gate, redesign the scan surface (currently packages/* source files only) and wire it in explicitly. The full cross-package consumer list and the Frozen Wire Literals with their read/write sites live in docs/audit/PRI-1104-single-version-convergence-plan.md (§4, §8).",
     "frozenWireLiterals": [
       "runtime_v2_prompt_activations_injected",
       "pd-runtime-v2",
@@ -99,15 +99,6 @@
       "governance_experience_v1",
       "model_aware_v2",
       "/api/v1/"
-    ],
-    "exemptPaths": [
-      "docs/adr/",
-      "docs/archive/",
-      "docs/audit/",
-      "CHANGELOG.md",
-      ".tmp/",
-      "packages/principles-core/src/runtime-v2/__tests__/fixtures/",
-      "packages/host-runtime/tests/"
     ],
     "exemptFiles": [
       "packages/principles-core/src/runtime-v2/adapter/output-schema-registry.ts",
