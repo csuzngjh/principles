@@ -36,6 +36,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const crypto = require('crypto');
 
 const BINDING_SCHEMA = 'pd.mcp-binding.v1';
 // Ownership stamp (SPEC §7.5/§11.3): installers and `pd health` prove that a
@@ -60,7 +61,200 @@ const SERVER_ENTRY_SEGMENTS = {
 const SERVER_PACKAGE_NAME = '@principles/pd-mcp-server';
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
+// ── Durable observability log (default ON, PD_MCP_LOG=0 disables) ──────────
+// Same file contract as the server: ~/.pd/logs/mcp, one JSONL file per
+// process, 2 MiB/file, 64 MiB/dir, 14 days retention. The launcher writes
+// `launcher_start` / `startup_failure` and then hands the SAME file to the
+// server through PD_MCP_LOG_FILE (basename only) so a process keeps one file.
+// Everything here is best-effort: a logging failure never changes the
+// fail-closed decision or the stderr line the host parses.
+const LAUNCHER_VERSION = 'pd-mcp-launcher.v1';
+const LOG_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const LOG_MAX_DIR_BYTES = 64 * 1024 * 1024;
+const LOG_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const LOG_MAX_SHARDS = 3;
+const LOG_DISABLED = ['0', 'false', 'off'].includes(String(process.env.PD_MCP_LOG || '').trim().toLowerCase());
+const INITIAL_ENV_PRESENCE = Object.freeze({
+  PD_MCP_WORKSPACE_DIR: typeof process.env.PD_MCP_WORKSPACE_DIR === 'string' && process.env.PD_MCP_WORKSPACE_DIR.length > 0,
+  PD_MCP_HOST: typeof process.env.PD_MCP_HOST === 'string' && process.env.PD_MCP_HOST.length > 0,
+  PD_WORKSPACE_DIR: typeof process.env.PD_WORKSPACE_DIR === 'string' && process.env.PD_WORKSPACE_DIR.length > 0,
+  OPENCLAW_WORKSPACE: typeof process.env.OPENCLAW_WORKSPACE === 'string' && process.env.OPENCLAW_WORKSPACE.length > 0,
+});
+
+const logState = {
+  host: 'unknown',
+  bindingPathExists: false,
+  workspaceResolution: 'not_checked',
+  seq: 0,
+  runId: null,
+  fileName: null,
+  currentPath: null,
+  bytes: 0,
+  shard: 1,
+  exhausted: false,
+};
+
+function pad(value, width) {
+  return String(value).padStart(width || 2, '0');
+}
+
+function localTimestamp(date) {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMinutes);
+  return {
+    ts:
+      `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+      `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}` +
+      `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`,
+    tzOffsetMinutes: offsetMinutes,
+  };
+}
+
+function logDir() {
+  const override = process.env.PD_MCP_LOG_DIR;
+  if (typeof override === 'string' && override.trim().length > 0) return path.resolve(override);
+  return path.join(os.homedir(), '.pd', 'logs', 'mcp');
+}
+
+function sanitizeSegment(value) {
+  const cleaned = String(value).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+  return cleaned.length > 0 ? cleaned : 'unknown';
+}
+
+function listOwnLogFiles(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /^mcp-.*\.jsonl$/.test(entry.name))
+      .map((entry) => {
+        const fullPath = path.join(dir, entry.name);
+        try {
+          const stat = fs.statSync(fullPath);
+          return { fullPath, size: stat.size, mtimeMs: stat.mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter((file) => file !== null);
+  } catch {
+    return [];
+  }
+}
+
+function maintainLogDir(dir, nowMs, keepPath) {
+  try {
+    const survivors = [];
+    for (const file of listOwnLogFiles(dir)) {
+      if (nowMs - file.mtimeMs > LOG_RETENTION_MS && file.fullPath !== keepPath) {
+        try {
+          fs.unlinkSync(file.fullPath);
+          continue;
+        } catch {
+          // Keep it.
+        }
+      }
+      survivors.push(file);
+    }
+    let total = survivors.reduce((sum, file) => sum + file.size, 0);
+    if (total <= LOG_MAX_DIR_BYTES) return;
+    for (const file of survivors.filter((f) => f.fullPath !== keepPath).sort((a, b) => a.mtimeMs - b.mtimeMs)) {
+      if (total <= LOG_MAX_DIR_BYTES) break;
+      try {
+        fs.unlinkSync(file.fullPath);
+        total -= file.size;
+      } catch {
+        // Leave it.
+      }
+    }
+  } catch {
+    // Maintenance is advisory only.
+  }
+}
+
+function ensureLogFile() {
+  if (LOG_DISABLED) return null;
+  if (logState.currentPath !== null) return logState.currentPath;
+  try {
+    const dir = logDir();
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (!fs.statSync(dir).isDirectory()) return null;
+    maintainLogDir(dir, Date.now(), null);
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, 'Z');
+    logState.fileName = `mcp-${sanitizeSegment(logState.host)}-${process.pid}-${stamp}.jsonl`;
+    logState.runId = crypto.randomBytes(4).toString('hex');
+    logState.currentPath = path.join(dir, logState.fileName);
+    try {
+      logState.bytes = fs.statSync(logState.currentPath).size;
+    } catch {
+      logState.bytes = 0;
+    }
+    return logState.currentPath;
+  } catch {
+    return null;
+  }
+}
+
+function writeLogEvent(level, event, fields) {
+  try {
+    const file = ensureLogFile();
+    if (file === null) return;
+    const dir = path.dirname(file);
+    const stamp = localTimestamp(new Date());
+    const entry = Object.assign(
+      {
+        ts: stamp.ts,
+        tzOffsetMinutes: stamp.tzOffsetMinutes,
+        runId: logState.runId,
+        seq: (logState.seq += 1),
+        server: 'pd-mcp-launcher',
+        version: LAUNCHER_VERSION,
+        level,
+        event,
+        host: logState.host,
+        pid: process.pid,
+      },
+      fields
+    );
+    const line = JSON.stringify(entry) + '\n';
+    const bytes = Buffer.byteLength(line, 'utf8');
+    if (logState.exhausted || logState.bytes + bytes > LOG_MAX_FILE_BYTES) {
+      if (logState.shard >= LOG_MAX_SHARDS) {
+        logState.exhausted = true;
+        return;
+      }
+      logState.shard += 1;
+      logState.currentPath = path.join(dir, logState.fileName.replace(/\.jsonl$/, `-${logState.shard}.jsonl`));
+      logState.bytes = 0;
+      maintainLogDir(dir, Date.now(), logState.currentPath);
+    }
+    fs.appendFileSync(logState.currentPath, line, { mode: 0o600 });
+    logState.bytes += bytes;
+  } catch {
+    // Logging must never affect launch behaviour.
+  }
+}
+
+/** Hand the same file/runId/seq to the server so one process keeps one file. */
+function shareLogFileWithServer() {
+  try {
+    if (logState.fileName === null) ensureLogFile();
+    if (logState.fileName === null) return;
+    process.env.PD_MCP_LOG_FILE = path.basename(logState.fileName);
+    process.env.PD_MCP_LOG_RUN_ID = logState.runId;
+    process.env.PD_MCP_LOG_SEQ = String(logState.seq);
+  } catch {
+    // The server then opens its own file — still bounded, still silent.
+  }
+}
+
 function fail(reason, nextAction) {
+  writeLogEvent('error', 'startup_failure', {
+    stage: 'launcher',
+    reason: String(reason).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 120),
+    bindingPathExists: logState.bindingPathExists,
+    workspaceResolution: logState.workspaceResolution,
+    envPresence: INITIAL_ENV_PRESENCE,
+  });
   process.stderr.write(JSON.stringify({ launcher: 'pd-mcp', status: 'failed', reason, nextAction }) + '\n');
   process.exit(1);
 }
@@ -179,12 +373,19 @@ if (detectedHosts.length !== 1) {
   );
 }
 const host = detectedHosts[0];
+logState.host = host;
 
 // rc-1/rc-3/rc-5: the binding file is read as untrusted; every field is
 // validated before use and unknown content is never coerced.
+const bindingPath = path.join(pluginRoot, 'mcp-binding.json');
+try {
+  logState.bindingPathExists = fs.statSync(bindingPath).isFile();
+} catch {
+  logState.bindingPathExists = false;
+}
 let raw;
 try {
-  raw = fs.readFileSync(path.join(pluginRoot, 'mcp-binding.json'), 'utf8');
+  raw = fs.readFileSync(bindingPath, 'utf8');
 } catch {
   fail('binding_missing', 'Re-run the PD host setup (Codex: $pd-control setup) so mcp-binding.json is written into the plugin directory.');
 }
@@ -294,6 +495,7 @@ try {
 if (!workspaceStat.isDirectory()) {
   fail('binding_workspace_not_directory', 'Re-run the PD host setup so the binding points at the governance workspace directory.');
 }
+logState.workspaceResolution = 'ok';
 
 // ── OpenClaw workspace-declaration gate (SPEC §3.5, final safety closure) ──
 // The OpenClaw binding is HOST-WIDE while agents have per-agent workspaces, so
@@ -327,6 +529,18 @@ if (host === 'openclaw') {
 // it overrides any inherited value and the server validates it fail-closed.
 process.env.PD_MCP_WORKSPACE_DIR = binding.workspaceDir;
 process.env.PD_MCP_HOST = host;
+
+// Validation is complete: record the launch attempt (version, binding
+// presence, workspace resolution and env PRESENCE — never values) and then
+// share this file with the server.
+writeLogEvent('info', 'launcher_start', {
+  launcherVersion: LAUNCHER_VERSION,
+  mcpServerVersion: packageManifest.version,
+  bindingPathExists: logState.bindingPathExists,
+  workspaceResolution: logState.workspaceResolution,
+  envPresence: INITIAL_ENV_PRESENCE,
+});
+shareLogFileWithServer();
 
 // Run the shared server entry in-process (single process per host). Nothing
 // above imports the server, so a rejected binding never emits MCP traffic.

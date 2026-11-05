@@ -136,6 +136,8 @@ function bindingFor({ host, runtime, workspace, overrides = {} }: BindingInput):
 interface LaunchOptions {
   /** Explicit OWNER declaration the launcher cross-checks against the binding. */
   declareWorkspace?: string;
+  /** Extra env for opt-out / rotation experiments. */
+  extraEnv?: Record<string, string>;
 }
 
 function runLauncher(root: string, options: LaunchOptions = {}): ReturnType<typeof spawnSync> {
@@ -155,6 +157,7 @@ function runLauncher(root: string, options: LaunchOptions = {}): ReturnType<type
       // Neither value may reach the server: the binding is the only authority.
       PD_MCP_WORKSPACE_DIR: path.join(root, 'inherited-workspace-must-not-win'),
       PD_MCP_HOST: 'inherited-host-must-not-win',
+      ...options.extraEnv,
     },
   });
 }
@@ -182,6 +185,34 @@ describe.each(['codex', 'openclaw', 'workbuddy'] as const)('launcher valid bindi
     expect(result.status).toBe(0);
     expect(String(result.stderr)).toBe('');
     expect(JSON.parse(String(result.stdout))).toEqual({ workspace, host });
+  });
+});
+
+describe('launcher durable log (observability)', () => {
+  it('persists startup_failure to the PD log dir before any MCP traffic', () => {
+    const root = makePluginRoot('openclaw');
+    expectFailure(runLauncher(root), 'binding_missing');
+
+    const logDir = path.join(root, '.pd', 'logs', 'mcp');
+    const files = fs.readdirSync(logDir).filter((name) => /^mcp-.*\.jsonl$/.test(name));
+    expect(files).toHaveLength(1);
+    const lines = fs.readFileSync(path.join(logDir, files[0] as string), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.event).toBe('startup_failure');
+    expect(lines[0]?.stage).toBe('launcher');
+    expect(lines[0]?.reason).toBe('binding_missing');
+    expect(lines[0]?.bindingPathExists).toBe(false);
+    expect(lines[0]?.seq).toBe(1);
+    expect(String(lines[0]?.ts)).toMatch(/[+-]\d{2}:\d{2}$/);
+  });
+
+  it('PD_MCP_LOG=0 writes nothing (zero side effects)', () => {
+    const root = makePluginRoot('openclaw');
+    expectFailure(runLauncher(root, { extraEnv: { PD_MCP_LOG: '0' } }), 'binding_missing');
+    expect(fs.existsSync(path.join(root, '.pd', 'logs', 'mcp'))).toBe(false);
   });
 });
 

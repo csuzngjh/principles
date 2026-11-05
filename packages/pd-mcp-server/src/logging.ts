@@ -25,25 +25,34 @@ function sanitizeErrorKind(err: unknown): string {
   return 'Error';
 }
 
-/** Default stderr sink. One JSON line per event, nothing else. */
+/** Default stderr sink. One JSON line per event, nothing else.
+ * A closed/broken stderr pipe must never turn into a process-level failure. */
 export function stderrSink(line: string): void {
-  process.stderr.write(line + '\n');
+  try {
+    process.stderr.write(line + '\n');
+  } catch {
+    // Logging must never affect the service.
+  }
 }
 
 export function createLogger(sink: (line: string) => void, baseFields?: LogFields): LogFn {
   return (level, event, fields) => {
-    const entry: Record<string, unknown> = {
-      ts: new Date().toISOString(),
-      server: SERVER_NAME,
-      version: SERVER_VERSION,
-      level,
-      event,
-    };
-    const merged: LogFields = { ...baseFields, ...fields };
-    for (const [k, v] of Object.entries(merged)) {
-      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') entry[k] = v;
+    try {
+      const entry: Record<string, unknown> = {
+        ts: new Date().toISOString(),
+        server: SERVER_NAME,
+        version: SERVER_VERSION,
+        level,
+        event,
+      };
+      const merged: LogFields = { ...baseFields, ...fields };
+      for (const [k, v] of Object.entries(merged)) {
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') entry[k] = v;
+      }
+      sink(JSON.stringify(entry));
+    } catch {
+      // Logging must never affect the caller (MCP tool calls included).
     }
-    sink(JSON.stringify(entry));
   };
 }
 

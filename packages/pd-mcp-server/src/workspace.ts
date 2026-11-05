@@ -26,9 +26,23 @@ export interface WorkspaceBinding {
   readonly host: string | null;
 }
 
+export type WorkspaceBindingFailureCode =
+  | 'workspace_env_missing'
+  | 'workspace_not_absolute'
+  | 'workspace_unreadable'
+  | 'workspace_not_directory'
+  | 'host_invalid';
+
 export type WorkspaceBindingResolution =
   | { readonly ok: true; readonly binding: WorkspaceBinding }
-  | { readonly ok: false; readonly reason: string; readonly envVar: string; readonly nextAction: string };
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      /** Stable machine-readable code (safe for logs; never a path). */
+      readonly reasonCode: WorkspaceBindingFailureCode;
+      readonly envVar: string;
+      readonly nextAction: string;
+    };
 
 /**
  * Resolve and validate the launch-time workspace binding from a process env
@@ -42,6 +56,7 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
     return {
       ok: false,
       reason: 'workspace binding env is missing or empty',
+      reasonCode: 'workspace_env_missing',
       envVar: WORKSPACE_DIR_ENV,
       nextAction: `Re-run the PD host setup (this writes the PD-owned mcp-binding.json and launches via launcher.cjs). Do not set ${WORKSPACE_DIR_ENV} by hand from agent context.`,
     };
@@ -50,6 +65,7 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
     return {
       ok: false,
       reason: 'workspace binding is not an absolute path',
+      reasonCode: 'workspace_not_absolute',
       envVar: WORKSPACE_DIR_ENV,
       nextAction: 'Re-run the PD host setup so the binding records the absolute governance workspace directory.',
     };
@@ -61,6 +77,7 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
     return {
       ok: false,
       reason: 'workspace binding directory does not exist or is not readable',
+      reasonCode: 'workspace_unreadable',
       envVar: WORKSPACE_DIR_ENV,
       nextAction: 'Re-run the PD host setup; if the workspace was moved, re-install PD for this host so the binding is regenerated.',
     };
@@ -69,6 +86,7 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
     return {
       ok: false,
       reason: 'workspace binding is not a directory',
+      reasonCode: 'workspace_not_directory',
       envVar: WORKSPACE_DIR_ENV,
       nextAction: 'Re-run the PD host setup so the binding points at the governance workspace directory.',
     };
@@ -79,6 +97,7 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
       return {
         ok: false,
         reason: 'host marker is not one of the known PD hosts',
+        reasonCode: 'host_invalid',
         envVar: HOST_ENV,
         nextAction: 'Re-run the PD host setup; the host marker is written by the PD installer and must not be edited.',
       };
