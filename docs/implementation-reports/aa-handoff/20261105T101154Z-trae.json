@@ -1,0 +1,191 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T101154Z-trae",
+  "previousCheckpoint": "20261105T093402Z-codex",
+  "generatedAt": "2026-11-05T10:11:54Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "核实无本对账方案的明确设计批准，且 PRI-1109 仍被 Backlog 的 PRI-1107 阻塞；仅交付一页可审阅设计 v0.1，未写实现代码。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+    "branch": "ai/PRI-1109-conservative-reconcile",
+    "baseCommit": "08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
+    "headCommit": "08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
+    "dirtyPaths": [],
+    "pushedCommit": null,
+    "prUrl": null,
+    "remoteChecks": "UNKNOWN"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1109",
+      "scope": "只读 journal 保守对账：设计确认与可审阅方案 v0.1",
+      "status": "NEEDS_OWNER",
+      "owner": "trae",
+      "writePaths": [
+        "docs/specs/PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.1.md",
+        "docs/implementation-reports/aa-handoff/"
+      ],
+      "commits": [],
+      "acceptance": [
+        {
+          "criterion": "核实仓库/Linear/交接记录中是否存在覆盖本对账方案的后续有效批准",
+          "result": "PASS",
+          "evidenceRefs": [
+            "linear-dependency",
+            "g0-design"
+          ]
+        },
+        {
+          "criterion": "交付一页可审阅设计，覆盖复用入口、输入/窗口/隔离、身份配对、输出 JSON 与原因码、重复冲突缺失处理、读取上限、验收回滚、文件归属",
+          "result": "PASS",
+          "evidenceRefs": [
+            "design-doc"
+          ]
+        },
+        {
+          "criterion": "读取依赖状态且不绕过阻塞、不提前关票",
+          "result": "PASS",
+          "evidenceRefs": [
+            "linear-dependency"
+          ]
+        },
+        {
+          "criterion": "经批准后实施最小只读对账代码",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        },
+        {
+          "criterion": "代码测试、远端 CI、真实宿主证据",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "Owner 对设计第 13 节三项做决定",
+        "PRI-1107 解除阻塞后按 Linear 规则进入 In Progress",
+        "批准后实施并运行代码测试/构建/门禁",
+        "真实宿主证据与整票其余验收不在本子范围"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "main-contains-merge",
+      "cwd": "D:\\Code\\principles",
+      "command": "git fetch origin; git branch -r --contains 08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["linear-dependency"]
+    },
+    {
+      "id": "linear-dependency",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "Linear MCP: get_issue PRI-1109 / PRI-1107 / list_comments PRI-1109",
+      "result": "PASS",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["linear-dependency"]
+    },
+    {
+      "id": "design-doc-validate",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "node -e \"JSON.parse(checkpoint); assert keys and design file exists/non-empty; sha256(design)==evidence\"",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["design-doc"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "design-doc",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\specs\\PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.1.md",
+      "observedAt": "2026-11-05T10:11:54Z",
+      "sha256": "e54cd9539937fca33c3d9c9b3a207b9c1a06cfc42d81cfb584957e8687bd5756",
+      "supports": "待审的只读对账最小方案存在且可读（16920 bytes）",
+      "limitations": "未经 Owner 批准，不能据此实施"
+    },
+    {
+      "id": "g0-design",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1106-aa-core-design\\docs\\specs\\PD-AA-G0-CORE-DESIGN-v0.1.md",
+      "observedAt": "2026-11-05T10:11:54Z",
+      "sha256": "3c3b94084496c97b58b46677764f40c9d62d6ece81deb4db6a0ba6041a5c4066",
+      "supports": "G0 仅条件批准离线校验器与验证 CLI，且第 119 行明确 G0 尚未通过；未见对账读模型批准",
+      "limitations": "该文件位于另一工作树，未合入 main；其状态可能被后续修订取代"
+    },
+    {
+      "id": "linear-dependency",
+      "kind": "CODE",
+      "locator": "https://linear.app/principlesdisciple/issue/PRI-1109/aa-04m-落实四维-receipt-与-journal-转换和对账契约",
+      "observedAt": "2026-11-05T10:11:54Z",
+      "sha256": null,
+      "supports": "PRI-1109 状态 Backlog，blockedBy PRI-1107（Backlog）；PRI-1107 blocks 包含 PRI-1109；评论只批准 PRI-1112 离线验证器",
+      "limitations": "Linear 状态随时变化，需在执行前重新读取"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "design-approval",
+      "issue": "PRI-1109",
+      "reason": "本对账读模型缺少明确 Owner 设计批准；既有批准只覆盖离线校验器/验证 CLI",
+      "evidenceRefs": ["g0-design", "linear-dependency"],
+      "neededFrom": "Owner",
+      "unblockAction": "审阅 design-doc 第 13 节三项并明确批准或提出修订",
+      "independentWork": "可继续只读核对真实日志样本、保留策略与测试 fixture 草案，不注册 CLI、不改包导出"
+    },
+    {
+      "id": "linear-blocker-pri-1107",
+      "issue": "PRI-1109",
+      "reason": "PRI-1107 处于 Backlog 且 blocks PRI-1109；工单要求先完成 02 的 Owner 设计确认",
+      "evidenceRefs": ["linear-dependency"],
+      "neededFrom": "PRI-1107",
+      "unblockAction": "PRI-1107 完成设计确认并解除 blocks 关系",
+      "independentWork": "本设计的审阅与不依赖接口冻结的只读准备"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1109",
+      "action": "Owner 决定：CLI 或纯库形态、默认窗口、输出上限；批准后按设计第 11 节实施",
+      "dependsOn": ["design-approval"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 明确批准或给出修订意见"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1109",
+      "action": "在批准前完成不依赖决定的只读准备：真实日志样本核对与验收 fixture 草案",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "形成可复用的脱敏 fixture 草案与保留期核对记录，且不写包代码"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1109",
+      "action": "PRI-1107 解除后按 Linear 规则进入 In Progress；不提前关闭整票",
+      "dependsOn": ["linear-blocker-pri-1107"],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "PRI-1107 解除且 Linear 状态按规则更新"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 本轮派工要求：先做设计确认并交付一页可审阅方案"
+    ]
+  }
+}
