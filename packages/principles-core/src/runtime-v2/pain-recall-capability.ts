@@ -206,6 +206,64 @@ function errorFor(result: PainRecallResult): PainRecallCapabilityError | null {
   return { code: 'invalid_input', message: 'The request violates the tool input contract.' };
 }
 
+const CANDIDATE_LINEAGE_REASONS: ReadonlySet<string> = new Set([
+  'candidate_query_failed',
+  'candidate_not_found',
+  'pain_unresolvable_from_candidate',
+  'pain_event_only_in_state_db',
+]);
+
+/** Warning text is built ONLY from trusted read-model facts (fixed literals,
+ * no ids, no workspace content). A recall that leaves associations unresolved
+ * must never look like a clean success: the model needs to know WHY it is
+ * empty and that the ledger field name is legacy. */
+function warningsFor(result: PainRecallResult): PainRecallCapabilityWarning[] {
+  const warnings: PainRecallCapabilityWarning[] = [];
+  const reasons = new Set(result.unresolvedAssociations.map((u) => u.reason));
+  const hasCandidateLineage =
+    result.results.some((e) => e.association.type === 'derived_from' || e.association.type === 'multiple_paths') ||
+    [...reasons].some((r) => CANDIDATE_LINEAGE_REASONS.has(r));
+  if (result.unresolvedAssociations.length > 0 && hasCandidateLineage) {
+    warnings.push({
+      code: 'derived_from_candidate_ids',
+      message:
+        'The ledger field derivedFromPainIds stores candidate IDs under a legacy pain-oriented name; this recall reverse-resolved them via candidate -> task -> pain. At least one association could not complete that chain.',
+    });
+  }
+  if (reasons.has('pain_event_only_in_state_db')) {
+    warnings.push({
+      code: 'pain_event_only_in_state_db',
+      message:
+        'A verified association has no trajectory.db pain_events row because the pain was registered without a bound host session (CLI bridge). Its text remains in the workspace state database.',
+    });
+  }
+  if (result.unresolvedAssociations.length > 0 && warnings.length === 0) {
+    warnings.push({
+      code: 'unresolved_associations',
+      message: 'Some ledger associations could not be verified against persisted pain events; see unresolvedAssociations.reason.',
+    });
+  }
+  return warnings;
+}
+
+/** An empty-looking recall must still carry an actionable next step whenever
+ * something failed to resolve (v0.5 §7.6). Never null in that case. */
+function nextActionFor(result: PainRecallResult): PainRecallCapabilityNextAction | null {
+  if (result.unresolvedAssociations.length === 0) return null;
+  if (result.unresolvedAssociations.some((u) => u.reason === 'pain_event_only_in_state_db')) {
+    return {
+      code: 'inspect_state_db_pain_diagnosis',
+      message:
+        'Run `pd trace` in this workspace to inspect the diagnosis task of the verified association, or re-record the pain with a bound --session so it is projected into trajectory.db.',
+    };
+  }
+  return {
+    code: 'inspect_unresolved_associations',
+    message:
+      'Run `pd trace` in this workspace to inspect the candidate -> diagnosis -> pain chain for the unresolved association.',
+  };
+}
+
 /** OD-A projection of a full PainRecallResult into the envelope. Construction
  * IS the whitelist: every field below is an ALLOWED_PATHS leaf; nothing else
  * from `result` is reachable. (Gate 2 projectEnvelope + disclosureProfile +
@@ -258,9 +316,9 @@ function projectEnvelope(result: PainRecallResult): PainRecallCapabilityResult {
         { name: 'stateDb', status: result.sources.stateDb },
       ],
     },
-    warnings: [],
+    warnings: warningsFor(result),
     error: errorFor(result),
-    nextAction: null,
+    nextAction: nextActionFor(result),
   };
 }
 

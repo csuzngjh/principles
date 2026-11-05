@@ -105,6 +105,10 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       // No existing install manifest → resolveInstallManifestHosts treats
       // current as undefined (fresh install) instead of re-reading it.
       if (s.endsWith('install.json')) return false;
+      // Fresh HOME: no OpenClaw PD workspace declaration exists yet, so the
+      // install-time preflight must see `absent` (not a syntactically valid
+      // but workspace-less JSON that the auto-mock would invent).
+      if (s.endsWith('principles-disciple.json')) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
@@ -167,6 +171,8 @@ describe('install() transaction journal integration (ADR-0024 D-2)', () => {
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
+      // Fresh HOME: the OpenClaw PD workspace declaration does not exist yet.
+      if (s.endsWith('principles-disciple.json')) return false;
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {

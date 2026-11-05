@@ -6,7 +6,9 @@
  *
  * Supported commands and their observable effects:
  *   plugin marketplace add <dir>     → "Marketplace <name> added successfully." (idempotent-tolerant: "already registered")
- *   plugin install <name>@<market>   → writes settings.json enabledPlugins[key]=true (other keys preserved),
+ *   plugin install <name>@<market>   → writes settings.json enabledPlugins[key] to the existing explicit
+ *                                      Owner choice, else the manifest's defaultEnabled (PD declares false:
+ *                                      install ≠ enable; other keys preserved),
  *                                      installed_plugins.json v2 entry {scope:'user', installPath, version, installedAt},
  *                                      copies the plugin from the recorded marketplace source into
  *                                      plugins/cache/<market>/<name>/<version>/ → "Successfully installed ..."
@@ -96,7 +98,12 @@ if (sub === 'install') {
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.cpSync(pluginDir, cacheDir, { recursive: true });
   const settings = readJson(settingsPath, {});
-  settings.enabledPlugins = { ...(settings.enabledPlugins ?? {}), [key]: true };
+  const existing = settings.enabledPlugins?.[key];
+  const declaredDefault = typeof pluginManifest.defaultEnabled === 'boolean' ? pluginManifest.defaultEnabled : true;
+  settings.enabledPlugins = {
+    ...(settings.enabledPlugins ?? {}),
+    [key]: typeof existing === 'boolean' ? existing : declaredDefault,
+  };
   writeJson(settingsPath, settings);
   const registry = readJson(registryPath, { version: 2 });
   registry.version = 2;

@@ -205,6 +205,33 @@ describe('production self-contained release asset', () => {
     expect(fs.existsSync(path.join(mcpDir, 'node_modules', 'zod'))).toBe(true);
   });
 
+  it('ships the OpenClaw MCP launcher its shipped manifest declares', () => {
+    // Regression guard for the published 2.8.0 defect: bundle-plugin.mjs
+    // staged the plugin without its mcp/ tree, so the archive carried
+    // openclaw.plugin.json declaring mcpServers → ./mcp/launcher.cjs while the
+    // file itself was absent. OpenClaw then fails to spawn the server and
+    // pd_recall_principle_pains never appears in the tool list.
+    const shippedManifest: unknown = JSON.parse(fs.readFileSync(path.join(assetDir, 'plugin', 'openclaw.plugin.json'), 'utf8'));
+    const mcpServers = typeof shippedManifest === 'object' && shippedManifest !== null && Object.hasOwn(shippedManifest, 'mcpServers')
+      ? Reflect.get(shippedManifest, 'mcpServers')
+      : undefined;
+    const declaredArgs: unknown[] = [];
+    if (typeof mcpServers === 'object' && mcpServers !== null) {
+      for (const server of Object.values(mcpServers)) {
+        if (typeof server === 'object' && server !== null && Object.hasOwn(server, 'args')) {
+          const args = Reflect.get(server, 'args');
+          if (Array.isArray(args)) declaredArgs.push(...args);
+        }
+      }
+    }
+    const relativeEntries = declaredArgs.filter((arg): arg is string => typeof arg === 'string' && arg.startsWith('./'));
+    expect(relativeEntries).toContain('./mcp/launcher.cjs');
+    for (const entry of relativeEntries) {
+      expect(fs.existsSync(path.join(assetDir, 'plugin', entry)), entry).toBe(true);
+    }
+    expect(fs.existsSync(path.join(assetDir, 'plugin', 'mcp', 'launcher.cjs'))).toBe(true);
+  });
+
   it('contains no symlinks after build-only npm links are removed', () => {
     timePhase('symlink-scan', () => {
       const visit = (directory: string): void => {
