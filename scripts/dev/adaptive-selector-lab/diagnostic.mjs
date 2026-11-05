@@ -173,6 +173,24 @@ export function createBoundary({ ledger, persist, keys, fetchImpl = globalThis.f
           .map(line => JSON.parse(line.slice(6)));
         if (kind === 'glm' && !packets.length) packets.push(JSON.parse(raw));
         for (const packet of packets) {
+          // Keep rejection witnesses BEFORE enforcing identity. An accepted
+          // model and an observed, rejected identifier are different evidence.
+          const identifiers = {};
+          for (const field of ['model', 'provider', 'id']) {
+            if (typeof packet[field] !== 'string') continue;
+            const projected = errorProjection({ error: { message: packet[field] } }, keys)?.message;
+            if (projected && /^[A-Za-z0-9/_.:+-]{1,200}$/.test(projected)) identifiers[field] = projected;
+          }
+          row.observedIdentifiers = identifiers;
+          row.usage = usageProjection(packet.usage) ?? row.usage;
+          if (kind === 'decision' && object(packet.answers)) {
+            row.untrustedAnswers = {};
+            for (const key of QUESTIONS) {
+              const answer = packet.answers[key];
+              if (answer?.type === 'noul' && typeof answer.noul === 'number' &&
+                  Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1) row.untrustedAnswers[key] = answer.noul;
+            }
+          }
           if (packet.model !== undefined) {
             const allowed = kind === 'decision' ? [MODELS.decision, 'respan/span-01-lite'] : [MODELS.glm];
             if (!allowed.includes(packet.model)) reject('RESPONSE_MODEL_NOT_ALLOWLISTED');
@@ -180,7 +198,6 @@ export function createBoundary({ ledger, persist, keys, fetchImpl = globalThis.f
           }
           if (kind === 'decision' && packet.provider !== undefined && packet.provider !== 'Respan') reject('RESPONSE_PROVIDER_NOT_ALLOWLISTED');
           if (packet.provider === 'Respan') row.provider = 'Respan';
-          row.usage = usageProjection(packet.usage) ?? row.usage;
           if (kind === 'decision' && (row.usage?.cost ?? 0) > 0) reject('FREE_MODEL_REPORTED_CHARGE');
           const finish = packet.choices?.[0]?.finish_reason;
           if (['stop', 'length', 'tool_calls', 'content_filter'].includes(finish)) row.finishReason = finish;

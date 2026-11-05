@@ -179,6 +179,18 @@ test('unexpected provider, model substitution or a charged free response stops a
     assert.equal(s.ledger.counts.decision, 1);
   }
 });
+test('identity rejection retains the observed identifier and request id without accepting the model', async () => {
+  const packet = { ...decision(), model: 'provider/unexpected-version', provider: 'Respan', id: 'gen-dec-test',
+    usage: { cost: 0, input_tokens: 90 } };
+  const s = setup({ fetchImpl: async () => Response.json(packet) });
+  await assert.rejects(s.boundary('decision', 'dev-01', 'D')(URLS.decision, request()), /RESPONSE_MODEL_NOT_ALLOWLISTED/);
+  const row = s.ledger.requests[0];
+  assert.equal(row.model, null);
+  assert.equal(row.observedIdentifiers.model, packet.model);
+  assert.equal(row.observedIdentifiers.id, packet.id);
+  assert.equal(row.untrustedAnswers.new_task, 0.2);
+  assert.equal(row.usage.cost, 0);
+});
 test('oversize response is bounded and cancelled instead of entering the SDK', async () => {
   const s = setup({ fetchImpl: async () => new Response('x'.repeat(65537)) });
   await assert.rejects(s.boundary('decision', 'dev', 'D')(URLS.decision, request()), /RESPONSE_TOO_LARGE/);
