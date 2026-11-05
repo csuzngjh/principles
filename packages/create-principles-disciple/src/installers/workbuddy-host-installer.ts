@@ -972,6 +972,9 @@ export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolea
  */
 export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOverrideResult & {
   hostExplicitOff: boolean;
+  keywordExplicitOff: boolean;
+  /** The keyword gate as it actually reads back after the migration. */
+  keywordPainEnabled: boolean;
   changed: boolean;
 } {
   const configPath = path.join(governanceDir, '.pd', 'config.yaml');
@@ -983,6 +986,8 @@ export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOve
       reason: 'fresh_workbuddy_config_unreadable',
       nextAction: `Fix the YAML by hand (the installer never rewrites the whole file), then retry. Affected file: ${configPath}.`,
       hostExplicitOff: false,
+      keywordExplicitOff: false,
+      keywordPainEnabled: false,
       changed: false,
     };
   }
@@ -994,19 +999,22 @@ export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOve
       reason: 'fresh_workbuddy_config_unreadable',
       nextAction: `Fix the YAML by hand (the installer never rewrites the whole file), then retry. Affected file: ${configPath}.`,
       hostExplicitOff: false,
+      keywordExplicitOff: false,
+      keywordPainEnabled: false,
       changed: false,
     };
   }
   if (!isRecord(raw) || !isRecord(raw.features)) {
-    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.', hostExplicitOff: false, changed: false };
+    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.', hostExplicitOff: false, keywordExplicitOff: false, keywordPainEnabled: false, changed: false };
   }
   const oldHost = raw.features['host.workbuddy'];
   const oldKeyword = raw.features.workbuddy_live_keyword_pain;
   const hostExplicitOff = isRecord(oldHost) && oldHost.enabled === false;
+  const keywordExplicitOff = isRecord(oldKeyword) && oldKeyword.enabled === false;
   const alreadyCorrect = isRecord(oldHost) && oldHost.enabled === !hostExplicitOff && oldHost.category === WORKBUDDY_FLAG_CATEGORY
     && isRecord(oldKeyword) && oldKeyword.enabled === false && oldKeyword.category === WORKBUDDY_FLAG_CATEGORY;
   if (alreadyCorrect) {
-    return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, changed: false };
+    return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled: false, changed: false };
   }
 
   // Line-targeted edits: only the two flag blocks change; every comment,
@@ -1024,17 +1032,25 @@ export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOve
       configPath,
     });
     if (!outcome.ok) {
-      return { ok: false, reason: outcome.reason, nextAction: outcome.nextAction, hostExplicitOff, changed: false };
+      return { ok: false, reason: outcome.reason, nextAction: outcome.nextAction, hostExplicitOff, keywordExplicitOff, keywordPainEnabled: false, changed: false };
     }
     ({ next } = outcome);
   }
 
+  // The summary must report the gate that the config ACTUALLY holds, not the
+  // value we intended to write. `applyFeatureFlagLineEdit` has already parsed
+  // `next` successfully, so this read only feeds the summary.
+  const finalParsed: unknown = yaml.load(next);
+  const finalFeatures = isRecord(finalParsed) ? finalParsed.features : undefined;
+  const finalKeyword = isRecord(finalFeatures) ? finalFeatures.workbuddy_live_keyword_pain : undefined;
+  const keywordPainEnabled = isRecord(finalKeyword) && finalKeyword.enabled === true;
+
   try {
     atomicReplaceTextFile(configPath, next);
   } catch {
-    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, changed: false };
+    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: false };
   }
-  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, changed: true };
+  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: true };
 }
 
 /**
@@ -1864,9 +1880,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         : {
             enabled: !governanceDefaults.hostExplicitOff,
             explicitOptOut: governanceDefaults.hostExplicitOff,
-            // 2026-11-05: always false — WorkBuddy has no persisted observation
-            // writer, so the keyword path cannot produce a Pain row.
-            keywordPainEnabled: false,
+            // Read back from the config after the migration (OFF by contract),
+            // never inferred from the Owner opt-out flag.
+            keywordPainEnabled: governanceDefaults.keywordPainEnabled,
             configPath: governanceDefaults.configPath,
           },
       reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}${mcpBinding.ok ? ' pd-recall MCP binding written.' : ` pd-recall MCP binding skipped (${mcpBinding.reason ?? 'unknown'}).`}`,

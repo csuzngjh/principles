@@ -1506,7 +1506,10 @@ describe('WorkBuddy user-facing copy guard', () => {
   const REPO_ROOT = path.resolve(__dirname, '../../..');
   const surfaces = [
     'packages/create-principles-disciple/src/installers/workbuddy-host-installer.ts',
-    'packages/create-principles-disciple/src/index.ts',
+    // #2349 moved the rendered install summary into install-summary.ts, which
+    // is now the surface that must name the manual prefix (index.ts only calls
+    // formatHostStateSummary).
+    'packages/create-principles-disciple/src/install-summary.ts',
     'packages/create-principles-disciple/src/prompts.ts',
     'packages/pd-cli/src/commands/workbuddy-worker.ts',
     'packages/website/.vitepress/theme/components/InstallGuide.vue',

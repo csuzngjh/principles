@@ -29,6 +29,7 @@ describe('formatHostStateSummary — WorkBuddy three-state block', () => {
     expect(lines).toContain('  WorkBuddy plugin ................. INSTALLED / DISABLED');
     expect(lines).toContain('  WorkBuddy governance ............. ON');
     expect(lines).toContain('  Automatic keyword Pain ........... OFF');
+    expect(lines).toContain('  Manual PD记录痛苦：............... available once the plugin is enabled');
     expect(lines).toContain('Next action:');
     expect(lines).toContain('Enable Principles Disciple in WorkBuddy plugin management.');
     expect(lines).toContain('Then start a new session or run /reload-plugins.');
@@ -42,8 +43,18 @@ describe('formatHostStateSummary — WorkBuddy three-state block', () => {
     ], true);
 
     expect(lines).toContain('  WorkBuddy plugin ................. INSTALLED / ENABLED');
+    expect(lines).toContain('  Manual PD记录痛苦：............... available');
     expect(lines.join('\n')).not.toContain('Next action:');
     expect(lines.join('\n')).not.toContain('Hooks stay INACTIVE');
+  });
+
+  it('keeps automatic detection and manual entry on separate lines (plugin disabled)', () => {
+    const lines = formatHostStateSummary([workbuddy()], true);
+    const autoLine = lines.find((line) => line.includes('Automatic keyword Pain'));
+    const manualLine = lines.find((line) => line.includes('Manual PD记录痛苦：'));
+    expect(autoLine).toBe('  Automatic keyword Pain ........... OFF');
+    expect(manualLine).toBe('  Manual PD记录痛苦：............... available once the plugin is enabled');
+    expect(autoLine).not.toContain('PD记录痛苦');
   });
 
   it('unreadable registry: never claims INSTALLED', () => {
