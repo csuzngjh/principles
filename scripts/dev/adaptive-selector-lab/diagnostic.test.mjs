@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createBoundary, MODELS, URLS, validateDecision, validateSelection, hash,
-  buildInputs, buildDecisionRequest, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, continuationPlan, ROOT, FIXTURE } from './diagnostic.mjs';
+  buildInputs, buildDecisionRequest, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, continuationPlan, finalPlan, catalogDecisionModels, ROOT, FIXTURE } from './diagnostic.mjs';
 
 const fixture = loadFixture();
 const keys = { decision: 'fake-decision+secret/=', glm: 'fake-glm+secret/=' };
@@ -57,6 +57,25 @@ test('valid overlapping probabilities are not normalized into fake exclusive lab
   const d = decision(); d.answers.new_task.noul = 0.9; d.answers.goal_shift.noul = 0.9;
   const scores = validateDecision(d);
   assert.equal(scores.new_task, 0.9); assert.equal(scores.goal_shift, 0.9);
+});
+test('only the selected free catalog row can establish a canonical response alias', async () => {
+  const catalog = { id: MODELS.decision, canonical_slug: 'respan/span-01-lite-20260925',
+    pricing: { prompt: '0', completion: '0' }, architecture: { output_modalities: ['decisions'] } };
+  const aliases = catalogDecisionModels(catalog);
+  const packet = { ...decision(), model: catalog.canonical_slug };
+  const s = setup({ decisionModels: aliases, fetchImpl: async () => Response.json(packet) });
+  const response = await s.boundary('decision', 'dev-02', 'D')(URLS.decision, request());
+  assert.equal(validateDecision(await response.json(), aliases).new_task, 0.2);
+  assert.throws(() => catalogDecisionModels({ ...catalog, id: 'paid-model' }), /UNAVAILABLE/);
+  assert.throws(() => catalogDecisionModels({ ...catalog, pricing: { prompt: '0.01', completion: '0' } }), /UNAVAILABLE/);
+  assert.throws(() => validateDecision({ ...packet, model: 'respan/span-01-lite-arbitrary' }, aliases), /PROTOCOL/);
+});
+test('last approval narrows to dev-02..04 and inherits all three previous decision attempts', () => {
+  const plan = finalPlan({ status: 'STOPPED', counts: { decision: 3, glm: 0 } });
+  assert.deepEqual(plan.caseIds, ['dev-02', 'dev-03', 'dev-04']);
+  assert.deepEqual(plan.inheritedCounts, { decision: 3, glm: 0 });
+  assert.deepEqual(plan.maxCounts, { decision: 6, glm: 6 });
+  assert.throws(() => finalPlan({ status: 'STOPPED', counts: { decision: 2, glm: 0 } }), /UNEXPECTED/);
 });
 for (const bad of [NaN, Infinity, -0.1, 1.1, '0.8', null]) {
   test(`reject invalid probability ${String(bad)}`, () => {

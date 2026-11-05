@@ -31,8 +31,16 @@ export function parseFrozenFixture(bytes) {
 
 export function loadFixture() { return parseFrozenFixture(fs.readFileSync(path.join(ROOT, FIXTURE))); }
 
-export function validateDecision(value) {
-  if (!object(value) || ![MODELS.decision, 'respan/span-01-lite'].includes(value.model) ||
+export function catalogDecisionModels(model) {
+  if (model?.id !== MODELS.decision || model.pricing?.prompt !== '0' || model.pricing?.completion !== '0' ||
+      !model.architecture?.output_modalities?.includes('decisions')) reject('FREE_DECISION_MODEL_UNAVAILABLE');
+  const allowed = [MODELS.decision, 'respan/span-01-lite'];
+  if (typeof model.canonical_slug === 'string' && /^respan\/span-01-lite-\d{8}$/.test(model.canonical_slug)) allowed.push(model.canonical_slug);
+  return allowed;
+}
+
+export function validateDecision(value, allowedModels = [MODELS.decision, 'respan/span-01-lite']) {
+  if (!object(value) || !allowedModels.includes(value.model) ||
       !object(value.answers)) reject('DECISION_PROTOCOL_INVALID');
   return Object.fromEntries(QUESTIONS.map(key => {
     const a = value.answers[key];
@@ -128,8 +136,15 @@ export function continuationPlan(previous) {
     maxCounts: { decision: 6, glm: 8 }, claim: 'APPROVAL-20261106-FOUR-CASE-CONTINUATION.json' };
 }
 
+export function finalPlan(previous) {
+  if (previous?.status !== 'STOPPED' || previous.counts?.decision !== 3 || previous.counts?.glm !== 0) reject('UNEXPECTED_PREVIOUS_RUN');
+  return { inheritedCounts: { decision: 3, glm: 0 }, caseIds: ['dev-02', 'dev-03', 'dev-04'],
+    maxCounts: { decision: 6, glm: 6 }, claim: 'APPROVAL-20261106-FINAL-THREE.json' };
+}
+
 export function createBoundary({ ledger, persist, keys, fetchImpl = globalThis.fetch, now = Date.now,
-  requestMs = 30000, endAt = now() + 600000, maxCounts = { decision: 6, glm: 12 } }) {
+  requestMs = 30000, endAt = now() + 600000, maxCounts = { decision: 6, glm: 12 },
+  decisionModels = [MODELS.decision, 'respan/span-01-lite'] }) {
   // A new closure per model invocation also blocks hidden SDK retries before send.
   return (kind, caseId, arm) => {
     let used = false;
@@ -192,12 +207,12 @@ export function createBoundary({ ledger, persist, keys, fetchImpl = globalThis.f
             }
           }
           if (packet.model !== undefined) {
-            const allowed = kind === 'decision' ? [MODELS.decision, 'respan/span-01-lite'] : [MODELS.glm];
+            const allowed = kind === 'decision' ? decisionModels : [MODELS.glm];
             if (!allowed.includes(packet.model)) reject('RESPONSE_MODEL_NOT_ALLOWLISTED');
             row.model = packet.model;
           }
-          if (kind === 'decision' && packet.provider !== undefined && packet.provider !== 'Respan') reject('RESPONSE_PROVIDER_NOT_ALLOWLISTED');
-          if (packet.provider === 'Respan') row.provider = 'Respan';
+          if (kind === 'decision' && packet.provider !== undefined && !['Respan', 'respan'].includes(packet.provider)) reject('RESPONSE_PROVIDER_NOT_ALLOWLISTED');
+          if (['Respan', 'respan'].includes(packet.provider)) row.provider = 'Respan';
           if (kind === 'decision' && (row.usage?.cost ?? 0) > 0) reject('FREE_MODEL_REPORTED_CHARGE');
           const finish = packet.choices?.[0]?.finish_reason;
           if (['stop', 'length', 'tool_calls', 'content_filter'].includes(finish)) row.finishReason = finish;
@@ -228,12 +243,15 @@ export async function glmSelection({ PiAiRuntimeAdapter, fetch, payload, candida
 
 async function main() {
   const runStarted = Date.now();
-  const continuing = process.argv[2] === '--execute-approved-four-case-continuation';
+  const final = process.argv[2] === '--execute-approved-final-three';
+  const continuing = final || process.argv[2] === '--execute-approved-four-case-continuation';
   if (process.argv.length !== 3 || (!continuing && process.argv[2] !== '--execute-approved-20261106')) reject('EXPLICIT_APPROVED_RUN_FLAG_REQUIRED');
   const fixture = loadFixture();
-  const previousPath = path.join(ROOT, 'docs/implementation-reports/aa-selector-experiments/2026-11-05T23-27-54-181Z-one-diagnostic/results.json');
+  const previousPath = path.join(ROOT, final
+    ? 'docs/implementation-reports/aa-selector-experiments/2026-11-05T23-34-44-835Z/results.json'
+    : 'docs/implementation-reports/aa-selector-experiments/2026-11-05T23-27-54-181Z-one-diagnostic/results.json');
   const previousBytes = continuing ? fs.readFileSync(previousPath) : null;
-  const plan = continuing ? continuationPlan(JSON.parse(previousBytes.toString('utf8'))) : {
+  const plan = final ? finalPlan(JSON.parse(previousBytes.toString('utf8'))) : continuing ? continuationPlan(JSON.parse(previousBytes.toString('utf8'))) : {
     inheritedCounts: { decision: 0, glm: 0 }, caseIds: fixture.cases.map(c => c.id),
     maxCounts: { decision: 6, glm: 12 }, claim: 'APPROVAL-20261106-CLAIM.json' };
   const keys = { decision: process.env.OPENROUTER_API_KEY, glm: process.env.ZAI_CODING_CN_API_KEY || process.env.ZAI_API_KEY };
@@ -245,8 +263,7 @@ async function main() {
   if (!catalogResponse.ok) reject('CATALOG_UNAVAILABLE');
   const catalog = await catalogResponse.json();
   const model = catalog.data?.find(item => item.id === MODELS.decision);
-  if (model?.pricing?.prompt !== '0' || model?.pricing?.completion !== '0' ||
-      !model.architecture?.output_modalities?.includes('decisions')) reject('FREE_DECISION_MODEL_UNAVAILABLE');
+  const decisionModels = catalogDecisionModels(model);
   const out = path.join(ROOT, 'docs/implementation-reports/aa-selector-experiments', new Date().toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   // This approval authorizes ONE run, not a fresh budget each CLI invocation.
@@ -256,34 +273,47 @@ async function main() {
   fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, 'RUN-LOCK'), 'Single non-resumable run; do not rerun without accounting for prior calls.\n', { flag: 'wx' });
   const ledger = { schemaVersion: 'pd-aa-selector-diagnostic/v1', startedAt: new Date().toISOString(),
-    approval: continuing ? 'Owner 2026-11-06: 批准，尽快完成这次实验；对应新增最多4次decision+8次GLM、前4冻结样本的续行提议'
+    approval: final ? 'Owner 2026-11-06: 批准按剩余预算处理并完成；对应dev-02..04，最多新增3decision+6GLM，允许官方可证同源别名归一化'
+      : continuing ? 'Owner 2026-11-06: 批准，尽快完成这次实验；对应新增最多4次decision+8次GLM、前4冻结样本的续行提议'
       : 'Owner 2026-11-06: 批准，开始实验吧；card PD-AA-PRI-1122-DECISIONS-GLM-EXPERIMENT-CARD-v0.1.md',
     fixtureHash: hash(fs.readFileSync(path.join(ROOT, FIXTURE))),
     codeHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
     sourceHash: hash(fs.readFileSync(fileURLToPath(import.meta.url))),
     systemPromptHash: hash(SYSTEM), candidateHash: hash(JSON.stringify(fixture.candidates)), modelConfig: MODELS,
-    catalog: { id: model.id, pricing: model.pricing }, counts: { ...plan.inheritedCounts },
+    catalog: { id: model.id, canonical_slug: model.canonical_slug ?? null, pricing: model.pricing,
+      identitySource: 'https://openrouter.ai/api/v1/models?output_modalities=decisions', allowedResponseModels: decisionModels }, counts: { ...plan.inheritedCounts },
     inheritedCounts: plan.inheritedCounts, maxCumulativeCounts: plan.maxCounts, plannedCaseIds: plan.caseIds,
     previousEvidenceHash: previousBytes ? hash(previousBytes) : null,
     status: 'RUNNING', requests: [], results: [], limitation: 'Synthetic development selection diagnostic; no actor/host/behavior/heldout evidence.' };
   const persist = () => fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(ledger, null, 2) + '\n', { flush: true });
   persist();
-  const boundary = createBoundary({ ledger, persist, keys, endAt: runStarted + 600000, maxCounts: plan.maxCounts });
+  const boundary = createBoundary({ ledger, persist, keys, endAt: runStarted + 600000, maxCounts: plan.maxCounts, decisionModels });
   try {
     for (const [index, sample] of fixture.cases.filter(c => plan.caseIds.includes(c.id)).entries()) {
       ledger.activeStage = { caseId: sample.id, kind: 'decision', arm: 'D' };
       const input = buildInputs(sample, fixture);
       const response = await boundary('decision', sample.id, 'D')(URLS.decision, { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildDecisionRequest(input.state, fixture.questions)) });
-      const scores = validateDecision(await response.json());
+      const scores = validateDecision(await response.json(), decisionModels);
       const result = { caseId: sample.id, scores, selections: {}, expectation: sample.expectedDecision,
         acceptableSelections: sample.acceptableSelections, order: index % 2 ? ['D', 'C'] : ['C', 'D'] };
       ledger.results.push(result); persist();
       for (const arm of result.order) {
         ledger.activeStage = { caseId: sample.id, kind: 'glm', arm };
         const prepared = buildInputs(sample, fixture, arm === 'D' ? scores : undefined);
-        result.selections[arm] = await glmSelection({ PiAiRuntimeAdapter,
-          fetch: boundary('glm', sample.id, arm), payload: prepared.glm, candidates: prepared.candidates });
+        try {
+          result.selections[arm] = await glmSelection({ PiAiRuntimeAdapter,
+            fetch: boundary('glm', sample.id, arm), payload: prepared.glm, candidates: prepared.candidates });
+        } catch (error) {
+          const code = localFailureCode(error);
+          // A completed call with invalid semantic/structured output is a failed
+          // observation, not a retry or permission failure. Keep it in the arm's
+          // denominator; actual HTTP/identity/budget failures still stop the run.
+          if (!final || ledger.requests.at(-1)?.status !== 'RECEIVED' ||
+              !['PI_AI_OUTPUT_INVALID', 'SELECTION_PROTOCOL_INVALID', 'SELECTION_REFERENCE_INVALID'].includes(code)) throw error;
+          result.selections[arm] = { status: 'invalid_output', reason: code, withinPrewrittenAllowedSet: false };
+          persist(); continue;
+        }
         const chosen = result.selections[arm];
         result.selections[arm].withinPrewrittenAllowedSet = sample.acceptableSelections.includes(chosen.status === 'selected' ? chosen.id : chosen.status);
         persist();
