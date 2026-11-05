@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS } from '@principles/core/runtime-v2/receipt-coverage';
+import { validateAdaptiveDeliveryRecord, type AdaptiveDeliveryRecord } from '@principles/core/runtime-v2/adaptive-delivery-record';
 import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
 import type {
   EventLogEntry,
@@ -137,6 +138,15 @@ export class EventLog {
     if (opts?.flushImmediately) {
       this.flushEvents();
     }
+  }
+
+  /** Durable invocation journal in the existing raw stream, separate from hook success statistics. */
+  recordAdaptiveDelivery(sessionId: string | undefined, data: AdaptiveDeliveryRecord): void {
+    const validation = validateAdaptiveDeliveryRecord(data);
+    if (!validation.ok) throw new Error(`Invalid adaptive delivery record: ${validation.errors.join('; ')}`);
+    // A closed/reconciled record is a journal fact, never a delivery success category.
+    this.record('adaptive_delivery', 'written', sessionId, data);
+    this.flushEvents();
   }
   
   recordGateBlock(sessionId: string | undefined, data: GateBlockEventData): void {

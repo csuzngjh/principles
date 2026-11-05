@@ -131,12 +131,15 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
       promptBudget,
       adaptivePriority: targetFor('TARGET'),
     });
-    expect(prioritized.adaptivePacking).toEqual({
+    expect(prioritized.adaptivePacking).toMatchObject({
       status: 'prioritized',
       targetActivationId: 'activation-TARGET',
       displacedActivationIds: ['activation-FILLER'],
     });
     expect(prioritized.activationIds[0]).toBe('activation-TARGET');
+    expect(prioritized.adaptivePacking?.nativeBaseline).toEqual(native);
+    expect(prioritized.adaptivePacking?.targetSnapshot).toMatchObject({ principleId: 'TARGET', authority: 'owner', approvedBy: 'owner-1' });
+    expect(prioritized.additionalContext).toContain(prioritized.adaptivePacking?.targetBody);
     expect(prioritized.additionalContext).toContain('t'.repeat(100));
     expect(prioritized.additionalContext).not.toMatch(/<directive [^>]*authority=/);
   });
@@ -146,12 +149,13 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
     await seedPrinciples(workspaceDir, [{ principleId: 'PRESENT', text: 'Already in native.', approved: true }]);
     const native = await buildActivePrinciplePromptContext({ workspaceDir });
     const adaptive = await buildActivePrinciplePromptContext({ workspaceDir, adaptivePriority: targetFor('PRESENT') });
-    expect(adaptive.adaptivePacking).toEqual({
+    expect(adaptive.adaptivePacking).toMatchObject({
       status: 'target_present',
       targetActivationId: 'activation-PRESENT',
       displacedActivationIds: [],
     });
     expect(adaptive.additionalContext).toBe(native.additionalContext);
+    expect(adaptive.adaptivePacking?.nativeBaseline).toEqual(native);
     expect(adaptive.activationIds).toEqual(native.activationIds);
     expect(adaptive.additionalContext).not.toMatch(/<directive [^>]*authority=/);
   });

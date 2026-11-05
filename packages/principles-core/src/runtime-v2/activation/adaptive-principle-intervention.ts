@@ -57,9 +57,6 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
     // Model-request identity belongs to later delivery evidence, not input admission.
     if (!nonempty(input.sessionId) || !(controlled || (!admission && nonempty(input.currentUserMessageId)))) return fallback('request_identity_unavailable');
     if (input.currentUserMessage?.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return fallback('scene_not_matched');
-    if (!Number.isFinite(input.deadlineAt) || deps.now() >= input.deadlineAt) return fallback('deadline');
-    if (!Number.isSafeInteger(input.selectionBudget) || input.selectionBudget < 0
-      || (input.roundKey !== undefined && !Number.isSafeInteger(input.roundKey))) return fallback('invalid_budget');
     const ids = input.principles.map(p => p.principleId);
     if (new Set(ids).size !== ids.length) return fallback('ambiguous_identity');
     const matches = input.principles.filter(p => p.artifactId === input.target.artifactId && p.activationId === input.target.activationId);
@@ -68,6 +65,9 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
     if (!target) return fallback('target_unavailable');
     targetPrincipleId = target.principleId;
     excludeUncertainTarget = true;
+    if (!Number.isFinite(input.deadlineAt) || deps.now() >= input.deadlineAt) return fallback('deadline');
+    if (!Number.isSafeInteger(input.selectionBudget) || input.selectionBudget < 0
+      || (input.roundKey !== undefined && !Number.isSafeInteger(input.roundKey))) return fallback('invalid_budget');
     const rendered = renderPrinciplesToDirectives([target], new Set([target.principleId]), { escapeFn: escapeXml, selfReportInstruction: input.selfReportInstruction });
     const body = rendered.slice(rendered.indexOf('<directive '), rendered.indexOf('</directive>') + '</directive>'.length);
     const unchanged = input.nativeText.includes(body);

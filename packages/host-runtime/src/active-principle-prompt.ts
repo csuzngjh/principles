@@ -62,6 +62,11 @@ export interface AdaptivePackingReport {
   reason?: string;
   targetActivationId: string;
   displacedActivationIds: string[];
+  /** Internal return-boundary checks; these snapshots are not delivery evidence. */
+  targetSnapshot?: ActivatedPrinciple;
+  targetBody?: string;
+  nativeBaseline?: ActivePrinciplePromptResult;
+  deadlineAt?: number;
 }
 
 export interface PromptActivationCandidates {
@@ -176,6 +181,7 @@ export async function buildActivePrinciplePromptContext(input: {
   mandatoryPrincipleIds?: string[];
   /** Request cancellation forwarded to the final read-only target revalidation. */
   signal?: AbortSignal;
+  deadlineAt?: number;
 }): Promise<ActivePrinciplePromptResult> {
   // One resolution per request (SPEC §6.1): the caller's pre-resolved budget
   // or the fixed-fallback default — never a per-line constant read.
@@ -340,10 +346,16 @@ export async function buildActivePrinciplePromptContext(input: {
   }
 
   const signal = input.signal ?? new AbortController().signal;
+  const targetRendered = renderPrinciplesToDirectives([nativeTarget], new Set([nativeTarget.principleId]), { escapeFn: escapeXml });
+  const targetBody = targetRendered.slice(targetRendered.indexOf('<directive '), targetRendered.indexOf('</directive>') + '</directive>'.length);
+  const prepared = (status: 'target_present' | 'prioritized', displaced: string[] = []): AdaptivePackingReport => ({
+    ...report(status, undefined, displaced), targetSnapshot: authorizedTarget, targetBody,
+    nativeBaseline: nativeResult, ...(input.deadlineAt !== undefined ? { deadlineAt: input.deadlineAt } : {}),
+  });
   if (baselineHasTarget) {
     const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
     if (!stillValid) return withoutTarget('target_changed');
-    return { ...nativeResult, adaptivePacking: report('target_present') };
+    return { ...nativeResult, adaptivePacking: prepared('target_present') };
   }
 
   const targetIndex = nativeScanOrder.indexOf(nativeTarget);
@@ -366,7 +378,7 @@ export async function buildActivePrinciplePromptContext(input: {
   const displacedActivationIds = nativePacking.included
     .filter((principle) => !prioritizedActivationIds.has(principle.activationId))
     .map((principle) => principle.activationId);
-  const result = makeResult(prioritizedPacking, principles, report('prioritized', undefined, displacedActivationIds));
+  const result = makeResult(prioritizedPacking, principles, prepared('prioritized', displacedActivationIds));
   // Adaptive assembly is deliberately limited to the existing renderer's Native budget cap.
   return result;
 }

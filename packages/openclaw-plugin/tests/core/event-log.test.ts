@@ -41,6 +41,24 @@ describe('EventLog', () => {
     });
   });
 
+  it('persists invocation start before process disposal and keeps closure separate from success', () => {
+    eventLog.recordAdaptiveDelivery('session-aa', { hookInvocationId: 'hook-aa', receiptState: 'open', execution: 'unknown', payload: 'unknown', selection: 'unavailable', selectionPending: true, submission: 'unknown' });
+    const eventsPath = path.join(tempDir, 'logs', `events_${new Date().toISOString().slice(0, 10)}.jsonl`);
+    const start = JSON.parse(fs.readFileSync(eventsPath, 'utf8').trim());
+    expect(start).toMatchObject({ type: 'adaptive_delivery', category: 'written', data: { receiptState: 'open', submission: 'unknown' } });
+    eventLog.recordAdaptiveDelivery('session-aa', { hookInvocationId: 'hook-aa', receiptState: 'closed', execution: 'degraded', payload: 'none', selection: 'unavailable', submission: 'unknown' });
+    const records = fs.readFileSync(eventsPath, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(records).toHaveLength(2);
+    expect(records[1]).toMatchObject({ category: 'written', data: { hookInvocationId: 'hook-aa', receiptState: 'closed', execution: 'degraded' } });
+    const stats = eventLog.getDailyStats(new Date().toISOString().slice(0, 10));
+    expect(stats.hooks.total).toBe(0);
+  });
+
+  it('rejects journal upgrades that lack independent evidence', () => {
+    expect(() => eventLog.recordAdaptiveDelivery('session-aa', { hookInvocationId: 'hook-aa', receiptState: 'reconciled', execution: 'completed', payload: 'confirmed', selection: 'selected', submission: 'unknown' })).toThrow('independentlyVerified');
+    expect(eventLog.getBufferedEvents()).toHaveLength(0);
+  });
+
   describe('DailyStats', () => {
     it('should aggregate tool call statistics correctly', () => {
       // Record multiple tool calls

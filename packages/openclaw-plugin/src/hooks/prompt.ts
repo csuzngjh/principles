@@ -1,7 +1,7 @@
  
  
 import * as fs from 'fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { setInjectedPrincipleIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -12,7 +12,7 @@ import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingM
 import { PathResolver } from '../core/path-resolver.js';
 import { RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, resolveTotalInjectionBudgetChars, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
 import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
-import { prepareAdaptiveIntervention, type ActivatedPrinciple, type AdaptiveInterventionResult } from '@principles/core/runtime-v2';
+import { prepareAdaptiveIntervention, type ActivatedPrinciple, type AdaptiveInterventionResult, type AdaptiveDeliveryRecord } from '@principles/core/runtime-v2';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
@@ -298,6 +298,30 @@ export async function handleBeforePromptBuild(
   const { runId, sessionKey, trigger, sessionId } = ctx;
   const isUserInteraction = isUserInteractionTrigger(trigger);
   const api = ctx.api;
+  const adaptiveMapping = readAdaptiveActivationConfig(api?.pluginConfig, workspaceDir, adaptiveStartedAt);
+  // A mapping can expire or be disabled while the shared packer is running.
+  // In that case discard its additional contribution before assembling anything.
+  const preparedPacking = sharedActivePrinciplePrompt?.adaptivePacking;
+  if (preparedPacking?.nativeBaseline && (!adaptiveMapping
+    || preparedPacking.targetActivationId !== adaptiveMapping.activationId
+    || preparedPacking.targetSnapshot?.artifactId !== adaptiveMapping.artifactId)) {
+    sharedActivePrinciplePrompt = preparedPacking.nativeBaseline;
+  }
+  const adaptiveInvocationId = adaptiveMapping ? randomUUID() : undefined;
+  const recordAdaptive = (record: AdaptiveDeliveryRecord) => {
+    try { wctx.eventLog.recordAdaptiveDelivery(sessionId, record); } catch (error) {
+      logger?.warn?.(`[PD:AA] Invocation journal unavailable: ${String(error)}`);
+    }
+  };
+  const adaptiveJournalContext = adaptiveMapping ? {
+    host: 'openclaw', runtimeMode: sharedActivePrinciplePrompt ? 'shared' : 'plugin_local',
+    workspaceDir, ...(sessionId ? { sessionId } : {}), ...(runId ? { runId } : {}),
+    artifactId: adaptiveMapping.artifactId, activationId: adaptiveMapping.activationId,
+    // The hook API does not attest these identities. Unknown is not a cached installation claim.
+    hostVersion: 'unknown', pluginVersion: 'unknown', effectiveHookSetFingerprint: 'unknown', evidenceCoverage: 'partial',
+  } : {};
+  if (adaptiveInvocationId) recordAdaptive({ ...adaptiveJournalContext, hookInvocationId: adaptiveInvocationId,
+    receiptState: 'open', execution: 'unknown', payload: 'unknown', selection: 'unavailable', selectionPending: true, submission: 'unknown' });
   // PRI-647: trajectory session recording and assistant-turn anchoring are
   // observability side-effects only. A closed/disposed trajectory connection
   // (plugin service stop during config hot-reload) must never abort the prompt
@@ -522,6 +546,7 @@ export async function handleBeforePromptBuild(
   let adaptiveOutcome: AdaptiveInterventionResult | undefined;
   let adaptiveAdmissionId: string | undefined;
   let adaptiveExpectedTarget: ActivatedPrinciple | undefined;
+  let adaptiveTargetBody: string | undefined;
   let adaptiveDeadlineAt = 0;
   let adaptiveBaseline: { text: string; ids: string[] } | undefined;
   let adaptiveSafeFallback: { text: string; ids: string[] } | undefined;
@@ -562,6 +587,27 @@ export async function handleBeforePromptBuild(
     dedupedV2 = v2Result.principles;
 
     if (sharedActivePrinciplePrompt) {
+      const packing = sharedActivePrinciplePrompt.adaptivePacking;
+      if (adaptiveMapping && packing?.targetSnapshot && packing.targetBody && packing.nativeBaseline
+        && packing.targetActivationId === adaptiveMapping.activationId
+        && packing.targetSnapshot.artifactId === adaptiveMapping.artifactId) {
+        const baseline = packing.nativeBaseline;
+        adaptiveExpectedTarget = packing.targetSnapshot;
+        adaptiveTargetBody = packing.targetBody;
+        adaptiveDeadlineAt = Math.min(packing.deadlineAt ?? adaptiveStartedAt + adaptiveMapping.softTimeoutMs, adaptiveMapping.expiresAtMs);
+        const admitted = getOwnValue(event, 'currentUserMessageId');
+        if (typeof admitted === 'string') adaptiveAdmissionId = admitted;
+        const safeIds = baseline.principleIds.filter(id => id !== packing.targetSnapshot?.principleId);
+        adaptiveSafeFallback = { text: safeIds.length ? baseline.additionalContext.replace(packing.targetBody, '') : '', ids: safeIds };
+        if (packing.status === 'prioritized') adaptiveBaseline = { text: baseline.additionalContext, ids: baseline.principleIds };
+        adaptiveDirectiveText = sharedActivePrinciplePrompt.additionalContext;
+        adaptiveOutcome = { text: adaptiveDirectiveText, reason: packing.status === 'prioritized' ? 'target_prioritized' : 'native_already_contains_target',
+          addedTarget: packing.status === 'prioritized', displacedActivationIds: packing.displacedActivationIds,
+          selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds,
+          targetBodySha256: createHash('sha256').update(packing.targetBody, 'utf8').digest('hex') };
+      } else if (adaptiveMapping && packing) {
+        adaptiveOutcome = { text: sharedActivePrinciplePrompt.additionalContext, reason: packing.reason ?? 'target_unavailable', addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
+      }
       runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
       for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
       v2Truncated = sharedActivePrinciplePrompt.truncated;
@@ -645,7 +691,7 @@ export async function handleBeforePromptBuild(
         runtimeV2PrincipleIds.add(id);
       }
       runtimeV2PrinciplesContent = lines.join('\n');
-      const mapping = readAdaptiveActivationConfig(api?.pluginConfig, workspaceDir, adaptiveStartedAt);
+      const mapping = adaptiveMapping;
       const admittedText = getOwnValue(event, 'currentUserMessage');
       const admittedId = getOwnValue(event, 'currentUserMessageId');
       if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode
@@ -699,6 +745,7 @@ export async function handleBeforePromptBuild(
     }
 
     commitRuntimeV2Evidence = () => {
+    const sharedPrompt = sharedActivePrinciplePrompt;
     // ── Emit structured observability event ──
     try {
       const eventLog = wctx.eventLog;
@@ -716,6 +763,7 @@ export async function handleBeforePromptBuild(
       eventLog.recordRuntimeV2ActivationsInjected({
         hostKind: 'openclaw',
         eventId: randomUUID(),
+        ...(adaptiveInvocationId ? { hookInvocationId: adaptiveInvocationId } : {}),
         sessionId: sessionId ?? 'unknown',
         workspaceDir: wctx.workspaceDir,
         // PRI-750: host run/turn id from the OpenClaw hook context — DIRECT
@@ -812,12 +860,12 @@ export async function handleBeforePromptBuild(
     // host's consumption is NOT claimed). Best-effort: never affects the
     // prompt being returned (ADR-0027 §2.4).
     try {
-      const evidenceInjected = sharedActivePrinciplePrompt
-        ? sharedActivePrinciplePrompt.principleIds
+      const evidenceInjected = sharedPrompt
+        ? sharedPrompt.principleIds
             .map((principleId, index) => ({
               principleId,
-              activationId: sharedActivePrinciplePrompt.activationIds[index] ?? '',
-              artifactId: sharedActivePrinciplePrompt.artifactIds[index],
+              activationId: sharedPrompt.activationIds[index] ?? '',
+              artifactId: sharedPrompt.artifactIds[index],
             }))
             .filter((entry) => entry.activationId.length > 0)
         : alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds)
@@ -948,6 +996,14 @@ export async function handleBeforePromptBuild(
       runtimeV2PrincipleIds.clear();
       for (const id of fallback.ids) runtimeV2PrincipleIds.add(id);
       runtimeV2PrinciplesContent = fallback.text;
+      if (sharedActivePrinciplePrompt) {
+        const baseline = sharedActivePrinciplePrompt.adaptivePacking?.nativeBaseline;
+        const sources = [sharedActivePrinciplePrompt, ...(baseline ? [baseline] : [])];
+        const refs = new Map(sources.flatMap(source => source.principleIds.map((id, i) =>
+          [id, { activationId: source.activationIds[i]!, artifactId: source.artifactIds[i]! }] as const)));
+        sharedActivePrinciplePrompt = { ...sharedActivePrinciplePrompt, additionalContext: fallback.text,
+          principleIds: fallback.ids, activationIds: fallback.ids.map(id => refs.get(id)!.activationId), artifactIds: fallback.ids.map(id => refs.get(id)!.artifactId) };
+      }
       v2SelectionPolicy = undefined;
       v2RotationStartIndex = undefined;
       v2RoundOrdinal = undefined;
@@ -956,7 +1012,7 @@ export async function handleBeforePromptBuild(
       adaptiveOutcome = { text: fallback.text, reason, addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: fallback.ids };
     };
     const expected = renderPrinciplesToDirectives([adaptiveExpectedTarget], new Set([adaptiveExpectedTarget.principleId]), { escapeFn: escapeXml });
-    const body = expected.slice(expected.indexOf('<directive '), expected.indexOf('</directive>') + '</directive>'.length);
+    const body = adaptiveTargetBody ?? expected.slice(expected.indexOf('<directive '), expected.indexOf('</directive>') + '</directive>'.length);
     if (!prependSystemContext.includes(body)) {
       restore(adaptiveSafeFallback, 'final_target_incomplete');
     } else if (Date.now() >= adaptiveDeadlineAt) {
@@ -980,11 +1036,24 @@ export async function handleBeforePromptBuild(
   }
   if (adaptiveOutcome) {
     logger?.info?.(`[PD:AA] ${JSON.stringify({
-      hookInvocationId: randomUUID(), sessionId, nativeAdmissionId: adaptiveAdmissionId,
+      hookInvocationId: adaptiveInvocationId, sessionId, nativeAdmissionId: adaptiveAdmissionId,
       reason: adaptiveOutcome.reason, addedTarget: adaptiveOutcome.addedTarget,
       payload: adaptiveOutcome.targetBodySha256 ? 'prepared' : 'none',
       targetBodySha256: adaptiveOutcome.targetBodySha256, submission: 'unknown',
     })}`);
+  }
+
+  if (adaptiveInvocationId) {
+    const selected = !!adaptiveOutcome?.targetBodySha256;
+    const notApplicable = adaptiveOutcome?.reason === 'scene_not_matched';
+    recordAdaptive({ ...adaptiveJournalContext, hookInvocationId: adaptiveInvocationId, receiptState: 'closed',
+      execution: !adaptiveOutcome || selected || notApplicable ? 'completed' : 'degraded',
+      payload: selected ? 'prepared' : 'none', selection: selected ? 'selected' : notApplicable ? 'none_applicable' : adaptiveOutcome ? 'unavailable' : 'skipped',
+      submission: 'unknown', reason: adaptiveOutcome?.reason ?? 'native_entry_preserved',
+      addedTarget: adaptiveOutcome?.addedTarget ?? false,
+      ...(adaptiveAdmissionId ? { nativeAdmissionId: adaptiveAdmissionId } : {}),
+      ...(adaptiveOutcome?.targetBodySha256 ? { targetBodySha256: adaptiveOutcome.targetBodySha256 } : {}),
+    });
   }
 
   return {

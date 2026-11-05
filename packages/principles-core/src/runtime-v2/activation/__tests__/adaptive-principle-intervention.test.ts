@@ -16,7 +16,7 @@ describe('bounded single-principle intervention',()=>{
  it('excludes an old cached revision when the new revision fails revalidation',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));i.principles=i.principles.map(candidate=>({...candidate,text:'new revision'}));const r=await prepareAdaptiveIntervention(i,{...deps(),renderAndGuard:ids=>renderPrinciplesToDirectives(i.principles,ids,{escapeFn:escapeXml}),revalidate:async()=>false});expect(r.text).toBe(i.nativeWithoutTargetText);});
  it('does not restore cached target content when revalidation times out',async()=>{const i=input();i.nativeText=deps().renderAndGuard(new Set(['b']));i.deadlineAt=Date.now()+30;const r=await prepareAdaptiveIntervention(i,{...deps(),revalidate:async()=>new Promise(()=>{ /* Deliberately pending. */ })});expect(r.reason).toBe('deadline');expect(r.text).toBe(i.nativeWithoutTargetText);});
  it('bounds a revalidation that never resolves and aborts its signal',async()=>{let signal:AbortSignal|undefined;const r=await prepareAdaptiveIntervention({...input(),deadlineAt:Date.now()+30},{...deps(),revalidate:async(_,s)=>{signal=s;return new Promise(()=>{ /* Deliberately unresolved Reader for the deadline regression. */ });}});expect(r.reason).toBe('deadline');expect(signal?.aborted).toBe(true);});
- it('returns Native on dependency failure, expiry, unavailable identity and insufficient budget',async()=>{for(const patch of [{deadlineAt:0},{selectionBudget:1},{target:{artifactId:'missing',activationId:'act-b'}},{principles:[p('b'),p('b')]}]){expect((await prepareAdaptiveIntervention({...input(),...patch},deps())).text).toBe(Object.hasOwn(patch,'selectionBudget') ? 'safe native without target' : 'native unchanged');}expect((await prepareAdaptiveIntervention(input(),{...deps(),revalidate:async()=>{throw new Error('database');}})).reason).toBe('dependency_failed');});
+ it('returns Native on dependency failure, expiry, unavailable identity and insufficient budget',async()=>{for(const patch of [{deadlineAt:0},{selectionBudget:1},{target:{artifactId:'missing',activationId:'act-b'}},{principles:[p('b'),p('b')]}]){expect((await prepareAdaptiveIntervention({...input(),...patch},deps())).text).toBe((Object.hasOwn(patch,'selectionBudget') || Object.hasOwn(patch,'deadlineAt')) ? 'safe native without target' : 'native unchanged');}expect((await prepareAdaptiveIntervention(input(),{...deps(),revalidate:async()=>{throw new Error('database');}})).reason).toBe('dependency_failed');});
 });
 
 describe('operator-controlled admission keeps identities distinct', () => {
@@ -45,4 +45,15 @@ it('can select from admitted user identity while model request identity remains 
   expect(r.reason).toBe('target_prioritized');
   expect(r.selectedPrincipleIds).toEqual(['b']);
   expect(Object.hasOwn(r, 'delivery')).toBe(false);
+});
+
+it('does not retain a cached target when the scene is admitted after its deadline', async () => {
+  const i = input();
+  i.nativePrincipleIds = ['a', 'b'];
+  i.nativeText = deps().renderAndGuard(new Set(['a', 'b']));
+  i.deadlineAt = 0;
+  const r = await prepareAdaptiveIntervention(i, deps());
+  expect(r.reason).toBe('deadline');
+  expect(r.text).toBe(i.nativeWithoutTargetText);
+  expect(r.selectedPrincipleIds).toEqual(['a']);
 });

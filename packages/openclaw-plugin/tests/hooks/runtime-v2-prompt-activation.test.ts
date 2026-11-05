@@ -55,6 +55,7 @@ vi.mock('../../src/core/event-log.js', () => ({
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
       recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordAdaptiveDelivery: vi.fn(),
     }),
   },
 }));
@@ -304,6 +305,14 @@ describe('Adaptive activation — actual local prompt entry', () => {
     expect(payload.principleIds).toContain(target);
     for (const id of payload.principleIds) expect(result?.prependSystemContext).toContain(`${id}-body-`);
     expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":true'));
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal).toHaveBeenCalledTimes(2);
+    const start = journal.mock.calls[0]![1] as Record<string, unknown>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(start).toMatchObject({ receiptState: 'open', execution: 'unknown', selectionPending: true, submission: 'unknown' });
+    expect(end).toMatchObject({ hookInvocationId: start.hookInvocationId, receiptState: 'closed', execution: 'completed', payload: 'prepared', selection: 'selected', submission: 'unknown' });
+    expect(end).not.toHaveProperty('requestId');
+    expect(spy.mock.calls[0]![0]).toHaveProperty('hookInvocationId', start.hookInvocationId);
   });
 
   it('reuses a Native target without duplicating or claiming a new contribution', async () => {
@@ -324,6 +333,9 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const native = await handleBeforePromptBuild(event, makeCtx());
     const result = await handleBeforePromptBuild(event, configured('AA-19'));
     expect(result).toEqual(native);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    expect(journal.mock.calls[1]![1]).toMatchObject({ selection: 'skipped', payload: 'none', submission: 'unknown' });
   });
 
   it('does not interpret a quoted scene marker as a current request', async () => {
@@ -339,6 +351,74 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(admitted(), configured('AA-inactive'));
     expect(JSON.stringify(result)).not.toContain('INACTIVE-MUST-NOT-APPEAR');
+  });
+
+  async function sharedPrepared(deadlineAt = Date.now() + 15000) {
+    await seed();
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const native = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`)
+      .find(id => !native.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside the Native pack');
+    const packed = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir,
+      adaptivePriority: { artifactId: `art-${target}`, activationId: `act_prompt_${target}` }, deadlineAt });
+    expect(packed.adaptivePacking?.status).toBe('prioritized');
+    return { native, target, packed };
+  }
+
+  it('carries shared packing through final prompt assembly with exact target bytes', async () => {
+    const { target, packed } = await sharedPrepared();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext?.split(`${target}-body-`)).toHaveLength(2);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    expect(spy.mock.calls[0]![0]).toMatchObject({ principleIds: packed.principleIds, activationIds: packed.activationIds, artifactIds: packed.artifactIds });
+  });
+
+  it('removes a shared target whose artifact changes between packing and final assembly', async () => {
+    const { target, packed } = await sharedPrepared();
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify({ principleId: target, text: 'changed after pack' }), `art-${target}`);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+    expect(result?.prependSystemContext).not.toContain('changed after pack');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    const payload = spy.mock.calls[0]![0] as { principleIds: string[]; activationIds: string[] };
+    expect(payload.principleIds).not.toContain(target);
+    expect(payload.activationIds).not.toContain(`act_prompt_${target}`);
+    for (const id of payload.principleIds) expect(result?.prependSystemContext).toContain(`${id}-body-`);
+  });
+
+  it('removes the shared contribution when its deadline has elapsed', async () => {
+    const { target, packed } = await sharedPrepared(Date.now() - 1);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+  });
+
+  it('disabling the mapping restores the exact shared Native baseline', async () => {
+    const { native, target, packed } = await sharedPrepared();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const expected = await handleBeforePromptBuild(admitted(), makeCtx(), native);
+    const result = await handleBeforePromptBuild(admitted(), makeCtx(), packed);
+    expect(result).toEqual(expected);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+  });
+
+  it('journal storage failure does not remove an otherwise valid intervention', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    journal.mockImplementationOnce(() => { throw new Error('storage unavailable'); });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const ctx = configured('AA-only');
+    const result = await handleBeforePromptBuild(admitted(), ctx);
+    expect(result?.prependSystemContext).toContain('AA-only-body');
+    expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('Invocation journal unavailable'));
   });
 });
 
