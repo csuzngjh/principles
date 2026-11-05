@@ -59,6 +59,7 @@ import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
 import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
+import type { HostPluginStateSummary, HostStateSummaryResult } from '../install-summary.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -970,13 +971,17 @@ export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolea
  * (it is part of the feature-flag contract and may exist in old configs), but
  * the installer never turns it on.
  */
-export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOverrideResult & {
+export function ensureWorkbuddyGovernanceEnabled(
+  governanceDir: string,
+  options: { persist?: boolean } = {},
+): FlagOverrideResult & {
   hostExplicitOff: boolean;
   keywordExplicitOff: boolean;
   /** The keyword gate as it actually reads back after the migration. */
   keywordPainEnabled: boolean;
   changed: boolean;
 } {
+  const persist = options.persist !== false;
   const configPath = path.join(governanceDir, '.pd', 'config.yaml');
   let rawText: string;
   try { rawText = readFileSync(configPath, 'utf-8'); }
@@ -1011,6 +1016,18 @@ export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOve
   const oldKeyword = raw.features.workbuddy_live_keyword_pain;
   const hostExplicitOff = isRecord(oldHost) && oldHost.enabled === false;
   const keywordExplicitOff = isRecord(oldKeyword) && oldKeyword.enabled === false;
+  // Read-only mode (`status`): report the gates the config ACTUALLY holds and
+  // never write. A flag that is absent is OFF (the registry default), never the
+  // install-time projection — guessing ON would misreport a config that does
+  // not set the gate. The install path keeps its migration below.
+  if (!persist) {
+    return {
+      ok: true, configPath,
+      enabled: isRecord(oldHost) && oldHost.enabled === true,
+      hostExplicitOff, keywordExplicitOff,
+      keywordPainEnabled: isRecord(oldKeyword) && oldKeyword.enabled === true, changed: false,
+    };
+  }
   const alreadyCorrect = isRecord(oldHost) && oldHost.enabled === !hostExplicitOff && oldHost.category === WORKBUDDY_FLAG_CATEGORY
     && isRecord(oldKeyword) && oldKeyword.enabled === false && oldKeyword.category === WORKBUDDY_FLAG_CATEGORY;
   if (alreadyCorrect) {
@@ -1051,6 +1068,68 @@ export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOve
     return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: false };
   }
   return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: true };
+}
+
+/**
+ * The single plugin-state judgment: registration (registry) and enablement
+ * (settings) are INDEPENDENT facts and neither may be inferred from the other
+ * (OD-03). Extracted so the install path and the read-only `status` path share
+ * exactly one implementation.
+ */
+export function readWorkbuddyPluginState(p: WorkbuddyPaths): HostPluginStateSummary {
+  const registry = readHostJsonFile(p.registryPath);
+  const registered = registry.ok && registry.existed && isRecord(registry.value.plugins)
+    ? Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)
+    : false;
+  const settings = readHostJsonFile(p.settingsPath);
+  const enabledPlugins = settings.ok && isRecord(settings.value?.enabledPlugins) ? settings.value.enabledPlugins : undefined;
+  const raw = enabledPlugins === undefined ? undefined : enabledPlugins[WORKBUDDY_PLUGIN_KEY];
+  return {
+    registered,
+    registryReadable: registry.ok,
+    enabled: typeof raw === 'boolean' ? raw : null,
+  };
+}
+
+/**
+ * Read-only host state projection for the installer's `status` command.
+ *
+ * It reports the SAME three independent facts the install summary reports —
+ * registry presence, enablement, governance gates — and is rendered by the
+ * SAME authority (`formatHostStateSummary`). It never writes: an unreadable
+ * source becomes UNKNOWN/UNREADABLE, never a guessed value.
+ */
+export function readWorkbuddyHostState(homeDir: string): HostStateSummaryResult {
+  const p = resolveWorkbuddyPaths(homeDir);
+  const pluginState = readWorkbuddyPluginState(p);
+  const governance = ensureWorkbuddyGovernanceEnabled(p.governanceDir, { persist: false });
+  if (!governance.ok) {
+    const configPath = path.join(p.governanceDir, '.pd', 'config.yaml');
+    return {
+      success: true,
+      hostId: 'workbuddy',
+      pluginState,
+      governance: {
+        enabled: false,
+        explicitOptOut: false,
+        configPath,
+        readable: false,
+        unreadableReason: `${governance.reason} (${configPath})`,
+      },
+    };
+  }
+  return {
+    success: true,
+    hostId: 'workbuddy',
+    pluginState,
+    governance: {
+      enabled: governance.enabled,
+      explicitOptOut: governance.hostExplicitOff,
+      keywordPainEnabled: governance.keywordPainEnabled,
+      configPath: governance.configPath,
+      readable: true,
+    },
+  };
 }
 
 /**
@@ -2124,20 +2203,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
    * the engine's exit status. An unreadable registry must NOT be reported as
    * "installed" (rc-9).
    */
-  private readInstalledPluginState(): { registered: boolean; registryReadable: boolean; enabled: boolean | null } {
-    const p = this.paths();
-    const registry = readHostJsonFile(p.registryPath);
-    const registered = registry.ok && registry.existed && isRecord(registry.value.plugins)
-      ? Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)
-      : false;
-    const settings = readHostJsonFile(p.settingsPath);
-    const enabledPlugins = settings.ok && isRecord(settings.value?.enabledPlugins) ? settings.value.enabledPlugins : undefined;
-    const raw = enabledPlugins === undefined ? undefined : enabledPlugins[WORKBUDDY_PLUGIN_KEY];
-    return {
-      registered,
-      registryReadable: registry.ok,
-      enabled: typeof raw === 'boolean' ? raw : null,
-    };
+  private readInstalledPluginState(): HostPluginStateSummary {
+    return readWorkbuddyPluginState(this.paths());
   }
 
   /**
