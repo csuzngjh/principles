@@ -86,5 +86,37 @@
         "runtime-v2/adapter/pi-ai-http-transport.ts"
       ]
     }
-  ]
+  ],
+  "namingPolicy": {
+    "description": "PRI-1104 single-version convergence. Derived by scripts/check-naming-policy.mjs and consumed by the naming guard from PR-3 onward. Keep this as the single exemption authority; do not hand-maintain a shadow list in eslint config or CI. Phase: warn-only in PR-1, error from PR-3.",
+    "frozenWireLiterals": [
+      "runtime_v2_prompt_activations_injected",
+      "pd-runtime-v2",
+      "pd-runtime-v2-diagnosis",
+      "pd.mcp-binding.v1",
+      "rulecode_context_v2",
+      "principle_governance_projection_v2",
+      "governance_experience_v1",
+      "model_aware_v2",
+      "/api/v1/"
+    ],
+    "exemptPaths": [
+      "docs/adr/",
+      "docs/archive/",
+      "docs/audit/",
+      "CHANGELOG.md",
+      ".tmp/",
+      "packages/principles-core/src/runtime-v2/__tests__/fixtures/",
+      "packages/host-runtime/tests/"
+    ],
+    "exemptFiles": [
+      "packages/principles-core/src/runtime-v2/adapter/output-schema-registry.ts",
+      "packages/host-runtime/src/prompt-injection-budget-observation.ts",
+      "packages/pd-console/src/server/index.ts",
+      "packages/pd-console/src/ui/api.ts",
+      "packages/principles-core/src/runtime-v2/types/event-types.ts",
+      "packages/principles-core/src/runtime-v2/pain-signal-observability.ts",
+      "packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts"
+    ]
+  }
 }

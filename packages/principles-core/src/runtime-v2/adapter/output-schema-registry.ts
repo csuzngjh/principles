@@ -57,16 +57,61 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
 ]);
 
 /**
+ * PRI-1104 Stage 0 (expand) — version-neutral ↔ versioned contract refs.
+ *
+ * One declaration, no shadow list. Both directions are registered up front so
+ * this table never needs to change during the single-version convergence:
+ *   - now (PR-1..PR-5): the registry still owns versioned keys, so a
+ *     version-neutral ref resolves FORWARD through this table;
+ *   - PR-6: registry keys become version-neutral, so historical versioned
+ *     refs resolve BACKWARD through the same table.
+ *
+ * `resolveOutputSchema` always tries an exact registry hit first, so this
+ * table is inert for every ref already registered. PR-6 can therefore be
+ * reverted independently: whichever ref the writer uses, the reader resolves.
+ *
+ * Deliberately NOT listed: retired v1 refs such as
+ * `signal-classification-output-v1`. Those were removed as an intentional
+ * breaking change (GFI removal SPEC); re-admitting them would hide the
+ * fail-loud `Unknown outputSchemaRef` contract.
+ */
+const CONTRACT_REF_PAIRS: readonly (readonly [string, string])[] = [
+  ['diagnostician-output', 'diagnostician-output-v1'],
+  ['diag-rootcause-output', 'diag-rootcause-output-v1'],
+  ['diag-distiller-output', 'diag-distiller-output-v1'],
+  ['dreamer-output', 'dreamer-output-v1'],
+  ['philosopher-output', 'philosopher-output-v1'],
+  ['scribe-output', 'scribe-output-v1'],
+  ['artificer-rule-output', 'artificer-rule-output-v2'],
+  ['evaluator-output', 'evaluator-output-v1'],
+  ['rollout-reviewer-output', 'rollout-reviewer-output-v1'],
+  ['correction-observer-output', 'correction-observer-output-v1'],
+  ['signal-classification-output', 'signal-classification-output-v2'],
+  ['reuse-evaluation-output', 'reuse-evaluation-output-v1'],
+  ['learning-lab-actor-action', 'learning-lab-actor-action-v1'],
+];
+
+const aliasEntries: [string, string][] = [];
+for (const [neutral, versioned] of CONTRACT_REF_PAIRS) {
+  aliasEntries.push([neutral, versioned], [versioned, neutral]);
+}
+export const OUTPUT_SCHEMA_REF_ALIASES: ReadonlyMap<string, string> = new Map(aliasEntries);
+
+/**
  * Resolve the TypeBox schema for a given `outputSchemaRef`.
  *
  * @param ref - the outputSchemaRef string passed by a runner (e.g. 'diag-rootcause-output-v1').
  * @returns the matching schema, or `undefined` when:
  *   - `ref` is undefined/null/empty (caller should apply its own default), OR
- *   - `ref` is a non-empty string not present in the registry (caller should fail loud).
+ *   - `ref` is a non-empty string not present in the registry or the PRI-1104
+ *     alias table (caller should fail loud).
  * Callers MUST distinguish these two cases: an absent ref is "use default", an
  * unknown ref is a bug (fail loud per rc-3-fail-loud-missing).
  */
 export function resolveOutputSchema(ref: string | undefined | null): TSchema | undefined {
   if (!ref) return undefined;
-  return OUTPUT_SCHEMA_REGISTRY.get(ref);
+  const direct = OUTPUT_SCHEMA_REGISTRY.get(ref);
+  if (direct !== undefined) return direct;
+  const alias = OUTPUT_SCHEMA_REF_ALIASES.get(ref);
+  return alias === undefined ? undefined : OUTPUT_SCHEMA_REGISTRY.get(alias);
 }
