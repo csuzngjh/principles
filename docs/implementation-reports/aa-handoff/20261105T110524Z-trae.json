@@ -1,0 +1,319 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T110524Z-trae",
+  "previousCheckpoint": "20261105T105757Z-trae",
+  "generatedAt": "2026-11-05T11:05:24Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "为 v0.2 设计修订创建 docs-only PR #2360 交付设计差异与检查点；更正上一检查点把 #2358 记为 OPEN/MERGEABLE 的事实错误（#2358 已于 2026-11-05T10:53:48Z 合并）。设计仍未获 Owner 批准，未写实现代码、未跑实现测试。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+    "branch": "ai/PRI-1109-conservative-reconcile",
+    "baseCommit": "c6ba18fe9",
+    "headCommit": "f6ddbb8d6",
+    "dirtyPaths": [
+      "docs/implementation-reports/aa-handoff/20261105T110524Z-trae.md",
+      "docs/implementation-reports/aa-handoff/20261105T110524Z-trae.json",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "pushedCommit": "f6ddbb8d6",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2360",
+    "remoteChecks": "PR #2360 创建时 head f6ddbb8d6：多数 job 因 docs-only 路径过滤 skipping；Verify Merge Gate 与 Dependency Audit 观察时为 pending。本检查点提交后 head 再次推进，其 CI 需重新核验；未声明为绿。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1109",
+      "scope": "交付 v0.2 设计差异与检查点（docs-only PR #2360）；更正 #2358 状态事实；不写实现",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "docs/specs/PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.2.md",
+        "docs/implementation-reports/aa-handoff/"
+      ],
+      "commits": ["f6ddbb8d6"],
+      "acceptance": [
+        {
+          "criterion": "五点逐条核实并给出 v0.1 章节与行号，判定属实/部分属实/不属实",
+          "result": "PASS",
+          "evidenceRefs": ["previous-checkpoint", "design-v0.1"]
+        },
+        {
+          "criterion": "属实的按意见修改；不属实的写明不成立原因，不把正确部分改坏",
+          "result": "PASS",
+          "evidenceRefs": ["previous-checkpoint", "design-v0.2"]
+        },
+        {
+          "criterion": "修订稿保留最小范围，不新增可选形态、不另开纯记录 PR",
+          "result": "PASS",
+          "evidenceRefs": ["design-v0.2"]
+        },
+        {
+          "criterion": "docs-only PR 交付设计差异与检查点，PR 模板完整填写",
+          "result": "PASS",
+          "evidenceRefs": ["pr-2360"]
+        },
+        {
+          "criterion": "独立核实 PRI-1107 状态，不把前置票报成完成",
+          "result": "PASS",
+          "evidenceRefs": ["pri1107-linear", "pri1107-g0"]
+        },
+        {
+          "criterion": "不声称 #2358 已全部通过；如实记录门禁状态",
+          "result": "PASS",
+          "evidenceRefs": ["pr-2358", "pr-2360"]
+        },
+        {
+          "criterion": "未写实现代码、未跑实现测试、未声称已获 Owner 批准",
+          "result": "PASS",
+          "evidenceRefs": ["checkpoint-md"]
+        },
+        {
+          "criterion": "Owner 明确批准 v0.2",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        },
+        {
+          "criterion": "实现代码、代码测试、真实宿主证据",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "Owner 明确批准 v0.2（五点修订 + 三项已定稿范围）",
+        "协调者确认 PRI-1109 被置为 Done 的来源并修正 Linear 状态",
+        "PR #2360 检查状态核验（尤其 Verify Merge Gate）",
+        "批准后从最新 origin/main 新建工作树实现并运行反例测试",
+        "PRI-1107 仍按原验收保持 Backlog，不提前解除"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "pr-create",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "gh pr create --repo csuzngjh/principles --base main --head ai/PRI-1109-conservative-reconcile --body-file .tmp/pri-1109/pr-v02-body.md",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2360"]
+    },
+    {
+      "id": "pr-state",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "gh pr view 2360 --json number,state,isDraft,mergeable,headRefOid,baseRefName,changedFiles,url",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2360"]
+    },
+    {
+      "id": "pr-checks",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "gh pr checks 2360",
+      "result": "PENDING",
+      "exitCode": 8,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2360"]
+    },
+    {
+      "id": "error-router-diff",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "npm run error:context -- --base origin/main --json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["checkpoint-md"]
+    },
+    {
+      "id": "pr-2358-state",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "gh pr view 2358 --json number,state,title,url,headRefOid",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2358"]
+    },
+    {
+      "id": "implementation-tests",
+      "cwd": null,
+      "command": "n/a — 未获批，按要求不运行实现测试",
+      "result": "SKIPPED",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "checkpoint-md",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\implementation-reports\\aa-handoff\\20261105T110524Z-trae.md",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": "f3c9e5ecd8e986e03a6b56c8d69edbaed609591d046c023d37449ac7a2c8967e",
+      "supports": "PR #2360 交付状态、#2358 已合并的事实更正、门禁现状与后续阻塞",
+      "limitations": "不是设计批准，不是实现；检查点提交后 PR head 与 CI 需重新核验"
+    },
+    {
+      "id": "previous-checkpoint",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\implementation-reports\\aa-handoff\\20261105T105757Z-trae.md",
+      "observedAt": "2026-11-05T10:57:57Z",
+      "sha256": "df79f5ebd933ca8678fb67b80d61a7f9c77a2d34539196d9368f2a0d680bc573",
+      "supports": "五点逐条判定表、v0.1→v0.2 diff 摘要、PRI-1107 独立核实",
+      "limitations": "其中 pr-2358 证据项误记为 OPEN/MERGEABLE，已由本检查点更正"
+    },
+    {
+      "id": "design-v0.2",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\specs\\PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.2.md",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": "7393be4b6459782c8a09a937e3982c486a6428255003636113067c8ae0b03e00",
+      "supports": "五点修订后的完整设计",
+      "limitations": "未获 Owner 批准"
+    },
+    {
+      "id": "design-v0.1",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile\\docs\\specs\\PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.1.md",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": "e54cd9539937fca33c3d9c9b3a207b9c1a06cfc42d81cfb584957e8687bd5756",
+      "supports": "五点判定所引用的原文行号；未被改写",
+      "limitations": "状态仍为 NEEDS_OWNER"
+    },
+    {
+      "id": "pr-2360",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2360",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": null,
+      "supports": "OPEN、非 draft、MERGEABLE、changedFiles=4、head f6ddbb8d6；检查状态 pending 与 skip",
+      "limitations": "创建后新增检查点提交会推进 head，其 CI 未核验"
+    },
+    {
+      "id": "pr-2358",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2358",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": null,
+      "supports": "state=MERGED、mergedAt=2026-11-05T10:53:48Z、head 7ae94410d；不含 v0.2",
+      "limitations": "合并后远程分支被删，后续推送重建同名分支"
+    },
+    {
+      "id": "pri1107-linear",
+      "kind": "CODE",
+      "locator": "https://linear.app/principlesdisciple/issue/PRI-1107/aa-02h-冻结最小调用契约文件归属及-g0-设计确认",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": null,
+      "supports": "状态 Backlog；验收要求 Owner 书面确认，Owner 仅条件批准离线范围",
+      "limitations": "结论依据 Linear 评论与 G0 文档"
+    },
+    {
+      "id": "pri1107-g0",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1106-aa-core-design\\docs\\specs\\PD-AA-G0-CORE-DESIGN-v0.1.md",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": null,
+      "supports": ":3 条件批准离线准备；:7 不能把整个 G0 记为通过；:119 完整 G0 仍需稳定机会/请求身份；:121 G0 尚未通过",
+      "limitations": "另一工作树文件；未修改"
+    },
+    {
+      "id": "pri1109-linear-state",
+      "kind": "CODE",
+      "locator": "https://linear.app/principlesdisciple/issue/PRI-1109/aa-04m-落实四维-receipt-与-journal-转换和对账契约",
+      "observedAt": "2026-11-05T11:05:24Z",
+      "sha256": null,
+      "supports": "state=Done、updatedAt=2026-11-05T10:53:14.387Z；与实现为零、设计未批准冲突",
+      "limitations": "未自行改回状态"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "design-approval",
+      "issue": "PRI-1109",
+      "reason": "v0.2 尚未获 Owner 明确批准；五点修订与三项范围需一次性确认",
+      "evidenceRefs": ["design-v0.2", "pr-2360"],
+      "neededFrom": "Owner",
+      "unblockAction": "Owner 审阅 PR #2360 的设计差异与检查点后明确批准或提出修订",
+      "independentWork": "设计侧已无可做的只读准备；实现不得先于批准"
+    },
+    {
+      "id": "linear-state-discrepancy",
+      "issue": "PRI-1109",
+      "reason": "工单被外部置为 Done，但实现代码为零、设计未批准",
+      "evidenceRefs": ["pri1109-linear-state"],
+      "neededFrom": "协调者/Owner",
+      "unblockAction": "确认 Done 来源；若属误置，按正式流程改回并留痕",
+      "independentWork": "不影响设计修订与批准；不得把 Done 当作验收证据"
+    },
+    {
+      "id": "linear-blocker-pri1107",
+      "issue": "PRI-1109",
+      "reason": "PRI-1107 验收未满足（G0 未通过、稳定请求身份未闭合），Backlog 是正确状态",
+      "evidenceRefs": ["pri1107-linear", "pri1107-g0"],
+      "neededFrom": "PRI-1107 / Owner",
+      "unblockAction": "按 PRI-1107 原验收完成 Owner 书面确认，不得虚报完成",
+      "independentWork": "设计修订与批准准备可继续；不得提前实现"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1109",
+      "action": "Owner 一次性审阅并批准 v0.2（五点修订 + 只读库/薄 CLI + 7 天 + 1000 条）",
+      "dependsOn": ["design-approval"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 明确批准 v0.2 或给出修订意见"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1109",
+      "action": "协调者核实 PRI-1109 被置为 Done 的来源；如属误置，按正式流程修正",
+      "dependsOn": ["linear-state-discrepancy"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Linear 状态与事实一致并有留痕"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1109",
+      "action": "核验 PR #2360 最终 head 的检查状态（尤其 Verify Merge Gate），如实记录；不合并",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "PR #2360 检查状态被核验并有记录"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1109",
+      "action": "批准后从最新 origin/main 新建工作树：先纯逻辑 + 反例测试，再薄 CLI；构建后新建实现 PR",
+      "dependsOn": ["design-approval"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "实现与反例测试完成，PR 创建且未合并"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "implementationCodeWritten": false,
+    "implementationTestsRun": false,
+    "designV01Modified": false,
+    "linearStatusChanged": false,
+    "prMerged": false,
+    "authorizationRefs": [
+      "Owner 转来的五点评审：按五点修订现有设计，保留最小范围；三项范围已定稿",
+      "协调者要求：设计批准前不写实现；交付设计差异与检查点；PRI-1107 独立核实并单独记录"
+    ]
+  }
+}
