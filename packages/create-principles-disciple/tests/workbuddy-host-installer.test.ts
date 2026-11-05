@@ -42,7 +42,7 @@ import {
   runWorkbuddyEarlyPreflight,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
-import { formatHostPluginEnablementLine } from '../src/install-summary.js';
+import { formatHostStateSummary } from '../src/install-summary.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
@@ -517,14 +517,42 @@ describe('WorkBuddyHostInstaller.install — engine-unreachable direct-write fal
 // ─── install ≠ enable + idempotency ──────────────────────────────────────────
 
 describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', () => {
-  it('fresh install leaves the declared default (disabled), and 3 reinstalls never overwrite an Owner enable', async () => {
+  it('fresh install summary says INSTALLED / DISABLED (governance ON never implies hooks run)', async () => {
     const created = lab();
     const first = await created.installer.install(installCtx(created));
     expect(first.success, first.reason).toBe(true);
     expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
-    // The summary line is driven by the ACTUAL post-install value.
-    expect(first.pluginEnabled).toBe(false);
-    expect(formatHostPluginEnablementLine(first)).toContain('installed but NOT enabled');
+    // The summary is driven by the ACTUAL post-install host files, not internals.
+    expect(first.pluginState).toEqual({ registered: true, registryReadable: true, enabled: false });
+
+    const summary = formatHostStateSummary([first], first.success);
+    expect(summary).toContain('  WorkBuddy plugin ................. INSTALLED / DISABLED');
+    expect(summary).toContain('  WorkBuddy governance ............. ON');
+    expect(summary.join('\n')).not.toContain('INSTALLED / ENABLED');
+    expect(summary).toContain('Enable Principles Disciple in WorkBuddy plugin management.');
+    expect(summary).toContain('Then start a new session or run /reload-plugins.');
+    // Governance ON + plugin DISABLED must explicitly say the hooks are inactive.
+    expect(summary).toContain('Hooks stay INACTIVE while the plugin is disabled, so "PD记录痛苦：" is not delivered.');
+  });
+
+  it('Owner-enabled install summary says INSTALLED / ENABLED and drops the activation guidance', async () => {
+    const created = lab();
+    fs.writeFileSync(settingsPath(created), JSON.stringify({ enabledPlugins: { [WORKBUDDY_PLUGIN_KEY]: true } }, null, 2));
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect(result.pluginState).toEqual({ registered: true, registryReadable: true, enabled: true });
+
+    const summary = formatHostStateSummary([result], result.success).join('\n');
+    expect(summary).toContain('  WorkBuddy plugin ................. INSTALLED / ENABLED');
+    expect(summary).not.toContain('Next action:');
+    expect(summary).not.toContain('Hooks stay INACTIVE');
+  });
+
+  it('3 reinstalls never overwrite an Owner enable, and every summary reflects the real value', async () => {
+    const created = lab();
+    const first = await created.installer.install(installCtx(created));
+    expect(first.success, first.reason).toBe(true);
+    expect(first.pluginState?.enabled).toBe(false);
 
     // The Owner explicitly enables the plugin through the host (not the installer).
     const settings = readJson(settingsPath(created));
@@ -538,8 +566,8 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
       expect(rerun.success, `reinstall ${attempt} failed: ${rerun.reason}`).toBe(true);
       expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
       // The summary must report the preserved Owner enable, not the manifest default.
-      expect(rerun.pluginEnabled).toBe(true);
-      expect(formatHostPluginEnablementLine(rerun)).toContain('the only Pain intake is the explicit');
+      expect(rerun.pluginState).toEqual({ registered: true, registryReadable: true, enabled: true });
+      expect(formatHostStateSummary([rerun], rerun.success)).toContain('  WorkBuddy plugin ................. INSTALLED / ENABLED');
     }
   });
 
@@ -549,7 +577,7 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
     const result = await created.installer.install(installCtx(created));
     expect(result.success, result.reason).toBe(true);
     expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(true);
-    expect(result.pluginEnabled).toBe(true);
+    expect(result.pluginState?.enabled).toBe(true);
   });
 
   it('preserves an Owner disable that predates the first install', async () => {
@@ -558,7 +586,17 @@ describe('WorkBuddyHostInstaller.install — install ≠ enable (SPEC §6.4)', (
     const result = await created.installer.install(installCtx(created));
     expect(result.success, result.reason).toBe(true);
     expect((readJson(settingsPath(created)).enabledPlugins as Record<string, unknown>)[WORKBUDDY_PLUGIN_KEY]).toBe(false);
-    expect(result.pluginEnabled).toBe(false);
+    expect(result.pluginState?.enabled).toBe(false);
+  });
+
+  it('a failed install prints NO summary lines (no success claim)', async () => {
+    const created = lab({ engine: 'unreachable' });
+    fs.mkdirSync(path.dirname(registryPath(created)), { recursive: true });
+    fs.writeFileSync(registryPath(created), '{ "plugins": ');
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success).toBe(false);
+    expect(result.pluginState).toBeUndefined();
+    expect(formatHostStateSummary([result], result.success)).toEqual([]);
   });
 });
 
@@ -1237,10 +1275,11 @@ describe('describeGovernanceDefaults (PRI-1064 review)', () => {
     expect(note).toContain('four-term keyword Pain detection is ON');
   });
 
-  it('reports the default-ON state with its install attribution', () => {
+  it('reports the default-ON state with its install attribution and the plugin-disabled caveat', () => {
     const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
     expect(note).toContain('enabled by this install');
-    expect(note).toContain('four-term keyword Pain detection is ON');
+    expect(note).toContain('has no effect until the plugin is enabled');
+    expect(note).toContain('four-term keyword Pain detection is ON (configured only — it cannot run while the plugin is disabled)');
   });
 
   it('names the missing governance config as UNKNOWN rather than claiming a state', () => {

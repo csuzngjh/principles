@@ -118,13 +118,20 @@ export interface HostInstallResult {
     readonly configPath?: string;
   };
   /**
-   * SPEC §6.4 (install ≠ enable): the ACTUAL `enabledPlugins[pluginKey]` value
-   * left behind by this install — the Owner's explicit choice when one exists,
-   * otherwise the plugin manifest's declared default. Only hosts whose plugin
-   * carries an explicit enablement gate set this. When false the plugin's hooks
-   * do not run, so the summary must not imply PD is already working.
+   * SPEC §6.4 (install ≠ enable): the states an install can leave behind are
+   * NOT equivalent. `registered` comes from the host registry
+   * (`installed_plugins.json`), `enabled` from `settings.json`'s
+   * `enabledPlugins` entry, and neither may be inferred from the other or from
+   * the governance flag. Only hosts with an explicit enablement gate set this.
    */
-  readonly pluginEnabled?: boolean;
+  readonly pluginState?: {
+    /** Host registry carries the plugin entry (currently installed). */
+    readonly registered: boolean;
+    /** False when the registry could not be read — "installed" must NOT be claimed. */
+    readonly registryReadable: boolean;
+    /** `enabledPlugins[key]`; null when absent or unreadable (activation unknown). */
+    readonly enabled: boolean | null;
+  };
 }
 
 export interface HostUninstallResult {

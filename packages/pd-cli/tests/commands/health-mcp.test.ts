@@ -414,6 +414,70 @@ describe('assessMcpHealth — declared entry integrity (PRI-1130)', () => {
     });
   });
 
+  it('workbuddy: a manifest-declared CUSTOM hooks path is verified, and a missing one is caught', () => {
+    withHome((home) => {
+      const fixture = makeSharedFixture(home, 'workbuddy');
+      const wrapper = path.join(fixture.payloadRoot, 'scripts', 'wrapper.cjs');
+      fs.mkdirSync(path.dirname(wrapper), { recursive: true });
+      fs.writeFileSync(wrapper, '// pd hook wrapper\n');
+      // Legal declaration form (manifest-facts.json): plugin.json `hooks` may
+      // point to a custom hooks JSON file instead of the root hooks/hooks.json.
+      const customHooks = './hooks/custom-hooks.json';
+      writeJson(path.join(fixture.payloadRoot, '.codebuddy-plugin', 'plugin.json'), {
+        name: 'principles-disciple',
+        hooks: customHooks,
+      });
+      writeJson(path.join(fixture.payloadRoot, 'hooks', 'custom-hooks.json'), {
+        hooks: {
+          PreToolUse: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: 'node "${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs" PreToolUse' }],
+          }],
+        },
+      });
+
+      const healthy = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(healthy.status).toBe('HEALTHY');
+      expect(healthy.declaredEntries.missing).toEqual([]);
+      expect(healthy.declaredEntries.checked).toBeGreaterThan(0);
+
+      // The declared custom hooks FILE disappearing is itself a missing entry.
+      fs.rmSync(path.join(fixture.payloadRoot, 'hooks', 'custom-hooks.json'));
+      const broken = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(broken.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(broken.reason).toBe('declared_entry_missing');
+      expect(broken.declaredEntries.missing.map((entry) => entry.declaration))
+        .toContain('.codebuddy-plugin/plugin.json#hooks');
+    });
+  });
+
+  it('workbuddy: commands inside a custom hooks file are verified under that file', () => {
+    withHome((home) => {
+      const fixture = makeSharedFixture(home, 'workbuddy');
+      const wrapper = path.join(fixture.payloadRoot, 'scripts', 'wrapper.cjs');
+      writeJson(path.join(fixture.payloadRoot, '.codebuddy-plugin', 'plugin.json'), {
+        name: 'principles-disciple',
+        hooks: './hooks/custom-hooks.json',
+      });
+      writeJson(path.join(fixture.payloadRoot, 'hooks', 'custom-hooks.json'), {
+        hooks: {
+          PreToolUse: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: 'node "${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs" PreToolUse' }],
+          }],
+        },
+      });
+      // wrapper intentionally absent → the custom file's command is a missing entry.
+      const broken = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(broken.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(broken.reason).toBe('declared_entry_missing');
+      const missing = broken.declaredEntries.missing;
+      expect(missing.map((entry) => entry.declaration)
+        .some((declaration) => declaration.startsWith('hooks/custom-hooks.json#hooks.PreToolUse'))).toBe(true);
+      expect(missing.map((entry) => path.resolve(String(entry.resolved)))).toContain(path.resolve(wrapper));
+    });
+  });
+
   it('openclaw: a missing declared skill directory is caught by the same universal rule', () => {
     withHome((home) => {
       const fixture = makeSharedFixture(home, 'openclaw');

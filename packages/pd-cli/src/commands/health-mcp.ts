@@ -386,6 +386,26 @@ function commandPathTokens(command: string): string[] {
   return tokens;
 }
 
+/** Collect path tokens from an inline hook event map (`EventName[] → hooks[] → command`). */
+function collectHookCommands(
+  hooks: Record<string, unknown>,
+  declarationFile: string,
+  add: (declaration: string, rawToken: string) => string | null,
+): void {
+  for (const [event, blocks] of Object.entries(hooks)) {
+    if (!Array.isArray(blocks)) continue;
+    blocks.forEach((block, blockIndex) => {
+      if (!isRecord(block) || !Array.isArray(block.hooks)) return;
+      block.hooks.forEach((hook, hookIndex) => {
+        if (!isRecord(hook) || typeof hook.command !== 'string') return;
+        for (const token of commandPathTokens(hook.command)) {
+          add(`${declarationFile}#hooks.${event}[${blockIndex}].hooks[${hookIndex}].command`, token);
+        }
+      });
+    });
+  }
+}
+
 /**
  * Read every declaration surface of the installed payload and verify that each
  * declared file path actually exists. This is the universal install-integrity
@@ -394,12 +414,12 @@ function commandPathTokens(command: string): string[] {
 function collectDeclaredEntries(payloadRoot: string): McpHealthSection['declaredEntries'] {
   const entries: McpDeclaredEntry[] = [];
   const seen = new Set<string>();
-  const add = (declaration: string, rawToken: string): void => {
-    if (!looksLikeEntryPath(rawToken)) return;
+  const add = (declaration: string, rawToken: string): string | null => {
+    if (!looksLikeEntryPath(rawToken)) return null;
     const token = unquoteToken(rawToken);
     const resolved = resolveDeclaredToken(token, payloadRoot);
     const key = resolved ?? `${declaration}\u0000${token}`;
-    if (seen.has(key)) return;
+    if (seen.has(key)) return resolved;
     seen.add(key);
     entries.push({
       declaration,
@@ -407,6 +427,7 @@ function collectDeclaredEntries(payloadRoot: string): McpHealthSection['declared
       resolved,
       exists: resolved === null ? 'unverified' : declaredEntryExists(resolved),
     });
+    return resolved;
   };
 
   for (const segments of DECLARED_ENTRY_SURFACES) {
@@ -445,20 +466,31 @@ function collectDeclaredEntries(payloadRoot: string): McpHealthSection['declared
       });
     }
 
-    // Hook command strings (`hooks/<event>[...].hooks[...].command`).
-    if (isRecord(record.hooks)) {
-      for (const [event, blocks] of Object.entries(record.hooks)) {
-        if (!Array.isArray(blocks)) continue;
-        blocks.forEach((block, blockIndex) => {
-          if (!isRecord(block) || !Array.isArray(block.hooks)) return;
-          block.hooks.forEach((hook, hookIndex) => {
-            if (!isRecord(hook) || typeof hook.command !== 'string') return;
-            for (const token of commandPathTokens(hook.command)) {
-              add(`${declarationFile}#hooks.${event}[${blockIndex}].hooks[${hookIndex}].command`, token);
-            }
-          });
-        });
-      }
+    // Hook commands. `hooks` has two LEGAL declaration forms (frozen host
+    // contract, manifest-facts.json: "hooks field in plugin.json may also point
+    // to a custom path"):
+    //   - an inline event map  → verify each command's path tokens;
+    //   - a path (string | string[]) to a custom hooks JSON file → the path
+    //     itself is a declared entry, and when it parses its commands are
+    //     verified under that file's own declaration label.
+    const hooksField = record.hooks;
+    if (typeof hooksField === 'string' || Array.isArray(hooksField)) {
+      const declaredHooks = typeof hooksField === 'string'
+        ? [hooksField]
+        : hooksField.filter((value): value is string => typeof value === 'string');
+      declaredHooks.forEach((rawToken, index) => {
+        const declaration = typeof hooksField === 'string'
+          ? `${declarationFile}#hooks`
+          : `${declarationFile}#hooks[${index}]`;
+        const resolved = add(declaration, rawToken);
+        if (resolved === null || declaredEntryExists(resolved) !== true) return;
+        const customHooks = readJsonRecord(resolved);
+        if (customHooks === null || !isRecord(customHooks.hooks)) return;
+        const customLabel = path.relative(payloadRoot, resolved).split(path.sep).join('/');
+        collectHookCommands(customHooks.hooks, customLabel, add);
+      });
+    } else if (isRecord(hooksField)) {
+      collectHookCommands(hooksField, declarationFile, add);
     }
   }
 
