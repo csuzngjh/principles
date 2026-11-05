@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   INTERVENTION_SHORT_SOURCE_RETENTION_DAYS,
+  canonicalStringify,
   validateAdaptiveDeliveryRecord,
 } from '@principles/core/runtime-v2';
 
@@ -21,7 +22,7 @@ import {
 
 export const ADAPTIVE_JOURNAL_SCHEMA_VERSION = 'pd-aa-journal-reconciliation/v1' as const;
 export const ADAPTIVE_JOURNAL_CANDIDATE_DIRS = ['.pd/logs', '.state/logs'] as const;
-export const ADAPTIVE_JOURNAL_MAX_DATE_FILES_PER_DIR = 8;
+export const ADAPTIVE_JOURNAL_MAX_DATE_FILES_PER_DIR = 9;
 export const ADAPTIVE_JOURNAL_MAX_FILE_BYTES = 4 * 1024 * 1024;
 export const ADAPTIVE_JOURNAL_MAX_INVOCATIONS = 1000;
 export const ADAPTIVE_JOURNAL_MAX_TERMINAL_VARIANTS = 5;
@@ -268,7 +269,7 @@ interface BoundedReadResult {
 }
 
 interface ParsedJournalRecord {
-  projectionKey: string;
+  identityKey: string;
   ts: string;
   tsMs: number;
   state: 'open' | 'closed' | 'reconciled';
@@ -502,6 +503,12 @@ function resolveWindow(
   for (let cursor = firstDayMs; cursor <= endMs; cursor += DAY_MS) {
     dates.push(utcDateKey(cursor));
   }
+  // EventLog flushes the in-memory buffer into a file named by the flush time,
+  // while each record's ts/date is fixed at creation. A record created just
+  // before midnight can therefore be appended to the next UTC day's file, so
+  // the day after the window end is a candidate even though its own date does
+  // not intersect the window. Envelope ts still decides inclusion later.
+  dates.push(utcDateKey(firstDayMs + dates.length * DAY_MS));
 
   return {
     ok: true,
@@ -630,23 +637,13 @@ function readBoundedLines(filePath: string, maxBytes: number): BoundedReadResult
   }
 }
 
-function projectionKey(record: ParsedJournalRecord): string {
-  const p = record.projection;
-  return JSON.stringify([
-    p.receiptState,
-    p.execution,
-    p.payload,
-    p.selection,
-    p.submission,
-    p.selectionPending,
-    p.reason,
-    p.artifactId,
-    p.activationId,
-    p.requestId,
-    p.evidenceReferencePresent,
-    p.evidenceIndependentlyVerifiedAsRecorded,
-    p.hostKillConfirmedAsRecorded,
-  ]);
+function identityKey(record: ParsedJournalRecord): string {
+  // Exact duplication is decided on the whole normalized record data, not on
+  // the display projection: two terminals that differ only in evidence reference
+  // or target digest are different observations and must stay conflicted.
+  const canonical = canonicalStringify(record.data);
+  if (canonical.truncated) return `${record.ts}|${canonical.text}`;
+  return canonical.text;
 }
 
 function buildProjection(data: Record<string, unknown>, fallbackTs: string): AdaptiveJournalRecordProjection {
@@ -714,12 +711,12 @@ function classifyGroup(options: {
   let duplicateOpen = 0;
   let duplicateTerminal = 0;
   for (const record of group.records) {
-    if (seen.has(record.projectionKey)) {
+    if (seen.has(record.identityKey)) {
       if (record.state === 'open') duplicateOpen += 1;
       else duplicateTerminal += 1;
       continue;
     }
-    seen.add(record.projectionKey);
+    seen.add(record.identityKey);
     deduped.push(record);
   }
 
@@ -751,11 +748,23 @@ function classifyGroup(options: {
     reasonCodes.push(group.invalidReason);
     unknowns.push('存在无法归属或未通过校验的记录，该调用不能作为配对证据');
   } else if (opens.length === 0 && terminals.length > 0) {
-    classification = 'terminal_only';
+    const distinctTerminalKeys = new Set(terminals.map((record) => record.identityKey));
+    if (distinctTerminalKeys.size > 1) {
+      classification = 'conflicted';
+      reasonCodes.push('conflicting_terminal_states');
+    } else {
+      classification = 'terminal_only';
+    }
     reasonCodes.push('start_not_visible_in_range');
     unknowns.push('开始记录在当前范围内不可见');
   } else if (opens.length > 0 && terminals.length === 0) {
-    classification = 'open_only';
+    const distinctOpenKeys = new Set(opens.map((record) => record.identityKey));
+    if (distinctOpenKeys.size > 1) {
+      classification = 'conflicted';
+      reasonCodes.push('multiple_starts_conflict');
+    } else {
+      classification = 'open_only';
+    }
     reasonCodes.push('terminal_not_visible_in_range');
     if (!window.endIsNow) reasonCodes.push('window_end_explicit_not_now');
     unknowns.push('终态记录在当前范围内不可见');
@@ -764,8 +773,8 @@ function classifyGroup(options: {
     classification = 'invalid';
     unknowns.push('该调用没有任何可归属的记录');
   } else {
-    const distinctOpenKeys = new Set(opens.map((record) => record.projectionKey));
-    const distinctTerminalKeys = new Set(terminals.map((record) => record.projectionKey));
+    const distinctOpenKeys = new Set(opens.map((record) => record.identityKey));
+    const distinctTerminalKeys = new Set(terminals.map((record) => record.identityKey));
     if (distinctOpenKeys.size > 1) {
       classification = 'conflicted';
       reasonCodes.push('multiple_starts_conflict');
@@ -1115,7 +1124,7 @@ export function reconcileAdaptiveJournal(input: ReconcileAdaptiveJournalInput): 
 
       const projection = buildProjection(data, ts);
       const record: ParsedJournalRecord = {
-        projectionKey: '',
+        identityKey: '',
         ts,
         tsMs,
         state: projection.receiptState,
@@ -1123,7 +1132,7 @@ export function reconcileAdaptiveJournal(input: ReconcileAdaptiveJournalInput): 
         projection,
         fromTruncatedFile: read.truncated,
       };
-      record.projectionKey = projectionKey(record);
+      record.identityKey = identityKey(record);
 
       const group = getGroup({
         hookInvocationId,

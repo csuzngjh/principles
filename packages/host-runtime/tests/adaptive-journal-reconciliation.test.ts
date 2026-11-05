@@ -580,3 +580,228 @@ describe('reconcileAdaptiveJournal — read-only guarantees and errors', () => {
     expect(badHost.error.code).toBe('unsupported_host');
   });
 });
+
+describe('reconcileAdaptiveJournal — cross-midnight buffered records', () => {
+  it('pairs a terminal flushed into the next UTC date file after the buffer crossed midnight', () => {
+    const dir = workspace();
+    const invocation = 'inv-midnight';
+    writeEvents(dir, '2026-11-04', [
+      adaptiveLine({ state: 'open', hookInvocationId: invocation, ts: '2026-11-04T23:59:40.000Z' }, dir),
+    ]);
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        ts: '2026-11-04T23:59:59.000Z',
+        reason: 'native_entry_preserved',
+      }, dir),
+    ]);
+
+    const report = run(dir, {
+      now: new Date('2026-11-05T12:00:00.000Z'),
+      since: '2026-11-04T23:59:30.000Z',
+      until: '2026-11-04T23:59:59.999Z',
+    });
+
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('paired_open_and_terminal');
+    expect(found.reasonCodes).not.toContain('terminal_not_visible_in_range');
+    expect(report.coverage.status).toBe('complete');
+    expect(report.totals.countsAreLowerBounds).toBe(false);
+    expect(report.answers.q1_open_and_terminal.count).toBe(1);
+  });
+
+  it('still excludes records whose envelope ts is outside the window even when the file is read', () => {
+    const dir = workspace();
+    const inside = 'inv-inside';
+    const outside = 'inv-outside';
+    writeEvents(dir, '2026-11-04', [
+      adaptiveLine({ state: 'open', hookInvocationId: inside, ts: '2026-11-04T23:59:40.000Z' }, dir),
+      adaptiveLine({ state: 'open', hookInvocationId: outside, ts: '2026-11-04T23:50:00.000Z' }, dir),
+    ]);
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: inside,
+        ts: '2026-11-04T23:59:59.000Z',
+        reason: 'native_entry_preserved',
+      }, dir),
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: outside,
+        ts: '2026-11-05T00:00:30.000Z',
+        reason: 'native_entry_preserved',
+      }, dir),
+    ]);
+
+    const report = run(dir, {
+      now: new Date('2026-11-05T12:00:00.000Z'),
+      since: '2026-11-04T23:59:30.000Z',
+      until: '2026-11-04T23:59:59.999Z',
+    });
+
+    expect(findInvocation(report, inside).classification).toBe('paired_open_and_terminal');
+    expect(report.invocations.some((item) => item.invocationId === outside)).toBe(false);
+  });
+
+  it('reports partial coverage when the spillover file would exceed the file budget', () => {
+    const dir = workspace();
+    const invocation = 'inv-midnight';
+    writeEvents(dir, '2026-11-04', [
+      adaptiveLine({ state: 'open', hookInvocationId: invocation, ts: '2026-11-04T23:59:40.000Z' }, dir),
+    ]);
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        ts: '2026-11-04T23:59:59.000Z',
+        reason: 'native_entry_preserved',
+      }, dir),
+    ]);
+
+    const report = run(dir, {
+      now: new Date('2026-11-05T12:00:00.000Z'),
+      since: '2026-11-04T23:59:30.000Z',
+      until: '2026-11-04T23:59:59.999Z',
+      limits: { maxDateFilesPerDir: 1 },
+    });
+
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('terminal_only');
+    expect(found.reasonCodes).toContain('start_not_visible_in_range');
+    expect(report.coverage.status).toBe('partial');
+    expect(report.coverage.limitCode).toBe('coverage_file_limit_reached');
+    expect(report.coverage.filesOmitted.length).toBe(1);
+    expect(report.totals.countsAreLowerBounds).toBe(true);
+  });
+
+  it('reads every candidate date file for the default seven-day window', () => {
+    const dir = workspace();
+    const now = new Date('2026-11-05T12:00:00.000Z');
+    const startKeys = [
+      '2026-10-29',
+      '2026-10-30',
+      '2026-10-31',
+      '2026-11-01',
+      '2026-11-02',
+      '2026-11-03',
+      '2026-11-04',
+      '2026-11-05',
+      '2026-11-06',
+    ];
+    for (const key of startKeys) {
+      writeEvents(dir, key, [
+        adaptiveLine({
+          state: 'open',
+          hookInvocationId: `inv-${key}`,
+          ts: '2026-10-29T12:00:00.000Z',
+        }, dir),
+      ]);
+    }
+    const report = run(dir, { now });
+    expect(report.coverage.filesRead).toBe(9);
+    expect(report.coverage.status).toBe('complete');
+    expect(report.coverage.limitCode).toBeNull();
+    expect(report.coverage.filesOmitted).toEqual([]);
+  });
+});
+
+describe('reconcileAdaptiveJournal — duplicate identity', () => {
+  it('does not treat different evidence references as an exact duplicate', () => {
+    const dir = workspace();
+    const invocation = 'inv-evidence';
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        evidence: { reference: 'capture-A', independentlyVerified: false },
+        reason: 'native_entry_preserved',
+      }, dir),
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        evidence: { reference: 'capture-B', independentlyVerified: false },
+        reason: 'native_entry_preserved',
+      }, dir),
+    ]);
+
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('conflicted');
+    expect(found.reasonCodes).toContain('conflicting_terminal_states');
+    expect(found.duplicates.terminal).toBe(0);
+    expect(found.terminalVariants.length).toBe(1);
+    expect(report.answers.q4_duplicate_or_conflicted.count).toBe(1);
+  });
+
+  it('does not treat different terminal bodies as an exact duplicate', () => {
+    const dir = workspace();
+    const invocation = 'inv-body';
+    writeEvents(dir, '2026-11-05', [
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        evidence: { reference: 'capture-A', targetBodySha256: 'hash-a' },
+      }, dir),
+      adaptiveLine({
+        state: 'closed',
+        hookInvocationId: invocation,
+        evidence: { reference: 'capture-A', targetBodySha256: 'hash-b' },
+      }, dir),
+    ]);
+
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('conflicted');
+    expect(found.duplicates.terminal).toBe(0);
+  });
+
+  it('deduplicates records that are byte-identical', () => {
+    const dir = workspace();
+    const invocation = 'inv-identical';
+    const line = adaptiveLine({
+      state: 'closed',
+      hookInvocationId: invocation,
+      evidence: { reference: 'capture-A', independentlyVerified: false },
+    }, dir);
+    writeEvents(dir, '2026-11-05', [line, line]);
+
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('terminal_only');
+    expect(found.duplicates.terminal).toBe(0);
+    expect(report.totals.duplicatesExact).toBe(1);
+  });
+
+  it('deduplicates records that differ only in object key order', () => {
+    const dir = workspace();
+    const invocation = 'inv-key-order';
+    const line = adaptiveLine({
+      state: 'closed',
+      hookInvocationId: invocation,
+      evidence: { reference: 'capture-A', independentlyVerified: false },
+    }, dir);
+    const reordered = JSON.stringify(reverseKeys(JSON.parse(line)));
+
+    writeEvents(dir, '2026-11-05', [line, reordered]);
+    const report = run(dir);
+    const found = findInvocation(report, invocation);
+    expect(found.classification).toBe('terminal_only');
+    expect(found.duplicates.terminal).toBe(1);
+    expect(report.totals.duplicatesExact).toBe(1);
+  });
+});
+
+function reverseKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((entry) => reverseKeys(entry));
+  if (!isRecord(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value).reverse()) {
+    result[key] = reverseKeys(value[key]);
+  }
+  return result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
