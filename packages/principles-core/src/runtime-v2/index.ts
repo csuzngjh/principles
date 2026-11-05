@@ -2350,3 +2350,5 @@ export type { ReviseRuleSourceOnceArgs, ReviseRuleSourceOnceResult, RuleSourceCo
 
 export { ApprovalReviewGuardSchema, isApprovalReviewGuard } from './activation/approval-review-guard.js';
 export type { ApprovalReviewGuard } from './activation/approval-review-guard.js';
+
+export { prepareAdaptiveIntervention, type AdaptiveInterventionInput, type AdaptiveInterventionDeps, type AdaptiveInterventionResult } from './activation/adaptive-principle-intervention.js';
