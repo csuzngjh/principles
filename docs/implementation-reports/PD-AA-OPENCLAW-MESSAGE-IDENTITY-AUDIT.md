@@ -2,7 +2,7 @@
 
 2026-11-05，只读代码核查；未修改D:/Code/openclaw或已安装OpenClaw。PD主线继续。
 
-结论：应表述为“当前选定的embedded before_prompt_build没有提供可供PD直接使用的当前消息身份”，不能泛化成OpenClaw全局没有消息ID。没有发现关闭该字段的开关。内部已有身份，未进入该Hook事件；新版另一条harness路径已经提供可选字段。PD本地SDK也尚未跟进新版可选字段，但这不是当前embedded缺字段的首因。
+结论：应表述为“当前选定的embedded before_prompt_build没有提供可供PD直接使用的当前消息身份”，不能泛化成OpenClaw全局没有消息ID。没有发现关闭该字段的开关。内部已有身份，未进入该Hook事件；新版另一条harness路径已经提供可选字段。PD本地SDK在调查基线中也未跟进新版可选字段，本次已补齐类型；这不是当前embedded缺字段的首因。
 
 版本必须分开：D:/Code/openclaw HEAD 63fbea0c0fc74ce66b582efeaddb4ed2a7368235，package版本2026.9.2，最后提交2026-09-07；安装包C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw是2026.10.10。不能在旧checkout修改后声称修复当前已安装版本。
 
@@ -20,7 +20,7 @@
 - dist/agentsapi-attempt-DNXcbiXG.mjs:209-212：传入admittedMessage；没有它时回退到字符串，字符串本身不会提供ID。故harness路径也不保证任何时候都有ID。
 - dist/attempt-system-prompt-prepare-BFRZxKas.mjs:136/3903：embedded仍调用context-engine-maintenance-Cgkf_lx3.mjs的helper；后者326-329仍只发prompt/messages。这是本轮selected embedded路径缺能力的直接代码边界。
 
-PD证据：packages/openclaw-plugin/src/openclaw-sdk.ts:200-203仍只声明prompt/messages；hooks/prompt.ts:358-359从event.prompt做包装提取；index.ts:467将event直接交给handler，没有专门剥除上述字段。补齐本地SDK并优先消费新版显式字段是PD侧应跟进的事项，但仅改类型无法让embedded producer自动开始传ID。
+PD调查基线证据：packages/openclaw-plugin/src/openclaw-sdk.ts:200-203当时只声明prompt/messages（本次已补齐新版两个可选字段）；hooks/prompt.ts:358-359从event.prompt做包装提取；index.ts:467将event直接交给handler，没有专门剥除上述字段。补齐本地SDK并优先消费新版显式字段是PD侧应跟进的事项，但仅改类型无法让embedded producer自动开始传ID。
 
 影响和修复落点：优先在与安装包匹配的OpenClaw源码中，让embedded生产者从当前turn recorder/admission读取稳定身份，与当前原始用户内容一起传入prompt hook，并补不同消息、重建/重试、历史/插入上下文、无admission的负例。身份只能表示相关性，不能成为执行授权。PD随后更新SDK和Adapter消费路径。不得把runId/sessionId当messageId，不能用历史最后一条user消息猜当前请求。当前旧checkout不可直接作为新安装包修复基线。
 
@@ -33,3 +33,5 @@ PD证据：packages/openclaw-plugin/src/openclaw-sdk.ts:200-203仍只声明promp
 安装包build-info标明commit=7dc3350cb9f08fcf9a0af5c4845a20d5b2f1a8be；当前本地git对象库没有该commit，因此没有将旧checkout或beta标签冒充正式安装版修复基线。本调查没有修改OpenClaw工作区，git status保持干净。
 
 PD SDK已在集成分支补齐两个可选字段及真实语义注释；这是类型跟进，不声称解决embedded producer缺失。没有更改Native消息抽取或原则激活行为。
+
+PD消费侧补充修正：支持宿主显式currentUserMessage时优先使用它；显式空/非法值不再回退复合prompt中的旧历史，只有字段真正缺失才保留旧解析。未将runId转换为消息ID。新增4项纯函数反例；相关prompt/signal/Runtime V2三套测试合计86项通过、0失败/跳过。这不改变embedded上游未传消息ID的结论。

@@ -29,7 +29,7 @@ import {
 import {
   buildGovernanceContext,
   buildEmpathySilenceConstraint,
-  extractUserMessageFromPrompt,
+  resolveCurrentUserMessage,
   assembleHeartbeatChecklist,
   assembleAppendSystemContext,
 } from './prompt-helpers.js';
@@ -356,7 +356,7 @@ export async function handleBeforePromptBuild(
   // Extract actual user message from prompt (handles boot checks + Feishu wrappers)
   // and detect agent-to-agent messages.
   const { message: currentUserMessage, isAgentToAgent } =
-    extractUserMessageFromPrompt(event.prompt, sessionId);
+    resolveCurrentUserMessage(event, sessionId);
 
   // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
   // 注:原 empathy 检测门控(empathyEnabled)已移除,检测职责由 SignalCollectorHost 接管。
