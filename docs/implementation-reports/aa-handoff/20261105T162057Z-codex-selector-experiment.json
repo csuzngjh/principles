@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T162057Z-codex-selector-experiment",
+  "previousCheckpoint": "20261105T155817Z-codex-decisions.json",
+  "generatedAt": "2026-11-05T16:20:57.554Z",
+  "agent": "codex-selector",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "已开发有界实验CLI并完成首轮尝试；HTTP400按卡停止，decision1/glm0；修复错误取证，24项测试通过；未获得选择/行为结果",
+  "git": {
+    "repo": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+    "branch": "ai/PRI-1122-two-stage-selector-design",
+    "baseCommit": "e9223abcb4508db1ca1cd277cb6955f63a3de530",
+    "headCommit": "4ecbf4ec0aa93884d9cc1b76a359040dd76f99fa",
+    "dirtyPaths": [],
+    "pushedCommit": null,
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2368",
+    "remoteChecks": "NOT_VERIFIED"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1141",
+      "scope": "专用Decisions隔离CLI与获批6样本诊断子范围，不是整张四臂工单",
+      "status": "NEEDS_OWNER",
+      "owner": "codex-selector",
+      "writePaths": [
+        "scripts/dev/adaptive-selector-lab",
+        "docs/implementation-reports/aa-selector-experiments"
+      ],
+      "commits": [
+        "4ecbf4ec0aa93884d9cc1b76a359040dd76f99fa"
+      ],
+      "acceptance": [
+        {
+          "criterion": "网络边界预算/超时/保密/输出校验和真实pi-ai假HTTP",
+          "result": "PASS",
+          "evidenceRefs": [
+            "report"
+          ]
+        },
+        {
+          "criterion": "真实协议与C/D选择比较",
+          "result": "FAIL",
+          "evidenceRefs": [
+            "run"
+          ]
+        }
+      ],
+      "remaining": [
+        "首请求HTTP400确切原因未知；新取证已补齐但未发起新模型请求",
+        "四臂actor与独立留出未执行，整票不关闭"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "unit",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node --test scripts/dev/adaptive-selector-lab/diagnostic.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "report"
+      ]
+    },
+    {
+      "id": "core-build",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "npm run build --workspace=@principles/core",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": [
+        "report"
+      ]
+    },
+    {
+      "id": "live",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node scripts/dev/adaptive-selector-lab/diagnostic.mjs --execute-approved-20261106",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 5,
+      "evidenceRefs": [
+        "run"
+      ]
+    },
+    {
+      "id": "bootstrap",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "npm run dev:worktree:bootstrap -- --skip-build",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": [
+        "report"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "run",
+      "kind": "HOST_TRACE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/aa-selector-experiments/2026-11-05T16-09-17-735Z/results.json",
+      "observedAt": "2026-11-05T16:20:57.554Z",
+      "sha256": "bc6d3527cbdc073f73fc44cb4de0bfc8f83d42d43c4a30a606c9bb82d12e91cb",
+      "supports": "1次HTTP400，GLM0；这是协议尝试记录，不是送达成功",
+      "limitations": "无成功决策、GLM推理、真实宿主送达或行为收益证据；HTTP400具体错误体缺失"
+    },
+    {
+      "id": "report",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/PD-AA-PRI-1141-DECISIONS-FIRST-RUN-20261106.md",
+      "observedAt": "2026-11-05T16:20:57.554Z",
+      "sha256": "cef1843aa4101acf99519bd2d781e6e102bb6aa51715dff34b27ce8389b56628",
+      "supports": "实现、测试与真实实验失败的分层报告",
+      "limitations": "无成功决策、GLM推理、真实宿主送达或行为收益证据；HTTP400具体错误体缺失"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "protocol-400",
+      "issue": "PRI-1141",
+      "reason": "批准卡要求400停止/无重试，首次错误体缺失，不能推断原因或自动再试",
+      "evidenceRefs": [
+        "run"
+      ],
+      "neededFrom": "Owner",
+      "unblockAction": "明确批准1次同参数免费诊断，只取脱敏错误，不调用GLM；仍计原决策预算",
+      "independentWork": "CLI、取证修复、测试、双轴审查和PR证据交付已完成"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1141",
+      "action": "仅在明确获批后执行1次同参数免费诊断，并留下新记录，不改原始失败账本",
+      "dependsOn": [
+        "protocol-400续行批准"
+      ],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "获得可归因的安全错误类别或有效决策响应；无自动继续"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "modelRequestsThisRun": {
+      "decision": 1,
+      "glm": 0
+    },
+    "authorizationRefs": [
+      "Owner当前消息（Asia/Shanghai 2026-11-06）：批准，开始实验吧；对应此前已交付的18次执行卡"
+    ]
+  }
+}

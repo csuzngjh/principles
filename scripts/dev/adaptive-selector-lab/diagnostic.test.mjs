@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createBoundary, MODELS, URLS, validateDecision, validateSelection, hash,
-  buildInputs, loadFixture, glmSelection } from './diagnostic.mjs';
+  buildInputs, loadFixture, glmSelection, localFailureCode, parseFrozenFixture, ROOT, FIXTURE } from './diagnostic.mjs';
 
 const fixture = loadFixture();
-const keys = { decision: 'fake-decision-secret', glm: 'fake-glm-secret' };
+const keys = { decision: 'fake-decision+secret/=', glm: 'fake-glm+secret/=' };
 const decision = () => ({ model: MODELS.decision,
   answers: Object.fromEntries(Object.keys(fixture.questions).map(k => [k, { type: 'noul', noul: 0.2 }])) });
 function setup(options = {}) {
@@ -17,6 +19,12 @@ function setup(options = {}) {
 const request = (extra = {}) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ model: MODELS.decision, state: ['synthetic'], questions: fixture.questions,
     provider: { only: ['Respan'], allow_fallbacks: false }, ...extra }) });
+
+test('both approved CRLF snapshot and Git LF checkout parse identically; changed content is rejected', () => {
+  const original = fs.readFileSync(path.join(ROOT, FIXTURE), 'utf8');
+  assert.deepEqual(parseFrozenFixture(Buffer.from(original.replace(/\r\n/g, '\n'))), fixture);
+  assert.throws(() => parseFrozenFixture(Buffer.from(original.replace('dev-01', 'dev-99'))), /FROZEN_FIXTURE_CHANGED/);
+});
 
 test('frozen fixture and prompt projection exclude gold and principles from decision input', () => {
   const input = buildInputs(fixture.cases[0], fixture);
@@ -41,6 +49,12 @@ test('missing probability or unknown model cannot masquerade as a successful dec
   const d = decision(); delete d.answers.goal_shift;
   assert.throws(() => validateDecision(d), /PROTOCOL/);
   assert.throws(() => validateDecision({ ...decision(), model: 'paid-model' }), /PROTOCOL/);
+});
+test('local protocol failure reasons remain specific without recording arbitrary error text', () => {
+  assert.equal(localFailureCode(new Error('DECISION_PROTOCOL_INVALID')), 'DECISION_PROTOCOL_INVALID');
+  assert.equal(localFailureCode(new Error('SELECTION_REFERENCE_INVALID')), 'SELECTION_REFERENCE_INVALID');
+  assert.equal(localFailureCode(new Error(keys.decision)), 'MODEL_OUTPUT_OR_LOCAL_BOUNDARY_REJECTED');
+  assert.equal(localFailureCode({ category: 'output_invalid', message: keys.glm }), 'PI_AI_OUTPUT_INVALID');
 });
 test('selection requires exact candidate digest; abstention cannot smuggle a target', () => {
   const c = fixture.candidates[0];
@@ -82,6 +96,21 @@ test('429 refusal is counted once and provider error text is never persisted', a
   await assert.rejects(s.boundary('decision', 'dev-01', 'D')(URLS.decision, request()), /HTTP_429/);
   assert.equal(sends, 1); assert.equal(s.ledger.counts.decision, 1);
   assert.equal(JSON.stringify(s.ledger).includes(keys.decision), false);
+});
+test('HTTP rejection retains its diagnostic reason while redacting credentials and extra fields', async () => {
+  const s = setup({ fetchImpl: async () => Response.json({ error: { code: 400,
+    message: `Unsupported question type; Bearer ${keys.decision}; ${encodeURIComponent(keys.glm)}; ${Buffer.from(keys.glm).toString('base64')}`,
+    param: 'questions.new_task.type', raw: keys.glm }, rawRequest: keys.decision }, { status: 400 }) });
+  await assert.rejects(s.boundary('decision', 'dev', 'D')(URLS.decision, request()), /HTTP_400/);
+  const projected = s.ledger.requests[0].providerError;
+  assert.equal(projected.code, 400);
+  assert.match(projected.message, /Unsupported question type/);
+  assert.equal(projected.param, 'questions.new_task.type');
+  assert.equal(Object.hasOwn(projected, 'raw'), false);
+  assert.equal(JSON.stringify(s.ledger).includes(keys.decision), false);
+  assert.equal(JSON.stringify(s.ledger).includes(keys.glm), false);
+  assert.equal(JSON.stringify(s.ledger).includes(encodeURIComponent(keys.glm)), false);
+  assert.equal(JSON.stringify(s.ledger).includes(Buffer.from(keys.glm).toString('base64')), false);
 });
 test('deadline abort reaches transport and timeout stays in the denominator', async () => {
   let aborted = false;
