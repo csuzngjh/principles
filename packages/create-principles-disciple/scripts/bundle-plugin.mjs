@@ -128,6 +128,11 @@ const PLUGIN_REQUIRED = [
   'dist',
   'dist/bundle.js',
   'dist/governance-audit.js',
+  // `mcp/launcher.cjs` is what openclaw.plugin.json declares as the
+  // mcpServers entrypoint, so it is not optional payload: staging without it
+  // ships a manifest pointing at a file the payload does not contain (the
+  // published 2.8.0 defect — OpenClaw fails closed, pd_recall never appears).
+  'mcp',
   'templates',
   'openclaw.plugin.json',
   'package.json',

@@ -99,6 +99,9 @@ describe('install() release-manager dependency install + authority import smoke 
       const s = String(value);
       if (s.endsWith('install.json')) return false;
       if (s.endsWith(path.join('.pd', 'state.db'))) return false;
+      // The PD workspace declaration is a real file the install preflight
+      // reads/never overwrites: answer from the throwaway HOME, not `true`.
+      if (s.endsWith('principles-disciple.json')) return realFs.existsSync(s);
       return true;
     });
     vi.mocked(fs.readFileSync).mockImplementation((value) => {
@@ -106,6 +109,8 @@ describe('install() release-manager dependency install + authority import smoke 
       if (filePath.endsWith('openclaw.plugin.json')) return PLUGIN_MANIFEST;
       if (filePath.endsWith(path.join('_release', 'product-identity.json'))) return STAMP_CONTENT;
       if (filePath.endsWith('install.json')) throw new Error(`ENOENT: ${filePath}`);
+      // Only reached when the real throwaway HOME actually holds the file.
+      if (filePath.endsWith('principles-disciple.json')) return realFs.readFileSync(filePath, 'utf8');
       return JSON.stringify({ name: 'pd-cli', version: '1.74.1', openclaw: { setupEntry: './dist/bundle.js' } });
     });
     vi.mocked(fs.readdirSync).mockReturnValue([]);

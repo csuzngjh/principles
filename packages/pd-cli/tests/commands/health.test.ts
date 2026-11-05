@@ -89,6 +89,18 @@ vi.mock('fs', () => ({
   readFileSync: mockReadFileSync,
 }));
 
+// PRI-1130: the exit-code contract is command-level wiring, so this file
+// controls the MCP section directly (real assessment is covered by
+// health-mcp.test.ts).
+const { mockAssessMcpHealth, mockFormatMcpHealthLines } = vi.hoisted(() => ({
+  mockAssessMcpHealth: vi.fn(),
+  mockFormatMcpHealthLines: vi.fn(),
+}));
+vi.mock('../../src/commands/health-mcp.js', () => ({
+  assessMcpHealth: mockAssessMcpHealth,
+  formatMcpHealthLines: mockFormatMcpHealthLines,
+}));
+
 vi.mock('better-sqlite3', () => {
   return {
     default: vi.fn().mockImplementation(() => {
@@ -145,6 +157,8 @@ describe('handleHealth', () => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockExistsSync.mockReturnValue(false);
+    mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
+    mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
   });
 
   afterEach(() => {
@@ -253,6 +267,43 @@ describe('handleHealth', () => {
       expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('DEGRADED'));
       expect(exitSpy).toHaveBeenCalledWith(1);
 
+      exitSpy.mockRestore();
+    });
+
+    it('exits 1 when the MCP section is non-HEALTHY (declared entry missing), in both text and JSON', async () => {
+      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+      mockAssessMcpHealth.mockReturnValue({
+        host: 'openclaw',
+        status: 'HOST_RUNTIME_NOT_VERIFIED',
+        reason: 'declared_entry_missing',
+        nextAction: 'Reinstall the PD plugin payload so every declared entry is present.',
+      });
+      const exitSpy = mockProcessExit();
+
+      await handleHealth({ workspace: WS, json: false });
+      expect(consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n')).toContain('mcp.status: HOST_RUNTIME_NOT_VERIFIED');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('MCP host health is HOST_RUNTIME_NOT_VERIFIED'));
+      expect(exitSpy).toHaveBeenCalledWith(1);
+
+      exitSpy.mockClear();
+      await handleHealth({ workspace: WS, json: true });
+      const jsonOutput = JSON.parse(consoleLogSpy.mock.calls.at(-1)?.[0] as string);
+      expect(jsonOutput.mcp.status).toBe('HOST_RUNTIME_NOT_VERIFIED');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+
+      exitSpy.mockRestore();
+    });
+
+    it('keeps exit code 0 when the host is simply absent (NOT_INSTALLED / HOST_NOT_FOUND)', async () => {
+      mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+      mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+      mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'NOT_INSTALLED', reason: 'plugin_payload_not_found', nextAction: 'Install PD.' });
+      const exitSpy = mockProcessExit();
+
+      await handleHealth({ workspace: WS, json: true });
+
+      expect(exitSpy).not.toHaveBeenCalled();
       exitSpy.mockRestore();
     });
 
