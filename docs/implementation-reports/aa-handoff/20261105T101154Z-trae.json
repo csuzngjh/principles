@@ -10,11 +10,11 @@
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
     "branch": "ai/PRI-1109-conservative-reconcile",
     "baseCommit": "08bc4e9244b65ae44d5b5238f0a8245dac955c1e",
-    "headCommit": "a7f910848",
+    "headCommit": "c95ad3eeb",
     "dirtyPaths": [],
-    "pushedCommit": "a7f910848",
+    "pushedCommit": "c95ad3eeb",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2357",
-    "remoteChecks": "UNKNOWN"
+    "remoteChecks": "PASS — Verify Merge Gate pass (2m33s), package jobs skipped by docs-only impact gate"
   },
   "tasks": [
     {
@@ -102,6 +102,17 @@
       "failed": null,
       "skipped": null,
       "evidenceRefs": ["design-doc"]
+    },
+    {
+      "id": "remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-conservative-reconcile",
+      "command": "gh pr checks 2357 --watch --interval 15",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["remote-ci"]
     }
   ],
   "evidence": [
@@ -131,6 +142,15 @@
       "sha256": null,
       "supports": "PRI-1109 状态 Backlog，blockedBy PRI-1107（Backlog）；PRI-1107 blocks 包含 PRI-1109；评论只批准 PRI-1112 离线验证器",
       "limitations": "Linear 状态随时变化，需在执行前重新读取"
+    },
+    {
+      "id": "remote-ci",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/actions/runs/42009555238",
+      "observedAt": "2026-11-05T10:21:38Z",
+      "sha256": null,
+      "supports": "PR #2357 在 head c95ad3eeb 上全部检查绿：Verify Merge Gate pass 2m33s；docs-only 影响面使包测试任务跳过",
+      "limitations": "仅覆盖当时 head；后续纯检查点提交会重新触发的同一 docs-only 门禁未单独声明"
     }
   ],
   "blockers": [
