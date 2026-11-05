@@ -1,0 +1,409 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T124325Z-trae",
+  "previousCheckpoint": "20261105T114631Z-trae",
+  "generatedAt": "2026-11-05T12:43:25Z",
+  "agent": "trae",
+  "overallStatus": "FIXES_PUSHED_CI_PENDING",
+  "summary": "按 Owner 指令修复 PR #2362 两项缺陷：跨午夜缓冲记录漏读（候选文件加窗口终点次日、上限 8→9、超预算显式 partial）与不同证据被误判完全重复（完整规范化 data 身份、超出比较预算保守判不同并报告 identityComparisonLimited）。两项均先写反例：修复前 3 failed / 33 passed，修复后 36/36；CLI 7/7。已登记 ERR-187/ERR-188 并通过 check:error-handbook。已合并最新 origin/main（fc8e0f8d5，无冲突）并推送 head 565eb12fb；远端必需检查尚未出结果，未声明为绿。整票未完成，未合并、未发版、未启动真实宿主实验。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+    "branch": "ai/PRI-1109-journal-reconcile",
+    "baseCommit": "9d9af2ca1",
+    "headCommit": "565eb12fbc9c7c25d752eeb714dab1c684c4bfe6",
+    "dirtyPaths": [
+      "docs/implementation-reports/aa-handoff/20261105T124325Z-trae.md",
+      "docs/implementation-reports/aa-handoff/20261105T124325Z-trae.json",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "pushedCommit": "565eb12fbc9c7c25d752eeb714dab1c684c4bfe6",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2362",
+    "remoteChecks": "最终 head 565eb12fb 的远端必需检查尚未取得结果；旧提交结果不作数"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1109",
+      "scope": "Owner 批准的只读子范围：adaptive journal 保守对账库 + pd activation journal 薄 CLI + 反例测试 + changeset + PR（本轮追加两项缺陷修复）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "packages/host-runtime/src/adaptive-journal-reconciliation.ts",
+        "packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts",
+        "packages/principles-core/src/runtime-v2/index.ts",
+        "packages/pd-cli/src/commands/runtime-activation.ts",
+        "packages/pd-cli/src/index.ts",
+        "packages/pd-cli/tests/commands/runtime-activation-journal-flag-wiring.test.ts",
+        "docs/specs/PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.2.md",
+        "docs/process/error-management/ERROR_PATTERN_INDEX.md",
+        "docs/process/error-management/records/patterns/P-20261105T123656Z-xm2dnght99.md",
+        "docs/process/error-management/records/patterns/P-20261105T123656Z-dk2pcatv99.md",
+        ".changeset/pri-1109-adaptive-journal-reconciler.md"
+      ],
+      "commits": ["124656683", "6696ca6fa", "cb9bb9982", "0a4e4e2d6", "693071202", "105a29652", "d42339c3b", "15a8f70de", "565eb12fb"],
+      "acceptance": [
+        {
+          "criterion": "Owner 明确批准设计 v0.2（批准来源可核实）",
+          "result": "PASS",
+          "evidenceRefs": ["owner-approval"]
+        },
+        {
+          "criterion": "跨午夜缓冲记录漏读：反例修复前失败、修复后通过",
+          "result": "PASS",
+          "evidenceRefs": ["tests-before", "tests-after"]
+        },
+        {
+          "criterion": "跨午夜：信封 ts 决定纳入；额外候选计入文件/字节预算；超预算显式 partial + 遗漏 + 下界",
+          "result": "PASS",
+          "evidenceRefs": ["implementation-source", "tests-after"]
+        },
+        {
+          "criterion": "不同证据误判重复：反例修复前失败、修复后通过",
+          "result": "PASS",
+          "evidenceRefs": ["tests-before", "tests-after"]
+        },
+        {
+          "criterion": "去重按完整规范化原始 data；超出比较预算保守判不同并报告限制；不输出原始内容",
+          "result": "PASS",
+          "evidenceRefs": ["implementation-source", "tests-after"]
+        },
+        {
+          "criterion": "保持跨午夜修复留存，host-runtime 对账整文件 36/36",
+          "result": "PASS",
+          "evidenceRefs": ["tests-after"]
+        },
+        {
+          "criterion": "CLI 契约与真实命令注册测试整文件 7/7",
+          "result": "PASS",
+          "evidenceRefs": ["cli-tests"]
+        },
+        {
+          "criterion": "CLI stdout 单 JSON、诊断仅 stderr、退出码 0/2/3 保持",
+          "result": "PASS",
+          "evidenceRefs": ["cli-smoke"]
+        },
+        {
+          "criterion": "输入日志字节与目录结构前后不变",
+          "result": "PASS",
+          "evidenceRefs": ["readonly-hash", "cli-smoke"]
+        },
+        {
+          "criterion": "构建、类型检查、lint、错误手册门禁",
+          "result": "PASS",
+          "evidenceRefs": ["builds", "root-lint", "error-handbook"]
+        },
+        {
+          "criterion": "最新 main 已同步且无冲突",
+          "result": "PASS",
+          "evidenceRefs": ["git-state"]
+        },
+        {
+          "criterion": "最终 head 远端必需检查通过",
+          "result": "NOT_RUN",
+          "evidenceRefs": ["pr-2362"]
+        },
+        {
+          "criterion": "真实宿主证据（真实 Agent/模型端到端）",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        },
+        {
+          "criterion": "整票全部验收项（含写回/修复类范围）",
+          "result": "NOT_RUN",
+          "evidenceRefs": ["owner-approval"]
+        }
+      ],
+      "remaining": [
+        "复核最终 head 565eb12fb 的远端必需检查并在本 PR 内收敛",
+        "全部条件满足后才可报告「可合并」；Owner 决定合并",
+        "Owner 决定整票验收判定与真实宿主证据轮次"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "tests-before",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "npx vitest run packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts (修复前 head 15a8f70de~1)",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": 33,
+      "failed": 3,
+      "skipped": 0,
+      "evidenceRefs": ["log-before-fix"]
+    },
+    {
+      "id": "tests-after",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "npx vitest run packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 36,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["log-after-fix"]
+    },
+    {
+      "id": "cli-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "npx vitest run packages/pd-cli/tests/commands/runtime-activation-journal-flag-wiring.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["cli-tests-source"]
+    },
+    {
+      "id": "builds",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "npm run build; npm run typecheck --workspace=@principles/pd-cli; npx tsc -p packages/host-runtime/tsconfig.json --noEmit",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["builds"]
+    },
+    {
+      "id": "root-lint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "npm run lint",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["root-lint"]
+    },
+    {
+      "id": "error-handbook",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "npm run error:record -- validate; npm run check:error-handbook",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["error-records"]
+    },
+    {
+      "id": "cli-smoke",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "node packages/pd-cli/dist/index.js activation journal -w .tmp/PRI-1109-prefix-identity/smoke --since 2026-11-04T23:59:30Z --until 2026-11-04T23:59:59.999Z",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["cli-smoke"]
+    },
+    {
+      "id": "readonly-hash",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "SHA-256 of events_2026-11-04.jsonl / events_2026-11-05.jsonl before and after CLI run",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["cli-smoke"]
+    },
+    {
+      "id": "remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile",
+      "command": "gh pr checks 2362 (最终 head 565eb12fb)",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["pr-2362"]
+    },
+    {
+      "id": "real-host-evidence",
+      "cwd": null,
+      "command": "n/a — 按纪律本轮不启动真实 Agent/模型实验",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "owner-approval",
+      "kind": "OWNER_DECISION",
+      "locator": "Owner 2026-11-05 直接回复“批准 PRI-1109 设计”，指向 docs/specs/PD-AA-PRI-1109-JOURNAL-RECONCILE-DESIGN-v0.2.md（SHA-256 7393be4b…）与 PR #2360；本轮修复指令为 Owner 转达的 PR #2362 review",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": "7393be4b6459782c8a09a937e3982c486a6428255003636113067c8ae0b03e00",
+      "supports": "已批准范围内的缺陷修复，无需重新申请设计批准",
+      "limitations": "一次性批准；未写入 AGENTS.md 或仓库流程文档"
+    },
+    {
+      "id": "git-state",
+      "kind": "CODE",
+      "locator": "git rev-parse HEAD; git rev-list --left-right --count origin/main...HEAD",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "head 565eb12fb；origin/main fc8e0f8d5 已合并，0 落后 / 10 领先",
+      "limitations": null
+    },
+    {
+      "id": "implementation-source",
+      "kind": "CODE",
+      "locator": "packages/host-runtime/src/adaptive-journal-reconciliation.ts",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": "3dc18122d069303d6954cea65f3433b7aa4ee9f96695713b44d9a6db780d23de",
+      "supports": "跨午夜候选文件 + 上限 9；完整规范化 data 身份；identityComparisonLimited",
+      "limitations": "仅只读对账；不含写回/修复动作"
+    },
+    {
+      "id": "tests-source",
+      "kind": "CODE",
+      "locator": "packages/host-runtime/tests/adaptive-journal-reconciliation.test.ts",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": "abf2ad8986b2efbf1ef7c351ebc2fdcb481fbf299bcf3a45a9b05efcd6d96207",
+      "supports": "跨午夜、ts 排除、默认 9 文件、预算不足；前缀差异、相同大记录、键序、超出比较预算",
+      "limitations": "样本为按真实信封格式构造的脱敏数据"
+    },
+    {
+      "id": "log-before-fix",
+      "kind": "CODE",
+      "locator": ".tmp/PRI-1109-prefix-identity/before-fix.log",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "修复前 3 failed / 33 passed 的断言与错误值",
+      "limitations": "本地临时证据，不随 PR 提交"
+    },
+    {
+      "id": "log-after-fix",
+      "kind": "CODE",
+      "locator": ".tmp/PRI-1109-prefix-identity/after-fix.log",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "修复后 36 passed / 0 failed",
+      "limitations": "本地临时证据，不随 PR 提交"
+    },
+    {
+      "id": "cli-tests-source",
+      "kind": "CODE",
+      "locator": "packages/pd-cli/tests/commands/runtime-activation-journal-flag-wiring.test.ts",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "真实接线、stdout 单 JSON、stderr 诊断、exit 2/3、上限生效、CLI 只读哈希",
+      "limitations": null
+    },
+    {
+      "id": "cli-smoke",
+      "kind": "CODE",
+      "locator": ".tmp/PRI-1109-prefix-identity/stdout.json, stderr.txt, hash-before.txt",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "跨午夜窗口 exit 0 / paired_open_and_terminal / complete / filesRead=2；无日志 exit 3；非法参数 exit 2；日志文件哈希前后一致",
+      "limitations": "使用构造的脱敏样本，不是真实宿主数据"
+    },
+    {
+      "id": "error-records",
+      "kind": "CODE",
+      "locator": "docs/process/error-management/records/patterns/P-20261105T123656Z-xm2dnght99.md; docs/process/error-management/records/patterns/P-20261105T123656Z-dk2pcatv99.md",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "ERR-187（EP-03）与 ERR-188（EP-07）及本次 occurrence；validate 188 patterns / 353 occurrences",
+      "limitations": null
+    },
+    {
+      "id": "pr-2362",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2362",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "OPEN；本轮修复已推送至 head 565eb12fb，未合并、未发版",
+      "limitations": "该 head 的远端检查结果尚未取得"
+    },
+    {
+      "id": "checkpoint-md",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1109-journal-reconcile\\docs\\implementation-reports\\aa-handoff\\20261105T124325Z-trae.md",
+      "observedAt": "2026-11-05T12:43:25Z",
+      "sha256": null,
+      "supports": "修复内容、红→绿证据、门禁、只读证明、边界与剩余限制",
+      "limitations": "未覆盖真实宿主证据与整票非只读部分"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "remote-ci-final-head",
+      "issue": "PRI-1109",
+      "reason": "最终 head 565eb12fb 的远端必需检查尚未取得结果，旧提交检查不作数",
+      "evidenceRefs": ["pr-2362"],
+      "neededFrom": "CI",
+      "unblockAction": "等待并复核；失败则区分代码/配置/基础设施并在本 PR 内修复",
+      "independentWork": "本地测试、构建、lint、错误手册已通过"
+    },
+    {
+      "id": "real-host-evidence",
+      "issue": "PRI-1109",
+      "reason": "真实宿主证据需要启动真实 Agent/模型实验，本轮按纪律未进行",
+      "evidenceRefs": [],
+      "neededFrom": "Owner",
+      "unblockAction": "Owner 另开授权轮次并明确允许真实宿主实验",
+      "independentWork": "只读库与 CLI 已完成并有本地测试与冒烟证据"
+    },
+    {
+      "id": "whole-ticket-acceptance",
+      "issue": "PRI-1109",
+      "reason": "本轮只完成 Owner 批准的只读子范围；整票验收判定不由 AI 自行给出",
+      "evidenceRefs": ["owner-approval"],
+      "neededFrom": "Owner",
+      "unblockAction": "Owner 作出验收判定并决定合并",
+      "independentWork": "只读子范围可独立评审"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1109",
+      "action": "复核最终 head 565eb12fb 的远端必需检查；修复新的有效阻断",
+      "dependsOn": ["remote-ci-final-head"],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "该 head 的必需检查全部 success 或无有效阻断"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1109",
+      "action": "全部条件满足后报告「可合并」；是否合并由 Owner 决定（AI 不合并）",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 合并或要求修订"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1109",
+      "action": "如需真实宿主证据，另开授权轮次运行真实 Agent/模型",
+      "dependsOn": ["real-host-evidence"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 明确授权并产出真实宿主证据"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "databaseModified": false,
+    "journalFilesModified": false,
+    "forcePushed": false,
+    "merged": false,
+    "released": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "realHostEvidenceRun": false,
+    "implementationCodeWritten": true,
+    "implementationTestsRun": true,
+    "designBodyModified": true,
+    "authorizationRefs": [
+      "Owner 2026-11-05 直接回复“批准 PRI-1109 设计”（一次性，指向 v0.2 / PR #2360）",
+      "Owner 2026-11-05 PR #2362 修复指令：已批准范围内的缺陷修复，持续做到位；不合并、不发版"
+    ]
+  }
+}
