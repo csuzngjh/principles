@@ -16,7 +16,7 @@
     "pushedCommit": "7c1613293e",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2389",
     "prState": "OPEN",
-    "remoteChecks": "读取 e3f37bd98 的 check-runs：Verify Merge Gate failure（release-intent N-3，缺 changeset），其余 success/in_progress；已补 .changeset 并在本地跑通守卫（PASS）。新 head 的 CI 结果未读取。"
+    "remoteChecks": "head 09d3f9763: Verify Merge Gate PASS（补 changeset 后）；Test principles-core failure（PRI-775 barrel surface freeze，新增 5 个导出未入快照）；plugin/shared-runtime/Lint/quick-check PASS。已更新 `runtime-v2-barrel-surface.json` 并在本地跑通该守卫；新 head 的 CI 结果未读取。"
   },
   "tasks": [
     {
@@ -41,7 +41,8 @@
       "commits": [
         "9ff7f002a6dfe60252bb63b38d917abbbff617da",
         "96cf4970b (harness: freeze fixtureRef into the admission)",
-        "7c1613293 (release: declare changeset intent)"
+        "7c1613293 (release: declare changeset intent)",
+        "及后续 barrel surface fixture 更新提交"
       ],
       "acceptance": [
         {"criterion": "同轮 claim 交接与重放判定分离，并有各自测试", "result": "PASS", "evidenceRefs": ["evidence-plugin-tests", "evidence-shared-entry"]},
