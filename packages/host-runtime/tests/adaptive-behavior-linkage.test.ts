@@ -640,3 +640,110 @@ describe('read-only and privacy contracts', () => {
     }
   });
 });
+
+// Each case builds a 200-row-per-table fixture to place the target at row 201;
+// the slowest case measures ~4.8s against vitest's 5s default and timed out once
+// when the full suite competed for CPU. Explicit budget, unchanged assertions.
+describe('coverage propagation — session row truncation is not a complete read', { timeout: 15000 }, () => {
+  const SAME_TS = '2026-11-05T09:03:00.000Z';
+
+  it('reports incomplete when the target outcome sits beyond the per-session row cap', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      ...SINGLE_RUN_JOURNAL(dir),
+      toolCallLine({ runId: 'run-1', toolCallId: 'tc-1' }),
+    ]);
+    const otherRunOutcomes = Array.from({ length: 200 }, (_, index) => ({
+      sessionId: 'sess-1',
+      taskId: `other-run-${index}`,
+      outcome: 'completed',
+      createdAt: SAME_TS,
+    }));
+    createTrajectory(dir, {
+      taskOutcomes: [
+        ...otherRunOutcomes,
+        { sessionId: 'sess-1', taskId: 'run-1', outcome: 'completed', createdAt: SAME_TS },
+      ],
+    });
+    const report = run(dir);
+    const item = invocation(report, 'inv-1');
+    // The target outcome is row 201 and must not be presented as "no outcome".
+    expect(item.facts.outcomes).toHaveLength(0);
+    expect(report.coverage.complete).toBe(false);
+    expect(report.coverage.trajectory.truncated).toBe(true);
+    expect(report.coverage.incompleteReasons).toContain('session_rows_truncated');
+    expect(item.unknowns).toEqual(expect.arrayContaining([
+      { fact: 'outcomes', reasonCode: 'session_rows_truncated' },
+    ]));
+    expect(report.nextAction.join(' ')).toContain('单会话 200 行上限');
+    expect(report.nextAction.join(' ')).toContain('缩小 --since/--until');
+    expect(report.nextAction.join(' ')).not.toContain('提高 --max-trajectory-rows');
+  });
+
+  it('reports incomplete when the target correction sits beyond the per-session row cap', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', SINGLE_RUN_JOURNAL(dir));
+    const otherRunTurns = Array.from({ length: 200 }, (_, index) => ({
+      id: index + 1,
+      sessionId: 'sess-1',
+      runId: `other-run-${index}`,
+      createdAt: SAME_TS,
+    }));
+    createTrajectory(dir, {
+      assistantTurns: [
+        ...otherRunTurns,
+        { id: 201, sessionId: 'sess-1', runId: 'run-1', createdAt: SAME_TS },
+      ],
+      userTurns: [
+        ...Array.from({ length: 200 }, (_, index) => ({
+          sessionId: 'sess-1',
+          turnIndex: index + 1,
+          correctionDetected: 1 as const,
+          referencesAssistantTurnId: index + 1,
+          createdAt: SAME_TS,
+        })),
+        {
+          sessionId: 'sess-1',
+          turnIndex: 201,
+          correctionDetected: 1 as const,
+          referencesAssistantTurnId: 201,
+          createdAt: SAME_TS,
+        },
+      ],
+    });
+    const report = run(dir);
+    const item = invocation(report, 'inv-1');
+    expect(item.facts.corrections).toHaveLength(0);
+    expect(report.coverage.complete).toBe(false);
+    expect(report.coverage.trajectory.truncated).toBe(true);
+    expect(report.coverage.incompleteReasons).toContain('session_rows_truncated');
+    expect(item.unknowns).toEqual(expect.arrayContaining([
+      { fact: 'corrections', reasonCode: 'session_rows_truncated' },
+    ]));
+  });
+
+  it('reports incomplete when the target weak tool call sits beyond the per-session row cap', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', SINGLE_RUN_JOURNAL(dir));
+    createTrajectory(dir, {
+      toolCalls: [
+        ...Array.from({ length: 200 }, (_, index) => ({
+          sessionId: 'sess-1',
+          toolName: 'read',
+          outcome: 'success',
+          createdAt: SAME_TS,
+        })),
+        { sessionId: 'sess-1', toolName: 'write', outcome: 'success', createdAt: SAME_TS },
+      ],
+    });
+    const report = run(dir, { limits: { maxWeakCandidatesPerInvocation: 200 } });
+    const item = invocation(report, 'inv-1');
+    expect(item.weakCandidates).toHaveLength(200);
+    expect(report.coverage.complete).toBe(false);
+    expect(report.coverage.trajectory.truncated).toBe(true);
+    expect(report.coverage.incompleteReasons).toContain('session_rows_truncated');
+    expect(item.unknowns).toEqual(expect.arrayContaining([
+      { fact: 'weak_candidates', reasonCode: 'session_rows_truncated' },
+    ]));
+  });
+});
