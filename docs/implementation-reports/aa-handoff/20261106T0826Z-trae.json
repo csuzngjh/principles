@@ -1,0 +1,359 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T0826Z-trae",
+  "previousCheckpoint": "20261106T061229Z-trae",
+  "generatedAt": "2026-11-06T08:26:00Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "按 Owner 2026-11-06 批准，基于 #2386 head 3579474cf 的 v1.2 设计完成受控准入接线实现、定向测试与 P0 预检，并开 PR #2389（OPEN，未合并）。三项要求均已落实：(1) 共享 provider→prompt 同轮 claim 交接与重放判定分离，各自有测试；(2) 独占消费覆盖读—校验—写 consumedAt/consumedBy—原子替换，失败不消费；(3) 实验 harness 以单一 ledger 统一宿主回合/HTTP/工具编号，夹具 id 在 input/manifest/admission/fixture 字节中一致。真实宿主实验被环境阻塞：openclaw CLI 不在 PATH，已安装 2026.11.1 生命周期不完整（.openclaw-lifecycle-pending、空 @openclaw/fs-safe），P0 exit 1。正例、对照、pd activation link 均 NOT RUN；未碰安装目录与生产配置，未启动宿主，未调模型。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+    "branch": "ai/PRI-1118-controlled-admission-impl",
+    "baseCommit": "b098a213ba792f5b7f5a7a2c0c5893f737d732fe",
+    "headCommit": "7c1613293",
+    "headCommitNote": "该值为最后一个代码提交（release-intent changeset）；紧随其后的检查点 JSON/MD 提交会使远端 head 前移，最终 head 以 PR #2389 页面为准。",
+    "dirtyPaths": [],
+    "pushedCommit": "7c1613293e",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2389",
+    "prState": "OPEN",
+    "remoteChecks": "head 09d3f9763: Verify Merge Gate PASS（补 changeset 后）；Test principles-core failure（PRI-775 barrel surface freeze，新增 5 个导出未入快照）；plugin/shared-runtime/Lint/quick-check PASS。已更新 `runtime-v2-barrel-surface.json` 并在本地跑通该守卫；新 head 的 CI 结果未读取。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1118",
+      "scope": "受控准入接线实现（共享/本地双入口、独占消费、统一实验计数与夹具编号）+ 定向测试 + P0 预检；不执行真实宿主回合",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "packages/principles-core/src/runtime-v2/activation/adaptive-principle-intervention.ts",
+        "packages/principles-core/src/runtime-v2/index.ts",
+        "packages/openclaw-plugin/src/hooks/controlled-admission.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/src/index.ts",
+        "packages/openclaw-plugin/tests/hooks/controlled-admission.test.ts",
+        "packages/openclaw-plugin/tests/hooks/runtime-v2-prompt-activation.test.ts",
+        "scripts/dev/aa-controlled-admission/lib/ledger.mjs",
+        "scripts/dev/aa-controlled-admission/lib/fake-provider.mjs",
+        "scripts/dev/aa-controlled-admission/p0-preflight.mjs",
+        "scripts/dev/aa-controlled-admission/run-experiment.mjs",
+        "scripts/__tests__/aa-controlled-admission.test.mjs"
+      ],
+      "commits": [
+        "9ff7f002a6dfe60252bb63b38d917abbbff617da",
+        "96cf4970b (harness: freeze fixtureRef into the admission)",
+        "7c1613293 (release: declare changeset intent)",
+        "及后续 barrel surface fixture 更新提交"
+      ],
+      "acceptance": [
+        {"criterion": "同轮 claim 交接与重放判定分离，并有各自测试", "result": "PASS", "evidenceRefs": ["evidence-plugin-tests", "evidence-shared-entry"]},
+        {"criterion": "重复回调、同输入新 run、跨 session、过期、工具后第二次请求、并发锁占用均拒绝", "result": "PASS", "evidenceRefs": ["evidence-plugin-tests"]},
+        {"criterion": "独占消费覆盖读—校验—写 consumedAt/consumedBy—原子替换，失败不消费", "result": "PASS", "evidenceRefs": ["evidence-controlled-admission", "evidence-plugin-tests"]},
+        {"criterion": "宿主回合/HTTP/工具计数单一来源，夹具编号一致", "result": "PASS", "evidenceRefs": ["evidence-scripts-tests", "evidence-fixture"]},
+        {"criterion": "定向测试与构建全绿", "result": "PASS", "evidenceRefs": ["evidence-core-tests", "evidence-plugin-tests", "evidence-scripts-tests", "evidence-builds"]},
+        {"criterion": "P0 预检通过", "result": "FAIL", "evidenceRefs": ["evidence-p0"]},
+        {"criterion": "一次正例 + 一次对照真实回合", "result": "NOT_RUN", "evidenceRefs": ["evidence-p0"]},
+        {"criterion": "pd activation link 原始 JSON", "result": "NOT_RUN", "evidenceRefs": []},
+        {"criterion": "PR #2389 创建（OPEN，不合并）", "result": "PASS", "evidenceRefs": ["evidence-pr"]}
+      ],
+      "remaining": [
+        "P0 被宿主环境阻塞；需要 Owner 对宿主方案做一次具体决策后才能执行正例/对照。",
+        "共享 provider 与 before_prompt_build 的真实 event 对象身份未在宿主上验证（静态与单测已覆盖同对象路径）。",
+        "verify:merge 未运行（§25 交给 CI）；CI 结果未读取。",
+        "PR #2389 未合并；是否合并由 Owner 决定，AI 不合并。"
+      ]
+    },
+    {
+      "issue": "PRI-1111",
+      "scope": "继续记录唯一宿主正常入口的身份缺口（不关闭工单）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [],
+      "acceptance": [
+        {"criterion": "记录 embedded before_prompt_build 缺 currentUserMessageId，常规路径保持 Native", "result": "PASS", "evidenceRefs": ["evidence-shared-entry"]}
+      ],
+      "remaining": [
+        "入口身份缺口未修复；受控准入仍是默认关闭的实验性替代。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-core-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl\\packages\\principles-core",
+      "command": "npx vitest run src/runtime-v2/activation/__tests__/adaptive-principle-intervention.test.ts src/runtime-v2/activation/__tests__/adaptive-delivery-record.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-core-tests"]
+    },
+    {
+      "id": "check-plugin-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl\\packages\\openclaw-plugin",
+      "command": "npx vitest run tests/hooks/runtime-v2-prompt-activation.test.ts tests/hooks/controlled-admission.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 84,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-plugin-tests"]
+    },
+    {
+      "id": "check-scripts-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl\\scripts",
+      "command": "npx vitest run __tests__/aa-controlled-admission.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-scripts-tests"]
+    },
+    {
+      "id": "check-builds",
+      "cwd": "packages/principles-core; packages/openclaw-plugin",
+      "command": "npm run build (core) ; npm run build (plugin)",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-builds"]
+    },
+    {
+      "id": "check-lint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "npx eslint scripts/dev/aa-controlled-admission scripts/__tests__/aa-controlled-admission.test.mjs packages/openclaw-plugin/src/hooks/controlled-admission.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-lint"]
+    },
+    {
+      "id": "check-p0",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "node scripts/dev/aa-controlled-admission/p0-preflight.mjs --repo <impl> --tool-name read --config <runDir>\\config.yaml --manifest <runDir>\\manifest.json --experiment-root <runDir> --out <runDir>\\p0.json",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": 5,
+      "failed": 2,
+      "skipped": 2,
+      "evidenceRefs": ["evidence-p0"]
+    },
+    {
+      "id": "check-positive-run",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "node scripts/dev/aa-controlled-admission/run-experiment.mjs --execute --run-dir <runDir> ...",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-p0"]
+    },
+    {
+      "id": "check-control-run",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "node scripts/dev/aa-controlled-admission/run-experiment.mjs --execute --run-dir <runDir> ...",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-p0"]
+    },
+    {
+      "id": "check-activation-link",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "pd activation link --json",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "check-verify-merge",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "npm run verify:merge",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-core-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "artifacts/aa-controlled-admission/aa-dryrun-20261106T1620Z/evidence/targeted-core.txt",
+      "observedAt": "2026-11-06T08:19:33Z",
+      "sha256": null,
+      "supports": "core 定向 2 文件 / 24 passed / exit 0。",
+      "limitations": "只覆盖 adaptive 定向文件，不是 core 全量。"
+    },
+    {
+      "id": "evidence-plugin-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "artifacts/aa-controlled-admission/aa-dryrun-20261106T1620Z/evidence/targeted-plugin.txt",
+      "observedAt": "2026-11-06T08:19:35Z",
+      "sha256": null,
+      "supports": "plugin 定向 2 文件 / 84 passed / exit 0；含同轮交接、重放拒绝、锁占用、失败不消费、默认关闭。",
+      "limitations": "事件对象身份用同一对象模拟，真实宿主身份未验证。"
+    },
+    {
+      "id": "evidence-scripts-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "artifacts/aa-controlled-admission/aa-dryrun-20261106T1620Z/evidence/targeted-scripts.txt",
+      "observedAt": "2026-11-06T08:19:55Z",
+      "sha256": null,
+      "supports": "ledger 全局编号、arm/实验双 budget fail-closed、付费 0、夹具字节唯一；provider 两 arm 行为与 429 拒绝。",
+      "limitations": "仅单进程内证明。"
+    },
+    {
+      "id": "evidence-builds",
+      "kind": "LOCAL_TEST",
+      "locator": "artifacts/aa-controlled-admission/aa-dryrun-20261106T1620Z/evidence/build-core.txt; .../build-plugin.txt",
+      "observedAt": "2026-11-06T08:24:00Z",
+      "sha256": null,
+      "supports": "core build exit 0；plugin build exit 0。",
+      "limitations": "不覆盖安装包。"
+    },
+    {
+      "id": "evidence-lint",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: npx eslint ...",
+      "observedAt": "2026-11-06T08:15:00Z",
+      "sha256": null,
+      "supports": "新文件 lint exit 0。",
+      "limitations": "非全仓 lint。"
+    },
+    {
+      "id": "evidence-p0",
+      "kind": "REPORT",
+      "locator": "artifacts/aa-controlled-admission/aa-dryrun-20261106T1620Z/p0.json",
+      "observedAt": "2026-11-06T08:19:00Z",
+      "sha256": null,
+      "supports": "5 PASS（bundle/isolated-config/frozen-files/endpoint/termination）；2 FAIL（host-binary、host-package-health）；2 NOT_RUN（hook-registration、tool-whitelist）。",
+      "limitations": "P0 不能证明宿主配置 schema，也不能证明真实 event 身份。"
+    },
+    {
+      "id": "evidence-fixture",
+      "kind": "REPORT",
+      "locator": "artifacts/aa-controlled-admission/aa-dryrun-20261106T1620Z/manifest.json; admission.json; input.txt",
+      "observedAt": "2026-11-06T08:18:26Z",
+      "sha256": null,
+      "supports": "fixtureId=AA-FIXTURE-aa-dryrun-20261106T1620Z 同时出现在 input/manifest/admission(fixtureRef)；fixtureSha=848ce5de…；inputSha=2be27274…；manifestSha=e19ca7c1…。",
+      "limitations": "dry-run 使用合成 artifact/activation id，不代表真实激活映射。"
+    },
+    {
+      "id": "evidence-shared-entry",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/index.ts; packages/openclaw-plugin/src/hooks/prompt.ts",
+      "observedAt": "2026-11-06T08:10:00Z",
+      "sha256": null,
+      "supports": "共享入口在无原生身份时 claim 并返回 hookInvocationId；prompt 入口用 event 对象身份 + hookInvocationId 取回；缺失时记录 admission_handoff_missing 并回退 Native。",
+      "limitations": "静态 + 单测，未在宿主运行。"
+    },
+    {
+      "id": "evidence-controlled-admission",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/hooks/controlled-admission.ts",
+      "observedAt": "2026-11-06T08:10:00Z",
+      "sha256": null,
+      "supports": "O_EXCL 锁内完成读取/校验/写 consumedAt+consumedBy；temp+rename 原子替换；写失败 unlink temp 并抛 admission_claim_write_failed。",
+      "limitations": "仅进程内 + 单文件锁；跨主机不适用（设计范围就是本机隔离实验）。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2389",
+      "observedAt": "2026-11-06T08:25:00Z",
+      "sha256": null,
+      "supports": "PR #2389 OPEN，base=main，head=ai/PRI-1118-controlled-admission-impl@9ff7f002a。",
+      "limitations": "CI 未读取；api.github.com 间歇超时，PR 经 REST 重试创建。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-evidence-bundle",
+      "kind": "EVIDENCE_BUNDLE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl\\artifacts\\aa-controlled-admission\\aa-dryrun-20261106T1620Z",
+      "persistence": "local-artifacts-git16",
+      "notes": "含 plan/manifest/admission/input/fixture/p0.json/evidence 与 README；未提交、未推送。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T0826Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T0826Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点同名 Markdown。"
+    }
+  ],
+  "blockers": [
+    "宿主环境不可用：openclaw CLI 不在 PATH；已安装 2026.11.1 生命周期不完整（.openclaw-lifecycle-pending，空 @openclaw/fs-safe）；备选 D:\\Code\\openclaw 为 2026.9.2，与设计声明的宿主版本不同。按 Owner 规则，改变环境需先决策，未擅自修复安装目录。",
+    "真实宿主 event 对象身份未验证（共享 provider 与 before_prompt_build 是否传同一对象）。",
+    "api.github.com 间歇 TLS/连接超时；github.com 与 git push 正常。PR 已通过 REST 重试创建，CI 结果未读取。",
+    "PR #2386 未合并；设计出处固定为 head 3579474cf，是否合并由 Owner 决定。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1118",
+      "action": "Owner 就宿主方案做一次具体决策：(A) 授权用 npm 重新安装/修复全局 openclaw 2026.11.1；(B) 授权在本次实验目录内隔离安装 2026.11.1（不碰安装目录与生产配置）；(C) 授权改用 D:\\Code\\openclaw 2026.9.2 源码检出并记录版本差异。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 指定 A/B/C 之一，或提出第四种方案。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1118",
+      "action": "环境解锁后重跑 P0；READY 后执行一次正例 + 一次对照，补 run-record.json、pd activation link 原始 JSON 与预算用量。",
+      "dependsOn": [1],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "P0 all PASS；两次回合记录与关联声明齐全。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1118",
+      "action": "Owner 审阅 PR #2389；合并由 Owner 执行，AI 不合并。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PR #2389 被合并或关闭。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-06：按 #2386 head 3579474cf 的 v1.2 设计继续实施；定向测试与 P0 预检通过后执行隔离实验；普通实现问题自行修复；仅在改变身份语义/环境/预算时停下请示。",
+      "预算：宿主回合 ≤2、HTTP ≤3、工具 ≤1、付费 0；本轮实际 0/0/0/0。",
+      "不改生产配置、不改安装目录、不手工覆盖安装目录；隔离环境仅 127.0.0.1 假 provider；插件走官方开发装载入口使用仓库构建产物。",
+      "不要自行合并 #2386。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261106T0826Z-trae\",\"kind\":\"implementation-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "未覆盖 20261106T061229Z-trae.json/.md 或其他 writer 的检查点。",
+      "LATEST.json 仅在本次提交中从上一 trae 检查点指向本检查点。"
+    ]
+  }
+}

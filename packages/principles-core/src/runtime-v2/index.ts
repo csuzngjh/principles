@@ -2352,7 +2352,7 @@ export type { ReviseRuleSourceOnceArgs, ReviseRuleSourceOnceResult, RuleSourceCo
 export { ApprovalReviewGuardSchema, isApprovalReviewGuard } from './activation/approval-review-guard.js';
 export type { ApprovalReviewGuard } from './activation/approval-review-guard.js';
 
-export { prepareAdaptiveIntervention, type AdaptiveInterventionInput, type AdaptiveInterventionDeps, type AdaptiveInterventionResult } from './activation/adaptive-principle-intervention.js';
+export { prepareAdaptiveIntervention, validateControlledAdmissionBinding, canonicalAdaptiveMappingSha256, type AdaptiveInterventionInput, type AdaptiveInterventionDeps, type AdaptiveInterventionResult, type ControlledAdmissionBinding, type ControlledAdmissionBindingResult, type AdaptiveMappingIdentity } from './activation/adaptive-principle-intervention.js';
 
 export { ADAPTIVE_DELIVERY_RECORD_ENUMS, validateAdaptiveDeliveryRecord } from './activation/adaptive-delivery-record.js';
 export type {
