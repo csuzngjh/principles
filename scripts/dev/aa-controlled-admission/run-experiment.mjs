@@ -2,17 +2,19 @@
 //
 // Two phases, deliberately separate so no host turn can happen before the
 // preflight has passed:
-//   --prepare   writes the frozen fixture/input/manifest/admission/config copy
-//               under .tmp/aa-experiment/<runId>/ and stops. It starts no host.
-//   --execute   re-reads that frozen plan, re-verifies every hash against the
-//               P0 report, then runs the positive arm and the control arm once.
+//   --prepare   freezes the host config, fixture, input, manifest and admission
+//               under artifacts/aa-controlled-admission/<runId>/ and stops. It
+//               starts no host and consumes no turn budget.
+//   --execute   re-reads that frozen plan, requires a READY P0 report for the
+//               SAME host/config/state root/plugin bundle, runs the positive arm
+//               once, applies the positive gate, and only then runs the control
+//               arm exactly once.
 //
 // The launcher owns the SHARED ledger (ledger.mjs) for both arms; the fake
 // provider only reserves through it. No retry, no provider switch, no extra run.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { canonicalAdaptiveMappingSha256 } from '@principles/core/runtime-v2';
@@ -23,6 +25,25 @@ import {
   sha256Hex,
 } from './lib/ledger.mjs';
 import { startFakeProvider } from './lib/fake-provider.mjs';
+import { hostCommand, hostIdentity, resolveHostProfile, sha256File } from './lib/host-profile.mjs';
+import {
+  buildHostConfig,
+  endpointBaseUrl,
+  hostConfigSha256,
+  selectLoopbackPort,
+  writeHostConfig,
+  FAKE_MODEL_ID,
+  FAKE_PROVIDER_ID,
+} from './lib/host-config.mjs';
+import {
+  evaluateControlGate,
+  evaluatePositiveGate,
+  runPositiveThenControl,
+  verifyExecutionFrozen,
+  verifyPlanIntegrity,
+  writeFailureArtifacts,
+} from './lib/gate.mjs';
+import { readControlledWorkspaceTarget, seedControlledWorkspace } from './lib/workspace-seed.mjs';
 
 const SCENE_MARKER = '[PD-AA:delivery-review:v1]';
 const HOST_TIMEOUT_MS = 45_000;
@@ -30,10 +51,7 @@ const OUTER_TIMEOUT_MS = 120_000;
 const RUN_SCHEMA = 'pd-aa-controlled-admission-run/v1';
 const ADMISSION_SCHEMA = 'pd-aa-controlled-admission/v2';
 const MANIFEST_SCHEMA = 'pd-aa-controlled-admission-manifest/v1';
-
-function sha256File(path) {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
-}
+const PLAN_SCHEMA = 'pd-aa-plan/v1';
 
 function safeRealpath(path) {
   try {
@@ -56,12 +74,15 @@ function writeRunFiles({
   identity,
   workspaceDir,
   controlWorkspaceDir,
-  configSource,
+  hostConfig,
   repoRoot,
+  pluginRoot,
   mappingIdentity,
-  configSnapshot,
-  sourceRef,
   toolName,
+  requestModel,
+  endpointPort,
+  pluginBundleSha256,
+  sourceRef,
   sessionBinding,
   expectedSessionId,
   operator,
@@ -71,15 +92,17 @@ function writeRunFiles({
   const inputFile = join(runDir, 'input.txt');
   const manifestPath = join(runDir, 'manifest.json');
   const admissionPath = join(runDir, 'admission.json');
-  const configPath = join(runDir, 'config.yaml');
+  const configPath = join(runDir, 'config.json');
   const controlInputFile = join(runDir, 'control-input.txt');
 
   mkdirSync(workspaceDir, { recursive: true });
   mkdirSync(controlWorkspaceDir, { recursive: true });
-  if (existsSync(fixtureFile)) unlinkSync(fixtureFile);
+  // writeFileSync truncates an existing fixture atomically enough for a fresh
+  // run directory; an existsSync-then-unlink pair is a check-then-use race.
   writeFileSync(fixtureFile, fixtureBytes(identity.fixtureId));
   writeFileSync(inputFile, positiveInput(identity.fixtureId, fixtureFile), 'utf8');
   writeFileSync(controlInputFile, controlInput(), 'utf8');
+  writeHostConfig(configPath, hostConfig);
 
   // Manifest shape is authoritative in packages/openclaw-plugin/src/hooks/
   // controlled-admission.ts (validateManifestDocument); extra fields are
@@ -93,7 +116,18 @@ function writeRunFiles({
     fixtureSha256: sha256File(fixtureFile),
     expectedToolName: toolName,
     expectedContentMarker: identity.fixtureId,
-    configSnapshot,
+    configSnapshot: {
+      configPath,
+      configSha256: hostConfigSha256(configPath),
+      provider: FAKE_PROVIDER_ID,
+      baseUrl: endpointBaseUrl(endpointPort),
+      endpointPort,
+      model: requestModel,
+      toolName,
+      allowConversationAccess: true,
+      pluginRoot: safeRealpath(pluginRoot),
+      pluginBundleSha256,
+    },
     runId: identity.runId,
     fixtureRef: identity.fixtureId,
     fixtureId: identity.fixtureId,
@@ -133,13 +167,12 @@ function writeRunFiles({
     sessionBinding,
     expectedSessionId: sessionBinding === 'predeclared' ? expectedSessionId : null,
     createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    expiresAt: mappingIdentity.expiresAt,
     consumedAt: null,
     consumedBy: null,
   };
   writeFileSync(admissionPath, `${JSON.stringify(admission, null, 2)}\n`, 'utf8');
 
-  copyFileSync(configSource, configPath);
   return { fixtureFile, inputFile, controlInputFile, manifestPath, admissionPath, configPath };
 }
 
@@ -149,7 +182,6 @@ async function prepare(options) {
   if (options.runId) identity.fixtureId = `AA-FIXTURE-${options.runId}`;
   const runDir = join(options.runRoot, identity.runId);
   if (existsSync(runDir)) throw new Error(`run directory already exists: ${runDir}`);
-  if (!existsSync(options.configSource)) throw new Error(`config source not found: ${options.configSource}`);
   if (!options.toolName) throw new Error('--tool-name is required (from P0 runtime inspect)');
   if (!options.artifactId || !options.activationId) throw new Error('--artifact-id and --activation-id are required');
   if (!Number.isInteger(options.softTimeoutMs) || options.softTimeoutMs <= 0) throw new Error('--soft-timeout-ms must be a positive integer');
@@ -162,59 +194,143 @@ async function prepare(options) {
     throw new Error('--session-id is required when --session-binding=predeclared');
   }
 
+  // The isolated host (Owner decision option B): required, never guessed.
+  const host = resolveHostProfile({ hostRoot: options.hostRoot });
+  if (!host.ok) throw new Error(`isolated host unavailable: ${host.reason}`);
+  if (!host.healthy) throw new Error('isolated host package is not healthy; refusing to freeze a plan');
+
+  const pluginRoot = resolve(options.pluginRoot);
+  const bundlePath = join(pluginRoot, 'dist', 'bundle.js');
+  if (!existsSync(bundlePath)) throw new Error(`plugin bundle missing: ${bundlePath} (run npm run build:bundle)`);
+  const pluginBundleSha256 = sha256File(bundlePath);
+
+  // One loopback port is chosen ONCE and frozen; both arms and P0 use it. If it
+  // is taken at execute time the run fails closed instead of re-binding.
+  const endpointPort = Number.isInteger(options.endpointPort) ? options.endpointPort : await selectLoopbackPort();
   const workspaceDir = join(runDir, 'positive', 'workspace');
   const controlWorkspaceDir = join(runDir, 'control', 'workspace');
+  const stateRoot = join(runDir, 'state');
   const mappingIdentity = {
     artifactId: options.artifactId,
     activationId: options.activationId,
     softTimeoutMs: options.softTimeoutMs,
     expiresAtMs,
+    expiresAt: options.activationExpiresAt,
   };
+  mkdirSync(workspaceDir, { recursive: true });
+  mkdirSync(controlWorkspaceDir, { recursive: true });
+  mkdirSync(stateRoot, { recursive: true });
+
+  // The positive arm needs a real Runtime V2 target in its OWN isolated
+  // workspace, otherwise the plugin cannot inject a directive and the run would
+  // prove nothing. The control workspace stays empty on purpose.
+  const principleId = options.principleId ?? `aa-principle-${identity.runId}`;
+  const workspaceTarget = seedControlledWorkspace({
+    workspaceDir: safeRealpath(workspaceDir),
+    artifactId: mappingIdentity.artifactId,
+    activationId: mappingIdentity.activationId,
+    principleId,
+    principleText: options.principleText
+      ?? '读取夹具文件后才报告其内容编号；只调用一次只读工具，不重复读取。',
+  });
+  const seededCheck = await readControlledWorkspaceTarget({
+    workspaceDir: safeRealpath(workspaceDir),
+    artifactId: mappingIdentity.artifactId,
+    activationId: mappingIdentity.activationId,
+  });
+  if (!seededCheck.ok || seededCheck.principleId !== principleId) {
+    throw new Error(`seeded workspace target is not readable: ${seededCheck.reason ?? 'principle id mismatch'}`);
+  }
+  if (seededCheck.stateDbSha256 !== workspaceTarget.stateDbSha256) {
+    throw new Error('seeded workspace state.db changed between seeding and verification');
+  }
+  writeFileSync(join(runDir, 'workspace-seed.json'), `${JSON.stringify({ ...workspaceTarget, verifiedBy: seededCheck }, null, 2)}\n`, 'utf8');
+
+  const hostConfig = buildHostConfig({
+    endpointPort,
+    workspaceDir: safeRealpath(workspaceDir),
+    pluginRoot: safeRealpath(pluginRoot),
+    mapping: mappingIdentity,
+    toolName: options.toolName,
+  });
+
   const files = writeRunFiles({
     runDir,
     identity,
     workspaceDir,
     controlWorkspaceDir,
-    configSource: options.configSource,
+    hostConfig,
     repoRoot: options.repoRoot,
+    pluginRoot,
     mappingIdentity,
-    configSnapshot: {
-      provider: 'local-fake-provider',
-      baseUrl: '127.0.0.1',
-      model: options.model,
-      allowConversationAccess: true,
-      toolName: options.toolName,
-    },
-    sourceRef: options.sourceRef,
     toolName: options.toolName,
+    requestModel: options.requestModel,
+    endpointPort,
+    pluginBundleSha256,
+    sourceRef: options.sourceRef,
     sessionBinding: options.sessionBinding,
     expectedSessionId: options.expectedSessionId,
     operator: options.operator,
     purpose: options.purpose,
   });
+
   const plan = {
-    schemaVersion: 'pd-aa-experiment-plan/v1',
+    schemaVersion: PLAN_SCHEMA,
     runId: identity.runId,
     fixtureId: identity.fixtureId,
+    fixtureRef: identity.fixtureId,
     runDir,
     startedAt: new Date().toISOString(),
+    configPath: files.configPath,
+    configSha256: hostConfigSha256(files.configPath),
+    endpoint: { host: '127.0.0.1', port: endpointPort, baseUrl: endpointBaseUrl(endpointPort) },
+    host: { ...hostIdentity(host), hostRoot: host.hostRoot, packageDir: host.packageDir, fsSafePath: host.fsSafePath },
+    plugin: { rootDir: safeRealpath(pluginRoot), bundlePath, bundleSha256: pluginBundleSha256 },
+    stateRoot,
+    workspaceDir: safeRealpath(workspaceDir),
+    controlWorkspaceDir: safeRealpath(controlWorkspaceDir),
+    workspaceTarget: {
+      stateDbPath: workspaceTarget.stateDbPath,
+      stateDbSha256: workspaceTarget.stateDbSha256,
+      artifactId: workspaceTarget.artifactId,
+      activationId: workspaceTarget.activationId,
+      principleId: workspaceTarget.principleId,
+      principleTextSha256: workspaceTarget.principleTextSha256,
+    },
+    toolName: options.toolName,
+    model: `${FAKE_PROVIDER_ID}/${FAKE_MODEL_ID}`,
+    requestModel: options.requestModel,
+    mapping: {
+      artifactId: mappingIdentity.artifactId,
+      activationId: mappingIdentity.activationId,
+      expiresAt: mappingIdentity.expiresAt,
+      softTimeoutMs: mappingIdentity.softTimeoutMs,
+    },
+    fixtureFile: files.fixtureFile,
+    fixtureSha256: sha256File(files.fixtureFile),
+    inputFile: files.inputFile,
+    inputSha256: sha256File(files.inputFile),
+    controlInputFile: files.controlInputFile,
+    manifestPath: files.manifestPath,
+    admissionPath: files.admissionPath,
     files,
-    configSha256: sha256File(files.configPath),
-    mappingIdentity,
   };
   writeFileSync(join(runDir, 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
   return plan;
 }
 
-async function executeArm({ arm, ledger, provider, stateDir, workspaceDir, configPath, inputFile, model, openclawBin, env, runDir }) {
+async function executeArm({ arm, ledger, provider, stateDir, workspaceDir, plan, inputFile, env, runDir }) {
   const turn = ledger.hostTurn(arm, { purpose: arm === 'positive' ? 'positive-host-turn' : 'control-host-turn' });
+  const { command, prefixArgs } = hostCommand(plan.host);
   const args = [
+    ...prefixArgs,
     'agent', 'exec',
-    '--config', configPath,
+    '--config', plan.configPath,
     '--state-dir', stateDir,
-    '--model', model,
+    '--model', plan.model,
     '--cwd', workspaceDir,
     '--timeout', String(Math.floor(HOST_TIMEOUT_MS / 1000)),
+    '--code-mode', 'direct',
     '--json',
     '--message-file', inputFile,
   ];
@@ -223,7 +339,7 @@ async function executeArm({ arm, ledger, provider, stateDir, workspaceDir, confi
   const stderrPath = join(runDir, `${arm}.host.stderr.txt`);
   mkdirSync(stateDir, { recursive: true });
 
-  const child = spawn(openclawBin, args, {
+  const child = spawn(command, args, {
     cwd: workspaceDir,
     env,
     windowsHide: true,
@@ -246,9 +362,9 @@ async function executeArm({ arm, ledger, provider, stateDir, workspaceDir, confi
   child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
   child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
 
-  const outcome = await new Promise((resolve) => {
-    child.on('error', (error) => resolve({ code: null, signal: null, error: String(error?.message ?? error) }));
-    child.on('close', (code, signal) => resolve({ code, signal, error: null }));
+  const outcome = await new Promise((resolvePromise) => {
+    child.on('error', (error) => resolvePromise({ code: null, signal: null, error: String(error?.message ?? error) }));
+    child.on('close', (code, signal) => resolvePromise({ code, signal, error: null }));
   });
   clearTimeout(timer);
 
@@ -273,98 +389,245 @@ async function executeArm({ arm, ledger, provider, stateDir, workspaceDir, confi
     stdoutSha256: sha256Hex(stdout),
     stderrSha256: sha256Hex(stderr),
     provider: provider.observations(),
+    anomalies: provider.anomalies(),
     providerPort: provider.port,
     providerBaseUrl: provider.baseUrl,
   };
 }
 
-async function execute({ runDir, openclawBin, model, toolName, p0ReportPath }) {
+function writeEndpointEvidence(runDir, arm, provider) {
+  const evidenceDir = join(runDir, 'evidence');
+  mkdirSync(evidenceDir, { recursive: true });
+  const path = join(evidenceDir, `${arm}.endpoint-requests.json`);
+  writeFileSync(path, `${JSON.stringify({
+    schemaVersion: 'pd-aa-endpoint-observations/v1',
+    arm,
+    port: provider.port,
+    baseUrl: provider.baseUrl,
+    observations: provider.observations(),
+    anomalies: provider.anomalies(),
+  }, null, 2)}\n`, 'utf8');
+  return path;
+}
+
+/**
+ * Remove single-consumer claim sidecars left by an abnormal plugin path. The
+ * result is recorded so an abnormal exit still has a cleanup outcome.
+ */
+function sweepClaimArtifacts(runDir, cleanup) {
+  cleanup.claimArtifactsRemoved = [];
+  for (const name of readdirSync(runDir)) {
+    if (!name.endsWith('.claim.lock') && !name.endsWith('.claim.tmp')) continue;
+    try {
+      unlinkSync(join(runDir, name));
+      cleanup.claimArtifactsRemoved.push(name);
+    } catch (error) {
+      cleanup.claimArtifactsRemoved.push(`${name}:${String(error?.code ?? error)}`);
+    }
+  }
+  return cleanup;
+}
+
+async function execute({ runDir, p0ReportPath }) {
   if (!existsSync(runDir)) throw new Error(`run directory not found: ${runDir}`);
   const planPath = join(runDir, 'plan.json');
   if (!existsSync(planPath)) throw new Error('plan.json missing; run --prepare first');
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
-  const manifest = JSON.parse(readFileSync(plan.files.manifestPath, 'utf8'));
-  const admission = JSON.parse(readFileSync(plan.files.admissionPath, 'utf8'));
-  const p0 = JSON.parse(readFileSync(p0ReportPath ?? join(runDir, 'p0.json'), 'utf8'));
-
-  if (p0?.schemaVersion !== 'pd-aa-p0-preflight/v1' || p0.ready !== true) {
-    throw new Error('P0 report is not ready; refusing to start a host turn');
-  }
-  if (p0.frozen?.fixtureSha256 !== manifest.fixtureSha256) throw new Error('P0 fixture hash does not match the frozen plan');
-  if (p0.frozen?.inputSha256 !== manifest.inputSha256) throw new Error('P0 input hash does not match the frozen plan');
-  if (p0.frozen?.manifestSha256 !== admission.manifestSha256) throw new Error('P0 manifest hash does not match the admission');
-  if (!toolName) throw new Error('--tool-name is required (from P0 runtime inspect)');
-
+  const cleanup = {
+    providers: [],
+    admission: 'not_attempted',
+    stateDirs: [join(plan.stateRoot, 'positive'), join(plan.stateRoot, 'control')],
+  };
   const ledger = createExperimentLedger({ runId: plan.runId, fixtureId: plan.fixtureId });
-  const arms = {};
   const evidenceDir = join(runDir, 'evidence');
   mkdirSync(evidenceDir, { recursive: true });
 
+  const finalizeAdmission = () => {
+    if (cleanup.admission !== 'not_attempted') return;
+    if (existsSync(plan.admissionPath)) {
+      copyFileSync(plan.admissionPath, join(evidenceDir, 'admission-consumed.json'));
+      unlinkSync(plan.admissionPath);
+      cleanup.admission = 'copied-and-removed';
+    } else {
+      cleanup.admission = 'absent';
+    }
+  };
+
   try {
-    // Positive arm first (design §6.1).
-    const positiveProvider = await startFakeProvider({
-      ledger,
-      arm: 'positive',
-      fixtureFile: manifest.fixtureFile,
-      fixtureId: manifest.fixtureId,
-      expectedToolName: toolName,
-    });
-    const positiveEnv = {
-      ...process.env,
-      PD_AA_ADMISSION_FILE: resolve(plan.files.admissionPath),
-      PD_AA_EXPERIMENT_ROOT: resolve(runDir),
-    };
-    try {
-      arms.positive = await executeArm({
-        arm: 'positive',
-        ledger,
-        provider: positiveProvider,
-        stateDir: join(runDir, 'positive', 'state'),
-        workspaceDir: manifest.workspaceDir,
-        configPath: plan.files.configPath,
-        inputFile: manifest.inputFile,
-        model,
-        openclawBin,
-        env: positiveEnv,
-        runDir,
-      });
-    } finally {
-      await positiveProvider.close();
+    const manifest = JSON.parse(readFileSync(plan.manifestPath, 'utf8'));
+    const admission = JSON.parse(readFileSync(plan.admissionPath, 'utf8'));
+    const p0 = JSON.parse(readFileSync(p0ReportPath ?? join(runDir, 'p0.json'), 'utf8'));
+
+    const host = resolveHostProfile({ hostRoot: plan.host.hostRoot });
+    if (!host.ok) throw new Error(`isolated host unavailable: ${host.reason}`);
+
+    const frozenViolations = [...verifyExecutionFrozen({
+      plan,
+      p0,
+      hostProfile: host,
+      configPath: plan.configPath,
+      manifestPath: plan.manifestPath,
+      bundlePath: plan.plugin.bundlePath,
+    }), ...verifyPlanIntegrity({
+      plan,
+      manifestPath: plan.manifestPath,
+      manifest,
+      admissionPath: plan.admissionPath,
+      admission,
+      configPath: plan.configPath,
+    })];
+    if (frozenViolations.length > 0) {
+      throw Object.assign(new Error(`frozen experiment state changed: ${frozenViolations.join('; ')}`), { code: 'aa_frozen_state_changed' });
     }
 
-    // Control arm: same inputs, no admission file, no PD_AA_* environment.
-    const controlProvider = await startFakeProvider({ ledger, arm: 'control' });
-    const controlEnv = { ...process.env };
-    delete controlEnv.PD_AA_ADMISSION_FILE;
-    delete controlEnv.PD_AA_EXPERIMENT_ROOT;
-    try {
-      arms.control = await executeArm({
-        arm: 'control',
+    const runPositive = async () => {
+      const provider = await startFakeProvider({
         ledger,
-        provider: controlProvider,
-        stateDir: join(runDir, 'control', 'state'),
-        workspaceDir: manifest.controlWorkspaceDir,
-        configPath: plan.files.configPath,
-        inputFile: manifest.controlInputFile,
-        model,
-        openclawBin,
-        env: controlEnv,
-        runDir,
+        arm: 'positive',
+        fixtureFile: manifest.fixtureFile,
+        fixtureId: manifest.fixtureId,
+        expectedToolName: plan.toolName,
+        port: plan.endpoint.port,
       });
-    } finally {
-      await controlProvider.close();
+      cleanup.providers.push('positive');
+      try {
+        const positiveEnv = {
+          ...process.env,
+          PD_WORKSPACE_DIR: resolve(plan.workspaceDir),
+          PD_AA_ADMISSION_FILE: resolve(plan.admissionPath),
+          PD_AA_EXPERIMENT_ROOT: resolve(runDir),
+        };
+        delete positiveEnv.OPENCLAW_WORKSPACE;
+        const arm = await executeArm({
+          arm: 'positive',
+          ledger,
+          provider,
+          stateDir: join(plan.stateRoot, 'positive'),
+          workspaceDir: plan.workspaceDir,
+          plan,
+          inputFile: manifest.inputFile,
+          env: positiveEnv,
+          runDir,
+        });
+        arm.endpointEvidencePath = writeEndpointEvidence(runDir, 'positive', provider);
+        // Capture the consumed admission BEFORE the gate: the gate verdict must
+        // be computed from the document the plugin actually wrote, and the
+        // original file stays in place until the experiment is finalised.
+        arm.admission = parseConsumedAdmission(plan.admissionPath, evidenceDir);
+        return arm;
+      } finally {
+        await provider.close();
+      }
+    };
+
+    const runControl = async () => {
+      const provider = await startFakeProvider({
+        ledger,
+        arm: 'control',
+        port: plan.endpoint.port,
+      });
+      cleanup.providers.push('control');
+      try {
+        const controlEnv = {
+          ...process.env,
+          PD_WORKSPACE_DIR: resolve(plan.controlWorkspaceDir),
+        };
+        delete controlEnv.OPENCLAW_WORKSPACE;
+        delete controlEnv.PD_AA_ADMISSION_FILE;
+        delete controlEnv.PD_AA_EXPERIMENT_ROOT;
+        const arm = await executeArm({
+          arm: 'control',
+          ledger,
+          provider,
+          stateDir: join(plan.stateRoot, 'control'),
+          workspaceDir: plan.controlWorkspaceDir,
+          plan,
+          inputFile: manifest.controlInputFile,
+          env: controlEnv,
+          runDir,
+        });
+        arm.endpointEvidencePath = writeEndpointEvidence(runDir, 'control', provider);
+        return arm;
+      } finally {
+        await provider.close();
+      }
+    };
+
+    const outcome = await runPositiveThenControl({
+      runPositive,
+      runControl,
+      evaluatePositive: (arm) => evaluatePositiveGate({
+        arm,
+        snapshot: ledger.snapshot(),
+        manifest,
+        toolName: plan.toolName,
+        model: plan.requestModel,
+        admission: arm.admission,
+        expectedPrincipleId: plan.workspaceTarget?.principleId ?? null,
+      }),
+      evaluateControl: (arm) => evaluateControlGate({
+        arm,
+        snapshot: ledger.snapshot(),
+        toolName: plan.toolName,
+        model: plan.requestModel,
+      }),
+    });
+
+    finalizeAdmission();
+    sweepClaimArtifacts(runDir, cleanup);
+    const snapshot = ledger.snapshot();
+    if (outcome.stoppedAt === 'positive') {
+      writeFailureArtifacts({
+        runDir,
+        phase: 'positive-gate',
+        error: new Error(`positive gate failed: ${outcome.positiveGate.failures.map((row) => row.id).join(', ')}`),
+        snapshot,
+        cleanup: { ...cleanup, status: 'stopped-before-control' },
+      });
+    } else if (outcome.stoppedAt === 'control') {
+      writeFailureArtifacts({
+        runDir,
+        phase: 'control-gate',
+        error: new Error(`control gate failed: ${outcome.controlGate.failures.map((row) => row.id).join(', ')}`),
+        snapshot,
+        cleanup: { ...cleanup, status: 'control-ran-but-gate-failed' },
+      });
     }
+
+    const record = buildRecord({
+      plan, snapshot, outcome, p0ReportPath, runDir, cleanup,
+    });
+    writeFileSync(join(runDir, 'run-record.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+    writeFileSync(join(runDir, 'ledger.json'), `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+    return record;
+  } catch (error) {
+    sweepClaimArtifacts(runDir, cleanup);
+    const snapshot = ledger.snapshot();
+    const artifacts = writeFailureArtifacts({
+      runDir,
+      phase: 'execute',
+      error,
+      snapshot,
+      cleanup: { ...cleanup, status: 'failed' },
+    });
+    error.evidence = artifacts;
+    throw error;
   } finally {
     // Copy the consumed admission into the evidence pack, then remove it from
     // the experiment root (design §6.7). The copy is the durable record.
-    if (existsSync(plan.files.admissionPath)) {
-      copyFileSync(plan.files.admissionPath, join(evidenceDir, 'admission-consumed.json'));
-      unlinkSync(plan.files.admissionPath);
-    }
+    finalizeAdmission();
   }
+}
 
-  const snapshot = ledger.snapshot();
-  const record = {
+/** Capture the consumed admission as evidence and return the parsed document. */
+function parseConsumedAdmission(admissionPath, evidenceDir) {
+  if (!existsSync(admissionPath)) return null;
+  copyFileSync(admissionPath, join(evidenceDir, 'admission-consumed.json'));
+  return JSON.parse(readFileSync(admissionPath, 'utf8'));
+}
+
+function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup }) {
+  return {
     schemaVersion: RUN_SCHEMA,
     runId: plan.runId,
     fixtureId: plan.fixtureId,
@@ -372,6 +635,15 @@ async function execute({ runDir, openclawBin, model, toolName, p0ReportPath }) {
     endedAt: new Date().toISOString(),
     baseSha: typeof process.env.PD_AA_BASE_SHA === 'string' ? process.env.PD_AA_BASE_SHA : null,
     p0ReportPath: resolve(p0ReportPath ?? join(runDir, 'p0.json')),
+    configPath: plan.configPath,
+    configSha256: plan.configSha256,
+    host: plan.host,
+    plugin: plan.plugin,
+    endpoint: plan.endpoint,
+    stateRoot: plan.stateRoot,
+    workspaceTarget: plan.workspaceTarget,
+    toolName: plan.toolName,
+    model: plan.model,
     budget: snapshot.budget,
     armBudgets: snapshot.armBudgets,
     used: snapshot.used,
@@ -382,14 +654,18 @@ async function execute({ runDir, openclawBin, model, toolName, p0ReportPath }) {
     toolCalls: snapshot.toolCalls,
     hostTurns: snapshot.hostTurns,
     paidCalls: 0,
-    arms,
+    stoppedAt: outcome.stoppedAt,
+    positiveGate: outcome.positiveGate,
+    controlGate: outcome.controlGate,
+    arms: {
+      positive: outcome.positive,
+      control: outcome.control,
+    },
+    cleanup,
     // Request-level association is `unknown` by design; it is neither success
     // nor failure and must not be inferred from this run record.
     association: 'unknown',
   };
-  writeFileSync(join(runDir, 'run-record.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
-  writeFileSync(join(runDir, 'ledger.json'), `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-  return record;
 }
 
 function argValue(argv, name) {
@@ -408,11 +684,15 @@ async function main() {
       repoRoot,
       runRoot,
       runId: argValue(argv, 'run-id'),
-      configSource: argValue(argv, 'config'),
-      model: argValue(argv, 'model') ?? 'local-fake-model',
+      hostRoot: argValue(argv, 'host-root') ?? process.env.PD_AA_HOST_ROOT,
+      pluginRoot: argValue(argv, 'plugin-root') ?? join(repoRoot, 'packages', 'openclaw-plugin'),
+      endpointPort: argValue(argv, 'endpoint-port') ? Number.parseInt(argValue(argv, 'endpoint-port'), 10) : null,
+      requestModel: argValue(argv, 'request-model') ?? FAKE_MODEL_ID,
       toolName: argValue(argv, 'tool-name'),
       artifactId: argValue(argv, 'artifact-id'),
       activationId: argValue(argv, 'activation-id'),
+      principleId: argValue(argv, 'principle-id'),
+      principleText: argValue(argv, 'principle-text'),
       softTimeoutMs: Number.parseInt(argValue(argv, 'soft-timeout-ms') ?? '', 10),
       activationExpiresAt: argValue(argv, 'activation-expires-at'),
       sessionBinding: argValue(argv, 'session-binding') ?? 'first_consumer',
@@ -427,12 +707,10 @@ async function main() {
   if (argv.includes('--execute')) {
     const record = await execute({
       runDir: argValue(argv, 'run-dir') ?? join(runRoot, argValue(argv, 'run-id') ?? ''),
-      openclawBin: argValue(argv, 'openclaw-bin') ?? 'openclaw',
-      model: argValue(argv, 'model') ?? 'local-fake-model',
-      toolName: argValue(argv, 'tool-name'),
       p0ReportPath: argValue(argv, 'p0-report'),
     });
     process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+    if (record.stoppedAt !== null) process.exitCode = 1;
     return;
   }
   throw new Error('use --prepare or --execute');

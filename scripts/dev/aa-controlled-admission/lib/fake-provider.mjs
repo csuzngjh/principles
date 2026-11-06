@@ -60,6 +60,45 @@ function lastToolCallName(messages) {
   return null;
 }
 
+/** Model-visible tool surface as the endpoint actually received it. */
+function toolDefinitionNames(payload) {
+  if (!Array.isArray(payload.tools)) return [];
+  const names = [];
+  for (const tool of payload.tools) {
+    const name = tool?.function?.name ?? tool?.name;
+    if (typeof name === 'string' && name.length > 0) names.push(name);
+  }
+  return names;
+}
+
+function systemMessageText(messages) {
+  if (!Array.isArray(messages)) return null;
+  const parts = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object' || message.role !== 'system') continue;
+    const content = message.content;
+    if (typeof content === 'string') {
+      parts.push(content);
+    } else if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part && typeof part === 'object' && typeof part.text === 'string') parts.push(part.text);
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join('\n') : null;
+}
+
+const DIRECTIVES_MARKER = '【ACTIVE BEHAVIOR DIRECTIVES】';
+
+function directiveIds(text) {
+  if (typeof text !== 'string') return [];
+  const ids = [];
+  const pattern = /<directive id="([^"]+)"/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) ids.push(match[1]);
+  return ids;
+}
+
 function completionEnvelope(model, message, finishReason) {
   return {
     id: 'chatcmpl-aa-local',
@@ -93,14 +132,17 @@ export async function startFakeProvider({
   fixtureId = null,
   expectedToolName = null,
   defaultModel = 'local-fake-model',
+  port = 0,
 } = {}) {
   if (!ledger || typeof ledger.http !== 'function') throw new Error('fake provider: a shared ledger is required');
   if (arm !== 'positive' && arm !== 'control') throw new Error(`fake provider: unknown arm '${arm}'`);
   if (arm === 'positive' && !expectedToolName) {
     throw new Error('fake provider: positive arm requires the P0-verified read-only tool name');
   }
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`fake provider: invalid port ${port}`);
 
   const observations = [];
+  const anomalies = [];
   let closed = false;
 
   const server = createServer(async (req, res) => {
@@ -111,15 +153,48 @@ export async function startFakeProvider({
     };
 
     if (req.method !== 'POST' || !req.url || !req.url.split('?')[0].endsWith(COMPLETION_PATH)) {
+      // Fail closed without charging the ledger: an off-protocol request is
+      // visible as an anomaly, never silently absorbed into the budget.
+      anomalies.push({
+        at: new Date().toISOString(),
+        kind: 'unfunded_request',
+        method: req.method ?? null,
+        url: req.url ?? null,
+      });
       respondJson(404, { error: { type: 'aa_unknown_endpoint', message: 'only POST /v1/chat/completions is served' } });
       return;
     }
 
     const startedAt = Date.now();
-    let record = null;
     const timeout = setTimeout(() => {
       req.destroy(new Error('aa_request_timeout'));
     }, MAX_REQUEST_TIMEOUT_MS);
+
+    // Reserve BEFORE reading the body: every request that reaches this endpoint
+    // is charged to the shared ledger even if its body is later rejected. The
+    // booking is what makes the budget fail-closed under malformed input.
+    let record;
+    try {
+      record = ledger.http(arm, { purpose: arm === 'positive' ? 'positive-request' : 'control-request', bytes: null });
+    } catch (error) {
+      clearTimeout(timeout);
+      if (error instanceof BudgetExceededError) {
+        respondJson(429, {
+          error: {
+            type: 'aa_budget_exceeded',
+            message: error.message,
+            arm: error.arm,
+            counter: error.counter,
+            scope: error.scope,
+            used: error.used,
+            cap: error.cap,
+          },
+        });
+        return;
+      }
+      throw error;
+    }
+    record.receivedAt = new Date(startedAt).toISOString();
 
     try {
       const chunks = [];
@@ -128,7 +203,10 @@ export async function startFakeProvider({
         bytes += chunk.length;
         if (bytes > MAX_BODY_BYTES) {
           clearTimeout(timeout);
-          if (record) record.status = 413;
+          record.status = 413;
+          record.bytes = bytes;
+          record.pushed = true;
+          observations.push(record);
           respondJson(413, { error: { type: 'aa_body_too_large', message: `body exceeds ${MAX_BODY_BYTES} bytes` } });
           return;
         }
@@ -136,28 +214,8 @@ export async function startFakeProvider({
       }
       const body = Buffer.concat(chunks);
 
-      try {
-        record = ledger.http(arm, { purpose: arm === 'positive' ? 'positive-request' : 'control-request', bytes });
-      } catch (error) {
-        if (error instanceof BudgetExceededError) {
-          respondJson(429, {
-            error: {
-              type: 'aa_budget_exceeded',
-              message: error.message,
-              arm: error.arm,
-              counter: error.counter,
-              scope: error.scope,
-              used: error.used,
-              cap: error.cap,
-            },
-          });
-          return;
-        }
-        throw error;
-      }
-
       record.bodySha256 = sha256Hex(body);
-      record.receivedAt = new Date(startedAt).toISOString();
+      record.bytes = bytes;
       record.streamRequested = false;
 
       let payload;
@@ -165,11 +223,15 @@ export async function startFakeProvider({
         payload = JSON.parse(body.toString('utf8'));
       } catch {
         record.status = 400;
+        record.pushed = true;
+        observations.push(record);
         respondJson(400, { error: { type: 'aa_invalid_json', message: 'request body is not valid JSON' } });
         return;
       }
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         record.status = 400;
+        record.pushed = true;
+        observations.push(record);
         respondJson(400, { error: { type: 'aa_invalid_json', message: 'request body must be a JSON object' } });
         return;
       }
@@ -183,6 +245,16 @@ export async function startFakeProvider({
         : sha256Hex(typeof toolMessage.content === 'string' ? toolMessage.content : JSON.stringify(toolMessage.content ?? null));
       record.model = typeof payload.model === 'string' ? payload.model : null;
       record.streamRequested = payload.stream === true;
+      record.toolDefinitions = toolDefinitionNames(payload);
+      const systemText = systemMessageText(payload.messages);
+      record.intervention = {
+        directivesBlockPresent: typeof systemText === 'string' && systemText.includes(DIRECTIVES_MARKER),
+        directiveIds: directiveIds(systemText),
+        systemPromptSha256: typeof systemText === 'string' ? sha256Hex(systemText) : null,
+      };
+      record.toolResultContainsFixture = fixtureId && typeof toolMessage?.content === 'string'
+        ? toolMessage.content.includes(fixtureId)
+        : null;
 
       // The only tool-call evidence the endpoint can see is the tool result the
       // host sends back. Reserving here keeps the tool counter on the same
@@ -196,6 +268,10 @@ export async function startFakeProvider({
           });
         } catch (error) {
           if (error instanceof BudgetExceededError) {
+            record.status = 429;
+            record.budgetError = { counter: error.counter, used: error.used, cap: error.cap };
+            record.pushed = true;
+            observations.push(record);
             respondJson(429, {
               error: {
                 type: 'aa_budget_exceeded',
@@ -240,6 +316,7 @@ export async function startFakeProvider({
       record.status = 200;
       record.finishReason = finishReason;
       record.fixtureId = fixtureId;
+      record.pushed = true;
       observations.push(record);
 
       if (record.streamRequested) {
@@ -250,7 +327,14 @@ export async function startFakeProvider({
         respondJson(200, completionEnvelope(model, message, finishReason));
       }
     } catch (error) {
-      if (record) record.status = record.status ?? 500;
+      if (record) {
+        record.status = record.status ?? 500;
+        record.error = String(error?.message ?? error);
+        if (!record.pushed) {
+          record.pushed = true;
+          observations.push(record);
+        }
+      }
       if (!res.headersSent) {
         respondJson(500, { error: { type: 'aa_provider_error', message: String(error?.message ?? error) } });
       } else {
@@ -263,7 +347,7 @@ export async function startFakeProvider({
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', () => {
       server.off('error', reject);
       resolve();
     });
@@ -279,6 +363,7 @@ export async function startFakeProvider({
     port: address.port,
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     observations: () => observations.map((row) => ({ ...row })),
+    anomalies: () => anomalies.map((row) => ({ ...row })),
     close: async () => {
       if (closed) return;
       closed = true;

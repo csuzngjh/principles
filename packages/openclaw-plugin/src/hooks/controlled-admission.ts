@@ -173,14 +173,34 @@ function readRealPath(filePath: string, rootRealPath: string): string {
   return realPath;
 }
 
+// One open handle for the size check and the read: a path-based stat followed
+// by a path-based read is a check-then-use race (CodeQL js/file-system-race).
 function readBounded(filePath: string, maxBytes: number): Buffer {
-  const stat = fs.statSync(filePath);
-  if (!stat.isFile() || stat.size > maxBytes) {
-    throw new AdmissionFailure('admission_file_invalid', `file exceeds the ${maxBytes}-byte limit or is not a file`);
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch {
+    throw new AdmissionFailure('admission_file_invalid', `unreadable file: ${path.basename(filePath)}`);
   }
-  const bytes = fs.readFileSync(filePath);
-  if (bytes.length > maxBytes) throw new AdmissionFailure('admission_file_invalid', 'file exceeds its byte limit');
-  return bytes;
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > maxBytes) {
+      throw new AdmissionFailure('admission_file_invalid', `file exceeds the ${maxBytes}-byte limit or is not a file`);
+    }
+    const bytes = Buffer.allocUnsafe(stat.size);
+    let offset = 0;
+    while (offset < stat.size) {
+      const read = fs.readSync(fd, bytes, offset, stat.size - offset, offset);
+      if (read <= 0) break;
+      offset += read;
+    }
+    if (offset !== stat.size) {
+      throw new AdmissionFailure('admission_file_invalid', 'file changed while it was being read');
+    }
+    return bytes;
+  } finally {
+    try { fs.closeSync(fd); } catch { /* the bounded bytes are already in memory */ }
+  }
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
