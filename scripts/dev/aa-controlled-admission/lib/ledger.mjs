@@ -9,13 +9,21 @@
 // counter commits. The reserve is fail-closed: the caller never gets an id for
 // a request that would exceed a budget.
 //
-// This module owns counters only. It writes no files and starts no processes.
+// This module owns counters only. It starts no processes. When a persist path
+// is supplied it records the cumulative usage there, so a NEW run directory
+// (a fresh --prepare) can never reset what earlier runs already spent.
+//
+// Owner decision (2026-11-06): the experiment-wide host-turn cap is 3 and the
+// already-failed turn-001 counts against it. Remaining: positive 1 + control 1.
+// HTTP total stays 3, read-only tool 1, paid calls 0.
 
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-/** Experiment-wide caps from design v1.2 §5.1. */
+/** Experiment-wide caps; the Owner raised hostTurns to 3 on 2026-11-06. */
 export const EXPERIMENT_BUDGET = Object.freeze({
-  hostTurns: 2,
+  hostTurns: 3,
   httpRequests: 3,
   toolCalls: 1,
   paidCalls: 0,
@@ -64,16 +72,103 @@ export function sha256Hex(value) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+export const CUMULATIVE_LEDGER_SCHEMA = 'pd-aa-budget-ledger/v1';
+
+function emptyCounters() {
+  return Object.fromEntries(COUNTERS.map((key) => [key, 0]));
+}
+
+function validateCounters(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`ledger: ${label} must be a counter object`);
+  }
+  for (const key of COUNTERS) {
+    if (!Number.isInteger(value[key]) || value[key] < 0) {
+      throw new Error(`ledger: ${label}.${key} must be a non-negative integer`);
+    }
+  }
+  return value;
+}
+
+function sumArms(usedByArm) {
+  if (!usedByArm || typeof usedByArm !== 'object') return null;
+  const total = emptyCounters();
+  for (const arm of ['positive', 'control']) {
+    const row = usedByArm[arm];
+    if (!row) return null;
+    for (const key of COUNTERS) total[key] += Number.isInteger(row[key]) ? row[key] : 0;
+  }
+  return total;
+}
+
+function readJsonStrict(path, label) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    const wrapped = new Error(`ledger: cannot read ${label} at ${path}: ${String(error?.message ?? error)}`);
+    wrapped.code = 'aa_ledger_unreadable';
+    throw wrapped;
+  }
+}
+
+function writeJsonAtomic(path, value) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  renameSync(tmp, path);
+}
+
+/**
+ * Bootstrap the cumulative usage from existing run directories.
+ *
+ * Each run's ledger.json records per-attempt usage (`attempt.used`, or the sum
+ * of `usedByArm` for runs written before that field existed). Summing those
+ * across run directories yields what the experiment already spent — this is how
+ * the failed turn-001 is carried into the new ledger instead of being forgotten
+ * when a fresh run directory is prepared.
+ */
+export function readAttemptUsageFromRuns(runRoot) {
+  const usage = emptyCounters();
+  const sources = [];
+  if (typeof runRoot !== 'string' || !runRoot.trim() || !existsSync(runRoot)) return { usage, sources };
+  for (const entry of readdirSync(runRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(runRoot, entry.name);
+    const ledgerPath = join(dir, 'ledger.json');
+    const recordPath = join(dir, 'run-record.json');
+    let doc = null;
+    if (existsSync(ledgerPath)) doc = readJsonStrict(ledgerPath, 'run ledger');
+    else if (existsSync(recordPath)) doc = readJsonStrict(recordPath, 'run record');
+    if (!doc || typeof doc !== 'object') continue;
+    const perAttempt = doc.attempt?.used ?? sumArms(doc.usedByArm);
+    if (!perAttempt) continue;
+    for (const key of COUNTERS) {
+      const value = perAttempt[key];
+      if (Number.isInteger(value) && value > 0) usage[key] += value;
+      else if (Number.isInteger(value) && value < 0) {
+        throw new Error(`ledger: run ${entry.name} reports a negative ${key} count`);
+      }
+    }
+    sources.push(entry.name);
+  }
+  return { usage, sources };
+}
+
 /**
  * One ledger per experiment process. `ledger.reserve` is the only place any
  * counter changes; ids are allocated from the GLOBAL sequence so the positive
  * and control arms never each restart at 001.
+ *
+ * `persistPath` is the experiment-wide cumulative ledger. It lives OUTSIDE any
+ * run directory, so preparing a new run cannot zero the counters. A malformed
+ * or budget-incompatible file fails closed: it is never silently reset.
  */
 export function createExperimentLedger({
   runId,
   fixtureId,
   budget = EXPERIMENT_BUDGET,
   armBudgets = ARM_BUDGET,
+  persistPath = null,
+  priorUsage = null,
 } = {}) {
   if (typeof runId !== 'string' || !runId.trim()) throw new Error('ledger: runId is required');
   if (typeof fixtureId !== 'string' || !fixtureId.trim()) throw new Error('ledger: fixtureId is required');
@@ -84,13 +179,75 @@ export function createExperimentLedger({
     if (!armBudgets[arm]) throw new Error(`ledger: missing arm budget for ${arm}`);
   }
 
-  const used = Object.fromEntries(COUNTERS.map((key) => [key, 0]));
+  const used = emptyCounters();
   const usedByArm = {
-    positive: Object.fromEntries(COUNTERS.map((key) => [key, 0])),
-    control: Object.fromEntries(COUNTERS.map((key) => [key, 0])),
+    positive: emptyCounters(),
+    control: emptyCounters(),
   };
   const records = Object.fromEntries(COUNTERS.map((key) => [key, []]));
   const violations = [];
+
+  let persisted = null;
+  if (persistPath !== null) {
+    if (typeof persistPath !== 'string' || !persistPath.trim()) throw new Error('ledger: persistPath must be a non-empty path');
+    if (existsSync(persistPath)) persisted = readJsonStrict(persistPath, 'cumulative ledger');
+  }
+
+  if (persisted) {
+    if (persisted.schemaVersion !== CUMULATIVE_LEDGER_SCHEMA) {
+      const error = new Error(`ledger: cumulative ledger schema ${JSON.stringify(persisted.schemaVersion)} is not ${CUMULATIVE_LEDGER_SCHEMA}`);
+      error.code = 'aa_ledger_schema_mismatch';
+      throw error;
+    }
+    for (const key of COUNTERS) {
+      if (!Number.isInteger(persisted.budget?.[key]) || persisted.budget[key] !== budget[key]) {
+        const error = new Error(`ledger: cumulative ledger budget.${key}=${JSON.stringify(persisted.budget?.[key])} differs from ${budget[key]}; reconcile explicitly instead of resetting`);
+        error.code = 'aa_ledger_budget_mismatch';
+        throw error;
+      }
+    }
+    Object.assign(used, validateCounters(persisted.used, 'persisted.used'));
+    for (const key of COUNTERS) {
+      if (!Array.isArray(persisted.records?.[key])) {
+        const error = new Error(`ledger: cumulative ledger records.${key} must be an array`);
+        error.code = 'aa_ledger_schema_mismatch';
+        throw error;
+      }
+      records[key].push(...persisted.records[key]);
+    }
+    if (Array.isArray(persisted.violations)) violations.push(...persisted.violations);
+  } else if (priorUsage) {
+    Object.assign(used, validateCounters(priorUsage, 'priorUsage'));
+  }
+
+  function persistNow() {
+    if (persistPath === null) return;
+    writeJsonAtomic(persistPath, {
+      schemaVersion: CUMULATIVE_LEDGER_SCHEMA,
+      budget: { ...budget },
+      armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } },
+      used: { ...used },
+      records: Object.fromEntries(COUNTERS.map((key) => [key, records[key].slice()])),
+      violations: violations.slice(),
+      lastRunId: runId,
+      lastFixtureId: fixtureId,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  function recordViolation(violation) {
+    violations.push(violation);
+    try {
+      persistNow();
+    } catch {
+      // A rejected reservation spent nothing; failing to persist the violation
+      // must not mask the budget error the caller is about to receive.
+    }
+  }
+
+  // Write the file at creation time so a later, different run directory sees
+  // the current cumulative state even when this attempt spends nothing.
+  persistNow();
 
   function reserve(arm, counter, meta = {}) {
     if (!usedByArm[arm]) throw new Error(`ledger: unknown arm '${arm}'`);
@@ -99,13 +256,13 @@ export function createExperimentLedger({
     const limit = budget[counter];
     const armNext = usedByArm[arm][counter] + 1;
     if (armNext > armCap) {
-      const violation = { arm, counter, scope: 'arm', used: usedByArm[arm][counter], cap: armCap, limit, at: new Date().toISOString() };
-      violations.push(violation);
+      const violation = { arm, counter, scope: 'arm', used: usedByArm[arm][counter], cap: armCap, limit, at: new Date().toISOString(), runId };
+      recordViolation(violation);
       throw new BudgetExceededError(violation);
     }
     if (used[counter] + 1 > limit) {
-      const violation = { arm, counter, scope: 'experiment', used: used[counter], cap: limit, limit, at: new Date().toISOString() };
-      violations.push(violation);
+      const violation = { arm, counter, scope: 'experiment', used: used[counter], cap: limit, limit, at: new Date().toISOString(), runId };
+      recordViolation(violation);
       throw new BudgetExceededError(violation);
     }
     usedByArm[arm][counter] += 1;
@@ -115,6 +272,8 @@ export function createExperimentLedger({
       id,
       arm,
       armOrdinal: usedByArm[arm][counter],
+      runId,
+      fixtureId,
       recordedAt: new Date().toISOString(),
       ...meta,
     };
@@ -122,6 +281,16 @@ export function createExperimentLedger({
     // source, two field names required by the design contract.
     if (counter === 'httpRequests') record.endpointRequestId = id;
     records[counter].push(record);
+    try {
+      persistNow();
+    } catch (error) {
+      records[counter].pop();
+      usedByArm[arm][counter] -= 1;
+      used[counter] -= 1;
+      const wrapped = new Error(`ledger: reservation could not be persisted: ${String(error?.message ?? error)}`);
+      wrapped.code = 'aa_ledger_persist_failed';
+      throw wrapped;
+    }
     return record;
   }
 
@@ -143,14 +312,18 @@ export function createExperimentLedger({
       return reserve(arm, 'paidCalls', meta);
     },
     snapshot() {
+      const attemptUsage = emptyCounters();
+      for (const key of COUNTERS) attemptUsage[key] = usedByArm.positive[key] + usedByArm.control[key];
       return {
         runId,
         fixtureId,
         budget: { ...budget },
         armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } },
         used: { ...used },
+        attempt: { used: attemptUsage, usedByArm: { positive: { ...usedByArm.positive }, control: { ...usedByArm.control } } },
         usedByArm: { positive: { ...usedByArm.positive }, control: { ...usedByArm.control } },
         withinBudget: COUNTERS.every((key) => used[key] <= budget[key]),
+        persistPath,
         violations: violations.slice(),
         hostTurns: records.hostTurns.slice(),
         httpRequests: records.httpRequests.slice(),

@@ -22,9 +22,11 @@ import {
   createExperimentLedger,
   createRunIdentity,
   fixtureBytes,
+  readAttemptUsageFromRuns,
   sha256Hex,
 } from './lib/ledger.mjs';
 import { startFakeProvider } from './lib/fake-provider.mjs';
+import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv } from './lib/env-isolation.mjs';
 import { hostCommand, hostIdentity, resolveHostProfile, sha256File } from './lib/host-profile.mjs';
 import {
   buildHostConfig,
@@ -411,6 +413,25 @@ function writeEndpointEvidence(runDir, arm, provider) {
 }
 
 /**
+ * Record the paths a phase resolved BEFORE it can write anything. This file
+ * survives an abnormal host exit, so an environment escape is diagnosable even
+ * when the run record is never produced.
+ */
+function writeEnvironmentEvidence(runDir, arm, isolation) {
+  const evidenceDir = join(runDir, 'evidence');
+  mkdirSync(evidenceDir, { recursive: true });
+  const path = join(evidenceDir, `${arm}.environment.json`);
+  writeFileSync(path, `${JSON.stringify({
+    schemaVersion: 'pd-aa-environment/v1',
+    arm,
+    resolved: isolation.resolved,
+    removedFromParent: isolation.removedFromParent,
+    insideExperimentRoot: true,
+  }, null, 2)}\n`, 'utf8');
+  return path;
+}
+
+/**
  * Remove single-consumer claim sidecars left by an abnormal plugin path. The
  * result is recorded so an abnormal exit still has a cleanup outcome.
  */
@@ -428,17 +449,72 @@ function sweepClaimArtifacts(runDir, cleanup) {
   return cleanup;
 }
 
-async function execute({ runDir, p0ReportPath }) {
+async function execute({ runDir, runRoot, p0ReportPath }) {
   if (!existsSync(runDir)) throw new Error(`run directory not found: ${runDir}`);
   const planPath = join(runDir, 'plan.json');
-  if (!existsSync(planPath)) throw new Error('plan.json missing; run --prepare first');
-  const plan = JSON.parse(readFileSync(planPath, 'utf8'));
+  let plan = null;
+  try {
+    if (!existsSync(planPath)) throw new Error('plan.json missing; run --prepare first');
+    plan = JSON.parse(readFileSync(planPath, 'utf8'));
+  } catch (error) {
+    // Even a plan that cannot be read leaves a durable failure artifact.
+    error.evidence = writeFailureArtifacts({
+      runDir,
+      phase: 'plan-read',
+      error,
+      snapshot: null,
+      cleanup: { status: 'refused-before-any-turn' },
+    });
+    throw error;
+  }
+
   const cleanup = {
     providers: [],
     admission: 'not_attempted',
     stateDirs: [join(plan.stateRoot, 'positive'), join(plan.stateRoot, 'control')],
   };
-  const ledger = createExperimentLedger({ runId: plan.runId, fixtureId: plan.fixtureId });
+
+  // Fail-closed BEFORE any write (including the cumulative ledger file): every
+  // writable path the plan names must sit inside this run directory.
+  try {
+    assertPlanInsideExperimentRoot({ runDir, plan });
+  } catch (error) {
+    error.evidence = writeFailureArtifacts({
+      runDir,
+      phase: 'environment-escape',
+      error,
+      snapshot: null,
+      cleanup: { ...cleanup, status: 'refused-before-any-turn' },
+    });
+    throw error;
+  }
+
+  const effectiveRunRoot = typeof runRoot === 'string' && runRoot.trim() ? runRoot : resolve(runDir, '..');
+  const budgetLedgerPath = join(effectiveRunRoot, 'experiment-budget.json');
+  const priorUsage = existsSync(budgetLedgerPath)
+    ? null
+    : readAttemptUsageFromRuns(effectiveRunRoot).usage;
+
+  // The cumulative ledger lives in the run ROOT, not in this run directory, so
+  // a fresh --prepare can never reset what earlier runs already spent.
+  let ledger = null;
+  try {
+    ledger = createExperimentLedger({
+      runId: plan.runId,
+      fixtureId: plan.fixtureId,
+      persistPath: budgetLedgerPath,
+      priorUsage,
+    });
+  } catch (error) {
+    error.evidence = writeFailureArtifacts({
+      runDir,
+      phase: 'budget-ledger',
+      error,
+      snapshot: null,
+      cleanup: { ...cleanup, status: 'refused-before-any-turn' },
+    });
+    throw error;
+  }
   const evidenceDir = join(runDir, 'evidence');
   mkdirSync(evidenceDir, { recursive: true });
 
@@ -481,6 +557,21 @@ async function execute({ runDir, p0ReportPath }) {
     }
 
     const runPositive = async () => {
+      const stateDir = join(plan.stateRoot, 'positive');
+      // Built BEFORE the provider and the host exist: an inherited production
+      // path or an out-of-root plan path is refused before anything can be
+      // written or bound.
+      const isolation = buildIsolatedHostEnv({
+        baseEnv: process.env,
+        experimentRoot: runDir,
+        workspaceDir: plan.workspaceDir,
+        stateDir,
+        configPath: plan.configPath,
+        profile: `aa-positive-${plan.runId}`,
+        admissionPath: plan.admissionPath,
+      });
+      const environmentPath = writeEnvironmentEvidence(runDir, 'positive', isolation);
+
       const provider = await startFakeProvider({
         ledger,
         arm: 'positive',
@@ -491,24 +582,22 @@ async function execute({ runDir, p0ReportPath }) {
       });
       cleanup.providers.push('positive');
       try {
-        const positiveEnv = {
-          ...process.env,
-          PD_WORKSPACE_DIR: resolve(plan.workspaceDir),
-          PD_AA_ADMISSION_FILE: resolve(plan.admissionPath),
-          PD_AA_EXPERIMENT_ROOT: resolve(runDir),
-        };
-        delete positiveEnv.OPENCLAW_WORKSPACE;
         const arm = await executeArm({
           arm: 'positive',
           ledger,
           provider,
-          stateDir: join(plan.stateRoot, 'positive'),
+          stateDir,
           workspaceDir: plan.workspaceDir,
           plan,
           inputFile: manifest.inputFile,
-          env: positiveEnv,
+          env: isolation.env,
           runDir,
         });
+        arm.environment = {
+          path: environmentPath,
+          resolved: isolation.resolved,
+          removedFromParent: isolation.removedFromParent,
+        };
         arm.endpointEvidencePath = writeEndpointEvidence(runDir, 'positive', provider);
         // Capture the consumed admission BEFORE the gate: the gate verdict must
         // be computed from the document the plugin actually wrote, and the
@@ -521,6 +610,17 @@ async function execute({ runDir, p0ReportPath }) {
     };
 
     const runControl = async () => {
+      const stateDir = join(plan.stateRoot, 'control');
+      const isolation = buildIsolatedHostEnv({
+        baseEnv: process.env,
+        experimentRoot: runDir,
+        workspaceDir: plan.controlWorkspaceDir,
+        stateDir,
+        configPath: plan.configPath,
+        profile: `aa-control-${plan.runId}`,
+      });
+      const environmentPath = writeEnvironmentEvidence(runDir, 'control', isolation);
+
       const provider = await startFakeProvider({
         ledger,
         arm: 'control',
@@ -528,24 +628,22 @@ async function execute({ runDir, p0ReportPath }) {
       });
       cleanup.providers.push('control');
       try {
-        const controlEnv = {
-          ...process.env,
-          PD_WORKSPACE_DIR: resolve(plan.controlWorkspaceDir),
-        };
-        delete controlEnv.OPENCLAW_WORKSPACE;
-        delete controlEnv.PD_AA_ADMISSION_FILE;
-        delete controlEnv.PD_AA_EXPERIMENT_ROOT;
         const arm = await executeArm({
           arm: 'control',
           ledger,
           provider,
-          stateDir: join(plan.stateRoot, 'control'),
+          stateDir,
           workspaceDir: plan.controlWorkspaceDir,
           plan,
           inputFile: manifest.controlInputFile,
-          env: controlEnv,
+          env: isolation.env,
           runDir,
         });
+        arm.environment = {
+          path: environmentPath,
+          resolved: isolation.resolved,
+          removedFromParent: isolation.removedFromParent,
+        };
         arm.endpointEvidencePath = writeEndpointEvidence(runDir, 'control', provider);
         return arm;
       } finally {
@@ -595,7 +693,7 @@ async function execute({ runDir, p0ReportPath }) {
     }
 
     const record = buildRecord({
-      plan, snapshot, outcome, p0ReportPath, runDir, cleanup,
+      plan, snapshot, outcome, p0ReportPath, runDir, cleanup, budgetLedgerPath,
     });
     writeFileSync(join(runDir, 'run-record.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
     writeFileSync(join(runDir, 'ledger.json'), `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
@@ -626,7 +724,7 @@ function parseConsumedAdmission(admissionPath, evidenceDir) {
   return JSON.parse(readFileSync(admissionPath, 'utf8'));
 }
 
-function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup }) {
+function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup, budgetLedgerPath }) {
   return {
     schemaVersion: RUN_SCHEMA,
     runId: plan.runId,
@@ -646,7 +744,9 @@ function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup })
     model: plan.model,
     budget: snapshot.budget,
     armBudgets: snapshot.armBudgets,
+    budgetLedgerPath,
     used: snapshot.used,
+    attempt: snapshot.attempt,
     usedByArm: snapshot.usedByArm,
     withinBudget: snapshot.withinBudget,
     violations: snapshot.violations,
@@ -707,6 +807,7 @@ async function main() {
   if (argv.includes('--execute')) {
     const record = await execute({
       runDir: argValue(argv, 'run-dir') ?? join(runRoot, argValue(argv, 'run-id') ?? ''),
+      runRoot,
       p0ReportPath: argValue(argv, 'p0-report'),
     });
     process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);

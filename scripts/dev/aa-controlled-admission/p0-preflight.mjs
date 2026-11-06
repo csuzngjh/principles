@@ -23,9 +23,19 @@ import { pathToFileURL } from 'node:url';
 
 import { hostCommand, hostIdentity, isRegularFile, resolveHostProfile, sha256File, verifyHostIdentity } from './lib/host-profile.mjs';
 import { hostConfigSha256, readHostConfig, validateHostConfigWiring, PLUGIN_ID } from './lib/host-config.mjs';
+import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv, isInsideRoot } from './lib/env-isolation.mjs';
 import { readControlledWorkspaceTarget } from './lib/workspace-seed.mjs';
 
 const PLUGIN_BUNDLE_RELATIVE = join('packages', 'openclaw-plugin', 'dist', 'bundle.js');
+const MCP_BINDING_RELATIVE = join('packages', 'openclaw-plugin', 'mcp-binding.json');
+// Host tool-policy: an MCP tool is only reachable when the allowlist carries a
+// global MCP group, a bundle group or a server-prefixed (`<server>__`) entry.
+const MCP_ALLOW_GLOBALS = new Set(['*', 'bundle-mcp', 'group:plugins']);
+
+function mcpAllowEntries(allow) {
+  if (!Array.isArray(allow)) return null;
+  return allow.filter((entry) => typeof entry === 'string' && (MCP_ALLOW_GLOBALS.has(entry) || entry.includes('__')));
+}
 
 function runCapture(command, args, { cwd, timeout = 25_000, env = undefined } = {}) {
   const result = spawnSync(command, args, {
@@ -154,6 +164,57 @@ export async function runP0Preflight({
   const root = experimentRoot ? resolve(experimentRoot) : planPath ? dirname(resolve(planPath)) : null;
   report.experimentRoot = root;
 
+  // 0b. Environment isolation — an inherited production path must not win.
+  // P0 builds the SAME child environment the launcher uses and proves every
+  // resolved workspace, PD database, host state and config path is inside this
+  // run root. This is the regression for the incident that read the production
+  // workspace through an inherited PD_WORKSPACE_DIR.
+  let p0Isolation = null;
+  let positiveIsolation = null;
+  let controlIsolation = null;
+  if (!plan || typeof root !== 'string') {
+    checks.push(check('environment-isolation', 'NOT_RUN', 'blocked: frozen plan unavailable'));
+  } else {
+    const violations = [];
+    const evidence = {};
+    try {
+      assertPlanInsideExperimentRoot({ runDir: root, plan });
+    } catch (error) {
+      violations.push(...(Array.isArray(error?.violations) ? error.violations : [{ id: 'plan-paths', path: String(error?.message ?? error) }]));
+    }
+    const build = (label, workspaceDir, profile, admissionPath = null) => {
+      try {
+        const isolation = buildIsolatedHostEnv({
+          baseEnv: process.env,
+          experimentRoot: root,
+          workspaceDir,
+          stateDir: join(plan.stateRoot, label),
+          configPath: plan.configPath,
+          profile,
+          admissionPath,
+        });
+        evidence[label] = { resolved: isolation.resolved, removedFromParent: isolation.removedFromParent };
+        return isolation;
+      } catch (error) {
+        violations.push(...(Array.isArray(error?.violations) ? error.violations : [{ id: `${label}-env`, path: String(error?.message ?? error) }]));
+        return null;
+      }
+    };
+    p0Isolation = build('p0', plan.workspaceDir, 'aa-p0');
+    positiveIsolation = build('positive', plan.workspaceDir, 'aa-p0-positive', plan.admissionPath);
+    controlIsolation = build('control', plan.controlWorkspaceDir, 'aa-p0-control');
+    for (const [label, isolation] of [['positive', positiveIsolation], ['control', controlIsolation]]) {
+      if (!isolation) continue;
+      if (!isInsideRoot(root, join(plan.stateRoot, label))) {
+        violations.push({ id: `${label}-host-state`, path: join(plan.stateRoot, label), root, reason: 'outside the experiment root' });
+      }
+    }
+    checks.push(check('environment-isolation', violations.length === 0 ? 'PASS' : 'FAIL',
+      'an inherited production environment cannot redirect this run: workspace, PD database, host state and config all resolve inside the experiment root',
+      { experimentRoot: root, violations, evidence }));
+    report.environmentIsolation = evidence;
+  }
+
   // 1. Plugin artifact from THIS repository.
   const bundlePath = join(rootDir, PLUGIN_BUNDLE_RELATIVE);
   let bundleSha256 = null;
@@ -219,30 +280,30 @@ export async function runP0Preflight({
     const violations = verifyHostIdentity(plan.host, hostIdentity(profile));
     if (plan.configSha256 !== hostConfigSha256(plan.configPath)) violations.push('config changed since the plan was frozen');
     if (plan.plugin?.bundleSha256 !== bundleSha256) violations.push('plugin bundle changed since the plan was frozen');
-    if (!inside(plan.configPath, root)) violations.push('config escapes the experiment root');
-    if (!inside(plan.stateRoot, root)) violations.push('state root escapes the experiment root');
+    if (!isInsideRoot(root, plan.configPath)) violations.push('config escapes the experiment root');
+    if (!isInsideRoot(root, plan.workspaceDir)) violations.push('workspace escapes the experiment root');
+    if (!plan.controlWorkspaceDir || !isInsideRoot(root, plan.controlWorkspaceDir)) violations.push('control workspace escapes the experiment root');
+    if (!isInsideRoot(root, plan.stateRoot)) violations.push('state root escapes the experiment root');
+    if (plan.workspaceTarget?.stateDbPath && !isInsideRoot(root, plan.workspaceTarget.stateDbPath)) violations.push('workspace state.db escapes the experiment root');
     if (!inside(plan.plugin?.rootDir, rootDir)) violations.push('plugin root escapes the repository');
     checks.push(check('host-consistency', violations.length === 0 ? 'PASS' : 'FAIL',
-      'P0 and the run launcher resolve the same host, config, state root and plugin artifact',
+      'P0 and the run launcher resolve the same host, config, state root, workspace and plugin artifact, all inside the experiment root',
       { violations }));
   }
 
   // 5. Runtime hook registration — structured inspect JSON, not stdout text.
   const inspectPath = profile.ok && plan ? join(root, 'p0-inspect.json') : null;
-  if (!profile.ok || !plan) {
-    checks.push(check('hook-registration', 'NOT_RUN', 'blocked: isolated host or plan unavailable'));
+  if (!profile.ok || !plan || !p0Isolation) {
+    checks.push(check('hook-registration', 'NOT_RUN', 'blocked: isolated host, plan or isolated environment unavailable'));
   } else {
     const { command, prefixArgs } = hostCommand(profile);
-    const env = {
-      ...process.env,
-      OPENCLAW_CONFIG_PATH: plan.configPath,
-      OPENCLAW_STATE_DIR: plan.stateRoot,
-      OPENCLAW_PROFILE: 'aa-p0',
-    };
+    // The inspect host loads the plugin with the SAME isolated environment as
+    // the arms, so the plugin's startup health check cannot read a production
+    // workspace through an inherited variable.
     const inspect = runCapture(command, [...prefixArgs, 'plugins', 'inspect', PLUGIN_ID, '--runtime', '--json'], {
       cwd: rootDir,
       timeout: 45_000,
-      env,
+      env: p0Isolation.env,
     });
     let parsedInspect = null;
     try {
@@ -271,7 +332,51 @@ export async function runP0Preflight({
         registeredToolNames,
         stderr: inspect.stderr.trim().slice(0, 400),
       }));
-    report.hookRegistration = { typedHooks, pluginStatus, pluginSource, registeredToolNames };
+    report.hookRegistration = {
+      typedHooks, pluginStatus, pluginSource, registeredToolNames,
+      mcpServers: Array.isArray(parsedInspect?.mcpServers) ? parsedInspect.mcpServers : [],
+    };
+  }
+
+  // 5a. Plugin MCP binding. The plugin's startup health check
+  // (`ensureMcpBinding` in packages/openclaw-plugin/src/core/mcp-binding.ts)
+  // writes `mcp-binding.json` beside its payload root. Only the pd-recall MCP
+  // launcher reads it, and host tool policy denies MCP tools for this run; the
+  // check proves the recorded workspace stays inside the experiment root so a
+  // production workspace cannot reappear through inheritance.
+  if (!plan || typeof root !== 'string') {
+    checks.push(check('mcp-binding', 'NOT_RUN', 'blocked: frozen plan unavailable'));
+  } else {
+    const bindingPath = join(rootDir, MCP_BINDING_RELATIVE);
+    if (!existsSync(bindingPath)) {
+      checks.push(check('mcp-binding', 'PASS', 'no plugin MCP binding file is present', {
+        bindingPath,
+        source: 'packages/openclaw-plugin/src/core/mcp-binding.ts (ensureMcpBinding)',
+      }));
+    } else {
+      const parsed = readJson(bindingPath);
+      const boundWorkspace = typeof parsed.value?.workspaceDir === 'string' ? parsed.value.workspaceDir : null;
+      const serverEntry = typeof parsed.value?.serverEntry === 'string' ? parsed.value.serverEntry : null;
+      const insideRootNow = parsed.ok && boundWorkspace !== null && isInsideRoot(root, boundWorkspace);
+      // A binding outside this run root cannot redirect the arm: the launcher
+      // re-derives the declared workspace from PD_WORKSPACE_DIR (set per arm)
+      // and refuses when it differs from the binding. That refusal happens
+      // before any MCP traffic. An inside-root binding is the normal outcome
+      // after the plugin's startup health check rewrites the file.
+      const declarationGate = insideRootNow ? 'binding matches the declared workspace' : 'launcher refuses before MCP traffic (binding_workspace_not_declared)';
+      const ok = parsed.ok && boundWorkspace !== null && serverEntry !== null;
+      checks.push(check('mcp-binding', ok ? 'PASS' : 'FAIL',
+        'the plugin startup binding is readable and cannot redirect this run outside its experiment root', {
+          bindingPath, boundWorkspace, serverEntry,
+          boundWorkspaceInsideRoot: insideRootNow,
+          declarationGate,
+          schemaVersion: parsed.value?.schemaVersion ?? null,
+          source: 'packages/openclaw-plugin/src/core/mcp-binding.ts (ensureMcpBinding)',
+          loadedBy: 'packages/openclaw-plugin/mcp/launcher.cjs (pd-recall MCP server only)',
+          modelSurface: 'MCP tools are denied by tools.allow; see tool-whitelist',
+        }));
+      report.mcpBinding = { bindingPath, boundWorkspace, serverEntry };
+    }
   }
 
   // 5b. Frozen workspace target — the positive arm can only prove an
@@ -402,11 +507,20 @@ export async function runP0Preflight({
     const exactAllowlist = allow !== null && allow.length === 1 && allow[0] === toolName;
     const pluginToolNames = Array.isArray(report.hookRegistration?.registeredToolNames) ? report.hookRegistration.registeredToolNames : null;
     const noPluginTools = pluginToolNames !== null && pluginToolNames.length === 0;
-    checks.push(check('tool-whitelist', exactAllowlist && noPluginTools && toolName === plan.toolName ? 'PASS' : 'FAIL',
-      'the declared allowlist is exactly one tool and the plugin registers none; the runtime tool surface is proven from the endpoint request body at execute', {
+    // Verifiable whitelist basis, not "the output contains read": the frozen
+    // config's allowlist must be exactly [toolName], AND it must contain no MCP
+    // escape hatch (global group, bundle group or `<server>__` prefix), so any
+    // plugin-declared MCP server is denied by the host tool policy.
+    const mcpEntries = mcpAllowEntries(allow);
+    const noMcpAllowance = mcpEntries !== null && mcpEntries.length === 0;
+    checks.push(check('tool-whitelist', exactAllowlist && noPluginTools && noMcpAllowance && toolName === plan.toolName ? 'PASS' : 'FAIL',
+      'the declared allowlist is exactly one built-in tool, registers no plugin tools and grants no MCP surface; the runtime tool surface is proven from the endpoint request body at execute', {
         toolName,
         declaredAllowlist: allow,
+        allowlistJsonPointer: 'tools.allow',
         pluginToolNames,
+        pluginDeclaredMcpServers: report.hookRegistration?.mcpServers ?? null,
+        mcpAllowEntries: mcpEntries,
         definitiveEvidence: 'endpoint request body (gate tool-surface)',
       }));
   }

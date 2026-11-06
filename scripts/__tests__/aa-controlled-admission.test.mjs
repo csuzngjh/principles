@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   BudgetExceededError,
+  CUMULATIVE_LEDGER_SCHEMA,
   createExperimentLedger,
   createRunIdentity,
   fixtureBytes,
+  readAttemptUsageFromRuns,
   sha256Hex,
 } from '../dev/aa-controlled-admission/lib/ledger.mjs';
+import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv, isInsideRoot } from '../dev/aa-controlled-admission/lib/env-isolation.mjs';
 import { startFakeProvider } from '../dev/aa-controlled-admission/lib/fake-provider.mjs';
 import {
   buildHostConfig,
@@ -106,6 +109,151 @@ describe('experiment ledger — one numbering source', () => {
     const bytes = fixtureBytes(identity.fixtureId);
     expect(bytes.toString('utf8')).toBe(`${identity.fixtureId}\n`);
     expect(sha256Hex(bytes)).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('experiment ledger — cumulative across run directories', () => {
+  it('carries the failed turn into a fresh run directory and continues the global ids', () => {
+    const runRoot = mkdtempSync(join(tmpdir(), 'aa-budget-'));
+    const failedRunDir = join(runRoot, 'aa-run-20261106T0941Z');
+    mkdirSync(failedRunDir);
+    const failed = makeLedger('aa-run-20261106T0941Z');
+    failed.hostTurn('positive');
+    writeFileSync(join(failedRunDir, 'ledger.json'), JSON.stringify(failed.snapshot(), null, 2));
+
+    const bootstrap = readAttemptUsageFromRuns(runRoot);
+    expect(bootstrap.usage.hostTurns).toBe(1);
+    expect(bootstrap.sources).toEqual(['aa-run-20261106T0941Z']);
+
+    const persistPath = join(runRoot, 'experiment-budget.json');
+    const first = createExperimentLedger({
+      runId: 'aa-run-first', fixtureId: 'AA-FIXTURE-run-first', persistPath, priorUsage: bootstrap.usage,
+    });
+    expect(first.snapshot().used.hostTurns).toBe(1);
+    expect(first.hostTurn('positive').id).toBe('turn-002');
+
+    // A NEW run directory (a fresh --prepare) reading the same cumulative file
+    // must not start from zero.
+    const second = createExperimentLedger({
+      runId: 'aa-run-second', fixtureId: 'AA-FIXTURE-run-second', persistPath,
+    });
+    expect(second.snapshot().used.hostTurns).toBe(2);
+    expect(second.hostTurn('control').id).toBe('turn-003');
+    expect(existsSync(persistPath)).toBe(true);
+  });
+
+  it('fails closed on a malformed or budget-incompatible cumulative ledger instead of resetting', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-budget-bad-'));
+    const persistPath = join(dir, 'experiment-budget.json');
+    writeFileSync(persistPath, '{not json', 'utf8');
+    expect(() => createExperimentLedger({ runId: 'aa-bad', fixtureId: 'F', persistPath })).toThrow(/cannot read/);
+
+    const incompatible = {
+      schemaVersion: CUMULATIVE_LEDGER_SCHEMA,
+      budget: { hostTurns: 2, httpRequests: 3, toolCalls: 1, paidCalls: 0 },
+      used: { hostTurns: 1, httpRequests: 0, toolCalls: 0, paidCalls: 0 },
+      records: { hostTurns: [], httpRequests: [], toolCalls: [], paidCalls: [] },
+      violations: [],
+    };
+    writeFileSync(persistPath, JSON.stringify(incompatible), 'utf8');
+    expect(() => createExperimentLedger({ runId: 'aa-bad', fixtureId: 'F', persistPath })).toThrow(/reconcile explicitly/);
+  });
+});
+
+describe('environment isolation — inherited production paths', () => {
+  function makeArmRoot() {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-env-'));
+    const runDir = join(dir, 'run');
+    const stateRoot = join(runDir, 'state');
+    const positiveWorkspace = join(runDir, 'positive', 'workspace');
+    const controlWorkspace = join(runDir, 'control', 'workspace');
+    mkdirSync(positiveWorkspace, { recursive: true });
+    mkdirSync(controlWorkspace, { recursive: true });
+    mkdirSync(stateRoot, { recursive: true });
+    const configPath = join(runDir, 'config.json');
+    writeFileSync(configPath, '{"plugins":{}}\n');
+    const admissionPath = join(runDir, 'admission.json');
+    writeFileSync(admissionPath, '{}\n');
+    return { dir, runDir, stateRoot, positiveWorkspace, controlWorkspace, configPath, admissionPath };
+  }
+
+  const productionEnv = {
+    PD_WORKSPACE_DIR: 'D:\\.openclaw\\workspace',
+    OPENCLAW_WORKSPACE: 'D:\\.openclaw\\workspace',
+    PD_STATE_DIR: 'D:\\.openclaw\\state',
+    OPENCLAW_STATE_DIR: 'D:\\.openclaw',
+    OPENCLAW_CONFIG_PATH: 'D:\\.openclaw\\openclaw.json',
+    OPENCLAW_PROFILE: 'production',
+    OPENCLAW_HOME: 'D:\\.openclaw',
+  };
+
+  it('keeps both arms inside their own root even when the parent declares production paths', () => {
+    const layout = makeArmRoot();
+    const positive = buildIsolatedHostEnv({
+      baseEnv: productionEnv,
+      experimentRoot: layout.runDir,
+      workspaceDir: layout.positiveWorkspace,
+      stateDir: join(layout.stateRoot, 'positive'),
+      configPath: layout.configPath,
+      profile: 'aa-positive',
+      admissionPath: layout.admissionPath,
+    });
+    const control = buildIsolatedHostEnv({
+      baseEnv: productionEnv,
+      experimentRoot: layout.runDir,
+      workspaceDir: layout.controlWorkspace,
+      stateDir: join(layout.stateRoot, 'control'),
+      configPath: layout.configPath,
+      profile: 'aa-control',
+    });
+
+    expect(positive.env.PD_WORKSPACE_DIR).toBe(resolve(layout.positiveWorkspace));
+    expect(control.env.PD_WORKSPACE_DIR).toBe(resolve(layout.controlWorkspace));
+    for (const isolation of [positive, control]) {
+      expect(isolation.env.OPENCLAW_WORKSPACE).toBeUndefined();
+      expect(isolation.env.PD_STATE_DIR).toBeUndefined();
+      expect(isolation.env.OPENCLAW_HOME).toBeUndefined();
+      expect(isolation.env.OPENCLAW_CONFIG_PATH).toBe(resolve(layout.configPath));
+      for (const path of [
+        isolation.resolved.workspaceDir,
+        isolation.resolved.pdStateDbPath,
+        isolation.resolved.pdStateDir,
+        isolation.resolved.hostStateDir,
+        isolation.resolved.hostConfigPath,
+      ]) {
+        expect(isInsideRoot(layout.runDir, path)).toBe(true);
+      }
+      expect(isolation.removedFromParent).toEqual(expect.arrayContaining(['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_STATE_DIR']));
+    }
+    expect(positive.resolved.admissionFile).not.toBeNull();
+    expect(isInsideRoot(layout.runDir, positive.resolved.admissionFile)).toBe(true);
+    expect(control.resolved.admissionFile).toBeNull();
+  });
+
+  it('refuses before any write when a resolved path escapes the experiment root', () => {
+    const layout = makeArmRoot();
+    expect(() => buildIsolatedHostEnv({
+      baseEnv: productionEnv,
+      experimentRoot: layout.runDir,
+      workspaceDir: 'D:\\.openclaw\\workspace',
+      stateDir: join(layout.stateRoot, 'positive'),
+      configPath: layout.configPath,
+      profile: 'aa-positive',
+    })).toThrow(/environment escape/);
+  });
+
+  it('refuses a plan whose workspace, state or config escapes the run directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-plan-escape-'));
+    const frozen = makeFrozenExperiment(join(dir, 'experiment'));
+    expect(assertPlanInsideExperimentRoot({ runDir: frozen.runDir, plan: frozen.plan }).checked.length).toBeGreaterThan(0);
+    expect(() => assertPlanInsideExperimentRoot({
+      runDir: frozen.runDir,
+      plan: { ...frozen.plan, workspaceDir: join(dir, 'outside-workspace') },
+    })).toThrow(/environment escape/);
+    expect(() => assertPlanInsideExperimentRoot({
+      runDir: frozen.runDir,
+      plan: { ...frozen.plan, stateRoot: join(dir, 'outside-state') },
+    })).toThrow(/environment escape/);
   });
 });
 
