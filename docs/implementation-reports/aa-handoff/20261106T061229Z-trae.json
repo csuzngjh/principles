@@ -1,0 +1,306 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T061229Z-trae",
+  "previousCheckpoint": "20261106T053533Z-trae",
+  "generatedAt": "2026-11-06T06:12:29Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "按 Owner 收口指令完成两件事：(1) 已按授权 squash 合并 PR #2380，head 仍为 730119952，合并提交 fda71df92，origin/main 新 head 同值；(2) 纯文档修正两份 AA 文档——验证卡 Q5 与设计 §7 区分“行为来源截断（corrections/outcomes/weakCandidates）保留 strong_run”与“journal 自身不完整/唯一性不可证明降为 unknown”，设计新增 §3.4 当前输入来源与校验、§3.5 单次消费绑定/有效期/原子消费、§3.6 共享入口真实调用链与双入口测试点。新接线实现归 PRI-1118，本 PR 与 PRI-1114 不含编码。文档 PR #2384 已创建，未合并。无代码变更，未重跑测试。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+    "branch": "ai/PRI-1114-coverage-propagation",
+    "baseCommit": "fda71df92fcbe28e4499dab3b98fcde6eeee251c",
+    "headCommit": "34d37c5de4577ff51be6d1ac4933df311f2d422a",
+    "dirtyPaths": [],
+    "pushedCommit": "34d37c5de4577ff51be6d1ac4933df311f2d422a",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2384",
+    "remoteChecks": "UNKNOWN at write: PR #2384 刚创建，尚未读取 CI 结果。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1114",
+      "scope": "收口：合并 #2380（Owner 授权）+ 两份文档修正（关联语义区分 + 受控准入三处接线说明）；不编码、不发版",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+        "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+        "docs/implementation-reports/aa-handoff/20261106T061229Z-trae.json",
+        "docs/implementation-reports/aa-handoff/20261106T061229Z-trae.md",
+        "docs/implementation-reports/aa-handoff/LATEST.json"
+      ],
+      "commits": [
+        "fda71df92fcbe28e4499dab3b98fcde6eeee251c",
+        "34d37c5de4577ff51be6d1ac4933df311f2d422a"
+      ],
+      "acceptance": [
+        {"criterion": "#2380 合并前核实 head 仍为 730119952、Ready、CLEAN；实际合并提交 fda71df92，main 新 head 同值", "result": "PASS", "evidenceRefs": ["evidence-merge-2380", "evidence-main-head"]},
+        {"criterion": "验证卡 Q5 区分行为来源截断与 journal 不完整/唯一性不可证明", "result": "PASS", "evidenceRefs": ["evidence-card"]},
+        {"criterion": "设计 §7 使用同一区分，并补 §3.4–§3.6 三个接线说明", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "纯文档：diff 仅两份文档；docs-structure 与 diff --check 通过；未重跑测试", "result": "PASS", "evidenceRefs": ["evidence-docs-check"]},
+        {"criterion": "PR #2384 已创建且未合并", "result": "PASS", "evidenceRefs": ["evidence-pr-2384"]},
+        {"criterion": "Owner 审阅并合并 #2384", "result": "NOT_RUN", "evidenceRefs": ["evidence-pr-2384"]}
+      ],
+      "remaining": [
+        "PR #2384 未合并；合并由 Owner 执行，AI 不合并第二个 PR。",
+        "无代码变更，未重跑 host-runtime / pd-cli 全量；745/2150 为外部证据，记为 NOT RUN。",
+        "PRI-1114 曾被合并自动化置为 Done；本检查点同时将状态恢复为 In Review，待 #2384 合并后再收口。"
+      ]
+    },
+    {
+      "issue": "PRI-1118",
+      "scope": "受控准入接线实现（§3.4 当前输入来源、§3.5 单次消费、§3.6 双入口），独立推进；本轮只设计，不编码",
+      "status": "NEEDS_OWNER",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md"
+      ],
+      "acceptance": [
+        {"criterion": "当前输入来源：说明 embedded 从 event.prompt 经 resolveCurrentUserMessage 取得正文，并给出四条校验", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "单次消费：绑定 sessionId/runId、expiresAt 有效期、先占后使用的原子消费与拒绝原因", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "共享入口：核实 index.ts 503–506 分流、adaptivePriorityProvider 原生 ID 门与 host-runtime 回调链，覆盖双入口测试点", "result": "PASS", "evidenceRefs": ["evidence-design", "evidence-shared-entry"]},
+        {"criterion": "Owner 批准接线实现", "result": "NOT_RUN", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "实现接线并运行双入口测试", "result": "NOT_RUN", "evidenceRefs": []}
+      ],
+      "remaining": [
+        "待 Owner 批准 §3.4–§3.6 接线后，由 PRI-1118 独立实现。",
+        "G1 历史两次假模型额度已用，新宿主实验需另行批准。",
+        "获批前不写接线代码、不跑宿主、不装插件、不改安装目录。"
+      ]
+    },
+    {
+      "issue": "PRI-1111",
+      "scope": "继续记录唯一宿主正常入口的身份缺口（不关闭工单）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+        "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md"
+      ],
+      "acceptance": [
+        {"criterion": "记录 embedded before_prompt_build 缺 currentUserMessageId，常规路径保持 Native", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-design"]}
+      ],
+      "remaining": [
+        "入口身份缺口未修复；受控准入只是实验性替代，不改变生产 Native 默认。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-merge-2380",
+      "cwd": "D:\\Code\\principles",
+      "command": "gh pr view 2380 --json state,headRefOid,mergeCommit,mergedAt,mergeStateStatus,isDraft",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-merge-2380"]
+    },
+    {
+      "id": "check-main-head",
+      "cwd": "D:\\Code\\principles",
+      "command": "git fetch origin --prune; git log -n 2 --oneline origin/main",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-main-head"]
+    },
+    {
+      "id": "check-docs-structure",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "node scripts/check-docs-structure.cjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-docs-check"]
+    },
+    {
+      "id": "check-diff",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "git diff --check; git diff --stat",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-docs-check"]
+    },
+    {
+      "id": "check-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "host-runtime / pd-cli 全量测试",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-merge-2380",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2380",
+      "observedAt": "2026-11-06T06:00:21Z",
+      "sha256": null,
+      "supports": "PR #2380 state=MERGED，head=730119952a8d922c1c2c56dc1de439d9bc017f43（合并前未变），mergeCommit=fda71df92fcbe28e4499dab3b98fcde6eeee251c，mergedAt=2026-11-06T06:00:21Z。",
+      "limitations": "仅合并事实；未复跑 CI 或测试。"
+    },
+    {
+      "id": "evidence-main-head",
+      "kind": "INLINE",
+      "locator": "inline: git log origin/main",
+      "observedAt": "2026-11-06T06:12:29Z",
+      "sha256": null,
+      "supports": "origin/main 新 head=fda71df92fcbe28e4499dab3b98fcde6eeee251c（squash 合并提交）；远程 ai/PRI-1114-coverage-propagation 已被自动删除。",
+      "limitations": "本地主检出未执行 pull，仍落后 origin/main。"
+    },
+    {
+      "id": "evidence-card",
+      "kind": "REPORT",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\docs\\implementation-reports\\PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+      "observedAt": "2026-11-06T06:12:29Z",
+      "sha256": "a22a0b95c515af26859a8145ce3e2c537eddc71546ee29a0254d9bcdcb797931",
+      "supports": "Q5 分开表述：行为来源截断只影响 facts/coverage，可保留 strong_run；journal 不完整或唯一性不可证明降为 unknown；另列 ambiguous/conflict 条件。",
+      "limitations": "DRAFT/NEEDS_OWNER，不是验收通过声明。"
+    },
+    {
+      "id": "evidence-design",
+      "kind": "REPORT",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\docs\\implementation-reports\\PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+      "observedAt": "2026-11-06T06:12:29Z",
+      "sha256": "023a56d7424d636332868f739bbd5a2120be042cd19067db97a23bc0b2225273",
+      "supports": "§7 与验证卡同一区分；新增 §3.4 当前输入来源与四条校验、§3.5 单次消费规则、§3.6 共享入口调用链与双入口测试点；明确实现归 PRI-1118。",
+      "limitations": "仅设计；未经 Owner 批准，不含实现或运行证据。"
+    },
+    {
+      "id": "evidence-shared-entry",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\openclaw-plugin\\src\\index.ts",
+      "observedAt": "2026-11-06T06:10:00Z",
+      "sha256": null,
+      "supports": "第 503–506 行按 runtimeGateFor 分流；共享入口 provider 在第 361–388 行要求原生 currentUserMessageId（371–373 行）；第 389–393 行仍回调 handleBeforePromptBuild。",
+      "limitations": "静态阅读；未运行插件测试。"
+    },
+    {
+      "id": "evidence-docs-check",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: node scripts/check-docs-structure.cjs; git diff --check",
+      "observedAt": "2026-11-06T06:12:29Z",
+      "sha256": null,
+      "supports": "文档结构检查 PASS；diff 仅两份文档，无空白错误。",
+      "limitations": "不覆盖运行时行为。"
+    },
+    {
+      "id": "evidence-pr-2384",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2384",
+      "observedAt": "2026-11-06T06:12:29Z",
+      "sha256": null,
+      "supports": "文档 PR 已创建，base=main，head=ai/PRI-1114-coverage-propagation@34d37c5de；未合并。",
+      "limitations": "CI 结果未读取。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-card",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+      "persistence": "committed",
+      "notes": "Q5 关联语义修正后的验证卡。"
+    },
+    {
+      "id": "artifact-design",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+      "persistence": "committed",
+      "notes": "v1.1：关联语义区分 + 三处接线说明，仅设计。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T061229Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T061229Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点同名 Markdown。"
+    }
+  ],
+  "blockers": [
+    "受控准入 §3.4–§3.6 的接线实现尚未获得 Owner 批准（PRI-1118）。",
+    "文档 PR #2384 未合并；PRI-1114 需待其合并后才可最终收口。",
+    "G1 历史两次本地假模型额度已使用，不复用。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1114",
+      "action": "Owner 审阅并合并文档 PR #2384；合并由 Owner 执行，AI 不合并。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PR #2384 合并，PRI-1114 可按收口处理。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1118",
+      "action": "Owner 审阅设计 §3.4–§3.6 并批准接线实现范围。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 书面批准或拒绝接线实现。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1118",
+      "action": "获批后实现准入加载器、prompt.ts 干预分支与 index.ts 共享入口选择分支，并补本地/共享两条接线测试。",
+      "dependsOn": [2],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "lint/typecheck/双入口测试全绿，默认关闭与回退路径均有断言。"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1118",
+      "action": "实现验证通过且另行获批后，再在隔离环境执行真实宿主实验。",
+      "dependsOn": [2, 3],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "证据包与清理字段齐全，结论分级符合声明边界。"
+    },
+    {
+      "order": 5,
+      "issue": "PRI-1114",
+      "action": "#2384 合并后按 git-8 清理 worktree 与租约。",
+      "dependsOn": [1],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "worktree 干净、无未合并状态，租约释放。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-06 收口指令：授权合并 #2380；文档只补一处区别；受控准入只补三个接线说明；新接线归 PRI-1118。",
+      "Owner 2026-11-06：核心漏报修复通过；不提前关闭 PRI-1114 整票。",
+      "PD-AA-G1-CONTROLLED-ADMISSION-CARD.md：历史受控准入范围（无工具、假 provider、两次额度已用）。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261106T061229Z-trae\",\"kind\":\"final\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "其他任务的 LATEST 指针未修改；历史检查点未覆盖。"
+    ]
+  }
+}
