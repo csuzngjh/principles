@@ -202,6 +202,25 @@ jobs:
           ref: ${{ github.event.inputs.ref || 'main' }}
           fetch-depth: 0
 
+      # PRI-1103: the publication gates are CONTROL PLANE and must run the
+      # tooling of the ref this run was dispatched against. Only THIS job may
+      # read the mutable input ref — every downstream job pins the SHA
+      # resolve-inputs measured (rc-6) and checks out the product cohort, which
+      # may predate the gate script. Handing the tooling down as an artifact
+      # keeps that invariant and keeps the gate out of the publication payload.
+      - name: Bundle publication-gate tooling
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          git archive HEAD scripts/release scripts/lib | tar -x -C "$RUNNER_TEMP/release-tools"
+          tar -czf "$RUNNER_TEMP/release-tools.tar.gz" -C "$RUNNER_TEMP/release-tools" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-publication-gate-tooling
+          path: ${{ runner.temp }}/release-tools.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Setup Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -727,21 +746,24 @@ jobs:
           done
 
       # PRI-1103 RACE GATE TOOLING. The gate is CONTROL PLANE: it must be the
-      # reviewed tooling the operator dispatched, never a file that happens to
-      # exist in the product cohort being published (this job's workspace is
-      # checked out at the cohort SHA). Extracting it into RUNNER_TEMP keeps the
-      # workspace — and therefore the gh-pages publication payload below —
-      # byte-for-byte what the product checkout produces.
-      - name: Fetch trusted publication-gate tooling
-        env:
-          TOOLS_REF: ${{ github.event.inputs.ref || 'main' }}
+      # reviewed tooling resolve-inputs bundled from the dispatched ref, never a
+      # file that happens to exist in the product cohort being published (this
+      # job's workspace is checked out at the cohort SHA, which may predate the
+      # script). Extracting it into RUNNER_TEMP keeps the workspace — and
+      # therefore the gh-pages publication payload below — byte-for-byte what
+      # the product checkout produces.
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-publication-gate-tooling
+          path: ${{ runner.temp }}/release-tools-archive
+
+      - name: Extract trusted publication-gate tooling
         run: |
           TOOLS_DIR="$RUNNER_TEMP/release-tools"
           mkdir -p "$TOOLS_DIR"
-          git fetch --no-tags origin "$TOOLS_REF"
-          TOOLS_SHA=$(git rev-parse FETCH_HEAD)
-          echo "publication gate tooling: $TOOLS_REF -> $TOOLS_SHA"
-          git archive FETCH_HEAD scripts/release scripts/lib | tar -x -C "$TOOLS_DIR"
+          tar -xzf "$RUNNER_TEMP/release-tools-archive/release-tools.tar.gz" -C "$TOOLS_DIR"
+          test -f "$TOOLS_DIR/scripts/release/verify-publication-cohort.mjs"
+          echo "publication gate tooling: $(sha256sum "$TOOLS_DIR/scripts/release/verify-publication-cohort.mjs" | cut -d' ' -f1)"
 
       # GATE 1 — after every platform asset exists and its embedded identity is
       # verified, BEFORE any external side effect (signing/upload/push). A

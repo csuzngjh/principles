@@ -829,6 +829,9 @@ describe('release-metadata.yml — cohort re-check gates around the publication 
       // No fallback path in the step itself: the script owns fail-closed.
       expect(step.run ?? '').not.toContain('|| true');
       expect(step.run ?? '').not.toContain('continue');
+      // A refusal must never be "fixed" by rewriting what the bytes claim.
+      expect(step.run ?? '').not.toContain('sourceCommit');
+      expect(step.run ?? '').not.toContain('sed -i');
     }
     // Publishing steps keep default success() semantics, so a gate failure
     // skips the upload/push instead of racing ahead.
@@ -837,15 +840,28 @@ describe('release-metadata.yml — cohort re-check gates around the publication 
     expect(stepNamed('Publication gate 2').if ?? '').toContain("env.MODE == 'publish'");
   });
 
-  it('fetches gate tooling from the dispatched ref, never from the product cohort', () => {
-    const tooling = stepNamed('Fetch trusted publication-gate tooling');
-    expect(tooling.env?.TOOLS_REF).toBe("${{ github.event.inputs.ref || 'main' }}");
-    const run = tooling.run ?? '';
-    expect(run).toContain('git archive FETCH_HEAD scripts/release scripts/lib');
+  it('receives gate tooling from resolve-inputs, never from the product cohort', () => {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Array<Step & { uses?: string; with?: Record<string, unknown> }> }> };
+    const resolveSteps = doc.jobs?.['resolve-inputs']?.steps ?? [];
+    const bundle = resolveSteps.find((s) => (s.name ?? '').startsWith('Bundle publication-gate tooling'));
+    expect(bundle?.run ?? '').toContain('git archive HEAD scripts/release scripts/lib');
+    const upload = resolveSteps.find(
+      (s) => (s.uses ?? '').startsWith('actions/upload-artifact') && s.with?.name === 'release-publication-gate-tooling',
+    );
+    expect(upload?.with?.['if-no-files-found']).toBe('error');
+
+    // assemble-publish downloads the bundle; it never re-reads the mutable ref.
+    const assemble = doc.jobs?.['assemble-publish']?.steps ?? [];
+    const download = assemble.find(
+      (s) => (s.uses ?? '').startsWith('actions/download-artifact') && s.with?.name === 'release-publication-gate-tooling',
+    );
+    expect(download?.with?.path).toBe('${{ runner.temp }}/release-tools-archive');
+    const extract = assemble.find((s) => (s.name ?? '').startsWith('Extract trusted publication-gate tooling'));
+    expect(extract?.run ?? '').toContain('$RUNNER_TEMP/release-tools');
+    expect(extract?.run ?? '').toContain('verify-publication-cohort.mjs');
     // Extraction target is RUNNER_TEMP: the cohort workspace (and therefore the
     // gh-pages publication payload) stays untouched.
-    expect(run).toContain('$RUNNER_TEMP/release-tools');
-    expect(run).not.toContain('path:');
+    expect(assemble.some((s) => (s.run ?? '').includes('git archive HEAD'))).toBe(false);
   });
 });
 
