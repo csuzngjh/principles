@@ -11,7 +11,6 @@ import {
   attachCoverage,
   COVERAGE_DEFINITIONS,
   FIELD_MAPPING,
-  SUMMARY_SCHEMA,
 } from './lib/adaptive/adaptive-evidence-adapter.mjs';
 
 const CLI_KEYS = new Set([

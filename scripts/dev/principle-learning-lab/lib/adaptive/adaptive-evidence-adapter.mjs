@@ -121,7 +121,6 @@ const POLLUTION_SCHEMA = 'pd-aa-prod-audit/v4';
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value) => typeof value === 'string' && value.trim().length > 0;
 const sha256 = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
-const own = (value, key) => object(value) && Object.hasOwn(value, key);
 
 function requireValid(condition, reason) {
   if (!condition) throw new TypeError(reason);
@@ -789,7 +788,6 @@ export function adaptAaEvidence({ linkage = [], budget = [], runRecords = [], re
 
   const linkageFacts = linkageInvocations(linkages.unique);
   const coverageInput = buildCoverageInput(linkageFacts);
-  const byRun = new Map(runs.unique.map((run) => [run.runId, run]));
 
   const runReports = runs.unique.map((entry) => {
     const record = entry.value;
