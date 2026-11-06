@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { decodeCodexInput } from '../src/codec/index.js';
-import { getPromptModelCatalog, promptBudgetCharsForContextWindow, resolvePromptBudget } from '@principles/core/runtime-v2';
+import { getPromptModelCatalog, promptBudgetCharsForContextWindow, resolvePromptBudget } from '@principles/core/runtime';
 
 /**
  * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §5.2 (Codex): the decoder keeps the

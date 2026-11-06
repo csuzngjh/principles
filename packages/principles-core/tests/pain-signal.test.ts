@@ -3,7 +3,7 @@ import {
   validatePainSignal,
   deriveSeverity,
   PainSignalSchema,
-} from '../src/runtime-v2/types/pain-signal.js';
+} from '../src/runtime/types/pain-signal.js';
 
 describe('deriveSeverity', () => {
   it('returns low for scores 0-39', () => {
@@ -31,7 +31,7 @@ describe('deriveSeverity', () => {
   });
 });
 
-describe('validatePainSignal (canonical runtime-v2/types/pain-signal.ts)', () => {
+describe('validatePainSignal (canonical runtime/types/pain-signal.ts)', () => {
   function createValidSignal(overrides = {}) {
     return {
       source: 'tool_failure',

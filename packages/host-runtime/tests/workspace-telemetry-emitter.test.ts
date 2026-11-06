@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime-v2';
+import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime';
 import { WorkspaceTelemetryEmitter } from '../src/workspace-telemetry-emitter.js';
 
 let workspaceDir: string;

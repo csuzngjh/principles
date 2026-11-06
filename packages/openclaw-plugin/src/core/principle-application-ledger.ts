@@ -12,7 +12,7 @@
  * Never throws: ledger failures degrade to false + caller-side warn (rc-9) —
  * the hook decision (block/allow/inject) is NEVER affected by ledger writes.
  */
-import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS, safeStringifyPreview } from '@principles/core/runtime-v2';
+import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS, safeStringifyPreview } from '@principles/core/runtime';
 import Database from 'better-sqlite3';
 import * as nodePath from 'node:path';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';

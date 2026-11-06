@@ -18,9 +18,9 @@ import {
   collectOwnerDecisionFacts,
   deriveOwnerDecisionCapability,
   buildOwnerDecisionReview,
-} from '@principles/core/runtime-v2';
-import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime-v2';
-import type { PIArtifactStore } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { OwnerDecisionReviewSnapshot, TaskRecord } from '@principles/core/runtime';
+import type { PIArtifactStore } from '@principles/core/runtime';
 import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
 import {
   createArtifactPrincipleResolutionDeps,

@@ -22,8 +22,8 @@ import {
   loadLedger,
   saveLedger,
 } from '../../src/core/principle-tree-ledger.js';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
-import type { RuleHostInput } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
+import type { RuleHostInput } from '@principles/core/runtime';
 import { safeRmDir } from '../test-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -301,7 +301,6 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
   });
 
   it('should return compilation failure when principle has no derivedFromPainIds', () => {
-    const sessionId = 'session-no-pain-001';
     const principleId = 'P_099';
 
     // Set up a principle WITHOUT derivedFromPainIds

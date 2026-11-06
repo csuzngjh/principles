@@ -27,14 +27,14 @@ import {
   hydratePITaskRecord,
   createOwnerEvidenceScopeError,
   type BehaviorExamplePack,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   handleRuntimeInternalizationEvidenceAttach,
   handleRuntimeInternalizationEvidenceList,
   handleRuntimeInternalizationEvidenceResume,
   registerRuntimeInternalizationEvidenceCommand,
 } from '../../src/commands/runtime-internalization-evidence.js';
-import { listOwnerEvidenceActions } from '@principles/core/runtime-v2';
+import { listOwnerEvidenceActions } from '@principles/core/runtime';
 
 // ── host evidence port double ────────────────────────────────────────────────────
 

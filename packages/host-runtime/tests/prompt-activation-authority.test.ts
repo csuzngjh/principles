@@ -7,7 +7,7 @@ import {
   SqliteActivationStateStore,
   SqliteConnection,
   getDefaultPdConfig,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { buildActivePrinciplePromptContext, readPromptActivationCandidates, revalidateAdaptivePrinciple } from '../src/index.js';
 
 const tempDirs: string[] = [];

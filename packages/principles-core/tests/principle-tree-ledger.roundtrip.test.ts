@@ -35,7 +35,7 @@ import type {
   LedgerPrinciple,
   LegacyPrincipleTrainingState,
   HybridLedgerStore,
-} from '../src/runtime-v2/types/ledger-store.js';
+} from '../src/runtime/types/ledger-store.js';
 
 function makePrinciple(id: string): LedgerPrinciple {
   return {

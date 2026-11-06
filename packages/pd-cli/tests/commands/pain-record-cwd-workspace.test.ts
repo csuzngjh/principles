@@ -73,8 +73,8 @@ vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
   }),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/core/runtime')>();
   return {
     ...actual,
     PainToPrincipleService: vi.fn().mockImplementation(function (options: Record<string, unknown>) {

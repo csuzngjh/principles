@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 
 let logLines: string[] = [];
 let savedExitCode: number | undefined;
@@ -141,7 +141,7 @@ describe('pd codex setup — accept flow', () => {
     expect(configAfter).toContain('  codex_conversation_ingestion:');
 
     // Production loader is the round-trip authority.
-    const { computeFeatureFlagsFromConfig, isFeatureEnabled } = await import('@principles/core/runtime-v2');
+    const { computeFeatureFlagsFromConfig, isFeatureEnabled } = await import('@principles/core/runtime');
     const { loadPdConfigForPlugin } = await import('@principles/host-runtime');
     const result = loadPdConfigForPlugin(ws);
     expect(result.ok).toBe(true);

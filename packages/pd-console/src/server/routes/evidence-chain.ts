@@ -6,7 +6,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { EvidenceChainConsoleModel } from '../models/EvidenceChainConsoleModel.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendError, errorMessage } from '../utils/response.js';
 
 const models = new Map<string, EvidenceChainConsoleModel>();
 
@@ -34,7 +34,7 @@ export async function handleEvidenceChainRoute(
     const result = await model.getEvidenceChain();
     sendSuccess(res, result);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     sendError(res, 500, 'evidence_chain_error', message);
   }
 }

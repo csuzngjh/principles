@@ -1,8 +1,9 @@
-import type { LifecycleDatasource } from '@principles/core/runtime-v2';
-import type { LedgerTreeStore, ReplayReport, ArtifactLineageRecord } from '@principles/core/runtime-v2';
+import type { LifecycleDatasource } from '@principles/core/runtime';
+import type { LedgerTreeStore, ReplayReport, ArtifactLineageRecord } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { errorMessage } from '../utils/response.js';
 
 export class LineageSourceRetiredError extends Error {
   constructor() {
@@ -71,7 +72,7 @@ export class ConsoleLifecycleDatasource implements LifecycleDatasource {
     } catch (err) {
       console.warn(
         `ConsoleLifecycleDatasource.listReplayReports: failed to read replay reports ` +
-        `for implementationId=${implementationId}: ${err instanceof Error ? err.message : String(err)}`
+        `for implementationId=${implementationId}: ${errorMessage(err)}`
       );
       return [];
     }

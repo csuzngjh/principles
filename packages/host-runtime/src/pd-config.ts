@@ -7,7 +7,7 @@ import {
   validatePdConfig,
   type EffectivePdConfig,
   type PdConfigValidationResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export const PD_CONFIG_DIR = '.pd';
 export const PD_CONFIG_FILENAME = 'config.yaml';

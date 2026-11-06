@@ -20,28 +20,28 @@
  * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md §7.2
  *
  * Boundary: this module is I/O. Pure logic (type + validator) lives in
- * `@principles/core/runtime-v2` → `behavior-example-pack.ts`.
+ * `@principles/core/runtime` → `behavior-example-pack.ts`.
  */
-import { buildRuleHostAction } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
-import { computeBehaviorFacts } from '@principles/core/runtime-v2/internalization/rule-context-v2';
-import { validateBehaviorExamplePack } from '@principles/core/runtime-v2/internalization/behavior-example-pack';
+import { buildRuleHostAction } from '@principles/core/runtime/internalization/rule-host-input-builder';
+import { computeBehaviorFacts } from '@principles/core/runtime/internalization/rule-context-v2';
+import { validateBehaviorExamplePack } from '@principles/core/runtime/internalization/behavior-example-pack';
 // Factory lives in evidence-readiness.ts (the classification authority); it is
 // consumed through its registered LEAF subpath. A VALUE import of the
-// runtime-v2 barrel on this satellite path re-pulls the whole LLM graph and
+// runtime barrel on this satellite path re-pulls the whole LLM graph and
 // fails the satellite-purity guard (OPT-002, scripts/build/check-satellite-purity.mjs) —
 // the leaf is on core's exports allowlist for exactly this consumer.
-import { createOwnerEvidenceScopeError } from '@principles/core/runtime-v2/internalization/evidence-readiness';
+import { createOwnerEvidenceScopeError } from '@principles/core/runtime/internalization/evidence-readiness';
 import type {
   RuleContextV2,
   BehaviorExamplePack,
   GoldenTraceCaseInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   RuleHostEvidenceRow,
   RuleHostContextRow,
 } from '@principles/core/trajectory-types';
 import { assembleBehaviorHistory } from './behavior-history.js';
-import type { ToolSemanticRegistry } from '@principles/core/runtime-v2';
+import type { ToolSemanticRegistry } from '@principles/core/runtime';
 
 // ── public types ───────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PruningReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
+import { PruningReadModel, RuntimeStateManager } from '@principles/core/runtime';
 import { HealthCheckModel } from '../../src/server/models/HealthCheckModel.js';
 import {
   createTestWorkspace,

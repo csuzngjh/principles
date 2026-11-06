@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   SqliteConnection, SqliteActivationSafetyStore, evaluateRuleCodeSafetyCircuit,
   initialRuleCodeSafetyCircuitState,
-} from '@principles/core/runtime-v2';
-import type { RuleCodeSafetyCircuitState } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { RuleCodeSafetyCircuitState } from '@principles/core/runtime';
 
 const states = new Map<string, RuleCodeSafetyCircuitState>();
 const approvedTools = new Map<string, Set<string> | null>();

@@ -16,8 +16,8 @@ import {
   MAX_EVIDENCE_ENTRIES,
   MAX_EVIDENCE_NOTE_CHARS,
   sanitizeString,
-} from '@principles/core/runtime-v2';
-import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PainEvidenceEntry } from '@principles/core/runtime';
 
 /**
  * PRI-642 (SPEC §7.3): discriminated acquisition result. `unavailable` carries

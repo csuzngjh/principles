@@ -9,7 +9,7 @@
  * Runtime Contract: rc-9-no-silent-fallback — refusal includes reason + nextAction
  * (callers MUST surface these in their structured CLI output).
  */
-import { evaluateCandidateAdmissionFromRecord, type AdmissionGateResult } from '@principles/core/runtime-v2';
+import { evaluateCandidateAdmissionFromRecord, type AdmissionGateResult } from '@principles/core/runtime';
 
 /**
  * Check admission gate for a candidate. Returns null if admitted (caller may

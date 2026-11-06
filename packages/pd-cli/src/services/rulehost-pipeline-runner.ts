@@ -22,7 +22,7 @@
  *     replay crosses the same vm trust boundary as the production gate.
  *
  * @see docs/plans/rulehost-mvp-activation.md
- * @see runAdversarialLoop in @principles/core/runtime-v2
+ * @see runAdversarialLoop in @principles/core/runtime
  */
 import {
   RuntimeStateManager,
@@ -61,7 +61,7 @@ import {
   // PRI-983 (FR-07): the CLI gate refusal derives from the ONE shared
   // Evidence Readiness judgment (same authority as the consumer preflight).
   assessEvidenceReadiness,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   AdversarialLoopResult,
   PDRuntimeAdapter,
@@ -76,7 +76,7 @@ import type {
   EvaluatorRunnerDeps,
   SeedArtificerRepairParams,
   EvaluatorValidator,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import * as path from 'node:path';
 import { loadPdConfig } from './pd-config-loader.js';
 import { createEvaluatorRuntimeContext } from '@principles/host-runtime';

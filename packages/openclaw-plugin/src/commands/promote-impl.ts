@@ -16,7 +16,7 @@
  *   - Only candidate -> active is valid for promotion
  *   - NOTE (PRI-230): The legacy replay generation path has been retired.
  *     This command is temporarily unavailable for implementations without
- *     pre-existing replay reports until a Runtime V2 replay entry is wired.
+ *     pre-existing replay reports until a Runtime replay entry is wired.
  */
 
 import * as fs from 'fs';

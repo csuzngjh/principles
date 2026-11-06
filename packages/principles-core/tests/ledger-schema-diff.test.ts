@@ -25,8 +25,8 @@ import { resolve } from 'path';
 // Load source files
 // ---------------------------------------------------------------------------
 
-const CORE_LEDGER_TYPES_PATH = resolve(__dirname, '..', 'src', 'runtime-v2', 'types', 'ledger-store.ts');
-const CORE_LEDGER_CODEC_PATH = resolve(__dirname, '..', 'src', 'runtime-v2', 'principle-tree', 'ledger-codec.ts');
+const CORE_LEDGER_TYPES_PATH = resolve(__dirname, '..', 'src', 'runtime', 'types', 'ledger-store.ts');
+const CORE_LEDGER_CODEC_PATH = resolve(__dirname, '..', 'src', 'runtime', 'principle-tree', 'ledger-codec.ts');
 const CORE_LEDGER_IO_PATH = resolve(__dirname, '..', 'src', 'principle-tree-ledger.ts');
 const PLUGIN_LEDGER_PATH = resolve(
   __dirname,
@@ -92,21 +92,20 @@ describe('PRI-459: plugin ledger is a re-export adapter (no duplicate impl)', ()
 
 describe('PRI-459: core remains the single SSOT for ledger types + codec', () => {
   describe('SSOT: ledger types defined exactly once in core src/', () => {
-    it('HybridLedgerStore is defined only in runtime-v2/types/ledger-store.ts', async () => {
-      const { readdirSync, statSync } = await import('node:fs');
+    it('HybridLedgerStore is defined only in runtime/types/ledger-store.ts', async () => {
+      const { readdirSync } = await import('node:fs');
       const { join } = await import('node:path');
 
       const coreSrcDir = resolve(__dirname, '..', 'src');
       const hits: string[] = [];
 
       function scanDir(dir: string): void {
-        for (const entry of readdirSync(dir)) {
-          const full = join(dir, entry);
-          const stat = statSync(full);
-          if (stat.isDirectory()) {
-            if (entry === 'node_modules' || entry === '__tests__') continue;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
             scanDir(full);
-          } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) {
+          } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
             const content = readFileSync(full, 'utf-8');
             if (/export\s+interface\s+HybridLedgerStore\s*\{/.test(content)) {
               hits.push(full.replace(coreSrcDir + '\\', '').replace(coreSrcDir + '/', ''));
@@ -118,29 +117,28 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       scanDir(coreSrcDir);
 
       const normalizedHits = hits.map((f: string) => f.replace(/\\/g, '/'));
-      expect(normalizedHits).toContain('runtime-v2/types/ledger-store.ts');
-      expect(normalizedHits).toEqual(['runtime-v2/types/ledger-store.ts']);
+      expect(normalizedHits).toContain('runtime/types/ledger-store.ts');
+      expect(normalizedHits).toEqual(['runtime/types/ledger-store.ts']);
     });
 
-    it('LegacyPrincipleTrainingState is defined only in runtime-v2/types/ledger-store.ts', async () => {
+    it('LegacyPrincipleTrainingState is defined only in runtime/types/ledger-store.ts', async () => {
       // Same SSOT guarantee as HybridLedgerStore above: scan the whole core
       // src tree and assert exactly one definition. The previous
       // coreTypesSource.contains() check only proved the intended file had it
       // — it could not catch a duplicate definition re-introduced elsewhere.
-      const { readdirSync, statSync } = await import('node:fs');
+      const { readdirSync } = await import('node:fs');
       const { join } = await import('node:path');
 
       const coreSrcDir = resolve(__dirname, '..', 'src');
       const legacyHits: string[] = [];
 
       function scanDir(dir: string): void {
-        for (const entry of readdirSync(dir)) {
-          const full = join(dir, entry);
-          const stat = statSync(full);
-          if (stat.isDirectory()) {
-            if (entry === 'node_modules' || entry === '__tests__') continue;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
             scanDir(full);
-          } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) {
+          } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
             const content = readFileSync(full, 'utf-8');
             if (/export\s+interface\s+LegacyPrincipleTrainingState\s*\{/.test(content)) {
               legacyHits.push(full.replace(coreSrcDir + '\\', '').replace(coreSrcDir + '/', ''));
@@ -152,27 +150,26 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       scanDir(coreSrcDir);
 
       const normalized = legacyHits.map((f: string) => f.replace(/\\/g, '/'));
-      expect(normalized).toContain('runtime-v2/types/ledger-store.ts');
-      expect(normalized).toEqual(['runtime-v2/types/ledger-store.ts']);
+      expect(normalized).toContain('runtime/types/ledger-store.ts');
+      expect(normalized).toEqual(['runtime/types/ledger-store.ts']);
     });
   });
 
   describe('SSOT: codec functions defined exactly once in core', () => {
-    it('parseHybridLedger lives only in runtime-v2/principle-tree/ledger-codec.ts', async () => {
-      const { readdirSync, statSync } = await import('node:fs');
+    it('parseHybridLedger lives only in runtime/principle-tree/ledger-codec.ts', async () => {
+      const { readdirSync } = await import('node:fs');
       const { join } = await import('node:path');
 
       const coreSrcDir = resolve(__dirname, '..', 'src');
       const codecHits: string[] = [];
 
       function scanDir(dir: string): void {
-        for (const entry of readdirSync(dir)) {
-          const full = join(dir, entry);
-          const stat = statSync(full);
-          if (stat.isDirectory()) {
-            if (entry === 'node_modules' || entry === '__tests__') continue;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
             scanDir(full);
-          } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) {
+          } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
             const content = readFileSync(full, 'utf-8');
             if (/export\s+function\s+parseHybridLedger\b/.test(content)) {
               codecHits.push(full.replace(coreSrcDir + '\\', '').replace(coreSrcDir + '/', ''));
@@ -184,7 +181,7 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       scanDir(coreSrcDir);
 
       const normalized = codecHits.map((f: string) => f.replace(/\\/g, '/'));
-      expect(normalized).toEqual(['runtime-v2/principle-tree/ledger-codec.ts']);
+      expect(normalized).toEqual(['runtime/principle-tree/ledger-codec.ts']);
     });
 
     it('ledger-codec.ts exports parseHybridLedger and serializeLedger', () => {

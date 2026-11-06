@@ -7,7 +7,7 @@
  *
  * The classifier contract is core-owned: `buildLlmPrompt`,
  * `signal-classification-output-v2` and `resolveLlmClassificationPayload`
- * come from `@principles/core/runtime-v2`. This module only owns acquisition:
+ * come from `@principles/core/runtime`. This module only owns acquisition:
  * reading the signalCollector runtime profile and calling the adapter.
  *
  * No second model runtime is introduced (ADR-0029: pi-ai is the only backend).
@@ -20,7 +20,7 @@ import {
   resolveLlmClassificationPayload,
   safeStringifyPreview,
   type LlmClassificationResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
 export interface SignalClassifierCallOptions {
@@ -58,7 +58,7 @@ export interface CreateSignalClassifierOptions {
 /**
  * The Stage-2 structured-output contract this classifier requests. It MUST stay
  * in sync with the registry key in
- * packages/principles-core/src/runtime-v2/adapter/output-schema-registry.ts:
+ * packages/principles-core/src/runtime/adapter/output-schema-registry.ts:
  * the adapter fails loud (`output_invalid`) on an unregistered ref, and the
  * catch below would silently degrade Stage 2 to "no classification".
  */

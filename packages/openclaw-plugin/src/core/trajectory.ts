@@ -8,8 +8,8 @@ import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
-import { applyTrajectorySchemaBase, convergeTrajectorySchemaVersion } from '@principles/core/runtime-v2/trajectory-schema';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
+import { applyTrajectorySchemaBase, convergeTrajectorySchemaVersion } from '@principles/core/runtime/trajectory-schema';
+import { guardWorkspaceLeak } from '@principles/core/runtime/store/workspace-leak-guard';
 import type {
   CorrectionSampleReviewStatus,
   CorrectionExportMode,
@@ -134,28 +134,6 @@ function isPainEventRow(value: unknown): value is PainEventRow {
     && Object.hasOwn(value, 'runtime_task_id')
     && Object.hasOwn(value, 'created_at')
   );
-}
-
-/**
- * True when the named table exists in the open database (PRI-770): used to
- * gate the conditional evolution_tasks column backfill without re-creating
- * the table on fresh workspaces.
- */
-function tableExists(db: Database.Database, name: string): boolean {
-  const row = db.prepare(
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
-  ).get(name);
-  return row !== undefined;
-}
-
-/**
- * SQLite's only signal for "column already exists" is the error message text
- * (there is no IF NOT EXISTS for ADD COLUMN). Mirrors the MEM-01 migration
- * pattern below; unexpected errors must rethrow.
- */
-function isDuplicateColumnError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes('duplicate column name') || message.includes('no column named');
 }
 
 /**

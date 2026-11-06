@@ -8,7 +8,7 @@ import {
   SqliteDiagnosticianCommitter,
   type RuntimeStateHandle,
   type DiagnosticianOutputV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { RuleCandidateBindingConsoleModel } from '../../src/server/models/RuleCandidateBindingConsoleModel.js';
 
 const NOW = '2026-10-26T00:00:00.000Z';

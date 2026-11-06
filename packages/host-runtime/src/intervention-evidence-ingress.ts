@@ -28,7 +28,7 @@ import {
   type InterventionActivationOccurrenceRef,
   type InterventionContentRef,
   type InterventionEvidenceBatchInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export interface InterventionIngressAppendResult {
   ok: boolean;

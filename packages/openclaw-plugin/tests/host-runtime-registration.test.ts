@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
 import type { OpenClawPluginApi } from '../src/openclaw-sdk.js';
-import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 
 // PRI-523: the after_tool_call route drives the real production pain-evidence
 // kernel, which short-circuits (and skips the enrichment provider) when the

@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import Database from 'better-sqlite3';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { probeCliRecoveryReachability, DEACTIVATE_DRY_RUN_PROBE_ACTIVATION_ID } from '../../src/commands/recovery-reachability-probe.js';
 
 let tempDir: string;

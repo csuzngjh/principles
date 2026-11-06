@@ -48,7 +48,7 @@ step('installed_plugins.json v2 + versioned cache layout', reg.version === 2 && 
 // 5. hooks fire in a NEW session (engine -p, mock model; SessionStart is enough)
 fs.writeFileSync(path.join(LAB, 'scenario.txt'), '*=neutral\n');
 try { fs.unlinkSync(path.join(LAB, 'hook-events/hook-log.jsonl')); } catch {}
-r = eng(['-p', 'say P1', '--model', 'wb-probe-mock', '--no-session-persistence'], { cwd: path.join(LAB, 'proj-a') });
+eng(['-p', 'say P1', '--model', 'wb-probe-mock', '--no-session-persistence'], { cwd: path.join(LAB, 'proj-a') });
 let hooks = [];
 try { hooks = fs.readFileSync(path.join(LAB, 'hook-events/hook-log.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
 const ss = hooks.find(h => h.eventArg === 'sessionstart');
@@ -66,7 +66,7 @@ step('settings enabledPlugins entry removed after uninstall', !settings.enabledP
 //    uninstall CLI process itself fires SessionStart hooks at its own startup)
 const step8Start = new Date(Date.now() - 1000).toISOString();
 try { fs.unlinkSync(path.join(LAB, 'hook-events/hook-log.jsonl')); } catch {}
-r = eng(['-p', 'say P1b', '--model', 'wb-probe-mock', '--no-session-persistence'], { cwd: path.join(LAB, 'proj-a') });
+eng(['-p', 'say P1b', '--model', 'wb-probe-mock', '--no-session-persistence'], { cwd: path.join(LAB, 'proj-a') });
 let lateHooks = [];
 try {
   lateHooks = fs.readFileSync(path.join(LAB, 'hook-events/hook-log.jsonl'), 'utf8').trim().split('\n').filter(Boolean)

@@ -1,0 +1,320 @@
+import type { ActivationStatusRecord } from './activation-types.js';
+import { createHash } from 'node:crypto';
+
+/**
+ * Reference principle budget for a 128K-token window (UTF-16 code units).
+ *
+ * This is the SAME anchor as `PROMPT_BUDGET_BASE_CHARS` (prompt-budget-policy):
+ * the historical fixed budget and the current fallback for hosts with no
+ * capacity fact. v2 recalibration (PRI-1066) raised it 2000 → 4000 because
+ * Owner-visible capacity ran out after a few activations; it is a policy
+ * anchor, not a measured optimum. Events computed under the previous value
+ * carry the old `policyVersion` and are skipped (and counted) by the reader
+ * instead of being silently reinterpreted.
+ */
+export const RUNTIME_PRINCIPLE_BUDGET = 4000;
+
+export interface ActivatedPrinciple {
+  principleId: string;
+  text: string;
+  artifactId: string;
+  activationId: string;
+  /** Exact governed artifact content_json bytes, separate from rendered directive hash. */
+  artifactContentSha256?: string;
+  /**
+   * 谁授权了这条激活 (INV-05, P0-G):
+   * - owner: 经 approvals 队列 approve (derived join on artifact_id+channel)
+   * - system_policy: PRI-811 Phase B 前的存量行 — 旧低风险渠道 policy 自动
+   *   激活 (无 approval 行)；Phase B 起不再产生新的 system_policy 激活
+   * - undefined: 读取层无法判定 (旧数据/查询失败) — 渲染层不得声称 owner
+   */
+  authority?: 'owner' | 'system_policy';
+  /** owner 授权时的决定者 (approvals.decided_by) */
+  approvedBy?: string;
+}
+
+export interface PromptActivationReaderResult {
+  principles: ActivatedPrinciple[];
+  warnings: string[];
+  source: 'runtime_v2';
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function safeJsonParse(input: string): unknown | null {
+  try {
+    return JSON.parse(input);
+  } catch {
+    return null;
+  }
+}
+
+export function filterPromptActivations(
+  activations: ActivationStatusRecord[],
+): ActivationStatusRecord[] {
+  return activations.filter(
+    (a) => a.channel === 'prompt' && a.action === 'prompt_activate' && a.deactivatedAt === null,
+  );
+}
+
+export function resolvePrincipleFromArtifact(
+  artifactRow: unknown,
+  activation: ActivationStatusRecord,
+): { ok: true; principle: ActivatedPrinciple } | { ok: false; warning: string } {
+  if (!isRecord(artifactRow)) {
+    return { ok: false, warning: `artifact_query_unexpected: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table` };
+  }
+
+  const artifact_id = Object.hasOwn(artifactRow, 'artifact_id') && typeof artifactRow.artifact_id === 'string' && artifactRow.artifact_id.length > 0 ? artifactRow.artifact_id : null;
+  const artifact_kind = Object.hasOwn(artifactRow, 'artifact_kind') && typeof artifactRow.artifact_kind === 'string' ? artifactRow.artifact_kind : null;
+  const raw_content_json = Object.hasOwn(artifactRow, 'content_json') && typeof artifactRow.content_json === 'string' ? artifactRow.content_json : null;
+  const validation_status = Object.hasOwn(artifactRow, 'validation_status') && typeof artifactRow.validation_status === 'string' ? artifactRow.validation_status : null;
+
+  if (!artifact_id) {
+    return { ok: false, warning: `artifact_not_found: artifactId=${activation.artifactId} activationId=${activation.activationId}; nextAction=verify_artifact_exists_or_remove_stale_activation` };
+  }
+
+  if (artifact_kind !== 'principle') {
+    return { ok: false, warning: `artifact_not_principle: artifactId=${artifact_id} kind=${artifact_kind ?? 'missing'}; nextAction=skip_non_principle_activations` };
+  }
+
+  if (validation_status !== 'validated') {
+    return { ok: false, warning: `artifact_not_validated: artifactId=${artifact_id} status=${validation_status ?? 'missing'}; nextAction=skip_unvalidated_artifacts` };
+  }
+
+  if (raw_content_json === null) {
+    return { ok: false, warning: `artifact_missing_content_json: artifactId=${artifact_id}; nextAction=ensure_artifact_has_content_json` };
+  }
+
+  const parsed = safeJsonParse(raw_content_json);
+  if (parsed === null) {
+    return { ok: false, warning: `artifact_content_json_parse_error: artifactId=${activation.artifactId} reason=invalid_json; nextAction=fix_artifact_content_json` };
+  }
+
+  if (!isRecord(parsed)) {
+    return { ok: false, warning: `artifact_content_malformed: artifactId=${activation.artifactId} reason=parsed_to_non_object; nextAction=fix_artifact_content_json` };
+  }
+
+  const principleId = Object.hasOwn(parsed, 'principleId') && typeof parsed.principleId === 'string' ? parsed.principleId : undefined;
+  const text = Object.hasOwn(parsed, 'text') && typeof parsed.text === 'string' ? parsed.text : undefined;
+
+  const draftObj = Object.hasOwn(parsed, 'principleDraft') && isRecord(parsed.principleDraft) ? parsed.principleDraft : null;
+  const draftTitle = draftObj && Object.hasOwn(draftObj, 'title') && typeof draftObj.title === 'string' ? draftObj.title : undefined;
+  const draftStatement = draftObj && Object.hasOwn(draftObj, 'statement') && typeof draftObj.statement === 'string' ? draftObj.statement : undefined;
+
+  const resolvedPrincipleId = principleId && principleId.length > 0 ? principleId : draftTitle;
+  const resolvedText = text && text.length > 0 ? text : draftStatement;
+
+  if (!resolvedPrincipleId || resolvedPrincipleId.length === 0) {
+    return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_principleId_or_principleDraft_title` };
+  }
+
+  if (!resolvedText || resolvedText.length === 0) {
+    return { ok: false, warning: `artifact_missing_text: artifactId=${activation.artifactId} principleId=${resolvedPrincipleId}; nextAction=ensure_artifact_has_text_or_principleDraft_statement` };
+  }
+
+  return {
+    ok: true,
+    principle: {
+      principleId: resolvedPrincipleId,
+      text: resolvedText,
+      artifactContentSha256: createHash('sha256').update(raw_content_json, 'utf8').digest('hex'),
+      artifactId: activation.artifactId,
+      activationId: activation.activationId,
+    },
+  };
+}
+
+/**
+ * PRI-904 (SPEC v0.1): which budget-packing policy produced a selection.
+ *
+ * - `legacy_fifo_prefix_v1` — the pre-PRI-904 policy and the rollback target:
+ *   greedy prefix packing in base order, first non-fit breaks. Also the
+ *   characterization baseline reproducing the audited 16→9/1893 behavior.
+ * - `fair_rotation_v1` — deterministic rotating start + circular
+ *   continue-on-non-fit packing. Eliminates permanent positional starvation
+ *   under the fixed budget without randomness or persisted cursors.
+ */
+export type PromptSelectionPolicy = 'legacy_fifo_prefix_v1' | 'fair_rotation_v1';
+
+export interface TrimToBudgetResult {
+  lines: string[];
+  injectedIds: Set<string>;
+  truncated: boolean;
+  /** PRI-904: policy that produced this selection. */
+  selectionPolicy: PromptSelectionPolicy;
+  /** PRI-904: candidates that reached the budget selector (post eligibility + dedup). */
+  eligibleCount: number;
+  /** PRI-904: circular scan start; present only under fair_rotation_v1. */
+  rotationStartIndex?: number;
+  /**
+   * PRI-904 (bounded, max 16): activation ids dropped because the remaining
+   * budget was insufficient. Ordered by scan position.
+   */
+  droppedActivationIds: string[];
+  /**
+   * PRI-904 (bounded, max 16): activation ids whose single entry exceeds the
+   * whole principle budget — they can never fit alone and are not starvation.
+   */
+  oversizedActivationIds: string[];
+}
+
+/** PRI-904 SPEC §10: hard cap for diagnostic id lists in telemetry. */
+const MAX_INJECTION_DIAGNOSTIC_IDS = 16;
+
+/**
+ * PRI-904: the round key is a deterministic session-local user-turn ordinal
+ * (see `nextSessionTurnOrdinal` in the registered trajectory-store seam) —
+ * NOT a hash of an opaque run identity. Because consecutive recorded user
+ * turns yield consecutive ordinals, N consecutive rounds cover all N
+ * positions of an N-entry eligible ring: a bounded opportunity window, not a
+ * statistical one. Both injection routes read the same fact, so their
+ * fairness semantics are identical.
+ */
+/**
+ * The single authority for the list route's serialized entry line format.
+ * `trimToBudget` measures entries through this helper; capacity prechecks and
+ * status projections must measure through it too instead of re-typing the
+ * format (PD_PROMPT_CAPACITY_V1 R-A2: costs come from the production
+ * serializer, not an approximation).
+ */
+export function listEntryLine(
+  principle: { principleId: string; text: string },
+  escapeFn: (s: string) => string = (s) => s,
+): string {
+  return `- [${escapeFn(principle.principleId)}] ${escapeFn(principle.text)}`;
+}
+
+// PRI-904: the optional roundKey extends the frozen 3-param public surface
+// positionally rather than via an options bag — existing callers (plugin hook,
+// console projection, tests) pass (principles, budget, escapeFn?) and must not
+// be rewritten for a scheduling-policy extension.
+// eslint-disable-next-line @typescript-eslint/max-params
+export function trimToBudget(
+  principles: ActivatedPrinciple[],
+  budget: number,
+  escapeFn: (s: string) => string = (s) => s,
+  roundKey?: number,
+): TrimToBudgetResult {
+  const lines: string[] = [];
+  const injectedIds = new Set<string>();
+  let remaining = budget;
+  let truncated = false;
+
+  const header = 'Runtime V2 activated principles:';
+  lines.push(header);
+  remaining -= header.length;
+
+  const eligibleCount = principles.length;
+  // The most budget any single entry can ever claim: an otherwise empty payload.
+  const emptyPayloadRemaining = remaining;
+  const droppedActivationIds: string[] = [];
+  const oversizedActivationIds: string[] = [];
+
+  if (roundKey === undefined || principles.length === 0) {
+    // legacy_fifo_prefix_v1 — byte-identical to the pre-PRI-904 loop: greedy
+    // prefix packing, first non-fit breaks. Rollback = omit the round key.
+    for (const p of principles) {
+      const entry = listEntryLine(p, escapeFn);
+      if (remaining < entry.length + 1) {
+        truncated = true;
+        // The loop breaks here, so both lists hold at most this one entry —
+        // no cap guard needed on the legacy path.
+        if (entry.length + 1 > emptyPayloadRemaining) {
+          oversizedActivationIds.push(p.activationId);
+        } else {
+          droppedActivationIds.push(p.activationId);
+        }
+        break;
+      }
+      lines.push(entry);
+      remaining -= entry.length + 1;
+      injectedIds.add(p.principleId);
+    }
+    return { lines, injectedIds, truncated, selectionPolicy: 'legacy_fifo_prefix_v1', eligibleCount, droppedActivationIds, oversizedActivationIds };
+  }
+
+  // fair_rotation_v1 — deterministic rotating start over the base (ASC) order,
+  // circular scan, continue-on-non-fit. Entry costs keep the exact legacy
+  // arithmetic (serialized entry + 1 newline), so budget accounting is
+  // unchanged: every round stays within `budget`.
+  const n = principles.length;
+  const rotationStartIndex = ((roundKey % n) + n) % n;
+  const ring = principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
+  for (const p of ring) {
+    const entry = listEntryLine(p, escapeFn);
+    const cost = entry.length + 1;
+    if (cost > emptyPayloadRemaining) {
+      // Cannot fit even in an empty payload — oversize, not starvation.
+      if (oversizedActivationIds.length < MAX_INJECTION_DIAGNOSTIC_IDS) oversizedActivationIds.push(p.activationId);
+      continue;
+    }
+    if (cost <= remaining) {
+      lines.push(entry);
+      remaining -= cost;
+      injectedIds.add(p.principleId);
+    } else {
+      // Non-fit no longer terminates the scan: a later, shorter entry may
+      // still fit (PRI-904 SPEC §6.5).
+      truncated = true;
+      if (droppedActivationIds.length < MAX_INJECTION_DIAGNOSTIC_IDS) droppedActivationIds.push(p.activationId);
+    }
+  }
+
+  return { lines, injectedIds, truncated, selectionPolicy: 'fair_rotation_v1', eligibleCount, rotationStartIndex, droppedActivationIds, oversizedActivationIds };
+}
+
+export interface RenderDirectivesOptions {
+  /** XML-escape function applied to principle ids and texts. */
+  escapeFn?: (s: string) => string;
+  /**
+   * PRI-532 (SPEC §5.2): append the agent self-report instruction footer.
+   * When a directive actually changes the agent's behavior this turn, the
+   * agent appends one 📌 line echoing the directive id — captured by the
+   * plugin's llm_output / before_message_write handlers.
+   */
+  selfReportInstruction?: boolean;
+}
+
+export function renderPrinciplesToDirectives(
+  principles: { principleId: string; text: string; artifactId: string; activationId: string; authority?: 'owner' | 'system_policy'; approvedBy?: string }[],
+  injectedIds: Set<string>,
+  options?: RenderDirectivesOptions,
+): string {
+  if (injectedIds.size === 0) return '';
+  const escapeFn = options?.escapeFn ?? ((s) => s);
+
+  const directiveLines: string[] = [];
+  directiveLines.push('');
+  // P0-G (MVP_CORE_LOOP_CONTRACT INV-05 / §12): 中性标题。低风险渠道的
+  // system-policy 自动激活不得被表示为 Owner-approved; 具体授权逐项标注
+  // authority 属性 (owner=审批队列批准, system_policy=策略自动激活)。
+  directiveLines.push('## 【ACTIVE BEHAVIOR DIRECTIVES】');
+  directiveLines.push('');
+  directiveLines.push('Active behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority="owner" (approved in the owner approval queue) or authority="system_policy" (auto-activated by low-risk policy).');
+  directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
+  directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
+  directiveLines.push('');
+  for (const p of principles) {
+    if (!injectedIds.has(p.principleId)) continue;
+    // authority 已知才标注; 未知(旧数据/查询失败)宁缺毋假 (INV-05)
+    const authorityAttr = p.authority === 'owner' || p.authority === 'system_policy'
+      ? ` authority="${p.authority}"`
+      : '';
+    directiveLines.push(`<directive id="${escapeFn(p.principleId)}" source="runtime_v2_activation"${authorityAttr}>`);
+    directiveLines.push(`MANDATORY: ${escapeFn(p.text)}`);
+    directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
+    directiveLines.push('</directive>');
+    directiveLines.push('');
+  }
+  if (options?.selfReportInstruction) {
+    directiveLines.push('Self-report (OWNER visibility): when a directive above actually changes what you do in this turn, append exactly ONE line at the end of your reply in this format:');
+    directiveLines.push('📌 应用了你的原则「<directive id>」：<用一句话说明你这次做法有何不同>');
+    directiveLines.push('Use the directive\'s exact id attribute. At most one line per directive per session. Omit the line entirely if no directive changed your behavior.');
+    directiveLines.push('');
+  }
+  directiveLines.push('Note: These directives do not override safety, security, or core system policy.');
+  return directiveLines.join('\n');
+}

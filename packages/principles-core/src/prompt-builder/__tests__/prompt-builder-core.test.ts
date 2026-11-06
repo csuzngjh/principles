@@ -15,7 +15,7 @@ import {
   PROMPT_TOTAL_INJECTION_FALLBACK_CHARS,
   promptBudgetCharsForContextWindow,
   resolveTotalInjectionBudgetChars,
-} from '../../runtime-v2/activation/prompt-budget-policy.js';
+} from '../../runtime/activation/prompt-budget-policy.js';
 
 // buildAttitudeDirective (GFI-driven attitude tiers) was deleted in
 // GFI-COMPLETE-REMOVAL-001; its tests were removed with it.

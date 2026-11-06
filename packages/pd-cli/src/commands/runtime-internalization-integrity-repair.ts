@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { InternalizationIntegrityRemediation } from '@principles/core/runtime-v2';
+import { InternalizationIntegrityRemediation } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import type { RemediationResult } from './remediation-output.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';

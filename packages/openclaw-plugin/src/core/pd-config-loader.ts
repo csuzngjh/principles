@@ -5,7 +5,7 @@
 import {
   INTERNAL_AGENT_NAMES,
   type InternalAgentName,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   loadPdConfigForPlugin,
   type PluginConfigLoadResult,

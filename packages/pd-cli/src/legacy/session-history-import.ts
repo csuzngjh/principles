@@ -2,7 +2,7 @@
  * Session History Import — OpenClaw trajectory.db → PD Runtime v2
  *
  * Reads real conversation history from OpenClaw's trajectory.db and imports
- * assistant_turns, user_turns, and tool_calls into PD-owned runtime-v2 runs table
+ * assistant_turns, user_turns, and tool_calls into PD-owned runtime runs table
  * so that `pd history query` and `pd context build` return non-empty results.
  *
  * This is a COMPATIBILITY IMPORT — not authoritative retrieval.
@@ -91,7 +91,7 @@ function openTrajectoryDb(dbPath: string): OpenClawTrajectoryDb {
 }
 
 /**
- * Import session history from OpenClaw trajectory.db into PD runtime-v2 runs table.
+ * Import session history from OpenClaw trajectory.db into PD runtime runs table.
  *
  * For each task that has a sessionIdHint in its diagnostic_json:
  *   1. Look up the session in trajectory.db

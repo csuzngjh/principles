@@ -39,8 +39,8 @@ import {
 import type {
   LedgerPrinciple,
   LedgerRule,
-} from '../src/runtime-v2/types/ledger-store.js';
-import type { ImplementationLifecycleState } from '../src/runtime-v2/types/principle-enums.js';
+} from '../src/runtime/types/ledger-store.js';
+import type { ImplementationLifecycleState } from '../src/runtime/types/principle-enums.js';
 
 function makePrinciple(id: string): LedgerPrinciple {
   return {

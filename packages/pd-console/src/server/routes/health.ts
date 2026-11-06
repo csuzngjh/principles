@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HealthCheckModel } from '../models/HealthCheckModel.js';
 import { CodexGovernanceHealthModel, type CodexGovernanceHealth, type CodexGovernanceHealthResult } from '../models/CodexGovernanceHealthModel.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendError, errorMessage } from '../utils/response.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -82,7 +82,7 @@ export async function handleHealthRoute(
         codexGovernance = collected.status === 'ok' ? collected.health : collected;
         codexCache.set(options.workspaceDir, { result: codexGovernance, cachedAt: Date.now() });
       } catch (error) {
-        const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
+        const message = errorMessage(error).slice(0, 200);
         codexGovernance = {
           status: 'unknown',
           ready: false,

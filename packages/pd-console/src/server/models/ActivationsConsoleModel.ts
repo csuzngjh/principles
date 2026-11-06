@@ -17,12 +17,13 @@ import {
   PrincipleTreeLedgerAdapter,
   previewApprovedRuleRevision,
   reviseApprovedRuleOnce,
-} from '@principles/core/runtime-v2';
-import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime-v2';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
-import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime';
+import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
+import { errorMessage } from '../utils/response.js';
 import type { PromptActivationInjectionStatusWire, PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -183,17 +184,17 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
 /**
  * PRI-577: RuleCode event telemetry candidate directories, in priority order.
  *
- * Runtime V2 convention is `.pd/logs`, but the v1 EventLog writer
+ * Runtime convention is `.pd/logs`, but the v1 EventLog writer
  * (openclaw-plugin `src/core/event-log.ts`) still emits `events_*.jsonl` under
  * `.state/logs`. No production code ever created `.pd/logs`, so scanning only
  * that path made every activation's shadow metrics report "unavailable" in the
  * console while real evaluations accumulated unread in `.state/logs`. Readers
  * scan both candidates until the writer migrates (ERR-031: both readers derive
  * from this same list — the single source is the host-runtime constant
- * `RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS`, shared with the PRI-1017 budget
+ * `RUNTIME_EVENT_LOG_CANDIDATE_DIRS`, shared with the PRI-1017 budget
  * observation reader so the two readers can never drift).
  */
-export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS;
+export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVENT_LOG_CANDIDATE_DIRS;
 
 export interface CollectedRuleCodeEventEntries {
   entries: unknown[];
@@ -537,7 +538,7 @@ export class ActivationsConsoleModel {
           },
         ]));
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         promptInjectionRoute = {
           status: 'unconfirmed',
           flagEnabled: false,
@@ -629,7 +630,7 @@ export class ActivationsConsoleModel {
           );
         }
       } catch (error: unknown) {
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = errorMessage(error);
         recoveryCapabilities.push(
           { capabilityId: 'pd_status', channel: 'cli', ok: false, workspaceMatched: false, detail: `cli probe failed: ${detail}` },
           { capabilityId: 'rulecode_deactivate', channel: 'cli', ok: false, workspaceMatched: false, detail: `cli probe failed: ${detail}` },
@@ -903,7 +904,7 @@ export class ActivationsConsoleModel {
       }
       return { capabilityId: 'rulecode_global_pause', channel: 'console', ok: true, workspaceMatched: true };
     } catch (error: unknown) {
-      return { capabilityId: 'rulecode_global_pause', channel: 'console', ok: false, workspaceMatched: true, detail: `pause substrate probe failed: ${error instanceof Error ? error.message : String(error)}` };
+      return { capabilityId: 'rulecode_global_pause', channel: 'console', ok: false, workspaceMatched: true, detail: `pause substrate probe failed: ${errorMessage(error)}` };
     } finally {
       try { conn.close(); } catch { /* best effort */ }
     }
@@ -959,7 +960,7 @@ export class ActivationsConsoleModel {
 
         return { ok: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         return { ok: false, reason: `Failed to deactivate activation: ${message}`, nextAction: 'Check server logs for details. The activation state has not been changed.' };
       }
     } finally {

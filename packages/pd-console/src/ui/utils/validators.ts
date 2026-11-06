@@ -8,7 +8,7 @@
  * - Uses `Object.hasOwn()` for untrusted object keys (Rule 5)
  * - Graceful degradation includes a reason (Rule 9)
  */
-import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
 
 /** Browser-local structural type for the compact inbox response (SPEC §11.1). */
 export interface OwnerDecisionInboxData {

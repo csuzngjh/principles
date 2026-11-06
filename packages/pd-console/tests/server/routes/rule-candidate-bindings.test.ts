@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRuntimeStateHandle, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, hydratePITaskRecord, ScribeRunner, ArtificerRunner, DefaultScribeValidator, DefaultArtificerValidator, TestDoubleRuntimeAdapter, StoreEventEmitter, PrincipleTreeLedgerAdapter, type RuntimeStateHandle, type DiagnosticianOutputV1 } from '@principles/core/runtime-v2';
+import { createRuntimeStateHandle, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, hydratePITaskRecord, ScribeRunner, ArtificerRunner, DefaultScribeValidator, DefaultArtificerValidator, TestDoubleRuntimeAdapter, StoreEventEmitter, PrincipleTreeLedgerAdapter, type RuntimeStateHandle, type DiagnosticianOutputV1 } from '@principles/core/runtime';
 import { addPrincipleToLedger, loadLedger } from '@principles/core/principle-tree-ledger';
 import { handleRuleCandidateBindingsRoute } from '../../../src/server/routes/rule-candidate-bindings.js';
 

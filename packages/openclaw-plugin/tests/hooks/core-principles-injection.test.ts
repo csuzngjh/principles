@@ -53,7 +53,7 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: {
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordPainSignal: vi.fn(),
     }),
   },
@@ -101,7 +101,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
     config: { get: vi.fn() },
     eventLog: {
       recordPainSignal: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordHeartbeatDiagnosis: vi.fn(),
     },
     // KEY: reducer returns EMPTY — simulates a fresh install where
@@ -158,7 +158,7 @@ vi.mock('../../src/hooks/message-sanitize.js', () => ({
   sanitizeForEvidence: vi.fn().mockReturnValue(''),
 }));
 
-vi.mock('../../src/core/runtime-v2-prompt-activation-reader.js', () => ({
+vi.mock('../../src/core/runtime-prompt-activation-reader.js', () => ({
   PromptActivationReader: vi.fn().mockImplementation(() => ({
     readActivatedPrinciples: vi.fn().mockResolvedValue({
       principles: [],
@@ -172,7 +172,7 @@ vi.mock('../../src/core/runtime-v2-prompt-activation-reader.js', () => ({
 import {
   getFoundationalPrinciples,
   getOperatingPrinciples,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 const FOUNDATIONAL = getFoundationalPrinciples();
 const OPERATING = getOperatingPrinciples();
@@ -307,7 +307,7 @@ describe('PRI-606: core principles injection (production path, empty reducer)', 
       config: { get: vi.fn() },
       eventLog: {
         recordPainSignal: vi.fn(),
-        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordRuntimeActivationsInjected: vi.fn(),
         recordHeartbeatDiagnosis: vi.fn(),
       },
       evolutionReducer: {
@@ -318,7 +318,7 @@ describe('PRI-606: core principles injection (production path, empty reducer)', 
       },
     });
     const append = await runHook();
-    // Runtime V2 activations are the single injection authority: reducer-backed
+    // Runtime activations are the single injection authority: reducer-backed
     // legacy principles are not rendered anywhere in the prompt.
     expect(append).not.toContain('<evolution_principles>');
     expect(append).not.toContain('Owner learned principle X');

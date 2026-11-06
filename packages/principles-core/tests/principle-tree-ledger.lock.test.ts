@@ -31,8 +31,8 @@ import {
   withLock,
   LockAcquisitionError,
 } from '../src/principle-tree-ledger.js';
-import { createEmptyTree } from '../src/runtime-v2/principle-tree/ledger-codec.js';
-import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
+import { createEmptyTree } from '../src/runtime/principle-tree/ledger-codec.js';
+import type { LedgerPrinciple } from '../src/runtime/types/ledger-store.js';
 
 // Tight retry budget for contention tests — proves fail-loud without waiting
 // on the production 50-retry exponential backoff.

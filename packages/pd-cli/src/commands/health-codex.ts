@@ -45,7 +45,7 @@ import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
 import type { McpHealthSection } from './health-mcp.js';
 import type * as CodexAdapterModule from '@principles/codex-adapter';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
-import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime';
 
 const require = createRequire(import.meta.url);
 
@@ -280,7 +280,7 @@ function readInstallManifestRegistration(workspace: string): { registered: boole
 }
 
 /**
- * §15 Diagnostician counts, read from the Runtime V2 task store
+ * §15 Diagnostician counts, read from the Runtime task store
  * (taskKind 'diagnostician'). Read-only; degradation is structured.
  */
 async function readDiagnosticianCounts(workspace: string): Promise<CodexHealthReport['diagnosticianTasks']> {

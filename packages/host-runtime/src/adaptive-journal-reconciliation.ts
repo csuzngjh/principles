@@ -4,7 +4,7 @@ import {
   INTERVENTION_SHORT_SOURCE_RETENTION_DAYS,
   canonicalStringify,
   validateAdaptiveDeliveryRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 /**
  * PRI-1109 — conservative, read-only reconciliation of adaptive-delivery journal

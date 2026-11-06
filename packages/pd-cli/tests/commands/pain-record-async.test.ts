@@ -31,10 +31,10 @@ vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
   ]),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   // PRI-642 review blocker 1: keep the REAL core evaluatePainIngress (the
   // shared semantic authority) — only service/IO classes are mocked.
-  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  const actual = await importOriginal<typeof import('@principles/core/runtime')>();
   return {
     ...actual,
     PainToPrincipleService: vi.fn().mockImplementation(function(this: Record<string, unknown>, opts: Record<string, unknown>) {
@@ -85,7 +85,7 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';
-import type { PainToPrincipleOutput, FailureCategory } from '@principles/core/runtime-v2';
+import type { PainToPrincipleOutput, FailureCategory } from '@principles/core/runtime';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

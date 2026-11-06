@@ -44,7 +44,7 @@ import {
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
 import { formatHostStateSummary } from '../src/install-summary.js';
-import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
 function parseYaml(text: string): Record<string, unknown> {

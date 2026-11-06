@@ -52,7 +52,7 @@ const EXPECTED_SKILLS = [
 /**
  * Every published skill declares the OpenClaw-specific invocation flag.
  * The four narrow PD capabilities are discoverable; general coding roles and
- * the overlapping Runtime V2 entry are not shipped as separate skills.
+ * the overlapping Runtime entry are not shipped as separate skills.
  */
 const EXPECTED_MODEL_INVOCATION_DISABLED: Record<string, boolean> = {
   'pd-cli-operator': false,

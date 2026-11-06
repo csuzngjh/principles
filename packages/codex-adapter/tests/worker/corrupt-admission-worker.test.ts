@@ -32,8 +32,8 @@ import {
   getDefaultPdConfig,
   SqliteConnection,
   SqliteDiagnosticianCommitter,
-} from '@principles/core/runtime-v2';
-// Ledger I/O lives OUTSIDE the runtime-v2 barrel by design (PRI-443 Phase 5);
+} from '@principles/core/runtime';
+// Ledger I/O lives OUTSIDE the runtime barrel by design (PRI-443 Phase 5);
 // consumers import it directly, which is exactly the authority the worker's
 // PrincipleTreeLedgerAdapter writes through.
 import { loadLedger } from '@principles/core/principle-tree-ledger';
@@ -199,7 +199,7 @@ async function seededTaskIds(root: string): Promise<string[]> {
 
 afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 120));
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   for (const dir of [...dirs]) {
     await disposePainSignalBridgesForWorkspace(dir).catch(() => {});
   }

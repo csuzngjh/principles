@@ -39,7 +39,7 @@ import type {
   GovernancePrimaryAttention,
   WorkspaceEnvironment,
   GovernanceActivityCategorySummary,
-} from "@principles/core/runtime-v2";
+} from "@principles/core/runtime";
 
 type DecisionResult =
   | { success: true; warning?: string }
@@ -795,7 +795,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const degradedSignals = queueData?.degradedSignals;
   const evidenceCount = queueData?.evidenceInProgressCount ?? 0;
   const gateBlocksToday = queueData?.gateBlocksToday ?? 0;
-  const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
   const ruleCodePending = ruleCodeItems.filter(item => item.action === 'code_tool_hook_shadow_activate' && item.enforcement !== 'safety_isolated');
   const ruleCodeAlerts = ruleCodeItems.filter(item => item.enforcement === 'safety_isolated');
 

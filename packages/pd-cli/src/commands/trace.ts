@@ -12,8 +12,8 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PainChainReadModel } from '@principles/core/runtime-v2';
-import type { PainChainTrace, PainChainTraceLatencyMs } from '@principles/core/runtime-v2';
+import { PainChainReadModel } from '@principles/core/runtime';
+import type { PainChainTrace, PainChainTraceLatencyMs } from '@principles/core/runtime';
 
 interface TraceResult {
   painId: string;

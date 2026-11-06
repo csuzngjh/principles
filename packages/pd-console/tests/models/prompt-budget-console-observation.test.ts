@@ -29,7 +29,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { SqliteActivationStateStore, SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { SqliteActivationStateStore, SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime';
 import { createProductionHostRuntime, saveHostToolDeclaration, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import type { HostEvent } from '@principles/core/host';
 // REAL v1 writer, resolved to openclaw-plugin source via vitest alias
@@ -116,7 +116,7 @@ async function dispatchProductionInjection(
     const runtime = createProductionHostRuntime({
       hostKind,
       events: {
-        recordRuntimeV2ActivationsInjected: (data) => eventLog.recordRuntimeV2ActivationsInjected(data),
+        recordRuntimeActivationsInjected: (data) => eventLog.recordRuntimeActivationsInjected(data),
         recordToolCall: () => { /* not under test */ },
       },
     });

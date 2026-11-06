@@ -17,7 +17,7 @@ import {
   SqliteConnection,
   SqlitePIArtifactStore,
   resolvePrincipleFromArtifact,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 function sha256File(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');

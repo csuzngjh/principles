@@ -1,0 +1,129 @@
+/**
+ * Canonical error categories for PD Runtime v2.
+ *
+ * Unified from:
+ *   - PD Runtime Protocol SPEC v1, Section 19
+ *   - Diagnostician v2 Detailed Design, Section 20
+ *   - History Retrieval and Context Assembly SPEC, Section 14
+ *
+ * All PD components, adapters, CLI commands, and events MUST use these
+ * categories instead of inventing local error codes.
+ *
+ * MIGRATION NOTE:
+ *   - openclaw-plugin's TrinityRuntimeFailureCode → superseded
+ *   - openclaw-plugin's TaskResolution → superseded (legacy marker-file values kept as legacy-only)
+ *   - openclaw-plugin's PdError class hierarchy → may wrap these categories
+ */
+import { Type, type Static } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
+
+// ── TypeBox schema for PDErrorCategory ──
+
+export const PDErrorCategorySchema = Type.Union([
+  Type.Literal('runtime_unavailable'),
+  Type.Literal('capability_missing'),
+  Type.Literal('input_invalid'),
+  Type.Literal('lease_conflict'),
+  Type.Literal('lease_expired'),
+  Type.Literal('execution_failed'),
+  Type.Literal('rate_limit'),
+  Type.Literal('timeout'),
+  Type.Literal('cancelled'),
+  Type.Literal('output_invalid'),
+  Type.Literal('artifact_commit_failed'),
+  Type.Literal('max_attempts_exceeded'),
+  Type.Literal('context_assembly_failed'),
+  Type.Literal('history_not_found'),
+  Type.Literal('trajectory_ambiguous'),
+  Type.Literal('storage_unavailable'),
+  Type.Literal('workspace_invalid'),
+  Type.Literal('workspace_dirty'),
+  Type.Literal('query_invalid'),
+]);
+export type PDErrorCategory = Static<typeof PDErrorCategorySchema>;
+
+/** All valid error category values. Useful for validation. */
+export const PD_ERROR_CATEGORIES: readonly PDErrorCategory[] = [
+  'runtime_unavailable',
+  'capability_missing',
+  'input_invalid',
+  'lease_conflict',
+  'lease_expired',
+  'execution_failed',
+  'rate_limit',
+  'timeout',
+  'cancelled',
+  'output_invalid',
+  'artifact_commit_failed',
+  'max_attempts_exceeded',
+  'context_assembly_failed',
+  'history_not_found',
+  'trajectory_ambiguous',
+  'storage_unavailable',
+  'workspace_invalid',
+  'workspace_dirty',
+  'query_invalid',
+] as const;
+
+/** Type guard for PDErrorCategory — uses TypeBox Value.Check for runtime validation. */
+export function isPDErrorCategory(value: string): value is PDErrorCategory {
+  return Value.Check(PDErrorCategorySchema, value);
+}
+
+/**
+ * Maps PDErrorCategory (19 internal codes) to 6 user-facing failure categories.
+ *
+ * Used by pd-cli trace + pain-record commands for consistent classification.
+ */
+export const FAILURE_CATEGORY_MAP: Record<PDErrorCategory, string> = {
+  runtime_unavailable: 'runtime_unavailable',
+  capability_missing: 'config_missing',
+  input_invalid: 'config_missing',
+  lease_conflict: 'runtime_unavailable',
+  lease_expired: 'runtime_unavailable',
+  execution_failed: 'runtime_unavailable',
+  rate_limit: 'runtime_unavailable',
+  timeout: 'runtime_timeout',
+  cancelled: 'runtime_timeout',
+  output_invalid: 'output_invalid',
+  artifact_commit_failed: 'artifact_missing',
+  max_attempts_exceeded: 'runtime_timeout',
+  context_assembly_failed: 'runtime_unavailable',
+  history_not_found: 'runtime_unavailable',
+  trajectory_ambiguous: 'runtime_unavailable',
+  storage_unavailable: 'ledger_write_failed',
+  workspace_invalid: 'config_missing',
+  workspace_dirty: 'artifact_missing',
+  query_invalid: 'runtime_unavailable',
+};
+
+export function mapFailureCategory(errorCategory?: string | null): string | null {
+  if (!errorCategory) return null;
+  if (!isPDErrorCategory(errorCategory)) return 'runtime_unavailable';
+  return FAILURE_CATEGORY_MAP[errorCategory];
+}
+
+// Runtime exhaustiveness assertion — verify every PDErrorCategory has a mapping
+for (const cat of PD_ERROR_CATEGORIES) {
+  if (!Object.hasOwn(FAILURE_CATEGORY_MAP, cat)) {
+    throw new Error(`FAILURE_CATEGORY_MAP is missing mapping for PDErrorCategory: ${cat}`);
+  }
+}
+
+/**
+ * Structured PD error carrying a normalized category.
+ *
+ * Adapters and services should throw or return PDRuntimeError
+ * instead of generic Error when operating within runtime paths.
+ */
+export class PDRuntimeError extends Error {
+  readonly category: PDErrorCategory;
+  readonly details?: Record<string, unknown>;
+
+  constructor(category: PDErrorCategory, message: string, details?: Record<string, unknown>) {
+    super(`[${category}] ${message}`);
+    this.name = 'PDRuntimeError';
+    this.category = category;
+    this.details = details;
+  }
+}

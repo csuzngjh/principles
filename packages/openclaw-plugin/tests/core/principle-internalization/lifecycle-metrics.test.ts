@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   computePrincipleAdherence,
   computeRuleMetrics,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   PrincipleLifecycleEvidence,
   RuleLifecycleEvidence,
 } from '../../../src/core/principle-internalization/lifecycle-read-model.js';
 import type { ReplayReport } from '../../../src/core/replay-engine.js';
-import type { ArtifactLineageRecord } from '@principles/core/runtime-v2';
+import type { ArtifactLineageRecord } from '@principles/core/runtime';
 
 function createReplayReport(
   implementationId: string,

@@ -13,7 +13,7 @@ Three automated layers prevent I/O from leaking into core:
    architecture-regression test and ESLint derive their exemption lists from
    this registry — there is no second hand-maintained list.
 
-2. **Architecture-regression test** — `runtime-v2/__tests__/architecture-regression.test.ts`
+2. **Architecture-regression test** — `runtime/__tests__/architecture-regression.test.ts`
    loads the registry, scans every `.ts` file under `src/` for `fs`/`path` imports,
    and verifies they match the registry. Any new I/O file must be added to the
    registry — otherwise CI fails.
@@ -28,7 +28,7 @@ Three automated layers prevent I/O from leaking into core:
 |------|-------|-------------|
 | `ledger-tree` | `principle-tree-ledger.ts` | File-based principle ledger SSOT; pd-cli reads/writes without importing openclaw-plugin |
 | `sdk-store` | `evolution-store.ts`, `trajectory-store.ts`, `workflow-funnel-loader.ts` | Standalone SDK store primitives exposed as package subpaths |
-| `sqlite-state-store` | `runtime-v2/store/sqlite-connection.ts`, `runtime-v2/store/runtime-state-manager.ts` | runtime-v2 state.db connection + manager |
+| `sqlite-state-store` | `runtime/store/sqlite-connection.ts`, `runtime/store/runtime-state-manager.ts` | runtime state.db connection + manager |
 | `read-model` | 5 `*read-model*.ts` files | Read-only composite models querying state.db + ledger |
 | `audit-observability` | `candidate-audit.ts`, `pain-signal-observability.ts` | Audit + pain signal observability writers |
 | `remediation-review` | `internalization-integrity-remediation.ts`, `recovery-actions-log.ts` | Integrity remediation + owner-action audit log |

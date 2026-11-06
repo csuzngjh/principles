@@ -10,11 +10,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
+import type { FeedbackReport } from '@principles/core/runtime/feedback';
+import { errorMessage } from '../utils/response.js';
 
 /**
  * Best-effort error message extraction from an `unknown` caught value.
- * Returns `String(err)` if no `.message` is present.
+ * Falls back to the shared `errorMessage` helper when no `.message` is present.
  */
 function errMsg(e: { code?: string } | undefined, err: unknown): string {
   // Check the unknown caught value (err) for a string message first.
@@ -23,7 +24,7 @@ function errMsg(e: { code?: string } | undefined, err: unknown): string {
     if (typeof msg === 'string') return msg;
   }
   if (typeof err === 'string') return err;
-  return String(err);
+  return errorMessage(err);
 }
 
 export type FeedbackReportDraftSummary = {
@@ -66,7 +67,7 @@ function ensureDir(dir: string): { ok: true } | { ok: false; error: string; next
   } catch (err) {
     return {
       ok: false,
-      error: `Failed to create directory ${dir}: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Failed to create directory ${dir}: ${errorMessage(err)}`,
       nextAction: 'verify the workspace directory is writable and that the parent exists',
     };
   }
@@ -133,7 +134,7 @@ export class FeedbackReportConsoleModel {
     } catch (err) {
       return {
         ok: false,
-        error: `Failed to write feedback report draft at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Failed to write feedback report draft at ${filePath}: ${errorMessage(err)}`,
         nextAction: 'verify the workspace directory is writable and that disk space is available',
       };
     }
@@ -180,7 +181,7 @@ export class FeedbackReportConsoleModel {
           }
         } catch (readErr) {
           // Skip unreadable/malformed draft — but record diagnostics for observability.
-          const skipReason = readErr instanceof Error ? readErr.message : String(readErr);
+          const skipReason = errorMessage(readErr);
           console.warn(`[FeedbackReportConsoleModel] skipping unreadable draft "${f.name}": ${skipReason}`);
         }
       }
@@ -190,7 +191,7 @@ export class FeedbackReportConsoleModel {
       return {
         ok: false,
         drafts: [],
-        error: `Failed to read feedback drafts directory ${this.draftsDir}: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Failed to read feedback drafts directory ${this.draftsDir}: ${errorMessage(err)}`,
         nextAction: 'verify the workspace directory exists and is readable',
       };
     }
@@ -305,7 +306,7 @@ export class FeedbackReportConsoleModel {
     } catch (err) {
       return {
         ok: false,
-        error: `Failed to write feedback report update at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Failed to write feedback report update at ${filePath}: ${errorMessage(err)}`,
         nextAction: 'verify the workspace directory is writable and that disk space is available',
       };
     }

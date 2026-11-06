@@ -9,9 +9,9 @@ import {
 } from '../models/PrinciplesConsoleModel.js';
 import { PrincipleTrajectoryModel } from '../models/PrincipleTrajectoryModel.js';
 import { GovernanceProjectionCollector, GovernanceProjectionCollectionError } from '../models/GovernanceProjectionCollector.js';
-import { CORE_PRINCIPLES, OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES, OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime';
 import { Value } from '@sinclair/typebox/value';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, errorMessage } from '../utils/response.js';
 
 const models = new Map<string, PrinciplesConsoleModel>();
 const trajectoryModels = new Map<string, PrincipleTrajectoryModel>();
@@ -79,7 +79,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
   pendingIds: Set<string>;
   unavailableReason?: string;
 }> {
-  // Runtime V2 uses <workspace>/.pd/state.db (NOT .state/state.db)
+  // Runtime uses <workspace>/.pd/state.db (NOT .state/state.db)
   const dbPath = path.join(workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(dbPath)) {
     return { ids: new Set(), pendingIds: new Set(), unavailableReason: 'approval_db_not_found' };
@@ -87,7 +87,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
 
   let closeFn: (() => void) | null = null;
   try {
-    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const { SqliteConnection } = await import('@principles/core/runtime');
     const conn = new SqliteConnection({ workspaceDir, readonly: true });
     closeFn = () => conn.close();
     const db = conn.getDb();
@@ -118,7 +118,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
     }
     return { ids, pendingIds };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ids: new Set(), pendingIds: new Set(), unavailableReason: `approval_query_failed: ${message}` };
   } finally {
     closeFn?.();
@@ -156,7 +156,7 @@ async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: 
   }
   let closeFn: (() => void) | null = null;
   try {
-    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const { SqliteConnection } = await import('@principles/core/runtime');
     const conn = new SqliteConnection({ workspaceDir, readonly: true });
     closeFn = () => conn.close();
     const db = conn.getDb();
@@ -180,7 +180,7 @@ async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: 
     }
     return { ids };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ids: new Set(), unavailableReason: `activation_query_failed: ${message}` };
   } finally {
     closeFn?.();
@@ -240,7 +240,7 @@ export async function handlePrinciplesRoute({
         sendError(res, error.reasonCode === 'principle_not_found' ? 404 : 500, error.reasonCode, error.message, { nextAction: error.nextActionCode });
         return;
       }
-      sendError(res, 500, 'governance_projection_error', error instanceof Error ? error.message : String(error), { nextAction: 'inspect_runtime_state' });
+      sendError(res, 500, 'governance_projection_error', errorMessage(error), { nextAction: 'inspect_runtime_state' });
     }
     return;
   }
@@ -278,7 +278,7 @@ export async function handlePrinciplesRoute({
           });
           return;
         }
-        sendError(res, 500, 'archive_failed', err instanceof Error ? err.message : String(err));
+        sendError(res, 500, 'archive_failed', errorMessage(err));
       }
       return;
     }
@@ -312,7 +312,7 @@ export async function handlePrinciplesRoute({
           });
           return;
         }
-        sendError(res, 500, 'unarchive_failed', err instanceof Error ? err.message : String(err));
+        sendError(res, 500, 'unarchive_failed', errorMessage(err));
       }
       return;
     }
@@ -354,7 +354,7 @@ export async function handlePrinciplesRoute({
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'principles_list_error', err instanceof Error ? err.message : String(err));
+      sendError(res, 500, 'principles_list_error', errorMessage(err));
     }
     return;
   }
@@ -383,7 +383,7 @@ export async function handlePrinciplesRoute({
       const result = await trajModel.getTrajectory(decodedPrincipleId);
       sendSuccess(res, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'principle_trajectory_error', message);
     }
     return;
@@ -412,7 +412,7 @@ export async function handlePrinciplesRoute({
         });
         return;
       }
-      sendError(res, 500, 'principle_detail_error', err instanceof Error ? err.message : String(err));
+      sendError(res, 500, 'principle_detail_error', errorMessage(err));
     }
     return;
   }

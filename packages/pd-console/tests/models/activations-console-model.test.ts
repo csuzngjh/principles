@@ -19,7 +19,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { ActivationsConsoleModel } from '../../src/server/models/ActivationsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
-import { SqliteConnection, collectOpenClawPromotionChecks } from '@principles/core/runtime-v2';
+import { SqliteConnection, collectOpenClawPromotionChecks } from '@principles/core/runtime';
 import { saveHostToolDeclaration, OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
 import type { GovernanceAuditWriter } from 'principles-disciple/governance-audit';
 

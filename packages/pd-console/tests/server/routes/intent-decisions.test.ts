@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
 import * as yaml from 'js-yaml';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { handleIntentDecisionsRoute, disposeIntentDecisionModels } from '../../../src/server/routes/intent-decisions.js';
 
 let workspaceDir: string;

@@ -25,7 +25,7 @@ import {
   type UnifiedKeywordStore,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   GOVERNANCE_STRONG_PAIN_SCORE,
   GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,

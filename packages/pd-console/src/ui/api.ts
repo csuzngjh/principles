@@ -1,10 +1,10 @@
 import { validateApprovalReview, type ApprovalReviewGuard, type ApprovalReviewData } from './utils/approval-review.js';
 import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
-import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime-v2/internalization/design-gate-facts";
+import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime/internalization/design-gate-facts";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import type { RuleBindingReviewView, RuleBindingQueueView } from '../shared/rule-candidate-binding-contract.js';
-import type { RuleCandidateBindingRequest } from '@principles/core/runtime-v2';
+import type { RuleCandidateBindingRequest } from '@principles/core/runtime';
 import { validateApprovedRuleRevisionPreview, validateApprovedRuleRevisionResult } from '../shared/approved-rule-revision-contract.js';
 import type { ApprovedRuleRevisionPreview, ApprovedRuleRevisionRequest, ApprovedRuleRevisionResult } from '../shared/approved-rule-revision-contract.js';
 import { validateBindingReview, validateBindingQueue, validateBindingMutation, validateBindingRevise } from './utils/rule-binding-validators.js';
@@ -68,7 +68,7 @@ import {
   validateOwnerIdentityRegister,
   validateOwnerIdentityUnregister,
 } from "./utils/validators.js";
-import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
 import type {
   OwnerIdentityViewData,
   OwnerIdentityRegisterData,

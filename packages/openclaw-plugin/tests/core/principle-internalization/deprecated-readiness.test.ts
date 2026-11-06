@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { assessDeprecatedReadiness } from '@principles/core/runtime-v2';
+import { assessDeprecatedReadiness } from '@principles/core/runtime';
 import type {
   PrincipleLifecycleEvidence,
   RuleLifecycleEvidence,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 function createRuleEvidence(
   id: string,

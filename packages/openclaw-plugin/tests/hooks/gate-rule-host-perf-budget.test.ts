@@ -38,7 +38,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 

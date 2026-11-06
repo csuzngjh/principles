@@ -9,7 +9,7 @@
  * inside the pd-cli subprocess (EP-06 Source of Truth).
  *
  * Feature flag gate: `new_user_onboarding` (default true, registered in
- * packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts).
+ * packages/principles-core/src/runtime/feature-flags/feature-flag-contract.ts).
  *
  * ERR entries considered:
  * - EP-02 (Production Path Wiring): registered in server/index.ts handleRequest
@@ -32,7 +32,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
-import { sendError, sendJson } from '../utils/response.js';
+import { sendError, sendJson, errorMessage } from '../utils/response.js';
 
 export interface OnboardingRouteContext {
   workspaceDir: string;
@@ -187,7 +187,7 @@ async function handleRunDemo(
       },
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     cleanupTempWorkspace(tempWorkspace);
     sendStructuredError(res, {
       statusCode: 500,

@@ -51,7 +51,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
-import type { ProductTelemetryMilestoneInput, TelemetryFact } from '@principles/core/runtime-v2';
+import type { ProductTelemetryMilestoneInput, TelemetryFact } from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig } from '../pd-config.js';
 
 /** Feature flag whose absence of writes makes receipt absence unprovable. */

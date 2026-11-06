@@ -54,7 +54,7 @@ import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveExplicitPdWorkspaceDir, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime-v2';
+import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime';
 import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
 import { readAdaptiveActivationConfig } from './hooks/adaptive-activation-config.js';
 import { claimControlledAdmission, isControlledAdmissionConfigured } from './hooks/controlled-admission.js';
@@ -1153,10 +1153,10 @@ const plugin = {
   }
 };
 
-// PrincipleTreeLedgerAdapter is exported from @principles/core/runtime-v2 (canonical,
+// PrincipleTreeLedgerAdapter is exported from @principles/core/runtime (canonical,
 // consolidated in PRI-459). The plugin-local duplicate was removed; re-export the core
 // symbol so any external consumer importing from the plugin still resolves it.
-export { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+export { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
 /* istanbul ignore next — test exports */
 export { loadFeatureFlagFromWorkspace, isRecord };
 

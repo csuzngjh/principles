@@ -11,8 +11,8 @@ import {
   createFeedbackReport,
   PendingAgentDraftStore,
   type FeedbackReport,
-} from '@principles/core/runtime-v2/feedback';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime/feedback';
+import { SqliteConnection } from '@principles/core/runtime';
 import {
   FeedbackReportConsoleModel,
   type FeedbackReportDraftSummary,
@@ -26,6 +26,7 @@ import {
   sendNotFound,
   sendMethodNotAllowed,
   sendBadRequest,
+  errorMessage,
 } from '../utils/response.js';
 
 const models = new Map<string, FeedbackReportConsoleModel>();
@@ -87,18 +88,14 @@ async function readJsonBody(req: IncomingMessage): Promise<{ ok: true; value: un
       } catch (err) {
         resolve({
           ok: false,
-          error: `invalid JSON body: ${err instanceof Error ? err.message : String(err)}`,
+          error: `invalid JSON body: ${errorMessage(err)}`,
         });
       }
     });
     req.on('error', (err) => {
-      resolve({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      resolve({ ok: false, error: errorMessage(err) });
     });
   });
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /**

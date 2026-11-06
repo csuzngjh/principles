@@ -4,7 +4,7 @@ import {
   PiAiRuntimeAdapter,
   buildLlmPrompt,
   resolveLlmClassificationPayload,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { SIGNAL_CLASSIFICATION_SCHEMA_REF } from '@principles/host-runtime';
 
 /**

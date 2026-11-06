@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
-import { SqliteContextAssembler } from '@principles/core/runtime-v2';
-import { SqliteHistoryQuery } from '@principles/core/runtime-v2';
-import { StoreEventEmitter } from '@principles/core/runtime-v2';
+import { RuntimeStateManager } from '@principles/core/runtime';
+import { SqliteContextAssembler } from '@principles/core/runtime';
+import { SqliteHistoryQuery } from '@principles/core/runtime';
+import { StoreEventEmitter } from '@principles/core/runtime';
 import {
   SplitDiagnosticianRunner,
   DiagRootCauseRunner,
@@ -11,18 +11,18 @@ import {
   DiagRouterRunner,
   DefaultDiagRootCauseValidator,
   DefaultDiagDistillerValidator,
-} from '@principles/core/runtime-v2';
-import { SqliteDiagnosticianCommitter } from '@principles/core/runtime-v2';
-import { TestDoubleRuntimeAdapter } from '@principles/core/runtime-v2';
-import { PainSignalBridge } from '@principles/core/runtime-v2';
-import { CandidateIntakeService } from '@principles/core/runtime-v2';
-import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
-import { makeDeterministicDiagnosticianOutput } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import { SqliteDiagnosticianCommitter } from '@principles/core/runtime';
+import { TestDoubleRuntimeAdapter } from '@principles/core/runtime';
+import { PainSignalBridge } from '@principles/core/runtime';
+import { CandidateIntakeService } from '@principles/core/runtime';
+import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
+import { makeDeterministicDiagnosticianOutput } from '@principles/core/runtime';
 import type {
   PainFloodSimulationSummary,
   PainFloodStage,
   PainFloodScenarioName,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   computeFloodStatus,
   computeFloodTotals,
@@ -33,7 +33,7 @@ import {
   truncateReason,
   FLOOD_SCENARIO_EXPECTATIONS,
   computeMaxAllowedTasks,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export interface PainFloodSimulationRunnerOptions {
   workspaceDir: string;

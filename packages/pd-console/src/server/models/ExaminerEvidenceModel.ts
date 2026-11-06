@@ -25,12 +25,13 @@
  *     prompt-consumption evidence.
  */
 import { readPromptActivationInjectionStatuses, type PromptActivationInjectionStatus } from '@principles/host-runtime';
-import type { ReceiptEvidenceCoverage } from '@principles/core/runtime-v2';
+import type { ReceiptEvidenceCoverage } from '@principles/core/runtime';
 import type { PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import type { PrincipleReceipts } from './ReceiptsConsoleModel.js';
 import { ReceiptsConsoleModel } from './ReceiptsConsoleModel.js';
 import { PrinciplesConsoleModel, CorePrincipleNotGovernedError } from './PrinciplesConsoleModel.js';
 import { ActivationsConsoleModel, type ActivationsResponse } from './ActivationsConsoleModel.js';
+import { errorMessage } from '../utils/response.js';
 
 /** Bounded per-kind sample shown on the evaluation page (audit stays paged). */
 const AUDIT_SAMPLE_LIMIT = 5;
@@ -226,7 +227,7 @@ export class ExaminerEvidenceModel {
       activations = {
         activations: [],
         status: 'degraded',
-        reason: `activation read failed: ${error instanceof Error ? error.message : String(error)}`,
+        reason: `activation read failed: ${errorMessage(error)}`,
         nextAction: 'check workspace .pd/state.db readability and the activation schema',
       };
     }

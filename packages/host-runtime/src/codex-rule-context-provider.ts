@@ -4,7 +4,7 @@ import {
   type RuleContextV2,
   type RuleHistoryWindow,
   type ToolSemanticRegistry,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type { ProductionRuleContextRequest, RuleContextProvider } from './production-rulehost-gate.js';
 import { assembleBehaviorHistory } from './behavior-history.js';
 import { readWorkspaceRuleContextRowsBefore } from './workspace-behavior-evidence.js';

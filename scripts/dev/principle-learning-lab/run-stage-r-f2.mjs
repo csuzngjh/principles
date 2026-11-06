@@ -42,7 +42,6 @@ if (!openclawBin) {
 }
 const probeWorkRoot = path.resolve(process.cwd(), arg('--probe-work-root', ''));
 const dryRun = process.argv.includes('--dry-run');
-const unitsArg = arg('--units', '36');
 const canonical = path.join(labRoot, 'challenge-studies', 'CEB-001');
 const probeRecordSource = path.resolve(labRoot, '..', '..', '..', 'docs', 'research', 'pri1037-probe-attempts', 'attempt-4-PRI-1037.json');
 const f2AuthorizationSource = path.resolve(labRoot, '..', '..', '..', 'docs', 'research', 'pri1038-f2', 'F2-RUN-AUTHORIZATION.json');
@@ -77,7 +76,6 @@ let studyCopy;
 let runRoot;
 if (resumeCopy !== undefined) {
   studyCopy = path.resolve(process.cwd(), resumeCopy);
-  runRoot = path.dirname(studyCopy);
   if (!fs.existsSync(path.join(studyCopy, 'suite-manifest.json'))) {
     console.error(`run-stage-r-f2: --resume copy is not a study directory: ${studyCopy}`);
     process.exit(1);

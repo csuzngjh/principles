@@ -14,7 +14,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { OwnerDecisionViewModel } from '../models/OwnerDecisionViewModel.js';
 import { GovernanceProjectionCollectionError } from '../models/GovernanceProjectionCollector.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendError, errorMessage } from '../utils/response.js';
 
 export interface OwnerDecisionRouteParams {
   req: IncomingMessage;
@@ -41,7 +41,7 @@ export async function handleOwnerDecisionInboxRoute(params: OwnerDecisionRoutePa
     const inbox = await new OwnerDecisionViewModel(workspaceDir).getInbox(now());
     sendSuccess(res, inbox);
   } catch (error: unknown) {
-    sendError(res, 500, 'owner_decision_inbox_error', error instanceof Error ? error.message : String(error), { nextAction: 'inspect_runtime_state' });
+    sendError(res, 500, 'owner_decision_inbox_error', errorMessage(error), { nextAction: 'inspect_runtime_state' });
   }
 }
 
@@ -56,7 +56,7 @@ export async function handleOwnerDecisionLibraryRoute(params: OwnerDecisionRoute
     const library = await new OwnerDecisionViewModel(workspaceDir).getLibraryCompact(now());
     sendSuccess(res, library);
   } catch (error: unknown) {
-    sendError(res, 500, 'owner_decision_library_error', error instanceof Error ? error.message : String(error), { nextAction: 'inspect_runtime_state' });
+    sendError(res, 500, 'owner_decision_library_error', errorMessage(error), { nextAction: 'inspect_runtime_state' });
   }
 }
 
@@ -105,7 +105,7 @@ export async function handleOwnerDecisionViewRoute(params: OwnerDecisionRoutePar
       sendError(res, 404, 'principle_not_found', 'Principle not found', { nextAction: 'Check the principle ID.' });
       return true;
     }
-    sendError(res, 500, 'owner_decision_view_error', error instanceof Error ? error.message : String(error), { nextAction: 'inspect_runtime_state' });
+    sendError(res, 500, 'owner_decision_view_error', errorMessage(error), { nextAction: 'inspect_runtime_state' });
   }
   return true;
 }

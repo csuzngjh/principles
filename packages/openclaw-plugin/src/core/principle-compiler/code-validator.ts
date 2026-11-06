@@ -12,7 +12,7 @@
 
 import { nodeVm } from '../../utils/node-vm-polyfill.js';
 import { loadRuleImplementationModule, type RuleImplementationModuleExports } from '../rule-implementation-runtime.js';
-import { checkForbiddenPatterns, type ValidationResult } from '@principles/core/runtime-v2';
+import { checkForbiddenPatterns, type ValidationResult } from '@principles/core/runtime';
 
 const MOCK_INPUT = {
   action: {
@@ -26,7 +26,7 @@ const MOCK_INPUT = {
   derived: { estimatedLineChanges: 0, bashRisk: 'safe' },
 };
 
-export type { ValidationResult } from '@principles/core/runtime-v2';
+export type { ValidationResult } from '@principles/core/runtime';
 
 export function validateGeneratedCode(code: string): ValidationResult {
   const errors: string[] = [];

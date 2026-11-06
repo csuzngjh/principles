@@ -119,7 +119,7 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
   };
 });
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   CandidateIntakeService: MockCandidateIntakeService,
   CandidateIntakeError: class CandidateIntakeError extends Error {
@@ -155,7 +155,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
 }));
 
 // PRI-443 Phase 5: loadLedger and getLedgerFilePathPublic now imported from
-// @principles/core/principle-tree-ledger (I/O module) instead of runtime-v2 barrel
+// @principles/core/principle-tree-ledger (I/O module) instead of runtime barrel
 vi.mock('@principles/core/principle-tree-ledger', () => ({
   loadLedger: mockLoadLedger,
   getLedgerFilePathPublic: mockGetLedgerFilePath,

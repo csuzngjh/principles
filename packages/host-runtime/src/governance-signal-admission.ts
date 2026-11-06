@@ -19,7 +19,7 @@
  *   process-local state dead state; OpenClaw's in-memory bucket and the
  *   tool-pain cooldown keep their existing behavior);
  * - one admitted pain → exactly one pending Diagnostician task via
- *   PainToPrincipleService async mode (Runtime V2 task authority), with the
+ *   PainToPrincipleService async mode (Runtime task authority), with the
  *   task link persisted on the admission marker;
  * - one narrow, idempotent reconciliation pass for the cross-store crash gaps
  *   (trajectory.db ↔ .pd/state.db cannot share a transaction).
@@ -61,7 +61,7 @@ import {
   type SignalCollectorOutput,
   type Stage2GateVerdict,
   type UnifiedKeywordStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   deriveProductionCorrectionPainIdentity,
   hasProductionPainSchema,
@@ -2446,7 +2446,7 @@ export interface ReconcileGovernanceContinuationResult {
 
 /**
  * Narrow idempotent reconciliation between the trajectory admission markers
- * and the Runtime V2 task store (separate SQLite databases — no cross-store
+ * and the Runtime task store (separate SQLite databases — no cross-store
  * transaction exists, SPEC §13). Current conversation-ingestion consent is
  * mandatory because it controls whether Codex observations may be read and
  * promoted; task/link recovery remains available when consent is off. Recovers:

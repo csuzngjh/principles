@@ -2,11 +2,19 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { classifyPrinciples, filterOwnerActionable } from './PrincipleClassifier.js';
 import { updatePrinciple } from '@principles/core/principle-tree-ledger';
-import { isCorePrincipleId } from '@principles/core/runtime-v2';
+import { isCorePrincipleId } from '@principles/core/runtime';
 
-import type { PrincipleStatus } from '@principles/core/runtime-v2';
+import type { PrincipleStatus } from '@principles/core/runtime';
 
 export type { PrincipleStatus };
+
+/**
+ * Collapse line breaks so an id interpolated into a log line cannot forge
+ * additional log entries (log injection).
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(/\r/g, '').replace(/\n/g, '');
+}
 
 // ── PRI-641: Core principle boundary errors ─────────────────────────────────
 // Core principles (registry T-01..T-10) are PD's built-in semantics, not
@@ -491,7 +499,7 @@ export class PrinciplesConsoleModel {
       this.cacheTimestamp = 0;
       return true;
     } catch (e) {
-      console.error(`Failed to archive principle ${principleId}:`, e);
+      console.error('Failed to archive principle:', sanitizeForLog(principleId), e);
       return false;
     }
   }
@@ -512,7 +520,7 @@ export class PrinciplesConsoleModel {
       this.cacheTimestamp = 0;
       return true;
     } catch (e) {
-      console.error(`Failed to unarchive principle ${principleId}:`, e);
+      console.error('Failed to unarchive principle:', sanitizeForLog(principleId), e);
       return false;
     }
   }

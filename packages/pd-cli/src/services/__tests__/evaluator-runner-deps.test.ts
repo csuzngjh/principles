@@ -33,8 +33,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { createEvaluatorRunnerDeps } from '../rulehost-pipeline-runner.js';
-import type { SeedArtificerRepairParams } from '@principles/core/runtime-v2';
-import type { RuntimeStateManager, TaskRecord } from '@principles/core/runtime-v2';
+import type { SeedArtificerRepairParams } from '@principles/core/runtime';
+import type { RuntimeStateManager, TaskRecord } from '@principles/core/runtime';
 
 // ─── Test workspace helpers ────────────────────────────────────────────────
 

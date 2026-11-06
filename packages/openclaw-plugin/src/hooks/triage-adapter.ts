@@ -29,7 +29,7 @@ import {
   type TriageInput,
   type TriageResult,
   type SourceKind,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // ── Source Kind Resolution ───────────────────────────────────────────────────
 

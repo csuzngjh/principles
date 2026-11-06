@@ -23,7 +23,7 @@ import {
   computeArtifactDigest,
   mapPiArtifactRow,
   type PiArtifactRow,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type { HostEvent } from '@principles/core/host';
 import { createProductionRuleHostGate } from '../src/production-rulehost-gate.js';
 import type { RuleImplementationRuntime, RuleBatchEvaluation } from '../src/rule-implementation-runtime.js';

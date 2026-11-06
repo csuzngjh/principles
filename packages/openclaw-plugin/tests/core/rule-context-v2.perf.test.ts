@@ -21,7 +21,7 @@ import * as yaml from 'js-yaml';
 import { buildProductionRuleContext } from '../../src/core/rule-context-assembler.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
-import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 
 // ── Mocks (non-DB services only) ───────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import {
   createRuntimeStateHandle, PrincipleTreeLedgerAdapter, SqliteDiagnosticianCommitter, reviseRuleBindingOnce,
   createPITaskDiagnosticJson, type RuntimeStateHandle, type DiagnosticianOutputV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { RuleCandidateBindingConsoleModel } from '../../src/server/models/RuleCandidateBindingConsoleModel.js';
 

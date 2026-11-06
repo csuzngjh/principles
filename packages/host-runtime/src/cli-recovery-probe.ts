@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { RecoveryCapabilityEvidence } from '@principles/core/runtime-v2';
+import type { RecoveryCapabilityEvidence } from '@principles/core/runtime';
 
 /**
  * SPEC-RULECODE-HOST-PROMOTION-001 review round 4 (P1): per-capability

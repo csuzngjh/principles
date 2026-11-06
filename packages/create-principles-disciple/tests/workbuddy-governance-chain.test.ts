@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import { WorkBuddyHostInstaller, WORKBUDDY_PLUGIN_KEY } from '../src/installers/workbuddy-host-installer.js';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
-import { computeFeatureFlagsFromConfig, SqliteConnection, SqliteActivationStateStore, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig, SqliteConnection, SqliteActivationStateStore, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime';
 import { logger } from '../src/utils/logger.js';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

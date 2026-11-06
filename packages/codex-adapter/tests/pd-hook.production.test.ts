@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteApprovalQueueStore, SqliteConnection, summarizeRuleCodeShadowEvents } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteApprovalQueueStore, SqliteConnection, summarizeRuleCodeShadowEvents } from '@principles/core/runtime';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 

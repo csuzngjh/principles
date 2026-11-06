@@ -4,7 +4,7 @@ import type {
   PDTaskDelivery as CorePDTaskDelivery,
   PDTaskMeta as CorePDTaskMeta,
   PDTaskSpec as CorePDTaskSpec,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export type PDTaskSchedule = CorePDTaskSchedule;
 export type PDTaskExecution = CorePDTaskExecution;
@@ -18,7 +18,7 @@ export {
   PDTaskDeliverySchema,
   PDTaskMetaSchema,
   PDTaskSpecSchema,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export const BUILTIN_PD_TASKS: PDTaskSpec[] = [];
 

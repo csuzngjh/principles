@@ -33,7 +33,7 @@ const { mockResolveOwnerIdentity, mockResolveRuntimeAdapter, evaluationScript } 
   evaluationScript: { outcomes: [] as unknown[] },
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveOwnerIdentity: mockResolveOwnerIdentity,
 }));
@@ -45,9 +45,9 @@ vi.mock('../../src/services/runtime-adapter-resolver.js', () => ({
   resolveRuntimeAdapterFromConfig: mockResolveRuntimeAdapter,
 }));
 
-import type { PDRuntimeAdapter, RunHandle, RunStatus, RuntimeCapabilities, RuntimeArtifactRef, RuntimeHealth, StartRunInput, StructuredRunOutput } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RunHandle, RunStatus, RuntimeCapabilities, RuntimeArtifactRef, RuntimeHealth, StartRunInput, StructuredRunOutput } from '@principles/core/runtime';
 import { handleCandidateReview, handleCandidateIntake } from '../../src/commands/candidate.js';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { RuntimeStateManager } from '@principles/core/runtime';
 import { addPrincipleToLedger, loadLedger } from '@principles/core/principle-tree-ledger';
 import type { LedgerPrinciple } from '@principles/core/principle-tree-ledger';
 

@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import type { RuntimeKind } from './runtime-v2/runtime-protocol.js';
+import type { RuntimeKind } from './runtime/runtime-protocol.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

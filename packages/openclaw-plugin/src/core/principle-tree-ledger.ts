@@ -14,7 +14,7 @@
  *      load by the other.
  *
  * Both are now fixed by converging on a SINGLE source of truth in core:
- *   - parse/serialize: @principles/core/runtime-v2/principle-tree/ledger-codec
+ *   - parse/serialize: @principles/core/runtime/principle-tree/ledger-codec
  *   - mutation (with cross-process file lock): @principles/core/principle-tree-ledger
  *
  * This file is now a thin re-export so existing relative imports

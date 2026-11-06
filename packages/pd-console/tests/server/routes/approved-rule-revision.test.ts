@@ -6,8 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { handleActivationsRoute, disposeActivationsModels } from '../../../src/server/routes/activations.js';
 import { ActivationsConsoleModel } from '../../../src/server/models/ActivationsConsoleModel.js';
-import type { OwnerPromotionActor } from '@principles/core/runtime-v2';
-import { createRuntimeStateHandle, SqliteDiagnosticianCommitter, PrincipleTreeLedgerAdapter, SqliteApprovalQueueStore, SqliteActivationStateStore, createPITaskDiagnosticJson, hydratePITaskRecord } from '@principles/core/runtime-v2';
+import type { OwnerPromotionActor } from '@principles/core/runtime';
+import { createRuntimeStateHandle, SqliteDiagnosticianCommitter, PrincipleTreeLedgerAdapter, SqliteApprovalQueueStore, SqliteActivationStateStore, createPITaskDiagnosticJson, hydratePITaskRecord } from '@principles/core/runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { validateApprovedRuleRevisionPreview } from '../../../src/shared/approved-rule-revision-contract.js';
 

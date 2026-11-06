@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime-v2';
+import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime';
 
 // Mock dependencies
 vi.mock('../../src/hooks/pain.js', () => ({

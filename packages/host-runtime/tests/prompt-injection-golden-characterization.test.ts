@@ -4,14 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
   getDefaultPdConfig,
   trimToBudget,
   renderPrinciplesToDirectives,
   type ActivatedPrinciple,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { buildActivePrinciplePromptContext } from '../src/index.js';
 
@@ -104,7 +104,7 @@ async function seedWorkspace(workspaceDir: string, entries: ActivatedPrinciple[]
 
 describe('AC-04 golden characterization — production prompt builders must stay byte-identical', () => {
   it('list route FIFO: exact selected lines, order, and usedChars (CJK / XML escaping / emoji)', () => {
-    const fifo = trimToBudget(CASE, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+    const fifo = trimToBudget(CASE, RUNTIME_PRINCIPLE_BUDGET, escapeXml);
     expect(fifo.lines).toEqual([
       'Runtime V2 activated principles:',
       `- [T-01] ${escT01}`,
@@ -121,7 +121,7 @@ describe('AC-04 golden characterization — production prompt builders must stay
   });
 
   it('list route final render (hooks/prompt.ts composition): exact full string, self-report off and on', () => {
-    const fifo = trimToBudget(CASE, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+    const fifo = trimToBudget(CASE, RUNTIME_PRINCIPLE_BUDGET, escapeXml);
     const injected = CASE.filter((p) => fifo.injectedIds.has(p.principleId));
     const expected =
       DIRECTIVE_HEADER
@@ -143,7 +143,7 @@ describe('AC-04 golden characterization — production prompt builders must stay
       [2, ['T-03', 'T-04', 'T-01', 'T-02']],
       [3, ['T-04', 'T-01', 'T-02', 'T-03']],
     ] as const) {
-      const t = trimToBudget(CASE, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, k);
+      const t = trimToBudget(CASE, RUNTIME_PRINCIPLE_BUDGET, escapeXml, k);
       expect([...t.injectedIds]).toEqual([...expectedIds]);
       expect(t.selectionPolicy).toBe('fair_rotation_v1');
       expect(t.rotationStartIndex).toBe(k);
@@ -155,17 +155,17 @@ describe('AC-04 golden characterization — production prompt builders must stay
   it('list route budget boundary: header+entry+newline exactly filling the budget injects; one char more is oversized', () => {
     const header = 'Runtime V2 activated principles:';
     // header + '\n' + '- [B-EXACT] ' + text + '\n' === the active budget
-    const b1TextLen = RUNTIME_V2_PRINCIPLE_BUDGET - header.length - 1 - '- [B-EXACT] '.length - 1;
-    const b1 = trimToBudget([mk('B-EXACT', 'x'.repeat(b1TextLen))], RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
-    expect(b1.lines.join('\n').length).toBe(RUNTIME_V2_PRINCIPLE_BUDGET - 1);
+    const b1TextLen = RUNTIME_PRINCIPLE_BUDGET - header.length - 1 - '- [B-EXACT] '.length - 1;
+    const b1 = trimToBudget([mk('B-EXACT', 'x'.repeat(b1TextLen))], RUNTIME_PRINCIPLE_BUDGET, escapeXml);
+    expect(b1.lines.join('\n').length).toBe(RUNTIME_PRINCIPLE_BUDGET - 1);
     expect([...b1.injectedIds]).toEqual(['B-EXACT']);
     expect(b1.oversizedActivationIds).toEqual([]);
-    const b2 = trimToBudget([mk('B-OVER1', 'x'.repeat(b1TextLen + 1))], RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
-    expect(b2.lines.join('\n').length).toBe(RUNTIME_V2_PRINCIPLE_BUDGET);
+    const b2 = trimToBudget([mk('B-OVER1', 'x'.repeat(b1TextLen + 1))], RUNTIME_PRINCIPLE_BUDGET, escapeXml);
+    expect(b2.lines.join('\n').length).toBe(RUNTIME_PRINCIPLE_BUDGET);
     expect([...b2.injectedIds]).toEqual(['B-OVER1']);
     expect(b2.oversizedActivationIds).toEqual([]);
     // Truly oversized alone: FIFO sets truncated and classifies oversized.
-    const ov = trimToBudget([mk('OV-1', 'o'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET))], RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+    const ov = trimToBudget([mk('OV-1', 'o'.repeat(RUNTIME_PRINCIPLE_BUDGET))], RUNTIME_PRINCIPLE_BUDGET, escapeXml);
     expect([...ov.injectedIds]).toEqual([]);
     expect(ov.oversizedActivationIds).toEqual(['act-OV-1']);
     expect(ov.truncated).toBe(true);
@@ -209,7 +209,7 @@ describe('AC-04 golden characterization — production prompt builders must stay
 
   it('AC-02 root scenario: shared route reports oversizedActivationIds with truncated=false (no other drop)', async () => {
     const workspaceDir = tempWorkspace();
-    const entries = [...CASE, mk('OV-S', 'y'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET))];
+    const entries = [...CASE, mk('OV-S', 'y'.repeat(RUNTIME_PRINCIPLE_BUDGET))];
     await seedWorkspace(workspaceDir, entries);
     const context = await buildActivePrinciplePromptContext({ workspaceDir });
     expect(context.oversizedActivationIds).toEqual(['act-OV-S']);

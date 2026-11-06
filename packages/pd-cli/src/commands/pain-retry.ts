@@ -45,12 +45,12 @@ import {
   type PainDetectedData,
   type PainSignalBridgeResult,
   type DeadLetterRow,
-} from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PDRuntimeAdapter, RuntimeConfig, OutputLanguage } from '@principles/core/runtime';
 import type { Command } from 'commander';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
-import type { PDTaskStatus } from '@principles/core/runtime-v2';
+import type { PDTaskStatus } from '@principles/core/runtime';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';

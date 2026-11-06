@@ -20,7 +20,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFileSync } from '../utils/io.js';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
+import { guardWorkspaceLeak } from '@principles/core/runtime/store/workspace-leak-guard';
 import { SystemLogger } from './system-logger.js';
 
 const SIGNAL_HEALTH_FILE = 'signal-health.json';

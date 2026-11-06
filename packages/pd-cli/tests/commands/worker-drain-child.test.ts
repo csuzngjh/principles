@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
 for (const host of ['codex', 'workbuddy']) {

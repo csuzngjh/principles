@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
+import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime';
 
 const repoRoot = path.resolve(__dirname, '../..');
 const indexPath = path.join(repoRoot, 'src/index.ts');

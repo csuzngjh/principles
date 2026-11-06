@@ -9,7 +9,7 @@ import {
   type DesignGateAction,
   type DesignGateFact,
   type DesignGateInvalidationReason,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export const DESIGN_GATE_FACT_KIND = 'design_approval' as const;
 export const DESIGN_GATE_FACT_INPUT_PATH = 'input.context.facts.designGate' as const;

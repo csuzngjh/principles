@@ -1,20 +1,18 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
 // ── Imports from @principles/core ───────────────────────────────────────────
-import { DiagnosticianPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.ts';
-import { RootCausePromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/rootcause-prompt-builder.ts';
-import { DistillerPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/distiller-prompt-builder.ts';
-import { RouterPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/router-prompt-builder.ts';
-import { CORE_PRINCIPLES, isCorePrincipleId } from '../packages/principles-core/src/runtime-v2/core-principles/core-principle-registry.ts';
+import { RootCausePromptBuilder } from '../packages/principles-core/src/runtime/diagnostician/rootcause-prompt-builder.ts';
+import { DistillerPromptBuilder } from '../packages/principles-core/src/runtime/diagnostician/distiller-prompt-builder.ts';
+import { RouterPromptBuilder } from '../packages/principles-core/src/runtime/diagnostician/router-prompt-builder.ts';
+import { isCorePrincipleId } from '../packages/principles-core/src/runtime/core-principles/core-principle-registry.ts';
 
 // Schemas for validation
-import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-rootcause-output.ts';
-import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-distiller-output.ts';
-import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
+import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician/diag-rootcause-output.ts';
+import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician/diag-distiller-output.ts';
+import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
 
 const SENSENOVA_BASE_URL = 'https://token.sensenova.cn/v1/chat/completions';
 const API_KEY = process.env.SENSENOVA_API_KEY ?? '';
@@ -499,110 +497,35 @@ function loadFixtures(): Fixture[] {
 
 // ── Run Arm 1: Monolith ─────────────────────────────────────────────────────
 
-async function runArm1(model: ModelConfig, fixture: Fixture): Promise<ArmResult> {
-  const start = Date.now();
-  try {
-    const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(fixture.contextPayload, {
-      coreGrounding: false,
-      outputLanguage
-    });
-
-    // PRI-633: the instruction now travels on the builder result's systemPrompt channel.
-    const systemPrompt = result.systemPrompt;
-    const userPrompt = JSON.stringify(result.promptInput, null, 2);
-
-    const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
-    const parsed = parseJsonSafe(apiResult.content);
-    let output: DiagnosticianOutputV1 | null = null;
-    let parseErr: string | undefined;
-    if (parsed.ok) {
-      if (Value.Check(DiagnosticianOutputV1Schema, parsed.value)) {
-        output = parsed.value;
-      } else {
-        parseErr = 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, parsed.value);
-      }
-    } else {
-      parseErr = `JSON parse failed: ${parsed.error.message}`;
-    }
-
-    const valid = output !== null;
-    const scoresWithMetrics = evaluateArmOutput('Arm 1 (Monolith)', output, fixture.contextPayload, outputLanguage);
-
-    return {
-      armName: 'Arm 1 (Monolith)',
-      success: valid,
-      latencyMs: Date.now() - start,
-      output,
-      error: valid ? undefined : parseErr,
-      scores: scoresWithMetrics,
-      metrics: scoresWithMetrics.metrics
-    };
-  } catch (err: any) {
-    return {
-      armName: 'Arm 1 (Monolith)',
-      success: false,
-      latencyMs: Date.now() - start,
-      output: null,
-      error: err.message,
-      scores: { abstractionQuality: 1, linkageQuality: 0, candidateValidity: 0, langConsistency: 0, groundingQuality: 0, totalScore: 0 },
-      metrics: { leakageCount: 0, axiomTied: [], fabricatedAxioms: [], languageUsed: 'unknown' }
-    };
-  }
+// DiagnosticianPromptBuilder was deleted in PRI-373 together with the monolith
+// pipeline it exercised, so this comparison arm no longer has a builder to run.
+// It is reported as unavailable instead of invoking a symbol that does not exist.
+async function runArm1(): Promise<ArmResult> {
+  return unavailableArm(
+    'Arm 1 (Monolith)',
+    'DiagnosticianPromptBuilder was removed in PRI-373; the monolith baseline no longer exists.',
+  );
 }
 
 // ── Run Arm 2: Grounded Monolith ────────────────────────────────────────────
 
-async function runArm2(model: ModelConfig, fixture: Fixture): Promise<ArmResult> {
-  const start = Date.now();
-  try {
-    const builder = new DiagnosticianPromptBuilder();
-    const result = builder.buildPrompt(fixture.contextPayload, {
-      coreGrounding: true,
-      outputLanguage
-    });
+async function runArm2(): Promise<ArmResult> {
+  return unavailableArm(
+    'Arm 2 (Grounded Monolith)',
+    'DiagnosticianPromptBuilder was removed in PRI-373; the grounded monolith baseline no longer exists.',
+  );
+}
 
-    // PRI-633: the instruction now travels on the builder result's systemPrompt channel.
-    const systemPrompt = result.systemPrompt;
-    const userPrompt = JSON.stringify(result.promptInput, null, 2);
-
-    const apiResult = await callSenseNova(model, systemPrompt, userPrompt);
-    const parsed = parseJsonSafe(apiResult.content);
-    let output: DiagnosticianOutputV1 | null = null;
-    let parseErr: string | undefined;
-    if (parsed.ok) {
-      if (Value.Check(DiagnosticianOutputV1Schema, parsed.value)) {
-        output = parsed.value;
-      } else {
-        parseErr = 'Output failed DiagnosticianOutputV1 schema validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, parsed.value);
-      }
-    } else {
-      parseErr = `JSON parse failed: ${parsed.error.message}`;
-    }
-
-    const valid = output !== null;
-    const scoresWithMetrics = evaluateArmOutput('Arm 2 (Grounded Monolith)', output, fixture.contextPayload, outputLanguage);
-
-    return {
-      armName: 'Arm 2 (Grounded Monolith)',
-      success: valid,
-      latencyMs: Date.now() - start,
-      output,
-      error: valid ? undefined : parseErr,
-      scores: scoresWithMetrics,
-      metrics: scoresWithMetrics.metrics
-    };
-  } catch (err: any) {
-    return {
-      armName: 'Arm 2 (Grounded Monolith)',
-      success: false,
-      latencyMs: Date.now() - start,
-      output: null,
-      error: err.message,
-      scores: { abstractionQuality: 1, linkageQuality: 0, candidateValidity: 0, langConsistency: 0, groundingQuality: 0, totalScore: 0 },
-      metrics: { leakageCount: 0, axiomTied: [], fabricatedAxioms: [], languageUsed: 'unknown' }
-    };
-  }
+function unavailableArm(armName: string, reason: string): ArmResult {
+  return {
+    armName,
+    success: false,
+    latencyMs: 0,
+    output: null,
+    error: reason,
+    scores: { abstractionQuality: 1, linkageQuality: 0, candidateValidity: 0, langConsistency: 0, groundingQuality: 0, totalScore: 0 },
+    metrics: { leakageCount: 0, axiomTied: [], fabricatedAxioms: [], languageUsed: 'unknown' },
+  };
 }
 
 // ── Run Arm 3: Split Pipeline ───────────────────────────────────────────────
@@ -943,11 +866,11 @@ async function main() {
       console.log(`[${model.label}] Scenario ${fixture.id} (${fixture.category})...`);
 
       console.log(`[${model.label}]   Running Arm 1 (Monolith)...`);
-      const arm1 = await runArm1(model, fixture);
+      const arm1 = await runArm1();
       console.log(`[${model.label}]     Arm 1 Abstraction: ${arm1.scores.abstractionQuality} (Success: ${arm1.success}, Latency: ${(arm1.latencyMs/1000).toFixed(1)}s)`);
 
       console.log(`[${model.label}]   Running Arm 2 (Grounded Monolith)...`);
-      const arm2 = await runArm2(model, fixture);
+      const arm2 = await runArm2();
       console.log(`[${model.label}]     Arm 2 Abstraction: ${arm2.scores.abstractionQuality} (Success: ${arm2.success}, Latency: ${(arm2.latencyMs/1000).toFixed(1)}s)`);
 
       console.log(`[${model.label}]   Running Arm 3 (Split)...`);

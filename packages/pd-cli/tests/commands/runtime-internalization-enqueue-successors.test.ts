@@ -17,8 +17,8 @@ vi.mock('../../src/resolve-workspace.js', () => ({
 // command (PD_TASK_STATUSES) stay authentic; only the stateful classes are
 // mocked. Previously a bare factory mock left new barrel exports undefined
 // at runtime (ERR-083 vi.mock variant — 19 tests failed on CI).
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@principles/core/runtime-v2')>()),
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@principles/core/runtime')>()),
   RuntimeStateManager: vi.fn().mockImplementation(function (opts: Record<string, unknown>) {
     mockRuntimeStateManagerOpts(opts);
     return {

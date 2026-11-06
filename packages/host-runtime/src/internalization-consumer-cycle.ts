@@ -12,7 +12,7 @@
  *   → runner construction (dreamer…rollout_reviewer) → runner.run
  *   → commit proposal → finally: recovery sweep + reconciliation budget
  *
- * The lease is acquired INSIDE runner.run by the Runtime V2 lease manager
+ * The lease is acquired INSIDE runner.run by the Runtime lease manager
  * (persisted in `<workspace>/.pd/state.db`, cross-process safe) — this cycle
  * never leases by itself, so two schedulers (OpenClaw + Companion) racing on
  * one workspace converge to exactly-once execution via lease_conflict.
@@ -72,7 +72,7 @@ import {
   type BehaviorEvidencePort,
   type ArtificerEvidencePreflightVerdict,
   type ArtificerTrustedFactsPort,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
 import { createEvaluatorRepairDeps, createRolloutGovernanceDeps, type ConsumerGovernanceLogger } from './internalization-consumer-governance.js';

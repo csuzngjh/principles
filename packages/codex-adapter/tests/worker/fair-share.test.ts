@@ -9,9 +9,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
-import { createRuntimeStateHandle } from '@principles/core/runtime-v2';
+import { createRuntimeStateHandle } from '@principles/core/runtime';
 void vi;
 
 const dirs: string[] = [];

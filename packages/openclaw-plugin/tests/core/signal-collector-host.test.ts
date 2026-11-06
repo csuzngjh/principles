@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime-v2';
+import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime';
 
 // mock 掉会触发真实副作用 (evolution reducer / pain service / trajectory DB) 的模块
 vi.mock('../../src/hooks/pain.js', () => ({

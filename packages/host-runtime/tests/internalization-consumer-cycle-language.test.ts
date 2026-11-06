@@ -29,7 +29,7 @@ import {
   getDefaultPdConfig,
   PiAiRuntimeAdapter,
   type StartRunInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runInternalizationConsumerCycle } from '../src/internalization-consumer-cycle.js';
 
 const dirs: string[] = [];
@@ -170,7 +170,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks();
   delete process.env.LLAMACPP_API_KEY;
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   for (const dir of dirs) {
     await disposePainSignalBridgesForWorkspace(dir).catch(() => undefined);
   }

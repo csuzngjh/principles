@@ -24,11 +24,11 @@ import {
   checkAgentRuntimeReadiness,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   EffectivePdConfig,
   RuntimeProfile,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { resolveRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────

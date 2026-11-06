@@ -24,11 +24,11 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { createTraceId } from '../utils/trace-id.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData, type TrajectoryTurnReader } from '@principles/core/runtime-v2';
+import { resolveWorkspaceDirForRuntime } from '../utils/workspace-resolver.js';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter, SqliteConnection, SqliteDeadLetterStore, type PainDetectedData, type TrajectoryTurnReader } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
-import { evaluateTriggerController } from '@principles/core/runtime-v2';
+import { evaluateTriggerController } from '@principles/core/runtime';
 import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-cooldown-tracker.js';
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
@@ -287,7 +287,7 @@ export function handleAfterToolCall(
   // ── Workspace Resolution ──
   let effectiveWorkspaceDir: string;
   try {
-    effectiveWorkspaceDir = resolveWorkspaceDirForRuntimeV2(ctx, api, 'after_tool_call');
+    effectiveWorkspaceDir = resolveWorkspaceDirForRuntime(ctx, api, 'after_tool_call');
   } catch (error) {
     SystemLogger.log(
       ctx.workspaceDir ?? 'unknown',

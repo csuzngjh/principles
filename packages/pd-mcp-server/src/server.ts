@@ -4,7 +4,7 @@
  * One server implementation shared by all three hosts (Codex / OpenClaw /
  * WorkBuddy each spawn their own process around this module). Business data
  * flows EXCLUSIVELY through the Gate 3 Capability public subpath
- * `@principles/core/runtime-v2/pain-recall-capability` — never the read
+ * `@principles/core/runtime/pain-recall-capability` — never the read
  * model, never a CLI subprocess, never a second query implementation
  * (§3.2). Core stays MCP-SDK-free (architecture guard test pins this).
  *
@@ -16,7 +16,7 @@ import { z } from 'zod';
 import {
   recallPrinciplePainsCapability,
   type PainRecallCapabilityResult,
-} from '@principles/core/runtime-v2/pain-recall-capability';
+} from '@principles/core/runtime/pain-recall-capability';
 import { runWithDeadline, OrphanLimiter, AdmissionLimiter, DEFAULT_DEADLINE_MS } from './deadline.js';
 import { assembleResult, adapterFailureEnvelope, textResult, type ToolResult } from './envelope.js';
 import { withinBudget } from './budget.js';

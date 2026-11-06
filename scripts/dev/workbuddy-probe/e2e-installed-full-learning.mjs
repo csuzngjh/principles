@@ -47,7 +47,7 @@ const require = createRequire(path.join(REPO, 'package.json'));
 const Database = require('better-sqlite3');
 // P3-3: the admission threshold comes from the production authority, never a
 // local copy (a threshold change must not desynchronize this acceptance).
-const { ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime-v2');
+const { ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime');
 
 const LAB_ROOT = path.join(
   process.env.WB_E2E_LAB || path.resolve(REPO, '../../../wb-probe-lab'),
@@ -65,6 +65,24 @@ const LLM_MODEL = process.env.WB_E2E_LLM_MODEL || 'DeepSeek-V4-Flash-Vision-Exp'
 const LLM_KEY_ENV = 'AMD_RADEON_API_KEY';
 const LLM_BASE_URL = process.env.WB_E2E_LLM_BASE_URL || 'https://developer.amd.com.cn/radeon/api/v1';
 const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
+
+/** Every scalar value of `key:` in the generated config text, quotes stripped.
+ * The probe compares install args against generated YAML verbatim, so no value
+ * is ever turned into a regular expression. */
+function configScalarValues(text, key) {
+  const prefix = `${key}:`;
+  const values = [];
+  for (const line of text.split('\n')) {
+    const entry = line.trim();
+    if (!entry.startsWith(prefix)) continue;
+    let value = entry.slice(prefix.length).trim();
+    const quoted = value.length >= 2
+      && ((value[0] === '"' && value.endsWith('"')) || (value[0] === "'" && value.endsWith("'")));
+    if (quoted) value = value.slice(1, -1);
+    values.push(value);
+  }
+  return values;
+}
 
 const results = [];
 const startedAt = new Date().toISOString();
@@ -272,8 +290,6 @@ async function main() {
   if (packed.error) { record('pack', 'FAIL', packed.error); return finalize(); }
   record('pack', 'PASS', `tarball ${path.basename(packed.tarball)} sha256 ${sha256(packed.tarball).slice(0, 16)}…`);
 
-  const nodeDir = path.dirname(process.execPath);
-  const npmCli = path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js');
   const releaseOut = path.join(LAB_ROOT, 'release-asset');
   const head = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD']).stdout.toString().trim();
   const assetBuild = spawnSync(process.execPath, [path.join('scripts', 'build-self-contained-release.mjs'), '--output', releaseOut, '--product-version', '2.3.3', '--source-commit', head], {
@@ -343,8 +359,10 @@ async function main() {
       let tarballGovOk = false;
       try {
         const tarballConfigText = fs.readFileSync(path.join(tarballGov, '.pd', 'config.yaml'), 'utf8');
-        tarballGovOk = new RegExp(`model:\\s*["']?${LLM_MODEL}`).test(tarballConfigText)
-          && new RegExp(`baseUrl:\\s*["']?${LLM_BASE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(tarballConfigText);
+        // Exact equality, not a URL substring test: the scalar must carry the
+        // configured base URL verbatim.
+        tarballGovOk = configScalarValues(tarballConfigText, 'model').includes(LLM_MODEL)
+          && configScalarValues(tarballConfigText, 'baseUrl').some((value) => value === LLM_BASE_URL);
       } catch { /* config absent */ }
       const tarballJson = parseLastJsonBlock(tarballInstall.stdout);
       const tarballOk = tarballInstall.status === 0 && tarballJson.success === true && tarballGovOk;
@@ -403,9 +421,9 @@ async function main() {
 
   // ── 4. The governance LLM profile came from INSTALL ARGS (consumable) ──
   const configText = fs.readFileSync(govConfig, 'utf8');
-  const profileFromArgs = new RegExp(`model:\\s*["']?${LLM_MODEL}["']?`).test(configText)
-    && new RegExp(`apiKeyEnv:\\s*["']?${LLM_KEY_ENV}["']?`).test(configText)
-    && new RegExp(`baseUrl:\\s*["']?${LLM_BASE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?`).test(configText);
+  const profileFromArgs = configScalarValues(configText, 'model').includes(LLM_MODEL)
+    && configScalarValues(configText, 'apiKeyEnv').includes(LLM_KEY_ENV)
+    && configScalarValues(configText, 'baseUrl').some((value) => value === LLM_BASE_URL);
   record('governance-config-from-args', profileFromArgs ? 'PASS' : 'FAIL',
     `config.yaml written by the installer carries the install-arg model/apiKeyEnv (read-only assertion; the worker cycles below prove consumption through the real loader)`);
 
@@ -449,7 +467,7 @@ async function main() {
     let before = reqLog().length;
     fs.writeFileSync(path.join(LAB_ROOT, 'mock-reply-inst-a.json'), JSON.stringify(bashToolReply('if1', 'exit 7')));
     fs.writeFileSync(path.join(LAB_ROOT, 'mock-reply-inst-b.json'), JSON.stringify(textReply('if2', 'noted')));
-    let run = runTurn('real-fail', 'hello', 'please run the failing command');
+    runTurn('real-fail', 'hello', 'please run the failing command');
     await new Promise((r) => setTimeout(r, 800));
     let traj = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
     const toolRow = traj.prepare("SELECT tool_name, outcome, exit_code FROM tool_calls WHERE tool_name = 'Bash' AND outcome = 'failure' ORDER BY id DESC").get();
@@ -604,7 +622,7 @@ async function main() {
     before = reqLog().length;
     fs.writeFileSync(path.join(LAB_ROOT, 'mock-reply-inst-c.json'), JSON.stringify(textReply('in1', 'understood')));
     fs.writeFileSync(path.join(LAB_ROOT, 'mock-reply-inst-d.json'), JSON.stringify(textReply('in2', 'acknowledged')));
-    run = runTurn('post-approval', 'what should I keep in mind now?', 'summarize your guidance');
+    runTurn('post-approval', 'what should I keep in mind now?', 'summarize your guidance');
     const postReqs = reqsSince(before);
     const postRan = postReqs.length > 0 && postReqs.some((r) => JSON.stringify(r.body ?? '').includes('keep in mind'));
     const injected = postRan && probe.length > 0 && postReqs.some((r) => JSON.stringify(r.body ?? '').includes(probe));
@@ -618,7 +636,7 @@ async function main() {
     before = reqLog().length;
     fs.writeFileSync(path.join(LAB_ROOT, 'mock-reply-inst-e.json'), JSON.stringify(textReply('iw1', 'ok')));
     fs.writeFileSync(path.join(LAB_ROOT, 'mock-reply-inst-f.json'), JSON.stringify(textReply('iw2', 'done')));
-    run = runTurn('post-withdraw', 'another question', 'and another');
+    runTurn('post-withdraw', 'another question', 'and another');
     const wReqs = reqsSince(before);
     const wRan = wReqs.length > 0 && wReqs.some((r) => JSON.stringify(r.body ?? '').includes('another question'));
     const stillThere = wReqs.some((r) => probe.length > 0 && JSON.stringify(r.body ?? '').includes(probe));

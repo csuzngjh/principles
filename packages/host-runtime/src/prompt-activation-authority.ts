@@ -1,4 +1,4 @@
-import type { SqliteConnection } from '@principles/core/runtime-v2';
+import type { SqliteConnection } from '@principles/core/runtime';
 
 export interface PromptActivationAuthority {
   authority?: 'owner' | 'system_policy';

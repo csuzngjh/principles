@@ -1,0 +1,2362 @@
+/**
+ * PD Runtime v2 — Foundation Contracts
+ *
+ * This module is the single canonical source for all runtime type definitions.
+ * Future milestones (M2-M9) import from here instead of inventing local types.
+ *
+ * Re-export hierarchy:
+ *   schema-version  → versioning utilities
+ *   error-categories → PDErrorCategory, PDRuntimeError
+ *   agent-spec      → AgentSpec, well-known agent IDs
+ *   runtime-protocol → PDRuntimeAdapter, RuntimeKind, run lifecycle types
+ *   task-status     → PDTaskStatus, TaskRecord, DiagnosticianTaskRecord
+ *   context-payload → ContextPayload, history/trajectory types
+ *   diagnostician-output → DiagnosticianOutputV1
+ */
+
+// Schema versioning
+export { RUNTIME_SCHEMA_VERSION, schemaRef } from './schema-version.js';
+
+// Schema exports (new — TypeBox schemas for runtime validation)
+export { PDErrorCategorySchema } from './error-categories.js';
+export { GovernanceChannelSchema, LineageConfidenceSchema, SourceRefSchema, RevisionIdentitySchema, PrincipleFactSchema, TaskFactSchema, RunnerVerdictFactSchema, ApprovalFactSchema, ActivationFactSchema, DerivedRelationFactSchema, TimelineEventSchema, DataQualityIssueSchema, LineageContextSchema, GovernanceFactsSchema, PrincipleStateSchema, ProcessViewSchema, AutomationViewSchema, AttentionItemSchema, AttentionViewSchema, ActivationSummarySchema, OwnerGovernanceSummarySchema, DataQualitySchema, OwnerGovernanceViewSchema } from './governance-projection-contract.js';
+export type { GovernanceChannel, LineageConfidence, SourceRef, RevisionIdentity, PrincipleFact, TaskFact, RunnerVerdictFact, ApprovalFact, ActivationFact, DerivedRelationFact, TimelineEvent, DataQualityIssue, LineageContext, GovernanceFacts, PrincipleState, ProcessView, AutomationView, AttentionItem, AttentionView, ActivationSummary, OwnerGovernanceSummary, DataQuality, OwnerGovernanceView } from './governance-projection-contract.js';
+export { GOVERNANCE_HEADLINE_CODES, deriveOwnerGovernanceView } from './governance-projection.js';
+export {
+  OwnerDecisionViewCoreSchema, OwnerSourceRefSchema, ReasonSchema, ClaimClassSchema,
+  ProducerRefSchema, SourceRelationSchema, OwnerSourceKindSchema,
+  NarrativeItemSchema, NarrativeSchema, StringFieldSchema, NumberFieldSchema,
+  NarrativeListFieldSchema, NarrativeFieldSchema, PrincipleTextSchema, RiskSummarySchema,
+  EnforcementSummarySchema, EvidenceSummarySchema, RollbackSummarySchema, CapabilitySchema,
+  DecisionMaterialGateSchema, DecisionSubjectSchema, ActionSchema, BlockerSchema,
+  NextActionSchema, DecisionStateSchema, InboxPlacementSchema, SourceReadSchema,
+} from './owner-decision/owner-decision-view-contract.js';
+export type {
+  OwnerDecisionViewCore, OwnerSourceRef, Reason, ClaimClass, ProducerRef, SourceRelation,
+  OwnerSourceKind, NarrativeItem, Narrative, StringField, NumberField, NarrativeListField,
+  NarrativeField, PrincipleText, RiskSummary, EnforcementSummary, EvidenceSummary,
+  RollbackSummary, Capability, DecisionMaterialGate, DecisionSubject, Action, Blocker,
+  NextAction, DecisionState, InboxPlacement, SourceRead,
+} from './owner-decision/owner-decision-view-contract.js';
+export { OwnerDecisionInputsSchema } from './owner-decision/owner-decision-view.js';
+export type { OwnerDecisionInputs } from './owner-decision/owner-decision-view.js';
+export { deriveOwnerDecisionView } from './owner-decision/owner-decision-view.js';
+export { selectLearnedPrincipleV0, selectLearnedPrincipleV1, extractStandaloneBehaviorSentence, isWholeFieldHumanReadable } from './owner-decision/semantic-selector.js';
+export type { SemanticSource, SemanticSelectionResult } from './owner-decision/semantic-selector.js';
+export {
+  GovernancePrimaryAttentionSchema, GovernanceExperienceReasonCodeSchema, GovernanceExperienceNextActionCodeSchema,
+  WorkspaceEnvironmentSchema, EnvironmentContextInputSchema, SourceAvailabilityInputSchema, UnlinkedRecordGroupSchema,
+  OwnerConfigSnapshotSchema, GovernanceViewInputSchema, FrontierEvidenceSchema, GovernanceExperienceInputsSchema,
+  GovernanceActionKindSchema, GovernanceObservedAuthoritySchema, GovernanceActionReadinessSchema, OwnerGovernanceReadinessSchema,
+  GovernanceActivityCategorySchema, GovernanceActivityItemSchema, GovernanceActivityCategorySummarySchema, GovernanceActivitySnapshotSchema,
+  GovernanceLineageTransparencySchema, GovernanceTrustContextSchema, GovernanceDataQualityIssueGroupSchema, GovernanceDataQualitySchema,
+  GovernanceExperienceSummarySchema, GovernanceExperienceSnapshotSchema,
+} from './governance-experience-contract.js';
+export type {
+  WorkspaceEnvironment, EnvironmentContextInput, SourceAvailabilityInput, UnlinkedRecordGroup, OwnerConfigSnapshot,
+  GovernanceViewInput, FrontierEvidence, GovernanceExperienceInputs, GovernanceActionKind, GovernanceObservedAuthority,
+  GovernanceActionReadiness, OwnerGovernanceReadiness, GovernancePrimaryAttention, GovernanceActivityCategory,
+  GovernanceActivityItem, GovernanceActivityCategorySummary, GovernanceActivitySnapshot, GovernanceLineageTransparency,
+  GovernanceTrustContext, GovernanceDataQualityIssueGroup, GovernanceDataQuality, GovernanceExperienceReasonCode,
+  GovernanceExperienceNextActionCode, GovernanceExperienceSummary, GovernanceExperienceSnapshot,
+} from './governance-experience-contract.js';
+export { GOVERNANCE_EXPERIENCE_ITEMS_LIMIT, GOVERNANCE_EXPERIENCE_ISSUE_GROUPS_LIMIT, deriveGovernanceExperienceSnapshot } from './governance-experience.js';
+// Receipt evidence coverage disclosure contract (PRI-590)
+export { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS, RECEIPT_RETENTION_POLICY_DAYS } from './receipt-coverage.js';
+export { canonicalStringify } from './internalization/artifact-content-hash.js';
+export type { ReceiptSourceStatus, ReceiptValidationStatus, ReceiptEvidenceCoverage } from './receipt-coverage.js';
+// Owner identity registration (ADR-0022, PRI-578) — env > ~/.pd/owner.json > none
+export {
+  OWNER_IDENTITY_SCHEMA_VERSION,
+  OWNER_IDENTITY_FILE_NAME,
+  resolveOwnerIdentity,
+  readOwnerIdentityFile,
+  writeOwnerIdentityFile,
+  deleteOwnerIdentityFile,
+  ownerIdentityFilePath,
+  defaultOwnerIdentityHomeDir,
+} from './owner-identity.js';
+export type { OwnerIdentityRecord, OwnerIdentitySource, OwnerIdentityResolved, OwnerIdentityFileResult, OwnerIdentityDeleteResult } from './owner-identity.js';
+// Anonymous Product Telemetry v1 (PRI-595~603) — pure contract, no I/O.
+// Durable-fact readers and the HTTPS exporter live in @principles/host-runtime.
+export {
+  generateTelemetrySecretHex,
+  isValidTelemetrySecretHex,
+  bucketDateFromTime,
+  isValidBucketDate,
+  deriveWorkspaceScopeId,
+  deriveDailyTelemetryId,
+  isValidDailyTelemetryId,
+  TELEMETRY_SECRET_BYTES,
+  DAILY_TELEMETRY_ID_HEX_LENGTH,
+  WORKSPACE_SCOPE_ID_HEX_LENGTH,
+} from './product-telemetry/daily-identity.js';
+export {
+  ProductTelemetrySnapshotV1Schema,
+  PRODUCT_TELEMETRY_SNAPSHOT_SCHEMA_VERSION,
+  PRODUCT_TELEMETRY_CONSENT_VERSION,
+  PRODUCT_TELEMETRY_HOST_KINDS,
+  PRODUCT_TELEMETRY_TOP_LEVEL_FIELDS,
+  PROHIBITED_TELEMETRY_FIELD_TOKENS,
+  PRODUCT_TELEMETRY_PD_VERSION_MAX_LENGTH,
+  assertTelemetrySchemaPrivacy,
+  validateProductTelemetrySnapshot,
+  buildProductTelemetrySnapshot,
+} from './product-telemetry/snapshot-contract.js';
+export type { TelemetryFact } from './product-telemetry/snapshot-contract.js';
+export type {
+  ProductTelemetryHostKind,
+  ProductTelemetrySnapshotV1,
+  ProductTelemetryMilestoneInput,
+  ProductTelemetryReliabilityInput,
+  BuildSnapshotInput,
+  SnapshotValidationResult,
+} from './product-telemetry/snapshot-contract.js';
+export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
+export { SchemaVersionRefSchema, RuntimeSchemaVersionSchema } from './schema-version.js';
+export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';
+export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
+// Context payload schemas (Phase 2)
+export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema, FullTracePayloadV2Schema, TraceSourceRefSchema, TraceTimelineEntrySchema, TraceEventKindSchema, SourceRefKindSchema, validateFullTracePayload, sanitizeFullTracePayload, buildFullTraceTimeline, buildSourceRefs, checkFullTracePayloadSchema, TRACE_EVENT_KINDS, SOURCE_REF_KINDS } from './context-payload.js';
+// Diagnostician output schemas (Phase 2)
+export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
+// Principle tree types schemas
+export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
+// Hygiene types schemas
+export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
+// Event types schemas
+export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimePromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
+// Event payload discriminated union schemas
+export { DiscriminatedEventLogEntrySchema } from './types/event-payload.js';
+
+// Candidate intake schemas (M7)
+export { CandidateIntakeInputSchema, CandidateIntakeOutputSchema, LedgerPrincipleEntrySchema } from './candidate-intake.js';
+
+// Error categories
+export { PD_ERROR_CATEGORIES, PDRuntimeError, FAILURE_CATEGORY_MAP, mapFailureCategory } from './error-categories.js';
+// Candidate intake errors (M7)
+export { INTAKE_ERROR_CODES, CandidateIntakeError } from './candidate-intake.js';
+export type { PDErrorCategory } from './error-categories.js';
+export { isPDErrorCategory } from './error-categories.js';
+
+// Agent specification
+export { AGENT_IDS } from './agent-spec.js';
+export type {
+  AgentSpec,
+  AgentCapabilityRequirements,
+  AgentTimeoutPolicy,
+  AgentRetryPolicy,
+  WellKnownAgentId,
+} from './agent-spec.js';
+
+// Runtime protocol
+export type {
+  RuntimeKind,
+  RuntimeCapabilities,
+  RuntimeHealth,
+  RunHandle,
+  RunExecutionStatus,
+  RunStatus,
+  ContextItem,
+  AgentSpecRef,
+  WorkflowRef,
+  TaskRef,
+  StartRunInput,
+  StructuredRunOutput,
+  RuntimeArtifactRef,
+  PDRuntimeAdapter,
+} from './runtime-protocol.js';
+
+// Task status and records
+export type {
+  PDTaskStatus,
+  TaskRecord,
+  DiagnosticianTaskRecord,
+} from './task-status.js';
+
+// Context payload and history retrieval
+export type {
+  HistoryQueryEntry,
+  TrajectoryLocateQuery,
+  TrajectoryCandidate,
+  TrajectoryLocateResult,
+  HistoryQueryResult,
+  DiagnosisTarget,
+  TraceAvailability,
+  TraceUnavailableDetail,
+  ContextPayload,
+  DiagnosticianContextPayload,
+  ToolCallEntry,
+  PainContext,
+  FullTracePayload,
+  FullTracePayloadV2,
+  TraceSourceRef,
+  TraceTimelineEntry,
+  TraceEventKind,
+  SourceRefKind,
+  FullTraceValidationResult,
+  SanitizeFullTraceResult,
+  RunRecordLike,
+} from './context-payload.js';
+
+// Diagnostician output
+export type {
+  DiagnosticianOutputV1,
+  DiagnosticianViolatedPrinciple,
+  DiagnosticianEvidence,
+  RecommendationKind,
+  DiagnosticianRecommendation,
+  DiagnosticianInvocationInput,
+} from './diagnostician-output.js';
+
+// Candidate intake types (M7)
+export type {
+  CandidateIntakeInput,
+  CandidateIntakeOutput,
+  LedgerPrincipleEntry,
+  LedgerAdapter,
+  Recommendation,
+} from './candidate-intake.js';
+export { validateRecommendation } from './candidate-intake.js';
+export { CandidateIntakeService } from './candidate-intake-service.js';
+export type { CandidateIntakeServiceOptions } from './candidate-intake-service.js';
+// PRI-917 v0.3.3 (OD-PRI917-05) — auto-path Reuse Review Gate: the semantic
+// recommendation hook builder shared by the three automatic intake sites
+// (pain-signal-runtime-factory / pd diagnose / pd pain-retry). RECOMMENDATION
+// channel only; the durable authority stays reuseEvidence.
+export { createReuseRecommendationHook } from './pain-signal-runtime-factory.js';
+export type { ReuseRecommendationOutcome } from './candidate-intake-service.js';
+// PRI-917 PR3A — the Owner decision surface (`pd candidate review`) consumes
+// the same proposal/semantics machinery as the intake gate, through this
+// barrel only (interaction layer; the durable authority stays reuseEvidence).
+export { extractIntakeRecommendation } from './candidate-intake-service.js';
+export type { CandidateRecommendationExtraction, CandidateIntakeResult } from './candidate-intake-service.js';
+export { buildReuseProposal, proposalNeedsDecision } from './principle-reuse/reuse-proposal.js';
+export type { ReuseProposal, ReuseProposalEntry, ReuseDecision } from './principle-reuse/reuse-proposal.js';
+export { buildReuseShortlist } from './principle-reuse/reuse-retrieval.js';
+// PRI-917 v0.3.2 (Phase 3C-3): the Semantic Reuse Evaluation Capability's
+// execution path. Proposal-only: it returns a RECOMMENDATION through the
+// injected PDRuntimeAdapter and has no path to any ledger writer.
+export { ReuseEvaluationRunner, isValidReuseEvaluationOutput } from './principle-reuse/reuse-evaluation-runner.js';
+export { ReuseEvaluationError } from './principle-reuse/reuse-evaluation-runner.js';
+export type {
+  ReuseEvaluationRunnerDeps,
+  ReuseEvaluationRunnerOptions,
+  ReuseEvaluationInput,
+  ReuseEvaluationCandidateInput,
+  ReuseEvaluationShortlistEntry,
+  ReuseEvaluationFailureReason,
+} from './principle-reuse/reuse-evaluation-runner.js';
+// PRI-917 v0.3.2 (Phase 3C-1): the Semantic Reuse Evaluation Capability's
+// proposal contract — proposal-only, never persisted (SPEC section 4.2/10).
+export {
+  REUSE_EVALUATION_OUTPUT_SCHEMA_REF,
+  ReuseEvaluationRecommendationSchema,
+  ReuseEvaluationOutputV1Schema,
+  validateReuseEvaluationOutput,
+} from './principle-reuse/reuse-evaluation-output.js';
+export type {
+  ReuseEvaluationOutputV1,
+  ReuseEvaluationValidation,
+} from './principle-reuse/reuse-evaluation-output.js';
+export { isPrincipleLedgerEligibleKind } from './store/candidate/recommendation-kind-resolver.js';
+
+// Store
+export { SqliteTaskStore } from './store/task/sqlite-task-store.js';
+export type { FailedTaskSummary, FailedTaskDetail, FailedTaskFilter } from './store/task/task-types.js';
+export { SqliteRunStore, MalformedRunError } from './store/run/sqlite-run-store.js';
+export { MemoryTaskStore } from './store/task/memory-task-store.js';
+export { MemoryRunStore } from './store/run/memory-run-store.js';
+export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
+export { MemoryCandidateStore } from './store/candidate/memory-candidate-store.js';
+export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
+export { SqliteConnection } from './store/sqlite-connection.js';
+export {
+  SqliteReconciliationCursorStore,
+  SUCCEEDED_TRANSITIONS_SCOPE,
+} from './store/reconciliation-cursor-store.js';
+export type { ReconciliationCursor } from './store/reconciliation-cursor-store.js';
+export type { SqlitePragmaReport } from './store/sqlite-connection.js';
+export { guardWorkspaceLeak, isMockLeakPath } from './store/workspace-leak-guard.js';
+export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
+export { SqliteSourceTraceLocator } from './store/trajectory/sqlite-source-trace-locator.js';
+export type { SourceTraceLocator, SourceTraceLocateDecision, SourceTraceLocateQuery, SourceTraceLocateResult, SourceTraceCandidate } from './store/trajectory/source-trace-locator.js';
+export { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
+export { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
+export { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
+export { ResilientContextAssembler } from './store/context/resilient-context-assembler.js';
+export { ResilientHistoryQuery } from './store/history/resilient-history-query.js';
+export type {
+  HistoryQuery,
+  HistoryQueryCursorData,
+  HistoryQueryOptions,
+} from './store/history/history-query.js';
+export type { ContextAssembler } from './store/context/context-assembler.js';
+export {
+  DEFAULT_HISTORY_PAGE_SIZE,
+  MAX_HISTORY_PAGE_SIZE,
+  DEFAULT_TIME_WINDOW_MS,
+} from './store/history/history-query.js';
+export type {
+  TaskStore,
+  TaskStoreFilter,
+  TaskStoreUpdatePatch,
+} from './store/task/task-store.js';
+export type {
+  RunStore,
+  RunRecord,
+} from './store/run/run-store.js';
+export type { TrajectoryLocator } from './store/trajectory/trajectory-locator.js';
+export type {
+  DiagnosticianCommitter,
+  CommitInput,
+  CommitResult,
+} from './store/commit/diagnostician-committer.js';
+
+// Lease & Recovery
+export { DefaultLeaseManager } from './store/lifecycle/lease-manager.js';
+export type { LeaseManager, AcquireLeaseOptions } from './store/lifecycle/lease-manager.js';
+export { DefaultRetryPolicy } from './store/lifecycle/retry-policy.js';
+export type { RetryPolicy, RetryPolicyConfig } from './store/lifecycle/retry-policy.js';
+export { DefaultRecoverySweep } from './store/lifecycle/recovery-sweep.js';
+export type { RecoverySweep, RecoveryResult } from './store/lifecycle/recovery-sweep.js';
+
+// Event emitter
+export { StoreEventEmitter, storeEmitter } from './store/event-emitter.js';
+export type { TelemetryEvent } from '../telemetry-event.js';
+
+// Runtime integration layer
+export { RuntimeStateManager } from './store/runtime-state-manager.js';
+export type { RuntimeStateManagerOptions } from './store/runtime-state-manager.js';
+export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './store/runtime-state-manager.js';
+
+// Runner (M4)
+export { RunnerPhase } from './runner/runner-phase.js';
+export type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
+export { SplitDiagnosticianRunner } from './internalization/split-diagnostician-runner.js';
+export { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js';
+export { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
+export { DiagRouterRunner } from './internalization/diag-router-runner.js';
+export { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-output.js';
+export {
+  IntentTensionSchema,
+  IntentTensionSourceSchema,
+  EvidenceStrengthSchema,
+  IntentRelatedFieldSchema,
+  SuggestedOwnerActionSchema,
+  isIntentTensionSource,
+  isEvidenceStrength,
+  isIntentRelatedField,
+  isSuggestedOwnerAction,
+} from './diagnostician/diag-rootcause-output.js';
+export type {
+  IntentTension,
+  IntentTensionSource,
+  EvidenceStrength,
+  IntentRelatedField,
+  SuggestedOwnerAction,
+} from './diagnostician/diag-rootcause-output.js';
+export { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
+export { DisabledDiagnosticianRunner } from './pain-signal-runtime-factory.js';
+// PRI-638: canonical Diagnostician capability authority (one Owner intent, one authority)
+export {
+  resolveDiagnosticianCapability,
+  DIAGNOSTICIAN_CAPABILITY_DISABLED,
+  type DiagnosticianCapability,
+} from './diagnostician-capability.js';
+// Runtime Adapter (M4)
+export { TestDoubleRuntimeAdapter } from './adapter/index.js';
+export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
+
+// PiAiRuntimeAdapter (M9)
+export { PiAiRuntimeAdapter } from './adapter/index.js';
+export type { PiAiRuntimeAdapterConfig } from './adapter/pi-ai-runtime-adapter.js';
+// PRI-966 G2 P1-01: the real base transport, exported so budgeting callers
+// (Learning Lab request ledger) can wrap it as PiAiRuntimeAdapterConfig.fetch
+// instead of bypassing the PRI-683 undici transport.
+export { getPiAiFetchForApi } from './adapter/pi-ai-http-transport.js';
+// PRI-621 PR2 review: core capability wrapper so cross-package callers query
+// the pi-ai builtin catalog without declaring pi-ai themselves (EP-06).
+export { builtinPiAiProviderIds, isBuiltinPiAiProvider, getPromptModelCatalog } from './adapter/pi-ai-catalog.js';
+
+// PrincipleTreeLedgerAdapter (M8)
+export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
+
+// Diagnostician Prompt Builder (M6)
+export { summarizeConversationWindow } from './diagnostician-prompt-builder.js';
+export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
+
+// Language directive for principle generation (PRI-336)
+export {
+  buildLanguageDirective,
+  resolveOutputLanguage,
+  isValidOutputLanguage,
+  VALID_OUTPUT_LANGUAGES,
+  DEFAULT_OUTPUT_LANGUAGE,
+} from './language-directive.js';
+export type { OutputLanguage, ResolvedOutputLanguage } from './language-directive.js';
+
+// CLI surface (M4)
+export { run, status, candidateList, candidateShow, artifactShow, probeRuntime } from './cli/index.js';
+export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions, ProbeOptions, ProbeResult } from './cli/index.js';
+
+// Pain signal bridge (M8) — INTERNAL: PainSignalBridge is a core implementation detail.
+// CLI/plugin consumers MUST use PainToPrincipleService (write) and PainChainReadModel (read).
+export {
+  /** @deprecated Internal implementation detail — use PainToPrincipleService instead */
+  PainSignalBridge,
+} from './pain-signal-bridge.js';
+export type {
+  /** @deprecated Use PainToPrincipleServiceOptions instead */
+  PainSignalBridgeOptions,
+  PainDetectedData,
+  PainEvidenceEntry,
+  /** PRI-640: host attribution union ('openclaw' | 'codex' | 'workbuddy'); NULL persists as unknown. */
+  GovernanceHostKind,
+  /** @deprecated Use PainToPrincipleOutput instead */
+  PainSignalBridgeResult,
+  /** @deprecated Internal — use PainToPrincipleOutput.status */
+  PainSignalBridgeStatus,
+  /** Minimal interface for a diagnostician runner (monolith or split pipeline). */
+  DiagnosticianRunnerLike,
+  /** PRI-642 §10: aggregate progress (at-least-one semantics). */
+  PainProgressReport,
+  PainFurthestStage,
+  /** PRI-642 §10: per-candidate disposition — the authority for mixed results. */
+  PainCandidateOutcome,
+} from './pain-signal-bridge.js';
+export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
+export { evaluateAndPersistAdmissionFromStore } from './pain-signal-bridge.js';
+/** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
+export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
+/**
+ * PRI-935: single authority for the pain_diagnoses attribution ledger write.
+ * The bridge and the CLI diagnosis paths (`pd diagnose run`, `pd pain retry`)
+ * all persist through this function; callers own the feature-flag gate.
+ */
+export { persistPainDiagnosis } from './pain-signal-bridge.js';
+// PRI-642 SPEC §9: persisted `painIngress.v1` contract — written by the
+// bridge beside the legacy top-level fields, re-validated on re-entry.
+export {
+  PAIN_INGRESS_PAYLOAD_VERSION,
+  parsePainIngressV1Payload,
+  deriveProvenanceFromIngressFacts,
+  checkIngressTopLevelConsistency,
+} from './pain-ingress-payload.js';
+export type {
+  PainIngressV1Payload,
+  PainIngressOriginV1,
+  PainIngressCorrelationV1,
+  PainIngressEvidenceClassV1,
+  PainIngressV1ParseResult,
+} from './pain-ingress-payload.js';
+// PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
+// for every adapter (OpenClaw funnel, pd-cli, Codex).
+export {
+  evaluatePainIngress,
+  parsePainIngressReport,
+  validateOriginCorrelationInvariant,
+  SENTINEL_SESSION_IDS,
+  isSentinelSessionId,
+} from './pain-ingress.js';
+export type {
+  PainIngressReport,
+  PainIngressDecision,
+  LegacyPainSubmission,
+  PainOrigin,
+  PainCorrelation,
+  IngressEvidenceEntry,
+  PainEvidenceBundle,
+  PainEvidenceUnavailableReason,
+  PainIngressParseResult,
+} from './pain-ingress.js';
+/** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
+export { recordPainSignalObservability, appendEventLogLine } from './pain-signal-observability.js';
+export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
+export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
+/** @deprecated Internal factory — use PainToPrincipleService constructor instead */
+export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, resolveRuntimeConfigForProfile, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
+
+// Pain-to-Principle service facade (PRI-12)
+export { PainToPrincipleService } from './pain-to-principle-service.js';
+export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincipleOutput, FailureCategory } from './pain-to-principle-service.js';
+
+// Admission gate (PRI-256)
+export { evaluateAdmission, evaluateCandidateAdmissions, evaluateCandidateAdmissionFromRecord, ADMISSION_CONFIDENCE_THRESHOLD } from './admission-gate.js';
+export type { AdmissionDecision, AdmissionGateInput, AdmissionGateResult, CandidateAdmissionResult, PainProvenance } from './admission-gate.js';
+
+// Evidence guards (PRI-345) — shared owner-exemption + short-circuit logic
+export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
+export {
+  ADMISSION_POLICY_VERSION,
+  CANDIDATE_ADMISSION_SCHEMA_VERSION,
+  appendAdmissionEvaluation as appendAdmissionEvaluationDocument,
+  currentEvaluation as currentAdmissionEvaluation,
+  parseAdmissionDocument,
+  fingerprintMaterial as fingerprintAdmissionMaterial,
+} from './store/candidate/admission-document.js';
+export type {
+  AdmissionEvaluationRecord,
+  AdmissionProcessingRecord,
+  AdmissionProcessingState,
+  CandidateAdmissionDocument,
+} from './store/candidate/admission-document.js';
+
+// Pain-chain read model (PRI-14)
+export { PainChainReadModel } from './pain-chain-read-model.js';
+export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';
+
+// Workspace guidance migration (PRI-286) removed in PRI-776: the PLAN.md-era
+// rules ran at every startup for months (all existing workspaces already
+// migrated) and current templates cannot produce matching text. The rules
+// remain in git history.
+
+// Ledger file utilities — PRI-443 Phase 5: removed from runtime barrel.
+// I/O functions (loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple)
+// are now imported directly from @principles/core/principle-tree-ledger by consumers
+// (pd-cli, openclaw-plugin). The runtime barrel must stay pure-types-only.
+
+// Pruning read model (PRI-15)
+export { PruningReadModel, removeOrphanReferencesFromLedger } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate, OrphanDetectionResult, RemovedOrphanReference } from './pruning-read-model.js';
+
+// Recovery actions audit log (Governance Recovery Actions v1)
+export { appendRecoveryAction, listRecoveryActions } from './recovery-actions-log.js';
+export type {
+  RecoveryActionRecord,
+  RecoveryActionKind,
+  RecoveryActionResult,
+  AppendRecoveryActionInput,
+} from './recovery-actions-log.js';
+
+// Candidate audit (PRI-28)
+export { auditCandidateLedgerConsistency } from './candidate-audit.js';
+export type { CandidateAuditResult } from './candidate-audit.js';
+
+// Operator health snapshot (PRI-28)
+export { OperatorHealthReadModel } from './operator-health-read-model.js';
+export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHealthStatus } from './operator-health-read-model.js';
+
+// Stalled diagnostician task read model (PRI-377)
+export { StalledDiagnosticianTaskReadModel } from './stalled-diagnostician-task-read-model.js';
+export type { StalledDiagnosticianTaskInfo, StalledDiagnosticianTaskReadModelOptions } from './stalled-diagnostician-task-read-model.js';
+
+// Synthetic baseline (PRI-206) — pure contract/helpers only; I/O runner lives in pd-cli
+export { computeOverallStatus, boundedEvidence, safeStringify, truncateReason, makeDeterministicDiagnosticianOutput, recommendNextIssue } from './synthetic-baseline.js';
+export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineFailStage, SyntheticBaselineOptions } from './synthetic-baseline.js';
+
+// Feature Flag Registry (PRI-239) — MVP-Quiet loadable feature flags
+
+export {
+  VALID_CATEGORIES,
+  validateFeatureFlagRaw,
+  computeEffectiveFlags,
+  DEFAULT_FEATURE_FLAGS,
+  FEATURE_FLAG_ALIASES,
+  normalizeFeatureFlagOverrides,
+} from './feature-flags/index.js';
+
+export type {
+  FeatureFlagCategory,
+  FeatureFlagDefinition,
+  EffectiveFeatureFlags,
+  FeatureFlagOverrideNormalization,
+  ValidationResult as FeatureFlagValidationResult,
+  ValidationResultOk as FeatureFlagValidationResultOk,
+  ValidationResultErr as FeatureFlagValidationResultErr,
+} from './feature-flags/index.js';
+
+// Core Principle Registry (PRI-367) — canonical built-in principle definitions
+// (exactly 10: 6 foundational axioms + 4 operating principles, PRI-606/607)
+export {
+  CORE_PRINCIPLES,
+  CORE_PRINCIPLE_IDS,
+  getFoundationalPrinciples,
+  getOperatingPrinciples,
+  isCorePrincipleId,
+  getCorePrinciple,
+  CorePrincipleSchema,
+  stripFabricatedCorePrincipleIds,
+  formatCorePrinciplesList,
+  buildCoreAxiomBlock,
+} from './core-principles/index.js';
+
+export type {
+  CorePrinciple,
+  CorePrincipleLayer,
+  CorePrincipleScope,
+} from './core-principles/index.js';
+
+// Plugin Surface Registry (PRI-289) — MVP hook/service/startup surface guard
+
+export {
+  VALID_SURFACE_KINDS,
+  VALID_MVP_CATEGORIES,
+  PLUGIN_SURFACE_REGISTRY,
+  validateSurfaceRegistry,
+  getEnabledSurfaces,
+  getSurfacesByCategory,
+  getSurfacesByKind,
+  findUnclassifiedSurfaces,
+} from './feature-flags/index.js';
+
+export type {
+  SurfaceKind,
+  MvpCategory,
+  PluginSurfaceEntry,
+  SurfaceRegistryValidationResult,
+} from './feature-flags/index.js';
+
+// Surface guard (Stage 3) — pure logic migrated from plugin
+export {
+  checkSurfaceGuard,
+  getSurfaceIdForHook,
+  getSurfaceIdForService,
+  isSurfaceEnabled,
+  guardHook,
+  guardService,
+  __resetSurfaceGuardSkipLogStateForTests,
+} from './feature-flags/index.js';
+
+export type {
+  SurfaceGuardResult,
+  HookHandler,
+} from './feature-flags/index.js';
+
+// Proven channel baseline (PRI-240) — MVP activation continuity fixtures
+export {
+  runPromptFixture,
+  runRuleHostFixture,
+  runDeferArchiveFixture,
+  computeProvenChannelStatus,
+  generateContinuityMatrix,
+  recommendProvenChannelNextIssue,
+  isMvpChannel,
+  parseChannels,
+  makePrincipleArtifact,
+  makeRuleArtifact,
+  makeSandboxAlwaysPass,
+  classifyLegacyDependency,
+  MVP_CHANNELS,
+} from './proven-channel-baseline.js';
+export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry, InputValidationFailure } from './proven-channel-baseline.js';
+
+// Story A' demo scenario (PRI-246) — pure types + helpers; I/O runner lives in pd-cli
+export {
+  STORY_A_CHANNELS,
+  makeRunId,
+  makePrincipleArtifactRecord,
+  makeRuleArtifactRecord,
+  computeDemoStatus,
+  buildFollowUpObservation,
+  buildDemoNarrative,
+  validateDemoChannels,
+  createDemoSandboxEvaluate,
+  evaluateDemoGoldenTrace,
+  type DemoNarrativeInput,
+} from './story-a-demo.js';
+export type { StoryADemoResult, StoryADemoStage, StoryADemoStageName, StoryADemoChannelOutcome, StoryADemoInputValidationFailure, StoryADemoOptions } from './story-a-demo.js';
+
+// RuleHost MVP Activation — multi-round adversarial loop (PRI-428)
+export { runAdversarialLoop, DEFAULT_MAX_ROUNDS } from './adversarial-loop.js';
+export type { AdversarialLoopInput, AdversarialLoopResult } from './adversarial-loop.js';
+
+// RuleHost MVP Activation — Artificer L2 Adapter (PRI-424 / PRI-439 Phase 4)
+export { ArtificerL2Adapter } from './adapter/artificer-l2-adapter.js';
+export type { ArtificerL2AdapterConfig } from './adapter/artificer-l2-adapter.js';
+
+// Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
+export {
+  computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
+  boundedFloodEvidence, maxEvidencePreviewLength, FLOOD_SCENARIO_EXPECTATIONS,
+  computeMaxAllowedTasks,
+} from './pain-flood-simulation.js';
+export type { PainFloodSimulationSummary, PainFloodStage, PainFloodScenarioName, PainFloodSimulationOptions, PainFloodScenarioExpectation } from './pain-flood-simulation.js';
+
+// Internalization contracts (PRI-42)
+export type {
+  RuleHostInput,
+  RuleHostDecision,
+  RuleHostMeta,
+  RuleHostResult,
+  LoadedImplementation,
+} from './internalization/rule-host-contracts.js';
+export type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
+export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
+// Legacy RuleHost contract dependency scanner (2026-08-19) — shared
+// detection for runtime load backstops and upgrade preflights.
+export type { LegacyRuleContractSymbol, LegacyRuleContractRuleSource, LegacyRuleContractFinding } from './internalization/legacy-rule-contract-scanner.js';
+export { scanLegacyRuleContractDependencies, formatLegacyRuleContractRemediation } from './internalization/legacy-rule-contract-scanner.js';
+// Correction proposal (PRI-114)
+export type { CorrectionProposal, CorrectionProposalValidationResult, PathValidationResult } from './internalization/correction-proposal.js';
+export { validateProposedParams, validateCorrectionProposal, isPathWithinWorkspace, validateProposedPathBounds } from './internalization/correction-proposal.js';
+
+// RuleHost input builder pure helpers (PRI-482 Phase 3: re-exported so the
+// openclaw-plugin assembler can normalise historical tool-call paths using the
+// same pure logic as buildRuleHostAction, avoiding production/replay drift.)
+export type { ExtractFilePathOptions, BuildRuleHostActionOptions } from './internalization/rule-host-input-builder.js';
+export { normalizePathPure, extractFilePathFromParams, buildRuleHostAction, deriveToolHintsFromCanonicalKind } from './internalization/rule-host-input-builder.js';
+
+// Tool semantic registry (PRI-634-F Phase 1 — Tool Semantic Closure): core
+// baseline + host-declared layer; replay and production resolve raw tool
+// names to canonical kinds identically through ONE registry value.
+export type {
+  ToolSemanticMappingV1,
+  ToolSemanticRegistry,
+  ToolSemanticMappingValidationResult,
+} from './internalization/tool-semantic-registry.js';
+export { buildToolSemanticRegistry, validateToolSemanticMappings } from './internalization/tool-semantic-registry.js';
+
+// Rule reliability validation & failure attribution (PRI-634-F Phase 3):
+// deterministic tool-existence validation + failure layer classification.
+export type {
+  FailureLayer,
+  RuleReliabilityFailure,
+  RuleReliabilityValidationInput,
+  RuleReliabilityValidationResult,
+} from './internalization/rule-reliability-validation.js';
+export { validateRuleReliability, classifyReplayFailure } from './internalization/rule-reliability-validation.js';
+
+// RuleContext v2 — Phase 1 Core ABI (PRI-480): pure-logic types + canonicalize +
+// validators + behavior-facts computation + the frozen unavailable sentinel.
+// Zero I/O; gates nothing in production yet (the flag from PRI-479 is still off).
+export type {
+  CanonicalKind,
+  EvidenceState,
+  RuleToolOutcome,
+  RuleHistoryStatus,
+  RuleToolCallRecord,
+  RuleHistoryWindow,
+  RuleBehaviorFacts,
+  RuleContextV2,
+  ValidationResult as RuleContextValidationResult,
+} from './internalization/rule-context-v2.js';
+export {
+  UNAVAILABLE_RULE_CONTEXT,
+  canonicalizeToolKind,
+  validateRuleToolCallRecord,
+  validateRuleHistoryWindow,
+  validateRuleBehaviorFacts,
+  validateRuleContextV2,
+  computeBehaviorFacts,
+} from './internalization/rule-context-v2.js';
+
+// BehaviorExamplePack (PRI-484 — Phase 5 Artificer)
+export type { BehaviorExamplePack, BehaviorExamplePackValidationResult } from './internalization/behavior-example-pack.js';
+export { validateBehaviorExamplePack } from './internalization/behavior-example-pack.js';
+
+// Evidence readiness gate (PRI-981 — SPEC-PD-IAER-001 FR-01)
+export type {
+  OwnerEvidenceSelection,
+  OwnerEvidenceReasonCode,
+  EvidenceAssemblyOutcome,
+  EvidenceReadinessInput,
+  EvidenceReadiness,
+} from './internalization/evidence-readiness.js';
+export { assessEvidenceReadiness } from './internalization/evidence-readiness.js';
+
+// Consumer evidence preflight (PRI-982 — SPEC-PD-IAER-001 FR-02/FR-04)
+export type {
+  BehaviorEvidencePort,
+  ArtificerEvidencePreflightVerdict,
+} from './internalization/consumer-evidence-preflight.js';
+export {
+  preflightArtificerOwnerEvidence,
+  ARTIFICER_EVIDENCE_NHR_SOURCE_RUN_ID,
+} from './internalization/consumer-evidence-preflight.js';
+
+// Artificer intent-basis preflight (SPEC-RULECODE-QUALITY-001 A1 — PRI-995)
+export type {
+  ArtificerTrustedFactsPort,
+  TrustedFactResolution,
+  ArtificerIntentPreflightVerdict,
+  IntentBasisStopReasonCode,
+} from './internalization/artificer-intent-preflight.js';
+export {
+  preflightArtificerIntentBasis,
+  consumeSourceFaultBackoffSkip,
+  advanceSourceFaultBackoff,
+  ARTIFICER_INTENT_NHR_SOURCE_RUN_ID,
+} from './internalization/artificer-intent-preflight.js';
+
+// Owner evidence attach/resume (PRI-983 — SPEC-PD-IAER-001 FR-03/FR-06)
+export type {
+  EvidenceWaitingTaskSummary,
+  AttachOwnerEvidenceInput,
+  OwnerEvidenceAttachOutcome,
+  ResumeOwnerEvidenceInput,
+  OwnerEvidenceResumeOutcome,
+} from './internalization/owner-evidence-recovery.js';
+export {
+  EVIDENCE_WAIT_REASON_CODES,
+  listEvidenceWaitingTasks,
+  attachOwnerEvidence,
+  resumeOwnerEvidenceTask,
+} from './internalization/owner-evidence-recovery.js';
+export {
+  computeBehaviorExamplePackDigest,
+  createOwnerEvidenceScopeError,
+  isOwnerEvidenceScopeError,
+  OWNER_EVIDENCE_SCOPE_ERROR_NAME,
+} from './internalization/evidence-readiness.js';
+export type {
+  OwnerEvidenceScopeMismatchKind,
+  OwnerEvidenceScopeError,
+} from './internalization/evidence-readiness.js';
+export type {
+  OwnerEvidenceActionKind,
+  OwnerEvidenceActionRecord,
+  AppendOwnerEvidenceActionInput,
+} from './recovery-actions-log.js';
+export {
+  appendOwnerEvidenceAction,
+  listOwnerEvidenceActions,
+} from './recovery-actions-log.js';
+
+// Internalization route model (PRI-43)
+export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
+export { decideInternalizationRoute } from './internalization/internalization-route.js';
+
+// Principle compiler core contracts (PRI-44)
+export type { PainPattern } from './internalization/template-generator.js';
+export { generateFromTemplate } from './internalization/template-generator.js';
+export type { ValidationResult } from './internalization/rule-code-validator.js';
+export { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from './internalization/rule-code-validator.js';
+export type { CompileResult } from './internalization/compile-result.js';
+
+// L1 Hard Cap & LRU Eviction (PRI-139)
+export { enforceL1HardCap, validateL1CapConfig, DEFAULT_L1_HARD_CAP, MAX_L1_HARD_CAP } from './l1-hard-cap.js';
+export type { L1CapConfig, L1EvictionCandidate, L1EvictionResult } from './l1-hard-cap.js';
+
+// Decision merge and adapter interface (PRI-45)
+export type { DecisionMergeLogger, RuleHostLogger } from './internalization/rule-host-evaluator.js';
+export { mergeDecisions } from './internalization/rule-host-evaluator.js';
+// RuleHost result validator (PRI-437)
+export type { RuleHostResultValidationResult } from './internalization/rule-host-validator.js';
+export { validateRuleHostResult } from './internalization/rule-host-validator.js';
+export type { RuleHostImplementationProvider } from './internalization/rule-host-adapter.js';
+
+// Principle tree domain types (PRI-51)
+export type {
+  PrincipleStatus,
+  PrinciplePriority,
+  PrincipleScope,
+  PrincipleEvaluability,
+  RuleStatus,
+  RuleType,
+  ImplementationLifecycleState,
+  ImplementationType,
+  SampleClassification,
+  Principle,
+  Rule,
+  Implementation,
+  ArtifactKind,
+  ArtifactLineageRecord,
+  ReplayResult,
+  ClassificationSummary,
+  ReplayReport,
+  PrincipleDependency,
+  PrincipleValueMetrics,
+  PrincipleEventType,
+  PrincipleLifecycleEvent,
+  PrincipleTreeStore,
+} from './types/index.js';
+
+// Migrated types & schemas (PRI-213)
+export type {
+  TypeboxPainSeverity as PainSeverity,
+  PainSignal,
+  PainSignalValidationResult,
+  PDTaskSchedule,
+  PDTaskExecution,
+  PDTaskDelivery,
+  PDTaskMeta,
+  PDTaskSpec,
+  EvidenceChainState,
+  EvidenceChainRecord,
+  EvidenceChainResponse,
+} from './types/index.js';
+
+export {
+  PainSeveritySchema,
+  PainSignalSchema,
+  deriveSeverity,
+  validatePainSignal,
+  PDTaskScheduleSchema,
+  PDTaskExecutionSchema,
+  PDTaskDeliverySchema,
+  PDTaskMetaSchema,
+  PDTaskSpecSchema,
+  BUILTIN_PD_TASKS,
+  mapSourceKind,
+  inferAdmissionDecision,
+  determineState,
+  determineNextAction,
+  resolveSummary,
+  normalizeDiagnosticianTaskId,
+  crossReferenceByTimestamp,
+  assembleEvidenceChain,
+  // PRI-469: pure validator for untrusted intentTension from artifacts.
+  validateIntentTension,
+} from './types/index.js';
+
+
+// Lifecycle read model types (PRI-51)
+export type {
+  LifecycleClassificationTotals,
+  RuleReplayEvidence,
+  RuleLiveEvidence,
+  RuleLineageEvidence,
+  ImplementationLifecycleEvidence,
+  RuleLifecycleEvidence,
+  PrincipleLifecycleEvidence,
+  LifecycleReadModel,
+} from './internalization/lifecycle-types.js';
+
+// Lifecycle metrics (PRI-52)
+export type { RuleMetricResult, PrincipleAdherenceResult } from './internalization/lifecycle-metrics.js';
+export { computeRuleMetrics, computePrincipleAdherence } from './internalization/lifecycle-metrics.js';
+
+// Deprecated readiness (PRI-53)
+export type { DeprecatedReadinessStatus, DeprecatedReadinessAssessment } from './internalization/deprecated-readiness.js';
+export { assessDeprecatedReadiness } from './internalization/deprecated-readiness.js';
+
+// Lifecycle routing policy (PRI-54)
+export type { LifecycleRoute, LifecycleRouteEvidenceSummary, LifecycleRouteRecommendation } from './internalization/routing-policy.js';
+export { recommendLifecycleRoute } from './internalization/routing-policy.js';
+
+// Lifecycle datasource adapter + read model builder (PRI-56)
+export type { LifecycleDatasource } from './internalization/lifecycle-datasource.js';
+export { buildLifecycleReadModel } from './internalization/lifecycle-read-model.js';
+
+// Ledger domain types needed by plugin datasource implementations (PRI-56)
+// PRI-443 Phase 5: import from pure types module, not the I/O module
+export type { LedgerTreeStore } from './types/ledger-store.js';
+
+// ── Internalization Peer Runner Contracts (PRI-61) ─────────────────────────
+
+export type {
+  InternalizationChannel,
+  PeerRunnerKind,
+  DiagnosticianStageKind,
+  RunnerKind,
+  PIArtifactKind,
+  PIArtifactValidationStatus,
+  ArtifactRef,
+  LineageRef,
+  PIArtifact,
+  PITaskRecord,
+} from './internalization/peer-runner-contracts.js';
+
+export {
+  PEER_RUNNER_KINDS,
+  DIAGNOSTICIAN_STAGE_KINDS,
+  INTERNALIZATION_CHANNELS,
+  PI_ARTIFACT_KINDS,
+  isPeerRunnerKind,
+  isDiagnosticianStageKind,
+  isRunnerKind,
+  isInternalizationChannel,
+  isPIArtifactKind,
+  isTerminalTaskStatus,
+  isValidPITaskRecord,
+  createMinimalPITaskRecord,
+} from './internalization/peer-runner-contracts.js';
+
+// ── Internalization Job Graph (PRI-61) ─────────────────────────────────────
+
+export {
+  ALLOWED_EDGES,
+  DIAGNOSTICIAN_EDGES,
+  validateEdge,
+  validateDiagEdge,
+  getDiagSuccessors,
+  isAcyclic,
+  getAllowedSuccessors,
+  getAllowedPredecessors,
+} from './internalization/internalization-job-graph.js';
+
+// ── Internalization State Machine Guards (PRI-62) ─────────────────────────────
+
+export {
+  canAcquireLease,
+  canRetryNow,
+  areDependenciesMet,
+  canTransitionTo,
+  isResultRefImmutable,
+  canUpdateLastError,
+  isArtifactRejected,
+  isUnresolvable,
+  recordRejection,
+  isRetryWaitBackoffElapsed,
+  DEFAULT_UNRESOLVABLE_THRESHOLD,
+} from './internalization/internalization-task-guards.js';
+
+export type {
+  DependencyGateDecision,
+  DependencyGateResult,
+  TransitionValidation,
+  RejectionFeedbackAction,
+  RejectionFeedbackResult,
+  NextTaskProposal,
+  GraphErrorType,
+  GraphValidationError,
+  GraphValidationResult,
+} from './internalization/internalization-state-machine.js';
+
+export {
+  validateInternalizationTaskReady,
+  validateTaskTransition,
+  decideArtifactRejectionFeedback,
+  createNextTaskProposal,
+  validateInternalizationGraph,
+} from './internalization/internalization-state-machine.js';
+
+// ── Internalization Transition Decision (P0-D, INV-02/INV-07) ────────────────
+
+export type {
+  InternalizationTransitionDecisionKind,
+  TransitionDecision,
+  TransitionDecisionInput,
+} from './internalization/internalization-transition-decision.js';
+export {
+  decideInternalizationTransition,
+  transitionInputFromTask,
+} from './internalization/internalization-transition-decision.js';
+
+// ── PITask Persistence & Hydration (PRI-65) ──────────────────────────────────
+
+export type {
+  PITaskMetadata,
+  RunnerDecision,
+  RolloutRevisionPayload,
+  HumanReviewContext,
+  OwnerResolutionRecord,
+  OwnerResolutionAction,
+  OwnerResolutionStatus,
+  FailedTaskRecoveryAuditRecord,
+  IntentBasisVerificationRecordV1,
+  SourceFaultBackoffRecordV1,
+  TrustedFactResolutionKind,
+} from './internalization/pitask-metadata.js';
+
+export {
+  PI_METADATA_KEY,
+  serializePITaskMetadata,
+  parsePITaskMetadata,
+  hydratePITaskRecord,
+  createPITaskDiagnosticJson,
+  mergePITaskMetadata,
+  artificerRepairTaskId,
+  parseSeedSourcePainId,
+  isValidIntentBasisVerificationRecord,
+  isValidSourceFaultBackoffRecord,
+  SOURCE_FAULT_PERSISTENT_REASON_CODE,
+  SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES,
+} from './internalization/pitask-metadata.js';
+
+// SPEC-RULECODE-QUALITY-001 A1: scribe execution-conditions declaration.
+export type {
+  ScribeExecutionConditionsV1,
+  ScribeRequiredFactV1,
+} from './internalization/intent-contract.js';
+export {
+  isValidScribeExecutionConditionsV1,
+  extractExecutionConditions,
+} from './internalization/intent-contract.js';
+
+// ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
+
+export type {
+  WakeOnceResult,
+  NoReadyTasksResult,
+  BlockedResult,
+  DependencyFailedResult,
+  LeasedResult,
+  WouldLeaseResult,
+  LeaseConflictResult,
+  InvalidTaskMetadataResult,
+  ProposalCreatedResult,
+  ProposeNextTaskResult,
+  CommitNextTaskResult,
+  InternalizationOrchestratorOptions,
+  InternalizationOrchestratorDeps,
+} from './internalization/internalization-orchestrator.js';
+
+export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
+
+// Golden fixtures (PRI-385)
+export type { FixtureDataSet } from './internalization/golden-dogfood-fixtures.js';
+export { GOLDEN_FIXTURES } from './internalization/golden-dogfood-fixtures.js';
+
+// ── Dreamer Peer Runner (PRI-67/PRI-85) ───────────────────────────────────────
+
+export type {
+  DreamerCandidate,
+  DreamerOutput,
+  DreamerValidationResult,
+  DreamerValidator,
+} from './internalization/dreamer-output.js';
+
+export { PassThroughDreamerValidator, DefaultDreamerValidator } from './internalization/dreamer-output.js';
+
+export type {
+  DreamerRunnerResult,
+  DreamerRunnerOptions,
+  ResolvedDreamerRunnerOptions,
+} from './internalization/dreamer-runner.js';
+
+export {
+  resolveDreamerRunnerOptions,
+  DEFAULT_DREAMER_RUNNER_OPTIONS,
+} from './internalization/dreamer-runner.js';
+
+export { DreamerRunner } from './internalization/dreamer-runner.js';
+
+// ── Base Peer Runner (PRI-302) ───────────────────────────────────────────────
+
+export { BasePeerRunner } from './runner/base-peer-runner.js';
+
+export type {
+  PeerRunnerOptions,
+  ResolvedPeerRunnerOptions,
+  PeerRunnerDeps,
+  PeerRunnerConfig,
+  PeerRunnerResult,
+  PeerRunnerResultStatus,
+  PeerRunnerValidationResult,
+  FailureContext,
+  ValidationErrorContext,
+} from './runner/peer-runner-types.js';
+
+// ── Philosopher Runner (PRI-90) ────────────────────────────────────────────────
+
+export type {
+  PhilosopherOutputV1,
+  PhilosopherPrincipleCandidate,
+  PhilosopherValidationResult,
+  PhilosopherValidator,
+} from './internalization/philosopher-output.js';
+
+export {
+  DefaultPhilosopherValidator,
+} from './internalization/philosopher-output.js';
+
+export type {
+  PhilosopherRunnerResultStatus,
+  PhilosopherRunnerResult,
+  PhilosopherRunnerOptions,
+  ResolvedPhilosopherRunnerOptions,
+  PhilosopherRunnerDeps,
+} from './internalization/philosopher-runner.js';
+
+export {
+  PhilosopherRunner,
+  resolvePhilosopherRunnerOptions,
+  DEFAULT_PHILOSOPHER_RUNNER_OPTIONS,
+} from './internalization/philosopher-runner.js';
+
+// ── Scribe Runner (PRI-109) ────────────────────────────────────────────────────
+
+export type {
+  ScribeOutputV1,
+  ScribePrincipleDraft,
+  ScribeSourceTrace,
+  ScribeValidationResult,
+  ScribeValidator,
+} from './internalization/scribe-output.js';
+
+export {
+  DefaultScribeValidator,
+} from './internalization/scribe-output.js';
+
+export type {
+  ScribeRunnerResultStatus,
+  ScribeRunnerResult,
+  ScribeRunnerOptions,
+  ResolvedScribeRunnerOptions,
+  ScribeRunnerDeps,
+} from './internalization/scribe-runner.js';
+
+export {
+  ScribeRunner,
+  resolveScribeRunnerOptions,
+  DEFAULT_SCRIBE_RUNNER_OPTIONS,
+} from './internalization/scribe-runner.js';
+
+// ── Artificer Runner (PRI-111) ────────────────────────────────────────────────
+
+export type {
+  ArtificerRuleOutput,
+  ArtificerSourceTrace,
+  ArtificerValidationResult,
+  ArtificerValidator,
+  GoldenTraceCaseInput,
+} from './internalization/artificer-output.js';
+
+export {
+  DefaultArtificerValidator,
+  ArtificerRuleOutputSchema,
+  ArtificerSourceTraceSchema,
+} from './internalization/artificer-output.js';
+
+// PRI-966 G2 — Learning Lab real-actor round contract (research-only consumer;
+// registered in OUTPUT_SCHEMA_REGISTRY so PiAiRuntimeAdapter serves the ref).
+export {
+  LearningLabActorActionV1Schema,
+  LEARNING_LAB_ACTOR_ACTION_REF,
+  LEARNING_LAB_ACTOR_ACTION_NAMES,
+} from './learning-lab/actor-action-output.js';
+export type { LearningLabActorActionV1 } from './learning-lab/actor-action-output.js';
+
+export type {
+  ArtificerRunnerResultStatus,
+  ArtificerRunnerResult,
+  ArtificerRunnerOptions,
+  ResolvedArtificerRunnerOptions,
+  ArtificerRunnerDeps,
+  ArtificerHostSemanticContext,
+} from './internalization/artificer-runner.js';
+
+export {
+  ArtificerRunner,
+  resolveArtificerRunnerOptions,
+  DEFAULT_ARTIFICER_RUNNER_OPTIONS,
+} from './internalization/artificer-runner.js';
+
+// PRI-741: host semantic projection DTO builder (sanitized for prompt use).
+export { buildArtificerHostSemanticContext } from './internalization/artificer-prompt-builder.js';
+
+// ── Evaluator Runner (PRI-EVAL) ────────────────────────────────────────────────
+
+export type {
+  EvaluatorEvaluation,
+  EvaluatorSourceTrace,
+  EvaluatorOutputV1,
+  EvaluatorOutputV2,
+  EvaluatorValidationResult,
+  EvaluatorValidator,
+  EvaluatorCodeReview,
+  EvaluatorAdversarialResult,
+  AdversarialCase,
+  AdversarialFailedCase,
+  AdversarialAttackType,
+} from './internalization/evaluator-output.js';
+
+export {
+  DefaultEvaluatorValidator,
+  EvaluatorOutputV1Schema,
+  EvaluatorEvaluationSchema,
+  EvaluatorSourceTraceSchema,
+  EVALUATOR_DECISIONS,
+  isEvaluatorOutputV2,
+} from './internalization/evaluator-output.js';
+
+export type {
+  EvaluatorRunnerResultStatus,
+  EvaluatorRunnerResult,
+  EvaluatorRunnerOptions,
+  ResolvedEvaluatorRunnerOptions,
+  EvaluatorRunnerDeps,
+  // PRI-510: re-export so the CLI plugin layer can reference the seeder contract
+  // without importing the runner source file directly (EP-02: production path
+  // wiring must use the barrel, not deep imports).
+  SeedArtificerRepairParams,
+} from './internalization/evaluator-runner.js';
+
+export {
+  EvaluatorRunner,
+  resolveEvaluatorRunnerOptions,
+  DEFAULT_EVALUATOR_RUNNER_OPTIONS,
+} from './internalization/evaluator-runner.js';
+
+export {
+  EvaluatorPromptBuilder,
+  EVALUATOR_PROTOCOL_INSTRUCTION,
+  EVALUATOR_PROMPT_CONTRACT_VERSION,
+} from './internalization/evaluator-prompt-builder.js';
+
+export type {
+  EvaluatorPromptBuilderInput,
+  EvaluatorPromptInput,
+  EvaluatorPromptBuildResult,
+} from './internalization/evaluator-prompt-builder.js';
+
+// ── Rollout Reviewer Runner (PRI-RR) ────────────────────────────────────────
+
+export type {
+  RolloutReviewerReview,
+  RolloutReviewerSourceTrace,
+  RolloutReviewerOutputV1,
+  RolloutReviewerValidationResult,
+  RolloutReviewerValidator,
+} from './internalization/rollout-reviewer-output.js';
+
+export {
+  DefaultRolloutReviewerValidator,
+  RolloutReviewerOutputV1Schema,
+  RolloutReviewerReviewSchema,
+  RolloutReviewerSourceTraceSchema,
+  ROLLOUT_REVIEWER_DECISIONS,
+} from './internalization/rollout-reviewer-output.js';
+
+export type {
+  RolloutReviewerRunnerResultStatus,
+  RolloutReviewerRunnerResult,
+  RolloutReviewerRunnerOptions,
+  ResolvedRolloutReviewerRunnerOptions,
+  RolloutReviewerRunnerDeps,
+  RolloutAutoDispatchInput,
+  RolloutAutoDispatchOutcome,
+  RolloutRevisionRoutingInput,
+} from './internalization/rollout-reviewer-runner.js';
+
+export {
+  RolloutReviewerRunner,
+  resolveRolloutReviewerRunnerOptions,
+  DEFAULT_ROLLOUT_REVIEWER_RUNNER_OPTIONS,
+} from './internalization/rollout-reviewer-runner.js';
+
+export {
+  RolloutReviewerPromptBuilder,
+  ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION,
+  ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION,
+} from './internalization/rollout-reviewer-prompt-builder.js';
+
+export type {
+  RolloutReviewerPromptBuilderInput,
+  RolloutReviewerPromptInput,
+  RolloutReviewerPromptBuildResult,
+} from './internalization/rollout-reviewer-prompt-builder.js';
+
+// ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
+
+export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
+export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
+export { SqlitePIArtifactStore, mapPiArtifactRow } from './store/artifact/sqlite-pi-artifact-store.js';
+export type { PiArtifactRow } from './store/artifact/sqlite-pi-artifact-store.js';
+
+// ── L2 Agent Loop Adapter (PRI-419) ──────────────────────────────────────────
+
+export { L2AgentLoopAdapter } from './adapter/l2-agent-loop-adapter.js';
+export type { L2AgentLoopAdapterConfig, L2AgentLoopAdapterDeps } from './adapter/l2-agent-loop-adapter.js';
+
+// ── L2 Agent Loop Tools (PRI-419) ─────────────────────────────────────────────
+
+export {
+  buildDreamerL2Tools,
+  DREAMER_L2_TOOL_WHITELIST,
+} from './tools/agent-tool-contract.js';
+export type {
+  PdL2ToolContext,
+  PdL2ArtifactReader,
+  PdL2PrincipleReader,
+  L2OutputCapture,
+} from './tools/agent-tool-contract.js';
+export { DreamerOutputV1Typebox, DreamerCandidateTypebox } from './tools/dreamer-output-typebox.js';
+
+// ── Artificer L2 Agent Loop Tools (PRI-439 Phase 4) ────────────────────────────
+//
+// TypeBox redeclaration of ArtificerRuleOutput for pi-agent-core tool parameter
+// schemas, plus the 4-tool contract (read_rulecode_spec, validate_rulecode,
+// replay_rulecode, submit_rulecode) used by ArtificerL2Adapter.
+
+export {
+  ArtificerRuleOutputTypebox,
+  ArtificerSourceTraceTypebox,
+  GoldenTraceCaseInputTypebox,
+} from './tools/artificer-output-typebox.js';
+
+export {
+  buildArtificerL2Tools,
+  ARTIFICER_L2_TOOL_WHITELIST,
+  RULECODE_SPEC_TEXT,
+} from './tools/artificer-l2-tool-contract.js';
+export type {
+  ArtificerL2ToolContext,
+  ArtificerL2OutputCapture,
+} from './tools/artificer-l2-tool-contract.js';
+
+// ── L2 Principle Reader (PRI-431) ─────────────────────────────────────────────
+// Only export the pure-logic entry point from the core barrel.
+// buildL2PrincipleReader() performs file I/O and is imported directly
+// from the module by pd-cli/openclaw-plugin — NOT re-exported here.
+
+export { buildL2PrincipleReaderFromLedger } from './build-l2-principle-reader.js';
+export type { BuildL2PrincipleReaderOptions } from './build-l2-principle-reader.js';
+
+// ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
+
+export type {
+  IntakeToInternalizationBridgeInput,
+  BridgeDecision,
+  BridgeTaskSeed,
+  BridgeTaskStore,
+} from './internalization/intake-to-internalization-bridge.js';
+
+export {
+  ROUTE_CHANNEL_MAP,
+  CANDIDATE_KIND_TO_ROUTE,
+  MVP_ENABLED_CHANNELS,
+  computeBridgeDecision,
+  buildDreamerTaskSeed,
+  buildDreamerSeedFromCandidate,
+  dreamerTaskIdsForCandidate,
+  findExistingDreamerTask,
+  seedIntakeTask,
+} from './internalization/intake-to-internalization-bridge.js';
+
+// ── Internalization Queue Read Model (PRI-73) ──────────────────────────────
+
+export { InternalizationQueueReadModel, createInternalizationQueueReadModel } from './internalization-queue-read-model.js';
+export type {
+  InternalizationQueueSnapshot,
+  NoReadyTasksDiagnosis,
+  QueueNoReadyTasksReason,
+  ReadyTask,
+  BlockedSample,
+  DependencyFailedSample,
+  RetryWaitPendingSample,
+  LeaseConflictSample,
+  UnresolvableSample,
+  InternalizationQueueReadModelHandle,
+  CreateQueueReadModelOptions,
+} from './internalization-queue-read-model.js';
+
+// ── Queue Actionability Policy (PRI-253) ─────────────────────────────────────
+
+export { classifyTaskActionability, MVP_CORE_TASK_KINDS } from './internalization/queue-actionability.js';
+export type {
+  ActionabilityPolicyInput,
+  SuppressedDiagnostic,
+  TaskActionabilityResult,
+  TaskClassificationInput,
+} from './internalization/queue-actionability.js';
+
+// ── Internalization Consumer Decision (PRI-381) ────────────────────────────
+
+export {
+  computeConsumerDecision,
+  DEFAULT_CONSUMER_MAX_TASKS_PER_CYCLE,
+  DEFAULT_CONSUMER_RUNNER_KINDS,
+  FULL_CHAIN_CONSUMER_RUNNER_KINDS,
+} from './internalization/internalization-consumer-decision.js';
+export type {
+  ConsumerDecision,
+  ConsumerDecisionInput,
+} from './internalization/internalization-consumer-decision.js';
+
+// ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
+
+export { createRecoverySweepService, recoverFailedTask, inspectFailedTaskRecovery, recoverSingleFailedTask } from './recovery-sweep-service.js';
+export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecoveryInfo, FailedTaskRecoveryResult, FailedTaskRecoveryInspection, SingleTaskRecoveryOutcome } from './recovery-sweep-service.js';
+
+// Owner authority reset for needs_human_review tasks (shared by CLI retry and
+// Console recovery — Governance Recovery Actions v1)
+export { ownerRetryNeedsHumanReviewTask } from './internalization/owner-retry.js';
+export type { OwnerRetryOutcome } from './internalization/owner-retry.js';
+// PRI-629 unified Owner Decision (Console/CLI/Runner 共用策略层)
+export {
+  HUMAN_REVIEW_REASON,
+  DECISION_CAPABLE_HUMAN_REVIEW_REASONS,
+  LEGACY_EVALUATOR_BUDGET_EXHAUSTED,
+  LEGACY_ROLLOUT_BUDGET_EXHAUSTED,
+  buildOwnerReviewKey,
+  collectOwnerDecisionFacts,
+  computeArtifactContentHash,
+  decisionArtifactIdFor,
+  deriveOwnerDecisionCapability,
+  resolveEffectiveRunnerDecision,
+  findOwnerResolutionForCurrentEpoch,
+  findAppliedVerdictOverrideResolution,
+  planOwnerVerdictOverrideResume,
+  markOwnerResolutionApplied,
+  canonicalHumanReviewReasonCode,
+  detectHardGateFailureFromArtifact,
+  effectiveDecisionFor,
+} from './internalization/owner-review.js';
+export type {
+  HumanReviewAttention,
+  OwnerDecisionCapability,
+  OwnerDecisionFactStore,
+  OwnerDecisionFacts,
+  DecisionArtifactRecord,
+  DecisionArtifactFacts,
+  ReviewKeyFacts,
+  OwnerOverrideResumePlan,
+} from './internalization/owner-review.js';
+export { buildOwnerDecisionReview } from './internalization/owner-decision-review.js';
+export type {
+  BoundEvidenceManifestV1,
+  DeterministicCheckStatus,
+  EvidenceClass,
+  EvaluatorDecisionBrief,
+  OwnerDecisionBrief,
+  OwnerDecisionReviewSnapshot,
+  OwnerDecisionReviewStore,
+  OwnerEvidenceItem,
+  ReviewEvidenceCompleteness,
+  RolloutDecisionBrief,
+} from './internalization/owner-decision-review.js';
+export {
+  applyOwnerResolution,
+  factStoreFromStateManager,
+  reviewStoreFromStateManager,
+  sanitizeOwnerInstruction,
+} from './internalization/owner-resolution-service.js';
+export type {
+  OwnerResolutionApplyDeps,
+  OwnerResolutionRequest,
+  OwnerResolutionOutcome,
+  OwnerIdentityContext,
+} from './internalization/owner-resolution-service.js';
+export { reopenTaskForRevision, resolveRolloutRevisionTarget, buildRepairRevisionCauseId } from './internalization/revision-reopen.js';
+export type { ReopenRevisionOptions, RolloutRevisionTarget } from './internalization/revision-reopen.js';
+
+// ── RuntimeStateHandle (PRI-198) ────────────────────────────────────────────
+
+export { createRuntimeStateHandle } from './runtime-state-handle.js';
+export type { RuntimeStateHandle } from './runtime-state-handle.js';
+
+// ── Activation Dispatcher (PRI-144) ──────────────────────────────────────
+
+export type {
+  ActivationRiskLevel,
+  ActivationActor,
+  RolloutActivationDecision,
+  DispatchInput,
+  ActivationDecision,
+  PIArtifactSnapshot,
+  ActivationArtifactReadModel,
+  ActivationStatusRecord,
+  ActivationStateReadModel,
+  ActivationDecisionRecord,
+  ActivationDecisionSubject,
+  ActivationDecisionKind,
+  ActivationControlState,
+  GlobalRuleCodePause,
+  PromotionEvidenceSnapshot,
+  PromotionFailedCheck,
+  PromotionReadinessResult,
+  OwnerPromotionActor,
+  OwnerPromotionRequest,
+  PromotionCommitInput,
+  OwnerPromotionResult,
+  RuleCodeOwnerDecisionServiceDeps,
+  PromotionCheckId,
+  PromotionReadinessCheck,
+  PromotionReadinessEvaluationInput,
+  PromotionReadinessReaderDeps,
+  RuleCodeSafetySample,
+  RuleCodeSafetyCircuitState,
+  RuleCodeSafetyTripReason,
+  HostLivenessContract,
+  RecoveryReachabilityEvidence,
+  RecoveryCapabilityEvidence,
+  RecoveryCapabilityCoverage,
+  RecoveryControlCapability,
+  RecoveryControlSurface,
+  RecoveryControlValidation,
+  RecoveryCompositionArtifact,
+  RecoveryCompositionInput,
+  RecoveryCompositionProbe,
+  RecoveryCompositionResult,
+  WriterInput,
+  WriterResult,
+  CanActivateResult,
+  ChannelWriter,
+  ApprovalStatus,
+  ApprovalRecord,
+  ApprovalEnqueueInput,
+  ApprovalFilter,
+  ApprovalDecisionResult,
+  ApprovalQueueStore,
+  ApprovalListFilter,
+  ApprovalStats,
+  ApprovalListResult,
+  ArtifactLineageIdentity,
+  ApprovalWithContext,
+  ConfidenceLabel,
+  BuildPromotionEvidenceSnapshotInput,
+  PromotionEvidenceOwnerIdentity,
+  LedgerIdentityChecker,
+  LedgerIdentityLookupDeps,
+  LedgerActivationResolution,
+} from './activation/index.js';
+
+export {
+  LOW_RISK_CHANNELS,
+  isArtifactRevisionOf,
+  HIGH_RISK_CHANNEL_MAP,
+  makeIdempotencyKey,
+  isLowRiskChannel,
+  getChannelRiskLevel,
+  ActivationDispatcher,
+  resolveLedgerActivationId,
+  candidateIdFromDreamerTaskId,
+  candidateIdFromDreamerSeed,
+  PromptWriter,
+  DeferArchiveWriter,
+  RuleHostWriter,
+  extractEvidenceRefs,
+  extractPrincipleId,
+  MemoryActivationStateStore,
+  MemoryArtifactReadModel,
+  SqliteActivationStateStore,
+  SqliteActivationSafetyStore,
+  RuleCodeOwnerDecisionService,
+  REQUIRED_PROMOTION_CHECK_IDS,
+  evaluateRuleCodePromotionReadiness,
+  PromotionReadinessReader,
+  evaluateRuleCodeSafetyCircuit,
+  initialRuleCodeSafetyCircuitState,
+  collectOpenClawPromotionChecks,
+  RECOVERY_CONTROL_SURFACES,
+  validateRecoveryControlSurfaces,
+  validateRecoveryCapabilityCoverage,
+  verifyRecoveryProbeComposition,
+  summarizeRuleCodeShadowEvents,
+  AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
+  AUTO_PROMOTABLE_CHANNELS,
+  ApprovalQueue,
+  decideAutoPromotion,
+  MemoryApprovalQueueStore,
+  SqliteApprovalQueueStore,
+  mapConfidenceToLabel,
+  RUNTIME_PRINCIPLE_BUDGET,
+  isArtifactRecord,
+  filterPromptActivations,
+  resolvePrincipleFromArtifact,
+  trimToBudget,
+  listEntryLine,
+  renderPrinciplesToDirectives,
+  PROMPT_BUDGET_POLICY_VERSION,
+  PROMPT_BUDGET_BASE_CHARS,
+  PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,
+  PROMPT_BUDGET_MIN_CHARS,
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_FALLBACK_CHARS,
+  MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
+  MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
+  TRUSTED_HOST_CONTEXT_WINDOW_SOURCES,
+  isValidContextWindowTokens,
+  promptBudgetCharsForContextWindow,
+  resolveTotalInjectionBudgetChars,
+  classifySingleItemBudgetTier,
+  resolvePromptBudget,
+  createProductionGateDeps,
+  compileHardenedRuleEvaluator,
+  ApprovalCompletionService,
+  detectPromptReplacementTarget,
+  detectRuleReplacementTarget,
+  buildOwnerRevisionArtifact,
+  revisionDigest,
+  buildPromotionEvidenceSnapshot,
+  computeArtifactDigest,
+  normalizeOwnerIdentity,
+  verifyPiArtifactRowDigest,
+} from './activation/index.js';
+
+export type {
+  ActivatedPrinciple,
+  PromptActivationReaderResult,
+  PromptSelectionPolicy,
+  TrimToBudgetResult,
+  PromptBudgetCapacitySource,
+  PromptBudgetCapacityStatus,
+  PromptBudgetFallbackReason,
+  PromptBudgetResolution,
+  PromptBudgetTierFit,
+  PromptModelCatalog,
+  PromptModelCatalogEntry,
+  PromptBudgetHostCapacityFact,
+  ResolvePromptBudgetInput,
+  ApprovalCompletionInput,
+  ApprovalCompletionResult,
+  ArtifactDigestCheck,
+} from './activation/index.js';
+
+// ── Schema Conformance Read Model (PRI-95) ──────────────────────────────────
+
+export { SchemaConformanceReadModel } from './schema-conformance-read-model.js';
+export type { SchemaConformanceResult, SchemaConformanceTableResult, SchemaConformanceReadModelOptions } from './schema-conformance-read-model.js';
+// Activation compatibility read model (2026-08-19) — upgrade preflight /
+// operator scan over active code_tool_hook RuleCode.
+export { ActivationCompatibilityReadModel } from './activation-compatibility-read-model.js';
+export type { ActivationCompatibilityScanResult } from './activation-compatibility-read-model.js';
+
+// ── Internalization Chain Integrity Read Model (PRI-97) ─────────────────────
+
+export { InternalizationChainIntegrityReadModel, extractPIMetadata } from './internalization-chain-integrity-read-model.js';
+export type { BrokenLink, ChainIntegrityResult, InternalizationChainIntegrityReadModelOptions, PIMetadataParseResult } from './internalization-chain-integrity-read-model.js';
+
+export { InternalizationIntegrityRemediation } from './internalization-integrity-remediation.js';
+export type { InternalizationIntegrityRemediationOptions } from './internalization-integrity-remediation.js';
+
+// ── Mainline Contract (Runtime Mainline Convergence — single source of truth) ──
+export { assertMainlineContract, EMPTY_CONTEXT_SENTINEL } from './mainline-contract.js';
+export type {
+  MainlineStage,
+  StageStatus,
+  StageVerdict,
+  MainlineVerdict,
+  ArtifactRefSnapshot,
+  RuntimeReadinessSnapshot,
+  DiagnosisTaskSnapshot,
+  DiagnosticianArtifactSnapshot,
+  CandidateSnapshot,
+  DreamerTaskSnapshot,
+  DreamerContextSnapshot,
+  SuccessorSnapshot,
+  OwnerReviewablePrincipleSnapshot,
+  MainlineChainSnapshot,
+  MainlineSnapshot,
+} from './mainline-contract.js';
+
+export {
+  createRemediationResult,
+  remediationAction,
+} from './remediation-contract.js';
+
+export type {
+  RemediationAction,
+  RemediationMode,
+  RemediationResult,
+  RemediationStatus,
+  CreateRemediationResultInput,
+} from './remediation-contract.js';
+
+// ── Control Plane Triage (PRI-99) ───────────────────────────────────────────
+
+export { classifyCanaryFindings } from './control-plane-triage.js';
+export type { TriageCategory, TriageCategoryName, TriagePlan } from './control-plane-triage.js';
+
+// ── GoldenTrace L2 artifact model (PRI-113) ────────────────────────────────
+
+export {
+  GoldenTraceCaseSchema,
+  GoldenTraceSchema,
+  CorrectionApplicationModeSchema,
+  GoldenTraceDecisionSchema,
+  GoldenTraceCaseKindSchema,
+  validateGoldenTraceCase,
+  validateGoldenTrace,
+  createSyntheticRuleHostInput,
+  createGoldenTraceFixture,
+  buildGoldenTraceFromArtificer,
+} from './golden-trace.js';
+
+export type {
+  CorrectionApplicationMode,
+  GoldenTraceDecision,
+  GoldenTraceCaseKind,
+  GoldenTraceCase,
+  GoldenTrace,
+  GoldenTraceValidationResult,
+  ToolCallSnapshot,
+  SyntheticRuleHostInputOverrides,
+  GoldenTraceFixtureInput,
+  BuildGoldenTraceFromArtificerInput,
+  BuildGoldenTraceResult,
+} from './golden-trace.js';
+// ── Trajectory Schema (PRI-774 canonical DDL owner) ───────────────────────
+
+export {
+  applyTrajectorySchemaBase,
+  migrateLegacyGfiSchema,
+  TRAJECTORY_SCHEMA_VERSION,
+  TRAJECTORY_TABLES,
+} from './trajectory-schema.js';
+
+export type {
+  TrajectorySchemaApplyOptions,
+  TrajectorySchemaApplyResult,
+} from './trajectory-schema.js';
+// ── GoldenTrace Replay Validator (PRI-115) ────────────────────────────────
+
+export {
+  replayGoldenTrace,
+  diffParams,
+  DEFAULT_REPLAY_VALIDATOR_CONFIG,
+} from './golden-trace-replay-validator.js';
+
+export type {
+  ReplayValidatorCaseResult,
+  ReplayValidatorResult,
+  ReplayValidatorConfig,
+  ReplayEvaluateFn,
+} from './golden-trace-replay-validator.js';
+
+// ── Evolution Types (migrated from openclaw-plugin) ────────────────────────
+
+export {
+  isCompleteDetectorMetadata,
+  EvolutionPrincipleStatusSchema,
+  PrincipleEvaluatorLevelSchema,
+  EvaluabilitySchema,
+  PrincipleDetectorSpecSchema,
+  EvolutionPrincipleSuggestedRuleSchema,
+  EvolutionPrincipleValueMetricsSnapshotSchema,
+  EvolutionPrincipleSchema,
+  EvolutionLoopEventTypeSchema,
+  EvolutionPainDetectedDataSchema,
+  CandidateCreatedDataSchema,
+  PrinciplePromotedDataSchema,
+  PrincipleDeprecatedDataSchema,
+  PrincipleRolledBackDataSchema,
+  CircuitBreakerOpenedDataSchema,
+  LegacyImportDataSchema,
+  EvolutionLoopEventSchema,
+} from './evolution/evolution-types.js';
+
+export type {
+  EvolutionPrincipleStatus,
+  PrincipleEvaluatorLevel,
+  Evaluability,
+  PrincipleDetectorSpec,
+  EvolutionPrinciple,
+  EvolutionPrincipleSuggestedRule,
+  EvolutionPrincipleValueMetricsSnapshot,
+  EvolutionLoopEventType,
+  EvolutionPainDetectedData,
+  CandidateCreatedData,
+  PrinciplePromotedData,
+  PrincipleDeprecatedData,
+  PrincipleRolledBackData,
+  CircuitBreakerOpenedData,
+  LegacyImportData,
+  EvolutionLoopEvent,
+} from './evolution/evolution-types.js';
+
+// ── Refiner Sandbox Wrapper (PRI-172) ────────────────────────────────────
+
+export {
+  evaluateInRefinerSandbox,
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+} from './internalization/refiner-sandbox-wrapper.js';
+
+export type {
+  RefinerSandboxErrorType,
+  RefinerSandboxFailedCase,
+  RefinerSandboxResult,
+  RefinerSandboxOptions,
+  RefinerSandboxDependencies,
+} from './internalization/refiner-sandbox-wrapper.js';
+
+// ── Refiner RuleHost Gate (PRI-173) ──────────────────────────────────────
+
+export {
+  evaluateRefinerRuleHostGate,
+} from './internalization/refiner-rulehost-gate.js';
+
+export type {
+  RefinerRuleHostGateDecision,
+  RefinerRuleHostGateInput,
+  RefinerRuleHostGateResult,
+  RefinerRuleHostGateDeps,
+} from './internalization/refiner-rulehost-gate.js';
+
+// ── Correction Cue Keyword Types (migrated from openclaw-plugin) ──────────
+
+export {
+  MAX_CORRECTION_KEYWORDS,
+  CORRECTION_SEED_KEYWORDS,
+  CorrectionKeywordSchema,
+  CorrectionKeywordStoreSchema,
+} from './correction/correction-types.js';
+
+export type {
+  CorrectionKeyword,
+  CorrectionKeywordStore,
+} from './correction/correction-types.js';
+
+// ── Queue, Hygiene, Runtime Summary, Event Types (migrated from openclaw-plugin) ──
+
+// Queue branded types removed (PRI-770): the queue domain they branded was
+// retired with the evolution worker; zero production consumers remained.
+
+export type {
+  PersistenceAction,
+  HygieneStats,
+} from './types/hygiene-types.js';
+
+export {
+  createEmptyHygieneStats,
+} from './types/hygiene-types.js';
+
+export type {
+  EventType,
+  EventCategory,
+  EventLogEntry,
+  ToolCallEventData,
+  PainSignalEventData,
+  RulePromotionEventData,
+  GovernanceActionEventData,
+  HookExecutionEventData,
+  GateBlockEventData,
+  GateBypassEventData,
+  EvolutionTaskEventData,
+  EmpathyRollbackEventData,
+  HeartbeatDiagnosisEventData,
+  DiagnosisTaskEventData,
+  DiagnosticianReportEventData,
+  PrincipleCandidateEventData,
+  RuleEnforcedEventData,
+  RuleHostEvaluatedEventData,
+  RuleHostBlockedEventData,
+  RuleHostRequireApprovalEventData,
+  RuleHostAutoCorrectProposedEventData,
+  RuleHostAutoCorrectAppliedEventData,
+  RuntimePromptActivationsInjectedEventData,
+  RuleHostUnhealthyEventData,
+  RuleHostSkippedEventData,
+  TrajectoryObservabilityFailureEventData,
+  ToolCallStats,
+  ErrorStats,
+  // PainStats export removed (PRI-451 Wave 1.5): no live reader.
+  EmpathyEventStats,
+  EventEvolutionStats,
+  HookStats,
+  DailyStats,
+} from './types/event-types.js';
+
+export {
+  createEmptyDailyStats,
+  // PRI-813: canonical rulehost_evaluated payload guard — host-side writers
+  // validate through this schema authority instead of hand-rolled copies.
+  isRuleHostEvaluatedEventData,
+} from './types/event-types.js';
+
+export type {
+  EventLogEntry as DiscriminatedEventLogEntry,
+} from './types/event-payload.js';
+
+export {
+  isToolCallEventEntry,
+  isPainSignalEventEntry,
+  isRulePromotionEventEntry,
+  isGovernanceActionEventEntry,
+  isHookExecutionEventEntry,
+  isGateBlockEventEntry,
+  isGateBypassEventEntry,
+  isEvolutionTaskEventEntry,
+  isEmpathyRollbackEventEntry,
+} from './types/event-payload.js';
+
+// ── Correction Observer (Unified SDK Migration) ──
+// (EmpathyObserver agent retired in PRI-819: no production instantiation since
+// detection moved to signal-collector-host; live empathy event infrastructure
+// lives in types/event-payload + eventLog, not here.)
+export {
+  CorrectionObserverPayloadSchema,
+  CorrectionObserverOutputV1Schema,
+  CorrectionObserver,
+} from './observer/correction-observer.js';
+export type {
+  CorrectionObserverPayload,
+  CorrectionObserverOutputV1,
+  CorrectionObserverDeps,
+  CorrectionObserverOptions,
+} from './observer/correction-observer.js';
+
+export {
+  AgentScheduler,
+} from './observer/agent-scheduler.js';
+export type {
+  AgentTypeMap,
+  AgentScheduleMode,
+  ScheduledAgent,
+} from './observer/agent-scheduler.js';
+
+export { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
+
+// ── Feedback Report Contract (PRI-285) ──────────────────────────────────────
+//
+// Pure logic only. No I/O, no fs, no process, no db, no network, no openclaw-plugin
+// imports. Server (pd-console) wraps this contract and adds draft storage under
+// <workspace>/.pd/feedback/drafts/. No automatic upload — agents and users must
+// copy or open the generated URL themselves.
+export {
+  isFeedbackType,
+  isUserSeverity,
+  isFeedbackSource,
+  isFeedbackFrequency,
+  isFeedbackBlockingLevel,
+  isFeedbackStatus,
+  isFeedbackSubmittedVia,
+  isRecord,
+  isBoolean,
+  normalizeFeedbackDraftInput,
+  computeFeedbackFingerprint,
+  normalizeFeedbackTitle,
+  FEEDBACK_FINGERPRINT_DEFAULT_AREA,
+  FEEDBACK_FINGERPRINT_TITLE_LIMIT,
+  redactAbsolutePaths,
+  redactTokenLikeValues,
+  redactEnvLikeValues,
+  redactStackTrace,
+  redactSensitiveFields,
+  redactTelemetryString,
+  REDACTED_PATH,
+  REDACTED_VALUE,
+  NO_STACK,
+  renderReportMarkdown,
+  MAX_MARKDOWN_LENGTH,
+  buildGitHubIssueDraftUrl,
+  MAX_URL_BODY_LENGTH,
+  GITHUB_REPO,
+  buildPrivacyPreview,
+  buildEmailText,
+  DEFAULT_INCLUDED_SECTIONS,
+  DEFAULT_EXCLUDED_CATEGORIES,
+  createFeedbackReport,
+  safeStringifyPreview,
+} from './feedback/index.js';
+
+// ── PD-Owned Config Contract (PRI-304) ──────────────────────────────────────
+//
+// Pure types, validation, defaults, effective config, redaction, and feature
+// flag computation for `.pd/config.yaml`. No I/O — YAML loading lives in
+// pd-cli / openclaw-plugin. ADR-0016: PD owns exactly one user config file.
+
+export {
+  PD_CONFIG_VERSION,
+  VALID_FEATURE_CATEGORIES,
+  VALID_PROFILE_TYPES,
+  INTERNAL_AGENT_NAMES,
+  VALID_DIAGNOSTICS_MODES,
+  DANGEROUS_KEYS as PD_CONFIG_DANGEROUS_KEYS,
+  validatePdConfig,
+  // PRI-1020: owner-declared capacity (promptBudget config section)
+  PROMPT_BUDGET_HOST_KINDS,
+  operatorDeclaredContextWindow,
+  DEFAULT_FEATURE_FLAGS as PD_DEFAULT_FEATURE_FLAGS,
+  DEFAULT_RUNTIME_PROFILE_ID,
+  DEFAULT_RUNTIME_PROFILE,
+  DEFAULT_UI as PD_DEFAULT_UI,
+  getDefaultInternalAgents,
+  getDefaultPdConfig,
+  computeEffectivePdConfig,
+  redactPdConfig,
+  redactConfigValue,
+  MVP_CHANNEL_IDS,
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
+  getEnabledFlagIds,
+} from './config/index.js';
+
+// Agent runtime binding — PRI-306
+export {
+  resolveAgentRuntimeBinding,
+  checkAgentRuntimeReadiness,
+  createAdapterConfigFromProfile,
+} from './config/index.js';
+
+export type {
+  AgentRuntimeBindingOk,
+  AgentRuntimeBindingErr,
+  AgentRuntimeBindingResult,
+  AgentRuntimeReadinessResult,
+  PiAiAdapterConfigResult,
+} from './config/index.js';
+
+export type {
+  PdConfigVersion,
+  FeatureCategory,
+  FeatureFlagEntry,
+  RuntimeProfileType,
+  OpenClawRuntimeProfile,
+  PdLocalRuntimeProfile,
+  RuntimeProfile,
+  InternalAgentName,
+  InternalAgentBinding,
+  InternalAgentsConfig,
+  DiagnosticsMode,
+  UiConfig,
+  PdConfig,
+  PdConfigValidationError,
+  PdConfigValidationResultOk,
+  PdConfigValidationResultErr,
+  PdConfigValidationResult,
+  EffectivePdConfig,
+  RedactedRuntimeProfileSummary,
+  RedactedAgentSummary,
+  RedactedFeatureSummary,
+  RedactedPdConfigSummary,
+  PromptBudgetConfig,
+  PromptBudgetHostKind,
+  EffectiveFeatureFlag,
+  FeatureFlagsResult,
+} from './config/index.js';
+export type {
+  FeedbackType,
+  UserSeverity,
+  FeedbackFrequency,
+  FeedbackBlockingLevel,
+  FeedbackStatus,
+  FeedbackSubmittedVia,
+  FeedbackSource,
+  FeedbackContext,
+  AgentDraft,
+  FeedbackUserText,
+  FeedbackDraftInput,
+  NormalizedDraft,
+  RecentEvent,
+  CanaryStatus,
+  DiagnosticSummary,
+  ContextRef,
+  PrivacyPreview,
+  FeedbackReport,
+  ValidationError,
+  NormalizeResult,
+  RedactResult,
+  GithubUrlResult,
+  CreateReportResult,
+} from './feedback/index.js';
+
+// Evidence triage — PEAT-B1 + B2
+// Pain Phase 0: admission event factories (create*Event, serialize, privacy
+// validator + their types) and the unused observation builders
+// (buildLlmDetectionObservation, buildEmpathyObservation) were removed —
+// zero production consumers across the monorepo.
+export type {
+  SourceKind,
+  TriageDecision,
+  TriageResult,
+  TriageInput,
+  SourceDescriptor,
+  RawObservation,
+  TriggerOutcome,
+  TriggerDecision,
+  TriggerControllerInput,
+} from './evidence-triage/index.js';
+export {
+  isSourceKind,
+  SOURCE_DESCRIPTORS,
+  getSourceDescriptor,
+  evaluateTriage,
+  resolveSourceKind,
+  buildToolFailureObservation,
+  buildManualPainObservation,
+  evaluateTriggerController,
+  shouldCreateTask,
+  isAdmittedOutcome,
+  isSkippedOutcome,
+} from './evidence-triage/index.js';
+
+// Detection funnel — PRI-446 (pure logic migrated from plugin)
+export type {
+  DetectionResult,
+  PainMatchResult,
+  PainMatcher,
+  TextHasher,
+  ProtocolTokenGate,
+  DetectionFunnelConfig,
+} from './detection/index.js';
+export { SimpleLRU, DetectionFunnelCore } from './detection/index.js';
+
+
+// Intent Engineering MVP (PRI-465 / PRI-466 / PRI-467 / PRI-468) — pure logic:
+// parser, hasher, validator, the bounded+escaped friction block builder, and
+// the IntentDocReader port interface (core-owned, plugin-implemented).
+export {
+  INTENT_MAX_BYTES,
+  INTENT_DOC_TEMPLATE,
+  INTENT_DOC_TEMPLATE_ZH,
+  INTENT_DOC_TEMPLATE_EN,
+  INTENT_INJECT_MAX_CHARS,
+  INTENT_TRUNCATION_MARKER,
+  getIntentFilename,
+  createIntentTemplate,
+  parseIntentDocSections,
+  assembleIntentDoc,
+  computeIntentContentHash,
+  validateIntentDocSections,
+  buildIntentFrictionBlock,
+  NullIntentDocReader,
+  generateIntentPatchProposal,
+  computeVersionDiff,
+  formatVersionSummary,
+} from './intent/index.js';
+export type {
+  IntentDocSections,
+  IntentDocWarning,
+  IntentDocWarningCode,
+  IntentFrictionBlockInput,
+  IntentDocReader,
+  IntentDocReadResult,
+  IntentDocReference,
+  IntentDocReadReason,
+  IntentDecisionRecord,
+  IntentDecisionInput,
+  IntentDecisionRecordResult,
+  IntentDecisionSummary,
+  IntentDecisionStore,
+  IntentLang,
+  IntentDocVersion,
+  IntentDocVersionStore,
+  FollowUpPatch,
+  IntentPatchProposal,
+} from './intent/index.js';
+
+// PRI-470: IntentDecisionRecord durable SQLite store (SPEC §21.7).
+export { SqliteIntentDecisionStore, SqliteIntentDocVersionStore } from './store/intent/index.js';
+
+// Task 3: Dead letter store for pain signals that failed to be recorded.
+export { SqliteDeadLetterStore } from './store/pain/sqlite-dead-letter-store.js';
+export type { DeadLetterRow, DeadLetterOpResult } from './store/pain/sqlite-dead-letter-store.js';
+
+// Task 11: PendingAgentDraftStore — durable store for agent-generated draft
+// context attached to a failed peer-runner task. The feedback-report pipeline
+// (Task 13) reads the unconsumed draft for a given taskId and merges it into
+// the user-facing FeedbackReport so the maintainer sees the agent's
+// perspective. See feedback/pending-agent-draft-store.ts for the full
+// idempotency + fail-loud contract.
+export { PendingAgentDraftStore } from './feedback/pending-agent-draft-store.js';
+export type {
+  AgentDraftPayload,
+  PendingAgentDraftRow,
+  PendingDraftOpResult,
+} from './feedback/pending-agent-draft-store.js';
+
+// Risk calculator — pure line-change estimation migrated from plugin (Stage 3)
+export type { FileModification } from './risk/index.js';
+export { estimateLineChanges } from './risk/index.js';
+
+// Thinking models policy (BUILTIN_PATTERNS detection regexes) was retired
+// 2026-08-19 with the Thinking Activity telemetry writer — its only remaining
+// consumers were tests and dead re-exports. The Core Principle Registry
+// (T-01..T-10) in core-principles/ and the THINKING_OS.md guidance templates
+// are current product and remain.
+
+export type {
+  TrajectoryTurnReader,
+  TrajectoryUserTurn,
+  TrajectoryAssistantTurn,
+} from './store/context/trajectory-turn-reader.js';
+
+// SignalCollector — 统一信号采集层 (correction 上游融合)
+export {
+  scanKeywords,
+  buildLlmPrompt,
+  SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
+  parseLlmClassification,
+  resolveLlmClassificationPayload,
+  SignalClassificationOutputV2Schema,
+  collectSync,
+  mapLlmResultToOutput,
+  buildEvidence,
+  STAGE2_CONFIRM_THRESHOLD,
+  STAGE2_NONE_THRESHOLD,
+  STAGE2_MAX_ATTEMPTS,
+  PENDING_CANDIDATE_TTL_MS,
+  evaluateStage2ConfidenceGate,
+} from './signal-collector/index.js';
+export type {
+  TermSource,
+  UnifiedKeyword,
+  UnifiedKeywordStore,
+  SignalCollectorConfig,
+  SignalStrength,
+  DetectionSource,
+  MatchedPrecision,
+  SignalEvidence,
+  SignalCollectorOutput,
+  LlmClassificationResult,
+  KeywordScanResult,
+  ParseResult,
+  PayloadResolveResult,
+  ClassifierPayloadPath,
+  SignalClassificationOutputV2,
+  Stage2GateVerdict,
+  Stage2GateResult,
+  Stage2Thresholds,
+} from './signal-collector/index.js';
+
+// Intervention Evidence — PD v2 Phase 1 Evidence Foundation (ADR-0027).
+// Deterministic normalization + contract; persistence lives in the SQLite
+// intervention-evidence store (same runtime store seam as activations).
+export {
+  normalizeInterventionEvidenceBatch,
+  canonicalJson,
+  computeEvidenceId,
+  computeRecordDigest,
+  mintObservationKey,
+} from './intervention-evidence-normalizer.js';
+export type {
+  NormalizedInterventionBatch,
+  InterventionNormalization,
+} from './intervention-evidence-normalizer.js';
+export {
+  DELIVERED_CONFIRMATIONS,
+  DELIVERY_CONFIRMATIONS,
+  INTERVENTION_CAPABILITIES,
+  INTERVENTION_RECORD_KINDS,
+  INTERVENTION_SOURCE_KINDS,
+  INTERVENTION_TEXT_BOUNDS,
+} from './types/intervention-evidence-contract.js';
+export type {
+  DeliveryConfirmation,
+  InterventionActivationOccurrenceRef,
+  InterventionApplicationAction,
+  InterventionApplicationProof,
+  InterventionAuditRecordSummary,
+  InterventionAuditCursor,
+  InterventionAuditKindPage,
+  InterventionAuditRelations,
+  InterventionAuditSelector,
+  InterventionCapability,
+  InterventionCapabilityDeclaration,
+  InterventionCapabilityStatus,
+  InterventionContentRef,
+  InterventionDeliveryOutcome,
+  InterventionDeliveryPayload,
+  InterventionDeliveryTarget,
+  InterventionEffectPayload,
+  InterventionEpisodePayload,
+  InterventionEvidenceBatchInput,
+  InterventionNativeRefs,
+  InterventionObservationInput,
+  InterventionOutcomePayload,
+  InterventionPayload,
+  InterventionRecordKind,
+  InterventionSourceKind,
+  NormalizedInterventionRecord,
+} from './types/intervention-evidence-contract.js';
+export {
+  SqliteInterventionEvidenceStore,
+} from './store/sqlite-intervention-evidence-store.js';
+export type {
+  AppendObservationBatchResult,
+  InterventionAuditRead,
+  InterventionAuditReadOptions,
+  InterventionSourceConflict,
+} from './store/sqlite-intervention-evidence-store.js';
+
+export { boundCorrectionEvidenceText } from './pain-signal-bridge.js';
+
+// PRI-1019: the one Owner-design declaration contract and persisted authority.
+export { DESIGN_GATE_FACT_SCHEMA_VERSION, isDesignGateFact, isDesignGateDeclaration } from './internalization/design-gate-facts.js';
+export type { DesignGateFact, DesignGateDeclaration, DesignGateActor, DesignGateScope, DesignGateAction, DesignGateDecision, DesignGateInvalidationReason } from './internalization/design-gate-facts.js';
+export { SqliteDesignGateStore, DesignGateStoreError } from './store/design-gate/sqlite-design-gate-store.js';
+
+// Owner-governed rule candidate identity; the Ledger remains the only relation authority.
+export type { CandidatePrincipleIdentityResolution, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult } from './types/rule-candidate-binding.js';
+export { reviseRuleBindingOnce, resolveRuleBindingRevisionTarget } from './internalization/rule-binding-revision.js';
+export { reviseRuleSourceOnce, previewRuleSourceCorrection, SOURCE_CORRECTION_STOP_REASON_CODES } from './internalization/rule-source-correction.js';
+export { previewApprovedRuleRevision, reviseApprovedRuleOnce, MAX_APPROVED_RULE_REVISION_FEEDBACK_LENGTH } from './internalization/approved-rule-revision.js';
+export type { ApprovedRuleRevisionLedger, ApprovedRuleRevisionPreview, ApprovedRuleRevisionResult, ReviseApprovedRuleOnceArgs } from './internalization/approved-rule-revision.js';
+export type { ReviseRuleSourceOnceArgs, ReviseRuleSourceOnceResult, RuleSourceCorrectionPreview } from './internalization/rule-source-correction.js';
+
+export { ApprovalReviewGuardSchema, isApprovalReviewGuard } from './activation/approval-review-guard.js';
+export type { ApprovalReviewGuard } from './activation/approval-review-guard.js';
+
+export { prepareAdaptiveIntervention, validateControlledAdmissionBinding, canonicalAdaptiveMappingSha256, type AdaptiveInterventionInput, type AdaptiveInterventionDeps, type AdaptiveInterventionResult, type ControlledAdmissionBinding, type ControlledAdmissionBindingResult, type AdaptiveMappingIdentity } from './activation/adaptive-principle-intervention.js';
+
+export { ADAPTIVE_DELIVERY_RECORD_ENUMS, validateAdaptiveDeliveryRecord } from './activation/adaptive-delivery-record.js';
+export type {
+  AdaptiveDeliveryEvidence, AdaptiveDeliveryExecution, AdaptiveDeliveryPayload,
+  AdaptiveDeliveryReceiptState, AdaptiveDeliveryRecord, AdaptiveDeliveryRecordValidation,
+  AdaptiveDeliverySelection, AdaptiveDeliverySubmission,
+} from './activation/adaptive-delivery-record.js';

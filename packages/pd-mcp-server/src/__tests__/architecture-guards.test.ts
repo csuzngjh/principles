@@ -6,7 +6,7 @@
  *   G4-1  Core never depends on any MCP SDK package (§9.2: SDK 只属于 MCP
  *         Server 相关包；Core 不得直接依赖或运行时导入 MCP SDK);
  *   G4-2  this package imports @principles/core ONLY via the public
- *         capability subpath `@principles/core/runtime-v2/pain-recall-capability`
+ *         capability subpath `@principles/core/runtime/pain-recall-capability`
  *         (§3.2 dependency direction; no read-model private imports, no
  *         second query implementation);
  *   G4-3  this package spawns no CLI subprocess for business queries (§8.3);
@@ -72,7 +72,7 @@ describe('G4-2: pd-mcp-server reaches business data only via the capability subp
       const text = fs.readFileSync(file, 'utf8');
       const importMatches = [...text.matchAll(/from\s+'(@principles\/core[^']*)'/g)];
       for (const match of importMatches) {
-        expect(match[1], `${file} imports ${match[1]}`).toBe('@principles/core/runtime-v2/pain-recall-capability');
+        expect(match[1], `${file} imports ${match[1]}`).toBe('@principles/core/runtime/pain-recall-capability');
       }
     }
   });
@@ -82,8 +82,8 @@ describe('G4-2: pd-mcp-server reaches business data only via the capability subp
     // the forbidden literals it asserts against.
     for (const file of listSourceFiles(path.join(PKG_ROOT, 'src'), true)) {
       const text = fs.readFileSync(file, 'utf8');
-      expect(text.includes('@principles/core/runtime-v2/pain-recall"')).toBe(false);
-      expect(text.includes('@principles/core/runtime-v2/pain-recall-read-model')).toBe(false);
+      expect(text.includes('@principles/core/runtime/pain-recall"')).toBe(false);
+      expect(text.includes('@principles/core/runtime/pain-recall-read-model')).toBe(false);
       expect(text.includes('@principles/pd-cli')).toBe(false);
     }
   });

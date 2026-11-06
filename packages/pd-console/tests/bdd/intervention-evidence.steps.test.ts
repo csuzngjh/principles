@@ -20,7 +20,7 @@ import {
   SqliteConnection,
   normalizeInterventionEvidenceBatch,
   type InterventionAuditSelector,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { getInterventionEvidenceIngress } from '@principles/host-runtime';
 import { ReceiptsConsoleModel } from '../../src/server/models/ReceiptsConsoleModel.js';
 import { handleEvidenceOutcomesRoute } from '../../src/server/routes/evidence-outcomes.js';

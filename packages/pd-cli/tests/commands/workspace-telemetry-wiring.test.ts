@@ -40,7 +40,7 @@ describe('PRI-939 Option A — CLI telemetry wiring guard', () => {
   });
 
   it('the bridge telemetry factory forwards into an injected sink when provided (default unchanged)', () => {
-    const factory = readSrc('../../../../packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts');
+    const factory = readSrc('../../../../packages/principles-core/src/runtime/pain-signal-runtime-factory.ts');
     expect(factory).toContain('(sink ?? storeEmitter).emitTelemetry(mapped)');
   });
 });

@@ -1,18 +1,20 @@
 import type { IncomingMessage } from 'node:http';
 
 export function parseQuery(url: string): Record<string, string> {
-  const query: Record<string, string> = {};
   const searchIndex = url.indexOf('?');
-  if (searchIndex === -1) return query;
+  if (searchIndex === -1) return {};
   const search = url.slice(searchIndex + 1);
+  const pairs: [string, string][] = [];
   for (const pair of search.split('&')) {
     const eqIndex = pair.indexOf('=');
     if (eqIndex === -1) continue;
-    const key = decodeURIComponent(pair.slice(0, eqIndex));
-    const value = decodeURIComponent(pair.slice(eqIndex + 1));
-    query[key] = value;
+    pairs.push([decodeURIComponent(pair.slice(0, eqIndex)), decodeURIComponent(pair.slice(eqIndex + 1))]);
   }
-  return query;
+  // PRI-1136: query keys come from the request URL, so they must never reach a
+  // property-write sink. Object.fromEntries builds the map without naming a
+  // property per key; a duplicate key keeps the last entry, exactly like the
+  // previous assignment loop did.
+  return Object.fromEntries(pairs);
 }
 
 const MAX_BODY_SIZE = 1024 * 64;

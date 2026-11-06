@@ -4,8 +4,8 @@
 // they never call an LLM at runtime. Before OPT-002 they each carried ~2.7 MB
 // of pi-ai / pi-agent-core / undici / @google/genai / anthropic / openai
 // pulled in transitively through VALUE imports of the
-// `@principles/core/runtime-v2` barrel. This guard turns reintroducing that
-// propagation (e.g. a future `import { X } from '@principles/core/runtime-v2'`
+// `@principles/core/runtime` barrel. This guard turns reintroducing that
+// propagation (e.g. a future `import { X } from '@principles/core/runtime'`
 // on a satellite path) from an engineering-discipline problem into a build
 // failure.
 //
@@ -264,9 +264,9 @@ export function assertSatellitePurity(metafile, options = {}) {
     lines.push(
       `[satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (${violations.length} inputs).`,
       'Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.',
-      'Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a',
+      'Root cause pattern: a VALUE import of the @principles/core/runtime barrel on a',
       'satellite path re-pulls the whole transitive graph — import the specific leaf',
-      'subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.',
+      'subpath instead (e.g. @principles/core/runtime/trajectory-schema). See OPT-002.',
     );
     for (const pkg of FORBIDDEN_LLM_PACKAGES) {
       const hits = violations.filter((v) => v.pkg === pkg);

@@ -30,7 +30,7 @@ import {
   buildToolSemanticRegistry,
   type ToolSemanticMappingV1,
   type ToolSemanticRegistry,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   loadHostToolDeclarations,
   saveHostToolDeclaration,

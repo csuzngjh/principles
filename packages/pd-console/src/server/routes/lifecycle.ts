@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { LifecycleConsoleModel } from '../models/LifecycleConsoleModel.js';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, errorMessage } from '../utils/response.js';
 
 const models = new Map<string, LifecycleConsoleModel>();
 
@@ -67,7 +67,7 @@ export async function handleLifecycleRoute(
       }
       sendSuccess(res, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'lifecycle_metrics_error', message);
     }
     return;

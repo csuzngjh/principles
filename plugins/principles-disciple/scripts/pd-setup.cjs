@@ -448,9 +448,14 @@ async function main() {
     let sourcePackage;
     try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.coreSource, 'package.json'), 'utf8')); }
     catch { fail('core_source_invalid', 'Pass the built @principles/core package directory containing package.json and dist.'); return; }
+    // PRI-1136: the core subpath is `runtime-v2` up to Core 4.x and `runtime`
+    // from Core 5.x. Accept either so a built core matching the current pin
+    // works regardless of which generation the pin names.
+    const runtimeDist = ['runtime', 'runtime-v2']
+      .find((dir) => fs.existsSync(path.join(args.coreSource, 'dist', dir, 'index.js')));
     if (!sourcePackage || sourcePackage.name !== '@principles/core'
       || sourcePackage.version !== desired.core
-      || !fs.existsSync(path.join(args.coreSource, 'dist', 'runtime-v2', 'index.js'))) {
+      || !runtimeDist) {
       fail('core_source_invalid', 'The built core name/version must match the plugin runtime pin (runtime-version.json).'); return;
     }
   }

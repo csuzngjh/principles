@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-// The factory dynamic-imports '@principles/core/runtime-v2'; substitute a
+// The factory dynamic-imports '@principles/core/runtime'; substitute a
 // mock Pi adapter whose `fetch` is the spy — the budgeted fetch wraps it,
 // so a fetch-spy count of 0 proves no HTTP attempt was made.
 const fetchSpy = vi.fn(() => Promise.resolve(new Response('{}', { status: 200 })));
@@ -41,7 +41,7 @@ class MockPiAiRuntimeAdapter {
   }
 }
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   PiAiRuntimeAdapter: MockPiAiRuntimeAdapter,
   getPiAiFetchForApi: () => (input: unknown, init: unknown) => fetchSpy(input, init),
   StoreEventEmitter: class {

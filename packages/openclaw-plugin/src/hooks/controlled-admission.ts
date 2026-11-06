@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { canonicalAdaptiveMappingSha256, validateControlledAdmissionBinding } from '@principles/core/runtime-v2';
+import { canonicalAdaptiveMappingSha256, validateControlledAdmissionBinding } from '@principles/core/runtime';
 import type { PluginHookBeforePromptBuildEvent } from '../openclaw-sdk.js';
 import type { AdaptiveActivationConfig } from './adaptive-activation-config.js';
 import { resolveCurrentUserMessage } from './prompt-helpers.js';

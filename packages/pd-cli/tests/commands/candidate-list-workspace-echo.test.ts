@@ -20,7 +20,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os';
 
 import { handleCandidateList } from '../../src/commands/candidate.js';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { RuntimeStateManager } from '@principles/core/runtime';
 
 let workRoot: string;
 let workspaceDir: string;

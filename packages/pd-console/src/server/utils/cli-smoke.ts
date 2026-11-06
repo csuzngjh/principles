@@ -14,6 +14,7 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { errorMessage } from './response.js';
 
 export type CliSmokeResult = { ok: true; version: string } | { ok: false; error: string };
 
@@ -51,7 +52,7 @@ export function runPostUpdateCliSmoke(pdCliDir: string): CliSmokeResult {
     // Node prints the error MESSAGE first and stack frames after, so the
     // operator-facing extract is the bounded HEAD of stderr (a tail would
     // carry only stack noise — observed in the PRI-711 test fixture).
-    let reason = error instanceof Error ? error.message : String(error);
+    let reason = errorMessage(error);
     if (typeof error === 'object' && error !== null && Object.hasOwn(error, 'stderr')) {
       const { stderr } = error as { stderr?: unknown };
       if (typeof stderr === 'string' && stderr.trim().length > 0) reason = stderr;

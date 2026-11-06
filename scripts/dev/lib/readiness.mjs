@@ -28,7 +28,7 @@ import { verifyBuildStamp } from './build-state.mjs';
 /**
  * L3 probe set, DERIVED from the manifests rather than hardcoded.
  *
- * A literal list of specifiers ("@principles/core/runtime-v2", …) would be a
+ * A literal list of specifiers ("@principles/core/runtime", …) would be a
  * second source of truth: adding a package or an export subpath would silently
  * drop it from coverage, and the probe set would rot. Each package's own
  * `exports`/`bin` IS the contract, so it is read from there (P4).

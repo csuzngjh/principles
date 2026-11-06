@@ -216,7 +216,7 @@ test('oversize response is bounded and cancelled instead of entering the SDK', a
   assert.equal(s.ledger.counts.decision, 1);
 });
 test('actual pi-ai adapter emits one bounded GLM request through the injected boundary', async () => {
-  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime-v2/adapter/pi-ai-runtime-adapter.js');
+  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js');
   const old = process.env.ZAI_CODING_CN_API_KEY;
   process.env.ZAI_CODING_CN_API_KEY = keys.glm;
   const c = fixture.candidates[0];
@@ -240,7 +240,7 @@ test('actual pi-ai adapter emits one bounded GLM request through the injected bo
   }
 });
 test('actual pi-ai adapter cannot retry a failed provider request', async () => {
-  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime-v2/adapter/pi-ai-runtime-adapter.js');
+  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js');
   const old = process.env.ZAI_CODING_CN_API_KEY; process.env.ZAI_CODING_CN_API_KEY = keys.glm;
   let sends = 0;
   const s = setup({ fetchImpl: async () => { sends++; return new Response('provider error', { status: 500 }); } });

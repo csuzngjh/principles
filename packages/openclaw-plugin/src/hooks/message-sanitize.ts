@@ -5,7 +5,7 @@ import {
   sanitizeToolParams as coreSanitizeToolParams,
   convergePath,
   MAX_EVIDENCE_VALUE_CHARS,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 const INTERNAL_TAG_PATTERNS = [
   /\[EMOTIONAL_DAMAGE_DETECTED(?::(?:mild|moderate|severe))?\]/gi,
@@ -21,8 +21,8 @@ function isAssistantMessageWithContent(
   msg: unknown
 ): msg is { role: 'assistant'; content: string } {
   return (
-    typeof msg === 'object' &&
     msg !== null &&
+    typeof msg === 'object' &&
     (msg as { role?: string }).role === 'assistant' &&
     typeof (msg as { content?: unknown }).content === 'string'
   );

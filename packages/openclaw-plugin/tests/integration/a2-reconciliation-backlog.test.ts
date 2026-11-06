@@ -17,9 +17,9 @@ import {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
   mergePITaskMetadata,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runConsumerCycle } from '../../src/service/internalization-auto-consumer-service.js';
-import type { TaskRecord } from '@principles/core/runtime-v2';
+import type { TaskRecord } from '@principles/core/runtime';
 
 process.env.PD_TEST_BACKLOG_KEY = 'dummy';
 

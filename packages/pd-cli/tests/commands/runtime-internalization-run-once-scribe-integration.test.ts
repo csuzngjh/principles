@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createPITaskDiagnosticJson, RuntimeStateManager } from '@principles/core/runtime-v2';
+import { createPITaskDiagnosticJson, RuntimeStateManager } from '@principles/core/runtime';
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
 
 const workspaceDirs: string[] = [];

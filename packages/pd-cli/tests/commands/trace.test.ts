@@ -11,7 +11,7 @@ import * as path from 'path';
 const mockTraceByPainId = vi.fn();
 const mockPainChainClose = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   PainChainReadModel: vi.fn().mockImplementation(function () {
     return { traceByPainId: mockTraceByPainId, close: mockPainChainClose };
   }),
@@ -46,10 +46,6 @@ function fullChainTrace() {
     checkedAt: '2026-05-03T12:00:00.000Z',
     missingLinks: [],
   };
-}
-
-function mockProcessExit() {
-  return vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 }
 
 describe('handleTraceShow', () => {

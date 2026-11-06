@@ -557,7 +557,7 @@ export class WorkspaceResolutionError extends Error {
   }
 }
 
-export function resolveWorkspaceDirForRuntimeV2(
+export function resolveWorkspaceDirForRuntime(
   ctx: { workspaceDir?: string },
   api: OpenClawPluginApi | undefined,
   source: string,

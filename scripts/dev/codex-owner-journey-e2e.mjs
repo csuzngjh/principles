@@ -149,7 +149,7 @@ cpSync(path.join(ROOT, 'packages', 'codex-adapter', 'tests', 'fixtures', 'g1-con
 const rootRequire = createRequire(path.join(ROOT, 'package.json'));
 const yaml = rootRequire('js-yaml');
 const runtimeRoot = PD_CLI_OVERRIDE !== undefined ? path.resolve(pdCliEntry, '..', '..', '..') : ROOT;
-const coreDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'core', 'dist', 'runtime-v2', 'index.js') : path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2', 'index.js');
+const coreDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'core', 'dist', 'runtime', 'index.js') : path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime', 'index.js');
 const hostRuntimeDistEntry = PD_CLI_OVERRIDE !== undefined ? path.join(runtimeRoot, 'host-runtime', 'dist', 'index.js') : path.join(ROOT, 'packages', 'host-runtime', 'dist', 'index.js');
 for (const entry of [coreDistEntry, hostRuntimeDistEntry]) {
   if (!existsSync(entry)) {

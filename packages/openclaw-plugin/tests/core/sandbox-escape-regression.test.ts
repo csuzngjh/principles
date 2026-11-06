@@ -17,7 +17,7 @@
 import { describe, test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { checkForbiddenPatterns } from '../../../principles-core/src/runtime-v2/internalization/rule-code-validator.js';
+import { checkForbiddenPatterns } from '../../../principles-core/src/runtime/internalization/rule-code-validator.js';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
 const RUNTIME_SOURCE_PATH = join(

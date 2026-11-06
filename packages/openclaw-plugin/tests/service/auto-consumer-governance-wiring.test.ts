@@ -16,7 +16,7 @@ import {
   SqliteConnection,
   SqlitePIArtifactStore,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 // PRI-624: the wiring moved to the shared host-runtime module (one
 // implementation for OpenClaw auto-consumer + Companion workspace worker);
 // these tests now exercise the shared seam directly.

@@ -1,11 +1,11 @@
 /**
- * pd legacy import openclaw — Import OpenClaw legacy data into PD runtime-v2 store.
+ * pd legacy import openclaw — Import OpenClaw legacy data into PD runtime store.
  *
  * Usage:
  *   pd legacy import openclaw --workspace <path>
  *
  * This command is the formal operator path for migrating OpenClaw workspace data
- * into PD runtime-v2 SQLite. It must be run before trajectory/history/context commands
+ * into PD runtime SQLite. It must be run before trajectory/history/context commands
  * can return results on a workspace that only has OpenClaw legacy data.
  *
  * Two import stages:

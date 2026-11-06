@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyTrajectorySchemaBase,
   SqliteConnection,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { getInterventionEvidenceIngress } from '@principles/host-runtime';
 import { handleDesignGateRoute } from '../../../src/server/routes/design-gate.js';
 

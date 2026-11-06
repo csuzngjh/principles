@@ -14,7 +14,7 @@
  */
 
 import type { PrincipleListItem } from './PrinciplesConsoleModel.js';
-import { isCorePrincipleId } from '@principles/core/runtime-v2';
+import { isCorePrincipleId } from '@principles/core/runtime';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

@@ -6,13 +6,13 @@ import {
   type HostEventResult,
   type HostEventEmitter,
 } from '@principles/core/host';
-import { getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget } from '@principles/core/runtime-v2';
+import { getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
 import { createProductionPainEvidenceHandler, type PainDatabaseFactory, type PainEnrichmentProvider } from './production-pain-evidence.js';
-import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime-v2';
+import type { GovernanceHostKind, ToolSemanticRegistry } from '@principles/core/runtime';
 
 export * from './active-principle-prompt.js';
 export * from './prompt-activation-authority.js';
@@ -378,7 +378,7 @@ export function createProductionHostRuntime(
       // observable warning (rc-9).
       const emissionWarnings: string[] = [];
       try {
-        options.events?.recordRuntimeV2ActivationsInjected({
+        options.events?.recordRuntimeActivationsInjected({
           sessionId: event.context.sessionId,
           workspaceDir: event.context.workspaceDir,
           principleIds: prompt.principleIds,

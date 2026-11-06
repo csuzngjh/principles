@@ -37,7 +37,7 @@ const { mockResolveOwnerIdentity, mockResolveRuntimeAdapter, evaluationScript } 
   evaluationScript: { outcomes: [] as unknown[] },
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveOwnerIdentity: mockResolveOwnerIdentity,
 }));
@@ -59,7 +59,7 @@ import {
   type RuntimeHealth,
   type StartRunInput,
   type StructuredRunOutput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { addPrincipleToLedger, loadLedger } from '@principles/core/principle-tree-ledger';
 import type { LedgerPrinciple } from '@principles/core/principle-tree-ledger';
 
@@ -247,7 +247,9 @@ function writeWorkspaceConfig(reuseEvaluation: Record<string, unknown> | undefin
       internalAgents: { defaultRuntime: 'pd.custom', agents: { diagnostician: { enabled: true } } },
       ...(reuseEvaluation !== undefined ? { reuseEvaluation } : {}),
     }),
-    'utf8',
+    // The workspace lives under the OS temp dir; an owner-only mode keeps the
+    // fixture private when it is first created (existing files keep their mode).
+    { encoding: 'utf8', mode: 0o600 },
   );
   process.env.PD_TEST_EVAL_KEY = 'test-key';
 }
@@ -330,7 +332,9 @@ class ScriptedEvaluationAdapter implements PDRuntimeAdapter {
 }
 
 beforeEach(async () => {
-  workspaceDir = join(os.tmpdir(), `pd-reuse-prodval-${randomUUID()}`);
+  // mkdtempSync: atomically-created unique dir, so nothing else can pre-create
+  // (or symlink) the workspace paths written below.
+  workspaceDir = fs.mkdtempSync(join(os.tmpdir(), 'pd-reuse-prodval-'));
   fs.mkdirSync(join(workspaceDir, '.pd'), { recursive: true });
   stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();

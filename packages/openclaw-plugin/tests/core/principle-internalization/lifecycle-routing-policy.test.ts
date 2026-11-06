@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { recommendLifecycleRoute } from '@principles/core/runtime-v2';
+import { recommendLifecycleRoute } from '@principles/core/runtime';
 import type {
   PrincipleLifecycleEvidence,
   RuleLifecycleEvidence,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 function createRuleEvidence(id: string, overrides: Partial<RuleLifecycleEvidence> = {}): RuleLifecycleEvidence {
   return {

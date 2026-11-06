@@ -7,7 +7,7 @@
  * or response bodies. The injectable fetchFn keeps unit tests offline.
  */
 
-import type { ProductTelemetrySnapshotV1 } from '@principles/core/runtime-v2';
+import type { ProductTelemetrySnapshotV1 } from '@principles/core/runtime';
 
 export const DEFAULT_PRODUCT_TELEMETRY_ENDPOINT = 'https://principles-website.pages.dev/api/product-telemetry/snapshot';
 export const PRODUCT_TELEMETRY_TIMEOUT_MS = 8000;

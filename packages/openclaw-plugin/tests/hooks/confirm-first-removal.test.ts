@@ -65,7 +65,7 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
   });
 
   it('confirm_first_gate is not in DEFAULT_FEATURE_FLAGS', async () => {
-    const { DEFAULT_FEATURE_FLAGS } = await import('@principles/core/runtime-v2');
+    const { DEFAULT_FEATURE_FLAGS } = await import('@principles/core/runtime');
     const ids = DEFAULT_FEATURE_FLAGS.map((f: { id: string }) => f.id);
     expect(ids).not.toContain('confirm_first_gate');
   });
@@ -149,23 +149,23 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
 
   it('event-types.ts does not contain runtime_v2_confirm_first_gate', () => {
     const source = fs.readFileSync(
-      path.join(ROOT, 'packages/principles-core/src/runtime-v2/types/event-types.ts'),
+      path.join(ROOT, 'packages/principles-core/src/runtime/types/event-types.ts'),
       'utf8',
     );
     expect(source).not.toContain('runtime_v2_confirm_first_gate');
-    expect(source).not.toContain('RuntimeV2ConfirmFirstGate');
+    expect(source).not.toContain('RuntimeConfirmFirstGate');
   });
 
   it('confirm-first state store source has been deleted', () => {
     const storePath = path.join(
-      ROOT, 'packages/principles-core/src/runtime-v2/activation/sqlite-confirm-first-state-store.ts',
+      ROOT, 'packages/principles-core/src/runtime/activation/sqlite-confirm-first-state-store.ts',
     );
     expect(fs.existsSync(storePath)).toBe(false);
   });
 
   it('confirm-first state store test has been deleted', () => {
     const testPath = path.join(
-      ROOT, 'packages/principles-core/src/runtime-v2/__tests__/sqlite-confirm-first-state-store.test.ts',
+      ROOT, 'packages/principles-core/src/runtime/__tests__/sqlite-confirm-first-state-store.test.ts',
     );
     expect(fs.existsSync(testPath)).toBe(false);
   });
@@ -174,7 +174,7 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
 
   it('RuleHostInput no longer exposes planStatus/hasPlanFile', () => {
     const source = fs.readFileSync(
-      path.join(ROOT, 'packages/principles-core/src/runtime-v2/internalization/rule-host-contracts.ts'),
+      path.join(ROOT, 'packages/principles-core/src/runtime/internalization/rule-host-contracts.ts'),
       'utf8',
     );
     expect(source).not.toContain('planStatus');
@@ -183,7 +183,7 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
 
   it('RuleHostHelpers no longer expose getPlanStatus()/hasPlanFile()', () => {
     const source = fs.readFileSync(
-      path.join(ROOT, 'packages/principles-core/src/runtime-v2/internalization/rule-host-helpers.ts'),
+      path.join(ROOT, 'packages/principles-core/src/runtime/internalization/rule-host-helpers.ts'),
       'utf8',
     );
     expect(source).not.toMatch(/hasPlanFile\(\)/);
@@ -205,8 +205,8 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
     for (const rel of [
       'packages/openclaw-plugin/src/core/rule-implementation-runtime.ts',
       'packages/host-runtime/src/rule-implementation-runtime.ts',
-      'packages/principles-core/src/runtime-v2/internalization/refiner-sandbox-wrapper.ts',
-      'packages/principles-core/src/runtime-v2/golden-trace-replay-validator.ts',
+      'packages/principles-core/src/runtime/internalization/refiner-sandbox-wrapper.ts',
+      'packages/principles-core/src/runtime/golden-trace-replay-validator.ts',
     ]) {
       const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
       expect(source, `${rel} must not expose hasPlanFile helper`).not.toContain('hasPlanFile');
@@ -216,9 +216,9 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
 
   it('PROFILE defaults no longer contain gate/progressive_gate/thinking_checkpoint', async () => {
     // Core defaults are internal to the config modules (not re-exported from
-    // the runtime-v2 barrel), so verify the source plus the plugin runtime.
+    // the runtime barrel), so verify the source plus the plugin runtime.
     const coreConstantsSource = fs.readFileSync(
-      path.join(ROOT, 'packages/principles-core/src/runtime-v2/config/pd-profile-constants.ts'),
+      path.join(ROOT, 'packages/principles-core/src/runtime/config/pd-profile-constants.ts'),
       'utf8',
     );
     expect(coreConstantsSource).not.toContain('PROFILE_DEFAULT_GATE');
@@ -247,7 +247,7 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
       'utf8',
     );
     expect(eventLogSource).not.toContain('recordPlanApproval');
-    const core = await import('@principles/core/runtime-v2');
+    const core = await import('@principles/core/runtime');
     const eventLog = core as unknown as Record<string, unknown>;
     expect(Object.keys(eventLog)).not.toContain('PlanApprovalEventData');
     expect(Object.keys(eventLog)).not.toContain('isPlanApprovalEventEntry');
@@ -262,7 +262,7 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
     );
     expect(trajectorySource).not.toContain('plan_status');
     const coreSchemaSource = fs.readFileSync(
-      path.join(ROOT, 'packages/principles-core/src/runtime-v2/pain-signal-observability.ts'),
+      path.join(ROOT, 'packages/principles-core/src/runtime/pain-signal-observability.ts'),
       'utf8',
     );
     expect(coreSchemaSource).not.toContain('plan_status');

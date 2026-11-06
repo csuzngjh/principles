@@ -12,7 +12,7 @@
  * Output: Pass/Fail for each checkpoint with detailed diagnostics.
  */
 
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, readdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -33,11 +33,6 @@ function assert(condition, testName, detail = '') {
     console.log(`  ❌ ${testName}${detail ? ` — ${detail}` : ''}`);
     failCount++;
   }
-}
-
-function warn(testName, detail = '') {
-  console.log(`  ⚠️  ${testName}${detail ? ` — ${detail}` : ''}`);
-  warnCount++;
 }
 
 function runSql(dbPath, sql) {
@@ -118,11 +113,11 @@ function main() {
   // ═══════════════════════════════════════════════
   console.log('\n── 2. PainSignalBridge + Runtime v2 ──');
 
-  // 2.1 Verify PainSignalBridge is imported from runtime-v2 in pain.ts
+  // 2.1 Verify PainSignalBridge is imported from runtime in pain.ts
   const painHookSource = join(__dirname, '..', 'src', 'hooks', 'pain.ts');
   if (existsSync(painHookSource)) {
     const painContent = readFileSync(painHookSource, 'utf-8');
-    assert(painContent.includes('PainToPrincipleService'), 'pain.ts uses PainToPrincipleService from runtime-v2');
+    assert(painContent.includes('PainToPrincipleService'), 'pain.ts uses PainToPrincipleService from runtime');
     assert(!painContent.includes('createPainSignalBridge'), 'pain.ts no longer imports createPainSignalBridge');
   }
 

@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { validateBehaviorExamplePack } from '@principles/core/runtime-v2';
+import { validateBehaviorExamplePack } from '@principles/core/runtime';
 // The typed-error guard via the same registered LEAF subpath the assembler
-// itself consumes (satellite purity — no runtime-v2 barrel value import here).
+// itself consumes (satellite purity — no runtime barrel value import here).
 import {
   isOwnerEvidenceScopeError,
-} from '@principles/core/runtime-v2/internalization/evidence-readiness';
+} from '@principles/core/runtime/internalization/evidence-readiness';
 import { TrajectoryDatabase, TrajectoryRegistry } from '../../src/core/trajectory.js';
 import { BehaviorExamplePackAssembler } from '../../src/core/behavior-example-pack-assembler.js';
 

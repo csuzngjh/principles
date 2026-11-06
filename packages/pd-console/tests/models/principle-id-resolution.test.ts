@@ -3,8 +3,8 @@ import {
   candidateIdFromDreamerTaskId,
   resolveLedgerPrincipleId,
 } from '../../src/server/models/principle-id-resolution.js';
-import type { PIArtifactRecord } from '@principles/core/runtime-v2';
-import type { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+import type { PIArtifactRecord } from '@principles/core/runtime';
+import type { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
 
 const CANDIDATE_ID = 'e57b62ca-34e6-4863-aca5-ef8e5febc232';
 const LEDGER_ID = '6d2f3fe6-b465-4a77-ad6b-af10aac5fc7d';

@@ -5,7 +5,7 @@ import * as os from 'os';
 
 import { WorkspaceContext } from '../src/core/workspace-context.js';
 import {
-  resolveWorkspaceDirForRuntimeV2,
+  resolveWorkspaceDirForRuntime,
   WorkspaceResolutionError,
 } from '../src/utils/workspace-resolver.js';
 import { validateWorkspaceDir } from '../src/core/workspace-dir-validation.js';
@@ -162,14 +162,14 @@ describe('PRI-228: Plugin config resolution cutover', () => {
     });
   });
 
-  describe('resolveWorkspaceDirForRuntimeV2: explicit-only resolution', () => {
+  describe('resolveWorkspaceDirForRuntime: explicit-only resolution', () => {
     it('throws WorkspaceResolutionError when workspaceDir is missing', () => {
       expect(() =>
-        resolveWorkspaceDirForRuntimeV2({}, undefined, 'test-source')
+        resolveWorkspaceDirForRuntime({}, undefined, 'test-source')
       ).toThrow(WorkspaceResolutionError);
 
       try {
-        resolveWorkspaceDirForRuntimeV2({}, undefined, 'test-source');
+        resolveWorkspaceDirForRuntime({}, undefined, 'test-source');
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(WorkspaceResolutionError);
@@ -181,11 +181,11 @@ describe('PRI-228: Plugin config resolution cutover', () => {
 
     it('throws WorkspaceResolutionError when workspaceDir is invalid', () => {
       expect(() =>
-        resolveWorkspaceDirForRuntimeV2({ workspaceDir: os.homedir() }, undefined, 'test-source')
+        resolveWorkspaceDirForRuntime({ workspaceDir: os.homedir() }, undefined, 'test-source')
       ).toThrow(WorkspaceResolutionError);
 
       try {
-        resolveWorkspaceDirForRuntimeV2({ workspaceDir: os.homedir() }, undefined, 'test-source');
+        resolveWorkspaceDirForRuntime({ workspaceDir: os.homedir() }, undefined, 'test-source');
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(WorkspaceResolutionError);
@@ -194,7 +194,7 @@ describe('PRI-228: Plugin config resolution cutover', () => {
     });
 
     it('returns normalized workspaceDir when explicit and valid', () => {
-      const result = resolveWorkspaceDirForRuntimeV2(
+      const result = resolveWorkspaceDirForRuntime(
         { workspaceDir: tmpDir },
         undefined,
         'test-source',
@@ -204,13 +204,13 @@ describe('PRI-228: Plugin config resolution cutover', () => {
 
     it('rejects /tmp/.. which normalizes to root', () => {
       expect(() =>
-        resolveWorkspaceDirForRuntimeV2({ workspaceDir: '/tmp/..' }, undefined, 'test-source')
+        resolveWorkspaceDirForRuntime({ workspaceDir: '/tmp/..' }, undefined, 'test-source')
       ).toThrow(WorkspaceResolutionError);
     });
 
     it('rejects home subpath traversal that normalizes to home', () => {
       expect(() =>
-        resolveWorkspaceDirForRuntimeV2({ workspaceDir: os.homedir() + '/subdir/..' }, undefined, 'test-source')
+        resolveWorkspaceDirForRuntime({ workspaceDir: os.homedir() + '/subdir/..' }, undefined, 'test-source')
       ).toThrow(WorkspaceResolutionError);
     });
 
@@ -223,7 +223,7 @@ describe('PRI-228: Plugin config resolution cutover', () => {
         config: {},
       };
       expect(() =>
-        resolveWorkspaceDirForRuntimeV2({}, mockApi, 'test-source')
+        resolveWorkspaceDirForRuntime({}, mockApi, 'test-source')
       ).toThrow(WorkspaceResolutionError);
     });
   });
@@ -278,7 +278,7 @@ describe('PRI-228: Plugin config resolution cutover', () => {
       const filePath = path.resolve(__dirname, '..', 'src', 'hooks', 'pain.ts');
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(content).toContain('fromHookContextExplicit');
-      expect(content).toContain('resolveWorkspaceDirForRuntimeV2');
+      expect(content).toContain('resolveWorkspaceDirForRuntime');
     });
 
     const hostEnhancementHooks = [
@@ -301,12 +301,12 @@ describe('PRI-228: Plugin config resolution cutover', () => {
     }
   });
 
-  describe('resolveWorkspaceDirForRuntimeV2 has production caller', () => {
-    it('pain.ts calls resolveWorkspaceDirForRuntimeV2', () => {
+  describe('resolveWorkspaceDirForRuntime has production caller', () => {
+    it('pain.ts calls resolveWorkspaceDirForRuntime', () => {
       const filePath = path.resolve(__dirname, '..', 'src', 'hooks', 'pain.ts');
       const content = fs.readFileSync(filePath, 'utf-8');
-      expect(content).toContain('resolveWorkspaceDirForRuntimeV2');
-      const callMatch = content.match(/resolveWorkspaceDirForRuntimeV2\(/g) ?? [];
+      expect(content).toContain('resolveWorkspaceDirForRuntime');
+      const callMatch = content.match(/resolveWorkspaceDirForRuntime\(/g) ?? [];
       expect(callMatch.length).toBeGreaterThanOrEqual(1);
     });
   });

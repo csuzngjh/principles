@@ -13,7 +13,7 @@ import {
   SqliteApprovalQueueStore,
   ApprovalQueue,
   computeArtifactDigest,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { handleActivationsRoute, disposeActivationsModels } from '../../src/server/routes/activations.js';

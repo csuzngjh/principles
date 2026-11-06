@@ -12,7 +12,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as yaml from 'js-yaml';
-import { isRuntimeConfigError } from '@principles/core/runtime-v2';
+import { isRuntimeConfigError } from '@principles/core/runtime';
 import {
   resolveRuntimeFromPdConfig,
   resolveRuntimeWithOverrides,

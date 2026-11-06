@@ -210,7 +210,7 @@ describe('pd-setup repairs a runtime tree npm claimed to install', () => {
     return {
       adapter: make(path.join(base, 'codex-adapter'), '@principles/codex-adapter', pins.codexAdapter, ['dist/pd-hook.js']),
       hostRuntime: make(path.join(base, 'host-runtime'), '@principles/host-runtime', pins.hostRuntime, ['dist/index.js']),
-      core: make(path.join(base, 'core'), '@principles/core', pins.core, ['dist/runtime-v2/index.js']),
+      core: make(path.join(base, 'core'), '@principles/core', pins.core, ['dist/runtime/index.js']),
     };
   }
 

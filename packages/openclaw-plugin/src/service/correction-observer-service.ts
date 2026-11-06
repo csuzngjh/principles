@@ -6,7 +6,7 @@ import {
     PiAiRuntimeAdapter,
     CorrectionObserver,
     AgentScheduler,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { resolveObserverConfig } from '../core/pd-config-loader.js';

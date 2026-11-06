@@ -18,11 +18,11 @@ import {
   serializePITaskMetadata,
   assertMainlineContract,
   EMPTY_CONTEXT_SENTINEL,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   DiagnosticianOutputV1,
   RuntimeReadinessSnapshot,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { assembleMainlineSnapshot } from '../../src/services/mainline-snapshot-assembler.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

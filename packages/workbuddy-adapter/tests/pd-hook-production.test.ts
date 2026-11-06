@@ -25,7 +25,7 @@ import {
   SqliteConnection,
   computeArtifactDigest,
   mapPiArtifactRow,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runEntry } from './helpers/hook-runner.js';
 import {
   activationArtifact,

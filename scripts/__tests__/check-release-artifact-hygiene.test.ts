@@ -48,9 +48,9 @@ describe('classifyArtifactViolation — Phase 1 contract', () => {
 
   it('does NOT flag production shapes (ERR-149 red lines + samples)', () => {
     for (const p of [
-      'runtime-v2/internalization/golden-dogfood-fixtures.js',
-      'runtime-v2/adapter/split-pipeline-fixtures.js',
-      'runtime-v2/adapter/test-double-runtime-adapter.js',
+      'runtime/internalization/golden-dogfood-fixtures.js',
+      'runtime/adapter/split-pipeline-fixtures.js',
+      'runtime/adapter/test-double-runtime-adapter.js',
       'samples/example.json', 'samples/fixtures-readme.md',
       'trust/root.json', '_release/product-identity.json',
       'index.js', 'codec/index.d.ts',
@@ -66,7 +66,7 @@ describe('classifyArtifactViolation — Phase 1 contract', () => {
 describe('scanArtifactTree — PASS / injection matrix (mission Phase 5)', () => {
   it('1. clean production artifact passes', () => {
     const root = makeTree([
-      'index.js', 'codec/index.d.ts', 'runtime-v2/adapter/test-double-runtime-adapter.js',
+      'index.js', 'codec/index.d.ts', 'runtime/adapter/test-double-runtime-adapter.js',
       'samples/example.json', 'package.json',
     ]);
     const { violations, scanned } = scanArtifactTree('pkg/dist', root);

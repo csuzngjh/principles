@@ -1,5 +1,5 @@
 /**
- * pd runtime health snapshot command — Operator health snapshot for Runtime V2.
+ * pd runtime health snapshot command — Operator health snapshot for Runtime.
  *
  * Usage:
  *   pd runtime health snapshot --workspace <path> --json
@@ -10,8 +10,8 @@
  * PRI-28: Operator health snapshot.
  */
 import * as path from 'path';
-import { OperatorHealthReadModel } from '@principles/core/runtime-v2';
-import type { OperatorHealthSnapshot } from '@principles/core/runtime-v2';
+import { OperatorHealthReadModel } from '@principles/core/runtime';
+import type { OperatorHealthSnapshot } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface HealthSnapshotOptions {

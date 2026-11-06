@@ -33,7 +33,7 @@ import {
   RuntimeStateManager,
   type ApprovalEnqueueInput,
   type PIArtifactRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { ApprovalsConsoleModel } from '../../src/server/models/ApprovalsConsoleModel.js';
 import { resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 

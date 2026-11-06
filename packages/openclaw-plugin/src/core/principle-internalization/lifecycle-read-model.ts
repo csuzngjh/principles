@@ -1,7 +1,7 @@
 /**
  * Lifecycle read model — re-export facade (PRI-56).
  *
- * All computation lives in @principles/core/runtime-v2.
+ * All computation lives in @principles/core/runtime.
  * This file re-exports types, the core builder, and provides
  * a backward-compatible path-based wrapper for existing consumers.
  */
@@ -16,18 +16,18 @@ export type {
   RuleLifecycleEvidence,
   PrincipleLifecycleEvidence,
   LifecycleReadModel,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // Re-export core builder (PRI-56)
-export { buildLifecycleReadModel } from '@principles/core/runtime-v2';
+export { buildLifecycleReadModel } from '@principles/core/runtime';
 
 // Re-export adapter interface (PRI-56)
-export type { LifecycleDatasource } from '@principles/core/runtime-v2';
+export type { LifecycleDatasource } from '@principles/core/runtime';
 
 // Re-export filesystem implementation (PRI-56)
 export { FilesystemLifecycleDatasource, LineageSourceRetiredError } from './filesystem-lifecycle-datasource.js';
 
-import { buildLifecycleReadModel } from '@principles/core/runtime-v2';
+import { buildLifecycleReadModel } from '@principles/core/runtime';
 import { FilesystemLifecycleDatasource } from './filesystem-lifecycle-datasource.js';
 
 /**

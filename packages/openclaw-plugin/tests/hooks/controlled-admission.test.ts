@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalAdaptiveMappingSha256 } from '@principles/core/runtime-v2';
+import { canonicalAdaptiveMappingSha256 } from '@principles/core/runtime';
 import type { PluginHookBeforePromptBuildEvent } from '../../src/openclaw-sdk.js';
 import {
   claimControlledAdmission,

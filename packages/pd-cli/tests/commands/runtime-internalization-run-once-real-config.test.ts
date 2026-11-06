@@ -1,7 +1,7 @@
 /**
  * PRI-719 review — real-config composition tests (NO core module mock).
  *
- * The run-once unit suites mock `@principles/core/runtime-v2`, which cannot
+ * The run-once unit suites mock `@principles/core/runtime`, which cannot
  * prove real default-config behavior. These tests drive the REAL resolver
  * chain (resolveRuntimeFromPdConfig → resolveRuntimeConfigForAgent →
  * resolveRuntimeAdapterFromConfig) against real workspaces built from
@@ -31,7 +31,7 @@ import {
   resolveRuntimeConfigForAgent,
   AGENT_NAME_FOR_TASK_KIND,
   type RuntimeConfigError,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { resolveRuntimeFromPdConfig } from '../../src/services/resolve-runtime-from-pd-config.js';
 import { resolveRuntimeAdapterFromConfig } from '../../src/services/runtime-adapter-resolver.js';
 

@@ -60,7 +60,7 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   }),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return {
       initialize: mockInitialize,
@@ -430,7 +430,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'test-double', allowTestDouble: true, json: true });
 
     const DreamerRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.DreamerRunner),
+      await import('@principles/core/runtime').then(m => m.DreamerRunner),
     );
     const lastCall = DreamerRunnerMock.mock.calls[DreamerRunnerMock.mock.calls.length - 1];
     if (lastCall) {
@@ -458,7 +458,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'pi-ai', json: true });
 
     const PiAiMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.PiAiRuntimeAdapter),
+      await import('@principles/core/runtime').then(m => m.PiAiRuntimeAdapter),
     );
     expect(PiAiMock).toHaveBeenCalled();
   });
@@ -556,7 +556,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'philosopher', runtime: 'test-double', allowTestDouble: true, json: true });
 
     const PhilosopherRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.PhilosopherRunner),
+      await import('@principles/core/runtime').then(m => m.PhilosopherRunner),
     );
     expect(PhilosopherRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-phil-001');
@@ -787,7 +787,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, timeoutMs: 180_000, json: true });
 
     const DreamerRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.DreamerRunner),
+      await import('@principles/core/runtime').then(m => m.DreamerRunner),
     );
     const lastCall = DreamerRunnerMock.mock.calls[DreamerRunnerMock.mock.calls.length - 1];
     if (lastCall) {
@@ -820,7 +820,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
 
     const DreamerRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.DreamerRunner),
+      await import('@principles/core/runtime').then(m => m.DreamerRunner),
     );
     const lastCall = DreamerRunnerMock.mock.calls[DreamerRunnerMock.mock.calls.length - 1];
     if (lastCall) {
@@ -837,7 +837,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     // timeout (mocked here to 600_000 — the local-llamacpp lab shape). Without
     // the PRI-670 fix the runner deadline stayed hardcoded at 300s and the
     // profile value only reached the adapter as a per-request timeout.
-    const coreModule = await import('@principles/core/runtime-v2');
+    const coreModule = await import('@principles/core/runtime');
     vi.mocked(coreModule.resolveRuntimeConfigForAgent).mockReturnValue({
       runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
       apiKeyEnv: 'TEST_API_KEY', timeoutMs: 600_000, agentId: 'main',
@@ -879,7 +879,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('PRI-670: --timeout-ms still wins over the profile timeoutMs', async () => {
-    const coreModule = await import('@principles/core/runtime-v2');
+    const coreModule = await import('@principles/core/runtime');
     vi.mocked(coreModule.resolveRuntimeConfigForAgent).mockReturnValue({
       runtimeKind: 'pi-ai', provider: 'test-provider', model: 'test-model',
       apiKeyEnv: 'TEST_API_KEY', timeoutMs: 600_000, agentId: 'main',
@@ -977,7 +977,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'config', timeoutMs: 240_000, json: true });
 
     const PiAiMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.PiAiRuntimeAdapter),
+      await import('@principles/core/runtime').then(m => m.PiAiRuntimeAdapter),
     );
     const lastCall = PiAiMock.mock.calls[PiAiMock.mock.calls.length - 1];
     if (lastCall) {
@@ -1017,7 +1017,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'scribe', runtime: 'test-double', allowTestDouble: true, json: true });
 
     const ScribeRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.ScribeRunner),
+      await import('@principles/core/runtime').then(m => m.ScribeRunner),
     );
     expect(ScribeRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-scribe-001');
@@ -1033,7 +1033,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     // Inspect the actual run-once test-double payload builder through the
     // adapter constructor, then use the real strict Scribe parser/validator.
     const testDouble = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.TestDoubleRuntimeAdapter),
+      await import('@principles/core/runtime').then(m => m.TestDoubleRuntimeAdapter),
     );
     const adapterArgs: unknown = testDouble.mock.calls.at(-1)?.[0];
     const onStartRun: unknown = adapterArgs && typeof adapterArgs === 'object' ? Reflect.get(adapterArgs, 'onStartRun') : undefined;
@@ -1044,7 +1044,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     Reflect.apply(onStartRun, undefined, [{ inputPayload: JSON.stringify({ sourcePhilosopherArtifactId: 'pi-art-resolved-philosopher' }) }]);
     const wrappedOutput: unknown = Reflect.apply(onFetchOutput, undefined, ['run-scribe-001']);
     const payload: unknown = wrappedOutput && typeof wrappedOutput === 'object' ? Reflect.get(wrappedOutput, 'payload') : undefined;
-    const actualCore = await vi.importActual<typeof import('@principles/core/runtime-v2')>('@principles/core/runtime-v2');
+    const actualCore = await vi.importActual<typeof import('@principles/core/runtime')>('@principles/core/runtime');
     const strictValidator = new actualCore.DefaultScribeValidator({ requireRuleCodeContracts: true });
     expect(payload).toMatchObject({
       sourcePhilosopherArtifactId: 'pi-art-resolved-philosopher',
@@ -1148,7 +1148,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true, json: true });
 
     const ArtificerRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.ArtificerRunner),
+      await import('@principles/core/runtime').then(m => m.ArtificerRunner),
     );
     expect(ArtificerRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-artificer-001');
@@ -1281,7 +1281,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'evaluator', runtime: 'test-double', allowTestDouble: true, json: true });
 
     const EvaluatorRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.EvaluatorRunner),
+      await import('@principles/core/runtime').then(m => m.EvaluatorRunner),
     );
     expect(EvaluatorRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-evaluator-001');
@@ -1307,7 +1307,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     // cli-5: refusal must not lease/advance any task.
     expect(mockWakeOnce).not.toHaveBeenCalled();
     const EvaluatorRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.EvaluatorRunner),
+      await import('@principles/core/runtime').then(m => m.EvaluatorRunner),
     );
     expect(EvaluatorRunnerMock).not.toHaveBeenCalled();
 
@@ -1399,7 +1399,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'rollout_reviewer', runtime: 'test-double', allowTestDouble: true, json: true });
 
     const RolloutReviewerRunnerMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.RolloutReviewerRunner),
+      await import('@principles/core/runtime').then(m => m.RolloutReviewerRunner),
     );
     expect(RolloutReviewerRunnerMock).toHaveBeenCalled();
     expect(mockRun).toHaveBeenCalledWith('task-rollout-reviewer-001');

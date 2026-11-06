@@ -15,7 +15,7 @@ import { scanRetiredContractSymbols } from '../src/legacy-rule-contract-symbols.
  * different hosts reach different governance decisions. This test pins the
  * host copy to the exact retired-symbol contract the core scanner enforces
  * (same corpus as
- * packages/principles-core/src/runtime-v2/internalization/__tests__/legacy-rule-contract-scanner.test.ts).
+ * packages/principles-core/src/runtime/internalization/__tests__/legacy-rule-contract-scanner.test.ts).
  * No production cross-package import is introduced.
  */
 

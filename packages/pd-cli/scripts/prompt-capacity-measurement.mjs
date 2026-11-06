@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   PROMPT_BUDGET_BASE_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
@@ -34,13 +34,12 @@ import {
   SqliteConnection,
   SqliteActivationStateStore,
   getDefaultPdConfig,
-  getPromptModelCatalog,
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
   trimToBudget,
   renderPrinciplesToDirectives,
   appendEventLogLine,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
@@ -105,7 +104,7 @@ function countOversizedCandidates(principles) {
   // Selector diagnostics are bounded and may stop scanning after a FIFO
   // prefix fills. Measure each candidate alone for a corpus-wide count.
   return principles.filter((principle) =>
-    trimToBudget([principle], RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml).oversizedActivationIds.includes(principle.activationId),
+    trimToBudget([principle], RUNTIME_PRINCIPLE_BUDGET, escapeXml).oversizedActivationIds.includes(principle.activationId),
   ).length;
 }
 
@@ -116,7 +115,7 @@ async function listRouteScenario(mix, selfReport, rounds) {
   const results = { route: 'list', selfReport, candidates: principles.length, aborted, avgInjected: 0, avgUsedChars: 0, avgFullRenderChars: 0, oversized: 0, policy: 'fair_rotation_v1', roundKeySource: 'controlled_simulation' };
   let injectedSum = 0, usedSum = 0, fullSum = 0;
   for (let k = 0; k < rounds; k += 1) {
-    const trimmed = trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, k % Math.max(principles.length, 1));
+    const trimmed = trimToBudget(principles, RUNTIME_PRINCIPLE_BUDGET, escapeXml, k % Math.max(principles.length, 1));
     const injected = principles.filter((p) => trimmed.injectedIds.has(p.principleId));
     const full = renderPrinciplesToDirectives(injected, trimmed.injectedIds, { escapeFn: escapeXml, selfReportInstruction: selfReport });
     injectedSum += injected.length;
@@ -136,7 +135,7 @@ async function listRouteFifoDegraded(mix) {
   const dir = makeWorkspace({});
   seedCandidates(dir, mix);
   const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
-  const trimmed = trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, undefined);
+  const trimmed = trimToBudget(principles, RUNTIME_PRINCIPLE_BUDGET, escapeXml, undefined);
   fs.rmSync(dir, { recursive: true, force: true });
   return {
     route: 'list-fifo',
@@ -178,7 +177,7 @@ async function sharedPathWithEvents(mix) {
   const runtime = createProductionHostRuntime({
     hostKind: 'codex',
     events: {
-      recordRuntimeV2ActivationsInjected: (data) => {
+      recordRuntimeActivationsInjected: (data) => {
         events.push(data);
         appendEventLogLine(path.join(dir, '.state'), {
           ts: new Date().toISOString(),
@@ -226,7 +225,7 @@ async function budgetCandidateReplay() {
   const rounds = 40;
   let listSum = 0, sharedRotationSum = 0, sharedFifoSum = 0;
   for (let k = 0; k < rounds; k += 1) {
-    const t = trimToBudget(candidates, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, k % candidates.length);
+    const t = trimToBudget(candidates, RUNTIME_PRINCIPLE_BUDGET, escapeXml, k % candidates.length);
     listSum += [...t.injectedIds].length;
     const shared = await buildActivePrinciplePromptContext({ workspaceDir: replayWorkspace, roundKey: k });
     sharedRotationSum += shared.principleIds.length;
@@ -290,7 +289,7 @@ async function budgetBeforeAfterReplay() {
   // Historical baseline (pre-recalibration v1 base = 2000). Deliberately a
   // literal: the BEFORE value is a fixed past fact, not a live policy value.
   const beforeChars = 2000;
-  const afterChars = RUNTIME_V2_PRINCIPLE_BUDGET;
+  const afterChars = RUNTIME_PRINCIPLE_BUDGET;
   const result = {
     scenario: 'same 16 persisted candidates (14 × 60 chars, 2 × 1200 chars), 40 forced round keys, both routes via the REAL production serializers',
     beforeChars,
@@ -379,7 +378,7 @@ async function modelAwareSharedDispatchEvidence() {
   const runtime = createProductionHostRuntime({
     hostKind: 'codex',
     events: {
-      recordRuntimeV2ActivationsInjected: (data) => { events.push(data); },
+      recordRuntimeActivationsInjected: (data) => { events.push(data); },
       recordToolCall: () => { /* not exercised by the prompt route */ },
     },
   });
@@ -451,7 +450,7 @@ async function main() {
   fs.rmSync(sanityWs, { recursive: true, force: true });
   const payload = {
     generatedAt: new Date().toISOString(),
-    budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+    budget: RUNTIME_PRINCIPLE_BUDGET,
     unit: 'utf16_code_units (String.prototype.length — NOT model tokens)',
     pdTokenCost: null,
     pdTokenCostReason: 'no tokenizer/model binding held by this measurement; whole-request usage cannot be attributed to PD output (SPEC §6) — recorded as null, never approximated by chars',
@@ -459,7 +458,7 @@ async function main() {
     scenarios,
     sharedPathWithEvents: withEvents,
     budgetCandidateReplay: replay,
-    decision: `defaults unchanged: both routes keep their existing ${RUNTIME_V2_PRINCIPLE_BUDGET} budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)`,
+    decision: `defaults unchanged: both routes keep their existing ${RUNTIME_PRINCIPLE_BUDGET} budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)`,
   };
   fs.mkdirSync(path.dirname(OUT_JSON), { recursive: true });
   fs.writeFileSync(OUT_JSON, JSON.stringify(payload, null, 2), 'utf8');
@@ -469,7 +468,7 @@ async function main() {
   lines.push('');
   lines.push(`生成时间：${payload.generatedAt}　测量入口：\`packages/pd-cli/scripts/prompt-capacity-measurement.mjs\`（可复现；合成样本 + 临时受控工作区 + 真实生产构建器）。`);
   lines.push('');
-  lines.push(`预算 = ${RUNTIME_V2_PRINCIPLE_BUDGET} UTF-16 字符（\`String.prototype.length\`），**不是模型 token**。PD token 成本 = null（无 tokenizer/模型绑定；整请求 usage 不可归属为 PD 输出）。`);
+  lines.push(`预算 = ${RUNTIME_PRINCIPLE_BUDGET} UTF-16 字符（\`String.prototype.length\`），**不是模型 token**。PD token 成本 = null（无 tokenizer/模型绑定；整请求 usage 不可归属为 PD 输出）。`);
   lines.push('');
   lines.push('## 场景对照（40 轮）');
   lines.push('');
@@ -506,7 +505,7 @@ async function main() {
   lines.push('```');
   lines.push('');
   lines.push('结论（本任务固定决策，未发起迁移确认）：');
-  lines.push(`- 保持两条路由各自的 ${RUNTIME_V2_PRINCIPLE_BUDGET} 计费口径、serializer 与选择器不变。`);
+  lines.push(`- 保持两条路由各自的 ${RUNTIME_PRINCIPLE_BUDGET} 计费口径、serializer 与选择器不变。`);
   lines.push(`- 受控模拟中完整渲染口径平均注入 ${replay.sharedForcedRotationAvgInjected} 条，列表口径平均 ${replay.listRouteAvgInjected} 条；两条路使用相同 16 个持久化候选，forced round keys 是模拟输入，不代表真实用户轮次。`);
   lines.push('- 模板收益：共享口径把包装/脚注计入预算，计量更诚实，但等价于隐性降预算；回退成本：路由口径迁移影响所有已激活原则的装入性判定，需要独立迁移任务与真实行为数据。');
   lines.push('- 未验证行为改善：本报告只有注入/字符事实；模型遵守率、历史真实注入率、最佳预算均未知（unknown），不得以“平均选中更多/更少”当作行为改善。');
@@ -528,7 +527,7 @@ async function main() {
       formula: `budgetChars = min(${PROMPT_BUDGET_MAX_CHARS}, max(${PROMPT_BUDGET_MIN_CHARS}, floor(${PROMPT_BUDGET_BASE_CHARS} * W / ${PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS})))`,
       minBudgetChars: PROMPT_BUDGET_MIN_CHARS,
       maxBudgetChars: PROMPT_BUDGET_MAX_CHARS,
-      fallbackBudgetChars: RUNTIME_V2_PRINCIPLE_BUDGET,
+      fallbackBudgetChars: RUNTIME_PRINCIPLE_BUDGET,
       windowToBudgetSanity: {
         '32K': promptBudgetCharsForContextWindow(32_000),
         '64K': promptBudgetCharsForContextWindow(64_000),
@@ -553,7 +552,7 @@ async function main() {
   ma.push('');
   ma.push(`生成时间：${maPayload.generatedAt}　测量入口：\`packages/pd-cli/scripts/prompt-capacity-measurement.mjs\`（真实生产构建器 + 受控临时工作区）。`);
   ma.push('');
-  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 ${promptBudgetCharsForContextWindow(1_000_000)}，不假装恰好等于上限。`);
+  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 ${promptBudgetCharsForContextWindow(1_000_000)}，不假装恰好等于上限。`);
   ma.push('');
   ma.push('## 容量档位 × 两路由对照');
   ma.push('');
@@ -564,7 +563,7 @@ async function main() {
   }
   ma.push('');
   ma.push('要点：');
-  ma.push(`- 未知容量档位如实回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符（\`legacy_fallback\` / \`unknown\` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。`);
+  ma.push(`- 未知容量档位如实回退 ${RUNTIME_PRINCIPLE_BUDGET} 字符（\`legacy_fallback\` / \`unknown\` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。`);
   ma.push(`- 1M 档位预算按公式精确为 ${promptBudgetCharsForContextWindow(1_000_000)} 字符（≥${Math.ceil(PROMPT_BUDGET_MAX_CHARS * PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS / PROMPT_BUDGET_BASE_CHARS)} token 才触顶 ${PROMPT_BUDGET_MAX_CHARS}）——上限是目标边界，不是必须达到的固定值。`);
   ma.push('- 32K 档位（=下限 1250）经真实生产构建器验证：共享路由在自报开/关两种状态下均至少完整注入一条最小有效原则（v0.1 的 500 下限在该档位注入 0 条，已修复并以回归测试钉住）。');
   ma.push('- 超长排除/截断语义在各档位下与既有选择器一致（同一 `trimToBudget` 与共享渲染路径，只是预算数值变化）。');

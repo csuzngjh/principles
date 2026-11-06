@@ -17,7 +17,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { canonicalAdaptiveMappingSha256 } from '@principles/core/runtime-v2';
+import { canonicalAdaptiveMappingSha256 } from '@principles/core/runtime';
 import {
   createExperimentLedger,
   createRunIdentity,

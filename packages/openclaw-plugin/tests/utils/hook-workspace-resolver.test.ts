@@ -9,7 +9,7 @@ import {
   resolveToolHookWorkspaceDirSafe,
   resolveCommandWorkspaceDir,
   resolvePluginCommandWorkspaceDir,
-  resolveWorkspaceDirForRuntimeV2,
+  resolveWorkspaceDirForRuntime,
   WorkspaceResolutionError,
 } from '../../src/utils/workspace-resolver.js';
 import type { CanonicalWorkspaceResult, HookWorkspaceResolutionResult } from '../../src/utils/workspace-resolver.js';
@@ -526,27 +526,27 @@ describe('resolvePluginCommandWorkspaceDir — Plugin Command Resolution', () =>
   });
 });
 
-describe('resolveWorkspaceDirForRuntimeV2 — Runtime V2 Resolution', () => {
+describe('resolveWorkspaceDirForRuntime — Runtime V2 Resolution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ensureDir(validWorkspace);
   });
 
   it('returns normalized workspaceDir when valid', () => {
-    const result = resolveWorkspaceDirForRuntimeV2(
+    const result = resolveWorkspaceDirForRuntime(
       { workspaceDir: validWorkspace },
       undefined,
-      'runtime-v2-test',
+      'runtime-test',
     );
     expect(result).toBe(path.resolve(validWorkspace));
   });
 
   it('throws WorkspaceResolutionError when workspaceDir is empty', () => {
-    expect(() => resolveWorkspaceDirForRuntimeV2({ workspaceDir: '' }, undefined, 'test'))
+    expect(() => resolveWorkspaceDirForRuntime({ workspaceDir: '' }, undefined, 'test'))
       .toThrow(WorkspaceResolutionError);
     
     try {
-      resolveWorkspaceDirForRuntimeV2({ workspaceDir: '' }, undefined, 'test');
+      resolveWorkspaceDirForRuntime({ workspaceDir: '' }, undefined, 'test');
     } catch (e) {
       expect((e as WorkspaceResolutionError).reason).toBe('workspace_dir_missing');
       expect((e as WorkspaceResolutionError).nextAction).toContain('PD_WORKSPACE_DIR');
@@ -554,16 +554,16 @@ describe('resolveWorkspaceDirForRuntimeV2 — Runtime V2 Resolution', () => {
   });
 
   it('throws WorkspaceResolutionError when workspaceDir is undefined', () => {
-    expect(() => resolveWorkspaceDirForRuntimeV2({}, undefined, 'test'))
+    expect(() => resolveWorkspaceDirForRuntime({}, undefined, 'test'))
       .toThrow(WorkspaceResolutionError);
   });
 
   it('throws WorkspaceResolutionError when workspaceDir is home directory', () => {
-    expect(() => resolveWorkspaceDirForRuntimeV2({ workspaceDir: homeDir }, undefined, 'test'))
+    expect(() => resolveWorkspaceDirForRuntime({ workspaceDir: homeDir }, undefined, 'test'))
       .toThrow(WorkspaceResolutionError);
     
     try {
-      resolveWorkspaceDirForRuntimeV2({ workspaceDir: homeDir }, undefined, 'test');
+      resolveWorkspaceDirForRuntime({ workspaceDir: homeDir }, undefined, 'test');
     } catch (e) {
       expect((e as WorkspaceResolutionError).reason).toBe('workspace_dir_invalid');
     }

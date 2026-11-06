@@ -26,7 +26,7 @@ import {
   resolveAgentRuntimeBinding,
   INTERNAL_AGENT_NAMES,
   VALID_PROFILE_TYPES,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   EffectivePdConfig,
   PdConfigValidationResult,
@@ -35,7 +35,8 @@ import type {
   AgentRuntimeReadinessResult,
   RuntimeProfile,
   FeatureFlagsResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import { errorMessage } from '../utils/response.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -265,7 +266,7 @@ export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
   try {
     raw = fs.readFileSync(configPath, 'utf8');
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     const defaults = computeEffectivePdConfig(null);
     return {
       ok: false,
@@ -282,7 +283,7 @@ export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
   try {
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     const defaults = computeEffectivePdConfig(null);
     return {
       ok: false,
@@ -710,10 +711,10 @@ export function updateDefaultRuntime(
 // ── Principles Output Language (PRI-332 P1-1) ─────────────────────────────
 
 // PRI-611: the output-language contract derives from the canonical core
-// authority (runtime-v2/language-directive.ts). Do NOT re-declare the value
+// authority (runtime/language-directive.ts). Do NOT re-declare the value
 // list or default here — a drift guard test fails on local re-declaration.
-import { VALID_OUTPUT_LANGUAGES, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
-import type { OutputLanguage } from '@principles/core/runtime-v2';
+import { VALID_OUTPUT_LANGUAGES, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime';
+import type { OutputLanguage } from '@principles/core/runtime';
 
 function isValidOutputLanguage(value: unknown): value is OutputLanguage {
   return typeof value === 'string' && (VALID_OUTPUT_LANGUAGES as readonly string[]).includes(value);
@@ -751,7 +752,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
   try {
     raw = fs.readFileSync(configPath, 'utf8');
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
   }
 
@@ -759,7 +760,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
   try {
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
   }
 
@@ -978,14 +979,14 @@ export function updatePrinciplesOutputLanguage(
     try {
       rawContent = fs.readFileSync(configPath, 'utf8');
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config for update: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
     }
     let rawParsed: unknown;
     try {
       rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error during update: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
     }
     if (isRecord(rawParsed)) {
@@ -1018,7 +1019,7 @@ export function updatePrinciplesOutputLanguage(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, error: 'write_error', statusCode: 500, message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1120,7 +1121,7 @@ export function updateFeatureFlag(
     try {
       rawContent = fs.readFileSync(configPath, 'utf8');
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, statusCode: 500, error: 'read_error', message: `Failed to read config for update: ${message}` };
     }
     let rawParsed: unknown;
@@ -1129,7 +1130,7 @@ export function updateFeatureFlag(
     } catch (err) {
       // YAML syntax error = malformed config (409, not 500). Consistent with
       // updateAgentBinding which treats loadPdConfig failures as conflict.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, statusCode: 409, error: 'conflict', message: `Cannot update feature flag: existing .pd/config.yaml is malformed. YAML parse error: ${message}` };
     }
     if (isRecord(rawParsed)) {
@@ -1235,7 +1236,7 @@ export function updateFeatureFlag(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1368,6 +1369,11 @@ function extractProfileFields(
   return {};
 }
 
+// Keys that resolve through the object prototype chain instead of the profile
+// map: assigning `profilesMap['__proto__']` would replace the map's prototype
+// rather than add a profile.
+const RESERVED_PROFILE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Create a new runtime profile in .pd/config.yaml.
  *
@@ -1389,6 +1395,9 @@ export function createRuntimeProfile(
   // 1. Validate profileId
   if (typeof profileId !== 'string' || profileId.length === 0) {
     return { ok: false, statusCode: 400, error: 'bad_request', message: 'profileId must be a non-empty string' };
+  }
+  if (RESERVED_PROFILE_KEYS.has(profileId)) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: `profileId '${profileId}' is reserved and cannot be used` };
   }
 
   // 2. Validate profile structure (type field)
@@ -1439,10 +1448,16 @@ export function createRuntimeProfile(
   // 6. Read raw config to preserve unknown sections, add new profile
   const configPath = getPdConfigPath(workspaceDir);
   const rawConfig = readRawConfig(configPath);
-  const profilesMap = isRecord(rawConfig.runtimeProfiles)
-    ? { ...rawConfig.runtimeProfiles }
-    : { ...effective.config.runtimeProfiles };
-  profilesMap[profileId] = profileRecord;
+  const profilesBase = isRecord(rawConfig.runtimeProfiles)
+    ? rawConfig.runtimeProfiles
+    : effective.config.runtimeProfiles;
+  // PRI-1136: the profile id comes from the request body, so it must never
+  // reach a property-write sink. Object.fromEntries builds the map without
+  // naming a property per key; last-wins ordering matches the old assignment.
+  const profilesMap: Record<string, unknown> = Object.fromEntries([
+    ...Object.entries(profilesBase),
+    [profileId, profileRecord],
+  ]);
   rawConfig.runtimeProfiles = profilesMap;
 
   // 7. Validate the full updated config (catches missing required fields etc.)
@@ -1461,7 +1476,7 @@ export function createRuntimeProfile(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1592,7 +1607,7 @@ export function updateRuntimeProfile(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1715,7 +1730,7 @@ export function deleteRuntimeProfile(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 

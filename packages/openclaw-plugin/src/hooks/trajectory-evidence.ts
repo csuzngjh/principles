@@ -13,8 +13,8 @@
  */
 
 import { sanitizeAssistantText } from './message-sanitize.js';
-import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
-import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime-v2';
+import type { PainEvidenceEntry } from '@principles/core/runtime';
+import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 
 /**

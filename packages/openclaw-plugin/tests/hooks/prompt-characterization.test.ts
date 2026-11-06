@@ -81,7 +81,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
     config: { get: vi.fn() },
     eventLog: {
       recordPainSignal: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordHeartbeatDiagnosis: vi.fn(),
       recordTrajectoryObservabilityFailure: vi.fn(),
     },
@@ -400,7 +400,7 @@ describe('Minimal trigger skips project context', () => {
       },
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
       config: { get: vi.fn() },
-      eventLog: { recordRuntimeV2ActivationsInjected: vi.fn() },
+      eventLog: { recordRuntimeActivationsInjected: vi.fn() },
       evolutionReducer: {
         getActivePrinciples: vi.fn().mockReturnValue([]),
         getProbationPrinciples: vi.fn().mockReturnValue([]),
@@ -540,7 +540,7 @@ describe('Size guard: never exceeds the derived total ceiling (11000)', () => {
       },
       eventLog: {
         recordPainSignal: vi.fn(),
-        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordRuntimeActivationsInjected: vi.fn(),
         recordHeartbeatDiagnosis: vi.fn(),
         recordTrajectoryObservabilityFailure,
       },

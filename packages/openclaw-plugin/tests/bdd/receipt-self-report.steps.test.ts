@@ -13,7 +13,7 @@ import {
   SqliteConnection,
   getDefaultPdConfig,
   renderPrinciplesToDirectives,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   recordSelfReportFromText,
   clearPrincipleApplicationLedgerCache,

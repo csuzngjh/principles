@@ -38,7 +38,7 @@ import {
 import { KeywordOptimizationService } from '../../src/service/keyword-optimization-service.js';
 import { createLiveSignalKeywordStore } from '../../src/core/signal-keyword-store.js';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
-import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
+import type { CorrectionObserverResult } from '@principles/core/runtime';
 
 const LEARNED_TERM = '先确认再改';
 const OWNER_TERM = '必须按我说的做';

@@ -661,11 +661,11 @@ describe('CLI command wiring (pd console open)', () => {
     fs.writeFileSync(path.join(nm, 'principles-disciple', 'dist', 'governance-audit.js'), 'export {};\n');
     // @principles/core: server imports TWO subpaths
     //   @principles/core/principle-tree-ledger → dist/principle-tree-ledger.js
-    //   @principles/core/runtime-v2            → dist/runtime-v2/index.js
-    fs.mkdirSync(path.join(nm, '@principles', 'core', 'dist', 'runtime-v2'), { recursive: true });
+    //   @principles/core/runtime            → dist/runtime/index.js
+    fs.mkdirSync(path.join(nm, '@principles', 'core', 'dist', 'runtime'), { recursive: true });
     fs.writeFileSync(path.join(nm, '@principles', 'core', 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
     fs.writeFileSync(path.join(nm, '@principles', 'core', 'dist', 'principle-tree-ledger.js'), 'export {};\n');
-    fs.writeFileSync(path.join(nm, '@principles', 'core', 'dist', 'runtime-v2', 'index.js'), 'export {};\n');
+    fs.writeFileSync(path.join(nm, '@principles', 'core', 'dist', 'runtime', 'index.js'), 'export {};\n');
     // @principles/host-runtime: uses root entry dist/index.js
     fs.mkdirSync(path.join(nm, '@principles', 'host-runtime', 'dist'), { recursive: true });
     fs.writeFileSync(path.join(nm, '@principles', 'host-runtime', 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0' }, null, 2));
@@ -1275,11 +1275,11 @@ describe('checkConsoleRuntimeDependencies', () => {
   it('returns undefined when all deps are intact', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
-      // @principles/core: entries are dist/principle-tree-ledger.js + dist/runtime-v2/index.js
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2'), { recursive: true });
+      // @principles/core: entries are dist/principle-tree-ledger.js + dist/runtime/index.js
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger.js'), '');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime', 'index.js'), '');
       // @principles/host-runtime: entry is dist/index.js
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'host-runtime', 'package.json'), '{}');
@@ -1304,10 +1304,10 @@ describe('checkConsoleRuntimeDependencies', () => {
     try {
       // Create all deps intact except host-runtime (no package.json)
       // core
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2'), { recursive: true });
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger.js'), '');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime', 'index.js'), '');
       // install-layout
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
@@ -1332,10 +1332,10 @@ describe('checkConsoleRuntimeDependencies', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
       // core intact
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2'), { recursive: true });
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger.js'), '');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime', 'index.js'), '');
       // install-layout intact
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
@@ -1360,10 +1360,10 @@ describe('checkConsoleRuntimeDependencies', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'console-integ-'));
     try {
       // Create core, install-layout, principles-disciple; leave host-runtime missing
-      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2'), { recursive: true });
+      fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'principle-tree-ledger.js'), '');
-      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime-v2', 'index.js'), '');
+      fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'core', 'dist', 'runtime', 'index.js'), '');
       fs.mkdirSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist'), { recursive: true });
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'package.json'), '{}');
       fs.writeFileSync(path.join(tmp, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'), '');

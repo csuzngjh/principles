@@ -8,7 +8,7 @@
 // PROVE so a report can state the honest ceiling instead of implying more.
 //
 // Naming aligns with the PRODUCTION contract
-// (principles-core/runtime-v2/types/intervention-evidence-contract.ts:
+// (principles-core/runtime/types/intervention-evidence-contract.ts:
 // prepared/submitted/host_accepted/context_present/runtime_loaded —
 // 'prepared' there covers this module's CONFIGURED+SELECTED planning states);
 // the levels are UPPER-CASE here to match the v0.9 SPEC tables verbatim.

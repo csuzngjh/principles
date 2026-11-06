@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
 import { handleRuntimeCompatibilityScan } from '../../src/commands/runtime-compatibility-scan.js';
 
 const LEGACY_CODE = `

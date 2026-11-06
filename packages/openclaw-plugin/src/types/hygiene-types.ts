@@ -1,8 +1,8 @@
 export type {
   PersistenceAction,
   HygieneStats,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export {
   createEmptyHygieneStats,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';

@@ -36,11 +36,11 @@ vi.mock('../../src/commands/build-trajectory-evidence.js', () => ({
   }),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   // PRI-642 review blocker 1: the CLI now evaluates ingress semantics via
   // the REAL core evaluatePainIngress (the shared authority) — only the
   // service/IO classes are mocked.
-  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  const actual = await importOriginal<typeof import('@principles/core/runtime')>();
   return {
     ...actual,
     PainToPrincipleService: vi.fn().mockImplementation(function() {
@@ -94,8 +94,8 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';
-import { isBuiltinPiAiProvider, type PainToPrincipleOutput, type PainToPrincipleInput } from '@principles/core/runtime-v2';
-import type { FailureCategory } from '@principles/core/runtime-v2';
+import { isBuiltinPiAiProvider, type PainToPrincipleOutput, type PainToPrincipleInput } from '@principles/core/runtime';
+import type { FailureCategory } from '@principles/core/runtime';
 import { acquireCodexToolFailureEvidenceFromDb, acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ describe('pd pain record', () => {
       failureCategory: 'config_missing' as FailureCategory,
       message: 'API key not found in env',
     });
-    const { isRuntimeConfigError, resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+    const { isRuntimeConfigError, resolveRuntimeConfig } = await import('@principles/core/runtime');
     vi.mocked(isRuntimeConfigError).mockReturnValueOnce(true);
     vi.mocked(resolveRuntimeConfig).mockReturnValueOnce({
       ok: false,
@@ -303,7 +303,7 @@ describe('pd pain record', () => {
       failureCategory: 'config_missing' as FailureCategory,
       message: 'API key not found in env',
     });
-    const { isRuntimeConfigError, resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+    const { isRuntimeConfigError, resolveRuntimeConfig } = await import('@principles/core/runtime');
     vi.mocked(isRuntimeConfigError).mockReturnValueOnce(true);
     vi.mocked(resolveRuntimeConfig).mockReturnValueOnce({
       ok: false,

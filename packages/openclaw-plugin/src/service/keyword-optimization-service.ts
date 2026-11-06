@@ -8,7 +8,7 @@
 
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { SystemLogger } from '../core/system-logger.js';
-import type { CorrectionObserverOutputV1 as CorrectionObserverResult } from '@principles/core/runtime-v2';
+import type { CorrectionObserverOutputV1 as CorrectionObserverResult } from '@principles/core/runtime';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 
@@ -289,4 +289,4 @@ export type TrajectoryHistoryEntry = {
 };
 
 /** Re-export CorrectionObserverPayload for convenience */
-export type { CorrectionObserverPayload } from '@principles/core/runtime-v2';
+export type { CorrectionObserverPayload } from '@principles/core/runtime';

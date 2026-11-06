@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ReceiptsConsoleModel } from '../../src/server/models/ReceiptsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../../principles-core/tests/bdd/support/repo-root.js';
 

@@ -108,7 +108,7 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return {
       initialize: mockInitialize,

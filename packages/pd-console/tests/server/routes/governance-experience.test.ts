@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { GovernanceExperienceSnapshotSchema } from '@principles/core/runtime-v2';
+import { GovernanceExperienceSnapshotSchema } from '@principles/core/runtime';
 import {
   handleGovernanceExperienceRoute,
   resolveOwnerConfigSnapshot,

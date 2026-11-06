@@ -15,7 +15,7 @@ import {
   type PromptBudgetFallbackReason,
   type PromptBudgetResolution,
   type PromptBudgetTierFit,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { computePromptSingleItemFit } from './prompt-activation-deliverability.js';
 import {

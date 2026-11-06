@@ -23,7 +23,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { isValidIntentContractV1 } from '../src/runtime-v2/internalization/intent-contract.js';
+import { isValidIntentContractV1 } from '../src/runtime/internalization/intent-contract.js';
 import { resolveRepoRoot } from './bdd/support/repo-root.js';
 
 // ── Shape rule ─────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ const ALLOWED_CHANNELS = ['prompt', 'code_tool_hook'];
 const FORBIDDEN_SPLIT_AXES = ['session', 'session_id', 'sessionId'];
 /**
  * The IntentContractV1 field names (the authority is
- * `packages/principles-core/src/runtime-v2/internalization/intent-contract.ts`).
+ * `packages/principles-core/src/runtime/internalization/intent-contract.ts`).
  * Spelling them once here keeps the fork check honest — an earlier draft listed
  * `validationExpected`, which does not exist, so the check silently passed.
  */

@@ -22,10 +22,10 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
-import { SqliteConnection, SchemaConformanceReadModel } from '@principles/core/runtime-v2';
-import { getDefaultPdConfig, validatePdConfig } from '@principles/core/runtime-v2';
+import { SqliteConnection, SchemaConformanceReadModel } from '@principles/core/runtime';
+import { getDefaultPdConfig, validatePdConfig } from '@principles/core/runtime';
 import { initTrajectorySchema } from 'principles-disciple';
-import { TRAJECTORY_TABLES } from '@principles/core/runtime-v2';
+import { TRAJECTORY_TABLES } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitFlagConflict, emitError } from '../services/cli-output.js';
 

@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
+import { errorMessage } from './response.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,7 +149,7 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start', extraArgs: reado
     });
     return { ok: true };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errorMessage(e);
     return { ok: false, error: `\`openclaw gateway ${subcommand}\` failed: ${msg}` };
   }
 }

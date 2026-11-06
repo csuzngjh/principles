@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { ingestGovernanceObservations, reconcileGovernanceContinuation } from '@principles/host-runtime';
 import { processHookInvocation } from '../src/pd-hook.js';
 import { parseOwnerStatementPrefix, MAX_OWNER_STATEMENT_CHARS, recordExplicitOwnerStatement } from '../src/ingestion/explicit-owner-statement.js';

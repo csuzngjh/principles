@@ -49,7 +49,7 @@ import {
   type OwnerEvidenceAttachOutcome,
   type OwnerEvidenceResumeOutcome,
   type BehaviorEvidencePort,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { createWorkspaceBehaviorEvidencePort } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
