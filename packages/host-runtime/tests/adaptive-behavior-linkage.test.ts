@@ -641,7 +641,10 @@ describe('read-only and privacy contracts', () => {
   });
 });
 
-describe('coverage propagation — session row truncation is not a complete read', () => {
+// Each case builds a 200-row-per-table fixture to place the target at row 201;
+// the slowest case measures ~4.8s against vitest's 5s default and timed out once
+// when the full suite competed for CPU. Explicit budget, unchanged assertions.
+describe('coverage propagation — session row truncation is not a complete read', { timeout: 15000 }, () => {
   const SAME_TS = '2026-11-05T09:03:00.000Z';
 
   it('reports incomplete when the target outcome sits beyond the per-session row cap', () => {
