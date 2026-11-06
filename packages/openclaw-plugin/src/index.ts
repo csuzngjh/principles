@@ -24,6 +24,7 @@ export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild, beginAdaptivePromptInvocation } from './hooks/prompt.js';
+import { createAdaptiveHookRegistrationRecorder, setAdaptiveHookSet } from './core/adaptive-config-identity.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
@@ -347,6 +348,11 @@ const plugin = {
       api.logger.warn(`[PD:surface-guard] ${warning}`);
     }
 
+    // PRI-1110: record the hook set that is actually passed to OpenClaw. The
+    // AA config identity fingerprint is derived from this, never from a
+    // declared/static list.
+    const hookRegistrations = createAdaptiveHookRegistrationRecorder(api);
+
     // Language fallback must match openclaw.plugin.json configSchema default
     // ("zh") — an 'en' fallback silently served English templates/prompts to
     // every install that never set plugin config language (ERR-075 family).
@@ -416,7 +422,8 @@ const plugin = {
     });
 
     // ── Hook: Prompt Building ──
-    api.on(
+    hookRegistrations.register(
+      'hook:before_prompt_build',
       'before_prompt_build',
       guardHook('hook:before_prompt_build', api.logger, async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_prompt_build');
@@ -517,7 +524,8 @@ const plugin = {
     );
 
     // ── Hook: Security Gate ──
-    api.on(
+    hookRegistrations.register(
+      'hook:before_tool_call',
       'before_tool_call',
       guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void | Promise<PluginHookBeforeToolCallResult | void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_tool_call');
@@ -575,7 +583,8 @@ const plugin = {
     // timeoutMs=10s: OpenClaw has no default timeout for after_tool_call; without
     // this a stuck SQLite write (busy_timeout=5000ms) leaks the handler promise.
     // 10s gives 2x headroom over busy_timeout. fail-open means agent is unaffected.
-    api.on(
+    hookRegistrations.register(
+      'hook:after_tool_call',
       'after_tool_call',
       guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void | Promise<void> => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_tool_call');
@@ -638,7 +647,8 @@ const plugin = {
     // ── Hook: LLM Analysis ──
     // timeoutMs=10s: OpenClaw has no default timeout for llm_output; without
     // this a stuck SQLite write leaks the handler promise. See after_tool_call.
-    api.on(
+    hookRegistrations.register(
+      'hook:llm_output',
       'llm_output',
       guardHook('hook:llm_output', api.logger, (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'llm_output');
@@ -679,7 +689,7 @@ const plugin = {
     );
 
     // ── Hook: Lifecycle ──
-    api.on('before_reset', guardHook('hook:before_reset', api.logger, (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
+    hookRegistrations.register('hook:before_reset', 'before_reset', guardHook('hook:before_reset', api.logger, (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
       const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_reset');
       if (!wsResult.ok) {
         api.logger.error(
@@ -695,7 +705,7 @@ const plugin = {
       return handleBeforeReset(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
     
-    api.on('before_compaction', guardHook('hook:before_compaction', api.logger, (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
+    hookRegistrations.register('hook:before_compaction', 'before_compaction', guardHook('hook:before_compaction', api.logger, (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
       const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_compaction');
       if (!wsResult.ok) {
         api.logger.error(
@@ -711,7 +721,7 @@ const plugin = {
       return handleBeforeCompaction(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
     
-    api.on('after_compaction', guardHook('hook:after_compaction', api.logger, (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
+    hookRegistrations.register('hook:after_compaction', 'after_compaction', guardHook('hook:after_compaction', api.logger, (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
       const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_compaction');
       if (!wsResult.ok) {
         api.logger.error(
@@ -731,7 +741,8 @@ const plugin = {
     // Fallback trajectory collection when llm_output is blocked by
     // missing allowConversationAccess. Not in CONVERSATION_HOOK_NAMES
     // so OpenClaw always delivers it.
-    api.on(
+    hookRegistrations.register(
+      'hook:before_message_write',
       'before_message_write',
       guardHook('hook:before_message_write', api.logger, (event: PluginHookBeforeMessageWriteEvent, ctx: PluginHookAgentContext): void => {
         const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_message_write');
@@ -751,6 +762,10 @@ const plugin = {
         }
       })
     );
+
+    // PRI-1110: freeze the hook set that was actually registered before any
+    // AA invocation can build its config identity snapshot.
+    setAdaptiveHookSet(hookRegistrations.snapshot());
 
     // ── Service Registration (surface-guarded) ──
     // Legacy EvolutionWorker service registration removed (PRI-294 started it
