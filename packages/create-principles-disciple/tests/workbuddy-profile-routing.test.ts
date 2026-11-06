@@ -314,9 +314,11 @@ function seedGovernanceWorkspace(lab: Lab, customize?: (config: GovernanceRawCon
     if (customize) {
       const config = yaml.load(fs.readFileSync(fd, 'utf8')) as GovernanceRawConfig;
       customize(config);
-      // Truncate before rewriting so the handle survives a full replace.
+      // Truncate before rewriting so the handle survives a full replace, and
+      // write explicitly at offset 0: readFileSync(fd) leaves the handle at its
+      // previous end offset, so a position-less write would leave NUL padding.
       fs.ftruncateSync(fd, 0);
-      fs.writeFileSync(fd, yaml.dump(config, { lineWidth: -1, quoteStyle: 'double' }), 'utf8');
+      fs.writeSync(fd, yaml.dump(config, { lineWidth: -1, quoteStyle: 'double' }), 0, 'utf8');
     }
   } finally {
     fs.closeSync(fd);
