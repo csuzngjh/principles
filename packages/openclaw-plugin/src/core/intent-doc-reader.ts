@@ -248,31 +248,31 @@ export function safeReadIntentDoc(
         };
       }
 
-      const raw = fs.readFileSync(fd, 'utf8');
-
-      // PRI-467 review fix (P2): TOCTOU guard — re-check actual byte length
-      // after reading. The file may have grown between the stat and the read,
-      // bypassing the stat.size oversized check. Without this, an oversized
-      // file would enter parse/hash/cache as ok:true.
-      const actualBytes = Buffer.byteLength(raw, 'utf8');
-      if (actualBytes > INTENT_MAX_BYTES) {
+      // Read at most INTENT_MAX_BYTES + 1 bytes. The same descriptor
+      // prevents a path swap; the fixed buffer also prevents concurrent file
+      // growth from turning the size check into an unbounded allocation.
+      const buffer = Buffer.allocUnsafe(INTENT_MAX_BYTES + 1);
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+      const finalStat = fs.fstatSync(fd);
+      if (bytesRead > INTENT_MAX_BYTES || finalStat.size > INTENT_MAX_BYTES) {
         _intentDocCache.delete(cacheKey);
         return {
           ok: false,
           found: true,
           flagEnabled: true,
           reason: 'oversized',
-          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${actualBytes} bytes after read). Reduce content.`,
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${Math.max(stat.size, finalStat.size, bytesRead)} bytes observed). Reduce content.`,
           warnings: [],
         };
       }
+      const raw = buffer.toString('utf8', 0, bytesRead);
 
       const doc = buildDocFromRaw(raw, filePath, new Date(now).toISOString());
 
       // Update cache
       _intentDocCache.set(cacheKey, {
         doc,
-        mtime: stat.mtimeMs,
+        mtime: finalStat.mtimeMs,
         loadedAt: now,
       });
 

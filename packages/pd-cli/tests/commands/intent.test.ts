@@ -11,6 +11,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    fstatSync: vi.fn(actual.fstatSync),
+    readSync: vi.fn(actual.readSync),
+    lstatSync: vi.fn(actual.lstatSync),
+  };
+});
+
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -125,6 +136,39 @@ describe('handleIntentInit', () => {
     expect(jsonOutput.status).toBe('dry_run');
 
     expect(fs.existsSync(getIntentPath())).toBe(false);
+    logSpy.mockRestore();
+  });
+
+  it('reports a filesystem permission error instead of treating the path as absent', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const permissionError = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    const lstatSpy = vi.spyOn(fs, 'lstatSync').mockImplementationOnce(() => {
+      throw permissionError;
+    });
+    process.exitCode = undefined;
+
+    await handleIntentInit({ workspace: workspaceDir, json: true });
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(jsonOutput.status).toBe('read_error');
+    expect(jsonOutput.reason).toBe('permission denied');
+    expect(process.exitCode).toBe(1);
+
+    process.exitCode = undefined;
+    lstatSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('treats a directory at the target path as existing during dry-run', async () => {
+    fs.mkdirSync(getIntentPath(), { recursive: true });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await handleIntentInit({ workspace: workspaceDir, json: true });
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(jsonOutput.status).toBe('skipped');
+    expect(jsonOutput.reason).toBe('file_exists');
+
     logSpy.mockRestore();
   });
 
@@ -282,6 +326,32 @@ describe('handleIntentShow', () => {
     expect(jsonOutput.nextAction).toContain('bytes');
 
     logSpy.mockRestore();
+  });
+
+  it('reads at most 32KB + 1 when the file grows after the initial size check', async () => {
+    writeConfig(true);
+    fs.mkdirSync(path.dirname(getIntentPath()), { recursive: true });
+    fs.writeFileSync(getIntentPath(), 'x'.repeat(33 * 1024), 'utf8');
+
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockReturnValueOnce({
+      size: 0,
+      mtimeMs: Date.now(),
+    } as fs.Stats);
+    const readSpy = vi.spyOn(fs, 'readSync');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await handleIntentShow({ workspace: workspaceDir, json: true });
+
+      const jsonOutput = JSON.parse(logSpy.mock.calls[0][0] as string);
+      expect(jsonOutput.status).toBe('oversized');
+      expect(readSpy.mock.calls[0]?.[3]).toBe(32 * 1024 + 1);
+      expect(fstatSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fstatSpy.mockRestore();
+      readSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it('emits warnings for partial INTENT.md', async () => {

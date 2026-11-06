@@ -85,7 +85,16 @@ function readIntentFileBounded(
     if (stat.size > maxBytes) {
       return { oversized: stat.size };
     }
-    return { raw: fs.readFileSync(fd, 'utf8'), mtimeMs: stat.mtimeMs };
+    // Read at most maxBytes + 1 bytes. The same descriptor prevents a path
+    // swap, while the fixed buffer also prevents concurrent file growth from
+    // turning the size check into an unbounded allocation.
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+    const finalStat = fs.fstatSync(fd);
+    if (bytesRead > maxBytes || finalStat.size > maxBytes) {
+      return { oversized: Math.max(stat.size, finalStat.size, bytesRead) };
+    }
+    return { raw: buffer.toString('utf8', 0, bytesRead), mtimeMs: finalStat.mtimeMs };
   } finally {
     fs.closeSync(fd);
   }

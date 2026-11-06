@@ -35,6 +35,7 @@ describe('pd demo story-a CLI', () => {
     expect(parsed.channelOutcomes).toHaveLength(3);
     expect(parsed.narrative).toBeDefined();
     expect(parsed.isRuntimeExclusive).toBe(true);
+    expect(parsed.isRuntimeV2Exclusive).toBe(true);
   });
 
   it('outputs text mode with stage summary', async () => {

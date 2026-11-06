@@ -43,6 +43,17 @@ function formatChannelOutcome(ch: { channel: string; status: string; failureReas
   return lines.join('\n');
 }
 
+/**
+ * Keep the pre-PRI-1136 JSON field for existing CLI consumers while exposing
+ * the generation-neutral name. The old field is deprecated, not authoritative.
+ */
+function formatJsonOutput<T extends { isRuntimeExclusive: boolean }>(result: T): string {
+  return JSON.stringify({
+    ...result,
+    isRuntimeV2Exclusive: result.isRuntimeExclusive,
+  }, null, 2);
+}
+
 function formatTextOutput(result: Record<string, unknown>): string {
   const lines: string[] = [];
   const status = result.status as string;
@@ -143,7 +154,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       },
     };
     if (opts.json) {
-      console.log(JSON.stringify(errorResult, null, 2));
+      console.log(formatJsonOutput(errorResult));
     } else {
       console.error('Refused: this command would write demo artifacts into an existing PD workspace.');
       console.error(`Target: ${workspaceDir}`);
@@ -172,7 +183,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       },
     };
     if (opts.json) {
-      console.log(JSON.stringify(errorResult, null, 2));
+      console.log(formatJsonOutput(errorResult));
     } else {
       console.error('Error: No channels specified. At least one MVP channel required.');
       console.error('Valid channels: prompt, code_tool_hook, defer_archive');
@@ -202,7 +213,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       },
     };
     if (opts.json) {
-      console.log(JSON.stringify(errorResult, null, 2));
+      console.log(formatJsonOutput(errorResult));
     } else {
       console.error(`Error: Unknown channels: ${parsed.unknowns.join(', ')}`);
       console.error('Valid channels: prompt, code_tool_hook, defer_archive');
@@ -221,7 +232,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
     });
 
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(formatJsonOutput(result));
     } else {
       console.log(formatTextOutput(result as unknown as Record<string, unknown>));
     }

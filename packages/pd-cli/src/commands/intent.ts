@@ -62,7 +62,16 @@ function readIntentFileBounded(
     if (stat.size > maxBytes) {
       return { oversized: stat.size };
     }
-    return { raw: fs.readFileSync(fd, 'utf8'), mtimeMs: stat.mtimeMs };
+    // Read at most maxBytes + 1 bytes. The same descriptor prevents a path
+    // swap, while the fixed buffer also prevents concurrent file growth from
+    // turning the size check into an unbounded allocation.
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+    const finalStat = fs.fstatSync(fd);
+    if (bytesRead > maxBytes || finalStat.size > maxBytes) {
+      return { oversized: Math.max(stat.size, finalStat.size, bytesRead) };
+    }
+    return { raw: buffer.toString('utf8', 0, bytesRead), mtimeMs: finalStat.mtimeMs };
   } finally {
     fs.closeSync(fd);
   }
@@ -246,16 +255,16 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
 
   try {
     if (isDryRun) {
-      // A dry-run still has to report whether the file exists, but a
-      // `existsSync` check here would dominate the create below and let a path
-      // swap slip between check and write. A trial read observes the file
-      // without a check; the template file is tiny.
+      // A dry-run only needs existence metadata; never read the document
+      // contents just to decide whether an exclusive create would succeed.
+      // Treat only ENOENT as absent. Permission, ENOTDIR, and other failures
+      // must remain visible instead of being misreported as a missing file.
       let exists = false;
       try {
-        fs.readFileSync(filePath);
+        fs.lstatSync(filePath);
         exists = true;
-      } catch {
-        exists = false;
+      } catch (err) {
+        if (!isEnoent(err)) throw err;
       }
       if (exists && !opts.force) {
         const output: IntentInitOutput = {

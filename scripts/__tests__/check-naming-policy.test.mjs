@@ -116,6 +116,27 @@ describe('check-naming-policy controlled scan roots (PR #2367 CodeRabbit #3/#4/#
     expect(JSON.parse(result.stdout).inventory['versioned-output-ref']).toBe(0);
   });
 
+  it('scans nested package manifests for stale runtime-v2 export paths', () => {
+    const root = tempScanRoot();
+    const nestedPackage = path.join(root, 'bundled', 'core');
+    fs.mkdirSync(nestedPackage, { recursive: true });
+    fs.writeFileSync(
+      path.join(nestedPackage, 'package.json'),
+      JSON.stringify({
+        name: '@fixture/core',
+        exports: { './runtime-v2': './dist/runtime.js' },
+      }),
+    );
+
+    const result = runRoot(root, '--strict', '--json');
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.inventory['runtime-v2-config']).toBe(1);
+    expect(parsed.findings.some(
+      (finding) => finding.rule === 'runtime-v2-config' && finding.file.endsWith('package.json'),
+    )).toBe(true);
+  });
+
   it('counts a bare ./runtime-v2 directory-entry import (#4) and fails on it', () => {
     const root = tempScanRoot();
     fs.writeFileSync(path.join(root, 'entry.ts'), "export * from './runtime-v2';\n");
@@ -197,12 +218,12 @@ describe('check-naming-policy identifier revival (PRI-1136 review P2)', () => {
     const root = tempScanRoot();
     fs.writeFileSync(
       path.join(root, 'alias.ts'),
-      'export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS = 1; export const RuntimeV2Thing = 2;\n',
+      'export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS = 1; export const RuntimeV2Thing = 2; export const isRuntimeV2Exclusive = true;\n',
     );
     const result = runRoot(root, '--strict', '--json');
     expect(result.status).toBe(1);
     const parsed = JSON.parse(result.stdout);
-    expect(parsed.inventory['runtime-v2-identifier']).toBe(2);
+    expect(parsed.inventory['runtime-v2-identifier']).toBe(3);
     const identifierFindings = parsed.findings.filter((finding) => finding.rule === 'runtime-v2-identifier');
     expect(identifierFindings).toHaveLength(1);
     expect(identifierFindings[0].count).toBe(1);

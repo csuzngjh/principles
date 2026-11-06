@@ -14,8 +14,8 @@
  *             shipped `plugins/**` payload
  *   - tests:  `packages/<pkg>/tests/**` and `*.test.ts(x)` — only the
  *             import-path rule applies here (`testsToo`)
- *   - config: every `packages/<pkg>/package.json`, `io-seam-registry.json`,
- *             and `.github/workflows/*.yml` (rule `runtime-v2-config`)
+ *   - config: all package manifests beneath `packages/` (including nested payload manifests),
+ *             `io-seam-registry.json`, and `.github/workflows/*.yml` (rule `runtime-v2-config`)
  * Historical records (docs/, CHANGELOG, `.gitleaksignore` commit
  * fingerprints) are deliberately out of scope: they describe the past and must
  * keep the paths they were written with.
@@ -36,9 +36,9 @@
  * treated as a violation. Exemptions apply to GATED findings only — an
  * exempt file still contributes to the inventory (PR #2367 CodeRabbit #5).
  *
- * `--scan-root <dir>` replaces the SOURCE scan root and disables the tests and
- * config passes, so tests stay hermetic. It never changes where the policy
- * registry is read from, and is never used in production.
+ * `--scan-root <dir>` replaces the SOURCE scan root and scans package manifests
+ * nested beneath that root; it disables the repository tests, registry and
+ * workflow passes so controlled fixtures stay hermetic. It is never used in production.
  *
  * Usage:
  *   node scripts/check-naming-policy.mjs            # warn-only report
@@ -181,14 +181,33 @@ function defaultTestFiles(out = []) {
 }
 
 /**
+ * Collect every package manifest, including nested payload manifests. Skip
+ * generated/dependency trees so the gate checks shipped package contracts,
+ * not installed copies or build output.
+ */
+function packageManifestFiles(dir, out = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    scanErrors.push({ path: dir, error: String((err && err.message) || err) });
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) packageManifestFiles(full, out);
+    else if (entry.isFile() && entry.name === 'package.json') out.push(full);
+  }
+  return out;
+}
+
+/**
  * Structured config pass. The PR-1 surface could not see an export subpath or
  * a registry path at all — those are JSON strings, not source imports.
  */
 function configFiles(out = []) {
-  for (const dir of packageDirs()) {
-    const manifest = path.join(dir, 'package.json');
-    if (fs.existsSync(manifest)) out.push(manifest);
-  }
+  packageManifestFiles(PACKAGES_DIR, out);
   if (fs.existsSync(REGISTRY_PATH)) out.push(REGISTRY_PATH);
   let workflows = [];
   try {
@@ -271,15 +290,15 @@ const RULES = [
   {
     id: 'runtime-v2-identifier',
     why: '代际标识符复活（应使用无代际语义的名字；冻结的 wire 字面量不受此规则约束）',
-    // Matches the three identifier spellings the rename removed. Snake-case
+    // Matches the generation-marked identifier spellings the rename removed. Snake-case
     // wire literals such as `runtime_v2_prompt_activations_injected` are not
     // identifiers of this shape and stay frozen by design.
-    re: /\b(?:RuntimeV2[A-Za-z0-9_]*|runtimeV2[A-Za-z0-9_]*|RUNTIME_V2[A-Z0-9_]*)\b/g,
+    re: /\b(?:isRuntimeV2[A-Za-z0-9_]*|RuntimeV2[A-Za-z0-9_]*|runtimeV2[A-Za-z0-9_]*|RUNTIME_V2[A-Z0-9_]*)\b/g,
     gated: true,
     frozenExempt: false,
     multiline: false,
     // Only the exact tokens in namingPolicy.allowedIdentifiers are suppressed
-    // (currently the deprecated host-runtime export alias).
+    // (the deprecated host-runtime export alias and CLI JSON compatibility alias).
     allowIdentifiers: true,
     scopes: ['source', 'tests'],
   },
@@ -361,6 +380,9 @@ function scan(rel, source, scope) {
 const work = [];
 if (SCAN_DIR) {
   work.push(...productionFiles(SCAN_DIR).map((f) => [f, 'source']));
+  if (fs.existsSync(SCAN_DIR)) {
+    work.push(...packageManifestFiles(SCAN_DIR).map((f) => [f, 'config']));
+  }
 } else {
   work.push(...defaultSourceFiles().map((f) => [f, 'source']));
   work.push(...defaultTestFiles().map((f) => [f, 'tests']));
