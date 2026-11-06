@@ -18,12 +18,18 @@
  *
  * `api-v1-route` is INVENTORY ONLY: the deprecated `/api/v1` alias is a
  * frozen wire literal that PR-6 deliberately keeps. It is counted, never
- * treated as a violation.
+ * treated as a violation. Exemptions apply to GATED findings only — an
+ * exempt file still contributes to the inventory (PR #2367 CodeRabbit #5).
+ *
+ * `--scan-root <dir>` overrides the scan directory for controlled tests. It
+ * does NOT change where the policy registry is read from, and is never used
+ * in production.
  *
  * Usage:
  *   node scripts/check-naming-policy.mjs            # warn-only report
  *   node scripts/check-naming-policy.mjs --strict   # exit 1 on gated findings
  *   node scripts/check-naming-policy.mjs --json     # machine-readable
+ *   node scripts/check-naming-policy.mjs --scan-root <dir> --strict
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,9 +40,15 @@ const REGISTRY_PATH = path.join(ROOT, 'packages/principles-core/io-seam-registry
 const PACKAGES_DIR = path.join(ROOT, 'packages');
 const SCANNABLE = /\.(?:ts|tsx|mjs|cjs|js)$/;
 
-const argv = new Set(process.argv.slice(2));
-const strict = argv.has('--strict');
-const asJson = argv.has('--json');
+const args = process.argv.slice(2);
+function flagValue(name) {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+const strict = args.includes('--strict');
+const asJson = args.includes('--json');
+const scanRootOverride = flagValue('--scan-root');
+const SCAN_DIR = scanRootOverride ? path.resolve(scanRootOverride) : PACKAGES_DIR;
 
 const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
 const policy = registry.namingPolicy ?? {};
@@ -61,7 +73,8 @@ function productionFiles(dir, out = []) {
     else if (
       entry.isFile() &&
       SCANNABLE.test(entry.name) &&
-      !/\.test\.[cm]?[jt]s$/.test(entry.name) &&
+      // PR #2367 CodeRabbit #3: also exclude .test.tsx / .test.jsx.
+      !/\.test\.[cm]?[jt]sx?$/.test(entry.name) &&
       !/^vitest\.config\./.test(entry.name)
     ) {
       out.push(full);
@@ -70,6 +83,7 @@ function productionFiles(dir, out = []) {
   return out;
 }
 
+/** Exemptions suppress GATED findings only; inventory always counts the file. */
 function isExempt(rel) {
   if (exemptFiles.has(rel)) return true;
   // Align with eslint.config.js ignores for packages/*/scripts/**.
@@ -80,9 +94,12 @@ const RULES = [
   {
     id: 'runtime-v2-import',
     why: '代际目录名 / 包子路径（PR-3 收敛为 runtime）',
-    re: /@principles\/core\/runtime-v2(?![A-Za-z0-9_-])|['"`][^'"`]*\/runtime-v2\//g,
+    // PR #2367 CodeRabbit #4: match directory-entry imports such as
+    // './runtime-v2' as well as subpaths ending in '/'.
+    re: /@principles\/core\/runtime-v2(?![A-Za-z0-9_-])|['"`][^'"`]*\/runtime-v2(?:\/|['"`])/g,
     gated: true,
     frozenExempt: true,
+    multiline: false,
   },
   {
     id: 'versioned-output-ref',
@@ -90,6 +107,9 @@ const RULES = [
     re: /outputSchemaRef:\s*['"`][^'"`]*-v[12]['"`]/g,
     gated: true,
     frozenExempt: false,
+    // PR #2367 CodeRabbit #6: scan the whole file so the property name and
+    // its value may live on different lines.
+    multiline: true,
   },
   {
     id: 'api-v1-route',
@@ -97,15 +117,15 @@ const RULES = [
     re: /['"`]\/api\/v1\//g,
     gated: false,
     frozenExempt: false,
+    multiline: false,
   },
 ];
 
 const inventory = Object.fromEntries(RULES.map((rule) => [rule.id, 0]));
 const findings = [];
 
-for (const file of productionFiles(PACKAGES_DIR)) {
+for (const file of productionFiles(SCAN_DIR)) {
   const rel = path.relative(ROOT, file).replace(/\\/g, '/');
-  if (isExempt(rel)) continue;
   let source;
   try {
     source = fs.readFileSync(file, 'utf8');
@@ -115,13 +135,19 @@ for (const file of productionFiles(PACKAGES_DIR)) {
   }
 
   const perFile = new Map();
-  for (const line of source.split('\n')) {
-    for (const rule of RULES) {
-      if (rule.frozenExempt && frozenLiterals.some((lit) => line.includes(lit))) continue;
-      const count = [...line.matchAll(rule.re)].length;
+  const lines = source.split('\n');
+  for (const rule of RULES) {
+    // A multiline rule matches against the whole file (its `\s*` spans \n).
+    // Line-scoped rules keep the line-level frozen-literal exemption.
+    const chunks = rule.multiline ? [source] : lines;
+    for (const chunk of chunks) {
+      if (rule.frozenExempt && frozenLiterals.some((lit) => chunk.includes(lit))) continue;
+      const count = [...chunk.matchAll(rule.re)].length;
       if (count === 0) continue;
       inventory[rule.id] += count;
-      if (rule.gated) perFile.set(rule.id, (perFile.get(rule.id) ?? 0) + count);
+      if (rule.gated && !isExempt(rel)) {
+        perFile.set(rule.id, (perFile.get(rule.id) ?? 0) + count);
+      }
     }
   }
   for (const [rule, count] of perFile) findings.push({ rule, file: rel, count, why: RULES.find((r) => r.id === rule).why });

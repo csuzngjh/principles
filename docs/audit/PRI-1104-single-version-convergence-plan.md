@@ -34,7 +34,7 @@
 
 因此：
 - **shared 现在并不等价于 legacy**，直接删会回退 PRI-904 的公平轮转能力 → 采用 **D1**：先给 `createOpenClawHostRuntime` 加可选 `roundKeyProvider`，只让 OpenClaw（有 `user_turns`）注入 `nextSessionTurnOrdinal`，再删 legacy。不接受行为回退。
-- 删后 `legacy_fifo_prefix_v1` **不会失去生产调用者，反而成为唯一生产策略**；失去调用者的是 `fair_rotation_v1`。**本次两条策略分支都不删。**
+- 采用 **D1 后**：OpenClaw 在取得 `roundKey` 且有候选原则时仍使用 `fair_rotation_v1`；未提供 `roundKey` 的宿主继续使用 `legacy_fifo_prefix_v1`。**本次两条策略分支都不删。**（若**不做 D1 而直接删** legacy 路由，`fair_rotation_v1` 才会失去全部生产调用者、`legacy_fifo_prefix_v1` 反成唯一策略 —— 这正是 D1 要避免的，也是 PR #2367 CodeRabbit 指出的表述歧义。）
 
 ## 4. Frozen Wire Literals（连写入都不改）
 
@@ -70,13 +70,15 @@
 2. 新增 `__tests__/output-schema-ref-alias.test.ts`：13 组双向解析、registry 大小不变、退役 `signal-classification-output-v1` 仍不可解析、未知/空 ref 仍 `undefined`。
 3. `prompt-injection-budget-observation.ts`：`ACCEPTED_BUDGET_POLICY_VERSIONS` 读取白名单双读（`narrowObservation` 与事件循环两处），当前两个值相同 → 零行为变更；PR-6 切 `model_aware` 后历史 `model_aware_v2` 事件仍被识别。
 4. `io-seam-registry.json` 新增 `namingPolicy` 段（`frozenWireLiterals` 行级豁免 + `exemptFiles`）。它是**观察脚本的配置**，不是门禁权威；无效的 `exemptPaths` 已在评审后删除（§11）。
-5. 新增 `scripts/check-naming-policy.mjs`：**PR-1 观察者脚本，未接入任何 CI / npm script / hook**。扫描 `packages/*` 源码中的 `runtime-v2` import、带 `-vN` 的 `outputSchemaRef`（两级 gated 规则）与 `/api/v1` 路由字面量（**inventory-only**，旧 alias 是冻结字面量）。退出契约：`--strict` 在**任何输出模式**下遇 gated finding 或扫描 I/O 错误即 exit 1；无 `--strict` 恒 exit 0 并打印告警。`--strict` 只是 PR-3 门禁的预览，**PR-3 前必须重新设计扫描面并显式接线**。
-6. 新增 `scripts/__tests__/check-naming-policy.test.mjs`：4 项退出契约回归测试（§11 含 mutation 证据）。
+5. 新增 `scripts/check-naming-policy.mjs`：**PR-1 观察者脚本，未接入任何 CI / npm script / hook**。扫描 `packages/*` 源码中的 `runtime-v2` import、带 `-vN` 的 `outputSchemaRef`（两级 gated 规则）与 `/api/v1` 路由字面量（**inventory-only**，旧 alias 是冻结字面量）。退出契约：`--strict` 在**任何输出模式**下遇 gated finding 或扫描 I/O 错误即 exit 1；无 `--strict` 恒 exit 0 并打印告警。`--strict` 只是 PR-3 门禁的预览，**PR-3 前必须重新设计扫描面并显式接线**。PR #2367 CodeRabbit 复核后补：`--scan-root <dir>` 受控扫描入口（仅供测试）、gated 豁免不再吞掉 inventory、目录入口导入与跨行 `outputSchemaRef` 正则、`.test.tsx` 排除（详见 §13）。
+6. 新增 `scripts/__tests__/check-naming-policy.test.mjs`：**10 项**回归测试（4 项退出契约 + 6 项受控 `--scan-root` / inventory 用例；§11 含 mutation 证据）。
 7. 本文。
 
 **调整 1（假测试已修复，不做无意义改动）**：计划里的 `trajectory-schema.test.ts:67-76` 假测试在当前基线**已经是真测试**——`migrateLegacyGfiSchema converges the real schema_version row (v1 → v2), idempotently` 用真实 SQLite 读 `SELECT version FROM schema_version` 并断言收敛与幂等，即审计报告 T1/T2 要求。T3（裸路径版本断言）属 PR-2 范围。本票只复核记录，不改测试。
 
 **调整 2（`/api/v1` alias 移到 PR-6）**：`pd-console/src/server/index.ts` 的路由是**手写 `urlPath === '/api/v1/...'` 字面量分发**，不是框架 router；且同一 `/api/` 命名空间下已存在 `/api/feedback/...`、`/api/principles/...`、`/api/workspaces/...`、`/api/update/...` 等**不带 v1 段**的真实路由。PR-1 引入路径归一化会误伤这些路由、扩大改动面（违反 P3）。因此 `/api` 双路径兼容随 PR-6 的 76+54 处 URL 切换一起做，采用「新路径 canonical + 旧 `/api/v1` alias 同 handler」，并补 equivalence 契约测试。已同步到 PRI-1139。
+
+**部署顺序（PR #2367 CodeRabbit #1）**：路径兼容层必须**先于客户端切换独立部署**——服务端先同时接受新路径与旧 `/api/v1`（沿用手写路由分发、共用同一 handler），部署稳定后才切 `ui/api.ts` 的客户端调用；**回滚 PR-6 时保留服务端新路径支持**，否则已打开的新版客户端仍会请求新路径，而回退后的服务端只认旧路径 → 404。即：新路径支持是一项可独立存在的能力，不随 PR-6 的客户端切换一起 revert。
 
 ## 7. 已知红灯基线（PR-1 记录，逐 PR 对比「失败集合一致」）
 
@@ -131,7 +133,7 @@ New external/network capability:    NO
 
 **Mutation 证据**：把 strict 判定临时改回「仅非 JSON 分支生效」后，`scripts/__tests__/check-naming-policy.test.mjs` 出现 **2 条失败**（`plain.status=1` vs `json.status=0`；`expected +0 to be 1`），直接探测 `strict EXIT=1 / strict+json EXIT=0` 精确复现旧缺陷；恢复后 4/4 全绿、`strict+json EXIT=1`。
 
-**修复后验证**：守门四模式 `warn=0 / json=0 / strict=1 / strict+json=1`；`check-naming-policy.test.mjs` 4/4；core `output-schema-ref-alias` 30 + `signal-classification-schema-registry` 5 + `architecture-regression` 478 = **513/513**；eslint 0；`node --check` 与 registry JSON 解析通过；`tsc --noEmit` 两包 0 错误。守门基线更新为 **`runtime-v2-import=434 / versioned-output-ref=16 / api-v1-route=16`**（原 478/16/10，变化原因：排除 vitest.config 与包内 scripts、正则覆盖反引号与词边界；它们是「packages 源码子集」的存量，**不等于 §8 的全仓 consumer 数**）。
+**修复后验证**：守门四模式 `warn=0 / json=0 / strict=1 / strict+json=1`；`check-naming-policy.test.mjs` 4/4；core `output-schema-ref-alias` 30 + `signal-classification-schema-registry` 5 + `architecture-regression` 478 = **513/513**；eslint 0；`node --check` 与 registry JSON 解析通过；`tsc --noEmit` 两包 0 错误。守门基线（本次独立评审修复后）为 `434/16/16`（原 478/16/10，变化原因：排除 vitest.config 与包内 scripts、正则覆盖反引号与词边界）。**CodeRabbit 复核修复后（§13）当前基线为 `458/16/135`** —— `api-v1-route` 从 16 升到 135 是因为 gated 豁免文件不再被整文件跳过（54+76 处路由字面量重新计入 inventory）。这些是「packages 源码子集」的存量，**不等于 §8 的全仓 consumer 数**。
 
 **措辞修正**：① 「零行为变更」应精确为「**对现有输入零变更；读取侧有意扩张 13 个中性 ref**」——这是 expand 阶段的设计本身，不是回归，但也不该被表述成完全无变化。② 「验证全绿」应精确为「本 PR 相关套件全绿 + CI 29 SUCCESS / 1 SKIPPED / CodeRabbit 仍 IN_PROGRESS」，§7 的三类已知红灯基线依然存在，不得把 pending 标绿。③ **调整 3（评审后补披露）**：原计划承诺「在 `eslint.config.js` 与 `check-pipeline-contract.mjs` 加命名规则」，实际改为独立 `scripts/check-naming-policy.mjs`。理由：`check-pipeline-contract.mjs` 自述「deliberately NOT a scanner framework」，塞入静态扫描会违背其设计边界；warn-only 阶段挂进 eslint 会产生 800+ 条既有告警淹没输出。该替换此前只在 registry description 间接提及，现补记于此。
 
@@ -144,4 +146,27 @@ New external/network capability:    NO
 3. PR-2（PRI-1135）需等 PR-1 合并后基于新 main 开工；PR-6（PRI-1139）另需 8 条前置条件全部签收。
 4. CodeRabbit 评审在 PR #2367 上仍 `IN_PROGRESS`（当前只有占位摘要，无实际 findings）；合并前应等其结果，不要把「0 条行内意见」误当「评审通过」。
 5. 若 PR-3/PR-6 不做，26 条双向 alias 映射、观察者脚本与 `namingPolicy` 配置会成为无消费者资产，应按 §10 的回滚路径清理。
+6. PR-2（PRI-1135）已于 2026-11-06 交付 PR #2371，基于最新 main 独立开工；PR-1 合并后如有冲突需 rebase。
+
+## 13. CodeRabbit 复核意见处置（PR #2367，review commit `ad46453`）
+
+CodeRabbit 共 **9 条**（6 条行内 + 2 条 follow-up + 1 条 nitpick），全部 Minor/Trivial；review state `DISMISSED`（后续 push 触发）。逐条按 P1 核实当前代码：
+
+| # | 意见 | 当前代码核实 | 处置 |
+| --- | --- | --- | --- |
+| 1 | PR-6 部署顺序 | 报告只写「双路径同 handler」，未写服务端先行与回滚保留 → 滚动部署/回滚会 404 | **已修**：§6 调整 2 补部署顺序（服务端兼容层先独立部署、再切客户端、回滚时保留新路径支持） |
+| 2 | 白名单加 `model_aware` | 注释已声称防 PR-6 revert，但 Set 只有 `model_aware_v2` → revert 后 `model_aware` 事件被当 foreign policy 跳过，Console 用旧预算 | **已修**：加入 `model_aware`，补 1 项读取回归测试（含 `budgetChars` / `policyVersion` 断言） |
+| 3 | 排除 `.test.tsx` | 仓库当前 0 个，但正则 `/\.test\.[cm]?[jt]s$/` 确实漏 | **已修**（防御性）+ 受控用例 |
+| 4 | 目录入口 `./runtime-v2` | 仓库当前 0 处，但正则要求尾斜杠确实漏 | **已修**（`(?:\/｜['"`])`）+ 受控用例 |
+| 5 | 豁免文件漏计 API 路由 | **成立**：`server/index.ts` 54 处 + `ui/api.ts` 76 处，脚本只报 16 | **已修**：豁免只作用于 gated findings，inventory 照常清点 → `api-v1-route` **16 → 135**，补回归测试 |
+| 6 | 跨行 `outputSchemaRef` | 仓库当前 0 处，但逐行扫描确实漏 | **已修**：该规则改为全文匹配（`\s*` 跨 `\n`）+ 受控用例 |
+| 7 | 改非空 changeset | 见下方判断 | **保留空 changeset**，有依据地不修 |
+| 8 | D1 后策略调用者说明 | **成立**：§3 未区分「直接删 legacy」与「D1 补齐后删」，会误导后续清理决策 | **已修**：明确 D1 后 OpenClaw 仍走 `fair_rotation_v1` |
+| 9 (nit) | 受控 strict 状态测试 | 合理，原测试依赖当前树的 findings | **已修**：新增 `--scan-root <dir>` 受控入口 + 6 项用例（空树 strict=0、仅扫描错误 strict=1、两种输出格式都覆盖） |
+| Docstring Coverage advisory | CodeRabbit pre-merge advisory，非仓库 required check | — | 顺手补 `isAcceptedBudgetPolicyVersion` 的 JSDoc |
+
+**#7 判断（保留空 changeset）**：① `output-schema-registry.ts` 不在公共 barrel（`runtime-v2/index.ts` 是具名导出、不含该模块），只有内部模块与测试 import；② 13 个生产 writer 全部仍传旧 ref，扩张的 13 个中性名当前**无任何生产调用者**，无用户可见行为变化；③ 空 changeset 是项目官方 `explicit-no-release` 通道（`check-pr-release-intent.mjs` 的 `emptyDeclaration`），本地与 CI 均 `RELEASE_INTENT_GUARD PASS`；④ PR-2（PRI-1135）同样用空 changeset，保持一致。若 Owner 认为「公共函数接受集合扩张」仍需对外声明，可单独补 `@principles/core` + `@principles/host-runtime` 的 patch changeset —— 这是产品决策，不由 bot 意见触发。注：release guard 读的是 HEAD 中已提交的 changeset，工作区未提交改动不参与判定，因此没有为验证「非空是否触发 C4」去造临时 commit（不为试验动 git 历史）。
+
+**修复后验证**：守门四模式 `warn=0 / json=0 / strict=1 / strict+json=1`；`check-naming-policy.test.mjs` **10/10**；`prompt-injection-budget-observation.test.ts` **34/34**；core `output-schema-ref-alias` 30 + architecture-regression 478；eslint 0 error；`tsc --noEmit` 0 错误；`RELEASE_INTENT_GUARD PASS`。当前 inventory `458 / 16 / 135`。
+
 

@@ -28,15 +28,23 @@ import {
  * "computed under a different policy" and silently skipped (and a revert of
  * PR-6 would strand events written with the new id).
  *
- * The literal below is a FROZEN WIRE LITERAL, not a second policy definition:
- * it exists only so old events remain readable. Both sets currently contain
- * the same value, which keeps PR-1 a zero-behaviour-change step.
+ * These are FROZEN WIRE LITERALS, not a second policy definition: they exist
+ * only so events remain readable across the PR-6 rename AND its revert. The
+ * PR-6 target id `model_aware` is listed up front (PR #2367 CodeRabbit #2):
+ * if PR-6 is reverted after it wrote `model_aware` events, a reader accepting
+ * only `model_aware_v2` would silently skip those observations and the console
+ * would fall back to a stale budget.
+ *
+ * Today the writer emits only `model_aware_v2`, so listing the future and
+ * historical literals does not change any current read result.
  */
 const ACCEPTED_BUDGET_POLICY_VERSIONS: ReadonlySet<string> = new Set<string>([
   PROMPT_BUDGET_POLICY_VERSION,
   'model_aware_v2',
+  'model_aware',
 ]);
 
+/** Narrow an untrusted event field to an accepted policy provenance id. */
 function isAcceptedBudgetPolicyVersion(value: unknown): boolean {
   return typeof value === 'string' && ACCEPTED_BUDGET_POLICY_VERSIONS.has(value);
 }
