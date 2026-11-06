@@ -1367,7 +1367,7 @@ the worktree:
 * **L1 dependencies** — the worktree's own workspace packages resolve inside it;
 * **L2 build** — the packages the root `npm run build` authority covers have
   emitted the artifacts their manifests promise;
-* **L3 runtime** — real specifiers (`@principles/core`, `@principles/core/runtime-v2`,
+* **L3 runtime** — real specifiers (`@principles/core`, `@principles/core/runtime`,
   `principles-disciple`, the `pd` CLI bin) resolve inside the worktree.
 
 A package resolving to the primary checkout is `PRIMARY_LEAKAGE` and a hard

@@ -11,7 +11,7 @@ import * as path from 'path';
 const mockTraceByPainId = vi.fn();
 const mockPainChainClose = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   PainChainReadModel: vi.fn().mockImplementation(function () {
     return { traceByPainId: mockTraceByPainId, close: mockPainChainClose };
   }),

@@ -37,7 +37,7 @@ const { mockResolveOwnerIdentity, mockResolveRuntimeAdapter, evaluationScript } 
   evaluationScript: { outcomes: [] as unknown[] },
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveOwnerIdentity: mockResolveOwnerIdentity,
 }));
@@ -59,7 +59,7 @@ import {
   type RuntimeHealth,
   type StartRunInput,
   type StructuredRunOutput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { addPrincipleToLedger, loadLedger } from '@principles/core/principle-tree-ledger';
 import type { LedgerPrinciple } from '@principles/core/principle-tree-ledger';
 

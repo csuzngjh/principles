@@ -19,7 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { resolveRuntimeAdapterFromConfig } from '../../src/services/runtime-adapter-resolver.js';
-import { PiAiRuntimeAdapter } from '@principles/core/runtime-v2';
+import { PiAiRuntimeAdapter } from '@principles/core/runtime';
 
 let workspaceDir: string;
 

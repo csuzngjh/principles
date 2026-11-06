@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeCliRecoveryCapabilities } from '@principles/host-runtime';
-import type { RecoveryCapabilityEvidence } from '@principles/core/runtime-v2';
+import type { RecoveryCapabilityEvidence } from '@principles/core/runtime';
 
 /**
  * SPEC-RULECODE-HOST-PROMOTION-001 R3/R4: CLI-channel recovery reachability

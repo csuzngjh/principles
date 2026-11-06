@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
-import { DEFAULT_FEATURE_FLAGS, computeEffectiveFlags } from '@principles/core/runtime-v2';
+import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime';
+import { DEFAULT_FEATURE_FLAGS, computeEffectiveFlags } from '@principles/core/runtime';
 
 // Renamed from evolution-worker.correction-observer.test.ts in PRI-737: the
 // file only ever asserted correction_observer / evolution_worker flag and

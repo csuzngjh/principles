@@ -6,7 +6,7 @@
  * refuses when unresolvable — no host guessing, no silent skip) stays here.
  */
 
-import type { ToolSemanticRegistry } from '@principles/core/runtime-v2';
+import type { ToolSemanticRegistry } from '@principles/core/runtime';
 import { resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 
 export type WorkspaceToolSemanticsResolution =

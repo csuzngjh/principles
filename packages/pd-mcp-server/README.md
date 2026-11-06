@@ -1,6 +1,6 @@
 # @principles/pd-mcp-server
 
-Principles Disciple 的正式 MCP Server —— 三个宿主（Codex、OpenClaw、WorkBuddy）共享的**同一份** Server 实现（SPEC-PD-MCP-GATE4-001）。每个宿主以插件内置 MCP 配置启动自己的 Server 子进程，业务数据**只**经 Gate 3 Capability（`@principles/core/runtime-v2/pain-recall-capability`，OD-A v1 披露）读取。
+Principles Disciple 的正式 MCP Server —— 三个宿主（Codex、OpenClaw、WorkBuddy）共享的**同一份** Server 实现（SPEC-PD-MCP-GATE4-001）。每个宿主以插件内置 MCP 配置启动自己的 Server 子进程，业务数据**只**经 Gate 3 Capability（`@principles/core/runtime/pain-recall-capability`，OD-A v1 披露）读取。
 
 ## 唯一 Tool：`pd_recall_principle_pains`（只读）
 

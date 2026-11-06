@@ -30,11 +30,11 @@
 import * as path from 'path';
 import type {
   RuntimeStateManager,
-  PrincipleTreeLedgerAdapter} from '@principles/core/runtime-v2';
+  PrincipleTreeLedgerAdapter} from '@principles/core/runtime';
 import {
   CandidateIntakeService,
   createReuseRecommendationHook,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadPdConfig } from './pd-config-loader.js';
 
 /**

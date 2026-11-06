@@ -2,7 +2,7 @@
  * pd runtime uat CLI unit tests.
  * Tests parseUatArgs, computeUatSummary, shouldExitWithError, runUatIteration.
  * Integration tests with real pd calls are done manually via
- *   node scripts/uat/runtime-v2-chain-uat.mjs --workspace <path> --count 2 --json
+ *   node scripts/uat/runtime-chain-uat.mjs --workspace <path> --count 2 --json
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';

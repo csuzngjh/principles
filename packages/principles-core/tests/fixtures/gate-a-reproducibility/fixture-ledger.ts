@@ -12,7 +12,7 @@ import { readLedgerFileState, loadLedger } from '../core-mirror/packages/princip
 import {
   resolveLedgerActivationId,
   candidateIdFromDreamerTaskId,
-} from '../core-mirror/packages/principles-core/src/runtime-v2/activation/ledger-identity.ts';
+} from '../core-mirror/packages/principles-core/src/runtime/activation/ledger-identity.ts';
 
 const results: { name: string; expect: string; actual: string; pass: boolean }[] = [];
 function record(name: string, expect: string, actual: string) {

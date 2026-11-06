@@ -20,7 +20,7 @@ import {
   RuntimeStateManager,
   SqliteDiagnosticianCommitter,
   type DiagnosticianOutputV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   handleCandidateInternalize,
   handleCandidateInternalizationBackfill,

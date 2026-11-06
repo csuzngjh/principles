@@ -11,7 +11,7 @@ import type * as childProcessNS from 'node:child_process';
 import type * as fsNS from 'node:fs';
 import type * as osNS from 'node:os';
 import type * as pathNS from 'node:path';
-import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
+import type { FeedbackReport } from '@principles/core/runtime/feedback';
 import type { ChannelDeps } from './channels.js';
 
 type ExecFileFn = typeof childProcessNS.execFile;

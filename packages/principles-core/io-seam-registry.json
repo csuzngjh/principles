@@ -8,7 +8,7 @@
       "description": "File-based principle ledger (principle_training_state.json). Single source of truth for parse, serialize, and mutate. Lives in core so pd-cli can read/write the ledger without importing openclaw-plugin private code. PRI-917 reuse retrieval joins this seam: it reads the same ledger document (read-only) so an existing-but-unparseable corpus fails closed instead of being reported as empty.",
       "files": [
         "principle-tree-ledger.ts",
-        "runtime-v2/principle-reuse/reuse-retrieval.ts"
+        "runtime/principle-reuse/reuse-retrieval.ts"
       ]
     },
     {
@@ -24,71 +24,71 @@
       "name": "sqlite-state-store",
       "description": "Runtime V2 state.db connection factory and the RuntimeStateManager integration layer that wires all SQLite stores. Owns the DB lifecycle (open, pragma, close) for task/run/candidate/commit/artifact stores. PD v2 Phase 1: the intervention evidence ledger store joins this seam as a leaf store (all access through SqliteConnection; no direct fs/path).",
       "files": [
-        "runtime-v2/store/sqlite-connection.ts",
-        "runtime-v2/store/runtime-state-manager.ts",
-        "runtime-v2/store/sqlite-intervention-evidence-store.ts"
+        "runtime/store/sqlite-connection.ts",
+        "runtime/store/runtime-state-manager.ts",
+        "runtime/store/sqlite-intervention-evidence-store.ts"
       ]
     },
     {
       "name": "workspace-leak-guard",
       "description": "Pure path-redirection helper that detects mock-leak workspace paths (e.g. '/fake/workspace', '/mock/state') used in test code and redirects them to a deterministic subdir under os.tmpdir(). Imports node:path for path joins and node:os for tmpdir(); performs no fs I/O itself. Called at every I/O entry point (SqliteConnection constructor, initTrajectorySchema, TrajectoryDatabase constructor, SystemLogger.log, EventLog constructor) to prevent Windows filesystem-root pollution.",
       "files": [
-        "runtime-v2/store/workspace-leak-guard.ts"
+        "runtime/store/workspace-leak-guard.ts"
       ]
     },
     {
       "name": "read-model",
       "description": "Read-only composite models that query state.db and the file ledger to produce operator-facing snapshots (operator health, pain chain, pain recall, pruning, schema conformance, internalization chain integrity, activation compatibility). No writes — pure read paths exposed for CLI and console reuse. The pain-recall read model's temp-directory I/O is WAL read-only snapshot staging only (system temp root, cleaned on success and failure paths): the business workspace is never written, and a missing database is never created.",
       "files": [
-        "runtime-v2/operator-health-read-model.ts",
-        "runtime-v2/pain-chain-read-model.ts",
-        "runtime-v2/pain-recall-read-model.ts",
-        "runtime-v2/pruning-read-model.ts",
-        "runtime-v2/schema-conformance-read-model.ts",
-        "runtime-v2/internalization-chain-integrity-read-model.ts",
-        "runtime-v2/activation-compatibility-read-model.ts"
+        "runtime/operator-health-read-model.ts",
+        "runtime/pain-chain-read-model.ts",
+        "runtime/pain-recall-read-model.ts",
+        "runtime/pruning-read-model.ts",
+        "runtime/schema-conformance-read-model.ts",
+        "runtime/internalization-chain-integrity-read-model.ts",
+        "runtime/activation-compatibility-read-model.ts"
       ]
     },
     {
       "name": "audit-observability",
       "description": "Candidate/ledger consistency audit and pain-signal observability writers. These write trajectory.db pain events and events_*.jsonl for CLI and gate-block paths that lack the legacy SDK observability writers, closing the observability gap without importing openclaw-plugin.",
       "files": [
-        "runtime-v2/candidate-audit.ts",
-        "runtime-v2/pain-signal-observability.ts"
+        "runtime/candidate-audit.ts",
+        "runtime/pain-signal-observability.ts"
       ]
     },
     {
       "name": "remediation-review",
       "description": "Internalization integrity remediation (reads state.db, writes corrective task records) and append-only owner-action audit logs (governance recovery actions at .state/recovery_actions.jsonl). Both own file/DB writes that core runners, CLI commands, and console recovery endpoints trigger directly.",
       "files": [
-        "runtime-v2/internalization-integrity-remediation.ts",
-        "runtime-v2/recovery-actions-log.ts"
+        "runtime/internalization-integrity-remediation.ts",
+        "runtime/recovery-actions-log.ts"
       ]
     },
     {
       "name": "test-infrastructure",
       "description": "Shared Story A acceptance helpers under src/__tests__. They create temporary workspaces and SQLite stores for production-path tests, but are excluded from published runtime behavior.",
       "files": [
-        "runtime-v2/activation/__tests__/helpers.ts"
+        "runtime/activation/__tests__/helpers.ts"
       ]
     },
     {
       "name": "owner-identity",
       "description": "Install-level Owner identity registration file (~/.pd/owner.json) per ADR-0022 (PRI-578). Lives in core so pd-console and pd-cli share the single resolver (env > file > none) with one tested implementation.",
       "files": [
-        "runtime-v2/owner-identity.ts"
+        "runtime/owner-identity.ts"
       ]
     },
     {
       "name": "pi-ai-http-transport",
       "description": "LLM transport owner (PRI-683): builds the undici Agent-backed fetch injected into every pi-ai provider request via options.fetch, disabling Node global fetch's implicit 300s headersTimeout/bodyTimeout caps so runtimeProfile.timeoutMs is the single timeout authority. Registered seam because it imports the undici transport library (no fs/DB I/O; requests still go out through the pi-ai SDK).",
       "files": [
-        "runtime-v2/adapter/pi-ai-http-transport.ts"
+        "runtime/adapter/pi-ai-http-transport.ts"
       ]
     }
   ],
   "namingPolicy": {
-    "description": "PRI-1104 Stage 0 observer config consumed by scripts/check-naming-policy.mjs. PR-1: warn-only and NOT wired into any CI workflow, npm script or hook; --strict is a preview, not a gate. Before PR-3 turns it into a merge gate, redesign the scan surface (currently packages/* source files only) and wire it in explicitly. The full cross-package consumer list and the Frozen Wire Literals with their read/write sites live in docs/audit/PRI-1104-single-version-convergence-plan.md (§4, §8).",
+    "description": "PRI-1104 naming policy consumed by scripts/check-naming-policy.mjs. PR-3 (PRI-1136) turned the runtime-v2 rule into a merge gate: the script runs --strict from verify:merge and fails on gated rules or scan I/O errors. Scan surface = packages/<pkg>/{src,scripts}/**, packages/<pkg>/tests/** (import rule only), every packages/<pkg>/package.json, this registry, and .github/workflows/*.yml. Historical records (docs/, CHANGELOG, .gitleaksignore commit fingerprints) are out of scope on purpose. The full cross-package consumer list and the Frozen Wire Literals with their read/write sites live in docs/audit/PRI-1104-single-version-convergence-plan.md (§4, §8).",
     "frozenWireLiterals": [
       "runtime_v2_prompt_activations_injected",
       "pd-runtime-v2",
@@ -101,13 +101,22 @@
       "/api/v1/"
     ],
     "exemptFiles": [
-      "packages/principles-core/src/runtime-v2/adapter/output-schema-registry.ts",
+      "packages/principles-core/src/runtime/adapter/output-schema-registry.ts",
       "packages/host-runtime/src/prompt-injection-budget-observation.ts",
       "packages/pd-console/src/server/index.ts",
       "packages/pd-console/src/ui/api.ts",
-      "packages/principles-core/src/runtime-v2/types/event-types.ts",
-      "packages/principles-core/src/runtime-v2/pain-signal-observability.ts",
-      "packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts"
+      "packages/principles-core/src/runtime/types/event-types.ts",
+      "packages/principles-core/src/runtime/pain-signal-observability.ts",
+      "packages/principles-core/src/runtime/pain-signal-runtime-factory.ts",
+      "scripts/check-naming-policy.mjs",
+      "scripts/__tests__/check-naming-policy.test.mjs"
+    ],
+    "gatedRules": [
+      "runtime-v2-import",
+      "runtime-v2-config"
+    ],
+    "pendingRules": [
+      "versioned-output-ref"
     ]
   }
 }

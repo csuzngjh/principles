@@ -22,7 +22,7 @@ import {
   OD_A_DISCLOSURE_PROFILE,
   RECALL_PAIN_CAPABILITY_ID,
   type PainRecallCapabilityResult,
-} from '@principles/core/runtime-v2/pain-recall-capability';
+} from '@principles/core/runtime/pain-recall-capability';
 import { withinBudget } from './budget.js';
 
 /** MCP tool result as produced by the handler (single text content block,

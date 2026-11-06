@@ -10,8 +10,8 @@
  * PRI-73 scope: dry-run inspection only; real lease acquisition is future scope.
  */
 import * as path from 'path';
-import { RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime-v2';
-import type { WakeOnceResult } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime';
+import type { WakeOnceResult } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface WakeOnceOptions {

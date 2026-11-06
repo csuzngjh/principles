@@ -18,13 +18,13 @@ import {
   resolveRuntimeConfigForProfile,
   isRuntimeConfigError,
   resolveAgentRuntimeBinding,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   RuntimeConfigResult,
   RuntimeConfig,
   RuntimeConfigError,
-} from '@principles/core/runtime-v2';
-import type { InternalAgentName } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { InternalAgentName } from '@principles/core/runtime';
 import { loadPdConfig } from './pd-config-loader.js';
 import type { PdConfigLoadResult } from './pd-config-loader.js';
 

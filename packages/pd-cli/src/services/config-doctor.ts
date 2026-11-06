@@ -30,11 +30,11 @@ import {
   redactLoadResult,
   getPdConfigPath,
 } from './pd-config-loader.js';
-import { MVP_CHANNEL_IDS } from '@principles/core/runtime-v2';
+import { MVP_CHANNEL_IDS } from '@principles/core/runtime';
 import type {
   RedactedAgentSummary,
   RedactedRuntimeProfileSummary,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // ─── Public types ────────────────────────────────────────────────────────────
 

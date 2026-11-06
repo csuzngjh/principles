@@ -20,7 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import Database from 'better-sqlite3';
 import { EvidenceChainConsoleModel } from '../../src/server/models/EvidenceChainConsoleModel.js';
-import { crossReferenceByTimestamp } from '@principles/core/runtime-v2';
+import { crossReferenceByTimestamp } from '@principles/core/runtime';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
 
@@ -1009,7 +1009,7 @@ describe('EvidenceChainConsoleModel — PRI-340 human-readable fields', () => {
   });
 });
 
-// ── PRI-380: Evidence chain lineage join with Runtime V2 task IDs ─────────────
+// ── PRI-380: Evidence chain lineage join with Runtime task IDs ─────────────
 
 describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => {
   // NOTE: the test below seeds 308 filler pain_events before the one under
@@ -1030,7 +1030,7 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
     });
     trajDb.close();
 
-    // Simulate Runtime V2 task with diagnosis_manual_* ID and input_ref pointing to pain_309
+    // Simulate Runtime task with diagnosis_manual_* ID and input_ref pointing to pain_309
     const stateDb = createStateDb();
     const rtTaskId = 'diagnosis_manual_1781314784282_5v264gy1';
     insertTask(stateDb, {
@@ -1039,7 +1039,7 @@ describe('PRI-380: Evidence chain lineage join with Runtime V2 task IDs', () => 
       inputRef: `${rowId}`,  // input_ref stores the numeric pain event ID
       diagnosticJson: '{"rootCause":"删除前未确认备份"}',
     });
-    // Candidate linked to the Runtime V2 task
+    // Candidate linked to the Runtime task
     insertCandidate(stateDb, {
       candidateId: 'cand-pri380-001',
       taskId: rtTaskId,
@@ -1294,7 +1294,7 @@ describe('PRI-380: crossReferenceByTimestamp', () => {
   });
 });
 
-// ── PRI-388: Dedupe trajectory pain rows with Runtime V2 canonical pain ───
+// ── PRI-388: Dedupe trajectory pain rows with Runtime canonical pain ───
 //
 // Reviewer P1/P2 requirements covered here:
 //   - dedupe MUST rely on strong lineage, not timestamp alone
@@ -1319,7 +1319,7 @@ describe('EvidenceChainConsoleModel — PRI-388 dedupe', () => {
     });
     trajDb.close();
 
-    // 2. Runtime V2 canonical task with a DIFFERENT id namespace (manual_*),
+    // 2. Runtime canonical task with a DIFFERENT id namespace (manual_*),
     //    so the task is not auto-merged in step 1. Its candidate title matches
     //    the trajectory text, which is the strong-lineage content hash.
     const stateDb = createStateDb();

@@ -1,6 +1,6 @@
 // Offline preparation only. The caller supplies Reader-qualified candidates.
 // This neither authorizes principles nor changes the production prompt path.
-import { trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
+import { trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 
 export function compareAdaptivePacking({ principles, target, selectionBudget, directiveBudget, roundKey }) {

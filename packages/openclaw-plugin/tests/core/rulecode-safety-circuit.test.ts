@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 import { observeRuleCodeSafety, resetRuleCodeSafetyCircuitsForTests } from '../../src/core/rulecode-safety-circuit.js';
 
 let workspace: string | null = null;

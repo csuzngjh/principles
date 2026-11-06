@@ -22,7 +22,7 @@ import path from 'node:path';
 import {
   validateToolSemanticMappings,
   type ToolSemanticMappingV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export const HOST_TOOL_DECLARATION_DIRNAME = 'host-tool-semantics';
 export const HOST_TOOL_DECLARATION_VERSION = 1 as const;

@@ -4,7 +4,7 @@ import {
   PainChainReadModel,
   PruningReadModel,
   RuntimeStateManager,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { readInstalledPdVersion } from '../utils/installed-layout.js';
 
 export interface HealthCheckResult {

@@ -25,7 +25,7 @@
  *     prompt-consumption evidence.
  */
 import { readPromptActivationInjectionStatuses, type PromptActivationInjectionStatus } from '@principles/host-runtime';
-import type { ReceiptEvidenceCoverage } from '@principles/core/runtime-v2';
+import type { ReceiptEvidenceCoverage } from '@principles/core/runtime';
 import type { PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import type { PrincipleReceipts } from './ReceiptsConsoleModel.js';
 import { ReceiptsConsoleModel } from './ReceiptsConsoleModel.js';

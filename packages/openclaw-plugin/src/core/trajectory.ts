@@ -8,8 +8,8 @@ import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
-import { applyTrajectorySchemaBase, convergeTrajectorySchemaVersion } from '@principles/core/runtime-v2/trajectory-schema';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
+import { applyTrajectorySchemaBase, convergeTrajectorySchemaVersion } from '@principles/core/runtime/trajectory-schema';
+import { guardWorkspaceLeak } from '@principles/core/runtime/store/workspace-leak-guard';
 import type {
   CorrectionSampleReviewStatus,
   CorrectionExportMode,

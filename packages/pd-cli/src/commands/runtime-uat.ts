@@ -1,5 +1,5 @@
 /**
- * pd runtime uat command — Runtime V2 chain UAT baseline runner.
+ * pd runtime uat command — Runtime chain UAT baseline runner.
  *
  * Usage:
  *   pd runtime uat --workspace <path> --count <N> [--min-success-rate <rate>] [--json]

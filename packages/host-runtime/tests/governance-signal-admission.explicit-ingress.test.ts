@@ -19,7 +19,7 @@ import {
   ensureGovernanceDiagnosticianTask,
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
-import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime';
 
 const BASELINE_DDL = [
   'CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)',

@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import {
   admitTrustedWorkbuddyLiveCorrection,
   assessWorkbuddyCorrectionCandidate,
@@ -232,7 +232,7 @@ describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUD
     const config = getDefaultPdConfig();
     if (config.features['host.workbuddy']) config.features['host.workbuddy'].enabled = false;
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
-    const { invalidatePainSignalBridge } = await import('@principles/core/runtime-v2');
+    const { invalidatePainSignalBridge } = await import('@principles/core/runtime');
     invalidatePainSignalBridge(workspaceDir);
     const disabled = admitTrustedWorkbuddyLiveCorrection({
       workspaceDir,

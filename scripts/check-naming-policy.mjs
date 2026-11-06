@@ -1,16 +1,30 @@
 #!/usr/bin/env node
 /**
- * PRI-1104 Stage 0 — naming policy OBSERVER (not a merge gate yet).
+ * PRI-1104 naming policy gate.
  *
- * PR-1: warn-only, NOT wired into any CI workflow, npm script or hook.
- * `--strict` is a preview of the PR-3 gate, not a gate today. Before PR-3
- * turns it on, the scan surface must be redesigned (it currently covers
- * packages/* source files only; the full consumer list is in
- * docs/audit/PRI-1104-single-version-convergence-plan.md §8) and the script
- * must be wired into the merge path explicitly.
+ * PR-1 shipped this as a warn-only observer. PR-3 (PRI-1136) is the rename
+ * contract: `runtime-v2` is gone from the tree, so the rule that forbids it
+ * becomes a merge gate. `npm run check:naming-policy` runs in `--strict` and
+ * is wired into `verify:merge`.
  *
- * Exit contract, regression-pinned by
- * scripts/__tests__/check-naming-policy.test.mjs (PR #2367 review):
+ * Scan surface (PR-3 redesign — the PR-1 surface covered `packages/*` source
+ * only, which was both false-green and needle-thin: the exports map, the
+ * io-seam registry and the workflows were outside it):
+ *   - source: `packages/<pkg>/src|scripts/**` and root `scripts/**`
+ *   - tests:  `packages/<pkg>/tests/**` and `*.test.ts(x)` — only the
+ *             import-path rule applies here (`testsToo`)
+ *   - config: every `packages/<pkg>/package.json`, `io-seam-registry.json`,
+ *             and `.github/workflows/*.yml` (rule `runtime-v2-config`)
+ * Historical records (docs/, CHANGELOG, `.gitleaksignore` commit
+ * fingerprints) are deliberately out of scope: they describe the past and must
+ * keep the paths they were written with.
+ *
+ * Rule gating is explicit config (`namingPolicy.gatedRules`), not "every rule
+ * marked gated". `versioned-output-ref` belongs to PRI-1139 (PR-6) and stays
+ * in `pendingRules` until that PR flips the write side; it is reported but
+ * never fails the build here.
+ *
+ * Exit contract:
  *   - `--strict` fails on gated violations OR scan I/O errors in EVERY output
  *     mode. `--json` must never bypass the verdict.
  *   - without `--strict`: report only; scan errors are printed as warnings.
@@ -21,9 +35,9 @@
  * treated as a violation. Exemptions apply to GATED findings only — an
  * exempt file still contributes to the inventory (PR #2367 CodeRabbit #5).
  *
- * `--scan-root <dir>` overrides the scan directory for controlled tests. It
- * does NOT change where the policy registry is read from, and is never used
- * in production.
+ * `--scan-root <dir>` replaces the SOURCE scan root and disables the tests and
+ * config passes, so tests stay hermetic. It never changes where the policy
+ * registry is read from, and is never used in production.
  *
  * Usage:
  *   node scripts/check-naming-policy.mjs            # warn-only report
@@ -38,6 +52,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REGISTRY_PATH = path.join(ROOT, 'packages/principles-core/io-seam-registry.json');
 const PACKAGES_DIR = path.join(ROOT, 'packages');
+const SCRIPTS_DIR = path.join(ROOT, 'scripts');
+const WORKFLOWS_DIR = path.join(ROOT, '.github/workflows');
 const SCANNABLE = /\.(?:ts|tsx|mjs|cjs|js)$/;
 
 const args = process.argv.slice(2);
@@ -48,14 +64,27 @@ function flagValue(name) {
 const strict = args.includes('--strict');
 const asJson = args.includes('--json');
 const scanRootOverride = flagValue('--scan-root');
-const SCAN_DIR = scanRootOverride ? path.resolve(scanRootOverride) : PACKAGES_DIR;
+const SCAN_DIR = scanRootOverride ? path.resolve(scanRootOverride) : null;
 
-const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+function failHard(reason, details) {
+  process.stdout.write(
+    JSON.stringify({ mode: strict ? 'strict' : 'warn', ok: false, reason, details }, null, 2) + '\n',
+  );
+  process.exit(1);
+}
+
+let registry;
+try {
+  registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+} catch (err) {
+  failHard('registry_unreadable', { path: REGISTRY_PATH, error: String((err && err.message) || err) });
+}
+
 const policy = registry.namingPolicy ?? {};
 const exemptFiles = new Set((policy.exemptFiles ?? []).map((p) => p.replace(/\\/g, '/')));
 const frozenLiterals = (policy.frozenWireLiterals ?? []).filter((p) => typeof p === 'string' && p.length > 0);
 
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '__tests__', 'tests', '.pd-test-temp']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.pd-test-temp', '.git']);
 const scanErrors = [];
 
 function productionFiles(dir, out = []) {
@@ -83,6 +112,133 @@ function productionFiles(dir, out = []) {
   return out;
 }
 
+/** Same walk, but test files are the point. */
+function testFiles(dir, out = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    scanErrors.push({ path: dir, error: String((err && err.message) || err) });
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'tests' || entry.name === '__tests__') testFiles(full, out);
+      else testFiles(full, out);
+    } else if (entry.isFile() && /\.test\.[cm]?[jt]sx?$/.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function packageDirs() {
+  try {
+    return fs
+      .readdirSync(PACKAGES_DIR, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => path.join(PACKAGES_DIR, e.name));
+  } catch (err) {
+    scanErrors.push({ path: PACKAGES_DIR, error: String((err && err.message) || err) });
+    return [];
+  }
+}
+
+/** Source roots for the default (repo) scan. */
+function defaultSourceFiles(out = []) {
+  for (const dir of packageDirs()) {
+    for (const sub of ['src', 'scripts']) {
+      const target = path.join(dir, sub);
+      if (fs.existsSync(target)) productionFiles(target, out);
+    }
+  }
+  productionFiles(SCRIPTS_DIR, out);
+  return out;
+}
+
+function defaultTestFiles(out = []) {
+  for (const dir of packageDirs()) {
+    for (const sub of ['src', 'tests']) {
+      const target = path.join(dir, sub);
+      if (fs.existsSync(target)) testFiles(target, out);
+    }
+  }
+  return out;
+}
+
+/**
+ * Structured config pass. The PR-1 surface could not see an export subpath or
+ * a registry path at all — those are JSON strings, not source imports.
+ */
+function configFiles(out = []) {
+  for (const dir of packageDirs()) {
+    const manifest = path.join(dir, 'package.json');
+    if (fs.existsSync(manifest)) out.push(manifest);
+  }
+  if (fs.existsSync(REGISTRY_PATH)) out.push(REGISTRY_PATH);
+  let workflows = [];
+  try {
+    workflows = fs.readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
+  } catch (err) {
+    scanErrors.push({ path: WORKFLOWS_DIR, error: String((err && err.message) || err) });
+  }
+  for (const f of workflows) out.push(path.join(WORKFLOWS_DIR, f));
+  return out;
+}
+
+/**
+ * Structured config pass. The PR-1 surface could not see an export subpath or
+ * a registry path at all — those are JSON strings, not source imports.
+ *
+ * This is field-aware on purpose: a plain text sweep of the registry would
+ * flag the policy's own rule ids (`runtime-v2-import`) and description, and
+ * excluding the file wholesale would blind the gate to `seams[].files`.
+ */
+function configHits(rel, raw) {
+  const forbidden = (s) => /(?<!pd-)runtime-v2/.test(s);
+  if (/package\.json$/.test(rel)) {
+    let manifest;
+    try {
+      manifest = JSON.parse(raw);
+    } catch (err) {
+      scanErrors.push({ path: rel, error: `unparseable package.json: ${String((err && err.message) || err)}` });
+      return 0;
+    }
+    const strings = [];
+    const walk = (value) => {
+      if (typeof value === 'string') strings.push(value);
+      else if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === 'object') {
+        for (const key of Object.keys(value)) {
+          strings.push(key);
+          walk(value[key]);
+        }
+      }
+    };
+    walk(manifest.exports ?? {});
+    for (const field of ['main', 'module', 'types', 'typesVersions', 'bin', 'files']) {
+      if (manifest[field]) walk(manifest[field]);
+    }
+    return strings.filter(forbidden).length;
+  }
+  if (/io-seam-registry\.json$/.test(rel)) {
+    let registryDoc;
+    try {
+      registryDoc = JSON.parse(raw);
+    } catch (err) {
+      scanErrors.push({ path: rel, error: `unparseable registry: ${String((err && err.message) || err)}` });
+      return 0;
+    }
+    const files = (registryDoc.seams ?? []).flatMap((seam) => seam.files ?? []);
+    return files.filter(forbidden).length;
+  }
+  // Workflows are YAML; a textual sweep is the only honest option. The frozen
+  // `pd-runtime-v2*` literals are excluded by the same lookbehind.
+  return [...raw.matchAll(/(?<!pd-)runtime-v2/g)].length;
+}
+
 /** Exemptions suppress GATED findings only; inventory always counts the file. */
 function isExempt(rel) {
   if (exemptFiles.has(rel)) return true;
@@ -93,23 +249,36 @@ function isExempt(rel) {
 const RULES = [
   {
     id: 'runtime-v2-import',
-    why: '代际目录名 / 包子路径（PR-3 收敛为 runtime）',
+    why: '代际目录名 / 包子路径（PR-3 已收敛为 runtime；再出现即为回退）',
     // PR #2367 CodeRabbit #4: match directory-entry imports such as
     // './runtime-v2' as well as subpaths ending in '/'.
     re: /@principles\/core\/runtime-v2(?![A-Za-z0-9_-])|['"`][^'"`]*\/runtime-v2(?:\/|['"`])/g,
     gated: true,
     frozenExempt: true,
     multiline: false,
+    scopes: ['source', 'tests'],
+  },
+  {
+    id: 'runtime-v2-config',
+    why: '包导出映射 / io-seam 路径 / CI 工作流里残留的代际路径',
+    // Evaluated field-aware by configHits(), not by the generic line scan —
+    // `scopes: []` keeps it out of scan().
+    re: /(?<!pd-)runtime-v2/g,
+    gated: true,
+    frozenExempt: false,
+    multiline: false,
+    scopes: [],
   },
   {
     id: 'versioned-output-ref',
-    why: '带 -vN 的 outputSchemaRef 写入（PR-6 去版本语义）',
+    why: '带 -vN 的 outputSchemaRef 写入（PRI-1139 / PR-6 去版本语义，尚未 gate）',
     re: /outputSchemaRef:\s*['"`][^'"`]*-v[12]['"`]/g,
     gated: true,
     frozenExempt: false,
     // PR #2367 CodeRabbit #6: scan the whole file so the property name and
     // its value may live on different lines.
     multiline: true,
+    scopes: ['source'],
   },
   {
     id: 'api-v1-route',
@@ -118,25 +287,24 @@ const RULES = [
     gated: false,
     frozenExempt: false,
     multiline: false,
+    scopes: ['source'],
   },
 ];
 
+const gatedRuleIds = new Set(
+  Array.isArray(policy.gatedRules) ? policy.gatedRules : RULES.filter((r) => r.gated).map((r) => r.id),
+);
+
 const inventory = Object.fromEntries(RULES.map((rule) => [rule.id, 0]));
 const findings = [];
+const pendingFindings = [];
 
-for (const file of productionFiles(SCAN_DIR)) {
-  const rel = path.relative(ROOT, file).replace(/\\/g, '/');
-  let source;
-  try {
-    source = fs.readFileSync(file, 'utf8');
-  } catch (err) {
-    scanErrors.push({ path: rel, error: String((err && err.message) || err) });
-    continue;
-  }
-
+function scan(rel, source, scope) {
   const perFile = new Map();
+  const perPending = new Map();
   const lines = source.split('\n');
   for (const rule of RULES) {
+    if (!rule.scopes.includes(scope)) continue;
     // A multiline rule matches against the whole file (its `\s*` spans \n).
     // Line-scoped rules keep the line-level frozen-literal exemption.
     const chunks = rule.multiline ? [source] : lines;
@@ -145,12 +313,58 @@ for (const file of productionFiles(SCAN_DIR)) {
       const count = [...chunk.matchAll(rule.re)].length;
       if (count === 0) continue;
       inventory[rule.id] += count;
-      if (rule.gated && !isExempt(rel)) {
-        perFile.set(rule.id, (perFile.get(rule.id) ?? 0) + count);
-      }
+      if (!rule.gated) continue;
+      const bucket = gatedRuleIds.has(rule.id) ? perFile : perPending;
+      bucket.set(rule.id, (bucket.get(rule.id) ?? 0) + count);
     }
   }
-  for (const [rule, count] of perFile) findings.push({ rule, file: rel, count, why: RULES.find((r) => r.id === rule).why });
+  const toFindings = (map) =>
+    [...map].map(([rule, count]) => ({
+      rule,
+      file: rel,
+      count,
+      why: RULES.find((r) => r.id === rule).why,
+    }));
+  if (perFile.size > 0 && !isExempt(rel)) findings.push(...toFindings(perFile));
+  if (perPending.size > 0 && !isExempt(rel)) pendingFindings.push(...toFindings(perPending));
+}
+
+const work = [];
+if (SCAN_DIR) {
+  work.push(...productionFiles(SCAN_DIR).map((f) => [f, 'source']));
+} else {
+  work.push(...defaultSourceFiles().map((f) => [f, 'source']));
+  work.push(...defaultTestFiles().map((f) => [f, 'tests']));
+  work.push(...configFiles().map((f) => [f, 'config']));
+}
+
+const seen = new Set();
+for (const [file, scope] of work) {
+  const rel = path.relative(ROOT, file).replace(/\\/g, '/');
+  if (seen.has(rel)) continue;
+  seen.add(rel);
+  let source;
+  try {
+    source = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    scanErrors.push({ path: rel, error: String((err && err.message) || err) });
+    continue;
+  }
+  if (scope === 'config') {
+    const hits = configHits(rel, source);
+    if (hits === 0) continue;
+    inventory['runtime-v2-config'] += hits;
+    if (gatedRuleIds.has('runtime-v2-config') && !isExempt(rel)) {
+      findings.push({
+        rule: 'runtime-v2-config',
+        file: rel,
+        count: hits,
+        why: RULES.find((r) => r.id === 'runtime-v2-config').why,
+      });
+    }
+    continue;
+  }
+  scan(rel, source, scope);
 }
 
 // Verdict is computed BEFORE choosing the output format. A machine-readable
@@ -159,21 +373,26 @@ const failed = strict && (findings.length > 0 || scanErrors.length > 0);
 const result = {
   mode: strict ? 'strict' : 'warn',
   inventory,
+  gatedRules: [...gatedRuleIds],
   gatedFindings: findings.length,
+  pendingFindings: pendingFindings.length,
   scanErrors,
   findings,
+  pending: pendingFindings,
 };
 
 if (asJson) {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 } else {
-  process.stdout.write(`[check:naming-policy] mode=${result.mode} (PRI-1104 observer, NOT wired into any gate)\n`);
+  process.stdout.write(`[check:naming-policy] mode=${result.mode} gatedRules=${result.gatedRules.join(',')}\n`);
   process.stdout.write(`[check:naming-policy] inventory: ${JSON.stringify(inventory)}\n`);
   const top = [...findings].sort((a, b) => b.count - a.count).slice(0, 8);
   for (const f of top) process.stdout.write(`  ${f.rule} ${f.count}x ${f.file}\n`);
-  process.stdout.write(`[check:naming-policy] ${findings.length} file(s) with gated findings; api-v1-route is inventory-only\n`);
+  process.stdout.write(
+    `[check:naming-policy] ${findings.length} gated finding(s), ${pendingFindings.length} pending rule(s) not gated yet; api-v1-route is inventory-only\n`,
+  );
   for (const err of scanErrors) process.stdout.write(`[check:naming-policy] WARN scan error: ${err.path}: ${err.error}\n`);
-  if (!strict) process.stdout.write('[check:naming-policy] warn-only: no gate failure in PR-1\n');
+  if (!strict) process.stdout.write('[check:naming-policy] warn-only: no gate failure\n');
 }
 
 if (failed) {

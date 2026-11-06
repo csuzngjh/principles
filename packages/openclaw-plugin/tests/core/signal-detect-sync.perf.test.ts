@@ -20,7 +20,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime-v2';
+import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime';
 
 vi.mock('../../src/hooks/pain.js', () => ({
   emitPainDetectedEvent: vi.fn().mockResolvedValue(undefined),

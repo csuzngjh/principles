@@ -25,7 +25,7 @@ import {
   formatLegacyRuleContractRemediation,
   type ActivationCompatibilityScanResult,
   type LegacyRuleContractFinding,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitError } from '../services/cli-output.js';
 

@@ -30,9 +30,9 @@ const ROOT = path.resolve(__dirname, '..');
 const SCAN_ROOTS = ['packages/principles-core/src', 'packages/pd-cli/src'];
 const UNION_FILE = 'packages/principles-core/src/telemetry-event.ts';
 const ARTIFACT_SUMMARY_FILE =
-  'packages/principles-core/src/runtime-v2/internalization/artifact-summary.ts';
+  'packages/principles-core/src/runtime/internalization/artifact-summary.ts';
 const FORMATION_CONTEXT_FILE =
-  'packages/principles-core/src/runtime-v2/internalization/formation-context.ts';
+  'packages/principles-core/src/runtime/internalization/formation-context.ts';
 
 // PainSignalBridge emits ad-hoc names that are deliberately NOT registered:
 // pain-signal-runtime-factory.ts:518-530 keeps them dormant (forwarding them

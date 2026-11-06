@@ -22,7 +22,7 @@
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1
  */
 
-import { PROMPT_TOTAL_INJECTION_FALLBACK_CHARS } from '../runtime-v2/activation/prompt-budget-policy.js';
+import { PROMPT_TOTAL_INJECTION_FALLBACK_CHARS } from '../runtime/activation/prompt-budget-policy.js';
 import type { SizeGuardOptions, TruncateResult } from './types.js';
 
 /**

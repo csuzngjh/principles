@@ -33,12 +33,12 @@ import {
   isIntentRelatedField,
   isSuggestedOwnerAction,
   generateIntentPatchProposal,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   IntentDecisionInput,
   IntentRelatedField,
   FollowUpPatch,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { IntentDecisionModel, type IntentDecisionRecordResultModel, type FollowUpDispatchResultModel } from '../models/IntentDecisionModel.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';

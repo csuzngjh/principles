@@ -27,7 +27,7 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
 import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin } from '@principles/host-runtime';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 
 const DEFAULT_INTERVAL_MS = 120_000;

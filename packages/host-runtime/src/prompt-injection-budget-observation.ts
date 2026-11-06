@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   PROMPT_BUDGET_POLICY_VERSION,
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   isValidContextWindowTokens,
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
@@ -12,7 +12,7 @@ import {
   type PromptBudgetFallbackReason,
   type PromptBudgetResolution,
   type PromptBudgetConfig,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   isPromptInjectionTargetHost,
   type PromptInjectionTargetHost,
@@ -87,22 +87,22 @@ function isAcceptedBudgetPolicyVersion(value: unknown): boolean {
  */
 
 /**
- * Candidate directories for the runtime-v2 event log, in priority order.
+ * Candidate directories for the runtime event log, in priority order.
  * Shared with the RuleCode telemetry collector (ERR-031: both readers derive
  * from one list — the v1 EventLog writer emits `.state/logs`, no production
  * code ever created `.pd/logs`).
  */
-export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
+export const RUNTIME_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
 
 /**
  * Bounded I/O: only the most recent daily files are scanned — PER candidate
- * log directory (`RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS`), not globally. The
+ * log directory (`RUNTIME_EVENT_LOG_CANDIDATE_DIRS`), not globally. The
  * cap is deliberately per directory: both directories describe the same
  * workspace's log convention and either can hold the newest event for a given
  * host (the reader takes latest-wins ACROSS them), so a global cap would let
  * one directory's files starve the other and drop a live host observation.
  * Worst case per read is therefore `RUNTIME_BUDGET_OBSERVATION_MAX_FILES ×
- * RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS.length` files (14 today) and the same
+ * RUNTIME_EVENT_LOG_CANDIDATE_DIRS.length` files (14 today) and the same
  * count × `RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES` bytes (56 MiB today).
  */
 export const RUNTIME_BUDGET_OBSERVATION_MAX_FILES = 7;
@@ -284,7 +284,7 @@ function narrowObservation(parsed: unknown, workspaceDir: string, nowMs: number)
     if (rawSource !== 'legacy_fallback') return null;
     if (rawWindow !== undefined) return null;
     if (!isBudgetFallbackReason(rawReason)) return null;
-    if (budget !== RUNTIME_V2_PRINCIPLE_BUDGET) return null;
+    if (budget !== RUNTIME_PRINCIPLE_BUDGET) return null;
   }
   return {
     workspaceDir,
@@ -339,7 +339,7 @@ function readBoundedLogText(filePath: string): { text: string; truncated: boolea
 
 /**
  * Read the most recent budget observation per host from the workspace's
- * runtime-v2 event logs. Never throws: an unreadable log directory degrades
+ * runtime event logs. Never throws: an unreadable log directory degrades
  * to an empty report with an explicit note (absence is UNKNOWN, not zero).
  */
 export function readRuntimePromptBudgetObservations(input: {
@@ -356,7 +356,7 @@ export function readRuntimePromptBudgetObservations(input: {
   const foreignPolicyEventsSkipped = { count: 0 };
   const truncatedFiles = { count: 0 };
   const latest = new Map<PromptInjectionTargetHost, RuntimePromptBudgetObservation>();
-  for (const candidate of RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS) {
+  for (const candidate of RUNTIME_EVENT_LOG_CANDIDATE_DIRS) {
     const logsRoot = path.resolve(workspaceDir, ...candidate.split('/'));
     if (!fs.existsSync(logsRoot)) continue;
     let canonicalRoot: string;

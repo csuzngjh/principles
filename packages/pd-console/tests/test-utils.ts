@@ -9,7 +9,7 @@ import {
   OperatorHealthReadModel,
   CandidateIntakeService,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export interface TestWorkspace {
   workspaceDir: string;

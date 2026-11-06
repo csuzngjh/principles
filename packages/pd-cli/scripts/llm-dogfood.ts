@@ -40,8 +40,8 @@ import {
   makeIdempotencyKey,
   createPITaskDiagnosticJson,
   buildToolSemanticRegistry,
-} from '@principles/core/runtime-v2';
-import type { PIArtifactSnapshot, PIArtifactRecord } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PIArtifactSnapshot, PIArtifactRecord } from '@principles/core/runtime';
 import { runRuleHostPipeline } from '../src/services/rulehost-pipeline-runner.js';
 import { compileDemoRule } from '../src/services/demo-rule-compiler.js';
 import { resolveWorkspaceHostToolSemantics, saveHostToolDeclaration } from '@principles/host-runtime';

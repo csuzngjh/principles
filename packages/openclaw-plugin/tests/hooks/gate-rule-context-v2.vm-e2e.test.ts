@@ -23,7 +23,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';

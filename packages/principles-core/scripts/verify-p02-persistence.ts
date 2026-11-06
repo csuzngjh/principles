@@ -7,15 +7,15 @@
  *
  * 运行：npx tsx packages/principles-core/scripts/verify-p02-persistence.ts
  */
-import { RuntimeStateManager } from '../src/runtime-v2/store/runtime-state-manager.js';
-import { BasePeerRunner } from '../src/runtime-v2/runner/base-peer-runner.js';
-import type { PDRuntimeAdapter, RunHandle } from '../src/runtime-v2/runtime-protocol.js';
-import type { StoreEventEmitter } from '../src/runtime-v2/store/event-emitter.js';
-import type { PIArtifactStore } from '../src/runtime-v2/internalization/pi-artifact.js';
-import type { TaskRecord } from '../src/runtime-v2/task-status.js';
-import type { PDErrorCategory } from '../src/runtime-v2/error-categories.js';
-import { PDRuntimeError } from '../src/runtime-v2/error-categories.js';
-import type { PeerRunnerDeps, PeerRunnerResult, PeerRunnerValidationResult } from '../src/runtime-v2/runner/peer-runner-types.js';
+import { RuntimeStateManager } from '../src/runtime/store/runtime-state-manager.js';
+import { BasePeerRunner } from '../src/runtime/runner/base-peer-runner.js';
+import type { PDRuntimeAdapter, RunHandle } from '../src/runtime/runtime-protocol.js';
+import type { StoreEventEmitter } from '../src/runtime/store/event-emitter.js';
+import type { PIArtifactStore } from '../src/runtime/internalization/pi-artifact.js';
+import type { TaskRecord } from '../src/runtime/task-status.js';
+import type { PDErrorCategory } from '../src/runtime/error-categories.js';
+import { PDRuntimeError } from '../src/runtime/error-categories.js';
+import type { PeerRunnerDeps, PeerRunnerResult, PeerRunnerValidationResult } from '../src/runtime/runner/peer-runner-types.js';
 
 const WORKSPACE = 'D:/.openclaw/workspace';
 

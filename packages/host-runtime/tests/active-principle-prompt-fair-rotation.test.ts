@@ -4,14 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
   getDefaultPdConfig,
   renderPrinciplesToDirectives,
   trimToBudget,
   type ActivatedPrinciple,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
@@ -80,7 +80,7 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     ]);
     const result = await buildActivePrinciplePromptContext({ workspaceDir });
     expect(result.selectionPolicy).toBe('legacy_fifo_prefix_v1');
-    expect(result.additionalContext.length).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(result.additionalContext.length).toBeLessThanOrEqual(RUNTIME_PRINCIPLE_BUDGET);
   });
 
   it('rotates the scan start and continues past non-fitting entries under a round key', async () => {
@@ -100,8 +100,8 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     expect(round5.rotationStartIndex).toBe(5);
     // Rotation actually moves the window: the two rounds differ in membership
     // while both stay within budget.
-    expect(round0.additionalContext.length).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
-    expect(round5.additionalContext.length).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(round0.additionalContext.length).toBeLessThanOrEqual(RUNTIME_PRINCIPLE_BUDGET);
+    expect(round5.additionalContext.length).toBeLessThanOrEqual(RUNTIME_PRINCIPLE_BUDGET);
     expect(new Set(round0.principleIds)).not.toEqual(new Set(round5.principleIds));
 
     // Bounded diagnostics describe the truncation.
@@ -187,7 +187,7 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     const runtime = createProductionHostRuntime({
       hostKind: 'codex',
       events: {
-        recordRuntimeV2ActivationsInjected: (data) => { emitted.push(data as unknown as Record<string, unknown>); },
+        recordRuntimeActivationsInjected: (data) => { emitted.push(data as unknown as Record<string, unknown>); },
       } as unknown as HostEventEmitter,
     });
 
@@ -257,7 +257,7 @@ describe('PRI-904 route parity — plugin-local selector vs host-shared renderer
     // Fixed template overhead (title + explanation + footer) = single render minus its own block.
     const fixedDirectiveOverhead = anchorAlone - blockCost.get(anchor.principleId)!;
     // Plugin route: header is the 32-char list header, entry cost = serialized entry + 1 newline.
-    const pluginBudget = RUNTIME_V2_PRINCIPLE_BUDGET - fixedDirectiveOverhead + 'Runtime V2 activated principles:'.length;
+    const pluginBudget = RUNTIME_PRINCIPLE_BUDGET - fixedDirectiveOverhead + 'Runtime V2 activated principles:'.length;
 
     const pluginFixture: ActivatedPrinciple[] = shared.map((p) => {
       const prefix = `- [${p.principleId}] `;
@@ -270,7 +270,7 @@ describe('PRI-904 route parity — plugin-local selector vs host-shared renderer
       expect(sharedResult.rotationStartIndex).toBe(pluginResult.rotationStartIndex);
       expect(new Set(sharedResult.principleIds)).toEqual(new Set(pluginResult.injectedIds));
       expect(sharedResult.truncated).toBe(pluginResult.truncated);
-      expect(sharedResult.additionalContext.length).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+      expect(sharedResult.additionalContext.length).toBeLessThanOrEqual(RUNTIME_PRINCIPLE_BUDGET);
       expect(pluginResult.lines.join('\n').length).toBeLessThanOrEqual(pluginBudget);
     }
   });

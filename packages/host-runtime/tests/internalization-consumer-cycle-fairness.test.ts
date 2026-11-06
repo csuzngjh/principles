@@ -27,7 +27,7 @@ import {
   ScribeRunner,
   getDefaultPdConfig,
   type RuntimeStateManager,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, orderKindsByOldestReadyStage } from '../src/internalization-consumer-cycle.js';
 
 const dirs: string[] = [];

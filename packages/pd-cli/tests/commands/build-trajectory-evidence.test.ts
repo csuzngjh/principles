@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { MAX_EVIDENCE_ENTRIES } from '@principles/core/runtime-v2';
+import { MAX_EVIDENCE_ENTRIES } from '@principles/core/runtime';
 import { acquireCodexToolFailureEvidenceFromDb, acquireTrajectoryEvidenceFromDb } from '../../src/commands/build-trajectory-evidence.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

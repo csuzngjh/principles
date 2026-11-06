@@ -29,7 +29,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from '../../src/server/routes/evidence-chain.js';
 import { sendJson, sendNotFound } from '../../src/server/utils/response.js';
 

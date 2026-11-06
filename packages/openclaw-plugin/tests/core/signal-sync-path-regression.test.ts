@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime-v2';
+import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime';
 
 // mock 掉会触发真实副作用的模块；signal-health 与 io(utils) 保持真实实现，
 // 这是本文件要验证的对象（文件何时被写）。

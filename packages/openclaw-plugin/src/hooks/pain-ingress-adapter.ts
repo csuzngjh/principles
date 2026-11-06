@@ -4,13 +4,13 @@
  * One seam converts the OpenClaw plugin's pain funnel facts (session from
  * the hook/command context, trajectory evidence, source) into a validated
  * PainIngressReport and delegates the decision to the SHARED semantic
- * evaluator `evaluatePainIngress` (owned by @principles/core/runtime-v2 —
+ * evaluator `evaluatePainIngress` (owned by @principles/core/runtime —
  * the same authority pd-cli uses).
  * Emitters stop assembling provenance or sentinel evidence themselves
  * (SPEC §8.3); observation-only automatic signals never reach an LLM.
  */
-import { evaluatePainIngress, isSentinelSessionId } from '@principles/core/runtime-v2';
-import type { PainEvidenceEntry, PainIngressDecision, IngressEvidenceEntry } from '@principles/core/runtime-v2';
+import { evaluatePainIngress, isSentinelSessionId } from '@principles/core/runtime';
+import type { PainEvidenceEntry, PainIngressDecision, IngressEvidenceEntry } from '@principles/core/runtime';
 import { acquireTrajectoryEvidence } from './trajectory-evidence.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 

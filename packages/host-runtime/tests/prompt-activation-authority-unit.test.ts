@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { SqliteConnection } from '@principles/core/runtime-v2';
+import type { SqliteConnection } from '@principles/core/runtime';
 import { readPromptActivationAuthority } from '../src/prompt-activation-authority.js';
 
 function connectionReturning(row: unknown): Pick<SqliteConnection, 'getDb'> {

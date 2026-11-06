@@ -29,7 +29,7 @@ import * as os from 'os';
 // All other core functions (validatePdConfig, computeEffectivePdConfig,
 // resolveAgentRuntimeBinding, etc.) use their real implementations.
 const mockProbeRuntime = vi.fn();
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,

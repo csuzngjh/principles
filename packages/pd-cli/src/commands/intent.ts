@@ -36,8 +36,8 @@ import {
   computeIntentContentHash,
   validateIntentDocSections,
   isFeatureEnabled,
-} from '@principles/core/runtime-v2';
-import type { IntentDocSections, IntentDocWarning, IntentLang } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { IntentDocSections, IntentDocWarning, IntentLang } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { emitResult } from '../services/cli-output.js';

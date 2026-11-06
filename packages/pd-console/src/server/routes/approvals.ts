@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime-v2';
-import { isApprovalReviewGuard, MVP_CHANNELS } from '@principles/core/runtime-v2';
+import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime';
+import { isApprovalReviewGuard, MVP_CHANNELS } from '@principles/core/runtime';
 import { ApprovalsConsoleModel, type ApproveWithActivationResult, type ReopenApprovalResult } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';

@@ -5,7 +5,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ReceiptsConsoleModel } from '../models/ReceiptsConsoleModel.js';
-import type { InterventionAuditSelector, InterventionRecordKind } from '@principles/core/runtime-v2';
+import type { InterventionAuditSelector, InterventionRecordKind } from '@principles/core/runtime';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, ReceiptsConsoleModel>();

@@ -290,7 +290,7 @@ describe('installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5
     copyPackageWithDeps(path.join(repoRoot, 'packages', 'principles-core'), path.join(nm, '@principles', 'core'), nm, rootNm);
     // 3. Workspace: host.codex ON + one approved prompt principle in SQLite.
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
-    const { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } = await import('@principles/core/runtime');
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
@@ -1128,7 +1128,7 @@ describe('pd-disable.cjs kill switch', () => {
   it('flips host.codex.enabled in the nearest .pd/config.yaml and is idempotent', async () => {
     const workspace = tempDir('pd-disable-ws-');
     fs.mkdirSync(path.join(workspace, '.pd', 'sub'), { recursive: true });
-    const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig } = await import('@principles/core/runtime');
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
     // js-yaml 5 is ESM-only: no default export — use the namespace.

@@ -14,7 +14,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function () {
     return { initialize: vi.fn().mockResolvedValue(undefined), close: mockClose };
   }),

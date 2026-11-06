@@ -14,7 +14,7 @@
  * never by Agent auto-modification (SPEC §3.9 preserved).
  *
  * Architecture note: parseIntentDocSections / assembleIntentDoc are imported
- * from @principles/core/runtime-v2. These are pure functions (no I/O, no
+ * from @principles/core/runtime. These are pure functions (no I/O, no
  * node:crypto) and safe for the browser bundle. The crypto-dependent
  * computeIntentContentHash lives in intent-hash.ts to keep intent-doc.ts
  * browser-bundleable.
@@ -28,7 +28,7 @@ import {
   parseIntentDocSections,
   assembleIntentDoc,
   type IntentDocSections,
-} from "@principles/core/runtime-v2/intent-browser";
+} from "@principles/core/runtime/intent-browser";
 
 // ── Section step helpers ─────────────────────────────────────────────────────
 

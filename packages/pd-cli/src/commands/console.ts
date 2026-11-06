@@ -67,7 +67,7 @@ function getConsoleDir(): { dir: string; mode: InstallLayoutMode } | null {
 /**
  * Verify the console server's runtime dependency slots are resolvable.
  *
- * The console's dist statically imports `@principles/core/runtime-v2` and
+ * The console's dist statically imports `@principles/core/runtime` and
  * `@principles/host-runtime`, and reads plugin governance exports from
  * `principles-disciple`. Each slot must be a real package (package.json present
  * AND dist/index.js present) — a dangling junction or an empty shell (package.json
@@ -80,7 +80,7 @@ export function checkConsoleRuntimeDependencies(consoleDir: string): string | un
   // These are the exact entry files the console server resolves at startup,
   // derived from each package's real `exports` map (not assumed dist/index.js):
   //   @principles/core/principle-tree-ledger → dist/principle-tree-ledger.js
-  //   @principles/core/runtime-v2            → dist/runtime-v2/index.js
+  //   @principles/core/runtime            → dist/runtime/index.js
   //   @principles/host-runtime               → dist/index.js
   //   @principles/install-layout             → dist/index.js
   //   principles-disciple/governance-audit   → dist/governance-audit.js
@@ -92,7 +92,7 @@ export function checkConsoleRuntimeDependencies(consoleDir: string): string | un
       pkg: '@principles/core',
       entries: [
         path.join('dist', 'principle-tree-ledger.js'),
-        path.join('dist', 'runtime-v2', 'index.js'),
+        path.join('dist', 'runtime', 'index.js'),
       ],
     },
     { pkg: '@principles/host-runtime', entries: [path.join('dist', 'index.js')] },
@@ -160,7 +160,7 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
   }
 
   // Runtime dependency integrity check: the console server statically imports
-  // @principles/core/runtime-v2 and @principles/host-runtime, and the console
+  // @principles/core/runtime and @principles/host-runtime, and the console
   // reads plugin governance exports from principles-disciple. When the OpenClaw
   // upgrade path refreshes the plugin bundle without re-running the PD installer
   // (2026-09: console_cli_exited_before_result), these node_modules slots can be
@@ -566,7 +566,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   // loaded in memory; broken disk slots (dangling junction / empty shell left
   // by an interrupted update) must not prevent reusing it. Only when we are
   // about to execute the local console bytes do the local bytes need to be
-  // resolvable. The server statically imports @principles/core/runtime-v2 and
+  // resolvable. The server statically imports @principles/core/runtime and
   // @principles/host-runtime, and reads plugin governance exports from
   // principles-disciple; without this check a broken install crashes with
   // ERR_MODULE_NOT_FOUND which the Companion reports as the opaque

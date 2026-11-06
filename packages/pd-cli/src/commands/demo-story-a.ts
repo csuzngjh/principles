@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runStoryADemo } from '../services/demo-story-a-runner.js';
-import type { MvpChannel } from '@principles/core/runtime-v2';
+import type { MvpChannel } from '@principles/core/runtime';
 
 interface DemoStoryAOptions {
   workspace?: string;
@@ -74,7 +74,7 @@ function formatTextOutput(result: Record<string, unknown>): string {
   }
 
   lines.push('');
-  lines.push(`Runtime V2 Exclusive: ${result.isRuntimeV2Exclusive ? 'Yes' : 'No'}`);
+  lines.push(`Runtime V2 Exclusive: ${result.isRuntimeExclusive ? 'Yes' : 'No'}`);
 
   lines.push('');
   lines.push('--- Narrative ---');
@@ -134,7 +134,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       storyDescription: 'Demo isolation guard',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       refusal: {
         reason: 'demo_write_to_existing_workspace',
         message: 'This command would write demo artifacts into an existing PD workspace.',
@@ -164,7 +164,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       storyDescription: 'Input validation failed',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       inputValidationFailure: {
         reason: 'empty_channels',
         message: 'No channels specified. At least one MVP channel required.',
@@ -193,7 +193,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       storyDescription: 'Input validation failed',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       inputValidationFailure: {
         reason: 'unknown_channels',
         message: `Unknown channels: ${parsed.unknowns.join(', ')}. Valid: prompt, code_tool_hook, defer_archive`,

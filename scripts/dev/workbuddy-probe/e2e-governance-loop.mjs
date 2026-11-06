@@ -148,7 +148,7 @@ function steps() {
 }
 
 async function governanceSetup() {
-  const { getDefaultPdConfig, SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime-v2');
+  const { getDefaultPdConfig, SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime');
   fs.mkdirSync(path.join(GOV, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(GOV, '.state'), { recursive: true });
   const config = getDefaultPdConfig();

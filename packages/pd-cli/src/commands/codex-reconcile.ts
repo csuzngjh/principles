@@ -3,7 +3,7 @@
  * Slice B, PRI-623; SPEC §13/§20).
  *
  * Runs the narrow idempotent reconciliation pass between the governance
- * admission markers (trajectory.db) and the Runtime V2 task store
+ * admission markers (trajectory.db) and the Runtime task store
  * (.pd/state.db): creates missing Diagnostician tasks for admitted pains,
  * repairs task links, retries pending promotion tails, and reports stale
  * tails — without a background worker (the Slice C Companion worker will
@@ -16,7 +16,7 @@
  */
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfigForPlugin, reconcileGovernanceContinuation } from '@principles/host-runtime';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 
 interface CodexReconcileOptions {
   workspace?: string;

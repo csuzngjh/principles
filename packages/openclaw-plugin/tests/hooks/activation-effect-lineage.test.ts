@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
-import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime';
 import { handleBeforeToolCall, accountSharedDeny, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallResult } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';

@@ -9,7 +9,7 @@ import {
   listRecoveryActions,
   hydratePITaskRecord,
   type FailedTaskRecoveryAuditRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { buildExecutionNextAction } from './runtime-recovery-failed-tasks.js';
 

@@ -15,9 +15,9 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RuntimeStateManager, SqliteDiagnosticianCommitter } from '@principles/core/runtime-v2';
-import { SqliteConnection } from '@principles/core/runtime-v2';
-import type { DiagnosticianOutputV1 } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, SqliteDiagnosticianCommitter } from '@principles/core/runtime';
+import { SqliteConnection } from '@principles/core/runtime';
+import type { DiagnosticianOutputV1 } from '@principles/core/runtime';
 import { enforceFullAdmissionForWrite } from '../../src/services/admission-write-gate.js';
 
 const dirs: string[] = [];

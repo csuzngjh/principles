@@ -22,7 +22,7 @@
  *
  * Correctness under concurrent consumers (Companion-spawned `pd workbuddy
  * worker` + manual `pd runtime internalization run-once`) is owned by the
- * durable Runtime V2 task lease — never by process-local state. The
+ * durable Runtime task lease — never by process-local state. The
  * governance workspace is the single canonical directory
  * (`~/.workbuddy/pd-workspace`), so two projects never double-schedule:
  * they share one workspace and the lease serialises consumption.
@@ -37,7 +37,7 @@ import {
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
   type TaskRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   loadPdConfigForPlugin,
   loadFeatureFlagFromConfig,

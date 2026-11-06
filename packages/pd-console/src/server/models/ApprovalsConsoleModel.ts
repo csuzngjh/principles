@@ -9,7 +9,7 @@ import type {
   ApprovalRecord,
   ApprovalStatus,
   ApprovalReviewGuard,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   SqliteConnection,
   SqliteApprovalQueueStore,
@@ -30,8 +30,8 @@ import {
   PrincipleTreeLedgerAdapter,
   MVP_CHANNELS,
   computeArtifactDigest,
-} from '@principles/core/runtime-v2';
-import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { createArtifactPrincipleResolutionDeps } from './artifact-principle-resolver.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
@@ -45,7 +45,7 @@ import {
   type PromptArtifactDeliverability,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
-import { PROMPT_BUDGET_HOST_KINDS, type PromptBudgetResolution } from '@principles/core/runtime-v2';
+import { PROMPT_BUDGET_HOST_KINDS, type PromptBudgetResolution } from '@principles/core/runtime';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 

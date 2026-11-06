@@ -1,7 +1,7 @@
 import type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export type {
   CorrectionKeyword,
@@ -11,4 +11,4 @@ export type {
 export {
   MAX_CORRECTION_KEYWORDS,
   CORRECTION_SEED_KEYWORDS,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';

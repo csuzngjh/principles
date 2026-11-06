@@ -23,7 +23,7 @@ import {
   createPITaskDiagnosticJson,
   listRecoveryActions,
   type TaskRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   handleRuntimeRecoveryFailedTask,
   registerRuntimeRecoveryFailedTaskCommand,
@@ -589,7 +589,7 @@ describe('P1-02 (r2) — a second recovery never destroys an unprojected prior f
     const ws = makeWorkspace();
     const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
     try {
-      const { recoverSingleFailedTask } = await import('@principles/core/runtime-v2');
+      const { recoverSingleFailedTask } = await import('@principles/core/runtime');
       await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
       const r1 = await recoverSingleFailedTask(handle.stateManager, TASK_ID, { resetBudget: true, operator: 'owner/core-1' });
       expect(r1.status).toBe('recovered');

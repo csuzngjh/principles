@@ -28,7 +28,7 @@ import {
   getLedgerFilePathPublic,
   withLock,
 } from '../src/principle-tree-ledger.js';
-import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
+import type { LedgerPrinciple } from '../src/runtime/types/ledger-store.js';
 
 function makePrinciple(id: string): LedgerPrinciple {
   return {

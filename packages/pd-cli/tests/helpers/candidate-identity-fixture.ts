@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { SqliteDiagnosticianCommitter, PrincipleTreeLedgerAdapter, type RuntimeStateManager } from '@principles/core/runtime-v2';
+import { SqliteDiagnosticianCommitter, PrincipleTreeLedgerAdapter, type RuntimeStateManager } from '@principles/core/runtime';
 
 /** Isolated test fixture: a real diagnosis commit with an explicit persisted recommendation kind. */
 export async function seedCandidateMaterial(sm: RuntimeStateManager, candidateId: string, workspaceDir?: string, principleId: string = randomUUID(), recommendationKind: 'principle' | 'rule' = 'principle'): Promise<string> {

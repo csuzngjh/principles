@@ -15,7 +15,7 @@ import {
   type ActivatedPrinciple,
   type ActivationStatusRecord,
   type PromptBudgetTierFit,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import {

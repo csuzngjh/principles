@@ -27,7 +27,7 @@ import type {
   InterventionCapabilityDeclaration,
   InterventionEvidenceBatchInput,
   InterventionObservationInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 /** Evidence adapter surface version (matches the frozen core contract test expectations). */
 export const WORKBUDDY_EVIDENCE_ADAPTER_VERSION = 'workbuddy-adapter@0.1.0';

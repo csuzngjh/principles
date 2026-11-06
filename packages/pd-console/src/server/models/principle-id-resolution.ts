@@ -1,10 +1,10 @@
-import { resolveLedgerActivationId } from '@principles/core/runtime-v2';
+import { resolveLedgerActivationId } from '@principles/core/runtime';
 import type {
   CandidatePrincipleIdentityResolution,
   PIArtifactRecord,
   PIArtifactSnapshot,
-} from '@principles/core/runtime-v2';
-import type { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
 
 /**
  * PRI-768 v5 follow-up (audit findings F3/F4): resolve the LEDGER principle id
@@ -56,7 +56,7 @@ export function toResolutionSnapshot(record: PIArtifactRecord): PIArtifactSnapsh
   };
 }
 
-export { candidateIdFromDreamerTaskId } from '@principles/core/runtime-v2';
+export { candidateIdFromDreamerTaskId } from '@principles/core/runtime';
 
 /** All Console read models use the activation boundary's fail-closed identity semantics. */
 export async function resolveLedgerPrincipleId(

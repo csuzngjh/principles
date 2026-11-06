@@ -26,12 +26,12 @@ import {
   summarizeRuleCodeShadowEvents,
   buildPromotionEvidenceSnapshot,
   detectPromptReplacementTarget,
-} from '@principles/core/runtime-v2';
-import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime';
 import {
   checkPromptArtifactDeliverabilityById,
   linkAdaptiveBehaviorEvidence,
-  RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
+  RUNTIME_EVENT_LOG_CANDIDATE_DIRS,
   reconcileAdaptiveJournal,
 } from '@principles/host-runtime';
 
@@ -68,15 +68,15 @@ function buildLedgerIdentityDeps(
     },
   };
 }
-import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime-v2';
+import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime';
 import type {
   ActivationDecision,
   PIArtifactSnapshot,
   RolloutActivationDecision,
   ApprovalDecisionResult,
   ApprovalCompletionResult,
-} from '@principles/core/runtime-v2';
-import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime';
 import { resolvePromotionHostLiveness } from '@principles/host-runtime';
 import { probeCliRecoveryReachability } from './recovery-reachability-probe.js';
 import { authorizeGovernanceAction, writeGovernanceAction } from 'principles-disciple/governance-audit';
@@ -103,16 +103,16 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
 /**
  * PRI-577: RuleCode event telemetry candidate directories, in priority order.
  *
- * Runtime V2 convention is `.pd/logs`, but the v1 EventLog writer
+ * Runtime convention is `.pd/logs`, but the v1 EventLog writer
  * (openclaw-plugin `src/core/event-log.ts`) still emits `events_*.jsonl` under
  * `.state/logs`. No production code ever created `.pd/logs`, so scanning only
  * that path made every shadow metric report "unavailable" while 2500+ real
  * evaluations sat unread in `.state/logs`. Readers scan both candidates until
  * the writer migrates (ERR-031: every reader derives from the host-runtime
- * constant `RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS` — console, CLI and the
+ * constant `RUNTIME_EVENT_LOG_CANDIDATE_DIRS` — console, CLI and the
  * PRI-1017 budget-observation reader share ONE list, so they cannot drift).
  */
-export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS;
+export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVENT_LOG_CANDIDATE_DIRS;
 
 export interface CollectedRuleCodeEventEntries {
   entries: unknown[];

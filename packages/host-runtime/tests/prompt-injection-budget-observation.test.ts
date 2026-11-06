@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PROMPT_BUDGET_POLICY_VERSION } from '@principles/core/runtime-v2';
+import { PROMPT_BUDGET_POLICY_VERSION } from '@principles/core/runtime';
 import {
   RUNTIME_BUDGET_OBSERVATION_MAX_AGE_MS,
   RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES,
   RUNTIME_BUDGET_OBSERVATION_MAX_FILES,
-  RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
+  RUNTIME_EVENT_LOG_CANDIDATE_DIRS,
   readRuntimePromptBudgetObservations,
   runtimeBudgetObservationToResolution,
   selectConsoleRuntimeBudgetFacts,
@@ -398,7 +398,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
       injectedEvent({ ts: '2026-10-21T05:00:00.000Z', data: { ...baseData(), workspaceDir: dir, hostKind: 'openclaw', budget: 6250, budgetCapacitySource: 'pi_catalog_exact', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 200_000, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
     ]);
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
-    expect(RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS).toEqual(['.pd/logs', '.state/logs']);
+    expect(RUNTIME_EVENT_LOG_CANDIDATE_DIRS).toEqual(['.pd/logs', '.state/logs']);
     // Latest across both directories wins.
     expect(report.observations).toHaveLength(1);
     expect(report.observations[0]?.budgetChars).toBe(6250);
@@ -431,7 +431,7 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     writeEvents(dir, '.pd/logs', '2026-10-01', [event('workbuddy', '2026-10-01T04:30:00.000Z', 8000, 256_000)]);
 
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir, now: new Date('2026-10-09T12:00:00.000Z') });
-    const expectedTotal = RUNTIME_BUDGET_OBSERVATION_MAX_FILES * RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS.length;
+    const expectedTotal = RUNTIME_BUDGET_OBSERVATION_MAX_FILES * RUNTIME_EVENT_LOG_CANDIDATE_DIRS.length;
     // The real worst-case read is cap × directories (14 today), NOT 7 overall —
     // a global cap would let the first directory consume the whole budget and
     // silently drop the second directory's live host observation.

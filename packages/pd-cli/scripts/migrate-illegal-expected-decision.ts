@@ -3,7 +3,7 @@
  *
  * 背景：
  *   GoldenTraceDecision 的合法值只有 "allow" | "block" | "propose_correction"
- *   （定义在 @principles/core/runtime-v2 的 golden-trace.ts GoldenTraceDecisionSchema）。
+ *   （定义在 @principles/core/runtime 的 golden-trace.ts GoldenTraceDecisionSchema）。
  *   但 PRI-427 加固前创建的 rule artifact 可能含有 "requireApproval"
  *   （这是 RuleHostDecision 的运行时枚举值，不是测试期望值）。
  *   这类 artifact 在 owner 批准时会失败，错误信息为

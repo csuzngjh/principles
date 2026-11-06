@@ -47,7 +47,7 @@ const require = createRequire(path.join(REPO, 'package.json'));
 const Database = require('better-sqlite3');
 // P3-3: the admission threshold comes from the production authority, never a
 // local copy (a threshold change must not desynchronize this acceptance).
-const { ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime-v2');
+const { ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime');
 
 const LAB_ROOT = path.join(
   process.env.WB_E2E_LAB || path.resolve(REPO, '../../../wb-probe-lab'),

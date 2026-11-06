@@ -602,7 +602,7 @@ jobs:
           npm run build --workspace=principles-disciple
 
       # PRI-819: the telemetry smoke config regression test validates the
-      # generated YAML through the real @principles/core/runtime-v2
+      # generated YAML through the real @principles/core/runtime
       # validatePdConfig (production parser path), which resolves the built
       # package exports — core is already built above.
       - name: Test scripts

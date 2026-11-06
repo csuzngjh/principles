@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterAll, describe, expect, it } from 'vitest';
-import { ADMISSION_CONFIDENCE_THRESHOLD } from '@principles/core/runtime-v2';
+import { ADMISSION_CONFIDENCE_THRESHOLD } from '@principles/core/runtime';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 import { runEntry } from './helpers/hook-runner.js';
@@ -503,7 +503,7 @@ registry.when(/^the Owner withdraws the activated principle$/, async () => {
   // the CLI command drives (pd activation deactivate → deactivateActivation).
   // The background seeds ONE approved behavior as a prompt principle + its
   // live rule; withdrawal retires both halves.
-  const { SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime-v2') as typeof import('@principles/core/runtime-v2');
+  const { SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime') as typeof import('@principles/core/runtime');
   const connection = new SqliteConnection(state.governance!);
   try {
     const store = new SqliteActivationStateStore(connection);
@@ -614,7 +614,7 @@ registry.when(/^WorkBuddy reports a real tool failure through the hook \(eligibl
 });
 registry.then(/^the failure is recorded as trajectory evidence with no Pain and no diagnostician task$/, async () => {
   const { runWorkbuddyWorkspaceWorkerCycle } = await import('../src/worker/workspace-worker.js');
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   // Phase A: the failed tool call is technical trajectory evidence. The worker
   // cycle runs normally but must never admit it as a Pain or queue a diagnosis.
   const first = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: state.governance! });

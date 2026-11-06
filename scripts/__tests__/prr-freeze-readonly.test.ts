@@ -28,7 +28,7 @@ import {
   measureLedgerPrinciples,
   snapshotTree,
 } from '../dev/principle-learning-lab/prr/lib/prr-readonly.mjs';
-import { PRINCIPLE_STATUSES } from '@principles/core/runtime-v2';
+import { PRINCIPLE_STATUSES } from '@principles/core/runtime';
 import { buildPrrDatasetFiles, writePrrDataset } from './prr-test-fixtures';
 import { loadPrrDataset } from '../dev/principle-learning-lab/prr/lib/prr-dataset.mjs';
 
@@ -645,7 +645,7 @@ describe('ledger availability four-way classification', () => {
 
   it('status validity follows the Core authoritative enum, not a local list (P1-3, rounds 3+4)', () => {
     // Round 4: the allowlist must be exactly the canonical Core export
-    // PRINCIPLE_STATUSES (runtime-v2/types/principle-enums.ts) — no local copy.
+    // PRINCIPLE_STATUSES (runtime/types/principle-enums.ts) — no local copy.
     expect(authoritativePrincipleStatuses()).toEqual([...PRINCIPLE_STATUSES].sort());
 
     const ok = { availability: { status: 'ok' } };

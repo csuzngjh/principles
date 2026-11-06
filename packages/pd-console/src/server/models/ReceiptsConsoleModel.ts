@@ -20,8 +20,8 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/core/runtime-v2';
-import { SqliteInterventionEvidenceStore } from '@principles/core/runtime-v2';
+import { SqliteConnection, RECEIPT_RETENTION_POLICY_DAYS } from '@principles/core/runtime';
+import { SqliteInterventionEvidenceStore } from '@principles/core/runtime';
 import type {
   InterventionAuditRecordSummary,
   InterventionAuditKindPage,
@@ -29,7 +29,7 @@ import type {
   InterventionCapabilityDeclaration,
   ReceiptEvidenceCoverage,
   ReceiptValidationStatus,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { computeFlagsFromLoadResult, loadPdConfig } from '../config/pd-config-store.js';
 
 export interface ReceiptEvent {

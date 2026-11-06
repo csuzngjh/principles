@@ -26,13 +26,13 @@ import {
 } from './GovernanceProjectionCollector.js';
 import {
   deriveOwnerDecisionView,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   OwnerDecisionInputs,
   OwnerDecisionViewCore,
   GovernanceFacts,
-} from '@principles/core/runtime-v2';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import { SqliteConnection } from '@principles/core/runtime';
 
 const ISO_NOW = () => new Date().toISOString();
 

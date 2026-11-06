@@ -36,10 +36,10 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
+import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
 import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyCorrectionCandidate, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
 import { resolveWorkbuddyWorkspace } from './workspace-resolution.js';
@@ -89,7 +89,7 @@ export interface WorkbuddyEvidenceContext {
  */
 function workbuddyEventEmitter(stateDir: string, evidence?: WorkbuddyEvidenceContext): HostEventEmitter {
   return {
-    recordRuntimeV2ActivationsInjected(data) {
+    recordRuntimeActivationsInjected(data) {
       appendEventLogLine(stateDir, {
         ts: new Date().toISOString(),
         type: 'runtime_v2_prompt_activations_injected',

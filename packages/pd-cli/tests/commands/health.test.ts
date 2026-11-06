@@ -32,7 +32,7 @@ const {
   };
 });
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   // PRI-634-F R2: full-module mocks must track new public exports — the
   // activation graph imports buildToolSemanticRegistry transitively
   // (workspace-tool-semantics), and vitest throws on the missing property
@@ -53,7 +53,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
 }));
 
 // PRI-443 Phase 5: getLedgerFilePathPublic now imported from
-// @principles/core/principle-tree-ledger (I/O module) instead of runtime-v2 barrel
+// @principles/core/principle-tree-ledger (I/O module) instead of runtime barrel
 vi.mock('@principles/core/principle-tree-ledger', () => ({
   getLedgerFilePathPublic: vi.fn().mockReturnValue('/fake/workspace/.state/principle_training_state.json'),
 }));

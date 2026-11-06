@@ -141,8 +141,8 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   let createProductionRuleHostGate;
   let validateRuleContextV2;
   try {
-    ({ SqliteConnection } = requireFromRuntime('@principles/core/runtime-v2'));
-    ({ validateRuleContextV2 } = requireFromRuntime('@principles/core/runtime-v2'));
+    ({ SqliteConnection } = requireFromRuntime('@principles/core/runtime'));
+    ({ validateRuleContextV2 } = requireFromRuntime('@principles/core/runtime'));
     ({ createProductionRuleHostGate } = requireFromRuntime('@principles/host-runtime'));
   } catch (error) {
     fail('probe_import_failed:' + String(error && error.message).slice(0, 200), 'verify the installed runtime layout matches $pd-control setup output');

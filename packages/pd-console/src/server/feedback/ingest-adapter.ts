@@ -7,7 +7,7 @@
 // - 20s default timeout (relay calls Linear on the happy path).
 // - Failure returns a structured reason + nextAction (rc-9).
 
-import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
+import type { FeedbackReport } from '@principles/core/runtime/feedback';
 
 export interface IngestHealthResult {
   available: boolean;

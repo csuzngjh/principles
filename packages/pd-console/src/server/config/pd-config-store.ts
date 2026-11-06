@@ -26,7 +26,7 @@ import {
   resolveAgentRuntimeBinding,
   INTERNAL_AGENT_NAMES,
   VALID_PROFILE_TYPES,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   EffectivePdConfig,
   PdConfigValidationResult,
@@ -35,7 +35,7 @@ import type {
   AgentRuntimeReadinessResult,
   RuntimeProfile,
   FeatureFlagsResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -710,10 +710,10 @@ export function updateDefaultRuntime(
 // ── Principles Output Language (PRI-332 P1-1) ─────────────────────────────
 
 // PRI-611: the output-language contract derives from the canonical core
-// authority (runtime-v2/language-directive.ts). Do NOT re-declare the value
+// authority (runtime/language-directive.ts). Do NOT re-declare the value
 // list or default here — a drift guard test fails on local re-declaration.
-import { VALID_OUTPUT_LANGUAGES, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
-import type { OutputLanguage } from '@principles/core/runtime-v2';
+import { VALID_OUTPUT_LANGUAGES, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime';
+import type { OutputLanguage } from '@principles/core/runtime';
 
 function isValidOutputLanguage(value: unknown): value is OutputLanguage {
   return typeof value === 'string' && (VALID_OUTPUT_LANGUAGES as readonly string[]).includes(value);

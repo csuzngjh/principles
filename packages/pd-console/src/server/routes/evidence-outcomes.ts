@@ -19,7 +19,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mintObservationKey, SqliteConnection, SqliteInterventionEvidenceStore } from '@principles/core/runtime-v2';
+import { mintObservationKey, SqliteConnection, SqliteInterventionEvidenceStore } from '@principles/core/runtime';
 import { getInterventionEvidenceIngress } from '@principles/host-runtime';
 import { sendSuccess, sendError, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
 import { readBody } from '../utils/request.js';

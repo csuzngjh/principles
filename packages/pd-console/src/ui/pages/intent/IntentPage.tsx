@@ -7,7 +7,7 @@ import { SectionTitle } from "../../components/layout/section-title.js";
 import { fetchIntentSummary, fetchIntentDecisionSummary, patchFeatureFlag, fetchIntentContent, fetchIntentVersions } from "../../api.js";
 import type { IntentSummaryData, IntentDocWarningData, IntentDecisionSummaryData, IntentVersionEntry } from "../../api.js";
 import { OnboardingModal, IntentEditor, CreateIntentButton, EditButton } from "./IntentOnboarding.js";
-import { computeVersionDiff } from "@principles/core/runtime-v2/intent-browser";
+import { computeVersionDiff } from "@principles/core/runtime/intent-browser";
 import { formatDate } from "../../utils/format-date.js";
 
 // ── Page state ────────────────────────────────────────────────────────────────

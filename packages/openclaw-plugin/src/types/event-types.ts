@@ -21,7 +21,7 @@ export type {
   RuleHostRequireApprovalEventData,
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
-  RuntimeV2PromptActivationsInjectedEventData,
+  RuntimePromptActivationsInjectedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
   TrajectoryObservabilityFailureEventData,
@@ -34,8 +34,8 @@ export type {
   EmpathyEventStats,
   HookStats,
   DailyStats,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export {
   createEmptyDailyStats,
-} from '@principles/core/runtime-v2/types/event-types';
+} from '@principles/core/runtime/types/event-types';

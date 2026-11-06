@@ -450,7 +450,7 @@ async function main() {
     catch { fail('core_source_invalid', 'Pass the built @principles/core package directory containing package.json and dist.'); return; }
     if (!sourcePackage || sourcePackage.name !== '@principles/core'
       || sourcePackage.version !== desired.core
-      || !fs.existsSync(path.join(args.coreSource, 'dist', 'runtime-v2', 'index.js'))) {
+      || !fs.existsSync(path.join(args.coreSource, 'dist', 'runtime', 'index.js'))) {
       fail('core_source_invalid', 'The built core name/version must match the plugin runtime pin (runtime-version.json).'); return;
     }
   }

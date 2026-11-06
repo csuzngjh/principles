@@ -13,7 +13,7 @@
  * keeps the generic block copy; the block decision is NEVER affected) and
  * are surfaced via logger.warn (rc-9).
  */
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 
 export interface PrincipleReceiptMetadata {
   /** Resolved display title (fallback chain result; never empty). */

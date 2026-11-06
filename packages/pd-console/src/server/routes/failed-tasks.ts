@@ -30,7 +30,7 @@ import {
   PDRuntimeError,
   createRecoverySweepService,
   appendRecoveryAction,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   sendSuccess,
   sendError,

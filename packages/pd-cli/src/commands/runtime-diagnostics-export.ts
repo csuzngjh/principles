@@ -7,7 +7,7 @@ import {
   createInternalizationQueueReadModel,
   InternalizationChainIntegrityReadModel,
   auditCandidateLedgerConsistency,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runCanaryChecks } from './runtime-canary.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 

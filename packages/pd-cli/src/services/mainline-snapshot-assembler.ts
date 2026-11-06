@@ -2,13 +2,13 @@
  * Shared MainlineSnapshot assembler (PRI-394)
  *
  * I/O-boundary reader that assembles a read-only `MainlineSnapshot` from real
- * Runtime V2 SQLite state, then hands it to core's pure `assertMainlineContract`.
+ * Runtime SQLite state, then hands it to core's pure `assertMainlineContract`.
  *
  * Rules:
  *   - This module lives in pd-cli (I/O boundary). It reads `.pd/state.db` via
  *     the existing `RuntimeStateManager` / `SqliteConnection` abstractions.
  *   - It does NOT judge the contract. Judgment lives exclusively in
- *     `packages/principles-core/src/runtime-v2/mainline-contract.ts`.
+ *     `packages/principles-core/src/runtime/mainline-contract.ts`.
  *   - All DB JSON / `diagnosticJson` / artifact metadata is treated as `unknown`
  *     and validated at runtime before use (EP-01).
  *   - It never throws on malformed input; it returns a snapshot that the pure
@@ -33,8 +33,8 @@ import {
   type OwnerReviewablePrincipleSnapshot,
   type ArtifactRefSnapshot,
   type MainlineChainSnapshot,
-} from '@principles/core/runtime-v2';
-import type { TaskRecord } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { TaskRecord } from '@principles/core/runtime';
 import { loadPdConfig } from './pd-config-loader.js';
 
 export interface AssembleMainlineSnapshotOptions {

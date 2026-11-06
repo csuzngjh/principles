@@ -2,9 +2,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { classifyPrinciples, filterOwnerActionable } from './PrincipleClassifier.js';
 import { updatePrinciple } from '@principles/core/principle-tree-ledger';
-import { isCorePrincipleId } from '@principles/core/runtime-v2';
+import { isCorePrincipleId } from '@principles/core/runtime';
 
-import type { PrincipleStatus } from '@principles/core/runtime-v2';
+import type { PrincipleStatus } from '@principles/core/runtime';
 
 export type { PrincipleStatus };
 

@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { buildToolSemanticRegistry } from '@principles/core/runtime-v2';
+import { buildToolSemanticRegistry } from '@principles/core/runtime';
 import { createWorkbuddyRuleContextProvider } from '../src/workbuddy-rule-context-provider.js';
 import type { ProductionRuleContextRequest } from '../src/production-rulehost-gate.js';
 

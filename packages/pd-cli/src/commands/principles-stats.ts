@@ -544,7 +544,7 @@ function formatTextOutput(r: PrinciplesStatsResult): string {
   lines.push(`  distinct principles:  ${r.injections.distinctPrinciples}`);
   lines.push('');
   lines.push('Context cost (chars)');
-  lines.push(`  avg runtime-v2 block: ${num(r.chars.avgV2PerTurn)}`);
+  lines.push(`  avg runtime block: ${num(r.chars.avgV2PerTurn)}`);
   lines.push(`  avg legacy block:     ${num(r.chars.avgLegacyPerTurn)}`);
   lines.push(`  truncation rate:      ${pct(r.chars.truncationRate)}  (v2:${r.chars.v2TruncatedTurns} legacy:${r.chars.legacyTruncatedTurns} of ${r.chars.turnsReporting} reporting turns)`);
   lines.push('');

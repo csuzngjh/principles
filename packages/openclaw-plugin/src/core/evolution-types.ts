@@ -1,11 +1,11 @@
 /**
  * Evolution domain type surface for the plugin.
  *
- * Canonical definitions live in @principles/core/runtime-v2 (evolution/).
+ * Canonical definitions live in @principles/core/runtime (evolution/).
  * This file keeps the plugin-facing backward-compatible aliases.
  *
  * NOTE: Principle → EvolutionPrinciple, PrincipleStatus → EvolutionPrincipleStatus
- *       to avoid collision with runtime-v2/types/principle-schema.ts Principle.
+ *       to avoid collision with runtime/types/principle-schema.ts Principle.
  *       Backward-compatible aliases are provided below.
  *
  * PRI-770: the Evolution Points/Tier re-exports (tiers, scorecards, storage /
@@ -19,11 +19,11 @@ import type {
   EvolutionPrincipleSuggestedRule as EvolutionPrincipleSuggestedRuleType,
   EvolutionPrincipleValueMetricsSnapshot as EvolutionPrincipleValueMetricsSnapshotType,
   EvolutionPainDetectedData as EvolutionPainDetectedDataType,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export {
   isCompleteDetectorMetadata,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export type {
   EvolutionPrincipleStatus,
@@ -42,7 +42,7 @@ export type {
   CircuitBreakerOpenedData,
   LegacyImportData,
   EvolutionLoopEvent,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // ── Backward-compatible aliases ──────────────────────────────────────────────
 

@@ -15,7 +15,7 @@
  * no reads (SPEC §10 hard privacy invariant; the port spy test covers the
  * lookup path too).
  */
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { loadPdConfigForPlugin, listGovernanceCheckpoints, type GovernanceCheckpointRecord } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
 import { locateCodexTranscriptByRolloutIdentity } from './transcript-locate.js';

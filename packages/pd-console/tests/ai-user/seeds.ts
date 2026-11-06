@@ -8,7 +8,7 @@
  */
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import { SqliteConnection, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { SqliteConnection, createPITaskDiagnosticJson } from '@principles/core/runtime';
 
 const AS_OF = '2026-09-18T10:00:00.000Z';
 const HUMAN_TEXT = '主任务未完成前不得推进次要议题：行动焦点必须锚定 Owner 明确表达的当前目标。';

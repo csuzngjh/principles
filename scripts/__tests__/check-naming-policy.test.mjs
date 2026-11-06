@@ -44,9 +44,17 @@ describe('check-naming-policy exit contract', () => {
     expect(JSON.parse(json.stdout).mode).toBe('strict');
   });
 
-  it('--strict fails while gated findings remain in the PR-1 tree', () => {
-    expect(run('--strict').status).toBe(1);
-    expect(run('--strict', '--json').status).toBe(1);
+  it('the PR-3 tree is clean: strict exits 0 and no rule is gated-failing', () => {
+    // PRI-1136 inverted this assertion: PR-1 pinned "strict fails while gated
+    // findings remain"; after the rename the same invocation must pass. If it
+    // ever fails again, a `runtime-v2` path came back.
+    const plain = run('--strict');
+    const json = run('--strict', '--json');
+    expect(plain.status).toBe(0);
+    expect(json.status).toBe(0);
+    const parsed = JSON.parse(json.stdout);
+    expect(parsed.gatedFindings).toBe(0);
+    expect(parsed.findings).toEqual([]);
   });
 
   it('warn mode never fails, in either output format', () => {
@@ -63,6 +71,23 @@ describe('check-naming-policy exit contract', () => {
     expect(Array.isArray(parsed.scanErrors)).toBe(true);
     expect(Array.isArray(parsed.findings)).toBe(true);
     expect(parsed.gatedFindings).toBe(parsed.findings.length);
+  });
+});
+
+describe('check-naming-policy rule gating is explicit (PRI-1136 / PR-6 boundary)', () => {
+  it('the registry decides which rules can fail the build', () => {
+    const parsed = JSON.parse(run('--json').stdout);
+    expect(parsed.gatedRules).toContain('runtime-v2-import');
+    expect(parsed.gatedRules).toContain('runtime-v2-config');
+    // PRI-1139 (PR-6) flips the write side; until then this rule must not gate.
+    expect(parsed.gatedRules).not.toContain('versioned-output-ref');
+  });
+
+  it('pending-rule findings are reported but never fail the build', () => {
+    const parsed = JSON.parse(run('--strict', '--json').stdout);
+    expect(parsed.pendingFindings).toBeGreaterThan(0);
+    for (const finding of parsed.pending) expect(finding.rule).toBe('versioned-output-ref');
+    expect(run('--strict').status).toBe(0);
   });
 });
 
@@ -90,7 +115,7 @@ describe('check-naming-policy controlled scan roots (PR #2367 CodeRabbit #3/#4/#
     expect(JSON.parse(result.stdout).inventory['versioned-output-ref']).toBe(0);
   });
 
-  it('counts a bare ./runtime-v2 directory-entry import (#4)', () => {
+  it('counts a bare ./runtime-v2 directory-entry import (#4) and fails on it', () => {
     const root = tempScanRoot();
     fs.writeFileSync(path.join(root, 'entry.ts'), "export * from './runtime-v2';\n");
     const result = runRoot(root, '--strict', '--json');
@@ -100,22 +125,43 @@ describe('check-naming-policy controlled scan roots (PR #2367 CodeRabbit #3/#4/#
     expect(parsed.findings.some((f) => f.rule === 'runtime-v2-import')).toBe(true);
   });
 
-  it('counts an outputSchemaRef whose value is on the next line (#6)', () => {
+  it('counts an outputSchemaRef whose value is on the next line (#6) without gating it yet', () => {
     const root = tempScanRoot();
     fs.writeFileSync(path.join(root, 'runner.ts'), "const input = {\n  outputSchemaRef:\n    'foo-output-v1',\n};\n");
     const result = runRoot(root, '--strict', '--json');
-    expect(result.status).toBe(1);
+    // PRI-1136: the rule stays in the inventory but is a PRI-1139 deliverable,
+    // so a hit here is pending — reported, not fatal.
+    expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.inventory['versioned-output-ref']).toBeGreaterThan(0);
-    expect(parsed.findings.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
+    expect(parsed.pending.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
+  });
+});
+
+describe('check-naming-policy config surface (PRI-1136 scan redesign)', () => {
+  it('does not flag the policy registry own rule ids or prose', () => {
+    // A plain text sweep would match `runtime-v2-import` / `runtime-v2-config`
+    // inside namingPolicy itself; the field-aware pass must not.
+    const parsed = JSON.parse(run('--strict', '--json').stdout);
+    expect(parsed.inventory['runtime-v2-config']).toBe(0);
+  });
+
+  it('the registry keeps its gated rules and clean seam paths', () => {
+    const registryPath = fileURLToPath(
+      new URL('../../packages/principles-core/io-seam-registry.json', import.meta.url),
+    );
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    expect(Array.isArray(registry.seams)).toBe(true);
+    expect(registry.seams.flatMap((s) => s.files ?? []).every((f) => !f.includes('runtime-v2'))).toBe(true);
+    expect(registry.namingPolicy.gatedRules).toEqual(['runtime-v2-import', 'runtime-v2-config']);
   });
 });
 
 describe('check-naming-policy inventory vs exemptions (PR #2367 CodeRabbit #5)', () => {
   it('exempt server/UI files still contribute their /api/v1 route literals', () => {
     const parsed = JSON.parse(run('--json').stdout);
-    // server/index.ts has 54 and ui/api.ts has 76 '/api/v1/' literals; both
-    // files are gated-rule exemptions but MUST appear in the inventory.
+    // server/index.ts and ui/api.ts hold the bulk of the '/api/v1/' literals;
+    // both files are gated-rule exemptions but MUST appear in the inventory.
     expect(parsed.inventory['api-v1-route']).toBeGreaterThanOrEqual(130);
   });
 });

@@ -13,7 +13,7 @@ import * as yaml from 'js-yaml';
 import {
   SqliteConnection,
   getDefaultPdConfig,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import {
   recordInjectionPresence,

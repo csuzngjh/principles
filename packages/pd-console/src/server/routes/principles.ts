@@ -9,7 +9,7 @@ import {
 } from '../models/PrinciplesConsoleModel.js';
 import { PrincipleTrajectoryModel } from '../models/PrincipleTrajectoryModel.js';
 import { GovernanceProjectionCollector, GovernanceProjectionCollectionError } from '../models/GovernanceProjectionCollector.js';
-import { CORE_PRINCIPLES, OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES, OwnerGovernanceViewSchema, deriveOwnerGovernanceView } from '@principles/core/runtime';
 import { Value } from '@sinclair/typebox/value';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
@@ -79,7 +79,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
   pendingIds: Set<string>;
   unavailableReason?: string;
 }> {
-  // Runtime V2 uses <workspace>/.pd/state.db (NOT .state/state.db)
+  // Runtime uses <workspace>/.pd/state.db (NOT .state/state.db)
   const dbPath = path.join(workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(dbPath)) {
     return { ids: new Set(), pendingIds: new Set(), unavailableReason: 'approval_db_not_found' };
@@ -87,7 +87,7 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
 
   let closeFn: (() => void) | null = null;
   try {
-    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const { SqliteConnection } = await import('@principles/core/runtime');
     const conn = new SqliteConnection({ workspaceDir, readonly: true });
     closeFn = () => conn.close();
     const db = conn.getDb();
@@ -156,7 +156,7 @@ async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: 
   }
   let closeFn: (() => void) | null = null;
   try {
-    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const { SqliteConnection } = await import('@principles/core/runtime');
     const conn = new SqliteConnection({ workspaceDir, readonly: true });
     closeFn = () => conn.close();
     const db = conn.getDb();

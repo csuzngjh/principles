@@ -39,7 +39,7 @@ import type {
   GovernancePrimaryAttention,
   WorkspaceEnvironment,
   GovernanceActivityCategorySummary,
-} from "@principles/core/runtime-v2";
+} from "@principles/core/runtime";
 
 type DecisionResult =
   | { success: true; warning?: string }

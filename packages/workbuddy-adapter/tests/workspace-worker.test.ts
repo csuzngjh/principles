@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { runWorkbuddyWorkspaceWorkerCycle } from '../src/worker/workspace-worker.js';
 import { makeHome, makeGovernance, cleanupTempDirs } from './helpers/workbench.js';
 

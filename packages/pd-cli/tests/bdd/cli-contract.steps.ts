@@ -3,7 +3,7 @@
  *
  * Approach: Command + mocks (NOT real CLI subprocess execution).
  * Reuses the exact same mock pattern as tests/commands/pain-retry.test.ts:
- *   - vi.hoisted() + vi.mock() to stub @principles/core/runtime-v2 and friends
+ *   - vi.hoisted() + vi.mock() to stub @principles/core/runtime and friends
  *   - Import handlePainRetry directly and call it in-process
  *   - Capture console.log via vi.spyOn to verify stdout JSON contract
  *
@@ -103,7 +103,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   return {
     ...(await importOriginal<object>()),
     RuntimeStateManager: vi.fn().mockImplementation(function () {

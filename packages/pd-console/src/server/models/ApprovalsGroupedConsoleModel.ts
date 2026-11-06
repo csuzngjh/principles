@@ -3,11 +3,11 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   detectPromptReplacementTarget,
   computeArtifactDigest,
   SqliteActivationStateStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   checkPromptArtifactDeliverability,
   operatorDeclaredBudgetResolution,
@@ -17,9 +17,9 @@ import {
   selectConsoleRuntimeBudgetFacts,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
-import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
+import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
-import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
+import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
 import { loadPdConfig } from '../config/pd-config-store.js';
 import {
   createArtifactPrincipleResolutionDeps,
@@ -523,7 +523,7 @@ export class ApprovalsGroupedConsoleModel {
         const reference = resolution.perHost[0]?.projection;
         return {
           promptInjection: {
-            budget: reference?.budget ?? RUNTIME_V2_PRINCIPLE_BUDGET,
+            budget: reference?.budget ?? RUNTIME_PRINCIPLE_BUDGET,
             usedChars: reference?.usedChars ?? 0,
             truncated: reference?.truncated ?? false,
             capacityStatus: 'unconfirmed',

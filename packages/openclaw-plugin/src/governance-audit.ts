@@ -1,4 +1,4 @@
-import type { GovernanceActionEventData } from '@principles/core/runtime-v2';
+import type { GovernanceActionEventData } from '@principles/core/runtime';
 import { EventLog } from './core/event-log.js';
 
 export type GovernanceAuditWriter = (
@@ -25,4 +25,4 @@ export async function authorizeGovernanceAction<T>(
   return mutation();
 }
 
-export type { GovernanceActionEventData } from '@principles/core/runtime-v2';
+export type { GovernanceActionEventData } from '@principles/core/runtime';

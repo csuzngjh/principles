@@ -94,7 +94,7 @@ import {
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(path.join(REPO, 'package.json'));
 const Database = require('better-sqlite3');
-const { getDefaultPdConfig, ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime-v2');
+const { getDefaultPdConfig, ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime');
 
 const LAB_ROOT = path.join(
   process.env.WB_E2E_LAB || path.resolve(REPO, '../../../wb-probe-lab'),
@@ -325,7 +325,7 @@ const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
 // whose persisted confidence is below it can NEVER be admitted — no approval
 // can ever appear for such a chain (rc-7: do not cycle on a terminal state).
 // P3-3: ADMISSION_CONFIDENCE_THRESHOLD is imported from the production
-// authority (@principles/core/runtime-v2) above, not copied here.
+// authority (@principles/core/runtime) above, not copied here.
 
 function readLearningChain(painId) {
   let admission;

@@ -3,7 +3,7 @@ import { validateGovernanceExperienceSnapshot } from '../../src/ui/utils/validat
 import { EXPERIENCE_ATTENTION, EXPERIENCE_REASON, EXPERIENCE_NEXT_ACTION } from '../../src/ui/pages/focus/FocusPage.js';
 import en from '../../src/ui/i18n/en.json' with { type: 'json' };
 import zhCN from '../../src/ui/i18n/zh-CN.json' with { type: 'json' };
-import type { GovernanceExperienceSnapshot } from '@principles/core/runtime-v2';
+import type { GovernanceExperienceSnapshot } from '@principles/core/runtime';
 
 const VALID_SNAPSHOT: GovernanceExperienceSnapshot = {
   schemaVersion: '1',

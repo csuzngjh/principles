@@ -3,7 +3,7 @@ import { IntentPageModel } from '../models/IntentPageModel.js';
 import { sendSuccess, sendError, sendJson } from '../utils/response.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { readBody } from '../utils/request.js';
-import type { IntentLang } from '@principles/core/runtime-v2';
+import type { IntentLang } from '@principles/core/runtime';
 
 /** Parse lang from query string; default 'zh-CN' if missing/invalid. */
 function parseLang(req: IncomingMessage): IntentLang {

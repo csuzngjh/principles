@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
+import type { FeedbackReport } from '@principles/core/runtime/feedback';
 
 /**
  * Best-effort error message extraction from an `unknown` caught value.

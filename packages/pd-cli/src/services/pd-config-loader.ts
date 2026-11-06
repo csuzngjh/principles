@@ -23,13 +23,13 @@ import {
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   redactPdConfig,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   EffectivePdConfig,
   PdConfigValidationResult,
   RedactedPdConfigSummary,
   FeatureFlagsResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

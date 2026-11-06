@@ -113,7 +113,7 @@ export interface ConfigFileLockOptions {
   sleep?: (milliseconds: number) => void;
 }
 
-/** Cross-process O_EXCL lock following the project's Runtime V2 lock convention. */
+/** Cross-process O_EXCL lock following the project's Runtime lock convention. */
 export function withConfigFileLock<T>(
   filePath: string,
   action: () => T,

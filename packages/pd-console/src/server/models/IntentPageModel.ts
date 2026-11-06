@@ -13,7 +13,7 @@ import {
   type IntentDocWarning,
   type IntentDocVersion,
   type IntentLang,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export interface IntentPageResult {
   ok: boolean;

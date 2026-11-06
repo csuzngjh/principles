@@ -27,7 +27,7 @@ const mockValidateRuntimeConfig = vi.fn();
 const mockIsRuntimeConfigError = vi.fn();
 const mockBuildL2PrincipleReader = vi.fn();
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
@@ -52,7 +52,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
 });
 
 // PRI-443 Phase 5: loadLedger now imported from
-// @principles/core/principle-tree-ledger (I/O module) instead of runtime-v2 barrel
+// @principles/core/principle-tree-ledger (I/O module) instead of runtime barrel
 vi.mock('@principles/core/principle-tree-ledger', () => ({
   loadLedger: vi.fn().mockReturnValue({ tree: { principles: {} } }),
 }));

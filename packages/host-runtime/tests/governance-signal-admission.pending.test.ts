@@ -26,8 +26,8 @@ import {
   type PendingReviewCallResult,
 } from '../src/governance-signal-admission.js';
 import { EARNED_PRECISION_MIN_TP } from '../src/index.js';
-import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
-import type { LlmClassificationResult } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime';
+import type { LlmClassificationResult } from '@principles/core/runtime';
 
 const BASELINE_DDL = [
   'CREATE TABLE sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)',

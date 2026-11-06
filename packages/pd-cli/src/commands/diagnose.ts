@@ -37,13 +37,13 @@ import {
   createReuseRecommendationHook,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
-} from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PDRuntimeAdapter, OutputLanguage } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig, resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.js';
-import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime-v2';
+import { SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, resolveDiagnosticianCapability } from '@principles/core/runtime';
 import { resolveRuntimeAdapterFromConfig, ConfigResolutionError } from '../services/runtime-adapter-resolver.js';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';

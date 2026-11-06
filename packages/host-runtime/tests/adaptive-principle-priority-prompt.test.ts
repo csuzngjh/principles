@@ -10,7 +10,7 @@ import {
   renderPrinciplesToDirectives,
   resolvePromptBudget,
   type ActivatedPrinciple,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,

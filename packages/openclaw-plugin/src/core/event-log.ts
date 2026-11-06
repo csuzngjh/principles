@@ -1,9 +1,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS } from '@principles/core/runtime-v2/receipt-coverage';
-import { validateAdaptiveDeliveryRecord, type AdaptiveDeliveryRecord } from '@principles/core/runtime-v2/adaptive-delivery-record';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
+import { INTERVENTION_SHORT_SOURCE_RETENTION_DAYS } from '@principles/core/runtime/receipt-coverage';
+import { validateAdaptiveDeliveryRecord, type AdaptiveDeliveryRecord } from '@principles/core/runtime/adaptive-delivery-record';
+import { guardWorkspaceLeak } from '@principles/core/runtime/store/workspace-leak-guard';
 import type {
   EventLogEntry,
   EventType,
@@ -28,7 +28,7 @@ import type {
   RuleHostRequireApprovalEventData,
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
-  RuntimeV2PromptActivationsInjectedEventData,
+  RuntimePromptActivationsInjectedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
   TrajectoryObservabilityFailureEventData,
@@ -36,7 +36,7 @@ import type {
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
-import { redactTelemetryString } from '@principles/core/runtime-v2/feedback/redact-sensitive';
+import { redactTelemetryString } from '@principles/core/runtime/feedback/redact-sensitive';
 
 const EVENT_LOG_RETENTION_DAYS = INTERVENTION_SHORT_SOURCE_RETENTION_DAYS;
 
@@ -219,7 +219,7 @@ export class EventLog {
     this.record('rulehost_auto_correct_applied', 'auto_correct', undefined, data);
   }
 
-  recordRuntimeV2ActivationsInjected(data: RuntimeV2PromptActivationsInjectedEventData): void {
+  recordRuntimeActivationsInjected(data: RuntimePromptActivationsInjectedEventData): void {
     this.record('runtime_v2_prompt_activations_injected', 'injected', data.sessionId, data);
   }
 

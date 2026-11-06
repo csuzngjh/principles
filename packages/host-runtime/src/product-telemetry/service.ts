@@ -28,7 +28,7 @@ import {
   isValidTelemetrySecretHex,
   type ProductTelemetryHostKind,
   type ProductTelemetrySnapshotV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { getInstallLayoutPaths, parseInstallManifest, resolveInstallLayout, type InstallManifest } from '@principles/install-layout';
 import { loadFeatureFlagFromConfig, loadPdConfigForPlugin } from '../pd-config.js';
 import {

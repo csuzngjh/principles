@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ActivationsConsoleModel } from '../models/ActivationsConsoleModel.js';
 import { ApprovalsConsoleModel } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
-import type { OwnerPromotionActor } from '@principles/core/runtime-v2';
+import type { OwnerPromotionActor } from '@principles/core/runtime';
 import { validateApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
 import type { ApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
 

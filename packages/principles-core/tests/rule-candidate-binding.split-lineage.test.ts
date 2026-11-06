@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addPrincipleToLedger, loadLedger } from '../src/principle-tree-ledger.js';
-import { PrincipleTreeLedgerAdapter } from '../src/runtime-v2/adapter/principle-tree-ledger-adapter.js';
-import type { RuleCandidateMaterial, RuleCandidateBindingRequest } from '../src/runtime-v2/types/rule-candidate-binding.js';
-import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
+import { PrincipleTreeLedgerAdapter } from '../src/runtime/adapter/principle-tree-ledger-adapter.js';
+import type { RuleCandidateMaterial, RuleCandidateBindingRequest } from '../src/runtime/types/rule-candidate-binding.js';
+import type { LedgerPrinciple } from '../src/runtime/types/ledger-store.js';
 const PID = '11111111-2222-4222-8222-222222222222';
 function material(id: string, kind: 'rule' | 'principle') {
   const taskId = 'router-' + id, runId = 'run-' + id, artifactId = 'artifact-' + id;

@@ -6,7 +6,7 @@ import {
   createPITaskDiagnosticJson,
   deriveOwnerGovernanceView,
   SqliteConnection,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { GovernanceProjectionCollector } from '../../src/server/models/GovernanceProjectionCollector.js';
 import { GovernanceExperienceCollector, hashWorkspacePath } from '../../src/server/models/GovernanceExperienceCollector.js';
 

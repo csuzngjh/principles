@@ -34,7 +34,7 @@ vi.mock('../../src/services/workspace-tool-semantics.js', async () => {
   // override the return value via vi.mocked. The default registry is a REAL
   // built one (SPEC R3/P1: readiness composition executes rules through it —
   // a fake without resolve would break the production code path under test).
-  const { buildToolSemanticRegistry } = await import('@principles/core/runtime-v2');
+  const { buildToolSemanticRegistry } = await import('@principles/core/runtime');
   return {
     resolveWorkspaceToolSemantics: vi.fn().mockReturnValue({
       ok: true,
@@ -53,7 +53,7 @@ vi.mock('../../src/services/pd-config-loader.js', () => ({
   computeFlagsFromLoadResult: vi.fn().mockReturnValue(mockFeatureFlags),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   const original = await importOriginal() as Record<string, unknown>;
   return {
     ...original,
@@ -294,7 +294,7 @@ describe('handleRuntimeActivationDispatch', () => {
   // that the output shape is invalid_artifact.
   it('missing-artifact failure path does not construct SqliteActivationStateStore or ActivationDispatcher', async () => {
     mockGetArtifactById.mockResolvedValue(null);
-    const { SqliteActivationStateStore, ActivationDispatcher } = await import('@principles/core/runtime-v2');
+    const { SqliteActivationStateStore, ActivationDispatcher } = await import('@principles/core/runtime');
 
     vi.mocked(SqliteActivationStateStore).mockClear();
     vi.mocked(ActivationDispatcher).mockClear();
@@ -315,7 +315,7 @@ describe('handleRuntimeActivationDispatch', () => {
   // any DB-backed store. Production code exits before stateManager.initialize()
   // (runtime-activation.ts lines 127-131). ERR-088 positive marker.
   it('mutex failure path (--dry-run + --confirm) does not construct RuntimeStateManager', async () => {
-    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    const { RuntimeStateManager } = await import('@principles/core/runtime');
     vi.mocked(RuntimeStateManager).mockClear();
 
     await handleRuntimeActivationDispatch({
@@ -388,7 +388,7 @@ describe('handleRuntimeActivationDeactivate', () => {
 
   it('not-found or already-deactivated returns ok=false with reason and nextAction (JSON)', async () => {
     // Override mock to return false (not found / already deactivated)
-    const { SqliteActivationStateStore } = await import('@principles/core/runtime-v2');
+    const { SqliteActivationStateStore } = await import('@principles/core/runtime');
     vi.mocked(SqliteActivationStateStore).mockImplementationOnce(function () {
       return {
         findByArtifactId: vi.fn().mockResolvedValue(null),
@@ -430,7 +430,7 @@ describe('handleRuntimeActivationDeactivate', () => {
   // mutating method should be invoked. ERR-088 positive path marker: capture
   // the store instance and assert insert was never called.
   it('not-found failure path does not call insert on the activation store', async () => {
-    const { SqliteActivationStateStore } = await import('@principles/core/runtime-v2');
+    const { SqliteActivationStateStore } = await import('@principles/core/runtime');
     const capturedInsert = vi.fn().mockResolvedValue(undefined);
     const capturedDeactivate = vi.fn().mockResolvedValue(false);
     vi.mocked(SqliteActivationStateStore).mockImplementationOnce(function () {
@@ -967,7 +967,7 @@ describe('handleRuntimeActivationPromote', () => {
   });
 
   it('feature-off refuses dry-run and does not construct a mutation store', async () => {
-    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    const { RuntimeStateManager } = await import('@principles/core/runtime');
     vi.mocked(RuntimeStateManager).mockClear();
     await handleRuntimeActivationPromote({ workspace: WS, activationId: 'act-hook-1', json: true });
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
@@ -1014,7 +1014,7 @@ describe('handleRuntimeActivationPromote', () => {
   });
 
   it('authenticated dry-run opens state read-only and never commits', async () => {
-    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    const { RuntimeStateManager } = await import('@principles/core/runtime');
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
     vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
@@ -1069,7 +1069,7 @@ describe('handleRuntimeActivationPromote', () => {
     // not-verified from a CLI process, which is exactly what this test now
     // asserts).
     {
-      const { SqliteConnection } = await import('@principles/core/runtime-v2');
+      const { SqliteConnection } = await import('@principles/core/runtime');
       const conn = new SqliteConnection({ workspaceDir: wsDir, readonly: false });
       const now = '2026-01-01T00:00:00.000Z';
       conn.getDb().prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-000', 'diagnosis', 'pending', ?, ?)").run(now, now);
@@ -1971,7 +1971,7 @@ describe('PRI-499: cli-2-exit-stops — failure paths set exitCode and do not co
 
   it('missing artifact: sets exitCode=1 and does not construct SqliteActivationStateStore or ActivationDispatcher (cli-2)', async () => {
     mockGetArtifactById.mockResolvedValue(null);
-    const { SqliteActivationStateStore, ActivationDispatcher } = await import('@principles/core/runtime-v2');
+    const { SqliteActivationStateStore, ActivationDispatcher } = await import('@principles/core/runtime');
     vi.mocked(SqliteActivationStateStore).mockClear();
     vi.mocked(ActivationDispatcher).mockClear();
 
@@ -1993,7 +1993,7 @@ describe('PRI-499: cli-2-exit-stops — failure paths set exitCode and do not co
   });
 
   it('mutex failure (--dry-run + --confirm): sets exitCode=1 and does not construct RuntimeStateManager', async () => {
-    const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+    const { RuntimeStateManager } = await import('@principles/core/runtime');
     vi.mocked(RuntimeStateManager).mockClear();
 
     await handleRuntimeActivationDispatch({

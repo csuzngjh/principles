@@ -8,12 +8,12 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   // Keep the real kind guards (isPeerRunnerKind / isDiagnosticianStageKind):
   // the per-kind execution guidance under test must exercise the actual
   // classification, not a test-local reimplementation. Only the I/O-bearing
   // service factory is replaced.
-  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+  const actual = await importOriginal<typeof import('@principles/core/runtime')>();
   return {
     ...actual,
     createRecoverySweepService: vi.fn().mockResolvedValue({

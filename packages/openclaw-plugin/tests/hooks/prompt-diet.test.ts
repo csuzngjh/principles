@@ -8,7 +8,7 @@
  * 1. Default prompt does NOT contain Thinking OS text
  * 2. Default prompt does NOT contain <routing_guidance>
  * 3. Default prompt does NOT contain GFI attitude/personality directive text
- * 4. Runtime V2 activation still injects validated directives into prependSystemContext
+ * 4. Runtime activation still injects validated directives into prependSystemContext
  * 5. runtime_v2_prompt_activations_injected event still emits
  * 6. GFI scoring/empathy evidence path still records friction and can emit pain
  */
@@ -39,7 +39,7 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: {
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
     }),
   },
 }));
@@ -52,7 +52,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
     trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
     config: { get: vi.fn() },
     eventLog: {
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
     },
     evolutionReducer: {
       getActivePrinciples: vi.fn().mockReturnValue([]),
@@ -218,7 +218,7 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
       config: { get: vi.fn() },
-      eventLog: { recordRuntimeV2ActivationsInjected: vi.fn() },
+      eventLog: { recordRuntimeActivationsInjected: vi.fn() },
       evolutionReducer: {
         getActivePrinciples: vi.fn().mockReturnValue([
           { id: 'P1', text: 'Evolution principle still works' },

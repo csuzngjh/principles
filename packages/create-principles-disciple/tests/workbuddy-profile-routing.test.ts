@@ -56,7 +56,7 @@ import {
   checkAgentRuntimeReadiness,
   createAdapterConfigFromProfile,
   INTERNAL_AGENT_NAMES,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { execFile } from 'node:child_process';
 

@@ -3,7 +3,7 @@
  *
  * Covers the fetchCorePrinciples API client, the network-shape validator,
  * the read-only Core page (no governance controls, no hardcoded registry
- * copy, no runtime-v2 import), App routing order, and the Debt regression
+ * copy, no runtime import), App routing order, and the Debt regression
  * (DebtPage must rely on the server projection, not its own T-xx filter).
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -155,7 +155,7 @@ describe("CorePrinciplesPage (source contract)", () => {
   });
 
   it("never runtime-imports the core runtime barrel", () => {
-    expect(pageSrc).not.toContain("@principles/core/runtime-v2");
+    expect(pageSrc).not.toContain("@principles/core/runtime");
   });
 
   it("renders no governance/mutation controls", () => {

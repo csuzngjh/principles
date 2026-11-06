@@ -9,8 +9,8 @@
  * here exactly once instead of being duplicated per model.
  */
 import * as path from 'node:path';
-import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
-import type { PIArtifactRecord, SqliteConnection } from '@principles/core/runtime-v2';
+import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
+import type { PIArtifactRecord, SqliteConnection } from '@principles/core/runtime';
 import { resolveLedgerPrincipleId, type LedgerResolutionDeps } from './principle-id-resolution.js';
 
 export interface ArtifactPrincipleResolutionDeps {

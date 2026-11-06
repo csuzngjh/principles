@@ -33,7 +33,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Database } from 'better-sqlite3';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { emitResult, emitError, emitFlagConflict } from '../services/cli-output.js';
 

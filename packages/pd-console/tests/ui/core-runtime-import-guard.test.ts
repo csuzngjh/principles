@@ -2,7 +2,7 @@
  * ERR-100 regression guard (PRI-584~586 maintainer review round).
  *
  * The browser bundle must never runtime-import the Node-oriented core barrel
- * `@principles/core/runtime-v2` — its export graph pulls fs/better-sqlite3 into
+ * `@principles/core/runtime` — its export graph pulls fs/better-sqlite3 into
  * the client build. Every barrel reference under src/ui must therefore be a
  * type-only import (erased at compile time). Runtime imports are allowed ONLY
  * from explicitly approved browser-safe subpaths (currently
@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const BARREL = '@principles/core/runtime-v2';
+const BARREL = '@principles/core/runtime';
 /** Browser-safe subpaths approved as explicit package contracts (not the Node barrel). */
 const BROWSER_SAFE_SUBPATHS = [`${BARREL}/intent-browser`];
 

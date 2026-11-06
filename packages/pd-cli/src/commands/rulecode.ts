@@ -40,8 +40,8 @@ import {
   evaluateRefinerRuleHostGate,
   buildGoldenTraceFromArtificer,
   createProductionGateDeps,
-} from '@principles/core/runtime-v2';
-import type { GoldenTraceCaseInput } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { GoldenTraceCaseInput } from '@principles/core/runtime';
 import { emitResult } from '../services/cli-output.js';
 
 // ── Output types ─────────────────────────────────────────────────────────────

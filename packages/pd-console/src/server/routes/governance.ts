@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { GovernanceConsoleModel } from '../models/GovernanceConsoleModel.js';
 import { GovernanceExperienceCollector } from '../models/GovernanceExperienceCollector.js';
-import type { OwnerConfigSnapshot, OwnerIdentityResolved } from '@principles/core/runtime-v2';
+import type { OwnerConfigSnapshot, OwnerIdentityResolved } from '@principles/core/runtime';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, GovernanceConsoleModel>();

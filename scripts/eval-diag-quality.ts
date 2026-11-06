@@ -5,16 +5,16 @@ import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
 // ── Imports from @principles/core ───────────────────────────────────────────
-import { DiagnosticianPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.ts';
-import { RootCausePromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/rootcause-prompt-builder.ts';
-import { DistillerPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/distiller-prompt-builder.ts';
-import { RouterPromptBuilder } from '../packages/principles-core/src/runtime-v2/diagnostician/router-prompt-builder.ts';
-import { CORE_PRINCIPLES, isCorePrincipleId } from '../packages/principles-core/src/runtime-v2/core-principles/core-principle-registry.ts';
+import { DiagnosticianPromptBuilder } from '../packages/principles-core/src/runtime/diagnostician-prompt-builder.ts';
+import { RootCausePromptBuilder } from '../packages/principles-core/src/runtime/diagnostician/rootcause-prompt-builder.ts';
+import { DistillerPromptBuilder } from '../packages/principles-core/src/runtime/diagnostician/distiller-prompt-builder.ts';
+import { RouterPromptBuilder } from '../packages/principles-core/src/runtime/diagnostician/router-prompt-builder.ts';
+import { CORE_PRINCIPLES, isCorePrincipleId } from '../packages/principles-core/src/runtime/core-principles/core-principle-registry.ts';
 
 // Schemas for validation
-import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-rootcause-output.ts';
-import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician/diag-distiller-output.ts';
-import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
+import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician/diag-rootcause-output.ts';
+import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician/diag-distiller-output.ts';
+import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
 
 const SENSENOVA_BASE_URL = 'https://token.sensenova.cn/v1/chat/completions';
 const API_KEY = process.env.SENSENOVA_API_KEY ?? '';

@@ -5,7 +5,7 @@ import {
   sanitizeToolParams as coreSanitizeToolParams,
   convergePath,
   MAX_EVIDENCE_VALUE_CHARS,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 const INTERNAL_TAG_PATTERNS = [
   /\[EMOTIONAL_DAMAGE_DETECTED(?::(?:mild|moderate|severe))?\]/gi,

@@ -4,13 +4,13 @@ import * as path from 'node:path';
 import {
   VALID_OUTPUT_LANGUAGES,
   DEFAULT_OUTPUT_LANGUAGE,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 /**
  * PRI-611 — config semantic authority drift guard.
  *
  * The pd-console config store must DERIVE the output-language contract from
- * the canonical core authority (runtime-v2/language-directive.ts), not
+ * the canonical core authority (runtime/language-directive.ts), not
  * re-declare it. Before PRI-611 the store carried its own
  * `VALID_OUTPUT_LANGUAGES = ['zh-CN', 'en']` / `DEFAULT_OUTPUT_LANGUAGE` /
  * `OutputLanguage` literals — the ERR-083 drift class (a new language added
@@ -28,16 +28,16 @@ describe('PRI-611 config authority drift guard', () => {
     const src = fs.readFileSync(storePath, 'utf-8');
     expect(
       src,
-      'pd-config-store must not re-declare VALID_OUTPUT_LANGUAGES locally — import from @principles/core/runtime-v2 (PRI-611)',
+      'pd-config-store must not re-declare VALID_OUTPUT_LANGUAGES locally — import from @principles/core/runtime (PRI-611)',
     ).not.toMatch(/const\s+VALID_OUTPUT_LANGUAGES\s*=/);
     expect(
       src,
-      'pd-config-store must not re-declare DEFAULT_OUTPUT_LANGUAGE locally — import from @principles/core/runtime-v2 (PRI-611)',
+      'pd-config-store must not re-declare DEFAULT_OUTPUT_LANGUAGE locally — import from @principles/core/runtime (PRI-611)',
     ).not.toMatch(/const\s+DEFAULT_OUTPUT_LANGUAGE\s*=/);
     expect(
       src,
       'pd-config-store must import the output-language contract from the core barrel',
-    ).toMatch(/import\s+\{[^}]*VALID_OUTPUT_LANGUAGES[^}]*\}\s+from\s+'@principles\/core\/runtime-v2'/);
+    ).toMatch(/import\s+\{[^}]*VALID_OUTPUT_LANGUAGES[^}]*\}\s+from\s+'@principles\/core\/runtime'/);
   });
 
   it('console validation delegates to the same value list core exports (parity smoke)', () => {

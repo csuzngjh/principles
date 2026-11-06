@@ -41,7 +41,7 @@ import { RuleHost } from '../../../openclaw-plugin/src/core/rule-host.js';
 import { OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../../../openclaw-plugin/src/constants/tool-semantics.js';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
 import {
   RuntimeStateManager,
   SqliteApprovalQueueStore,
@@ -55,8 +55,8 @@ import {
   createProductionGateDeps,
   makeIdempotencyKey,
   createPITaskDiagnosticJson,
-} from '@principles/core/runtime-v2';
-import type { PIArtifactSnapshot, RuleHostInput } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PIArtifactSnapshot, RuleHostInput } from '@principles/core/runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 
 // ── Scripted adapter (same pattern as rulehost-pipeline-runner.test.ts) ──────

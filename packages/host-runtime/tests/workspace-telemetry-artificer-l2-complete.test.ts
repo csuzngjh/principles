@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime-v2';
+import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime';
 import { WorkspaceTelemetryEmitter } from '../src/workspace-telemetry-emitter.js';
 
 const dirs: string[] = [];

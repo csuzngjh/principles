@@ -1,6 +1,6 @@
 import * as path from 'path';
-import { InternalizationChainIntegrityReadModel } from '@principles/core/runtime-v2';
-import type { ChainIntegrityResult } from '@principles/core/runtime-v2';
+import { InternalizationChainIntegrityReadModel } from '@principles/core/runtime';
+import type { ChainIntegrityResult } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { assembleMainlineSnapshot } from '../services/mainline-snapshot-assembler.js';
 

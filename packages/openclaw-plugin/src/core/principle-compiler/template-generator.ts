@@ -5,4 +5,4 @@
  * This file re-exports for backward compatibility.
  */
 
-export { generateFromTemplate, type PainPattern } from '@principles/core/runtime-v2';
+export { generateFromTemplate, type PainPattern } from '@principles/core/runtime';

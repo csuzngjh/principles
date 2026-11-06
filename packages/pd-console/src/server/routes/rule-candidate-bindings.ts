@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { RuleCandidateBindingRequest } from '@principles/core/runtime-v2';
+import type { RuleCandidateBindingRequest } from '@principles/core/runtime';
 import { RuleCandidateBindingConsoleModel } from '../models/RuleCandidateBindingConsoleModel.js';
 import { readBody } from '../utils/request.js';
 import { sendSuccess, sendError, sendBadRequest, sendMethodNotAllowed } from '../utils/response.js';

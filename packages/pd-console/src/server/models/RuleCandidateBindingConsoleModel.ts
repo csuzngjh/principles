@@ -5,9 +5,9 @@ import {
   createRuntimeStateHandle, PrincipleTreeLedgerAdapter, reviseRuleBindingOnce, resolveRuleBindingRevisionTarget,
   reviseRuleSourceOnce, previewRuleSourceCorrection,
   hydratePITaskRecord, candidateIdFromDreamerSeed,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
-import type { RuntimeStateManager, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult, TaskRecord } from '@principles/core/runtime-v2';
+import type { RuntimeStateManager, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult, TaskRecord } from '@principles/core/runtime';
 import type {
   RuleBindingReviewView, RuleBindingQueueView, RuleBindingQueueItem, RuleBindingPainSourceView,
   RuleBindingGenerationView, RuleBindingResumeView, RuleBindingQueueBindingView, RuleBindingBoundPrincipleView,

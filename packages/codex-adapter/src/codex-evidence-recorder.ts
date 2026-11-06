@@ -16,7 +16,7 @@ import type {
   InterventionCapabilityDeclaration,
   InterventionEvidenceBatchInput,
   InterventionObservationInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 /** Evidence adapter surface version (major-series label; exact package version lives in package.json). */
 export const CODEX_EVIDENCE_ADAPTER_VERSION = 'codex-adapter@2';

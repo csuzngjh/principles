@@ -17,8 +17,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'node:crypto';
-import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime-v2/principle-tree/rule-candidate-binding.js';
-import type { RuleCandidateBinding, RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime-v2/types/rule-candidate-binding.js';
+import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime/principle-tree/rule-candidate-binding.js';
+import type { RuleCandidateBinding, RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime/types/rule-candidate-binding.js';
 
 // PRI-443: Types and constants now live in the pure module
 import type {
@@ -32,12 +32,12 @@ import type {
   LegacyPrincipleTrainingState,
   LegacyPrincipleTrainingStore,
   HybridLedgerStore,
-} from './runtime-v2/types/ledger-store.js';
-import { TREE_NAMESPACE } from './runtime-v2/types/ledger-store.js';
+} from './runtime/types/ledger-store.js';
+import { TREE_NAMESPACE } from './runtime/types/ledger-store.js';
 // PRI-459: lifecycle enum is the core SSOT (values match the transition table)
-import type { ImplementationLifecycleState } from './runtime-v2/types/principle-enums.js';
+import type { ImplementationLifecycleState } from './runtime/types/principle-enums.js';
 // PRI-917 PR3B: reuse evidence contract lives with the Principle schema SSOT
-import type { ReuseEvidenceActor, ReuseEvidenceEntry } from './runtime-v2/types/principle-schema.js';
+import type { ReuseEvidenceActor, ReuseEvidenceEntry } from './runtime/types/principle-schema.js';
 
 // PRI-443: Pure parse/serialize functions extracted to codec module
 import {
@@ -46,7 +46,7 @@ import {
   createEmptyTree,
   parseHybridLedger,
   serializeLedger,
-} from './runtime-v2/principle-tree/ledger-codec.js';
+} from './runtime/principle-tree/ledger-codec.js';
 
 // Re-export for backward compatibility — existing imports from
 // @principles/core/principle-tree-ledger continue to work.

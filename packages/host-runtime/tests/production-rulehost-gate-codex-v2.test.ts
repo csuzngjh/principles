@@ -18,7 +18,7 @@ import {
   buildToolSemanticRegistry,
   type PiArtifactRow,
   type RuleContextV2,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { createProductionRuleHostGate } from '../src/production-rulehost-gate.js';
 import { createNodeRuleImplementationRuntime, type RuleBatchEvaluation, type RuleImplementationRuntime } from '../src/rule-implementation-runtime.js';
 import type { HostEvent } from '@principles/core/host';
@@ -242,8 +242,8 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
       action: 'code_tool_hook_live_activate', approved: true, promoted: true,
       contract: { version, contextVersion: 2, hostKinds: ['codex'] },
     });
-    vi.doMock('@principles/core/runtime-v2', async importOriginal => {
-      const core = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+    vi.doMock('@principles/core/runtime', async importOriginal => {
+      const core = await importOriginal<typeof import('@principles/core/runtime')>();
       return { ...core, buildRuleHostAction: (...args: Parameters<typeof core.buildRuleHostAction>) => {
         const legacyAction = { ...core.buildRuleHostAction(...args) };
         delete legacyAction.recoveryControl;
@@ -265,7 +265,7 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
         expect(calls.some(call => call.ruleCount === 1)).toBe(true);
       }
     } finally {
-      vi.doUnmock('@principles/core/runtime-v2');
+      vi.doUnmock('@principles/core/runtime');
       vi.resetModules();
       connection.close();
     }

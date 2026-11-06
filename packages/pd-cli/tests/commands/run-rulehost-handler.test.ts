@@ -20,7 +20,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as yaml from 'js-yaml';
-import { createOwnerEvidenceScopeError, type BehaviorExamplePack } from '@principles/core/runtime-v2';
+import { createOwnerEvidenceScopeError, type BehaviorExamplePack } from '@principles/core/runtime';
 import { handleRunRuleHost } from '../../src/commands/runtime-internalization-run-rulehost.js';
 
 // PRI-983 (FR-07): the plugin assembler module is doubled file-wide so the
@@ -773,8 +773,8 @@ const hoisted657 = vi.hoisted(() => {
   };
 });
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@principles/core/runtime')>();
   class MockArtificerL2Adapter {
     constructor(options: unknown) {
       hoisted657.artificerL2Calls.push(options);

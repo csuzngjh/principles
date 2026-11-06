@@ -28,7 +28,7 @@ import {
   buildToolSemanticRegistry,
   createProductionGateDeps,
   type ToolSemanticMappingV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
 

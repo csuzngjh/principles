@@ -11,7 +11,7 @@
  *
  * SCENARIOS:
  * 1. Default (empty state, no principles, no focus) — heartbeat trigger
- * 2. Legacy evolution principles are not injected (Runtime V2 is the single authority)
+ * 2. Legacy evolution principles are not injected (Runtime is the single authority)
  * 3. Minimal heartbeat (no project context)
  * 4. With project context + thinking OS
  * 5. Section ordering verification
@@ -49,7 +49,7 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: {
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordPainSignal: vi.fn(),
     }),
   },
@@ -80,7 +80,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
     config: { get: vi.fn() },
     eventLog: {
       recordPainSignal: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordHeartbeatDiagnosis: vi.fn(),
     },
     evolutionReducer: {
@@ -135,7 +135,7 @@ vi.mock('../../src/hooks/message-sanitize.js', () => ({
   sanitizeForEvidence: vi.fn().mockReturnValue(''),
 }));
 
-vi.mock('../../src/core/runtime-v2-prompt-activation-reader.js', () => ({
+vi.mock('../../src/core/runtime-prompt-activation-reader.js', () => ({
   PromptActivationReader: vi.fn().mockImplementation(() => ({
     readActivatedPrinciples: vi.fn().mockResolvedValue({
       principles: [],
@@ -270,7 +270,7 @@ describe('Golden fixture: prompt output', () => {
       config: { get: vi.fn() },
       eventLog: {
         recordPainSignal: vi.fn(),
-        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordRuntimeActivationsInjected: vi.fn(),
       },
       evolutionReducer: {
         getActivePrinciples: vi.fn().mockReturnValue([
@@ -385,7 +385,7 @@ describe('Golden fixture: prompt output', () => {
       }) },
       eventLog: {
         recordPainSignal: vi.fn(),
-        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordRuntimeActivationsInjected: vi.fn(),
       },
       evolutionReducer: {
         getActivePrinciples: vi.fn().mockReturnValue([
@@ -456,7 +456,7 @@ describe('Golden fixture: prompt output', () => {
       }) },
       eventLog: {
         recordPainSignal: vi.fn(),
-        recordRuntimeV2ActivationsInjected: vi.fn(),
+        recordRuntimeActivationsInjected: vi.fn(),
       },
       evolutionReducer: {
         getActivePrinciples: vi.fn().mockReturnValue([

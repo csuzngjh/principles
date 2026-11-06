@@ -38,7 +38,7 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: {
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordPainDetected: vi.fn(),
     }),
   },
@@ -58,7 +58,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
           getProbationPrinciples: vi.fn().mockReturnValue([]),
         },
         eventLog: {
-          recordRuntimeV2ActivationsInjected: vi.fn(),
+          recordRuntimeActivationsInjected: vi.fn(),
           recordPainDetected: vi.fn(),
         },
       })),
@@ -132,7 +132,7 @@ vi.mock('../../src/hooks/message-sanitize.js', () => ({
   sanitizeForEvidence: vi.fn().mockReturnValue(''),
 }));
 
-vi.mock('../../src/core/runtime-v2-prompt-activation-reader.js', () => ({
+vi.mock('../../src/core/runtime-prompt-activation-reader.js', () => ({
   // PRI-467 review fix (P2): production code calls readActivatedPrinciples(),
   // not readActivations(). The previous mock name mismatch silently passed
   // because the prompt hook catch-and-continue masked the undefined method.

@@ -14,11 +14,11 @@
  *   - current admitted → revalidated against the current persisted material
  *     (a changed material appends a NEW evaluation whose decision rules).
  */
-import type { RuntimeStateManager } from '@principles/core/runtime-v2';
+import type { RuntimeStateManager } from '@principles/core/runtime';
 import {
   currentAdmissionEvaluation,
   evaluateAndPersistAdmissionFromStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export type AdmissionWriteGateRefusal = {
   decision: string;

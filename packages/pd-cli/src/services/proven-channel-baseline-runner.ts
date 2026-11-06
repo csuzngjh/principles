@@ -9,12 +9,12 @@ import {
   recommendProvenChannelNextIssue,
   isMvpChannel,
   MVP_CHANNELS,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   ChannelFixtureResult,
   ProvenChannelBaselineSummary,
   MvpChannel,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export interface ProvenChannelBaselineRunnerOptions {
   workspaceDir: string;

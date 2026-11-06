@@ -24,7 +24,7 @@
 
 import * as path from 'path';
 import type { Command } from 'commander';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import {
   aggregateArtificerEvidenceRuns,

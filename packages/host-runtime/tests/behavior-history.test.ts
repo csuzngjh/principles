@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildToolSemanticRegistry } from '@principles/core/runtime-v2/internalization/tool-semantic-registry';
+import { buildToolSemanticRegistry } from '@principles/core/runtime/internalization/tool-semantic-registry';
 import type { RuleHostContextRow } from '@principles/core/trajectory-types';
 import { assembleBehaviorHistory } from '../src/behavior-history.js';
 

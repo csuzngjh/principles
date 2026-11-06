@@ -27,12 +27,12 @@ import {
   SqliteConnection,
   sanitizeString,
   assembleEvidenceChain,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   EvidenceChainState,
   EvidenceChainRecord,
   EvidenceChainResponse,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';

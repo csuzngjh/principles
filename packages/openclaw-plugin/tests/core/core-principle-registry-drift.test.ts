@@ -10,8 +10,8 @@ import {
   getFoundationalPrinciples,
   getOperatingPrinciples,
   isCorePrincipleId,
-} from '@principles/core/runtime-v2';
-import type { CorePrinciple } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { CorePrinciple } from '@principles/core/runtime';
 
 /**
  * Core Principle Registry drift test (PRI-606/PRI-607).

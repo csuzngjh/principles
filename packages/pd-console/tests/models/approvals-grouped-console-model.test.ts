@@ -5,7 +5,7 @@
  * （真实 SQLite workspace + 真实提取链），不以仅搜索源码替代验证。
  *
  * 证据边界（SPEC E11 / AC-R1）：
- * - scribe（principleDraft.title+statement）是生产可达分支（runtime-v2 scribe
+ * - scribe（principleDraft.title+statement）是生产可达分支（runtime scribe
  *   写入该形状）——按生产路径验证；
  * - rule（implementationCode 注释提取）未发现生产写入方——此处为提取函数级
  *   验证 + 向后兼容，不冒称当前生产数据路径；
@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { SqliteConnection } from "@principles/core/runtime-v2";
+import { SqliteConnection } from "@principles/core/runtime";
 import { ApprovalsGroupedConsoleModel } from "../../src/server/models/ApprovalsGroupedConsoleModel.js";
 
 const REPLACEMENT_CHAR = "\uFFFD";

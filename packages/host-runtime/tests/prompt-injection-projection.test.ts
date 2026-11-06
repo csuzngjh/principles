@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
   SqlitePIArtifactStore,
@@ -13,7 +13,7 @@ import {
   resolvePrincipleFromArtifact,
   trimToBudget,
   type ActivatedPrinciple,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
@@ -97,7 +97,7 @@ async function replayLiveInjectionExpectation(workspaceDir: string): Promise<{
       }, activation);
       if (resolved.ok) principles.push(resolved.principle);
     }
-    return trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+    return trimToBudget(principles, RUNTIME_PRINCIPLE_BUDGET, escapeXml);
   } finally {
     connection.close();
   }
@@ -154,7 +154,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect([...projection.injectedPrincipleIds].sort()).toEqual([...expected.injectedIds].sort());
     expect(projection.usedChars).toBe(expected.lines.join('\n').length);
     expect(projection.truncated).toBe(expected.truncated);
-    expect(projection.budget).toBe(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(projection.budget).toBe(RUNTIME_PRINCIPLE_BUDGET);
   });
 
   it('Case 1b — shared route: projection mirrors buildActivePrinciplePromptContext exactly', async () => {
@@ -186,7 +186,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(projection.injectedPrincipleIds).not.toContain('P_FIFO_10');
     expect(projection.injectedPrincipleIds).not.toContain('P_FIFO_11');
     expect(projection.injectedActivationIds).toHaveLength(9);
-    expect(projection.usedChars).toBeLessThanOrEqual(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(projection.usedChars).toBeLessThanOrEqual(RUNTIME_PRINCIPLE_BUDGET);
     expect(projection.usedChars).toBeGreaterThan(1800);
 
     // The divergence this PR fixes: on the SAME activations the shared-route
@@ -236,7 +236,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, [
       { principleId: 'P_SMALL', text: 'ok' },
-      { principleId: 'P_HUGE', text: 'H'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET * 2) },
+      { principleId: 'P_HUGE', text: 'H'.repeat(RUNTIME_PRINCIPLE_BUDGET * 2) },
     ]);
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir });
@@ -258,20 +258,20 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
   it('Case 3 — exact budget boundary: an entry that exactly fills the cap injects; one char over discards it', async () => {
     // entry = "- [id] text"; fit rule: remaining >= entry.length + 1.
     // With a 10-char id, text 1952c → entry 1967c → joined content is
-    // exactly RUNTIME_V2_PRINCIPLE_BUDGET chars.
+    // exactly RUNTIME_PRINCIPLE_BUDGET chars.
     const exactId = 'P_BOUNDARY';
     const fits = await (async () => {
       const workspaceDir = tempWorkspace();
-      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET - 48) }]);
+      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(RUNTIME_PRINCIPLE_BUDGET - 48) }]);
       return buildLivePromptInjectionProjection({ workspaceDir });
     })();
     expect(fits.truncated).toBe(false);
     expect(fits.injectedPrincipleIds).toEqual([exactId]);
-    expect(fits.usedChars).toBe(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(fits.usedChars).toBe(RUNTIME_PRINCIPLE_BUDGET);
 
     const over = await (async () => {
       const workspaceDir = tempWorkspace();
-      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(RUNTIME_V2_PRINCIPLE_BUDGET - 47) }]);
+      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(RUNTIME_PRINCIPLE_BUDGET - 47) }]);
       return buildLivePromptInjectionProjection({ workspaceDir });
     })();
     expect(over.truncated).toBe(true);
@@ -282,7 +282,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     const empty = tempWorkspace();
     const emptyProjection = await buildLivePromptInjectionProjection({ workspaceDir: empty });
     expect(emptyProjection).toMatchObject({
-      route: 'legacy_trim', budget: RUNTIME_V2_PRINCIPLE_BUDGET, usedChars: 0, truncated: false,
+      route: 'legacy_trim', budget: RUNTIME_PRINCIPLE_BUDGET, usedChars: 0, truncated: false,
     });
     expect(emptyProjection.injectedPrincipleIds).toEqual([]);
 

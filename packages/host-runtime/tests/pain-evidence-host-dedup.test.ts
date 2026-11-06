@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { applyTrajectorySchemaBase } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase } from '@principles/core/runtime';
 import { createProductionPainEvidenceHandler } from '../src/production-pain-evidence.js';
 
 let ws: string;

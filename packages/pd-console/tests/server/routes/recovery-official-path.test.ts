@@ -20,7 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { handleActivationsRoute, disposeActivationsModels } from '../../../src/server/routes/activations.js';
 import { createProductionRuleHostGate } from '@principles/host-runtime';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 
 function createMockRequest(method: string, options?: { body?: unknown; subPath?: string }): IncomingMessage {
   const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';

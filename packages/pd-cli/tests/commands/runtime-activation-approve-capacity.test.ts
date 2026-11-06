@@ -9,7 +9,7 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { Command } from 'commander';
 import { registerRuntimeActivationApproveCommand, handleActivationApprove } from '../../src/commands/runtime-activation.js';

@@ -1,5 +1,5 @@
-import type { LifecycleDatasource } from '@principles/core/runtime-v2';
-import type { LedgerTreeStore, ReplayReport, ArtifactLineageRecord } from '@principles/core/runtime-v2';
+import type { LifecycleDatasource } from '@principles/core/runtime';
+import type { LedgerTreeStore, ReplayReport, ArtifactLineageRecord } from '@principles/core/runtime';
 import { loadLedger } from '../principle-tree-ledger.js';
 import { ReplayEngine } from '../replay-engine.js';
 

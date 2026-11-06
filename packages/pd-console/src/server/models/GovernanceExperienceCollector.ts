@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import {
   deriveGovernanceExperienceSnapshot,
   deriveOwnerGovernanceView,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   DataQualityIssue,
   GovernanceExperienceInputs,
@@ -27,7 +27,7 @@ import type {
   SourceAvailabilityInput,
   SourceRef,
   UnlinkedRecordGroup,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   GovernanceProjectionCollector,
   isRecord,

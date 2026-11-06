@@ -18,7 +18,7 @@ import { createRequire } from 'node:module';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(path.join(REPO, 'package.json'));
 const Database = require('better-sqlite3');
-const { getDefaultPdConfig, SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime-v2');
+const { getDefaultPdConfig, SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime');
 // Top-level import: the engine-turn section was promoted out of a
 // fire-and-forget IIFE into main()'s await chain (review P2-1).
 

@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { RuntimeStateManager } from '@principles/core/runtime';
 import type { Database } from 'better-sqlite3';
 import {
   handleLegacyCleanup,

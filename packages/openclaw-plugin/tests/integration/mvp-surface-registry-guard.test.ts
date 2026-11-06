@@ -7,7 +7,7 @@ import {
   findUnclassifiedSurfaces,
   getSurfacesByCategory,
   getSurfacesByKind,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 function findRepoRoot(cwd: string): string {
   let dir = cwd;
@@ -320,67 +320,67 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       // Lazy import so the module state is freshly required per describe and
       // we can reset the PRI-298 rate-limit bookkeeping before every runtime
       // assertion that depends on the first-fire log firing.
-      const mod = await import('@principles/core/runtime-v2');
+      const mod = await import('@principles/core/runtime');
       resetSurfaceGuardLogState = mod.__resetSurfaceGuardSkipLogStateForTests;
       resetSurfaceGuardLogState();
     });
 
     it('checkSurfaceGuard passes with current registry', async () => {
-      const { checkSurfaceGuard } = await import('@principles/core/runtime-v2');
+      const { checkSurfaceGuard } = await import('@principles/core/runtime');
       const result = checkSurfaceGuard();
       expect(result.passed).toBe(true);
       expect(result.violations).toEqual([]);
     });
 
     it('isSurfaceEnabled returns false for unknown surface with reason', async () => {
-      const { isSurfaceEnabled } = await import('@principles/core/runtime-v2');
+      const { isSurfaceEnabled } = await import('@principles/core/runtime');
       const result = isSurfaceEnabled('hook:unknown_new_hook');
       expect(result.enabled).toBe(false);
       expect(result.reason).toContain('not found in registry');
     });
 
     it('isSurfaceEnabled returns true for core surfaces', async () => {
-      const { isSurfaceEnabled } = await import('@principles/core/runtime-v2');
+      const { isSurfaceEnabled } = await import('@principles/core/runtime');
       const result = isSurfaceEnabled('hook:before_prompt_build');
       expect(result.enabled).toBe(true);
     });
 
     it('isSurfaceEnabled returns false for unknown surfaces even with override', async () => {
-      const { isSurfaceEnabled } = await import('@principles/core/runtime-v2');
+      const { isSurfaceEnabled } = await import('@principles/core/runtime');
       const result = isSurfaceEnabled('hook:nonexistent_gone', { 'hook:nonexistent_gone': true });
       expect(result.enabled).toBe(false);
       expect(result.reason).toContain('not found in registry');
     });
 
     it('isSurfaceEnabled returns true for core surfaces even with false override', async () => {
-      const { isSurfaceEnabled } = await import('@principles/core/runtime-v2');
+      const { isSurfaceEnabled } = await import('@principles/core/runtime');
       const result = isSurfaceEnabled('hook:before_prompt_build', { 'hook:before_prompt_build': false });
       expect(result.enabled).toBe(true);
       expect(result.reason).toContain('core');
     });
 
     it('isSurfaceEnabled returns false for quiet surfaces by default', async () => {
-      const { isSurfaceEnabled } = await import('@principles/core/runtime-v2');
+      const { isSurfaceEnabled } = await import('@principles/core/runtime');
       const result = isSurfaceEnabled('hook:before_reset');
       expect(result.enabled).toBe(false);
       expect(result.reason).toBeDefined();
     });
 
     it('isSurfaceEnabled allows quiet surfaces with explicit override', async () => {
-      const { isSurfaceEnabled } = await import('@principles/core/runtime-v2');
+      const { isSurfaceEnabled } = await import('@principles/core/runtime');
       const result = isSurfaceEnabled('hook:before_reset', { 'hook:before_reset': true });
       expect(result.enabled).toBe(true);
     });
 
     it('guardHook returns original handler for core surfaces', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const handler = () => 'result';
       const guarded = guardHook('hook:before_prompt_build', undefined, handler);
       expect(guarded).toBe(handler);
     });
 
     it('guardHook returns no-op handler for quiet surfaces', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const handler = () => 'result';
       const guarded = guardHook('hook:after_tool_call.trajectory', undefined, handler);
       expect(guarded).not.toBe(handler);
@@ -388,14 +388,14 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('guardHook returns no-op handler for unregistered surfaces', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const handler = () => 'result';
       const guarded = guardHook('hook:nonexistent_hook', undefined, handler);
       expect(guarded).not.toBe(handler);
     });
 
     it('guardHook logs disabled reason via logger for quiet surfaces', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const logs: string[] = [];
       const logger = { info: (msg: string) => { logs.push(msg); } };
       const handler = () => 'result';
@@ -407,7 +407,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('guardHook does not log for enabled surfaces', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const logs: string[] = [];
       const logger = { info: (msg: string) => { logs.push(msg); } };
       const handler = () => 'result';
@@ -417,28 +417,28 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('guardService returns null for quiet surfaces (pd-task, default off)', async () => {
-      const { guardService } = await import('@principles/core/runtime-v2');
+      const { guardService } = await import('@principles/core/runtime');
       const service = { api: null, start: () => {} };
       const guarded = guardService('service:pd-task', service);
       expect(guarded).toBeNull();
     });
 
     it('guardService returns the service for core surfaces (trajectory is now core)', async () => {
-      const { guardService } = await import('@principles/core/runtime-v2');
+      const { guardService } = await import('@principles/core/runtime');
       const service = { api: null, start: () => {} };
       const guarded = guardService('service:trajectory', service);
       expect(guarded).toBe(service);
     });
 
     it('guardService returns null for unregistered surfaces', async () => {
-      const { guardService } = await import('@principles/core/runtime-v2');
+      const { guardService } = await import('@principles/core/runtime');
       const service = { api: null, start: () => {} };
       const guarded = guardService('service:nonexistent_service', service);
       expect(guarded).toBeNull();
     });
 
     it('PRI-298 rate-limit: quiet surface logs once, not per invocation', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const logs: string[] = [];
       const logger = { info: (msg: string) => { logs.push(msg); } };
       const handler = () => 'result';
@@ -458,7 +458,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('PRI-298 rate-limit: resetSurfaceGuardSkipLogStateForTests re-arms first-fire', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const logs: string[] = [];
       const logger = { info: (msg: string) => { logs.push(msg); } };
       const handler = () => 'result';
@@ -481,7 +481,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('PRI-298 / chatgpt P2: guardHook does NOT log at construction time', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
       const logs: string[] = [];
       const logger = { info: (msg: string) => { logs.push(msg); } };
       // The act of constructing the guard must not emit a SKIP line. Plugin
@@ -497,7 +497,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
 
     it('PRI-298 / coderabbit Major: guardHook logger undefined on first fire does not consume the one-shot slot', async () => {
-      const { guardHook } = await import('@principles/core/runtime-v2');
+      const { guardHook } = await import('@principles/core/runtime');
 
       // First call: no logger. The no-op suppresses the handler, but the
       // once-only slot is preserved (a missing logger must not eat the

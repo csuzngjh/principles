@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { computeEffectivePdConfig, createPITaskDiagnosticJson, SqliteConnection } from '@principles/core/runtime-v2';
+import { computeEffectivePdConfig, createPITaskDiagnosticJson, SqliteConnection } from '@principles/core/runtime';
 import { computeFlagsFromLoadResult, loadPdConfig } from '../../../src/server/config/pd-config-store.js';
 import { handlePrinciplesRoute, disposePrinciplesModels } from '../../../src/server/routes/principles.js';
 

@@ -22,8 +22,8 @@ import {
   loadLedger,
   saveLedger,
 } from '../../src/core/principle-tree-ledger.js';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
-import type { RuleHostInput } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
+import type { RuleHostInput } from '@principles/core/runtime';
 import { safeRmDir } from '../test-utils.js';
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import {
   getFeedbackChannelConfig,
   type FeedbackChannelConfig,
 } from './config/pd-config-store.js';
-import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime-v2';
+import { resolveOwnerIdentity, defaultOwnerIdentityHomeDir } from '@principles/core/runtime';
 import { createProductTelemetryService, scheduleProductTelemetryExport } from '@principles/host-runtime';
 import { AuthConfig } from './config/AuthConfig.js';
 import { assertLoopbackBindForUnauthenticatedServer } from './bind-guard.js';

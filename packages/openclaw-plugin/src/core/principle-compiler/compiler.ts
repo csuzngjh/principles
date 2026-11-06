@@ -18,15 +18,15 @@ import { generateFromTemplate, type PainPattern } from './template-generator.js'
 import { registerCompiledRule } from './ledger-registrar.js';
 import { createImplementationAssetDir } from '../code-implementation-storage.js';
 import type { TrajectoryDatabase } from '../trajectory.js';
-import type { CompileResult } from '@principles/core/runtime-v2';
+import type { CompileResult } from '@principles/core/runtime';
 import { loadRuleImplementationModule, type RuleImplementationModuleExports } from '../rule-implementation-runtime.js';
-import { createGoldenTraceFixture, type GoldenTraceCase } from '@principles/core/runtime-v2';
+import { createGoldenTraceFixture, type GoldenTraceCase } from '@principles/core/runtime';
 import {
   replayGoldenTrace,
   validateRuleHostResult,
   type ReplayEvaluateFn,
   type RuleHostResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 /** rc-2: type predicate over the canonical RuleHostResult validator (no `as`). */
 function isRuleHostResultValue(value: unknown): value is RuleHostResult {
@@ -34,7 +34,7 @@ function isRuleHostResultValue(value: unknown): value is RuleHostResult {
 }
 
 // Re-export CompileResult from core
-export type { CompileResult } from '@principles/core/runtime-v2';
+export type { CompileResult } from '@principles/core/runtime';
 
 // ---------------------------------------------------------------------------
 // Constants

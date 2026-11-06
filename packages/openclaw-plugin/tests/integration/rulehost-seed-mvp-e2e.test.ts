@@ -63,7 +63,7 @@ import {
   getChannelRiskLevel,
   SqliteConnection,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   PDRuntimeAdapter,
   RunHandle,
@@ -83,7 +83,7 @@ import type {
   WriterInput,
   ActivationActor,
   ApprovalEnqueueInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 import { RuleHost } from '../../src/core/rule-host.js';
 import { TrajectoryRegistry } from '../../src/core/trajectory.js';

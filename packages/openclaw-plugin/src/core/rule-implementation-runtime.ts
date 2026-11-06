@@ -28,7 +28,7 @@ const EVALUATE_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 
 // LOCKSTEP (PRI-809 review): the helpers built here must stay semantically
 // identical to the in-process replay bridge in
-// packages/principles-core/src/runtime-v2/activation/production-gate-deps.ts
+// packages/principles-core/src/runtime/activation/production-gate-deps.ts
 // (normalizeSource) — change both or neither, or replay/live helper semantics
 // silently drift.
 const EVALUATION_PROCESS_SOURCE = String.raw`

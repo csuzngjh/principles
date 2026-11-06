@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { SqliteConnection, normalizeInterventionEvidenceBatch } from '@principles/core/runtime-v2';
+import { SqliteConnection, normalizeInterventionEvidenceBatch } from '@principles/core/runtime';
 import { getInterventionEvidenceIngress } from '@principles/host-runtime';
 import { handleEvidenceOutcomesRoute } from '../../../src/server/routes/evidence-outcomes.js';
 import { handleReceiptsRoute } from '../../../src/server/routes/receipts.js';

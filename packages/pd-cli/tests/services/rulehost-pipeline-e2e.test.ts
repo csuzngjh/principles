@@ -299,7 +299,7 @@ describe('runRuleHost production-wiring (PRI-429) — deterministic, no LLM', ()
     expect(String(output.reason)).toContain('philosopher');
     expect(typeof output.nextAction).toBe('string');
     expect(process.exitCode).toBe(1);
-    expect(fs.existsSync(path.join(workspace, '.state', 'runtime-v2.sqlite'))).toBe(false);
+    expect(fs.existsSync(path.join(workspace, '.state', 'runtime.sqlite'))).toBe(false);
   });
 
   it('rejects fractional numeric handler options as non-integers', async () => {

@@ -23,12 +23,12 @@ import {
   makeArtifactReadModel,
   seedArtifactToDb,
   type TestWorkspace,
-} from '../../src/runtime-v2/activation/__tests__/helpers.js';
+} from '../../src/runtime/activation/__tests__/helpers.js';
 import {
   ApprovalCompletionService,
   makeIdempotencyKey,
-} from '../../src/runtime-v2/index.js';
-import type { PIArtifactSnapshot } from '../../src/runtime-v2/index.js';
+} from '../../src/runtime/index.js';
+import type { PIArtifactSnapshot } from '../../src/runtime/index.js';
 
 const registry = createStepRegistry();
 let ws: TestWorkspace | null = null;

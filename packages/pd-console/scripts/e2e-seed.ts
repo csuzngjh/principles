@@ -9,7 +9,7 @@
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
-import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV1 } from '@principles/core/runtime-v2';
+import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV1 } from '@principles/core/runtime';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
@@ -438,7 +438,7 @@ stateDb.prepare(`
 //
 // PRI-947: the approve fixture is a real Scribe formal draft. Owner Decision
 // v1 gates approve on per-subject decision material
-// (runtime-v2/owner-decision/owner-decision-view.ts: subjectReadableSatisfied
+// (runtime/owner-decision/owner-decision-view.ts: subjectReadableSatisfied
 // ← a bound scribe artifact carrying principleDraft.statement). The plain
 // `{principleId,title}` content left that fixture with only 拒绝, so no spec
 // could ever reach the confirmation panel a real Owner sees.

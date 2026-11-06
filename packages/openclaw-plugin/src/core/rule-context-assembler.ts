@@ -18,13 +18,13 @@
 import {
   computeBehaviorFacts,
   UNAVAILABLE_RULE_CONTEXT,
-} from '@principles/core/runtime-v2/internalization/rule-context-v2';
+} from '@principles/core/runtime/internalization/rule-context-v2';
 import { assembleBehaviorHistory } from '@principles/host-runtime/behavior-history';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import type {
   RuleContextV2,
   RuleHistoryWindow,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   RuleHostContextResult,
   RuleHostContextRow,

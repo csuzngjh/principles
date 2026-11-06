@@ -2,10 +2,10 @@
  * @principles/core -- Universal Evolution SDK
  *
  * Runtime-v2 contracts, store primitives, and prompt-builder helpers for
- * Principles Disciple host integrations. The pre-runtime-v2 public modules
+ * Principles Disciple host integrations. The pre-runtime public modules
  * (pain-signal, pain-signal-adapter, telemetry-event, principle-injector)
  * were removed from the public surface in PRI-636. The PainSignal schema is
- * canonical under ./runtime-v2/types (exported via the ./runtime-v2 subpath);
+ * canonical under ./runtime/types (exported via the ./runtime subpath);
  * telemetry-event remains an internal module consumed via relative imports.
  *
  * @example
@@ -73,20 +73,20 @@ export { listCorrectionSamples, reviewCorrectionSample, TrajectoryDbUnavailableE
 export type { CorrectionSampleRecord, CorrectionSampleReviewStatus } from './trajectory-store.js';
 
 // Runtime v2 Foundation Contracts (M1)
-// Import via '@principles/core/runtime-v2' for the full contract set,
+// Import via '@principles/core/runtime' for the full contract set,
 // or import individual types and schemas from this barrel export.
 
 // Versioning + error categories
 export {
-  RUNTIME_V2_SCHEMA_VERSION,
+  RUNTIME_SCHEMA_VERSION,
   schemaRef,
   SchemaVersionRefSchema,
-  RuntimeV2SchemaVersionSchema,
+  RuntimeSchemaVersionSchema,
   PDErrorCategorySchema,
   PD_ERROR_CATEGORIES,
   PDRuntimeError,
   isPDErrorCategory,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 
 // Agent specification schemas
 export {
@@ -95,7 +95,7 @@ export {
   AgentTimeoutPolicySchema,
   AgentRetryPolicySchema,
   AgentSpecSchema,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 
 // Runtime protocol schemas
 export {
@@ -112,14 +112,14 @@ export {
   StartRunInputSchema,
   StructuredRunOutputSchema,
   RuntimeArtifactRefSchema,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 
 // Task status schemas
 export {
   PDTaskStatusSchema,
   TaskRecordSchema,
   DiagnosticianTaskRecordSchema,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 
 // Context payload schemas (Phase 2)
 export {
@@ -131,7 +131,7 @@ export {
   DiagnosisTargetSchema,
   ContextPayloadSchema,
   DiagnosticianContextPayloadSchema,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 
 // Diagnostician output schemas (Phase 2)
 export {
@@ -141,7 +141,7 @@ export {
   DiagnosticianRecommendationSchema,
   DiagnosticianOutputV1Schema,
   DiagnosticianInvocationInputSchema,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 export type {
   PDErrorCategory,
   AgentSpec,
@@ -180,11 +180,11 @@ export type {
   RecommendationKind,
   DiagnosticianRecommendation,
   DiagnosticianInvocationInput,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 
 // Runtime integration layer
-export { RuntimeStateManager } from './runtime-v2/index.js';
-export type { RuntimeStateManagerOptions } from './runtime-v2/index.js';
+export { RuntimeStateManager } from './runtime/index.js';
+export type { RuntimeStateManagerOptions } from './runtime/index.js';
 
 // Store exports (for pd-cli and openclaw-plugin direct usage)
 export {
@@ -201,34 +201,34 @@ export {
   DEFAULT_HISTORY_PAGE_SIZE,
   MAX_HISTORY_PAGE_SIZE,
   DEFAULT_TIME_WINDOW_MS,
-} from './runtime-v2/index.js';
+} from './runtime/index.js';
 export type {
   HistoryQuery,
   HistoryQueryCursorData,
   HistoryQueryOptions,
-} from './runtime-v2/index.js';
-export type { ContextAssembler } from './runtime-v2/store/context/context-assembler.js';
+} from './runtime/index.js';
+export type { ContextAssembler } from './runtime/store/context/context-assembler.js';
 export type {
   TaskStore,
   TaskStoreFilter,
   TaskStoreUpdatePatch,
-} from './runtime-v2/store/task/task-store.js';
+} from './runtime/store/task/task-store.js';
 export type {
   RunStore,
   RunRecord,
-} from './runtime-v2/store/run/run-store.js';
-export type { TrajectoryLocator } from './runtime-v2/store/trajectory/trajectory-locator.js';
+} from './runtime/store/run/run-store.js';
+export type { TrajectoryLocator } from './runtime/store/trajectory/trajectory-locator.js';
 
 // Lease & Recovery
-export { DefaultLeaseManager } from './runtime-v2/index.js';
-export type { LeaseManager, AcquireLeaseOptions } from './runtime-v2/index.js';
-export { DefaultRetryPolicy } from './runtime-v2/index.js';
-export type { RetryPolicy, RetryPolicyConfig } from './runtime-v2/index.js';
-export { DefaultRecoverySweep } from './runtime-v2/index.js';
-export type { RecoverySweep, RecoveryResult } from './runtime-v2/index.js';
+export { DefaultLeaseManager } from './runtime/index.js';
+export type { LeaseManager, AcquireLeaseOptions } from './runtime/index.js';
+export { DefaultRetryPolicy } from './runtime/index.js';
+export type { RetryPolicy, RetryPolicyConfig } from './runtime/index.js';
+export { DefaultRecoverySweep } from './runtime/index.js';
+export type { RecoverySweep, RecoveryResult } from './runtime/index.js';
 
 // Event emitter
-export { StoreEventEmitter, storeEmitter } from './runtime-v2/index.js';
+export { StoreEventEmitter, storeEmitter } from './runtime/index.js';
 
 // Workflow funnel loader
 export { WorkflowFunnelLoader } from './workflow-funnel-loader.js';
@@ -240,8 +240,8 @@ export type {
 } from './workflow-funnel-loader.js';
 
 // PD Config — context injection types re-exported for openclaw-plugin consumers
-export type { ContextInjectionConfig, ProjectFocusMode } from './runtime-v2/config/index.js';
-export { DEFAULT_CONTEXT_INJECTION } from './runtime-v2/config/index.js';
+export type { ContextInjectionConfig, ProjectFocusMode } from './runtime/config/index.js';
+export { DEFAULT_CONTEXT_INJECTION } from './runtime/config/index.js';
 
 // Host Adapter — Multi-platform host abstraction (ADR-0020 §2.2, §2.3)
 // Pure types + type guards. No I/O. Import from '@principles/core/host' for

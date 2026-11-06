@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addPrincipleToLedger, appendReuseEvidence, loadLedger, saveLedger, saveLedgerAsync, updatePrinciple } from '../src/principle-tree-ledger.js';
-import { PrincipleTreeLedgerAdapter } from '../src/runtime-v2/adapter/principle-tree-ledger-adapter.js';
-import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
-import type { RuleCandidateBindingRequest, RuleCandidateMaterial } from '../src/runtime-v2/types/rule-candidate-binding.js';
+import { PrincipleTreeLedgerAdapter } from '../src/runtime/adapter/principle-tree-ledger-adapter.js';
+import type { LedgerPrinciple } from '../src/runtime/types/ledger-store.js';
+import type { RuleCandidateBindingRequest, RuleCandidateMaterial } from '../src/runtime/types/rule-candidate-binding.js';
 
 const PID = '11111111-2222-4222-8222-222222222222';
 const OTHER = '22222222-3333-4333-8333-333333333333';

@@ -37,7 +37,7 @@ const SNAPSHOT_URL = `${ENDPOINT}/api/product-telemetry/snapshot`;
 const SIGNALS_URL = `${ENDPOINT}/product-signals`;
 
 // Resolve the official builder from the monorepo's built core.
-const core = await import('@principles/core/runtime-v2');
+const core = await import('@principles/core/runtime');
 const {
   buildProductTelemetrySnapshot,
   deriveDailyTelemetryId,

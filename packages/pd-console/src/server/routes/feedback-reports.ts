@@ -11,8 +11,8 @@ import {
   createFeedbackReport,
   PendingAgentDraftStore,
   type FeedbackReport,
-} from '@principles/core/runtime-v2/feedback';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime/feedback';
+import { SqliteConnection } from '@principles/core/runtime';
 import {
   FeedbackReportConsoleModel,
   type FeedbackReportDraftSummary,

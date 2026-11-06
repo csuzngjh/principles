@@ -17,7 +17,7 @@
  * - ERR-014/016/017: Previews bounded, no raw JSON.stringify on unknown values
  */
 
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 

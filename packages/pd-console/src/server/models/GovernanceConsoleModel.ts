@@ -3,8 +3,8 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
-} from '@principles/core/runtime-v2';
-import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 

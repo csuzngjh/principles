@@ -28,7 +28,7 @@ import {
   type RuntimeStateManager,
   type StoreEventEmitter,
   type TelemetryEvent,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runInternalizationConsumerCycle } from '../src/internalization-consumer-cycle.js';
 
 const dirs: string[] = [];
@@ -139,7 +139,7 @@ beforeEach(() => {
 afterEach(async () => {
   delete process.env.EVAL_TELEMETRY_KEY;
   vi.restoreAllMocks();
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   for (const dir of dirs) {
     await disposePainSignalBridgesForWorkspace(dir).catch(() => undefined);
   }

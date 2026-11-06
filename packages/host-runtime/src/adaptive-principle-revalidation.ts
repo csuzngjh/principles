@@ -2,7 +2,7 @@ import {
   readPromptActivationCandidates,
   type PromptActivationCandidates,
 } from './active-principle-prompt.js';
-import type { ActivatedPrinciple } from '@principles/core/runtime-v2';
+import type { ActivatedPrinciple } from '@principles/core/runtime';
 
 export type AdaptivePrincipleReader = (input: { workspaceDir: string }) => Promise<PromptActivationCandidates>;
 

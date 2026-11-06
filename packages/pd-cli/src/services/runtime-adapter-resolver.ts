@@ -30,8 +30,8 @@ import {
   buildL2PrincipleReaderFromLedger,
   isRuntimeConfigError,
   validateRuntimeConfig,
-} from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult, InternalAgentName } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PDRuntimeAdapter, PdL2ArtifactReader, RuntimeConfig, RuntimeConfigResult, InternalAgentName } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfig, computeFlagsFromLoadResult } from './pd-config-loader.js';
 import { resolveRuntimeFromPdConfig } from './resolve-runtime-from-pd-config.js';

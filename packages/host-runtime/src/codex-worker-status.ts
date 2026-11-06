@@ -16,7 +16,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loadPdConfigForPlugin } from './pd-config.js';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 
 export type CodexWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
 

@@ -20,7 +20,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as yaml from 'js-yaml';
 import Database from 'better-sqlite3';
-import { validatePdConfig } from '@principles/core/runtime-v2';
+import { validatePdConfig } from '@principles/core/runtime';
 import { buildRuntimeInitOutput } from '../../src/commands/runtime-init.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

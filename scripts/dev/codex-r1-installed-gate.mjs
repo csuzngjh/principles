@@ -86,7 +86,7 @@ const frozenDisclosure = (() => {
 const sandbox = mkdtempSync(path.join(tmpdir(), 'pd-r1-gate-'));
 const require = createRequire(path.join(ROOT, 'package.json'));
 const yaml = require('js-yaml');
-const { getDefaultPdConfig } = await import(pathToFileURL(path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2', 'index.js')));
+const { getDefaultPdConfig } = await import(pathToFileURL(path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime', 'index.js')));
 
 function makeWorkspace(name, { enableIngestion = false } = {}) {
   const ws = path.join(sandbox, name);

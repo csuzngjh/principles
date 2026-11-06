@@ -37,7 +37,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Thin adapter candidates
     'principle-internalization/principle-lifecycle-service.ts',
     // principle-tree-ledger-adapter.ts removed — orphan duplicate of the canonical
-    // @principles/core/runtime-v2 adapter (PRI-459 consolidation completed).
+    // @principles/core/runtime adapter (PRI-459 consolidation completed).
     'principle-compiler/ledger-registrar.ts',
     'principle-compiler/code-validator.ts',
     'pd-task-service.ts',
@@ -100,7 +100,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'principle-tree-ledger.ts',
     // evolution-logger.ts / evolution-engine.ts removed (PRI-737 legacy
     // evolution worker retirement; trace-id util moved to src/utils/trace-id.ts).
-    'runtime-v2-prompt-activation-reader.ts',
+    'runtime-prompt-activation-reader.ts',
     'pd-config-loader.ts',
     'config-health.ts',  // PRI-346: conversation access check extracted to avoid circular imports
     // Security audit run-1 (gate-failopen-allow-on-state-corruption): plugin

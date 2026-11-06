@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteConnection, SqliteApprovalQueueStore, isApprovalReviewGuard } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteApprovalQueueStore, isApprovalReviewGuard } from '@principles/core/runtime';
 import { ApprovalsConsoleModel } from '../../src/server/models/ApprovalsConsoleModel.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 

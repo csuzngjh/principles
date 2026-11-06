@@ -25,8 +25,8 @@ import {
   loadLedger,
   LedgerIntegrityError,
 } from '../src/principle-tree-ledger.js';
-import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
-import type { ReuseEvidenceEntry } from '../src/runtime-v2/types/principle-schema.js';
+import type { LedgerPrinciple } from '../src/runtime/types/ledger-store.js';
+import type { ReuseEvidenceEntry } from '../src/runtime/types/principle-schema.js';
 
 function makePrinciple(id: string): LedgerPrinciple {
   return {

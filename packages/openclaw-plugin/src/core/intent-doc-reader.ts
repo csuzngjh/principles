@@ -33,7 +33,7 @@ import {
   type IntentDocSections,
   type IntentDocWarning,
   type IntentLang,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────

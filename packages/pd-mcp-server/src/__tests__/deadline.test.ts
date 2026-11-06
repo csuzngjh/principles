@@ -19,7 +19,7 @@ import {
   MAX_CONCURRENT_CALLS,
   MAX_TRACKED_ORPHANS,
 } from '../deadline.js';
-import type { PainRecallCapabilityResult } from '@principles/core/runtime-v2/pain-recall-capability';
+import type { PainRecallCapabilityResult } from '@principles/core/runtime/pain-recall-capability';
 
 const OK_ENVELOPE: PainRecallCapabilityResult = {
   schemaVersion: 'pd.capability.v1',

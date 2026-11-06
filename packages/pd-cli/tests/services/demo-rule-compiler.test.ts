@@ -16,8 +16,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { compileDemoRule } from '../../src/services/demo-rule-compiler.js';
-import { createRuleHostHelpers } from '@principles/core/runtime-v2';
-import type { ReplayEvaluateFn, RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
+import { createRuleHostHelpers } from '@principles/core/runtime';
+import type { ReplayEvaluateFn, RuleHostInput, RuleHostResult } from '@principles/core/runtime';
 
 const VALID_RULE = `
 export const meta = {

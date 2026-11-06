@@ -25,8 +25,8 @@ import { resolve } from 'path';
 // Load source files
 // ---------------------------------------------------------------------------
 
-const CORE_LEDGER_TYPES_PATH = resolve(__dirname, '..', 'src', 'runtime-v2', 'types', 'ledger-store.ts');
-const CORE_LEDGER_CODEC_PATH = resolve(__dirname, '..', 'src', 'runtime-v2', 'principle-tree', 'ledger-codec.ts');
+const CORE_LEDGER_TYPES_PATH = resolve(__dirname, '..', 'src', 'runtime', 'types', 'ledger-store.ts');
+const CORE_LEDGER_CODEC_PATH = resolve(__dirname, '..', 'src', 'runtime', 'principle-tree', 'ledger-codec.ts');
 const CORE_LEDGER_IO_PATH = resolve(__dirname, '..', 'src', 'principle-tree-ledger.ts');
 const PLUGIN_LEDGER_PATH = resolve(
   __dirname,
@@ -92,7 +92,7 @@ describe('PRI-459: plugin ledger is a re-export adapter (no duplicate impl)', ()
 
 describe('PRI-459: core remains the single SSOT for ledger types + codec', () => {
   describe('SSOT: ledger types defined exactly once in core src/', () => {
-    it('HybridLedgerStore is defined only in runtime-v2/types/ledger-store.ts', async () => {
+    it('HybridLedgerStore is defined only in runtime/types/ledger-store.ts', async () => {
       const { readdirSync, statSync } = await import('node:fs');
       const { join } = await import('node:path');
 
@@ -118,11 +118,11 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       scanDir(coreSrcDir);
 
       const normalizedHits = hits.map((f: string) => f.replace(/\\/g, '/'));
-      expect(normalizedHits).toContain('runtime-v2/types/ledger-store.ts');
-      expect(normalizedHits).toEqual(['runtime-v2/types/ledger-store.ts']);
+      expect(normalizedHits).toContain('runtime/types/ledger-store.ts');
+      expect(normalizedHits).toEqual(['runtime/types/ledger-store.ts']);
     });
 
-    it('LegacyPrincipleTrainingState is defined only in runtime-v2/types/ledger-store.ts', async () => {
+    it('LegacyPrincipleTrainingState is defined only in runtime/types/ledger-store.ts', async () => {
       // Same SSOT guarantee as HybridLedgerStore above: scan the whole core
       // src tree and assert exactly one definition. The previous
       // coreTypesSource.contains() check only proved the intended file had it
@@ -152,13 +152,13 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       scanDir(coreSrcDir);
 
       const normalized = legacyHits.map((f: string) => f.replace(/\\/g, '/'));
-      expect(normalized).toContain('runtime-v2/types/ledger-store.ts');
-      expect(normalized).toEqual(['runtime-v2/types/ledger-store.ts']);
+      expect(normalized).toContain('runtime/types/ledger-store.ts');
+      expect(normalized).toEqual(['runtime/types/ledger-store.ts']);
     });
   });
 
   describe('SSOT: codec functions defined exactly once in core', () => {
-    it('parseHybridLedger lives only in runtime-v2/principle-tree/ledger-codec.ts', async () => {
+    it('parseHybridLedger lives only in runtime/principle-tree/ledger-codec.ts', async () => {
       const { readdirSync, statSync } = await import('node:fs');
       const { join } = await import('node:path');
 
@@ -184,7 +184,7 @@ describe('PRI-459: core remains the single SSOT for ledger types + codec', () =>
       scanDir(coreSrcDir);
 
       const normalized = codecHits.map((f: string) => f.replace(/\\/g, '/'));
-      expect(normalized).toEqual(['runtime-v2/principle-tree/ledger-codec.ts']);
+      expect(normalized).toEqual(['runtime/principle-tree/ledger-codec.ts']);
     });
 
     it('ledger-codec.ts exports parseHybridLedger and serializeLedger', () => {

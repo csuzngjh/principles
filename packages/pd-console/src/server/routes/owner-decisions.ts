@@ -15,8 +15,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   createRuntimeStateHandle,
   applyOwnerResolution,
-} from '@principles/core/runtime-v2';
-import type { OwnerResolutionOutcome } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { OwnerResolutionOutcome } from '@principles/core/runtime';
 import { OwnerDecisionConsoleModel } from '../models/OwnerDecisionConsoleModel.js';
 import { sendSuccess, sendError, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
 import { readBody } from '../utils/request.js';

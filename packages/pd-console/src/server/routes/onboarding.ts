@@ -9,7 +9,7 @@
  * inside the pd-cli subprocess (EP-06 Source of Truth).
  *
  * Feature flag gate: `new_user_onboarding` (default true, registered in
- * packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts).
+ * packages/principles-core/src/runtime/feature-flags/feature-flag-contract.ts).
  *
  * ERR entries considered:
  * - EP-02 (Production Path Wiring): registered in server/index.ts handleRequest

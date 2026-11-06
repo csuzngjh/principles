@@ -23,13 +23,13 @@ import {
   RolloutReviewerRunner,
   DefaultRolloutReviewerValidator,
   storeEmitter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   PITaskMetadata,
   RolloutRevisionPayload,
   PDRuntimeAdapter,
   RolloutReviewerOutputV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { handleRuntimeInternalizationRetry } from '../../src/commands/runtime-internalization-retry.js';
 
 /** barrel 未导出 RunnerCompletionIntent — 从 metadata 字段派生 (避免为测试改 core) */

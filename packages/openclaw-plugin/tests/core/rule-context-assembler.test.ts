@@ -16,10 +16,10 @@ import path from 'path';
 import {
   UNAVAILABLE_RULE_CONTEXT,
   sanitizeToolParams,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   RuleToolCallRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   assembleHistoryFromRows,
   buildProductionRuleContext,

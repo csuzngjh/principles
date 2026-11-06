@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RuleCandidateBindingRequest } from '@principles/core/runtime-v2';
+import type { RuleCandidateBindingRequest } from '@principles/core/runtime';
 import { fetchRuleBindingQueue, fetchRuleBindingReview, mutateRuleBinding, reviseRuleBindingOnce } from '../../api.js';
 import { validateBindingMutation, validateBindingQueue, validateBindingReview, validateBindingRevise } from '../rule-binding-validators.js';
 
