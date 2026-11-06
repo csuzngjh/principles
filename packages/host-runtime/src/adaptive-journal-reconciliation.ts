@@ -131,6 +131,13 @@ export interface AdaptiveJournalTotals {
   countsAreLowerBounds: boolean;
 }
 
+export interface AdaptiveJournalConfigIdentity {
+  hostVersion: string | null;
+  pluginVersion: string | null;
+  effectiveHookSetFingerprint: string | null;
+  evidenceCoverage: string | null;
+}
+
 export interface AdaptiveJournalRecordProjection {
   ts: string;
   receiptState: 'open' | 'closed' | 'reconciled';
@@ -143,6 +150,10 @@ export interface AdaptiveJournalRecordProjection {
   artifactId: string | null;
   activationId: string | null;
   requestId: string | null;
+  /** PRI-1114: recorded target body hash; never re-computed by this reader. */
+  targetBodySha256: string | null;
+  /** PRI-1114: recorded call-configuration identity (PRI-1109 §3.3 contract). */
+  configIdentity: AdaptiveJournalConfigIdentity | null;
   evidenceReferencePresent: boolean;
   /** Transcribed as recorded; never re-verified by this reader. */
   evidenceIndependentlyVerifiedAsRecorded: boolean | null;
@@ -715,6 +726,20 @@ function countDistinctIdentities(records: ParsedJournalRecord[]): number {
 function buildProjection(data: Record<string, unknown>, fallbackTs: string): AdaptiveJournalRecordProjection {
   const receiptState = data.receiptState === 'closed' || data.receiptState === 'reconciled' ? data.receiptState : 'open';
   const evidence = isRecord(data.evidence) ? data.evidence : null;
+  const configIdentity: AdaptiveJournalConfigIdentity | null = (() => {
+    const identity = {
+      hostVersion: optionalString(data.hostVersion),
+      pluginVersion: optionalString(data.pluginVersion),
+      effectiveHookSetFingerprint: optionalString(data.effectiveHookSetFingerprint),
+      evidenceCoverage: optionalString(data.evidenceCoverage),
+    };
+    return identity.hostVersion === null
+      && identity.pluginVersion === null
+      && identity.effectiveHookSetFingerprint === null
+      && identity.evidenceCoverage === null
+      ? null
+      : identity;
+  })();
   return {
     ts: fallbackTs,
     receiptState,
@@ -727,6 +752,8 @@ function buildProjection(data: Record<string, unknown>, fallbackTs: string): Ada
     artifactId: optionalString(data.artifactId) ?? optionalString(data.principleArtifactId),
     activationId: optionalString(data.activationId) ?? optionalString(data.activationRunId),
     requestId: optionalString(data.requestId),
+    targetBodySha256: optionalString(data.targetBodySha256),
+    configIdentity,
     evidenceReferencePresent: evidence !== null && optionalString(evidence.reference) !== null,
     evidenceIndependentlyVerifiedAsRecorded: evidence === null ? null : optionalBoolean(evidence.independentlyVerified),
     hostKillConfirmedAsRecorded: evidence === null ? null : optionalBoolean(evidence.hostKillConfirmed),

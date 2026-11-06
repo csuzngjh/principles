@@ -30,6 +30,7 @@ import {
 import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime-v2';
 import {
   checkPromptArtifactDeliverabilityById,
+  linkAdaptiveBehaviorEvidence,
   RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
   reconcileAdaptiveJournal,
 } from '@principles/host-runtime';
@@ -1969,7 +1970,7 @@ export function registerRuntimeActivationJournalCommand(parent: Command): Comman
     .option('--until <iso>', 'Explicit window end (ISO timestamp; default: now)')
     .option('--host <host>', 'Host identity to reconcile', 'openclaw')
     .option('--max-invocations <n>', 'Maximum invocations emitted (default: 1000)')
-    .option('--max-date-files <n>', 'Maximum date files read per log directory (default: 8)')
+    .option('--max-date-files <n>', 'Maximum date files read per log directory (default: 9)')
     .option('--max-file-bytes <n>', 'Maximum bytes read per file (default: 4194304)')
     .option('--max-terminal-variants <n>', 'Maximum terminal variants per invocation (default: 5)')
     .action(async (opts) => {
@@ -1982,6 +1983,102 @@ export function registerRuntimeActivationJournalCommand(parent: Command): Comman
         maxDateFiles: opts.maxDateFiles,
         maxFileBytes: opts.maxFileBytes,
         maxTerminalVariants: opts.maxTerminalVariants,
+      });
+    });
+}
+
+export interface RuntimeActivationLinkOptions {
+  workspace?: string;
+  since?: string;
+  until?: string;
+  host?: string;
+  json?: boolean;
+  maxInvocations?: string;
+  maxDateFiles?: string;
+  maxFileBytes?: string;
+  maxEventLines?: string;
+  maxTrajectoryRows?: string;
+}
+
+/**
+ * PRI-1114: thin CLI wrapper over the read-only behavior linkage in
+ * @principles/host-runtime. All association semantics live in the library.
+ * stdout carries exactly one JSON document; diagnostics go to stderr.
+ */
+export async function handleRuntimeActivationLink(opts: RuntimeActivationLinkOptions): Promise<void> {
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  const limits: {
+    maxInvocations?: number;
+    maxDateFilesPerDir?: number;
+    maxFileBytes?: number;
+    maxEventLogLines?: number;
+    maxTrajectoryRows?: number;
+  } = {};
+  if (opts.maxInvocations !== undefined) limits.maxInvocations = Number(opts.maxInvocations);
+  if (opts.maxDateFiles !== undefined) limits.maxDateFilesPerDir = Number(opts.maxDateFiles);
+  if (opts.maxFileBytes !== undefined) limits.maxFileBytes = Number(opts.maxFileBytes);
+  if (opts.maxEventLines !== undefined) limits.maxEventLogLines = Number(opts.maxEventLines);
+  if (opts.maxTrajectoryRows !== undefined) limits.maxTrajectoryRows = Number(opts.maxTrajectoryRows);
+
+  const result = linkAdaptiveBehaviorEvidence({
+    workspaceDir,
+    ...(opts.since !== undefined ? { since: opts.since } : {}),
+    ...(opts.until !== undefined ? { until: opts.until } : {}),
+    ...(opts.host !== undefined ? { host: opts.host } : {}),
+    limits,
+  });
+
+  if (!result.ok) {
+    console.log(JSON.stringify(result, null, 2));
+    console.error(`[activation link] ${result.error.code}: ${result.error.message}`);
+    console.error(`[activation link] nextAction: ${result.error.nextAction}`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const {report} = result;
+  console.log(JSON.stringify(report, null, 2));
+  console.error(
+    `[activation link] window: ${report.request.window.start} ~ ${report.request.window.end}`
+      + ` invocations=${report.totals.invocations} strong_run=${report.totals.byAssociation.strong_run}`,
+  );
+  console.error(
+    `[activation link] coverage complete=${report.coverage.complete}`
+      + ` journal=${report.coverage.journal.status}`
+      + ` trajectory=${report.coverage.trajectory.status}`,
+  );
+  if (report.coverage.journal.status === 'unavailable') {
+    console.error('[activation link] no readable journal directory: association is unknown, not absent');
+    process.exitCode = 3;
+  }
+}
+
+export function registerRuntimeActivationLinkCommand(parent: Command): Command {
+  return parent
+    .command('link')
+    .description('Read-only linkage of interventions to run-level actions, corrections and task outcomes (never writes, never runs a model)')
+    .option('-w, --workspace <path>', 'Workspace directory')
+    .option('--since <iso>', 'Explicit window start (ISO timestamp; default: 7 days before the window end)')
+    .option('--until <iso>', 'Explicit window end (ISO timestamp; default: now)')
+    .option('--host <host>', 'Host identity to link', 'openclaw')
+    .option('--max-invocations <n>', 'Maximum invocations emitted (default: 1000)')
+    .option('--max-date-files <n>', 'Maximum date files read per log directory (default: 9)')
+    .option('--max-file-bytes <n>', 'Maximum bytes read per file (default: 4194304)')
+    .option('--max-event-lines <n>', 'Maximum EventLog lines parsed (default: 20000)')
+    .option('--max-trajectory-rows <n>', 'Maximum trajectory rows read (default: 5000)')
+    .option('--json', 'Output the JSON document (this read-only command always emits JSON)')
+    .action(async (opts) => {
+      await handleRuntimeActivationLink({
+        workspace: opts.workspace,
+        since: opts.since,
+        until: opts.until,
+        host: opts.host,
+        json: opts.json,
+        maxInvocations: opts.maxInvocations,
+        maxDateFiles: opts.maxDateFiles,
+        maxFileBytes: opts.maxFileBytes,
+        maxEventLines: opts.maxEventLines,
+        maxTrajectoryRows: opts.maxTrajectoryRows,
       });
     });
 }

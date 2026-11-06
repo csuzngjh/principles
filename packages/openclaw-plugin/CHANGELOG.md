@@ -1,5 +1,27 @@
 # principles-disciple
 
+## 2.6.4
+
+### Patch Changes
+
+- fbe9d79: PRI-1110 follow-up (P2): the executing-manifest walk now keeps the real read
+  failure (for example `manifest_too_large`) instead of letting a shallower
+  directory without a `package.json` replace it with `manifest_ENOENT`. Evidence
+  notes therefore name the actual reason the plugin version is `unknown`. The
+  bounded-read and module-load-binding tests now assert the exact byte count,
+  degradation result and reason code.
+
+## 2.6.3
+
+### Patch Changes
+
+- 440aa63: PRI-1110: AA invocation journal now records the minimal effective configuration
+  identity for each invocation (host, runtime mode, executing plugin version,
+  confirmed hook-set fingerprint, evidence coverage). Fields the running host
+  cannot prove stay `unknown`; one frozen snapshot is taken when the invocation
+  opens and is reused by its terminal record, so a mid-invocation environment
+  change cannot rewrite already-recorded evidence.
+
 ## 2.6.2
 
 ### Patch Changes

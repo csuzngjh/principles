@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T233053Z-codex-same-parameter",
+  "previousCheckpoint": "20261105T162057Z-codex-selector-experiment.json",
+  "generatedAt": "2026-11-05T23:30:53.583Z",
+  "agent": "codex-selector",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "已执行获批1次同参数诊断，确认Respan不接受数组state；已修为字符串并25项测试通过，未追加第三次请求；累计decision2/glm0",
+  "git": {
+    "repo": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+    "branch": "ai/PRI-1122-two-stage-selector-design",
+    "baseCommit": "e9223abcb4508db1ca1cd277cb6955f63a3de530",
+    "headCommit": "4e1380ce7be43a7c9691fc64f84ef721ea40ae56",
+    "dirtyPaths": [],
+    "pushedCommit": null,
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2368",
+    "remoteChecks": "NOT_VERIFIED_FOR_NEW_HEAD"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1141",
+      "scope": "专用Decisions隔离CLI与获批6样本诊断子范围，不是整张四臂工单",
+      "status": "NEEDS_OWNER",
+      "owner": "codex-selector",
+      "writePaths": [
+        "scripts/dev/adaptive-selector-lab",
+        "docs/implementation-reports/aa-selector-experiments"
+      ],
+      "commits": [
+        "4ecbf4ec0aa93884d9cc1b76a359040dd76f99fa"
+      ],
+      "acceptance": [
+        {
+          "criterion": "网络边界预算/超时/保密/输出校验和真实pi-ai假HTTP",
+          "result": "PASS",
+          "evidenceRefs": [
+            "report"
+          ]
+        },
+        {
+          "criterion": "真实协议与C/D选择比较",
+          "result": "FAIL",
+          "evidenceRefs": [
+            "run"
+          ]
+        }
+      ],
+      "remaining": [
+        "修正后真实协议尚未验证；完整选择/行为对照未运行",
+        "续行拟限dev-01..04，4次decision+8次GLM，待明确批准"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "unit",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node --test scripts/dev/adaptive-selector-lab/diagnostic.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "root-report"
+      ]
+    },
+    {
+      "id": "negative-control",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node --test --test-name-pattern \"Respan rejects\" scripts/dev/adaptive-selector-lab/diagnostic.test.mjs (old array builder)",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "evidenceRefs": [
+        "root-report"
+      ]
+    },
+    {
+      "id": "one-request",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node scripts/dev/adaptive-selector-lab/same-parameter-diagnostic.mjs --execute-approved-one-diagnostic",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "evidenceRefs": [
+        "same-request"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "same-request",
+      "kind": "HOST_TRACE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/aa-selector-experiments/2026-11-05T23-27-54-181Z-one-diagnostic/results.json",
+      "observedAt": "2026-11-05T23:30:53.583Z",
+      "sha256": "68d0ae13b6189f47bc6644060a209a0381a3b5253f96d4288c078c6ede8dce11",
+      "supports": "请求hash相同、HTTP400服务端state约束、原始证据未改",
+      "limitations": "没有修正格式后的真实成功响应；没有GLM或行为结果"
+    },
+    {
+      "id": "root-report",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/PD-AA-PRI-1141-DECISIONS-ROOT-CAUSE-20261106.md",
+      "observedAt": "2026-11-05T23:30:53.583Z",
+      "sha256": "dcbfccf690257dffabbabc0c4da362979c6bd82e04bb4b0b0624acbafedd52d0",
+      "supports": "根因、最小修复、反例与续行边界",
+      "limitations": "没有修正格式后的真实成功响应；没有GLM或行为结果"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "protocol-400",
+      "issue": "PRI-1141",
+      "reason": "同参数诊断授权仅1次已消耗；state格式根因已定位并本地修复，真实续行仍需批准",
+      "evidenceRefs": [
+        "same-request",
+        "root-report"
+      ],
+      "neededFrom": "Owner",
+      "unblockAction": "批准原总预算内新增4次decision+8次GLM，只覆盖前4冻结开发样本",
+      "independentWork": "CLI、取证修复、测试、双轴审查和PR证据交付已完成"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1141",
+      "action": "获准后按修正state格式执行前4样本，继承累计计数，最多新增4次decision+8次GLM，不重置旧claim",
+      "dependsOn": [
+        "protocol-400续行批准"
+      ],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "真实协议与C/D选择诊断留下证据；保留未覆盖与失败分母"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "modelRequestsThisRun": {
+      "decision": 1,
+      "glm": 0
+    },
+    "authorizationRefs": [
+      "Owner当前结构化回复：批准一次同参数诊断；仅1次决策、不调用GLM、不自动继续"
+    ],
+    "cumulativeModelRequests": {
+      "decision": 2,
+      "glm": 0
+    }
+  }
+}

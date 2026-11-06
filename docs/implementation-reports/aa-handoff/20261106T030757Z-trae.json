@@ -1,0 +1,249 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T030757Z-trae",
+  "previousCheckpoint": "20261106T023606Z-trae",
+  "generatedAt": "2026-11-06T03:07:57Z",
+  "agent": "trae",
+  "overallStatus": "READY_FOR_REVIEW",
+  "summary": "PRI-1114 独立评审收尾轮：同步 origin/main（含已合入的 PR #2374 与 #2377 版本提交）后复跑全部本地验证，并确认真实 CLI 入口行为不变。合并后 head 587003366 的 PR 必跑检查全部通过（e2e 13m55s、Verify Merge Gate 2m21s）；4 项 skipping 不计为通过。本轮更正上一检查点中『PR #2374 仍 OPEN、未进入 main』的过时结论：main 已于 fbe9d7969 合入 #2374，本分支已同步，无冲突。未合并 PR、未发版、未写生产库、未调模型、未运行真实 Agent 回合、未接控制台。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+    "branch": "ai/PRI-1114-behavior-evidence-link",
+    "baseCommit": "bcd8b467047c0acc268fc0c248c2ebfa68a621e3",
+    "headCommit": "587003366e44d890ac959c0d01071db21b8d3042",
+    "dirtyPaths": [],
+    "pushedCommit": "587003366e44d890ac959c0d01071db21b8d3042",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2373",
+    "remoteChecks": "PASS on 587003366: Verify Merge Gate, e2e (13m55s), Test pd-console, Test pd-cli, Test OpenClaw Plugin (unit+integration+coverage), Test shared runtime & adapters, Test workbuddy-adapter, Test packaged install smoke, Test release asset smoke, Build OpenClaw Plugin, Release Build Parity, Codex plugin delivery contract, Lint, TypeScript Check (pd-console), quick-check, Analyze (javascript-typescript), CodeQL, Dependency Audit, CI Impact Gate, Check PR Size, Repository Size & Large File Guard, Telemetry Union Guard, Auto Label PR, Welcome First Time Contributor, codecov/patch. SKIPPED (not counted as pass): Test principles-core, Test pd-mcp-server, Test create-principles-disciple, CodeRabbit. mergeStateStatus=CLEAN."
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1114",
+      "scope": "Owner 已批准的只读子范围：运行级行为证据关联模块 + pd activation link；本轮为独立评审与修复，不含控制台、写侧、模型调用、生产库、合并、发版、真实宿主验证",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "packages/host-runtime/src/adaptive-behavior-linkage.ts",
+        "packages/host-runtime/tests/adaptive-behavior-linkage.test.ts",
+        "docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.2.md"
+      ],
+      "commits": [
+        "f2f2c128f",
+        "83bd5a2c3",
+        "587003366"
+      ],
+      "acceptance": [
+        {"criterion": "R1 journal 有 malformed/invalid 丢弃时，strong_run 降为 unknown（不假唯一）", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-code-linkage"]},
+        {"criterion": "R2 EventLog parseErrors>0 进入 incompleteReasons（未读不等于不存在）", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "R3 EventLog 日期文件被省略时 eventLog.truncated=true 且报告 event_log_files_omitted", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "R4 每机会 action/correction/outcome/weak 上限命中时 coverage.complete=false", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "R5 每个机会输出 evidenceLayers，请求级/原则遵循/因果改善为 unknown", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-cli-run"]},
+        {"criterion": "R6 principle IDs 半非法数组按 session_level_unknown，不降级为 absent", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "R7 缺 run/session 身份的工具事件计入 unattributedToolCalls，不当作未发生", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "R8 EventLog 目录缺失时报告 event_log_unavailable，不输出空事实并宣称完整", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "O1-O5 与既有 12 条反例继续通过（无回归）", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "同步 origin/main 后本地验证复跑通过（无冲突回归）", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-test-pd-cli", "evidence-build"]},
+        {"criterion": "至少一次真实 CLI 入口隔离实跑，且运行前后工作区字节不变", "result": "PASS", "evidenceRefs": ["evidence-cli-run"]},
+        {"criterion": "PR #2373 合并后 head 587003366 的必跑检查全部通过", "result": "PASS", "evidenceRefs": ["evidence-pr"]},
+        {"criterion": "最终 head 的 CI（含本检查点元数据提交）", "result": "PENDING_AT_WRITE", "evidenceRefs": []},
+        {"criterion": "Owner 验收 / 合并 / 真实宿主验证", "result": "NOT_RUN", "evidenceRefs": []}
+      ],
+      "remaining": [
+        "PRI-1114 整票仍被 PRI-1109 阻塞；未删 blocker、未关父票。",
+        "本轮未运行 npm run verify:merge（按 §25 由 PR CI 承担）。",
+        "控制台只读入口需 Owner 另行批准。",
+        "已知下界：task_outcomes 仍按 session 查询后再按 run 过滤；同一 session 结果过多时报 outcome_limit_reached，不伪称完整（未在本轮扩大改动）。",
+        "范围外且未在本轮修复：association=ambiguous 时行动仍留在 facts.actions（verified=false/run_ambiguous），设计 §4.5 更偏好 weakCandidates；已作为后续决定项记录，未擅自改结构。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-host-runtime",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\host-runtime",
+      "command": "npx vitest run tests/adaptive-behavior-linkage.test.ts tests/adaptive-journal-reconciliation.test.ts --reporter=json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-host-runtime"]
+    },
+    {
+      "id": "check-pd-cli",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\pd-cli",
+      "command": "npx vitest run tests/commands/runtime-activation-link-flag-wiring.test.ts tests/commands/runtime-activation-journal-flag-wiring.test.ts --reporter=json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-pd-cli"]
+    },
+    {
+      "id": "check-build",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "npm run build --prefix packages/host-runtime; npm run build --prefix packages/pd-cli",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-build"]
+    },
+    {
+      "id": "check-eslint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "npx eslint packages/host-runtime/src/adaptive-behavior-linkage.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-code-linkage"]
+    },
+    {
+      "id": "check-cli-real-run",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "node packages/pd-cli/dist/index.js activation link -w .tmp/pri1114-cli/ws --since 2026-11-05T00:00:00.000Z --until 2026-11-05T23:59:59.999Z --json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-cli-run"]
+    },
+    {
+      "id": "check-remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "gh pr checks 2373 --watch",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": 0,
+      "skipped": 4,
+      "evidenceRefs": ["evidence-pr"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-design-v02",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\docs\\specs\\PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.2.md",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": "2b1c13b2f1a7dc8ba012de5149ed3be00992497ed84db2b23c8dc01609748343",
+      "supports": "六条 Owner 修正、四层声明边界、R1-R8 评审补强、覆盖不完整判定与验收条件。",
+      "limitations": "设计文档不是 Owner 验收；eyeball 不替代真实宿主验证。"
+    },
+    {
+      "id": "evidence-code-linkage",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\host-runtime\\src\\adaptive-behavior-linkage.ts",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": "7a54e1c22961eeee909ddd9a2bdab9fbd5b203f570d01487ee4db79d9d84f013",
+      "supports": "journal 无丢弃才可 strong_run；EventLog 覆盖/身份/上限统一报告；evidenceLayers 四层边界；只读查询与隐私投影。",
+      "limitations": "不接控制台；不提供写侧或独立产物验证。"
+    },
+    {
+      "id": "evidence-test-host-runtime",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\host-runtime\\tests\\adaptive-behavior-linkage.test.ts",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": "7c9aea25a0cbe72e0930697636755564cd4972d6a72641a7cd6c8c7aafe48d8b",
+      "supports": "8 条 R1-R8 新反例先在旧实现上失败（8 failed），修复后 65/65 通过；含 O1-O5、只读与隐私断言。",
+      "limitations": "fixture 行为，不证明真实生产数据分布。"
+    },
+    {
+      "id": "evidence-test-pd-cli",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\pd-cli\\tests\\commands\\runtime-activation-link-flag-wiring.test.ts",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": "0c9276ba00515b3a392285b5b4df0e36df938c577521625836b0559ca3fda4a1",
+      "supports": "真实 Commander 注册/解析、单 JSON stdout、exit 2/3、CLI 路径只读；本轮 13/13。",
+      "limitations": "未验证控制台调用。"
+    },
+    {
+      "id": "evidence-build",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: npm run build in packages/host-runtime and packages/pd-cli after merging origin/main",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": null,
+      "supports": "合并 origin/main 后两包 tsc 构建通过，dist 无编译测试产物。",
+      "limitations": "未运行完整 verify:merge 于本地。"
+    },
+    {
+      "id": "evidence-cli-run",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: pd activation link real CLI run (fixture was under .tmp/pri1114-cli, cleaned after verification)",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": null,
+      "supports": "真实 CLI 入口隔离实跑：exit 0；stdout 单 JSON；runAssociation=strong_run；requestAssociation/principleAdherence/behaviorImprovement=unknown；actions=1；coverage.complete=false 且仅因 trajectory_db_unavailable；运行前后工作区文件 SHA-256 无变化。",
+      "limitations": "临时 fixture 已清理，不作为长期证据资产。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2373",
+      "observedAt": "2026-11-06T03:07:57Z",
+      "sha256": null,
+      "supports": "同一 PR 更新到合并后 head 587003366；必跑检查全通过（含 e2e 13m55s），mergeStateStatus=CLEAN；skipped 未计为通过。",
+      "limitations": "未合并、未发版；最终 head 的 CI 在本检查点写入后另行确认。"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "blocker-pri-1109",
+      "issue": "PRI-1109",
+      "reason": "PRI-1114 整票仍被 PRI-1109 阻塞；本轮只执行 Owner 已批准的只读子范围，未删除 blocker、未关闭父票。",
+      "evidenceRefs": ["evidence-pr"],
+      "neededFrom": "PRI-1109 剩余写侧交付与 Owner 对整票范围的确认",
+      "unblockAction": "PRI-1109 完成后重新评估 PRI-1114 剩余验收",
+      "independentWork": "只读模块与 CLI 已可独立评审"
+    },
+    {
+      "id": "blocker-owner-console",
+      "issue": "PRI-1114",
+      "reason": "控制台入口不在本轮批准范围，需要 Owner 另行批准。",
+      "evidenceRefs": ["evidence-design-v02"],
+      "neededFrom": "Owner",
+      "unblockAction": "批准或拒绝控制台只读入口",
+      "independentWork": "CLI JSON 已可供 PRI-1115 消费"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1114",
+      "action": "确认检查点元数据提交后的最终 PR head CI；红则同 PR 修复。",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "最终 head 的必跑检查全绿，或失败被证明为既有/环境问题并记录"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1115",
+      "action": "用 pd activation link 的 JSON 做汇总，不另写扫描器。",
+      "dependsOn": ["PRI-1114"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PRI-1115 设计明确消费 schemaVersion pd-aa-behavior-linkage/v1"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1114",
+      "action": "Owner 验收与合并决定；未批准前不合并。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 给出验收/合并决定"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "databaseWritesThisRun": 0,
+    "authorizationRefs": [
+      "Owner 本轮消息：只读模块 + CLI；不建表、不写生产库、不调模型、暂不接控制台；允许修复、测试、提交、推送；不含合并、发版、安装启用、真实模型调用"
+    ]
+  }
+}

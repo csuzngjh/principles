@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "pd-aa-selector-diagnostic/v1",
+  "startedAt": "2026-11-05T16:09:17.736Z",
+  "approval": "Owner 2026-11-06: 批准，开始实验吧；card PD-AA-PRI-1122-DECISIONS-GLM-EXPERIMENT-CARD-v0.1.md",
+  "fixtureHash": "126759edb1508b9f8ab99cab8d22455532376e3e6070725a8db628fbedf4930e",
+  "codeHead": "4ecbf4ec0aa93884d9cc1b76a359040dd76f99fa",
+  "sourceHash": "3c84701934e8a1b3668e2a994f0e463f75c5ef7bfb8bec9df2e775096e85c740",
+  "systemPromptHash": "71e00f7ef95d5961bc35043c9e1b745e738571eefb8a36448f4d010fe8fec999",
+  "candidateHash": "a93d3a8097892b19f444808dc640fec209b0927de04ef60d272faf7093b30bd8",
+  "modelConfig": {
+    "decision": "respan/span-01-lite:free",
+    "glm": "glm-5.3-flash"
+  },
+  "catalog": {
+    "id": "respan/span-01-lite:free",
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    }
+  },
+  "counts": {
+    "decision": 1,
+    "glm": 0
+  },
+  "status": "STOPPED",
+  "requests": [
+    {
+      "caseId": "dev-01",
+      "arm": "D",
+      "kind": "decision",
+      "inputHash": "1c56c152eb985958f160171e35d2871ce860f4432b205bb01fffd48118006e57",
+      "requestOrdinal": 1,
+      "status": "FAILED",
+      "httpStatus": 400,
+      "model": null,
+      "provider": null,
+      "usage": null,
+      "latencyMs": 300,
+      "failure": "HTTP_400"
+    }
+  ],
+  "results": [],
+  "limitation": "Synthetic development selection diagnostic; no actor/host/behavior/heldout evidence.",
+  "stopReason": "HTTP_400",
+  "endedAt": "2026-11-05T16:09:18.064Z"
+}

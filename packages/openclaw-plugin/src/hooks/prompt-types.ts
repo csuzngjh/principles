@@ -37,6 +37,8 @@ export interface PromptHookApi {
   };
   runtime: OpenClawPluginApi['runtime'];
   logger: PluginLogger;
+  /** Host-declared plugin artifact root (PRI-1110 identity cross-check only). */
+  rootDir?: string;
 }
 
 /** Result of extracting the user message from the raw prompt text. */

@@ -897,3 +897,52 @@ function reverseKeys(value: unknown): unknown {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+describe('reconcileAdaptiveJournal — config identity fields (PRI-1110)', () => {
+  function identityLine(
+    dir: string,
+    state: 'open' | 'closed',
+    withExtendedFields: boolean,
+  ): string {
+    const envelope = JSON.parse(adaptiveLine({ hookInvocationId: 'inv-identity', state }, dir)) as {
+      data: Record<string, unknown>;
+    };
+    if (withExtendedFields) {
+      envelope.data['configIdentityCoverage'] = {
+        confirmed: ['host', 'runtimeMode'],
+        partial: ['effectiveHookSetFingerprint'],
+        missing: ['hostVersion'],
+        notes: ['hostVersion:no_runtime_interface'],
+      };
+    } else {
+      for (const field of ['hostVersion', 'pluginVersion', 'effectiveHookSetFingerprint', 'evidenceCoverage']) {
+        delete envelope.data[field];
+      }
+    }
+    return JSON.stringify(envelope);
+  }
+
+  it('pairs records carrying the extended coverage object without reinterpretation', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      identityLine(dir, 'open', true),
+      identityLine(dir, 'closed', true),
+    ]);
+    const report = run(dir);
+    const invocation = findInvocation(report, 'inv-identity');
+    expect(invocation.classification).toBe('paired_open_and_terminal');
+    expect(invocation.terminal?.payload).toBe('prepared');
+  });
+
+  it('keeps legacy records without identity fields readable (unknown, not invalid)', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      identityLine(dir, 'open', false),
+      identityLine(dir, 'closed', false),
+    ]);
+    const report = run(dir);
+    const invocation = findInvocation(report, 'inv-identity');
+    expect(invocation.classification).toBe('paired_open_and_terminal');
+    expect(report.rejected).toHaveLength(0);
+  });
+});

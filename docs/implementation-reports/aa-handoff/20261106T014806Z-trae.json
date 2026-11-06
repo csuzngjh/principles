@@ -1,0 +1,242 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T014806Z-trae",
+  "previousCheckpoint": "20261106T014215Z-trae",
+  "generatedAt": "2026-11-06T01:48:06Z",
+  "agent": "trae",
+  "overallStatus": "READY_FOR_REVIEW",
+  "summary": "PRI-1114 已批准只读子范围（模块 + CLI）收尾：最后一项代码改动（行动事实按时间排序、保留 before_open 原因码）已提交并推送；host-runtime 57/57、pd-cli 13/13 复跑通过，改动文件 eslint 通过。远端 CI 刚触发，状态 PENDING，未将未完成检查记为绿。未合并、未发版、未动生产库、未调用模型、未运行真实 Agent 回合。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+    "branch": "ai/PRI-1114-behavior-evidence-link",
+    "baseCommit": "953d12f5b59c3c05d1bba530b6c99f3d38d3b4e0",
+    "headCommit": "87057b5b5134901f95836130154d1af0e9b34c3e",
+    "dirtyPaths": [],
+    "pushedCommit": "87057b5b5134901f95836130154d1af0e9b34c3e",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2373",
+    "remoteChecks": "PENDING"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1114",
+      "scope": "已批准只读子范围：运行级行为证据关联模块与 pd activation link；设计 v0.2 的六条修正与 O1-O5 反例；不含控制台、写侧、模型调用、生产库",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "packages/host-runtime/src/adaptive-behavior-linkage.ts",
+        "packages/host-runtime/src/adaptive-journal-reconciliation.ts",
+        "packages/host-runtime/src/index.ts",
+        "packages/host-runtime/tests/adaptive-behavior-linkage.test.ts",
+        "packages/pd-cli/src/commands/runtime-activation.ts",
+        "packages/pd-cli/src/index.ts",
+        "packages/pd-cli/tests/commands/runtime-activation-link-flag-wiring.test.ts",
+        "docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.2.md"
+      ],
+      "commits": [
+        "888160c3e",
+        "bf07c78ab",
+        "66c8ccec9",
+        "f6f47a8bf",
+        "87057b5b5"
+      ],
+      "acceptance": [
+        {"criterion": "O1 截断后假唯一：窗口被截断但只读到一个注入 -> 不是 strong_run", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-check-host-runtime"]},
+        {"criterion": "O2 同一 run 内多次请求不得升级为请求级关联", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-check-host-runtime"]},
+        {"criterion": "O3 行动晚于 open、早于实际送达 -> ordering 必须 unknown", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-check-host-runtime"]},
+        {"criterion": "O4 completed 但任务实际失败 -> 不得计为成功", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-check-host-runtime"]},
+        {"criterion": "O5 工具声明写文件但无有效产物 -> 不得计为产物已产生", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-check-host-runtime"]},
+        {"criterion": "跨请求/跨 Session 相同原则不因原则 ID 相同而关联", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "弱时间关联只能作为标注的弱候选", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "一个机会对应多条行动/纠正时全部保留，后续纠正不覆盖首次行动", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "重复/冲突终态保留并标注，不擅自择一", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "缺失终态/任务结果保持 unknown", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "配置身份变化 -> config_changed，旧快照不得充当新配置证据", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "读取预算耗尽 -> 报告覆盖不完整（journal/EventLog/轨迹行）", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-check-host-runtime"]},
+        {"criterion": "principle_ids_json 无连接键 -> session_level_unknown，不伪造 conflict", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-design-v02"]},
+        {"criterion": "轨迹库缺失/缺列 -> unavailable，不建库不迁移", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "CLI 严格单 JSON、失败带 reason+nextAction、exit 2/3", "result": "PASS", "evidenceRefs": ["evidence-test-pd-cli", "evidence-check-pd-cli"]},
+        {"criterion": "只读：运行前后工作区文件字节不变", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-test-pd-cli"]},
+        {"criterion": "隐私：不输出原始 command/params_json/result_preview/summary/正文", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "行动事实按时间排序，且 before_open 仅作相对 open 的标注，不推断送达先后", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime", "evidence-code-linkage"]},
+        {"criterion": "PR #2373 更新（同一 PR，不新开）", "result": "PASS", "evidenceRefs": ["evidence-pr"]},
+        {"criterion": "远端 CI / merge gate", "result": "NOT_RUN", "evidenceRefs": []}
+      ],
+      "remaining": [
+        "PR #2373 远端 CI 仍为 PENDING；结果出来后如红则同 PR 修复。",
+        "本轮未运行 npm run verify:merge。",
+        "Owner 决定是否批准控制台入口（超出本 PR 范围）。",
+        "PRI-1115 消费本 JSON；PRI-901 去重与剩余验收项；PRI-1109 写侧与整票关闭均未在本轮处理。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-host-runtime",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\host-runtime",
+      "command": "npx vitest run tests/adaptive-behavior-linkage.test.ts tests/adaptive-journal-reconciliation.test.ts --reporter=dot",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 57,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-host-runtime"]
+    },
+    {
+      "id": "check-pd-cli",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\pd-cli",
+      "command": "npx vitest run tests/commands/runtime-activation-link-flag-wiring.test.ts tests/commands/runtime-activation-journal-flag-wiring.test.ts --reporter=dot",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-pd-cli"]
+    },
+    {
+      "id": "check-build",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "npm run build --prefix packages/host-runtime; npm run build --prefix packages/pd-cli",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "check-eslint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "npx eslint packages/host-runtime/src/adaptive-behavior-linkage.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-code-linkage"]
+    },
+    {
+      "id": "check-verify-merge",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "npm run verify:merge",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "check-remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "gh pr checks 2373",
+      "result": "NOT_RUN",
+      "exitCode": 8,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-pr"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-design-v02",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\docs\\specs\\PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.2.md",
+      "observedAt": "2026-11-06T01:48:06Z",
+      "sha256": "555da9aec5835e19087518bbdb31aafdfa685b67dfa6fec1035880cbdb5a226c",
+      "supports": "六条 Owner 修正、输出契约、读取预算、隐私白名单与验收条件的当前版本。",
+      "limitations": "设计文档不是代码实现批准；第 12 条反例按不可比对实现为 unknown。"
+    },
+    {
+      "id": "evidence-code-linkage",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\host-runtime\\src\\adaptive-behavior-linkage.ts",
+      "observedAt": "2026-11-06T01:48:06Z",
+      "sha256": "92d863e7a6ee0cd83ab1f2db535a690d5179a5acf7d66cb5681653fe44676acd",
+      "supports": "只读关联模块：journal 复用、EventLog 有界读取、轨迹只读查询、事实降级、隐私投影、行动事实按时间排序。",
+      "limitations": "未接控制台；不提供写侧或独立产物验证。"
+    },
+    {
+      "id": "evidence-test-host-runtime",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\host-runtime\\tests\\adaptive-behavior-linkage.test.ts",
+      "observedAt": "2026-11-06T01:48:06Z",
+      "sha256": "77217eaa6c8aae5d7b839a07eb2d65b0c25f56f91809ef99c4c2070b68965ccc",
+      "supports": "O1-O5 与既有 12 条反例的确定性断言，以及只读/隐私测试。",
+      "limitations": "只证明 fixture 行为，不证明真实生产数据分布。"
+    },
+    {
+      "id": "evidence-test-pd-cli",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\packages\\pd-cli\\tests\\commands\\runtime-activation-link-flag-wiring.test.ts",
+      "observedAt": "2026-11-06T01:48:06Z",
+      "sha256": "0c9276ba00515b3a392285b5b4df0e36df938c577521625836b0559ca3fda4a1",
+      "supports": "真实 Commander 注册/解析、单 JSON stdout、exit 2/3、CLI 路径只读。",
+      "limitations": "无远端 CI 证据；未验证控制台调用。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2373",
+      "observedAt": "2026-11-06T01:48:06Z",
+      "sha256": null,
+      "supports": "同一草稿 PR 已更新到 head 87057b5b5，含设计、代码、测试与本检查点。",
+      "limitations": "未合并、未发版；CI 刚触发，状态 PENDING。"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "blocker-pri-1109",
+      "issue": "PRI-1109",
+      "reason": "PRI-1114 整票仍被 PRI-1109 阻塞；本轮只执行 Owner 已批准的只读子范围，未删除 blocker、未关闭父票。",
+      "evidenceRefs": ["evidence-pr"],
+      "neededFrom": "PRI-1109 剩余写侧交付与 Owner 对整票范围的确认",
+      "unblockAction": "PRI-1109 完成后重新评估 PRI-1114 剩余验收",
+      "independentWork": "只读模块与 CLI 已可独立评审"
+    },
+    {
+      "id": "blocker-owner-console",
+      "issue": "PRI-1114",
+      "reason": "控制台入口不在本轮批准范围，需要 Owner 另行批准。",
+      "evidenceRefs": ["evidence-design-v02"],
+      "neededFrom": "Owner",
+      "unblockAction": "批准或拒绝控制台只读入口",
+      "independentWork": "CLI JSON 已可供 PRI-1115 消费"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1114",
+      "action": "拉取 PR #2373 的远端 CI 结果；若红，定位并修复同一 PR。",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "PR checks 全绿，或失败被证明为既有/环境问题并记录"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1115",
+      "action": "用 pd activation link 的 JSON 做汇总，不另写扫描器。",
+      "dependsOn": ["PRI-1114"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PRI-1115 设计明确消费 schemaVersion pd-aa-behavior-linkage/v1"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1114",
+      "action": "Owner 决定是否批准控制台只读入口；未批准前不改。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 给出批准或拒绝"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 本轮消息：只读模块 + CLI，不建表、不写生产库、不调模型、暂不接控制台"
+    ]
+  }
+}
