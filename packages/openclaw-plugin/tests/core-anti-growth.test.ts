@@ -137,6 +137,13 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // resolved workspace the hooks use (fs read/write + canonical runtime
     // path probe); the launcher consumes it fail-closed.
     'mcp-binding.ts',
+    // PRI-1110: AA config identity acquisition. Plugin I/O boundary: resolves
+    // the manifest of the artifact that actually loaded this module (fs read +
+    // import.meta.url) and needs the host's declared rootDir for cross-checking.
+    // Not pure domain logic — it cannot move to @principles/core because only
+    // the plugin knows which artifact is executing. Also holds the bounded
+    // in-memory invocation snapshot keyed by hookInvocationId.
+    'adaptive-config-identity.ts',
   ] as const;
 
   // Category 6: Test files

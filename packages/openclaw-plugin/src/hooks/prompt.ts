@@ -18,6 +18,14 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
+import {
+  buildAdaptiveConfigIdentitySnapshot,
+  buildUnavailableAdaptiveConfigIdentity,
+  forgetAdaptiveConfigIdentity,
+  getRememberedAdaptiveConfigIdentity,
+  rememberAdaptiveConfigIdentity,
+  type AdaptiveConfigIdentitySnapshot,
+} from '../core/adaptive-config-identity.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { recordInjectionPresence, alignActivationIds, alignInjectedPrinciples } from '../core/principle-application-ledger.js';
 import { recordPromptDeliveryEvidence } from '../core/intervention-evidence-recorder.js';
@@ -280,21 +288,44 @@ function resolveCoreAxiomLanguage(
   }
 }
 
-function adaptiveJournalFacts(ctx: PluginHookAgentContext, target: { artifactId: string; activationId: string } | undefined, runtimeMode: string) {
+function adaptiveJournalFacts(
+  ctx: PluginHookAgentContext,
+  target: { artifactId: string; activationId: string } | undefined,
+  identity: AdaptiveConfigIdentitySnapshot,
+) {
   return target ? {
-    host: 'openclaw', runtimeMode, workspaceDir: ctx.workspaceDir,
+    host: identity.host, hostVersion: identity.hostVersion, runtimeMode: identity.runtimeMode,
+    pluginVersion: identity.pluginVersion, effectiveHookSetFingerprint: identity.effectiveHookSetFingerprint,
+    evidenceCoverage: identity.evidenceCoverage, configIdentityCoverage: identity.configIdentityCoverage,
+    workspaceDir: ctx.workspaceDir,
     ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}), ...(ctx.runId ? { runId: ctx.runId } : {}),
     artifactId: target.artifactId, activationId: target.activationId,
-    hostVersion: 'unknown', pluginVersion: 'unknown', effectiveHookSetFingerprint: 'unknown', evidenceCoverage: 'partial',
   } : {};
+}
+
+function collectAdaptiveConfigIdentity(
+  ctx: PluginHookAgentContext & { api?: PromptHookApi },
+  runtimeMode: string,
+): AdaptiveConfigIdentitySnapshot {
+  try {
+    return buildAdaptiveConfigIdentitySnapshot({ runtimeMode, pluginRootDir: ctx.api?.rootDir });
+  } catch (error) {
+    // Identity collection must never block or alter prompt assembly.
+    ctx.api?.logger?.warn?.(`[PD:AA] Config identity unavailable: ${String(error)}`);
+    return buildUnavailableAdaptiveConfigIdentity(runtimeMode, 'identity_collection_failed');
+  }
 }
 
 /** Called before shared priority packing, or at the local entry before its work begins. */
 export function beginAdaptivePromptInvocation(ctx: PluginHookAgentContext & { api?: PromptHookApi }, target: { artifactId: string; activationId: string }, runtimeMode: string): string {
   const hookInvocationId = randomUUID();
+  // One frozen snapshot per invocation: the terminal record must reuse it even
+  // if the environment changes while this invocation is in flight.
+  const identity = collectAdaptiveConfigIdentity(ctx, runtimeMode);
+  rememberAdaptiveConfigIdentity(hookInvocationId, identity);
   try {
     WorkspaceContext.fromHookContext(ctx).eventLog.recordAdaptiveDelivery(ctx.sessionId, {
-      ...adaptiveJournalFacts(ctx, target, runtimeMode), hookInvocationId,
+      ...adaptiveJournalFacts(ctx, target, identity), hookInvocationId,
       receiptState: 'open', execution: 'unknown', payload: 'unknown', selection: 'unavailable', selectionPending: true, submission: 'unknown',
     });
   } catch (error) { ctx.api?.logger?.warn?.(`[PD:AA] Invocation journal unavailable: ${String(error)}`); }
@@ -339,7 +370,14 @@ export async function handleBeforePromptBuild(
   // still belongs to the invocation's original target, never the replacement.
   const journalTarget = preparedPacking?.hookInvocationId && preparedPacking.targetArtifactId
     ? { artifactId: preparedPacking.targetArtifactId, activationId: preparedPacking.targetActivationId } : adaptiveMapping ?? undefined;
-  const adaptiveJournalContext = adaptiveJournalFacts(ctx, journalTarget, sharedActivePrinciplePrompt ? 'shared' : 'plugin_local');
+  // Reuse the snapshot taken when this invocation opened. A runtime/config
+  // change after that point must not rewrite the invocation's own evidence.
+  const journalRuntimeMode = sharedActivePrinciplePrompt ? 'shared' : 'plugin_local';
+  const journalIdentity = adaptiveInvocationId
+    ? getRememberedAdaptiveConfigIdentity(adaptiveInvocationId)
+      ?? buildUnavailableAdaptiveConfigIdentity(journalRuntimeMode, 'invocation_snapshot_unavailable')
+    : buildUnavailableAdaptiveConfigIdentity(journalRuntimeMode, 'no_invocation');
+  const adaptiveJournalContext = adaptiveJournalFacts(ctx, journalTarget, journalIdentity);
   // PRI-647: trajectory session recording and assistant-turn anchoring are
   // observability side-effects only. A closed/disposed trajectory connection
   // (plugin service stop during config hot-reload) must never abort the prompt
@@ -1081,6 +1119,7 @@ export async function handleBeforePromptBuild(
       ...(adaptiveAdmissionId ? { nativeAdmissionId: adaptiveAdmissionId } : {}),
       ...(adaptiveOutcome?.targetBodySha256 ? { targetBodySha256: adaptiveOutcome.targetBodySha256 } : {}),
     });
+    forgetAdaptiveConfigIdentity(adaptiveInvocationId);
   }
 
   return {
