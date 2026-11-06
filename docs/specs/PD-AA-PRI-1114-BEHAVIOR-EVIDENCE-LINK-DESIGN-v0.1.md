@@ -2,7 +2,7 @@
 
 日期：2026-11-06
 基线：`953d12f5b59c3c05d1bba530b6c99f3d38d3b4e0`（origin/main，已合并 PR #2370）
-状态：**NEEDS_OWNER — 未找到覆盖本实现范围的 Owner 设计批准；本轮只做调查与方案，未写任何生产行为代码。**
+状态：**SUPERSEDED — 已由 `PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.2.md` 取代（Owner 于 2026-11-06 批准只读模块 + CLI 范围，并提出六条修正）。以下内容保留作历史记录，不再作为实现依据。**
 
 ## 0. 授权与现场核实结论
 
