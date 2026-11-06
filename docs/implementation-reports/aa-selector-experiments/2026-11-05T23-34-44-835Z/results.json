@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "pd-aa-selector-diagnostic/v1",
+  "startedAt": "2026-11-05T23:34:44.840Z",
+  "approval": "Owner 2026-11-06: 批准，尽快完成这次实验；对应新增最多4次decision+8次GLM、前4冻结样本的续行提议",
+  "fixtureHash": "126759edb1508b9f8ab99cab8d22455532376e3e6070725a8db628fbedf4930e",
+  "codeHead": "44ca56df81ed89c276fd89f82c8b51002ca4e38c",
+  "sourceHash": "035140753829fc98d3fd5f532e12724215d519fe9b4cff532e45ab68810bdc49",
+  "systemPromptHash": "71e00f7ef95d5961bc35043c9e1b745e738571eefb8a36448f4d010fe8fec999",
+  "candidateHash": "a93d3a8097892b19f444808dc640fec209b0927de04ef60d272faf7093b30bd8",
+  "modelConfig": {
+    "decision": "respan/span-01-lite:free",
+    "glm": "glm-5.3-flash"
+  },
+  "catalog": {
+    "id": "respan/span-01-lite:free",
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    }
+  },
+  "counts": {
+    "decision": 3,
+    "glm": 0
+  },
+  "inheritedCounts": {
+    "decision": 2,
+    "glm": 0
+  },
+  "maxCumulativeCounts": {
+    "decision": 6,
+    "glm": 8
+  },
+  "plannedCaseIds": [
+    "dev-01",
+    "dev-02",
+    "dev-03",
+    "dev-04"
+  ],
+  "previousEvidenceHash": "68d0ae13b6189f47bc6644060a209a0381a3b5253f96d4288c078c6ede8dce11",
+  "status": "STOPPED",
+  "requests": [
+    {
+      "caseId": "dev-01",
+      "arm": "D",
+      "kind": "decision",
+      "inputHash": "17581e9dbc8d38d33c553c039deba0476c89e2bfe84d4f7e273ad90a353bf3bc",
+      "requestOrdinal": 3,
+      "status": "FAILED",
+      "httpStatus": 200,
+      "model": null,
+      "provider": null,
+      "usage": null,
+      "latencyMs": 1312,
+      "failure": "RESPONSE_MODEL_NOT_ALLOWLISTED"
+    }
+  ],
+  "results": [],
+  "limitation": "Synthetic development selection diagnostic; no actor/host/behavior/heldout evidence.",
+  "activeStage": {
+    "caseId": "dev-01",
+    "kind": "decision",
+    "arm": "D"
+  },
+  "stopReason": "RESPONSE_MODEL_NOT_ALLOWLISTED",
+  "failedStage": {
+    "caseId": "dev-01",
+    "kind": "decision",
+    "arm": "D"
+  },
+  "thisRunAttempts": {
+    "decision": 1,
+    "glm": 0
+  },
+  "previousEvidenceUnchanged": true,
+  "endedAt": "2026-11-05T23:34:46.181Z"
+}

@@ -1,0 +1,249 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T004718Z-trae",
+  "previousCheckpoint": "20261105T155039Z-trae",
+  "generatedAt": "2026-11-06T00:47:18Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "完成 PRI-1114 现状核实与最小接线设计：确认 #2370 已并入 origin/main，干预身份（hookInvocationId/runId/配置快照）已在 journal 中，行为侧事实（tool_calls/user_turns/task_outcomes）已在 trajectory.db 中，但缺少以 hookInvocationId/runId 为骨架的只读连接层。未找到覆盖本实现范围的 Owner 设计批准，本轮未写生产行为代码。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+    "branch": "ai/PRI-1114-behavior-evidence-link",
+    "baseCommit": "953d12f5b59c3c05d1bba530b6c99f3d38d3b4e0",
+    "headCommit": "33dd26120",
+    "dirtyPaths": [
+      "docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.1.md",
+      "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.json",
+      "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.md",
+      "docs/implementation-reports/aa-handoff/LATEST.json"
+    ],
+    "pushedCommit": "33dd26120",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2373",
+    "remoteChecks": "NOT_RUN"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1114",
+      "scope": "现状核实 + 最小接线设计 + 可审阅 PR（设计稿；不写生产行为代码）",
+      "status": "NEEDS_OWNER",
+      "owner": "trae",
+      "writePaths": [
+        "docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.1.md",
+        "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.json",
+        "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.md",
+        "docs/implementation-reports/aa-handoff/LATEST.json"
+      ],
+      "commits": ["33dd26120"],
+      "acceptance": [
+        {
+          "criterion": "独立核实 #2370 是否已并入 main（不采信转述）",
+          "result": "PASS",
+          "evidenceRefs": ["evidence-1", "evidence-2"]
+        },
+        {
+          "criterion": "核实 PRI-1114/PRI-1109/PRI-901/PRI-1107 当前状态与依赖",
+          "result": "PASS",
+          "evidenceRefs": ["evidence-3"]
+        },
+        {
+          "criterion": "交付事实表：所需事实→生产者→身份字段→读取入口→消费者→状态",
+          "result": "PASS",
+          "evidenceRefs": ["evidence-4"]
+        },
+        {
+          "criterion": "交付最小关联设计（强/弱关联、反例、预算、消费路径、复杂度增量、回滚、批准请求）",
+          "result": "PASS",
+          "evidenceRefs": ["evidence-4"]
+        },
+        {
+          "criterion": "创建草稿 PR 并同步 Linear 子范围",
+          "result": "PASS",
+          "evidenceRefs": ["evidence-7", "evidence-8"]
+        },
+        {
+          "criterion": "按批准范围实现代码与确定性测试",
+          "result": "NOT_RUN",
+          "evidenceRefs": []
+        }
+      ],
+      "remaining": [
+        "等待 Owner 对设计 v0.1 的 A1–A7 批准（尤其 A5 PRI-901/1114 归属、A6 依赖解锁）",
+        "批准后实现 adaptive-behavior-linkage.ts + pd activation link + 12 条反例测试",
+        "创建草稿 PR 并同步 Linear"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-1",
+      "cwd": "d:\\Code\\principles",
+      "command": "gh pr view 2370 --json number,title,state,mergedAt,headRefOid,baseRefName,url",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-1"]
+    },
+    {
+      "id": "check-2",
+      "cwd": "d:\\Code\\principles",
+      "command": "git fetch origin --prune && git merge-base --is-ancestor 47b617734a0e7fe2fd6d9a78ff148dff6ea32435 origin/main",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-2"]
+    },
+    {
+      "id": "check-3",
+      "cwd": "d:\\Code\\principles",
+      "command": "npm run dev:worktree -- PRI-1114 behavior-evidence-link",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-5"]
+    },
+    {
+      "id": "check-4",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
+      "command": "npm run dev:worktree:claim -- --writer trae",
+      "result": "UNKNOWN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-1",
+      "kind": "REMOTE_CI",
+      "locator": "https://github.com/csuzngjh/principles/pull/2370",
+      "observedAt": "2026-11-06T00:35:00Z",
+      "sha256": null,
+      "supports": "PR #2370 state=MERGED，merge commit base 为 953d12f5b",
+      "limitations": "合并状态本身不证明配置身份快照被生产路径实际消费"
+    },
+    {
+      "id": "evidence-2",
+      "kind": "CODE",
+      "locator": "d:\\Code\\principles (git): 47b617734a0e7fe2fd6d9a78ff148dff6ea32435 is ancestor of origin/main",
+      "observedAt": "2026-11-06T00:35:00Z",
+      "sha256": null,
+      "supports": "#2370 head 已进入 origin/main；主检出本地 HEAD 为旧提交",
+      "limitations": "仅证明提交可达，不证明运行行为"
+    },
+    {
+      "id": "evidence-3",
+      "kind": "CODE",
+      "locator": "Linear: PRI-1114 Backlog(blocked by PRI-1109); PRI-1109 In Progress(blocked by PRI-1107); PRI-901 Backlog; PRI-1107 In Review",
+      "observedAt": "2026-11-06T00:40:00Z",
+      "sha256": null,
+      "supports": "依赖链真实存在；PRI-901 未实现；PRI-1107 设计未批准",
+      "limitations": "Linear 状态不是实现真相，已用仓库代码交叉核实"
+    },
+    {
+      "id": "evidence-4",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link\\docs\\specs\\PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.1.md",
+      "observedAt": "2026-11-06T00:47:18Z",
+      "sha256": "29449429acd82c084108b1dfb0dd4fe774002c84be2ebdb567d254b92d05ec2e",
+      "supports": "事实表、关联模型、反例、预算、消费者、复杂度增量、回滚与批准请求",
+      "limitations": "设计文档不是实现批准，也不是代码证据"
+    },
+    {
+      "id": "evidence-5",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link (worktree READY)",
+      "observedAt": "2026-11-06T00:40:00Z",
+      "sha256": null,
+      "supports": "任务工作树基于最新 origin/main 并完成 bootstrap 验证",
+      "limitations": "工作树就绪不等于测试已运行"
+    },
+    {
+      "id": "evidence-6",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/hooks/prompt.ts:320-333,828-841,1111-1123; packages/openclaw-plugin/src/core/trajectory.ts:379-385,402-410,445-456,576-599; packages/openclaw-plugin/src/hooks/llm.ts:216-224; packages/host-runtime/src/production-pain-evidence.ts:555; packages/principles-core/src/runtime-v2/trajectory-schema.ts:151-159,212-231",
+      "observedAt": "2026-11-06T00:46:00Z",
+      "sha256": null,
+      "supports": "干预身份与行为事实的生产者/身份字段/缺口均来自当前代码",
+      "limitations": "只读静态核实；未运行真实 Agent 回合验证端到端事实"
+    },
+    {
+      "id": "evidence-7",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2373",
+      "observedAt": "2026-11-06T00:52:00Z",
+      "sha256": null,
+      "supports": "草稿 PR 已创建，包含设计文档与检查点（docs-only）",
+      "limitations": "草稿 PR 不构成实现批准；CI 未运行"
+    },
+    {
+      "id": "evidence-8",
+      "kind": "CODE",
+      "locator": "https://linear.app/principlesdisciple/issue/PRI-1114/aa-09m-复用行为读模型连接请求原则动作与任务结果#comment-224974b5",
+      "observedAt": "2026-11-06T00:52:00Z",
+      "sha256": null,
+      "supports": "Linear 已同步本轮子范围、PR 与待 Owner 决定事项；整票状态未推进",
+      "limitations": "评论不是验收证据，也不解除 PRI-1109 阻塞"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "blocker-1",
+      "issue": "PRI-1109",
+      "reason": "PRI-1114 在 Linear 中被 PRI-1109 阻塞；PRI-1109 自身被 PRI-1107（In Review）阻塞。本轮未删除 blocker、未绕过 start 守卫。",
+      "evidenceRefs": ["evidence-3"],
+      "neededFrom": "OWNER",
+      "unblockAction": "Owner 决定是否在阻塞解除前授权只读并行实现（设计 A6）",
+      "independentWork": "可在不改生产代码的前提下完善设计与反例清单"
+    },
+    {
+      "id": "blocker-2",
+      "issue": "PRI-1107",
+      "reason": "设计批准边界未覆盖 PRI-1114 的干预↔行为关联实现；G0 稳定请求身份仍待确认。",
+      "evidenceRefs": ["evidence-3"],
+      "neededFrom": "OWNER",
+      "unblockAction": "Owner 明确批准或否决设计 v0.1 的 A1–A6",
+      "independentWork": "本次已完成调查与方案"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1114",
+      "action": "Owner 审阅 docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.1.md 的 A1–A7，并决定 PRI-901/PRI-1114 唯一归属（A5）与依赖解锁（A6）",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Linear 或 PR 评审中出现 Owner 对 A1–A6 的逐项批准或明确否决"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1114",
+      "action": "批准后实现 adaptive-behavior-linkage.ts、pd activation link、12 条反例确定性测试",
+      "dependsOn": ["nextActions[0]"],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "相关包测试通过且 PR 记录 head 与真实运行证据"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1114",
+      "action": "同步 Linear：注明本轮子范围与 PR，不将整票标记完成",
+      "dependsOn": ["nextActions[1]"],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "Linear 评论引用本检查点与 PR，状态保持未完成"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": []
+  }
+}

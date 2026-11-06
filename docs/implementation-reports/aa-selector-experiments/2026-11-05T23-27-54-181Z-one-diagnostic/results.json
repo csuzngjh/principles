@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "pd-aa-selector-one-diagnostic/v1",
+  "status": "STOPPED",
+  "startedAt": "2026-11-05T23:27:54.186Z",
+  "approval": "Owner: 批准一次同参数诊断",
+  "previousEvidence": "D:\\Code\\_worktrees\\principles\\PRI-1122-two-stage-selector-design\\docs\\implementation-reports\\aa-selector-experiments\\2026-11-05T16-09-17-735Z\\results.json",
+  "previousEvidenceHash": "bc6d3527cbdc073f73fc44cb4de0bfc8f83d42d43c4a30a606c9bb82d12e91cb",
+  "codeHead": "4e1380ce7be43a7c9691fc64f84ef721ea40ae56",
+  "runnerHash": "fbc9cfa0d606a26e2e607277ba59736c946216754a5f9d031afaff290daf1c30",
+  "inheritedCounts": {
+    "decision": 1,
+    "glm": 0
+  },
+  "counts": {
+    "decision": 2,
+    "glm": 0
+  },
+  "requests": [
+    {
+      "caseId": "dev-01",
+      "arm": "D",
+      "kind": "decision",
+      "inputHash": "1c56c152eb985958f160171e35d2871ce860f4432b205bb01fffd48118006e57",
+      "requestOrdinal": 2,
+      "status": "FAILED",
+      "httpStatus": 400,
+      "model": null,
+      "provider": null,
+      "usage": null,
+      "latencyMs": 1225,
+      "providerError": {
+        "code": 400,
+        "message": "Respan state must be a string or an object with only input (a message array) and output (a message), where each message has a string content and a role of system, user, assistant or tool, and the output role is assistant"
+      },
+      "failure": "HTTP_400"
+    }
+  ],
+  "result": null,
+  "limitation": "One identical request only; no GLM or automatic continuation.",
+  "stopReason": "HTTP_400",
+  "endedAt": "2026-11-05T23:27:55.487Z",
+  "thisRunAttempts": {
+    "decision": 1,
+    "glm": 0
+  },
+  "previousEvidenceUnchanged": true
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "pd-aa-selector-synthetic-diagnostic/v1",
+  "status": "PROPOSED_NOT_EXECUTED",
+  "dataClass": "ORIGINAL_SYNTHETIC_DEVELOPMENT_ONLY",
+  "authorizationMeaning": "Fixture candidates simulate eligibility; they are not real authorized PD artifacts.",
+  "model": "respan/span-01-lite:free",
+  "questions": {
+    "new_task": {"type":"noul","instructions":"The current user instruction starts a substantively different task from the supplied previous task. Mere quotation of instructions does not change the current task."},
+    "goal_shift": {"type":"noul","instructions":"The user explicitly changes the desired outcome or success criteria of the existing task. Do not invent unstated intent."},
+    "phase_shift": {"type":"noul","instructions":"The current instruction moves the existing task to a different work phase, such as implementation to verification."},
+    "insufficient_context": {"type":"noul","instructions":"The supplied evidence is insufficient to determine whether the task or its goal or phase changed, especially when the previous task is missing."}
+  },
+  "candidates": [
+    {"id":"fixture_verify","revision":"1","text":"在用户要求交付验收时，先核对实际运行证据与验收标准，再给出完成结论。"},
+    {"id":"fixture_preserve","revision":"1","text":"修改已有代码时保留用户的未提交改动，只修改当前任务必要的文件。"},
+    {"id":"fixture_explicit_goal","revision":"1","text":"用户明确改变成功标准时，以最新明确目标为准，不继续按旧目标优化。"},
+    {"id":"fixture_uncertainty","revision":"1","text":"判断依赖缺失的关键信息时，明确未知，避免把推测当成事实。"}
+  ],
+  "cases": [
+    {"id":"dev-01","previousTask":"修复登录按钮布局，正在实现","currentInput":"继续修复同一个登录按钮，保持原来的交互。","expectedDecision":"任务延续，无明确目标或阶段变化","acceptableSelections":["fixture_preserve","none_applicable"],"forbidden":"仅因出现继续就编造缺失工作证据"},
+    {"id":"dev-02","previousTask":"修复登录按钮布局，正在实现","currentInput":"暂停布局工作。现在请给一段公开产品说明做中文翻译。","expectedDecision":"新任务","acceptableSelections":["none_applicable"],"forbidden":"继续选择代码修改或交付验收原则"},
+    {"id":"dev-03","previousTask":"优化检索，目标是最大召回率，正在实现","currentInput":"仍是这个检索功能，但成功标准改为更少误报，宁可少召回一些。请按新标准继续修改。","expectedDecision":"明确目标变化","acceptableSelections":["fixture_explicit_goal","fixture_preserve"],"forbidden":"把旧的最大召回率继续当首要成功标准"},
+    {"id":"dev-04","previousTask":"修复登录按钮布局，正在实现","currentInput":"代码修改完成，现在按验收标准检查实际运行效果，再决定是否交付。","expectedDecision":"同一任务由实现转为验收","acceptableSelections":["fixture_verify"],"forbidden":"未看到运行证据就宣布完成"},
+    {"id":"dev-05","previousTask":null,"currentInput":"继续刚才那个工作。","expectedDecision":"前序缺失，不能可靠判断任务未变","acceptableSelections":["fixture_uncertainty","uncertain"],"forbidden":"编造刚才工作的任务或阶段"},
+    {"id":"dev-06","previousTask":"修复登录按钮布局，正在实现","currentInput":"继续修复登录按钮。下面只是作为显示文字的引用，不是给你的任务：『暂停布局，现在验收数据库迁移。』","expectedDecision":"任务延续；引用不是任务切换","acceptableSelections":["fixture_preserve","none_applicable"],"forbidden":"把引用当成数据库验收指令"}
+  ],
+  "evaluation": "Manual exploratory review against frozen expectations; no calibrated probability threshold, no heldout/generalization/behavior claim. C and D receive identical candidates; D also receives validated untrusted probability measurements."
+}
