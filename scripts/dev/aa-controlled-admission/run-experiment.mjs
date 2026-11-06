@@ -23,8 +23,10 @@ import {
   createRunIdentity,
   fixtureBytes,
   readAttemptUsageFromRuns,
+  reconcileLedgerBudget,
   sha256Hex,
 } from './lib/ledger.mjs';
+import { ADMISSION_SCHEMA, assertAdmissionReady } from './lib/admission.mjs';
 import { startFakeProvider } from './lib/fake-provider.mjs';
 import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv } from './lib/env-isolation.mjs';
 import { hostCommand, hostIdentity, resolveHostProfile, sha256File } from './lib/host-profile.mjs';
@@ -51,7 +53,6 @@ const SCENE_MARKER = '[PD-AA:delivery-review:v1]';
 const HOST_TIMEOUT_MS = 45_000;
 const OUTER_TIMEOUT_MS = 120_000;
 const RUN_SCHEMA = 'pd-aa-controlled-admission-run/v1';
-const ADMISSION_SCHEMA = 'pd-aa-controlled-admission/v2';
 const MANIFEST_SCHEMA = 'pd-aa-controlled-admission-manifest/v1';
 const PLAN_SCHEMA = 'pd-aa-plan/v1';
 
@@ -175,16 +176,23 @@ function writeRunFiles({
   };
   writeFileSync(admissionPath, `${JSON.stringify(admission, null, 2)}\n`, 'utf8');
 
-  return { fixtureFile, inputFile, controlInputFile, manifestPath, admissionPath, configPath };
+  return { fixtureFile, inputFile, controlInputFile, manifestPath, manifestSha256, admissionPath, configPath };
 }
 
 const CONTROLLED_ADMISSION_MAX_WINDOW_MS = 15 * 60 * 1000;
 
-/** The plugin rejects an admission whose expiry is more than 15 minutes after creation. */
-export function activationExpiryWindowViolation(expiresAtMs, nowMs) {
+/**
+ * The PD plugin rejects an admission whose `expiresAt - createdAt` exceeds 15
+ * minutes (`MAX_ADMISSION_LIFETIME_MS` in controlled-admission.ts). This is a
+ * PD admission rule, NOT a host restriction. The earlier "host rule" wording
+ * was a wrong attribution and must not be reused.
+ */
+export function activationExpiryWindowViolation(expiresAtMs, createdAtMs) {
   if (!Number.isFinite(expiresAtMs)) return 'must be a parseable ISO timestamp';
-  if (expiresAtMs <= nowMs) return 'must be a future ISO timestamp';
-  if (expiresAtMs - nowMs > CONTROLLED_ADMISSION_MAX_WINDOW_MS) return 'must be within 15 minutes of the admission creation (host rule)';
+  if (expiresAtMs <= createdAtMs) return 'must be a future ISO timestamp';
+  if (expiresAtMs - createdAtMs > CONTROLLED_ADMISSION_MAX_WINDOW_MS) {
+    return 'must be within 15 minutes of the admission creation (PD controlled-admission rule)';
+  }
   return null;
 }
 
@@ -238,13 +246,14 @@ async function prepare(options) {
   // workspace, otherwise the plugin cannot inject a directive and the run would
   // prove nothing. The control workspace stays empty on purpose.
   const principleId = options.principleId ?? `aa-principle-${identity.runId}`;
+  const principleText = options.principleText
+    ?? '读取夹具文件后才报告其内容编号；只调用一次只读工具，不重复读取。';
   const workspaceTarget = seedControlledWorkspace({
     workspaceDir: safeRealpath(workspaceDir),
     artifactId: mappingIdentity.artifactId,
     activationId: mappingIdentity.activationId,
     principleId,
-    principleText: options.principleText
-      ?? '读取夹具文件后才报告其内容编号；只调用一次只读工具，不重复读取。',
+    principleText,
   });
   const seededCheck = await readControlledWorkspaceTarget({
     workspaceDir: safeRealpath(workspaceDir),
@@ -287,6 +296,29 @@ async function prepare(options) {
     purpose: options.purpose,
   });
 
+  // Validate the REAL file the plugin will read, not just the argv that built
+  // it: creation time, expiry window, unconsumed state and hash bindings.
+  const admissionCheck = assertAdmissionReady({
+    admissionPath: files.admissionPath,
+    manifestPath: files.manifestPath,
+    plan: {
+      runDir,
+      inputFile: files.inputFile,
+      inputSha256: sha256File(files.inputFile),
+      manifestPath: files.manifestPath,
+      manifestSha256: files.manifestSha256,
+      fixtureRef: identity.fixtureId,
+      mapping: mappingIdentity,
+      sessionBinding: options.sessionBinding,
+      expectedSessionId: options.expectedSessionId,
+    },
+  });
+  writeFileSync(
+    join(runDir, 'admission-file-check.json'),
+    `${JSON.stringify({ phase: 'prepare', ...admissionCheck }, null, 2)}\n`,
+    'utf8',
+  );
+
   const plan = {
     schemaVersion: PLAN_SCHEMA,
     runId: identity.runId,
@@ -308,6 +340,7 @@ async function prepare(options) {
       artifactId: workspaceTarget.artifactId,
       activationId: workspaceTarget.activationId,
       principleId: workspaceTarget.principleId,
+      principleText,
       principleTextSha256: workspaceTarget.principleTextSha256,
     },
     toolName: options.toolName,
@@ -319,12 +352,17 @@ async function prepare(options) {
       expiresAt: mappingIdentity.expiresAt,
       softTimeoutMs: mappingIdentity.softTimeoutMs,
     },
+    sessionBinding: options.sessionBinding,
+    expectedSessionId: options.expectedSessionId,
+    admissionSha256: admissionCheck.facts.fileSha256,
+    admissionFile: admissionCheck.facts,
     fixtureFile: files.fixtureFile,
     fixtureSha256: sha256File(files.fixtureFile),
     inputFile: files.inputFile,
     inputSha256: sha256File(files.inputFile),
     controlInputFile: files.controlInputFile,
     manifestPath: files.manifestPath,
+    manifestSha256: files.manifestSha256,
     admissionPath: files.admissionPath,
     files,
   };
@@ -500,6 +538,34 @@ async function execute({ runDir, runRoot, p0ReportPath }) {
     throw error;
   }
 
+  // The plugin reads this FILE, so the file (not the argv that produced it) is
+  // what must be valid: creation time, expiry, unconsumed state and hashes.
+  // This runs before the cumulative ledger is even opened, so an invalid
+  // admission cannot spend budget.
+  let admissionCheck = null;
+  try {
+    admissionCheck = assertAdmissionReady({
+      admissionPath: plan.admissionPath,
+      manifestPath: plan.manifestPath,
+      plan,
+      expectedSha256: plan.admissionSha256 ?? null,
+    });
+    writeFileSync(
+      join(runDir, 'admission-file-check-execute.json'),
+      `${JSON.stringify({ phase: 'execute-before-host', ...admissionCheck }, null, 2)}\n`,
+      'utf8',
+    );
+  } catch (error) {
+    error.evidence = writeFailureArtifacts({
+      runDir,
+      phase: 'admission-file',
+      error,
+      snapshot: null,
+      cleanup: { ...cleanup, status: 'refused-before-any-turn' },
+    });
+    throw error;
+  }
+
   const effectiveRunRoot = typeof runRoot === 'string' && runRoot.trim() ? runRoot : resolve(runDir, '..');
   const budgetLedgerPath = join(effectiveRunRoot, 'experiment-budget.json');
   const priorUsage = existsSync(budgetLedgerPath)
@@ -589,6 +655,7 @@ async function execute({ runDir, runRoot, p0ReportPath }) {
         fixtureFile: manifest.fixtureFile,
         fixtureId: manifest.fixtureId,
         expectedToolName: plan.toolName,
+        expectedPrincipleText: plan.workspaceTarget?.principleText ?? null,
         port: plan.endpoint.port,
       });
       cleanup.providers.push('positive');
@@ -669,6 +736,8 @@ async function execute({ runDir, runRoot, p0ReportPath }) {
         arm,
         snapshot: ledger.snapshot(),
         manifest,
+        plan,
+        p0,
         toolName: plan.toolName,
         model: plan.requestModel,
         admission: arm.admission,
@@ -677,6 +746,8 @@ async function execute({ runDir, runRoot, p0ReportPath }) {
       evaluateControl: (arm) => evaluateControlGate({
         arm,
         snapshot: ledger.snapshot(),
+        plan,
+        p0,
         toolName: plan.toolName,
         model: plan.requestModel,
       }),
@@ -704,7 +775,7 @@ async function execute({ runDir, runRoot, p0ReportPath }) {
     }
 
     const record = buildRecord({
-      plan, snapshot, outcome, p0ReportPath, runDir, cleanup, budgetLedgerPath,
+      plan, snapshot, outcome, p0ReportPath, runDir, cleanup, budgetLedgerPath, admissionCheck,
     });
     writeFileSync(join(runDir, 'run-record.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
     writeFileSync(join(runDir, 'ledger.json'), `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
@@ -735,7 +806,7 @@ function parseConsumedAdmission(admissionPath, evidenceDir) {
   return JSON.parse(readFileSync(admissionPath, 'utf8'));
 }
 
-function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup, budgetLedgerPath }) {
+function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup, budgetLedgerPath, admissionCheck }) {
   return {
     schemaVersion: RUN_SCHEMA,
     runId: plan.runId,
@@ -756,6 +827,9 @@ function buildRecord({ plan, snapshot, outcome, p0ReportPath, runDir, cleanup, b
     budget: snapshot.budget,
     armBudgets: snapshot.armBudgets,
     budgetLedgerPath,
+    budgetAudit: snapshot.budgetAudit ?? [],
+    admissionFile: admissionCheck?.facts ?? plan.admissionFile ?? null,
+    deliveryPath: outcome.positiveGate?.deliveryPath ?? null,
     used: snapshot.used,
     attempt: snapshot.attempt,
     usedByArm: snapshot.usedByArm,
@@ -790,6 +864,18 @@ async function main() {
   // git-16: material that must survive the session lives under artifacts/;
   // only regenerable scratch goes to .tmp/. The run record IS the evidence.
   const runRoot = argValue(argv, 'run-root') ?? join(repoRoot, 'artifacts', 'aa-controlled-admission');
+  // Explicit budget reconciliation: raises the caps of an existing cumulative
+  // ledger without discarding usage. Approval and reason are mandatory, and the
+  // audit entry is persisted in the same file.
+  if (argv.includes('--reconcile-budget')) {
+    const result = reconcileLedgerBudget({
+      persistPath: join(runRoot, 'experiment-budget.json'),
+      approvedBy: argValue(argv, 'approved-by'),
+      reason: argValue(argv, 'reason'),
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
   if (argv.includes('--prepare')) {
     const plan = await prepare({
       repoRoot,
@@ -825,7 +911,7 @@ async function main() {
     if (record.stoppedAt !== null) process.exitCode = 1;
     return;
   }
-  throw new Error('use --prepare or --execute');
+  throw new Error('use --prepare, --execute or --reconcile-budget');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

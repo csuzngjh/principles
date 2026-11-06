@@ -9,10 +9,12 @@ import {
   createRunIdentity,
   fixtureBytes,
   readAttemptUsageFromRuns,
+  reconcileLedgerBudget,
   sha256Hex,
 } from '../dev/aa-controlled-admission/lib/ledger.mjs';
 import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv, isInsideRoot } from '../dev/aa-controlled-admission/lib/env-isolation.mjs';
 import { activationExpiryWindowViolation } from '../dev/aa-controlled-admission/run-experiment.mjs';
+import { inspectAdmissionFile } from '../dev/aa-controlled-admission/lib/admission.mjs';
 import { startFakeProvider } from '../dev/aa-controlled-admission/lib/fake-provider.mjs';
 import {
   buildHostConfig,
@@ -33,6 +35,8 @@ import {
 } from '../dev/aa-controlled-admission/lib/host-profile.mjs';
 import {
   evaluatePositiveGate,
+  evaluateToolExposure,
+  evaluateToolPermission,
   runPositiveThenControl,
   verifyExecutionFrozen,
   verifyPlanIntegrity,
@@ -159,17 +163,54 @@ describe('experiment ledger — cumulative across run directories', () => {
     writeFileSync(persistPath, JSON.stringify(incompatible), 'utf8');
     expect(() => createExperimentLedger({ runId: 'aa-bad', fixtureId: 'F', persistPath })).toThrow(/reconcile explicitly/);
   });
+
+  it('reconciles caps explicitly: usage survives, the audit is recorded, shrinking below usage is refused', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-budget-reconcile-'));
+    const persistPath = join(dir, 'experiment-budget.json');
+    const oldBudget = { hostTurns: 3, httpRequests: 3, toolCalls: 1, paidCalls: 0 };
+    const persisted = {
+      schemaVersion: CUMULATIVE_LEDGER_SCHEMA,
+      budget: oldBudget,
+      armBudgets: { positive: { hostTurns: 1, httpRequests: 2, toolCalls: 1, paidCalls: 0 }, control: { hostTurns: 1, httpRequests: 1, toolCalls: 0, paidCalls: 0 } },
+      used: { hostTurns: 2, httpRequests: 2, toolCalls: 1, paidCalls: 0 },
+      records: { hostTurns: [], httpRequests: [], toolCalls: [], paidCalls: [] },
+      violations: [],
+    };
+    writeFileSync(persistPath, JSON.stringify(persisted), 'utf8');
+
+    expect(() => reconcileLedgerBudget({ persistPath, approvedBy: 'Owner', reason: 'caps raised' }))
+      .not.toThrow();
+    const reconciled = JSON.parse(readFileSync(persistPath, 'utf8'));
+    expect(reconciled.budget).toEqual({ hostTurns: 4, httpRequests: 5, toolCalls: 2, paidCalls: 0 });
+    expect(reconciled.used).toEqual(persisted.used);
+    expect(reconciled.budgetAudit).toHaveLength(1);
+    expect(reconciled.budgetAudit[0]).toMatchObject({ approvedBy: 'Owner', reason: 'caps raised', used: persisted.used });
+
+    // The run continues from carried-over usage, not from zero.
+    const ledger = createExperimentLedger({ runId: 'aa-after-reconcile', fixtureId: 'F', persistPath });
+    expect(ledger.snapshot().used.hostTurns).toBe(2);
+
+    expect(() => reconcileLedgerBudget({
+      persistPath,
+      budget: { hostTurns: 1, httpRequests: 5, toolCalls: 2, paidCalls: 0 },
+      approvedBy: 'Owner',
+      reason: 'shrink',
+    })).toThrow(/below already-used/);
+    expect(() => reconcileLedgerBudget({ persistPath, approvedBy: '', reason: 'x' })).toThrow(/approvedBy/);
+    expect(() => reconcileLedgerBudget({ persistPath, approvedBy: 'Owner', reason: '' })).toThrow(/reason/);
+  });
 });
 
 describe('activation expiry window', () => {
   const now = Date.parse('2026-11-06T11:05:00Z');
 
-  it('accepts a future expiry inside the host 15-minute window', () => {
+  it('accepts a future expiry inside the PD 15-minute admission window', () => {
     expect(activationExpiryWindowViolation(now + 10 * 60 * 1000, now)).toBeNull();
   });
 
-  it('rejects an expiry beyond the host 15-minute window', () => {
+  it('rejects an expiry beyond the PD 15-minute admission window', () => {
     expect(activationExpiryWindowViolation(now + 16 * 60 * 1000, now)).toMatch(/within 15 minutes/);
+    expect(activationExpiryWindowViolation(now + 16 * 60 * 1000, now)).toMatch(/PD controlled-admission/);
   });
 
   it('rejects a past or unparseable expiry', () => {
@@ -414,7 +455,175 @@ describe('launcher boundary — endpoint config wiring', () => {
   });
 });
 
+const FIXED_META_TOOLS = ['dispatch_action', 'tool_describe', 'tool_search'];
+
+function fullDefinition(name, index = 0) {
+  return {
+    index,
+    name,
+    descriptionSha256: sha256Hex(`description:${name}`),
+    description: `description:${name}`,
+    parametersSha256: sha256Hex(`parameters:${name}`),
+    parameters: { type: 'object', properties: {} },
+    definitionSha256: sha256Hex(`definition:${name}`),
+  };
+}
+
+function toolSurface(toolName = 'read') {
+  return [toolName, ...FIXED_META_TOOLS].map((name, index) => fullDefinition(name, index));
+}
+
+function makePositiveGateFixture({
+  consumed = true,
+  principleId = 'principle-1',
+  principleText = '只调用一次只读工具。',
+  toolName = 'read',
+} = {}) {
+  const surface = toolSurface(toolName);
+  const names = surface.map((definition) => definition.name);
+  const observations = [
+    {
+      endpointRequestId: 'http-001', status: 200, finishReason: 'tool_calls', model: FAKE_MODEL_ID,
+      toolDefinitions: names, toolDefinitionsFull: surface, toolCallAttempts: [],
+      intervention: { directivesBlockPresent: true, directiveIds: [principleId] },
+      principleBody: { present: true, directiveMatches: [], expectedSha256: sha256Hex(principleText) },
+    },
+    {
+      endpointRequestId: 'http-002', status: 200, finishReason: 'stop', model: FAKE_MODEL_ID,
+      toolDefinitions: names, toolDefinitionsFull: surface,
+      toolCallAttempts: [{ toolCallId: 'call_1', name: toolName, argumentsSha256: 'args' }],
+      intervention: { directivesBlockPresent: true, directiveIds: [principleId] },
+      principleBody: { present: true, directiveMatches: [], expectedSha256: sha256Hex(principleText) },
+      toolResultObserved: true, toolResultContainsFixture: true,
+    },
+  ];
+  const snapshot = {
+    withinBudget: true,
+    usedByArm: { positive: { hostTurns: 1, httpRequests: 2, toolCalls: 1, paidCalls: 0 } },
+    toolCalls: [{ toolCallId: 'call_1', name: toolName }],
+    violations: [],
+  };
+  const plan = {
+    host: { identitySha256: 'host-1' },
+    toolName,
+    fixtureRef: 'AA-FIXTURE-x',
+    sessionBinding: 'predeclared',
+    expectedSessionId: 'session-1',
+    mapping: { artifactId: 'artifact-1', activationId: 'activation-1', expiresAt: '2026-11-06T11:15:00.000Z' },
+    workspaceTarget: { principleText, principleTextSha256: sha256Hex(principleText) },
+  };
+  const p0 = {
+    ready: true,
+    host: { identitySha256: 'host-1' },
+    toolExecutionPolicy: {
+      ok: true,
+      policyAllow: [toolName],
+      oracle: { readAllowed: true, metaToolsDenied: true, allowedMetaTools: [], predicateFileSha256: 'predicate-sha' },
+      dispatch: { catalogOnly: true, evidence: [{ id: 'dispatch-resolves-only-catalog', present: true }] },
+    },
+  };
+  const admission = {
+    createdAt: '2026-11-06T11:05:00.000Z',
+    expiresAt: '2026-11-06T11:15:00.000Z',
+    consumedAt: consumed ? '2026-11-06T11:06:00.000Z' : null,
+    consumedBy: consumed ? { sessionId: 'session-1', hookInvocationId: 'hook-1' } : null,
+    expectedSessionId: 'session-1',
+    targetArtifactId: 'artifact-1',
+    targetActivationId: 'activation-1',
+    fixtureRef: 'AA-FIXTURE-x',
+  };
+  const manifest = { targetArtifactId: 'artifact-1', targetActivationId: 'activation-1', fixtureRef: 'AA-FIXTURE-x' };
+  const arm = { arm: 'positive', exitCode: 0, timedOut: false, spawnError: null, anomalies: [], provider: observations };
+  return { arm, snapshot, plan, p0, admission, manifest, toolName, principleId };
+}
+
 describe('launcher boundary — positive gate stops before control', () => {
+  it('passes only when admission is consumed, identity matches and the target body reached the endpoint', () => {
+    const fixture = makePositiveGateFixture();
+    const verdict = evaluatePositiveGate({ ...fixture, model: FAKE_MODEL_ID, expectedPrincipleId: fixture.principleId });
+    expect(verdict.ok).toBe(true);
+    expect(verdict.deliveryPath).toBe('controlled');
+    expect(verdict.checks.map((row) => row.id)).toEqual(expect.arrayContaining([
+      'tool-exposure', 'tool-permission', 'tool-invocation',
+      'admission-consumed', 'admission-identity', 'target-body',
+    ]));
+  });
+
+  it('counterexample: native delivery succeeded but the controlled admission was refused — never a controlled pass', () => {
+    const fixture = makePositiveGateFixture({ consumed: false });
+    const arm = {
+      ...fixture.arm,
+      activationLink: { association: 'strong_run' },
+      nativeDelivery: { delivered: true, association: 'strong_run' },
+    };
+    const verdict = evaluatePositiveGate({ ...fixture, arm, model: FAKE_MODEL_ID, expectedPrincipleId: fixture.principleId });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.deliveryPath).toBe('native_not_controlled');
+    expect(verdict.nativeDeliveryObserved).toBe(true);
+    expect(verdict.failures.map((row) => row.id)).toContain('admission-consumed');
+    expect(verdict.failures.map((row) => row.id)).toContain('admission-identity');
+  });
+
+  it('fails the invocation layer when a fixed meta tool was actually called, without exempting it by name', () => {
+    const fixture = makePositiveGateFixture();
+    const arm = {
+      ...fixture.arm,
+      provider: [
+        fixture.arm.provider[0],
+        {
+          ...fixture.arm.provider[1],
+          toolCallAttempts: [{ toolCallId: 'call_1', name: 'dispatch_action', argumentsSha256: 'args' }],
+        },
+      ],
+    };
+    const snapshot = {
+      ...fixture.snapshot,
+      toolCalls: [{ toolCallId: 'call_1', name: 'dispatch_action' }],
+    };
+    const verdict = evaluatePositiveGate({ ...fixture, arm, snapshot, model: FAKE_MODEL_ID, expectedPrincipleId: fixture.principleId });
+    expect(verdict.ok).toBe(false);
+    const invocation = verdict.failures.find((row) => row.id === 'tool-invocation');
+    expect(invocation).toBeTruthy();
+    expect(invocation.evidence.metaToolAttempts).toHaveLength(1);
+    // The exposure layer still accepts the meta tool in the definitions: the
+    // failure is about the CALL, not the NAME.
+    expect(verdict.failures.map((row) => row.id)).not.toContain('tool-exposure');
+  });
+
+  it('fails the exposure and permission layers independently of the invocation layer', () => {
+    const fixture = makePositiveGateFixture();
+    const exposure = evaluateToolExposure({
+      observations: [{
+        ...fixture.arm.provider[0],
+        toolDefinitionsFull: [
+          { name: 'read', definitionSha256: 'def', parametersSha256: 'params' },
+          { name: 'exec', definitionSha256: 'def', parametersSha256: 'params' },
+        ],
+      }],
+      toolName: 'read',
+    });
+    expect(exposure.ok).toBe(false);
+    expect(exposure.violations.join(' ')).toContain('unexpected capability: exec');
+
+    // A meta tool that the host policy would allow is a permission failure even
+    // though it merely appears in the definitions and was never called.
+    const permission = evaluateToolPermission({
+      plan: fixture.plan,
+      p0: {
+        ...fixture.p0,
+        toolExecutionPolicy: {
+          ...fixture.p0.toolExecutionPolicy,
+          oracle: { ...fixture.p0.toolExecutionPolicy.oracle, metaToolsDenied: false },
+          dispatch: { ...fixture.p0.toolExecutionPolicy.dispatch, catalogOnly: false },
+        },
+      },
+      toolName: 'read',
+    });
+    expect(permission.ok).toBe(false);
+    expect(permission.violations).toContain('the host policy allows one or more fixed meta tools');
+    expect(permission.violations).toContain('the dispatch chain did not prove catalog-only resolution');
+  });
+
   it('never invokes the control arm when the positive gate fails', async () => {
     let controlRuns = 0;
     const outcome = await runPositiveThenControl({
@@ -429,52 +638,27 @@ describe('launcher boundary — positive gate stops before control', () => {
   });
 
   it('fails the positive gate on a missing second request and on missing intervention evidence', () => {
-    const ledger = makeLedger('aa-gate');
-    ledger.hostTurn('positive');
-    ledger.http('positive', { purpose: 'positive-request' });
+    const fixture = makePositiveGateFixture();
     const arm = {
-      arm: 'positive', exitCode: 0, timedOut: false, spawnError: null, anomalies: [],
-      provider: [{ endpointRequestId: 'http-001', status: 200, finishReason: 'tool_calls', model: FAKE_MODEL_ID, toolDefinitions: ['read'], intervention: { directivesBlockPresent: false, directiveIds: [] } }],
+      ...fixture.arm,
+      provider: [{
+        ...fixture.arm.provider[0],
+        intervention: { directivesBlockPresent: false, directiveIds: [] },
+        principleBody: { present: false, directiveMatches: [] },
+      }],
     };
-    const verdict = evaluatePositiveGate({
-      arm,
-      snapshot: ledger.snapshot(),
-      manifest: { targetArtifactId: 'artifact-1', targetActivationId: 'activation-1' },
-      toolName: 'read',
-      model: FAKE_MODEL_ID,
-      admission: { consumedAt: null, consumedBy: null, targetArtifactId: 'artifact-1', targetActivationId: 'activation-1' },
-      expectedPrincipleId: 'principle-1',
-    });
+    const verdict = evaluatePositiveGate({ ...fixture, arm, model: FAKE_MODEL_ID, expectedPrincipleId: fixture.principleId });
     expect(verdict.ok).toBe(false);
     const failed = verdict.failures.map((row) => row.id);
     expect(failed).toContain('http-count');
-    expect(failed).toContain('tool-evidence');
+    expect(failed).toContain('tool-invocation');
     expect(failed).toContain('intervention');
-    expect(failed).toContain('identity');
+    expect(failed).toContain('target-body');
   });
 
   it('requires the frozen target directive id, not just any directives block', () => {
-    const ledger = makeLedger('aa-target-directive');
-    ledger.hostTurn('positive');
-    ledger.http('positive', { purpose: 'positive-request' });
-    ledger.http('positive', { purpose: 'positive-request' });
-    const arm = {
-      arm: 'positive', exitCode: 0, timedOut: false, spawnError: null, anomalies: [],
-      provider: [
-        { endpointRequestId: 'http-001', status: 200, finishReason: 'tool_calls', model: FAKE_MODEL_ID, toolDefinitions: ['read'], intervention: { directivesBlockPresent: true, directiveIds: ['other-principle'] } },
-        { endpointRequestId: 'http-002', status: 200, finishReason: 'stop', model: FAKE_MODEL_ID, toolDefinitions: ['read'], intervention: { directivesBlockPresent: true, directiveIds: ['other-principle'] } },
-      ],
-    };
-    const snapshot = ledger.snapshot();
-    const verdict = evaluatePositiveGate({
-      arm,
-      snapshot,
-      manifest: { targetArtifactId: 'artifact-1', targetActivationId: 'activation-1' },
-      toolName: 'read',
-      model: FAKE_MODEL_ID,
-      admission: { consumedAt: '2026-11-06T00:00:00.000Z', consumedBy: { sessionId: 's-1', hookInvocationId: 'h-1' }, targetArtifactId: 'artifact-1', targetActivationId: 'activation-1' },
-      expectedPrincipleId: 'principle-1',
-    });
+    const fixture = makePositiveGateFixture({ principleId: 'other-principle' });
+    const verdict = evaluatePositiveGate({ ...fixture, model: FAKE_MODEL_ID, expectedPrincipleId: 'principle-1' });
     expect(verdict.failures.map((row) => row.id)).toContain('intervention');
   });
 
@@ -492,6 +676,79 @@ describe('launcher boundary — positive gate stops before control', () => {
     expect(existsSync(paths.ledgerPath)).toBe(true);
     expect(existsSync(paths.cleanupPath)).toBe(true);
     expect(JSON.parse(readFileSync(paths.failurePath, 'utf8')).error.stopBeforeControl).toBe(true);
+  });
+});
+
+describe('admission file — the real file, not the argv', () => {
+  function writeAdmission(dir, overrides = {}) {
+    // Bind the claimed createdAt to the real file clock: the inspected file is
+    // written now, and the check refuses a createdAt that disagrees with the
+    // filesystem birthtime by more than two minutes.
+    const base = overrides.now ?? Date.now() - 60_000;
+    const createdAt = overrides.createdAt ?? new Date(base).toISOString();
+    const expiresAt = overrides.expiresAt ?? new Date(base + 10 * 60 * 1000).toISOString();
+    const admissionPath = join(dir, 'admission.json');
+    const document = {
+      schemaVersion: 'pd-aa-controlled-admission/v2',
+      admissionId: 'adm-test',
+      experimentRoot: dir,
+      inputPath: join(dir, 'input.txt'),
+      inputSha256: 'i',
+      manifestPath: join(dir, 'manifest.json'),
+      manifestSha256: 'm',
+      targetArtifactId: 'artifact-1',
+      targetActivationId: 'activation-1',
+      fixtureRef: 'AA-FIXTURE-x',
+      sessionBinding: 'predeclared',
+      expectedSessionId: 'session-1',
+      createdAt,
+      expiresAt,
+      consumedAt: null,
+      consumedBy: null,
+      ...overrides.document,
+    };
+    writeFileSync(admissionPath, JSON.stringify(document, null, 2), 'utf8');
+    return { admissionPath, document };
+  }
+
+  const now = Date.now();
+
+  it('accepts an unconsumed, unexpired, 10-minute admission', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-adm-'));
+    const { admissionPath } = writeAdmission(dir);
+    const result = inspectAdmissionFile({ admissionPath, now });
+    expect(result.ok).toBe(true);
+    expect(result.facts.lifetimeMs).toBe(10 * 60 * 1000);
+  });
+
+  it('rejects the exact 13:00Z failure: a 115-minute admission lifetime (PD rule)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-adm-'));
+    const { admissionPath } = writeAdmission(dir, {
+      createdAt: '2026-11-06T11:05:00.000Z',
+      expiresAt: '2026-11-06T13:00:00.000Z',
+    });
+    const result = inspectAdmissionFile({ admissionPath, now });
+    expect(result.ok).toBe(false);
+    expect(result.violations.some((row) => row.includes('15-minute'))).toBe(true);
+  });
+
+  it('rejects an already-consumed admission and an expired admission', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-adm-'));
+    const consumed = writeAdmission(dir, { document: { consumedAt: '2026-11-06T11:06:00.000Z', consumedBy: { sessionId: 's', hookInvocationId: 'h' } } });
+    expect(inspectAdmissionFile({ admissionPath: consumed.admissionPath, now }).ok).toBe(false);
+
+    const expired = writeAdmission(dir, { createdAt: '2026-11-06T10:50:00.000Z', expiresAt: '2026-11-06T11:00:00.000Z' });
+    const result = inspectAdmissionFile({ admissionPath: expired.admissionPath, now });
+    expect(result.ok).toBe(false);
+    expect(result.violations.some((row) => row.includes('expired'))).toBe(true);
+  });
+
+  it('rejects bytes that differ from the frozen hash', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aa-adm-'));
+    const { admissionPath } = writeAdmission(dir);
+    const result = inspectAdmissionFile({ admissionPath, now, expectedSha256: 'not-the-file' });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('admission file sha256 differs from the frozen plan');
   });
 });
 
@@ -677,6 +934,14 @@ describe('launcher boundary — frozen files and isolated host', () => {
       endpoint: { port: frozen.plan.endpoint.port },
       stateRoot: frozen.plan.stateRoot,
       fixtureRef: frozen.plan.fixtureId,
+      admissionFile: { ok: true },
+      toolExecutionPolicy: {
+        ok: true,
+        policyAllow: [frozen.plan.toolName],
+        readAllowed: true,
+        metaToolsDenied: true,
+        dispatch: { catalogOnly: true },
+      },
       workspace: {
         principleId: frozen.plan.workspaceTarget.principleId,
         stateDbSha256: frozen.plan.workspaceTarget.stateDbSha256,

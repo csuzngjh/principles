@@ -25,8 +25,147 @@ function summarize(checks) {
   return { ok: failures.length === 0, checks, failures };
 }
 
-/** Positive arm: process, HTTP, tool, intervention, identity, budget, surface. */
-export function evaluatePositiveGate({ arm, snapshot, manifest, toolName, model, admission, expectedPrincipleId = null }) {
+/** Fixed meta tools the host injects regardless of `tools.allow`. */
+export const FIXED_META_TOOLS = Object.freeze(['dispatch_action', 'tool_describe', 'tool_search']);
+
+function normalizeText(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : null;
+}
+
+function normalizedSha256(value) {
+  const normalized = normalizeText(value);
+  return normalized === null || normalized.length === 0 ? null : createHash('sha256').update(normalized).digest('hex');
+}
+
+/**
+ * Layer 1 — exposure audit.
+ *
+ * Meta tools are allowed to APPEAR (the host injects tool-search controls),
+ * but every definition is recorded in full and every name is audited. A
+ * definition whose name is not the allowlisted tool and not a fixed meta tool
+ * fails, so no capability can hide behind a familiar name.
+ */
+export function evaluateToolExposure({ observations, toolName }) {
+  const allowedSet = [toolName, ...FIXED_META_TOOLS];
+  const surfaces = observations.map((row) => (
+    Array.isArray(row?.toolDefinitionsFull) && row.toolDefinitionsFull.length > 0
+      ? row.toolDefinitionsFull
+      : (Array.isArray(row?.toolDefinitions) ? row.toolDefinitions.map((name) => ({ name })) : [])
+  ));
+  const namesByRequest = surfaces.map((definitions) => definitions.map((definition) => definition?.name ?? null));
+  const violations = [];
+  if (surfaces.length === 0) violations.push('no endpoint observation');
+  for (const [index, definitions] of surfaces.entries()) {
+    if (definitions.length === 0) violations.push(`request ${index + 1} carried no tool definitions`);
+    if (!namesByRequest[index].includes(toolName)) violations.push(`request ${index + 1} did not expose the allowlisted tool ${toolName}`);
+    for (const definition of definitions) {
+      if (definition?.name === null || typeof definition?.name !== 'string') {
+        violations.push(`request ${index + 1} has a definition without a name`);
+        continue;
+      }
+      if (!allowedSet.includes(definition.name)) violations.push(`request ${index + 1} exposed an unexpected capability: ${definition.name}`);
+      if (typeof definition.definitionSha256 !== 'string' || definition.definitionSha256.length === 0) {
+        violations.push(`request ${index + 1} did not record the complete definition hash for ${definition.name}`);
+      }
+      if (typeof definition.parametersSha256 !== 'string' || definition.parametersSha256.length === 0) {
+        violations.push(`request ${index + 1} did not record the parameter schema for ${definition.name}`);
+      }
+    }
+  }
+  const capabilityTools = [...new Set(namesByRequest.flat().filter((name) => name !== null && !FIXED_META_TOOLS.includes(name)))].sort();
+  if (capabilityTools.length !== 1 || capabilityTools[0] !== toolName) {
+    violations.push(`capability tools in the surface were ${JSON.stringify(capabilityTools)}, expected only ${toolName}`);
+  }
+  const metaToolsObserved = [...new Set(namesByRequest.flat().filter((name) => FIXED_META_TOOLS.includes(name)))].sort();
+  return {
+    ok: violations.length === 0,
+    violations,
+    evidence: {
+      allowedSet,
+      fixedMetaTools: [...FIXED_META_TOOLS],
+      metaToolsObserved,
+      capabilityTools,
+      surfaces: namesByRequest,
+      definitions: surfaces,
+    },
+  };
+}
+
+/**
+ * Layer 2 — effective permission.
+ *
+ * Presence in the definitions is not permission. This consumes the P0 audit
+ * that (a) executed the host's own policy predicate under `tools.allow` and
+ * (b) recorded the dispatch chain showing `dispatch_action` resolves ids only
+ * against a catalog built from the effective tool surface.
+ */
+export function evaluateToolPermission({ p0, plan, toolName }) {
+  const policy = p0?.toolExecutionPolicy ?? null;
+  const oracle = policy?.oracle ?? null;
+  const dispatch = policy?.dispatch ?? null;
+  const violations = [];
+  if (p0?.ready !== true) violations.push('P0 report is not ready');
+  if (p0?.host?.identitySha256 !== plan?.host?.identitySha256) violations.push('P0 host identity differs from the frozen plan');
+  if (!Array.isArray(policy?.policyAllow) || policy.policyAllow.length !== 1 || policy.policyAllow[0] !== toolName) {
+    violations.push(`policy allowlist ${JSON.stringify(policy?.policyAllow ?? null)} is not [${toolName}]`);
+  }
+  if (oracle?.readAllowed !== true) violations.push('the host policy does not allow the allowlisted tool');
+  if (oracle?.metaToolsDenied !== true) violations.push('the host policy allows one or more fixed meta tools');
+  if (dispatch?.catalogOnly !== true) violations.push('the dispatch chain did not prove catalog-only resolution');
+  if (typeof oracle?.predicateFileSha256 !== 'string' || oracle.predicateFileSha256.length === 0) {
+    violations.push('the policy predicate was not hash-bound to the host bundle');
+  }
+  const evidence = Array.isArray(dispatch?.evidence) ? dispatch.evidence : [];
+  if (evidence.length === 0 || evidence.some((item) => item?.present !== true)) {
+    violations.push('one or more dispatch-chain facts are missing');
+  }
+  return {
+    ok: violations.length === 0,
+    violations,
+    evidence: {
+      policyAllow: policy?.policyAllow ?? null,
+      readAllowed: oracle?.readAllowed ?? null,
+      metaToolsDenied: oracle?.metaToolsDenied ?? null,
+      allowedMetaTools: oracle?.allowedMetaTools ?? null,
+      predicateFileSha256: oracle?.predicateFileSha256 ?? null,
+      catalogOnly: dispatch?.catalogOnly ?? null,
+      dispatchEvidenceIds: evidence.map((item) => item?.id ?? null),
+      p0HostIdentitySha256: p0?.host?.identitySha256 ?? null,
+      planHostIdentitySha256: plan?.host?.identitySha256 ?? null,
+    },
+  };
+}
+
+/**
+ * Layer 3 — actual invocation.
+ *
+ * The only invocation anywhere in the conversation must be one call to the
+ * allowlisted tool. A meta-tool call is an invocation too and fails here; it is
+ * never exempted by name.
+ */
+export function evaluateToolInvocation({ observations, snapshot, toolName, second }) {
+  const attempts = observations.flatMap((row) => (Array.isArray(row?.toolCallAttempts) ? row.toolCallAttempts : []));
+  const toolCalls = Array.isArray(snapshot?.toolCalls) ? snapshot.toolCalls : [];
+  const violations = [];
+  if (toolCalls.length !== 1) violations.push(`ledger recorded ${toolCalls.length} tool calls, expected 1`);
+  if (toolCalls[0]?.name !== toolName) violations.push(`ledger tool name ${JSON.stringify(toolCalls[0]?.name ?? null)} is not ${toolName}`);
+  if (typeof toolCalls[0]?.toolCallId !== 'string') violations.push('ledger tool call has no id');
+  if (attempts.length !== 1) violations.push(`endpoint saw ${attempts.length} assistant tool-call attempts, expected 1`);
+  if (attempts[0]?.name !== toolName) violations.push(`endpoint tool-call name ${JSON.stringify(attempts[0]?.name ?? null)} is not ${toolName}`);
+  if (attempts[0]?.toolCallId !== toolCalls[0]?.toolCallId) violations.push('endpoint and ledger tool-call ids differ');
+  if (second?.toolResultObserved !== true) violations.push('the tool result was not echoed back to the endpoint');
+  if (second?.toolResultContainsFixture !== true) violations.push('the tool result did not contain the fixture bytes');
+  return {
+    ok: violations.length === 0,
+    violations,
+    evidence: { toolCalls, attempts, toolName, metaToolAttempts: attempts.filter((attempt) => FIXED_META_TOOLS.includes(attempt?.name)) },
+  };
+}
+
+/** Positive arm: process, HTTP, three tool layers, intervention, admission, route. */
+export function evaluatePositiveGate({
+  arm, snapshot, manifest, plan = null, p0 = null, toolName, model, admission, expectedPrincipleId = null,
+}) {
   const observations = Array.isArray(arm?.provider) ? arm.provider : [];
   const checks = [];
 
@@ -53,18 +192,19 @@ export function evaluatePositiveGate({ arm, snapshot, manifest, toolName, model,
       secondStatus: second?.status, secondFinish: second?.finishReason,
     }));
 
-  const toolCalls = Array.isArray(snapshot?.toolCalls) ? snapshot.toolCalls : [];
-  checks.push(check('tool-evidence',
-    toolCalls.length === 1
-    && toolCalls[0]?.name === toolName
-    && typeof toolCalls[0]?.toolCallId === 'string'
-    && second?.toolResultObserved === true
-    && second?.toolResultContainsFixture === true,
-    'exactly one tool call of the allowlisted name returned the fixture bytes', {
-      toolCalls, toolName,
-      secondToolResultObserved: second?.toolResultObserved ?? null,
-      secondToolResultContainsFixture: second?.toolResultContainsFixture ?? null,
-    }));
+  const exposure = evaluateToolExposure({ observations, toolName });
+  checks.push(check('tool-exposure', exposure.ok,
+    'every request exposed the complete tool definitions; only the allowlisted capability plus the fixed meta tools appeared',
+    exposure.evidence));
+
+  const permission = evaluateToolPermission({ p0, plan, toolName });
+  checks.push(check('tool-permission', permission.ok,
+    'the frozen host policy denies the fixed meta tools under the allowlist and dispatch_action resolves ids only from the effective surface catalog',
+    permission.evidence));
+
+  const invocation = evaluateToolInvocation({ observations, snapshot, toolName, second });
+  checks.push(check('tool-invocation', invocation.ok,
+    'the only tool invocation in the whole conversation was one call to the allowlisted tool', invocation.evidence));
 
   const targetDirectivePresent = typeof expectedPrincipleId === 'string'
     && expectedPrincipleId.length > 0
@@ -80,17 +220,62 @@ export function evaluatePositiveGate({ arm, snapshot, manifest, toolName, model,
       targetDirectivePresent,
     }));
 
-  checks.push(check('identity',
-    typeof admission?.consumedAt === 'string' && admission.consumedAt.length > 0
+  // The TARGET BODY itself must reach the endpoint. A directive id alone is not
+  // enough: the native delivery path can carry the id while the controlled
+  // admission was never consumed.
+  const expectedBodySha256 = normalizedSha256(plan?.workspaceTarget?.principleText);
+  const bodyMatches = observations.map((row) => {
+    const match = Array.isArray(row?.principleBody?.directiveMatches)
+      ? row.principleBody.directiveMatches.find((entry) => entry?.id === expectedPrincipleId)
+      : null;
+    return {
+      present: row?.principleBody?.present === true,
+      normalizedMatch: match ? match.normalizedSha256 === expectedBodySha256 : false,
+    };
+  });
+  const targetBodyOk = observations.length > 0
+    && bodyMatches.every((row) => row.present === true || row.normalizedMatch === true);
+  checks.push(check('target-body', targetBodyOk,
+    'the frozen target principle body (not only its id) reached every endpoint request', {
+      expectedBodySha256,
+      bodyMatches,
+      principleBudgets: observations.map((row) => row?.principleBody ?? null),
+    }));
+
+  const consumedAtMs = typeof admission?.consumedAt === 'string' ? Date.parse(admission.consumedAt) : NaN;
+  const createdAtMs = typeof admission?.createdAt === 'string' ? Date.parse(admission.createdAt) : NaN;
+  const expiresAtMs = typeof admission?.expiresAt === 'string' ? Date.parse(admission.expiresAt) : NaN;
+  const consumedOk = typeof admission?.consumedAt === 'string' && admission.consumedAt.length > 0
+    && Number.isFinite(consumedAtMs)
     && typeof admission?.consumedBy?.sessionId === 'string' && admission.consumedBy.sessionId.length > 0
-    && typeof admission?.consumedBy?.hookInvocationId === 'string' && admission.consumedBy.hookInvocationId.length > 0
-    && admission?.targetArtifactId === manifest?.targetArtifactId
-    && admission?.targetActivationId === manifest?.targetActivationId,
-    'the single admission was consumed once for the frozen target', {
+    && typeof admission?.consumedBy?.hookInvocationId === 'string' && admission.consumedBy.hookInvocationId.length > 0;
+  checks.push(check('admission-consumed', consumedOk,
+    'the plugin actually consumed the controlled admission (consumedAt/consumedBy written into the file)', {
       consumedAt: admission?.consumedAt ?? null,
+      consumedBy: admission?.consumedBy ?? null,
+    }));
+
+  const expectedSessionId = plan?.sessionBinding === 'predeclared' ? plan.expectedSessionId : null;
+  const sessionMatched = plan?.sessionBinding === 'predeclared'
+    ? admission?.consumedBy?.sessionId === expectedSessionId
+    : typeof admission?.consumedBy?.sessionId === 'string' && admission.consumedBy.sessionId.length > 0;
+  const identityOk = sessionMatched
+    && admission?.expectedSessionId === expectedSessionId
+    && admission?.targetArtifactId === plan?.mapping?.artifactId
+    && admission?.targetActivationId === plan?.mapping?.activationId
+    && admission?.fixtureRef === plan?.fixtureRef
+    && (manifest ? admission?.targetArtifactId === manifest?.targetArtifactId : true)
+    && (manifest ? admission?.targetActivationId === manifest?.targetActivationId : true)
+    && (Number.isFinite(consumedAtMs) && Number.isFinite(createdAtMs) ? consumedAtMs >= createdAtMs : true)
+    && (Number.isFinite(consumedAtMs) && Number.isFinite(expiresAtMs) ? consumedAtMs <= expiresAtMs : true);
+  checks.push(check('admission-identity', identityOk,
+    'the consumed admission matches the frozen target, fixture and session binding inside its window', {
+      sessionBinding: plan?.sessionBinding ?? null,
+      expectedSessionId,
       consumedBy: admission?.consumedBy ?? null,
       targetArtifactId: admission?.targetArtifactId ?? null,
       targetActivationId: admission?.targetActivationId ?? null,
+      fixtureRef: admission?.fixtureRef ?? null,
     }));
 
   checks.push(check('budget',
@@ -101,21 +286,29 @@ export function evaluatePositiveGate({ arm, snapshot, manifest, toolName, model,
     && snapshot?.usedByArm?.positive?.paidCalls === 0,
     'positive arm stayed inside its own allocation', { usedByArm: snapshot?.usedByArm ?? null, violations: snapshot?.violations ?? [] }));
 
-  const surfaces = observations.map((row) => Array.isArray(row.toolDefinitions) ? row.toolDefinitions : []);
-  const surfaceOk = surfaces.length > 0
-    && surfaces.every((names) => names.length > 0 && names.every((name) => name === toolName))
-    && surfaces[0].includes(toolName);
-  checks.push(check('tool-surface', surfaceOk, 'the endpoint only received the single allowlisted tool', { surfaces, toolName }));
-
   checks.push(check('model', observations.every((row) => row.model === model),
     'every request used the frozen fake model', { observed: observations.map((row) => row.model), model }));
 
+  // Route verdict: a native activation-link delivery that reached the endpoint
+  // while the controlled admission stayed unconsumed is a DIFFERENT path. It
+  // must never be reported as a successful controlled wiring.
+  const nativeDelivered = arm?.activationLink?.association === 'strong_run'
+    || arm?.nativeDelivery?.delivered === true
+    || arm?.nativeDelivery?.association === 'strong_run';
+  const deliveryPath = consumedOk ? 'controlled' : (nativeDelivered ? 'native_not_controlled' : 'unknown');
+
   const verdict = summarize(checks);
-  return { ...verdict, arm: 'positive', stopBeforeControl: !verdict.ok ? verdict.failures.map((row) => row.id) : [] };
+  return {
+    ...verdict,
+    arm: 'positive',
+    deliveryPath,
+    nativeDeliveryObserved: nativeDelivered,
+    stopBeforeControl: !verdict.ok ? verdict.failures.map((row) => row.id) : [],
+  };
 }
 
 /** Control arm: same endpoint, no admission, no tool call, no directives. */
-export function evaluateControlGate({ arm, snapshot, toolName, model }) {
+export function evaluateControlGate({ arm, snapshot, plan = null, p0 = null, toolName, model }) {
   const observations = Array.isArray(arm?.provider) ? arm.provider : [];
   const checks = [];
 
@@ -150,9 +343,14 @@ export function evaluateControlGate({ arm, snapshot, toolName, model }) {
     && snapshot?.usedByArm?.control?.paidCalls === 0,
     'control arm stayed inside its own allocation', { usedByArm: snapshot?.usedByArm ?? null, violations: snapshot?.violations ?? [] }));
 
-  const surfaces = observations.map((row) => Array.isArray(row.toolDefinitions) ? row.toolDefinitions : []);
-  checks.push(check('tool-surface', surfaces.every((names) => names.every((name) => name === toolName)),
-    'control endpoint also saw only the allowlisted tool surface', { surfaces, toolName }));
+  const exposure = evaluateToolExposure({ observations, toolName });
+  checks.push(check('tool-exposure', exposure.ok,
+    'the control endpoint exposed the same complete definitions (allowlisted capability plus fixed meta tools)',
+    exposure.evidence));
+  const permission = evaluateToolPermission({ p0, plan, toolName });
+  checks.push(check('tool-permission', permission.ok,
+    'the frozen host policy denies the fixed meta tools under the allowlist and dispatch_action resolves ids only from the effective surface catalog',
+    permission.evidence));
 
   checks.push(check('model', observations.every((row) => row.model === model),
     'the control request used the frozen fake model', { observed: observations.map((row) => row.model), model }));
@@ -189,6 +387,10 @@ export function verifyPlanIntegrity({ plan, manifestPath, manifest, admissionPat
   if (admission.inputSha256 !== manifest.inputSha256) violations.push('admission input sha256 differs from the manifest');
 
   if (!existsSync(admissionPath)) violations.push('admission file is missing');
+  else if (typeof plan.admissionSha256 === 'string' && plan.admissionSha256.length > 0
+    && sha256File(admissionPath) !== plan.admissionSha256) {
+    violations.push('admission file bytes changed after the plan was frozen');
+  }
   if (admission.fixtureRef !== manifest.fixtureRef) violations.push('admission fixtureRef differs from the manifest');
 
   const workspaceTarget = plan.workspaceTarget;
@@ -233,6 +435,12 @@ export function verifyExecutionFrozen({ plan, p0, hostProfile, configPath, manif
   if (p0?.endpoint?.port !== plan?.endpoint?.port) violations.push('P0 endpoint port differs from the frozen plan');
   if (p0?.stateRoot !== plan?.stateRoot) violations.push('P0 state root differs from the frozen plan');
   if (p0?.fixtureRef !== plan?.fixtureId) violations.push('P0 fixture ref differs from the frozen plan');
+  if (p0?.admissionFile?.ok !== true) violations.push('P0 admission-file check did not pass');
+  if (p0?.toolExecutionPolicy?.ok !== true) violations.push('P0 tool-policy audit did not pass');
+  if (Array.isArray(p0?.toolExecutionPolicy?.policyAllow)
+    && (p0.toolExecutionPolicy.policyAllow.length !== 1 || p0.toolExecutionPolicy.policyAllow[0] !== plan?.toolName)) {
+    violations.push('P0 tool-policy allowlist differs from the frozen plan');
+  }
   if (p0?.workspace?.principleId !== plan?.workspaceTarget?.principleId) violations.push('P0 workspace target differs from the frozen plan');
   if (p0?.workspace?.stateDbSha256 !== plan?.workspaceTarget?.stateDbSha256) violations.push('P0 workspace state.db differs from the frozen plan');
 
@@ -260,11 +468,26 @@ export async function runPositiveThenControl({ runPositive, runControl, evaluate
   const positive = await runPositive();
   const positiveGate = evaluatePositive(positive);
   if (!positiveGate.ok) {
-    return { stoppedAt: 'positive', positive, positiveGate, control: null, controlGate: null };
+    return {
+      stoppedAt: 'positive',
+      deliveryPath: positiveGate.deliveryPath ?? 'unknown',
+      positive,
+      positiveGate,
+      control: null,
+      controlGate: null,
+    };
   }
   const control = await runControl();
   const controlGate = evaluateControl(control);
-  return { stoppedAt: controlGate.ok ? null : 'control', positive, positiveGate, control, controlGate };
+  return {
+    stoppedAt: controlGate.ok ? null : 'control',
+    deliveryPath: positiveGate.deliveryPath ?? 'unknown',
+    controlledAdmissionProven: positiveGate.deliveryPath === 'controlled' && controlGate.ok,
+    positive,
+    positiveGate,
+    control,
+    controlGate,
+  };
 }
 
 /**

@@ -13,19 +13,22 @@
 // is supplied it records the cumulative usage there, so a NEW run directory
 // (a fresh --prepare) can never reset what earlier runs already spent.
 //
-// Owner decision (2026-11-06): the experiment-wide host-turn cap is 3 and the
-// already-failed turn-001 counts against it. Remaining: positive 1 + control 1.
-// HTTP total stays 3, read-only tool 1, paid calls 0.
+// Owner decision (2026-11-06, revised): the cumulative experiment caps are
+// hostTurns 4, HTTP 5, read-only tool 2, paid calls 0. Both historical arms
+// (turn-001 and the failed turn-002 of aa-run-20261106T1105Z) count against
+// them. This revision raises only the caps: usage is carried over, never reset.
+// An existing ledger written under the older caps is migrated by the explicit
+// reconcile path below, which preserves `used` and records an audit entry.
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Experiment-wide caps; the Owner raised hostTurns to 3 on 2026-11-06. */
+/** Experiment-wide cumulative caps (Owner-approved 2026-11-06, revised). */
 export const EXPERIMENT_BUDGET = Object.freeze({
-  hostTurns: 3,
-  httpRequests: 3,
-  toolCalls: 1,
+  hostTurns: 4,
+  httpRequests: 5,
+  toolCalls: 2,
   paidCalls: 0,
 });
 
@@ -118,6 +121,65 @@ function writeJsonAtomic(path, value) {
 }
 
 /**
+ * Explicit budget reconciliation.
+ *
+ * A ledger written under an older Owner-approved cap must never be silently
+ * reset. This function changes ONLY the caps, keeps every used counter and
+ * record, refuses to shrink a cap below what was already spent, and appends an
+ * audit entry naming who approved the change and why.
+ */
+export function reconcileLedgerBudget({
+  persistPath,
+  budget = EXPERIMENT_BUDGET,
+  armBudgets = ARM_BUDGET,
+  approvedBy,
+  reason,
+} = {}) {
+  if (typeof persistPath !== 'string' || !persistPath.trim()) throw new Error('reconcileLedgerBudget: persistPath is required');
+  if (typeof approvedBy !== 'string' || !approvedBy.trim()) throw new Error('reconcileLedgerBudget: approvedBy is required');
+  if (typeof reason !== 'string' || !reason.trim()) throw new Error('reconcileLedgerBudget: reason is required');
+  for (const key of COUNTERS) {
+    if (!Number.isInteger(budget[key]) || budget[key] < 0) throw new Error(`reconcileLedgerBudget: budget.${key} must be a non-negative integer`);
+  }
+  if (!existsSync(persistPath)) {
+    const error = new Error(`reconcileLedgerBudget: no ledger at ${persistPath}; create a run first`);
+    error.code = 'aa_ledger_reconcile_missing';
+    throw error;
+  }
+  const persisted = readJsonStrict(persistPath, 'cumulative ledger');
+  if (persisted.schemaVersion !== CUMULATIVE_LEDGER_SCHEMA) {
+    const error = new Error(`reconcileLedgerBudget: schema ${JSON.stringify(persisted.schemaVersion)} is not ${CUMULATIVE_LEDGER_SCHEMA}`);
+    error.code = 'aa_ledger_schema_mismatch';
+    throw error;
+  }
+  const used = validateCounters(persisted.used, 'persisted.used');
+  for (const key of COUNTERS) {
+    if (used[key] > budget[key]) {
+      const error = new Error(`reconcileLedgerBudget: budget.${key}=${budget[key]} is below already-used ${used[key]}; usage cannot be discarded`);
+      error.code = 'aa_ledger_reconcile_below_usage';
+      throw error;
+    }
+  }
+  const auditEntry = {
+    at: new Date().toISOString(),
+    approvedBy: approvedBy.trim(),
+    reason: reason.trim(),
+    from: { budget: { ...persisted.budget }, armBudgets: persisted.armBudgets ?? null },
+    to: { budget: { ...budget }, armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } } },
+    used: { ...used },
+  };
+  const next = {
+    ...persisted,
+    budget: { ...budget },
+    armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } },
+    budgetAudit: [...(Array.isArray(persisted.budgetAudit) ? persisted.budgetAudit : []), auditEntry],
+    updatedAt: new Date().toISOString(),
+  };
+  writeJsonAtomic(persistPath, next);
+  return { ok: true, auditEntry, ledger: next };
+}
+
+/**
  * Bootstrap the cumulative usage from existing run directories.
  *
  * Each run's ledger.json records per-attempt usage (`attempt.used`, or the sum
@@ -186,6 +248,7 @@ export function createExperimentLedger({
   };
   const records = Object.fromEntries(COUNTERS.map((key) => [key, []]));
   const violations = [];
+  const budgetAudit = [];
 
   let persisted = null;
   if (persistPath !== null) {
@@ -216,6 +279,7 @@ export function createExperimentLedger({
       records[key].push(...persisted.records[key]);
     }
     if (Array.isArray(persisted.violations)) violations.push(...persisted.violations);
+    if (Array.isArray(persisted.budgetAudit)) budgetAudit.push(...persisted.budgetAudit);
   } else if (priorUsage) {
     Object.assign(used, validateCounters(priorUsage, 'priorUsage'));
   }
@@ -229,6 +293,7 @@ export function createExperimentLedger({
       used: { ...used },
       records: Object.fromEntries(COUNTERS.map((key) => [key, records[key].slice()])),
       violations: violations.slice(),
+      budgetAudit: budgetAudit.slice(),
       lastRunId: runId,
       lastFixtureId: fixtureId,
       updatedAt: new Date().toISOString(),
@@ -325,6 +390,7 @@ export function createExperimentLedger({
         withinBudget: COUNTERS.every((key) => used[key] <= budget[key]),
         persistPath,
         violations: violations.slice(),
+        budgetAudit: budgetAudit.slice(),
         hostTurns: records.hostTurns.slice(),
         httpRequests: records.httpRequests.slice(),
         toolCalls: records.toolCalls.slice(),

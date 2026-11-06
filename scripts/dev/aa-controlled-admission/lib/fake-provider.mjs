@@ -71,6 +71,52 @@ function toolDefinitionNames(payload) {
   return names;
 }
 
+/**
+ * The COMPLETE tool definitions, not only their names. The exposure audit must
+ * be able to show what the model could see (description + full parameter
+ * schema), so a definition cannot be smuggled in behind a familiar name.
+ */
+function toolDefinitionRecords(payload) {
+  if (!Array.isArray(payload.tools)) return [];
+  return payload.tools.map((tool, index) => {
+    const fn = tool?.function && typeof tool.function === 'object' ? tool.function : tool;
+    const name = typeof fn?.name === 'string' ? fn.name : null;
+    const description = typeof fn?.description === 'string' ? fn.description : null;
+    const parameters = fn?.parameters ?? null;
+    return {
+      index,
+      name,
+      descriptionSha256: description === null ? null : sha256Hex(description),
+      description: description,
+      parametersSha256: parameters === null ? null : sha256Hex(JSON.stringify(parameters)),
+      parameters,
+      definitionSha256: sha256Hex(JSON.stringify({ name, description, parameters })),
+    };
+  });
+}
+
+/**
+ * Every assistant tool call the endpoint can see in the conversation. This is
+ * the invocation layer: a call to a meta tool is still an invocation and must
+ * be counted, never skipped because of its name.
+ */
+function assistantToolCallAttempts(messages) {
+  if (!Array.isArray(messages)) return [];
+  const attempts = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object' || message.role !== 'assistant') continue;
+    if (!Array.isArray(message.tool_calls)) continue;
+    for (const call of message.tool_calls) {
+      attempts.push({
+        toolCallId: typeof call?.id === 'string' ? call.id : null,
+        name: typeof call?.function?.name === 'string' ? call.function.name : null,
+        argumentsSha256: typeof call?.function?.arguments === 'string' ? sha256Hex(call.function.arguments) : null,
+      });
+    }
+  }
+  return attempts;
+}
+
 function systemMessageText(messages) {
   if (!Array.isArray(messages)) return null;
   const parts = [];
@@ -97,6 +143,27 @@ function directiveIds(text) {
   let match;
   while ((match = pattern.exec(text)) !== null) ids.push(match[1]);
   return ids;
+}
+
+function normalizeDirectiveText(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : null;
+}
+
+/** Directive bodies keyed by id, so the gate can verify the TARGET BODY itself. */
+function directiveBodies(text) {
+  if (typeof text !== 'string') return [];
+  const bodies = [];
+  const pattern = /<directive id="([^"]+)"[^>]*>([\s\S]*?)<\/directive>/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const normalized = normalizeDirectiveText(match[2]);
+    bodies.push({
+      id: match[1],
+      normalizedSha256: normalized === null || normalized.length === 0 ? null : sha256Hex(normalized),
+      normalizedBytes: normalized === null ? null : Buffer.byteLength(normalized, 'utf8'),
+    });
+  }
+  return bodies;
 }
 
 function completionEnvelope(model, message, finishReason) {
@@ -131,6 +198,7 @@ export async function startFakeProvider({
   fixtureFile = null,
   fixtureId = null,
   expectedToolName = null,
+  expectedPrincipleText = null,
   defaultModel = 'local-fake-model',
   port = 0,
 } = {}) {
@@ -246,11 +314,30 @@ export async function startFakeProvider({
       record.model = typeof payload.model === 'string' ? payload.model : null;
       record.streamRequested = payload.stream === true;
       record.toolDefinitions = toolDefinitionNames(payload);
+      record.toolDefinitionsFull = toolDefinitionRecords(payload);
+      record.toolCallAttempts = assistantToolCallAttempts(payload.messages);
+      record.toolCallAttemptNames = record.toolCallAttempts.map((attempt) => attempt.name);
       const systemText = systemMessageText(payload.messages);
       record.intervention = {
         directivesBlockPresent: typeof systemText === 'string' && systemText.includes(DIRECTIVES_MARKER),
         directiveIds: directiveIds(systemText),
         systemPromptSha256: typeof systemText === 'string' ? sha256Hex(systemText) : null,
+      };
+      // The success gate must see the TARGET BODY in the endpoint request, not
+      // merely a directive id. Without it, a native-path delivery can look like
+      // a controlled admission.
+      record.principleBody = {
+        expectedSha256: typeof expectedPrincipleText === 'string' && expectedPrincipleText.length > 0
+          ? sha256Hex(expectedPrincipleText)
+          : null,
+        present: typeof expectedPrincipleText === 'string'
+          && expectedPrincipleText.length > 0
+          && typeof systemText === 'string'
+          && systemText.includes(expectedPrincipleText),
+        occurrences: typeof expectedPrincipleText === 'string' && expectedPrincipleText.length > 0 && typeof systemText === 'string'
+          ? systemText.split(expectedPrincipleText).length - 1
+          : 0,
+        directiveMatches: directiveBodies(systemText),
       };
       record.toolResultContainsFixture = fixtureId && typeof toolMessage?.content === 'string'
         ? toolMessage.content.includes(fixtureId)

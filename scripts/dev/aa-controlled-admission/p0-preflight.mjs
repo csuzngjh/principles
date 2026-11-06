@@ -25,6 +25,8 @@ import { hostCommand, hostIdentity, isRegularFile, resolveHostProfile, sha256Fil
 import { hostConfigSha256, readHostConfig, validateHostConfigWiring, PLUGIN_ID, MCP_SERVER_NAME } from './lib/host-config.mjs';
 import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv, isInsideRoot } from './lib/env-isolation.mjs';
 import { readControlledWorkspaceTarget } from './lib/workspace-seed.mjs';
+import { inspectAdmissionFile } from './lib/admission.mjs';
+import { auditHostToolPolicy } from './lib/tool-policy-audit.mjs';
 
 const PLUGIN_BUNDLE_RELATIVE = join('packages', 'openclaw-plugin', 'dist', 'bundle.js');
 const MCP_BINDING_RELATIVE = join('packages', 'openclaw-plugin', 'mcp-binding.json');
@@ -476,6 +478,22 @@ export async function runP0Preflight({
     checks.push(check('frozen-files', violations.length === 0 ? 'PASS' : 'FAIL',
       'fixture, input, manifest and admission agree with the frozen plan', { violations }));
     report.fixtureRef = plan.fixtureRef;
+
+    // 7a. The REAL admission file the plugin will read — creation time,
+    // expiry window, unconsumed state and hash bindings. Checking only the
+    // argv that produced the file is not evidence (the 15-minute ceiling is a
+    // PD admission rule, not a host rule).
+    const admissionCheck = inspectAdmissionFile({
+      admissionPath: plan.admissionPath,
+      manifestPath: plan.manifestPath,
+      plan,
+      expectedSha256: plan.admissionSha256 ?? null,
+      requireUnconsumed: true,
+    });
+    checks.push(check('admission-file', admissionCheck.ok ? 'PASS' : 'FAIL',
+      'the final admission file is unconsumed, unexpired, inside the PD 15-minute window and hash-bound to the frozen plan',
+      { violations: admissionCheck.violations, facts: admissionCheck.facts }));
+    report.admissionFile = admissionCheck;
   }
 
   // 8. Loopback reachability at the FROZEN port (the endpoint the host will call).
@@ -544,6 +562,22 @@ export async function runP0Preflight({
         otherEnabledMcpServers,
         definitiveEvidence: 'endpoint request body (gate tool-surface)',
       }));
+  }
+
+  // 11. Effective permission: the fixed meta tools may APPEAR in the surface
+  // (the host injects tool-search controls), but they must not reach any
+  // capability outside `tools.allow`. This executes the host's own policy
+  // predicate against the frozen allowlist and records the dispatch chain.
+  if (!plan || !profile.ok || !toolName) {
+    checks.push(check('tool-policy-effective', 'NOT_RUN', 'blocked: plan, isolated host or tool name unavailable'));
+  } else {
+    const config = readHostConfig(plan.configPath);
+    const allow = Array.isArray(config?.tools?.allow) ? config.tools.allow : null;
+    const audit = await auditHostToolPolicy({ packageDir: profile.packageDir, toolsAllow: allow ?? [], toolName });
+    checks.push(check('tool-policy-effective', audit.ok ? 'PASS' : 'FAIL',
+      'the host policy denies the fixed meta tools under the single-tool allowlist, and dispatch_action can resolve ids only from a catalog built from the effective tool surface',
+      audit));
+    report.toolExecutionPolicy = audit;
   }
 
   report.ready = checks.every((row) => row.status === 'PASS');
