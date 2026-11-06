@@ -246,7 +246,7 @@ async function main() {
   // ── P1 SCAN (read-only) ──
   const rows = entries.map((e) => {
     const c = classifyEntry(e, ctx);
-    let planned = 'keep';
+    let planned;
     if (forceKeep.has(e.id)) planned = 'keep(forced)';
     else if (forceExclude.has(e.id)) planned = 'exclude(forced)';
     else if (c.category === 'A') planned = 'keep';

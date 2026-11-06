@@ -879,7 +879,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             },
           });
 
-          const originalOutput = typeof parsedOutput === 'object' && parsedOutput !== null
+          const originalOutput = typeof parsedOutput === 'object'
             ? parsedOutput as Record<string, unknown>
             : undefined;
 
@@ -1321,7 +1321,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       // RunnerContext / TaskRecord, never from validated output.
       // This prevents LLM-supplied lineage from poisoning downstream
       // commits (ERR-008 family). See PRI-271 D4 in PR description.
-      const protectedParsed = typeof parsed === 'object' && parsed !== null
+      const protectedParsed = typeof parsed === 'object'
         ? stripLineageFields(parsed)
         : parsed;
 

@@ -67,7 +67,6 @@ function exists(p: string): boolean { return fs.existsSync(p); }
     seed.exec('CREATE TABLE unrelated_seed_table (id INTEGER PRIMARY KEY)');
     seed.close();
   }
-  const sizeBefore = fs.statSync(traj4).size;
   const listRes = listGovernanceObservations({ workspaceDir: ws4 } as never) as Record<string, unknown>;
   let sideEffectTables: string[] | null = null;
   let journalMode: string | null = null;

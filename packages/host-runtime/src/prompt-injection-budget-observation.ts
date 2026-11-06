@@ -320,7 +320,10 @@ function narrowObservation(parsed: unknown, workspaceDir: string, nowMs: number)
 function readBoundedLogText(filePath: string): { text: string; truncated: boolean } | null {
   let fd: number;
   try {
-    fd = fs.openSync(filePath, 'r');
+    // Read-only open. The mode is explicit anyway: this path can be derived
+    // from a temp-dir workspace, and an explicit 0600 keeps the file
+    // owner-only if this call is ever changed to a creating flag.
+    fd = fs.openSync(filePath, 'r', 0o600);
   } catch {
     return null;
   }

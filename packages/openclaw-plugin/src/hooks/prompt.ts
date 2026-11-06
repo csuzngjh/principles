@@ -132,16 +132,23 @@ function cachedReadFile(filePath: string, workspaceDir: string): string {
   const cached = cache.get(filePath);
 
   try {
-    const stat = fs.statSync(filePath);
-    const mtime = stat.mtimeMs;
+    // mtime check and read share one handle: `statSync` + `readFileSync` on the
+    // path can observe two different files (TOCTOU on a cached read).
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const stat = fs.fstatSync(fd);
+      const mtime = stat.mtimeMs;
 
-    if (cached && (now - cached.loadedAt) < STATIC_FILE_TTL_MS && cached.mtime === mtime) {
-      return cached.content;
+      if (cached && (now - cached.loadedAt) < STATIC_FILE_TTL_MS && cached.mtime === mtime) {
+        return cached.content;
+      }
+
+      const content = fs.readFileSync(fd, 'utf8');
+      cache.set(filePath, { content, mtime, loadedAt: now });
+      return content;
+    } finally {
+      fs.closeSync(fd);
     }
-
-    const content = fs.readFileSync(filePath, 'utf8');
-    cache.set(filePath, { content, mtime, loadedAt: now });
-    return content;
   } catch (error) {
     // File doesn't exist or unreadable — invalidate cache
     cache.delete(filePath);

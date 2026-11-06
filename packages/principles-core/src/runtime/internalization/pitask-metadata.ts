@@ -1086,7 +1086,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
   const rawMeta = parsed[PI_METADATA_KEY];
-  if (!rawMeta || typeof rawMeta !== 'object' || rawMeta === null || Array.isArray(rawMeta)) return null;
+  if (rawMeta === null || typeof rawMeta !== 'object' || Array.isArray(rawMeta)) return null;
 
   const m = rawMeta as Record<string, unknown>;
 

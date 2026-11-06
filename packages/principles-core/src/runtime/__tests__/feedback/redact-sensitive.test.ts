@@ -40,7 +40,7 @@ describe('redactAbsolutePaths', () => {
   it('handles multiple absolute paths in one string', () => {
     const text = 'From C:\\a\\b.ts to D:\\c\\d.ts works';
     const result = redactAbsolutePaths(text);
-    const matches = result.match(new RegExp(REDACTED_PATH.replace(/[<>]/g, '\\$&'), 'g'));
+    const matches = result.match(new RegExp(REDACTED_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'));
     expect(matches?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });

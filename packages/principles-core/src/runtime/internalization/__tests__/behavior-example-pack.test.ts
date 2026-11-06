@@ -253,8 +253,9 @@ describe('PRI-484 BehaviorExamplePack validator — hostile input (ERR-001 / ERR
 
   it('rejects object with __proto__ key (prototype pollution)', () => {
     const pack = makeValidPack();
-    const hostile = JSON.parse(JSON.stringify(pack));
-    Object.defineProperty(hostile, '__proto__', { value: 'polluted', enumerable: true });
+    // JSON text, not `defineProperty`: it produces the own `__proto__` key an
+    // untrusted JSON payload would carry, without mutating a prototype.
+    const hostile = JSON.parse(`${JSON.stringify(pack).slice(0, -1)},"__proto__":"polluted"}`);
     const result = validateBehaviorExamplePack(hostile);
     expect(result.valid).toBe(false);
   });

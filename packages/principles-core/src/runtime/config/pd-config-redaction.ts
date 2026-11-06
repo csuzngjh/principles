@@ -216,7 +216,7 @@ export function redactConfigValue(value: unknown, key?: string): unknown {
     return value.slice(0, 20).map((v) => redactConfigValue(v, undefined));
   }
 
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+  if (typeof value === 'object' && !Array.isArray(value)) {
     const result: Record<string, unknown> = {};
     const entries = Object.entries(value).slice(0, 30);
     for (const [k, v] of entries) {

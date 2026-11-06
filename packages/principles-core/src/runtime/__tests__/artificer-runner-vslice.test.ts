@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ArtificerRunner } from '../internalization/artificer-runner.js';
 import type { ArtificerRunnerDeps } from '../internalization/artificer-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
-import { collectUpstreamNormalisedText } from '../internalization/artificer-intent-preflight.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';

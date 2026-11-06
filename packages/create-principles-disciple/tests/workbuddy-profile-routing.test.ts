@@ -298,13 +298,28 @@ function seedGovernanceWorkspace(lab: Lab, customize?: (config: GovernanceRawCon
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 120_000,
   });
-  if (!fs.existsSync(lab.governanceConfigPath)) {
-    throw new Error(`runtime init did not create ${lab.governanceConfigPath}`);
+  // Open the file once and do the read/rewrite through that single handle:
+  // a path-based existence check followed by a path-based write would race
+  // against a path swap between the two.
+  let fd: number;
+  try {
+    fd = fs.openSync(lab.governanceConfigPath, 'r+');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`runtime init did not create ${lab.governanceConfigPath}`);
+    }
+    throw e;
   }
-  if (customize) {
-    const config = readGovernanceConfig(lab);
-    customize(config);
-    fs.writeFileSync(lab.governanceConfigPath, yaml.dump(config, { lineWidth: -1, quoteStyle: 'double' }), 'utf8');
+  try {
+    if (customize) {
+      const config = yaml.load(fs.readFileSync(fd, 'utf8')) as GovernanceRawConfig;
+      customize(config);
+      // Truncate before rewriting so the handle survives a full replace.
+      fs.ftruncateSync(fd, 0);
+      fs.writeFileSync(fd, yaml.dump(config, { lineWidth: -1, quoteStyle: 'double' }), 'utf8');
+    }
+  } finally {
+    fs.closeSync(fd);
   }
 }
 

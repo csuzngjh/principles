@@ -89,7 +89,7 @@ export function safeStringifyPreview(value: unknown, maxLen = 500): string {
     const serialized = JSON.stringify(value);
     return truncatePreview(serialized, maxLen);
   } catch {
-    if (typeof value === 'object' && value !== null) {
+    if (typeof value === 'object') {
       const ctor = (value as Record<string, unknown>).constructor;
       return truncatePreview(`[unserializable: ${ctor?.name ?? 'Object'}]`, maxLen);
     }

@@ -77,7 +77,6 @@ let studyCopy;
 let runRoot;
 if (resumeCopy !== undefined) {
   studyCopy = path.resolve(process.cwd(), resumeCopy);
-  runRoot = path.dirname(studyCopy);
   if (!fs.existsSync(path.join(studyCopy, 'suite-manifest.json'))) {
     console.error(`run-stage-r-f2: --resume copy is not a study directory: ${studyCopy}`);
     process.exit(1);

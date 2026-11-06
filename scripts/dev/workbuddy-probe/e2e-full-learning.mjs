@@ -726,7 +726,7 @@ async function main() {
     before = mockReqCount();
     writeMockReply('e', textReply('learn5', 'ok'));
     writeMockReply('f', textReply('learn6', 'done'));
-    run = runTwoPrompts('post-withdraw', 'another question', 'and another');
+    runTwoPrompts('post-withdraw', 'another question', 'and another');
     const wReqs = mockReqsSince(before);
     const wRan = wReqs.length > 0 && wReqs.some((r) => JSON.stringify(r.body ?? '').includes('another question'));
     const stillThere = wReqs.some((r) => probe.length > 0 && JSON.stringify(r.body ?? '').includes(probe));

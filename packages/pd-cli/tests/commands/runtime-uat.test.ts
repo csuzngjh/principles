@@ -5,8 +5,6 @@
  *   node scripts/uat/runtime-chain-uat.mjs --workspace <path> --count 2 --json
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
 
 // ── Mock child_process before importing the module under test ────────────────
 

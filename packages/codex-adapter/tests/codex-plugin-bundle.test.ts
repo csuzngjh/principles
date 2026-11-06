@@ -1063,7 +1063,6 @@ describe('first-run $pd-control setup (real user flow)', () => {
     // dist/index.js proves nothing about the installed MCP server. Launch the
     // REAL npm-installed pinned server bytes through the shipped launcher and
     // require discovery, so a placeholder install can no longer pass this test.
-    const installedServerDist = path.join(pluginData, 'runtime', 'node_modules', '@principles', 'pd-mcp-server', 'dist');
     const discovery = spawnSync(process.execPath, [path.join(cachePlugin, 'mcp', 'launcher.cjs')], {
       cwd: workspace,
       encoding: 'utf8',

@@ -439,9 +439,6 @@ export function checkLine(line, ctx) {
 function stripNoise(line) {
   let out = '';
   let i = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let inTemplate = false;
   let inRegex = false;
   let inBlockComment = false;
 
@@ -480,27 +477,6 @@ function stripNoise(line) {
       continue;
     }
 
-    if (inSingle || inDouble || inTemplate) {
-      // Unreachable: the quote-entry branches above consume the entire literal
-      // and reset the flag before the loop continues. Kept defensively in case
-      // a future edit re-introduces mid-string state.
-      const close = inSingle ? "'" : inDouble ? '"' : '`';
-      if (ch === '\\' && next !== undefined) {
-        i += 2;
-        continue;
-      }
-      if (ch === close) {
-        out += ch;
-        if (inSingle) inSingle = false;
-        else if (inDouble) inDouble = false;
-        else inTemplate = false;
-        i += 1;
-        continue;
-      }
-      i += 1;
-      continue;
-    }
-
     if (ch === '/' && next === '/') {
       break; // line comment
     }
@@ -520,7 +496,6 @@ function stripNoise(line) {
       // (a) an `as`/`in` token inside the string cannot trigger a false match,
       // but (b) a quoted property key like `'type' in obj` still has a
       // non-empty quoted token the ERR-013 regex can match.
-      inSingle = true;
       out += "'_";
       i += 1;
       while (i < line.length && line[i] !== "'") {
@@ -534,11 +509,9 @@ function stripNoise(line) {
         out += "'";
         i += 1;
       }
-      inSingle = false;
       continue;
     }
     if (ch === '"') {
-      inDouble = true;
       out += '"_';
       i += 1;
       while (i < line.length && line[i] !== '"') {
@@ -552,7 +525,6 @@ function stripNoise(line) {
         out += '"';
         i += 1;
       }
-      inDouble = false;
       continue;
     }
     if (ch === '`') {
@@ -560,7 +532,6 @@ function stripNoise(line) {
       // is not specially handled — a violation inside `${...}` would be masked.
       // This is acceptable: violations inside template interpolation are rare
       // and the detector runs on the original line via parseExemption anyway.
-      inTemplate = true;
       out += '`_';
       i += 1;
       while (i < line.length && line[i] !== '`') {
@@ -574,7 +545,6 @@ function stripNoise(line) {
         out += '`';
         i += 1;
       }
-      inTemplate = false;
       continue;
     }
     out += ch;

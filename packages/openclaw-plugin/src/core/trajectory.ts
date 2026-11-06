@@ -137,28 +137,6 @@ function isPainEventRow(value: unknown): value is PainEventRow {
 }
 
 /**
- * True when the named table exists in the open database (PRI-770): used to
- * gate the conditional evolution_tasks column backfill without re-creating
- * the table on fresh workspaces.
- */
-function tableExists(db: Database.Database, name: string): boolean {
-  const row = db.prepare(
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
-  ).get(name);
-  return row !== undefined;
-}
-
-/**
- * SQLite's only signal for "column already exists" is the error message text
- * (there is no IF NOT EXISTS for ADD COLUMN). Mirrors the MEM-01 migration
- * pattern below; unexpected errors must rethrow.
- */
-function isDuplicateColumnError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes('duplicate column name') || message.includes('no column named');
-}
-
-/**
  * Apply the trajectory.db schema to an open Database handle (PRI-774).
  *
  * Delegates to the canonical schema module (`applyTrajectorySchemaBase`,

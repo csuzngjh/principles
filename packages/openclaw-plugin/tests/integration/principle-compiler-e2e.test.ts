@@ -301,7 +301,6 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
   });
 
   it('should return compilation failure when principle has no derivedFromPainIds', () => {
-    const sessionId = 'session-no-pain-001';
     const principleId = 'P_099';
 
     // Set up a principle WITHOUT derivedFromPainIds

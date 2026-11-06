@@ -142,14 +142,11 @@ describe('validatePdConfig workspace field', () => {
   });
 
   // 11. Rejects dangerous keys in workspace section
-  // Note: __proto__ in object literals is not enumerable, so the dangerous key
-  // check is for runtime configs where these keys might be present.
-  // We test this by constructing the object via Object.create to bypass the
-  // literal __proto__ special case.
+  // Note: `__proto__` in object literals sets the prototype instead of creating
+  // an own key, so the hostile input is parsed from JSON text — exactly how an
+  // untrusted config file would deliver the key.
   it('rejects dangerous keys in workspace section', () => {
-    const wsObj = Object.create(null);
-    wsObj.default = '/valid/path';
-    wsObj.__proto__ = 'bad';
+    const wsObj = JSON.parse('{"default":"/valid/path","__proto__":"bad"}') as Record<string, unknown>;
     const result = validatePdConfig(makeValidConfig(wsObj));
     expect(result.ok).toBe(false);
     if (!result.ok) {

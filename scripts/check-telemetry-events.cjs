@@ -83,7 +83,7 @@ function extractUnionNames() {
 
 function collectRunnerNames(sources) {
   const names = new Set();
-  for (const { rel, src } of sources) {
+  for (const { src } of sources) {
     for (const m of src.matchAll(/runnerName:\s*'([a-z_]+)'/g)) {
       names.add(m[1]);
     }

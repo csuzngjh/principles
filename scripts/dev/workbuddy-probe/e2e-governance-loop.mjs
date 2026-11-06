@@ -25,7 +25,6 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -297,10 +296,9 @@ async function main() {
     // ── Turn 3: real failing tool → evidence ──
     // The row must be the REAL failure shape (outcome=failure, exit_code
     // recorded, attributed session) — not merely "some Read row exists".
-    before = mockReqCount();
     writeMockReply('a', toolCallReply('e2eread', 'Read', { file_path: path.join(PROJECT, 'definitely-missing-e2e.txt') }));
     writeMockReply('b', textReply('e2ewrap2', 'noted'));
-    run = runTwoPrompts('fail');
+    runTwoPrompts('fail');
     await new Promise((resolve) => setTimeout(resolve, 500));
     const traj = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
     const toolRow = traj.prepare("SELECT tool_name, outcome, exit_code, session_id FROM tool_calls WHERE tool_name = 'Read' ORDER BY id DESC").get();

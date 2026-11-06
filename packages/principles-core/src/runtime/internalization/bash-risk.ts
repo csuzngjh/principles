@@ -785,7 +785,10 @@ function classifyCommandChain(input: string, depth: number): BashRiskLevel {
   if (tokens === null) return 'unknown';
   if (tokens.length === 0) return 'unknown';
   const segments = splitSegments(tokens);
-  if (segments === null) return 'unknown';
+  // splitSegments reports "cannot split safely" as null; an array (including an
+  // empty one) is a real result. `Array.isArray` narrows the union without
+  // relying on a null comparison the analyzer models as unreachable.
+  if (!Array.isArray(segments)) return 'unknown';
   let level: BashRiskLevel = 'safe';
   for (const segment of segments) {
     const segLevel = classifySegment(segment, subLevels);

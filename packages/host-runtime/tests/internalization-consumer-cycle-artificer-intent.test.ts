@@ -25,13 +25,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  applyTrajectorySchemaBase,
-  buildToolSemanticRegistry,
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
   ArtificerRunner,
-  PDRuntimeError,
   getDefaultPdConfig,
   type BehaviorExamplePack,
   type OwnerEvidenceSelection,

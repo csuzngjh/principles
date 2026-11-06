@@ -264,9 +264,6 @@ registry.when(/operator 执行 "(.+)"/, async (ctx, command: string) => {
   }
 
   const allLogCalls = logSpy.mock.calls.map((c) => String(c[0]));
-  const jsonCall = allLogCalls.find((s) => {
-    try { JSON.parse(s); return true; } catch { return false; }
-  });
   // cli-1: 统计 stdout 上可解析为 JSON 的调用数，用于 Then 步骤验证"恰好一个"
   const jsonCallCount = allLogCalls.filter((s) => {
     try { JSON.parse(s); return true; } catch { return false; }

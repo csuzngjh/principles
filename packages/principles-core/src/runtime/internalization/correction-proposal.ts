@@ -109,6 +109,23 @@ export interface PathValidationResult {
   reason: string;
 }
 
+function normalizePosixPath(value: string, stripTrailingSlash: boolean): string {
+  let normalized = '';
+  let previousWasSlash = false;
+  for (const character of value) {
+    const current = character === '\\' ? '/' : character;
+    if (current === '/') {
+      if (!previousWasSlash) normalized += '/';
+      previousWasSlash = true;
+    } else {
+      normalized += current;
+      previousWasSlash = false;
+    }
+  }
+  if (stripTrailingSlash && normalized.endsWith('/')) normalized = normalized.slice(0, -1);
+  return normalized;
+}
+
 export function isPathWithinWorkspace(
   proposedPath: string,
   workspaceDir: string,
@@ -117,8 +134,8 @@ export function isPathWithinWorkspace(
     return { valid: false, reason: 'proposed path is empty or not a string' };
   }
 
-  const normalizedPath = proposedPath.replace(/\\/g, '/').replace(/\/+/g, '/');
-  const normalizedWorkspace = workspaceDir.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/+$/, '');
+  const normalizedPath = normalizePosixPath(proposedPath, false);
+  const normalizedWorkspace = normalizePosixPath(workspaceDir, true);
 
   if (/^\\\\/.test(proposedPath) || /^\/\/[^/]/.test(proposedPath)) {
     return { valid: false, reason: `UNC/network path not allowed: ${proposedPath}` };

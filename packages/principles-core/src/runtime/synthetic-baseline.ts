@@ -48,7 +48,7 @@ export function safeStringify(value: unknown): string {
     if (typeof value === 'bigint') return `${value}n`;
     if (value === undefined) return 'undefined';
     if (value === null) return 'null';
-    if (typeof value === 'object' && value !== null) {
+    if (typeof value === 'object') {
       const proto = Object.getPrototypeOf(value);
       if (proto === null) {
         return JSON.stringify(Object.fromEntries(Object.entries(value)));

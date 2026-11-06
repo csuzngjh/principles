@@ -68,6 +68,11 @@ export { TREE_NAMESPACE };
 
 const PRINCIPLE_TRAINING_FILE = 'principle_training_state.json';
 
+// Keys that resolve through the object prototype chain instead of the ledger.
+// `principles['__proto__']` yields Object.prototype, so an update would treat
+// it as an existing principle and then write through it.
+const RESERVED_PRINCIPLE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
 // ---------------------------------------------------------------------------
 // Atomic file write (inlined PRI-443 Phase 4)
 // ---------------------------------------------------------------------------
@@ -511,6 +516,9 @@ export function addPrincipleToLedger(stateDir: string, principle: LedgerPrincipl
 
 export function updatePrinciple(stateDir: string, principleId: string, updates: Partial<LedgerPrinciple>): LedgerPrinciple {
   return mutateLedger(stateDir, (store) => {
+    if (RESERVED_PRINCIPLE_KEYS.has(principleId)) {
+      throw new Error(`Cannot update principle with reserved id "${principleId}".`);
+    }
     const existing = store.tree.principles[principleId];
     if (!existing) throw new Error(`Cannot update missing principle "${principleId}".`);
     const next: LedgerPrinciple = {
@@ -523,7 +531,13 @@ export function updatePrinciple(stateDir: string, principleId: string, updates: 
       derivedFromPainIds: updates.derivedFromPainIds
         ? uniqueStrings(updates.derivedFromPainIds) : existing.derivedFromPainIds,
     };
-    store.tree.principles[principleId] = next;
+    // PRI-1136: the id is caller-supplied, so it must not reach a property-write
+    // sink. Object.fromEntries rebuilds the map without naming a property per
+    // key; a duplicate id keeps the last entry, exactly like the old assignment.
+    store.tree.principles = Object.fromEntries([
+      ...Object.entries(store.tree.principles),
+      [principleId, next],
+    ]);
     return next;
   });
 }

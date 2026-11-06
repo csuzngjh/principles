@@ -1368,6 +1368,11 @@ function extractProfileFields(
   return {};
 }
 
+// Keys that resolve through the object prototype chain instead of the profile
+// map: assigning `profilesMap['__proto__']` would replace the map's prototype
+// rather than add a profile.
+const RESERVED_PROFILE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Create a new runtime profile in .pd/config.yaml.
  *
@@ -1389,6 +1394,9 @@ export function createRuntimeProfile(
   // 1. Validate profileId
   if (typeof profileId !== 'string' || profileId.length === 0) {
     return { ok: false, statusCode: 400, error: 'bad_request', message: 'profileId must be a non-empty string' };
+  }
+  if (RESERVED_PROFILE_KEYS.has(profileId)) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: `profileId '${profileId}' is reserved and cannot be used` };
   }
 
   // 2. Validate profile structure (type field)
@@ -1439,10 +1447,16 @@ export function createRuntimeProfile(
   // 6. Read raw config to preserve unknown sections, add new profile
   const configPath = getPdConfigPath(workspaceDir);
   const rawConfig = readRawConfig(configPath);
-  const profilesMap = isRecord(rawConfig.runtimeProfiles)
-    ? { ...rawConfig.runtimeProfiles }
-    : { ...effective.config.runtimeProfiles };
-  profilesMap[profileId] = profileRecord;
+  const profilesBase = isRecord(rawConfig.runtimeProfiles)
+    ? rawConfig.runtimeProfiles
+    : effective.config.runtimeProfiles;
+  // PRI-1136: the profile id comes from the request body, so it must never
+  // reach a property-write sink. Object.fromEntries builds the map without
+  // naming a property per key; last-wins ordering matches the old assignment.
+  const profilesMap: Record<string, unknown> = Object.fromEntries([
+    ...Object.entries(profilesBase),
+    [profileId, profileRecord],
+  ]);
   rawConfig.runtimeProfiles = profilesMap;
 
   // 7. Validate the full updated config (catches missing required fields etc.)

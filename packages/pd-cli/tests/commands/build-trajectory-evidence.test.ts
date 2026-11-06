@@ -389,7 +389,7 @@ describe('acquireTrajectoryEvidenceFromDb — typed CLI acquisition (PRI-642 Sco
 
     const unreadable = acquireTrajectoryEvidenceFromDb(stateDir, 'some-session', tmpDir);
 
-    const stateDir2 = createStateDir();
+    createStateDir();
     const db2 = createTrajectoryDb();
     db2.close();
 

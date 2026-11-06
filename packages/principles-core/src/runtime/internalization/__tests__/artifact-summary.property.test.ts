@@ -34,11 +34,6 @@ const optionalText = () => fc.oneof(
   fc.string({ minLength: 700, maxLength: 900 }), // forces SUMMARY_FIELD_MAX_CHARS clamping
 );
 
-const requiredText = () => fc.oneof(
-  fc.string({ minLength: 1, maxLength: 40 }),
-  fc.string({ minLength: 900, maxLength: 1200 }), // forces headline clamping
-);
-
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {

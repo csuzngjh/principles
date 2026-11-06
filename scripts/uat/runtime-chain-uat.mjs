@@ -247,7 +247,7 @@ async function main() {
     }
 
     // Run candidate audit
-    let auditStatus = 'unknown';
+    let auditStatus;
     try {
       const auditOut = pd(['candidate', 'audit', '--json'], workspace, 30_000);
       const audit = parseJsonOutput(auditOut);

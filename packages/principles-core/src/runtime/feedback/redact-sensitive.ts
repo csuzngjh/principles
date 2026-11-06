@@ -94,7 +94,21 @@ export function redactTelemetryString(text: unknown): unknown {
 
 // ── Stack trace redaction ──────────────────────────────────────────────────
 
-const STACK_FRAME_LINE = /^\s*at\s+.*$/gm;
+// Line-scanning equivalent of `/^[ \t]*at[ \t]+.*$/gm`. Written as a single
+// left-to-right pass over each line so adversarial input stays linear; a global
+// multiline regex could rescan following lines on every failed match.
+function collectStackFrames(text: string): string[] {
+  const frames: string[] = [];
+  for (const line of text.split(/[\r\n\u2028\u2029]/)) {
+    let i = 0;
+    while (i < line.length && (line[i] === ' ' || line[i] === '\t')) i += 1;
+    if (!line.startsWith('at', i)) continue;
+    i += 2;
+    if (i >= line.length || line[i] !== ' ' && line[i] !== '\t') continue;
+    frames.push(line);
+  }
+  return frames;
+}
 
 /**
  * Reduce a stack trace to the error name and the first N frames (paths redacted).
@@ -103,7 +117,7 @@ const STACK_FRAME_LINE = /^\s*at\s+.*$/gm;
 export function redactStackTrace(text: string, maxFrames: number = MAX_STACK_FRAMES_DEFAULT): string {
   if (typeof text !== 'string' || text.length === 0) return NO_STACK;
   const firstLine = text.split('\n', 1)[0]?.trim() ?? '';
-  const frames = text.match(STACK_FRAME_LINE) ?? [];
+  const frames = collectStackFrames(text);
   const kept = frames
     .slice(0, Math.max(0, maxFrames))
     .map((f) => f.replace(WINDOWS_PATH, REDACTED_PATH).replace(POSIX_PATH, REDACTED_PATH))

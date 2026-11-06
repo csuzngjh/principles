@@ -23,7 +23,7 @@
  *   - ERR-026/037 (EP-09): fixtures match production schema — real
  *     SqliteConnection for state.db, real pain_events table for trajectory.db
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach, afterEach } from 'vitest';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';

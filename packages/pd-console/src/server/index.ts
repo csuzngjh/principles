@@ -201,16 +201,12 @@ function safeStaticPath(rootDir: string, requestPath: string): string | null {
 }
 
 function serveFile(res: http.ServerResponse, filePath: string): boolean {
-  if (!fs.existsSync(filePath)) {
-    return false;
-  }
   try {
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) {
-      return false;
-    }
-    const contentType = contentTypeFor(filePath);
+    // A single read is enough: a missing path or a directory throws here,
+    // which maps to the same `false` the previous exists+stat checks returned.
+    // Check-then-read would let the file change between the two calls.
     const data = fs.readFileSync(filePath);
+    const contentType = contentTypeFor(filePath);
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': data.length,
@@ -243,6 +239,14 @@ const UPDATE_CHECK_TIMEOUT_MS = resolveCheckTimeoutMs();
 
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
+/**
+ * Collapse line breaks before a request value reaches a log line, so a crafted
+ * path cannot forge additional log entries (log injection).
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(/\r/g, '').replace(/\n/g, '');
+}
+
 function asyncHandler(fn: AsyncRouteHandler, timeoutMs: number = REQUEST_TIMEOUT_MS): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   return (innerReq, innerRes) => {
     const timeoutId = setTimeout(() => {
@@ -250,7 +254,11 @@ function asyncHandler(fn: AsyncRouteHandler, timeoutMs: number = REQUEST_TIMEOUT
         // The route keeps running after this point; record the real cause
         // before any dropped late write, so the log never leads with a
         // transport error (ERR_HTTP_HEADERS_SENT) instead of the timeout.
-        console.warn(`[pd-console] Request timed out after ${timeoutMs}ms: ${innerReq.method ?? 'GET'} ${innerReq.url ?? ''}`);
+        console.warn(
+          '[pd-console] Request timed out after %dms: %s',
+          timeoutMs,
+          sanitizeForLog(`${innerReq.method ?? 'GET'} ${innerReq.url ?? ''}`),
+        );
         sendJson(innerRes, 504, { success: false, error: 'Request timeout' });
         innerRes.end();
       }

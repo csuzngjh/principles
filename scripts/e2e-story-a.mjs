@@ -549,7 +549,7 @@ function generateEvidence({ runId, trap, phase0R, phase1R, phase2R, phase3R, pha
   // Compute verdict via the strict, unit-tested computation extracted to
   // e2e-story-a-verdict.mjs. The previous inline verdict block was removed
   // because it was unconditionally overwritten by strictResult below.
-  let verdict = 'story_a_validated';
+  let verdict;
   const verdictNotes = [];
 
   const strictResult = computeStoryAVerdict({

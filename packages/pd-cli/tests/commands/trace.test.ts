@@ -48,10 +48,6 @@ function fullChainTrace() {
   };
 }
 
-function mockProcessExit() {
-  return vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
-}
-
 describe('handleTraceShow', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;

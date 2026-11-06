@@ -18,7 +18,7 @@ import { Command } from 'commander';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
-const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetCandidateImpl } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation } = vi.hoisted(() => {
   const mockGetTask = vi.fn().mockResolvedValue(null);
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);

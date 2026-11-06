@@ -62,7 +62,7 @@ export async function handleRuntimeInternalizationWakeOnce(opts: WakeOnceOptions
       { owner: OWNER, runtimeKind: RUNTIME_KIND, dryRun: true },
     );
 
-    let result: WakeOnceResult = { decision: 'no_ready_tasks', reason: 'no_candidates', inspectedCount: 0 };
+    let result: WakeOnceResult;
     try {
       result = await orchestrator.wakeOnce();
     } catch (err) {

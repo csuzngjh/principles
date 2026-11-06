@@ -61,7 +61,6 @@ import {
   createProductionGateDeps,
   ApprovalCompletionService,
   getChannelRiskLevel,
-  SqliteConnection,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime';
 import type {
@@ -509,7 +508,7 @@ beforeAll(async () => {
   // Seed: read_file(src/auth.ts) → write_file(src/auth.ts) → write_file(src/other.ts)
   // The positive case (write src/auth.ts) has a prior read → priorReadOfTarget = 'yes'
   // The negative case (write src/other.ts) has NO prior read → priorReadOfTarget = 'no'
-  const readCallId = trajectory.recordToolCall({
+  trajectory.recordToolCall({
     sessionId: SESSION_ID,
     toolName: 'read_file',
     outcome: 'success',

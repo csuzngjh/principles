@@ -841,7 +841,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
 //   - no config → the zh-CN default applies.
 // Deleting the pipeline's language resolution makes these fail.
 
-function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
+function writeLanguageConfig(dir: string, outputLanguage: 'en' = 'en'): void {
   fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
   // Full valid-config shape (mirrors pd-config-loader.test.ts) so validation
   // keeps `principles` intact instead of degrading to defaults.
@@ -872,7 +872,7 @@ function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
     },
     ui: { diagnostics: { mode: 'simple' } },
   };
-  if (outputLanguage !== undefined) config.principles = { outputLanguage };
+  config.principles = { outputLanguage };
   // JSON is valid YAML — same trick the shared executor tests use.
   fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), JSON.stringify(config));
 }

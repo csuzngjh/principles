@@ -76,7 +76,7 @@ export function resolveModelFromConfig(
   }
 
   // Case 2: modelConfig is an object { primary, fallbacks } like { primary: "provider/model", fallbacks: [...] }
-  if (typeof modelConfig === 'object' && modelConfig !== null && !Array.isArray(modelConfig)) {
+  if (modelConfig !== null && typeof modelConfig === 'object' && !Array.isArray(modelConfig)) {
     if (Object.hasOwn(modelConfig, 'primary')) {
       const primaryDescriptor = Object.getOwnPropertyDescriptor(modelConfig, 'primary');
       if (!primaryDescriptor) return null;

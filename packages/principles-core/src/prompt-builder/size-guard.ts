@@ -38,6 +38,25 @@ import type { SizeGuardOptions, TruncateResult } from './types.js';
 const DEFAULT_BUDGET = PROMPT_TOTAL_INJECTION_FALLBACK_CHARS;
 
 /**
+ * Replaces the first `<open>…<close>` block with `replacement`.
+ *
+ * Equivalent to `new RegExp('<open>[\\s\\S]*?<close>')`, but linear in the input
+ * length: a lazy `[\s\S]*?` re-scans the remainder from every `<open>`
+ * occurrence when no closing tag follows, which is quadratic on adversarial
+ * prompt text built from repeated opening tags.
+ */
+function replaceFirstDelimitedBlock(
+  text: string,
+  block: { readonly open: string; readonly close: string; readonly replacement: string },
+): string {
+  const start = text.indexOf(block.open);
+  if (start === -1) return text;
+  const end = text.indexOf(block.close, start + block.open.length);
+  if (end === -1) return text;
+  return text.slice(0, start) + block.replacement + text.slice(end + block.close.length);
+}
+
+/**
  * Truncates the combined prompt injection to fit within budget.
  *
  * Receives the three prompt components separately (prependSystemContext,
@@ -82,8 +101,12 @@ export function truncateInjectionToBudget(
       totalSize = ps.length + pc.length + ac.length;
     }
   } else if (ac.includes('<project_context>')) {
-    // Fallback: use regex when exact content not provided
-    ac = ac.replace(/<project_context>[\s\S]*?<\/project_context>/, '<project_context>\n[stripped: project_context]\n</project_context>');
+    // Fallback: locate the block markers when exact content not provided
+    ac = replaceFirstDelimitedBlock(ac, {
+      open: '<project_context>',
+      close: '</project_context>',
+      replacement: '<project_context>\n[stripped: project_context]\n</project_context>',
+    });
     truncationLog.push('project_context');
     totalSize = ps.length + pc.length + ac.length;
   }
@@ -105,7 +128,11 @@ export function truncateInjectionToBudget(
       totalSize = ps.length + pc.length + ac.length;
     }
   } else if (ac.includes('<intent_anchor>')) {
-    ac = ac.replace(/<intent_anchor>[\s\S]*?<\/intent_friction>/, '[stripped: intent_block]');
+    ac = replaceFirstDelimitedBlock(ac, {
+      open: '<intent_anchor>',
+      close: '</intent_friction>',
+      replacement: '[stripped: intent_block]',
+    });
     truncationLog.push('intent_block');
     totalSize = ps.length + pc.length + ac.length;
   }
@@ -125,7 +152,11 @@ export function truncateInjectionToBudget(
         totalSize = ps.length + pc.length + ac.length;
       }
     } else if (ac.includes('<thinking_os>')) {
-      ac = ac.replace(/<thinking_os>[\s\S]*?<\/thinking_os>/, '<thinking_os>\n[stripped: thinking_os]\n</thinking_os>');
+      ac = replaceFirstDelimitedBlock(ac, {
+        open: '<thinking_os>',
+        close: '</thinking_os>',
+        replacement: '<thinking_os>\n[stripped: thinking_os]\n</thinking_os>',
+      });
       truncationLog.push('thinking_os');
       totalSize = ps.length + pc.length + ac.length;
     }
@@ -136,7 +167,11 @@ export function truncateInjectionToBudget(
 
     // Step 3 — strip reflection_log
     if (ac.includes('<reflection_log>')) {
-      ac = ac.replace(/<reflection_log>[\s\S]*?<\/reflection_log>/, '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>');
+      ac = replaceFirstDelimitedBlock(ac, {
+        open: '<reflection_log>',
+        close: '</reflection_log>',
+        replacement: '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>',
+      });
       truncationLog.push('reflection_log');
       totalSize = ps.length + pc.length + ac.length;
     }

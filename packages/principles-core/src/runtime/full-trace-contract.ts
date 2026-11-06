@@ -253,19 +253,33 @@ const SECRET_KEY_PATTERNS = [
   'access_token', 'refresh_token', 'auth_token', 'secret_key',
 ];
 
+/**
+ * Replaces the trailing run of non-whitespace characters with `replacement`.
+ *
+ * Equivalent to `text.replace(/\S+$/, replacement)`, but linear: a greedy `\S+`
+ * followed by `$` is retried from every start position, which is quadratic on
+ * adversarial input that contains no trailing whitespace.
+ */
+function redactTrailingValue(text: string, replacement: string): string {
+  let end = text.length;
+  while (end > 0 && !/\s/.test(text.charAt(end - 1))) end -= 1;
+  if (end === text.length) return text;
+  return text.slice(0, end) + replacement;
+}
+
 function sanitizeString(input: string): { result: string; redacted: boolean } {
   let redacted = false;
   const result = input
-    .replace(/\bapi[_-]?key\s*[:=]\s*\S+/gi, (m) => { redacted = true; return m.replace(/\S+$/, '[REDACTED]'); })
+    .replace(/\bapi[_-]?key\s*[:=]\s*\S+/gi, (m) => { redacted = true; return redactTrailingValue(m, '[REDACTED]'); })
     .replace(/\bapi[_-]?key["']?\s*:\s*["'][^"']*["']/gi, (m) => { redacted = true; const i = m.indexOf(':'); return m.slice(0, i + 1) + '"[REDACTED]"'; })
-    .replace(/\btoken\s*[:=]\s*\S+/gi, (m) => { redacted = true; return m.replace(/\S+$/, '[REDACTED]'); })
+    .replace(/\btoken\s*[:=]\s*\S+/gi, (m) => { redacted = true; return redactTrailingValue(m, '[REDACTED]'); })
     .replace(/\btoken["']?\s*:\s*["'][^"']*["']/gi, (m) => { redacted = true; const i = m.indexOf(':'); return m.slice(0, i + 1) + '"[REDACTED]"'; })
-    .replace(/\bbearer\s+\S+/gi, (m) => { redacted = true; return m.replace(/\S+$/, '[REDACTED]'); })
-    .replace(/\bauthorization\s*[:=]\s*\S+/gi, (m) => { redacted = true; return m.replace(/\S+$/, '[REDACTED]'); })
+    .replace(/\bbearer\s+\S+/gi, (m) => { redacted = true; return redactTrailingValue(m, '[REDACTED]'); })
+    .replace(/\bauthorization\s*[:=]\s*\S+/gi, (m) => { redacted = true; return redactTrailingValue(m, '[REDACTED]'); })
     .replace(/\bauthorization["']?\s*:\s*["'][^"']*["']/gi, (m) => { redacted = true; const i = m.indexOf(':'); return m.slice(0, i + 1) + '"[REDACTED]"'; })
-    .replace(/\bpassword\s*[:=]\s*\S+/gi, (m) => { redacted = true; return m.replace(/\S+$/, '[REDACTED]'); })
+    .replace(/\bpassword\s*[:=]\s*\S+/gi, (m) => { redacted = true; return redactTrailingValue(m, '[REDACTED]'); })
     .replace(/\bpassword["']?\s*:\s*["'][^"']*["']/gi, (m) => { redacted = true; const i = m.indexOf(':'); return m.slice(0, i + 1) + '"[REDACTED]"'; })
-    .replace(/\bsecret\s*[:=]\s*\S+/gi, (m) => { redacted = true; return m.replace(/\S+$/, '[REDACTED]'); })
+    .replace(/\bsecret\s*[:=]\s*\S+/gi, (m) => { redacted = true; return redactTrailingValue(m, '[REDACTED]'); })
     .replace(/\bsecret["']?\s*:\s*["'][^"']*["']/gi, (m) => { redacted = true; const i = m.indexOf(':'); return m.slice(0, i + 1) + '"[REDACTED]"'; });
   return { result, redacted };
 }

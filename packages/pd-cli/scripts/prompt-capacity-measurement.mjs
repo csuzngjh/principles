@@ -34,7 +34,6 @@ import {
   SqliteConnection,
   SqliteActivationStateStore,
   getDefaultPdConfig,
-  getPromptModelCatalog,
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
   trimToBudget,

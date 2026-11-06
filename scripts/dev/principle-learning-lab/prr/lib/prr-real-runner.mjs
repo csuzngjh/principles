@@ -152,7 +152,6 @@ export async function runPrrRealAc({
   const exclusions = [];
   const stopEvents = [];
   let executedRequests = 0; // authoritative only when a counter source says so
-  let globalStop = null;
 
   for (const task of dataset.tasks.tasks) {
     const principle = dataset.principlesById.get(task.principleId);
@@ -182,7 +181,6 @@ export async function runPrrRealAc({
       if (studyRequestCap !== null && usedBeforeCall >= studyRequestCap) preCallStopReason = 'study_budget_exhausted';
       if (armRequestCap !== null && armUsedBeforeCall >= armRequestCap) preCallStopReason = 'arm_budget_exhausted';
       if (preCallStopReason !== null) {
-        globalStop = { reasonCode: preCallStopReason };
         stopEvents.push({
           type: 'AC-S4_BUDGET_STOP',
           group,

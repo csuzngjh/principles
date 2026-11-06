@@ -261,7 +261,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       });
 
       // Second approve should NOT be 409 conflict
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Second' }),

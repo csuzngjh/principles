@@ -21,8 +21,8 @@ function isAssistantMessageWithContent(
   msg: unknown
 ): msg is { role: 'assistant'; content: string } {
   return (
-    typeof msg === 'object' &&
     msg !== null &&
+    typeof msg === 'object' &&
     (msg as { role?: string }).role === 'assistant' &&
     typeof (msg as { content?: unknown }).content === 'string'
   );

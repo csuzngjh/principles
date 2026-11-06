@@ -4,7 +4,6 @@ import * as path from 'path';
 import {
   PLUGIN_SURFACE_REGISTRY,
   validateSurfaceRegistry,
-  findUnclassifiedSurfaces,
   getSurfacesByCategory,
   getSurfacesByKind,
 } from '@principles/core/runtime';

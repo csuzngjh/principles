@@ -656,7 +656,6 @@ describe('Real packaged install smoke test', () => {
 
       const cliEntry = path.join(backupHomeDir, 'node_modules', 'create-principles-disciple', 'dist', 'index.js');
 
-      let exitCode: number | null = 0;
       let stdout = '';
       try {
         stdout = execFileSync(process.execPath, [
@@ -677,7 +676,6 @@ describe('Real packaged install smoke test', () => {
         }).toString();
       } catch (e: unknown) {
         const err = e as { status?: number; stdout?: Buffer };
-        exitCode = err.status ?? 1;
         stdout = err.stdout?.toString() ?? '';
       }
 

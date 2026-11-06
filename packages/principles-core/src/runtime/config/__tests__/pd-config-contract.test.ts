@@ -677,7 +677,10 @@ describe('Scenario 8: Redaction does not leak secrets', () => {
   });
 
   it('redactConfigValue handles dangerous keys', () => {
-    const input = { __proto__: 'evil', constructor: 'bad', normal: 'ok' };
+    // JSON.parse, not an object literal: `{ __proto__: 'evil' }` in literal
+    // syntax sets (and ignores) the prototype instead of creating an own
+    // `__proto__` key, so the fixture would not exercise redaction at all.
+    const input = JSON.parse('{"__proto__":"evil","constructor":"bad","normal":"ok"}') as Record<string, unknown>;
     const result = redactConfigValue(input) as Record<string, unknown>;
     expect(Object.hasOwn(result, '__proto__')).toBe(false);
     expect(Object.hasOwn(result, 'constructor')).toBe(false);

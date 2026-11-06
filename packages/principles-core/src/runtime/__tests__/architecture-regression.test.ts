@@ -3382,13 +3382,12 @@ describe('PRI-416: type single-ownership guards', () => {
   function findDefinitions(pattern: RegExp): string[] {
     const hits: string[] = [];
     function scan(dir: string): void {
-      for (const entry of fs.readdirSync(dir)) {
-        const full = pathModule.join(dir, entry);
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) {
-          if (entry === 'node_modules' || entry === '__tests__') continue;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = pathModule.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
           scan(full);
-        } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts') && !entry.endsWith('.d.ts')) {
+        } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') && !entry.name.endsWith('.d.ts')) {
           const content = fs.readFileSync(full, 'utf-8');
           if (pattern.test(content)) {
             hits.push(full.replace(coreSrcDir + pathModule.sep, '').replace(coreSrcDir + '/', '').replace(/\\/g, '/'));

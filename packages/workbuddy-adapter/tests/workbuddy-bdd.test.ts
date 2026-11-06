@@ -27,13 +27,10 @@
  * the not_internalizable policy terminal, reported explicitly (never wrapped
  * as a provider BLOCKED, never counted as an injection PASS).
  */
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { afterAll, describe, expect, it } from 'vitest';
-import { ADMISSION_CONFIDENCE_THRESHOLD } from '@principles/core/runtime';
+import { afterAll, expect, it } from 'vitest';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 import { runEntry } from './helpers/hook-runner.js';
@@ -48,9 +45,6 @@ import {
 } from './helpers/workbench.js';
 
 const DENY_RULE_CODE = `function evaluate(input) { if (input.action.normalizedPath.indexOf('bdd-protected') >= 0) return { decision: 'block', matched: true, reason: 'WB_BDD_DENY' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'bdd',version:'1',ruleId:'R_WB_BDD',coversCondition:'all'};`;
-
-/** The real product approval/withdrawal entry (packages/pd-cli dist). */
-const PD_CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'pd-cli', 'dist', 'index.js');
 
 interface PendingApprovalRow {
   approval_id: string;
@@ -82,8 +76,6 @@ interface ChainArtifactRow {
   source_task_id: string;
 }
 
-type CandidateDisposition = 'policy_terminal' | 'pending_approval' | 'decided' | 'in_flight';
-
 /**
  * The full acceptance surface of ONE learning scenario, correlated by IDs
  * from its own diagnostician task. No field here is ever selected queue-wide.
@@ -106,13 +98,6 @@ interface ApprovalOutcome {
   approveOk: boolean;
   activationId?: string;
 }
-
-/**
- * Recommendation kinds whose ONLY production disposition is the intake policy
- * refusal (intake-to-internalization-bridge: MVP-disabled channel →
- * not_internalizable, no dreamer task, no approval row — BY DESIGN).
- */
-const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
 
 /**
  * The admission gate's durable threshold (evaluateAdmission): a candidate
@@ -181,196 +166,6 @@ async function seedApprovedBehavior(): Promise<void> {
     content: { principleId: 'P_WB_BDD_RULE', ruleId: 'R_WB_BDD', implementationCode: DENY_RULE_CODE },
     channel: 'code_tool_hook', action: 'code_tool_hook_live_activate', target: 'impl://R_WB_BDD',
   });
-}
-
-/**
- * Learning-scenario governance: the REAL LLM runtime profile on top of the
- * flags `freshGovernance` wrote — same shape as e2e-full-learning
- * governanceSetup (provider/model/keyEnv/baseUrl). Without this profile the
- * diagnostician can never reach the provider, so the real-LLM scenario would
- * fail for a configuration reason while looking like a chain defect
- * (review §4 P2-c).
- */
-function enableRealLlmProfile(): void {
-  if (!process.env.AMD_RADEON_API_KEY) {
-    throw new BlockedScenarioError('BLOCKED: AMD_RADEON_API_KEY not set — the real LLM diagnostician cannot run; scenario skipped honestly (never mocked over)');
-  }
-  const configPath = path.join(state.governance!, '.pd', 'config.yaml');
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
-    runtimeProfiles?: Record<string, unknown>;
-    internalAgents?: { defaultRuntime?: string; agents: Record<string, { runtimeProfile?: string }> };
-  };
-  config.runtimeProfiles ??= {};
-  config.runtimeProfiles['pi-ai.real'] = {
-    type: 'pi-ai',
-    provider: 'openai',
-    model: 'DeepSeek-V4-Flash-Vision-Exp',
-    apiKeyEnv: 'AMD_RADEON_API_KEY',
-    baseUrl: 'https://developer.amd.com.cn/radeon/api/v1',
-    timeoutMs: 300000,
-  };
-  if (config.internalAgents) {
-    config.internalAgents.defaultRuntime = 'pi-ai.real';
-    for (const agent of Object.keys(config.internalAgents.agents)) {
-      config.internalAgents.agents[agent] = { ...config.internalAgents.agents[agent], runtimeProfile: 'pi-ai.real' };
-    }
-  }
-  fs.writeFileSync(configPath, JSON.stringify(config));
-}
-
-function assertPdCliBuilt(): void {
-  if (!fs.existsSync(PD_CLI)) {
-    throw new Error(`pd-cli entry not found: ${PD_CLI} (run: npm run build --workspace=@principles/pd-cli)`);
-  }
-}
-
-/** Run the REAL product approval entry (`pd activation approve`) in a subprocess. */
-function pdCli(args: string[], timeoutMs = 120_000): { status: number; stdout: string; stderr: string } {
-  assertPdCliBuilt();
-  const result = spawnSync(process.execPath, [PD_CLI, ...args], {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    env: { ...process.env, USERPROFILE: state.home!, HOME: state.home! },
-    windowsHide: true,
-  });
-  return { status: result.status ?? 1, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? '') };
-}
-
-function readPendingApprovals(governance: string): PendingApprovalRow[] {
-  const db = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
-  try {
-    return db.prepare(
-      "SELECT approval_id, artifact_id, channel, status FROM approvals WHERE status = 'pending' ORDER BY requested_at ASC",
-    ).all() as PendingApprovalRow[];
-  } finally {
-    db.close();
-  }
-}
-
-/**
- * Identity-chain reader (P2 remediation). Correlates the acceptance surface of
- * THIS scenario's diagnostician task through IDs only:
- *   admission(trajectory) → principle_candidates → chain tasks (durable
- *   pi_metadata.correlationId = candidateId) → pi_artifacts(source_task_id) →
- *   approvals(artifact_id).
- * Every query is readonly and parameterized; returns null when the stores are
- * not readable yet (the caller keeps cycling) — never an empty-row guess.
- */
-function readLearningChain(governance: string, diagnosticianTaskId: string): LearningChain | null {
-  let db: Database.Database;
-  try {
-    db = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
-  } catch {
-    return null; // state store not created yet — the caller keeps cycling
-  }
-  const chain: LearningChain = {
-    diagnosticianTaskId,
-    candidates: [],
-    chainTasks: [],
-    artifacts: [],
-    approvals: [],
-    pendingApprovals: [],
-  };
-  try {
-    // Candidates of this chain: minted on the top diagnostician task itself or
-    // on its diag_router SUB-task (input_ref → top task, the canonical
-    // production parent link verified against real task records).
-    chain.candidates = db.prepare(
-      `SELECT candidate_id, artifact_id, task_id, recommendation_kind, status, consumed_at, confidence
-       FROM principle_candidates
-       WHERE task_id = ?
-          OR task_id IN (SELECT task_id FROM tasks WHERE task_kind = 'diag_router' AND input_ref = ?)`,
-    ).all(diagnosticianTaskId, diagnosticianTaskId) as ChainCandidateRow[];
-    for (const candidate of chain.candidates) {
-      // Production chain tasks (dreamer + every successor record) carry the
-      // candidate id as pi_metadata.correlationId — the durable link.
-      const tasks = db.prepare(
-        `SELECT task_id, task_kind, status, json_extract(diagnostic_json, '$.pi_metadata.correlationId') AS candidate_id
-         FROM tasks
-         WHERE json_extract(diagnostic_json, '$.pi_metadata.correlationId') = ?`,
-      ).all(candidate.candidate_id) as ChainTaskRow[];
-      chain.chainTasks.push(...tasks);
-      for (const task of tasks) {
-        const artifacts = db.prepare(
-          'SELECT artifact_id, artifact_kind, source_task_id FROM pi_artifacts WHERE source_task_id = ?',
-        ).all(task.task_id) as ChainArtifactRow[];
-        chain.artifacts.push(...artifacts);
-      }
-    }
-    for (const artifact of chain.artifacts) {
-      const approvals = db.prepare(
-        'SELECT approval_id, artifact_id, channel, status FROM approvals WHERE artifact_id = ?',
-      ).all(artifact.artifact_id) as PendingApprovalRow[];
-      chain.approvals.push(...approvals);
-    }
-    chain.pendingApprovals = chain.approvals.filter((a) => a.status === 'pending');
-  } finally {
-    db.close();
-  }
-  return chain;
-}
-
-/** Artifact ids a candidate owns, via its correlated chain tasks. */
-function candidateArtifactIds(chain: LearningChain, candidateId: string): string[] {
-  const taskIds = new Set(
-    chain.chainTasks.filter((t) => t.candidate_id === candidateId).map((t) => t.task_id),
-  );
-  return chain.artifacts.filter((a) => taskIds.has(a.source_task_id)).map((a) => a.artifact_id);
-}
-
-function candidateDisposition(chain: LearningChain, candidate: ChainCandidateRow): CandidateDisposition {
-  const artifactIds = candidateArtifactIds(chain, candidate.candidate_id);
-  const approval = chain.approvals.find((a) => artifactIds.includes(a.artifact_id));
-  if (approval?.status === 'pending') return 'pending_approval';
-  if (approval !== undefined) return 'decided';
-  // A policy-terminal kind never seeds a chain task (intake refusal is its
-  // designed terminal); an actionable kind without chain tasks is still moving.
-  if (POLICY_TERMINAL_KINDS.has(candidate.recommendation_kind) && artifactIds.length === 0) {
-    return 'policy_terminal';
-  }
-  return 'in_flight';
-}
-
-function candidateForApprovalArtifact(chain: LearningChain, artifactId: string): ChainCandidateRow | undefined {
-  return chain.candidates.find((c) => candidateArtifactIds(chain, c.candidate_id).includes(artifactId));
-}
-
-/** Primary = the prompt-channel approval when one exists (it drives the
- * injection + withdrawal legs); otherwise the first chain approval. */
-function selectPrimaryApproval(chain: LearningChain): PendingApprovalRow {
-  return chain.pendingApprovals.find((a) => a.channel === 'prompt') ?? chain.pendingApprovals[0];
-}
-
-function chainSummary(chain: LearningChain): string {
-  return chain.candidates
-    .map((c) => {
-      const tasks = chain.chainTasks
-        .filter((t) => t.candidate_id === c.candidate_id)
-        .map((t) => `${t.task_kind}:${t.status}`)
-        .join(',');
-      const taskNote = tasks.length > 0 ? `;tasks=${tasks}` : '';
-      return `${c.candidate_id.slice(0, 8)}(kind=${c.recommendation_kind},status=${c.status},${candidateDisposition(chain, c)}${taskNote})`;
-    })
-    .join('; ');
-}
-
-/** Best-effort telemetry for BLOCKED reasons — the primary rate-limit signal
- * is the worker report's errorCategory; this cross-checks the durable run row. */
-function latestRunErrorCategory(governance: string, taskId: string): string | undefined {
-  let db: Database.Database | undefined;
-  try {
-    db = new Database(path.join(governance, '.pd', 'state.db'), { readonly: true });
-    const row = db.prepare('SELECT error_category FROM runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1').get(taskId) as { error_category?: string | null } | undefined;
-    return row?.error_category ?? undefined;
-  } catch {
-    return undefined;
-  } finally {
-    try { db?.close(); } catch { /* handle already closed */ }
-  }
-}
-
-function capabilityNextAction(result: { report?: { diagnostician?: { nextAction?: string } | null } | null }): string {
-  return result.report?.diagnostician?.nextAction ?? 'no nextAction reported';
 }
 
 afterAll(() => {

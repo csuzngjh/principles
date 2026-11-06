@@ -134,7 +134,6 @@ describe('consumer target-name resolution (PRI-852 contract)', () => {
         'utf8',
       )) as unknown,
     );
-    if (metadata === null) throw new Error('fixture metadata missing');
     const pathsModule = await import('../src/update/install-layout.js');
     const downloaded = await downloadReleaseAsset({
       paths: pathsModule.resolvePdHomePaths(fixture.pdHome),
