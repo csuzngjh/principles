@@ -1,0 +1,373 @@
+{
+  "schemaVersion": "pd-aa-selector-diagnostic/v1",
+  "startedAt": "2026-11-05T23:45:11.767Z",
+  "approval": "Owner 2026-11-06: 批准按剩余预算处理并完成；对应dev-02..04，最多新增3decision+6GLM，允许官方可证同源别名归一化",
+  "fixtureHash": "126759edb1508b9f8ab99cab8d22455532376e3e6070725a8db628fbedf4930e",
+  "codeHead": "c6ee9cbf784bc322b346a8bbc12b8013ba83407a",
+  "sourceHash": "2cf3fb6c99de29728847293cc2de10fa136d7bebde73fe0b2d0e2e4258b0afa2",
+  "systemPromptHash": "71e00f7ef95d5961bc35043c9e1b745e738571eefb8a36448f4d010fe8fec999",
+  "candidateHash": "a93d3a8097892b19f444808dc640fec209b0927de04ef60d272faf7093b30bd8",
+  "modelConfig": {
+    "decision": "respan/span-01-lite:free",
+    "glm": "glm-5.3-flash"
+  },
+  "catalog": {
+    "id": "respan/span-01-lite:free",
+    "canonical_slug": "respan/span-01-lite-20260925",
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "identitySource": "https://openrouter.ai/api/v1/models?output_modalities=decisions",
+    "allowedResponseModels": [
+      "respan/span-01-lite:free",
+      "respan/span-01-lite",
+      "respan/span-01-lite-20260925"
+    ]
+  },
+  "counts": {
+    "decision": 6,
+    "glm": 6
+  },
+  "inheritedCounts": {
+    "decision": 3,
+    "glm": 0
+  },
+  "maxCumulativeCounts": {
+    "decision": 6,
+    "glm": 6
+  },
+  "plannedCaseIds": [
+    "dev-02",
+    "dev-03",
+    "dev-04"
+  ],
+  "previousEvidenceHash": "0c154afaa1befea706c919e07c68ba83a5f1a08b72f3e0c0549359f8972ee18a",
+  "status": "COMPLETE",
+  "requests": [
+    {
+      "caseId": "dev-02",
+      "arm": "D",
+      "kind": "decision",
+      "inputHash": "91ec4c3a98b0a3d6905f48fe063ee54bc47bcc407dc74dc1ee132449440f8d8e",
+      "requestOrdinal": 4,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "respan/span-01-lite-20260925",
+      "provider": "Respan",
+      "usage": {
+        "input_tokens": 653,
+        "output_tokens": 0,
+        "cost": 0
+      },
+      "latencyMs": 1664,
+      "observedIdentifiers": {
+        "model": "respan/span-01-lite-20260925",
+        "provider": "Respan",
+        "id": "gen-dec-1793922326-dsuhUUwZMi6EDyHAMvAJ"
+      },
+      "untrustedAnswers": {
+        "new_task": 0.9593863,
+        "goal_shift": 0.95651996,
+        "phase_shift": 0.070776805,
+        "insufficient_context": 0.1962395
+      }
+    },
+    {
+      "caseId": "dev-02",
+      "arm": "C",
+      "kind": "glm",
+      "inputHash": "302c0c6589fff436ac26f387d3192cb0d151339e33ba773ee8c6738ab5b0fa16",
+      "requestOrdinal": 1,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "glm-5.3-flash",
+      "provider": null,
+      "usage": {
+        "prompt_tokens": 443,
+        "completion_tokens": 294,
+        "total_tokens": 737
+      },
+      "latencyMs": 4539,
+      "observedIdentifiers": {
+        "model": "glm-5.3-flash",
+        "id": "20261106074528340b9374aa954655"
+      },
+      "finishReason": "stop"
+    },
+    {
+      "caseId": "dev-02",
+      "arm": "D",
+      "kind": "glm",
+      "inputHash": "bc9a35a56d1a5cb107c3406b0f0d735ba196bd605d6454510f0c1698193cfb23",
+      "requestOrdinal": 2,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "glm-5.3-flash",
+      "provider": null,
+      "usage": {
+        "prompt_tokens": 495,
+        "completion_tokens": 189,
+        "total_tokens": 684
+      },
+      "latencyMs": 3406,
+      "observedIdentifiers": {
+        "model": "glm-5.3-flash",
+        "id": "20261106074532e5580432985044f3"
+      },
+      "finishReason": "stop"
+    },
+    {
+      "caseId": "dev-03",
+      "arm": "D",
+      "kind": "decision",
+      "inputHash": "bc84b93227983eaec79c3cddab829c2018fcc9bbbafa3f8876382caf1d3938c1",
+      "requestOrdinal": 5,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "respan/span-01-lite-20260925",
+      "provider": "Respan",
+      "usage": {
+        "input_tokens": 729,
+        "output_tokens": 0,
+        "cost": 0
+      },
+      "latencyMs": 940,
+      "observedIdentifiers": {
+        "model": "respan/span-01-lite-20260925",
+        "provider": "Respan",
+        "id": "gen-dec-1793922336-yHUeco8jTDMKMFSypPV1"
+      },
+      "untrustedAnswers": {
+        "new_task": 0.049620405,
+        "goal_shift": 0.995775,
+        "phase_shift": 0.20682019,
+        "insufficient_context": 0.13750939
+      }
+    },
+    {
+      "caseId": "dev-03",
+      "arm": "D",
+      "kind": "glm",
+      "inputHash": "0567cf5657cc3e6bfba0107d9745c2aa2782026585a4cb9f2dbb6e8a928a6a45",
+      "requestOrdinal": 3,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "glm-5.3-flash",
+      "provider": null,
+      "usage": {
+        "prompt_tokens": 507,
+        "completion_tokens": 156,
+        "total_tokens": 663
+      },
+      "latencyMs": 2794,
+      "observedIdentifiers": {
+        "model": "glm-5.3-flash",
+        "id": "202611060745378f6715c26b9e4ab8"
+      },
+      "finishReason": "stop"
+    },
+    {
+      "caseId": "dev-03",
+      "arm": "C",
+      "kind": "glm",
+      "inputHash": "a1f058b57ca842acef34838d76e149705887f18d8b46aadc58950782f17678d0",
+      "requestOrdinal": 4,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "glm-5.3-flash",
+      "provider": null,
+      "usage": {
+        "prompt_tokens": 457,
+        "completion_tokens": 149,
+        "total_tokens": 606
+      },
+      "latencyMs": 2478,
+      "observedIdentifiers": {
+        "model": "glm-5.3-flash",
+        "id": "20261106074539acc078c10302419a"
+      },
+      "finishReason": "stop"
+    },
+    {
+      "caseId": "dev-04",
+      "arm": "D",
+      "kind": "decision",
+      "inputHash": "b12da164c1f3fd3f336075f5d897b7e15ee137b5a2c22f82214742c9d165c7e4",
+      "requestOrdinal": 6,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "respan/span-01-lite-20260925",
+      "provider": "Respan",
+      "usage": {
+        "input_tokens": 665,
+        "output_tokens": 0,
+        "cost": 0
+      },
+      "latencyMs": 1507,
+      "observedIdentifiers": {
+        "model": "respan/span-01-lite-20260925",
+        "provider": "Respan",
+        "id": "gen-dec-1793922343-7op7ZyEbgAkWE4bJe9dZ"
+      },
+      "untrustedAnswers": {
+        "new_task": 0.06244897,
+        "goal_shift": 0.03399504,
+        "phase_shift": 0.9887885,
+        "insufficient_context": 0.2668238
+      }
+    },
+    {
+      "caseId": "dev-04",
+      "arm": "C",
+      "kind": "glm",
+      "inputHash": "ee6e8a0b5f8b00650e04d3395967ae968e208f664ad1bc9e3830c94ead5e1067",
+      "requestOrdinal": 5,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "glm-5.3-flash",
+      "provider": null,
+      "usage": {
+        "prompt_tokens": 446,
+        "completion_tokens": 227,
+        "total_tokens": 673
+      },
+      "latencyMs": 3172,
+      "observedIdentifiers": {
+        "model": "glm-5.3-flash",
+        "id": "2026110607454461f676d5c9cc4b97"
+      },
+      "finishReason": "stop"
+    },
+    {
+      "caseId": "dev-04",
+      "arm": "D",
+      "kind": "glm",
+      "inputHash": "ed0c5045eaaa0ff949d5b35869490a7ebaa4ea9700a86e43877a26f8f5effeff",
+      "requestOrdinal": 6,
+      "status": "RECEIVED",
+      "httpStatus": 200,
+      "model": "glm-5.3-flash",
+      "provider": null,
+      "usage": {
+        "prompt_tokens": 498,
+        "completion_tokens": 311,
+        "total_tokens": 809
+      },
+      "latencyMs": 4704,
+      "observedIdentifiers": {
+        "model": "glm-5.3-flash",
+        "id": "2026110607454797b75becb1df4b15"
+      },
+      "finishReason": "stop"
+    }
+  ],
+  "results": [
+    {
+      "caseId": "dev-02",
+      "scores": {
+        "new_task": 0.9593863,
+        "goal_shift": 0.95651996,
+        "phase_shift": 0.070776805,
+        "insufficient_context": 0.1962395
+      },
+      "selections": {
+        "C": {
+          "status": "selected",
+          "id": "fixture_explicit_goal",
+          "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+          "withinPrewrittenAllowedSet": false
+        },
+        "D": {
+          "status": "selected",
+          "id": "fixture_explicit_goal",
+          "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+          "withinPrewrittenAllowedSet": false
+        }
+      },
+      "expectation": "新任务",
+      "acceptableSelections": [
+        "none_applicable"
+      ],
+      "order": [
+        "C",
+        "D"
+      ]
+    },
+    {
+      "caseId": "dev-03",
+      "scores": {
+        "new_task": 0.049620405,
+        "goal_shift": 0.995775,
+        "phase_shift": 0.20682019,
+        "insufficient_context": 0.13750939
+      },
+      "selections": {
+        "D": {
+          "status": "selected",
+          "id": "fixture_explicit_goal",
+          "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+          "withinPrewrittenAllowedSet": true
+        },
+        "C": {
+          "status": "selected",
+          "id": "fixture_explicit_goal",
+          "digest": "2e675b16e6fabd467a2e7e7f67b943afacd20dc5c3acc64d79b40e1b120f9a89",
+          "withinPrewrittenAllowedSet": true
+        }
+      },
+      "expectation": "明确目标变化",
+      "acceptableSelections": [
+        "fixture_explicit_goal",
+        "fixture_preserve"
+      ],
+      "order": [
+        "D",
+        "C"
+      ]
+    },
+    {
+      "caseId": "dev-04",
+      "scores": {
+        "new_task": 0.06244897,
+        "goal_shift": 0.03399504,
+        "phase_shift": 0.9887885,
+        "insufficient_context": 0.2668238
+      },
+      "selections": {
+        "C": {
+          "status": "selected",
+          "id": "fixture_verify",
+          "digest": "dc463914b5a1215f1a8cccc6545e0bc979b386d244aba3a2938a84965a4486e6",
+          "withinPrewrittenAllowedSet": true
+        },
+        "D": {
+          "status": "selected",
+          "id": "fixture_verify",
+          "digest": "dc463914b5a1215f1a8cccc6545e0bc979b386d244aba3a2938a84965a4486e6",
+          "withinPrewrittenAllowedSet": true
+        }
+      },
+      "expectation": "同一任务由实现转为验收",
+      "acceptableSelections": [
+        "fixture_verify"
+      ],
+      "order": [
+        "C",
+        "D"
+      ]
+    }
+  ],
+  "limitation": "Synthetic development selection diagnostic; no actor/host/behavior/heldout evidence.",
+  "activeStage": {
+    "caseId": "dev-04",
+    "kind": "glm",
+    "arm": "D"
+  },
+  "thisRunAttempts": {
+    "decision": 3,
+    "glm": 6
+  },
+  "previousEvidenceUnchanged": true,
+  "endedAt": "2026-11-05T23:45:37.407Z"
+}
