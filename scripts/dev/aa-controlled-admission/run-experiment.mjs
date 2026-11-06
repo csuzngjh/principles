@@ -122,6 +122,7 @@ function writeRunFiles({
     manifestSha256,
     targetArtifactId: mappingIdentity.artifactId,
     targetActivationId: mappingIdentity.activationId,
+    fixtureRef: identity.fixtureId,
     mappingSha256: canonicalAdaptiveMappingSha256({
       workspaceRealPath: safeRealpath(workspaceDir),
       artifactId: mappingIdentity.artifactId,
