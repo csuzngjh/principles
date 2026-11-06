@@ -1,0 +1,380 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T053533Z-trae",
+  "previousCheckpoint": "20261106T043554Z-trae",
+  "generatedAt": "2026-11-06T05:35:33Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "按 Owner 复核意见完成四点修正：(1) session_rows_truncated 提示改为缩小时间窗口并写明单会话 200 行固定上限，不再建议提高 --max-trajectory-rows，未新增配置项；(2) 验证卡把预算拆成宿主回合 2 / HTTP 请求 3 / 工具调用 1 三个独立口径；(3) 停止条件只针对本次必须确认的运行身份或工具行动缺证，unknown 属设计预期不停止；(4) 文档区分“运行关联可信”与“行为记录完整”，代码保持 strong_run 不变。另因新增的重夹具用例在一次全量运行中触发 vitest 5 秒默认超时，给该 describe 设置 15000ms 显式预算，断言与夹具不变。已同步 origin/main（含 #2378/#2367/#2368/#2379/#2381），新 head 上 host-runtime 745/745、pd-cli 2150/2150、lint、runtime-contract、release-intent 全绿；PR #2380 已非草稿，CI 在新 head 上运行中。随后提交受控准入接线的具体设计（仅设计，不执行）。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+    "branch": "ai/PRI-1114-coverage-propagation",
+    "baseCommit": "94820d2b9c5b33907512d81974ccbad696b4edb3",
+    "headCommit": "a8efd90e8e114376e4b0d7b321b21744d0bcc73a",
+    "dirtyPaths": [],
+    "pushedCommit": "a8efd90e8e114376e4b0d7b321b21744d0bcc73a",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2380",
+    "remoteChecks": "PENDING at write on head a8efd90e8: Verify Merge Gate, Lint, TypeScript Check, Test host-runtime, Test pd-cli, Test OpenClaw Plugin, Build OpenClaw Plugin, e2e, release/packaged smoke, CodeQL. PASS at write: CI Impact Gate, Check PR Size, Repository Size & Large File Guard, Dependency Audit, Auto Label, Telemetry Union Guard, Auto Label。SKIPPED (not counted as pass): Test principles-core, Test pd-mcp-server, Test create-principles-disciple, CodeRabbit。Owner 已在 head fc599c53a 独立复跑 host-runtime 68/68、CLI 13/13 且确认无失败；本轮文档提交后 head 会再次前进，需按最终 head 复评。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1114",
+      "scope": "Owner 复核后的四点修正 + 同步 main + 新 head 复跑 + 转 Ready；不扩大修复范围，不合并、不发版",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "packages/host-runtime/src/adaptive-behavior-linkage.ts",
+        "packages/host-runtime/tests/adaptive-behavior-linkage.test.ts",
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md"
+      ],
+      "commits": [
+        "b7bd3ba607ffc16f6f38e16a27e9a211d687c280",
+        "16c05bc55",
+        "1d57eac26",
+        "a8efd90e8e114376e4b0d7b321b21744d0bcc73a"
+      ],
+      "acceptance": [
+        {"criterion": "截断提示不再建议提高 --max-trajectory-rows，改为缩小 --since/--until 窗口并写明单会话 200 行固定上限；未新增配置项", "result": "PASS", "evidenceRefs": ["evidence-fix-code", "evidence-fix-test"]},
+        {"criterion": "预算拆为宿主回合 / HTTP 请求 / 工具调用三个独立口径且彼此自洽", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-design"]},
+        {"criterion": "停止条件只针对必须确认的运行身份或工具行动缺证；请求级/时序/行为改善为 unknown 属预期", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-design"]},
+        {"criterion": "文档区分运行关联可信与行为记录完整；代码在 journal 唯一性成立时保持 strong_run", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-fix-code"]},
+        {"criterion": "同步最新 origin/main 后在新 head 复跑：host-runtime 745/745", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "pd-cli 全量 2150/2150；默认并行下出现的 8 个 5 秒超时经隔离复跑证明为环境竞争", "result": "PASS", "evidenceRefs": ["evidence-test-pd-cli", "evidence-timeout-flake"]},
+        {"criterion": "lint、check:runtime-contract、release-intent 在新 head 全部通过", "result": "PASS", "evidenceRefs": ["evidence-guards"]},
+        {"criterion": "PR 已非草稿且分支不再落后 main", "result": "PASS", "evidenceRefs": ["evidence-pr"]},
+        {"criterion": "最终 head 的 PR CI", "result": "PENDING_AT_WRITE", "evidenceRefs": ["evidence-remote-ci"]},
+        {"criterion": "Owner 验收 / 合并 / 发版", "result": "NOT_RUN", "evidenceRefs": ["evidence-pr"]}
+      ],
+      "remaining": [
+        "PR #2380 未合并、未发版；Owner 复核与合并由 Owner 执行。",
+        "本轮文档与检查点提交会使 head 再次前进，需按最终 head 复评 CI。",
+        "本地未运行完整 npm run verify:merge（按 AGENTS.md §25 由 PR CI 承担）。",
+        "默认并行运行 pd-cli 全量时出现的 5 秒超时为环境问题，未修改任何生产代码或测试断言。"
+      ]
+    },
+    {
+      "issue": "PRI-1118",
+      "scope": "受控准入接线的具体设计：环境、预算（宿主回合/HTTP 请求/工具调用）、停止条件、清理；仅设计不执行",
+      "status": "NEEDS_OWNER",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md"
+      ],
+      "acceptance": [
+        {"criterion": "核实 core 已实现 controlledAdmission 校验，缺口是 hook 未接线（Connection Before Creation）", "result": "PASS", "evidenceRefs": ["evidence-core-admission", "evidence-design"]},
+        {"criterion": "给出默认关闭的最小接线面：准入文件加载器 + hook 分支 + 单测，不改 core", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "环境隔离：独立 config/state/workspace、127.0.0.1 假 provider、0 付费调用、不碰安装目录", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "预算三口径：宿主回合 2、HTTP 请求 3、工具调用 1、付费模型 0", "result": "PASS", "evidenceRefs": ["evidence-design", "evidence-card"]},
+        {"criterion": "停止条件只针对必须确认的身份/工具行动缺证，并列出预期 unknown", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "清理与回滚：删除环境变量即恢复 Native，准入文件位于隔离 .tmp 并删除", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "Owner 批准接线/预算/环境/一次宿主实验", "result": "NOT_RUN", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "实现接线、隔离夹具验证、真实宿主回合", "result": "NOT_RUN", "evidenceRefs": []}
+      ],
+      "remaining": [
+        "待 Owner 对设计 §10 的四项作出有界批准或拒绝。",
+        "B1 仍成立：已安装 OpenClaw 2026.11.1 embedded producer 不传 currentUserMessageId。",
+        "G1 历史两次假模型额度已用，不复用；新实验需按本设计重新批准。",
+        "获批前不写接线代码、不跑宿主、不装插件。"
+      ]
+    },
+    {
+      "issue": "PRI-1111",
+      "scope": "继续记录唯一宿主正常入口的身份缺口（不关闭工单）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+        "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md"
+      ],
+      "acceptance": [
+        {"criterion": "记录 embedded before_prompt_build 缺 currentUserMessageId，常规路径保持 Native", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-design"]}
+      ],
+      "remaining": [
+        "入口身份缺口未修复；受控准入只是实验性替代，不改变生产 Native 默认。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-host-runtime",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "npm test --workspace=@principles/host-runtime",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 745,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-host-runtime"]
+    },
+    {
+      "id": "check-linkage-file",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\host-runtime",
+      "command": "npx vitest run tests/adaptive-behavior-linkage.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-fix-test"]
+    },
+    {
+      "id": "check-pd-cli",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\pd-cli",
+      "command": "npx vitest run --maxWorkers=2",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 2150,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-pd-cli"]
+    },
+    {
+      "id": "check-lint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "npm run lint",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-guards"]
+    },
+    {
+      "id": "check-guards",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "npm run check:runtime-contract; node scripts/release/check-pr-release-intent.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-guards"]
+    },
+    {
+      "id": "check-remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "gh pr checks 2380; gh pr view 2380 --json headRefOid,isDraft,mergeStateStatus",
+      "result": "PENDING_AT_WRITE",
+      "exitCode": null,
+      "passed": null,
+      "failed": 0,
+      "skipped": 4,
+      "evidenceRefs": ["evidence-remote-ci"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-fix-code",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\host-runtime\\src\\adaptive-behavior-linkage.ts",
+      "observedAt": "2026-11-06T05:33:39Z",
+      "sha256": "a70682aab1e8652baeb4f4a45687f9500ca0fccf23d5d410ec4ce9629aabcf85",
+      "supports": "session_rows_truncated 的 nextAction 改为缩小 --since/--until 并写明单会话 200 行上限；截断传播、unknowns、incompleteReasons 逻辑不变。",
+      "limitations": "只读读模型；不提供写侧或行为改善证据。"
+    },
+    {
+      "id": "evidence-fix-test",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\host-runtime\\tests\\adaptive-behavior-linkage.test.ts",
+      "observedAt": "2026-11-06T05:33:39Z",
+      "sha256": "88d7df85addee4ef23eda3a9c35ecaeaaa12333965fd1e4bb6c4d9326731e3ea",
+      "supports": "断言提示包含单会话 200 行上限与缩小窗口，且不得包含提高 --max-trajectory-rows；三条 201 行反例保留；重夹具 describe 设置 15000ms 超时预算，断言不变。",
+      "limitations": "fixture 行为，不证明真实生产数据分布。"
+    },
+    {
+      "id": "evidence-test-host-runtime",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: npm test --workspace=@principles/host-runtime",
+      "observedAt": "2026-11-06T05:25:53Z",
+      "sha256": null,
+      "supports": "同步 origin/main 后的 head 上 65 个文件、745/745 通过，0 跳过。",
+      "limitations": "本机运行，未跑全仓 verify:merge。"
+    },
+    {
+      "id": "evidence-test-pd-cli",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: npx vitest run --maxWorkers=2 (packages/pd-cli)",
+      "observedAt": "2026-11-06T05:28:21Z",
+      "sha256": null,
+      "supports": "162 个文件、2150/2150 通过，0 跳过；包含 activation link 的 Commander 注册/解析与单 JSON 合同。",
+      "limitations": "限制 worker 数是以证据方式规避本机 CPU 竞争，未改生产代码或测试。"
+    },
+    {
+      "id": "evidence-timeout-flake",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: 两次默认并行全量运行 + 7 个文件隔离复跑",
+      "observedAt": "2026-11-06T05:19:08Z",
+      "sha256": null,
+      "supports": "默认并行下 7/8 个失败全部是 5000ms 超时，涉及 pain/cli-help/runtime-*/candidate-intake 等与本改动无关的文件；7 个文件隔离复跑 235/235 通过，证明为环境竞争而非回归。",
+      "limitations": "未在 origin/main 基线复现同一并行竞争。"
+    },
+    {
+      "id": "evidence-guards",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: npm run lint; npm run check:runtime-contract; node scripts/release/check-pr-release-intent.mjs",
+      "observedAt": "2026-11-06T05:30:00Z",
+      "sha256": null,
+      "supports": "12/12 包 lint 通过；runtime-contract 0 新增违规；release-intent PASS（@principles/host-runtime:patch）。",
+      "limitations": "守卫基于 git diff，head 前进后需复跑。"
+    },
+    {
+      "id": "evidence-card",
+      "kind": "REPORT",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\docs\\implementation-reports\\PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+      "observedAt": "2026-11-06T05:33:39Z",
+      "sha256": "6613dc489a789c15237d75623d4386b76ee8daf8c247d13b58ee5bd0df382139",
+      "supports": "Q5 区分运行关联可信与行为记录完整；Q7 与决策卡使用宿主回合/HTTP 请求/工具调用三口径；停止条件只针对必须确认的身份或工具行动缺证。",
+      "limitations": "DRAFT/NEEDS_OWNER，不是验收通过声明。"
+    },
+    {
+      "id": "evidence-design",
+      "kind": "REPORT",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\docs\\implementation-reports\\PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+      "observedAt": "2026-11-06T05:35:33Z",
+      "sha256": "ea6a78c4f0aeee10d375660397f6b0cf94179641ae40d3b83eae43c36137d5d1",
+      "supports": "默认关闭的最小接线设计、隔离环境、三口径预算、停止条件、清理回滚与验证计划；明确只设计不执行。",
+      "limitations": "未经 Owner 批准；不包含实现或运行证据。"
+    },
+    {
+      "id": "evidence-core-admission",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\principles-core\\src\\runtime-v2\\activation\\adaptive-principle-intervention.ts",
+      "observedAt": "2026-11-06T05:35:33Z",
+      "sha256": null,
+      "supports": "core 已校验 admissionId、inputSha256 与 manifestSha256，并在与原生 currentUserMessageId/requestId 并存时回退 ambiguous_admission（第 52–59 行）。",
+      "limitations": "静态阅读，未运行 core 测试。"
+    },
+    {
+      "id": "evidence-sample-link",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\link-output.json",
+      "observedAt": "2026-11-06T04:40:40Z",
+      "sha256": "14e7ad507d6e025f0b421655c2fc590169fda805e0a049d6f1b0c7ad4f16f281",
+      "supports": "真实 pd activation link 在合成夹具上输出单 JSON：association=strong_run、actions=1、corrections=1、outcomes=1、coverage.complete=true；请求级/原则遵循/行为改善为 unknown。",
+      "limitations": "夹具是合成的；不是宿主、模型或行为证据。"
+    },
+    {
+      "id": "evidence-sample-manifest",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\manifest.json",
+      "observedAt": "2026-11-06T04:40:40Z",
+      "sha256": "848484db6a5e2c8ca863001f924e7d87cf73909b64c7fd6b10d3ab611c3d7418",
+      "supports": "pd-aa-evidence-package/v1 manifest 含身份、边界、文件哈希、覆盖、关联、支持/不支持结论与清理字段。",
+      "limitations": "临时资产，未提交；保留于 .tmp。"
+    },
+    {
+      "id": "evidence-remote-ci",
+      "kind": "REMOTE_CI",
+      "locator": "inline: gh pr checks 2380",
+      "observedAt": "2026-11-06T05:33:39Z",
+      "sha256": null,
+      "supports": "head a8efd90e8 上 CI Impact Gate、Check PR Size、Repository Size、Dependency Audit 等已通过；其余 pending；4 项 skipping。",
+      "limitations": "检查点在写时仍 pending；文档提交后 head 再次前进，需按最终 head 复评。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2380",
+      "observedAt": "2026-11-06T05:33:39Z",
+      "sha256": null,
+      "supports": "PR 已非草稿（isDraft=false），head=a8efd90e8，分支已同步最新 main。",
+      "limitations": "未合并、未发版；mergeStateStatus 在写时为 BLOCKED（必需检查 pending）。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-design",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+      "persistence": "committed",
+      "notes": "受控准入接线设计，仅设计不执行。"
+    },
+    {
+      "id": "artifact-card",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+      "persistence": "committed",
+      "notes": "四点修正后的验证卡。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T053533Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T053533Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点同名 Markdown。"
+    }
+  ],
+  "blockers": [
+    "受控准入接线设计与预算尚未获得 Owner 批准（设计 §10 四项）。",
+    "B1 仍成立：已安装 OpenClaw 2026.11.1 embedded before_prompt_build 不提供 currentUserMessageId。",
+    "G1 历史两次本地假模型额度已使用，不复用。",
+    "PR #2380 最终 head 的 CI 在写检查点时仍 pending。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1118",
+      "action": "Owner 审阅 PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md §10，对接线面、预算、隔离环境与一次宿主实验作出有界批准或拒绝。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 书面给出批准/拒绝及范围；检查点记录决定。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1114",
+      "action": "Owner 评审 PR #2380 的最终 head 与 CI；合并由 Owner 执行，AI 不合并、不发版。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PR 最终 head CI 全绿且 Owner 完成合并/拒绝。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1118",
+      "action": "获批后按设计实现默认关闭的准入加载器与 hook 分支，补单测与接线断言；不跑宿主。",
+      "dependsOn": [1],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "lint/typecheck/相关测试全绿，默认关闭与回退路径均有断言。"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1118",
+      "action": "实现验证通过且另行获批后，在隔离环境执行 1 正例（含 1 次只读工具）+ 1 对照，预算 2 宿主回合 / 3 HTTP 请求 / 1 工具调用 / 0 付费调用。",
+      "dependsOn": [1, 3],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "证据包 manifest/link-output/清理字段齐全，结论分级符合四层声明边界。"
+    },
+    {
+      "order": 5,
+      "issue": "PRI-1114",
+      "action": "PR 合并后按 git-8 清理 worktree 与租约；PRI-1114 不提前关闭整票。",
+      "dependsOn": [2],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "worktree 干净、无未合并状态，租约释放。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-06：核心漏报修复通过；仅四点修正后同步 main、复跑、转 Ready；不合并、不发版。",
+      "PD-AA-G1-CONTROLLED-ADMISSION-CARD.md：历史受控准入范围（无工具、假 provider、两次额度已用）。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261106T053533Z-trae\",\"kind\":\"final\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "其他任务的 LATEST 指针未修改；历史检查点未覆盖。"
+    ]
+  }
+}
