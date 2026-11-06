@@ -14,6 +14,7 @@ import type {
   PluginHookBeforeMessageWriteEvent,
 } from './openclaw-sdk.js';
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
 import * as os from 'os';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
 import { ensureMcpBinding, invalidateMcpBinding } from './core/mcp-binding.js';
@@ -56,6 +57,7 @@ import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime';
 import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
 import { readAdaptiveActivationConfig } from './hooks/adaptive-activation-config.js';
+import { claimControlledAdmission, isControlledAdmissionConfigured } from './hooks/controlled-admission.js';
 import { resolveCurrentUserMessage } from './hooks/prompt-helpers.js';
 import { isUserInteractionTrigger } from './core/signal-collector-host.js';
 import { isMinimalTrigger } from '@principles/core/prompt-builder';
@@ -368,13 +370,45 @@ const plugin = {
         };
         const currentMessage = ownValue(event, 'currentUserMessage');
         const currentMessageId = ownValue(event, 'currentUserMessageId');
-        if (!workspaceDir || !sessionId?.trim() || typeof currentMessage !== 'string'
-          || typeof currentMessageId !== 'string' || !currentMessageId.trim()
-          || !isUserInteractionTrigger(context.trigger) || isMinimalTrigger(context.trigger, sessionId)) return undefined;
-        const resolved = resolveCurrentUserMessage(event, sessionId);
-        if (resolved.isAgentToAgent || currentMessage.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return undefined;
+        const requestId = ownValue(event, 'requestId');
+        if (!workspaceDir || !sessionId?.trim() || !isUserInteractionTrigger(context.trigger) || isMinimalTrigger(context.trigger, sessionId)) return undefined;
         const mapping = readAdaptiveActivationConfig(ownValue(api, 'pluginConfig'), workspaceDir, startedAt);
         if (!mapping) return undefined;
+
+        const hasNativeIdentity = (typeof currentMessageId === 'string' && currentMessageId.trim().length > 0)
+          || (typeof requestId === 'string' && requestId.trim().length > 0);
+        if (!hasNativeIdentity) {
+          // Embedded OpenClaw supplies no native message identity. The operator
+          // admission covers exactly one frozen input; consumption happens here
+          // (the earliest selection point) and is handed to the same-round
+          // beforePromptBuild callback through the claim cache.
+          if (!isControlledAdmissionConfigured()) return undefined;
+          const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
+          if (deadlineAt - Date.now() <= 0) return undefined;
+          const hookInvocationId = randomUUID();
+          const admission = claimControlledAdmission({
+            event, workspaceDir, sessionId, runId: context.runId ?? null, mapping, hookInvocationId, now: startedAt,
+          });
+          if (admission.status !== 'claimed') {
+            api.logger.warn(`[PD:AA] controlled admission refused: ${JSON.stringify({
+              status: admission.status,
+              ...(admission.status === 'rejected' ? { reason: admission.reason, detail: admission.detail } : {}),
+            })}`);
+            return undefined;
+          }
+          beginAdaptivePromptInvocation({ ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] }, mapping, 'shared', hookInvocationId);
+          return {
+            artifactId: mapping.artifactId,
+            activationId: mapping.activationId,
+            hookInvocationId,
+            signal: AbortSignal.timeout(Math.max(1, deadlineAt - Date.now())),
+            deadlineAt,
+          };
+        }
+
+        if (typeof currentMessage !== 'string') return undefined;
+        const resolved = resolveCurrentUserMessage(event, sessionId);
+        if (resolved.isAgentToAgent || currentMessage.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return undefined;
         const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
         const remainingMs = deadlineAt - Date.now();
         if (remainingMs <= 0) return undefined;

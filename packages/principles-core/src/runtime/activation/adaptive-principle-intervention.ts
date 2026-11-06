@@ -40,6 +40,66 @@ export interface AdaptiveInterventionResult {
   targetBodySha256?: string;
 }
 
+export interface ControlledAdmissionBinding {
+  controlledAdmission?: { admissionId: string; inputSha256: string; manifestSha256: string };
+  currentUserMessage?: string;
+  currentUserMessageId?: string;
+  requestId?: string;
+  sessionId?: string;
+}
+
+export type ControlledAdmissionBindingResult =
+  | { ok: true; controlled: boolean }
+  | { ok: false; reason: 'ambiguous_admission' | 'request_identity_unavailable' | 'scene_not_matched' };
+
+/**
+ * Shared admission gate for both the shared-provider and plugin-local entries.
+ * Operator admission and native host identity must never coexist; an operator
+ * admission proves the exact message bytes instead of a native message identity.
+ */
+export function validateControlledAdmissionBinding(input: ControlledAdmissionBinding): ControlledAdmissionBindingResult {
+  const nonempty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+  const admission = input.controlledAdmission;
+  if (admission && (input.currentUserMessageId !== undefined || input.requestId !== undefined)) {
+    return { ok: false, reason: 'ambiguous_admission' };
+  }
+  const controlled = admission && nonempty(admission.admissionId)
+    && /^[a-f0-9]{64}$/.test(admission.inputSha256) && /^[a-f0-9]{64}$/.test(admission.manifestSha256)
+    && typeof input.currentUserMessage === 'string'
+    && createHash('sha256').update(input.currentUserMessage, 'utf8').digest('hex') === admission.inputSha256;
+  // Model-request identity belongs to later delivery evidence, not input admission.
+  if (!nonempty(input.sessionId) || !(controlled || (!admission && nonempty(input.currentUserMessageId)))) {
+    return { ok: false, reason: 'request_identity_unavailable' };
+  }
+  if (input.currentUserMessage?.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') {
+    return { ok: false, reason: 'scene_not_matched' };
+  }
+  return { ok: true, controlled: Boolean(controlled) };
+}
+
+export interface AdaptiveMappingIdentity {
+  workspaceRealPath: string;
+  artifactId: string;
+  activationId: string;
+  softTimeoutMs: number;
+  expiresAtMs: number;
+}
+
+/**
+ * Canonical hash of the one workspace-scoped mapping an operator admission
+ * authorizes. Fixed key order is part of the contract; both the plugin and the
+ * experiment launcher must call this function rather than re-implement it.
+ */
+export function canonicalAdaptiveMappingSha256(mapping: AdaptiveMappingIdentity): string {
+  return createHash('sha256').update(JSON.stringify({
+    workspaceRealPath: mapping.workspaceRealPath,
+    artifactId: mapping.artifactId,
+    activationId: mapping.activationId,
+    softTimeoutMs: mapping.softTimeoutMs,
+    expiresAt: new Date(mapping.expiresAtMs).toISOString(),
+  }), 'utf8').digest('hex');
+}
+
 /** One bounded intervention; no governance writes, model calls, caches or delivery assertions. */
 export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInput, deps: AdaptiveInterventionDeps): Promise<AdaptiveInterventionResult> {
   let excludeUncertainTarget = false;
@@ -47,16 +107,8 @@ export async function prepareAdaptiveIntervention(input: AdaptiveInterventionInp
   const fallback = (reason: string): AdaptiveInterventionResult => ({ text: excludeUncertainTarget ? input.nativeWithoutTargetText : input.nativeText, reason, addedTarget: false, displacedActivationIds: [],
     ...(input.nativePrincipleIds ? { selectedPrincipleIds: input.nativePrincipleIds.filter(id => !excludeUncertainTarget || id !== targetPrincipleId) } : {}) });
   try {
-    const nonempty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
-    const admission = input.controlledAdmission;
-    if (admission && (input.currentUserMessageId !== undefined || input.requestId !== undefined)) return fallback('ambiguous_admission');
-    const controlled = admission && nonempty(admission.admissionId)
-      && /^[a-f0-9]{64}$/.test(admission.inputSha256) && /^[a-f0-9]{64}$/.test(admission.manifestSha256)
-      && typeof input.currentUserMessage === 'string'
-      && createHash('sha256').update(input.currentUserMessage, 'utf8').digest('hex') === admission.inputSha256;
-    // Model-request identity belongs to later delivery evidence, not input admission.
-    if (!nonempty(input.sessionId) || !(controlled || (!admission && nonempty(input.currentUserMessageId)))) return fallback('request_identity_unavailable');
-    if (input.currentUserMessage?.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return fallback('scene_not_matched');
+    const binding = validateControlledAdmissionBinding(input);
+    if (!binding.ok) return fallback(binding.reason);
     const ids = input.principles.map(p => p.principleId);
     if (new Set(ids).size !== ids.length) return fallback('ambiguous_identity');
     const matches = input.principles.filter(p => p.artifactId === input.target.artifactId && p.activationId === input.target.activationId);
