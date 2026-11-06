@@ -39,7 +39,9 @@ interface Stub {
 interface RecordedRequest {
   url: string;
   pathname: string;
-  query: Record<string, string>;
+  /** Raw query string; parsed at assertion time so no property key is ever
+   *  written from request data. */
+  search: string;
   headers: http.IncomingHttpHeaders;
 }
 
@@ -203,11 +205,7 @@ beforeAll(async () => {
   checkout = await makeCheckout();
   stubServer = http.createServer((req, res) => {
     const parsed = new URL(req.url ?? '/', `http://127.0.0.1:${stubPort}`);
-    const query: Record<string, string> = {};
-    parsed.searchParams.forEach((value, key) => {
-      query[key] = value;
-    });
-    requests.push({ url: req.url ?? '', pathname: parsed.pathname, query, headers: req.headers });
+    requests.push({ url: req.url ?? '', pathname: parsed.pathname, search: parsed.search, headers: req.headers });
     // A request carrying npm's freshness marker sees the CURRENT packument;
     // one without it sees whatever an intermediary had cached.
     const body = stub.freshBody !== undefined && parsed.searchParams.get('write') === 'true' ? stub.freshBody : stub.body;
@@ -372,7 +370,7 @@ describe('verify-publication-cohort gate — registry freshness', () => {
     packument('1.147.13', [{ version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-04T00:00:00.000Z' }]);
 
   function expectFresh(request: RecordedRequest) {
-    expect(request.query).toEqual({ write: 'true' });
+    expect(new URLSearchParams(request.search).get('write')).toBe('true');
     expect(request.pathname).toBe(`/${INSTALLER}`);
     // Complement, never the sole freshness argument (see registry-client).
     expect(String(request.headers['cache-control'])).toContain('no-cache');
