@@ -177,18 +177,24 @@ describe('environment isolation — inherited production paths', () => {
     return { dir, runDir, stateRoot, positiveWorkspace, controlWorkspace, configPath, admissionPath };
   }
 
-  const productionEnv = {
-    PD_WORKSPACE_DIR: 'D:\\.openclaw\\workspace',
-    OPENCLAW_WORKSPACE: 'D:\\.openclaw\\workspace',
-    PD_STATE_DIR: 'D:\\.openclaw\\state',
-    OPENCLAW_STATE_DIR: 'D:\\.openclaw',
-    OPENCLAW_CONFIG_PATH: 'D:\\.openclaw\\openclaw.json',
-    OPENCLAW_PROFILE: 'production',
-    OPENCLAW_HOME: 'D:\\.openclaw',
-  };
+  // Absolute on every platform: the parent declares paths OUTSIDE the run
+  // directory, never a Windows-only string that POSIX treats as relative.
+  function productionEnvOutside(layout) {
+    const outside = resolve(layout.dir, 'production');
+    return {
+      PD_WORKSPACE_DIR: join(outside, 'workspace'),
+      OPENCLAW_WORKSPACE: join(outside, 'workspace'),
+      PD_STATE_DIR: join(outside, 'state'),
+      OPENCLAW_STATE_DIR: outside,
+      OPENCLAW_CONFIG_PATH: join(outside, 'openclaw.json'),
+      OPENCLAW_PROFILE: 'production',
+      OPENCLAW_HOME: outside,
+    };
+  }
 
   it('keeps both arms inside their own root even when the parent declares production paths', () => {
     const layout = makeArmRoot();
+    const productionEnv = productionEnvOutside(layout);
     const positive = buildIsolatedHostEnv({
       baseEnv: productionEnv,
       experimentRoot: layout.runDir,
@@ -232,10 +238,11 @@ describe('environment isolation — inherited production paths', () => {
 
   it('refuses before any write when a resolved path escapes the experiment root', () => {
     const layout = makeArmRoot();
+    const outsideWorkspace = resolve(layout.dir, 'production', 'workspace');
     expect(() => buildIsolatedHostEnv({
-      baseEnv: productionEnv,
+      baseEnv: productionEnvOutside(layout),
       experimentRoot: layout.runDir,
-      workspaceDir: 'D:\\.openclaw\\workspace',
+      workspaceDir: outsideWorkspace,
       stateDir: join(layout.stateRoot, 'positive'),
       configPath: layout.configPath,
       profile: 'aa-positive',
