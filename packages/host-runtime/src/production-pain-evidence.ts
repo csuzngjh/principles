@@ -8,6 +8,9 @@ import {
   sanitizeToolParams,
   sanitizeValue,
 } from '@principles/core/runtime-v2';
+// PRI-1135: the canonical column declaration lives with the DDL owner. Import
+// the subpath directly so the public runtime-v2 barrel surface stays unchanged.
+import { TRAJECTORY_REQUIRED_COLUMNS } from '@principles/core/runtime-v2/trajectory-schema';
 import type { GovernanceHostKind } from '@principles/core/runtime-v2';
 import type { HostEvent, HostEventEmitter, HostEventResult } from '@principles/core/host';
 
@@ -200,11 +203,8 @@ export function deriveProductionCorrectionPainIdentity(fields: {
 }
 
 
-const REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
-  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT', project_dir: 'TEXT' },
-  pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', host_kind: 'TEXT', created_at: 'TEXT' },
-};
+// PRI-1135: the canonical required-column declaration now lives in core
+// (TRAJECTORY_REQUIRED_COLUMNS); this module keeps no second copy.
 
 function pragmaField(row: unknown, key: string): unknown {
   return isRecord(row) && Object.hasOwn(row, key) ? Object.getOwnPropertyDescriptor(row, key)?.value : undefined;
@@ -226,7 +226,7 @@ function hasCanonicalIndexPredicate(db: Database.Database): boolean {
 }
 
 function hasCanonicalSchema(db: Database.Database): boolean {
-  for (const [table, required] of Object.entries(REQUIRED_COLUMNS)) {
+  for (const [table, required] of Object.entries(TRAJECTORY_REQUIRED_COLUMNS)) {
     const rows: unknown[] = db.prepare(`PRAGMA table_info(${table})`).all();
     const actual = new Map<string, string>();
     for (const row of rows) {

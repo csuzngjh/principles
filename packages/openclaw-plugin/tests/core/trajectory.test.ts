@@ -3,9 +3,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { TrajectoryDatabase } from '../../src/core/trajectory.js';
+import { TrajectoryDatabase, initTrajectorySchema, TrajectoryRegistry } from '../../src/core/trajectory.js';
+import { TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
-import { TrajectoryRegistry } from '../../src/core/trajectory.js';
 
 describe('TrajectoryDatabase', () => {
   let workspaceDir: string | null = null;
@@ -1388,5 +1388,49 @@ describe('TrajectoryDatabase — correction turn readers (PRI-844)', () => {
     } finally {
       db.dispose();
     }
+  });
+});
+
+describe('initTrajectorySchema (PRI-1135: the module-level entry point delegates the version row to core)', () => {
+  let workspaceDir: string | null = null;
+
+  afterEach(() => {
+    if (workspaceDir) {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      workspaceDir = null;
+    }
+  });
+
+  it('upgrades a v1 workspace to the current schema version, idempotently', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-init-'));
+    workspaceDir = dir;
+    const dbPath = path.join(dir, '.state', 'trajectory.db');
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+    const seed = new Database(dbPath);
+    seed.exec('CREATE TABLE schema_version (version INTEGER NOT NULL)');
+    seed.prepare('INSERT INTO schema_version (version) VALUES (?)').run(1);
+    seed.close();
+
+    const readVersion = (): unknown => {
+      const handle = new Database(dbPath, { readonly: true });
+      try {
+        const row = handle.prepare('SELECT version FROM schema_version LIMIT 1').get() as
+          | { version?: unknown }
+          | undefined;
+        return row?.version;
+      } finally {
+        handle.close();
+      }
+    };
+
+    expect(readVersion()).toBe(1);
+
+    const first = initTrajectorySchema(dir);
+    expect(first.tables.length).toBeGreaterThan(0);
+    expect(readVersion()).toBe(TRAJECTORY_SCHEMA_VERSION);
+
+    initTrajectorySchema(dir);
+    expect(readVersion()).toBe(TRAJECTORY_SCHEMA_VERSION);
   });
 });

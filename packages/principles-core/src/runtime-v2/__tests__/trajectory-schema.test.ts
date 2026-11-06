@@ -3,8 +3,10 @@ import Database from 'better-sqlite3';
 import {
   applyTrajectorySchemaBase,
   migrateLegacyGfiSchema,
+  TRAJECTORY_REQUIRED_COLUMNS,
   TRAJECTORY_SCHEMA_VERSION,
   TRAJECTORY_TABLES,
+  convergeTrajectorySchemaVersion,
 } from '../trajectory-schema.js';
 
 /**
@@ -165,6 +167,53 @@ describe('PRI-774: canonical trajectory schema module', () => {
     expect(columns.some((column) => column.name === 'gfi_after')).toBe(false);
     const row = db.prepare('SELECT session_id, tool_name, project_dir FROM tool_calls WHERE session_id = ?').get('legacy-session');
     expect(row).toEqual({ session_id: 'legacy-session', tool_name: 'apply_patch', project_dir: null });
+    db.close();
+  });
+});
+
+describe('PRI-1135: single schema truth + single version-row writer', () => {
+  it('TRAJECTORY_REQUIRED_COLUMNS only lists columns the real DDL produces, with the listed type', () => {
+    const db = new Database(':memory:');
+    applyTrajectorySchemaBase(db);
+    for (const [table, required] of Object.entries(TRAJECTORY_REQUIRED_COLUMNS)) {
+      const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; type: string }[];
+      const actual = new Map(rows.map((r) => [r.name, r.type.toUpperCase()]));
+      for (const [name, type] of Object.entries(required)) {
+        expect(actual.get(name), `${table}.${name}`).toBe(type);
+      }
+    }
+    db.close();
+  });
+
+  it('TRAJECTORY_REQUIRED_COLUMNS is frozen so a consumer cannot rewrite the gate in place', () => {
+    expect(Object.isFrozen(TRAJECTORY_REQUIRED_COLUMNS)).toBe(true);
+    for (const table of Object.values(TRAJECTORY_REQUIRED_COLUMNS)) {
+      expect(Object.isFrozen(table)).toBe(true);
+    }
+  });
+
+  it('convergeTrajectorySchemaVersion inserts, upgrades a stale row, and is idempotent', () => {
+    const readVersion = (handle: Database.Database): unknown =>
+      (handle.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: unknown } | undefined)?.version;
+
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE schema_version (version INTEGER NOT NULL)');
+    convergeTrajectorySchemaVersion(db);
+    expect(readVersion(db)).toBe(TRAJECTORY_SCHEMA_VERSION);
+
+    db.prepare('UPDATE schema_version SET version = ?').run(1);
+    convergeTrajectorySchemaVersion(db);
+    expect(readVersion(db)).toBe(TRAJECTORY_SCHEMA_VERSION);
+
+    convergeTrajectorySchemaVersion(db);
+    expect(readVersion(db)).toBe(TRAJECTORY_SCHEMA_VERSION);
+    expect((db.prepare('SELECT COUNT(*) AS c FROM schema_version').get() as { c: number }).c).toBe(1);
+    db.close();
+  });
+
+  it('convergeTrajectorySchemaVersion is a no-op when the version table is absent', () => {
+    const db = new Database(':memory:');
+    expect(() => convergeTrajectorySchemaVersion(db)).not.toThrow();
     db.close();
   });
 });
