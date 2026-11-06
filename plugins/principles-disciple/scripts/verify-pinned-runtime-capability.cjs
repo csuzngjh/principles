@@ -137,15 +137,33 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   }
 
   // ── canonical workspace state bootstrap (INSTALLED core, not source) ──
+  // PRI-1136 renamed the core subpath `runtime-v2` -> `runtime`. The plugin pin
+  // may point at either generation (pinned 4.1.0 ships runtime-v2, Core 5.x
+  // ships runtime), so accept both and record which one the installed bytes
+  // actually provided instead of silently falling back.
   let SqliteConnection;
   let createProductionRuleHostGate;
   let validateRuleContextV2;
+  let coreRuntimeSubpath;
+  const importErrors = [];
+  for (const specifier of ['@principles/core/runtime', '@principles/core/runtime-v2']) {
+    try {
+      const coreRuntime = requireFromRuntime(specifier);
+      ({ SqliteConnection } = coreRuntime);
+      ({ validateRuleContextV2 } = coreRuntime);
+      coreRuntimeSubpath = specifier;
+      break;
+    } catch (error) {
+      importErrors.push(specifier + ': ' + String(error && error.message).slice(0, 120));
+    }
+  }
   try {
-    ({ SqliteConnection } = requireFromRuntime('@principles/core/runtime'));
-    ({ validateRuleContextV2 } = requireFromRuntime('@principles/core/runtime'));
     ({ createProductionRuleHostGate } = requireFromRuntime('@principles/host-runtime'));
   } catch (error) {
-    fail('probe_import_failed:' + String(error && error.message).slice(0, 200), 'verify the installed runtime layout matches $pd-control setup output');
+    importErrors.push('@principles/host-runtime: ' + String(error && error.message).slice(0, 120));
+  }
+  if (!coreRuntimeSubpath || typeof createProductionRuleHostGate !== 'function') {
+    fail('probe_import_failed:' + importErrors.join(' | '), 'verify the installed runtime layout matches $pd-control setup output');
   }
   if (typeof createProductionRuleHostGate !== 'function' || typeof validateRuleContextV2 !== 'function') {
     fail('probe_capability_not_exported', 'installed packages omit the production gate or RuleContextV2 validator required by this behavior probe');
@@ -364,6 +382,7 @@ async function verifyPinnedRuntimeCapability(options = {}) {
     ok: failures === 0,
     mode: useInstall ? 'install+probe' : 'probe',
     identities,
+    coreRuntimeSubpath,
     scenarioResults: results,
     result: failures === 0
       ? 'installed runtime satisfies Owner-control, Codex V2, and DesignGate capability contracts'

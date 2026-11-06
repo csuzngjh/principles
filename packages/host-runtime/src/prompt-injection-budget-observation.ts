@@ -95,6 +95,18 @@ function isAcceptedBudgetPolicyVersion(value: unknown): boolean {
 export const RUNTIME_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
 
 /**
+ * @deprecated Use `RUNTIME_EVENT_LOG_CANDIDATE_DIRS`.
+ *
+ * PRI-1136 renamed this exported constant, and `src/index.ts` re-exports it
+ * through `export *`, so it is part of the package's public root API. Removing
+ * the old name in a patch release would break external consumers that
+ * `import { RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS } from '@principles/host-runtime'`.
+ * The alias is the exact same frozen array (not a copy) and will be removed in
+ * the next major release.
+ */
+export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVENT_LOG_CANDIDATE_DIRS;
+
+/**
  * Bounded I/O: only the most recent daily files are scanned — PER candidate
  * log directory (`RUNTIME_EVENT_LOG_CANDIDATE_DIRS`), not globally. The
  * cap is deliberately per directory: both directories describe the same

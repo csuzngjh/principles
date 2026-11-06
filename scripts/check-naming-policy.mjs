@@ -10,7 +10,8 @@
  * Scan surface (PR-3 redesign — the PR-1 surface covered `packages/*` source
  * only, which was both false-green and needle-thin: the exports map, the
  * io-seam registry and the workflows were outside it):
- *   - source: `packages/<pkg>/src|scripts/**` and root `scripts/**`
+ *   - source: `packages/<pkg>/src|scripts/**`, root `scripts/**`, and the
+ *             shipped `plugins/**` payload
  *   - tests:  `packages/<pkg>/tests/**` and `*.test.ts(x)` — only the
  *             import-path rule applies here (`testsToo`)
  *   - config: every `packages/<pkg>/package.json`, `io-seam-registry.json`,
@@ -53,6 +54,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REGISTRY_PATH = path.join(ROOT, 'packages/principles-core/io-seam-registry.json');
 const PACKAGES_DIR = path.join(ROOT, 'packages');
 const SCRIPTS_DIR = path.join(ROOT, 'scripts');
+const PLUGINS_DIR = path.join(ROOT, 'plugins');
 const WORKFLOWS_DIR = path.join(ROOT, '.github/workflows');
 const SCANNABLE = /\.(?:ts|tsx|mjs|cjs|js)$/;
 
@@ -83,6 +85,13 @@ try {
 const policy = registry.namingPolicy ?? {};
 const exemptFiles = new Set((policy.exemptFiles ?? []).map((p) => p.replace(/\\/g, '/')));
 const frozenLiterals = (policy.frozenWireLiterals ?? []).filter((p) => typeof p === 'string' && p.length > 0);
+// Exact identifier tokens that must keep the pre-rename spelling, e.g. the
+// deprecated public alias in host-runtime. Unlike a line/whole-file exemption,
+// this only suppresses the named token; every other identifier in the same
+// file (or on the same line) is still checked.
+const allowedIdentifiers = new Set(
+  (policy.allowedIdentifiers ?? []).filter((value) => typeof value === 'string' && value.length > 0),
+);
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.pd-test-temp', '.git']);
 const scanErrors = [];
@@ -155,6 +164,9 @@ function defaultSourceFiles(out = []) {
     }
   }
   productionFiles(SCRIPTS_DIR, out);
+  // The root plugin is shipped payload: its .cjs files run on the Owner's
+  // machine and are exactly where a stale subpath would break delivery.
+  if (fs.existsSync(PLUGINS_DIR)) productionFiles(PLUGINS_DIR, out);
   return out;
 }
 
@@ -241,9 +253,7 @@ function configHits(rel, raw) {
 
 /** Exemptions suppress GATED findings only; inventory always counts the file. */
 function isExempt(rel) {
-  if (exemptFiles.has(rel)) return true;
-  // Align with eslint.config.js ignores for packages/*/scripts/**.
-  return /^packages\/[^/]+\/scripts\//.test(rel);
+  return exemptFiles.has(rel);
 }
 
 const RULES = [
@@ -256,6 +266,21 @@ const RULES = [
     gated: true,
     frozenExempt: true,
     multiline: false,
+    scopes: ['source', 'tests'],
+  },
+  {
+    id: 'runtime-v2-identifier',
+    why: '代际标识符复活（应使用无代际语义的名字；冻结的 wire 字面量不受此规则约束）',
+    // Matches the three identifier spellings the rename removed. Snake-case
+    // wire literals such as `runtime_v2_prompt_activations_injected` are not
+    // identifiers of this shape and stay frozen by design.
+    re: /\b(?:RuntimeV2[A-Za-z0-9_]*|runtimeV2[A-Za-z0-9_]*|RUNTIME_V2[A-Z0-9_]*)\b/g,
+    gated: true,
+    frozenExempt: false,
+    multiline: false,
+    // Only the exact tokens in namingPolicy.allowedIdentifiers are suppressed
+    // (currently the deprecated host-runtime export alias).
+    allowIdentifiers: true,
     scopes: ['source', 'tests'],
   },
   {
@@ -310,12 +335,16 @@ function scan(rel, source, scope) {
     const chunks = rule.multiline ? [source] : lines;
     for (const chunk of chunks) {
       if (rule.frozenExempt && frozenLiterals.some((lit) => chunk.includes(lit))) continue;
-      const count = [...chunk.matchAll(rule.re)].length;
-      if (count === 0) continue;
-      inventory[rule.id] += count;
+      const matches = [...chunk.matchAll(rule.re)];
+      if (matches.length === 0) continue;
+      inventory[rule.id] += matches.length;
+      const violations = rule.allowIdentifiers
+        ? matches.filter((match) => !allowedIdentifiers.has(match[0]))
+        : matches;
+      if (violations.length === 0) continue;
       if (!rule.gated) continue;
       const bucket = gatedRuleIds.has(rule.id) ? perFile : perPending;
-      bucket.set(rule.id, (bucket.get(rule.id) ?? 0) + count);
+      bucket.set(rule.id, (bucket.get(rule.id) ?? 0) + violations.length);
     }
   }
   const toFindings = (map) =>

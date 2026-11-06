@@ -78,6 +78,7 @@ describe('check-naming-policy rule gating is explicit (PRI-1136 / PR-6 boundary)
   it('the registry decides which rules can fail the build', () => {
     const parsed = JSON.parse(run('--json').stdout);
     expect(parsed.gatedRules).toContain('runtime-v2-import');
+    expect(parsed.gatedRules).toContain('runtime-v2-identifier');
     expect(parsed.gatedRules).toContain('runtime-v2-config');
     // PRI-1139 (PR-6) flips the write side; until then this rule must not gate.
     expect(parsed.gatedRules).not.toContain('versioned-output-ref');
@@ -153,7 +154,11 @@ describe('check-naming-policy config surface (PRI-1136 scan redesign)', () => {
     const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
     expect(Array.isArray(registry.seams)).toBe(true);
     expect(registry.seams.flatMap((s) => s.files ?? []).every((f) => !f.includes('runtime-v2'))).toBe(true);
-    expect(registry.namingPolicy.gatedRules).toEqual(['runtime-v2-import', 'runtime-v2-config']);
+    expect(registry.namingPolicy.gatedRules).toEqual([
+      'runtime-v2-import',
+      'runtime-v2-identifier',
+      'runtime-v2-config',
+    ]);
   });
 });
 
@@ -163,5 +168,56 @@ describe('check-naming-policy inventory vs exemptions (PR #2367 CodeRabbit #5)',
     // server/index.ts and ui/api.ts hold the bulk of the '/api/v1/' literals;
     // both files are gated-rule exemptions but MUST appear in the inventory.
     expect(parsed.inventory['api-v1-route']).toBeGreaterThanOrEqual(130);
+  });
+
+  it('the default scan surface includes the root plugin payload', () => {
+    // The two shipped plugin scripts are temporarily exempt until the Core 5.x
+    // runtime-pins move; they still must be inventoried, which proves plugins/**
+    // is scanned at all (PRI-1136 review P2).
+    const parsed = JSON.parse(run('--json').stdout);
+    expect(parsed.inventory['runtime-v2-import']).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('check-naming-policy identifier revival (PRI-1136 review P2)', () => {
+  it('flags RuntimeV2 / runtimeV2 / RUNTIME_V2 identifiers and fails strict', () => {
+    const root = tempScanRoot();
+    fs.writeFileSync(
+      path.join(root, 'identifiers.ts'),
+      'export const RuntimeV2Thing = 1;\nexport const runtimeV2Thing = RuntimeV2Thing;\nexport const RUNTIME_V2_THING = 2;\n',
+    );
+    const result = runRoot(root, '--strict', '--json');
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.inventory['runtime-v2-identifier']).toBe(4);
+    expect(parsed.findings.some((finding) => finding.rule === 'runtime-v2-identifier')).toBe(true);
+  });
+
+  it('suppresses only the exact deprecated token, not the whole line or file', () => {
+    const root = tempScanRoot();
+    fs.writeFileSync(
+      path.join(root, 'alias.ts'),
+      'export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS = 1; export const RuntimeV2Thing = 2;\n',
+    );
+    const result = runRoot(root, '--strict', '--json');
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.inventory['runtime-v2-identifier']).toBe(2);
+    const identifierFindings = parsed.findings.filter((finding) => finding.rule === 'runtime-v2-identifier');
+    expect(identifierFindings).toHaveLength(1);
+    expect(identifierFindings[0].count).toBe(1);
+  });
+
+  it('the deprecated alias alone is inventoried but never gated', () => {
+    const root = tempScanRoot();
+    fs.writeFileSync(
+      path.join(root, 'alias.ts'),
+      'export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS = 1;\n',
+    );
+    const result = runRoot(root, '--strict', '--json');
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.inventory['runtime-v2-identifier']).toBe(1);
+    expect(parsed.findings).toEqual([]);
   });
 });

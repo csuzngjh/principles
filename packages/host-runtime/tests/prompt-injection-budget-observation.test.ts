@@ -8,6 +8,7 @@ import {
   RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES,
   RUNTIME_BUDGET_OBSERVATION_MAX_FILES,
   RUNTIME_EVENT_LOG_CANDIDATE_DIRS,
+  RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
   readRuntimePromptBudgetObservations,
   runtimeBudgetObservationToResolution,
   selectConsoleRuntimeBudgetFacts,
@@ -403,6 +404,14 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.observations).toHaveLength(1);
     expect(report.observations[0]?.budgetChars).toBe(6250);
     expect(report.filesRead.length).toBe(2);
+  });
+
+  it('keeps the pre-rename public constant name as a deprecated alias', () => {
+    // `src/index.ts` re-exports this module with `export *`, so the old name is
+    // part of the package root API. External `^2.2.0` consumers must keep
+    // resolving it through a patch release (PRI-1136 review P1-2).
+    expect(RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS).toBe(RUNTIME_EVENT_LOG_CANDIDATE_DIRS);
+    expect(RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS).toEqual(['.pd/logs', '.state/logs']);
   });
 
   it('the file cap applies PER candidate directory: the later directory is never starved and files beyond the cap are dropped', () => {

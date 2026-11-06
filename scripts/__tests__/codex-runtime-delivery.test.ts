@@ -256,6 +256,25 @@ describe('Codex runtime delivery authority and discoverability', () => {
     });
   });
 
+  it('shipped payload accepts both core runtime subpath generations', () => {
+    // PRI-1136 renamed `@principles/core/runtime-v2` -> .../runtime. The plugin
+    // pin still points at Core 4.1.0 (runtime-v2), while PR CI probes the
+    // PR-built Core 5.x bytes (runtime). Both must resolve, and the probe must
+    // report which generation the installed bytes provided.
+    const probe = fs.readFileSync(
+      path.join(root, 'plugins/principles-disciple/scripts/verify-pinned-runtime-capability.cjs'),
+      'utf8',
+    );
+    expect(probe).toContain("'@principles/core/runtime'");
+    expect(probe).toContain("'@principles/core/runtime-v2'");
+    expect(probe).toContain('coreRuntimeSubpath,');
+    const setup = fs.readFileSync(
+      path.join(root, 'plugins/principles-disciple/scripts/pd-setup.cjs'),
+      'utf8',
+    );
+    expect(setup).toContain("['runtime', 'runtime-v2']");
+  });
+
   it('production CI probes the PR-built runtime bytes and publication reconciles a separate maintenance PR', () => {
     const ci = fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8');
     const train = fs.readFileSync(path.join(root, '.github/workflows/publish-npm.yml'), 'utf8');

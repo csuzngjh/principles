@@ -7,7 +7,7 @@
     "files": [
       {
         "name": "actor.mjs",
-        "sha256": "30ed5c55616f3c490811385b7965b7d87ee05e0ba3edaa7bd0602362ea0ac77e"
+        "sha256": "9ecffd152e4e6def80a727c3098fe9eaa0c5ff37ff3dbe1b462dc54473247a22"
       },
       {
         "name": "ceb002-cli.mjs",
@@ -127,7 +127,7 @@
       },
       {
         "name": "examiner-injection-evidence.mjs",
-        "sha256": "123183a2fbc0bca48985f4bf4ba9eacdff7a5bddddf08000c59fa1b3e4a14331"
+        "sha256": "4ece4bbb772c711380d96d95977b95ed3d95fec0f41bd6835649834f05d02c15"
       },
       {
         "name": "examiner-study.mjs",
@@ -210,7 +210,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "97de69338f3be4008f2b17f5ebce36f918cfa1fa908530f42a41f072987b8275"
+      "sha256": "9be73ca62dfe92621915bf8da504d9681c948ef3c7e0198fad6ea99591dbad7d"
     },
     {
       "path": "blind-review/review-form.json",
@@ -218,7 +218,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "12aef14c31c43219a83840df5d4c725e32cc8fa869c61e2fb9857e7f51902e57"
+      "sha256": "010b9c6d4746abbb05760a1df04366ba0ce18e92cb01f21692757a3fa621dfd8"
     },
     {
       "path": "gold-review.json",
@@ -262,7 +262,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "d01028655150c66ce9bc97a35d8543080b25c29cd3b1fc9a3c96d7460c596a48"
+      "sha256": "d949acbb60322d71850f0a8ef94de03fa22c8248125532ca9241f673b57408f6"
     },
     {
       "path": "revision.json",
@@ -277,5 +277,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "39e6a4a12f6a44e3bbeb5fccd85eac6df80ea69266e534c49b5f805e6d731623"
+  "packageHash": "c2d62c63dabfa7a0dbea871e509eeea5d6d3ac7793f5aa3a2f1e2248367a7b1f"
 }
