@@ -106,7 +106,7 @@ export interface PromptInjectionRouteSummaryWire {
   status: 'confirmed' | 'unconfirmed';
   hostKind?: PromptInjectionTargetHostName;
   route?: PromptInjectionRouteName;
-  flagEnabled: boolean;
+  /** PRI-1137: no flag participates in route selection — the field is retired. */
   unconfirmedReason?: string;
   nextAction?: string;
   /** Present when no status could be computed at all (fail-loud degradation). */
@@ -124,6 +124,12 @@ export interface PromptInjectionRouteSummaryWire {
   budgetContextWindowTokens?: number;
   /** Present only when the rows were measured under the fixed fallback. */
   budgetFallbackReason?: PromptBudgetFallbackReasonWire;
+  /**
+   * PRI-1137: does the ONE shared production route rotate for this workspace?
+   * True only when the responsible host supplies a trusted round authority
+   * (OpenClaw). Console copy must use this instead of a per-route/flag check.
+   */
+  productionRotates?: boolean;
 }
 
 export interface PromptInjectionBudgetStatus {

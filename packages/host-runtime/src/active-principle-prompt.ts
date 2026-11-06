@@ -35,6 +35,13 @@ export interface ActivePrinciplePromptResult {
   eligibleCount?: number;
   /** PRI-904: circular scan start; present only under fair_rotation_v1. */
   rotationStartIndex?: number;
+  /**
+   * PRI-1137: the trusted round key this fair rotation actually advanced on.
+   * Present only under fair_rotation_v1 — the injection event mirrors it as
+   * `selectionRoundOrdinal`, so the recorded round can never disagree with
+   * the selection that produced the payload.
+   */
+  selectionRoundOrdinal?: number;
   /** PRI-904 (bounded, max 16): activation ids dropped for insufficient remaining budget. */
   droppedActivationIds?: string[];
   /** PRI-904 (bounded, max 16): activation ids that cannot fit even in an empty payload. */
@@ -77,7 +84,11 @@ export interface PromptActivationCandidates {
   /** true = prompt flag off or state.db missing — candidates are necessarily empty */
   aborted: boolean;
   selfReportEnabled: boolean;
-  abstractionLayerEnabled: boolean;
+  /**
+   * PRI-1137: the `abstraction_layer_v1` route context is retired — every host
+   * now reads the same candidate set. Field removed rather than pinned false,
+   * so no consumer can branch on a dead route marker.
+   */
 }
 
 /**
@@ -87,8 +98,19 @@ export interface PromptActivationCandidates {
  */
 export async function readPromptActivationCandidates(input: {
   workspaceDir: string;
-  /** Opt in for revalidation; default route keeps its historical prompt bytes. */
+  /**
+   * PRI-1137: annotate each candidate with its authority. The shared runtime is
+   * now the ONLY prompt route, so this must stay on for the production read —
+   * the retired OpenClaw list route rendered `authority="owner"`/`"system_policy"`
+   * per directive, and dropping it would silently weaken the P0-G INV-05
+   * guarantee that a low-risk auto-activation is never represented as Owner-approved.
+   */
   includeAuthority?: boolean;
+  /**
+   * Additional adaptive reads must not hold the host behind SQLite's synchronous
+   * busy wait. Only the adaptive revalidation read opts in.
+   */
+  noBusyWait?: boolean;
 }): Promise<PromptActivationCandidates> {
   const warnings: string[] = [];
   const principles: ActivatedPrinciple[] = [];
@@ -98,10 +120,9 @@ export async function readPromptActivationCandidates(input: {
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   const { prompt: promptFlag } = flags;
-  const abstractionLayerEnabled = flags.abstraction_layer_v1?.enabled === true;
   if (!promptFlag?.enabled) {
     warnings.push('prompt_feature_disabled; nextAction=set features.prompt.enabled=true in .pd/config.yaml');
-    return { principles, warnings, aborted: true, selfReportEnabled: false, abstractionLayerEnabled };
+    return { principles, warnings, aborted: true, selfReportEnabled: false };
   }
   // PRI-532: agent self-report instruction rides the directive template when
   // the flag is on (flag-off keeps the template byte-identical).
@@ -111,12 +132,12 @@ export async function readPromptActivationCandidates(input: {
   const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(stateDbPath)) {
     warnings.push('activation_db_not_found; nextAction=initialize_workspace_runtime_state');
-    return { principles, warnings, aborted: true, selfReportEnabled, abstractionLayerEnabled };
+    return { principles, warnings, aborted: true, selfReportEnabled };
   }
   try {
     connection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true, bootstrapIfMissing: false,
       // Additional adaptive reads must not hold the host behind SQLite's synchronous busy wait.
-      ...(input.includeAuthority === true ? { busyTimeoutMs: 0 } : {}),
+      ...(input.noBusyWait === true ? { busyTimeoutMs: 0 } : {}),
     });
     const activations = filterPromptActivations(await new SqliteActivationStateStore(connection).listPromptActivations());
     const artifactStore = new SqlitePIArtifactStore(connection);
@@ -161,7 +182,62 @@ export async function readPromptActivationCandidates(input: {
   } finally {
     connection?.close();
   }
-  return { principles, warnings, aborted: false, selfReportEnabled, abstractionLayerEnabled };
+  return { principles, warnings, aborted: false, selfReportEnabled };
+}
+
+export interface SharedDirectivePacking {
+  included: ActivatedPrinciple[];
+  additionalContext: string;
+  truncated: boolean;
+  dropped: string[];
+  oversized: string[];
+}
+
+/**
+ * PRI-1137: THE shared directive packer. `buildActivePrinciplePromptContext`
+ * selects through it, and the console projection reuses it to answer "which
+ * activations this route reaches across rounds". One policy implementation —
+ * the retired list-route `trimToBudget` arithmetic must not survive as a
+ * second forecast authority.
+ */
+export function packSharedDirectives(input: {
+  scanOrder: ActivatedPrinciple[];
+  budgetChars: number;
+  selfReportEnabled: boolean;
+  /** Fair rotation continues past a non-fit; legacy FIFO stops at the first one. */
+  continueOnNonFit: boolean;
+}): SharedDirectivePacking {
+  const { scanOrder, budgetChars, selfReportEnabled, continueOnNonFit } = input;
+  const included: ActivatedPrinciple[] = [];
+  let additionalContext = '';
+  let truncated = false;
+  const dropped: string[] = [];
+  const oversized: string[] = [];
+  const standaloneFits = (principle: ActivatedPrinciple): boolean =>
+    renderPrinciplesToDirectives([principle], new Set([principle.principleId]), { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }).length
+    <= budgetChars;
+
+  for (const principle of scanOrder) {
+    const candidate = [...included, principle];
+    const candidateContext = renderPrinciplesToDirectives(
+      candidate,
+      new Set(candidate.map((entry) => entry.principleId)),
+      { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
+    );
+    if (candidateContext.length > budgetChars) {
+      if (standaloneFits(principle)) {
+        truncated = true;
+        if (dropped.length < MAX_SHARED_DIAGNOSTIC_IDS) dropped.push(principle.activationId);
+      } else if (oversized.length < MAX_SHARED_DIAGNOSTIC_IDS) {
+        oversized.push(principle.activationId);
+      }
+      if (!continueOnNonFit) break;
+      continue;
+    }
+    included.push(principle);
+    additionalContext = candidateContext;
+  }
+  return { included, additionalContext, truncated, dropped, oversized };
 }
 
 export async function buildActivePrinciplePromptContext(input: {
@@ -194,7 +270,7 @@ export async function buildActivePrinciplePromptContext(input: {
   const promptBudget = input.promptBudget ?? resolvePromptBudget();
   const { budgetChars } = promptBudget;
   const { principles, warnings, aborted, selfReportEnabled } =
-    await readPromptActivationCandidates(input);
+    await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true });
   if (aborted) {
     return {
       additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
@@ -232,38 +308,8 @@ export async function buildActivePrinciplePromptContext(input: {
     ? principles
     : principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
 
-  const pack = (scanOrder: ActivatedPrinciple[]) => {
-    const included: ActivatedPrinciple[] = [];
-    let additionalContext = '';
-    let truncated = false;
-    const dropped: string[] = [];
-    const oversized: string[] = [];
-    const standaloneFits = (principle: ActivatedPrinciple): boolean =>
-      renderPrinciplesToDirectives([principle], new Set([principle.principleId]), { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }).length
-      <= budgetChars;
-
-    for (const principle of scanOrder) {
-      const candidate = [...included, principle];
-      const candidateContext = renderPrinciplesToDirectives(
-        candidate,
-        new Set(candidate.map((entry) => entry.principleId)),
-        { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
-      );
-      if (candidateContext.length > budgetChars) {
-        if (standaloneFits(principle)) {
-          truncated = true;
-          if (dropped.length < MAX_SHARED_DIAGNOSTIC_IDS) dropped.push(principle.activationId);
-        } else if (oversized.length < MAX_SHARED_DIAGNOSTIC_IDS) {
-          oversized.push(principle.activationId);
-        }
-        if (selectionPolicy === 'legacy_fifo_prefix_v1') break;
-        continue;
-      }
-      included.push(principle);
-      additionalContext = candidateContext;
-    }
-    return { included, additionalContext, truncated, dropped, oversized };
-  };
+  const pack = (scanOrder: ActivatedPrinciple[]) =>
+    packSharedDirectives({ scanOrder, budgetChars, selfReportEnabled, continueOnNonFit: selectionPolicy === 'fair_rotation_v1' });
 
   const makeResult = (
     packing: ReturnType<typeof pack>,
@@ -286,6 +332,7 @@ export async function buildActivePrinciplePromptContext(input: {
       selectionPolicy,
       eligibleCount: eligiblePrinciples.length,
       ...(rotationStartIndex !== undefined ? { rotationStartIndex } : {}),
+      ...(selectionPolicy === 'fair_rotation_v1' && roundKey !== undefined ? { selectionRoundOrdinal: roundKey } : {}),
       ...(packing.dropped.length > 0 ? { droppedActivationIds: packing.dropped } : {}),
       ...(packing.oversized.length > 0 ? { oversizedActivationIds: packing.oversized } : {}),
       budgetCapacitySource: promptBudget.capacitySource,
@@ -342,7 +389,7 @@ export async function buildActivePrinciplePromptContext(input: {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'target_ambiguous') };
   }
 
-  const authorityRead = await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true });
+  const authorityRead = await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true, noBusyWait: true });
   const authorizedMatches = authorityRead.principles.filter((principle) =>
     principle.artifactId === priority.artifactId && principle.activationId === priority.activationId,
   );

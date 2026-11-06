@@ -8,20 +8,18 @@ import {
   SqlitePIArtifactStore,
   classifySingleItemBudgetTier,
   computeFeatureFlagsFromConfig,
-  listEntryLine,
   renderPrinciplesToDirectives,
   resolvePrincipleFromArtifact,
-  trimToBudget,
   type ActivatedPrinciple,
   type ActivationStatusRecord,
   type PromptBudgetTierFit,
 } from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
+import { readPromptActivationAuthority } from './prompt-activation-authority.js';
 import {
   PROMPT_INJECTION_TARGET_HOSTS,
   PROMPT_INJECTION_UNIT,
-  promptRouteForHost,
   resolvePromptInjectionRouteDecision,
   type PromptInjectionBudgetScope,
   type PromptInjectionRouteDecision,
@@ -32,11 +30,11 @@ import {
 /**
  * SPEC PD_PROMPT_CAPACITY_V1 R-B2: ONE route-aware single-artifact capacity
  * precheck, shared by every real prompt-activation write entry (Console
- * approve, CLI approve) and by the pre-approval candidate fit (R-A2). The
- * cost is measured with the SAME production serializer/selector the bound
- * route uses — list route bills the selected-lines entry (header + entry),
- * shared route bills the full single-principle directive render including
- * the self-report footer when that flag is on. The principle identity is
+ * approve, CLI approve) and by the pre-approval candidate fit (R-A2).
+ * PRI-1137: the cost is measured with the ONE live production serializer —
+ * the full single-principle directive render (including the self-report
+ * footer when that flag is on). The retired list-route selected-lines
+ * arithmetic is gone. The principle identity is
  * the REAL resolved id (content `principleId` or draft title) — never a
  * fixed-length UUID allowance (a title-derived id can only be longer).
  *
@@ -149,41 +147,31 @@ function selfReportEnabledFor(workspaceDir: string): boolean {
 }
 
 /**
- * Positive single-item evidence under a given route, using the production
- * selector itself (AC-06: a row is "fits" because its own serialized entry
- * fits — never because it is absent from a bounded diagnostic list).
+ * Positive single-item evidence under the live route, using the production
+ * serializer itself (AC-06: a row is "fits" because its own serialized
+ * directive fits — never because it is absent from a bounded diagnostic list).
  *
- * `costChars` is what the single-entry selection would consume, measured the
- * same way the route's projection reports `usedChars` (the joined selected
- * lines). For an entry that does NOT fit, trimToBudget returns only the
- * header line, so the would-be cost is reconstructed from the header line it
- * DID return plus the real entry line (same format authority, listEntryLine).
+ * `costChars` is what the single-entry selection consumes, measured exactly as
+ * the shared projection reports `usedChars`. PRI-1137: there is one live route,
+ * so there is no route parameter and no list-route `trimToBudget` arithmetic to
+ * keep in sync — a forecast may not measure a deleted path.
  *
- * The budget parameter defaults to the legacy fixed budget: approval-time
+ * The budget parameter defaults to the fixed fallback budget: approval-time
  * callers hold no runtime model facts, and SPEC §6.3 requires the fixed
  * fallback — never an invented capacity — when none can be confirmed.
  */
 export function computePromptSingleItemFit(input: {
   principle: ActivatedPrinciple;
-  route: PromptInjectionRouteName;
   selfReportEnabled: boolean;
   budget?: number;
 }): { fits: boolean; costChars: number } {
   const budget = input.budget ?? PROMPT_BUDGET_FALLBACK_CHARS;
-  if (input.route === 'shared_render') {
-    const render = renderPrinciplesToDirectives(
-      [input.principle],
-      new Set([input.principle.principleId]),
-      { escapeFn: escapeXml, selfReportInstruction: input.selfReportEnabled },
-    );
-    return { fits: render.length <= budget, costChars: render.length };
-  }
-  const trimmed = trimToBudget([input.principle], budget, escapeXml);
-  const fits = trimmed.injectedIds.has(input.principle.principleId);
-  const costChars = trimmed.lines.length > 1
-    ? trimmed.lines.join('\n').length
-    : (trimmed.lines[0]?.length ?? 0) + 1 + listEntryLine(input.principle, escapeXml).length;
-  return { fits, costChars };
+  const render = renderPrinciplesToDirectives(
+    [input.principle],
+    new Set([input.principle.principleId]),
+    { escapeFn: escapeXml, selfReportInstruction: input.selfReportEnabled },
+  );
+  return { fits: render.length <= budget, costChars: render.length };
 }
 
 const UNDELIVERABLE_NEXT_ACTION =
@@ -191,6 +179,28 @@ const UNDELIVERABLE_NEXT_ACTION =
 
 const MODEL_DEPENDENT_NEXT_ACTION =
   'this principle fits the injection budget only on models with a larger context window; it may be excluded at runtime on smaller-context models — the approval itself is unaffected';
+
+/**
+ * PRI-1137: the production prompt annotates each directive with its authority,
+ * so an approval-time cost that omitted the attribute would understate the real
+ * bytes. Unknown/unreadable stays unannotated — never inferred.
+ */
+function readAuthorityForArtifact(
+  workspaceDir: string,
+  artifactId: string,
+): 'owner' | 'system_policy' | undefined {
+  const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  if (!fs.existsSync(stateDbPath)) return undefined;
+  let connection: SqliteConnection | undefined;
+  try {
+    connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false, busyTimeoutMs: 0 });
+    return readPromptActivationAuthority(connection, artifactId, 'prompt').authority;
+  } catch {
+    return undefined;
+  } finally {
+    connection?.close();
+  }
+}
 
 /**
  * Precheck one artifact against the workspace's effective injection route.
@@ -217,6 +227,10 @@ export async function checkPromptArtifactDeliverability(input: {
     };
   }
   const selfReportEnabled = selfReportEnabledFor(input.workspaceDir);
+  const authority = readAuthorityForArtifact(input.workspaceDir, input.artifact.artifactId);
+  const principle: ActivatedPrinciple = authority === undefined
+    ? resolved.principle
+    : { ...resolved.principle, authority };
   const decision = resolvePromptInjectionRouteDecision({
     workspaceDir: input.workspaceDir,
     targetHost: input.targetHost,
@@ -224,13 +238,10 @@ export async function checkPromptArtifactDeliverability(input: {
 
   if (decision.status === 'confirmed' && decision.route !== undefined) {
     const { costChars } = computePromptSingleItemFit({
-      principle: resolved.principle,
-      route: decision.route,
+      principle,
       selfReportEnabled,
     });
-    const budgetScope: PromptInjectionBudgetScope = decision.route === 'shared_render'
-      ? 'full_directive_context'
-      : 'selected_lines';
+    const budgetScope: PromptInjectionBudgetScope = 'full_directive_context';
     const shared = {
       route: decision.route,
       ...(decision.hostKind !== undefined ? { hostKind: decision.hostKind } : {}),
@@ -275,10 +286,8 @@ export async function checkPromptArtifactDeliverability(input: {
   // hand-typed two-host array dropped WorkBuddy from unconfirmed
   // deliverability reports).
   const perHost = PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => {
-    const route = promptRouteForHost(hostKind, decision.flagEnabled);
     const { costChars } = computePromptSingleItemFit({
-      principle: resolved.principle,
-      route,
+      principle,
       selfReportEnabled,
     });
     return { hostKind, tierFit: classifySingleItemBudgetTier(costChars), costChars };

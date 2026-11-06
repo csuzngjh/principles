@@ -5,9 +5,9 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import * as yaml from 'js-yaml';
 import {
+  PROMPT_BUDGET_FALLBACK_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
-  RUNTIME_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
   getDefaultPdConfig,
@@ -24,10 +24,12 @@ import {
 
 /**
  * AC-01 / AC-02 / AC-05 / AC-06 (SPEC PD_PROMPT_CAPACITY_V1 §7) at the
- * host-runtime boundary: the effective route is bound to real host facts
- * (declarations ∪ pain evidence), Codex is never forecast on the list route,
- * single-item costs use the REAL resolved identity and the route's own
- * serializer, and unknown facts surface as unconfirmed — never as a guess.
+ * host-runtime boundary. PRI-1137 deleted the OpenClaw plugin-local list
+ * route: every standard host injects through the shared directive render, so
+ * host facts bind ATTRIBUTION only (which host is talking), never a per-host
+ * route split. Single-item costs use the REAL resolved identity and the
+ * shared serializer, and unreadable inputs still surface as unconfirmed —
+ * never as a guess.
  */
 
 const tempDirs: string[] = [];
@@ -117,16 +119,16 @@ async function seedActivation(workspaceDir: string, principleId: string, text: s
 }
 
 describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host facts', () => {
-  it('openclaw declared, flag off → confirmed legacy list route', () => {
+  it('openclaw declared → confirmed shared route (PRI-1137: the legacy route is deleted)', () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('confirmed');
     expect(d.hostKind).toBe('openclaw');
-    expect(d.route).toBe('legacy_trim');
+    expect(d.route).toBe('shared_render');
     expect(d.basis).toBe('workspace_host_facts');
   });
 
-  it('openclaw declared, flag on → confirmed shared route', () => {
+  it('openclaw declared with a stale abstraction_layer_v1 enabled:true → still shared route', () => {
     const dir = tempWorkspace({ sharedFlag: true, declare: ['openclaw'] });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('confirmed');
@@ -134,7 +136,7 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     expect(d.route).toBe('shared_render');
   });
 
-  it('codex declared, flag OFF → still confirmed SHARED route (the misprojection this task fixes)', () => {
+  it('codex declared → confirmed SHARED route (the misprojection this task fixes)', () => {
     const dir = tempWorkspace({ declare: ['codex'] });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('confirmed');
@@ -150,7 +152,7 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     expect(d.route).toBe('shared_render');
   });
 
-  it('workbuddy declared, flag OFF → confirmed shared route (the third host never takes the list route)', () => {
+  it('workbuddy declared → confirmed shared route (the third host never takes the deleted list route)', () => {
     const dir = tempWorkspace({ declare: ['workbuddy'] });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('confirmed');
@@ -175,41 +177,24 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     expect(d.route).toBe('shared_render');
   });
 
-  it('both hosts declared with the flag ON → one shared route for all hosts', () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['openclaw', 'codex'] });
+  it('several host facts → one shared route, no guessed host attribution', () => {
+    const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('confirmed');
     expect(d.route).toBe('shared_render');
-    expect(d.basis).toBe('flag_shared_all_hosts');
+    expect(d.basis).toBe('single_route_all_hosts');
     expect(d.hostKind).toBeUndefined();
   });
 
-  it('both hosts declared with the flag OFF → unconfirmed with per-host routes, no guess', () => {
-    const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
-    const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
-    expect(d.status).toBe('unconfirmed');
-    expect(d.unconfirmedReason).toContain('multi_host_routes_differ');
-    // WorkBuddy joined the standard roster (third host): always shared_render.
-    expect(d.perHost).toEqual([
-      { hostKind: 'openclaw', route: 'legacy_trim' },
-      { hostKind: 'codex', route: 'shared_render' },
-      { hostKind: 'workbuddy', route: 'shared_render' },
-    ]);
-  });
-
-  it('no host facts at all, flag off → unconfirmed (cannot pick a route)', () => {
+  it('no host facts → confirmed shared route; host attribution stays unknown', () => {
     const dir = tempWorkspace();
-    const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
-    expect(d.status).toBe('unconfirmed');
-    expect(d.unconfirmedReason).toContain('no_host_facts_and_flag_off');
-    expect(d.nextAction).toContain('target host');
-  });
-
-  it('no host facts, flag ON → confirmed shared (both standard hosts agree)', () => {
-    const dir = tempWorkspace({ sharedFlag: true });
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir });
     expect(d.status).toBe('confirmed');
     expect(d.route).toBe('shared_render');
+    expect(d.basis).toBe('single_route_all_hosts');
+    expect(d.hostKind).toBeUndefined();
+    expect(d.declaredHostKinds).toEqual([]);
+    expect(d.effectiveHostKinds).toEqual([]);
   });
 
   it('an explicit request-level target host overrides the facts', () => {
@@ -217,7 +202,7 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
     const d = resolvePromptInjectionRouteDecision({ workspaceDir: dir, targetHost: 'openclaw' });
     expect(d.status).toBe('confirmed');
     expect(d.hostKind).toBe('openclaw');
-    expect(d.route).toBe('legacy_trim');
+    expect(d.route).toBe('shared_render');
     expect(d.basis).toBe('explicit_target');
   });
 
@@ -246,7 +231,7 @@ describe('AC-01: resolvePromptInjectionRouteDecision binds the route to host fac
 });
 
 describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route', () => {
-  it('a codex workspace with the flag off forecasts on the SHARED route (old code said legacy_trim)', async () => {
+  it('a codex workspace forecasts on the SHARED route (old code said legacy_trim)', async () => {
     const dir = tempWorkspace({ declare: ['codex'] });
     await seedActivation(dir, 'C-1', 'codex 原则内容');
     const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: dir });
@@ -260,7 +245,7 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(resolution.projection.injectedActivationIds).toEqual(['act-C-1']);
   });
 
-  it('a workbuddy workspace with the flag off forecasts the SAME shared injection as codex (old code said legacy_trim)', async () => {
+  it('a workbuddy workspace forecasts the SAME shared injection as codex (old code said legacy_trim)', async () => {
     const dir = tempWorkspace({ declare: ['workbuddy'] });
     await seedActivation(dir, 'WB-1', 'workbuddy 原则内容');
     const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: dir });
@@ -283,33 +268,36 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(codexResolution.projection.injectedActivationIds).toEqual(resolution.projection.injectedActivationIds);
   });
 
-  it('an unconfirmed route returns per-host forecasts instead of one guessed projection', async () => {
+  it('several host facts → ONE confirmed shared projection; host attribution stays unknown', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
     await seedActivation(dir, 'M-1', '多宿主工作区原则');
     const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: dir });
-    expect(resolution.status).toBe('unconfirmed');
-    if (resolution.status !== 'unconfirmed') return;
-    expect(resolution.perHost.map((entry) => [entry.hostKind, entry.projection.route])).toEqual([
-      ['openclaw', 'legacy_trim'],
-      ['codex', 'shared_render'],
-      ['workbuddy', 'shared_render'],
-    ]);
-    // 列表路由计费范围与共享路由不同——两个数字都要有,且语义标注正确
-    const openclaw = resolution.perHost[0].projection;
-    const codex = resolution.perHost[1].projection;
-    const workbuddy = resolution.perHost[2].projection;
-    expect(openclaw.budgetScope).toBe('selected_lines');
-    expect(codex.budgetScope).toBe('full_directive_context');
-    expect(workbuddy.budgetScope).toBe('full_directive_context');
-    expect(codex.usedChars).toBeGreaterThan(openclaw.usedChars);
-    expect(workbuddy.usedChars).toBe(codex.usedChars);
-    // 轮转语义按宿主如实标注 (PR-1894): 列表路由轮转, 共享路由不轮转 —
-    // WorkBuddy 与 Codex 同为共享路由, selection/rotation 语义必须一致
-    expect(openclaw.productionRotates).toBe(true);
-    expect(codex.productionRotates).toBe(false);
-    expect(workbuddy.productionRotates).toBe(false);
-    expect(openclaw.selectionPolicy).toBe('legacy_fifo_prefix_v1');
-    expect(workbuddy.selectionPolicy).toBe(codex.selectionPolicy);
+    // PRI-1137: with one route there is no per-host forecast to diverge. The
+    // ROUTE is confirmed; the HOST is not guessed.
+    expect(resolution.status).toBe('confirmed');
+    if (resolution.status !== 'confirmed') return;
+    expect(resolution.decision.basis).toBe('single_route_all_hosts');
+    expect(resolution.decision.hostKind).toBeUndefined();
+    expect(resolution.projection.route).toBe('shared_render');
+    expect(resolution.projection.budgetScope).toBe('full_directive_context');
+    expect(resolution.projection.injectedActivationIds).toEqual(['act-M-1']);
+    // No single host owns the advancing round authority, so production
+    // rotation is not claimed for an unattributed workspace.
+    expect(resolution.projection.productionRotates).toBe(false);
+    expect(resolution.projection.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+  });
+
+  it('an openclaw-only workspace is the one host whose forecast claims production rotation', async () => {
+    const dir = tempWorkspace({ declare: ['openclaw'] });
+    await seedActivation(dir, 'O-1', 'openclaw 原则内容');
+    const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: dir });
+    expect(resolution.status).toBe('confirmed');
+    if (resolution.status !== 'confirmed') return;
+    expect(resolution.decision.hostKind).toBe('openclaw');
+    expect(resolution.projection.route).toBe('shared_render');
+    // OpenClaw owns trajectory.db::user_turns, so its real injection rotates;
+    // Codex/WorkBuddy supply no round key (see AC-01 decision tests above).
+    expect(resolution.projection.productionRotates).toBe(true);
   });
 });
 
@@ -329,16 +317,17 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     expect(disabledResult.reason).toContain('prompt_feature_disabled');
   });
 
-  it('list route: tier boundaries — exactly at the min tier is deliverable, mid-band is model_dependent, two chars over the max tier is refused by exactly 2 (SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3)', async () => {
+  it('shared route: tier boundaries — exactly at the min tier is deliverable, mid-band is model_dependent, two chars over the max tier is refused by exactly 2 (SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
-    const header = 'Runtime V2 activated principles:';
-    // 内部计费含尾换行: join(header+entry) = header + 1 + '- [B-1] ' + textLen
-    const joinedCost = (textLen: number) => header.length + 1 + '- [B-1] '.length + textLen;
-    const textFor = (cost: number) => 'x'.repeat(cost - header.length - 1 - '- [B-1] '.length);
+    // PRI-1137: openclaw now bills the shared directive render. The single-item
+    // cost is the production serializer's output: a fixed directive wrapper
+    // (755 measured) + the entry's id + text.
+    const sharedCost = (textLen: number) => 755 + 'B-1'.length + textLen;
+    const textFor = (cost: number) => 'x'.repeat(cost - sharedCost(0));
     const artifactFor = (text: string) => ({ artifactId: 'art-B-1', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'B-1', text }), validationStatus: 'validated' as const });
 
     // Exactly at the MIN supported tier (1250, measured floor): deliverable everywhere.
-    expect(joinedCost(textFor(PROMPT_BUDGET_MIN_CHARS).length)).toBe(PROMPT_BUDGET_MIN_CHARS);
+    expect(sharedCost(textFor(PROMPT_BUDGET_MIN_CHARS).length)).toBe(PROMPT_BUDGET_MIN_CHARS);
     const atMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(PROMPT_BUDGET_MIN_CHARS)) });
     expect(atMin.status).toBe('deliverable');
     if (atMin.status === 'deliverable') expect(atMin.costChars).toBe(PROMPT_BUDGET_MIN_CHARS);
@@ -363,24 +352,22 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     }
   });
 
-  it('route divergence: the same candidate is tier-classified by each route own serializer (list vs shared bill different costs)', async () => {
+  it('one shared serializer: the same candidate is tier-classified identically for openclaw, codex and workbuddy', async () => {
     const text = 'S'.repeat(1250);
     const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text }), validationStatus: 'validated' as const };
-    const listDir = tempWorkspace({ declare: ['openclaw'] });
-    const listResult = await checkPromptArtifactDeliverability({ workspaceDir: listDir, artifact });
-    // 1292 serialized chars sit inside the supported 1250..32000 range but above
-    // the min tier — model-dependent on the list route.
-    expect(listResult.status).toBe('model_dependent');
-    if (listResult.status === 'model_dependent') expect(listResult.costChars).toBe(1292);
-
-    const sharedDir = tempWorkspace({ declare: ['codex'] });
-    const sharedResult = await checkPromptArtifactDeliverability({ workspaceDir: sharedDir, artifact });
-    expect(sharedResult.status).toBe('model_dependent');
-    if (sharedResult.status === 'model_dependent') {
-      // The shared route bills the full directive render — 717 chars MORE for
-      // the same candidate. Both serializers stay the single cost authority.
-      expect(sharedResult.costChars).toBe(2009);
-      expect(sharedResult.budgetScope).toBe('full_directive_context');
+    const verdicts = await Promise.all(
+      (['openclaw', 'codex', 'workbuddy'] as const).map(async (targetHost) => {
+        const dir = tempWorkspace({ declare: [targetHost] });
+        return checkPromptArtifactDeliverability({ workspaceDir: dir, artifact });
+      }),
+    );
+    for (const verdict of verdicts) {
+      expect(verdict.status).toBe('model_dependent');
+      if (verdict.status !== 'model_dependent') continue;
+      expect(verdict.route).toBe('shared_render');
+      expect(verdict.budgetScope).toBe('full_directive_context');
+      // PRI-1137: 1250 chars of text + fixed wrapper + id = 2009 for EVERY host.
+      expect(verdict.costChars).toBe(2009);
     }
   });
 
@@ -405,8 +392,8 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(codexResult.costChars).toBe(result.costChars);
     }
 
-    // 超出最大支持档位才不可投递（共享路由完整渲染计费；34000 字符正文在
-    // 共享路由 ≈34763 > 32000 上限，在列表路由 ≈34041 同样超限）
+    // 超出最大支持档位才不可投递（共享路由完整渲染计费：34000 字符正文
+    // 在共享路由 = 34759 > 32000 上限）
     const hugeArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-3', text: 'S'.repeat(34000) }) };
     const undeliverable = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact: hugeArtifact });
     expect(undeliverable.status).toBe('undeliverable');
@@ -437,36 +424,31 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     }
   });
 
-  it('uses the REAL resolved principle id (a title-derived id is measured, not a 36-char UUID allowance)', () => {
+  it('uses the REAL resolved principle id on the live shared serializer (a title-derived id is measured, not a 36-char UUID allowance)', () => {
     const longTitleId = '很长的标题派生标识'.repeat(3);
     const fit = computePromptSingleItemFit({
       principle: { principleId: longTitleId, text: 'x'.repeat(30), artifactId: 'a', activationId: 'b' },
-      route: 'legacy_trim',
       selfReportEnabled: false,
     });
-    // costChars = join(header + entry) — no trailing newline in the join
-    const expected = 'Runtime V2 activated principles:'.length + 1 + `- [${longTitleId}] ${'x'.repeat(30)}`.length;
+    // The shared directive render bills the wrapper + the real id + text.
+    const expected = 755 + longTitleId.length + 30;
     expect(fit.costChars).toBe(expected);
-    expect(fit.costChars).not.toBe('Runtime V2 activated principles:'.length + 1 + `- [${'0'.repeat(36)}] ${'x'.repeat(30)}`.length);
+    expect(fit.costChars).not.toBe(755 + '0'.repeat(36).length + 30);
   });
 
-  it('unconfirmed route → per-host tier facts, never a guessed verdict', async () => {
+  it('several host facts → one confirmed verdict: the artifact is judged by the single shared serializer', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
-    // The list route bills ~718 fewer chars than the shared route for the
-    // same entry (fixed wrapper delta). An 800-char statement lands at
-    // ≈841 on the list route (fits ALL tiers) but ≈1563 on the shared route
-    // (model_dependent) — a REAL per-host divergence the UI must show.
+    // PRI-1137: with ONE route there is no per-host divergence to report. An
+    // 800-char statement costs 1559 on the shared render → model_dependent.
     const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(800) }), validationStatus: 'validated' as const };
     const result = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact });
-    expect(result.status).toBe('unconfirmed');
-    if (result.status === 'unconfirmed') {
-      expect(result.reason).toContain('route_unconfirmed');
-      expect(result.perHost?.map((e) => ({ hostKind: e.hostKind, tierFit: e.tierFit }))).toEqual([
-        { hostKind: 'openclaw', tierFit: 'fits_all_tiers' },
-        { hostKind: 'codex', tierFit: 'model_dependent' },
-        { hostKind: 'workbuddy', tierFit: 'model_dependent' },
-      ]);
-      expect(result.perHost?.every((e) => typeof e.costChars === 'number')).toBe(true);
+    expect(result.status).toBe('model_dependent');
+    if (result.status === 'model_dependent') {
+      expect(result.route).toBe('shared_render');
+      expect(result.basis).toBe('single_route_all_hosts');
+      expect(result.hostKind).toBeUndefined();
+      expect(result.costChars).toBe(1559);
+      expect(result.budgetScope).toBe('full_directive_context');
     }
   });
 
@@ -483,13 +465,13 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
 });
 
 describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-item evidence', () => {
-  it('confirmed list route: injectable / window_excluded / oversized each with their own evidence', async () => {
+  it('confirmed shared route: injectable / model_dependent / oversized each with their own evidence', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'K-1', '第一条短原则');
     await seedActivation(dir, 'K-2', '第二条短原则');
     // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 v0.3: 单条超出最大支持档位(32000)才是
-    // oversized；2000 字符正文(列表计费 ≈2042)落在支持区间内 → model_dependent，
-    // 且在 4000 的兜底投影窗口内。
+    // oversized；2000 字符正文(共享整块计费 2786：wrapper 755 + authority 26 + id + text)
+    // 落在支持区间内 → model_dependent，且在 4000 的兜底投影窗口内。
     await seedActivation(dir, 'K-BIG', 'Z'.repeat(2000));
     await seedActivation(dir, 'K-HUGE', 'Z'.repeat(33000));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
@@ -506,12 +488,12 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     expect(byId.get('act-K-HUGE')?.reason).toContain('single_item_exceeds_budget');
   });
 
-  it('SPEC §6.3 consistency: an entry in (1250, 2000] that fits the fallback estimate is model_dependent — never an unconditional injectable (CodeRabbit review)', async () => {
-    // 1500-char statement → list-route cost ≈1574: fits the console's
-    // fallback projection budget (4000), sits IN the current window, yet
-    // exceeds the measured floor — on a 32K/64K model (budget = floor) it
-    // would NOT inject. The status surface must tell the Owner exactly what
-    // the approval-time precheck tells them: model_dependent.
+  it('SPEC §6.3 consistency: an entry in (1250, 4000] that fits the fallback estimate is model_dependent — never an unconditional injectable (CodeRabbit review)', async () => {
+    // 1500-char statement → shared cost 2289 (755 wrapper + 26 authority + id +
+    // text): fits the console's fallback projection budget (4000), sits IN the
+    // current window, yet exceeds the measured floor — on a 32K/64K model
+    // (budget = floor) it would NOT inject. The status surface must tell the
+    // Owner exactly what the approval-time precheck tells them: model_dependent.
     const dir = tempWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'MID-BAND', 'B'.repeat(1500));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
@@ -519,21 +501,21 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     const row = report.statuses[0];
     expect(row.status).toBe('model_dependent');
     expect(row.inCurrentWindow).toBe(true);
-    expect(row.costChars).toBeGreaterThan(1250);
-    expect(row.costChars).toBeLessThanOrEqual(2000);
+    expect(row.costChars).toBe(2289);
     expect(row.reason).toContain('model_dependent_capacity');
     expect(row.reason).toContain('fallback-budget estimate');
   });
 
   it('window full but single-item deliverable → window_excluded, not oversized (mid-band filler is model_dependent, keeping its window fact)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
-    const header = 'Runtime V2 activated principles:';
-    const bigLen = RUNTIME_PRINCIPLE_BUDGET - header.length - 1 - '- [W-1] '.length - 1;
-    await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满（成本 3999 ∈ (1250,4000] 当前投影窗口）
+    // Shared render bills wrapper(755) + authority(26) + id + text; fill the
+    // 4000 fallback projection window with one entry, then try to add a second.
+    const bigLen = PROMPT_BUDGET_FALLBACK_CHARS - 755 - 26 - 'W-1'.length;
+    await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满（成本 4000 ∈ (1250,4000] 当前投影窗口）
     await seedActivation(dir, 'W-2', '第二条原则');
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
     const byId = new Map(report.statuses.map((s) => [s.activationId, s]));
-    // Tier-first (SPEC §6.3): the 3999-char filler exceeds the measured floor,
+    // Tier-first (SPEC §6.3): the 4000-char filler exceeds the measured floor,
     // so it is model_dependent — but keeps the POSITIVE window fact (it does
     // sit in this fallback-budget projection).
     expect(byId.get('act-W-1')?.status).toBe('model_dependent');
@@ -547,14 +529,17 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     expect(byId.get('act-W-2')?.status).not.toBe('oversized');
   });
 
-  it('unconfirmed route → every row route_unconfirmed with per-host fits', async () => {
+  it('several host facts → one confirmed shared route, so rows carry real statuses (no route_unconfirmed)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
     await seedActivation(dir, 'U-1', '原则内容');
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
-    expect(report.route.status).toBe('unconfirmed');
+    expect(report.route.status).toBe('confirmed');
+    expect(report.route.basis).toBe('single_route_all_hosts');
     expect(report.statuses).toHaveLength(1);
-    expect(report.statuses[0].status).toBe('route_unconfirmed');
-    expect(report.statuses[0].perHostFits?.map((f) => f.hostKind)).toEqual(['openclaw', 'codex', 'workbuddy']);
+    expect(report.statuses[0].status).toBe('injectable');
+    expect(report.statuses[0].route).toBe('shared_render');
+    expect(report.statuses[0].costChars).toBe(788);
+    expect(report.statuses[0].inCurrentWindow).toBe(true);
   });
 
   it('missing state.db and prompt-flag-off degrade with a global reason (never "all healthy")', async () => {

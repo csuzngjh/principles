@@ -181,23 +181,23 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     expect(result).toEqual(nativeResult);
   });
 
-  it('keeps the observable legacy route when abstraction_layer_v1 is explicitly false', async () => {
+  it('a stale abstraction_layer_v1=true/false in user config cannot revive the retired legacy route', async () => {
+    // PRI-1137: the flag is a gone tombstone. Even an explicit enabled:true
+    // (and certainly false) must not route ordinary hooks to plugin-local code.
     sharedEnabled.value = false;
-    const legacyResult = { skipToolCall: true, reason: 'legacy deny' };
-    handleBeforeToolCall.mockReturnValue(legacyResult);
-    const { api, hooks, info } = createApi();
+    const { api, hooks } = createApi();
     plugin.register(api);
 
-    const result = hooks.get('before_tool_call')?.(
+    await hooks.get('before_tool_call')?.(
       { toolName: 'write_file', params: { path: 'x' } },
       { workspaceDir: 'D:/workspace', sessionId: 'session-1' },
     );
 
-    expect(result).toEqual(legacyResult);
-    expect(result).not.toBeInstanceOf(Promise);
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('abstraction_layer_v1_disabled'));
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('openclaw_legacy'));
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'before_tool_call', source: 'openclaw:before_tool_call' }),
+      expect.any(Function),
+    );
+    expect(handleBeforeToolCall).not.toHaveBeenCalled();
   });
 
   it('forwards an explicit scoped adaptive mapping through the shared prompt dispatch and leaves unconfigured Native unchanged', async () => {

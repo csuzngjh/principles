@@ -23,6 +23,15 @@ type NativeResult =
 
 export interface OpenClawHostRuntimeOptions {
   beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
+  /**
+   * PRI-1137: the OpenClaw prompt ROUND authority, supplied by the plugin
+   * adapter (`nextSessionTurnOrdinal` after its pre-selection signal
+   * collection). Runs before the shared prompt context is built; returning
+   * `undefined` (missing sessionId / unreadable trajectory DB / failed
+   * ordinal read) is the observable degraded case and selects
+   * `legacy_fifo_prefix_v1`. Never fabricate a round here.
+   */
+  roundKeyProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): number | undefined | Promise<number | undefined>;
   adaptivePriorityProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): {
     artifactId: string;
     activationId: string;
@@ -113,6 +122,13 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     // the OpenClaw registry (not the core baseline) — production hints and
     // action.canonicalKind then agree with the plugin hook path and replay.
     toolSemantics: OPENCLAW_TOOL_SEMANTICS,
+    ...(options.roundKeyProvider ? {
+      roundKeyProvider(event: HostEvent) {
+        const payload = payloadFor(event);
+        if (payload.kind !== 'before_prompt_build') return undefined;
+        return options.roundKeyProvider?.(payload.event, payload.context);
+      },
+    } : {}),
     adaptivePriorityProvider(event) {
       const payload = payloadFor(event);
       if (payload.kind !== 'before_prompt_build') return undefined;

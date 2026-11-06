@@ -918,13 +918,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // (2) the refuse-before-write behavior of the real approve HTTP route, which
   // must not be talked out of it by a fresh 256K observation — an observation
   // is budget evidence, never route evidence.
-  it('unconfirmed route with mixed bases: the grouped HTTP route gives every host its own budget provenance', async () => {
+  it('one shared route with mixed budget bases: the grouped HTTP route gives every host its own budget provenance', async () => {
     clearRuntimeBudgetLogs();
     ensureDefaultConfig();
 
-    // A second real host shares this workspace. With the abstraction flag off,
-    // openclaw takes the list route while codex/workbuddy take the shared
-    // route, so the effective route is honestly unconfirmed.
+    // A second real host shares this workspace. PRI-1137 unified every host
+    // onto ONE shared route, so the route is CONFIRMED even though budget
+    // bases differ per host: each host's own observation is still its own
+    // fact (host attribution survives the route unification).
     const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'codex.json');
     const saved = saveHostToolDeclaration(tmpDir, {
       version: 1,
@@ -958,9 +959,15 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       expect(status).toBe(200);
       const promptInjection = getDataObject(body)?.['promptInjection'];
       expect(isRecord(promptInjection)).toBe(true);
-      expect(promptInjection!['capacityStatus']).toBe('unconfirmed');
+      expect(promptInjection!['capacityStatus']).toBe('confirmed');
+      expect(promptInjection!['route']).toBe('shared_render');
       const perHost = promptInjection!['perHost'];
       expect(Array.isArray(perHost)).toBe(true);
+      // One route, many hosts: every per-host entry must report the same
+      // shared route while keeping its own budget basis.
+      for (const entry of (perHost as unknown[]).filter(isRecord)) {
+        expect(entry['route']).toBe('shared_render');
+      }
       const byHost = new Map<string, Record<string, unknown>>((perHost as unknown[])
         .filter(isRecord)
         .map((entry) => [getStringField(entry, 'hostKind') ?? '', entry]));
@@ -992,7 +999,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     }
   });
 
-  it('unconfirmed route with mixed observations: approve is still refused before any write (an observation never confirms the route)', async () => {
+  it('mixed observations under ONE shared route: the approve proceeds (an observation still never borrows another host’s window)', async () => {
     deactivateActivePromptActivations();
     clearRuntimeBudgetLogs();
     ensureDefaultConfig();
@@ -1032,50 +1039,40 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'PRI-1017 P2-3 mixed observations' }),
       });
-      expect(res.status).toBe(422);
-      const body = res.body as { error?: string; message?: string; capacity?: unknown };
-      expect(body.error).toBe('prompt_capacity_refused');
-      expect(String(body.message)).toContain('route_unconfirmed');
-      // The refusal still names each host it forecast under, so the Owner sees
-      // the per-host gap rather than one borrowed verdict.
-      const capacity = body.capacity;
-      expect(isRecord(capacity)).toBe(true);
-      expect((capacity as { category?: string }).category).toBe('route_unconfirmed');
-      const perHost = (capacity as { perHost?: unknown }).perHost;
-      expect(Array.isArray(perHost)).toBe(true);
-      const hosts = (perHost as unknown[]).filter(isRecord)
-        .map((entry) => getStringField(entry, 'hostKind'))
-        .sort();
-      expect(hosts).toEqual(['codex', 'openclaw', 'workbuddy']);
+      expect(res.status).toBe(200);
+      const body = getDataObject(res.body);
+      expect(body).toBeDefined();
+      expect(getStringField(body, 'status')).toBe('approved');
+      const activation = body?.activation;
+      expect(isRecord(activation)).toBe(true);
+      if (isRecord(activation)) {
+        expect(getStringField(activation, 'decision')).toBe('activated');
+      }
 
-      // No governance write happened: the approval remains pending.
+      // The single shared route is confirmed without borrowing the 256K
+      // observation for codex/openclaw: a fresh observation is budget
+      // evidence, never route evidence.
+      const grouped = await fetchJson('/api/v1/approvals/grouped');
+      const promptInjection = getDataObject(grouped.body)?.['promptInjection'];
+      expect(isRecord(promptInjection)).toBe(true);
+      expect(promptInjection!['capacityStatus']).toBe('confirmed');
+
+      // The governance write happened — the retired route refusal must not
+      // linger on a workspace whose hosts now share one route.
       const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
-      expect(getStringField(getDataObject(detail.body), 'status')).toBe('pending');
+      expect(getStringField(getDataObject(detail.body), 'status')).toBe('approved');
     } finally {
       fs.rmSync(declarationPath, { force: true });
       clearRuntimeBudgetLogs();
     }
   });
 
-  // PR-1894: on the shared route (abstraction_layer_v1 ON) the production path
-  // deliberately passes no round key, so nothing is merely "queued" — an
-  // out-of-window activation IS starved and the FIFO wording is correct. This
-  // test flips the flag to prove the branch selects the truthful copy for the
-  // workspace's actual policy rather than a fixed one.
-  it('approve reports true starvation (not queued) when the production route does not rotate', async () => {
-    const configPath = path.join(tmpDir, '.pd', 'config.yaml');
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    // CodeQL file-system-race: no existsSync probe — try/catch the read.
-    let originalConfig: string | null = null;
-    try { originalConfig = fs.readFileSync(configPath, 'utf8'); } catch { /* absent */ }
-    // Build from the real default config: the validator requires version /
-    // runtimeProfiles / internalAgents, so a hand-written fragment is rejected
-    // as malformed and the flag silently stays off.
-    const sharedConfig = getDefaultPdConfig();
-    sharedConfig.features.abstraction_layer_v1 = { ...sharedConfig.features.abstraction_layer_v1, enabled: true };
-    fs.writeFileSync(configPath, yaml.dump(sharedConfig), 'utf8');
-
-    try {
+  // PRI-1137: the only production route left is the shared renderer. OpenClaw
+  // supplies a trusted round key, so an out-of-window activation is genuinely
+  // QUEUED (fair rotation), never mislabeled as permanent starvation. Codex /
+  // WorkBuddy have no round authority and report the same queue honestly.
+  it('approve reports a queued (fair rotation) explanation when the OpenClaw production route rotates', async () => {
+    {
       // Saturate the shared renderer: a few very long principles blow the
       // 4000c cap well before the new one is considered.
       const db = sqliteConn.getDb();
@@ -1119,15 +1116,12 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
       const warning = getStringField(getDataObject(res.body), 'warning');
       expect(warning).toBeDefined();
-      // The shared route does not rotate, so the honest report is starvation
-      // WITH the FIFO wording — not the rotation/queued promise.
-      expect(warning).toContain('injection_budget_excluded');
-      expect(warning).not.toContain('injection_budget_queued');
-      expect(warning).toContain('FIFO by activated_at');
+      // OpenClaw's production route rotates (trusted round key), so the
+      // honest report is the QUEUED promise — never permanent starvation.
+      expect(warning).toContain('injection_budget_queued');
+      expect(warning).not.toContain('injection_budget_excluded');
+      expect(warning).toContain('fair_rotation_v1');
       expect(warning).toContain('nextAction=');
-    } finally {
-      if (originalConfig === null) fs.rmSync(configPath, { force: true });
-      else fs.writeFileSync(configPath, originalConfig, 'utf8');
     }
   });
 
@@ -1355,7 +1349,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect((res.body as { error?: string }).error).toBe('prompt_capacity_refused');
   });
 
-  it('AC-07: an unconfirmed route (declaration removed, flag off) refuses with a structured reason and nextAction', async () => {
+  it('AC-07: unknown host attribution no longer refuses the approval — ONE shared route is confirmed without inventing a host', async () => {
     const base = Date.now();
     const artifactId = `art-unconfirmed-${base}`;
     const approvalId = `apr-unconfirmed-${base}`;
@@ -1378,32 +1372,40 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'no host facts' }),
       });
-      expect(res.status).toBe(422);
-      const body = res.body as { error?: string; message?: string };
-      expect(body.error).toBe('prompt_capacity_refused');
-      expect(typeof body.message === 'string' && body.message.includes('route_unconfirmed')).toBe(true);
-      // 审批未被写。
+      expect(res.status).toBe(200);
+      const body = getDataObject(res.body);
+      expect(getStringField(body, 'status')).toBe('approved');
+      const activation = body?.activation;
+      expect(isRecord(activation)).toBe(true);
+      if (isRecord(activation)) {
+        expect(getStringField(activation, 'decision')).toBe('activated');
+      }
+      // 审批已写。
       const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
-      expect(getStringField(getDataObject(detail.body), 'status')).toBe('pending');
+      expect(getStringField(getDataObject(detail.body), 'status')).toBe('approved');
+
+      // PRI-1137: with ONE shared route, unknown host attribution is a fact
+      // gap — not a route ambiguity. The route stays confirmed without
+      // fabricating a host, so this approval is no longer refused on that
+      // basis (per-host budget attribution remains explicitly unknown).
+      const grouped = await fetchJson('/api/v1/approvals/grouped');
+      const promptInjection = getDataObject(grouped.body)?.['promptInjection'];
+      expect(isRecord(promptInjection)).toBe(true);
+      expect(promptInjection!['capacityStatus']).toBe('confirmed');
+      expect(promptInjection!['route']).toBe('shared_render');
     } finally {
       if (declarationBackup !== null) fs.writeFileSync(declarationPath, declarationBackup, 'utf8');
     }
-    // 声明恢复后同一审批可通过（请求级目标宿主或事实齐备均可）。
-    const res2 = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note: 'host facts restored' }),
-    });
-    expect(res2.status).toBe(200);
   });
 
-  it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6: cross-host aggregation stays monotone — a shared-route-only overflow does NOT brand the entry oversized everywhere (real counterexample)', async () => {
-    // 31600-char statement: list route bills ≈31674 (model_dependent —
-    // injectable on larger-context models), shared route bills ≈32363
-    // (exceeds the 32000 max tier). The OLD aggregation (any host exceeds →
-    // exceeds) reported exceeds_max_tier, wrongly telling an OpenClaw owner
-    // this entry could never inject. Route is unconfirmed here (openclaw
-    // declaration removed, flag off) so the per-host aggregation runs.
+  it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6: cross-host aggregation stays monotone — with ONE route the same full-render cost applies everywhere', async () => {
+    // PRI-1137: there is no second rendering route to mix in. A 31600-char
+    // statement bills ≈32363 chars through the shared renderer, which exceeds
+    // the 32000 max tier on EVERY host. The honest aggregation is therefore
+    // exceeds_max_tier everywhere; the old model_dependent counterexample was
+    // a property of the retired dual route and cannot survive unification.
+    // Neither may the aggregation borrow a smaller per-host window to fake a
+    // better verdict.
     const base = Date.now();
     const artifactId = `art-agg-cx-${base}`;
     const approvalId = `apr-agg-cx-${base}`;
@@ -1428,10 +1430,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       const match = groups.find((g) => isRecord(g) && (g as { principleId?: unknown }).principleId === principleId);
       expect(match, 'group for the aggregation-counterexample principle').toBeTruthy();
       const group = match as { promptBudgetTierFit?: string; fitsPromptBudget?: boolean };
-      // Mixed per-host verdicts (list model_dependent + shared exceeds) must
-      // aggregate to the honest model_dependent, not exceeds_max_tier.
-      expect(group.promptBudgetTierFit).toBe('model_dependent');
-      expect(group.fitsPromptBudget).toBe(true);
+      // ONE rendering route → the same 32363c cost on every host → every
+      // host exceeds the max tier. The aggregation must report that plainly.
+      expect(group.promptBudgetTierFit).toBe('exceeds_max_tier');
+      expect(group.fitsPromptBudget).toBe(false);
     } finally {
       if (declarationBackup !== null) fs.writeFileSync(declarationPath, declarationBackup, 'utf8');
     }
@@ -1439,10 +1441,12 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
   it('AC-09: window full but single item deliverable → activation proceeds with the queued (rotation) explanation, not a global admission gate', async () => {
     const base = Date.now();
-    // 预算接近占满：一条恰好装满列表预算的已激活原则。
-    const header = 'Runtime V2 activated principles:';
-    const fillerLen = 4000 - header.length - 1 - `- [${'F'.repeat(0)}] `.length - 60 - 1; // leave ~60 chars room: single new entry still fits alone
+    // PRI-1137: the budget is billed by the ONE shared renderer — 755 fixed
+    // wrapper + directive id + text (+ the 26c authority annotation). Saturate
+    // that window while leaving less than the new entry's ~900c cost, so the
+    // new entry is deliverable ALONE yet does not fit next to the filler.
     const fillerPrinciple = newPrincipleId();
+    const fillerLen = Math.max(0, 4000 - 755 - fillerPrinciple.length - 26 - 40);
     seedLedgerPrinciple(fillerPrinciple, 'F'.repeat(fillerLen));
     const fillerArtifact = `art-window-filler-${base}`;
     await seedPrincipleArtifact(fillerArtifact, {

@@ -1,15 +1,17 @@
 import {
   computeFeatureFlagsFromConfig,
-  renderPrinciplesToDirectives,
   resolvePromptBudget,
-  trimToBudget,
   type ActivatedPrinciple,
   type PromptBudgetResolution,
   type PromptSelectionPolicy,
 } from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
-import { buildActivePrinciplePromptContext, readPromptActivationCandidates, MAX_SHARED_DIAGNOSTIC_IDS } from './active-principle-prompt.js';
+import {
+  buildActivePrinciplePromptContext,
+  packSharedDirectives,
+  readPromptActivationCandidates,
+  MAX_SHARED_DIAGNOSTIC_IDS,
+} from './active-principle-prompt.js';
 import { readWorkspaceHostKindFacts } from './host-liveness-contract.js';
 
 /** Hosts with a production prompt-injection path today (shared GovernanceHostKind boundary). */
@@ -29,6 +31,22 @@ export function isPromptInjectionTargetHost(kind: unknown): kind is PromptInject
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 
 /**
+ * PRI-1137: the ONE production route rotates only when its host supplies a
+ * trusted round authority — today only OpenClaw (nextSessionTurnOrdinal).
+ * Codex/WorkBuddy deliberately do NOT fabricate a round key; several possible
+ * hosts mean no single authority can be attributed, so no rotation is claimed.
+ * Console copy and the CLI use this single predicate instead of re-deriving
+ * route/flag state.
+ */
+export function productionRouteRotates(input: { workspaceDir: string; targetHost?: PromptInjectionTargetHost }): boolean {
+  const facts = readWorkspaceHostKindFacts(input.workspaceDir);
+  const hosts = input.targetHost !== undefined
+    ? [input.targetHost]
+    : facts.ok ? [...facts.effectiveKinds].filter(isPromptInjectionTargetHost) : [];
+  return hosts.length === 1 && hosts[0] === 'openclaw';
+}
+
+/**
  * Which serialization the budget is charged against (SPEC R-A2): the legacy
  * list route bills only the selected `- [id] text` lines (the directive
  * wrapper and the self-report footer live OUTSIDE that budget on that route),
@@ -40,15 +58,14 @@ export type PromptInjectionBudgetScope = 'selected_lines' | 'full_directive_cont
 export const PROMPT_INJECTION_UNIT = 'utf16_code_units' as const;
 
 /**
- * AC-01: the effective injection route is a fact about WHICH HOST will run
- * the prompt build, not about the workspace flag alone. Codex always injects
- * through the shared route (`codex-adapter/src/pd-hook.ts`); OpenClaw routes
- * by its `abstraction_layer_v1` gate (`openclaw-plugin/src/index.ts`). Host
- * facts come from the existing durable provenance (declarations ∪ pain
- * evidence — `readWorkspaceHostKindFacts`); an explicit request-level target
- * overrides them. When the applicable hosts disagree (flag OFF + both hosts
- * possible, or no host facts at all) the decision is `unconfirmed` and every
- * consumer must say so instead of guessing FIFO or rotation (SPEC R-A1).
+ * AC-01 / PRI-1137: every standard host now injects through ONE shared route.
+ * `abstraction_layer_v1` is a gone tombstone and no longer selects a route, so
+ * the decision is about WHICH host will run the build (host attribution for
+ * the Owner), never about a per-host legacy/shared split. Host facts come from
+ * the existing durable provenance (declarations ∪ pain evidence —
+ * `readWorkspaceHostKindFacts`); an explicit request-level target overrides
+ * them. Unconfirmed remains for genuinely unreadable inputs (config, prompt
+ * flag, host facts, unknown host kinds) — never for "routes differ".
  */
 export interface PromptInjectionRouteDecision {
   status: 'confirmed' | 'unconfirmed';
@@ -56,11 +73,9 @@ export interface PromptInjectionRouteDecision {
   hostKind?: PromptInjectionTargetHost;
   /** Present when status === 'confirmed'. */
   route?: PromptInjectionRouteName;
-  basis?: 'explicit_target' | 'workspace_host_facts' | 'flag_shared_all_hosts';
+  basis?: 'explicit_target' | 'workspace_host_facts' | 'single_route_all_hosts';
   /** Present when explicit binding succeeds while workspace-wide host facts are unreadable. */
   hostFactsStatus?: 'unreadable';
-  /** Raw `abstraction_layer_v1` flag state (context for the OpenClaw branch). */
-  flagEnabled: boolean;
   declaredHostKinds: readonly string[];
   effectiveHostKinds: readonly string[];
   /** Present when status === 'unconfirmed'. */
@@ -72,20 +87,18 @@ export interface PromptInjectionRouteDecision {
 }
 
 /**
- * THE one route formula (P4): Codex always injects through the shared route
- * (codex-adapter has no flag branch); so does WorkBuddy (workbuddy-adapter
- * renders through the shared runtime unconditionally — it has no legacy
- * route); OpenClaw routes by its `abstraction_layer_v1` gate. Every consumer
- * that needs "which route would host X take" must call this — never re-type
- * the ternary.
+ * THE one route formula (P4 / PRI-1137): every standard host injects through
+ * the shared route. The OpenClaw legacy plugin-local route was deleted, so
+ * `legacy_trim` is retained only as a historical wire literal — production
+ * never returns it. Every consumer that needs "which route would host X take"
+ * must call this; never re-type the mapping.
  */
-export function promptRouteForHost(hostKind: PromptInjectionTargetHost, flagEnabled: boolean): PromptInjectionRouteName {
-  if (hostKind === 'codex' || hostKind === 'workbuddy') return 'shared_render';
-  return flagEnabled ? 'shared_render' : 'legacy_trim';
+export function promptRouteForHost(_hostKind: PromptInjectionTargetHost): PromptInjectionRouteName {
+  return 'shared_render';
 }
 
-function standardHostRoutes(flagEnabled: boolean): { hostKind: PromptInjectionTargetHost; route: PromptInjectionRouteName }[] {
-  return PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => ({ hostKind, route: promptRouteForHost(hostKind, flagEnabled) }));
+function standardHostRoutes(): { hostKind: PromptInjectionTargetHost; route: PromptInjectionRouteName }[] {
+  return PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => ({ hostKind, route: promptRouteForHost(hostKind) }));
 }
 
 /**
@@ -98,31 +111,28 @@ export function resolvePromptInjectionRouteDecision(input: {
 }): PromptInjectionRouteDecision {
   const config = loadPdConfigForPlugin(input.workspaceDir);
   const {flags} = computeFeatureFlagsFromConfig(config.effective);
-  const flagEnabled = flags.abstraction_layer_v1?.enabled === true;
   const facts = readWorkspaceHostKindFacts(input.workspaceDir);
   if (!config.ok) {
     const [error] = config.errors;
     return {
       status: 'unconfirmed',
-      flagEnabled,
       declaredHostKinds: facts.ok ? facts.declaredKinds : [],
       effectiveHostKinds: facts.ok ? facts.effectiveKinds : [],
       ...(!facts.ok ? { hostFactsStatus: 'unreadable' as const } : {}),
       unconfirmedReason: `config_unreadable: ${error?.reason ?? 'workspace config is invalid'}`,
       nextAction: error?.nextAction ?? 'repair .pd/config.yaml before measuring prompt injection',
-      perHost: standardHostRoutes(flagEnabled),
+      perHost: standardHostRoutes(),
     };
   }
   if (!flags.prompt?.enabled) {
     return {
       status: 'unconfirmed',
-      flagEnabled,
       declaredHostKinds: facts.ok ? facts.declaredKinds : [],
       effectiveHostKinds: facts.ok ? facts.effectiveKinds : [],
       ...(!facts.ok ? { hostFactsStatus: 'unreadable' as const } : {}),
       unconfirmedReason: 'prompt_feature_disabled: the prompt injection surface is off',
       nextAction: 'set features.prompt.enabled=true in .pd/config.yaml',
-      perHost: standardHostRoutes(flagEnabled),
+      perHost: standardHostRoutes(),
     };
   }
   // Explicit request-level host is sufficient to bind the route even when
@@ -132,9 +142,8 @@ export function resolvePromptInjectionRouteDecision(input: {
     return {
       status: 'confirmed',
       hostKind: input.targetHost,
-      route: promptRouteForHost(input.targetHost, flagEnabled),
+      route: promptRouteForHost(input.targetHost),
       basis: 'explicit_target',
-      flagEnabled,
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.ok ? facts.effectiveKinds : [],
       ...(!facts.ok ? { hostFactsStatus: 'unreadable' as const } : {}),
@@ -143,13 +152,12 @@ export function resolvePromptInjectionRouteDecision(input: {
   if (!facts.ok) {
     return {
       status: 'unconfirmed',
-      flagEnabled,
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: [],
       hostFactsStatus: 'unreadable',
       unconfirmedReason: `host_facts_unreadable: ${facts.detail}`,
       nextAction: facts.nextAction,
-      perHost: standardHostRoutes(flagEnabled),
+      perHost: standardHostRoutes(),
     };
   }
 
@@ -159,38 +167,25 @@ export function resolvePromptInjectionRouteDecision(input: {
   if (unknownKinds.length > 0) {
     return {
       status: 'unconfirmed',
-      flagEnabled,
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.effectiveKinds,
       unconfirmedReason: `unknown_host_kind_declared: ${unknownKinds.join(', ')} has no known prompt-injection route`,
       nextAction: 'pass an explicit target host (openclaw|codex|workbuddy) for this request, or remove the unknown host declaration',
-      perHost: standardHostRoutes(flagEnabled),
+      perHost: standardHostRoutes(),
     };
   }
 
   if (knownKinds.length === 0) {
-    // No host ever operated this workspace. With the flag ON both standard
-    // hosts take the shared route, so the route IS confirmed; with the flag
-    // OFF they genuinely differ (OpenClaw list vs Codex shared) and there is
-    // no fact to pick one with — report unconfirmed instead of guessing.
-    if (flagEnabled) {
-      return {
-        status: 'confirmed',
-        route: 'shared_render',
-        basis: 'flag_shared_all_hosts',
-        flagEnabled,
-        declaredHostKinds: facts.declaredKinds,
-        effectiveHostKinds: facts.effectiveKinds,
-      };
-    }
+    // No host ever operated this workspace. Every standard host takes the
+    // shared route, so the ROUTE is confirmed even though no host is bound.
+    // Hosts stay unbound (`hostKind` absent) — attribution is unknown, not
+    // guessed.
     return {
-      status: 'unconfirmed',
-      flagEnabled,
+      status: 'confirmed',
+      route: 'shared_render',
+      basis: 'single_route_all_hosts',
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.effectiveKinds,
-      unconfirmedReason: 'no_host_facts_and_flag_off: no host declaration or host evidence exists, and the applicable hosts would take different routes',
-      nextAction: 'pass an explicit target host (openclaw|codex|workbuddy), or let a host run once in this workspace so it persists its declaration',
-      perHost: standardHostRoutes(flagEnabled),
     };
   }
 
@@ -200,34 +195,21 @@ export function resolvePromptInjectionRouteDecision(input: {
       return {
         status: 'confirmed',
         hostKind: maybeHostKind,
-        route: promptRouteForHost(maybeHostKind, flagEnabled),
+        route: promptRouteForHost(maybeHostKind),
         basis: 'workspace_host_facts',
-        flagEnabled,
         declaredHostKinds: facts.declaredKinds,
         effectiveHostKinds: facts.effectiveKinds,
       };
     }
   }
 
-  // Both openclaw and codex are applicable.
-  if (flagEnabled) {
-    return {
-      status: 'confirmed',
-      route: 'shared_render',
-      basis: 'flag_shared_all_hosts',
-      flagEnabled,
-      declaredHostKinds: facts.declaredKinds,
-      effectiveHostKinds: facts.effectiveKinds,
-    };
-  }
+  // Several applicable hosts — the route is still one: shared_render.
   return {
-    status: 'unconfirmed',
-    flagEnabled,
+    status: 'confirmed',
+    route: 'shared_render',
+    basis: 'single_route_all_hosts',
     declaredHostKinds: facts.declaredKinds,
     effectiveHostKinds: facts.effectiveKinds,
-    unconfirmedReason: 'multi_host_routes_differ: openclaw would take the legacy list route while codex/workbuddy would take the shared route under the current flag-off config',
-    nextAction: 'pass an explicit target host (openclaw|codex|workbuddy) for this request, or enable abstraction_layer_v1 so all hosts share one route',
-    perHost: standardHostRoutes(flagEnabled),
   };
 }
 
@@ -318,26 +300,33 @@ export interface PromptInjectionProjection {
 }
 
 /**
- * PR-1894: which activations a fair-rotation selector injects across the
- * whole ring. The plugin's round key advances by one per recorded user turn
- * within a continuously advancing session, so N consecutive turns cover all
- * N ring positions: an activation absent from the current window but present
- * in ANY round is reachable, not starved.
+ * PR-1894 / PRI-1137: which activations the production fair rotation injects
+ * across the whole ring. The plugin's round key advances by one per recorded
+ * user turn within a continuously advancing session, so N consecutive turns
+ * cover all N ring positions: an activation absent from the current window but
+ * present in ANY round is reachable, not starved.
  *
- * Kept here (not in the console) so the production selector's own arithmetic
- * stays the single authority for what "reachable" means.
+ * PRI-1137: reachability is replayed with the SHARED packer the production
+ * route actually runs (`packSharedDirectives`), not the retired list-route
+ * `trimToBudget` arithmetic — a forecast may not measure a deleted path.
  */
 function collectReachableActivationIds(
   principles: ActivatedPrinciple[],
   budget: number,
+  selfReportEnabled: boolean,
 ): string[] {
   const reachable = new Set<string>();
-  for (let roundKey = 0; roundKey < principles.length; roundKey += 1) {
-    const result = trimToBudget(principles, budget, escapeXml, roundKey);
-    for (const principleId of result.injectedIds) {
-      const match = principles.find((p) => p.principleId === principleId);
-      if (match) reachable.add(match.activationId);
-    }
+  const n = principles.length;
+  for (let roundKey = 0; roundKey < n; roundKey += 1) {
+    const rotationStartIndex = ((roundKey % n) + n) % n;
+    const scanOrder = principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
+    const { included } = packSharedDirectives({
+      scanOrder,
+      budgetChars: budget,
+      selfReportEnabled,
+      continueOnNonFit: true,
+    });
+    for (const principle of included) reachable.add(principle.activationId);
   }
   return [...reachable];
 }
@@ -347,43 +336,37 @@ function isDiagnosticCapHit(ids: readonly string[]): boolean {
 }
 
 /**
- * PR #1844 follow-up: forecast the prompt-injection budget from the SAME
- * projection the agent injection itself uses:
+ * PR #1844 follow-up / PRI-1137: forecast the prompt-injection budget from the
+ * SAME projection the agent injection itself uses — ONE route, no legacy path:
+ * `buildActivePrinciplePromptContext`, which IS the production shared path's
+ * projection source for every standard host.
  *
- * - legacy route: activation candidates from `readPromptActivationCandidates`
- *   (same FIFO query + artifact resolve as the plugin's list path) trimmed by
- *   the REAL `trimToBudget` — identical input × ordering × trim logic as
- *   `openclaw-plugin/src/hooks/prompt.ts`;
- * - shared route: delegate to `buildActivePrinciplePromptContext`, which IS
- *   the production shared path's projection source (Codex always; OpenClaw
- *   when its `abstraction_layer_v1` gate is on).
+ * `targetHost` is host attribution only. It narrows which host's round
+ * authority the forecast may assume (see `productionRouteRotates`); it never
+ * selects a different injection route.
  *
- * Route selection here is EXPLICIT: `targetHost: 'codex'` forces the shared
- * route (production truth for Codex), `targetHost: 'openclaw'` follows the
- * workspace flag, and no target follows the flag (the historical behavior —
- * callers that lack host context should prefer
- * `resolveLivePromptInjectionProjection`, which binds the route to real host
- * facts and refuses to guess).
- *
- * PR-1894 — round-key alignment. The plugin derives its fair-rotation round
- * key from the CURRENT session's turn ordinal (`nextSessionTurnOrdinal`),
- * which the console has no access to. Passing no key therefore does NOT make
- * the forecast "more conservative": it selects a DIFFERENT policy
- * (`legacy_fifo_prefix_v1`) than the one production runs. The console must
- * either supply the round key or report the policy honestly, so this
- * function takes the key as an explicit input and exposes
- * `selectionPolicy` on the result.
+ * PR-1894 — round-key alignment. Production derives its fair-rotation round
+ * key from the CURRENT session's turn ordinal. The console has no access to
+ * it, so passing no key selects `legacy_fifo_prefix_v1` for THIS forecast while
+ * production runs `fair_rotation_v1` on OpenClaw. The result therefore exposes
+ * both `selectionPolicy` (what this projection ran) and `productionRotates`
+ * (what the real injection will do) — never a single blended claim.
  */
 export async function buildLivePromptInjectionProjection(input: {
   workspaceDir: string;
   /**
-   * PR-1894: the fair-rotation round key the production route is using this
+   * PRI-1137: the fair-rotation round key the production route is using this
    * turn. Callers that hold one (the plugin) pass it; callers that do not
    * (the console) omit it and MUST read `selectionPolicy` off the result
    * rather than assuming FIFO.
    */
   roundKey?: number;
-  /** AC-01: explicit route binding — 'codex'/'workbuddy' always shared, 'openclaw' by flag. */
+  /**
+   * PRI-1137: host attribution only — every host now takes the same shared
+   * route. This narrows WHICH host's rotation authority the forecast may
+   * assume (rotation is an OpenClaw-only capability); it never selects a
+   * different injection route.
+   */
   targetHost?: PromptInjectionTargetHost;
   /**
    * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1: budget resolution this
@@ -395,124 +378,51 @@ export async function buildLivePromptInjectionProjection(input: {
   promptBudget?: PromptBudgetResolution;
 }): Promise<PromptInjectionProjection> {
   const promptBudget = input.promptBudget ?? resolvePromptBudget();
-  const flagEnabled = computeFeatureFlagsFromConfig(
-    loadPdConfigForPlugin(input.workspaceDir).effective,
-  ).flags.abstraction_layer_v1?.enabled === true;
-  // Route face follows THE one route formula (review P2-2: a re-typed
-  // codex-only ternary forecast WorkBuddy as legacy_trim while its adapter
-  // renders shared unconditionally). No explicit target (console callers)
-  // keeps the flag-gated workspace default.
-  const sharedRoute = input.targetHost === undefined
-    ? flagEnabled
-    : promptRouteForHost(input.targetHost, flagEnabled) === 'shared_render';
-
-  if (sharedRoute) {
-    const context = await buildActivePrinciplePromptContext({ ...input, promptBudget });
-    const oversized = context.oversizedActivationIds ?? [];
-    const dropped = context.droppedActivationIds ?? [];
-    return {
-      route: 'shared_render',
-      budget: context.budget,
-      usedChars: context.additionalContext.length,
-      truncated: context.truncated,
-      injectedPrincipleIds: context.principleIds,
-      injectedActivationIds: context.activationIds,
-      warnings: context.warnings,
-      // The shared production path deliberately passes no round key
-      // (host-runtime/src/index.ts), so this route genuinely does not rotate
-      // and claims nothing about eventual reachability.
-      selectionPolicy: context.selectionPolicy ?? 'legacy_fifo_prefix_v1',
-      eventuallyInjectedActivationIds: [],
-      eligibleCount: context.eligibleCount ?? 0,
-      productionRotates: false,
-      unit: PROMPT_INJECTION_UNIT,
-      budgetScope: 'full_directive_context',
-      oversizedActivationIds: oversized,
-      droppedActivationIds: dropped,
-      oversizedDiagnosticTruncated: isDiagnosticCapHit(oversized),
-      droppedDiagnosticTruncated: isDiagnosticCapHit(dropped),
-      budgetCapacitySource: context.budgetCapacitySource,
-      budgetCapacityStatus: context.budgetCapacityStatus,
-      budgetContextWindowTokens: context.budgetContextWindowTokens,
-      budgetPolicyVersion: context.budgetPolicyVersion,
-      ...(context.budgetFallbackReason !== undefined ? { budgetFallbackReason: context.budgetFallbackReason } : {}),
-      ...(context.budgetFallbackDetail !== undefined ? { budgetFallbackDetail: context.budgetFallbackDetail } : {}),
-    };
+  // PRI-1137: ONE production route for every host. The retired plugin-local
+  // `legacy_trim` projection is gone, so the forecast can no longer describe
+  // a path production does not run.
+  const rotates = productionRouteRotates(input);
+  const context = await buildActivePrinciplePromptContext({ ...input, promptBudget });
+  const oversized = context.oversizedActivationIds ?? [];
+  const dropped = context.droppedActivationIds ?? [];
+  // Reachability is a property of the PRODUCTION rotation, not of this
+  // forecast (a console holds no session round key). It is computed only when
+  // the production host genuinely rotates, from the same candidate set.
+  let eventuallyInjectedActivationIds: string[] = [];
+  if (rotates) {
+    const candidates = await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true });
+    if (!candidates.aborted) {
+      eventuallyInjectedActivationIds = collectReachableActivationIds(
+        candidates.principles,
+        context.budget,
+        candidates.selfReportEnabled,
+      );
+    }
   }
-
-  const candidates = await readPromptActivationCandidates(input);
-  const { principles, warnings } = candidates;
-  if (candidates.aborted || principles.length === 0) {
-    return {
-      route: 'legacy_trim',
-      budget: promptBudget.budgetChars,
-      usedChars: 0,
-      truncated: false,
-      injectedPrincipleIds: [],
-      injectedActivationIds: [],
-      warnings,
-      selectionPolicy: 'legacy_fifo_prefix_v1',
-      eventuallyInjectedActivationIds: [],
-      eligibleCount: 0,
-      productionRotates: false,
-      unit: PROMPT_INJECTION_UNIT,
-      budgetScope: 'selected_lines',
-      oversizedActivationIds: [],
-      droppedActivationIds: [],
-      oversizedDiagnosticTruncated: false,
-      droppedDiagnosticTruncated: false,
-      budgetCapacitySource: promptBudget.capacitySource,
-      budgetCapacityStatus: promptBudget.capacityStatus,
-      budgetContextWindowTokens: promptBudget.contextWindowTokens,
-      budgetPolicyVersion: promptBudget.policyVersion,
-      ...(promptBudget.fallbackReason !== undefined ? { budgetFallbackReason: promptBudget.fallbackReason } : {}),
-      ...(promptBudget.fallbackDetail !== undefined ? { budgetFallbackDetail: promptBudget.fallbackDetail } : {}),
-    };
-  }
-  // PR-1894: pass the caller's round key so the forecast runs the SAME
-  // packing policy production runs this turn.
-  const trimmed = trimToBudget(principles, promptBudget.budgetChars, escapeXml, input.roundKey);
-  const injected = principles.filter((p) => trimmed.injectedIds.has(p.principleId));
-  // PR-1894: the legacy_trim route IS the OpenClaw plugin-local route, which
-  // rotates on every recorded user turn (PRI-904). Reachability is therefore
-  // computed under fair rotation regardless of whether THIS forecast holds a
-  // round key — a console without a session key must still be able to tell
-  // "queued behind rotation" apart from "structurally starved", otherwise it
-  // keeps telling the Owner to deactivate healthy principles.
-  const eventuallyInjectedActivationIds = collectReachableActivationIds(
-    principles,
-    promptBudget.budgetChars,
-  );
-  const fullRenderChars = renderPrinciplesToDirectives(
-    injected,
-    trimmed.injectedIds,
-    { escapeFn: escapeXml, selfReportInstruction: candidates.selfReportEnabled },
-  ).length;
   return {
-    route: 'legacy_trim',
-    budget: promptBudget.budgetChars,
-    usedChars: trimmed.lines.join('\n').length,
-    truncated: trimmed.truncated,
-    injectedPrincipleIds: [...trimmed.injectedIds],
-    injectedActivationIds: injected.map((p) => p.activationId),
-    warnings,
-    selectionPolicy: trimmed.selectionPolicy,
+    route: 'shared_render',
+    budget: context.budget,
+    usedChars: context.additionalContext.length,
+    truncated: context.truncated,
+    injectedPrincipleIds: context.principleIds,
+    injectedActivationIds: context.activationIds,
+    warnings: context.warnings,
+    selectionPolicy: context.selectionPolicy ?? 'legacy_fifo_prefix_v1',
     eventuallyInjectedActivationIds,
-    eligibleCount: trimmed.eligibleCount,
-    productionRotates: true,
+    eligibleCount: context.eligibleCount ?? 0,
+    productionRotates: rotates,
     unit: PROMPT_INJECTION_UNIT,
-    budgetScope: 'selected_lines',
-    oversizedActivationIds: trimmed.oversizedActivationIds,
-    droppedActivationIds: trimmed.droppedActivationIds,
-    oversizedDiagnosticTruncated: isDiagnosticCapHit(trimmed.oversizedActivationIds),
-    droppedDiagnosticTruncated: isDiagnosticCapHit(trimmed.droppedActivationIds),
-    ...(injected.length > 0 ? { fullRenderChars } : {}),
-    budgetCapacitySource: promptBudget.capacitySource,
-    budgetCapacityStatus: promptBudget.capacityStatus,
-    budgetContextWindowTokens: promptBudget.contextWindowTokens,
-    budgetPolicyVersion: promptBudget.policyVersion,
-    ...(promptBudget.fallbackReason !== undefined ? { budgetFallbackReason: promptBudget.fallbackReason } : {}),
-    ...(promptBudget.fallbackDetail !== undefined ? { budgetFallbackDetail: promptBudget.fallbackDetail } : {}),
+    budgetScope: 'full_directive_context',
+    oversizedActivationIds: oversized,
+    droppedActivationIds: dropped,
+    oversizedDiagnosticTruncated: isDiagnosticCapHit(oversized),
+    droppedDiagnosticTruncated: isDiagnosticCapHit(dropped),
+    budgetCapacitySource: context.budgetCapacitySource,
+    budgetCapacityStatus: context.budgetCapacityStatus,
+    budgetContextWindowTokens: context.budgetContextWindowTokens,
+    budgetPolicyVersion: context.budgetPolicyVersion,
+    ...(context.budgetFallbackReason !== undefined ? { budgetFallbackReason: context.budgetFallbackReason } : {}),
+    ...(context.budgetFallbackDetail !== undefined ? { budgetFallbackDetail: context.budgetFallbackDetail } : {}),
   };
 }
 
@@ -527,6 +437,17 @@ export type LivePromptInjectionProjectionResolution =
     status: 'confirmed';
     decision: PromptInjectionRouteDecision;
     projection: PromptInjectionProjection;
+    /**
+     * PRI-1137: with ONE shared route, a workspace that binds no single host
+     * still has per-host budget facts (host attribution is a fact, not a route
+     * split). Each standard host's forecast runs under ITS OWN budget basis —
+     * never another host's window. Absent when a single host is bound (the
+     * headline projection already is that host's).
+     */
+    perHost?: readonly {
+      hostKind: PromptInjectionTargetHost;
+      projection: PromptInjectionProjection;
+    }[];
   }
   | {
     status: 'unconfirmed';
@@ -562,19 +483,40 @@ export async function resolveLivePromptInjectionProjection(input: {
   const decision = resolvePromptInjectionRouteDecision(projectionInput);
   if (decision.status === 'confirmed') {
     // PRI-1017: the route can be confirmed by WORKSPACE FACTS without any
-    // request-level targetHost (a single-host workspace). The caller then has
-    // no `promptBudget`, but it does have that host's own observation in the
-    // per-host map — use it. A flag-shared route with no hostKind stays on
-    // the honest fallback: no host was identified, so no host's window may
-    // be borrowed.
-    const decidedBudget = promptBudget
-      ?? (decision.hostKind !== undefined ? perHostPromptBudget?.[decision.hostKind] : undefined);
+    // request-level targetHost. When ONE host is bound, that host's own
+    // observation is used. When NO host is bound, the headline stays a
+    // REFERENCE view: it may borrow the first standard host's budget BASIS so
+    // the numbers are real, but it must NOT borrow that host's rotation
+    // authority — `targetHost` stays undefined, so an unbound workspace never
+    // claims fair rotation on behalf of a host it has not identified.
+    const referenceHost = decision.hostKind ?? PROMPT_INJECTION_TARGET_HOSTS[0] ?? 'openclaw';
+    const decidedBudget = promptBudget ?? perHostPromptBudget?.[referenceHost];
     const projection = await buildLivePromptInjectionProjection({
       ...projectionInput,
       targetHost: decision.hostKind,
       ...(decidedBudget !== undefined ? { promptBudget: decidedBudget } : {}),
     });
-    return { status: 'confirmed', decision, projection };
+    if (decision.hostKind !== undefined) {
+      return { status: 'confirmed', decision, projection };
+    }
+    // PRI-1137: no single host is bound (single-route workspace). The route is
+    // known, but each standard host's BUDGET basis is still its own fact —
+    // keep host attribution without letting the headline claim one host's
+    // rotation authority. Unconfirmed stays reserved for genuinely unreadable
+    // inputs.
+    const perHost: { hostKind: PromptInjectionTargetHost; projection: PromptInjectionProjection }[] = [];
+    for (const hostKind of PROMPT_INJECTION_TARGET_HOSTS) {
+      const hostBudget = perHostPromptBudget?.[hostKind];
+      perHost.push({
+        hostKind,
+        projection: await buildLivePromptInjectionProjection({
+          ...projectionInput,
+          targetHost: hostKind,
+          ...(hostBudget !== undefined ? { promptBudget: hostBudget } : {}),
+        }),
+      });
+    }
+    return { status: 'confirmed', decision, projection, perHost };
   }
   const hosts = decision.perHost?.map((entry) => entry.hostKind) ?? [...PROMPT_INJECTION_TARGET_HOSTS];
   const perHost: { hostKind: PromptInjectionTargetHost; projection: PromptInjectionProjection }[] = [];

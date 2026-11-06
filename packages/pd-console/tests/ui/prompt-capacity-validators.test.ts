@@ -258,15 +258,17 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
   it('parses injectable/oversized/window_excluded rows with their evidence fields', () => {
     const v = validateActivations({
       activations: [
-        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'selected_lines', route: 'legacy_trim' } },
+        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'full_directive_context', route: 'shared_render' } },
       ],
       status: 'ok',
-      promptInjectionRoute: { status: 'confirmed', hostKind: 'openclaw', route: 'legacy_trim', flagEnabled: false },
+      promptInjectionRoute: { status: 'confirmed', hostKind: 'openclaw', route: 'shared_render' },
     });
     expect(v?.activations[0]?.promptInjection).toEqual({
-      activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'selected_lines', route: 'legacy_trim',
+      activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'full_directive_context', route: 'shared_render',
     });
-    expect(v?.promptInjectionRoute).toEqual({ status: 'confirmed', hostKind: 'openclaw', route: 'legacy_trim', flagEnabled: false });
+    // PRI-1137: `flagEnabled` is retired from the route summary — no flag
+    // participates in route selection.
+    expect(v?.promptInjectionRoute).toEqual({ status: 'confirmed', hostKind: 'openclaw', route: 'shared_render' });
   });
 
   it('parses route_unconfirmed rows with per-host tier fits and reason', () => {
@@ -335,7 +337,7 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
       activations: [],
       status: 'ok',
       promptInjectionRoute: {
-        status: 'confirmed', hostKind: 'codex', route: 'shared_render', flagEnabled: false,
+        status: 'confirmed', hostKind: 'codex', route: 'shared_render',
         budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown',
         budgetFallbackReason: 'host_capacity_absent', budgetObservedAt: '2026-10-21T04:00:00.000Z',
       },
@@ -349,12 +351,12 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
       activations: [],
       status: 'ok',
       promptInjectionRoute: {
-        status: 'confirmed', flagEnabled: false,
+        status: 'confirmed',
         budgetCapacitySource: 'vibes', budgetCapacityStatus: 'probably',
         budgetContextWindowTokens: -5, budgetFallbackReason: 'free_form_detail',
       },
     });
-    expect(invalid?.promptInjectionRoute).toEqual({ status: 'confirmed', flagEnabled: false });
+    expect(invalid?.promptInjectionRoute).toEqual({ status: 'confirmed' });
   });
 
   it('keeps resolution_failed rows with their structured reason', () => {

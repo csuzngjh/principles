@@ -598,6 +598,37 @@ export class ApprovalsGroupedConsoleModel {
           // runtime's last budget was not used.
           ...(staleObservation !== undefined ? { budgetFallbackReason: RUNTIME_BUDGET_OBSERVATION_STALE_REASON } : {}),
           ...(usedObservation !== undefined ? { budgetObservedAt: usedObservation.observedAt } : {}),
+          // PRI-1137: with ONE shared route, a workspace binding no single
+          // host still carries per-host budget facts. The headline is the
+          // route-confirmed reference view; each host keeps its OWN basis
+          // (observation / declaration / honest fallback) so attribution
+          // survives the route unification.
+          ...(resolution.perHost !== undefined
+            ? {
+              perHost: resolution.perHost.map((entry) => {
+                const observation = facts.perHost.get(entry.hostKind);
+                const declaredUsed = observation === undefined && declaredHosts.has(entry.hostKind);
+                const stale = observation === undefined && !declaredUsed
+                  ? facts.stalePerHost.get(entry.hostKind)
+                  : undefined;
+                return {
+                  hostKind: entry.hostKind,
+                  route: entry.projection.route,
+                  usedChars: entry.projection.usedChars,
+                  truncated: entry.projection.truncated,
+                  budget: entry.projection.budget,
+                  ...(entry.projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: entry.projection.budgetCapacitySource } : {}),
+                  ...(entry.projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: entry.projection.budgetCapacityStatus } : {}),
+                  ...(observation !== undefined ? { budgetObservedAt: observation.observedAt } : {}),
+                  ...(stale !== undefined
+                    ? { budgetFallbackReason: RUNTIME_BUDGET_OBSERVATION_STALE_REASON }
+                    : entry.projection.budgetFallbackReason !== undefined
+                      ? { budgetFallbackReason: entry.projection.budgetFallbackReason }
+                      : {}),
+                };
+              }),
+            }
+            : {}),
         },
       };
     } catch (err: unknown) {

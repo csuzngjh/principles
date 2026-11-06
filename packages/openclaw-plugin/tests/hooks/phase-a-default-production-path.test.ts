@@ -2,12 +2,12 @@
  * Phase A (SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 v0.3) —
  * DEFAULT production path regression.
  *
- * `abstraction_layer_v1` is OFF by default, so the production after_tool_call
- * route is `src/index.ts` → registered `after_tool_call` handler →
- * `handleAfterToolCall`. This suite drives that route end to end through the
- * REAL plugin registration (no handler-level shortcut, no mocked kernel,
- * no mocked SQLite) against a temporary workspace whose only state is a real
- * `trajectory.db`.
+ * `abstraction_layer_v1` is a gone tombstone (PRI-1137), so EVERY production
+ * after_tool_call route is `src/index.ts` → registered `after_tool_call`
+ * handler → the shared production pain-evidence kernel. This suite drives that
+ * route end to end through the REAL plugin registration (no handler-level
+ * shortcut, no mocked kernel, no mocked SQLite) against a temporary workspace
+ * whose only state is a real canonical `trajectory.db`.
  *
  * Contract pinned here:
  *   A. a real failed tool call is trajectory evidence — `tool_calls` gains a
@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
+import { applyTrajectorySchemaBase } from '@principles/core/runtime';
 import { isolatePdCanonicalConfig } from '../utils/isolate-pd-canonical.js';
 isolatePdCanonicalConfig();
 import plugin from '../../src/index';
@@ -55,6 +56,16 @@ function createWorkspace(): string {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-phase-a-default-'));
   tempDirs.push(workspaceDir);
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  // PRI-1137: after_tool_call now runs entirely through the shared runtime,
+  // whose evidence kernel requires the workspace's canonical trajectory store
+  // to already exist (the retired plugin-local handler used to bootstrap it).
+  // Production workspaces are initialized before hooks run, so mirror that.
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  try {
+    applyTrajectorySchemaBase(db);
+  } finally {
+    db.close();
+  }
   return workspaceDir;
 }
 
@@ -111,7 +122,7 @@ afterEach(() => {
   tempDirs.length = 0;
 });
 
-describe('Phase A default production path (abstraction_layer_v1 OFF)', () => {
+describe('Phase A default production path (unified shared runtime)', () => {
   it('A: a real failed tool call is trajectory evidence only — no Pain, no task', async () => {
     const workspaceDir = createWorkspace();
     const { afterToolCall } = registerPlugin(workspaceDir);

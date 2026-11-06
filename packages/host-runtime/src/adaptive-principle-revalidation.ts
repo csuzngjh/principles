@@ -62,6 +62,6 @@ export function revalidateAdaptivePrinciple(
   signal: AbortSignal,
 ): Promise<boolean> {
   const readWithAuthority: AdaptivePrincipleReader = ({ workspaceDir: currentWorkspaceDir }) =>
-    readPromptActivationCandidates({ workspaceDir: currentWorkspaceDir, includeAuthority: true });
+    readPromptActivationCandidates({ workspaceDir: currentWorkspaceDir, includeAuthority: true, noBusyWait: true });
   return revalidateWithReader({ workspaceDir, expected, signal }, readWithAuthority);
 }

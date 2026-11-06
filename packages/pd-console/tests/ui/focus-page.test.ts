@@ -1084,9 +1084,11 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
   });
 
   it("PRI-1066: per-host truncation never renders as a permanent 「已满」", () => {
-    // The rotating list route queues the entries that did not fit for later
-    // turns; only the non-rotating shared render may say "not all entered".
-    expect(capacitySrc).toContain('entry.route === "legacy_trim"');
+    // PRI-1137: rotation is decided by whether the production host supplies
+    // round authority (`productionRotates`), never by a retired route name; a
+    // rotating host queues the entries that did not fit for later turns, while
+    // a non-rotating host may say "not all entered".
+    expect(capacitySrc).toContain("promptInjection.productionRotates === true");
     expect(capacitySrc).toContain('t("pages.focus.promptCapacityPerHostRotating")');
     for (const focus of [enFocus, zhFocus]) {
       expect(getOwnString(focus, "promptCapacityPerHostFull") ?? "").not.toContain("已满");

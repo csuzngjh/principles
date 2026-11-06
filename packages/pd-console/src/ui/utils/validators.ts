@@ -1388,8 +1388,10 @@ export function validateActivations(v: unknown): ActivationsData | null {
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) result.nextAction = v.nextAction;
   if (Object.hasOwn(v, 'promptInjectionRoute') && isObject(v.promptInjectionRoute)) {
     const route = v.promptInjectionRoute;
-    if ((route.status === 'confirmed' || route.status === 'unconfirmed') && typeof route.flagEnabled === 'boolean') {
-      const summary: PromptInjectionRouteSummaryWire = { status: route.status, flagEnabled: route.flagEnabled };
+    if (route.status === 'confirmed' || route.status === 'unconfirmed') {
+      // PRI-1137: `flagEnabled` is retired from the route contract — no flag
+      // selects a prompt-injection route any more.
+      const summary: PromptInjectionRouteSummaryWire = { status: route.status };
       if (Object.hasOwn(route, 'hostKind') && (route.hostKind === 'openclaw' || route.hostKind === 'codex' || route.hostKind === 'workbuddy')) summary.hostKind = route.hostKind;
       if (Object.hasOwn(route, 'route') && (route.route === 'legacy_trim' || route.route === 'shared_render')) summary.route = route.route;
       if (Object.hasOwn(route, 'unconfirmedReason') && isString(route.unconfirmedReason)) summary.unconfirmedReason = route.unconfirmedReason;
@@ -1412,6 +1414,10 @@ export function validateActivations(v: unknown): ActivationsData | null {
       }
       if (Object.hasOwn(route, 'budgetFallbackReason') && isPromptBudgetFallbackReason(route.budgetFallbackReason)) {
         summary.budgetFallbackReason = route.budgetFallbackReason;
+      }
+      // PRI-1137: rotation truth of the ONE shared route.
+      if (Object.hasOwn(route, 'productionRotates') && typeof route.productionRotates === 'boolean') {
+        summary.productionRotates = route.productionRotates;
       }
       result.promptInjectionRoute = summary;
     }

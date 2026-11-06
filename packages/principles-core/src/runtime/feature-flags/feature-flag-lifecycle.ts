@@ -190,14 +190,6 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Not a graduation candidate — it is a permanent Owner control surface (like a rollback lever), not an unfinished feature; stays quiet by design',
     retirementCriteria: 'Only if the full-pipeline path is retired entirely (Owner decision); otherwise permanent',
   },
-  abstraction_layer_v1: {
-    decision: 'KEEP_QUIET',
-    consumers: ['openclaw-plugin/src/index.ts (host-runtime cutover gate)'],
-    evidence: 'PRI-523 shared host-runtime cutover for OpenClaw (since 2026-08-13); default-off for controlled parity validation',
-    decided: '2026-08-27',
-    graduationCriteria: 'Host-runtime parity validation passes on live install (parity contract tests green)',
-    retirementCriteria: 'Cutover completed (legacy route deleted) or cutover abandoned (shared host-runtime reverted)',
-  },
   principle_receipt_block_copy: {
     decision: 'GRADUATE',
     consumers: ['openclaw-plugin/src/hooks/gate-block-helper.ts (block copy)'],

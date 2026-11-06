@@ -19,8 +19,9 @@ export interface PromptCapacitySectionProps {
  *
  * 1. The host picker — the ONLY way to request approvals while the injection
  *    route is unconfirmed (`ApprovalsConsoleModel` answers 422 without a
- *    chosen host). It must be reachable whenever a per-host breakdown exists,
- *    including the common non-starved `abstraction_layer_v1` OFF state.
+ *    chosen host). It must be reachable whenever a per-host breakdown exists —
+ *    PRI-1137: every host now shares one route, so this covers every
+ *    not-yet-confirmed workspace regardless of host declarations.
  * 2. The starvation notice — shown only when a host cannot fit even ONE
  *    principle (`usedChars === 0 && truncated`). `truncated` alone is the
  *    normal rotation state and must never become a standing nag.
@@ -54,7 +55,7 @@ export function PromptCapacitySection({
             </summary>
             <p className="mt-1 text-ink-2">
               {t("pages.focus.promptCapacityUnconfirmed", {
-                defaultValue: "当前宿主容量未确认：本工作区适用的宿主会走不同的注入路由，以下数字未绑定具体宿主。",
+                defaultValue: "当前宿主容量未确认：本工作区适用宿主的容量事实不可用，以下数字未绑定具体宿主。",
               })}
             </p>
             <ul className="mt-1 list-disc pl-5">
@@ -62,20 +63,19 @@ export function PromptCapacitySection({
                 <li key={entry.hostKind} data-testid={`prompt-capacity-perhost-${entry.hostKind}`}>
                   {t("pages.focus.promptCapacityPerHostEntry", {
                     host: entry.hostKind === "openclaw" ? "OpenClaw" : entry.hostKind === "workbuddy" ? "WorkBuddy" : "Codex",
-                    billing: entry.route === "shared_render"
-                      ? t("pages.focus.promptCapacitySharedRoute")
-                      : t("pages.focus.promptCapacityListRoute"),
+                    // PRI-1137: one shared renderer for every host, billed as a
+                    // full directive block.
+                    billing: t("pages.focus.promptCapacitySharedRoute"),
                     used: entry.usedChars,
                     // PRI-1017: each host shows ITS OWN budget basis (runtime
                     // observation or its own honest fallback) — never the
                     // shared headline number.
                     budget: entry.budget ?? promptInjection.budget,
-                    // PRI-1066: `truncated` never means "the budget is full
-                    // forever". On the rotating list route the entries that
-                    // did not fit are queued for later turns; only the
-                    // non-rotating shared render genuinely stops here.
+                    // PRI-1066 / PRI-1137: rotation is decided by whether the
+                    // PRODUCTION host supplies round authority (OpenClaw does,
+                    // Codex/WorkBuddy do not) — never by a retired route name.
                     full: entry.truncated
-                      ? entry.route === "legacy_trim"
+                      ? promptInjection.productionRotates === true
                         ? t("pages.focus.promptCapacityPerHostRotating")
                         : t("pages.focus.promptCapacityPerHostFull")
                       : "",

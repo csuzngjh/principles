@@ -99,10 +99,14 @@ describe('AC-04/05: principle templates (B/C)', () => {
 });
 
 describe('AC-06: runtime prompt injection does not depend on core PRINCIPLES.md', () => {
-  it('prompt.ts injects from Runtime V2 activations, not the legacy reducer or markdown template', () => {
+  it('prompt.ts consumes the shared Runtime activation prompt, not the legacy reducer or markdown template', () => {
     const promptSrc = fs.readFileSync(path.join(PACKAGE_ROOT, 'src', 'hooks', 'prompt.ts'), 'utf8');
-    // Runtime activations are the single injection authority.
-    expect(promptSrc).toContain('readActivatedPrinciples');
+    // PRI-1137: Runtime activations remain the single injection authority, and
+    // the reader now lives in the shared host runtime; the plugin must consume
+    // the shared result rather than re-reading activations locally.
+    expect(promptSrc).toContain('sharedActivePrinciplePrompt');
+    expect(promptSrc).not.toContain('readActivatedPrinciples');
+    expect(promptSrc).not.toContain('trimToBudget');
     // The legacy evolution reducer is no longer an injection source.
     expect(promptSrc).not.toContain('getActivePrinciples');
     // Must not read the shipped core template as runtime source of truth.

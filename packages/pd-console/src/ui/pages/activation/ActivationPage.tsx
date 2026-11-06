@@ -217,6 +217,7 @@ function ActivationFactCard({
   onDisable,
   disabling,
   onChanged,
+  productionRotates,
 }: {
   record: ActivationRecord;
   lifecycleData: LifecycleMetricsData | null | undefined;
@@ -226,6 +227,10 @@ function ActivationFactCard({
   onDisable: (record: ActivationRecord) => void;
   disabling: boolean;
   onChanged: () => void;
+  /** PRI-1137: the ONE shared production route's rotation truth (from the
+   * page-level projection), so a window-excluded row explains queueing vs
+   * permanent starvation without re-deriving a route per row. */
+  productionRotates: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -404,7 +409,7 @@ function ActivationFactCard({
                   budget: record.promptInjection.budget ?? 0,
                 })}
               {record.promptInjection.status === "window_excluded" &&
-                (record.promptInjection.route === "legacy_trim"
+                (productionRotates === true
                   ? t("pages.activation.injectionWindowRotates", {
                       defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），后续轮次会轮到（预测）",
                       cost: record.promptInjection.costChars ?? 0,
@@ -924,8 +929,8 @@ export function ActivationPage() {
         </div>
       )}
 
-      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
-      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} />)}</div></section>}
+      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true} />)}</div></section>}
+      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true} />)}</div></section>}
 
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">
@@ -1001,6 +1006,7 @@ export function ActivationPage() {
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
                 onChanged={() => void loadData()}
+                productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true}
               />
             ))}
           </div>
@@ -1027,6 +1033,7 @@ export function ActivationPage() {
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
                 onChanged={() => void loadData()}
+                productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true}
               />
             ))}
           </div>

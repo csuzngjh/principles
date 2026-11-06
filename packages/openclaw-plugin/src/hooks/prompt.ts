@@ -10,18 +10,18 @@ import type { ContextInjectionConfig } from '../types.js';
 // Routing guidance is no longer injected into prompts.
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
-import { RUNTIME_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, resolveTotalInjectionBudgetChars, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime';
+import { RUNTIME_PRINCIPLE_BUDGET, resolveTotalInjectionBudgetChars, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime';
+// PRI-1137: the plugin-local injection route (activation list reader + budget
+// trimmer + adaptive intervention) is retired; the shared runtime is the only
+// ordinary Runtime principle authority.
 import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime';
-import { prepareAdaptiveIntervention, type ActivatedPrinciple, type AdaptiveInterventionResult, type AdaptiveDeliveryRecord } from '@principles/core/runtime';
+import type { ActivatedPrinciple, AdaptiveInterventionResult, AdaptiveDeliveryRecord } from '@principles/core/runtime';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
-import { PromptActivationReader } from '../core/runtime-prompt-activation-reader.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
 import {
-  claimControlledAdmission,
   isControlledAdmissionConfigured,
-  releaseControlledAdmissionClaim,
   takeControlledAdmissionHandoff,
   type ControlledAdmissionClaim,
 } from './controlled-admission.js';
@@ -168,15 +168,12 @@ function cachedReadFile(filePath: string, workspaceDir: string): string {
 
 /**
  * PRI-1065: the Runtime principle budget ACTUALLY applied to this build —
- * the shared route's own resolution or the plugin-local one, otherwise the
- * legacy constant. Both the injection event and the size guard read this one
- * derivation, so the recorded budget and the enforced ceiling cannot drift.
+ * the shared route's own resolution, otherwise the legacy constant. The
+ * injection event and the size guard both read this one derivation, so the
+ * recorded budget and the enforced ceiling cannot drift.
  */
-function appliedPrincipleBudgetChars(
-  shared: ActivePrinciplePromptResult | undefined,
-  local: PromptBudgetResolution | undefined,
-): number {
-  return shared?.budget ?? local?.budgetChars ?? RUNTIME_PRINCIPLE_BUDGET;
+function appliedPrincipleBudgetChars(shared: ActivePrinciplePromptResult | undefined): number {
+  return shared?.budget ?? RUNTIME_PRINCIPLE_BUDGET;
 }
 
 /**
@@ -345,6 +342,116 @@ export function beginAdaptivePromptInvocation(ctx: PluginHookAgentContext & { ap
   return hookInvocationId;
 }
 
+/**
+ * PRI-1137: native hook events whose PRE-SELECTION round preparation already
+ * ran. Keyed on the native event object — the SAME object instance reaches
+ * both `prepareOpenClawPromptRound` (through the shared `roundKeyProvider`)
+ * and the post-selection `handleBeforePromptBuild` callback. It is the only
+ * deduplication signal that also covers a host invocation WITHOUT a runId,
+ * where the run-claim key cannot distinguish two hook calls.
+ */
+const _roundPreparedEvents = new WeakSet<object>();
+
+/**
+ * PRI-1137 PRE-SELECTION phase for the OpenClaw shared prompt route.
+ *
+ * The shared runtime must know the session round BEFORE it selects principles
+ * (`buildActivePrinciplePromptContext` → roundKey), but OpenClaw's user-turn
+ * record is written by `SignalCollectorHost.detectSync`, which the plugin
+ * previously ran inside `handleBeforePromptBuild` — i.e. AFTER the shared
+ * selection. Calling `nextSessionTurnOrdinal` before that write would read a
+ * PREVIOUS round and shift the rotation by one turn.
+ *
+ * So the plugin preparation is split in two halves that share ONE write:
+ *   - pre-selection (this function): signal collection + user_turns write,
+ *     then read the trusted ordinal;
+ *   - post-selection (`handleBeforePromptBuild`): skips signal collection for
+ *     an event already claimed here and assembles the host context.
+ *
+ * The returned ordinal is exactly `max(turn_index) + 1` AFTER this turn is
+ * persisted — the same derivation the former plugin-local route used, so the
+ * two routes agreed turn-for-turn. No unconditional `+1` offset is applied
+ * anywhere. `undefined` (missing sessionId / unreadable trajectory DB /
+ * non-integer ordinal) is the observable degraded case: the shared selector
+ * then reports `legacy_fifo_prefix_v1`; a constant round is never fabricated.
+ */
+export function prepareOpenClawPromptRound(
+  event: PluginHookBeforePromptBuildEvent,
+  ctx: PluginHookAgentContext & { api?: PromptHookApi },
+): number | undefined {
+  const logger = ctx.api?.logger;
+  const { workspaceDir, sessionId, trigger, runId, sessionKey } = ctx;
+  if (!workspaceDir) return undefined;
+
+  let wctx: WorkspaceContext;
+  try {
+    wctx = WorkspaceContext.fromHookContext(ctx);
+  } catch (error) {
+    logger?.warn?.(`[PD:Prompt] pre-selection workspace context unavailable: ${String(error)} → legacy_fifo_prefix_v1`);
+    return undefined;
+  }
+
+  // ── pre-selection half: the ONE signal-collection write for this invocation ──
+  let currentUserMessage = '';
+  let isAgentToAgent = false;
+  try {
+    const resolved = resolveCurrentUserMessage(event, sessionId);
+    currentUserMessage = resolved.message;
+    isAgentToAgent = resolved.isAgentToAgent;
+  } catch (error) {
+    logger?.warn?.(`[PD:Prompt] pre-selection user message resolution failed: ${String(error)}`);
+  }
+  const isUserInteraction = isUserInteractionTrigger(trigger);
+  if (currentUserMessage && sessionId && isUserInteraction && !isAgentToAgent) {
+    if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
+      // Another hook invocation for this run already collected the signal.
+    } else {
+      if (!runId) {
+        logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId.substring(0, 20)}`);
+      }
+      let referencesAssistantTurnId: number | null = null;
+      try {
+        if (event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
+          const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+          referencesAssistantTurnId = turns[turns.length - 1]?.id ?? null;
+        }
+      } catch (error) {
+        logger?.warn?.(`[PD:Prompt] pre-selection assistant-turn anchor unavailable: ${String(error)}`);
+      }
+      try {
+        getSignalCollectorHost(wctx, logger).detectSync(
+          currentUserMessage, sessionId, trigger ?? 'api',
+          { referencesAssistantTurnId, turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages) },
+        );
+        if (runId) claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId);
+      } catch (error) {
+        // Detection failure must not lose the round authority altogether —
+        // the ordinal below is a separate read of already-persisted state.
+        logger?.warn?.(`[PD:Prompt] pre-selection signal collection failed: ${String(error)}`);
+      }
+    }
+  }
+  _roundPreparedEvents.add(event);
+
+  // ── round authority: only the persisted OpenClaw user_turns counter ──
+  if (!sessionId) {
+    logger?.warn?.('[PD:Prompt] round key unavailable: no sessionId → legacy_fifo_prefix_v1');
+    return undefined;
+  }
+  try {
+    const ordinal = nextSessionTurnOrdinal(wctx.workspaceDir, sessionId);
+    if (typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 1) {
+      logger?.info?.(`[PD:Prompt] round key resolved: round=${ordinal}, sessionId=${sessionId.substring(0, 20)}`);
+      return ordinal;
+    }
+    logger?.warn?.(`[PD:Prompt] round key invalid (${String(ordinal)}); falling back to legacy_fifo_prefix_v1`);
+    return undefined;
+  } catch (error) {
+    logger?.warn?.(`[PD:Prompt] round key unavailable (trajectory DB unreadable): ${String(error)} → legacy_fifo_prefix_v1`);
+    return undefined;
+  }
+}
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi },
@@ -465,7 +572,16 @@ export async function handleBeforePromptBuild(
   // SignalCollectorHost 统一接管 correction + empathy 检测(spec §3.3 决策1)。
   // 在 isAgentToAgent 解析之后调用,避免 agent-to-agent 流量被误当用户纠正(CodeRabbit #7)。
   if (currentUserMessage && sessionId && isUserInteraction && !isAgentToAgent) {
-    if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
+    if (_roundPreparedEvents.has(event)) {
+      // PRI-1137: the shared route's pre-selection phase already ran
+      // SignalCollectorHost for this invocation (it must, because the round
+      // key is resolved before the shared prompt context is built). Repeating
+      // it here would double-write user_turns and double-dispatch STRONG
+      // signals — including when no runId exists, where the run-claim key
+      // cannot deduplicate.
+      _roundPreparedEvents.delete(event);
+      logger?.info?.('[PD:Prompt] signal collection already performed by the pre-selection round phase');
+    } else if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
       logger?.info?.(`[PD:Prompt] duplicate signal run skipped: runId=${runId}, sessionId=${sessionId.substring(0, 20)}`);
     } else {
       if (!runId) {
@@ -638,24 +754,29 @@ export async function handleBeforePromptBuild(
   // Owner-approved Runtime principles are the single prompt-injection
   // authority. Hoisted so the owner_approved_behavior_directives section can
   // access them.
-  let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
-  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the plugin-local route's budget
-  // resolution (resolved lazily below from THIS hook's model facts). The
-  // shared route carries its own resolution in sharedActivePrinciplePrompt —
-  // resolved by host-runtime from the same facts — so exactly one resolution
-  // feeds each injection.
-  let v2PromptBudget: PromptBudgetResolution | undefined;
+  // PRI-1137: the plugin-local injection route is retired — the shared runtime
+  // is the ONLY source of ordinary Runtime principles; there is no local fallback.
+  let v2ResultWarnings: string[] = [];
   try {
-    const reader = sharedActivePrinciplePrompt ? undefined : new PromptActivationReader(wctx.workspaceDir, { logger });
-    const v2Result = sharedActivePrinciplePrompt
-      ? { principles: [], warnings: sharedActivePrinciplePrompt.warnings, source: 'runtime_v2' as const }
-      : await reader!.readActivatedPrinciples();
-
-    if (v2Result.warnings.length > 0) {
-      logger?.info?.(`[PD:Runtime] Activation read warnings: ${v2Result.warnings.join('; ')}`);
+    if (sharedActivePrinciplePrompt) {
+      v2ResultWarnings = sharedActivePrinciplePrompt.warnings;
+      if (v2ResultWarnings.length > 0) {
+        // Data-integrity warnings (unreadable artifacts, malformed content,
+        // broken config) must stay at warn: they are degradations the Owner
+        // must see, not routine info. Benign states (feature disabled, no
+        // runtime DB yet) stay at info to avoid per-turn warn spam.
+        const integrity = v2ResultWarnings.some((w) =>
+          /^(config_invalid|artifact_|activation_db_unreadable|prompt_activation_authority_unavailable)/.test(w));
+        const line = `[PD:Runtime] Activation read warnings: ${v2ResultWarnings.join('; ')}`;
+        if (integrity) logger?.warn?.(line);
+        else logger?.info?.(line);
+      }
+    } else {
+      // Every production OpenClaw prompt arrives through the shared runtime.
+      // An absent result is a wiring failure, not a reason to re-run the
+      // retired plugin-local reader (rc-9: the absence stays observable).
+      logger?.warn?.('[PD:Runtime] shared prompt result missing — no Runtime principles injected on this invocation');
     }
-
-    dedupedV2 = v2Result.principles;
 
     if (sharedActivePrinciplePrompt) {
       const packing = sharedActivePrinciplePrompt.adaptivePacking;
@@ -713,179 +834,29 @@ export async function handleBeforePromptBuild(
       v2SelectionPolicy = sharedActivePrinciplePrompt.selectionPolicy;
       v2EligibleCount = sharedActivePrinciplePrompt.eligibleCount;
       v2RotationStartIndex = sharedActivePrinciplePrompt.rotationStartIndex;
+      // PRI-1137: the shared selection carries the trusted round it advanced
+      // on; the injected event records the same fact instead of omitting it.
+      v2RoundOrdinal = sharedActivePrinciplePrompt.selectionRoundOrdinal;
       v2DroppedActivationIds = sharedActivePrinciplePrompt.droppedActivationIds;
       v2OversizedActivationIds = sharedActivePrinciplePrompt.oversizedActivationIds;
-    } else if (dedupedV2.length > 0) {
-      // PRI-904 Phase-1 (Option 3) fair rotation round = the session-local
-      // user-turn ordinal already persisted in trajectory.db (same fact the
-      // correction pipeline anchors on). Timing, verified on this route:
-      // SignalCollectorHost.detectSync writes user_turns synchronously at the
-      // top of this hook, so at selection time THIS turn is already recorded
-      // and the helper returns MAX(turn_index)+1 — the NEXT turn's ordinal,
-      // not the current one. That off-by-one is harmless for fairness (only
-      // the strict +1 progression matters); it is documented rather than
-      // papered over. Consecutive user turns therefore advance the rotation
-      // start by exactly one, and N such turns cover all N eligible ring
-      // positions. A missing sessionId or unreadable trajectory db degrades to
-      // the legacy FIFO policy, observable via selectionPolicy.
-      //
-      // Scope: this guarantee is per CONTINUOUSLY ADVANCING SESSION on the
-      // currently live plugin-local route. It is NOT cross-session, and it is
-      // NOT claimed for the host-shared/Codex route (which passes no round key).
-      let v2RoundKey: number | undefined;
-      if (sessionId) {
-        try {
-          v2RoundKey = nextSessionTurnOrdinal(wctx.workspaceDir, sessionId);
-        } catch (ordinalErr) {
-          logger?.warn?.(`[PD:Runtime] Fair-rotation round ordinal unavailable (${String(ordinalErr)}); falling back to legacy FIFO selection for this build`);
-        }
-      }
-      // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve the injection budget
-      // ONCE for this build from the host hook's own model facts (effective
-      // context window first, installed Pi AI catalog as metadata fallback,
-      // legacy 2000 with an observable reason when nothing is confirmable).
-      // The shared route resolves the same facts inside host-runtime — same
-      // resolver, same catalog, deterministic same result.
-      // PRI-1020: the Owner's declared window (.pd/config.yaml promptBudget)
-      // outranks all of these (tier 0); plugin-local route hostKind is always
-      // openclaw. Loader never throws; malformed config degrades to no
-      // declaration and is warned about by the other config readers here.
-      const declaredWindow = operatorDeclaredContextWindow(
-        loadPdConfigForPlugin(workspaceDir).effective.config.promptBudget,
-        'openclaw',
-      );
-      v2PromptBudget = resolvePromptBudget({
-        ...(declaredWindow !== undefined ? { operatorDeclared: { contextWindowTokens: declaredWindow } } : {}),
-        hostCapacity: {
-          contextTokenBudget: ctx.contextTokenBudget,
-          contextWindowSource: ctx.contextWindowSource,
-        },
-        modelIdentity: {
-          providerId: ctx.modelProviderId,
-          modelId: ctx.modelId,
-        },
-        catalog: getPromptModelCatalog(),
-      });
-      if (v2PromptBudget.capacityStatus === 'unknown' && v2PromptBudget.fallbackReason) {
-        // Per-turn debug noise control: the injection EVENT already records
-        // capacityStatus=legacy_fallback + the bounded reason code (SPEC §7);
-        // the log adds the non-sensitive detail for local diagnosis only.
-        logger?.debug?.(`[PD:Runtime] Model-aware budget fell back to ${v2PromptBudget.budgetChars}c (reason: ${v2PromptBudget.fallbackReason}; detail: ${v2PromptBudget.fallbackDetail ?? 'n/a'})`);
-      } else {
-        logger?.info?.(`[PD:Runtime] Model-aware budget ${v2PromptBudget.budgetChars}c (source: ${v2PromptBudget.capacitySource}, window: ${v2PromptBudget.contextWindowTokens} tokens)`);
-      }
-      const selection = trimToBudget(dedupedV2, v2PromptBudget.budgetChars, escapeXml, v2RoundKey);
-      const { lines, injectedIds, truncated } = selection;
-      v2Truncated = truncated;
-      v2SelectionPolicy = selection.selectionPolicy;
-      v2EligibleCount = selection.eligibleCount;
-      v2RotationStartIndex = selection.rotationStartIndex;
-      v2RoundOrdinal = v2RoundKey;
-      v2DroppedActivationIds = selection.droppedActivationIds;
-      v2OversizedActivationIds = selection.oversizedActivationIds;
-      if (truncated) {
-        logger?.info?.(`[PD:Runtime] Principle budget reached (${v2PromptBudget.budgetChars}c) — ${injectedIds.size} principles injected under ${selection.selectionPolicy} (round=${v2RoundKey ?? 'n/a'}, start=${selection.rotationStartIndex ?? 0}, dropped=${selection.droppedActivationIds.length}, oversized=${selection.oversizedActivationIds.length})`);
-      }
-      for (const id of injectedIds) {
-        runtimePrincipleIds.add(id);
-      }
-      runtimePrinciplesContent = lines.join('\n');
-      const mapping = adaptiveMapping;
-      const admittedText = getOwnValue(event, 'currentUserMessage');
-      const admittedId = getOwnValue(event, 'currentUserMessageId');
-      const nativeIdentity = typeof admittedId === 'string' && admittedId.trim().length > 0;
-      let admissionClaim: ControlledAdmissionClaim | undefined;
-      if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode && sessionId
-        && adaptiveInvocationId && isControlledAdmissionConfigured() && !nativeIdentity) {
-        adaptiveDeadlineAt = Math.min(adaptiveStartedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
-        const admission = claimControlledAdmission({
-          event, workspaceDir, sessionId, runId: runId ?? null, mapping,
-          hookInvocationId: adaptiveInvocationId, now: adaptiveStartedAt,
-        });
-        if (admission.status === 'claimed') admissionClaim = admission.claim;
-        else if (admission.status === 'rejected') {
-          logger?.warn?.(`[PD:AA] controlled admission refused: ${JSON.stringify({ reason: admission.reason, detail: admission.detail })}`);
-        }
-      }
-      if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode && sessionId
-        && (admissionClaim || (typeof admittedText === 'string' && nativeIdentity))) {
-        const selfReport = loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled;
-        const render = (ids: Set<string>) => renderPrinciplesToDirectives(dedupedV2, ids, { escapeFn: escapeXml, selfReportInstruction: selfReport });
-        const target = dedupedV2.find(p => p.artifactId === mapping.artifactId && p.activationId === mapping.activationId);
-        const withoutTarget = new Set(injectedIds);
-        if (target) withoutTarget.delete(target.principleId);
-        adaptiveDeadlineAt = Math.min(adaptiveStartedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
-        const intervention = await prepareAdaptiveIntervention({
-          nativeText: render(injectedIds), nativeWithoutTargetText: render(withoutTarget),
-          nativePrincipleIds: [...injectedIds], principles: dedupedV2, target: mapping,
-          currentUserMessage: admissionClaim ? admissionClaim.admittedText : admittedText as string,
-          ...(admissionClaim
-            ? { controlledAdmission: {
-                admissionId: admissionClaim.identity.admissionId,
-                inputSha256: admissionClaim.identity.inputSha256,
-                manifestSha256: admissionClaim.identity.manifestSha256,
-              } }
-            : { currentUserMessageId: admittedId as string }),
-          sessionId,
-          selectionBudget: v2PromptBudget.budgetChars, roundKey: v2RoundKey,
-          mandatoryPrincipleIds: [], selfReportInstruction: selfReport,
-          deadlineAt: adaptiveDeadlineAt,
-        }, {
-          now: Date.now,
-          revalidate: (expected, signal) => revalidateAdaptivePrinciple(workspaceDir, expected, signal),
-          renderAndGuard: ids => {
-            const text = render(ids);
-            return text.length <= resolveTotalInjectionBudgetChars(v2PromptBudget?.budgetChars ?? RUNTIME_PRINCIPLE_BUDGET) ? text : '';
-          },
-        });
-        adaptiveDirectiveText = intervention.text;
-        adaptiveOutcome = intervention;
-        if (admissionClaim) {
-          adaptiveOperatorAdmission = { ...admissionClaim.identity, claimId: admissionClaim.claimId, status: 'claimed' };
-          releaseControlledAdmissionClaim(admissionClaim);
-        } else {
-          adaptiveAdmissionId = admittedId as string;
-        }
-        adaptiveExpectedTarget = target;
-        adaptiveSafeFallback = { text: render(withoutTarget), ids: [...withoutTarget] };
-        if (intervention.addedTarget) adaptiveBaseline = { text: render(injectedIds), ids: [...injectedIds] };
-        if (intervention.selectedPrincipleIds) {
-          const changed = intervention.selectedPrincipleIds.length !== runtimePrincipleIds.size
-            || intervention.selectedPrincipleIds.some(id => !runtimePrincipleIds.has(id));
-          runtimePrincipleIds.clear();
-          for (const id of intervention.selectedPrincipleIds) runtimePrincipleIds.add(id);
-          if (changed) {
-            // The original rotation diagnostics describe the baseline, not the intervened selection.
-            v2SelectionPolicy = undefined;
-            v2RotationStartIndex = undefined;
-            v2RoundOrdinal = undefined;
-            v2DroppedActivationIds = undefined;
-            v2OversizedActivationIds = undefined;
-            v2Truncated = runtimePrincipleIds.size < dedupedV2.length;
-          }
-        }
-        runtimePrinciplesContent = intervention.text;
-      } else if (mapping) {
-        logger?.info?.('[PD:AA] Native preserved: trusted current admission or supported user entry unavailable');
-      }
     }
 
     commitRuntimeEvidence = () => {
     const sharedPrompt = sharedActivePrinciplePrompt;
     // ── Emit structured observability event ──
+    // PRI-1137: the event describes the ONE shared selection that was actually
+    // rendered. No plugin-local fallback exists, so an absent shared result
+    // emits nothing (the wiring failure was already logged at warn).
+    if (!sharedPrompt) return;
     try {
       const eventLog = wctx.eventLog;
-      // PRI-537: pair the source arrays with the INJECTED subset — dedupedV2
-      // is the full candidate list, so raw .map() mispairs under budget
-      // truncation (rc-6-adjacent). All three arrays derive from the same
-      // aligned list so index alignment cannot drift between them.
-      const alignedPrinciples = alignInjectedPrinciples(dedupedV2, runtimePrincipleIds);
+      // PRI-537: pair the source arrays with the INJECTED subset — all three
+      // arrays come from the same shared selection, so index alignment cannot
+      // drift between them.
       // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the budget THIS injection ran
-      // under — the shared route's own resolution (host-runtime resolved from
-      // the same hook facts), or the plugin-local resolution. Never a
-      // restated constant: a recorded budget that differs from the executed
-      // one is a silent lie.
-      const v2EventBudget = appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget);
+      // under — the shared route's own resolution. Never a restated constant:
+      // a recorded budget that differs from the executed one is a silent lie.
+      const v2EventBudget = appliedPrincipleBudgetChars(sharedPrompt);
       eventLog.recordRuntimeActivationsInjected({
         hostKind: 'openclaw',
         eventId: randomUUID(),
@@ -897,11 +868,11 @@ export async function handleBeforePromptBuild(
         // supplies none (event stays compatible; signal collection already
         // warns on missing runId at prompt build).
         ...(runId ? { runId } : {}),
-        principleIds: sharedActivePrinciplePrompt?.principleIds ?? alignedPrinciples.map((p) => p.principleId),
-        activationIds: sharedActivePrinciplePrompt?.activationIds ?? alignedPrinciples.map((p) => p.activationId),
-        artifactIds: sharedActivePrinciplePrompt?.artifactIds ?? alignedPrinciples.map((p) => p.artifactId),
+        principleIds: sharedPrompt.principleIds,
+        activationIds: sharedPrompt.activationIds,
+        artifactIds: sharedPrompt.artifactIds,
         injectedCount: runtimePrincipleIds.size,
-        skippedWarnings: v2Result.warnings,
+        skippedWarnings: v2ResultWarnings,
         injectedCharCount: runtimePrinciplesContent.length,
         budget: v2EventBudget,
         ...(v2Truncated !== undefined ? { v2Truncated } : {}),
@@ -914,16 +885,15 @@ export async function handleBeforePromptBuild(
         ...(v2DroppedActivationIds !== undefined && v2DroppedActivationIds.length > 0 ? { droppedActivationIds: v2DroppedActivationIds } : {}),
         ...(v2OversizedActivationIds !== undefined && v2OversizedActivationIds.length > 0 ? { oversizedActivationIds: v2OversizedActivationIds } : {}),
         // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: budget provenance travels
-        // with the event — shared route carries its own resolution, local
-        // route the one resolved above; absent resolution (aborted build)
-        // means policy unknown, which readers must treat as fixed-budget.
-        ...(sharedActivePrinciplePrompt?.budgetPolicyVersion !== undefined ? { budgetPolicyVersion: sharedActivePrinciplePrompt.budgetPolicyVersion } : v2PromptBudget !== undefined ? { budgetPolicyVersion: v2PromptBudget.policyVersion } : {}),
-        ...(sharedActivePrinciplePrompt?.budgetCapacitySource !== undefined ? { budgetCapacitySource: sharedActivePrinciplePrompt.budgetCapacitySource } : v2PromptBudget !== undefined ? { budgetCapacitySource: v2PromptBudget.capacitySource } : {}),
-        ...(sharedActivePrinciplePrompt?.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: sharedActivePrinciplePrompt.budgetCapacityStatus } : v2PromptBudget !== undefined ? { budgetCapacityStatus: v2PromptBudget.capacityStatus } : {}),
-        ...(sharedActivePrinciplePrompt != null && sharedActivePrinciplePrompt.budgetContextWindowTokens != null ? { budgetContextWindowTokens: sharedActivePrinciplePrompt.budgetContextWindowTokens } : v2PromptBudget != null && v2PromptBudget.contextWindowTokens != null ? { budgetContextWindowTokens: v2PromptBudget.contextWindowTokens } : {}),
-        // SPEC §7 v0.2: bounded fallback reason code — same facts, same code
-        // on both routes (shared carries its own resolution's code).
-        ...(sharedActivePrinciplePrompt?.budgetFallbackReason !== undefined ? { budgetFallbackReason: sharedActivePrinciplePrompt.budgetFallbackReason } : v2PromptBudget?.fallbackReason !== undefined ? { budgetFallbackReason: v2PromptBudget.fallbackReason } : {}),
+        // with the event — the shared route carries its own resolution; absent
+        // resolution (aborted build) means policy unknown, which readers must
+        // treat as fixed-budget.
+        ...(sharedPrompt.budgetPolicyVersion !== undefined ? { budgetPolicyVersion: sharedPrompt.budgetPolicyVersion } : {}),
+        ...(sharedPrompt.budgetCapacitySource !== undefined ? { budgetCapacitySource: sharedPrompt.budgetCapacitySource } : {}),
+        ...(sharedPrompt.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: sharedPrompt.budgetCapacityStatus } : {}),
+        ...(sharedPrompt.budgetContextWindowTokens != null ? { budgetContextWindowTokens: sharedPrompt.budgetContextWindowTokens } : {}),
+        // SPEC §7 v0.2: bounded fallback reason code.
+        ...(sharedPrompt.budgetFallbackReason !== undefined ? { budgetFallbackReason: sharedPrompt.budgetFallbackReason } : {}),
         ...(runtimePrincipleIds.size === 0
           ? {
               skipReason: 'no_validated_activations',
@@ -942,16 +912,12 @@ export async function handleBeforePromptBuild(
     // stale non-empty set from an earlier turn would re-admit markers for
     // principles no longer injected this turn.
     // Review fix (rc-6-adjacent pairing): activation ids must align with the
-    // INJECTED subset — the full dedupedV2 list mispairs when budget
-    // truncation drops principles. The shared-runtime path keeps its own
-    // parallel arrays.
+    // INJECTED subset. The shared selection already carries parallel arrays.
     // PRI-899: the SAME aligned array now feeds BOTH the session tracker (the
     // pairing the self_report effect row is written from) and the presence
     // writer below, so the two receipt levels pair principles to activations
     // identically — one pairing derivation, not two.
-    const alignedActivationIds = sharedActivePrinciplePrompt
-      ? sharedActivePrinciplePrompt.activationIds
-      : alignActivationIds(dedupedV2, runtimePrincipleIds);
+    const alignedActivationIds = sharedPrompt.activationIds;
     try {
       if (sessionId) {
         setInjectedPrincipleIds(sessionId, [...runtimePrincipleIds], workspaceDir, alignedActivationIds);
@@ -986,17 +952,13 @@ export async function handleBeforePromptBuild(
     // host's consumption is NOT claimed). Best-effort: never affects the
     // prompt being returned (ADR-0027 §2.4).
     try {
-      const evidenceInjected = sharedPrompt
-        ? sharedPrompt.principleIds
-            .map((principleId, index) => ({
-              principleId,
-              activationId: sharedPrompt.activationIds[index] ?? '',
-              artifactId: sharedPrompt.artifactIds[index],
-            }))
-            .filter((entry) => entry.activationId.length > 0)
-        : alignInjectedPrinciples(dedupedV2, runtimePrincipleIds)
-            .filter((entry) => entry.activationId.length > 0)
-            .map((entry) => ({ principleId: entry.principleId, activationId: entry.activationId, artifactId: entry.artifactId }));
+      const evidenceInjected = sharedPrompt.principleIds
+        .map((principleId, index) => ({
+          principleId,
+          activationId: sharedPrompt.activationIds[index] ?? '',
+          artifactId: sharedPrompt.artifactIds[index],
+        }))
+        .filter((entry) => entry.activationId.length > 0);
       if (evidenceInjected.length > 0) {
         recordPromptDeliveryEvidence({
           workspaceDir,
@@ -1055,16 +1017,9 @@ export async function handleBeforePromptBuild(
   // 3.5. Owner-Approved Behavior Directives (Runtime V2 activated principles)
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
-  if (runtimePrincipleIds.size > 0) {
+  if (runtimePrincipleIds.size > 0 && sharedActivePrinciplePrompt) {
     if (adaptiveOutcome) adaptivePrefix = prependSystemContext;
-    const directiveText = adaptiveDirectiveText ?? sharedActivePrinciplePrompt?.additionalContext
-      ?? renderPrinciplesToDirectives(dedupedV2, runtimePrincipleIds, {
-          escapeFn: escapeXml,
-          // PRI-532: self-report instruction on the fallback render path (the
-          // shared host-runtime path applies the same flag internally).
-          selfReportInstruction: loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled,
-        });
-    prependSystemContext += directiveText;
+    prependSystemContext += adaptiveDirectiveText ?? sharedActivePrinciplePrompt.additionalContext;
   }
 
   // Routing guidance removed per PRI-291; local-worker-routing module and its
@@ -1087,7 +1042,7 @@ export async function handleBeforePromptBuild(
     appendSystemContext,
     {
       totalBudgetChars: resolveTotalInjectionBudgetChars(
-        appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget),
+        appliedPrincipleBudgetChars(sharedActivePrinciplePrompt),
       ),
       blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
     }
@@ -1113,7 +1068,7 @@ export async function handleBeforePromptBuild(
   if (adaptiveOutcome?.targetBodySha256 && adaptiveExpectedTarget && adaptiveSafeFallback) {
     const restore = (fallback: { text: string; ids: string[] }, reason: string) => {
       const guarded = truncateInjectionToBudget(adaptivePrefix + fallback.text, beforeSizeGuard.prependContext, beforeSizeGuard.appendSystemContext, {
-        totalBudgetChars: resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget)),
+        totalBudgetChars: resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt)),
         blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
       });
       prependSystemContext = guarded.prependSystemContext;
@@ -1150,7 +1105,7 @@ export async function handleBeforePromptBuild(
         restore(adaptiveSafeFallback, signal.aborted || Date.now() >= adaptiveDeadlineAt ? 'deadline' : 'target_changed');
       } else if (adaptiveOutcome?.addedTarget && adaptiveBaseline
         && prependSystemContext.length + prependContext.length + appendSystemContext.length
-          > resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget))) {
+          > resolveTotalInjectionBudgetChars(appliedPrincipleBudgetChars(sharedActivePrinciplePrompt))) {
         restore(adaptiveBaseline, 'final_budget_exceeded');
       }
     }
