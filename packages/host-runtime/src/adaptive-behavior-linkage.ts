@@ -111,7 +111,8 @@ export type BehaviorUnknownReason =
   | 'outcome_limit_reached'
   | 'weak_candidate_limit_reached'
   | 'trajectory_row_limit_reached'
-  | 'session_query_limit_reached';
+  | 'session_query_limit_reached'
+  | 'session_rows_truncated';
 
 export interface BehaviorLinkageActionFact {
   source: 'event_log.tool_call';
@@ -795,6 +796,14 @@ function readTrajectory(input: {
         });
         row.weakToolCalls = weakToolCalls.rows;
         row.weakTruncated = weakToolCalls.truncated;
+        // A truncated per-session read means rows may exist past the cap; the
+        // targeted run's row can be among them, so the whole read is incomplete.
+        if (corrections.truncated || outcomes.truncated || weakToolCalls.truncated) {
+          result.truncated = true;
+          if (!result.reasons.includes('session_rows_truncated')) {
+            result.reasons.push('session_rows_truncated');
+          }
+        }
       } catch {
         row.queryFailed = true;
         result.truncated = true;
@@ -1051,6 +1060,11 @@ function buildInvocation(input: {
   if (correctionsTruncated) addUnknown('corrections', 'correction_limit_reached');
   if (outcomesTruncated) addUnknown('outcomes', 'outcome_limit_reached');
   if (weakTruncated) addUnknown('weak_candidates', 'weak_candidate_limit_reached');
+  // Session-level truncation is not the per-opportunity cap: filtering by run
+  // can hide the missing rows, so it must degrade coverage on its own.
+  if (sessionRows?.correctionsTruncated) addUnknown('corrections', 'session_rows_truncated');
+  if (sessionRows?.outcomesTruncated) addUnknown('outcomes', 'session_rows_truncated');
+  if (sessionRows?.weakTruncated) addUnknown('weak_candidates', 'session_rows_truncated');
   if (sessionRows?.queryFailed) addUnknown('trajectory', 'trajectory_row_limit_reached');
   if (trajectory.status === 'unavailable') {
     addUnknown('trajectory', trajectory.reasons.includes('trajectory_schema_incomplete')
@@ -1059,6 +1073,7 @@ function buildInvocation(input: {
   } else if (trajectory.truncated) {
     for (const reason of trajectory.reasons) {
       if (reason === 'session_query_limit_reached') addUnknown('trajectory', 'session_query_limit_reached');
+      if (reason === 'session_rows_truncated') addUnknown('trajectory', 'session_rows_truncated');
       if (reason === 'trajectory_row_limit_reached') addUnknown('trajectory', 'trajectory_row_limit_reached');
     }
   }
@@ -1255,6 +1270,7 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
   } else {
     if (trajectory.reasons.includes('trajectory_row_limit_reached')) incompleteReasons.push('trajectory_row_limit_reached');
     if (trajectory.reasons.includes('session_query_limit_reached')) incompleteReasons.push('session_query_limit_reached');
+    if (trajectory.reasons.includes('session_rows_truncated')) incompleteReasons.push('session_rows_truncated');
     if (trajectory.reasons.includes('trajectory_query_failed')) incompleteReasons.push('trajectory_query_failed');
   }
   // Per-opportunity caps are budgets too: a lower-bound list must not read as complete.
@@ -1263,6 +1279,7 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
     'correction_limit_reached',
     'outcome_limit_reached',
     'weak_candidate_limit_reached',
+    'session_rows_truncated',
   ];
   for (const code of perInvocationCaps) {
     if (invocations.some((item) => item.unknowns.some((entry) => entry.reasonCode === code))) {
@@ -1295,6 +1312,9 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
   if (incompleteReasons.includes('weak_candidate_limit_reached')) nextAction.push('提高 --max-weak-candidates 以读取全部弱候选。');
   if (incompleteReasons.includes('trajectory_row_limit_reached') || incompleteReasons.includes('session_query_limit_reached')) {
     nextAction.push('提高 --max-trajectory-rows/--max-session-queries，或缩小时间窗口。');
+  }
+  if (incompleteReasons.includes('session_rows_truncated')) {
+    nextAction.push(`该会话的分类查询已达到固定的单会话 ${BEHAVIOR_LINKAGE_ROWS_PER_SESSION} 行上限；请缩小 --since/--until 时间窗口后重试（--max-trajectory-rows 不控制该上限）。空结果不代表“不存在”。`);
   }
   if (eventLog.unattributedToolCalls > 0) nextAction.push('部分工具事件缺少 run/session 身份，已排除在关联之外；不要把它们当作未发生。');
   if (invocations.some((item) => item.association === 'ambiguous')) nextAction.push('同一 run 存在多个干预机会；按 hookInvocationId 单独复核。');
