@@ -204,6 +204,27 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.foreignPolicyEventsSkipped).toBe(1);
   });
 
+  it('PR-6 policy id stays readable if PR-6 is reverted (PR #2367 CodeRabbit #2)', () => {
+    // Expand stage must accept the id PR-6 will WRITE, not only the id the
+    // current writer emits. Otherwise a PR-6 revert strands events written
+    // under `model_aware` and the console falls back to a stale budget.
+    const dir = workspaceWith({
+      hostKind: 'openclaw',
+      budget: 8000,
+      budgetCapacitySource: 'host_effective_window',
+      budgetCapacityStatus: 'confirmed',
+      budgetContextWindowTokens: 256_000,
+      budgetPolicyVersion: 'model_aware',
+    });
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
+    expect(report.foreignPolicyEventsSkipped).toBe(0);
+    expect(report.observations).toHaveLength(1);
+    expect(report.observations[0].budgetChars).toBe(8000);
+    // The event is accepted and folded into the CURRENT formula observation:
+    // PR-6 renames the id without changing the budget formula.
+    expect(report.observations[0].policyVersion).toBe(PROMPT_BUDGET_POLICY_VERSION);
+  });
+
   it('provenance without a policy version is pre-policy, not "current by default"', () => {
     // A writer that emits source/status/window but no policy version cannot
     // prove the budget was computed under the CURRENT formula. Treating the

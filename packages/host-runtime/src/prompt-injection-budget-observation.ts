@@ -19,6 +19,37 @@ import {
 } from './prompt-injection-projection.js';
 
 /**
+ * PRI-1104 Stage 0 (expand): accepted budget policy provenance versions.
+ *
+ * Injection events written to the JSONL event log carry `budgetPolicyVersion`
+ * as a durable wire literal. PR-6 renames the CURRENT policy id from
+ * `model_aware_v2` to a version-neutral `model_aware`; without this read-side
+ * allowance, every historical event would suddenly be classified as
+ * "computed under a different policy" and silently skipped (and a revert of
+ * PR-6 would strand events written with the new id).
+ *
+ * These are FROZEN WIRE LITERALS, not a second policy definition: they exist
+ * only so events remain readable across the PR-6 rename AND its revert. The
+ * PR-6 target id `model_aware` is listed up front (PR #2367 CodeRabbit #2):
+ * if PR-6 is reverted after it wrote `model_aware` events, a reader accepting
+ * only `model_aware_v2` would silently skip those observations and the console
+ * would fall back to a stale budget.
+ *
+ * Today the writer emits only `model_aware_v2`, so listing the future and
+ * historical literals does not change any current read result.
+ */
+const ACCEPTED_BUDGET_POLICY_VERSIONS: ReadonlySet<string> = new Set<string>([
+  PROMPT_BUDGET_POLICY_VERSION,
+  'model_aware_v2',
+  'model_aware',
+]);
+
+/** Narrow an untrusted event field to an accepted policy provenance id. */
+function isAcceptedBudgetPolicyVersion(value: unknown): boolean {
+  return typeof value === 'string' && ACCEPTED_BUDGET_POLICY_VERSIONS.has(value);
+}
+
+/**
  * PRI-1017: runtime budget OBSERVATION read model over the EXISTING
  * injection-event JSONL (`<workspaceDir>/{.pd,.state}/logs/events_<date>.jsonl`,
  * written by the OpenClaw EventLog and the Codex/WorkBuddy shared path via
@@ -227,7 +258,7 @@ function narrowObservation(parsed: unknown, workspaceDir: string, nowMs: number)
   // A budget computed under another policy version is not evidence about the
   // CURRENT formula. Absent provenance is pre-policy, not "current by
   // default": both are skipped, never reinterpreted.
-  if (data.budgetPolicyVersion !== PROMPT_BUDGET_POLICY_VERSION) return null;
+  if (!isAcceptedBudgetPolicyVersion(data.budgetPolicyVersion)) return null;
   const rawSource = data.budgetCapacitySource;
   const rawStatus = data.budgetCapacityStatus;
   if (typeof rawSource !== 'string' || !BUDGET_CAPACITY_SOURCES.has(rawSource)) return null;
@@ -375,7 +406,7 @@ export function readRuntimePromptBudgetObservations(input: {
         if (isRecord(parsed) && parsed.type === 'runtime_v2_prompt_activations_injected' && isRecord(parsed.data)) {
           const { data } = parsed;
           const rawPolicyVersion = data.budgetPolicyVersion;
-          if (rawPolicyVersion !== undefined && rawPolicyVersion !== PROMPT_BUDGET_POLICY_VERSION) {
+          if (rawPolicyVersion !== undefined && !isAcceptedBudgetPolicyVersion(rawPolicyVersion)) {
             // A budget computed under a DIFFERENT policy version is not
             // evidence about the current formula — counted, not reinterpreted.
             foreignPolicyEventsSkipped.count += 1;

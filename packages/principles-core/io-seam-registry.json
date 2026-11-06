@@ -86,5 +86,28 @@
         "runtime-v2/adapter/pi-ai-http-transport.ts"
       ]
     }
-  ]
+  ],
+  "namingPolicy": {
+    "description": "PRI-1104 Stage 0 observer config consumed by scripts/check-naming-policy.mjs. PR-1: warn-only and NOT wired into any CI workflow, npm script or hook; --strict is a preview, not a gate. Before PR-3 turns it into a merge gate, redesign the scan surface (currently packages/* source files only) and wire it in explicitly. The full cross-package consumer list and the Frozen Wire Literals with their read/write sites live in docs/audit/PRI-1104-single-version-convergence-plan.md (§4, §8).",
+    "frozenWireLiterals": [
+      "runtime_v2_prompt_activations_injected",
+      "pd-runtime-v2",
+      "pd-runtime-v2-diagnosis",
+      "pd.mcp-binding.v1",
+      "rulecode_context_v2",
+      "principle_governance_projection_v2",
+      "governance_experience_v1",
+      "model_aware_v2",
+      "/api/v1/"
+    ],
+    "exemptFiles": [
+      "packages/principles-core/src/runtime-v2/adapter/output-schema-registry.ts",
+      "packages/host-runtime/src/prompt-injection-budget-observation.ts",
+      "packages/pd-console/src/server/index.ts",
+      "packages/pd-console/src/ui/api.ts",
+      "packages/principles-core/src/runtime-v2/types/event-types.ts",
+      "packages/principles-core/src/runtime-v2/pain-signal-observability.ts",
+      "packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts"
+    ]
+  }
 }
