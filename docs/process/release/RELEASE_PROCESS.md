@@ -125,6 +125,16 @@ versions equal "because they ship together".
   scheduled run derives `data_schema_forward_readable_from` from the live
   channel pointer (an operator dispatch must still pass it explicitly,
   PRI-853).
+- **Signed-channel asset publication** (`release-metadata.yml`, manual
+  `mode=publish`): since PRI-1103 the build commit is NOT the dispatched
+  `ref` — the workflow asks the registry which cohort
+  `create-principles-disciple` actually shipped for that product version and
+  builds that commit, so the console-update channel and the fresh-install
+  channel cannot ship different bytes under one version number. `ref` picks
+  the release tooling; `cohort_sha` re-publishes an older version from its
+  own cohort (validated, so `allow_version_drift` is not needed). If the
+  npm side has not shipped yet, a publish dispatch refuses and a preflight
+  rehearses the ref with a warning.
 
 The Version PR bot (`changesets/action`, pinned) requires the
 `PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +

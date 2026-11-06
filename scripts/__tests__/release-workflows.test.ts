@@ -647,3 +647,76 @@ describe('G3.2 console skip flag — set only where the console was just built',
     }
   });
 });
+
+/**
+ * PRI-1103 — the asset leg used to build from whatever ref an operator
+ * dispatched while npm built from the cohort it published. Both legs preserve
+ * source component versions, so identical version numbers could hide
+ * different bytes, and no install-side observer could tell them apart. These
+ * pins keep the commit bound to the npm channel by construction: the identity
+ * step asks the registry which cohort shipped the product version, and every
+ * downstream consumer keeps reading that one output.
+ */
+describe('release-metadata.yml — asset commit bound to the npm cohort (PRI-1103)', () => {
+  const rel = '.github/workflows/release-metadata.yml';
+  const text = () => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+  type Step = { name?: string; run?: string; env?: Record<string, unknown>; with?: Record<string, string> };
+
+  function identityStep(): Step {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[] }> };
+    const step = (doc.jobs?.['resolve-inputs']?.steps ?? []).find((s) => s.name === 'Resolve release identity');
+    if (!step?.run) throw new Error('Resolve release identity step missing');
+    return step;
+  }
+
+  it('offers cohort_sha as the validated exception, defaulted so no event can invent one', () => {
+    const doc = loadWorkflow(rel) as { on?: Record<string, { inputs?: Record<string, { default?: unknown; type?: string }> }> };
+    const inputs = doc.on?.workflow_dispatch?.inputs;
+    expect(Object.keys(inputs ?? [])).toContain('cohort_sha');
+    expect(inputs?.cohort_sha?.default).toBe('');
+    expect(inputs?.cohort_sha?.type).toBe('string');
+    // A schedule event carries no inputs, so the daily preflight can never
+    // pin an arbitrary cohort — same posture as mode.
+    expect(text()).toContain('github.event.inputs.cohort_sha');
+  });
+
+  it('derives the commit from the resolver instead of the dispatched ref', () => {
+    const run = identityStep().run ?? '';
+    expect(run).toContain('node scripts/release/resolve-installer-cohort.mjs --product-version "$VERSION"');
+    expect(run).toMatch(/JSON\.parse\(process\.argv\[1\]\)\.cohort/);
+    // The only remaining HEAD read is the dry-run fallback, inside the else
+    // branch after the publish refusal — a second one anywhere else would
+    // re-open the door this ticket closed.
+    expect((run.match(/COMMIT=\$\(git rev-parse HEAD\)/g) ?? [])).toHaveLength(1);
+    expect((text().match(/resolve-installer-cohort\.mjs/g) ?? [])).toHaveLength(1);
+  });
+
+  it('fails closed on mode=publish and only rehearses the ref in a dry-run', () => {
+    const run = identityStep().run ?? '';
+    expect(run).toMatch(/if \[ "\$MODE" = "publish" \]; then[\s\S]{0,600}?exit 1[\s\S]{0,20}fi[\s\S]*?DRY-RUN[\s\S]*?COMMIT=\$\(git rev-parse HEAD\)/);
+  });
+
+  it('lets a validated cohort_sha stand in for the allow_version_drift boolean', () => {
+    // Without this, the Owner-sanctioned exception path would have to pass the
+    // unvalidated boolean to survive the PRI-874 ref-vs-explicit gate.
+    expect(identityStep().run ?? '').toMatch(/\[ -z "\$COHORT_SHA_INPUT" \] && \[ "\$PRODUCT_VERSION_INPUT" != "auto" \]/);
+  });
+
+  it('anchors the deterministic archive epoch to the resolved commit', () => {
+    // SOURCE_DATE_EPOCH must describe the bytes being built, which since this
+    // change is the cohort rather than the checkout tip.
+    expect(identityStep().run ?? '').toMatch(/git log -1 --format=%ct "\$COMMIT"/);
+    expect(text()).toContain('export SOURCE_DATE_EPOCH="${{ needs.resolve-inputs.outputs.source_epoch }}"');
+  });
+
+  it('threads the resolved commit through build, stamp and publish expectations', () => {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[]; needs?: unknown }> };
+    for (const job of ['build-asset', 'assemble-publish']) {
+      const checkout = (doc.jobs?.[job]?.steps ?? []).find((s) => s.uses?.startsWith('actions/checkout'));
+      expect(checkout?.with?.ref, job).toBe('${{ needs.resolve-inputs.outputs.commit }}');
+    }
+    const t = text();
+    expect(t).toContain('--source-commit "${{ needs.resolve-inputs.outputs.commit }}"');
+    expect(t).toContain('EXPECTED_COMMIT="${{ needs.resolve-inputs.outputs.commit }}"');
+  });
+});
