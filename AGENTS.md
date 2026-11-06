@@ -1433,6 +1433,10 @@ root, Desktop, or Downloads.
 
 * Browser-tool screenshots default to the workspace root — every save must
   explicitly target a `.tmp/...` path.
+* Scratch that must live outside the worktree's `.tmp/` (probe dumps, PR-review
+  material, test run dirs) uses the one managed root. 会话临时目录的统一入口是
+  `node scripts/dev/pd-tmp.mjs new <label>`，落在
+  `<shared-base>/.pd-tmp/<repo>/<日期>/`；禁止手工拼 `D:\<名称>` 或任何盘根路径。
 * Reports cite evidence as `.tmp/...` paths or embed it inline in the
   conversation.
 * Cleanup follows git-4: an agent deletes only artifacts it created itself.
