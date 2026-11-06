@@ -897,6 +897,7 @@ function buildInvocation(input: {
   if (actions.some((action) => action.relativeToRecordedOpen === 'before_open')) {
     reasons.push('action_before_open');
   }
+  actions.sort((left, right) => Date.parse(left.ts) - Date.parse(right.ts));
 
   const actionsByTool = new Set<string>();
   let declaredTargetCount = 0;
