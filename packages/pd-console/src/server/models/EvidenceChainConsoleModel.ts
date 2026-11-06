@@ -36,6 +36,7 @@ import type {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
+import { errorMessage } from '../utils/response.js';
 
 export type {
   EvidenceChainState,
@@ -195,7 +196,7 @@ export class EvidenceChainConsoleModel {
             'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id, host_kind FROM pain_events ORDER BY created_at DESC LIMIT 100',
           ).all();
         } catch (colErr: unknown) {
-          const colMessage = colErr instanceof Error ? colErr.message : String(colErr);
+          const colMessage = errorMessage(colErr);
           if (colMessage.includes('no such column')) {
             // Degrade per missing column (review round 3): a missing host_kind
             // must not drop canonical_pain_id / runtime_task_id — the task join
@@ -205,7 +206,7 @@ export class EvidenceChainConsoleModel {
                 'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at, canonical_pain_id, runtime_task_id, NULL AS host_kind FROM pain_events ORDER BY created_at DESC LIMIT 100',
               ).all();
             } catch (colErr2: unknown) {
-              const colMessage2 = colErr2 instanceof Error ? colErr2.message : String(colErr2);
+              const colMessage2 = errorMessage(colErr2);
               if (colMessage2.includes('no such column')) {
                 painEvents = trajDb.prepare(
                   'SELECT id, session_id, source, score, reason, severity, origin, confidence, text, created_at FROM pain_events ORDER BY created_at DESC LIMIT 100',

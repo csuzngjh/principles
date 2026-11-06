@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendMethodNotAllowed, sendNotFound, errorMessage } from '../utils/response.js';
 import { appendUpdateHistory } from './update-history.js';
 import type * as authorityModule from 'create-principles-disciple/update-console';
 
@@ -17,7 +17,7 @@ function appendGovernedUpdateHistory(workspaceDir: string, entry: Parameters<typ
   try {
     appendUpdateHistory(workspaceDir, entry);
   } catch (error) {
-    console.error(`[update] ReleaseManager attempt completed WITHOUT an update-history record: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[update] ReleaseManager attempt completed WITHOUT an update-history record: ${errorMessage(error)}`);
   }
 }
 
@@ -220,7 +220,7 @@ export async function handleUpdateRoute(
   } catch (error) {
     failure = mod
       ? mod.mapReleaseManagerError(error)
-      : { ...failure, message: error instanceof Error ? error.message : String(error) };
+      : { ...failure, message: errorMessage(error) };
   }
   console.error(`[update] ${subPath} refused (${failure.reason}): ${failure.message}`);
   if (subPath === '/check') {

@@ -32,6 +32,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import { resolveUpdateLayout } from '../utils/installed-layout.js';
+import { errorMessage } from '../utils/response.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -103,7 +104,7 @@ function errnoCode(error: unknown): string | undefined {
 
 /** rc-8: bounded rendering of an unknown value that goes into an API payload. */
 function boundedDetail(value: unknown): string {
-  return (value instanceof Error ? value.message : String(value)).slice(0, 160);
+  return errorMessage(value).slice(0, 160);
 }
 
 const MANUAL_RUN_ACTION =

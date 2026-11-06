@@ -21,6 +21,7 @@ import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
 import { loadPdConfig } from '../config/pd-config-store.js';
+import { errorMessage } from '../utils/response.js';
 import {
   createArtifactPrincipleResolutionDeps,
   resolveArtifactPrincipleId,
@@ -602,7 +603,7 @@ export class ApprovalsGroupedConsoleModel {
     } catch (err: unknown) {
       // rc-9: degradation is observable to operators even though it stays
       // invisible in the UI payload (the badge is advisory only).
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.warn(`[pd-console] prompt injection forecast unavailable, omitting promptInjection: ${message}`);
       return {};
     }

@@ -181,8 +181,6 @@ function buildClusters(entries) {
       }
     }
   }
-  const size = new Map();
-  for (const s of sig) { const r = find(s.id); size.set(s.id, (size.get(s.id) || 0) + 1); }
   // recompute true cluster sizes
   const counts = new Map();
   for (const s of sig) { const r = find(s.id); counts.set(r, (counts.get(r) || 0) + 1); }
@@ -322,7 +320,6 @@ async function main() {
 
   const dbDump = path.join(outDir, `principle-candidates-${stamp}.json`);
   {
-    const Database2 = require(BETTER_SQLITE3);
     const db2 = new Database(dbPath, { readonly: true, fileMustExist: true });
     const snap = db2.prepare('SELECT candidate_id, recommendation_kind, status, title, description, trigger_pattern, action, abstracted_principle, confidence, created_at, source_recommendation_json FROM principle_candidates').all();
     db2.close();

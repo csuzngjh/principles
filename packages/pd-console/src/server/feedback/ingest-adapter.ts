@@ -8,6 +8,7 @@
 // - Failure returns a structured reason + nextAction (rc-9).
 
 import type { FeedbackReport } from '@principles/core/runtime/feedback';
+import { errorMessage } from '../utils/response.js';
 
 export interface IngestHealthResult {
   available: boolean;
@@ -77,7 +78,7 @@ export async function probeIngestHealth(
   } catch (err) {
     const reason = err instanceof Error
       ? (err.name === 'AbortError' ? `探活超时(${timeoutMs}ms)` : err.message)
-      : String(err);
+      : errorMessage(err);
     return {
       available: false,
       reason: `无法连接反馈服务:${reason}`,
@@ -127,7 +128,7 @@ export async function submitToIngest(args: {
   } catch (err) {
     const reason = err instanceof Error
       ? (err.name === 'AbortError' ? `提交超时(${timeoutMs}ms)` : err.message)
-      : String(err);
+      : errorMessage(err);
     return {
       ok: false,
       status: 0,

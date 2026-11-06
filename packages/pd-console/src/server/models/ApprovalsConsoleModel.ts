@@ -35,6 +35,7 @@ import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
 import { createArtifactPrincipleResolutionDeps } from './artifact-principle-resolver.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
+import { errorMessage } from '../utils/response.js';
 import {
   resolveWorkspaceHostToolSemantics,
   checkPromptArtifactDeliverabilityById,
@@ -432,7 +433,7 @@ export class ApprovalsConsoleModel {
       });
     } catch (error) {
       // rc-9: a crashed precheck is NOT a pass — refuse with the reason.
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       return {
         ok: false,
         error: 'prompt_capacity_refused',
@@ -535,7 +536,7 @@ export class ApprovalsConsoleModel {
           : {}),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       return `injection_budget_check_failed: could not recompute the prompt injection projection from the runtime budget observation (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db and event log readability and re-run pd runtime activation list`;
     }
     if (resolution.status === 'unconfirmed') {
@@ -636,7 +637,7 @@ export class ApprovalsConsoleModel {
       // approval flow after activation is already committed. The activation
       // succeeded; ledger upgrade is a non-fatal post-step. Surface the error
       // as a warning so the owner can repair the ledger separately (rc-9).
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return `ledger_activate_failed: ${message}`;
     } finally {
       try { connection.close(); } catch { /* best-effort */ }
@@ -864,7 +865,7 @@ export class ApprovalsConsoleModel {
 
       return completionResult.decision;
     } catch (dispatchErr) {
-      const dispatchMsg = dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
+      const dispatchMsg = errorMessage(dispatchErr);
       return {
         decision: 'refused' as const,
         reason: `activation_dispatch_failed: ${dispatchMsg}`,

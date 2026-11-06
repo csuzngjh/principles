@@ -40,7 +40,7 @@ import type {
   FollowUpPatch,
 } from '@principles/core/runtime';
 import { IntentDecisionModel, type IntentDecisionRecordResultModel, type FollowUpDispatchResultModel } from '../models/IntentDecisionModel.js';
-import { sendJson, sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
+import { sendJson, sendSuccess, sendError, sendNotFound, sendBadRequest, errorMessage } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 
@@ -55,10 +55,6 @@ function getModel(workspaceDir: string): IntentDecisionModel {
     models.set(workspaceDir, model);
   }
   return model;
-}
-
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -336,7 +332,7 @@ export async function handleIntentDecisionsRoute(
         sendSuccess(res, responseData);
       }
     } catch (err: unknown) {
-      const message = getErrorMessage(err);
+      const message = errorMessage(err);
       if (message === 'Request body too large') {
         sendError(res, 413, 'payload_too_large', message);
       } else {
@@ -378,7 +374,7 @@ export async function handleIntentDecisionsRoute(
         sendSuccess(res, items);
       }
     } catch (err: unknown) {
-      sendError(res, 500, 'intent_decision_list_error', getErrorMessage(err));
+      sendError(res, 500, 'intent_decision_list_error', errorMessage(err));
     }
     return;
   }
@@ -389,7 +385,7 @@ export async function handleIntentDecisionsRoute(
       const summary = await model.getSummary();
       sendSuccess(res, summary);
     } catch (err: unknown) {
-      sendError(res, 500, 'intent_decision_summary_error', getErrorMessage(err));
+      sendError(res, 500, 'intent_decision_summary_error', errorMessage(err));
     }
     return;
   }
@@ -417,7 +413,7 @@ export async function handleIntentDecisionsRoute(
       }
       sendSuccess(res, record);
     } catch (err: unknown) {
-      sendError(res, 500, 'intent_decision_detail_error', getErrorMessage(err));
+      sendError(res, 500, 'intent_decision_detail_error', errorMessage(err));
     }
     return;
   }
@@ -521,7 +517,7 @@ export async function handleIntentDecisionsRoute(
       // Defensive guard for future enum additions.
       sendBadRequest(res, 'Unknown follow-up type: ' + String(followUpInput.type));
     } catch (err: unknown) {
-      const message = getErrorMessage(err);
+      const message = errorMessage(err);
       if (message === 'Request body too large') {
         sendError(res, 413, 'payload_too_large', message);
       } else {

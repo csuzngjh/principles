@@ -37,6 +37,7 @@ import {
   sendNotFound,
   sendMethodNotAllowed,
   sendBadRequest,
+  errorMessage,
 } from '../utils/response.js';
 import { readBody } from '../utils/request.js';
 import { OwnerDecisionConsoleModel } from '../models/OwnerDecisionConsoleModel.js';
@@ -99,10 +100,6 @@ export function disposeFailedTasksModels(): void {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /**
  * Parse a non-negative integer query parameter.
@@ -655,7 +652,7 @@ export async function handleFailedTasksRoute(
           forceApplied: dispatch.forceApplied,
         });
       } catch (auditErr) {
-        console.warn('[failed-tasks] recovery audit append failed:', auditErr instanceof Error ? auditErr.message : String(auditErr));
+        console.warn('[failed-tasks] recovery audit append failed:', errorMessage(auditErr));
       }
 
       // SPEC §6.4: "Recovery Accepted", not "Task Completed" — execution is

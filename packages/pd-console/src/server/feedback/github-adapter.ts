@@ -13,6 +13,7 @@ import type * as osNS from 'node:os';
 import type * as pathNS from 'node:path';
 import type { FeedbackReport } from '@principles/core/runtime/feedback';
 import type { ChannelDeps } from './channels.js';
+import { errorMessage } from '../utils/response.js';
 
 type ExecFileFn = typeof childProcessNS.execFile;
 
@@ -138,7 +139,7 @@ export async function submitToGithub(args: {
   } catch (err) {
     return {
       ok: false,
-      reason: `无法写入临时文件写入 gh 正文:${err instanceof Error ? err.message : String(err)}`,
+      reason: `无法写入临时文件写入 gh 正文:${errorMessage(err)}`,
       nextAction: '检查临时目录可写后重试;或改用反馈服务通道',
     };
   }
@@ -160,7 +161,7 @@ export async function submitToGithub(args: {
       ? (err as { killed?: boolean; code?: unknown }).code === 'ETIMEDOUT'
         ? `gh 提交超时(${timeoutMs}ms)`
         : err.message
-      : String(err);
+      : errorMessage(err);
     return {
       ok: false,
       reason: `gh 建单失败:${reason}`,

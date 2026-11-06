@@ -31,6 +31,7 @@ import type {
   ReceiptValidationStatus,
 } from '@principles/core/runtime';
 import { computeFlagsFromLoadResult, loadPdConfig } from '../config/pd-config-store.js';
+import { errorMessage } from '../utils/response.js';
 
 export interface ReceiptEvent {
   kind: 'rule_blocked' | 'auto_correct_applied' | 'self_reported' | 'prompt_injected';
@@ -275,7 +276,7 @@ export class ReceiptsConsoleModel {
       // An unreadable state.db (permissions, corruption) must degrade, not
       // throw: the documented read-path contract is degraded-over-500, so the
       // evidence route keeps its ledger facts and shows WHY receipts are absent.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         status: 'degraded',
         reason: `receipt ledger read failed: ${message}`,
@@ -464,7 +465,7 @@ export class ReceiptsConsoleModel {
       // corruption) or a drifted partial schema must ALSO degrade here —
       // the route contract promises degraded-over-500 and the UI needs a
       // visible evidence section with a reason, not a vanished block.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return {
         status: 'degraded',
         reason: `intervention evidence read failed: ${message}`,

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime';
 import { isApprovalReviewGuard, MVP_CHANNELS } from '@principles/core/runtime';
 import { ApprovalsConsoleModel, type ApproveWithActivationResult, type ReopenApprovalResult } from '../models/ApprovalsConsoleModel.js';
-import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, sendBadRequest, errorMessage } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
 
 const models = new Map<string, ApprovalsConsoleModel>();
@@ -18,10 +18,6 @@ function getModel(workspaceDir: string): ApprovalsConsoleModel {
     models.set(workspaceDir, model);
   }
   return model;
-}
-
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,7 +81,7 @@ export async function handleApprovalsRoute(
       });
       sendSuccess(res, result);
     } catch (err: unknown) {
-      sendError(res, 500, 'approvals_error', getErrorMessage(err));
+      sendError(res, 500, 'approvals_error', errorMessage(err));
     }
     return;
   }
@@ -113,7 +109,7 @@ export async function handleApprovalsRoute(
       }
       sendSuccess(res, detail);
     } catch (err: unknown) {
-      sendError(res, 500, 'approval_detail_error', getErrorMessage(err));
+      sendError(res, 500, 'approval_detail_error', errorMessage(err));
     }
     return;
   }
@@ -214,7 +210,7 @@ export async function handleApprovalsRoute(
       }
       sendSuccess(res, { ...result.record, activation: result.activation, warning: result.warning });
     } catch (err: unknown) {
-      const message = getErrorMessage(err);
+      const message = errorMessage(err);
       if (message === 'Request body too large') {
         sendError(res, 413, 'payload_too_large', message);
       } else if (message.includes('current PI artifact snapshot is missing or malformed')) {
@@ -284,7 +280,7 @@ export async function handleApprovalsRoute(
       }
       sendSuccess(res, result.record);
     } catch (err: unknown) {
-      const message = getErrorMessage(err);
+      const message = errorMessage(err);
       if (message === 'Request body too large') {
         sendError(res, 413, 'payload_too_large', message);
       } else {
@@ -326,7 +322,7 @@ export async function handleApprovalsRoute(
       }
       sendSuccess(res, { ...result.record, alreadyPending: result.alreadyPending });
     } catch (err: unknown) {
-      sendError(res, 500, 'reopen_error', getErrorMessage(err));
+      sendError(res, 500, 'reopen_error', errorMessage(err));
     }
     return;
   }
@@ -389,7 +385,7 @@ export async function handleApprovalsRoute(
       }
       sendSuccess(res, result.record);
     } catch (err: unknown) {
-      const message = getErrorMessage(err);
+      const message = errorMessage(err);
       if (message === 'Request body too large') {
         sendError(res, 413, 'payload_too_large', message);
       } else {

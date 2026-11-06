@@ -6,7 +6,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ReceiptsConsoleModel } from '../models/ReceiptsConsoleModel.js';
 import type { InterventionAuditSelector, InterventionRecordKind } from '@principles/core/runtime';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, errorMessage } from '../utils/response.js';
 
 const models = new Map<string, ReceiptsConsoleModel>();
 
@@ -37,7 +37,7 @@ export async function handleReceiptsRoute(
       const result = await model.getReceiptCounts();
       sendSuccess(res, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'receipts_counts_error', message);
     }
     return;
@@ -63,7 +63,7 @@ export async function handleReceiptsRoute(
       const result = await model.getPrincipleReceipts(principleId);
       sendSuccess(res, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'receipts_error', message);
     }
     return;
@@ -115,7 +115,7 @@ export async function handleReceiptsRoute(
       const result = await model.getEvidenceAudit(selector, cursor);
       sendSuccess(res, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'evidence_audit_error', message);
     }
     return;

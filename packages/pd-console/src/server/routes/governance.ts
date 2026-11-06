@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { GovernanceConsoleModel } from '../models/GovernanceConsoleModel.js';
 import { GovernanceExperienceCollector } from '../models/GovernanceExperienceCollector.js';
 import type { OwnerConfigSnapshot, OwnerIdentityResolved } from '@principles/core/runtime';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, errorMessage } from '../utils/response.js';
 
 const models = new Map<string, GovernanceConsoleModel>();
 
@@ -88,7 +88,7 @@ export async function handleGovernanceExperienceRoute(
     const snapshot = getExperienceCollector(ctx.workspaceDir).collectSnapshot({ ownerConfig: ctx.ownerConfig });
     sendSuccess(res, snapshot);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     sendError(res, 500, 'governance_experience_error', message, { nextAction: 'Inspect the workspace state (.pd/state.db, .state/principle_training_state.json, .pd/config.yaml) and retry.' });
   }
 }
@@ -108,7 +108,7 @@ export async function handleGovernanceRoute(
     const result = await model.getGovernanceQueue();
     sendSuccess(res, result);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     sendError(res, 500, 'governance_queue_error', message);
   }
 }

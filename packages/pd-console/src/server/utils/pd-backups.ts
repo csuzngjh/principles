@@ -17,6 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { errorMessage } from './response.js';
 
 export interface LegacyBackupMigrationResult {
   movedFrom: string[];
@@ -81,7 +82,7 @@ export function reservePdBackupDestination(targetName: string): string {
       throw err;
     }
   }
-  throw new Error(`Could not reserve a unique backup directory under ${root}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+  throw new Error(`Could not reserve a unique backup directory under ${root}: ${errorMessage(lastError)}`);
 }
 
 /**
@@ -126,7 +127,7 @@ export function migrateLegacyExtensionBackups(): LegacyBackupMigrationResult {
     } catch (err) {
       result.failed.push({
         name: entry.name,
-        reason: err instanceof Error ? err.message : String(err),
+        reason: errorMessage(err),
       });
     }
   }

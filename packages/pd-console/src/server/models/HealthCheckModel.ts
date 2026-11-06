@@ -6,6 +6,7 @@ import {
   RuntimeStateManager,
 } from '@principles/core/runtime';
 import { readInstalledPdVersion } from '../utils/installed-layout.js';
+import { errorMessage } from '../utils/response.js';
 
 export interface HealthCheckResult {
   id: string;
@@ -117,7 +118,7 @@ export class HealthCheckModel {
       // rc-9: surface the resolution failure so the operator can observe why
       // the core version is missing from feedback reports instead of silently
       // getting 'unknown' forever.
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       process.stderr.write(
         `[HealthCheckModel] readCoreVersion failed: ${msg}\n`,
       );

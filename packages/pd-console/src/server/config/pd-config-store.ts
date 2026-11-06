@@ -36,6 +36,7 @@ import type {
   RuntimeProfile,
   FeatureFlagsResult,
 } from '@principles/core/runtime';
+import { errorMessage } from '../utils/response.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -265,7 +266,7 @@ export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
   try {
     raw = fs.readFileSync(configPath, 'utf8');
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     const defaults = computeEffectivePdConfig(null);
     return {
       ok: false,
@@ -282,7 +283,7 @@ export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
   try {
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     const defaults = computeEffectivePdConfig(null);
     return {
       ok: false,
@@ -751,7 +752,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
   try {
     raw = fs.readFileSync(configPath, 'utf8');
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
   }
 
@@ -759,7 +760,7 @@ export function getPrinciplesOutputLanguage(workspaceDir: string): OutputLanguag
   try {
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
   }
 
@@ -978,14 +979,14 @@ export function updatePrinciplesOutputLanguage(
     try {
       rawContent = fs.readFileSync(configPath, 'utf8');
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, error: 'read_error', statusCode: 500, message: `Failed to read config for update: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' };
     }
     let rawParsed: unknown;
     try {
       rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, error: 'yaml_error', statusCode: 500, message: `YAML parse error during update: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' };
     }
     if (isRecord(rawParsed)) {
@@ -1018,7 +1019,7 @@ export function updatePrinciplesOutputLanguage(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, error: 'write_error', statusCode: 500, message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1120,7 +1121,7 @@ export function updateFeatureFlag(
     try {
       rawContent = fs.readFileSync(configPath, 'utf8');
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, statusCode: 500, error: 'read_error', message: `Failed to read config for update: ${message}` };
     }
     let rawParsed: unknown;
@@ -1129,7 +1130,7 @@ export function updateFeatureFlag(
     } catch (err) {
       // YAML syntax error = malformed config (409, not 500). Consistent with
       // updateAgentBinding which treats loadPdConfig failures as conflict.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { ok: false, statusCode: 409, error: 'conflict', message: `Cannot update feature flag: existing .pd/config.yaml is malformed. YAML parse error: ${message}` };
     }
     if (isRecord(rawParsed)) {
@@ -1235,7 +1236,7 @@ export function updateFeatureFlag(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1475,7 +1476,7 @@ export function createRuntimeProfile(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1606,7 +1607,7 @@ export function updateRuntimeProfile(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
@@ -1729,7 +1730,7 @@ export function deleteRuntimeProfile(
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 

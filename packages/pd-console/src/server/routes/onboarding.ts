@@ -32,7 +32,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
-import { sendError, sendJson } from '../utils/response.js';
+import { sendError, sendJson, errorMessage } from '../utils/response.js';
 
 export interface OnboardingRouteContext {
   workspaceDir: string;
@@ -187,7 +187,7 @@ async function handleRunDemo(
       },
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     cleanupTempWorkspace(tempWorkspace);
     sendStructuredError(res, {
       statusCode: 500,

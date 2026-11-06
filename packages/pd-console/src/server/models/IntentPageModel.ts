@@ -14,6 +14,7 @@ import {
   type IntentDocVersion,
   type IntentLang,
 } from '@principles/core/runtime';
+import { errorMessage } from '../utils/response.js';
 
 export interface IntentPageResult {
   ok: boolean;
@@ -97,9 +98,14 @@ function fsErrorCode(err: unknown): string | undefined {
   return typeof descriptor?.value === 'string' ? descriptor.value : undefined;
 }
 
-/** True when a filesystem call failed because the path does not exist. */
-function isEnoent(err: unknown): boolean {
-  return fsErrorCode(err) === 'ENOENT';
+/**
+ * True when the intent document provably is not there: the path is missing
+ * (ENOENT) or a parent component is not a directory (ENOTDIR). Both used to
+ * surface as `existsSync === false`, so they must stay `not_found`.
+ */
+function isNotFound(err: unknown): boolean {
+  const code = fsErrorCode(err);
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 /** True when an exclusive create failed because the path already exists. */
@@ -160,7 +166,7 @@ export class IntentPageModel {
       } catch (err) {
         // The bounded read opens the path once; ENOENT *is* not-found, so no
         // separate existsSync check is needed (or wanted).
-        if (!isEnoent(err)) throw err;
+        if (!isNotFound(err)) throw err;
         return {
           ok: false,
           found: false,
@@ -231,7 +237,7 @@ export class IntentPageModel {
       try {
         read = readIntentFileBounded(filePath, INTENT_MAX_BYTES);
       } catch (err) {
-        if (!isEnoent(err)) throw err;
+        if (!isNotFound(err)) throw err;
         return {
           ok: false,
           reason: 'not_found',
@@ -248,7 +254,7 @@ export class IntentPageModel {
 
       return { ok: true, content: read.raw, path: filePath };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[IntentPageModel] failed to read raw ${getIntentFilename(lang)}:`, err);
       return {
         ok: false,
@@ -407,7 +413,7 @@ export class IntentPageModel {
         try { connection.close(); } catch { /* best-effort */ }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[IntentPageModel] failed to list versions:`, err);
       return {
         ok: false,

@@ -7,6 +7,7 @@ import {
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { errorMessage } from '../utils/response.js';
 
 export interface StagnationSignal {
   type: 'no_pain' | 'never_activated';
@@ -554,7 +555,7 @@ export class GovernanceConsoleModel {
         stateReason: 'State database is present but UNREADABLE (corrupt or not a valid database) — Owner-approved RuleCode is NOT being enforced while the governance store is damaged.',
         nextAction: 'Restore state.db from backup or re-initialize the workspace runtime state, then re-approve rules; run pd config doctor to inspect the workspace.',
         generatedAt: new Date().toISOString(),
-        note: `state.db unreadable: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+        note: `state.db unreadable: ${errorMessage(err)}`.slice(0, 300),
       };
     } finally {
       try { conn.close(); } catch { /* best-effort */ }

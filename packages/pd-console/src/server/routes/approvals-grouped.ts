@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ApprovalsGroupedConsoleModel } from '../models/ApprovalsGroupedConsoleModel.js';
-import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, sendBadRequest, errorMessage } from '../utils/response.js';
 import { isPromptInjectionTargetHost, type PromptInjectionTargetHost } from '@principles/host-runtime';
 
 const models = new Map<string, ApprovalsGroupedConsoleModel>();
@@ -45,7 +45,7 @@ export async function handleApprovalsGroupedRoute(
     const result = await model.getApprovalsGrouped(targetHost);
     sendSuccess(res, result);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     sendError(res, 500, 'approvals_grouped_error', message);
   }
 }

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ActivationsConsoleModel } from '../models/ActivationsConsoleModel.js';
 import { ApprovalsConsoleModel } from '../models/ApprovalsConsoleModel.js';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, errorMessage } from '../utils/response.js';
 import type { OwnerPromotionActor } from '@principles/core/runtime';
 import { validateApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
 import type { ApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
@@ -106,7 +106,7 @@ export async function handleActivationsRoute(
       const result = await model.getActivations(targetHost);
       sendSuccess(res, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'activations_error', message);
     }
     return;
@@ -125,14 +125,14 @@ export async function handleActivationsRoute(
     let input: ApprovedRuleRevisionRequest | null | undefined;
     if (req.method === 'POST') {
       try { input = validateApprovedRuleRevisionRequest(await readJson(req)); }
-      catch (err: unknown) { const message = err instanceof Error ? err.message : String(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message); return; }
+      catch (err: unknown) { const message = errorMessage(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message); return; }
       if (!input) { sendError(res, 400, 'validation_error', 'Revision requires the reviewed artifact, digest, binding/control/task versions, requestId and 1–4000 characters of directed feedback.', { nextAction: 'Refresh the revision preview and describe the required correction.' }); return; }
     }
     try {
       const model = getModel(workspaceDir);
       sendSuccess(res, input ? await model.reviseApprovedRuleOnce(activationId, input, actor) : await model.previewApprovedRuleRevision(activationId));
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'rule_revision_unavailable', message, { nextAction: 'Refresh the revision preview; keep the current rule in shadow.' });
     }
     return;
@@ -144,7 +144,7 @@ export async function handleActivationsRoute(
   if (req.method === 'POST' && (mutationMatch || pauseMatch || releaseMatch)) {
     let body: ReturnType<typeof mutationBody>;
     try { body = mutationBody(await readJson(req)); }
-    catch (err: unknown) { const message = err instanceof Error ? err.message : String(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message, { nextAction: 'Refresh the review and submit a valid bounded request.' }); return; }
+    catch (err: unknown) { const message = errorMessage(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message, { nextAction: 'Refresh the review and submit a valid bounded request.' }); return; }
     const [, , matchedOperation] = mutationMatch ?? [];
     const operation = matchedOperation ?? (pauseMatch ? 'emergency-pause' : 'release');
     const governance = operation === 'continue-observing' || operation === 'promote' || operation === 'reject-after-shadow' || operation === 'recover-to-shadow' || operation === 'release';
@@ -168,7 +168,7 @@ export async function handleActivationsRoute(
         if (!result.ok) { sendError(res, 409, result.reasonCode, result.summary, { failedChecks: result.failedChecks, nextAction: result.nextAction }); return; }
         sendSuccess(res, result);
       }
-    } catch (err: unknown) { const message = err instanceof Error ? err.message : String(err); sendError(res, message.includes('expected version') || message.includes('requires exactly one') ? 409 : 500, 'owner_decision_failed', message, { nextAction: 'Refresh the Owner review; no partial decision was applied.' }); }
+    } catch (err: unknown) { const message = errorMessage(err); sendError(res, message.includes('expected version') || message.includes('requires exactly one') ? 409 : 500, 'owner_decision_failed', message, { nextAction: 'Refresh the Owner review; no partial decision was applied.' }); }
     return;
   }
 
@@ -184,7 +184,7 @@ export async function handleActivationsRoute(
       // entry evidence — pass the route signal into the readiness assembly.
       sendSuccess(res, await getModel(workspaceDir).getOwnerReview(activationId, authority?.ownerActor !== null && authority?.ownerActor !== undefined, { ownerActor: authority?.ownerActor ?? undefined, routeContext: { servedThroughAuthenticatedConsoleRoute: true } }));
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       if (message.includes('requires exactly one') || message.includes('not found')) sendNotFound(res, message);
       else sendError(res, 500, 'owner_review_error', message, { nextAction: 'Keep the rule in shadow and inspect workspace integrity.' });
     }
@@ -204,7 +204,7 @@ export async function handleActivationsRoute(
     catch { sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding'); return; }
     let body: unknown;
     try { body = await readJson(req); }
-    catch (err: unknown) { const message = err instanceof Error ? err.message : String(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message); return; }
+    catch (err: unknown) { const message = errorMessage(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message); return; }
     if (!isRecord(body) || !Object.hasOwn(body, 'statement') || typeof body.statement !== 'string' || body.statement.trim().length === 0) {
       sendError(res, 400, 'validation_error', 'statement is required and must be a non-empty string');
       return;
@@ -239,7 +239,7 @@ export async function handleActivationsRoute(
     } catch (err: unknown) {
       // CodeQL information-exposure: the raw error may carry stack/internal
       // details — log it server-side, return a fixed client message.
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[activations] propose-revision failed: ${JSON.stringify({ activationId: revisionActivationId.slice(0, 256), message: message.slice(0, 1024) })}`);
       sendError(res, 500, 'propose_revision_error', 'Failed to propose a revision due to an internal error.', { nextAction: 'Check the console server logs and retry; the old activation remains in effect.' });
     }
@@ -299,7 +299,7 @@ export async function handleActivationsRoute(
         sendError(res, 409, 'deactivate_failed', result.reason, { nextAction: result.nextAction });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'deactivate_error', message, { nextAction: 'Check server logs. The activation state has not been changed.' });
     }
     return;
