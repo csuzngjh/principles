@@ -12,6 +12,7 @@ import {
   sha256Hex,
 } from '../dev/aa-controlled-admission/lib/ledger.mjs';
 import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv, isInsideRoot } from '../dev/aa-controlled-admission/lib/env-isolation.mjs';
+import { activationExpiryWindowViolation } from '../dev/aa-controlled-admission/run-experiment.mjs';
 import { startFakeProvider } from '../dev/aa-controlled-admission/lib/fake-provider.mjs';
 import {
   buildHostConfig,
@@ -157,6 +158,23 @@ describe('experiment ledger — cumulative across run directories', () => {
     };
     writeFileSync(persistPath, JSON.stringify(incompatible), 'utf8');
     expect(() => createExperimentLedger({ runId: 'aa-bad', fixtureId: 'F', persistPath })).toThrow(/reconcile explicitly/);
+  });
+});
+
+describe('activation expiry window', () => {
+  const now = Date.parse('2026-11-06T11:05:00Z');
+
+  it('accepts a future expiry inside the host 15-minute window', () => {
+    expect(activationExpiryWindowViolation(now + 10 * 60 * 1000, now)).toBeNull();
+  });
+
+  it('rejects an expiry beyond the host 15-minute window', () => {
+    expect(activationExpiryWindowViolation(now + 16 * 60 * 1000, now)).toMatch(/within 15 minutes/);
+  });
+
+  it('rejects a past or unparseable expiry', () => {
+    expect(activationExpiryWindowViolation(now - 1000, now)).toMatch(/future/);
+    expect(activationExpiryWindowViolation(Number.NaN, now)).toMatch(/parseable/);
   });
 });
 

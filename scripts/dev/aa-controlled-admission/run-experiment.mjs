@@ -178,6 +178,16 @@ function writeRunFiles({
   return { fixtureFile, inputFile, controlInputFile, manifestPath, admissionPath, configPath };
 }
 
+const CONTROLLED_ADMISSION_MAX_WINDOW_MS = 15 * 60 * 1000;
+
+/** The plugin rejects an admission whose expiry is more than 15 minutes after creation. */
+export function activationExpiryWindowViolation(expiresAtMs, nowMs) {
+  if (!Number.isFinite(expiresAtMs)) return 'must be a parseable ISO timestamp';
+  if (expiresAtMs <= nowMs) return 'must be a future ISO timestamp';
+  if (expiresAtMs - nowMs > CONTROLLED_ADMISSION_MAX_WINDOW_MS) return 'must be within 15 minutes of the admission creation (host rule)';
+  return null;
+}
+
 async function prepare(options) {
   const identity = createRunIdentity(new Date());
   if (options.runId) identity.runId = options.runId;
@@ -188,7 +198,8 @@ async function prepare(options) {
   if (!options.artifactId || !options.activationId) throw new Error('--artifact-id and --activation-id are required');
   if (!Number.isInteger(options.softTimeoutMs) || options.softTimeoutMs <= 0) throw new Error('--soft-timeout-ms must be a positive integer');
   const expiresAtMs = Date.parse(options.activationExpiresAt);
-  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) throw new Error('--activation-expires-at must be a future ISO timestamp');
+  const expiryViolation = activationExpiryWindowViolation(expiresAtMs, Date.now());
+  if (expiryViolation) throw new Error(`--activation-expires-at ${expiryViolation}`);
   if (options.sessionBinding !== 'predeclared' && options.sessionBinding !== 'first_consumer') {
     throw new Error('--session-binding must be predeclared or first_consumer');
   }
