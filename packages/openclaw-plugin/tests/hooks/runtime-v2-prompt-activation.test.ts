@@ -12,12 +12,23 @@ import { escapeXml } from '@principles/core/prompt-builder';
 
 const TEST_PRINCIPLE_TEXT = 'UNIQUE_RUNTIME_V2_TEST_PRINCIPLE_7x9k2';
 
+const CONFIG_IDENTITY_FIELDS = [
+  'host',
+  'hostVersion',
+  'runtimeMode',
+  'pluginVersion',
+  'effectiveHookSetFingerprint',
+  'evidenceCoverage',
+] as const;
+
 let tempWorkspaceDir: string;
 let tempStateDir: string;
 let sqliteConn: SqliteConnection;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  const { resetAdaptiveConfigIdentityStateForTest } = await import('../../src/core/adaptive-config-identity.js');
+  resetAdaptiveConfigIdentityStateForTest();
   process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = 'true';
 
   const baseTmp = os.tmpdir();
@@ -59,6 +70,10 @@ vi.mock('../../src/core/event-log.js', () => ({
     }),
   },
 }));
+
+// Spy mode keeps the real identity collector while letting individual tests
+// prove where the snapshot is produced and what happens when collection fails.
+vi.mock('../../src/core/adaptive-config-identity.js', { spy: true });
 
 /**
  * Legacy reducer surface. Kept as a live fixture so tests can prove that
@@ -421,6 +436,77 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
     expect(journal).toHaveBeenCalledTimes(2);
     expect(journal.mock.calls[1]![1]).toMatchObject({ hookInvocationId, receiptState: 'closed', ...original, payload: 'none' });
+
+    // Both records of one invocation carry the same frozen identity snapshot.
+    const start = journal.mock.calls[0]![1] as Record<string, unknown>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(start).toMatchObject({
+      host: 'openclaw',
+      hostVersion: 'unknown',
+      runtimeMode: 'shared',
+      effectiveHookSetFingerprint: 'unknown',
+      evidenceCoverage: 'partial',
+    });
+    expect(start.pluginVersion).toEqual(expect.any(String));
+    expect(start.pluginVersion).not.toBe('unknown');
+    expect(start.configIdentityCoverage).toBeDefined();
+    for (const field of CONFIG_IDENTITY_FIELDS) {
+      expect(end[field]).toEqual(start[field]);
+    }
+  });
+
+  it('binds the terminal record to the snapshot taken when the invocation opened', async () => {
+    const { target, packed } = await sharedPrepared();
+    const identityModule = await import('../../src/core/adaptive-config-identity.js');
+    identityModule.setAdaptiveHookSet([
+      { surfaceId: 'hook:before_prompt_build', event: 'before_prompt_build', enabled: true },
+      { surfaceId: 'hook:llm_output', event: 'llm_output', enabled: true },
+    ]);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const original = { artifactId: `art-${target}`, activationId: `act_prompt_${target}` };
+    const { beginAdaptivePromptInvocation, handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const hookInvocationId = beginAdaptivePromptInvocation(configured(target), original, 'shared');
+    const start = journal.mock.calls[0]![1] as Record<string, unknown>;
+    expect(start.effectiveHookSetFingerprint).toMatch(/^sha256:/);
+    expect(start.evidenceCoverage).toBe('partial');
+
+    // Environment changes while this invocation is in flight.
+    identityModule.setAdaptiveHookSet([
+      { surfaceId: 'hook:before_tool_call', event: 'before_tool_call', enabled: false },
+    ]);
+    if (!packed.adaptivePacking) throw new Error('requires prepared packing');
+    packed.adaptivePacking.hookInvocationId = hookInvocationId;
+    await handleBeforePromptBuild(admitted(), configured(target), packed);
+
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(end.hookInvocationId).toBe(hookInvocationId);
+    for (const field of CONFIG_IDENTITY_FIELDS) {
+      expect(end[field]).toEqual(start[field]);
+    }
+
+    // Only the NEXT invocation picks up the new environment.
+    beginAdaptivePromptInvocation(configured(target), original, 'shared');
+    const nextStart = journal.mock.calls[2]![1] as Record<string, unknown>;
+    expect(nextStart.effectiveHookSetFingerprint).not.toBe(start.effectiveHookSetFingerprint);
+  });
+
+  it('identity collection failure leaves prompt assembly on the normal fallback path', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const identityModule = await import('../../src/core/adaptive-config-identity.js');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    const baseline = await handleBeforePromptBuild(admitted(), configured('AA-only'));
+
+    vi.mocked(identityModule.buildAdaptiveConfigIdentitySnapshot).mockImplementationOnce(() => {
+      throw new Error('collector unavailable');
+    });
+    const failingCtx = configured('AA-only');
+    const degraded = await handleBeforePromptBuild(admitted(), failingCtx);
+
+    expect(degraded).toEqual(baseline);
+    expect(failingCtx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('Config identity unavailable'));
   });
 
   it('journal storage failure does not remove an otherwise valid intervention', async () => {
@@ -462,6 +548,17 @@ describe('Adaptive activation — actual local prompt entry', () => {
     expect(journal).toHaveBeenCalledTimes(2);
     expect(journal.mock.calls[1]![1]).toMatchObject({ hookInvocationId: journal.mock.calls[0]![1].hookInvocationId,
       receiptState: 'closed', payload: 'prepared', selection: 'selected', submission: 'unknown' });
+
+    // The real entry (not a hand-built record) produced the identity once for
+    // the opening record; the closing record reused the same snapshot.
+    const { buildAdaptiveConfigIdentitySnapshot } = await import('../../src/core/adaptive-config-identity.js');
+    expect(buildAdaptiveConfigIdentitySnapshot).toHaveBeenCalledTimes(1);
+    const start = journal.mock.calls[0]![1] as Record<string, unknown>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(start).toMatchObject({ host: 'openclaw', runtimeMode: 'shared', hostVersion: 'unknown' });
+    for (const field of CONFIG_IDENTITY_FIELDS) {
+      expect(end[field]).toEqual(start[field]);
+    }
   });
 
   it.each([

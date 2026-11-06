@@ -11,13 +11,22 @@ const hooksAgentsSrc = fs.readFileSync(hooksAgentsPath, 'utf-8');
 
 function extractApiOnRegistrations(source: string): Array<{ event: string; surfaceId: string | null }> {
   const registrations: Array<{ event: string; surfaceId: string | null }> = [];
-  const apiOnPattern = /api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*/g;
+  // PRI-1110: hooks are registered through the recorder that records the actual
+  // registration for the AA config identity fingerprint. Accept both forms and
+  // keep asserting that every registration is guarded and registry-matched.
+  const pattern = /(?:api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*)|(?:hookRegistrations\.register\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*)/g;
   let match: RegExpExecArray | null;
-  while ((match = apiOnPattern.exec(source)) !== null) {
-    const event = match[1];
+  while ((match = pattern.exec(source)) !== null) {
+    const legacyEvent = match[1];
+    const recordedSurfaceId = match[2];
+    const event = legacyEvent ?? match[3]!;
     const afterMatch = source.slice(match.index + match[0].length);
     const guardHookMatch = afterMatch.match(/^guardHook\s*\(\s*['"]([^'"]+)['"]\s*,/);
-    registrations.push({ event, surfaceId: guardHookMatch ? guardHookMatch[1] : null });
+    const guardSurfaceId = guardHookMatch ? guardHookMatch[1] : null;
+    const surfaceId = recordedSurfaceId === undefined
+      ? guardSurfaceId
+      : (guardSurfaceId === recordedSurfaceId ? guardSurfaceId : null);
+    registrations.push({ event, surfaceId });
   }
   return registrations;
 }
@@ -67,7 +76,7 @@ describe('PRI-448: subagent/shadow hook deletion', () => {
     }
   });
 
-  it('every api.on registration is guarded and has a matching registry entry', () => {
+  it('every hook registration is guarded and has a matching registry entry', () => {
     const registrations = extractApiOnRegistrations(indexSrc);
     expect(registrations.length).toBeGreaterThan(0);
 

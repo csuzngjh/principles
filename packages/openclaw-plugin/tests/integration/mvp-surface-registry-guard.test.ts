@@ -35,16 +35,25 @@ interface ApiOnRegistration {
 
 function extractApiOnRegistrations(source: string): ApiOnRegistration[] {
   const registrations: ApiOnRegistration[] = [];
-  const apiOnPattern = /api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*/g;
+  // PRI-1110: hooks are registered through the recorder that captures the
+  // actual registration for the AA config identity fingerprint. Accept both
+  // forms; every registration must still be guardHook-wrapped and classified.
+  const pattern = /(?:api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*)|(?:hookRegistrations\.register\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*)/g;
   let match: RegExpExecArray | null;
   let regIndex = 0;
-  while ((match = apiOnPattern.exec(source)) !== null) {
-    const event = match[1];
+  while ((match = pattern.exec(source)) !== null) {
+    const legacyEvent = match[1];
+    const recordedSurfaceId = match[2];
+    const event = legacyEvent ?? match[3]!;
     const afterMatch = source.slice(match.index + match[0].length);
     const guardHookMatch = afterMatch.match(/^guardHook\s*\(\s*['"]([^'"]+)['"]\s*,/);
+    const guardSurfaceId = guardHookMatch ? guardHookMatch[1] : null;
+    const surfaceId = recordedSurfaceId === undefined
+      ? guardSurfaceId
+      : (guardSurfaceId === recordedSurfaceId ? guardSurfaceId : null);
     registrations.push({
       event,
-      surfaceId: guardHookMatch ? guardHookMatch[1] : null,
+      surfaceId,
       rawLine: match[0],
       index: regIndex++,
     });
@@ -147,21 +156,21 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
   });
 
-  describe('api.on() registration coverage — every hook must be guarded', () => {
+  describe('hook registration coverage — every hook must be guarded', () => {
     const source = read('packages/openclaw-plugin/src/index.ts');
     const registrations = extractApiOnRegistrations(source);
 
-    it('has at least one api.on registration', () => {
+    it('has at least one hook registration', () => {
       expect(registrations.length).toBeGreaterThan(0);
     });
 
-    it('every api.on() handler is wrapped with guardHook()', () => {
+    it('every hook handler is wrapped with guardHook()', () => {
       const unguarded = registrations.filter(r => r.surfaceId === null);
       if (unguarded.length > 0) {
-        const details = unguarded.map(r => `api.on('${r.event}', ...) #${r.index} — NOT wrapped with guardHook`);
+        const details = unguarded.map(r => `hook '${r.event}' #${r.index} — NOT wrapped with guardHook`);
         throw new Error(
-          `Found ${unguarded.length} unguarded api.on() registration(s):\n${details.join('\n')}\n` +
-          `Every api.on() handler MUST be wrapped with guardHook('<surfaceId>', api.logger, ...) per PRI-289.`,
+          `Found ${unguarded.length} unguarded hook registration(s):\n${details.join('\n')}\n` +
+          `Every hook handler MUST be wrapped with guardHook('<surfaceId>', api.logger, ...) per PRI-289.`,
         );
       }
     });
@@ -178,7 +187,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(unclassified).toEqual([]);
     });
 
-    it('each individual api.on registration is covered (no dedup by event name)', () => {
+    it('each individual hook registration is covered (no dedup by event name)', () => {
       const guarded = registrations.filter(r => r.surfaceId !== null);
       const registeredIds = new Set(PLUGIN_SURFACE_REGISTRY.map(s => s.id));
       for (const reg of guarded) {
@@ -198,7 +207,7 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(llmOutputRegs[0].surfaceId).toBe('hook:llm_output');
     });
 
-    it('total api.on registrations with guardHook match registry hook count', () => {
+    it('total hook registrations with guardHook match registry hook count', () => {
       const guarded = registrations.filter(r => r.surfaceId !== null);
       const registryHookCount = PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').length;
       expect(guarded.length).toBe(registryHookCount);
