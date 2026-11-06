@@ -607,6 +607,19 @@ interface BoundedRows {
   truncated: boolean;
 }
 
+function isRecordRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireRecordRows(value: unknown[]): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  for (const row of value) {
+    if (!isRecordRow(row)) throw new Error('trajectory_row_malformed');
+    rows.push(row);
+  }
+  return rows;
+}
+
 function boundedQuery(input: {
   db: Database.Database;
   sql: string;
@@ -617,19 +630,23 @@ function boundedQuery(input: {
   const { db, sql, params, budget, requested } = input;
   if (budget.remaining <= 0) return { rows: [], truncated: true };
   const limit = Math.min(requested, budget.remaining);
-  const rows = db.prepare(sql).all(...params, limit + 1) as Record<string, unknown>[];
+  const rows = requireRecordRows(db.prepare(sql).all(...params, limit + 1));
   const kept = rows.slice(0, limit);
   budget.remaining = Math.max(0, budget.remaining - kept.length);
   return { rows: kept, truncated: rows.length > limit };
 }
 
 function tableColumns(db: Database.Database, table: string): Set<string> {
+  const columns = new Set<string>();
   try {
-    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Record<string, unknown>[];
-    return new Set(rows.flatMap((row) => (typeof row.name === 'string' ? [row.name] : [])));
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all();
+    for (const row of rows) {
+      if (isRecordRow(row) && typeof row.name === 'string') columns.add(row.name);
+    }
   } catch {
     return new Set();
   }
+  return columns;
 }
 
 function hasRequiredSchema(db: Database.Database): boolean {
