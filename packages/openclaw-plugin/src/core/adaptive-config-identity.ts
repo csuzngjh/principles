@@ -146,23 +146,37 @@ function readManifestFile(filePath: string): { manifest?: ParsedManifest; reason
  *   src/core/x.ts   -> src -> package root
  *   dist/core/x.js  -> dist -> package root
  *   dist/bundle.js  -> dist -> package root
+ *
+ * Reason precedence: `manifest_ENOENT` only means "no manifest at this
+ * directory, keep walking". It says nothing about the artifact's own manifest,
+ * so a shallower directory without a package.json must never replace a deeper
+ * read failure (for example `manifest_too_large`). The nearest specific
+ * failure wins, and a pure "nothing anywhere" walk stays `manifest_ENOENT`.
  */
+const MANIFEST_MISSING = 'manifest_ENOENT';
+
 function findExecutingManifest(startDir: string): { manifest?: ParsedManifest; reason?: string } {
   let dir = startDir;
-  let lastReason: string | undefined;
+  let specificReason: string | undefined;
+  let sawMissingManifest = false;
   for (let depth = 0; depth <= MAX_MANIFEST_WALK_DEPTH; depth += 1) {
     const read = readManifestFile(join(dir, 'package.json'));
     if (read.manifest?.name === MANIFEST_NAME) {
       return { manifest: read.manifest };
     }
-    lastReason = read.reason ?? (read.manifest ? 'manifest_name_mismatch' : undefined) ?? lastReason;
+    const reason = read.reason ?? (read.manifest ? 'manifest_name_mismatch' : undefined);
+    if (reason === MANIFEST_MISSING) {
+      sawMissingManifest = true;
+    } else if (reason !== undefined && specificReason === undefined) {
+      specificReason = reason;
+    }
     const parent = dirname(dir);
     if (parent === dir) {
       break;
     }
     dir = parent;
   }
-  return { reason: lastReason ?? 'manifest_not_found' };
+  return { reason: specificReason ?? (sawMissingManifest ? MANIFEST_MISSING : 'manifest_not_found') };
 }
 
 interface BoundPluginVersion {
