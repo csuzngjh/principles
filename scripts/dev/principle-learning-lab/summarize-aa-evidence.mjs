@@ -9,6 +9,7 @@ import { summarizeAdaptiveStudy } from './summarize-adaptive-coverage.mjs';
 import {
   adaptAaEvidence,
   attachCoverage,
+  COVERAGE_DEFINITIONS,
   FIELD_MAPPING,
   SUMMARY_SCHEMA,
 } from './lib/adaptive/adaptive-evidence-adapter.mjs';
@@ -54,7 +55,7 @@ function parseArgs(argv) {
     if (Object.hasOwn(parsed, flag)) throw new TypeError('duplicate_argument');
     parsed[flag] = value;
   }
-  if (!parsed['--linkage'] || !parsed['--budget'] || !parsed['--run-record']) {
+  if (!parsed['--linkage'] || !parsed['--budget']) {
     throw new TypeError('required_arguments_missing');
   }
   return parsed;
@@ -107,10 +108,49 @@ export function renderOwnerBrief(summary) {
   const cover = summary.coverage ?? {};
   const interpretation = summary.coverageInterpretation ?? {};
   const budget = summary.budget ?? {};
-  const failed = runs.filter((run) => run.originalVerdict?.ok === false).length;
+  const definitions = summary.definitions ?? COVERAGE_DEFINITIONS;
+  const runsKnown = summary.units?.runs?.state !== 'unknown';
+  const failed = runs.filter((run) => run.originalVerdict?.ok === false);
+  const passed = runs.filter((run) => run.originalVerdict?.ok === true);
+  const unknownVerdict = runs.filter((run) => run.originalVerdict?.ok !== true
+    && run.originalVerdict?.ok !== false);
   const controlledConsumed = runs.filter((run) => run.controlledFacts?.admissionConsumed === 'confirmed');
   const targetReached = runs.filter((run) => run.controlledFacts?.targetBodyReachedEndpoint === 'confirmed');
-  const strongRun = runs.filter((run) => run.linkage?.association === 'strong_run');
+  const strongLinked = runs.filter((run) => run.linkage?.experimentLevelStrongLink === true);
+  const weakLinked = runs.filter((run) => run.linkage?.state === 'weak_candidate');
+  const ambiguousLinked = runs.filter((run) => run.linkage?.state === 'ambiguous');
+  const reevalPassed = runs.filter((run) => run.offlineReevaluation?.state === 'present'
+    && run.offlineReevaluation.correctedGateOk === true);
+  const controlExecuted = summary.units?.experimentAttempts?.controlArmsExecuted ?? 0;
+  const ids = (list) => list.map((run) => run.runId).join('、');
+  const idsOrUnknown = (list) => (list.length ? ids(list) : (runsKnown ? '无' : 'unknown（未提供运行记录）'));
+
+  const conclusionParts = [];
+  if (runs.length === 0) {
+    conclusionParts.push('本次输入未提供运行记录；只能陈述调用、预算与来源哈希，不能得出实验或覆盖结论');
+  } else {
+    conclusionParts.push(`本次输入包含 ${runs.length} 条运行记录（${ids(runs)}）`);
+    if (passed.length) conclusionParts.push(`原判定通过 ${passed.length} 条（${ids(passed)}）`);
+    if (failed.length) conclusionParts.push(`原判定失败 ${failed.length} 条（${ids(failed)}）`);
+    if (unknownVerdict.length) conclusionParts.push(`原判定未知 ${unknownVerdict.length} 条（${ids(unknownVerdict)}）`);
+    if (controlledConsumed.length) {
+      conclusionParts.push(`受控准入被消费 ${controlledConsumed.length} 条（${ids(controlledConsumed)}）`);
+    }
+    if (targetReached.length) {
+      conclusionParts.push(`目标正文到达端点 ${targetReached.length} 条（${ids(targetReached)}）`);
+    }
+    if (failed.length && (controlledConsumed.length || targetReached.length)) {
+      conclusionParts.push('原判定失败只表示该次实验门禁未通过，不表示受控接线事实不存在');
+    }
+    if (reevalPassed.length) {
+      conclusionParts.push(`离线复核通过 ${reevalPassed.length} 条（${ids(reevalPassed)}），仅为派生结果，不改原判定，也不等于原实验成功`);
+    }
+    conclusionParts.push(controlExecuted === 0 ? '对照未执行' : `对照执行 ${controlExecuted} 条`);
+    if (controlExecuted === 0) conclusionParts.push('因此收益、损害与因果改善不评价');
+    conclusionParts.push('任何关联或离线通过都不能证明 request 级送达、timely、行为收益或总体覆盖率');
+  }
+  const conclusion = `${conclusionParts.join('；')}。`;
+
   const lines = [
     '# PRI-1115 AA 证据汇总 — Owner 简报',
     '',
@@ -118,58 +158,99 @@ export function renderOwnerBrief(summary) {
     '',
     '## 一句话结论',
     '',
-    '本次证据只能证明：受控准入在 1258 运行中被消费、目标正文到达本地假端点，且两次运行各存在一次 run 级只读行动关联'
-    + '（1105 以时间邻近匹配，1258 以 host identity 匹配）。它不能证明 request 级送达、timely、行为收益、'
-    + '因果改善或总体覆盖率。原运行判定仍为失败，对照未执行。',
+    conclusion,
+    '',
+    '## 证据层级（互不替代）',
+    '',
+    '- 原始运行判定：run-record 的 positiveGate / controlGate，保留原值，不被事后复核改写。',
+    '- 受控接线事实：同一 run-record 内的门禁检查；与原始判定分开陈述，原判定失败不等于这些事实不存在。',
+    '- 端点观察：本地假端点的 userMessageSha256 与冻结输入比较；差异是限制，不单独决定 D。',
+    '- 事后复核：offline-reevaluation，派生结果；不改原判定，也不等于原实验成功。',
+    '- 独立观察：只有输入显式提供时才陈述；未提供保持 unknown。',
     '',
     '## 已观察事实',
     '',
-    `- 运行数：${summary.units?.runs?.observed ?? 'unknown'}；实验尝试：${summary.units?.experimentAttempts?.observed ?? 'unknown'}`
-    + `；其中原判定失败 ${failed} 次，受控接线被证明 ${summary.units?.experimentAttempts?.succeeded ?? 'unknown'} 次。`,
+  ];
+  if (runs.length) {
+    lines.push(
+      `- 运行数：${runs.length}（${ids(runs)}）；运行证据状态：${summary.units?.runs?.state ?? 'unknown'}。`,
+      `- 原判定：失败 ${failed.length} 条（${idsOrUnknown(failed)}）；通过 ${passed.length} 条（${idsOrUnknown(passed)}）；未知 ${unknownVerdict.length} 条。`,
+      `- 受控接线整体证明：${summary.units?.experimentAttempts?.succeeded ?? 'unknown'} 条；对照执行 ${controlExecuted} 条。`,
+      `- 受控准入被消费：${idsOrUnknown(controlledConsumed)}；目标正文到达端点：${idsOrUnknown(targetReached)}。`,
+    );
+  } else {
+    lines.push(
+      '- 运行数：0（未提供运行记录）；运行证据状态：unknown。',
+      '- 原判定、受控接线与对照：unknown（未提供运行记录，不能写成确定的 0）。',
+    );
+  }
+  lines.push(
     `- 调用数：${summary.units?.calls?.observed ?? 'unknown'}（linkage 窗口内，调用不等于决策机会）。`,
     `- 决策机会：${summary.units?.decisionOpportunities?.state ?? 'unknown'} — 没有任务机会普查，不能把调用或运行当分母`
     + `（未链接调用 ${cover.diagnostics?.unlinkedRecords ?? 'unknown'} 条）。`,
-    `- 受控准入被消费：${controlledConsumed.map((run) => run.runId).join('、') || '无'}`
-    + `；目标正文到达端点：${targetReached.map((run) => run.runId).join('、') || '无'}。`,
-    `- 关联为 strong_run：${strongRun.map((run) => `${run.runId}（requestAssociation=${run.linkage?.requestAssociation ?? 'unknown'}，ordering=${run.linkage?.actionOrdering?.join('/') ?? 'unknown'}）`).join('；') || '无'}。`,
+    `- 实验级强关联：${idsOrUnknown(strongLinked)}；弱候选（不作为实验级强关联）：${idsOrUnknown(weakLinked)}`
+    + `${ambiguousLinked.length ? `；歧义候选 ${ids(ambiguousLinked)}` : ''}。`,
     '',
-  ];
+  );
+
   for (const run of runs) {
     const re = run.offlineReevaluation;
+    const linkage = run.linkage ?? {};
+    const delta = Number.isFinite(linkage.matchDeltaMs) ? `，deltaMs=${linkage.matchDeltaMs}` : '';
+    const linkageText = linkage.state === 'matched_by_run'
+      ? `strong（basis=${linkage.matchBasis}${delta}；实验级强关联=是；linkage 自身 association=${linkage.association}）`
+      : linkage.state === 'weak_candidate'
+        ? `弱候选（basis=${linkage.matchBasis}${delta}；实验级强关联=否；不升级为 matched_by_run；linkage 自身 association=${linkage.association}）`
+        : linkage.state === 'ambiguous'
+          ? `歧义（candidate=${(linkage.candidateHookInvocationIds ?? []).join('、') || 'unknown'}；未任取第一条；实验级强关联=否）`
+          : linkage.state === 'contradictory_identity'
+            ? `矛盾（${linkage.reason ?? 'identity_contradiction'}；实验级强关联=否）`
+            : `未关联（${linkage.reason ?? 'no reliable identity'}；不补造身份）`;
+    const wiringNote = run.originalVerdict?.ok === false
+      && (run.controlledFacts?.admissionConsumed === 'confirmed'
+        || run.controlledFacts?.targetBodyReachedEndpoint === 'confirmed')
+      ? '；原判定失败不表示受控接线事实不存在' : '';
     lines.push(
       `### ${run.runId}`,
       '',
-      `- 原判定：${run.originalVerdict?.ok === true ? '通过' : run.originalVerdict?.ok === false ? '失败' : 'unknown'}`
+      `- 原始运行判定：${run.originalVerdict?.ok === true ? '通过' : run.originalVerdict?.ok === false ? '失败' : 'unknown'}`
       + `${run.originalVerdict?.failures?.length ? `（${run.originalVerdict.failures.map((failure) => failure.id).join('、')}）` : ''}`,
-      `- 受控接线：${run.controlledFacts?.controlledInstrumentationProven === true ? '已证明' : '未证明'}`
-      + `（deliveryPath=${run.deliveryPath}，admissionConsumed=${run.controlledFacts?.admissionConsumed}，`
-      + `targetBody=${run.controlledFacts?.targetBodyReachedEndpoint}）`,
+      `- 受控接线事实：admissionConsumed=${run.controlledFacts?.admissionConsumed}，`
+      + `targetBody=${run.controlledFacts?.targetBodyReachedEndpoint}；整体受控接线门禁：`
+      + `${run.controlledFacts?.controlledInstrumentationProven === true ? '已证明' : '未证明'}`
+      + `（deliveryPath=${run.deliveryPath}）${wiringNote}`,
+      `- 端点观察：用户正文摘要与冻结输入=${run.endpoint?.userMessageMatchesFrozenInput ?? 'unknown'}`
+      + `（endpoint=${short(run.endpoint?.endpointUserMessageSha256)}，frozen=${short(run.endpoint?.frozenInputSha256)}）`,
       `- 事后复核：${re?.state === 'present' ? `存在（correctedGate=${re.correctedGateOk}，仅作派生结果，不改原判定）` : '缺失'}`
       + `${re?.knownDefectsFixedAfterTheRun?.length ? `；复核器修正了原判定中的 ${re.knownDefectsFixedAfterTheRun.length} 个门禁缺陷，不改变实验结论` : ''}`,
-      `- 端点用户正文摘要与冻结输入：${run.endpoint?.userMessageMatchesFrozenInput ?? 'unknown'}`
-      + `（endpoint=${short(run.endpoint?.endpointUserMessageSha256)}，frozen=${short(run.endpoint?.frozenInputSha256)}）`,
+      `- 运行内关联：${linkageText}`,
       `- 本次运行成本：${run.cost?.state === 'recorded' ? JSON.stringify(run.cost.currentRun) : 'unknown'}`
       + `；证据 sha256=${short(run.evidenceSha256)}`,
       '',
     );
   }
+  if (runs.length === 0) lines.push('本轮没有逐运行记录。', '');
   lines.push(
-    '## 覆盖口径（T/V/O/D）',
+    '## 覆盖口径（T/V/O/D，SPEC v0.6 §6.1）',
     '',
-    renderLayer(interpretation.T ?? {}, 'T（决策机会）'),
-    renderLayer(interpretation.V ?? {}, 'V（原则可得）'),
-    renderLayer(interpretation.O ?? {}, 'O（行动前被识别）'),
-    renderLayer(interpretation.D ?? {}, 'D（request 级送达）'),
+    renderLayer(interpretation.T ?? {}, 'T（理论决策机会）'),
+    renderLayer(interpretation.V ?? {}, 'V（事前可见的合格信号）'),
+    renderLayer(interpretation.O ?? {}, 'O（PD 在行动前实际识别）'),
+    renderLayer(interpretation.D ?? {}, 'D（独立确认目标正文进入实际请求且早于关键行动）'),
+    `- 定义：T=${definitions.T}；V=${definitions.V}；O=${definitions.O}；D=${definitions.D}。`,
+    '- 口径：V 不等于送达；O 不等于 Agent 遵循；缺证据保持 unknown，不用 strong_run、端点送达或离线通过替代。',
     `- D/T：${cover.ratios?.['D/T']?.status ?? 'unknown'}（value=${percent(cover.ratios?.['D/T']?.value)}）`,
     `- 链接子集 D/T：${interpretation.zeroDenominator?.linkedSubsetDOverT ?? 'unknown'}（链接子集无分母，不等于总体确定为零）`,
     `- 收益：${interpretation.benefit?.state ?? 'not_evaluated'}；损害：${interpretation.harm?.state ?? 'not_evaluated'}`,
-    `- 已记录调用/运行不是覆盖率分母；离线 13/13 复核通过不等于原实验成功。`,
+    '- 已记录调用/运行不是覆盖率分母；离线复核通过（若存在）只作派生结果，不等于原实验成功。',
     '',
     '## 成本',
     '',
-    `- 累计账本：caps=${JSON.stringify(budget.caps ?? null)}，used=${JSON.stringify(budget.used ?? null)}，`
-    + `remaining=${JSON.stringify(budget.remaining ?? null)}${budget.overBudget ? '，已超预算' : ''}。`,
-    `- 单次运行成本取 run-record.attempt.used；历史工具调用与历史 HTTP 不重复计入当前运行。`,
+    budget.state === 'recorded'
+      ? `- 累计账本：caps=${JSON.stringify(budget.caps ?? null)}，used=${JSON.stringify(budget.used ?? null)}，`
+        + `remaining=${JSON.stringify(budget.remaining ?? null)}${budget.overBudget ? '，已超预算' : ''}。`
+      : '- 累计账本：unknown（未提供或无效），不能写成 0。',
+    '- 单次运行成本取 run-record.attempt.used；历史工具调用与历史 HTTP 不重复计入当前运行。',
     '',
     '## 来源与哈希',
     '',

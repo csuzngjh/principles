@@ -33,21 +33,21 @@
     },
     {
       "statisticField": "V",
-      "source": "coverage-input opportunities[].classification.V + delivery order evidence",
-      "eligibility": "linked opportunity and evidence that delivery preceded the critical action",
-      "missingOutput": "unknown; strong_run alone is insufficient"
+      "source": "coverage-input opportunities[].classification.V + pre-action eligible-signal visibility evidence",
+      "eligibility": "among T: an eligible signal is visible before the action on the selected profile; visibility is not delivery",
+      "missingOutput": "unknown; delivery or strong_run alone is insufficient"
     },
     {
       "statisticField": "O",
-      "source": "coverage-input opportunities[].classification.O + independent recognition evidence",
-      "eligibility": "linked opportunity and independent principle-adherence evidence",
-      "missingOutput": "unknown; fake-provider tool choice is not adherence"
+      "source": "coverage-input opportunities[].classification.O + pre-action recognition evidence",
+      "eligibility": "among V: PD actually recognized the opportunity before the key action; recognition is not Agent adherence",
+      "missingOutput": "unknown; fake-provider tool choice or Agent adherence is not recognition"
     },
     {
       "statisticField": "D",
       "source": "existing verify-adaptive-delivery.mjs over independently pinned request/action captures",
-      "eligibility": "final_model_request boundary, exact target body, trusted pin, ordered action",
-      "missingOutput": "unknown; native delivery or a passing offline replay cannot confirm D"
+      "eligibility": "among O: independent confirmation that the exact target body entered the same decision's actual model request and preceded the key action",
+      "missingOutput": "unknown; native delivery, offline replay or a returned receipt cannot confirm D"
     },
     {
       "statisticField": "sameText",
@@ -93,11 +93,11 @@
     }
   ],
   "schemaVersion": "pd-aa-coverage-summary/v1",
-  "generatedAt": "2026-11-06T15:30:12.832Z",
+  "generatedAt": "2026-11-06T16:14:23.538Z",
   "coverageInput": {
     "schemaVersion": "aa-coverage-input.v1",
-    "windowId": "window:2026-11-06T10:50:00.000Z..2026-11-06T11:20:00.000Z",
-    "workspaceId": "workspace-sha256:24ef680bd2adef47",
+    "windowId": "windows-sha256:711b7a29cbab2420",
+    "workspaceId": "workspaces-sha256:41b0f56b79d45d9e",
     "enumeration": "unknown",
     "config": {
       "host": "openclaw",
@@ -117,8 +117,9 @@
         },
         "classificationReferences": {
           "T": "missing:no_decision_opportunity_census",
-          "V": "missing:no_timely_delivery_order_evidence",
-          "O": "missing:no_independent_principle_adherence_evidence"
+          "V": "missing:no_pre_action_eligible_signal_visibility",
+          "O": "missing:no_pre_action_recognition",
+          "D": "missing:no_independent_request_and_action_order"
         },
         "sameText": "unknown",
         "checks": []
@@ -132,13 +133,20 @@
         },
         "classificationReferences": {
           "T": "missing:no_decision_opportunity_census",
-          "V": "missing:no_timely_delivery_order_evidence",
-          "O": "missing:no_independent_principle_adherence_evidence"
+          "V": "missing:no_pre_action_eligible_signal_visibility",
+          "O": "missing:no_pre_action_recognition",
+          "D": "missing:no_independent_request_and_action_order"
         },
         "sameText": "unknown",
         "checks": []
       }
     ]
+  },
+  "definitions": {
+    "T": "theoretical decision opportunity: a real decision that could be changed, an authorized principle, and a plausible pre-action intervention window; requires a declared opportunity census",
+    "V": "eligible signal visible before the action on the selected profile; visibility is not delivery",
+    "O": "PD actually recognized the opportunity before the key action; recognition is not Agent adherence",
+    "D": "independent confirmation that the exact target body entered the same decision's actual request and preceded the key action"
   },
   "trust": {
     "sources": []
@@ -216,6 +224,7 @@
   },
   "duplicates": {
     "linkage": 0,
+    "invocations": 0,
     "runRecords": 0,
     "reevaluations": 0,
     "plans": 0,
@@ -240,7 +249,39 @@
         "outcomes": 1,
         "weakCandidates": 1
       },
-      "scope": "behavior-linkage window; a call is not a decision opportunity"
+      "scope": "behavior-linkage window; a call is not a decision opportunity",
+      "scopeVariants": {
+        "windows": [
+          {
+            "start": "2026-11-06T10:50:00.000Z",
+            "end": "2026-11-06T11:20:00.000Z",
+            "inclusiveBounds": "[start,end]",
+            "endIsNow": false,
+            "requestedStart": "2026-11-06T10:50:00.000Z",
+            "clampedByRetention": false,
+            "retentionDays": 7
+          },
+          {
+            "start": "2026-11-06T12:40:00.000Z",
+            "end": "2026-11-06T13:10:00.000Z",
+            "inclusiveBounds": "[start,end]",
+            "endIsNow": false,
+            "requestedStart": "2026-11-06T12:40:00.000Z",
+            "clampedByRetention": false,
+            "retentionDays": 7
+          }
+        ],
+        "workspaces": [
+          "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl\\artifacts\\aa-controlled-admission\\aa-run-20261106T1105Z\\positive\\workspace",
+          "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl\\artifacts\\aa-controlled-admission\\aa-run-20261106T1258Z\\positive\\workspace"
+        ],
+        "hosts": [
+          "openclaw"
+        ],
+        "configIdentities": [
+          "844dcee99ce42ac9114967870efc758dd531d3f301703f4aba8ea433fbf206f2"
+        ]
+      }
     },
     "runs": {
       "state": "recorded",
@@ -303,7 +344,9 @@
         "nativeDeliveryIsNotControlledSuccess": true
       },
       "linkage": {
-        "state": "matched_by_run",
+        "state": "weak_candidate",
+        "matchStrength": "weak",
+        "experimentLevelStrongLink": false,
         "matchBasis": "action_timestamp_proximity",
         "matchDeltaMs": 22,
         "hookInvocationId": "854b8c37-af73-49eb-afe4-b95daed1ef0b",
@@ -401,7 +444,9 @@
       },
       "linkage": {
         "state": "matched_by_run",
-        "matchBasis": "host_identity",
+        "matchStrength": "strong",
+        "experimentLevelStrongLink": true,
+        "matchBasis": "hook_invocation_id",
         "matchDeltaMs": null,
         "hookInvocationId": "4b181412-1734-432d-a281-28e3cb68d8e8",
         "association": "strong_run",
@@ -507,7 +552,7 @@
     }
   },
   "coverage": {
-    "windowId": "window:2026-11-06T10:50:00.000Z..2026-11-06T11:20:00.000Z",
+    "windowId": "windows-sha256:711b7a29cbab2420",
     "configIdentity": "b10923235a2aacc3f36715a926e3c29b033479300d17889e13e338b7af79f3be",
     "configurationCoverage": "unknown",
     "enumeration": "unknown",
@@ -632,19 +677,19 @@
       "state": "unknown",
       "confirmed": 0,
       "unknown": 0,
-      "reason": "no linked opportunity with timely delivery-order evidence"
+      "reason": "no linked opportunity with a pre-action visible eligible signal; visibility is not delivery"
     },
     "O": {
       "state": "unknown",
       "confirmed": 0,
       "unknown": 0,
-      "reason": "no linked opportunity with independent principle-adherence evidence"
+      "reason": "no linked opportunity with PD pre-action recognition; recognition is not Agent adherence"
     },
     "D": {
       "state": "unknown",
       "confirmed": 0,
       "unknown": 0,
-      "reason": "no independently pinned request+action evidence; strong_run does not confirm delivery"
+      "reason": "no independently pinned confirmation that the target body entered the actual request before the key action; strong_run is not D"
     },
     "ratios": {
       "population": {
@@ -736,7 +781,7 @@
     "benefit": {
       "state": "not_evaluated",
       "value": null,
-      "reason": "no control arm and no evaluation evidence"
+      "reason": "no executed control arm and no evaluation evidence"
     },
     "harm": {
       "state": "not_evaluated",
@@ -783,19 +828,19 @@
   },
   "benefitHarm": {
     "state": "not_evaluated",
-    "reason": "no control arm and no independent evaluation evidence"
+    "reason": "no independent evaluation evidence; benefit and harm stay not evaluated"
   },
   "conclusionScope": "observed_records_only_no_population_denominator",
   "unknowns": [
-    "No decision-opportunity census exists, so T and all population ratios are unknown.",
-    "No independently pinned request+action evidence exists, so D is unknown even where association is strong_run.",
-    "The endpoint user body digest and frozen input digest differ; this limitation is preserved and does not decide D.",
-    "The control arm never ran, so benefit, harm and causal improvement are not evaluated.",
-    "A fake provider specified the tool; this does not show the Agent independently followed the principle."
+    "没有任务机会普查，因此 T 与总体比例均为 unknown。",
+    "没有独立固定的 request 与 action 证据，因此即使 association=strong_run，D 仍为 unknown。",
+    "端点用户正文摘要与冻结输入不同；该限制保留，不据此判定 D。",
+    "已提供的记录中没有执行对照，因此收益、损害与因果改善均未评价。",
+    "假 provider 指定工具，不代表 Agent 自主遵循原则。"
   ],
   "nextDecisions": [
-    "Decide whether to run the untouched control arm under the remaining budget (1 host turn / 1 HTTP request).",
-    "Decide whether a future run should capture independently pinned request and action evidence, or accept D as permanently unknown for this experiment.",
-    "Decide whether to design a task-opportunity census before any overall coverage claim."
+    "决定是否在剩余预算内执行未动的对照臂（剩余 1 次宿主回合 / 1 次 HTTP 请求）。",
+    "决定未来运行是否采集独立固定的 request 与 action 证据，或接受本实验 D 永久为 unknown。",
+    "在作出任何总体覆盖率结论前，决定是否设计任务机会普查。"
   ]
 }
