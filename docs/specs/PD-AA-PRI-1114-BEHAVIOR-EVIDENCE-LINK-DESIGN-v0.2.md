@@ -153,7 +153,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 - 总查询行上限 5000；每机会行动 200 / 纠正 50 / 结果 20；
 - 必须显式设置 `PRAGMA query_only=ON`（只读连接双保险）；
 - 按既有索引：`idx_tool_calls_session_tool_use_id`、session/time 列；
-- 命中上限 → `coverage.complete=false` + 对应 `incompleteReasons`（`action_limit_reached` / `correction_limit_reached` / `outcome_limit_reached` / `weak_candidate_limit_reached` / `trajectory_row_limit_reached` / `session_query_limit_reached`），计数为下界。
+- 命中上限 → `coverage.complete=false` + 对应 `incompleteReasons`（`action_limit_reached` / `correction_limit_reached` / `outcome_limit_reached` / `weak_candidate_limit_reached` / `trajectory_row_limit_reached` / `session_query_limit_reached` / `session_rows_truncated`），计数为下界。`session_rows_truncated` 表示单会话分类查询（纠正/任务结果/弱候选）在窗口内被截断；按 run 过滤后出现的空结果必须按它降级，不能读作“确实没有”。
 
 ### 5.3 JSONL 预算
 
