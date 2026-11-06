@@ -15,7 +15,7 @@
  * - The next invocation builds a new snapshot.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync, readSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isSurfaceEnabled } from '@principles/core/runtime-v2';
@@ -87,18 +87,35 @@ interface ParsedManifest {
   version: string;
 }
 
+/**
+ * Test-only observation of how many bytes a manifest read actually consumed.
+ * Production never sets it; it exists so the bounded-read contract can be
+ * asserted instead of assumed.
+ */
+let manifestReadProbe: ((bytesRead: number) => void) | null = null;
+
+export function setManifestReadProbeForTest(probe: ((bytesRead: number) => void) | null): void {
+  manifestReadProbe = probe;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readManifestFile(filePath: string): { manifest?: ParsedManifest; reason?: string } {
+  let fd: number | undefined;
   try {
-    // Read once and bound the in-memory value: stat-then-read would be a
-    // TOCTOU race (CodeQL js/file-system-race) and buys nothing here.
-    const raw = readFileSync(filePath, 'utf8');
-    if (Buffer.byteLength(raw, 'utf8') > MAX_MANIFEST_BYTES) {
+    fd = openSync(filePath, 'r');
+    // Read at most MAX + 1 bytes. A full-file read would allocate the whole
+    // manifest before the size check, and stat-then-read would race (CodeQL
+    // js/file-system-race); one bounded read does neither.
+    const buffer = Buffer.alloc(MAX_MANIFEST_BYTES + 1);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+    manifestReadProbe?.(bytesRead);
+    if (bytesRead > MAX_MANIFEST_BYTES) {
       return { reason: 'manifest_too_large' };
     }
+    const raw = buffer.subarray(0, bytesRead).toString('utf8');
     const parsed: unknown = JSON.parse(raw);
     if (!isPlainRecord(parsed)) {
       return { reason: 'manifest_invalid_shape' };
@@ -112,6 +129,14 @@ function readManifestFile(filePath: string): { manifest?: ParsedManifest; reason
   } catch (error) {
     const code = isPlainRecord(error) && typeof error['code'] === 'string' ? error['code'] : null;
     return { reason: code ? `manifest_${code}` : 'manifest_unreadable' };
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // A failed close cannot become identity evidence.
+      }
+    }
   }
 }
 
@@ -140,21 +165,15 @@ function findExecutingManifest(startDir: string): { manifest?: ParsedManifest; r
   return { reason: lastReason ?? 'manifest_not_found' };
 }
 
-/**
- * Reads the version of the executing plugin artifact.
- *
- * The manifest must sit in the directory tree that owns the loaded module. When
- * the host also supplies `rootDir`, a readable manifest there must agree; a
- * disagreement is a conflict and yields `unknown` instead of a guess.
- */
-export function readExecutingPluginVersion(options: {
-  executingFileUrl?: string;
-  pluginRootDir?: string;
-} = {}): { version: string; reason?: string } {
-  const fileUrl = options.executingFileUrl ?? import.meta.url;
+interface BoundPluginVersion {
+  version: string;
+  reason?: string;
+}
+
+function resolvePluginVersion(executingFileUrl: string): BoundPluginVersion {
   let startDir: string;
   try {
-    startDir = dirname(fileURLToPath(fileUrl));
+    startDir = dirname(fileURLToPath(executingFileUrl));
   } catch {
     return { version: 'unknown', reason: 'executing_url_invalid' };
   }
@@ -166,16 +185,48 @@ export function readExecutingPluginVersion(options: {
   if (!VERSION_PATTERN.test(found.manifest.version) || found.manifest.version.length > MAX_VERSION_LENGTH) {
     return { version: 'unknown', reason: 'plugin_version_invalid' };
   }
+  return { version: found.manifest.version };
+}
+
+/**
+ * Bound once when this module is evaluated. It describes the artifact whose
+ * code the running process actually loaded, so a later on-disk manifest edit
+ * (upgrade, rollback, restored backup) cannot relabel already-loaded behaviour.
+ */
+const LOADED_PLUGIN_VERSION: BoundPluginVersion = resolvePluginVersion(import.meta.url);
+
+let boundPluginVersion: BoundPluginVersion = LOADED_PLUGIN_VERSION;
+
+/** Test-only: simulate a process whose module was loaded from another artifact. */
+export function bindAdaptivePluginVersionForTest(executingFileUrl: string): void {
+  boundPluginVersion = resolvePluginVersion(executingFileUrl);
+}
+
+/**
+ * Returns the version of the loaded plugin artifact.
+ *
+ * The disk is never re-read to "refresh" this value. When the host also
+ * supplies `rootDir`, a readable manifest there must agree with the bound
+ * version; a disagreement (for example an in-place upgrade while the old code
+ * still runs) yields `unknown` instead of promoting the new disk value.
+ */
+export function readExecutingPluginVersion(options: {
+  pluginRootDir?: string;
+} = {}): BoundPluginVersion {
+  const bound = boundPluginVersion;
+  if (bound.version === 'unknown') {
+    return bound;
+  }
 
   if (options.pluginRootDir) {
     const rootManifest = readManifestFile(join(options.pluginRootDir, 'package.json'));
     if (rootManifest.manifest?.name === MANIFEST_NAME
-      && rootManifest.manifest.version !== found.manifest.version) {
+      && rootManifest.manifest.version !== bound.version) {
       return { version: 'unknown', reason: 'plugin_version_manifest_conflict' };
     }
   }
 
-  return { version: found.manifest.version };
+  return bound;
 }
 
 /**
@@ -226,7 +277,6 @@ export interface AdaptiveConfigIdentityInput {
   runtimeMode: string;
   pluginRootDir?: string;
   hookRegistrations?: readonly AdaptiveHookRegistration[];
-  executingFileUrl?: string;
 }
 
 /**
@@ -264,7 +314,6 @@ export function buildAdaptiveConfigIdentitySnapshot(
   notes.push('hostVersion:no_runtime_interface');
 
   const pluginVersionResult = readExecutingPluginVersion({
-    executingFileUrl: input.executingFileUrl,
     pluginRootDir: input.pluginRootDir,
   });
   const pluginVersion = pluginVersionResult.version;
@@ -398,6 +447,8 @@ export function forgetAdaptiveConfigIdentity(hookInvocationId: string): void {
 export function resetAdaptiveConfigIdentityStateForTest(): void {
   registeredHooks = [];
   invocationSnapshots.clear();
+  boundPluginVersion = LOADED_PLUGIN_VERSION;
+  manifestReadProbe = null;
 }
 
 export function createAdaptiveHookRegistrationRecorder(

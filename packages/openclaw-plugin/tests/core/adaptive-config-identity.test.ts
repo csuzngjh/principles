@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  bindAdaptivePluginVersionForTest,
   buildAdaptiveConfigIdentitySnapshot,
   buildUnavailableAdaptiveConfigIdentity,
   computeEffectiveHookSetFingerprint,
@@ -13,6 +14,7 @@ import {
   readExecutingPluginVersion,
   rememberAdaptiveConfigIdentity,
   resetAdaptiveConfigIdentityStateForTest,
+  setManifestReadProbeForTest,
   type AdaptiveHookRegistration,
 } from '../../src/core/adaptive-config-identity.js';
 
@@ -38,6 +40,23 @@ function artifactFixture(version: string, name = 'principles-disciple'): {
   return { root, executingFileUrl: pathToFileURL(executingFile).href };
 }
 
+function oversizedArtifactFixture(paddingBytes: number): { root: string; executingFileUrl: string } {
+  const root = mkdtempSync(join(tmpdir(), 'pd-adaptive-identity-'));
+  tempRoots.push(root);
+  mkdirSync(join(root, 'dist'), { recursive: true });
+  writeFileSync(
+    join(root, 'package.json'),
+    JSON.stringify({
+      name: 'principles-disciple',
+      version: '1.0.0',
+      padding: 'x'.repeat(paddingBytes),
+    }),
+  );
+  const executingFile = join(root, 'dist', 'bundle.js');
+  writeFileSync(executingFile, '// fixture\n');
+  return { root, executingFileUrl: pathToFileURL(executingFile).href };
+}
+
 function hooks(overrides: Partial<AdaptiveHookRegistration> = {}, count = 2): AdaptiveHookRegistration[] {
   const base: AdaptiveHookRegistration[] = [
     { surfaceId: 'hook:before_prompt_build', event: 'before_prompt_build', enabled: true },
@@ -48,27 +67,70 @@ function hooks(overrides: Partial<AdaptiveHookRegistration> = {}, count = 2): Ad
 }
 
 describe('readExecutingPluginVersion', () => {
-  it('reads the manifest that owns the executing module', () => {
+  it('reads the manifest that owns the loaded module', () => {
     const fixture = artifactFixture('2.6.2');
-    expect(readExecutingPluginVersion({ executingFileUrl: fixture.executingFileUrl }))
-      .toEqual({ version: '2.6.2' });
+    bindAdaptivePluginVersionForTest(fixture.executingFileUrl);
+    expect(readExecutingPluginVersion()).toEqual({ version: '2.6.2' });
   });
 
   it('cross-checks the host-declared plugin root and refuses a conflict', () => {
     const executing = artifactFixture('2.6.2');
+    bindAdaptivePluginVersionForTest(executing.executingFileUrl);
     const conflictingRoot = artifactFixture('2.5.0').root;
-    expect(readExecutingPluginVersion({
-      executingFileUrl: executing.executingFileUrl,
-      pluginRootDir: conflictingRoot,
-    })).toEqual({ version: 'unknown', reason: 'plugin_version_manifest_conflict' });
+    expect(readExecutingPluginVersion({ pluginRootDir: conflictingRoot }))
+      .toEqual({ version: 'unknown', reason: 'plugin_version_manifest_conflict' });
   });
 
   it('degrades to unknown on missing or unreadable manifests without throwing', () => {
-    expect(readExecutingPluginVersion({ executingFileUrl: 'not-a-file-url' }))
-      .toEqual({ version: 'unknown', reason: 'executing_url_invalid' });
+    bindAdaptivePluginVersionForTest('not-a-file-url');
+    expect(readExecutingPluginVersion()).toEqual({ version: 'unknown', reason: 'executing_url_invalid' });
+
     const missing = artifactFixture('0.0.0');
     rmSync(join(missing.root, 'package.json'));
-    expect(readExecutingPluginVersion({ executingFileUrl: missing.executingFileUrl }).version).toBe('unknown');
+    bindAdaptivePluginVersionForTest(missing.executingFileUrl);
+    expect(readExecutingPluginVersion().version).toBe('unknown');
+  });
+
+  it('keeps the loaded version when the on-disk manifest changes after load', () => {
+    const fixture = artifactFixture('1.0.0');
+    // Simulates module evaluation: the version is bound once here.
+    bindAdaptivePluginVersionForTest(fixture.executingFileUrl);
+    expect(readExecutingPluginVersion()).toEqual({ version: '1.0.0' });
+
+    // The process keeps running the same loaded code; only the disk changes.
+    writeFileSync(
+      join(fixture.root, 'package.json'),
+      JSON.stringify({ name: 'principles-disciple', version: '2.0.0' }),
+    );
+
+    expect(readExecutingPluginVersion()).toEqual({ version: '1.0.0' });
+    const snapshot = buildAdaptiveConfigIdentitySnapshot({
+      runtimeMode: 'shared',
+      hookRegistrations: hooks(),
+    });
+    expect(snapshot.pluginVersion).toBe('1.0.0');
+    expect(snapshot.configIdentityCoverage.confirmed).toContain('pluginVersion');
+  });
+
+  it('downgrades to unknown when the installed root disagrees with the loaded version', () => {
+    const executing = artifactFixture('1.0.0');
+    bindAdaptivePluginVersionForTest(executing.executingFileUrl);
+    // In-place upgrade replaced the installed manifest, but the old code runs.
+    const upgradedRoot = artifactFixture('2.0.0').root;
+    expect(readExecutingPluginVersion({ pluginRootDir: upgradedRoot }))
+      .toEqual({ version: 'unknown', reason: 'plugin_version_manifest_conflict' });
+  });
+
+  it('reads at most MAX_MANIFEST_BYTES + 1 bytes before rejecting an oversized manifest', () => {
+    const fixture = oversizedArtifactFixture(128 * 1024);
+    let observedBytes = 0;
+    setManifestReadProbeForTest(bytesRead => {
+      observedBytes = bytesRead;
+    });
+
+    bindAdaptivePluginVersionForTest(fixture.executingFileUrl);
+    expect(readExecutingPluginVersion().version).toBe('unknown');
+    expect(observedBytes).toBeLessThanOrEqual(65537);
   });
 });
 
@@ -95,10 +157,9 @@ describe('effective hook set fingerprint', () => {
 
 describe('adaptive config identity snapshot', () => {
   it('keeps hostVersion unknown because no trusted runtime interface exists', () => {
-    const fixture = artifactFixture('2.6.2');
+    bindAdaptivePluginVersionForTest(artifactFixture('2.6.2').executingFileUrl);
     const snapshot = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'shared',
-      executingFileUrl: fixture.executingFileUrl,
       hookRegistrations: hooks(),
     });
     expect(snapshot.hostVersion).toBe('unknown');
@@ -106,15 +167,17 @@ describe('adaptive config identity snapshot', () => {
     expect(snapshot.evidenceCoverage).toBe('partial');
   });
 
-  it('changes identity when plugin version or runtime mode changes', () => {
+  it('changes identity when the loaded plugin version or runtime mode changes', () => {
+    bindAdaptivePluginVersionForTest(artifactFixture('1.0.0').executingFileUrl);
     const versionA = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'shared',
-      executingFileUrl: artifactFixture('1.0.0').executingFileUrl,
       hookRegistrations: hooks(),
     });
+
+    // A different process loaded a different artifact.
+    bindAdaptivePluginVersionForTest(artifactFixture('1.0.1').executingFileUrl);
     const versionB = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'shared',
-      executingFileUrl: artifactFixture('1.0.1').executingFileUrl,
       hookRegistrations: hooks(),
     });
     expect(versionA.pluginVersion).toBe('1.0.0');
@@ -123,7 +186,6 @@ describe('adaptive config identity snapshot', () => {
 
     const modeB = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'plugin_local',
-      executingFileUrl: artifactFixture('1.0.0').executingFileUrl,
       hookRegistrations: hooks(),
     });
     expect(modeB.runtimeMode).toBe('plugin_local');
@@ -147,10 +209,10 @@ describe('adaptive config identity snapshot', () => {
   });
 
   it('freezes the snapshot so later configuration changes cannot rewrite it', () => {
+    bindAdaptivePluginVersionForTest(artifactFixture('2.6.2').executingFileUrl);
     const registrations = hooks();
     const snapshot = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'shared',
-      executingFileUrl: artifactFixture('2.6.2').executingFileUrl,
       hookRegistrations: registrations,
     });
     const before = snapshot.effectiveHookSetFingerprint;
@@ -164,16 +226,16 @@ describe('adaptive config identity snapshot', () => {
   });
 
   it('keeps the opening snapshot for an in-flight invocation', () => {
+    bindAdaptivePluginVersionForTest(artifactFixture('1.0.0').executingFileUrl);
     const opening = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'shared',
-      executingFileUrl: artifactFixture('1.0.0').executingFileUrl,
       hookRegistrations: hooks(),
     });
     rememberAdaptiveConfigIdentity('inv-1', opening);
 
+    bindAdaptivePluginVersionForTest(artifactFixture('1.0.1').executingFileUrl);
     const nextInvocation = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'plugin_local',
-      executingFileUrl: artifactFixture('1.0.1').executingFileUrl,
       hookRegistrations: hooks({ enabled: false }, 1),
     });
 
@@ -187,9 +249,9 @@ describe('adaptive config identity snapshot', () => {
   });
 
   it('emits only whitelisted identity fields', () => {
+    bindAdaptivePluginVersionForTest(artifactFixture('2.6.2').executingFileUrl);
     const snapshot = buildAdaptiveConfigIdentitySnapshot({
       runtimeMode: 'shared',
-      executingFileUrl: artifactFixture('2.6.2').executingFileUrl,
       hookRegistrations: hooks(),
     });
     expect(Object.keys(snapshot).sort()).toEqual([
