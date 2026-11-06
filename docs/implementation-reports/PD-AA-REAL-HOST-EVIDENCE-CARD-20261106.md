@@ -146,9 +146,14 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 
 ### Q5. 哪些关联可以确认，哪些只能保持 unknown？
 
-运行关联（`runAssociation`）可信的条件：journal 中该 `hookInvocationId` 唯一、`sessionId + runId` 一致，且在该 run 内唯一匹配。满足即可为 `strong_run`。
+运行关联（`runAssociation`）可信的条件：journal 中该 `hookInvocationId` 唯一、`sessionId + runId` 一致、在该 run 内唯一匹配，且本次读取的 journal 范围完整（`journalRangeComplete=true`）。满足即可为 `strong_run`。
 
-**运行关联可信 ≠ 行为记录完整。** 当单会话行截断、总轨迹上限或日期范围导致 `coverage.complete=false` 时，读模型仍可保持 `strong_run`；此时 `coverage.incompleteReasons` 只表示行为事实不完整（是下界），不表示关联不可信。只有身份缺失/冲突、同一 run 多次干预导致歧义、`runId` 不匹配时，运行关联才降为 `ambiguous / unknown / conflict`。
+**运行关联可信 ≠ 行为记录完整。** 两者必须分开报告，且降级条件不同：
+
+- **行为来源截断**（`coverage` 中的单会话行截断、总轨迹上限、日期范围裁剪，来源为 corrections / outcomes / weakCandidates）只影响 `facts` 与 `coverage.complete`，**不参与** `journalRangeComplete`；因此即使 `coverage.complete=false`，关联仍可保持 `strong_run`，此时 `coverage.incompleteReasons` 只表示行为事实是下界，不表示关联不可信。
+- **journal 自身不完整或唯一性无法证明**时，关联必须降为 `unknown`：journal coverage 非 `complete`、`truncation.omitted > 0`、`outputTruncated`、`malformedJsonLines / invalidEnvelopeRecords / invalidRecords` 任一大于 0；身份缺失（`runId` 缺失或 workspace 身份不可证）；open/terminal 记录重复；`targetIdentityUnproven`；open 与 terminal 的配置身份不一致。open/terminal 在读取范围内不可见时，身份有效为 `weak`，否则为 `unknown`。
+- 同一 run 内多次干预 → `ambiguous`（`run_has_multiple_invocations`）。
+- open 与 terminal 分类冲突 → `conflict`（`terminal_conflicted`）。
 
 可以确认：
 
@@ -165,7 +170,7 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 - 产物是否由工具实际产生（`artifacts.confirmation`）；
 - 行为是否改善（`behaviorImprovement`）。
 
-截断与覆盖不完整只影响 `facts`（actions/corrections/outcomes/weakCandidates）的完整性，不自动把 `runAssociation` 降级；两者必须分开报告。
+行为来源截断（corrections / outcomes / weakCandidates）与覆盖不完整只影响 `facts` 的完整性，不自动把 `runAssociation` 降级；但 journal 自身不完整、唯一性无法证明时，`runAssociation` 仍会降为 `unknown`。两者必须分开报告。
 
 ### Q6. 是否需要先发布或安装？
 
