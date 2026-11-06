@@ -64,6 +64,7 @@ import {
   registerRuntimeActivationDeactivateCommand,
   registerRuntimeActivationListCommand,
   registerRuntimeActivationJournalCommand,
+  registerRuntimeActivationLinkCommand,
   registerRuntimeActivationDispatchCommand,
   registerRuntimeActivationApproveCommand,
 } from './commands/runtime-activation.js';
@@ -521,6 +522,9 @@ registerRuntimeActivationListCommand(activationTopCmd);
 
 // PRI-1109: read-only journal reconciliation (no writes, no model runs).
 registerRuntimeActivationJournalCommand(activationTopCmd);
+
+// PRI-1114: read-only behavior evidence linkage (no writes, no model runs).
+registerRuntimeActivationLinkCommand(activationTopCmd);
 
 registerRuntimeActivationDeactivateCommand(activationTopCmd);
 

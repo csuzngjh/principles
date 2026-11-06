@@ -449,3 +449,6 @@ export { createCodexArtificerTrustedFactsPort } from './codex-artificer-trusted-
 export { revalidateAdaptivePrinciple, createAdaptivePrincipleRevalidator, type AdaptivePrincipleReader } from './adaptive-principle-revalidation.js';
 
 export * from './adaptive-journal-reconciliation.js';
+
+// PRI-1114: read-only behavior evidence linkage (no writes, no model runs).
+export * from './adaptive-behavior-linkage.js';
