@@ -20,6 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GATE = path.resolve(HERE, '..', 'release', 'verify-publication-cohort.mjs');
+const RESOLVER = path.resolve(HERE, '..', 'release', 'resolve-installer-cohort.mjs');
 const INSTALLER = 'create-principles-disciple';
 const GIT_ID = ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid'];
 
@@ -27,9 +28,23 @@ interface Stub {
   status: number;
   body: string;
   delayMs: number;
+  /**
+   * Simulated intermediary cache: requests WITHOUT npm's `?write=true`
+   * freshness marker receive `body` (the stale packument); requests WITH it
+   * receive `freshBody` (what the registry actually serves now).
+   */
+  freshBody?: string;
+}
+
+interface RecordedRequest {
+  url: string;
+  pathname: string;
+  query: Record<string, string>;
+  headers: http.IncomingHttpHeaders;
 }
 
 const tempDirs: string[] = [];
+const requests: RecordedRequest[] = [];
 let stubServer: http.Server | null = null;
 let stubPort = 0;
 let stub: Stub = { status: 200, body: '{}', delayMs: 0 };
@@ -105,11 +120,18 @@ function serve(json: unknown, status = 200) {
   stub = { status, body: JSON.stringify(json), delayMs: 0 };
 }
 
-async function runGate(args: string[], cwd: string, env: Record<string, string> = {}) {
-  const { code, stdout, stderr } = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+/** Simulate an intermediary that keeps serving `stale` unless the request
+ *  carries npm's `?write=true` freshness marker, in which case `fresh` is
+ *  returned. This is how a CDN-backed stale packument would behave. */
+function serveStale(stale: unknown, fresh: unknown, status = 200) {
+  stub = { status, body: JSON.stringify(stale), freshBody: JSON.stringify(fresh), delayMs: 0 };
+}
+
+async function runScript(script: string, args: string[], cwd: string, env: Record<string, string> = {}) {
+  return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
     execFile(
       process.execPath,
-      [GATE, ...args],
+      [script, ...args],
       {
         cwd,
         env: {
@@ -125,6 +147,10 @@ async function runGate(args: string[], cwd: string, env: Record<string, string> 
       },
     );
   });
+}
+
+async function runGate(args: string[], cwd: string, env: Record<string, string> = {}) {
+  const { code, stdout, stderr } = await runScript(GATE, args, cwd, env);
   let json: Record<string, any> | null = null;
   if (args.includes('--json')) {
     try {
@@ -132,6 +158,19 @@ async function runGate(args: string[], cwd: string, env: Record<string, string> 
     } catch {
       json = null;
     }
+  }
+  return { code, stdout, stderr, json };
+}
+
+/** The initial cohort resolution performed by `resolve-inputs` — a separate
+ *  process, therefore a separate registry query, exactly like production. */
+async function runResolver(args: string[], cwd: string, env: Record<string, string> = {}) {
+  const { code, stdout, stderr } = await runScript(RESOLVER, args, cwd, env);
+  let json: Record<string, any> | null = null;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    json = null;
   }
   return { code, stdout, stderr, json };
 }
@@ -162,10 +201,19 @@ let checkout: { root: string; shas: Record<string, string> };
 
 beforeAll(async () => {
   checkout = await makeCheckout();
-  stubServer = http.createServer((_req, res) => {
+  stubServer = http.createServer((req, res) => {
+    const parsed = new URL(req.url ?? '/', `http://127.0.0.1:${stubPort}`);
+    const query: Record<string, string> = {};
+    parsed.searchParams.forEach((value, key) => {
+      query[key] = value;
+    });
+    requests.push({ url: req.url ?? '', pathname: parsed.pathname, query, headers: req.headers });
+    // A request carrying npm's freshness marker sees the CURRENT packument;
+    // one without it sees whatever an intermediary had cached.
+    const body = stub.freshBody !== undefined && parsed.searchParams.get('write') === 'true' ? stub.freshBody : stub.body;
     const respond = () => {
       res.writeHead(stub.status, { 'content-type': 'application/json' });
-      res.end(stub.body);
+      res.end(body);
     };
     if (stub.delayMs > 0) setTimeout(respond, stub.delayMs);
     else respond();
@@ -181,12 +229,13 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  requests.length = 0;
   serve({});
 });
 
 describe('verify-publication-cohort gate — the business scenarios', () => {
   // Scenario A — normal publication: the channel still serves A at gate time.
-  it('A: passes when npm latest is still the exact version+commit this run built', async () => {
+  it('passes when npm latest is still the exact version+commit this run built', async () => {
     serve(packument('1.147.12', [{ version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' }]));
     const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
 
@@ -204,7 +253,7 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
 
   // Scenario B — SAME product version, DIFFERENT commit. The exact TOCTOU
   // shape: a version-only check would pass here and ship the wrong bytes.
-  it('B: BLOCKS when the same product version is published from a different commit', async () => {
+  it('BLOCKS when the same product version is published from a different commit', async () => {
     serve(packument('1.147.13', [{ version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-03T00:00:00.000Z' }]));
     const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
 
@@ -222,7 +271,7 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
   });
 
   // Scenario C — the version moved too.
-  it('C: BLOCKS when the product version changed during the build', async () => {
+  it('BLOCKS when the product version changed during the build', async () => {
     serve(packument('1.147.13', [{ version: '1.147.13', gitHead: checkout.shas.C, publishedAt: '2026-11-03T00:00:00.000Z' }]));
     const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
 
@@ -234,47 +283,10 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
     });
   });
 
-  // Scenario D — every registry failure is a refusal, never "no drift".
-  const registryFailures: Array<[string, Stub]> = [
-    ['404', { status: 404, body: JSON.stringify({ error: 'not found' }), delayMs: 0 }],
-    ['503', { status: 503, body: JSON.stringify({ error: 'unavailable' }), delayMs: 0 }],
-    ['invalid JSON', { status: 200, body: '<html>not json</html>', delayMs: 0 }],
-    [
-      'missing gitHead',
-      {
-        status: 200,
-        body: JSON.stringify(packument('1.147.12', [{ version: '1.147.12', publishedAt: '2026-11-03T00:00:00.000Z' }])),
-        delayMs: 0,
-      },
-    ],
-  ];
-
-  it.each(registryFailures)('D: fails closed on %s', async (_label, response) => {
-    stub = response;
-    const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
-
-    expect(run.code).toBe(1);
-    expect(run.json?.status).toBe('BLOCKED');
-    expect(['REGISTRY_ERROR', 'ABSENT_COHORT']).toContain(run.json?.resolverStatus);
-    expect(run.json?.actual).toEqual({ version: null, commit: null });
-    expect(run.stderr).toContain('REFUSED');
-  }, 30_000);
-
-  it('D: fails closed on a request timeout', async () => {
-    stub = { status: 200, body: '{}', delayMs: 5_000 };
-    const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root, {
-      PD_RELEASE_TIMEOUT_MS: '40',
-    });
-
-    expect(run.code).toBe(1);
-    expect(run.json?.status).toBe('BLOCKED');
-    expect(run.json?.resolverStatus).toBe('REGISTRY_ERROR');
-  }, 30_000);
-
   // Scenario E — an explicit HISTORICAL cohort republish stays legal even
   // though npm latest is a newer cohort. The final guard must not demand that
   // a historical cohort equals latest.
-  it('E: passes for a published historical cohort even when latest is newer', async () => {
+  it('passes for a published historical cohort even when latest is newer', async () => {
     serve(
       packument('1.147.13', [
         { version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-04T00:00:00.000Z' },
@@ -295,7 +307,7 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
   });
 
   // Scenario F — a SHA with no published record is never an acceptable cohort.
-  it('F: BLOCKS an explicit historical cohort that was never published', async () => {
+  it('BLOCKS an explicit historical cohort that was never published', async () => {
     serve(packument('1.147.13', [{ version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-03T00:00:00.000Z' }]));
     const run = await runGate(
       gateArgs({ version: '2.8.3', commit: 'f'.repeat(40), explicit: 'f'.repeat(40) }),
@@ -304,35 +316,6 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
 
     expect(run.code).toBe(1);
     expect(run.json).toMatchObject({ status: 'BLOCKED', mode: 'explicit-cohort', resolverStatus: 'EXPLICIT_UNPUBLISHED' });
-  });
-
-  // Scenario H — gate 1 passed, registry moved before the gh-pages push:
-  // gate 2 must refuse, must NOT report success, and must disclose that asset
-  // bytes are already uploaded.
-  it('H: gate 2 blocks when the registry moves between gate 1 and the push, reporting the side effect', async () => {
-    const gate1Response = packument('1.147.12', [
-      { version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' },
-    ]);
-    serve(gate1Response);
-    const gate1 = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
-    expect(gate1.code).toBe(0);
-
-    // Same product version, different commit — the race arriving mid-run.
-    serve(packument('1.147.13', [{ version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-03T00:00:00.000Z' }]));
-    const gate2 = await runGate(
-      gateArgs({ version: '2.8.3', commit: checkout.shas.A, sideEffects: 'asset-bytes-uploaded' }),
-      checkout.root,
-    );
-
-    expect(gate2.code).toBe(1);
-    expect(gate2.json).toMatchObject({
-      status: 'BLOCKED',
-      externalSideEffects: 'asset-bytes-uploaded',
-      actual: { version: '2.8.3', commit: checkout.shas.B },
-    });
-    expect(gate2.stderr).toContain('ALREADY uploaded');
-    expect(gate2.stderr).toContain('NO signed metadata pointer');
-    expect(gate2.stderr).not.toContain('VERIFIED');
   });
 
   // Dry-run fallback stays available, but can never be publication evidence;
@@ -374,4 +357,155 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
     );
     expect(badMode.code).toBe(2);
   });
+});
+
+// PRI-1103 second-round hardening: a repeated query is not a fresh query. npm's
+// documented `?write=true` marker makes the registry serve the CURRENT
+// packument; without it an intermediary can hand every gate the same stale
+// document, which turns both gates into no-ops.
+describe('verify-publication-cohort gate — registry freshness', () => {
+  // Functions, not constants: describe callbacks run during collection,
+  // before `beforeAll` builds the fixture repository.
+  const latestA = () =>
+    packument('1.147.12', [{ version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' }]);
+  const latestB = () =>
+    packument('1.147.13', [{ version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-04T00:00:00.000Z' }]);
+
+  function expectFresh(request: RecordedRequest) {
+    expect(request.query).toEqual({ write: 'true' });
+    expect(request.pathname).toBe(`/${INSTALLER}`);
+    // Complement, never the sole freshness argument (see registry-client).
+    expect(String(request.headers['cache-control'])).toContain('no-cache');
+  }
+
+  // A — every cohort query point force-revalidates, and each one performs a
+  // real new request instead of reusing the initial resolution or gate 1.
+  it('A: initial resolution, gate 1 and gate 2 each issue a fresh, independent query', async () => {
+    serve(latestA());
+    const initial = await runResolver(['--product-version', '2.8.3', '--json'], checkout.root);
+    expect(initial.code).toBe(0);
+
+    const gate1 = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
+    expect(gate1.code).toBe(0);
+    const gate2 = await runGate(
+      gateArgs({ version: '2.8.3', commit: checkout.shas.A, sideEffects: 'asset-bytes-uploaded' }),
+      checkout.root,
+    );
+    expect(gate2.code).toBe(0);
+
+    expect(requests).toHaveLength(3);
+    for (const request of requests) expectFresh(request);
+  });
+
+  // B — a stale intermediary cache: without the freshness marker this exact
+  // code path would read A forever and declare "no drift".
+  it('B: reads the current packument through a stale cache layer (A cached, B current)', async () => {
+    serveStale(latestA(), latestB());
+    const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
+
+    expect(run.code).toBe(1);
+    expect(run.json).toMatchObject({
+      status: 'BLOCKED',
+      actual: { version: '2.8.3', commit: checkout.shas.B },
+    });
+    expect(requests).toHaveLength(1);
+    expectFresh(requests[0]);
+  });
+
+  // C — the channel moved while the platform assets were being built: gate 1
+  // refuses before any external side effect can happen.
+  it('C: blocks gate 1 when the channel moved during the build (initial A, gate 1 B)', async () => {
+    serve(latestA());
+    const initial = await runResolver(['--product-version', '2.8.3', '--json'], checkout.root);
+    expect(initial.code).toBe(0);
+    expect(initial.json).toMatchObject({ status: 'MATCH', cohort: checkout.shas.A });
+
+    serve(latestB());
+    const gate1 = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
+    expect(gate1.code).toBe(1);
+    expect(gate1.json).toMatchObject({
+      status: 'BLOCKED',
+      externalSideEffects: 'none',
+      actual: { version: '2.8.3', commit: checkout.shas.B },
+    });
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expectFresh(request);
+  });
+
+  // D — gate 1 passed, then the registry moved before the push: gate 2 must
+  // refuse, must NOT report success, must disclose the uploaded asset bytes,
+  // and must not tamper with the asset identity.
+  it('D: gate 2 blocks when the registry moves between gate 1 and the push, reporting the side effect', async () => {
+    serve(latestA());
+    const gate1 = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
+    expect(gate1.code).toBe(0);
+
+    serve(latestB());
+    const gate2 = await runGate(
+      gateArgs({ version: '2.8.3', commit: checkout.shas.A, sideEffects: 'asset-bytes-uploaded' }),
+      checkout.root,
+    );
+
+    expect(gate2.code).toBe(1);
+    expect(gate2.json).toMatchObject({
+      status: 'BLOCKED',
+      externalSideEffects: 'asset-bytes-uploaded',
+      expected: { version: '2.8.3', commit: checkout.shas.A },
+      actual: { version: '2.8.3', commit: checkout.shas.B },
+    });
+    expect(gate2.stderr).toContain('ALREADY uploaded');
+    expect(gate2.stderr).toContain('NO signed metadata pointer');
+    expect(gate2.stderr).not.toContain('VERIFIED');
+    // Both gates queried the registry independently, each with the marker.
+    expect(requests).toHaveLength(2);
+    for (const request of requests) expectFresh(request);
+  });
+
+  // E — an undecidable registry is never "no drift".
+  const registryFailures: Array<[string, Stub]> = [
+    ['404', { status: 404, body: JSON.stringify({ error: 'not found' }), delayMs: 0 }],
+    ['503', { status: 503, body: JSON.stringify({ error: 'unavailable' }), delayMs: 0 }],
+    ['invalid JSON', { status: 200, body: '<html>not json</html>', delayMs: 0 }],
+    [
+      'missing gitHead',
+      {
+        status: 200,
+        body: JSON.stringify(packument('1.147.12', [{ version: '1.147.12', publishedAt: '2026-11-03T00:00:00.000Z' }])),
+        delayMs: 0,
+      },
+    ],
+  ];
+
+  it.each(registryFailures)('E: fails closed on %s', async (_label, response) => {
+    stub = response;
+    const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root);
+
+    expect(run.code).toBe(1);
+    expect(run.json?.status).toBe('BLOCKED');
+    expect(['REGISTRY_ERROR', 'ABSENT_COHORT']).toContain(run.json?.resolverStatus);
+    expect(run.json?.actual).toEqual({ version: null, commit: null });
+    expect(run.stderr).toContain('REFUSED');
+  }, 30_000);
+
+  it('E: fails closed on a request timeout', async () => {
+    stub = { status: 200, body: '{}', delayMs: 5_000 };
+    const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root, {
+      PD_RELEASE_TIMEOUT_MS: '40',
+    });
+
+    expect(run.code).toBe(1);
+    expect(run.json?.status).toBe('BLOCKED');
+    expect(run.json?.resolverStatus).toBe('REGISTRY_ERROR');
+  }, 30_000);
+
+  it('E: fails closed on a network failure (connection refused)', async () => {
+    const run = await runGate(gateArgs({ version: '2.8.3', commit: checkout.shas.A }), checkout.root, {
+      PD_RELEASE_REGISTRY: 'http://127.0.0.1:1',
+    });
+
+    expect(run.code).toBe(1);
+    expect(run.json?.status).toBe('BLOCKED');
+    expect(run.json?.resolverStatus).toBe('REGISTRY_ERROR');
+    expect(run.stderr).toContain('REFUSED');
+  }, 30_000);
 });

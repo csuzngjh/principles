@@ -882,13 +882,15 @@ jobs:
           path: ${{ runner.temp }}/metadata-repo
           if-no-files-found: ignore
 
-      # GATE 2 — immediately before the metadata pointer is pushed. The build
-      # may have taken the better part of an hour; if the npm channel moved
-      # during it, these bytes no longer represent what a fresh install
-      # receives. Fail closed: no gh-pages push, no success announcement. Asset
-      # bytes already uploaded above are content-addressed and unreferenced —
-      # the refusal says so instead of pretending nothing happened.
-      - name: Publication gate 2 — re-verify npm cohort immediately before push
+      # GATE 2 RUNS INSIDE THIS SHELL, after `git commit` and IMMEDIATELY
+      # before `git push origin gh-pages`. A separate YAML step that merely
+      # precedes this step cannot protect the push: worktree preparation,
+      # metadata copying, staging, checks and the commit all execute between
+      # the two steps. The gate is control-plane tooling from resolve-inputs
+      # (never the product cohort checkout). Fail closed: no push, no success
+      # announcement. Asset bytes already uploaded above are content-addressed
+      # and unreferenced — the refusal says so.
+      - name: Publish to metadata source (gh-pages, atomic push)
         if: env.MODE == 'publish' && success()
         env:
           MODE: ${{ github.event.inputs.mode || 'dry-run' }}
@@ -896,18 +898,7 @@ jobs:
           EXPECTED_COMMIT: ${{ needs.resolve-inputs.outputs.commit }}
           COHORT_SHA_INPUT: ${{ github.event.inputs.cohort_sha }}
         run: |
-          GATE_ARGS=(
-            --mode "$MODE"
-            --product-version "$EXPECTED_VERSION"
-            --expected-commit "$EXPECTED_COMMIT"
-            --external-side-effects asset-bytes-uploaded
-          )
-          if [ -n "$COHORT_SHA_INPUT" ]; then GATE_ARGS+=(--explicit-cohort "$COHORT_SHA_INPUT"); fi
-          node "$RUNNER_TEMP/release-tools/scripts/release/verify-publication-cohort.mjs" "${GATE_ARGS[@]}"
-
-      - name: Publish to metadata source (gh-pages, atomic push)
-        if: env.MODE == 'publish' && success()
-        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
@@ -957,6 +948,19 @@ jobs:
             console.log(payload.releaseId.slice(0, 12));
           " "$RUNNER_TEMP/metadata-repo/targets/channels/$CHANNEL.json")
           git commit -m "release-metadata: ${RELEASE_ID} (${{ needs.resolve-inputs.outputs.version }}, $CHANNEL)"
+          # GATE 2 — the build may have taken the better part of an hour. If
+          # the npm channel moved during it, these bytes no longer represent
+          # what a fresh install receives. The registry read is force-
+          # revalidated (?write=true), never a cached packument, and this is a
+          # NEW query after gate 1. The very next command is the push.
+          GATE_ARGS2=(
+            --mode "$MODE"
+            --product-version "$EXPECTED_VERSION"
+            --expected-commit "$EXPECTED_COMMIT"
+            --external-side-effects asset-bytes-uploaded
+          )
+          if [ -n "$COHORT_SHA_INPUT" ]; then GATE_ARGS2+=(--explicit-cohort "$COHORT_SHA_INPUT"); fi
+          node "$RUNNER_TEMP/release-tools/scripts/release/verify-publication-cohort.mjs" "${GATE_ARGS2[@]}"
           # One push updates the whole tree atomically; consumers never see a
           # channel pointer whose artifact is missing.
           git push origin gh-pages

@@ -40,7 +40,11 @@
  *   REGISTRY_ERROR         exit 1  undecidable; a failed read is not "no drift"
  *   INVALID_ARGS           exit 2
  *
- * No cache, no writes, no network beyond one public packument read.
+ * No writes, and exactly one public packument read per run. That read is
+ * FORCE-REVALIDATED (`?write=true`, the npm client's documented "give me the
+ * current value" mechanism), because every caller of this resolver is a
+ * publication decision: a cached packument cannot prove the channel still
+ * serves what this run is about to publish.
  *
  * Distinct from `resolve-release-cohort.mjs`, which decides which SHA
  * SHOULD be the cohort from git history (it reproduces the Version Packages
@@ -125,7 +129,9 @@ async function main() {
 
   let packument;
   try {
-    packument = await fetchPackument(pkg);
+    // PRI-1103 freshness: never accept a cached packument. A stale
+    // `dist-tags.latest` would be read as "no drift" by every gate.
+    packument = await fetchPackument(pkg, { fresh: true });
   } catch (err) {
     const detail = err instanceof RegistryError ? `registry read failed (${err.status ?? 'network'}): ${err.message}` : `registry read failed: ${String(err?.message ?? err)}`;
     // A failed registry read is never evidence of "no drift".

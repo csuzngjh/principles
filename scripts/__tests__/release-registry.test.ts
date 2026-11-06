@@ -222,3 +222,44 @@ describe('registry-exact CLI: LOCAL_BEHIND_REGISTRY (T1 baseline gate)', () => {
     }
   });
 });
+
+// PRI-1103: a cohort query must not read a cached packument. `?write=true` is
+// the mechanism npm's own client documents for "give me the current value";
+// the no-cache headers are a complement, never the sole argument.
+describe('registry client: cohort freshness', () => {
+  it('fresh packument reads append ?write=true and no-cache headers without disturbing the scoped path', async () => {
+    const { fetchPackument } = await loadClient();
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    const out = await fetchPackument('@principles/core', {
+      fresh: true,
+      attempts: 1,
+      fetchImpl: async (url: string, init: { headers: Record<string, string> }) => {
+        seen.push({ url, headers: init.headers });
+        return jsonResponse(200, { 'dist-tags': { latest: '1.0.0' }, versions: {} });
+      },
+    });
+
+    expect(out).not.toBeNull();
+    const parsed = new URL(seen[0].url);
+    expect(parsed.pathname).toBe('/@principles/core');
+    expect(parsed.searchParams.get('write')).toBe('true');
+    expect(seen[0].headers['cache-control']).toBe('no-cache');
+    expect(seen[0].headers.pragma).toBe('no-cache');
+  });
+
+  it('ordinary packument reads keep the existing default behaviour', async () => {
+    const { fetchPackument } = await loadClient();
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    await fetchPackument('@principles/core', {
+      attempts: 1,
+      fetchImpl: async (url: string, init: { headers: Record<string, string> }) => {
+        seen.push({ url, headers: init.headers });
+        return jsonResponse(200, { 'dist-tags': { latest: '1.0.0' }, versions: {} });
+      },
+    });
+
+    const parsed = new URL(seen[0].url);
+    expect(parsed.searchParams.has('write')).toBe(false);
+    expect(seen[0].headers['cache-control']).toBeUndefined();
+  });
+});

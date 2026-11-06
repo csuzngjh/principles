@@ -154,16 +154,27 @@ versions equal "because they ship together".
 - **Cohort re-verification gates** (`scripts/release/verify-publication-cohort.mjs`,
   same script at both points): gate 1 runs after every platform asset is
   built/downloaded/identity-verified and BEFORE any side effect; gate 2 runs
-  immediately before the gh-pages pointer push. Both re-read npm through the
-  existing resolver and registry client and require the full
-  `productVersion` + 40-char `gitHead` to still equal what the run built.
+  INSIDE the `Publish to metadata source` shell, after `git commit` and
+  immediately before `git push origin gh-pages` — nothing else executes
+  between the gate and the push. Both re-read npm through the existing
+  resolver and registry client and require the full `productVersion` +
+  40-char `gitHead` to still equal what the run built.
+  **Every cohort query is force-revalidated**: the registry client appends
+  npm's documented `?write=true` marker (the npm client's "give me the
+  current value" mechanism before a write) plus `Cache-Control: no-cache`
+  as a complement — a repeated query is not a fresh query, and a cached
+  packument would make both gates no-ops. Initial resolution, gate 1 and
+  gate 2 are separate processes, so each issues its own revalidated request
+  and never reuses an earlier result. Ordinary (non-cohort) registry reads
+  keep the default behaviour.
   Auto mode (`cohort_sha` empty) re-reads `latest`; explicit-cohort mode
   accepts a published historical SHA (a legal byte-identical republish is
-  not blocked). 404 / 503 / timeout / malformed JSON / missing `gitHead` /
-  version or commit drift / unreadable commit all fail closed, reporting
-  expected vs actual identity, the mode, and whether external side effects
-  (asset bytes) already happened. A dry-run result is advisory only and is
-  explicitly labelled NOT publication evidence; `mode=publish` never takes
+  not blocked). 404 / 503 / timeout / network failure / malformed JSON /
+  missing `gitHead` / version or commit drift / unreadable commit all fail
+  closed, reporting expected vs actual identity, the mode, and whether
+  external side effects (asset bytes) already happened. A dry-run result is
+  advisory only and is explicitly labelled NOT publication evidence, and a
+  dry-run never executes the mode=publish shell; `mode=publish` never takes
   that fallback.
 
 The Version PR bot (`changesets/action`, pinned) requires the

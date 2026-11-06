@@ -790,54 +790,131 @@ describe('release-metadata.yml — cohort re-check gates around the publication 
     return step;
   }
 
-  it('runs gate 1 after asset identity verification and before every external side effect', () => {
+  /**
+   * Executable lines of a `run:` block. Comments and blank lines carry no
+   * execution order, so "nothing between gate 2 and push" is judged on real
+   * commands, never on YAML step names or comments.
+   */
+  function commandLines(run: string): string[] {
+    return run
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'));
+  }
+
+  const GATE_SCRIPT = '"$RUNNER_TEMP/release-tools/scripts/release/verify-publication-cohort.mjs"';
+
+  function publishRun(): string {
+    const run = stepNamed('Publish to metadata source').run ?? '';
+    expect(run.length).toBeGreaterThan(0);
+    return run;
+  }
+
+  it('keeps gate 1 after asset identity verification and before every external side effect', () => {
     const order = steps().map((s) => s.name ?? '');
     const identity = order.findIndex((n) => n.startsWith('Verify embedded product identity'));
     const gate1 = order.findIndex((n) => n.startsWith('Publication gate 1'));
     const sign = order.findIndex((n) => n.startsWith('Sign and emit release metadata'));
     const uploadBytes = order.findIndex((n) => n.startsWith('Upload asset bytes'));
-    const gate2 = order.findIndex((n) => n.startsWith('Publication gate 2'));
     const push = order.findIndex((n) => n.startsWith('Publish to metadata source'));
 
     expect(identity).toBeGreaterThanOrEqual(0);
     expect(gate1).toBeGreaterThan(identity);
     expect(sign).toBeGreaterThan(gate1);
     expect(uploadBytes).toBeGreaterThan(gate1);
-    // Gate 2 is IMMEDIATELY before the pointer push: nothing may sit between.
-    expect(gate2).toBeGreaterThan(uploadBytes);
-    expect(push).toBe(gate2 + 1);
+    expect(push).toBeGreaterThan(uploadBytes);
+    // Gate 2 is no longer a sibling step: a step boundary cannot protect the
+    // push, because the push happens INSIDE the publish step.
+    expect(order.some((n) => n.startsWith('Publication gate 2'))).toBe(false);
   });
 
-  it('runs both gates through one shared script so the two checks cannot drift', () => {
-    for (const prefix of ['Publication gate 1', 'Publication gate 2']) {
-      const run = stepNamed(prefix).run ?? '';
-      expect(run, prefix).toContain('verify-publication-cohort.mjs');
-      expect(run, prefix).toContain('--mode "$MODE"');
-      expect(run, prefix).toContain('--product-version "$EXPECTED_VERSION"');
-      expect(run, prefix).toContain('--expected-commit "$EXPECTED_COMMIT"');
-      expect(run, prefix).toContain('--explicit-cohort "$COHORT_SHA_INPUT"');
-    }
-    // Only gate 2 may claim that external bytes already exist.
-    expect(stepNamed('Publication gate 1').run ?? '').toContain('--external-side-effects none');
-    expect(stepNamed('Publication gate 2').run ?? '').toContain('--external-side-effects asset-bytes-uploaded');
+  it('runs gate 2 inside the real publish shell, after git commit and immediately before git push', () => {
+    const lines = commandLines(publishRun());
+    const add = lines.indexOf('git add -A');
+    const commit = lines.findIndex((line) => line.startsWith('git commit'));
+    const gate = lines.findIndex((line) => line.includes(GATE_SCRIPT));
+    const push = lines.indexOf('git push origin gh-pages');
+
+    // Fixed order inside one shell: prepare/copy -> stage -> checks -> commit
+    // -> gate 2 -> push.
+    expect(add).toBeGreaterThanOrEqual(0);
+    expect(commit).toBeGreaterThan(add);
+    expect(lines.some((line) => line.includes('find targets/releases'))).toBe(true);
+    expect(gate).toBeGreaterThan(commit);
+    expect(push).toBeGreaterThan(gate);
+    // NOTHING executes between the gate and the push: push is the next command.
+    expect(push).toBe(gate + 1);
+    // The gate is invoked as one clear command, so its position is testable.
+    expect(lines[gate]).toContain(`node ${GATE_SCRIPT}`);
   });
 
-  it('never lets a refusal be skipped, retried or downgraded', () => {
-    for (const prefix of ['Publication gate 1', 'Publication gate 2']) {
-      const step = stepNamed(prefix);
-      expect(step['continue-on-error']).toBeUndefined();
-      // No fallback path in the step itself: the script owns fail-closed.
-      expect(step.run ?? '').not.toContain('|| true');
-      expect(step.run ?? '').not.toContain('continue');
-      // A refusal must never be "fixed" by rewriting what the bytes claim.
-      expect(step.run ?? '').not.toContain('sourceCommit');
-      expect(step.run ?? '').not.toContain('sed -i');
+  it('calls gate 2 with the same verifier and cohort arguments as gate 1', () => {
+    const gate1 = stepNamed('Publication gate 1').run ?? '';
+    const publish = publishRun();
+    for (const arg of [
+      '--mode "$MODE"',
+      '--product-version "$EXPECTED_VERSION"',
+      '--expected-commit "$EXPECTED_COMMIT"',
+      '--explicit-cohort "$COHORT_SHA_INPUT"',
+    ]) {
+      expect(gate1, `gate1 ${arg}`).toContain(arg);
+      expect(publish, `gate2 ${arg}`).toContain(arg);
     }
+    // One shared control-plane script, same path in both gates.
+    expect(gate1).toContain(`node ${GATE_SCRIPT}`);
+    expect(publish).toContain(`node ${GATE_SCRIPT}`);
+    // Only gate 2 may claim that external bytes already exist; gate 1 runs
+    // before any upload.
+    expect(gate1).toContain('--external-side-effects none');
+    expect(publish).toContain('--external-side-effects asset-bytes-uploaded');
+  });
+
+  it('makes the push unreachable when gate 2 refuses, and rewrites no asset identity', () => {
+    const run = publishRun();
+    expect(run).toContain('set -euo pipefail');
+    const lines = commandLines(run);
+    const gate = lines.findIndex((line) => line.includes(GATE_SCRIPT));
+    expect(gate).toBeGreaterThanOrEqual(0);
+    // `set -e` + a plain sequential command means a non-zero gate exits the
+    // shell before the next line, which is the push.
+    expect(lines[gate]).not.toContain('||');
+    expect(lines[gate]).not.toContain('set +e');
+    expect(lines.slice(gate).join('\n')).not.toContain('|| true');
+
+    const step = stepNamed('Publish to metadata source');
+    expect(step['continue-on-error']).toBeUndefined();
+    expect(step.if ?? '').toContain("env.MODE == 'publish'");
+    expect(step.if ?? '').toContain('success()');
+    // A refusal must never be "fixed" by rewriting what the bytes claim.
+    expect(run).not.toContain('sourceCommit');
+    expect(run).not.toContain('sed -i');
+    // The only gh-pages push in the whole workflow is this guarded shell.
+    const pushes = steps().filter((s) => (s.run ?? '').includes('git push origin gh-pages'));
+    expect(pushes).toHaveLength(1);
+  });
+
+  it('never lets a gate refusal be skipped, retried or downgraded', () => {
+    const gate1 = stepNamed('Publication gate 1');
+    expect(gate1['continue-on-error']).toBeUndefined();
+    expect(gate1.run ?? '').not.toContain('|| true');
+    expect(gate1.run ?? '').not.toContain('continue');
+    expect(gate1.run ?? '').not.toContain('sourceCommit');
+    expect(gate1.run ?? '').not.toContain('sed -i');
     // Publishing steps keep default success() semantics, so a gate failure
     // skips the upload/push instead of racing ahead.
     expect(stepNamed('Upload asset bytes').if ?? '').toContain('success()');
-    expect(stepNamed('Publish to metadata source').if ?? '').toContain('success()');
-    expect(stepNamed('Publication gate 2').if ?? '').toContain("env.MODE == 'publish'");
+  });
+
+  it('keeps dry-run off the production gate-2 write path', () => {
+    // Gate 1 runs in dry-run but is advisory by mode; the production write
+    // (push) is unreachable unless mode=publish.
+    const step = stepNamed('Publish to metadata source');
+    expect(step.if ?? '').toMatch(/env\.MODE == 'publish'/);
+    expect(publishRun()).toContain('git push origin gh-pages');
+    // Nothing outside this mode-guarded shell pushes metadata.
+    for (const candidate of steps().filter((s) => (s.run ?? '').includes('git push'))) {
+      expect(candidate.name ?? '').toContain('Publish to metadata source');
+    }
   });
 
   it('receives gate tooling from resolve-inputs, never from the product cohort', () => {
