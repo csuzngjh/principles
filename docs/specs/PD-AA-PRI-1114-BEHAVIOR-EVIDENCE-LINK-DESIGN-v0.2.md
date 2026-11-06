@@ -73,7 +73,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 - 身份缺失 → `unknown`；
 - 冲突 → `conflict`。
 
-即使 `strong_run` 成立，也只表示“该 run 内发生了该事实”，**不表示同一次模型请求**，更不表示遵循原则或行为改善。
+即使 `strong_run` 成立，也只表示“该 run 内发生了该事实”，**不表示同一次模型请求**，更不表示遵循原则或行为改善。输出必须用 `evidenceLayers` 显式区分四层：运行级关联、请求级关联、原则遵循、因果改善；后三层在缺少独立送达/遵循/结果证据时固定为 `unknown`。
 
 ### 4.3 调用开始 vs 真实送达
 
@@ -112,6 +112,12 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
                     targetBodySha256, configIdentity, terminal: {state, variants} },
     association: 'strong_run' | 'weak' | 'ambiguous' | 'unknown' | 'conflict',
     associationReasons: string[],
+    evidenceLayers: {
+      runAssociation:    'strong_run' | 'weak' | 'ambiguous' | 'unknown' | 'conflict',
+      requestAssociation:'unknown',
+      principleAdherence: 'unknown',
+      behaviorImprovement:'unknown'
+    },
     facts: {
       actions:   [{ source:'event_log.tool_call', toolName, outcome, exitCode, errorType,
                     ts, ordering:'unknown'|'after_open_only', strength }],
@@ -137,7 +143,8 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 - 每文件最多 4 MiB（`ADAPTIVE_JOURNAL_MAX_FILE_BYTES`），尾部读取；
 - 只解析 `type === 'tool_call'` 且 `ts` 在窗口内的行；命中上限后停止读取并标记截断；
 - 只允许字段：`ts`、`sessionId`、`data.toolName`、`data.runId`、`data.toolCallId`、`data.error`（截断 200 字符）、`data.errorType`、`data.exitCode`、`data.filePath` 仅在内部用于计数，不输出原文；
-- 解析失败计数，不猜测；journal 对账结果**不能替代**工具事件。
+- 解析失败计数，不猜测；journal 对账结果**不能替代**工具事件；
+- 日期文件被省略（`omittedFiles>0`）视为截断；读取失败（`errors>0`）与目录缺失（`dirsFound=0`）必须显式报告为覆盖不完整。
 
 ### 5.2 SQLite 有界查询（限制查询与解析工作量，不只限制输出）
 
@@ -146,7 +153,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 - 总查询行上限 5000；每机会行动 200 / 纠正 50 / 结果 20；
 - 必须显式设置 `PRAGMA query_only=ON`（只读连接双保险）；
 - 按既有索引：`idx_tool_calls_session_tool_use_id`、session/time 列；
-- 命中上限 → `coverage.truncated=true`，计数为下界。
+- 命中上限 → `coverage.complete=false` + 对应 `incompleteReasons`（`action_limit_reached` / `correction_limit_reached` / `outcome_limit_reached` / `weak_candidate_limit_reached` / `trajectory_row_limit_reached` / `session_query_limit_reached`），计数为下界。
 
 ### 5.3 JSONL 预算
 
@@ -166,6 +173,9 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 - 无终态、无 runId、无任务结果 → `unknown`；
 - duplicate/conflict 终态 → 全部保留并进入 `conflicts`；
 - 预算/窗口截断 → `coverage.complete=false` + `incompleteReasons`；
+- **唯一性举证必须建立在“无丢弃”之上**：journal 扫描只要出现 `malformedJsonLines`、`invalidEnvelopeRecords` 或 `invalidRecords`，`strong_run` 一律降为 `unknown`（被丢弃的记录可能属于同一 run）；
+- **EventLog 的省略不等于不存在**：日期文件被预算省略、解析失败、读取失败、目录缺失，以及每机会行动/纠正/结果/弱候选上限命中，都必须进入 `incompleteReasons` 并使 `coverage.complete=false`；
+- **身份缺失的工具事件必须计数**：`data.runId`/`sessionId` 缺失的 `tool_call` 行不计入任何 run，但必须输出 `unattributedToolCalls`，不得被读成“没有行动”；
 - 配置身份变化（fingerprint 不同）→ `config_changed`，旧结果不得充当新配置证据；
 - 行动早于 open → `pre_open`，不计为“之后”；先后关系仍 `unknown`。
 
@@ -205,6 +215,17 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 - **O4 `completed` 但任务实际失败**：只能输出 `model_completion_only`，不得计为成功。
 - **O5 工具声明写文件但无有效产物**：`artifacts.confirmedCount=0`、`confirmation='unknown'`，不得计为产物已产生。
 
+**评审补强（R1–R8，本轮新增并已先失败后通过）**：
+
+- **R1 journal 有丢弃 → 不得假唯一**：同一文件出现 malformed / invalid envelope / invalid record 时，`strong_run` 降为 `unknown`，并输出 `coverage.journal.malformedLines` / `invalidRecords`。
+- **R2 EventLog 解析失败 → 覆盖不完整**：`parseErrors>0` 必须进入 `incompleteReasons`，不得静默当作“没有行动”。
+- **R3 EventLog 日期文件被省略 → 截断**：`omittedFiles>0` 必须置 `eventLog.truncated=true` 并报告 `event_log_files_omitted`。
+- **R4 每机会上限 → 覆盖不完整**：`action/correction/outcome/weak_candidate` 上限命中必须使 `coverage.complete=false`。
+- **R5 四层必须可区分**：每个机会输出 `evidenceLayers`；只有 `runAssociation` 可非 unknown。
+- **R6 半合法 principle ID 数组 → 不可比对**：任一元非非空字符串时返回 `session_level_unknown`，不得降级为 `absent`。
+- **R7 工具事件缺身份 → 计数而非丢弃**：输出 `coverage.eventLog.unattributedToolCalls`，不得读成“没有行动”。
+- **R8 EventLog 目录缺失 → 显式不可用**：`dirsFound=0` 必须报告 `event_log_unavailable`，不得输出空事实并宣称完整。
+
 ## 9. 测试计划
 
 - 确定性 fixture：临时目录构造 `events_*.jsonl`（adaptive + tool_call）与临时 `trajectory.db`（session/assistant_turns/tool_calls/user_turns/task_outcomes）。
@@ -232,7 +253,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 
 ## 11. 验收标准
 
-1. 17 条反例（12 既有 + O1–O5）全部有确定性测试且通过；其中第 12 条按 §4.4 的“不可比对 → unknown”实现，不伪造 conflict；
+1. 25 条反例（12 既有 + O1–O5 + R1–R8）全部有确定性测试且通过；其中第 12 条按 §4.4 的“不可比对 → unknown”实现，不伪造 conflict；
 2. `strong_run` 仅在实际满足 §4.2 四条件时出现，并输出理由；
 3. O1/O2 下绝不出现 `strong_run`；
 4. 所有“完成/成功/产物”结论按 §4.4 降级，无一处升级；

@@ -100,7 +100,12 @@ export type BehaviorUnknownReason =
   | 'config_changed'
   | 'trajectory_db_unavailable'
   | 'trajectory_schema_incomplete'
+  | 'trajectory_query_failed'
+  | 'event_log_unavailable'
   | 'event_log_parse_limit_reached'
+  | 'event_log_files_omitted'
+  | 'event_log_parse_errors'
+  | 'event_log_read_error'
   | 'action_limit_reached'
   | 'correction_limit_reached'
   | 'outcome_limit_reached'
@@ -190,6 +195,17 @@ export interface BehaviorLinkageInvocation {
   };
   association: BehaviorAssociation;
   associationReasons: BehaviorAssociationReason[];
+  /**
+   * Explicit four-layer claim boundary. Only `runAssociation` is ever derived
+   * from recorded facts; request-level attribution, principle adherence and
+   * causal improvement are not observable with the current evidence.
+   */
+  evidenceLayers: {
+    runAssociation: BehaviorAssociation;
+    requestAssociation: 'unknown';
+    principleAdherence: 'unknown';
+    behaviorImprovement: 'unknown';
+  };
   facts: {
     actions: BehaviorLinkageActionFact[];
     corrections: BehaviorLinkageCorrectionFact[];
@@ -225,6 +241,8 @@ export interface BehaviorLinkageReport {
       limitCode: AdaptiveJournalReport['coverage']['limitCode'];
       truncatedFiles: number;
       errors: number;
+      malformedLines: number;
+      invalidRecords: number;
     };
     eventLog: {
       dirsFound: number;
@@ -234,6 +252,8 @@ export interface BehaviorLinkageReport {
       truncated: boolean;
       omittedFiles: number;
       parseErrors: number;
+      errors: number;
+      unattributedToolCalls: number;
     };
     trajectory: {
       status: 'read' | 'unavailable';
@@ -421,6 +441,7 @@ interface EventLogCoverage {
   omittedFiles: number;
   parseErrors: number;
   errors: number;
+  unattributedToolCalls: number;
 }
 
 function selectEventLogFiles(input: {
@@ -458,7 +479,12 @@ function selectEventLogFiles(input: {
       })
       .filter((entry): entry is { name: string; dateKey: string } => entry !== null && dateSet.has(entry.dateKey))
       .sort((left, right) => right.dateKey.localeCompare(left.dateKey));
-    coverage.omittedFiles += Math.max(0, dateFiles.length - maxDateFilesPerDir);
+    const omitted = Math.max(0, dateFiles.length - maxDateFilesPerDir);
+    if (omitted > 0) {
+      coverage.omittedFiles += omitted;
+      // A whole date file was not read: this is bounded coverage, never "absent".
+      coverage.truncated = true;
+    }
     for (const entry of dateFiles.slice(0, maxDateFilesPerDir)) {
       selected.push({
         absolutePath: path.join(canonicalDir, entry.name),
@@ -482,28 +508,28 @@ interface BoundedLines {
 }
 
 function readTailLines(absolutePath: string, maxBytes: number): BoundedLines {
-  const stat = fs.statSync(absolutePath);
-  const start = Math.max(0, stat.size - maxBytes);
-  const length = stat.size - start;
-  if (length === 0) return { lines: [], bytesRead: 0, truncated: false };
-  const buffer = Buffer.alloc(length);
   const fd = fs.openSync(absolutePath, 'r');
   try {
+    const stat = fs.fstatSync(fd);
+    const start = Math.max(0, stat.size - maxBytes);
+    const length = stat.size - start;
+    if (length === 0) return { lines: [], bytesRead: 0, truncated: false };
+    const buffer = Buffer.alloc(length);
     fs.readSync(fd, buffer, 0, length, start);
+    let text = buffer.toString('utf8');
+    if (start > 0) {
+      const firstNewline = text.indexOf('\n');
+      text = firstNewline >= 0 ? text.slice(firstNewline + 1) : '';
+    }
+    const rawLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const lines = rawLines.map((line, index) => ({
+      text: line,
+      ordinal: start > 0 ? -1 : index + 1,
+    }));
+    return { lines, bytesRead: length, truncated: start > 0 };
   } finally {
     fs.closeSync(fd);
   }
-  let text = buffer.toString('utf8');
-  if (start > 0) {
-    const firstNewline = text.indexOf('\n');
-    text = firstNewline >= 0 ? text.slice(firstNewline + 1) : '';
-  }
-  const rawLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  const lines = rawLines.map((line, index) => ({
-    text: line,
-    ordinal: start > 0 ? -1 : index + 1,
-  }));
-  return { lines, bytesRead: length, truncated: start > 0 };
 }
 
 function hashRef(value: string): string {
@@ -591,6 +617,9 @@ function readToolCallRows(input: {
     }
   }
   coverage.toolCalls = rows.length;
+  coverage.unattributedToolCalls = rows.filter(
+    (row) => row.sessionId === null || row.runId === null,
+  ).length;
   return rows;
 }
 
@@ -796,7 +825,11 @@ function configChanged(invocation: AdaptiveJournalInvocation): boolean {
 function journalRangeComplete(report: AdaptiveJournalReport): boolean {
   return report.coverage.status === 'complete'
     && (report.truncation?.omitted ?? 0) === 0
-    && !report.outputTruncated;
+    && !report.outputTruncated
+    // Design §4.2: dropped parse/envelope/identity failures make uniqueness unproven.
+    && (report.totals.malformedJsonLines ?? 0) === 0
+    && (report.totals.invalidEnvelopeRecords ?? 0) === 0
+    && (report.totals.invalidRecords ?? 0) === 0;
 }
 
 function classifyAssociation(
@@ -855,7 +888,13 @@ function parsePrincipleIds(value: unknown): string[] | null {
   try {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return null;
-    return parsed.filter((entry): entry is string => typeof entry === 'string');
+    const ids: string[] = [];
+    for (const entry of parsed) {
+      // rc-4/rc-9: a partially invalid array is incomparable, not "absent".
+      if (typeof entry !== 'string' || entry.length === 0) return null;
+      ids.push(entry);
+    }
+    return ids;
   } catch {
     return null;
   }
@@ -1066,6 +1105,12 @@ function buildInvocation(input: {
     },
     association,
     associationReasons: reasons,
+    evidenceLayers: {
+      runAssociation: association,
+      requestAssociation: 'unknown',
+      principleAdherence: 'unknown',
+      behaviorImprovement: 'unknown',
+    },
     facts: {
       actions,
       corrections,
@@ -1149,6 +1194,7 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
     omittedFiles: 0,
     parseErrors: 0,
     errors: 0,
+    unattributedToolCalls: 0,
   };
   const toolCalls = readToolCallRows({
     workspaceDir: input.workspaceDir,
@@ -1197,7 +1243,11 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
 
   const incompleteReasons: BehaviorUnknownReason[] = [];
   if (!rangeComplete) incompleteReasons.push('journal_range_incomplete');
-  if (eventLog.truncated) incompleteReasons.push('event_log_parse_limit_reached');
+  if (eventLog.dirsFound === 0) incompleteReasons.push('event_log_unavailable');
+  if (eventLog.omittedFiles > 0) incompleteReasons.push('event_log_files_omitted');
+  else if (eventLog.truncated) incompleteReasons.push('event_log_parse_limit_reached');
+  if (eventLog.parseErrors > 0) incompleteReasons.push('event_log_parse_errors');
+  if (eventLog.errors > 0) incompleteReasons.push('event_log_read_error');
   if (trajectory.status === 'unavailable') {
     incompleteReasons.push(trajectory.reasons.includes('trajectory_schema_incomplete')
       ? 'trajectory_schema_incomplete'
@@ -1205,6 +1255,19 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
   } else {
     if (trajectory.reasons.includes('trajectory_row_limit_reached')) incompleteReasons.push('trajectory_row_limit_reached');
     if (trajectory.reasons.includes('session_query_limit_reached')) incompleteReasons.push('session_query_limit_reached');
+    if (trajectory.reasons.includes('trajectory_query_failed')) incompleteReasons.push('trajectory_query_failed');
+  }
+  // Per-opportunity caps are budgets too: a lower-bound list must not read as complete.
+  const perInvocationCaps: BehaviorUnknownReason[] = [
+    'action_limit_reached',
+    'correction_limit_reached',
+    'outcome_limit_reached',
+    'weak_candidate_limit_reached',
+  ];
+  for (const code of perInvocationCaps) {
+    if (invocations.some((item) => item.unknowns.some((entry) => entry.reasonCode === code))) {
+      incompleteReasons.push(code);
+    }
   }
 
   const byAssociation: Record<BehaviorAssociation, number> = {
@@ -1217,10 +1280,23 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
   for (const invocation of invocations) byAssociation[invocation.association] += 1;
 
   const nextAction: string[] = [];
-  if (incompleteReasons.includes('journal_range_incomplete')) nextAction.push('缩小 --since 窗口或提高 --max-date-files 后重试。');
-  if (eventLog.truncated) nextAction.push('提高 --max-event-lines，或缩小时间窗口以读取完整的工具事件。');
+  if (incompleteReasons.includes('journal_range_incomplete')) nextAction.push('缩小 --since 窗口或提高 --max-date-files 后重试；日志中被丢弃的解析/身份失败不会被当作“不存在”。');
+  if (incompleteReasons.includes('event_log_unavailable')) nextAction.push('未找到 EventLog 目录：本次没有可关联的工具事件，不代表没有发生行动。');
+  if (incompleteReasons.includes('event_log_files_omitted')) nextAction.push('提高 --max-date-files，或缩小 --since 窗口以读取全部工具事件文件。');
+  if (incompleteReasons.includes('event_log_parse_limit_reached')) nextAction.push('提高 --max-event-lines，或缩小时间窗口以读取完整的工具事件。');
+  if (incompleteReasons.includes('event_log_parse_errors')) nextAction.push('部分 EventLog 行无法解析；这些行未被当作“没有行动”。');
+  if (incompleteReasons.includes('event_log_read_error')) nextAction.push('部分日志目录/文件不可读；检查权限与符号链接后重试。');
   if (incompleteReasons.includes('trajectory_db_unavailable')) nextAction.push('轨迹库尚不存在；先让插件写入轨迹，或仅使用运行级关联。');
   if (incompleteReasons.includes('trajectory_schema_incomplete')) nextAction.push('轨迹库缺少本读取器所需列；本命令不迁移，请先修复写侧 schema。');
+  if (incompleteReasons.includes('trajectory_query_failed')) nextAction.push('轨迹查询失败；修复数据库可读性后重试。');
+  if (incompleteReasons.includes('action_limit_reached')) nextAction.push('提高 --max-actions 以读取该机会的全部行动。');
+  if (incompleteReasons.includes('correction_limit_reached')) nextAction.push('提高 --max-corrections 以读取该机会的全部纠正记录。');
+  if (incompleteReasons.includes('outcome_limit_reached')) nextAction.push('提高 --max-outcomes 以读取该机会的全部任务结果。');
+  if (incompleteReasons.includes('weak_candidate_limit_reached')) nextAction.push('提高 --max-weak-candidates 以读取全部弱候选。');
+  if (incompleteReasons.includes('trajectory_row_limit_reached') || incompleteReasons.includes('session_query_limit_reached')) {
+    nextAction.push('提高 --max-trajectory-rows/--max-session-queries，或缩小时间窗口。');
+  }
+  if (eventLog.unattributedToolCalls > 0) nextAction.push('部分工具事件缺少 run/session 身份，已排除在关联之外；不要把它们当作未发生。');
   if (invocations.some((item) => item.association === 'ambiguous')) nextAction.push('同一 run 存在多个干预机会；按 hookInvocationId 单独复核。');
   if (nextAction.length === 0) nextAction.push('无需操作。');
 
@@ -1244,6 +1320,8 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
         limitCode: report.coverage.limitCode,
         truncatedFiles: report.coverage.truncatedFiles.length,
         errors: report.coverage.errors.length,
+        malformedLines: report.totals.malformedJsonLines ?? 0,
+        invalidRecords: report.totals.invalidRecords ?? 0,
       },
       eventLog: {
         dirsFound: eventLog.dirsFound,
@@ -1253,6 +1331,8 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
         truncated: eventLog.truncated,
         omittedFiles: eventLog.omittedFiles,
         parseErrors: eventLog.parseErrors,
+        errors: eventLog.errors,
+        unattributedToolCalls: eventLog.unattributedToolCalls,
       },
       trajectory: {
         status: trajectory.status,

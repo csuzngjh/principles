@@ -504,6 +504,98 @@ describe('pre-existing counterexamples', () => {
   });
 });
 
+describe('review — coverage completeness and claim layers', () => {
+  it('does not prove uniqueness when the journal scan dropped malformed lines', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      ...SINGLE_RUN_JOURNAL(dir),
+      '{"ts":"2026-11-05T09:06:00.000Z","type":"adaptive_delivery",broken',
+    ]);
+    const report = run(dir);
+    expect(report.coverage.journal.malformedLines).toBe(1);
+    expect(report.coverage.journal.complete).toBe(false);
+    expect(invocation(report, 'inv-1').association).toBe('unknown');
+    expect(report.coverage.incompleteReasons).toContain('journal_range_incomplete');
+  });
+
+  it('reports EventLog parse failures as incomplete coverage', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      ...SINGLE_RUN_JOURNAL(dir),
+      '{"ts":"2026-11-05T09:06:00.000Z","type":"tool_call",broken',
+    ]);
+    const report = run(dir);
+    expect(report.coverage.eventLog.parseErrors).toBe(1);
+    expect(report.coverage.incompleteReasons).toContain('event_log_parse_errors');
+  });
+
+  it('treats omitted EventLog date files as truncated coverage', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-04', [toolCallLine({ ts: '2026-11-04T09:02:00.000Z', runId: 'run-1' })]);
+    writeEvents(dir, '2026-11-05', SINGLE_RUN_JOURNAL(dir));
+    const report = run(dir, { limits: { maxDateFilesPerDir: 1 } });
+    expect(report.coverage.eventLog.omittedFiles).toBeGreaterThanOrEqual(1);
+    expect(report.coverage.eventLog.truncated).toBe(true);
+    expect(report.coverage.incompleteReasons).toContain('event_log_files_omitted');
+  });
+
+  it('marks per-invocation action caps as incomplete coverage', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      ...SINGLE_RUN_JOURNAL(dir),
+      toolCallLine({ ts: '2026-11-05T09:06:00.000Z', runId: 'run-1', toolCallId: 'tc-1' }),
+      toolCallLine({ ts: '2026-11-05T09:07:00.000Z', runId: 'run-1', toolCallId: 'tc-2' }),
+    ]);
+    const report = run(dir, { limits: { maxActionsPerInvocation: 1 } });
+    expect(invocation(report, 'inv-1').facts.actions).toHaveLength(1);
+    expect(report.coverage.complete).toBe(false);
+    expect(report.coverage.incompleteReasons).toContain('action_limit_reached');
+  });
+
+  it('separates run-level association from request-level, adherence and causal claims', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      ...SINGLE_RUN_JOURNAL(dir),
+      toolCallLine({ runId: 'run-1', toolCallId: 'tc-1' }),
+    ]);
+    const report = run(dir);
+    expect(invocation(report, 'inv-1').evidenceLayers).toEqual({
+      runAssociation: 'strong_run',
+      requestAssociation: 'unknown',
+      principleAdherence: 'unknown',
+      behaviorImprovement: 'unknown',
+    });
+  });
+
+  it('treats a partially invalid principle id array as incomparable, not absent', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', SINGLE_RUN_JOURNAL(dir));
+    createTrajectory(dir, {
+      taskOutcomes: [{ sessionId: 'sess-1', taskId: 'run-1', outcome: 'completed', principleIdsJson: '[null]' }],
+    });
+    const report = run(dir);
+    expect(invocation(report, 'inv-1').facts.outcomes[0]?.principleBinding).toBe('session_level_unknown');
+  });
+
+  it('counts tool events whose run identity is missing instead of silently dropping them', () => {
+    const dir = workspace();
+    writeEvents(dir, '2026-11-05', [
+      ...SINGLE_RUN_JOURNAL(dir),
+      toolCallLine({ runId: null, toolCallId: 'tc-1' }),
+    ]);
+    const report = run(dir);
+    expect(report.coverage.eventLog.unattributedToolCalls).toBe(1);
+    expect(invocation(report, 'inv-1').facts.actions).toHaveLength(0);
+  });
+
+  it('reports an unavailable EventLog source instead of an empty result', () => {
+    const dir = workspace();
+    const report = run(dir);
+    expect(report.coverage.eventLog.dirsFound).toBe(0);
+    expect(report.coverage.incompleteReasons).toContain('event_log_unavailable');
+  });
+});
+
 describe('read-only and privacy contracts', () => {
   it('leaves every workspace file byte-identical', () => {
     const dir = workspace();
