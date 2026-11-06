@@ -1,0 +1,801 @@
+{
+  "ok": true,
+  "fieldMapping": [
+    {
+      "statisticField": "units.calls",
+      "source": "pd activation link report.totals / invocations[].intervention.hookInvocationId",
+      "eligibility": "schemaVersion = pd-aa-behavior-linkage/v1; unique hookInvocationId only",
+      "missingOutput": "state=unknown; never inferred from runs or tool calls"
+    },
+    {
+      "statisticField": "units.runs",
+      "source": "run-record.json.runId",
+      "eligibility": "schemaVersion = pd-aa-controlled-admission-run/v1; unique runId; identical bytes de-duplicated",
+      "missingOutput": "state=unknown"
+    },
+    {
+      "statisticField": "units.decisionOpportunities",
+      "source": "none in the current evidence set",
+      "eligibility": "requires a task-opportunity census with declared enumeration",
+      "missingOutput": "state=unknown; calls and runs must not be used as the denominator"
+    },
+    {
+      "statisticField": "units.experimentAttempts",
+      "source": "run-record.json (one record = one attempt)",
+      "eligibility": "unique runId; original positive-arm verdict retained",
+      "missingOutput": "state=unknown"
+    },
+    {
+      "statisticField": "T",
+      "source": "coverage-input opportunities[].classification.T + enumeration declaration",
+      "eligibility": "only for opportunities linked to a declared opportunity census",
+      "missingOutput": "unknown; no overall ratio; linked subset ratio stays not_applicable"
+    },
+    {
+      "statisticField": "V",
+      "source": "coverage-input opportunities[].classification.V + delivery order evidence",
+      "eligibility": "linked opportunity and evidence that delivery preceded the critical action",
+      "missingOutput": "unknown; strong_run alone is insufficient"
+    },
+    {
+      "statisticField": "O",
+      "source": "coverage-input opportunities[].classification.O + independent recognition evidence",
+      "eligibility": "linked opportunity and independent principle-adherence evidence",
+      "missingOutput": "unknown; fake-provider tool choice is not adherence"
+    },
+    {
+      "statisticField": "D",
+      "source": "existing verify-adaptive-delivery.mjs over independently pinned request/action captures",
+      "eligibility": "final_model_request boundary, exact target body, trusted pin, ordered action",
+      "missingOutput": "unknown; native delivery or a passing offline replay cannot confirm D"
+    },
+    {
+      "statisticField": "sameText",
+      "source": "coverage-input opportunities[].sameText",
+      "eligibility": "frozen input digest compared at the request boundary",
+      "missingOutput": "unknown"
+    },
+    {
+      "statisticField": "budget.cumulative",
+      "source": "experiment-budget.json (pd-aa-budget-ledger/v1)",
+      "eligibility": "all recorded runIds, cumulative caps and usage",
+      "missingOutput": "state=unknown; never reported as zero"
+    },
+    {
+      "statisticField": "budget.perRun",
+      "source": "run-record.json.attempt.used (fallback: arrays filtered by runId)",
+      "eligibility": "records whose runId equals the run under report",
+      "missingOutput": "state=unknown"
+    },
+    {
+      "statisticField": "runs[].originalVerdict",
+      "source": "run-record.json.positiveGate / controlGate",
+      "eligibility": "the recorded verdict at gate time",
+      "missingOutput": "state=unknown"
+    },
+    {
+      "statisticField": "runs[].offlineReevaluation",
+      "source": "offline-reevaluation.json",
+      "eligibility": "separate file, labelled derived; sourceRun must match a recorded run",
+      "missingOutput": "state=missing; never promoted to an experiment success"
+    },
+    {
+      "statisticField": "productionExclusions",
+      "source": "pollution audit with incidentWindow (v4)",
+      "eligibility": "incident time boundary + snapshot content; rowid is not an exclusion key",
+      "missingOutput": "state=not_audited; never treated as clean"
+    },
+    {
+      "statisticField": "benefit / harm",
+      "source": "evaluation evidence (not present in this evidence set)",
+      "eligibility": "independent outcome/evaluation evidence",
+      "missingOutput": "not_evaluated; never written as zero"
+    }
+  ],
+  "schemaVersion": "pd-aa-coverage-summary/v1",
+  "generatedAt": "2026-11-06T15:30:12.832Z",
+  "coverageInput": {
+    "schemaVersion": "aa-coverage-input.v1",
+    "windowId": "window:2026-11-06T10:50:00.000Z..2026-11-06T11:20:00.000Z",
+    "workspaceId": "workspace-sha256:24ef680bd2adef47",
+    "enumeration": "unknown",
+    "config": {
+      "host": "openclaw",
+      "hostVersion": "unknown",
+      "runtimeMode": "unknown",
+      "pluginVersion": "2.6.5",
+      "effectiveHookSetFingerprint": "sha256:f97290dfa5f2b68a5597e72b79b59eaa99df0a63ea3f0e4bf9dc9441b69fa343",
+      "evidenceCoverage": "partial"
+    },
+    "opportunities": [
+      {
+        "opportunityId": null,
+        "classification": {
+          "T": "unknown",
+          "V": "unknown",
+          "O": "unknown"
+        },
+        "classificationReferences": {
+          "T": "missing:no_decision_opportunity_census",
+          "V": "missing:no_timely_delivery_order_evidence",
+          "O": "missing:no_independent_principle_adherence_evidence"
+        },
+        "sameText": "unknown",
+        "checks": []
+      },
+      {
+        "opportunityId": null,
+        "classification": {
+          "T": "unknown",
+          "V": "unknown",
+          "O": "unknown"
+        },
+        "classificationReferences": {
+          "T": "missing:no_decision_opportunity_census",
+          "V": "missing:no_timely_delivery_order_evidence",
+          "O": "missing:no_independent_principle_adherence_evidence"
+        },
+        "sameText": "unknown",
+        "checks": []
+      }
+    ]
+  },
+  "trust": {
+    "sources": []
+  },
+  "provenance": {
+    "linkage": [
+      {
+        "role": "linkage",
+        "source": "linkage-1105.json",
+        "sha256": "122f3b8bb042e316b1f381a15f1e01ed8e4123da53c2d902c3acc10dbdadb785",
+        "schemaVersion": "pd-aa-behavior-linkage/v1"
+      },
+      {
+        "role": "linkage",
+        "source": "linkage-1258.json",
+        "sha256": "18159a3c109db81ac94adbedb6ae69c681463a090fc61d1fd763aa518f9cb462",
+        "schemaVersion": "pd-aa-behavior-linkage/v1"
+      }
+    ],
+    "budget": [
+      {
+        "role": "budget",
+        "source": "experiment-budget.json",
+        "sha256": "e2b948dcccdfb653222ff1a24f876ccd134d783e10c666834505f1bc28899e38",
+        "schemaVersion": "pd-aa-budget-ledger/v1"
+      }
+    ],
+    "runs": [
+      {
+        "role": "run-record",
+        "source": "run-record.json",
+        "sha256": "0ad44b19bd7a6ab5d156b02b0e7a28702f1a89e6cc0c47566c6f79fc71545346",
+        "runId": "aa-run-20261106T1105Z",
+        "schemaVersion": "pd-aa-controlled-admission-run/v1"
+      },
+      {
+        "role": "run-record",
+        "source": "run-record.json",
+        "sha256": "9b339ff239c210ada4a733f417588b2f21b9b0a5e3e1ef08f2987a010669f736",
+        "runId": "aa-run-20261106T1258Z",
+        "schemaVersion": "pd-aa-controlled-admission-run/v1"
+      }
+    ],
+    "reevaluations": [
+      {
+        "role": "offline-reevaluation",
+        "source": "offline-reevaluation.json",
+        "sha256": "5b7ade6c7ba5e2586b6c923ac8fd948d06b57ce6cf81cc33e6836e161c70d24c",
+        "runId": "aa-run-20261106T1258Z",
+        "schemaVersion": "pd-aa-offline-reevaluation/v1"
+      }
+    ],
+    "plans": [
+      {
+        "role": "run-plan",
+        "source": "plan.json",
+        "sha256": "b209307c93295b5ca02ff6ec1b6b74ca65df3db3027c94ff5de43e22d385a3ad",
+        "runId": "aa-run-20261106T1105Z"
+      },
+      {
+        "role": "run-plan",
+        "source": "plan.json",
+        "sha256": "0f3a0c3b947da8e3c1c1f48ad99a79a844644b7bf9fab02b9d6a8f4ba037c6ec",
+        "runId": "aa-run-20261106T1258Z"
+      }
+    ],
+    "pollutionAudits": [
+      {
+        "role": "pollution-audit",
+        "source": "pollution-exclusion-2026-11-06-v4.json",
+        "sha256": "604453fea3a5a04bad7d2b6ddf502dc9494925c4f493a61d914abe1493138524",
+        "schemaVersion": "pd-aa-prod-audit/v4"
+      }
+    ]
+  },
+  "duplicates": {
+    "linkage": 0,
+    "runRecords": 0,
+    "reevaluations": 0,
+    "plans": 0,
+    "budgets": 0,
+    "pollutionAudits": 0
+  },
+  "units": {
+    "calls": {
+      "state": "recorded",
+      "observed": 2,
+      "reportedTotals": {
+        "invocations": 1,
+        "byAssociation": {
+          "strong_run": 1,
+          "weak": 0,
+          "ambiguous": 0,
+          "unknown": 0,
+          "conflict": 0
+        },
+        "actions": 1,
+        "corrections": 0,
+        "outcomes": 1,
+        "weakCandidates": 1
+      },
+      "scope": "behavior-linkage window; a call is not a decision opportunity"
+    },
+    "runs": {
+      "state": "recorded",
+      "observed": 2,
+      "ids": [
+        "aa-run-20261106T1105Z",
+        "aa-run-20261106T1258Z"
+      ]
+    },
+    "decisionOpportunities": {
+      "state": "unknown",
+      "observed": 0,
+      "reason": "no declared task-opportunity census; linking calls to opportunities is not permitted"
+    },
+    "experimentAttempts": {
+      "state": "recorded",
+      "observed": 2,
+      "failed": 2,
+      "succeeded": 0,
+      "controlArmsExecuted": 0
+    }
+  },
+  "runs": [
+    {
+      "runId": "aa-run-20261106T1105Z",
+      "fixtureId": "AA-FIXTURE-aa-run-20261106T1105Z",
+      "evidenceSha256": "0ad44b19bd7a6ab5d156b02b0e7a28702f1a89e6cc0c47566c6f79fc71545346",
+      "originalVerdict": {
+        "state": "recorded",
+        "ok": false,
+        "failures": [
+          {
+            "id": "identity",
+            "status": "FAIL"
+          },
+          {
+            "id": "tool-surface",
+            "status": "FAIL"
+          }
+        ],
+        "stopBeforeControl": [
+          "identity",
+          "tool-surface"
+        ],
+        "controlExecuted": false
+      },
+      "controlVerdict": {
+        "state": "unknown",
+        "ok": "unknown",
+        "failures": [],
+        "detail": "gate_not_recorded"
+      },
+      "deliveryPath": "unknown",
+      "nativeDeliveryObserved": "unknown",
+      "controlledFacts": {
+        "admissionConsumed": "unknown",
+        "admissionIdentity": "unknown",
+        "targetBodyReachedEndpoint": "unknown",
+        "controlledInstrumentationProven": false,
+        "nativeDeliveryIsNotControlledSuccess": true
+      },
+      "linkage": {
+        "state": "matched_by_run",
+        "matchBasis": "action_timestamp_proximity",
+        "matchDeltaMs": 22,
+        "hookInvocationId": "854b8c37-af73-49eb-afe4-b95daed1ef0b",
+        "association": "strong_run",
+        "requestAssociation": "unknown",
+        "principleAdherence": "unknown",
+        "actionOrdering": [
+          "unknown"
+        ],
+        "toolNames": [
+          "read"
+        ]
+      },
+      "offlineReevaluation": {
+        "state": "missing"
+      },
+      "endpoint": {
+        "state": "recorded",
+        "requestCount": 2,
+        "requestIds": [
+          "http-001",
+          "http-002"
+        ],
+        "endpointUserMessageSha256": "ccbcc71e9a6220b748cb97558d45ec0c88943886533bece87f4d51ea070a13fa",
+        "frozenInputSha256": "813856594fedd609eef1b931ec026200cd62ace0842419a2381df108d624b9f8",
+        "userMessageMatchesFrozenInput": "different",
+        "digestBasis": "endpoint userMessageSha256 vs plan.inputSha256; a difference records the known limitation, it is not a D verdict"
+      },
+      "cost": {
+        "state": "recorded",
+        "currentRun": {
+          "hostTurns": 1,
+          "httpRequests": 2,
+          "toolCalls": 1,
+          "paidCalls": 0
+        },
+        "cumulativeAtRecord": {
+          "hostTurns": 2,
+          "httpRequests": 2,
+          "toolCalls": 1,
+          "paidCalls": 0
+        },
+        "historicalRecordsExcluded": {
+          "hostTurns": 0,
+          "httpRequests": 0,
+          "toolCalls": 0,
+          "paidCalls": 0
+        }
+      },
+      "cleanup": {
+        "recorded": true,
+        "admission": "copied-and-removed",
+        "providers": [
+          "positive"
+        ]
+      }
+    },
+    {
+      "runId": "aa-run-20261106T1258Z",
+      "fixtureId": "AA-FIXTURE-aa-run-20261106T1258Z",
+      "evidenceSha256": "9b339ff239c210ada4a733f417588b2f21b9b0a5e3e1ef08f2987a010669f736",
+      "originalVerdict": {
+        "state": "recorded",
+        "ok": false,
+        "failures": [
+          {
+            "id": "tool-invocation",
+            "status": "FAIL"
+          },
+          {
+            "id": "admission-identity",
+            "status": "FAIL"
+          }
+        ],
+        "stopBeforeControl": [
+          "tool-invocation",
+          "admission-identity"
+        ],
+        "controlExecuted": false
+      },
+      "controlVerdict": {
+        "state": "unknown",
+        "ok": "unknown",
+        "failures": [],
+        "detail": "gate_not_recorded"
+      },
+      "deliveryPath": "controlled",
+      "nativeDeliveryObserved": "not_confirmed",
+      "controlledFacts": {
+        "admissionConsumed": "confirmed",
+        "admissionIdentity": "not_verified",
+        "targetBodyReachedEndpoint": "confirmed",
+        "controlledInstrumentationProven": false,
+        "nativeDeliveryIsNotControlledSuccess": false
+      },
+      "linkage": {
+        "state": "matched_by_run",
+        "matchBasis": "host_identity",
+        "matchDeltaMs": null,
+        "hookInvocationId": "4b181412-1734-432d-a281-28e3cb68d8e8",
+        "association": "strong_run",
+        "requestAssociation": "unknown",
+        "principleAdherence": "unknown",
+        "actionOrdering": [
+          "unknown"
+        ],
+        "toolNames": [
+          "read"
+        ]
+      },
+      "offlineReevaluation": {
+        "state": "present",
+        "generatedAt": "2026-11-06T13:15:48.263Z",
+        "recordedGateOk": false,
+        "correctedGateOk": true,
+        "knownDefectsFixedAfterTheRun": [
+          "Cumulative-ledger tool calls were counted as the current run invocation.",
+          "Fixture identity was read from the consumed admission, which the plugin contract does not preserve: fixtureRef is dropped on rewrite; the manifest hash is the correct binding."
+        ],
+        "affectsOriginalVerdict": false,
+        "note": "derived offline replay; the recorded run verdict remains authoritative",
+        "evidenceSha256": "5b7ade6c7ba5e2586b6c923ac8fd948d06b57ce6cf81cc33e6836e161c70d24c"
+      },
+      "endpoint": {
+        "state": "recorded",
+        "requestCount": 2,
+        "requestIds": [
+          "http-003",
+          "http-004"
+        ],
+        "endpointUserMessageSha256": "77f64517a0919948940eeb6b9e72b6aa250d2da3c6453606c32a623c8342a1b8",
+        "frozenInputSha256": "458dac4f7d14ebd159c38c27783e6d26ba553686b26f89343e1ca491da02cef7",
+        "userMessageMatchesFrozenInput": "different",
+        "digestBasis": "endpoint userMessageSha256 vs plan.inputSha256; a difference records the known limitation, it is not a D verdict"
+      },
+      "cost": {
+        "state": "recorded",
+        "currentRun": {
+          "hostTurns": 1,
+          "httpRequests": 2,
+          "toolCalls": 1,
+          "paidCalls": 0
+        },
+        "cumulativeAtRecord": {
+          "hostTurns": 3,
+          "httpRequests": 4,
+          "toolCalls": 2,
+          "paidCalls": 0
+        },
+        "historicalRecordsExcluded": {
+          "hostTurns": 1,
+          "httpRequests": 2,
+          "toolCalls": 1,
+          "paidCalls": 0
+        }
+      },
+      "cleanup": {
+        "recorded": true,
+        "admission": "copied-and-removed",
+        "providers": [
+          "positive"
+        ]
+      }
+    }
+  ],
+  "budget": {
+    "state": "recorded",
+    "sourceSha256": "e2b948dcccdfb653222ff1a24f876ccd134d783e10c666834505f1bc28899e38",
+    "caps": {
+      "hostTurns": 4,
+      "httpRequests": 5,
+      "toolCalls": 2,
+      "paidCalls": 0
+    },
+    "used": {
+      "hostTurns": 3,
+      "httpRequests": 4,
+      "toolCalls": 2,
+      "paidCalls": 0
+    },
+    "remaining": {
+      "hostTurns": 1,
+      "httpRequests": 1,
+      "toolCalls": 0,
+      "paidCalls": 0
+    },
+    "overBudget": false,
+    "armBudgets": {
+      "positive": {
+        "hostTurns": 1,
+        "httpRequests": 2,
+        "toolCalls": 1,
+        "paidCalls": 0
+      },
+      "control": {
+        "hostTurns": 1,
+        "httpRequests": 1,
+        "toolCalls": 0,
+        "paidCalls": 0
+      }
+    }
+  },
+  "coverage": {
+    "windowId": "window:2026-11-06T10:50:00.000Z..2026-11-06T11:20:00.000Z",
+    "configIdentity": "b10923235a2aacc3f36715a926e3c29b033479300d17889e13e338b7af79f3be",
+    "configurationCoverage": "unknown",
+    "enumeration": "unknown",
+    "declaredEnumeration": "unknown",
+    "counts": {
+      "T": {
+        "confirmed": 0,
+        "unknown": 0
+      },
+      "V": {
+        "confirmed": 0,
+        "unknown": 0
+      },
+      "O": {
+        "confirmed": 0,
+        "unknown": 0
+      },
+      "D": {
+        "confirmed": 0,
+        "unknown": 0
+      }
+    },
+    "ratios": {
+      "D/T": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "unknown"
+      },
+      "V/T": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "unknown"
+      },
+      "O/V": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "not_applicable"
+      },
+      "D/O": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "not_applicable"
+      }
+    },
+    "newTimely": {
+      "confirmed": 0,
+      "unknown": 0
+    },
+    "diagnostics": {
+      "duplicateRows": 0,
+      "conflictingOpportunities": 0,
+      "conflictingChecks": 0,
+      "unlinkedRecords": 2,
+      "fixtureChecks": 0,
+      "excludedTimelyDeliveries": 0
+    },
+    "linkedSubsetRatios": {
+      "D/T": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "not_applicable"
+      },
+      "V/T": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "not_applicable"
+      },
+      "O/V": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "not_applicable"
+      },
+      "D/O": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": null,
+        "unknownCount": 0,
+        "unknownNumerator": 0,
+        "unknownDenominator": 0,
+        "status": "not_applicable"
+      }
+    },
+    "behavioralImprovement": "not_evaluated",
+    "conclusionScope": "observed_records_only_no_population_denominator"
+  },
+  "coverageInterpretation": {
+    "T": {
+      "state": "unknown",
+      "confirmed": 0,
+      "unknown": 0,
+      "reason": "no declared decision-opportunity census; calls and runs are not the denominator"
+    },
+    "V": {
+      "state": "unknown",
+      "confirmed": 0,
+      "unknown": 0,
+      "reason": "no linked opportunity with timely delivery-order evidence"
+    },
+    "O": {
+      "state": "unknown",
+      "confirmed": 0,
+      "unknown": 0,
+      "reason": "no linked opportunity with independent principle-adherence evidence"
+    },
+    "D": {
+      "state": "unknown",
+      "confirmed": 0,
+      "unknown": 0,
+      "reason": "no independently pinned request+action evidence; strong_run does not confirm delivery"
+    },
+    "ratios": {
+      "population": {
+        "D/T": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "unknown"
+        },
+        "V/T": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "unknown"
+        },
+        "O/V": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "not_applicable"
+        },
+        "D/O": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "not_applicable"
+        }
+      },
+      "linkedSubset": {
+        "D/T": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "not_applicable"
+        },
+        "V/T": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "not_applicable"
+        },
+        "O/V": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "not_applicable"
+        },
+        "D/O": {
+          "numerator": 0,
+          "denominator": 0,
+          "value": null,
+          "unknownCount": 0,
+          "unknownNumerator": 0,
+          "unknownDenominator": 0,
+          "status": "not_applicable"
+        }
+      }
+    },
+    "zeroDenominator": {
+      "state": "unknown",
+      "linkedSubsetDOverT": "not_applicable",
+      "reason": "the linked subset has no denominator; this is not a confirmed zero population"
+    },
+    "sameText": {
+      "state": "unknown",
+      "reason": "endpoint user body digest and frozen input digest are recorded separately; a difference is a limitation, not a D verdict"
+    },
+    "benefit": {
+      "state": "not_evaluated",
+      "value": null,
+      "reason": "no control arm and no evaluation evidence"
+    },
+    "harm": {
+      "state": "not_evaluated",
+      "value": null,
+      "reason": "no evaluation evidence"
+    }
+  },
+  "coverageGuards": {
+    "sourceComplete": true,
+    "incompleteReasons": [],
+    "associationUsedAsCoverage": false,
+    "strongRunConfirmsDelivery": false,
+    "offlineReevaluationChangesRecordedVerdict": false,
+    "nativeDeliveryCountsAsControlledSuccess": false,
+    "populationDenominator": "unknown"
+  },
+  "productionExclusions": {
+    "state": "audited",
+    "sourceSha256": "604453fea3a5a04bad7d2b6ddf502dc9494925c4f493a61d914abe1493138524",
+    "incidentWindow": {
+      "from": "2026-11-06T09:35:00Z",
+      "to": "2026-11-06T10:20:00Z"
+    },
+    "exclusionKey": "incident_time_boundary+snapshot_content",
+    "rowidIsExclusionKey": false,
+    "excludedCounts": {
+      "principleApplications": 14,
+      "interventionEvidenceRecords": 14,
+      "capabilityDeclarations": 6
+    },
+    "retainedDeclarations": {
+      "count": 6,
+      "declaredAtValues": [
+        "2026-11-06T12:06:27.182Z"
+      ],
+      "rowsInIncidentBoundary": 0
+    },
+    "classificationModel": [
+      "The contaminated artifact is the snapshot captured in the 10:38Z backup with declared_at 2026-11-06T10:05:35.929Z.",
+      "Exclusion keys are the incident time boundary plus the snapshot content — NOT rowid.",
+      "Production re-declared the same capability set later; those later rows are legitimate declarations and stay retained.",
+      "rowid values listed below are snapshot references so the incident batch can be re-read from the backup; they are not a permanent exclusion key."
+    ]
+  },
+  "benefitHarm": {
+    "state": "not_evaluated",
+    "reason": "no control arm and no independent evaluation evidence"
+  },
+  "conclusionScope": "observed_records_only_no_population_denominator",
+  "unknowns": [
+    "No decision-opportunity census exists, so T and all population ratios are unknown.",
+    "No independently pinned request+action evidence exists, so D is unknown even where association is strong_run.",
+    "The endpoint user body digest and frozen input digest differ; this limitation is preserved and does not decide D.",
+    "The control arm never ran, so benefit, harm and causal improvement are not evaluated.",
+    "A fake provider specified the tool; this does not show the Agent independently followed the principle."
+  ],
+  "nextDecisions": [
+    "Decide whether to run the untouched control arm under the remaining budget (1 host turn / 1 HTTP request).",
+    "Decide whether a future run should capture independently pinned request and action evidence, or accept D as permanently unknown for this experiment.",
+    "Decide whether to design a task-opportunity census before any overall coverage claim."
+  ]
+}
