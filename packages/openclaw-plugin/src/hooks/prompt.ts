@@ -19,6 +19,13 @@ import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-rea
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
 import {
+  claimControlledAdmission,
+  isControlledAdmissionConfigured,
+  releaseControlledAdmissionClaim,
+  takeControlledAdmissionHandoff,
+  type ControlledAdmissionClaim,
+} from './controlled-admission.js';
+import {
   buildAdaptiveConfigIdentitySnapshot,
   buildUnavailableAdaptiveConfigIdentity,
   forgetAdaptiveConfigIdentity,
@@ -317,8 +324,7 @@ function collectAdaptiveConfigIdentity(
 }
 
 /** Called before shared priority packing, or at the local entry before its work begins. */
-export function beginAdaptivePromptInvocation(ctx: PluginHookAgentContext & { api?: PromptHookApi }, target: { artifactId: string; activationId: string }, runtimeMode: string): string {
-  const hookInvocationId = randomUUID();
+export function beginAdaptivePromptInvocation(ctx: PluginHookAgentContext & { api?: PromptHookApi }, target: { artifactId: string; activationId: string }, runtimeMode: string, hookInvocationId: string = randomUUID()): string {
   // One frozen snapshot per invocation: the terminal record must reuse it even
   // if the environment changes while this invocation is in flight.
   const identity = collectAdaptiveConfigIdentity(ctx, runtimeMode);
@@ -601,6 +607,8 @@ export async function handleBeforePromptBuild(
   let adaptiveDirectiveText: string | undefined;
   let adaptiveOutcome: AdaptiveInterventionResult | undefined;
   let adaptiveAdmissionId: string | undefined;
+  let adaptiveOperatorAdmission: (ControlledAdmissionClaim['identity'] & { claimId: string; status: 'claimed' }) | undefined;
+  let admissionHandoffMissing = false;
   let adaptiveExpectedTarget: ActivatedPrinciple | undefined;
   let adaptiveTargetBody: string | undefined;
   let adaptiveDeadlineAt = 0;
@@ -648,19 +656,33 @@ export async function handleBeforePromptBuild(
         && packing.targetActivationId === adaptiveMapping.activationId
         && packing.targetSnapshot.artifactId === adaptiveMapping.artifactId) {
         const baseline = packing.nativeBaseline;
-        adaptiveExpectedTarget = packing.targetSnapshot;
-        adaptiveTargetBody = packing.targetBody;
         adaptiveDeadlineAt = Math.min(packing.deadlineAt ?? adaptiveStartedAt + adaptiveMapping.softTimeoutMs, adaptiveMapping.expiresAtMs);
-        const admitted = getOwnValue(event, 'currentUserMessageId');
-        if (typeof admitted === 'string') adaptiveAdmissionId = admitted;
-        const safeIds = baseline.principleIds.filter(id => id !== packing.targetSnapshot?.principleId);
-        adaptiveSafeFallback = { text: safeIds.length ? baseline.additionalContext.replace(packing.targetBody, '') : '', ids: safeIds };
-        if (packing.status === 'prioritized') adaptiveBaseline = { text: baseline.additionalContext, ids: baseline.principleIds };
-        adaptiveDirectiveText = sharedActivePrinciplePrompt.additionalContext;
-        adaptiveOutcome = { text: adaptiveDirectiveText, reason: packing.status === 'prioritized' ? 'target_prioritized' : 'native_already_contains_target',
-          addedTarget: packing.status === 'prioritized', displacedActivationIds: packing.displacedActivationIds,
-          selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds,
-          targetBodySha256: createHash('sha256').update(packing.targetBody, 'utf8').digest('hex') };
+        const handedOff = takeControlledAdmissionHandoff(event, packing.hookInvocationId);
+        if (handedOff) {
+          adaptiveOperatorAdmission = { ...handedOff.identity, claimId: handedOff.claimId, status: 'claimed' };
+        } else {
+          const admitted = getOwnValue(event, 'currentUserMessageId');
+          if (typeof admitted === 'string') adaptiveAdmissionId = admitted;
+          // A replay, a duplicate callback or a lost handoff can never re-apply
+          // the priority target; the Native baseline is preserved instead.
+          else admissionHandoffMissing = isControlledAdmissionConfigured();
+        }
+        adaptiveSafeFallback = { text: baseline.principleIds.filter(id => id !== packing.targetSnapshot?.principleId).length
+          ? baseline.additionalContext.replace(packing.targetBody, '') : '', ids: baseline.principleIds.filter(id => id !== packing.targetSnapshot?.principleId) };
+        if (!admissionHandoffMissing) {
+          adaptiveExpectedTarget = packing.targetSnapshot;
+          adaptiveTargetBody = packing.targetBody;
+          if (packing.status === 'prioritized') adaptiveBaseline = { text: baseline.additionalContext, ids: baseline.principleIds };
+          adaptiveDirectiveText = sharedActivePrinciplePrompt.additionalContext;
+          adaptiveOutcome = { text: adaptiveDirectiveText, reason: packing.status === 'prioritized' ? 'target_prioritized' : 'native_already_contains_target',
+            addedTarget: packing.status === 'prioritized', displacedActivationIds: packing.displacedActivationIds,
+            selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds,
+            targetBodySha256: createHash('sha256').update(packing.targetBody, 'utf8').digest('hex') };
+        } else {
+          adaptiveDirectiveText = baseline.additionalContext;
+          adaptiveOutcome = { text: baseline.additionalContext, reason: 'admission_handoff_missing',
+            addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: baseline.principleIds };
+        }
       } else if (adaptiveMapping && packing) {
         adaptiveOutcome = { text: sharedActivePrinciplePrompt.additionalContext, reason: packing.reason ?? 'target_unavailable', addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
       } else if (adaptiveMapping && isUserInteraction && !isAgentToAgent && !isMinimalMode) {
@@ -673,8 +695,13 @@ export async function handleBeforePromptBuild(
             addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
         }
       }
-      runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
-      for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
+      if (admissionHandoffMissing && sharedActivePrinciplePrompt.adaptivePacking?.nativeBaseline) {
+        runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.adaptivePacking.nativeBaseline.additionalContext;
+        for (const id of sharedActivePrinciplePrompt.adaptivePacking.nativeBaseline.principleIds) runtimeV2PrincipleIds.add(id);
+      } else {
+        runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
+        for (const id of sharedActivePrinciplePrompt.principleIds) runtimeV2PrincipleIds.add(id);
+      }
       v2Truncated = sharedActivePrinciplePrompt.truncated;
       v2SelectionPolicy = sharedActivePrinciplePrompt.selectionPolicy;
       v2EligibleCount = sharedActivePrinciplePrompt.eligibleCount;
@@ -759,8 +786,22 @@ export async function handleBeforePromptBuild(
       const mapping = adaptiveMapping;
       const admittedText = getOwnValue(event, 'currentUserMessage');
       const admittedId = getOwnValue(event, 'currentUserMessageId');
-      if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode
-        && typeof admittedText === 'string' && typeof admittedId === 'string' && admittedId.trim() && sessionId) {
+      const nativeIdentity = typeof admittedId === 'string' && admittedId.trim().length > 0;
+      let admissionClaim: ControlledAdmissionClaim | undefined;
+      if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode && sessionId
+        && adaptiveInvocationId && isControlledAdmissionConfigured() && !nativeIdentity) {
+        adaptiveDeadlineAt = Math.min(adaptiveStartedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
+        const admission = claimControlledAdmission({
+          event, workspaceDir, sessionId, runId: runId ?? null, mapping,
+          hookInvocationId: adaptiveInvocationId, now: adaptiveStartedAt,
+        });
+        if (admission.status === 'claimed') admissionClaim = admission.claim;
+        else if (admission.status === 'rejected') {
+          logger?.warn?.(`[PD:AA] controlled admission refused: ${JSON.stringify({ reason: admission.reason, detail: admission.detail })}`);
+        }
+      }
+      if (mapping && isUserInteraction && !isAgentToAgent && !isMinimalMode && sessionId
+        && (admissionClaim || (typeof admittedText === 'string' && nativeIdentity))) {
         const selfReport = loadFeatureFlagFromConfig(workspaceDir, 'principle_receipt_self_report', logger).enabled;
         const render = (ids: Set<string>) => renderPrinciplesToDirectives(dedupedV2, ids, { escapeFn: escapeXml, selfReportInstruction: selfReport });
         const target = dedupedV2.find(p => p.artifactId === mapping.artifactId && p.activationId === mapping.activationId);
@@ -770,7 +811,15 @@ export async function handleBeforePromptBuild(
         const intervention = await prepareAdaptiveIntervention({
           nativeText: render(injectedIds), nativeWithoutTargetText: render(withoutTarget),
           nativePrincipleIds: [...injectedIds], principles: dedupedV2, target: mapping,
-          currentUserMessage: admittedText, currentUserMessageId: admittedId, sessionId,
+          currentUserMessage: admissionClaim ? admissionClaim.admittedText : admittedText as string,
+          ...(admissionClaim
+            ? { controlledAdmission: {
+                admissionId: admissionClaim.identity.admissionId,
+                inputSha256: admissionClaim.identity.inputSha256,
+                manifestSha256: admissionClaim.identity.manifestSha256,
+              } }
+            : { currentUserMessageId: admittedId as string }),
+          sessionId,
           selectionBudget: v2PromptBudget.budgetChars, roundKey: v2RoundKey,
           mandatoryPrincipleIds: [], selfReportInstruction: selfReport,
           deadlineAt: adaptiveDeadlineAt,
@@ -784,7 +833,12 @@ export async function handleBeforePromptBuild(
         });
         adaptiveDirectiveText = intervention.text;
         adaptiveOutcome = intervention;
-        adaptiveAdmissionId = admittedId;
+        if (admissionClaim) {
+          adaptiveOperatorAdmission = { ...admissionClaim.identity, claimId: admissionClaim.claimId, status: 'claimed' };
+          releaseControlledAdmissionClaim(admissionClaim);
+        } else {
+          adaptiveAdmissionId = admittedId as string;
+        }
         adaptiveExpectedTarget = target;
         adaptiveSafeFallback = { text: render(withoutTarget), ids: [...withoutTarget] };
         if (intervention.addedTarget) adaptiveBaseline = { text: render(injectedIds), ids: [...injectedIds] };
@@ -1102,6 +1156,7 @@ export async function handleBeforePromptBuild(
   if (adaptiveOutcome) {
     logger?.info?.(`[PD:AA] ${JSON.stringify({
       hookInvocationId: adaptiveInvocationId, sessionId, nativeAdmissionId: adaptiveAdmissionId,
+      operatorAdmissionId: adaptiveOperatorAdmission?.admissionId, claimId: adaptiveOperatorAdmission?.claimId,
       reason: adaptiveOutcome.reason, addedTarget: adaptiveOutcome.addedTarget,
       payload: adaptiveOutcome.targetBodySha256 ? 'prepared' : 'none',
       targetBodySha256: adaptiveOutcome.targetBodySha256, submission: 'unknown',
@@ -1117,6 +1172,7 @@ export async function handleBeforePromptBuild(
       submission: 'unknown', reason: adaptiveOutcome?.reason ?? 'native_entry_preserved',
       addedTarget: adaptiveOutcome?.addedTarget ?? false,
       ...(adaptiveAdmissionId ? { nativeAdmissionId: adaptiveAdmissionId } : {}),
+      ...(adaptiveOperatorAdmission ? { operatorAdmission: adaptiveOperatorAdmission } : {}),
       ...(adaptiveOutcome?.targetBodySha256 ? { targetBodySha256: adaptiveOutcome.targetBodySha256 } : {}),
     });
     forgetAdaptiveConfigIdentity(adaptiveInvocationId);
