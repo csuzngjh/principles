@@ -1442,6 +1442,31 @@ root, Desktop, or Downloads.
 * Cleanup follows git-4: an agent deletes only artifacts it created itself.
   `.tmp/` never enters a commit.
 
+## `git-16-managed-local-artifact-root`
+
+Session-throwaway material is covered by git-15. Material that must SURVIVE
+the session — experiment output, evidence bundles, one-off assets that cannot
+be regenerated — has exactly one home: the repository-root managed directory
+
+```
+artifacts/<topic>/
+```
+
+There is no CLI entry point; create the directory directly. It is gitignored in
+full (`/artifacts/` in `.gitignore`) and is local-only by design: never `git add` it, never push it, never rely on it from production code.
+
+* Never create such a directory at a drive root (`D:\<name>`, `C:\<name>`) or
+  leave it loose anywhere else in the tree. A drive-root directory is invisible
+  to this repository, outlives the task, and cannot be cleaned up by anyone
+  else's tooling.
+* When archiving, keep the source's relative path inside `artifacts/<topic>/`,
+  and write an index `README.md` beside it: source path, archive time, contents,
+  whether the material is unique, and whether it can be rebuilt.
+* Order is copy → verify (file count + byte total + per-file hash) → only then
+  delete the source.
+* Prove exclusion before handoff: `git check-ignore -v artifacts/` must hit the
+  `/artifacts/` rule and `git status --porcelain` must not list the directory.
+
 ---
 
 # 24. Adversarial Self-review

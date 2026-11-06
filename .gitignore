@@ -264,5 +264,12 @@ packages/website/.wrangler/
 # new enters from either directory; a deliberate exception takes `git add -f`
 # plus a stated reason.
 /docs/audit/
+
+# ===== Managed local artifact root (AGENTS.md §23A git-16) =====
+# `artifacts/` is the single home for material that must survive the session:
+# experiment output, evidence bundles, one-off assets that cannot be
+# regenerated. Local-only by design — never `git add` it, never push it, and no
+# production code may read it. Root-anchored so a same-named directory deeper in
+# the tree stays tracked; session-throwaway material still goes to `.tmp/` (git-15).
 /artifacts/
 
