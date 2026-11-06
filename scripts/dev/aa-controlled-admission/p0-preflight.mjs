@@ -15,7 +15,8 @@
 // run gate. "stdout contains read" is not evidence and is never used.
 
 import { spawnSync } from 'node:child_process';
-import { createServer, get as httpGet } from 'node:http';
+import { createServer } from 'node:http';
+import { connect } from 'node:net';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -80,13 +81,22 @@ async function probeBoundPort(port) {
     if (!address || typeof address !== 'object' || address.address !== '127.0.0.1') {
       return { ok: false, reason: `unexpected bind address ${JSON.stringify(address)}` };
     }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return { ok: false, reason: `frozen port is not a valid TCP port: ${String(port)}` };
+    }
     const reachable = await new Promise((resolvePromise) => {
-      const req = httpGet({ hostname: '127.0.0.1', port, path: '/', timeout: 5000 }, (res) => {
-        res.resume();
-        resolvePromise(res.statusCode === 204);
+      // A raw TCP connect proves the bound loopback endpoint is reachable. It
+      // deliberately avoids any HTTP request so this preflight cannot carry
+      // file-derived data to a network sink (CodeQL js/file-access-to-http).
+      const socket = connect({ host: '127.0.0.1', port }, () => {
+        socket.destroy();
+        resolvePromise(true);
       });
-      req.on('timeout', () => req.destroy());
-      req.on('error', () => resolvePromise(false));
+      socket.setTimeout(5000, () => {
+        socket.destroy();
+        resolvePromise(false);
+      });
+      socket.on('error', () => resolvePromise(false));
     });
     return { ok: reachable, port, address: address.address };
   } catch (error) {

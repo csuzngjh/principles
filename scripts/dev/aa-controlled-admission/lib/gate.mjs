@@ -10,7 +10,7 @@
 // inferred from stdout text.
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sha256File, sha256Bytes, verifyHostIdentity } from './host-profile.mjs';
 import { fixtureBytes } from './ledger.mjs';
