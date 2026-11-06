@@ -10,15 +10,15 @@
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-behavior-evidence-link",
     "branch": "ai/PRI-1114-behavior-evidence-link",
     "baseCommit": "953d12f5b59c3c05d1bba530b6c99f3d38d3b4e0",
-    "headCommit": "953d12f5b59c3c05d1bba530b6c99f3d38d3b4e0",
+    "headCommit": "33dd26120",
     "dirtyPaths": [
       "docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.1.md",
       "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.json",
       "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.md",
       "docs/implementation-reports/aa-handoff/LATEST.json"
     ],
-    "pushedCommit": null,
-    "prUrl": null,
+    "pushedCommit": "33dd26120",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2373",
     "remoteChecks": "NOT_RUN"
   },
   "tasks": [
@@ -33,7 +33,7 @@
         "docs/implementation-reports/aa-handoff/20261106T004718Z-trae.md",
         "docs/implementation-reports/aa-handoff/LATEST.json"
       ],
-      "commits": [],
+      "commits": ["33dd26120"],
       "acceptance": [
         {
           "criterion": "独立核实 #2370 是否已并入 main（不采信转述）",
@@ -57,8 +57,8 @@
         },
         {
           "criterion": "创建草稿 PR 并同步 Linear 子范围",
-          "result": "NOT_RUN",
-          "evidenceRefs": []
+          "result": "PASS",
+          "evidenceRefs": ["evidence-7", "evidence-8"]
         },
         {
           "criterion": "按批准范围实现代码与确定性测试",
@@ -173,6 +173,24 @@
       "sha256": null,
       "supports": "干预身份与行为事实的生产者/身份字段/缺口均来自当前代码",
       "limitations": "只读静态核实；未运行真实 Agent 回合验证端到端事实"
+    },
+    {
+      "id": "evidence-7",
+      "kind": "CODE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2373",
+      "observedAt": "2026-11-06T00:52:00Z",
+      "sha256": null,
+      "supports": "草稿 PR 已创建，包含设计文档与检查点（docs-only）",
+      "limitations": "草稿 PR 不构成实现批准；CI 未运行"
+    },
+    {
+      "id": "evidence-8",
+      "kind": "CODE",
+      "locator": "https://linear.app/principlesdisciple/issue/PRI-1114/aa-09m-复用行为读模型连接请求原则动作与任务结果#comment-224974b5",
+      "observedAt": "2026-11-06T00:52:00Z",
+      "sha256": null,
+      "supports": "Linear 已同步本轮子范围、PR 与待 Owner 决定事项；整票状态未推进",
+      "limitations": "评论不是验收证据，也不解除 PRI-1109 阻塞"
     }
   ],
   "blockers": [
