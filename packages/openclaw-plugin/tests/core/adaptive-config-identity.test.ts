@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +29,7 @@ afterEach(() => {
 
 function artifactFixture(version: string, name = 'principles-disciple'): {
   root: string;
+  executingFilePath: string;
   executingFileUrl: string;
 } {
   const root = mkdtempSync(join(tmpdir(), 'pd-adaptive-identity-'));
@@ -37,7 +38,7 @@ function artifactFixture(version: string, name = 'principles-disciple'): {
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name, version }));
   const executingFile = join(root, 'dist', 'bundle.js');
   writeFileSync(executingFile, '// fixture\n');
-  return { root, executingFileUrl: pathToFileURL(executingFile).href };
+  return { root, executingFilePath: executingFile, executingFileUrl: pathToFileURL(executingFile).href };
 }
 
 function oversizedArtifactFixture(paddingBytes: number): { root: string; executingFileUrl: string } {
@@ -53,6 +54,29 @@ function oversizedArtifactFixture(paddingBytes: number): { root: string; executi
     }),
   );
   const executingFile = join(root, 'dist', 'bundle.js');
+  writeFileSync(executingFile, '// fixture\n');
+  return { root, executingFileUrl: pathToFileURL(executingFile).href };
+}
+
+/**
+ * The artifact manifest lives one level below the temp root, and every
+ * directory above it has no package.json. Walking outward therefore sees
+ * ENOENT after the real failure and must not let it replace the real one.
+ */
+function nestedOversizedArtifactFixture(paddingBytes: number): { root: string; executingFileUrl: string } {
+  const root = mkdtempSync(join(tmpdir(), 'pd-adaptive-identity-'));
+  tempRoots.push(root);
+  const artifactRoot = join(root, 'plugin');
+  mkdirSync(join(artifactRoot, 'dist'), { recursive: true });
+  writeFileSync(
+    join(artifactRoot, 'package.json'),
+    JSON.stringify({
+      name: 'principles-disciple',
+      version: '1.0.0',
+      padding: 'x'.repeat(paddingBytes),
+    }),
+  );
+  const executingFile = join(artifactRoot, 'dist', 'bundle.js');
   writeFileSync(executingFile, '// fixture\n');
   return { root, executingFileUrl: pathToFileURL(executingFile).href };
 }
@@ -121,7 +145,7 @@ describe('readExecutingPluginVersion', () => {
       .toEqual({ version: 'unknown', reason: 'plugin_version_manifest_conflict' });
   });
 
-  it('reads at most MAX_MANIFEST_BYTES + 1 bytes before rejecting an oversized manifest', () => {
+  it('reads exactly MAX_MANIFEST_BYTES + 1 bytes before rejecting an oversized manifest', () => {
     const fixture = oversizedArtifactFixture(128 * 1024);
     let observedBytes = 0;
     setManifestReadProbeForTest(bytesRead => {
@@ -129,8 +153,52 @@ describe('readExecutingPluginVersion', () => {
     });
 
     bindAdaptivePluginVersionForTest(fixture.executingFileUrl);
-    expect(readExecutingPluginVersion().version).toBe('unknown');
-    expect(observedBytes).toBeLessThanOrEqual(65537);
+    expect(readExecutingPluginVersion()).toEqual({ version: 'unknown', reason: 'manifest_too_large' });
+    expect(observedBytes).toBe(65537);
+  });
+
+  it('keeps the oversized-manifest reason when upper directories have no package.json', () => {
+    const fixture = nestedOversizedArtifactFixture(128 * 1024);
+    bindAdaptivePluginVersionForTest(fixture.executingFileUrl);
+    expect(readExecutingPluginVersion()).toEqual({ version: 'unknown', reason: 'manifest_too_large' });
+  });
+});
+
+describe('module-load version binding', () => {
+  it('keeps the version read at module load when the disk changes before the first call', async () => {
+    const fixture = artifactFixture('1.0.0');
+
+    // Simulate the process importing the module from this fixture artifact
+    // without touching the real repository manifest.
+    vi.doMock('node:url', async importOriginal => {
+      const actual = await importOriginal<typeof import('node:url')>();
+      return {
+        ...actual,
+        fileURLToPath(url: string | URL) {
+          const text = String(url);
+          if (text.includes('adaptive-config-identity')) {
+            return fixture.executingFilePath;
+          }
+          return actual.fileURLToPath(url);
+        },
+      };
+    });
+
+    try {
+      vi.resetModules();
+      const fresh = await import('../../src/core/adaptive-config-identity.js');
+
+      // The disk changes after module evaluation, before the first call.
+      writeFileSync(
+        join(fixture.root, 'package.json'),
+        JSON.stringify({ name: 'principles-disciple', version: '2.0.0' }),
+      );
+
+      expect(fresh.readExecutingPluginVersion()).toEqual({ version: '1.0.0' });
+    } finally {
+      vi.doUnmock('node:url');
+      vi.resetModules();
+    }
   });
 });
 
