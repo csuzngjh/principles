@@ -91,6 +91,11 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 | `trajectory.tool_calls.outcome=success` | “宿主报告该调用未失败” | 产物有效、任务达成 |
 | 纠正后的再次调用 | “后续行动” | 覆盖/抹除第一次行动 |
 | 原则被注入 | “已返回给调用上下文” | 已确认、已遵循 |
+| `principle_ids_json` | “该会话注入集合的记录”（会话级） | 本次 run 注入一致、本次请求唯一 |
+
+`principle_ids_json` 只有会话级容器，没有 principleId ↔ `artifactId` 连接键；
+因此本任务只能输出 `principleBinding='session_level_unknown'`（空数组为 `absent`），
+**不得**把“无法比对”写成 `conflict`。
 
 独立结果证据缺失 → `unknown`。本任务**不补造写侧**。
 
@@ -173,7 +178,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 3. `packages/pd-cli/src/commands/runtime-activation.ts`：新增 `pd activation link`（只读薄包装；`--json` 严格单文档；失败带 `reason` + `nextAction`）。
 4. 测试：`packages/host-runtime/tests/adaptive-behavior-linkage.test.ts`、CLI 命令注册/输出契约测试。
 
-不修改 `journal` 命令契约；不新增 flag；不写任何存储。
+不修改 `journal` 命令契约（只对其只读投影追加两个安全字段：`targetBodySha256`、`configIdentity`）；不新增运行时 feature flag；`link` 子命令自带只读预算参数；不写任何存储。
 
 ## 8. 反例（验收条件；先失败后通过）
 
@@ -190,7 +195,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 9. 预算耗尽 → `coverage.incompleteReasons`。
 10. run 内多次注入 → `ambiguous`。
 11. SQLite 不存在/缺列 → `unavailable`，不建库不迁移。
-12. `principle_ids_json` 与本次注入不一致 → `conflict`。
+12. `principle_ids_json` 无法与本次注入比对（无连接键）→ 输出 `principleBinding='session_level_unknown'`，不臆造 `conflict`；空数组 → `absent`。
 
 **新增（Owner 指定，O1–O5）**：
 
@@ -227,7 +232,7 @@ PD 能证明“原则被注入”，但不能把一次注入机会与其后的�
 
 ## 11. 验收标准
 
-1. 17 条反例（12 既有 + O1–O5）全部有确定性测试且通过；
+1. 17 条反例（12 既有 + O1–O5）全部有确定性测试且通过；其中第 12 条按 §4.4 的“不可比对 → unknown”实现，不伪造 conflict；
 2. `strong_run` 仅在实际满足 §4.2 四条件时出现，并输出理由；
 3. O1/O2 下绝不出现 `strong_run`；
 4. 所有“完成/成功/产物”结论按 §4.4 降级，无一处升级；
