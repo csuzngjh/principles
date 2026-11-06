@@ -171,6 +171,8 @@ describe('pd activation link — output contract', () => {
     expect((report.totals as { byAssociation: { strong_run: number } }).byAssociation.strong_run).toBe(1);
     expect(streams.stderr.join('\n')).toContain('[activation link]');
     expect(streams.stdout.join('\n')).not.toContain('[activation link]');
+    // Exactly one stdout write: pretty JSON is a single argument, not a banner + document.
+    expect(streams.stdout).toHaveLength(1);
   });
 
   it('sets exit code 2 and emits a structured JSON error for parameter failures', async () => {

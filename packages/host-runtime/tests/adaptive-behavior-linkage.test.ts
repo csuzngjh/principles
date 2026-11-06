@@ -279,6 +279,8 @@ describe('O1 — truncation must never manufacture uniqueness', () => {
     writeEvents(dir, '2026-11-05', SINGLE_RUN_JOURNAL(dir));
     const report = run(dir, { limits: { maxDateFilesPerDir: 1 } });
     expect(report.coverage.journal.complete).toBe(false);
+    expect(report.coverage.eventLog.filesRead).toBeLessThanOrEqual(1);
+    expect(report.coverage.eventLog.omittedFiles).toBeGreaterThanOrEqual(1);
     expect(invocation(report, 'inv-1').association).toBe('unknown');
     expect(invocation(report, 'inv-1').associationReasons).toContain('journal_range_incomplete');
   });
@@ -463,6 +465,7 @@ describe('pre-existing counterexamples', () => {
     writeEvents(dir, '2026-11-05', [...SINGLE_RUN_JOURNAL(dir), ...lines]);
     const report = run(dir, { limits: { maxEventLogLines: 10 } });
     expect(report.coverage.eventLog.truncated).toBe(true);
+    expect(report.coverage.eventLog.linesRead).toBeLessThanOrEqual(10);
     expect(report.coverage.incompleteReasons).toContain('event_log_parse_limit_reached');
   });
 
