@@ -135,6 +135,36 @@ versions equal "because they ship together".
   own cohort (validated, so `allow_version_drift` is not needed). If the
   npm side has not shipped yet, a publish dispatch refuses and a preflight
   rehearses the ref with a warning.
+- **Publication mutex and cohort re-checks** (PRI-1103, race hardening):
+  npm `latest` is one global fact, so `publish-npm.yml` and
+  `release-metadata.yml` `mode=publish` share the single Actions concurrency
+  group `pd-release-publication-global` (`cancel-in-progress: false`, stable
+  and candidate alike). Release-metadata dry-runs and `publish-preflight`
+  keep their own groups and never take the production lock.
+  **Actions concurrency is NOT a queue**: it keeps one running plus at most
+  one pending run per group; a newer pending run REPLACES the older pending
+  one (which is cancelled). Serialisation is guaranteed, delivery of every
+  queued publication is not — a replaced pending run must be re-dispatched.
+  No persistent lock service is introduced; the repository has none, and a
+  second lock would become a competing truth. The legacy manual
+  `scripts/release.sh` publishes outside Actions and therefore cannot be
+  serialised by a concurrency group: operators must not run it while a
+  publication workflow is in flight (a drift it causes is still caught by
+  the cohort gates before the pointer push).
+- **Cohort re-verification gates** (`scripts/release/verify-publication-cohort.mjs`,
+  same script at both points): gate 1 runs after every platform asset is
+  built/downloaded/identity-verified and BEFORE any side effect; gate 2 runs
+  immediately before the gh-pages pointer push. Both re-read npm through the
+  existing resolver and registry client and require the full
+  `productVersion` + 40-char `gitHead` to still equal what the run built.
+  Auto mode (`cohort_sha` empty) re-reads `latest`; explicit-cohort mode
+  accepts a published historical SHA (a legal byte-identical republish is
+  not blocked). 404 / 503 / timeout / malformed JSON / missing `gitHead` /
+  version or commit drift / unreadable commit all fail closed, reporting
+  expected vs actual identity, the mode, and whether external side effects
+  (asset bytes) already happened. A dry-run result is advisory only and is
+  explicitly labelled NOT publication evidence; `mode=publish` never takes
+  that fallback.
 
 The Version PR bot (`changesets/action`, pinned) requires the
 `PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +

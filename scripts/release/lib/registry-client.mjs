@@ -64,11 +64,16 @@ function registryBase() {
   return DEFAULT_REGISTRY;
 }
 
-async function fetchJson(url, { timeoutMs = 15000, fetchImpl } = {}) {
+async function fetchJson(url, { timeoutMs, fetchImpl } = {}) {
+  // Env override exists so release-contract tests can prove the TIMEOUT refusal
+  // (the release gate must fail closed) without waiting 45s for the production
+  // bound; it never changes the default posture.
+  const effectiveTimeout =
+    timeoutMs ?? (Number(process.env.PD_RELEASE_TIMEOUT_MS) > 0 ? Number(process.env.PD_RELEASE_TIMEOUT_MS) : 15000);
   const doFetch = fetchImpl ?? globalThis.fetch;
   if (typeof doFetch !== 'function') throw new RegistryError('no fetch implementation available');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), effectiveTimeout);
   let res;
   try {
     res = await doFetch(url, {

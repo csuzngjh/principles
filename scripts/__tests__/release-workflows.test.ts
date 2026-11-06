@@ -720,3 +720,132 @@ describe('release-metadata.yml — asset commit bound to the npm cohort (PRI-110
     expect(t).toContain('EXPECTED_COMMIT="${{ needs.resolve-inputs.outputs.commit }}"');
   });
 });
+
+/**
+ * PRI-1103 final round — two publication facts are GLOBAL, not per-channel:
+ * npm `latest`, and the installer cohort it points at. A long cross-platform
+ * build can outlive that fact, so the workflows need (1) one mutex around all
+ * production writes to the npm channel and (2) two cohort re-checks around the
+ * bytes they publish.
+ *
+ * These pins are deliberately structural: GitHub Actions concurrency cannot be
+ * unit-executed here, so the contract is "which group expression is committed"
+ * plus the documented limitation in the workflow comments.
+ */
+describe('release workflows — global publication mutex (PRI-1103 race)', () => {
+  const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+
+  it('gives the npm publish train the same global group as release-metadata publish', () => {
+    const doc = loadWorkflow('.github/workflows/publish-npm.yml') as {
+      concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+    };
+    // No channel token: stable and candidate publish the SAME npm latest.
+    expect(doc.concurrency?.group).toBe('pd-release-publication-global');
+    expect(doc.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('locks only mode=publish in release-metadata, and keeps dry-run off the production lock', () => {
+    const doc = loadWorkflow('.github/workflows/release-metadata.yml') as {
+      concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+    };
+    const group = doc.concurrency?.group ?? '';
+    expect(group).toContain("github.event.inputs.mode == 'publish'");
+    // Outer `||` arms: the publish arm is channel-agnostic; the dry-run arm is
+    // per-channel and must not contain the production group.
+    const arms = group.split('||');
+    expect(arms[0]).toContain("'pd-release-publication-global'");
+    expect(arms[0]).not.toContain('channel');
+    expect(arms.slice(1).join('||')).toContain("format('release-metadata-{0}'");
+    expect(arms.slice(1).join('||')).toContain('github.event.inputs.channel');
+    expect(doc.concurrency?.['cancel-in-progress']).toBe(false);
+    // Exactly one production-lock literal: no second group can be smuggled in.
+    expect((read('.github/workflows/release-metadata.yml').match(/pd-release-publication-global/g) ?? [])).toHaveLength(1);
+  });
+
+  it('keeps the npm preflight rehearsal off the production lock (it never publishes)', () => {
+    const doc = loadWorkflow('.github/workflows/publish-preflight.yml') as { concurrency?: { group?: string } };
+    expect(doc.concurrency?.group ?? '').not.toContain('pd-release-publication-global');
+    // It can only invoke the publish action with dry_run: true.
+    const calls = (doc as unknown as { jobs?: Record<string, { steps?: Array<{ with?: Record<string, unknown> }> }> }).jobs ?? {};
+    const publishCalls = Object.values(calls)
+      .flatMap((job) => job.steps ?? [])
+      .filter((step) => (step.with?.dry_run as unknown) !== undefined);
+    expect(publishCalls.length).toBeGreaterThan(0);
+    for (const call of publishCalls) expect(call.with?.dry_run).toBe(true);
+  });
+});
+
+describe('release-metadata.yml — cohort re-check gates around the publication (PRI-1103 race)', () => {
+  const rel = '.github/workflows/release-metadata.yml';
+  type Step = { name?: string; if?: string; run?: string; env?: Record<string, unknown>; 'continue-on-error'?: boolean };
+
+  function steps(): Step[] {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[] }> };
+    return doc.jobs?.['assemble-publish']?.steps ?? [];
+  }
+
+  function stepNamed(prefix: string): Step {
+    const step = steps().find((s) => (s.name ?? '').startsWith(prefix));
+    if (!step) throw new Error(`step ${prefix} missing`);
+    return step;
+  }
+
+  it('runs gate 1 after asset identity verification and before every external side effect', () => {
+    const order = steps().map((s) => s.name ?? '');
+    const identity = order.findIndex((n) => n.startsWith('Verify embedded product identity'));
+    const gate1 = order.findIndex((n) => n.startsWith('Publication gate 1'));
+    const sign = order.findIndex((n) => n.startsWith('Sign and emit release metadata'));
+    const uploadBytes = order.findIndex((n) => n.startsWith('Upload asset bytes'));
+    const gate2 = order.findIndex((n) => n.startsWith('Publication gate 2'));
+    const push = order.findIndex((n) => n.startsWith('Publish to metadata source'));
+
+    expect(identity).toBeGreaterThanOrEqual(0);
+    expect(gate1).toBeGreaterThan(identity);
+    expect(sign).toBeGreaterThan(gate1);
+    expect(uploadBytes).toBeGreaterThan(gate1);
+    // Gate 2 is IMMEDIATELY before the pointer push: nothing may sit between.
+    expect(gate2).toBeGreaterThan(uploadBytes);
+    expect(push).toBe(gate2 + 1);
+  });
+
+  it('runs both gates through one shared script so the two checks cannot drift', () => {
+    for (const prefix of ['Publication gate 1', 'Publication gate 2']) {
+      const run = stepNamed(prefix).run ?? '';
+      expect(run, prefix).toContain('verify-publication-cohort.mjs');
+      expect(run, prefix).toContain('--mode "$MODE"');
+      expect(run, prefix).toContain('--product-version "$EXPECTED_VERSION"');
+      expect(run, prefix).toContain('--expected-commit "$EXPECTED_COMMIT"');
+      expect(run, prefix).toContain('--explicit-cohort "$COHORT_SHA_INPUT"');
+    }
+    // Only gate 2 may claim that external bytes already exist.
+    expect(stepNamed('Publication gate 1').run ?? '').toContain('--external-side-effects none');
+    expect(stepNamed('Publication gate 2').run ?? '').toContain('--external-side-effects asset-bytes-uploaded');
+  });
+
+  it('never lets a refusal be skipped, retried or downgraded', () => {
+    for (const prefix of ['Publication gate 1', 'Publication gate 2']) {
+      const step = stepNamed(prefix);
+      expect(step['continue-on-error']).toBeUndefined();
+      // No fallback path in the step itself: the script owns fail-closed.
+      expect(step.run ?? '').not.toContain('|| true');
+      expect(step.run ?? '').not.toContain('continue');
+    }
+    // Publishing steps keep default success() semantics, so a gate failure
+    // skips the upload/push instead of racing ahead.
+    expect(stepNamed('Upload asset bytes').if ?? '').toContain('success()');
+    expect(stepNamed('Publish to metadata source').if ?? '').toContain('success()');
+    expect(stepNamed('Publication gate 2').if ?? '').toContain("env.MODE == 'publish'");
+  });
+
+  it('fetches gate tooling from the dispatched ref, never from the product cohort', () => {
+    const tooling = stepNamed('Fetch trusted publication-gate tooling');
+    expect(tooling.env?.TOOLS_REF).toBe("${{ github.event.inputs.ref || 'main' }}");
+    const run = tooling.run ?? '';
+    expect(run).toContain('git archive FETCH_HEAD scripts/release scripts/lib');
+    // Extraction target is RUNNER_TEMP: the cohort workspace (and therefore the
+    // gh-pages publication payload) stays untouched.
+    expect(run).toContain('$RUNNER_TEMP/release-tools');
+    expect(run).not.toContain('path:');
+  });
+});
+
