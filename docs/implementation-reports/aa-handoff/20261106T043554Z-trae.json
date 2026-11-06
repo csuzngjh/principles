@@ -1,0 +1,366 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T043554Z-trae",
+  "previousCheckpoint": "20261106T030757Z-trae",
+  "generatedAt": "2026-11-06T04:35:54Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "两段并行：第一部分修复 PRI-1114 已确认的会话行截断漏报（3 条新反例先红后绿，PR #2380 草稿、未合并）；第二部分完成真实宿主证据链的最小验证卡与证据包结构，并用真实 pd activation link 在合成夹具上完成了一次本地无模型读链实跑。关键发现：已安装 OpenClaw 2026.11.1 的 embedded before_prompt_build 仍不传 currentUserMessageId；controlledAdmission 只在 core 实现、hook 未接线；G1 范围明确无工具，且历史两次假模型额度已用完。因此真实宿主闭环（PRI-1118）需要新的有界批准，本轮未执行任何宿主/模型/安装操作。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+    "branch": "ai/PRI-1114-coverage-propagation",
+    "baseCommit": "dfe4643c77c7953178cf943c823c4b140e67a592",
+    "headCommit": "b7bd3ba607ffc16f6f38e16a27e9a211d687c280",
+    "dirtyPaths": [],
+    "pushedCommit": "b7bd3ba607ffc16f6f38e16a27e9a211d687c280",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2380",
+    "remoteChecks": "PASS at write: PR <-> Linear link, Codex plugin delivery contract, CI Impact Gate, Check PR Size, Dependency Audit, Test pd-cli. PENDING at write: Verify Merge Gate, e2e, Lint, TypeScript Check, Test host-runtime, Test OpenClaw Plugin, Build OpenClaw Plugin, Release Build Parity, CodeQL/Analyze, packaged install smoke, release asset smoke. SKIPPED (not counted as pass): Test principles-core, Test pd-mcp-server, Test create-principles-disciple, CodeRabbit. 本轮文档与检查点提交后 head 会前进，CI 需按新 head 复评。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1114",
+      "scope": "已批准的只读子范围：修复单会话分类查询截断未传播到覆盖判定的缺陷；不新增表、不写生产库、不调模型、不接控制台",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "packages/host-runtime/src/adaptive-behavior-linkage.ts",
+        "packages/host-runtime/tests/adaptive-behavior-linkage.test.ts",
+        "docs/specs/PD-AA-PRI-1114-BEHAVIOR-EVIDENCE-LINK-DESIGN-v0.2.md",
+        ".changeset/pri-1114-session-rows-truncated.md"
+      ],
+      "commits": [
+        "b7bd3ba607ffc16f6f38e16a27e9a211d687c280"
+      ],
+      "acceptance": [
+        {"criterion": "反例先红：前 200 条属于其他 run、目标记录在第 201 条的 3 条用例在旧实现上失败", "result": "PASS", "evidenceRefs": ["evidence-fix-test"]},
+        {"criterion": "修复后 3 条反例转绿", "result": "PASS", "evidenceRefs": ["evidence-fix-test"]},
+        {"criterion": "纠正、任务结果、弱候选三条同类路径均覆盖", "result": "PASS", "evidenceRefs": ["evidence-fix-test"]},
+        {"criterion": "截断时 coverage.complete=false 且原因码可操作（session_rows_truncated）", "result": "PASS", "evidenceRefs": ["evidence-fix-code", "evidence-fix-test"]},
+        {"criterion": "保持有界读取：未提高默认上限、未改数据库、未无限读取", "result": "PASS", "evidenceRefs": ["evidence-fix-code"]},
+        {"criterion": "既有相关测试无回归：host-runtime 68/68", "result": "PASS", "evidenceRefs": ["evidence-test-host-runtime"]},
+        {"criterion": "CLI 注册/解析测试 13/13", "result": "PASS", "evidenceRefs": ["evidence-test-pd-cli"]},
+        {"criterion": "host-runtime 构建与 pd-cli 类型检查通过", "result": "PASS", "evidenceRefs": ["evidence-build"]},
+        {"criterion": "check:runtime-contract 与 release-intent 守卫通过", "result": "PASS", "evidenceRefs": ["evidence-guards"]},
+        {"criterion": "最终 head 的 PR CI", "result": "PENDING_AT_WRITE", "evidenceRefs": ["evidence-remote-ci"]},
+        {"criterion": "Owner 验收 / 合并", "result": "NOT_RUN", "evidenceRefs": ["evidence-pr"]}
+      ],
+      "remaining": [
+        "PR #2380 仍为草稿，未合并、未发版。",
+        "本地未运行 npm run verify:merge（按 AGENTS.md §25 由 PR CI 承担）。",
+        "文档与检查点随本轮同一分支提交，head 将前进，需按新 head 复评 CI。",
+        "未做无边界重构或全仓审计。"
+      ]
+    },
+    {
+      "issue": "PRI-1118",
+      "scope": "真实宿主证据链验证准备：版本分层、授权边界、触发路径、读取方式、可确认/unknown、发布安装流程、预算与停止条件、证据包结构",
+      "status": "NEEDS_OWNER",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md"
+      ],
+      "acceptance": [
+        {"criterion": "Q1 区分仓库源码 / 已发布 / 当前安装产物，并核实宿主版本 2026.11.1", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-installed-versions"]},
+        {"criterion": "Q2 核实既有批准与额度冲突，按已消耗处理", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-budget-conflict"]},
+        {"criterion": "Q3 既有正常入口触发路径与阻塞原因（B1/B2/B3）", "result": "BLOCKED_NEEDS_OWNER", "evidenceRefs": ["evidence-card", "evidence-embedded-identity"]},
+        {"criterion": "Q4 journal / EventLog / 只读关联读取命令与字段", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-sample-link"]},
+        {"criterion": "Q5 可确认与必须保持 unknown 的清单", "result": "PASS", "evidenceRefs": ["evidence-card", "evidence-sample-link"]},
+        {"criterion": "Q6 正式发布/安装流程与禁止手工覆盖", "result": "PASS", "evidenceRefs": ["evidence-card"]},
+        {"criterion": "Q7 调用数量、费用、超时、停止与清理", "result": "PASS", "evidenceRefs": ["evidence-card"]},
+        {"criterion": "证据包结构 pd-aa-evidence-package/v1 与可重复读取方式落地", "result": "PASS", "evidenceRefs": ["evidence-sample-manifest", "evidence-sample-builder"]},
+        {"criterion": "本地无模型读链实跑：真实 pd activation link + 合成夹具", "result": "PASS", "evidenceRefs": ["evidence-sample-link", "evidence-sample-manifest"]},
+        {"criterion": "真实宿主回合 / 真实模型 / 安装", "result": "NOT_RUN", "evidenceRefs": ["evidence-card"]}
+      ],
+      "remaining": [
+        "B1：已安装 OpenClaw 2026.11.1 embedded producer 仍只传 prompt/messages，无 currentUserMessageId；正常入口无法触发干预。",
+        "B2：controlledAdmission 仅 core 支持，OpenClaw hook 未接线，无既有控制器；属身份语义变更，需设计批准。",
+        "B3：G1 范围明确无工具，无法产生可观察工具行动；需单独批准。",
+        "G1 历史两次假模型额度已使用，不复用；新的宿主回合需按 handoff 第 49 行取得有界批准。",
+        "合成夹具与本地假 provider 结果不能当作真实模型行为改善证据。"
+      ]
+    },
+    {
+      "issue": "PRI-1111",
+      "scope": "接通唯一宿主正常入口的状态事实更新（不关闭工单）",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md"
+      ],
+      "acceptance": [
+        {"criterion": "记录当前安装宿主 embedded 入口仍缺消息身份（2026.11.1 静态复核）", "result": "PASS", "evidenceRefs": ["evidence-embedded-identity", "evidence-card"]}
+      ],
+      "remaining": [
+        "入口身份缺口未修复；不在本轮授权范围。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-host-runtime",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\host-runtime",
+      "command": "npx vitest run tests/adaptive-behavior-linkage.test.ts tests/adaptive-journal-reconciliation.test.ts --reporter=json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 68,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-host-runtime"]
+    },
+    {
+      "id": "check-pd-cli",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\pd-cli",
+      "command": "npx vitest run tests/commands/runtime-activation-link-flag-wiring.test.ts tests/commands/runtime-activation-journal-flag-wiring.test.ts --reporter=json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-test-pd-cli"]
+    },
+    {
+      "id": "check-build",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "npm run build --prefix packages/host-runtime; npm run typecheck --prefix packages/pd-cli",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-build"]
+    },
+    {
+      "id": "check-eslint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "npx eslint packages/host-runtime/src/adaptive-behavior-linkage.ts packages/host-runtime/tests/adaptive-behavior-linkage.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-fix-code"]
+    },
+    {
+      "id": "check-guards",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "npm run check:runtime-contract; node scripts/release/check-pr-release-intent.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-guards"]
+    },
+    {
+      "id": "check-sample-cli-read",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "node .tmp/PRI-1114-evidence-package-sample/build.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-sample-link", "evidence-sample-manifest"]
+    },
+    {
+      "id": "check-remote-ci",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
+      "command": "gh pr checks 2380",
+      "result": "PENDING_AT_WRITE",
+      "exitCode": null,
+      "passed": null,
+      "failed": 0,
+      "skipped": 4,
+      "evidenceRefs": ["evidence-remote-ci"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-fix-code",
+      "kind": "CODE",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\host-runtime\\src\\adaptive-behavior-linkage.ts",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": "daa1ae95b15652a2a42c5ceaaed7d41a9022ae076f82907261fce4eaafee3d8a",
+      "supports": "单会话每表截断传播到 trajectory.truncated、机会 unknowns、全局 incompleteReasons 与 nextAction；未提高默认上限。",
+      "limitations": "只读读模型；不提供写侧、控制台或行为改善证据。"
+    },
+    {
+      "id": "evidence-fix-test",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\packages\\host-runtime\\tests\\adaptive-behavior-linkage.test.ts",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": "06e688fc79369368007a69e9c7626a4b4fb7c820424bd66bf119b48469e5b6f2",
+      "supports": "3 条『前 200 条其他 run、目标在第 201 条』反例先红后绿；覆盖纠正、结果、弱候选三条路径。",
+      "limitations": "fixture 行为，不证明真实生产数据分布。"
+    },
+    {
+      "id": "evidence-test-host-runtime",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: vitest host-runtime suites",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "68/68 通过，既有 R1-R8、O1-O5 与只读断言无回归。",
+      "limitations": "未跑全仓 verify:merge。"
+    },
+    {
+      "id": "evidence-test-pd-cli",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: vitest pd-cli flag wiring suites",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "13/13 通过，真实 Commander 注册/解析与单 JSON stdout 合同不变。",
+      "limitations": "未验证控制台调用。"
+    },
+    {
+      "id": "evidence-build",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: npm build/typecheck",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "host-runtime 构建与 pd-cli 类型检查通过。",
+      "limitations": "未运行完整 verify:merge。"
+    },
+    {
+      "id": "evidence-guards",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: check:runtime-contract + check-pr-release-intent",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "无新增 runtime-contract 违规；changeset 存在，release-intent 通过。",
+      "limitations": "守卫基于 git diff，需提交后才准确。"
+    },
+    {
+      "id": "evidence-card",
+      "kind": "REPORT",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\docs\\implementation-reports\\PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": "83af95dc4c90ccb0234a2bb082a2a54ee1f0fccfd01e551c38e8cc83d2487741",
+      "supports": "七问验证卡、证据包结构、可重复读取方式、授权决策卡与明确不做清单。",
+      "limitations": "DRAFT/NEEDS_OWNER，不是验收通过声明。"
+    },
+    {
+      "id": "evidence-installed-versions",
+      "kind": "INLINE",
+      "locator": "inline: read-only version audit of ~/.pd/runtime, ~/.openclaw/extensions/principles-disciple, %APPDATA%\\npm\\node_modules\\openclaw",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "已安装 core 4.1.0 / host-runtime 2.1.0 / pd-cli 1.166.0 / 插件 2.6.2 / OpenClaw 2026.11.1；仓库源码为 4.1.0 / 2.2.0 / 1.167.0 / 2.6.4。",
+      "limitations": "npm 已发布版本未联网核实。"
+    },
+    {
+      "id": "evidence-budget-conflict",
+      "kind": "INLINE",
+      "locator": "inline: PD-AA-G1-CONTROLLED-ADMISSION-CARD.md vs PD-AA-v0.6-IMPLEMENTATION-STATUS.md vs PD-AA-LOCAL-AGENT-HANDOFF.md",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "G1 卡称额度未使用，但状态文档与 handoff 记录两次已用；按已消耗处理。",
+      "limitations": "文档冲突只能按保守解释，不能自行恢复额度。"
+    },
+    {
+      "id": "evidence-embedded-identity",
+      "kind": "INLINE",
+      "locator": "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\node_modules\\openclaw\\dist\\attempt-system-prompt-prepare-F34qAuO4.mjs",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "已安装 2026.11.1 embedded producer 构造 promptEvent 时只有 prompt 与 messages，仍无 currentUserMessageId（第 3943-3946 行）。",
+      "limitations": "静态代码复核，未运行该宿主。"
+    },
+    {
+      "id": "evidence-sample-link",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\link-output.json",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": "84fb0a1be970b93b86e1c8b50d268e3da708c930fcc6d931cd28440343c7ed68",
+      "supports": "真实 pd activation link 在合成夹具上输出单 JSON：association=strong_run、actions=1、corrections=1、outcomes=1、coverage.complete=true；请求级/原则遵循/行为改善为 unknown。",
+      "limitations": "夹具是合成的；不是宿主、模型或行为证据。"
+    },
+    {
+      "id": "evidence-sample-manifest",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\manifest.json",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": "042d9c4b982bd4cbfa1575faba979bd569b3fe5b6b723c320fea3b84d3c237cb",
+      "supports": "pd-aa-evidence-package/v1 manifest 含身份、边界、文件哈希、覆盖、关联、支持/不支持结论与清理字段。",
+      "limitations": "临时资产，未提交；保留于 .tmp。"
+    },
+    {
+      "id": "evidence-sample-builder",
+      "kind": "LOCAL_TEST",
+      "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\build.mjs",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": "c1ef100745b2f4ed1db1d2cf773b4f05713fe9ebe68580836d4761640a5923f7",
+      "supports": "可重复重建夹具并调用真实 CLI、生成 manifest 与哈希。",
+      "limitations": "临时脚本，不入库。"
+    },
+    {
+      "id": "evidence-remote-ci",
+      "kind": "INLINE",
+      "locator": "inline: gh pr checks 2380",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "修复 head b7bd3ba 上部分检查已通过；其余 pending；4 项 skipping。",
+      "limitations": "文档提交后 head 前进，需按新 head 复评。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2380",
+      "observedAt": "2026-11-06T04:35:54Z",
+      "sha256": null,
+      "supports": "有界修复 PR 可评审。",
+      "limitations": "草稿、未合并、未发版。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-card",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md",
+      "persistence": "committed",
+      "notes": "验证卡 + 证据包结构 + 决策卡。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T043554Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T043554Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点同名 Markdown。"
+    },
+    {
+      "id": "artifact-sample",
+      "kind": "EVIDENCE_SAMPLE",
+      "locator": ".tmp/PRI-1114-evidence-package-sample/",
+      "persistence": "ephemeral",
+      "notes": "合成夹具 + link-output.json + manifest.json + build.mjs；gitignored，保留于当前 worktree。"
+    }
+  ],
+  "blockers": [
+    "B1 已安装 OpenClaw 2026.11.1 embedded before_prompt_build 不提供 currentUserMessageId。",
+    "B2 controlledAdmission 仅 core 实现，OpenClaw hook 未接线，无既有控制器。",
+    "B3 G1 范围无工具，无法产生可观察工具行动。",
+    "G1 历史两次本地假模型额度已使用，不复用。",
+    "PR #2380 CI 在写检查点时仍 pending。"
+  ],
+  "nextActions": [
+    "Owner 评审 PR #2380；按新 head 复评 CI；不合并由 Owner 执行。",
+    "Owner 对验证卡 §4 的决策 1（受控准入接线）与决策 2（一次只读工具行动）作出有界批准或拒绝。",
+    "获批后先实现默认关闭的受控准入接线并做隔离夹具验证，再跑一次本地假 provider 宿主回合。",
+    "PRI-1118 保持 In Progress；PRI-1114 保持 In Review；不提前关闭整票。",
+    "PR 合并后按 git-8 清理 worktree 与租约。"
+  ],
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261106T043554Z-trae\",\"kind\":\"final\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "其他任务的 LATEST 指针未修改；历史检查点未覆盖。"
+    ]
+  }
+}
