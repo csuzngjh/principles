@@ -10,7 +10,7 @@
 // anything longer (`admission_file_invalid`). The earlier attribution to the
 // host was wrong and must not reappear.
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { sha256Bytes, sha256File } from './host-profile.mjs';
 
@@ -104,20 +104,31 @@ export function inspectAdmissionFile({
     violations.push('admissionPath is required');
     return { ok: false, violations, facts };
   }
-  if (!existsSync(admissionPath)) {
-    violations.push(`admission file does not exist: ${admissionPath}`);
-    return { ok: false, violations, facts };
-  }
-
+  // One open handle for stat + read: the file the plugin will read is the file
+  // that was inspected. A path-based exists/stat/read sequence is a TOCTOU race
+  // (CodeQL js/file-system-race).
+  let fd;
   let stat;
   let bytes;
   try {
-    stat = statSync(admissionPath);
+    fd = openSync(admissionPath, 'r');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      violations.push(`admission file does not exist: ${admissionPath}`);
+    } else {
+      violations.push(`admission file is unreadable: ${String(error?.message ?? error)}`);
+    }
+    return { ok: false, violations, facts };
+  }
+  try {
+    stat = fstatSync(fd);
     if (!stat.isFile()) violations.push('admission path is not a regular file');
-    bytes = readFileSync(admissionPath);
+    bytes = readFileSync(fd);
   } catch (error) {
     violations.push(`admission file is unreadable: ${String(error?.message ?? error)}`);
     return { ok: false, violations, facts };
+  } finally {
+    closeSync(fd);
   }
   facts.exists = true;
   facts.isRegularFile = stat.isFile();
