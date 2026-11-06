@@ -64,19 +64,31 @@ function registryBase() {
   return DEFAULT_REGISTRY;
 }
 
-async function fetchJson(url, { timeoutMs = 15000, fetchImpl } = {}) {
+async function fetchJson(url, { timeoutMs, fetchImpl, fresh } = {}) {
+  // Env override exists so release-contract tests can prove the TIMEOUT refusal
+  // (the release gate must fail closed) without waiting 45s for the production
+  // bound; it never changes the default posture.
+  const effectiveTimeout =
+    timeoutMs ?? (Number(process.env.PD_RELEASE_TIMEOUT_MS) > 0 ? Number(process.env.PD_RELEASE_TIMEOUT_MS) : 15000);
   const doFetch = fetchImpl ?? globalThis.fetch;
   if (typeof doFetch !== 'function') throw new RegistryError('no fetch implementation available');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), effectiveTimeout);
+  // Plain application/json = the FULL packument. The abbreviated install-v1
+  // "corgi" doc strips gitHead, which the identity check (SPEC §18.2) depends
+  // on. `Cache-Control: no-cache` is a COMPLEMENT to the `?write=true`
+  // mechanism below: request headers alone cannot prove a registry CDN was
+  // bypassed, so they are never the only freshness argument.
+  const headers = { accept: 'application/json' };
+  if (fresh) {
+    headers['cache-control'] = 'no-cache';
+    headers.pragma = 'no-cache';
+  }
   let res;
   try {
     res = await doFetch(url, {
       signal: controller.signal,
-      // Plain application/json = the FULL packument. The abbreviated
-      // install-v1 "corgi" doc strips gitHead, which the identity check
-      // (SPEC §18.2) depends on.
-      headers: { accept: 'application/json' },
+      headers,
     });
   } catch (err) {
     throw new RegistryError(`network failure fetching ${url}: ${err?.message ?? err}`, { cause: err });
@@ -119,13 +131,36 @@ async function withRetries(fn, { attempts = 3, delayMs, onRetry } = {}) {
 }
 
 /**
+ * Append npm's documented freshness escape hatch to a packument URL.
+ *
+ * `?write=true` is the mechanism npm's own client uses before a write
+ * (`npm-registry-fetch`): its documented meaning is "I intend to write to this
+ * thing, and need to know the latest current value", i.e. the registry serves
+ * CURRENT metadata instead of a cached packument. Request headers alone can be
+ * ignored by a CDN, so they are only a complement. Existing query parameters
+ * are preserved (`searchParams.set` never drops them), and the scoped-name
+ * path is untouched because only the query string is rewritten.
+ */
+function withFreshQuery(url) {
+  const parsed = new URL(url);
+  parsed.searchParams.set('write', 'true');
+  return parsed.toString();
+}
+
+/**
  * Fetch the full packument (all versions, dist-tags) for a package.
  * Throws RegistryError on 5xx/network/malformed after bounded retries.
  * Returns null when the package itself is not on the registry (404).
+ *
+ * `fresh: true` forces the registry to revalidate: publication cohort checks
+ * MUST NOT read a cached packument, because a stale `dist-tags.latest` is
+ * indistinguishable from "the channel did not move". Ordinary callers keep the
+ * default (false) so unrelated registry reads are not changed.
  */
 export async function fetchPackument(npmName, opts = {}) {
   assertValidNpmName(npmName);
-  const url = `${registryBase()}/${registryPath(npmName)}`;
+  const baseUrl = `${registryBase()}/${registryPath(npmName)}`;
+  const url = opts.fresh ? withFreshQuery(baseUrl) : baseUrl;
   try {
     return await withRetries(
       (attempt) => fetchJson(url, opts),

@@ -51,7 +51,12 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Git ref to build and publish from'
+        description: >-
+          Git ref carrying the release tooling. Since PRI-1103 it does NOT
+          pick the published bytes: mode=publish builds from the cohort the
+          npm installer channel shipped for product_version (see cohort_sha).
+          A dry-run whose channel cannot be resolved rehearses this ref
+          instead, loudly, and publishes nothing.
         required: false
         default: 'main'
         type: string
@@ -75,16 +80,34 @@ on:
         description: >-
           Product version to publish ("auto" = the shared product identity
           resolver scripts/resolve-product-version.mjs over the ref''s ROOT
-          manifest — NEVER an npm registry lookup; PRI-849/853, SPEC v0.3 §12).
-          Identity = this resolved version + HEAD commit (format-validated,
-          verified against each asset''s embedded stamp at assembly). An
-          EXPLICIT version must match the ref''s
-          create-principles-disciple/package.json unless allow_version_drift is set.
+          manifest — the VERSION never comes from an npm lookup; PRI-849/853,
+          SPEC v0.3 §12). Identity = this resolved version + the cohort commit
+          npm actually shipped for it (PRI-1103: create-principles-disciple''s
+          published gitHead, not the ref''s HEAD — the COMMIT does come from
+          the registry, because binding the asset channel to the npm channel is
+          what that lookup is for). Format-validated, verified against each
+          asset''s embedded stamp at assembly. An EXPLICIT version must match
+          the ref''s ROOT manifest unless allow_version_drift is true; cohort_sha
+          does not bypass that check — it must equal the current npm latest
+          commit, whose ROOT manifest must carry this version.
         required: false
         default: 'auto'
         type: string
+      cohort_sha:
+        description: >-
+          Explicit identity ASSERTION that this release's commit IS the commit
+          npm `latest` currently points at (create-principles-disciple''s
+          gitHead). Legal uses: deterministic rebuild, repeat publication of the
+          unchanged channel, key rotation / re-signing of that same cohort.
+          NOT a historical selector: once latest has moved to another commit,
+          an older published cohort is refused (EXPLICIT_NOT_LATEST), because
+          it would ship different bytes than a fresh npm install receives.
+          Leave empty to bind to the live npm channel release.
+        required: false
+        default: ''
+        type: string
       allow_version_drift:
-        description: 'Explicit product_version that disagrees with the ref''s package.json is refused unless this is true (deliberate re-publication escape hatch).'
+        description: 'Explicit product_version that disagrees with the ref''s ROOT manifest is refused unless this is true (deliberate re-publication escape hatch). It never changes the npm latest commit identity: cohort_sha, when set, must still equal that commit.'
         required: false
         default: false
         type: boolean
@@ -142,7 +165,19 @@ on:
     - cron: '0 6 * * *'
 
 concurrency:
-  group: release-metadata-${{ github.event.inputs.channel || 'stable' }}
+  # PRI-1103: a real publication (mode=publish) shares the GLOBAL npm
+  # publication group with publish-npm.yml — npm `latest` is global state, not
+  # a per-channel fact, so stable and candidate use the same lock and cannot
+  # overlap an npm train (nor each other). A dry-run / scheduled preflight
+  # publishes nothing, keeps its per-channel group, and must never occupy the
+  # production lock.
+  #
+  # LIMITATION: GitHub Actions concurrency is not a FIFO queue and keeps only
+  # one pending run per group (a newer pending run replaces an older one).
+  # Serialisation is guaranteed; delivery of every queued publication is not —
+  # a replaced pending run must be re-dispatched. cancel-in-progress stays
+  # false so a running publication is never cancelled by a new arrival.
+  group: ${{ github.event.inputs.mode == 'publish' && 'pd-release-publication-global' || format('release-metadata-{0}', github.event.inputs.channel || 'stable') }}
   cancel-in-progress: false
 
 permissions:
@@ -170,6 +205,25 @@ jobs:
           ref: ${{ github.event.inputs.ref || 'main' }}
           fetch-depth: 0
 
+      # PRI-1103: the publication gates are CONTROL PLANE and must run the
+      # tooling of the ref this run was dispatched against. Only THIS job may
+      # read the mutable input ref — every downstream job pins the SHA
+      # resolve-inputs measured (rc-6) and checks out the product cohort, which
+      # may predate the gate script. Handing the tooling down as an artifact
+      # keeps that invariant and keeps the gate out of the publication payload.
+      - name: Bundle publication-gate tooling
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          git archive HEAD scripts/release scripts/lib | tar -x -C "$RUNNER_TEMP/release-tools"
+          tar -czf "$RUNNER_TEMP/release-tools.tar.gz" -C "$RUNNER_TEMP/release-tools" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-publication-gate-tooling
+          path: ${{ runner.temp }}/release-tools.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Setup Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -182,12 +236,14 @@ jobs:
         env:
           PRODUCT_VERSION_INPUT: ${{ github.event.inputs.product_version }}
           ALLOW_VERSION_DRIFT: ${{ github.event.inputs.allow_version_drift }}
+          COHORT_SHA_INPUT: ${{ github.event.inputs.cohort_sha }}
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
         run: |
           # PRI-849/853 review fix: the product version comes from the SINGLE
           # shared resolver (root manifest authority) — never an npm registry
           # `latest` lookup, never a per-package manifest. An explicit
-          # product_version input still wins and must match the ref's
-          # installer manifest unless allow_version_drift is set.
+          # product_version input still wins and must match the ref's root
+          # manifest unless allow_version_drift or a validated cohort_sha is set.
           VERSION="$PRODUCT_VERSION_INPUT"
           if [ "$VERSION" = "auto" ] || [ -z "$VERSION" ]; then
             VERSION=$(node scripts/resolve-product-version.mjs)
@@ -196,7 +252,6 @@ jobs:
             echo "::error::Could not resolve the product version from the shared resolver."
             exit 1
           fi
-          COMMIT=$(git rev-parse HEAD)
           # PRI-874 re-anchor (was: compared against the ref's installer
           # COMPONENT manifest — the wrong plane, and it refused a correctly
           # advanced root manifest): an EXPLICIT product_version must agree
@@ -204,19 +259,62 @@ jobs:
           # allow_version_drift stays the deliberate-override door. "auto"
           # already resolves from the root manifest, so no comparison is
           # needed for it.
-          if [ "$PRODUCT_VERSION_INPUT" != "auto" ] && [ -n "$PRODUCT_VERSION_INPUT" ] && [ "$ALLOW_VERSION_DRIFT" != "true" ]; then
+          # PRI-1103: cohort_sha is an identity ASSERTION about the CURRENT npm
+          # latest commit, not a historical selector. The resolver below refuses
+          # unless that sha equals latest's gitHead and latest's ROOT manifest
+          # carries this product version, so it already proves the version
+          # binding; the ref's own root manifest may legitimately differ because
+          # main keeps advancing. allow_version_drift remains the explicit
+          # override for the ref-manifest disagreement only.
+          if [ -z "$COHORT_SHA_INPUT" ] && [ "$PRODUCT_VERSION_INPUT" != "auto" ] && [ -n "$PRODUCT_VERSION_INPUT" ] && [ "$ALLOW_VERSION_DRIFT" != "true" ]; then
             ROOT_VERSION=$(node scripts/resolve-product-version.mjs)
             if [ "$VERSION" != "$ROOT_VERSION" ]; then
-              echo "::error::Explicit product_version ($VERSION) disagrees with the root manifest resolver ($ROOT_VERSION). Pass allow_version_drift=true only for a deliberate exception."
+              echo "::error::Explicit product_version ($VERSION) disagrees with the root manifest resolver ($ROOT_VERSION). Pass allow_version_drift=true only for a deliberate exception; an older cohort_sha can no longer be republished onto the active npm channel."
               exit 1
             fi
+          fi
+          # PRI-1103 — THE BUILD COMMIT COMES FROM THE NPM CHANNEL, NOT THE REF.
+          # This job publishes the console-update channel; `npx
+          # create-principles-disciple` publishes the fresh-install channel. Both
+          # build their payloads from source with component-version preservation
+          # on (publish-npm-package exports PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1,
+          # bundle-plugin.mjs then skips the movable registry `latest` sync), so
+          # the channels agree on version NUMBERS while main keeps advancing with
+          # commits that touch no manifest at all: identical declared versions,
+          # different built bytes, and nothing at the install side able to
+          # observe which commit produced what the Owner downloaded. Binding the
+          # commit makes that divergence impossible to BUILD rather than
+          # something to detect. Every consumer below (build-asset checkout,
+          # SOURCE_DATE_EPOCH, the stamp written into the archive, the identity
+          # assemble-publish expects) already reads `commit` from this step, so
+          # re-anchoring here is the whole connection — no second mechanism.
+          COHORT_ARGS=()
+          if [ -n "$COHORT_SHA_INPUT" ]; then COHORT_ARGS+=(--expect-cohort "$COHORT_SHA_INPUT"); fi
+          if IDENTITY=$(node scripts/release/resolve-installer-cohort.mjs --product-version "$VERSION" "${COHORT_ARGS[@]}" --json); then
+            COMMIT=$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).cohort))' "$IDENTITY")
+            IDENTITY_SOURCE='npm cohort'
+          else
+            if [ "$MODE" = "publish" ]; then
+              echo "::error::PRI-1103: the npm installer channel does not pin product version $VERSION, so publishing this asset would serve bytes no install channel can be reconciled against. Run the npm train for this version first; an older cohort cannot be republished onto the active channel."
+              exit 1
+            fi
+            # A dry-run publishes nothing, so a preflight may still rehearse the
+            # ref it was dispatched on — but never quietly. The resolver has
+            # already printed the refusal above, and this states what
+            # mode=publish does with the same inputs, so a green rehearsal can
+            # never be read as publication evidence (rc-9).
+            echo "::warning::PRI-1103: npm channel unresolved for $VERSION — this DRY-RUN builds the dispatched ref instead and is NOT publication evidence; mode=publish would refuse."
+            COMMIT=$(git rev-parse HEAD)
+            IDENTITY_SOURCE='dispatched ref, dry-run fallback'
           fi
           # Consistency gate — validation target: the PUBLISHED-INPUT identity
           # (SPEC §12 product identity unification). `productVersion` and
           # `sourceCommit` below are the identity the publisher signs and the
           # build-asset legs stamp INTO the artifact (verified again at
           # assemble time against each asset's embedded stamp), so they must
-          # both be well-formed and mutually pinned to THIS run's ref.
+          # both be well-formed and mutually pinned to the cohort this run
+          # resolved — the npm channel's for a publication, the ref's for a
+          # rehearsal fallback.
           #
           # The source tree's package.json version is NO LONGER the release
           # identity authority: since the product-identity unification it is a
@@ -237,8 +335,11 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
-          echo "source_epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
-          echo "release identity: version=$VERSION commit=$(git rev-parse --short HEAD)"
+          # The epoch is the DETERMINISTIC-ARCHIVE input (SOURCE_DATE_EPOCH at
+          # build-asset), so it must describe the commit that gets built —
+          # which since PRI-1103 is the npm cohort, not this checkout's tip.
+          echo "source_epoch=$(git log -1 --format=%ct "$COMMIT")" >> "$GITHUB_OUTPUT"
+          echo "release identity: version=$VERSION commit=${COMMIT:0:12} ($IDENTITY_SOURCE)"
 
       - name: Fetch previously published metadata state
         id: prev
@@ -649,6 +750,46 @@ jobs:
             echo "Asset $LEG identity verified: version=$EXPECTED_VERSION commit=${EXPECTED_COMMIT:0:12}"
           done
 
+      # PRI-1103 RACE GATE TOOLING. The gate is CONTROL PLANE: it must be the
+      # reviewed tooling resolve-inputs bundled from the dispatched ref, never a
+      # file that happens to exist in the product cohort being published (this
+      # job's workspace is checked out at the cohort SHA, which may predate the
+      # script). Extracting it into RUNNER_TEMP keeps the workspace — and
+      # therefore the gh-pages publication payload below — byte-for-byte what
+      # the product checkout produces.
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-publication-gate-tooling
+          path: ${{ runner.temp }}/release-tools-archive
+
+      - name: Extract trusted publication-gate tooling
+        run: |
+          TOOLS_DIR="$RUNNER_TEMP/release-tools"
+          mkdir -p "$TOOLS_DIR"
+          tar -xzf "$RUNNER_TEMP/release-tools-archive/release-tools.tar.gz" -C "$TOOLS_DIR"
+          test -f "$TOOLS_DIR/scripts/release/verify-publication-cohort.mjs"
+          echo "publication gate tooling: $(sha256sum "$TOOLS_DIR/scripts/release/verify-publication-cohort.mjs" | cut -d' ' -f1)"
+
+      # GATE 1 — after every platform asset exists and its embedded identity is
+      # verified, BEFORE any external side effect (signing/upload/push). A
+      # refusal here leaves nothing published. A dry-run publishes nothing, so
+      # the same check is ADVISORY there (reported, never publication evidence).
+      - name: Publication gate 1 — re-verify npm cohort before any side effect
+        env:
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          EXPECTED_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+          EXPECTED_COMMIT: ${{ needs.resolve-inputs.outputs.commit }}
+          COHORT_SHA_INPUT: ${{ github.event.inputs.cohort_sha }}
+        run: |
+          GATE_ARGS=(
+            --mode "$MODE"
+            --product-version "$EXPECTED_VERSION"
+            --expected-commit "$EXPECTED_COMMIT"
+            --external-side-effects none
+          )
+          if [ -n "$COHORT_SHA_INPUT" ]; then GATE_ARGS+=(--explicit-cohort "$COHORT_SHA_INPUT"); fi
+          node "$RUNNER_TEMP/release-tools/scripts/release/verify-publication-cohort.mjs" "${GATE_ARGS[@]}"
+
       - name: Fetch previously published metadata state
         run: |
           mkdir -p "$RUNNER_TEMP/prev-metadata"
@@ -746,9 +887,23 @@ jobs:
           path: ${{ runner.temp }}/metadata-repo
           if-no-files-found: ignore
 
+      # GATE 2 RUNS INSIDE THIS SHELL, after `git commit` and IMMEDIATELY
+      # before `git push origin gh-pages`. A separate YAML step that merely
+      # precedes this step cannot protect the push: worktree preparation,
+      # metadata copying, staging, checks and the commit all execute between
+      # the two steps. The gate is control-plane tooling from resolve-inputs
+      # (never the product cohort checkout). Fail closed: no push, no success
+      # announcement. Asset bytes already uploaded above are content-addressed
+      # and unreferenced — the refusal says so.
       - name: Publish to metadata source (gh-pages, atomic push)
         if: env.MODE == 'publish' && success()
+        env:
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          EXPECTED_VERSION: ${{ needs.resolve-inputs.outputs.version }}
+          EXPECTED_COMMIT: ${{ needs.resolve-inputs.outputs.commit }}
+          COHORT_SHA_INPUT: ${{ github.event.inputs.cohort_sha }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
@@ -798,6 +953,19 @@ jobs:
             console.log(payload.releaseId.slice(0, 12));
           " "$RUNNER_TEMP/metadata-repo/targets/channels/$CHANNEL.json")
           git commit -m "release-metadata: ${RELEASE_ID} (${{ needs.resolve-inputs.outputs.version }}, $CHANNEL)"
+          # GATE 2 — the build may have taken the better part of an hour. If
+          # the npm channel moved during it, these bytes no longer represent
+          # what a fresh install receives. The registry read is force-
+          # revalidated (?write=true), never a cached packument, and this is a
+          # NEW query after gate 1. The very next command is the push.
+          GATE_ARGS2=(
+            --mode "$MODE"
+            --product-version "$EXPECTED_VERSION"
+            --expected-commit "$EXPECTED_COMMIT"
+            --external-side-effects asset-bytes-uploaded
+          )
+          if [ -n "$COHORT_SHA_INPUT" ]; then GATE_ARGS2+=(--explicit-cohort "$COHORT_SHA_INPUT"); fi
+          node "$RUNNER_TEMP/release-tools/scripts/release/verify-publication-cohort.mjs" "${GATE_ARGS2[@]}"
           # One push updates the whole tree atomically; consumers never see a
           # channel pointer whose artifact is missing.
           git push origin gh-pages

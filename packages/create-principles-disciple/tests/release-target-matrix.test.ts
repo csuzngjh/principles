@@ -121,8 +121,14 @@ describe('native release target matrix', () => {
     expect(secretUsages.length).toBe(1);
     expect(metadataWorkflow.indexOf('assemble-publish:')).toBeLessThan(metadataWorkflow.indexOf('secrets.PD_RELEASE_SIGNING_KEY'));
 
-    // Single-channel concurrency: one publication owns the sequence at a time.
-    expect(metadataWorkflow).toContain("group: release-metadata-${{ github.event.inputs.channel || 'stable' }}");
+    // PRI-1103: npm `latest` is GLOBAL, so a real publication shares ONE
+    // channel-agnostic mutex with publish-npm; a dry-run keeps its own
+    // per-channel group and never takes the production lock.
+    expect(metadataWorkflow).toContain('pd-release-publication-global');
+    expect(metadataWorkflow).toContain("github.event.inputs.mode == 'publish'");
+    expect(metadataWorkflow).toContain("format('release-metadata-{0}', github.event.inputs.channel || 'stable')");
+    expect(metadataWorkflow).not.toContain("group: release-metadata-${{ github.event.inputs.channel || 'stable' }}");
+    expect(metadataWorkflow).toContain('cancel-in-progress: false');
 
     // Manual workflow only: PR merge CI must not pay for the matrix.
     expect(metadataWorkflow).toContain('workflow_dispatch:');
