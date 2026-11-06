@@ -164,8 +164,9 @@ function isDuplicateColumnError(err: unknown): boolean {
  * Delegates to the canonical schema module (`applyTrajectorySchemaBase`,
  * Profile B: base + the three runtime-init views). Profile C extras
  * (v_daily_metrics) are applied by migrateSchema() in
- * TrajectoryDatabase.initSchema. schema_version row writes stay with
- * initSchema/initTrajectorySchema (SPEC §5 contract).
+ * TrajectoryDatabase.initSchema. The schema_version row is NOT written here:
+ * core `convergeTrajectorySchemaVersion` is its only writer (PRI-1135), reached
+ * through migrateLegacyGfiSchema inside applyTrajectorySchemaBase.
  *
  * Idempotent: all CREATE statements use IF NOT EXISTS; column migrations
  * swallow duplicate-column errors.
@@ -211,7 +212,9 @@ export function initTrajectorySchema(workspaceDir: string): { tables: string[]; 
     // PRI-1135: the version-row write has ONE owner. Both plugin entry points
     // delegate to the core convergence function instead of duplicating the
     // INSERT/UPDATE logic (the raw host-runtime open paths reach it through
-    // migrateLegacyGfiSchema).
+    // migrateLegacyGfiSchema, i.e. already inside applyTrajectorySchema above;
+    // this explicit call is idempotent and keeps the contract visible at the
+    // entry point).
     convergeTrajectorySchemaVersion(db);
     return result;
   } finally {

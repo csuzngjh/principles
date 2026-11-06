@@ -70,13 +70,25 @@ export const TRAJECTORY_TABLES = [
  *
  * It lives with the DDL owner so the next schema evolution changes one place.
  * trajectory-schema.test.ts derives the actual columns from a real database
- * via PRAGMA and fails if this list and the applied DDL drift apart.
+ * via PRAGMA and asserts every column listed here still exists with the listed
+ * type. The assertion is intentionally list ⊆ DDL, not equality: a stricter
+ * bidirectional check would have to whitelist columns the gate deliberately
+ * does not model (e.g. tool_calls.host_kind). The fail-closed direction — a
+ * column that disappears from the DDL — is covered by the prepared-statement
+ * probe in host-runtime `hasProductionPainSchema`, which throws on any missing
+ * column, so shrinking this list can only lose type checking, never silently
+ * open the gate.
+ *
+ * Frozen at runtime: consumers import the same object from another package, so
+ * a mutation here would rewrite the gate's "single truth" in place.
  */
 export const TRAJECTORY_REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
   tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT', project_dir: 'TEXT' },
   pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', host_kind: 'TEXT', created_at: 'TEXT' },
 };
+for (const table of Object.values(TRAJECTORY_REQUIRED_COLUMNS)) Object.freeze(table);
+Object.freeze(TRAJECTORY_REQUIRED_COLUMNS);
 
 /**
  * SQLite's only signal for "column already exists" is the error message text

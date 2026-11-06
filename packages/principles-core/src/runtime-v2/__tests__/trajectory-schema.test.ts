@@ -172,7 +172,7 @@ describe('PRI-774: canonical trajectory schema module', () => {
 });
 
 describe('PRI-1135: single schema truth + single version-row writer', () => {
-  it('TRAJECTORY_REQUIRED_COLUMNS matches what the real DDL produces (drift guard)', () => {
+  it('TRAJECTORY_REQUIRED_COLUMNS only lists columns the real DDL produces, with the listed type', () => {
     const db = new Database(':memory:');
     applyTrajectorySchemaBase(db);
     for (const [table, required] of Object.entries(TRAJECTORY_REQUIRED_COLUMNS)) {
@@ -183,6 +183,13 @@ describe('PRI-1135: single schema truth + single version-row writer', () => {
       }
     }
     db.close();
+  });
+
+  it('TRAJECTORY_REQUIRED_COLUMNS is frozen so a consumer cannot rewrite the gate in place', () => {
+    expect(Object.isFrozen(TRAJECTORY_REQUIRED_COLUMNS)).toBe(true);
+    for (const table of Object.values(TRAJECTORY_REQUIRED_COLUMNS)) {
+      expect(Object.isFrozen(table)).toBe(true);
+    }
   });
 
   it('convergeTrajectorySchemaVersion inserts, upgrades a stale row, and is idempotent', () => {
