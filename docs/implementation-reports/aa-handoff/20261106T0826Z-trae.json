@@ -10,13 +10,13 @@
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
     "branch": "ai/PRI-1118-controlled-admission-impl",
     "baseCommit": "b098a213ba792f5b7f5a7a2c0c5893f737d732fe",
-    "headCommit": "9ff7f002a6dfe60252bb63b38d917abbbff617da",
-    "headCommitNote": "本检查点 JSON/MD 紧随该实现提交之后单独提交；最终 head 以 PR #2389 页面为准。",
+    "headCommit": "7c1613293",
+    "headCommitNote": "该值为最后一个代码提交（release-intent changeset）；紧随其后的检查点 JSON/MD 提交会使远端 head 前移，最终 head 以 PR #2389 页面为准。",
     "dirtyPaths": [],
-    "pushedCommit": "9ff7f002a6dfe60252bb63b38d917abbbff617da",
+    "pushedCommit": "7c1613293e",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2389",
     "prState": "OPEN",
-    "remoteChecks": "UNKNOWN at write: PR #2389 刚创建，未读取 CI；api.github.com 在本机间歇超时（github.com 正常），PR 经 REST 重试创建。"
+    "remoteChecks": "读取 e3f37bd98 的 check-runs：Verify Merge Gate failure（release-intent N-3，缺 changeset），其余 success/in_progress；已补 .changeset 并在本地跑通守卫（PASS）。新 head 的 CI 结果未读取。"
   },
   "tasks": [
     {
@@ -38,7 +38,11 @@
         "scripts/dev/aa-controlled-admission/run-experiment.mjs",
         "scripts/__tests__/aa-controlled-admission.test.mjs"
       ],
-      "commits": ["9ff7f002a6dfe60252bb63b38d917abbbff617da"],
+      "commits": [
+        "9ff7f002a6dfe60252bb63b38d917abbbff617da",
+        "96cf4970b (harness: freeze fixtureRef into the admission)",
+        "7c1613293 (release: declare changeset intent)"
+      ],
       "acceptance": [
         {"criterion": "同轮 claim 交接与重放判定分离，并有各自测试", "result": "PASS", "evidenceRefs": ["evidence-plugin-tests", "evidence-shared-entry"]},
         {"criterion": "重复回调、同输入新 run、跨 session、过期、工具后第二次请求、并发锁占用均拒绝", "result": "PASS", "evidenceRefs": ["evidence-plugin-tests"]},
