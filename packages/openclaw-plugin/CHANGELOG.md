@@ -1,5 +1,17 @@
 # principles-disciple
 
+## 2.6.5
+
+### Patch Changes
+
+- a902255: core: add `TRAJECTORY_REQUIRED_COLUMNS` and `convergeTrajectorySchemaVersion` — one declaration of the columns trajectory.db must carry and one writer of its `schema_version` row (PRI-1135). Both are module-level exports of `runtime-v2/trajectory-schema`; the runtime-v2 barrel surface is unchanged.
+  
+  host-runtime: drop the duplicate hand-maintained column list and import the core constant instead. Because host-runtime now names an export that this core release introduces, both packages must ship in the same version pass — a host-runtime-only release would resolve `@principles/core@4.1.x` and fail at module link time.
+  
+  principles-disciple: the bundled OpenClaw plugin's trajectory lifecycle now delegates the `schema_version` row to core instead of writing it inline; no user-visible behavior change.
+  
+  create-principles-disciple: the installer bundles the plugin, so it follows the principles-disciple patch above (same version pass).
+
 ## 2.6.4
 
 ### Patch Changes
