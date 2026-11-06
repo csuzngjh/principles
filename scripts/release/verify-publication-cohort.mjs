@@ -116,6 +116,10 @@ function actualIdentity(status, payload) {
       return { version: payload?.channelProductVersion ?? null, commit: payload?.cohort ?? null };
     case 'VERSION_MISMATCH':
       return { version: payload?.cohortProductVersion ?? null, commit: payload?.expectedCohort ?? null };
+    case 'EXPLICIT_NOT_LATEST':
+      // The named cohort is published, but the live channel serves another
+      // commit; the actual side is the channel's current identity.
+      return { version: payload?.actualProductVersion ?? null, commit: payload?.actualLatestCommit ?? null };
     case 'COMMIT_UNAVAILABLE':
       // The registry named a cohort, but this checkout cannot read it.
       return { version: null, commit: payload?.cohort ?? null };

@@ -131,10 +131,14 @@ versions equal "because they ship together".
   `create-principles-disciple` actually shipped for that product version and
   builds that commit, so the console-update channel and the fresh-install
   channel cannot ship different bytes under one version number. `ref` picks
-  the release tooling; `cohort_sha` re-publishes an older version from its
-  own cohort (validated, so `allow_version_drift` is not needed). If the
-  npm side has not shipped yet, a publish dispatch refuses and a preflight
-  rehearses the ref with a warning.
+  the release tooling; `cohort_sha` is an explicit identity assertion that
+  this commit IS the commit npm `latest` currently points at — legal for a
+  deterministic rebuild, a repeat publication of the unchanged channel, or a
+  key-rotation re-sign of that same cohort. It is NOT a historical selector:
+  once `latest` has moved to another commit, an older published cohort is
+  refused (`EXPLICIT_NOT_LATEST`) because it would ship different bytes than
+  a fresh npm install receives. If the npm side has not shipped yet, a publish
+  dispatch refuses and a preflight rehearses the ref with a warning.
 - **Publication mutex and cohort re-checks** (PRI-1103, race hardening):
   npm `latest` is one global fact, so `publish-npm.yml` and
   `release-metadata.yml` `mode=publish` share the single Actions concurrency
@@ -167,15 +171,18 @@ versions equal "because they ship together".
   gate 2 are separate processes, so each issues its own revalidated request
   and never reuses an earlier result. Ordinary (non-cohort) registry reads
   keep the default behaviour.
-  Auto mode (`cohort_sha` empty) re-reads `latest`; explicit-cohort mode
-  accepts a published historical SHA (a legal byte-identical republish is
-  not blocked). 404 / 503 / timeout / network failure / malformed JSON /
-  missing `gitHead` / version or commit drift / unreadable commit all fail
-  closed, reporting expected vs actual identity, the mode, and whether
-  external side effects (asset bytes) already happened. A dry-run result is
-  advisory only and is explicitly labelled NOT publication evidence, and a
-  dry-run never executes the mode=publish shell; `mode=publish` never takes
-  that fallback.
+  Auto mode (`cohort_sha` empty) and explicit mode apply the SAME rule: the
+  commit must be the one npm `latest` currently serves, with a readable
+  manifest whose root product version equals the expected version. Explicit
+  mode may only name that current commit (repeat build / re-sign); it can
+  never revive an older published cohort, and `allow_version_drift` does not
+  change the npm latest commit identity. 404 / 503 / timeout / network failure
+  / malformed JSON / missing `gitHead` / version or commit drift / unreadable
+  commit all fail closed, reporting expected vs actual identity, the mode, and
+  whether external side effects (asset bytes) already happened. A dry-run
+  result is advisory only and is explicitly labelled NOT publication
+  evidence, and a dry-run never executes the mode=publish shell;
+  `mode=publish` never takes that fallback.
 
 The Version PR bot (`changesets/action`, pinned) requires the
 `PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +

@@ -152,12 +152,11 @@ describe('resolve-installer-cohort.mjs', () => {
       status: 'VERSION_LAGS',
       channelProductVersion: '1.1.0',
       cohort: checkout.shas['1.1.0'],
-      suggestedCohort: checkout.shas['1.0.0'],
-      suggestedInstallerVersion: '1.147.11',
     });
+    // No "pass an older cohort to republish" hint: that path is now refused.
+    expect(run.json).not.toHaveProperty('suggestedCohort');
     expect(run.stderr).toContain('1.1.0');
-    expect(run.stderr).toContain('1.0.0');
-    expect(run.stderr).toContain(checkout.shas['1.0.0']);
+    expect(run.stderr).not.toContain('cohort_sha');
   });
 
   it('still refuses when no published installer release carries the requested version', async () => {
@@ -167,12 +166,13 @@ describe('resolve-installer-cohort.mjs', () => {
     const run = await runCli(['--product-version', '9.9.9', '--json'], checkout.root);
 
     expect(run.code).toBe(1);
-    expect(run.json).toMatchObject({ status: 'VERSION_LAGS', suggestedCohort: null });
+    expect(run.json).toMatchObject({ status: 'VERSION_LAGS' });
+    expect(run.json).not.toHaveProperty('suggestedCohort');
     // No invented cohort: the operator gets a refusal, not a guess to paste.
     expect(run.stderr).not.toContain('cohort_sha = ');
   });
 
-  it('accepts an explicit cohort only when a published release recorded it', async () => {
+  it('accepts an explicit cohort only when it is the current npm latest commit', async () => {
     servedStatus = 200;
     servedPackument = packument('1.147.12', [{ version: '1.147.12', gitHead: checkout.shas['1.1.0'], publishedAt: '2026-11-03T00:00:00.000Z' }]);
 
@@ -180,12 +180,25 @@ describe('resolve-installer-cohort.mjs', () => {
     expect(ok.code).toBe(0);
     expect(ok.json).toMatchObject({ status: 'MATCH', via: 'explicit', cohort: checkout.shas['1.1.0'] });
 
+    // Never published at all: unprovable, therefore refused.
     const unknown = await runCli(['--product-version', '1.1.0', '--expect-cohort', 'f'.repeat(40), '--json'], checkout.root);
     expect(unknown.code).toBe(1);
     expect(unknown.json?.status).toBe('EXPLICIT_UNPUBLISHED');
+
+    // Unreadable live channel: an explicit SHA cannot substitute for it.
+    servedPackument = packument('1.147.12', [{ version: '1.147.12', publishedAt: '2026-11-03T00:00:00.000Z' }]);
+    const noHead = await runCli(['--product-version', '1.1.0', '--expect-cohort', checkout.shas['1.1.0'], '--json'], checkout.root);
+    expect(noHead.code).toBe(1);
+    expect(noHead.json?.status).toBe('ABSENT_COHORT');
   });
 
-  it('refuses an explicit cohort whose root manifest carries a different product version', async () => {
+  /**
+   * The Owner-identified P1: a published historical cohort with the SAME
+   * product version must not be usable once `latest` moved to another commit.
+   * Both sides carry product version 1.1.0, so only a full-SHA comparison
+   * against the live channel can refuse this.
+   */
+  it('refuses a published historical cohort once latest points at another commit', async () => {
     servedStatus = 200;
     servedPackument = packument('1.147.12', [
       { version: '1.147.12', gitHead: checkout.shas['1.1.0'], publishedAt: '2026-11-03T00:00:00.000Z' },
@@ -195,7 +208,31 @@ describe('resolve-installer-cohort.mjs', () => {
     const run = await runCli(['--product-version', '1.1.0', '--expect-cohort', checkout.shas['1.0.0'], '--json'], checkout.root);
 
     expect(run.code).toBe(1);
-    expect(run.json).toMatchObject({ status: 'VERSION_MISMATCH', cohortProductVersion: '1.0.0', installerVersion: '1.147.11' });
+    expect(run.json).toMatchObject({
+      status: 'EXPLICIT_NOT_LATEST',
+      expectedCommit: checkout.shas['1.0.0'],
+      actualLatestCommit: checkout.shas['1.1.0'],
+      installerVersion: '1.147.12',
+      productVersion: '1.1.0',
+      actualProductVersion: '1.1.0',
+    });
+    expect(run.stderr).toContain('EXPLICIT_NOT_LATEST');
+    expect(run.stderr).toContain(checkout.shas['1.0.0']);
+    expect(run.stderr).toContain(checkout.shas['1.1.0']);
+  });
+
+  it('refuses an explicit cohort whose root manifest carries a different product version', async () => {
+    servedStatus = 200;
+    // `latest` itself points at the commit whose root manifest says 1.0.0,
+    // while this run expects product version 1.1.0.
+    servedPackument = packument('1.147.12', [
+      { version: '1.147.12', gitHead: checkout.shas['1.0.0'], publishedAt: '2026-11-03T00:00:00.000Z' },
+    ]);
+
+    const run = await runCli(['--product-version', '1.1.0', '--expect-cohort', checkout.shas['1.0.0'], '--json'], checkout.root);
+
+    expect(run.code).toBe(1);
+    expect(run.json).toMatchObject({ status: 'VERSION_MISMATCH', cohortProductVersion: '1.0.0', installerVersion: '1.147.12' });
   });
 
   it('refuses rather than assuming when the release records no gitHead', async () => {

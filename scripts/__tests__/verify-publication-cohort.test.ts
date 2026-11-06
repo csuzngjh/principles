@@ -281,10 +281,90 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
     });
   });
 
-  // Scenario E — an explicit HISTORICAL cohort republish stays legal even
-  // though npm latest is a newer cohort. The final guard must not demand that
-  // a historical cohort equals latest.
-  it('passes for a published historical cohort even when latest is newer', async () => {
+  // Scenario A/C — an explicit cohort that IS the current npm latest stays
+  // legal: deterministic rebuilds, repeat publication of the unchanged
+  // channel and key-rotation re-signing all name the same commit.
+  it('passes an explicit cohort when it is the current npm latest commit', async () => {
+    serve(packument('1.147.12', [{ version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' }]));
+    const run = await runGate(
+      gateArgs({ version: '2.8.3', commit: checkout.shas.A, explicit: checkout.shas.A }),
+      checkout.root,
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.json).toMatchObject({
+      status: 'MATCH',
+      mode: 'explicit-cohort',
+      actual: { version: '2.8.3', commit: checkout.shas.A },
+    });
+  });
+
+  // Scenario B — THE Owner-identified bypass. A and B both declare product
+  // version 2.8.3; A is published, but `latest` has already moved to B.
+  // Naming A must now be refused by the initial resolver, gate 1 and gate 2:
+  // a version-only rule would accept it and let the console-update channel
+  // ship different bytes than a fresh npm install receives.
+  it('refuses a published historical cohort once latest points at another commit', async () => {
+    const published = packument('1.147.13', [
+      { version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-04T00:00:00.000Z' },
+      { version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' },
+    ]);
+    serve(published);
+
+    const initial = await runResolver(
+      ['--product-version', '2.8.3', '--expect-cohort', checkout.shas.A, '--json'],
+      checkout.root,
+    );
+    expect(initial.code).toBe(1);
+    expect(initial.json).toMatchObject({
+      status: 'EXPLICIT_NOT_LATEST',
+      expectedCommit: checkout.shas.A,
+      actualLatestCommit: checkout.shas.B,
+      installerVersion: '1.147.13',
+      productVersion: '2.8.3',
+      actualProductVersion: '2.8.3',
+    });
+    expect(initial.stderr).toContain('EXPLICIT_NOT_LATEST');
+
+    const gate1 = await runGate(
+      gateArgs({ version: '2.8.3', commit: checkout.shas.A, explicit: checkout.shas.A }),
+      checkout.root,
+    );
+    expect(gate1.code).toBe(1);
+    expect(gate1.json).toMatchObject({
+      status: 'BLOCKED',
+      mode: 'explicit-cohort',
+      resolverStatus: 'EXPLICIT_NOT_LATEST',
+      expected: { version: '2.8.3', commit: checkout.shas.A },
+      actual: { version: '2.8.3', commit: checkout.shas.B },
+      externalSideEffects: 'none',
+    });
+
+    const gate2 = await runGate(
+      gateArgs({
+        version: '2.8.3',
+        commit: checkout.shas.A,
+        explicit: checkout.shas.A,
+        sideEffects: 'asset-bytes-uploaded',
+      }),
+      checkout.root,
+    );
+    expect(gate2.code).toBe(1);
+    expect(gate2.json).toMatchObject({
+      status: 'BLOCKED',
+      resolverStatus: 'EXPLICIT_NOT_LATEST',
+      externalSideEffects: 'asset-bytes-uploaded',
+    });
+    for (const run of [initial, gate1, gate2]) {
+      expect(run.stderr).not.toContain('VERIFIED');
+      expect(run.stdout).not.toContain('VERIFIED');
+    }
+  });
+
+  // Scenario H — the former passing test, inverted. It used to assert that a
+  // published historical cohort passes even when latest is newer; that was
+  // the bypass itself. The regression must keep proving the refusal.
+  it('BLOCKS the former historical-cohort bypass (same version, latest moved on)', async () => {
     serve(
       packument('1.147.13', [
         { version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-04T00:00:00.000Z' },
@@ -296,11 +376,59 @@ describe('verify-publication-cohort gate — the business scenarios', () => {
       checkout.root,
     );
 
-    expect(run.code).toBe(0);
+    expect(run.code).toBe(1);
     expect(run.json).toMatchObject({
-      status: 'MATCH',
+      status: 'BLOCKED',
       mode: 'explicit-cohort',
-      actual: { version: '2.8.3', commit: checkout.shas.A },
+      resolverStatus: 'EXPLICIT_NOT_LATEST',
+      expected: { version: '2.8.3', commit: checkout.shas.A },
+      actual: { version: '2.8.3', commit: checkout.shas.B },
+      externalSideEffects: 'none',
+    });
+    expect(run.stderr).toContain('EXPLICIT_NOT_LATEST');
+    expect(run.stdout).not.toContain('VERIFIED');
+  });
+
+  // Scenario E — an unreadable latest gitHead is unprovable, so an explicit
+  // cohort cannot be accepted either. Never inferred from the version number.
+  it('BLOCKS an explicit cohort when npm latest carries no readable gitHead', async () => {
+    serve(packument('1.147.13', [{ version: '1.147.13', publishedAt: '2026-11-04T00:00:00.000Z' }]));
+    const run = await runGate(
+      gateArgs({ version: '2.8.3', commit: checkout.shas.A, explicit: checkout.shas.A }),
+      checkout.root,
+    );
+
+    expect(run.code).toBe(1);
+    expect(run.json).toMatchObject({ status: 'BLOCKED', mode: 'explicit-cohort', resolverStatus: 'ABSENT_COHORT' });
+  });
+
+  // Scenario G (explicit variant) — the channel moves AFTER the initial
+  // resolution accepted A. Gate 1 must issue its own fresh query and refuse;
+  // it may not inherit the initial process's answer.
+  it('BLOCKS gate 1 when latest moves away from an explicitly resolved cohort during the build', async () => {
+    serve(packument('1.147.12', [{ version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' }]));
+    const initial = await runResolver(
+      ['--product-version', '2.8.3', '--expect-cohort', checkout.shas.A, '--json'],
+      checkout.root,
+    );
+    expect(initial.code).toBe(0);
+
+    serve(
+      packument('1.147.13', [
+        { version: '1.147.13', gitHead: checkout.shas.B, publishedAt: '2026-11-04T00:00:00.000Z' },
+        { version: '1.147.12', gitHead: checkout.shas.A, publishedAt: '2026-11-03T00:00:00.000Z' },
+      ]),
+    );
+    const gate1 = await runGate(
+      gateArgs({ version: '2.8.3', commit: checkout.shas.A, explicit: checkout.shas.A }),
+      checkout.root,
+    );
+
+    expect(gate1.code).toBe(1);
+    expect(gate1.json).toMatchObject({
+      status: 'BLOCKED',
+      resolverStatus: 'EXPLICIT_NOT_LATEST',
+      actual: { version: '2.8.3', commit: checkout.shas.B },
     });
   });
 

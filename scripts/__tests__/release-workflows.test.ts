@@ -669,12 +669,19 @@ describe('release-metadata.yml — asset commit bound to the npm cohort (PRI-110
     return step;
   }
 
-  it('offers cohort_sha as the validated exception, defaulted so no event can invent one', () => {
-    const doc = loadWorkflow(rel) as { on?: Record<string, { inputs?: Record<string, { default?: unknown; type?: string }> }> };
+  it('exposes cohort_sha as a current-npm-latest assertion, defaulted so no event can invent one', () => {
+    const doc = loadWorkflow(rel) as {
+      on?: Record<string, { inputs?: Record<string, { default?: unknown; type?: string; description?: string }> }>;
+    };
     const inputs = doc.on?.workflow_dispatch?.inputs;
     expect(Object.keys(inputs ?? [])).toContain('cohort_sha');
     expect(inputs?.cohort_sha?.default).toBe('');
     expect(inputs?.cohort_sha?.type).toBe('string');
+    // The operator-facing contract must not advertise historical republishing:
+    // the value asserts the commit npm `latest` currently points at.
+    expect(inputs?.cohort_sha?.description ?? '').toMatch(/npm `latest`/);
+    expect(inputs?.cohort_sha?.description ?? '').toContain('NOT a historical selector');
+    expect(inputs?.allow_version_drift?.description ?? '').toContain('never changes the npm latest commit identity');
     // A schedule event carries no inputs, so the daily preflight can never
     // pin an arbitrary cohort — same posture as mode.
     expect(text()).toContain('github.event.inputs.cohort_sha');
@@ -689,6 +696,10 @@ describe('release-metadata.yml — asset commit bound to the npm cohort (PRI-110
     // re-open the door this ticket closed.
     expect((run.match(/COMMIT=\$\(git rev-parse HEAD\)/g) ?? [])).toHaveLength(1);
     expect((text().match(/resolve-installer-cohort\.mjs/g) ?? [])).toHaveLength(1);
+    // No refusal message may send the operator to an older cohort: that is the
+    // bypass this rule exists to close.
+    expect(run).not.toContain('cohort_sha that shipped it');
+    expect(run).not.toContain('re-publish it from its own cohort');
   });
 
   it('fails closed on mode=publish and only rehearses the ref in a dry-run', () => {
@@ -696,9 +707,11 @@ describe('release-metadata.yml — asset commit bound to the npm cohort (PRI-110
     expect(run).toMatch(/if \[ "\$MODE" = "publish" \]; then[\s\S]{0,600}?exit 1[\s\S]{0,20}fi[\s\S]*?DRY-RUN[\s\S]*?COMMIT=\$\(git rev-parse HEAD\)/);
   });
 
-  it('lets a validated cohort_sha stand in for the allow_version_drift boolean', () => {
-    // Without this, the Owner-sanctioned exception path would have to pass the
-    // unvalidated boolean to survive the PRI-874 ref-vs-explicit gate.
+  it('skips the ref-manifest check only for a cohort_sha the resolver binds to current npm latest', () => {
+    // The resolver refuses any cohort_sha that is not latest's gitHead and
+    // checks latest's ROOT manifest against the expected version, so that
+    // branch already proves the version binding; the ref manifest may differ
+    // because main keeps advancing.
     expect(identityStep().run ?? '').toMatch(/\[ -z "\$COHORT_SHA_INPUT" \] && \[ "\$PRODUCT_VERSION_INPUT" != "auto" \]/);
   });
 

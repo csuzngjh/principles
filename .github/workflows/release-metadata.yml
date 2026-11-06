@@ -87,24 +87,27 @@ on:
           the registry, because binding the asset channel to the npm channel is
           what that lookup is for). Format-validated, verified against each
           asset''s embedded stamp at assembly. An EXPLICIT version must match
-          the ref''s ROOT manifest unless allow_version_drift or cohort_sha
-          is set.
+          the ref''s ROOT manifest unless allow_version_drift is true; cohort_sha
+          does not bypass that check — it must equal the current npm latest
+          commit, whose ROOT manifest must carry this version.
         required: false
         default: 'auto'
         type: string
       cohort_sha:
         description: >-
-          PRI-1103 exception path: re-publish an older product version from the
-          exact commit npm shipped it from (e.g. a byte-identical republish
-          after a key rotation). Validated, not a bypass — the workflow refuses
-          a sha no published create-principles-disciple version records as its
-          gitHead, and refuses one whose ROOT manifest declares a different
-          product version. Leave empty to bind to the live npm channel release.
+          Explicit identity ASSERTION that this release's commit IS the commit
+          npm `latest` currently points at (create-principles-disciple''s
+          gitHead). Legal uses: deterministic rebuild, repeat publication of the
+          unchanged channel, key rotation / re-signing of that same cohort.
+          NOT a historical selector: once latest has moved to another commit,
+          an older published cohort is refused (EXPLICIT_NOT_LATEST), because
+          it would ship different bytes than a fresh npm install receives.
+          Leave empty to bind to the live npm channel release.
         required: false
         default: ''
         type: string
       allow_version_drift:
-        description: 'Explicit product_version that disagrees with the ref''s ROOT manifest is refused unless this is true (deliberate re-publication escape hatch; cohort_sha is the validated alternative).'
+        description: 'Explicit product_version that disagrees with the ref''s ROOT manifest is refused unless this is true (deliberate re-publication escape hatch). It never changes the npm latest commit identity: cohort_sha, when set, must still equal that commit.'
         required: false
         default: false
         type: boolean
@@ -256,15 +259,17 @@ jobs:
           # allow_version_drift stays the deliberate-override door. "auto"
           # already resolves from the root manifest, so no comparison is
           # needed for it.
-          # PRI-1103: an explicit cohort_sha is the VALIDATED exception — the
-          # resolver below refuses unless that commit shipped exactly this
-          # product version, so main having advanced past it is the expected
-          # state of a re-publication, not drift. Making that path also carry
-          # allow_version_drift would route the safe door through the boolean.
+          # PRI-1103: cohort_sha is an identity ASSERTION about the CURRENT npm
+          # latest commit, not a historical selector. The resolver below refuses
+          # unless that sha equals latest's gitHead and latest's ROOT manifest
+          # carries this product version, so it already proves the version
+          # binding; the ref's own root manifest may legitimately differ because
+          # main keeps advancing. allow_version_drift remains the explicit
+          # override for the ref-manifest disagreement only.
           if [ -z "$COHORT_SHA_INPUT" ] && [ "$PRODUCT_VERSION_INPUT" != "auto" ] && [ -n "$PRODUCT_VERSION_INPUT" ] && [ "$ALLOW_VERSION_DRIFT" != "true" ]; then
             ROOT_VERSION=$(node scripts/resolve-product-version.mjs)
             if [ "$VERSION" != "$ROOT_VERSION" ]; then
-              echo "::error::Explicit product_version ($VERSION) disagrees with the root manifest resolver ($ROOT_VERSION). Pass cohort_sha to re-publish it from its own cohort, or allow_version_drift=true only for a deliberate exception."
+              echo "::error::Explicit product_version ($VERSION) disagrees with the root manifest resolver ($ROOT_VERSION). Pass allow_version_drift=true only for a deliberate exception; an older cohort_sha can no longer be republished onto the active npm channel."
               exit 1
             fi
           fi
@@ -290,7 +295,7 @@ jobs:
             IDENTITY_SOURCE='npm cohort'
           else
             if [ "$MODE" = "publish" ]; then
-              echo "::error::PRI-1103: the npm installer channel does not pin product version $VERSION, so publishing this asset would serve bytes no install channel can be reconciled against. Run the npm train for this version first, or pass the cohort_sha that shipped it."
+              echo "::error::PRI-1103: the npm installer channel does not pin product version $VERSION, so publishing this asset would serve bytes no install channel can be reconciled against. Run the npm train for this version first; an older cohort cannot be republished onto the active channel."
               exit 1
             fi
             # A dry-run publishes nothing, so a preflight may still rehearse the

@@ -108,9 +108,13 @@ runtime pin、或"因为一起发布就让版本相同"。
   PRI-1103 起，构建 commit **不再**取 dispatch 的 `ref`——工作流先问 registry：
   该产品版本实际由哪个 cohort 发出（`create-principles-disciple` 已发布
   manifest 的 `gitHead`），再构建那个 commit。于是「控制台更新通道」与「新装
-  通道」不可能在同一版本号下携带不同字节。`ref` 只选发布工具链；要用
-  `cohort_sha` 重发旧版本（它经校验，因此无需 `allow_version_drift`）。若
-  npm 侧尚未发出该版本：publish 直接拒绝，预演带 `::warning::` 退回构建 ref。
+  通道」不可能在同一版本号下携带不同字节。`ref` 只选发布工具链；`cohort_sha`
+  是对「当前 npm `latest` 指向的提交」的显式身份断言（用于确定性重建、频道未
+  变时的重复发布、同一 cohort 的密钥轮换/重签名），**不是**历史版本选择器：
+  `latest` 一旦指向其他提交，旧 cohort 会被拒绝（`EXPLICIT_NOT_LATEST`），
+  因为那会让控制台更新通道与新装通道代码身份不一致。`allow_version_drift`
+  不改变 npm latest 的提交身份。若 npm 侧尚未发出该版本：publish 直接拒绝，
+  预演带 `::warning::` 退回构建 ref。
 
 Version PR 机器人（`changesets/action`，已锁版本）**必须**配置
 `PD_VERSION_PR_TOKEN` secret（细粒度 PAT：contents:write +

@@ -28,12 +28,16 @@
  *
  *   MATCH                  exit 0  cohort resolved and pinned to the version
  *   VERSION_LAGS           exit 1  the npm channel serves a DIFFERENT product
- *                                  version; `suggestedCohort` names the cohort
- *                                  that shipped the requested one, when found
+ *                                  version; no older cohort may be republished
+ *                                  onto the active channel to work around it
  *   EXPLICIT_UNPUBLISHED   exit 1  --expect-cohort is not any published
  *                                  installer version's recorded cohort
- *   VERSION_MISMATCH       exit 1  explicit cohort ships a different product
- *                                  version than the one being published
+ *   EXPLICIT_NOT_LATEST    exit 1  --expect-cohort is published but npm
+ *                                  `latest` now points at another commit;
+ *                                  cohort_sha asserts the CURRENT latest,
+ *                                  it is not a historical selector
+ *   VERSION_MISMATCH       exit 1  npm latest's commit carries a different
+ *                                  product version than the one being published
  *   ABSENT_COHORT          exit 1  the installer release records no gitHead —
  *                                  identity unverifiable, never assumed equal
  *   COMMIT_UNAVAILABLE     exit 1  the cohort commit is not in this checkout
@@ -58,9 +62,6 @@ import { STRICT_SEMVER } from '../lib/product-version-order.mjs';
 
 const INSTALLER_PACKAGE = 'create-principles-disciple';
 const GIT_SHA = /^[a-f0-9]{40}$/;
-/** How many recent installer releases to scan for one that shipped the
- *  requested product version, so a refusal can name the cohort to pass. */
-const CANDIDATE_SCAN_LIMIT = 12;
 
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
@@ -93,16 +94,6 @@ function gitHeads(packument) {
     if (typeof manifest?.gitHead === 'string' && GIT_SHA.test(manifest.gitHead)) heads.set(manifest.gitHead, version);
   }
   return heads;
-}
-
-/** Newest first, by the registry's own publish time, so the suggestion is the
- *  cohort closest to the requested release rather than an arbitrary old one. */
-function recentInstallerVersions(packument) {
-  const times = packument?.time ?? {};
-  return Object.keys(packument?.versions ?? {})
-    .filter((v) => typeof packument.versions[v]?.gitHead === 'string' && GIT_SHA.test(packument.versions[v].gitHead))
-    .sort((a, b) => Date.parse(times[b] ?? 0) - Date.parse(times[a] ?? 0))
-    .slice(0, CANDIDATE_SCAN_LIMIT);
 }
 
 async function main() {
@@ -141,25 +132,6 @@ async function main() {
     fail('REGISTRY_ERROR', `${pkg} is not published to the registry — the npm channel this release must be bound to does not exist.`);
   }
 
-  if (expectCohort !== undefined) {
-    const heads = gitHeads(packument);
-    const installerVersion = heads.get(expectCohort);
-    if (installerVersion === undefined) {
-      fail('EXPLICIT_UNPUBLISHED', `cohort ${expectCohort} is not recorded as the gitHead of any published ${pkg} release, so it cannot be the bytes a fresh install receives. Publish the npm train for this cohort first.`, { expectedCohort: expectCohort });
-    }
-    const atCohort = productVersionAt(expectCohort);
-    if (!atCohort.ok) {
-      fail('COMMIT_UNAVAILABLE', `cohort ${expectCohort} is published but its root manifest is not readable in this checkout (fetch the commit before dispatching).`, { expectedCohort: expectCohort, installerVersion });
-    }
-    if (atCohort.version !== productVersion) {
-      fail('VERSION_MISMATCH', `cohort ${expectCohort} shipped ${pkg}@${installerVersion} for product version ${atCohort.version}, not ${productVersion}. Publish the product version that cohort carries, or name the cohort that carries this one.`, { expectedCohort: expectCohort, installerVersion, cohortProductVersion: atCohort.version });
-    }
-    const payload = { status: 'MATCH', via: 'explicit', productVersion, package: pkg, installerVersion, cohort: expectCohort };
-    if (asJson) process.stdout.write(`${JSON.stringify(payload)}\n`);
-    console.error(`npm channel: product ${productVersion} is ${pkg}@${installerVersion} from ${expectCohort.slice(0, 10)} (explicit cohort).`);
-    process.exit(0);
-  }
-
   const latestVersion = packument?.['dist-tags']?.latest;
   if (typeof latestVersion !== 'string') {
     fail('ABSENT_COHORT', `${pkg} has no \`latest\` dist-tag on the registry — there is no npm channel release to bind this asset to.`);
@@ -168,6 +140,46 @@ async function main() {
   const cohort = typeof latestManifest?.gitHead === 'string' && GIT_SHA.test(latestManifest.gitHead)
     ? latestManifest.gitHead
     : null;
+
+  if (expectCohort !== undefined) {
+    // cohort_sha is an identity ASSERTION about the current npm latest, never
+    // a historical selector. Once `latest` moved to another commit, naming an
+    // older published cohort would make the console-update channel ship
+    // different bytes than a fresh npm install receives.
+    if (cohort === null) {
+      fail('ABSENT_COHORT', `${pkg}@${latestVersion} carries no gitHead, so the commit the npm channel currently serves cannot be identified. An explicit cohort_sha cannot substitute for a live channel identity.`, { installerVersion: latestVersion, expectedCohort: expectCohort });
+    }
+    if (expectCohort !== cohort) {
+      const heads = gitHeads(packument);
+      if (!heads.has(expectCohort)) {
+        fail('EXPLICIT_UNPUBLISHED', `cohort ${expectCohort} is not recorded as the gitHead of any published ${pkg} release, so it cannot be the bytes a fresh install receives. Publish the npm train for this cohort first.`, { expectedCohort: expectCohort });
+      }
+      const latestProduct = productVersionAt(cohort);
+      fail(
+        'EXPLICIT_NOT_LATEST',
+        `EXPLICIT_NOT_LATEST: cohort_sha ${expectCohort} is a published ${pkg} release, but npm \`latest\` now points at ${cohort} (${pkg}@${latestVersion}, product version ${latestProduct.ok ? latestProduct.version : 'unreadable'}). Publishing the older cohort would make the console-update channel carry a different code identity than a fresh npm install. cohort_sha asserts the CURRENT npm latest commit; historical cohorts cannot be republished onto the active channel.`,
+        {
+          expectedCohort: expectCohort,
+          expectedCommit: expectCohort,
+          actualLatestCommit: cohort,
+          installerVersion: latestVersion,
+          actualProductVersion: latestProduct.ok ? latestProduct.version : null,
+        },
+      );
+    }
+    const atCohort = productVersionAt(expectCohort);
+    if (!atCohort.ok) {
+      fail('COMMIT_UNAVAILABLE', `cohort ${expectCohort} is the npm latest commit but its root manifest is not readable in this checkout (fetch the commit before dispatching).`, { expectedCohort: expectCohort, installerVersion: latestVersion });
+    }
+    if (atCohort.version !== productVersion) {
+      fail('VERSION_MISMATCH', `npm latest (${pkg}@${latestVersion}) points at cohort ${expectCohort}, whose root manifest carries product version ${atCohort.version}, not ${productVersion}. Publish the product version that cohort carries.`, { expectedCohort: expectCohort, installerVersion: latestVersion, cohortProductVersion: atCohort.version });
+    }
+    const payload = { status: 'MATCH', via: 'explicit', productVersion, package: pkg, installerVersion: latestVersion, cohort: expectCohort };
+    if (asJson) process.stdout.write(`${JSON.stringify(payload)}\n`);
+    console.error(`npm channel: product ${productVersion} is ${pkg}@${latestVersion} from ${expectCohort.slice(0, 10)} (explicit cohort, asserted equal to npm latest).`);
+    process.exit(0);
+  }
+
   if (cohort === null) {
     // rc-9: an identity this check depends on being unreadable is reported,
     // never treated as agreement.
@@ -184,25 +196,13 @@ async function main() {
     process.exit(0);
   }
 
-  // The channel's latest serves a different product version. Name the cohort
-  // that DID ship the requested one, if the registry still records it, so the
-  // operator has a value to pass as cohort_sha instead of a guess to make.
-  let suggestedCohort = null;
-  let suggestedInstallerVersion = null;
-  for (const version of recentInstallerVersions(packument)) {
-    if (version === latestVersion) continue;
-    const candidate = packument.versions[version].gitHead;
-    const read = productVersionAt(candidate);
-    if (read.ok && read.version === productVersion) {
-      suggestedCohort = candidate;
-      suggestedInstallerVersion = version;
-      break;
-    }
-  }
+  // The live channel serves a different product version. There is deliberately
+  // no "pass cohort_sha = <older cohort>" suggestion: an older cohort may not
+  // be republished onto the active channel while `latest` points elsewhere.
   fail(
     'VERSION_LAGS',
-    `the npm channel serves product version ${atCohort.version} (${pkg}@${latestVersion}, cohort ${cohort.slice(0, 10)}), not ${productVersion}. Build the asset from the cohort npm shipped, or pass cohort_sha${suggestedCohort ? ` = ${suggestedCohort} (${pkg}@${suggestedInstallerVersion})` : ''} to publish this older version from its own cohort.`,
-    { installerVersion: latestVersion, cohort, channelProductVersion: atCohort.version, suggestedCohort, suggestedInstallerVersion },
+    `the npm channel serves product version ${atCohort.version} (${pkg}@${latestVersion}, cohort ${cohort.slice(0, 10)}), not ${productVersion}. Build the release for the product version npm currently serves; an older cohort cannot overwrite the active channel.`,
+    { installerVersion: latestVersion, cohort, channelProductVersion: atCohort.version },
   );
 }
 
