@@ -1,0 +1,146 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T235054Z-codex-final-diagnostic",
+  "previousCheckpoint": "20261105T233951Z-codex-continuation.json",
+  "generatedAt": "2026-11-05T23:50:54.840Z",
+  "agent": "codex-selector",
+  "overallStatus": "COMPLETE",
+  "summary": "当前获批dev02..04有界诊断完成，新增3decision+6GLM，累计6/6；C/D同选且各2/3匹配冻结集合，未见两阶段增益；不是完整SPEC或行为验证完成",
+  "git": {
+    "repo": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+    "branch": "ai/PRI-1122-two-stage-selector-design",
+    "baseCommit": "e9223abcb4508db1ca1cd277cb6955f63a3de530",
+    "headCommit": "c6ee9cbf784bc322b346a8bbc12b8013ba83407a",
+    "dirtyPaths": [],
+    "pushedCommit": null,
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2368",
+    "remoteChecks": "NOT_VERIFIED_FOR_NEW_HEAD"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1141",
+      "scope": "当前明确批准的dev02..04、3decision+6GLM有界协议/选择诊断；不含整张四臂工单",
+      "status": "COMPLETE",
+      "owner": "codex-selector",
+      "writePaths": [
+        "scripts/dev/adaptive-selector-lab",
+        "docs/implementation-reports/aa-selector-experiments"
+      ],
+      "commits": [
+        "c6ee9cbf784bc322b346a8bbc12b8013ba83407a"
+      ],
+      "acceptance": [
+        {
+          "criterion": "官方免费条目canonical身份映射、预算继承、3样本真实C/D输出与分层比较",
+          "result": "PASS",
+          "evidenceRefs": [
+            "final-run",
+            "analysis",
+            "final-report"
+          ]
+        }
+      ],
+      "remaining": [
+        "本子范围无必需剩余工作；整张PRI-1141的留出/actor/四臂和行为验证仍未完成，不能关闭整票"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "unit",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node --test scripts/dev/adaptive-selector-lab/diagnostic.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "final-report"
+      ]
+    },
+    {
+      "id": "live",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node scripts/dev/adaptive-selector-lab/diagnostic.mjs --execute-approved-final-three",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "final-run"
+      ]
+    },
+    {
+      "id": "analysis",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "deterministic analysis from results.json with source/previous-hash and counts assertions",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "analysis"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "final-run",
+      "kind": "HOST_TRACE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/aa-selector-experiments/2026-11-05T23-45-11-762Z/results.json",
+      "observedAt": "2026-11-05T23:50:54.840Z",
+      "sha256": "6c833a97e820f9ab4a78168ed3e14252f13e4c236ea9ff84e5e5c4ea307ebe4f",
+      "supports": "9次本轮实际API请求均通过协议/引用校验，model/counter/usage与原始输出",
+      "limitations": "仅合成开发集选择诊断，无生产宿主/actor行为/泛化证据；允许集合不是独立审定Gold"
+    },
+    {
+      "id": "analysis",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/aa-selector-experiments/2026-11-05T23-45-11-762Z/analysis.json",
+      "observedAt": "2026-11-05T23:50:54.840Z",
+      "sha256": "3cb78f3fb3a8fbd76802161dee6451f5ffe65d7823cb63b14b96fcbd9cc4e4e4",
+      "supports": "源hash绑定的确定性计数、允许集合和延迟/token汇总",
+      "limitations": "仅合成开发集选择诊断，无生产宿主/actor行为/泛化证据；允许集合不是独立审定Gold"
+    },
+    {
+      "id": "final-report",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/PD-AA-PRI-1141-FINAL-DIAGNOSTIC-20261106.md",
+      "observedAt": "2026-11-05T23:50:54.840Z",
+      "sha256": "9b26d7c65f6f52ece443da7a9f7232bf39d32e97c844fa760d8c8156380105d2",
+      "supports": "结论、歧义、失败历史和实验限制",
+      "limitations": "仅合成开发集选择诊断，无生产宿主/actor行为/泛化证据；允许集合不是独立审定Gold"
+    }
+  ],
+  "blockers": [],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1141",
+      "action": "只读复核dev02弃选判据与原则文本边界，保留原评分；准备无变化/缺上下文/引用误导的独立后续方案，不追加模型请求",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "形成判据问题与后续最小实验建议；本轮记录不改"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "modelRequestsThisRun": {
+      "decision": 3,
+      "glm": 6
+    },
+    "authorizationRefs": [
+      "Owner结构化回复：批准按剩余预算处理并完成；对应最多新增3decision+6GLM，dev02..04，官方可证同源别名归一化"
+    ],
+    "cumulativeModelRequests": {
+      "decision": 6,
+      "glm": 6
+    }
+  }
+}

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261105T233951Z-codex-continuation",
+  "previousCheckpoint": "20261105T233053Z-codex-same-parameter.json",
+  "generatedAt": "2026-11-05T23:39:51.696Z",
+  "agent": "codex-selector",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "已执行获批四样本续行，首请求HTTP200后响应model白名单拒绝；累计decision3/glm0，27项本地测试通过；比较未完成",
+  "git": {
+    "repo": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+    "branch": "ai/PRI-1122-two-stage-selector-design",
+    "baseCommit": "e9223abcb4508db1ca1cd277cb6955f63a3de530",
+    "headCommit": "44ca56df81ed89c276fd89f82c8b51002ca4e38c",
+    "dirtyPaths": [],
+    "pushedCommit": null,
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2368",
+    "remoteChecks": "NOT_VERIFIED_FOR_NEW_HEAD"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1141",
+      "scope": "专用Decisions隔离CLI与获批6样本诊断子范围，不是整张四臂工单",
+      "status": "NEEDS_OWNER",
+      "owner": "codex-selector",
+      "writePaths": [
+        "scripts/dev/adaptive-selector-lab",
+        "docs/implementation-reports/aa-selector-experiments"
+      ],
+      "commits": [
+        "4ecbf4ec0aa93884d9cc1b76a359040dd76f99fa"
+      ],
+      "acceptance": [
+        {
+          "criterion": "网络边界预算/超时/保密/输出校验和真实pi-ai假HTTP",
+          "result": "PASS",
+          "evidenceRefs": [
+            "report"
+          ]
+        },
+        {
+          "criterion": "真实协议与C/D选择比较",
+          "result": "FAIL",
+          "evidenceRefs": [
+            "run"
+          ]
+        }
+      ],
+      "remaining": [
+        "实际被拒绝的响应model未保留，不能确定是否仅原生别名；已补观察值先记录后校验",
+        "剩余3decision+6GLM的条件式兼容处理/继续对照方案待批准"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "unit",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node --test scripts/dev/adaptive-selector-lab/diagnostic.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": [
+        "continuation-report"
+      ]
+    },
+    {
+      "id": "live",
+      "cwd": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design",
+      "command": "node scripts/dev/adaptive-selector-lab/diagnostic.mjs --execute-approved-four-case-continuation",
+      "result": "FAIL",
+      "exitCode": 1,
+      "passed": 0,
+      "failed": 1,
+      "skipped": 3,
+      "evidenceRefs": [
+        "continuation-run"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "continuation-run",
+      "kind": "HOST_TRACE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/aa-selector-experiments/2026-11-05T23-34-44-835Z/results.json",
+      "observedAt": "2026-11-05T23:39:51.696Z",
+      "sha256": "0c154afaa1befea706c919e07c68ba83a5f1a08b72f3e0c0549359f8972ee18a",
+      "supports": "继承计数、HTTP200、本地model身份拒绝、没有GLM调用",
+      "limitations": "无通过身份校验的决策结果；无C/D或行为实验"
+    },
+    {
+      "id": "continuation-report",
+      "kind": "CODE",
+      "locator": "D:/Code/_worktrees/principles/PRI-1122-two-stage-selector-design/docs/implementation-reports/PD-AA-PRI-1141-CONTINUATION-20261106.md",
+      "observedAt": "2026-11-05T23:39:51.696Z",
+      "sha256": "a17eeb3231dca6cbd64684fa3c0d5cd2152973b764bd6ac0573bd23b0bcf7e8f",
+      "supports": "本轮停止、取证缺陷修复及剩余预算建议",
+      "limitations": "无通过身份校验的决策结果；无C/D或行为实验"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "protocol-400",
+      "issue": "PRI-1141",
+      "reason": "HTTP200后model标识未匹配白名单；观察值未保留；按卡停止，未自动继续",
+      "evidenceRefs": [
+        "continuation-run"
+      ],
+      "neededFrom": "Owner",
+      "unblockAction": "批准剩余3decision+6GLM内识别可证同源别名、离线重验后继续；真正换模型/收费/权限问题仍停止",
+      "independentWork": "CLI、取证修复、测试、双轴审查和PR证据交付已完成"
+    }
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1141",
+      "action": "批准剩余3decision+6GLM内识别可证同源别名、离线重验后继续；真正换模型/收费/权限问题仍停止",
+      "dependsOn": [
+        "protocol-400续行批准"
+      ],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "固定端点/模型和剩余上限内留下可复核选择结果，或具体停止证据"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "modelRequestsThisRun": {
+      "decision": 1,
+      "glm": 0
+    },
+    "authorizationRefs": [
+      "Owner当前消息：批准，尽快完成这次实验；对应前4样本、最多新增4decision+8GLM的续行提议"
+    ],
+    "cumulativeModelRequests": {
+      "decision": 3,
+      "glm": 0
+    }
+  }
+}
