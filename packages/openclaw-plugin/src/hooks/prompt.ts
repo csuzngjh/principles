@@ -14,7 +14,7 @@ import { RUNTIME_PRINCIPLE_BUDGET, resolveTotalInjectionBudgetChars, renderPrinc
 // PRI-1137: the plugin-local injection route (activation list reader + budget
 // trimmer + adaptive intervention) is retired; the shared runtime is the only
 // ordinary Runtime principle authority.
-import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime';
+import type { ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime';
 import type { ActivatedPrinciple, AdaptiveInterventionResult, AdaptiveDeliveryRecord } from '@principles/core/runtime';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
@@ -34,7 +34,7 @@ import {
   type AdaptiveConfigIdentitySnapshot,
 } from '../core/adaptive-config-identity.js';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
-import { recordInjectionPresence, alignActivationIds, alignInjectedPrinciples } from '../core/principle-application-ledger.js';
+import { recordInjectionPresence } from '../core/principle-application-ledger.js';
 import { recordPromptDeliveryEvidence } from '../core/intervention-evidence-recorder.js';
 import { safeReadIntentDoc, resetIntentDocCacheForTest } from '../core/intent-doc-reader.js';
 import { resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
