@@ -2,20 +2,20 @@
   "schemaVersion": "pd-aa-handoff/v1",
   "checkpointId": "20261105T155039Z-trae",
   "previousCheckpoint": "20261105T130723Z-trae",
-  "generatedAt": "2026-11-05T15:50:39Z",
+  "generatedAt": "2026-11-06T00:14:21Z",
   "agent": "trae",
   "overallStatus": "READY_FOR_REVIEW",
-  "summary": "PRI-1110 子范围完成：AA 调用 journal 现在携带最小生效配置身份。调用开始时构建一次冻结六字段快照，terminal 记录复用，不再重采；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度，不改变提示内容。已接到真实 open/terminal 与 index.ts 的 8 个 Hook 注册路径；只读对账器兼容新增字段与旧日志。分支已 rebase 到最新 origin/main 5ad4b6e11。PR #2370 已推送；首轮 CodeQL 报出 js/file-system-race（statSync 后 readFileSync 的 TOCTOU），已改为单次读取 + 读后字节上限，最终 head 5b47fcebb 上 CI 42064043112 与 CodeQL 127377529702 均 pass。未合并、未发版、未安装启用、未跑真实 Agent 回合。",
+  "summary": "PRI-1110 子范围完成，并已处理独立评审的两处问题。AA 调用 journal 携带最小生效配置身份：调用开始时构建一次冻结六字段快照，terminal 复用；来源不可证明的字段保持 unknown 并附机器可读 reason code；采集异常只降级证据完整度。修复 1（P1）：pluginVersion 改为模块加载时绑定一次（import.meta.url 定位执行产物清单），进程运行旧代码时不再因磁盘清单升级而改报新版本；与宿主 rootDir 不一致则降级 unknown。修复 2（P2）：清单读取改为 openSync+readSync 最多读 MAX+1=65537 字节，超出即 manifest_too_large，finally 关闭句柄。两条反例均先在旧实现上失败（版本断言收到 2.0.0；128 KiB 清单读入 131133 字节），修复后通过（版本保持 1.0.0；读入 65537 字节）。分支 base 5ad4b6e11，head ec548768e，PR #2370。未合并、未发版、未安装启用、未跑真实 Agent 回合。",
   "git": {
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
     "branch": "ai/PRI-1110-host-profile-identity",
     "baseCommit": "5ad4b6e116e71777d010d535cec34dc0de3cd6f8",
-    "headCommit": "5b47fcebbf9918a6963884bb3f6267dfeb69f93c",
+    "headCommit": "ec548768e67de28215ca037259d4cb5a5e2f92df",
     "dirtyPaths": [
       "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.json",
       "docs/implementation-reports/aa-handoff/20261105T155039Z-trae.md"
     ],
-    "pushedCommit": "5b47fcebbf9918a6963884bb3f6267dfeb69f93c",
+    "pushedCommit": "ec548768e67de28215ca037259d4cb5a5e2f92df",
     "prUrl": "https://github.com/csuzngjh/principles/pull/2370",
     "remoteChecks": "PASS — CI 42064043112 success（Test OpenClaw Plugin、Lint、Verify Merge Gate、packaged install smoke、release asset smoke、shared runtime、pd-cli、pd-console、e2e、quick-check 等）；CodeQL 127377529702 success（首轮 js/file-system-race 已修复）；codecov/patch pass。skipped 任务为 Impact Gate 判定不相关（principles-core / pd-mcp-server / create-principles-disciple 的独立任务）"
   },
@@ -40,7 +40,7 @@
     },
     {
       "field": "pluginVersion",
-      "source": "从执行模块自身 import.meta.url 目录向上定位 name=principles-disciple 的 package.json（兼容 src/dist/bundle），与宿主 rootDir 清单交叉校验",
+      "source": "模块加载时用 import.meta.url 目录向上定位 name=principles-disciple 的 package.json 并绑定一次（不再随磁盘变化重读）；与宿主 rootDir 清单交叉校验，不一致降级 unknown",
       "state": "confirmed（本轮实测 2.6.2）",
       "reason": "清单缺失/非法/超限/与 rootDir 冲突时降级 unknown 并给 reason code"
     },
@@ -91,7 +91,8 @@
         "cf250f5cc",
         "8b00ab8f4dfe201dedf72034097eb56a94636195",
         "cb7e5d147",
-        "5b47fcebbf9918a6963884bb3f6267dfeb69f93c"
+        "5b47fcebbf9918a6963884bb3f6267dfeb69f93c",
+        "ec548768e67de28215ca037259d4cb5a5e2f92df"
       ],
       "acceptance": [
         {
@@ -155,6 +156,16 @@
           "evidenceRefs": ["reconciliation-tests"]
         },
         {
+          "criterion": "评审 P1：进程运行旧代码时，磁盘清单升级不得把 pluginVersion 改成新版本；rootDir 不一致降级 unknown",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests", "identity-tests-source"]
+        },
+        {
+          "criterion": "评审 P2：清单读取最多 MAX+1 字节，超出即拒绝并降级 unknown，句柄在 finally 关闭",
+          "result": "PASS",
+          "evidenceRefs": ["identity-unit-tests", "identity-tests-source"]
+        },
+        {
           "criterion": "构建、类型检查、lint、release intent、测试现实性",
           "result": "PASS",
           "evidenceRefs": ["build", "lint", "release-intent", "test-reality"]
@@ -178,12 +189,24 @@
       "id": "plugin-unit",
       "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
       "command": "npx vitest run --config vitest.unit.config.ts tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts",
-      "result": "PASS",
-      "exitCode": 0,
-      "passed": 1810,
+      "result": "ENVIRONMENT_FAIL",
+      "exitCode": 1,
+      "passed": 1805,
       "failed": 0,
       "skipped": 3,
-      "evidenceRefs": ["identity-unit-tests", "prompt-integration-tests"]
+      "failure": "两次重跑均在 tests/core/signal-collector-host-edge-cases.test.ts 的 worker 触发本地堆上限 OOM（exit 134），163/164 文件、1805 passed；该文件单独重跑 18/18 passed。属本地内存/并发环境问题，CI 上同一套件此前为 success",
+      "evidenceRefs": ["identity-unit-tests", "prompt-integration-tests", "oom-isolated-rerun"]
+    },
+    {
+      "id": "oom-isolated-rerun",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npx vitest run --config vitest.unit.config.ts tests/core/signal-collector-host-edge-cases.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["plugin-unit"]
     },
     {
       "id": "identity-unit-tests",
@@ -191,7 +214,7 @@
       "command": "npx vitest run --config vitest.unit.config.ts tests/core/adaptive-config-identity.test.ts",
       "result": "PASS",
       "exitCode": 0,
-      "passed": 12,
+      "passed": 15,
       "failed": 0,
       "skipped": 0,
       "evidenceRefs": ["identity-tests-source"]
@@ -243,7 +266,7 @@
     {
       "id": "release-intent",
       "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
-      "command": "node scripts/release/check-pr-release-intent.mjs (base=5ad4b6e116 head=5b47fcebbf)",
+      "command": "node scripts/release/check-pr-release-intent.mjs (base=5ad4b6e116 head=ec548768e6)",
       "result": "PASS",
       "exitCode": 0,
       "passed": null,
@@ -280,20 +303,42 @@
       "command": "npx vitest run tests/integration/mvp-surface-registry-guard.test.ts",
       "result": "PASS",
       "exitCode": 0,
-      "passed": 9,
+      "passed": 42,
       "failed": 0,
       "skipped": 0,
       "evidenceRefs": ["surface-guard-source"]
     },
     {
+      "id": "typecheck",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
+      "command": "npm run typecheck:openclaw-plugin",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["implementation-source", "identity-tests-source"]
+    },
+    {
+      "id": "production-build",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity\\packages\\openclaw-plugin",
+      "command": "npm run build:production (esbuild ESM bundle + verify-build)",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["implementation-source"]
+    },
+    {
       "id": "remote-ci",
       "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1110-host-profile-identity",
-      "command": "gh run watch 42064043112 + CodeQL check-run 127377529702 (head 5b47fcebb)",
+      "command": "gh pr checks 2370 (head ec548768e6); CI run 42135260300, CodeQL run 42135260208 (check 127623817243), e2e 42135260296, quick-check 42135260353",
       "result": "PASS",
       "exitCode": 0,
       "passed": null,
       "failed": 0,
-      "skipped": 3,
+      "skipped": 4,
       "evidenceRefs": ["pr-2370"]
     }
   ],
@@ -311,9 +356,9 @@
       "id": "implementation-source",
       "kind": "CODE",
       "locator": "packages/openclaw-plugin/src/core/adaptive-config-identity.ts",
-      "observedAt": "2026-11-05T15:50:39Z",
-      "sha256": "01646f8a5b8ca62bfd8dd93f07d564be4fb5eee2c7947a6a46f1bbd548102c30",
-      "supports": "快照构建、执行产物版本读取、指纹规范化、coverage 推导、有界快照 Map、注册 recorder",
+      "observedAt": "2026-11-06T00:14:21Z",
+      "sha256": "2b4df6a665ba93c7aeb0a2f2d466427e3f593f61f0a2de042cab81ac35832f67",
+      "supports": "快照构建、模块加载期绑定执行产物版本、指纹规范化、coverage 推导、有界快照 Map、注册 recorder；清单读取上限 MAX+1 字节并在 finally 关闭句柄",
       "limitations": "hostVersion 恒 unknown；指纹恒 partial"
     },
     {
@@ -338,9 +383,9 @@
       "id": "identity-tests-source",
       "kind": "LOCAL_TEST",
       "locator": "packages/openclaw-plugin/tests/core/adaptive-config-identity.test.ts",
-      "observedAt": "2026-11-05T15:50:39Z",
-      "sha256": "2bf6998803b13a0447c9361549f1ae27b390f7b802778e054f3b6581fe4a692c",
-      "supports": "完整/部分/全未知、顺序无关、变化产生新身份、冻结、白名单",
+      "observedAt": "2026-11-06T00:14:21Z",
+      "sha256": "c856d909221443b7ba6e1e84d47a82b83279130ec8430ac47849a7f680f39d50",
+      "supports": "完整/部分/全未知、顺序无关、变化产生新身份、冻结、白名单；模块加载后磁盘清单升级不改写版本；rootDir 冲突降级；128 KiB 清单最多读 65537 字节",
       "limitations": null
     },
     {
@@ -385,7 +430,7 @@
       "locator": "https://github.com/csuzngjh/principles/pull/2370",
       "observedAt": "2026-11-05T15:50:39Z",
       "sha256": null,
-      "supports": "OPEN；head 5b47fcebbf；全部必需检查 pass（含 CodeQL）；未合并、未发版",
+      "supports": "OPEN；head ec548768e6；评审 P1/P2 已修复并附反例；未合并、未发版",
       "limitations": "尚无 Owner 审批"
     }
   ],
