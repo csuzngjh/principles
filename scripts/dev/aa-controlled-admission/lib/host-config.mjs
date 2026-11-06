@@ -16,6 +16,7 @@ import { resolve } from 'node:path';
 export const FAKE_PROVIDER_ID = 'aa-fake';
 export const FAKE_MODEL_ID = 'local-fake-model';
 export const PLUGIN_ID = 'principles-disciple';
+export const MCP_SERVER_NAME = 'pd-recall';
 
 export function endpointBaseUrl(port) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error(`invalid endpoint port: ${port}`);
@@ -101,6 +102,12 @@ export function buildHostConfig({ endpointPort, workspaceDir, pluginRoot, mappin
     // absolute allowlist still clamps the model-visible surface to exactly one
     // tool. Profile + allowlist are both asserted structurally below.
     tools: { profile: 'coding', allow: [toolName] },
+    // The plugin ships a `pd-recall` MCP server (openclaw.plugin.json). It is
+    // omitted here by the operator-authoritative switch so the arm never spawns
+    // the installed PD MCP server, never touches the host-wide mcp-binding
+    // launcher and never carries MCP traffic. Tool policy alone would hide MCP
+    // tools but still allow the process to be prepared.
+    mcp: { servers: { [MCP_SERVER_NAME]: { enabled: false } } },
     models: {
       mode: 'merge',
       providers: {
@@ -160,6 +167,12 @@ export function validateHostConfigWiring(config, expected) {
   if (config?.tools?.profile !== 'coding') violations.push('tools.profile is not the frozen coding profile');
   if (config?.tools?.alsoAllow !== undefined) violations.push('tools.alsoAllow must be absent for a single-tool surface');
   if (config?.tools?.deny !== undefined) violations.push('tools.deny must be absent for a single-tool surface');
+
+  // Operator-authoritative MCP switch: the plugin's declared server is omitted,
+  // so no launcher process from the installed runtime can be prepared.
+  if (config?.mcp?.servers?.[MCP_SERVER_NAME]?.enabled !== false) {
+    violations.push(`mcp.servers.${MCP_SERVER_NAME}.enabled is not false; the plugin MCP server would be prepared`);
+  }
 
   const provider = config?.models?.providers?.[FAKE_PROVIDER_ID];
   if (provider?.baseUrl !== endpointBaseUrl(expected.endpointPort)) violations.push('provider baseUrl does not match the frozen endpoint port');

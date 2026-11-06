@@ -20,6 +20,10 @@ import { isAbsolute, join, resolve, sep } from 'node:path';
 export const HOST_ENV_OVERRIDE_KEYS = Object.freeze([
   'PD_WORKSPACE_DIR',
   'OPENCLAW_WORKSPACE',
+  // Documented host override (docs/help/environment.md). `plugins inspect` has
+  // no `--cwd`, so without this the host would resolve its default agent
+  // workspace from the production home and scan it for plugins.
+  'OPENCLAW_WORKSPACE_DIR',
   'PD_STATE_DIR',
   'PD_AA_ADMISSION_FILE',
   'PD_AA_EXPERIMENT_ROOT',
@@ -101,6 +105,7 @@ export function buildIsolatedHostEnv({
   const admission = admissionPath === null ? null : resolve(admissionPath);
 
   env.PD_WORKSPACE_DIR = workspace;
+  env.OPENCLAW_WORKSPACE_DIR = workspace;
   env.OPENCLAW_STATE_DIR = state;
   env.OPENCLAW_CONFIG_PATH = config;
   env.OPENCLAW_PROFILE = profile;
@@ -119,6 +124,7 @@ export function buildIsolatedHostEnv({
     admissionFile: admission === null ? null : canonical(admission),
     env: {
       PD_WORKSPACE_DIR: env.PD_WORKSPACE_DIR,
+      OPENCLAW_WORKSPACE_DIR: env.OPENCLAW_WORKSPACE_DIR,
       OPENCLAW_STATE_DIR: env.OPENCLAW_STATE_DIR,
       OPENCLAW_CONFIG_PATH: env.OPENCLAW_CONFIG_PATH,
       OPENCLAW_PROFILE: env.OPENCLAW_PROFILE,

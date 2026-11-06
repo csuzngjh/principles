@@ -22,7 +22,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { hostCommand, hostIdentity, isRegularFile, resolveHostProfile, sha256File, verifyHostIdentity } from './lib/host-profile.mjs';
-import { hostConfigSha256, readHostConfig, validateHostConfigWiring, PLUGIN_ID } from './lib/host-config.mjs';
+import { hostConfigSha256, readHostConfig, validateHostConfigWiring, PLUGIN_ID, MCP_SERVER_NAME } from './lib/host-config.mjs';
 import { assertPlanInsideExperimentRoot, buildIsolatedHostEnv, isInsideRoot } from './lib/env-isolation.mjs';
 import { readControlledWorkspaceTarget } from './lib/workspace-seed.mjs';
 
@@ -373,7 +373,7 @@ export async function runP0Preflight({
           schemaVersion: parsed.value?.schemaVersion ?? null,
           source: 'packages/openclaw-plugin/src/core/mcp-binding.ts (ensureMcpBinding)',
           loadedBy: 'packages/openclaw-plugin/mcp/launcher.cjs (pd-recall MCP server only)',
-          modelSurface: 'MCP tools are denied by tools.allow; see tool-whitelist',
+          modelSurface: 'mcp.servers.pd-recall.enabled=false in the frozen config; MCP tools are also denied by tools.allow',
         }));
       report.mcpBinding = { bindingPath, boundWorkspace, serverEntry };
     }
@@ -513,14 +513,35 @@ export async function runP0Preflight({
     // plugin-declared MCP server is denied by the host tool policy.
     const mcpEntries = mcpAllowEntries(allow);
     const noMcpAllowance = mcpEntries !== null && mcpEntries.length === 0;
-    checks.push(check('tool-whitelist', exactAllowlist && noPluginTools && noMcpAllowance && toolName === plan.toolName ? 'PASS' : 'FAIL',
-      'the declared allowlist is exactly one built-in tool, registers no plugin tools and grants no MCP surface; the runtime tool surface is proven from the endpoint request body at execute', {
+    // Operator-authoritative omission of the plugin's own MCP server: without
+    // it the host would prepare a launcher from the installed PD runtime even
+    // though tool policy hides the tools.
+    const declaredMcpServers = report.hookRegistration?.mcpServers ?? null;
+    const pluginManifest = readJson(join(rootDir, 'packages', 'openclaw-plugin', 'openclaw.plugin.json'));
+    const pluginServerNames = pluginManifest.ok && pluginManifest.value?.mcpServers && typeof pluginManifest.value.mcpServers === 'object'
+      ? Object.keys(pluginManifest.value.mcpServers)
+      : [];
+    const mcpSwitch = config?.mcp?.servers?.[MCP_SERVER_NAME];
+    const mcpServerDisabled = mcpSwitch?.enabled === false;
+    const pluginServersDisabled = pluginServerNames.length > 0
+      && pluginServerNames.every((name) => config?.mcp?.servers?.[name]?.enabled === false);
+    const otherEnabledMcpServers = Object.entries(config?.mcp?.servers ?? {})
+      .filter(([name, value]) => name !== MCP_SERVER_NAME && value?.enabled !== false)
+      .map(([name]) => name);
+    checks.push(check('tool-whitelist', exactAllowlist && noPluginTools && noMcpAllowance && mcpServerDisabled && pluginServersDisabled && otherEnabledMcpServers.length === 0 && toolName === plan.toolName ? 'PASS' : 'FAIL',
+      'the declared allowlist is exactly one built-in tool, registers no plugin tools and grants no MCP surface; every plugin-declared MCP server is omitted by the operator switch; the runtime tool surface is proven from the endpoint request body at execute', {
         toolName,
         declaredAllowlist: allow,
         allowlistJsonPointer: 'tools.allow',
         pluginToolNames,
-        pluginDeclaredMcpServers: report.hookRegistration?.mcpServers ?? null,
+        inspectMcpServers: declaredMcpServers,
+        pluginManifestPath: join(rootDir, 'packages', 'openclaw-plugin', 'openclaw.plugin.json'),
+        pluginServerNames,
         mcpAllowEntries: mcpEntries,
+        mcpSwitchJsonPointer: `mcp.servers.${MCP_SERVER_NAME}.enabled`,
+        mcpServerDisabled,
+        pluginServersDisabled,
+        otherEnabledMcpServers,
         definitiveEvidence: 'endpoint request body (gate tool-surface)',
       }));
   }

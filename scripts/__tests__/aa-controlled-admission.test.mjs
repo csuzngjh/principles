@@ -184,6 +184,7 @@ describe('environment isolation — inherited production paths', () => {
     return {
       PD_WORKSPACE_DIR: join(outside, 'workspace'),
       OPENCLAW_WORKSPACE: join(outside, 'workspace'),
+      OPENCLAW_WORKSPACE_DIR: join(outside, 'workspace'),
       PD_STATE_DIR: join(outside, 'state'),
       OPENCLAW_STATE_DIR: outside,
       OPENCLAW_CONFIG_PATH: join(outside, 'openclaw.json'),
@@ -219,6 +220,9 @@ describe('environment isolation — inherited production paths', () => {
       expect(isolation.env.OPENCLAW_WORKSPACE).toBeUndefined();
       expect(isolation.env.PD_STATE_DIR).toBeUndefined();
       expect(isolation.env.OPENCLAW_HOME).toBeUndefined();
+      // The documented host workspace override must also be re-pointed inside
+      // the arm root; `plugins inspect` has no `--cwd` to fall back on.
+      expect(isolation.env.OPENCLAW_WORKSPACE_DIR).toBe(isolation.env.PD_WORKSPACE_DIR);
       expect(isolation.env.OPENCLAW_CONFIG_PATH).toBe(resolve(layout.configPath));
       for (const path of [
         isolation.resolved.workspaceDir,
@@ -229,7 +233,7 @@ describe('environment isolation — inherited production paths', () => {
       ]) {
         expect(isInsideRoot(layout.runDir, path)).toBe(true);
       }
-      expect(isolation.removedFromParent).toEqual(expect.arrayContaining(['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_STATE_DIR']));
+      expect(isolation.removedFromParent).toEqual(expect.arrayContaining(['PD_WORKSPACE_DIR', 'OPENCLAW_WORKSPACE', 'OPENCLAW_WORKSPACE_DIR', 'OPENCLAW_STATE_DIR']));
     }
     expect(positive.resolved.admissionFile).not.toBeNull();
     expect(isInsideRoot(layout.runDir, positive.resolved.admissionFile)).toBe(true);
