@@ -672,7 +672,9 @@ describe('coverage propagation — session row truncation is not a complete read
     expect(item.unknowns).toEqual(expect.arrayContaining([
       { fact: 'outcomes', reasonCode: 'session_rows_truncated' },
     ]));
-    expect(report.nextAction.join(' ')).toContain('--max-trajectory-rows');
+    expect(report.nextAction.join(' ')).toContain('单会话 200 行上限');
+    expect(report.nextAction.join(' ')).toContain('缩小 --since/--until');
+    expect(report.nextAction.join(' ')).not.toContain('提高 --max-trajectory-rows');
   });
 
   it('reports incomplete when the target correction sits beyond the per-session row cap', () => {

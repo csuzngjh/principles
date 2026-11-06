@@ -1314,7 +1314,7 @@ export function linkAdaptiveBehaviorEvidence(input: LinkAdaptiveBehaviorEvidence
     nextAction.push('提高 --max-trajectory-rows/--max-session-queries，或缩小时间窗口。');
   }
   if (incompleteReasons.includes('session_rows_truncated')) {
-    nextAction.push('提高 --max-trajectory-rows，或缩小 --since 窗口后重试；该会话的分类查询在窗口内被截断，空结果不代表“不存在”。');
+    nextAction.push(`该会话的分类查询已达到固定的单会话 ${BEHAVIOR_LINKAGE_ROWS_PER_SESSION} 行上限；请缩小 --since/--until 时间窗口后重试（--max-trajectory-rows 不控制该上限）。空结果不代表“不存在”。`);
   }
   if (eventLog.unattributedToolCalls > 0) nextAction.push('部分工具事件缺少 run/session 身份，已排除在关联之外；不要把它们当作未发生。');
   if (invocations.some((item) => item.association === 'ambiguous')) nextAction.push('同一 run 存在多个干预机会；按 hookInvocationId 单独复核。');

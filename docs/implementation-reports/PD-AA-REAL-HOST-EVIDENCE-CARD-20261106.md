@@ -146,7 +146,11 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 
 ### Q5. 哪些关联可以确认，哪些只能保持 unknown？
 
-可以确认（且必须同时满足 `coverage.complete=true`、身份一致、唯一性成立）：
+运行关联（`runAssociation`）可信的条件：journal 中该 `hookInvocationId` 唯一、`sessionId + runId` 一致，且在该 run 内唯一匹配。满足即可为 `strong_run`。
+
+**运行关联可信 ≠ 行为记录完整。** 当单会话行截断、总轨迹上限或日期范围导致 `coverage.complete=false` 时，读模型仍可保持 `strong_run`；此时 `coverage.incompleteReasons` 只表示行为事实不完整（是下界），不表示关联不可信。只有身份缺失/冲突、同一 run 多次干预导致歧义、`runId` 不匹配时，运行关联才降为 `ambiguous / unknown / conflict`。
+
+可以确认：
 
 - 某次干预记录的 `sessionId + runId` 与同一 `runId` 的 `tool_call` 之间的 **run 级**关联（`strong_run`）；
 - 某条纠正记录引用了该 run 的 assistant turn（`run_strong`）；
@@ -161,7 +165,7 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 - 产物是否由工具实际产生（`artifacts.confirmation`）；
 - 行为是否改善（`behaviorImprovement`）。
 
-强制降级为 `unknown` 的条件：覆盖不完整、身份缺失/不一致、同一 run 多次调用、行级冲突、任何截断原因码（含 `session_rows_truncated`、`trajectory_row_limit_reached`、`journal_range_incomplete`）。
+截断与覆盖不完整只影响 `facts`（actions/corrections/outcomes/weakCandidates）的完整性，不自动把 `runAssociation` 降级；两者必须分开报告。
 
 ### Q6. 是否需要先发布或安装？
 
@@ -187,9 +191,17 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 
 本轮实际执行：**0 次宿主调用、0 次模型调用、0 次安装、0 次生产写入。** 只做本地无模型读链实跑（§3）。
 
-获批后建议的上限（见 §4）：最多 2 次本地假 provider 宿主回合（1 正例 + 1 对照），0 次付费模型调用，最多 1 次只读工具行动；配置预检 25 秒、宿主外层 120 秒、Agent 45 秒。
+获批后建议的上限（见 §4），三个口径分开计：
 
-停止条件：任一轮出现覆盖不完整、journal 不可读、一轮内多于一个请求、身份不一致、非预期工具错误、超时、或必须靠 `unknown` 才能解释结果——立即停止，不重试、不放大窗口。
+| 口径 | 上限 | 分配 |
+|---|---|---|
+| 宿主回合数 | 2 | 1 正例（含 1 次工具）+ 1 对照（无工具） |
+| HTTP 请求数 | 3 | 正例最多 2（工具结果回传需要第二次模型请求）；对照 1 |
+| 工具调用次数 | 1 | 仅正例，只读工具 |
+
+0 次付费模型调用（仅 `127.0.0.1` 假 provider）。超时：配置预检 25 秒、宿主外层 120 秒、Agent 45 秒。
+
+停止条件：只在**本次必须确认的运行身份（`hookInvocationId` / `sessionId` / `runId`）或工具行动缺证**时停止；此外，实际请求数超出上表、journal 不可读、非预期工具错误或超时也停止。请求级关联、`ordering`、原则遵循、行为改善为 `unknown` 是本实验的设计预期，不构成停止理由。停止后不重试、不放大窗口。
 
 清理：终止进程树、`finally` 关闭本地端点；保留 `.tmp` 原始证据；不删除共享状态；不改生产配置。
 
@@ -293,19 +305,19 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 | 调用 | 0 次模型调用；0 次宿主调用即可先做单元/夹具验证 |
 | 成本 | 0 |
 | 代码范围 | 仅受控准入控制器 + hook 的显式开关分支；默认关闭；不新增表、不新增自动选择器 |
-| 停止条件 | 输入 SHA-256 或 manifest SHA-256 不匹配、身份歧义、覆盖不完整 |
+| 停止条件 | 输入 SHA-256 或 manifest SHA-256 不匹配、身份歧义、本次必须确认的运行身份缺证 |
 | 清理 | 删除隔离目录中的临时准入文件；生产不受影响 |
 
-### 决策 2：是否批准**一次**带只读工具行动的宿主回合？
+### 决策 2：是否批准一次受控实验（1 正例 + 1 对照，正例含 1 次只读工具）？
 
 | 项 | 内容 |
 |---|---|
 | 目的 | 证明“干预记录 → 一条可观察工具行动”的 run 级关联 |
 | 环境 | 隔离 config/state/workspace；本地假 provider；最多 1 个只读工具；无并发 |
-| 调用 | 宿主 1 次；模型 0 次付费；工具 1 次 |
+| 调用 | 宿主回合 2（1 正例 + 1 对照）；HTTP 请求最多 3；工具调用 1；付费模型 0 |
 | 成本 | 0（本地假 provider） |
 | 超时 | 预检 25s / 宿主外层 120s / Agent 45s |
-| 停止条件 | 多请求、身份不一致、覆盖不完整、非预期工具错误、超时 |
+| 停止条件 | 本次必须确认的运行身份或工具行动缺证、HTTP 请求数超出 3、非预期工具错误、超时；请求级关联/时序/行为改善为 `unknown` 属设计预期，不停止 |
 | 清理 | 终止进程树、关闭端点、保留 `.tmp` 证据、不改生产 |
 | 为什么需要新批准 | G1 卡明确“无工具”，且历史两次额度已用完 |
 
