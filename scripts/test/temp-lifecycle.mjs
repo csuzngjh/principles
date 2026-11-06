@@ -5,8 +5,9 @@
  * EBUSY while handles are open, vitest worker kills), and 431 test files
  * create temp dirs through os.tmpdir()/mkdtemp. Instead of fixing each file,
  * every vitest run redirects TMPDIR/TEMP/TMP into a run-scoped directory
- * under the managed root (.pd-test-temp, a sibling of the repo checkout)
- * and reclaims stale runs at the START of the next run: cleanup is an async contract between runs, not a synchronous promise.
+ * under the managed temp root (`<PD_TMP_ROOT>/test-runs`, see
+ * scripts/dev/pd-tmp.mjs) and reclaims stale runs at the START of the next
+ * run: cleanup is an async contract between runs, not a synchronous promise.
  * Teardown deletion is best-effort only.
  */
 import fs from 'node:fs';
@@ -14,6 +15,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { resolveTmpRoot } from '../dev/pd-tmp.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -25,17 +27,20 @@ export const DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // ancestors looking for packages/principles-core — a repo-internal temp root
 // would make every such "outside any checkout" fixture self-detect as a repo
 // checkout and suppress telemetry. Host-verified 2026-09-21.
+//
+// Unified with session scratch (scripts/dev/pd-tmp.mjs): one managed root per
+// repo, `<root>/test-runs` here. PD_TMP_ROOT overrides the root for both paths.
 function defaultTempRoot() {
-  return path.join(path.dirname(REPO_ROOT), '.pd-test-temp');
+  return path.join(resolveTmpRoot(), 'test-runs');
 }
 
 /**
  * Resolved temp root for this process.
  * - `PD_TEST_TEMP_ROOT=system` → null (redirection disabled; escape hatch)
  * - any other value → used as the base directory (advanced/test use)
- * - unset → sibling of the repo checkout: <parent(repoRoot)>/.pd-test-temp
- *   (worktree-isolated by construction; MUST stay outside the repo tree, see
- *   defaultTempRoot above)
+ * - unset → `<PD_TMP_ROOT>/test-runs` (PD_TMP_ROOT default:
+ *   `<shared-base>/.pd-tmp/<repo>`, outside every checkout; see
+ *   scripts/dev/pd-tmp.mjs and defaultTempRoot above)
  */
 export function resolveTempRoot() {
   const override = process.env.PD_TEST_TEMP_ROOT;
@@ -81,8 +86,8 @@ function safeRealpath(p) {
 /**
  * Remove entries in `base` older than `maxAgeMs`. Never traverses symlinks /
  * junctions, refuses a `base` that is itself a symlink, and refuses the system
- * temp root — this function must only ever operate inside our own
- * `.pd-test-temp` managed directories. `systemTemp` must be captured BEFORE
+ * temp root — this function must only ever operate inside our own managed
+ * temp root (see scripts/dev/pd-tmp.mjs). `systemTemp` must be captured BEFORE
  * any TMPDIR/TEMP/TMP redirection (see globalSetup below): os.tmpdir()
  * derives from those env vars, so calling it after the redirect makes the
  * refusal compare against our own run dir and silently never fire.
