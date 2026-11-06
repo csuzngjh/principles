@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createHash } from 'node:crypto';
 import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, trimToBudget } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
@@ -576,6 +577,178 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
     expect(journal.mock.calls[1]![1]).toMatchObject({ selection, execution, payload: 'none', submission: 'unknown' });
   });
+});
+
+describe('Controlled admission — real local/shared entries', () => {
+  const admissionRoots: string[] = [];
+
+  afterEach(async () => {
+    delete process.env.PD_AA_ADMISSION_FILE;
+    delete process.env.PD_AA_EXPERIMENT_ROOT;
+    const cache = await import('../../src/hooks/controlled-admission.js');
+    cache.resetControlledAdmissionCacheForTest();
+    for (const root of admissionRoots.splice(0)) {
+      try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  });
+
+  async function seedTwenty() {
+    for (let i = 0; i < 20; i++) {
+      const principleId = `AA-${String(i).padStart(2, '0')}`;
+      insertValidatedPrincipleArtifact({ artifactId: `art-${principleId}`, principleId, text: `${principleId}-body-${'Z'.repeat(300)}` });
+      await insertPromptActivation({ artifactId: `art-${principleId}`, principleId });
+    }
+  }
+
+  function configuredWith(principleId: string) {
+    const ctx = makeCtx();
+    if (!ctx.api) throw new Error('test requires plugin API');
+    ctx.api.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, artifactId: `art-${principleId}`,
+      activationId: `act_prompt_${principleId}`, expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    return ctx;
+  }
+
+  async function makeAdmission(options: {
+    inputText: string;
+    artifactId: string;
+    activationId: string;
+    softTimeoutMs: number;
+    expiresAt: string;
+  }): Promise<{ event: Parameters<typeof import('../../src/hooks/controlled-admission.js').claimControlledAdmission>[0]['event']; mapping: { artifactId: string; activationId: string; softTimeoutMs: number; expiresAtMs: number } }> {
+    const { canonicalAdaptiveMappingSha256 } = await import('@principles/core/runtime-v2');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-aa-entry-'));
+    admissionRoots.push(root);
+    const workspaceDir = tempWorkspaceDir;
+    const inputPath = path.join(root, 'input.txt');
+    fs.writeFileSync(inputPath, options.inputText, 'utf8');
+    const fixturePath = path.join(root, 'fixture.txt');
+    const fixtureContent = 'AA-FIXTURE-CONTENT';
+    fs.writeFileSync(fixturePath, fixtureContent, 'utf8');
+    const sha = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+    const manifest = {
+      targetArtifactId: options.artifactId, targetActivationId: options.activationId,
+      sourceRef: '#2386@3579474cf', fixtureFile: fixturePath, fixtureSha256: sha(fixtureContent),
+      expectedToolName: 'read', expectedContentMarker: fixtureContent, configSnapshot: { experiment: 'AA' },
+    };
+    const manifestPath = path.join(root, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8');
+    const mapping = { artifactId: options.artifactId, activationId: options.activationId,
+      softTimeoutMs: options.softTimeoutMs, expiresAtMs: Date.parse(options.expiresAt) };
+    const admission = {
+      schemaVersion: 'pd-aa-controlled-admission/v2', admissionId: 'adm-entry-1', operator: 'owner',
+      purpose: 'entry wiring', experimentRoot: root, inputPath, inputSha256: sha(options.inputText),
+      manifestPath, manifestSha256: sha(JSON.stringify(manifest)),
+      targetArtifactId: options.artifactId, targetActivationId: options.activationId,
+      mappingSha256: canonicalAdaptiveMappingSha256({ workspaceRealPath: fs.realpathSync(workspaceDir), ...mapping }),
+      sessionBinding: 'predeclared', expectedSessionId: 'test-session-v2',
+      createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 5 * 60000).toISOString(),
+      consumedAt: null, consumedBy: null,
+    };
+    const admissionPath = path.join(root, 'admission.json');
+    fs.writeFileSync(admissionPath, JSON.stringify(admission, null, 2), 'utf8');
+    process.env.PD_AA_ADMISSION_FILE = admissionPath;
+    process.env.PD_AA_EXPERIMENT_ROOT = root;
+    return {
+      event: { prompt: options.inputText, messages: [], trigger: 'user', sessionId: 'test-session-v2' } as never,
+      mapping,
+    };
+  }
+
+  function consumed(): Record<string, unknown> {
+    const root = process.env.PD_AA_EXPERIMENT_ROOT!;
+    return JSON.parse(fs.readFileSync(path.join(root, 'admission.json'), 'utf8'));
+  }
+
+  it('local entry consumes the admission and records the operator admission separately', async () => {
+    await seedTwenty();
+    const inputText = '[PD-AA:delivery-review:v1]\nReview delivery';
+    const ctx = configuredWith('AA-19');
+    const { event, mapping } = await makeAdmission({ inputText, artifactId: 'art-AA-19', activationId: 'act_prompt_AA-19',
+      softTimeoutMs: mappingSoftTimeout(ctx), expiresAt: mappingExpiresAt(ctx) });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(event, ctx);
+    expect(result?.prependSystemContext).toContain('AA-19-body-');
+    expect(consumed().consumedAt).toBeTruthy();
+    expect(consumed().consumedBy).toMatchObject({ sessionId: 'test-session-v2' });
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(end.operatorAdmission).toMatchObject({ admissionId: 'adm-entry-1', status: 'claimed' });
+    expect(end).not.toHaveProperty('nativeAdmissionId');
+    expect(mapping.artifactId).toBe('art-AA-19');
+  });
+
+  it('local entry keeps the native path when a native message identity is present', async () => {
+    await seedTwenty();
+    const inputText = '[PD-AA:delivery-review:v1]\nReview delivery';
+    const ctx = configuredWith('AA-19');
+    await makeAdmission({ inputText, artifactId: 'art-AA-19', activationId: 'act_prompt_AA-19',
+      softTimeoutMs: mappingSoftTimeout(ctx), expiresAt: mappingExpiresAt(ctx) });
+    const event = { ...makeMinimalEvent(), prompt: inputText, currentUserMessage: inputText,
+      currentUserMessageId: 'native-1' } as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(event, ctx);
+    expect(result?.prependSystemContext).toContain('AA-19-body-');
+    expect(consumed().consumedAt).toBeNull();
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(end.nativeAdmissionId).toBe('native-1');
+    expect(end).not.toHaveProperty('operatorAdmission');
+  });
+
+  it('shared entry applies only the same-round provider claim, and a replay falls back to Native', async () => {
+    await seedTwenty();
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const baseline = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`).find(id => !baseline.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside Native');
+    const ctx = configuredWith(target);
+    const packed = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir,
+      adaptivePriority: { artifactId: `art-${target}`, activationId: `act_prompt_${target}` },
+      hookInvocationId: 'hook-shared-1',
+      deadlineAt: Date.now() + 15000 });
+    if (!packed.adaptivePacking) throw new Error('requires prepared packing');
+    expect(packed.adaptivePacking.status).toBe('prioritized');
+    expect(packed.adaptivePacking.hookInvocationId).toBe('hook-shared-1');
+    expect(packed.adaptivePacking.targetSnapshot).toBeTruthy();
+    const inputText = '[PD-AA:delivery-review:v1]\nReview delivery';
+    const { event } = await makeAdmission({ inputText, artifactId: `art-${target}`, activationId: `act_prompt_${target}`,
+      softTimeoutMs: mappingSoftTimeout(ctx), expiresAt: mappingExpiresAt(ctx) });
+    const { claimControlledAdmission, takeControlledAdmissionHandoff } = await import('../../src/hooks/controlled-admission.js');
+    const claimed = claimControlledAdmission({ event, workspaceDir: tempWorkspaceDir, sessionId: 'test-session-v2',
+      runId: 'run-1', mapping: { artifactId: `art-${target}`, activationId: `act_prompt_${target}`,
+        softTimeoutMs: mappingSoftTimeout(ctx), expiresAtMs: Date.parse(mappingExpiresAt(ctx)) },
+      hookInvocationId: packed.adaptivePacking.hookInvocationId });
+    expect(claimed.status).toBe('claimed');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(event, ctx, packed);
+    expect(result?.prependSystemContext).toContain(`${target}-body-`);
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const end = journal.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(end.operatorAdmission).toMatchObject({ admissionId: 'adm-entry-1', status: 'claimed' });
+    expect(takeControlledAdmissionHandoff(event, packed.adaptivePacking.hookInvocationId)).toBeNull();
+
+    // A duplicate callback for the same packed round cannot re-apply the target.
+    const replayEvent = { ...event };
+    const replay = await handleBeforePromptBuild(replayEvent, ctx, packed);
+    expect(replay?.prependSystemContext).not.toContain(`${target}-body-`);
+    const replayEnd = journal.mock.calls[journal.mock.calls.length - 1]![1] as Record<string, unknown>;
+    expect(replayEnd).toMatchObject({ reason: 'admission_handoff_missing' });
+  });
+
+  function mappingExpiresAt(ctx: Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1]): string {
+    return (ctx.api as unknown as { pluginConfig: { adaptiveActivation: { expiresAt: string } } })
+      .pluginConfig.adaptiveActivation.expiresAt;
+  }
+
+  function mappingSoftTimeout(ctx: Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1]): number {
+    return (ctx.api as unknown as { pluginConfig: { adaptiveActivation: { softTimeoutMs: number } } })
+      .pluginConfig.adaptiveActivation.softTimeoutMs;
+  }
 });
 
 describe('Runtime V2 prompt activation injection', () => {
