@@ -55,7 +55,13 @@ the consumer extracts with `tar xzf` — the publisher wraps deterministically
 Three jobs, one publication (PRI-733 multi-platform matrix):
 
 1. `resolve-inputs` (ubuntu): resolve the product version/commit identity
-   (fail-closed version guard), read the previously published state from
+   (fail-closed version guard). Since PRI-1103 the COMMIT is not the
+   dispatched `ref`: `scripts/release/resolve-installer-cohort.mjs` reads the
+   npm installer channel and returns the cohort that actually shipped this
+   product version, so the metadata, the stamped assets and the npm bytes all
+   name one commit (`ref` still selects the release tooling, and a dry-run
+   whose lookup fails rehearses the ref with a warning instead of publishing).
+   Then read the previously published state from
    `gh-pages`, and derive `publicationSequence`/pointer version (previous + 1)
    and expiry (dispatch input; `auto` = now + 90d with a loud warning that
    reproducible re-publication needs an explicit value). Derived ONCE so the

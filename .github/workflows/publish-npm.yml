@@ -68,7 +68,20 @@ on:
     - cron: '0 4 * * *'
 
 concurrency:
-  group: publish-npm-release-train
+  # PRI-1103: npm `latest` is a GLOBAL, cross-channel publication fact. A
+  # release-metadata publication (console-update channel) and this npm train
+  # (fresh-install channel) must never write it concurrently, so BOTH use the
+  # same global group regardless of channel. cancel-in-progress stays false:
+  # a pending run must never cancel a publication that is already uploading.
+  #
+  # LIMITATION (documented, not a queue): GitHub Actions concurrency is not
+  # FIFO and keeps at most ONE pending run per group — a newer pending run
+  # REPLACES the older pending one (which is cancelled). Serialisation is
+  # guaranteed; delivery of every queued publication is NOT. A dropped pending
+  # run must be re-dispatched by its operator. No persistent publication lock
+  # service is introduced here; the repository has none, and a second locking
+  # mechanism would become a competing source of truth.
+  group: pd-release-publication-global
   cancel-in-progress: false
 
 jobs:

@@ -647,3 +647,311 @@ describe('G3.2 console skip flag — set only where the console was just built',
     }
   });
 });
+
+/**
+ * PRI-1103 — the asset leg used to build from whatever ref an operator
+ * dispatched while npm built from the cohort it published. Both legs preserve
+ * source component versions, so identical version numbers could hide
+ * different bytes, and no install-side observer could tell them apart. These
+ * pins keep the commit bound to the npm channel by construction: the identity
+ * step asks the registry which cohort shipped the product version, and every
+ * downstream consumer keeps reading that one output.
+ */
+describe('release-metadata.yml — asset commit bound to the npm cohort (PRI-1103)', () => {
+  const rel = '.github/workflows/release-metadata.yml';
+  const text = () => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+  type Step = { name?: string; run?: string; env?: Record<string, unknown>; with?: Record<string, string> };
+
+  function identityStep(): Step {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[] }> };
+    const step = (doc.jobs?.['resolve-inputs']?.steps ?? []).find((s) => s.name === 'Resolve release identity');
+    if (!step?.run) throw new Error('Resolve release identity step missing');
+    return step;
+  }
+
+  it('exposes cohort_sha as a current-npm-latest assertion, defaulted so no event can invent one', () => {
+    const doc = loadWorkflow(rel) as {
+      on?: Record<string, { inputs?: Record<string, { default?: unknown; type?: string; description?: string }> }>;
+    };
+    const inputs = doc.on?.workflow_dispatch?.inputs;
+    expect(Object.keys(inputs ?? [])).toContain('cohort_sha');
+    expect(inputs?.cohort_sha?.default).toBe('');
+    expect(inputs?.cohort_sha?.type).toBe('string');
+    // The operator-facing contract must not advertise historical republishing:
+    // the value asserts the commit npm `latest` currently points at.
+    expect(inputs?.cohort_sha?.description ?? '').toMatch(/npm `latest`/);
+    expect(inputs?.cohort_sha?.description ?? '').toContain('NOT a historical selector');
+    expect(inputs?.allow_version_drift?.description ?? '').toContain('never changes the npm latest commit identity');
+    // A schedule event carries no inputs, so the daily preflight can never
+    // pin an arbitrary cohort — same posture as mode.
+    expect(text()).toContain('github.event.inputs.cohort_sha');
+  });
+
+  it('derives the commit from the resolver instead of the dispatched ref', () => {
+    const run = identityStep().run ?? '';
+    expect(run).toContain('node scripts/release/resolve-installer-cohort.mjs --product-version "$VERSION"');
+    expect(run).toMatch(/JSON\.parse\(process\.argv\[1\]\)\.cohort/);
+    // The only remaining HEAD read is the dry-run fallback, inside the else
+    // branch after the publish refusal — a second one anywhere else would
+    // re-open the door this ticket closed.
+    expect((run.match(/COMMIT=\$\(git rev-parse HEAD\)/g) ?? [])).toHaveLength(1);
+    expect((text().match(/resolve-installer-cohort\.mjs/g) ?? [])).toHaveLength(1);
+    // No refusal message may send the operator to an older cohort: that is the
+    // bypass this rule exists to close.
+    expect(run).not.toContain('cohort_sha that shipped it');
+    expect(run).not.toContain('re-publish it from its own cohort');
+  });
+
+  it('fails closed on mode=publish and only rehearses the ref in a dry-run', () => {
+    const run = identityStep().run ?? '';
+    expect(run).toMatch(/if \[ "\$MODE" = "publish" \]; then[\s\S]{0,600}?exit 1[\s\S]{0,20}fi[\s\S]*?DRY-RUN[\s\S]*?COMMIT=\$\(git rev-parse HEAD\)/);
+  });
+
+  it('skips the ref-manifest check only for a cohort_sha the resolver binds to current npm latest', () => {
+    // The resolver refuses any cohort_sha that is not latest's gitHead and
+    // checks latest's ROOT manifest against the expected version, so that
+    // branch already proves the version binding; the ref manifest may differ
+    // because main keeps advancing.
+    expect(identityStep().run ?? '').toMatch(/\[ -z "\$COHORT_SHA_INPUT" \] && \[ "\$PRODUCT_VERSION_INPUT" != "auto" \]/);
+  });
+
+  it('anchors the deterministic archive epoch to the resolved commit', () => {
+    // SOURCE_DATE_EPOCH must describe the bytes being built, which since this
+    // change is the cohort rather than the checkout tip.
+    expect(identityStep().run ?? '').toMatch(/git log -1 --format=%ct "\$COMMIT"/);
+    expect(text()).toContain('export SOURCE_DATE_EPOCH="${{ needs.resolve-inputs.outputs.source_epoch }}"');
+  });
+
+  it('threads the resolved commit through build, stamp and publish expectations', () => {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[]; needs?: unknown }> };
+    for (const job of ['build-asset', 'assemble-publish']) {
+      const checkout = (doc.jobs?.[job]?.steps ?? []).find((s) => s.uses?.startsWith('actions/checkout'));
+      expect(checkout?.with?.ref, job).toBe('${{ needs.resolve-inputs.outputs.commit }}');
+    }
+    const t = text();
+    expect(t).toContain('--source-commit "${{ needs.resolve-inputs.outputs.commit }}"');
+    expect(t).toContain('EXPECTED_COMMIT="${{ needs.resolve-inputs.outputs.commit }}"');
+  });
+});
+
+/**
+ * PRI-1103 final round — two publication facts are GLOBAL, not per-channel:
+ * npm `latest`, and the installer cohort it points at. A long cross-platform
+ * build can outlive that fact, so the workflows need (1) one mutex around all
+ * production writes to the npm channel and (2) two cohort re-checks around the
+ * bytes they publish.
+ *
+ * These pins are deliberately structural: GitHub Actions concurrency cannot be
+ * unit-executed here, so the contract is "which group expression is committed"
+ * plus the documented limitation in the workflow comments.
+ */
+describe('release workflows — global publication mutex (PRI-1103 race)', () => {
+  const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+
+  it('gives the npm publish train the same global group as release-metadata publish', () => {
+    const doc = loadWorkflow('.github/workflows/publish-npm.yml') as {
+      concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+    };
+    // No channel token: stable and candidate publish the SAME npm latest.
+    expect(doc.concurrency?.group).toBe('pd-release-publication-global');
+    expect(doc.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('locks only mode=publish in release-metadata, and keeps dry-run off the production lock', () => {
+    const doc = loadWorkflow('.github/workflows/release-metadata.yml') as {
+      concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+    };
+    const group = doc.concurrency?.group ?? '';
+    expect(group).toContain("github.event.inputs.mode == 'publish'");
+    // Outer `||` arms: the publish arm is channel-agnostic; the dry-run arm is
+    // per-channel and must not contain the production group.
+    const arms = group.split('||');
+    expect(arms[0]).toContain("'pd-release-publication-global'");
+    expect(arms[0]).not.toContain('channel');
+    expect(arms.slice(1).join('||')).toContain("format('release-metadata-{0}'");
+    expect(arms.slice(1).join('||')).toContain('github.event.inputs.channel');
+    expect(doc.concurrency?.['cancel-in-progress']).toBe(false);
+    // Exactly one production-lock literal: no second group can be smuggled in.
+    expect((read('.github/workflows/release-metadata.yml').match(/pd-release-publication-global/g) ?? [])).toHaveLength(1);
+  });
+
+  it('keeps the npm preflight rehearsal off the production lock (it never publishes)', () => {
+    const doc = loadWorkflow('.github/workflows/publish-preflight.yml') as { concurrency?: { group?: string } };
+    expect(doc.concurrency?.group ?? '').not.toContain('pd-release-publication-global');
+    // It can only invoke the publish action with dry_run: true.
+    const calls = (doc as unknown as { jobs?: Record<string, { steps?: Array<{ with?: Record<string, unknown> }> }> }).jobs ?? {};
+    const publishCalls = Object.values(calls)
+      .flatMap((job) => job.steps ?? [])
+      .filter((step) => (step.with?.dry_run as unknown) !== undefined);
+    expect(publishCalls.length).toBeGreaterThan(0);
+    for (const call of publishCalls) expect(call.with?.dry_run).toBe(true);
+  });
+});
+
+describe('release-metadata.yml — cohort re-check gates around the publication (PRI-1103 race)', () => {
+  const rel = '.github/workflows/release-metadata.yml';
+  type Step = { name?: string; if?: string; run?: string; env?: Record<string, unknown>; 'continue-on-error'?: boolean };
+
+  function steps(): Step[] {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[] }> };
+    return doc.jobs?.['assemble-publish']?.steps ?? [];
+  }
+
+  function stepNamed(prefix: string): Step {
+    const step = steps().find((s) => (s.name ?? '').startsWith(prefix));
+    if (!step) throw new Error(`step ${prefix} missing`);
+    return step;
+  }
+
+  /**
+   * Executable lines of a `run:` block. Comments and blank lines carry no
+   * execution order, so "nothing between gate 2 and push" is judged on real
+   * commands, never on YAML step names or comments.
+   */
+  function commandLines(run: string): string[] {
+    return run
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'));
+  }
+
+  const GATE_SCRIPT = '"$RUNNER_TEMP/release-tools/scripts/release/verify-publication-cohort.mjs"';
+
+  function publishRun(): string {
+    const run = stepNamed('Publish to metadata source').run ?? '';
+    expect(run.length).toBeGreaterThan(0);
+    return run;
+  }
+
+  it('keeps gate 1 after asset identity verification and before every external side effect', () => {
+    const order = steps().map((s) => s.name ?? '');
+    const identity = order.findIndex((n) => n.startsWith('Verify embedded product identity'));
+    const gate1 = order.findIndex((n) => n.startsWith('Publication gate 1'));
+    const sign = order.findIndex((n) => n.startsWith('Sign and emit release metadata'));
+    const uploadBytes = order.findIndex((n) => n.startsWith('Upload asset bytes'));
+    const push = order.findIndex((n) => n.startsWith('Publish to metadata source'));
+
+    expect(identity).toBeGreaterThanOrEqual(0);
+    expect(gate1).toBeGreaterThan(identity);
+    expect(sign).toBeGreaterThan(gate1);
+    expect(uploadBytes).toBeGreaterThan(gate1);
+    expect(push).toBeGreaterThan(uploadBytes);
+    // Gate 2 is no longer a sibling step: a step boundary cannot protect the
+    // push, because the push happens INSIDE the publish step.
+    expect(order.some((n) => n.startsWith('Publication gate 2'))).toBe(false);
+  });
+
+  it('runs gate 2 inside the real publish shell, after git commit and immediately before git push', () => {
+    const lines = commandLines(publishRun());
+    const add = lines.indexOf('git add -A');
+    const commit = lines.findIndex((line) => line.startsWith('git commit'));
+    const gate = lines.findIndex((line) => line.includes(GATE_SCRIPT));
+    const push = lines.indexOf('git push origin gh-pages');
+
+    // Fixed order inside one shell: prepare/copy -> stage -> checks -> commit
+    // -> gate 2 -> push.
+    expect(add).toBeGreaterThanOrEqual(0);
+    expect(commit).toBeGreaterThan(add);
+    expect(lines.some((line) => line.includes('find targets/releases'))).toBe(true);
+    expect(gate).toBeGreaterThan(commit);
+    expect(push).toBeGreaterThan(gate);
+    // NOTHING executes between the gate and the push: push is the next command.
+    expect(push).toBe(gate + 1);
+    // The gate is invoked as one clear command, so its position is testable.
+    expect(lines[gate]).toContain(`node ${GATE_SCRIPT}`);
+  });
+
+  it('calls gate 2 with the same verifier and cohort arguments as gate 1', () => {
+    const gate1 = stepNamed('Publication gate 1').run ?? '';
+    const publish = publishRun();
+    for (const arg of [
+      '--mode "$MODE"',
+      '--product-version "$EXPECTED_VERSION"',
+      '--expected-commit "$EXPECTED_COMMIT"',
+      '--explicit-cohort "$COHORT_SHA_INPUT"',
+    ]) {
+      expect(gate1, `gate1 ${arg}`).toContain(arg);
+      expect(publish, `gate2 ${arg}`).toContain(arg);
+    }
+    // One shared control-plane script, same path in both gates.
+    expect(gate1).toContain(`node ${GATE_SCRIPT}`);
+    expect(publish).toContain(`node ${GATE_SCRIPT}`);
+    // Only gate 2 may claim that external bytes already exist; gate 1 runs
+    // before any upload.
+    expect(gate1).toContain('--external-side-effects none');
+    expect(publish).toContain('--external-side-effects asset-bytes-uploaded');
+  });
+
+  it('makes the push unreachable when gate 2 refuses, and rewrites no asset identity', () => {
+    const run = publishRun();
+    expect(run).toContain('set -euo pipefail');
+    const lines = commandLines(run);
+    const gate = lines.findIndex((line) => line.includes(GATE_SCRIPT));
+    expect(gate).toBeGreaterThanOrEqual(0);
+    // `set -e` + a plain sequential command means a non-zero gate exits the
+    // shell before the next line, which is the push.
+    expect(lines[gate]).not.toContain('||');
+    expect(lines[gate]).not.toContain('set +e');
+    expect(lines.slice(gate).join('\n')).not.toContain('|| true');
+
+    const step = stepNamed('Publish to metadata source');
+    expect(step['continue-on-error']).toBeUndefined();
+    expect(step.if ?? '').toContain("env.MODE == 'publish'");
+    expect(step.if ?? '').toContain('success()');
+    // A refusal must never be "fixed" by rewriting what the bytes claim.
+    expect(run).not.toContain('sourceCommit');
+    expect(run).not.toContain('sed -i');
+    // The only gh-pages push in the whole workflow is this guarded shell.
+    const pushes = steps().filter((s) => (s.run ?? '').includes('git push origin gh-pages'));
+    expect(pushes).toHaveLength(1);
+  });
+
+  it('never lets a gate refusal be skipped, retried or downgraded', () => {
+    const gate1 = stepNamed('Publication gate 1');
+    expect(gate1['continue-on-error']).toBeUndefined();
+    expect(gate1.run ?? '').not.toContain('|| true');
+    expect(gate1.run ?? '').not.toContain('continue');
+    expect(gate1.run ?? '').not.toContain('sourceCommit');
+    expect(gate1.run ?? '').not.toContain('sed -i');
+    // Publishing steps keep default success() semantics, so a gate failure
+    // skips the upload/push instead of racing ahead.
+    expect(stepNamed('Upload asset bytes').if ?? '').toContain('success()');
+  });
+
+  it('keeps dry-run off the production gate-2 write path', () => {
+    // Gate 1 runs in dry-run but is advisory by mode; the production write
+    // (push) is unreachable unless mode=publish.
+    const step = stepNamed('Publish to metadata source');
+    expect(step.if ?? '').toMatch(/env\.MODE == 'publish'/);
+    expect(publishRun()).toContain('git push origin gh-pages');
+    // Nothing outside this mode-guarded shell pushes metadata.
+    for (const candidate of steps().filter((s) => (s.run ?? '').includes('git push'))) {
+      expect(candidate.name ?? '').toContain('Publish to metadata source');
+    }
+  });
+
+  it('receives gate tooling from resolve-inputs, never from the product cohort', () => {
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Array<Step & { uses?: string; with?: Record<string, unknown> }> }> };
+    const resolveSteps = doc.jobs?.['resolve-inputs']?.steps ?? [];
+    const bundle = resolveSteps.find((s) => (s.name ?? '').startsWith('Bundle publication-gate tooling'));
+    expect(bundle?.run ?? '').toContain('git archive HEAD scripts/release scripts/lib');
+    const upload = resolveSteps.find(
+      (s) => (s.uses ?? '').startsWith('actions/upload-artifact') && s.with?.name === 'release-publication-gate-tooling',
+    );
+    expect(upload?.with?.['if-no-files-found']).toBe('error');
+
+    // assemble-publish downloads the bundle; it never re-reads the mutable ref.
+    const assemble = doc.jobs?.['assemble-publish']?.steps ?? [];
+    const download = assemble.find(
+      (s) => (s.uses ?? '').startsWith('actions/download-artifact') && s.with?.name === 'release-publication-gate-tooling',
+    );
+    expect(download?.with?.path).toBe('${{ runner.temp }}/release-tools-archive');
+    const extract = assemble.find((s) => (s.name ?? '').startsWith('Extract trusted publication-gate tooling'));
+    expect(extract?.run ?? '').toContain('$RUNNER_TEMP/release-tools');
+    expect(extract?.run ?? '').toContain('verify-publication-cohort.mjs');
+    // Extraction target is RUNNER_TEMP: the cohort workspace (and therefore the
+    // gh-pages publication payload) stays untouched.
+    expect(assemble.some((s) => (s.run ?? '').includes('git archive HEAD'))).toBe(false);
+  });
+});
+
