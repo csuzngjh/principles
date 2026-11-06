@@ -8,7 +8,7 @@ import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
-import { applyTrajectorySchemaBase, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2/trajectory-schema';
+import { applyTrajectorySchemaBase, convergeTrajectorySchemaVersion } from '@principles/core/runtime-v2/trajectory-schema';
 import { guardWorkspaceLeak } from '@principles/core/runtime-v2/store/workspace-leak-guard';
 import type {
   CorrectionSampleReviewStatus,
@@ -208,13 +208,11 @@ export function initTrajectorySchema(workspaceDir: string): { tables: string[]; 
     db.pragma('synchronous = NORMAL');
     db.pragma(`busy_timeout = ${DEFAULT_BUSY_TIMEOUT_MS}`);
     const result = applyTrajectorySchema(db);
-    // Record schema version (same logic as TrajectoryDatabase.initSchema)
-    const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
-    if (!row) {
-      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(TRAJECTORY_SCHEMA_VERSION);
-    } else if (row.version !== TRAJECTORY_SCHEMA_VERSION) {
-      db.prepare('UPDATE schema_version SET version = ?').run(TRAJECTORY_SCHEMA_VERSION);
-    }
+    // PRI-1135: the version-row write has ONE owner. Both plugin entry points
+    // delegate to the core convergence function instead of duplicating the
+    // INSERT/UPDATE logic (the raw host-runtime open paths reach it through
+    // migrateLegacyGfiSchema).
+    convergeTrajectorySchemaVersion(db);
     return result;
   } finally {
     db.close();
@@ -1495,11 +1493,9 @@ export class TrajectoryDatabase {
     }
     const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
     this.migrateSchema(row?.version);
-    if (!row) {
-      this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(TRAJECTORY_SCHEMA_VERSION);
-    } else if (row.version !== TRAJECTORY_SCHEMA_VERSION) {
-      this.db.prepare('UPDATE schema_version SET version = ?').run(TRAJECTORY_SCHEMA_VERSION);
-    }
+    // PRI-1135: single version-row writer — the same core function used by
+    // initTrajectorySchema and, indirectly, every raw host-runtime open path.
+    convergeTrajectorySchemaVersion(this.db);
   }
 
   private importLegacyArtifacts(): void {

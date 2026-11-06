@@ -95,9 +95,11 @@ function getSessionsColumns(db: Database.Database): string[] {
  * Activity analytics views were retired (2026-08-19) along with their writer,
  * and no reader needs them on the pain record path.
  *
- * The schema_version ROW stays untouched by core (P1-A contract): this only
- * guarantees the table exists; version read/migrate/write remains with the
- * plugin TrajectoryDatabase lifecycle.
+ * PRI-1135: applyTrajectorySchemaBase ends with migrateLegacyGfiSchema, which
+ * converges the schema_version ROW through the SAME single writer
+ * (convergeTrajectorySchemaVersion) the plugin lifecycle uses. The old
+ * "core never touches the version row" P1-A note was stale after PR #2332;
+ * there is still only one implementation of the version-row write.
  */
 function ensureTrajectorySchema(db: Database.Database): { tables: string[]; warnings: string[] } {
   return applyTrajectorySchemaBase(db);

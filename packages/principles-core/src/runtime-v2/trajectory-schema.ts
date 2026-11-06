@@ -11,11 +11,14 @@
  * - owns: CREATE TABLE/INDEX/VIEW statements, column-migration blocks, the
  *   evolution_tasks column backfill, TRAJECTORY_SCHEMA_VERSION and
  *   TRAJECTORY_TABLES declarations.
+ * - owns (PRI-1135): the single version-row writer
+ *   `convergeTrajectorySchemaVersion`, called by migrateLegacyGfiSchema and
+ *   directly by both plugin lifecycle entry points. The plugin no longer
+ *   duplicates the INSERT/UPDATE logic.
+ * - owns: TRAJECTORY_REQUIRED_COLUMNS, the one declaration of the columns a
+ *   raw host-runtime open path requires before writing.
  * - does NOT own: path resolution, directory creation, connection lifecycle,
- *   WAL/pragmas, schema_version ROW creation/upgrade on the normal entry points
- *   (TrajectoryDatabase.initSchema and initTrajectorySchema keep that), the
- *   version-row convergence performed by migrateLegacyGfiSchema (see below),
- *   v_daily_metrics (plugin migrateSchema), governance_* tables
+ *   WAL/pragmas, v_daily_metrics (plugin migrateSchema), governance_* tables
  *   (host-runtime stores).
  *
  * Zero pathways are abolished: both paths keep their exact pre-PRI-774
@@ -60,6 +63,22 @@ export const TRAJECTORY_TABLES = [
 ] as const;
 
 /**
+ * PRI-1104 / PRI-1135: the ONE canonical declaration of the columns a
+ * trajectory.db must carry before the raw host-runtime open paths treat it as
+ * writable. This used to be a hand-maintained second copy named
+ * REQUIRED_COLUMNS in host-runtime/production-pain-evidence.ts.
+ *
+ * It lives with the DDL owner so the next schema evolution changes one place.
+ * trajectory-schema.test.ts derives the actual columns from a real database
+ * via PRAGMA and fails if this list and the applied DDL drift apart.
+ */
+export const TRAJECTORY_REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
+  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT', project_dir: 'TEXT' },
+  pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', host_kind: 'TEXT', created_at: 'TEXT' },
+};
+
+/**
  * SQLite's only signal for "column already exists" is the error message text
  * (there is no IF NOT EXISTS for ADD COLUMN); unexpected errors must rethrow.
  */
@@ -82,7 +101,7 @@ function tableExists(db: Database, name: string): boolean {
  * No-op on a v2 database (version already current) and on databases that do
  * not have the table yet. A v1 row is upgraded in place.
  */
-function convergeSchemaVersion(db: Database): void {
+export function convergeTrajectorySchemaVersion(db: Database): void {
   if (!tableExists(db, 'schema_version')) return;
   const row = db
     .prepare('SELECT version FROM schema_version LIMIT 1')
@@ -135,7 +154,7 @@ export function migrateLegacyGfiSchema(db: Database): void {
       .run(new Date().toISOString(), 'gfi_removal');
   }
 
-  convergeSchemaVersion(db);
+  convergeTrajectorySchemaVersion(db);
 }
 
 export function applyTrajectorySchemaBase(
