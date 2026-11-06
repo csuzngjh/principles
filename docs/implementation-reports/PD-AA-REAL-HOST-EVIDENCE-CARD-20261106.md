@@ -210,6 +210,10 @@ pd activation link --workspace <ws> --since <ISO> --until <ISO> --json
 
 清理：终止进程树、`finally` 关闭本地端点；保留 `.tmp` 原始证据；不删除共享状态；不改生产配置。
 
+**v1.2 冻结细化**：本节由 `PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md` v1.2 §5–§6 冻结并细化（假 provider 的工具调用/结果/结束、工具白名单与夹具、单请求 15 秒与整回合 120 秒、预检 25 秒、停止条件、预期 `unknown`、关闭端点与进程树）。若两处措辞冲突，以设计 v1.2 §5–§6 为准；本卡保留七问与证据包结构。
+
+三条身份线必须分别记录、不得互相冒充：**operator admission**（`admissionId`/输入与清单哈希/目标）、**host identity**（`hookInvocationId`/`sessionId`/`runId`/配置快照）、**endpoint request identity**（`endpointRequestId`/`bodySha256`/`userMessageSha256`）。请求级关联保持 `unknown`，不用端点序号替代宿主 `requestId`。
+
 ---
 
 ## 2. 证据包结构（`pd-aa-evidence-package/v1`）
