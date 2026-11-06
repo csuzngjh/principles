@@ -388,6 +388,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // <workspace>/.state/signal-health.json (mkdir + atomicWriteFileSync +
   // SystemLogger) so `pd config doctor` can surface detection-chain health.
   'signal-health.ts',
+  // PRI-1110: Plugin I/O boundary — OpenClaw-only "effective configuration
+  // identity" for AA invocation evidence. Reads the executing plugin manifest
+  // from disk (bounded fs read) to bind the running plugin version and
+  // fingerprints the confirmed hook-set; host-version/plugin-layout probing is
+  // intrinsically OpenClaw-specific, so the I/O stays in the plugin shell.
+  'adaptive-config-identity.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -510,7 +516,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Gate 4 (PRI-1071): Added mcp-binding.ts (92 → 93) — plugin I/O boundary
     // for the PD-owned mcp-binding.json (host filesystem + component presence),
     // consumed by the OpenClaw startup health check and the host launcher.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    // PRI-1110: Added adaptive-config-identity.ts (93 → 94) — OpenClaw-only
+    // plugin I/O boundary reading the executing manifest from disk to bind the
+    // running plugin version for AA invocation evidence.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 
