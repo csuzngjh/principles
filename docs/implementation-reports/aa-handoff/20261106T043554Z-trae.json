@@ -5,7 +5,7 @@
   "generatedAt": "2026-11-06T04:35:54Z",
   "agent": "trae",
   "overallStatus": "NEEDS_OWNER",
-  "summary": "两段并行：第一部分修复 PRI-1114 已确认的会话行截断漏报（3 条新反例先红后绿，PR #2380 草稿、未合并）；第二部分完成真实宿主证据链的最小验证卡与证据包结构，并用真实 pd activation link 在合成夹具上完成了一次本地无模型读链实跑。关键发现：已安装 OpenClaw 2026.11.1 的 embedded before_prompt_build 仍不传 currentUserMessageId；controlledAdmission 只在 core 实现、hook 未接线；G1 范围明确无工具，且历史两次假模型额度已用完。因此真实宿主闭环（PRI-1118）需要新的有界批准，本轮未执行任何宿主/模型/安装操作。",
+  "summary": "两段并行：第一部分修复 PRI-1114 已确认的会话行截断漏报（3 条新反例先红后绿，PR #2380 草稿、未合并）；第二部分完成真实宿主证据链的最小验证卡与证据包结构，并用真实 pd activation link 在合成夹具上完成了一次本地无模型读链实跑。关键发现：已安装 OpenClaw 2026.11.1 的 embedded before_prompt_build 仍不传 currentUserMessageId；controlledAdmission 只在 core 实现、hook 未接线；G1 范围明确无工具，且历史两次假模型额度已用完。因此真实宿主闭环（PRI-1118）需要新的有界批准，本轮未执行任何宿主/模型/安装操作。样例初次生成后发现 manifest 的安装宿主版本误写为 2026.10.10，已修正为 2026.11.1 并重新生成哈希。",
   "git": {
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation",
     "branch": "ai/PRI-1114-coverage-propagation",
@@ -269,8 +269,8 @@
       "id": "evidence-sample-link",
       "kind": "LOCAL_TEST",
       "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\link-output.json",
-      "observedAt": "2026-11-06T04:35:54Z",
-      "sha256": "84fb0a1be970b93b86e1c8b50d268e3da708c930fcc6d931cd28440343c7ed68",
+      "observedAt": "2026-11-06T04:40:40Z",
+      "sha256": "14e7ad507d6e025f0b421655c2fc590169fda805e0a049d6f1b0c7ad4f16f281",
       "supports": "真实 pd activation link 在合成夹具上输出单 JSON：association=strong_run、actions=1、corrections=1、outcomes=1、coverage.complete=true；请求级/原则遵循/行为改善为 unknown。",
       "limitations": "夹具是合成的；不是宿主、模型或行为证据。"
     },
@@ -278,8 +278,8 @@
       "id": "evidence-sample-manifest",
       "kind": "LOCAL_TEST",
       "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\manifest.json",
-      "observedAt": "2026-11-06T04:35:54Z",
-      "sha256": "042d9c4b982bd4cbfa1575faba979bd569b3fe5b6b723c320fea3b84d3c237cb",
+      "observedAt": "2026-11-06T04:40:40Z",
+      "sha256": "848484db6a5e2c8ca863001f924e7d87cf73909b64c7fd6b10d3ab611c3d7418",
       "supports": "pd-aa-evidence-package/v1 manifest 含身份、边界、文件哈希、覆盖、关联、支持/不支持结论与清理字段。",
       "limitations": "临时资产，未提交；保留于 .tmp。"
     },
@@ -287,8 +287,8 @@
       "id": "evidence-sample-builder",
       "kind": "LOCAL_TEST",
       "locator": "D:\\Code\\_worktrees\\principles\\PRI-1114-coverage-propagation\\.tmp\\PRI-1114-evidence-package-sample\\build.mjs",
-      "observedAt": "2026-11-06T04:35:54Z",
-      "sha256": "c1ef100745b2f4ed1db1d2cf773b4f05713fe9ebe68580836d4761640a5923f7",
+      "observedAt": "2026-11-06T04:40:40Z",
+      "sha256": "d7912f86458ec82b37a9e603a71bc0aa217cc8292dfe66c801f3b29194a99d9c",
       "supports": "可重复重建夹具并调用真实 CLI、生成 manifest 与哈希。",
       "limitations": "临时脚本，不入库。"
     },
