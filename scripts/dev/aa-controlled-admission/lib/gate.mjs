@@ -143,11 +143,16 @@ export function evaluateToolPermission({ p0, plan, toolName }) {
  * allowlisted tool. A meta-tool call is an invocation too and fails here; it is
  * never exempted by name.
  */
-export function evaluateToolInvocation({ observations, snapshot, toolName, second }) {
+export function evaluateToolInvocation({ observations, snapshot, toolName, second, plan }) {
   const attempts = observations.flatMap((row) => (Array.isArray(row?.toolCallAttempts) ? row.toolCallAttempts : []));
-  const toolCalls = Array.isArray(snapshot?.toolCalls) ? snapshot.toolCalls : [];
+  // The budget ledger is cumulative across runs by design. Only this run's
+  // positive arm may contribute to the invocation verdict; historical records
+  // must neither fail nor satisfy it.
+  const allToolCalls = Array.isArray(snapshot?.toolCalls) ? snapshot.toolCalls : [];
+  const toolCalls = allToolCalls.filter((row) => row?.runId === plan?.runId && row?.arm === 'positive');
+  const historicalToolCalls = allToolCalls.filter((row) => !(row?.runId === plan?.runId && row?.arm === 'positive'));
   const violations = [];
-  if (toolCalls.length !== 1) violations.push(`ledger recorded ${toolCalls.length} tool calls, expected 1`);
+  if (toolCalls.length !== 1) violations.push(`ledger recorded ${toolCalls.length} tool calls for this run, expected 1`);
   if (toolCalls[0]?.name !== toolName) violations.push(`ledger tool name ${JSON.stringify(toolCalls[0]?.name ?? null)} is not ${toolName}`);
   if (typeof toolCalls[0]?.toolCallId !== 'string') violations.push('ledger tool call has no id');
   if (attempts.length !== 1) violations.push(`endpoint saw ${attempts.length} assistant tool-call attempts, expected 1`);
@@ -158,7 +163,13 @@ export function evaluateToolInvocation({ observations, snapshot, toolName, secon
   return {
     ok: violations.length === 0,
     violations,
-    evidence: { toolCalls, attempts, toolName, metaToolAttempts: attempts.filter((attempt) => FIXED_META_TOOLS.includes(attempt?.name)) },
+    evidence: {
+      toolCalls,
+      historicalToolCalls,
+      attempts,
+      toolName,
+      metaToolAttempts: attempts.filter((attempt) => FIXED_META_TOOLS.includes(attempt?.name)),
+    },
   };
 }
 
@@ -202,7 +213,7 @@ export function evaluatePositiveGate({
     'the frozen host policy denies the fixed meta tools under the allowlist and dispatch_action resolves ids only from the effective surface catalog',
     permission.evidence));
 
-  const invocation = evaluateToolInvocation({ observations, snapshot, toolName, second });
+  const invocation = evaluateToolInvocation({ observations, snapshot, toolName, second, plan });
   checks.push(check('tool-invocation', invocation.ok,
     'the only tool invocation in the whole conversation was one call to the allowlisted tool', invocation.evidence));
 
@@ -259,23 +270,32 @@ export function evaluatePositiveGate({
   const sessionMatched = plan?.sessionBinding === 'predeclared'
     ? admission?.consumedBy?.sessionId === expectedSessionId
     : typeof admission?.consumedBy?.sessionId === 'string' && admission.consumedBy.sessionId.length > 0;
+  // The plugin's consumed-admission document carries its own fixed field set
+  // (AdmissionDocument in controlled-admission.ts); it does NOT preserve
+  // `fixtureRef`. Fixture identity is therefore proven through the manifest:
+  // the manifest is hash-bound into the admission and the manifest in turn
+  // names the fixture.
   const identityOk = sessionMatched
     && admission?.expectedSessionId === expectedSessionId
     && admission?.targetArtifactId === plan?.mapping?.artifactId
     && admission?.targetActivationId === plan?.mapping?.activationId
-    && admission?.fixtureRef === plan?.fixtureRef
+    && admission?.manifestSha256 === plan?.manifestSha256
+    && manifest?.fixtureRef === plan?.fixtureRef
     && (manifest ? admission?.targetArtifactId === manifest?.targetArtifactId : true)
     && (manifest ? admission?.targetActivationId === manifest?.targetActivationId : true)
     && (Number.isFinite(consumedAtMs) && Number.isFinite(createdAtMs) ? consumedAtMs >= createdAtMs : true)
     && (Number.isFinite(consumedAtMs) && Number.isFinite(expiresAtMs) ? consumedAtMs <= expiresAtMs : true);
   checks.push(check('admission-identity', identityOk,
-    'the consumed admission matches the frozen target, fixture and session binding inside its window', {
+    'the consumed admission matches the frozen target, manifest, fixture and session binding inside its window', {
       sessionBinding: plan?.sessionBinding ?? null,
       expectedSessionId,
       consumedBy: admission?.consumedBy ?? null,
       targetArtifactId: admission?.targetArtifactId ?? null,
       targetActivationId: admission?.targetActivationId ?? null,
-      fixtureRef: admission?.fixtureRef ?? null,
+      admissionManifestSha256: admission?.manifestSha256 ?? null,
+      planManifestSha256: plan?.manifestSha256 ?? null,
+      manifestFixtureRef: manifest?.fixtureRef ?? null,
+      planFixtureRef: plan?.fixtureRef ?? null,
     }));
 
   checks.push(check('budget',
@@ -327,8 +347,12 @@ export function evaluateControlGate({ arm, snapshot, plan = null, p0 = null, too
   checks.push(check('http-response', observations[0]?.status === 200 && observations[0]?.finishReason === 'stop',
     'the single control request returned the final answer', { status: observations[0]?.status, finish: observations[0]?.finishReason }));
 
-  checks.push(check('no-tool', (snapshot?.toolCalls?.length ?? 0) === 0 && observations[0]?.toolResultObserved !== true,
-    'control arm called no tool', { toolCalls: snapshot?.toolCalls ?? [] }));
+  // Same cumulative-ledger rule as the positive arm: only control-arm rows for
+  // this run count. Historical rows from earlier runs are not this run's call.
+  const controlToolCalls = (Array.isArray(snapshot?.toolCalls) ? snapshot.toolCalls : [])
+    .filter((row) => row?.runId === plan?.runId && row?.arm === 'control');
+  checks.push(check('no-tool', controlToolCalls.length === 0 && observations[0]?.toolResultObserved !== true,
+    'control arm called no tool', { toolCalls: controlToolCalls, historicalToolCalls: snapshot?.toolCalls ?? [] }));
 
   checks.push(check('no-intervention',
     observations[0]?.intervention?.directivesBlockPresent === false

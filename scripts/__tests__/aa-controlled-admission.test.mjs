@@ -500,13 +500,20 @@ function makePositiveGateFixture({
   const snapshot = {
     withinBudget: true,
     usedByArm: { positive: { hostTurns: 1, httpRequests: 2, toolCalls: 1, paidCalls: 0 } },
-    toolCalls: [{ toolCallId: 'call_1', name: toolName }],
+    // The ledger is cumulative across runs; a historical row must neither fail
+    // nor satisfy this run's invocation verdict.
+    toolCalls: [
+      { toolCallId: 'call_0', name: toolName, runId: 'aa-run-previous', arm: 'positive' },
+      { toolCallId: 'call_1', name: toolName, runId: 'aa-run-test', arm: 'positive' },
+    ],
     violations: [],
   };
   const plan = {
+    runId: 'aa-run-test',
     host: { identitySha256: 'host-1' },
     toolName,
     fixtureRef: 'AA-FIXTURE-x',
+    manifestSha256: 'manifest-sha',
     sessionBinding: 'predeclared',
     expectedSessionId: 'session-1',
     mapping: { artifactId: 'artifact-1', activationId: 'activation-1', expiresAt: '2026-11-06T11:15:00.000Z' },
@@ -530,7 +537,9 @@ function makePositiveGateFixture({
     expectedSessionId: 'session-1',
     targetArtifactId: 'artifact-1',
     targetActivationId: 'activation-1',
-    fixtureRef: 'AA-FIXTURE-x',
+    // The plugin rewrites the admission into its own fixed field set, which has
+    // no fixtureRef; fixture identity is bound through the manifest hash.
+    manifestSha256: 'manifest-sha',
   };
   const manifest = { targetArtifactId: 'artifact-1', targetActivationId: 'activation-1', fixtureRef: 'AA-FIXTURE-x' };
   const arm = { arm: 'positive', exitCode: 0, timedOut: false, spawnError: null, anomalies: [], provider: observations };
