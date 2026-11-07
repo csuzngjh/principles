@@ -247,6 +247,16 @@ export function createProductionHostRuntime(
     projectDir?: string;
     /** PRI-634-F: host-declared tool semantics supplied by the constructing host adapter. */
     toolSemantics?: ToolSemanticRegistry;
+    /**
+     * PRI-1137: optional authoritative session-round key supplied by the host
+     * adapter that actually owns an advancing user-turn authority. The
+     * OpenClaw adapter forwards the trusted `nextSessionTurnOrdinal` value
+     * here; Codex / WorkBuddy supply nothing because they have no user_turns
+     * authority (a constant or a synthetic value would be a false fair-rotation
+     * claim). Absent / `undefined` → `legacy_fifo_prefix_v1`, exactly as
+     * before this convergence. Must be a positive integer when present.
+     */
+    roundKeyProvider?: (event: HostEvent) => number | undefined | Promise<number | undefined>;
     /** Optional, already-scoped single prompt target from the host adapter. Errors fail closed to Native. */
     adaptivePriorityProvider?: (event: HostEvent) => {
       artifactId: string;
@@ -290,16 +300,31 @@ export function createProductionHostRuntime(
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
     async beforePromptBuild(event) {
-      // PRI-904 Phase-1 (Option 3): this production path is ALSO the Codex
-      // route, and Codex never writes trajectory.db::user_turns — its
-      // ingestion writes governance_* rows instead. Reading a session turn
-      // ordinal here would therefore be a false round authority: on Codex it
-      // either throws (→ legacy) or returns a constant 1 (→ fixed start, a
-      // different positional starvation while the event still claimed a fair
-      // rotation). So the shared production path passes NO round key and
-      // reports `legacy_fifo_prefix_v1` honestly. The selector's fair-rotation
-      // capability is retained and stays reachable for callers that DO hold a
-      // legitimate advancing round authority.
+      // PRI-904 Phase-1 (Option 3): Codex never writes
+      // trajectory.db::user_turns — its ingestion writes governance_* rows
+      // instead. Reading a session turn ordinal there would be a false round
+      // authority: either it throws (→ legacy) or returns a constant 1 (→
+      // fixed start, a different positional starvation while the event still
+      // claimed a fair rotation). PRI-1137: this is now enforced through
+      // `roundKeyProvider` — only the host that owns a real advancing
+      // user-turn authority (OpenClaw) supplies one, and everything else
+      // honestly reports `legacy_fifo_prefix_v1`.
+      let roundKey: number | undefined;
+      if (options.roundKeyProvider) {
+        try {
+          // The provider may perform the host's PRE-SELECTION work (OpenClaw:
+          // signal collection + user_turns write) before returning the ordinal,
+          // so it must run before the prompt context is built.
+          const candidate = await options.roundKeyProvider(event);
+          if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 1) {
+            roundKey = candidate;
+          }
+        } catch {
+          // Degradation is observable through the resulting selectionPolicy
+          // (`legacy_fifo_prefix_v1`); the provider logs its own reason.
+          roundKey = undefined;
+        }
+      }
       // PRI-1020: the Owner's declared window (.pd/config.yaml promptBudget)
       // is tier 0 of the budget chain — resolved per host and fed into the
       // SAME single resolver below. One extra sync config read per prompt
@@ -335,6 +360,7 @@ export function createProductionHostRuntime(
       }
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
+        ...(roundKey !== undefined ? { roundKey } : {}),
         ...(adaptivePriority ? {
           adaptivePriority: { artifactId: adaptivePriority.artifactId, activationId: adaptivePriority.activationId },
           ...(adaptivePriority.signal ? { signal: adaptivePriority.signal } : {}),
@@ -403,9 +429,10 @@ export function createProductionHostRuntime(
           // operators can tell model-identity absence from catalog ambiguity
           // etc. without touching logs. Detail stays out of events.
           ...(prompt.budgetFallbackReason !== undefined ? { budgetFallbackReason: prompt.budgetFallbackReason } : {}),
-          // PRI-904: selection diagnostics (bounded, optional). On this route
-          // the policy is legacy_fifo_prefix_v1 and NO rotation provenance is
-          // emitted — a fair claim would be untrue here (see above).
+          // PRI-904/PRI-1137: selection diagnostics (bounded, optional).
+          // The policy reflects the real selection: `fair_rotation_v1` only
+          // when a trusted roundKey was supplied, `legacy_fifo_prefix_v1`
+          // otherwise — never a claim the selection did not make.
           ...(prompt.selectionPolicy !== undefined ? { selectionPolicy: prompt.selectionPolicy } : {}),
           ...(prompt.eligibleCount !== undefined ? { eligibleCount: prompt.eligibleCount } : {}),
           ...(prompt.rotationStartIndex !== undefined ? { rotationStartIndex: prompt.rotationStartIndex } : {}),

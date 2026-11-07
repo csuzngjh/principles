@@ -1084,9 +1084,11 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
   });
 
   it("PRI-1066: per-host truncation never renders as a permanent 「已满」", () => {
-    // The rotating list route queues the entries that did not fit for later
-    // turns; only the non-rotating shared render may say "not all entered".
-    expect(capacitySrc).toContain('entry.route === "legacy_trim"');
+    // PRI-1137 final review (P1-3): per-host truncation wording follows THAT
+    // host's own rotation state (entry.rotation), never the blended headline;
+    // a rotating host queues the entries that did not fit for later turns,
+    // while a non-rotating host may say "not all entered".
+    expect(capacitySrc).toContain('entry.rotation === "rotates"');
     expect(capacitySrc).toContain('t("pages.focus.promptCapacityPerHostRotating")');
     for (const focus of [enFocus, zhFocus]) {
       expect(getOwnString(focus, "promptCapacityPerHostFull") ?? "").not.toContain("已满");
@@ -1094,6 +1096,51 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
       const rotating = getOwnString(focus, "promptCapacityPerHostRotating") ?? "";
       expect(rotating.length).toBeGreaterThan(10);
     }
+  });
+
+  it("P1-3: a confirmed route with NO bound host still shows per-host facts as a labelled reference view", () => {
+    // After the route unification a multi-host workspace is CONFIRMED (one
+    // shared route) with no hostKind — the pre-fix gate (unconfirmed-only)
+    // hid the per-host facts exactly when they became most relevant.
+    const referenceViewStatus: PromptInjectionBudgetStatus = {
+      budget: 4000,
+      usedChars: 3080,
+      truncated: true,
+      capacityStatus: "confirmed",
+      route: "shared_render",
+      productionRotation: "unknown",
+      perHost: [
+        { hostKind: "openclaw", route: "shared_render", usedChars: 3080, truncated: true, budget: 4000, rotation: "rotates" },
+        { hostKind: "codex", route: "shared_render", usedChars: 3899, truncated: true, budget: 3899, rotation: "does_not_rotate" },
+        { hostKind: "workbuddy", route: "shared_render", usedChars: 3899, truncated: true, budget: 3899, rotation: "does_not_rotate" },
+      ],
+    };
+    renderSection(referenceViewStatus);
+    // Panel visible, picker and starvation banner absent.
+    expect(screen.getByTestId("prompt-capacity-perhost-panel")).toBeTruthy();
+    expect(screen.getByTestId("prompt-capacity-reference-note")).toBeTruthy();
+    expect(screen.queryByTestId("prompt-capacity-host-picker")).toBeNull();
+    expect(screen.queryByTestId("prompt-capacity-unconfirmed-banner")).toBeNull();
+    // Each host shows ITS OWN rotation state (P1-3.5).
+    expect(screen.getByTestId("prompt-capacity-perhost-rotation-openclaw").textContent).toContain(
+      getOwnString(zhFocus, "promptCapacityPerHostRotationRotates") ?? "轮转",
+    );
+    expect(screen.getByTestId("prompt-capacity-perhost-rotation-codex").textContent).not.toEqual(
+      screen.getByTestId("prompt-capacity-perhost-rotation-openclaw").textContent,
+    );
+    cleanup();
+    // A BOUND single-host workspace keeps the simple page: no panel, no picker.
+    renderSection({ ...referenceViewStatus, hostKind: "openclaw", productionRotation: "rotates" });
+    expect(screen.queryByTestId("prompt-capacity-perhost-panel")).toBeNull();
+    expect(screen.queryByTestId("prompt-capacity-host-picker")).toBeNull();
+  });
+
+  it("P1-3: an unconfirmed route that is NOT starved still exposes the per-host panel (facts, not a nag)", () => {
+    renderSection(unconfirmedStatus);
+    // No starvation banner (no usedChars===0 host), but the facts are shown.
+    expect(screen.queryByTestId("prompt-capacity-unconfirmed-banner")).toBeNull();
+    expect(screen.getByTestId("prompt-capacity-perhost-panel")).toBeTruthy();
+    expect(screen.getByTestId("prompt-capacity-host-picker")).toBeTruthy();
   });
 
   it("the fallback copy carries the bounded reason and, when available, the observation time", () => {

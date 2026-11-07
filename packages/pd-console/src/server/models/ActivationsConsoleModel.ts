@@ -20,7 +20,7 @@ import {
 } from '@principles/core/runtime';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime';
 import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, productionRouteRotationState, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { errorMessage } from '../utils/response.js';
@@ -507,7 +507,14 @@ export class ActivationsConsoleModel {
           status: report.route.status,
           ...(report.route.hostKind !== undefined ? { hostKind: report.route.hostKind } : {}),
           ...(report.route.route !== undefined ? { route: report.route.route } : {}),
-          flagEnabled: report.route.flagEnabled,
+          // PRI-1137: rotation truth of the ONE shared route is a route
+          // fact, not a per-row re-derivation. Final review P1-1: three
+          // states — an unbound multi-host workspace stays `unknown`, it is
+          // never flattened into "all hosts are FIFO".
+          productionRotation: productionRouteRotationState({
+            workspaceDir: this.workspaceDir,
+            ...(targetHost !== undefined ? { targetHost } : {}),
+          }).state,
           ...(report.route.unconfirmedReason !== undefined ? { unconfirmedReason: report.route.unconfirmedReason } : {}),
           ...(report.route.nextAction !== undefined ? { nextAction: report.route.nextAction } : {}),
           ...(report.globalReason !== undefined ? { globalReason: report.globalReason } : {}),
@@ -541,7 +548,6 @@ export class ActivationsConsoleModel {
         const message = errorMessage(err);
         promptInjectionRoute = {
           status: 'unconfirmed',
-          flagEnabled: false,
           unconfirmedReason: `injection_status_reader_failed: ${message}`,
           nextAction: 'check workspace .pd/state.db readability and the host declarations',
         };

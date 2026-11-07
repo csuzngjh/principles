@@ -1,5 +1,13 @@
 # @principles/codex-adapter
 
+## 0.8.3
+
+### Patch Changes
+
+- Updated dependencies [6278ec3]
+  - @principles/core@5.1.0
+  - @principles/host-runtime@3.0.0
+
 ## 0.8.2
 
 ### Patch Changes

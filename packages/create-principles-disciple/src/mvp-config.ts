@@ -550,6 +550,10 @@ export function validateConfigYamlFull(workspaceDir: string): void {
  * the write changes representation only, never behavior. Existing configs are
  * now preserved verbatim: no normalization, no cleanup (source=system is an
  * origin hint, not an auto-delete license — PRI-637).
+ *
+ * PRI-1137: `abstraction_layer_v1` is now a `gone` tombstone (the shared host
+ * runtime is the only route for every host), so no migration may write it and
+ * a stale `enabled: true` is inert by design.
  */
 export class ExistingConfigVerifyInfraError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

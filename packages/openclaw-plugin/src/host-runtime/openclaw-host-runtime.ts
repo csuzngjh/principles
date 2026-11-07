@@ -19,10 +19,19 @@ type NativePayload =
 type NativeResult =
   | { kind: 'before_prompt_build'; value: PluginHookBeforePromptBuildResult | void }
   | { kind: 'before_tool_call'; value: PluginHookBeforeToolCallResult | void }
-  | { kind: 'after_tool_call'; value: void };
+  | { kind: 'after_tool_call'; value: void; hostResult?: AfterToolCallDispatch };
 
 export interface OpenClawHostRuntimeOptions {
   beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
+  /**
+   * PRI-1137: the OpenClaw prompt ROUND authority, supplied by the plugin
+   * adapter (`nextSessionTurnOrdinal` after its pre-selection signal
+   * collection). Runs before the shared prompt context is built; returning
+   * `undefined` (missing sessionId / unreadable trajectory DB / failed
+   * ordinal read) is the observable degraded case and selects
+   * `legacy_fifo_prefix_v1`. Never fabricate a round here.
+   */
+  roundKeyProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): number | undefined | Promise<number | undefined>;
   adaptivePriorityProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): {
     artifactId: string;
     activationId: string;
@@ -46,7 +55,22 @@ export interface OpenClawHostRuntime {
   readonly runtime: HostRuntime;
   dispatchBeforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void>;
   dispatchBeforeToolCall(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext): Promise<PluginHookBeforeToolCallResult | void>;
-  dispatchAfterToolCall(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): Promise<void>;
+  /**
+   * PRI-1137 final review P1-4: after_tool_call dispatches return the shared
+   * runtime's degradation facts (e.g. `trajectory_db_not_found`) instead of an
+   * opaque void — evidence that failed to persist must be observable to the
+   * operator, never silently recorded as a successful hook execution.
+   */
+  dispatchAfterToolCall(event: PluginHookAfterToolCallEvent, context: PluginHookToolContext): Promise<AfterToolCallDispatch>;
+}
+
+/** Degradation facts surfaced by one after_tool_call dispatch (P1-4). */
+export interface AfterToolCallDispatch {
+  /** Shared-runtime warnings (bounded); empty when the evidence path was healthy. */
+  warnings: readonly string[];
+  /** `unavailable` when the technical evidence could not be persisted. */
+  outcome?: 'unavailable' | string;
+  nextAction?: string;
 }
 
 function contextFor(workspaceDir: string, sessionId: string | undefined, toolName?: string): HostEventContext {
@@ -113,6 +137,13 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     // the OpenClaw registry (not the core baseline) — production hints and
     // action.canonicalKind then agree with the plugin hook path and replay.
     toolSemantics: OPENCLAW_TOOL_SEMANTICS,
+    ...(options.roundKeyProvider ? {
+      roundKeyProvider(event: HostEvent) {
+        const payload = payloadFor(event);
+        if (payload.kind !== 'before_prompt_build') return undefined;
+        return options.roundKeyProvider?.(payload.event, payload.context);
+      },
+    } : {}),
     adaptivePriorityProvider(event) {
       const payload = payloadFor(event);
       if (payload.kind !== 'before_prompt_build') return undefined;
@@ -153,13 +184,25 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     const token = {};
     payloads.set(token, payload);
     const modelContext = modelContextFor(payload.context);
+    // PRI-1137 final review P1-4: the SDK's native after-tool field is
+    // `toolArgs`; parity/legacy hosts may still supply `params`. Preserve an
+    // explicitly supplied params object as the authoritative legacy payload,
+    // and use toolArgs only when params is absent/invalid. Both paths are
+    // runtime-guarded before the shared evidence sanitizer receives them.
+    const afterEvent = payload.kind === 'after_tool_call' ? payload.event : undefined;
+    const legacyAfterParams: unknown = afterEvent !== undefined ? afterEvent.params : undefined;
+    const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value);
+    const afterToolInput = isRecordValue(legacyAfterParams)
+      ? legacyAfterParams
+      : isRecordValue(afterEvent?.toolArgs) ? afterEvent.toolArgs : {};
     const event: HostEvent = {
       kind: payload.kind,
       context: {
         ...contextFor(workspaceDir, sessionId, payload.kind === 'before_prompt_build' ? undefined : payload.event.toolName),
-        ...(payload.kind === 'after_tool_call' ? {
-          toolInput: payload.event.params ?? {},
-          toolOutput: { error: payload.event.error, result: payload.event.result, durationMs: payload.event.durationMs },
+        ...(afterEvent !== undefined ? {
+          toolInput: afterToolInput,
+          toolOutput: { error: afterEvent.error, result: afterEvent.result, durationMs: afterEvent.durationMs },
         } : {}),
         ...(modelContext !== undefined ? { modelContext } : {}),
       },
@@ -178,8 +221,17 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     }
     if (payload.kind === 'after_tool_call' && !native) {
       // Phase A: the shared after-tool kernel only records technical evidence
-      // now; no pain result needs a host-side continuation.
-      return { kind: payload.kind, value: undefined };
+      // now; no pain result needs a host-side continuation. P1-4: surface the
+      // kernel's degradation facts (warnings / unavailable outcome) so the
+      // caller can record an HONEST hook execution instead of a blind success.
+      const metadata = (result as { metadata?: { outcome?: unknown; nextAction?: unknown } }).metadata;
+      const outcome = typeof (metadata?.outcome) === 'string' ? metadata.outcome : undefined;
+      const nextAction = typeof (metadata?.nextAction) === 'string' ? metadata.nextAction : undefined;
+      return {
+        kind: payload.kind,
+        value: undefined,
+        hostResult: { warnings: result.warnings ?? [], ...(outcome !== undefined ? { outcome } : {}), ...(nextAction !== undefined ? { nextAction } : {}) },
+      };
     }
     if (!native || native.kind !== payload.kind) {
       throw new Error(`OpenClaw ${payload.kind} result mapping is missing`);
@@ -201,9 +253,11 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       if (native.kind !== 'before_tool_call') throw new Error('OpenClaw gate result mismatch');
       return native.value;
     },
-    async dispatchAfterToolCall(event, context) {
+    async dispatchAfterToolCall(event, context): Promise<AfterToolCallDispatch> {
       if (!context.workspaceDir) throw new Error('OpenClaw after_tool_call requires workspaceDir');
-      await dispatch({ kind: 'after_tool_call', event, context }, context.workspaceDir, context.sessionId);
+      const native = await dispatch({ kind: 'after_tool_call', event, context }, context.workspaceDir, context.sessionId);
+      if (native.kind !== 'after_tool_call') throw new Error('OpenClaw after_tool_call result mismatch');
+      return native.hostResult ?? { warnings: [] };
     },
   };
 }

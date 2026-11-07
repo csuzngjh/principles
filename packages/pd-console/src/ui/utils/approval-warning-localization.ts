@@ -92,6 +92,18 @@ export function localizeApprovalWarning(warning: string, t: TranslateFn): Locali
       activationAction: true,
     };
   }
+  // PRI-1137 final review (P1-4): an unbound multi-host workspace admits NO
+  // single queue-vs-starved conclusion — never render the FIFO starvation
+  // claim for it. The server message enumerates per-host judgments; the
+  // localized body says the same in plain language.
+  if (code === 'injection_budget_rotation_unknown') {
+    return {
+      ...base,
+      title: t('pages.focus.approveWarning.rotationUnknownTitle'),
+      body: t('pages.focus.approveWarning.rotationUnknownBody'),
+      activationAction: true,
+    };
+  }
   // PR-1894: the activation is merely rotated out of the CURRENT window, not
   // starved. This is the common case on a live fair-rotation workspace and the
   // copy must NOT tell the Owner to deactivate healthy older principles.

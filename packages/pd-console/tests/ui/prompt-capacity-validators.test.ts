@@ -20,7 +20,7 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
   it('keeps every valid capacity field (confirmed payload)', () => {
     const v = validatePromptInjectionBudgetStatus({
       ...baseStatus(),
-      productionRotates: true,
+      productionRotation: 'rotates',
       eligibleCount: 12,
       capacityStatus: 'confirmed',
       hostKind: 'openclaw',
@@ -33,6 +33,7 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
     });
     expect(v).not.toBeNull();
     expect(v?.capacityStatus).toBe('confirmed');
+    expect(v?.productionRotation).toBe('rotates');
     expect(v?.hostKind).toBe('openclaw');
     expect(v?.route).toBe('legacy_trim');
     expect(v?.unit).toBe('utf16_code_units');
@@ -49,15 +50,15 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
       unconfirmedReason: 'multi_host_routes_differ: openclaw legacy vs codex/workbuddy shared',
       nextAction: 'pass an explicit target host (openclaw|codex|workbuddy)',
       perHost: [
-        { hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true },
-        { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: true },
-        { hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true },
+        { hostKind: 'openclaw', route: 'shared_render', usedChars: 1855, truncated: true, rotation: 'rotates' },
+        { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: true, rotation: 'does_not_rotate' },
+        { hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true, rotation: 'does_not_rotate' },
       ],
     });
     expect(v?.capacityStatus).toBe('unconfirmed');
     expect(v?.perHost).toHaveLength(3);
-    expect(v?.perHost?.[0]).toEqual({ hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true });
-    expect(v?.perHost?.[2]).toEqual({ hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true });
+    expect(v?.perHost?.[0]).toEqual({ hostKind: 'openclaw', route: 'shared_render', usedChars: 1855, truncated: true, rotation: 'rotates' });
+    expect(v?.perHost?.[2]).toEqual({ hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true, rotation: 'does_not_rotate' });
   });
 
   it('keeps workbuddy as a valid hostKind on the confirmed payload (roster third host)', () => {
@@ -258,15 +259,17 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
   it('parses injectable/oversized/window_excluded rows with their evidence fields', () => {
     const v = validateActivations({
       activations: [
-        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'selected_lines', route: 'legacy_trim' } },
+        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'full_directive_context', route: 'shared_render' } },
       ],
       status: 'ok',
-      promptInjectionRoute: { status: 'confirmed', hostKind: 'openclaw', route: 'legacy_trim', flagEnabled: false },
+      promptInjectionRoute: { status: 'confirmed', hostKind: 'openclaw', route: 'shared_render' },
     });
     expect(v?.activations[0]?.promptInjection).toEqual({
-      activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'selected_lines', route: 'legacy_trim',
+      activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 480, budget: 2000, budgetScope: 'full_directive_context', route: 'shared_render',
     });
-    expect(v?.promptInjectionRoute).toEqual({ status: 'confirmed', hostKind: 'openclaw', route: 'legacy_trim', flagEnabled: false });
+    // PRI-1137: `flagEnabled` is retired from the route summary — no flag
+    // participates in route selection.
+    expect(v?.promptInjectionRoute).toEqual({ status: 'confirmed', hostKind: 'openclaw', route: 'shared_render' });
   });
 
   it('parses route_unconfirmed rows with per-host tier fits and reason', () => {
@@ -335,7 +338,7 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
       activations: [],
       status: 'ok',
       promptInjectionRoute: {
-        status: 'confirmed', hostKind: 'codex', route: 'shared_render', flagEnabled: false,
+        status: 'confirmed', hostKind: 'codex', route: 'shared_render',
         budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown',
         budgetFallbackReason: 'host_capacity_absent', budgetObservedAt: '2026-10-21T04:00:00.000Z',
       },
@@ -349,12 +352,12 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
       activations: [],
       status: 'ok',
       promptInjectionRoute: {
-        status: 'confirmed', flagEnabled: false,
+        status: 'confirmed',
         budgetCapacitySource: 'vibes', budgetCapacityStatus: 'probably',
         budgetContextWindowTokens: -5, budgetFallbackReason: 'free_form_detail',
       },
     });
-    expect(invalid?.promptInjectionRoute).toEqual({ status: 'confirmed', flagEnabled: false });
+    expect(invalid?.promptInjectionRoute).toEqual({ status: 'confirmed' });
   });
 
   it('keeps resolution_failed rows with their structured reason', () => {
