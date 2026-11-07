@@ -26,8 +26,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore, RUNTIME_PRINCIPLE_BUDGET, trimToBudget } from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
+import { SqliteConnection, SqliteActivationStateStore, RUNTIME_PRINCIPLE_BUDGET } from '@principles/core/runtime';
+import { buildActivePrinciplePromptContext, packSharedDirectives } from '@principles/host-runtime';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt.js';
 import { EventLogService } from '../../src/core/event-log.js';
 
@@ -111,8 +111,8 @@ function readInjectionEvents(): Array<{ type: string; data: Record<string, unkno
 
 describe('PRI-537: activations-injected event pairs source arrays with the injected subset', () => {
   it('budget-truncated build emits index-aligned principleIds/activationIds/artifactIds', async () => {
-    // Seed in activated_at ASC order — listPromptActivations returns them in
-    // this order, so trimToBudget injects the first K seeds verbatim.
+    // Seed in activated_at ASC order — the shared selector scans them in this
+    // order when no round authority is supplied (legacy_fifo_prefix_v1).
     for (let i = 0; i < SEED_COUNT; i++) {
       const id = seededIds[i]!;
       insertValidatedPrincipleArtifact(id, seededArtifactById.get(id)!, `${PRINCIPLE_TEXT}_${i}`);
@@ -125,11 +125,18 @@ describe('PRI-537: activations-injected event pairs source arrays with the injec
       trigger: 'user',
       sessionId: SESSION_ID,
     };
-    const ctx = { workspaceDir: tempWorkspaceDir, sessionId: SESSION_ID };
+    const ctx = {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: SESSION_ID,
+      api: { logger: { info: () => {}, warn: () => {}, error: () => {} }, runtime: {}, config: {} },
+    };
 
+    // PRI-1137: the production path is shared-runtime build → host callback.
+    const shared = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
     await handleBeforePromptBuild(
       event as unknown as Parameters<typeof handleBeforePromptBuild>[0],
       ctx as unknown as Parameters<typeof handleBeforePromptBuild>[1],
+      shared,
     );
 
     EventLogService.get(path.join(tempWorkspaceDir, '.state')).flush();
@@ -155,28 +162,21 @@ describe('PRI-537: activations-injected event pairs source arrays with the injec
     expect(activationIds).toHaveLength(injectedCount);
     expect(artifactIds).toHaveLength(injectedCount);
 
-    // Injected set = whatever the PRODUCTION selector chose for this build's
-    // round. Recomputed from the event's own round provenance (PRI-904) with
-    // the real selector, so this stays an exact expectation rather than a
-    // weakened "whatever came out" assertion.
-    const roundOrdinal = d['selectionRoundOrdinal'] as number | undefined;
-    const selectionPolicy = d['selectionPolicy'] as string | undefined;
-    expect(selectionPolicy).toBeDefined();
-    const selectedBySelector = trimToBudget(
-      seededIds.map((pid, i) => ({
+    expect(d['selectionPolicy']).toBeDefined();
+    // Injected set = exactly what the shared packer produced for this build.
+    const expected = packSharedDirectives({
+      scanOrder: seededIds.map((pid, i) => ({
         principleId: pid,
         text: `${PRINCIPLE_TEXT}_${i}`,
         artifactId: seededArtifactById.get(pid)!,
         activationId: seededActivationById.get(pid)!,
+        authority: 'system_policy' as const,
       })),
-      RUNTIME_PRINCIPLE_BUDGET,
-      escapeXml,
-      selectionPolicy === 'fair_rotation_v1' ? roundOrdinal : undefined,
-    );
-    // The event pairs the arrays in CANDIDATE order (alignInjectedPrinciples
-    // filters dedupedV2 preserving its order), while trimToBudget chooses the
-    // SET in rotation order. Assert set equality plus per-index pairing.
-    expect(principleIds).toEqual(seededIds.filter((id) => selectedBySelector.injectedIds.has(id)));
+      budgetChars: RUNTIME_PRINCIPLE_BUDGET,
+      selfReportEnabled: false,
+      continueOnNonFit: d['selectionPolicy'] === 'fair_rotation_v1',
+    });
+    expect(principleIds).toEqual(expected.included.map((p) => p.principleId));
     for (let i = 0; i < injectedCount; i++) {
       const pid = principleIds[i]!;
       expect(activationIds[i]).toBe(seededActivationById.get(pid));

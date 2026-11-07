@@ -16,6 +16,17 @@ export type PromptInjectionTargetHostName = 'openclaw' | 'codex' | 'workbuddy';
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 export type PromptInjectionBudgetScopeName = 'selected_lines' | 'full_directive_context';
 
+/**
+ * PRI-1137 final review (P1-1): THREE-STATE rotation truth of the ONE shared
+ * production route. `'rotates'` = a bound OpenClaw (trusted round authority);
+ * `'does_not_rotate'` = a bound FIFO host (Codex/WorkBuddy inject by their own
+ * FIFO policy); `'unknown'` = no single host is bound (multi-host or
+ * never-operated workspace), so rotation cannot be attributed. Absent behaves
+ * as `'unknown'` — NEVER as FIFO: the pre-fix boolean flattened the unknown
+ * case into "all hosts are FIFO" and produced wrong permanent-queue warnings.
+ */
+export type PromptProductionRotationName = 'rotates' | 'does_not_rotate' | 'unknown';
+
 export type PromptBudgetCapacitySourceWire =
   | 'operator_declared'
   | 'host_effective_window'
@@ -71,6 +82,14 @@ export interface PromptInjectionPerHostForecast {
    * missing capacity is never attributed to another host.
    */
   budgetFallbackReason?: PromptBudgetFallbackReasonWire;
+  /**
+   * PRI-1137 final review (P1-3): THIS host's own rotation state — a static
+   * host capability (OpenClaw rotates via its round authority; Codex/
+   * WorkBuddy are FIFO). Per-host so an unbound workspace can show each
+   * host's behavior instead of one blended (wrong) aggregate. Absent behaves
+   * as `'unknown'`.
+   */
+  rotation?: Exclude<PromptProductionRotationName, 'unknown'>;
 }
 
 /**
@@ -106,7 +125,7 @@ export interface PromptInjectionRouteSummaryWire {
   status: 'confirmed' | 'unconfirmed';
   hostKind?: PromptInjectionTargetHostName;
   route?: PromptInjectionRouteName;
-  flagEnabled: boolean;
+  /** PRI-1137: no flag participates in route selection — the field is retired. */
   unconfirmedReason?: string;
   nextAction?: string;
   /** Present when no status could be computed at all (fail-loud degradation). */
@@ -124,6 +143,13 @@ export interface PromptInjectionRouteSummaryWire {
   budgetContextWindowTokens?: number;
   /** Present only when the rows were measured under the fixed fallback. */
   budgetFallbackReason?: PromptBudgetFallbackReasonWire;
+  /**
+   * PRI-1137: rotation truth of the ONE shared production route for this
+   * workspace. Final review P1-1: three-state (`PromptProductionRotationName`)
+   * — only a BOUND host resolves it; an unbound multi-host workspace stays
+   * `'unknown'`. Console copy must use this instead of a per-route/flag check.
+   */
+  productionRotation?: PromptProductionRotationName;
 }
 
 export interface PromptInjectionBudgetStatus {
@@ -142,10 +168,12 @@ export interface PromptInjectionBudgetStatus {
    * PR-1894: whether the PRODUCTION route rotates. This — not the forecast's
    * own selection policy — decides whether an out-of-window approval is queued
    * behind rotation or genuinely starved, and therefore which badge copy is
-   * truthful. Optional so a pre-PR-1894 payload still validates; absent
-   * behaves as `false` (the conservative pre-PR-1894 reading).
+   * truthful. Final review P1-1: three-state — an unbound multi-host
+   * workspace is `'unknown'`, never flattened into FIFO. Optional so a
+   * pre-P1-1 payload still validates; absent behaves as `'unknown'` (the
+   * conservative no-single-conclusion reading).
    */
-  productionRotates?: boolean;
+  productionRotation?: PromptProductionRotationName;
   /** PR-1894: eligible activations that reached the selector. */
   eligibleCount?: number;
   /**

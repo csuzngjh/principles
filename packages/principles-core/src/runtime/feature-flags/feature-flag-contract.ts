@@ -340,7 +340,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // + exit 0 with an observable skip record (rc-9), no dispatch, no
   // transcript access. Enable via .pd/config.yaml: host.workbuddy: { enabled: true }.
   { id: 'host.workbuddy', category: 'quiet', enabled: false, since: '2026-10-12', description: 'WorkBuddy host adapter (ADR-0020 third host, SPEC workbuddy-host-adapter v0.3.0 OD-03). Default OFF; explicit user opt-in required. Flag-off = neutral JSON + exit 0 + observable skip, no dispatch, no transcript reads.' },
-  { id: 'abstraction_layer_v1', category: 'quiet', enabled: false, since: '2026-08-13', description: 'PRI-523 shared host-runtime cutover for OpenClaw. Default OFF preserves the legacy route; enable only for controlled parity validation.' },
+  // PRI-1137: gone tombstone. The shared host runtime is the ONLY route for every
+  // host; the OpenClaw legacy injection route and its per-workspace gate were
+  // deleted. The id is kept so an old `.pd/config.yaml` entry stays recognizable
+  // (and is reported as a no-op), but a stale `enabled: true` can never re-open
+  // the retired route.
+  { id: 'abstraction_layer_v1', category: 'gone', enabled: false, since: '2026-08-13', description: 'Retired by PRI-1137: shared host runtime is the only route for all hosts (OpenClaw legacy route deleted). Gone tombstone; a stale enabled:true is inert.' },
   // PRI-530: Principle Receipt P0 — enriched RuleHost block copy. When off,
   // the block message keeps the existing generic English template (byte
   // identical); when on, blockReason carries principle attribution (title

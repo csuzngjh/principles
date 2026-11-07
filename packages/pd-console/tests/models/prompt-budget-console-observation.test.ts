@@ -402,13 +402,15 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     expect(grouped.promptInjection?.budgetObservedAt).toBeUndefined();
   });
 
-  it('B5: unconfirmed route → per-host forecasts each carry their OWN budget basis (no shared headline smuggle)', async () => {
+  it('B5: no host facts → still one confirmed route, yet each per-host forecast carries its OWN budget basis (no shared headline smuggle)', async () => {
     const dir = makeWorkspace();
     await seedActivation(dir, 'neg-b5', '未确认路由逐宿主验证原则');
     writeRawEvent(dir, new Date().toISOString(), budgetEventData(dir, TRUSTED_256K));
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
     const promptInjection = grouped.promptInjection;
-    expect(promptInjection?.capacityStatus).toBe('unconfirmed');
+    // PRI-1137: all hosts share ONE render route, so an unbound workspace no
+    // longer degrades to `unconfirmed` merely because hosts could diverge.
+    expect(promptInjection?.capacityStatus).toBe('confirmed');
     const perHost = promptInjection?.perHost ?? [];
     const openclaw = perHost.find((entry) => entry.hostKind === 'openclaw');
     const codex = perHost.find((entry) => entry.hostKind === 'codex');
@@ -542,14 +544,16 @@ describe('PRI-1020: the Owner-declared basis backs console surfaces with no fres
     expect(validatePromptInjectionBudgetStatus(promptInjection)).toEqual(promptInjection);
   });
 
-  it('D2: unconfirmed route — each per-host forecast carries ITS OWN declared basis', async () => {
+  it('D2: no host facts → one confirmed route, and each per-host forecast carries ITS OWN declared basis', async () => {
     const dir = makeWorkspace({
       promptBudget: { declaredContextWindowTokens: 262144, hosts: { codex: 400000 } },
     });
     await seedActivation(dir, 'decl-d2', '未确认路由声明基座验证原则');
     const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
     const promptInjection = grouped.promptInjection;
-    expect(promptInjection?.capacityStatus).toBe('unconfirmed');
+    // PRI-1137: a single route means routing divergence no longer makes the
+    // workspace unconfirmed; per-host budget bases remain distinct facts.
+    expect(promptInjection?.capacityStatus).toBe('confirmed');
     const perHost = promptInjection?.perHost ?? [];
     const codex = perHost.find((entry) => entry.hostKind === 'codex');
     const workbuddy = perHost.find((entry) => entry.hostKind === 'workbuddy');

@@ -117,14 +117,37 @@ interface PendingSignal {
 }
 
 /**
- * adapter 抽象 (Stage2 LLM 调用)。plugin 层可注入真实 adapter (LMStudio);
- * 为 null / 不可用时 host 走纯关键词降级。
- *
- * 本文件不依赖具体的 PDRuntimeAdapter 实现,只依赖一个最小的分类函数,
- * 以保持 host 可单测 (测试可注入 mock classifier)。
+ * Same-run signal state retained across retries of a transient user_turn write.
+ * This keeps classification and signal-routing side effects idempotent.
+ */
+interface ProcessedSignalRun {
+  userMessageDigest: string;
+  output: SignalCollectorOutput;
+  occurrenceId: string;
+  userTurnRowid?: number;
+  pendingSignal?: PendingSignal;
+}
+
+const MAX_PROCESSED_SIGNAL_RUNS = 512;
+
+/**
+ * Adapter abstraction for Stage-2 LLM classification. The plugin may inject
+ * a real provider; null/unavailable keeps the host on keyword-only fallback.
  */
 export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
   Promise<{ is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string } | null>;
+
+/**
+ * PRI-1137: `detectSync` must report whether THIS invocation's `user_turns`
+ * row was actually persisted. A `void` return made a swallowed write failure
+ * indistinguishable from success, so the shared round-key provider could read
+ * a PREVIOUS ordinal and claim fair rotation for a round that was never
+ * recorded. Only `user_turn_persisted` authorises a round key / run claim.
+ */
+export type SignalSyncOutcome =
+  | { readonly status: 'not_user_interaction' }
+  | { readonly status: 'user_turn_persisted'; readonly userTurnRowid: number }
+  | { readonly status: 'user_turn_persist_failed'; readonly reason: string };
 
 export interface SignalCollectorHostOptions {
   keywordStore?: UnifiedKeywordStore;
@@ -156,7 +179,14 @@ export class SignalCollectorHost {
   /** rate limit 状态:sessionId → STRONG 计数桶 */
   private readonly rateLimit = new Map<string, RateLimitBucket>();
 
-  /** 零命中「发现」调用的配额桶(每 host = 每 workspace,进程内) */
+  /**
+   * Same-run retry cache. A failed user_turn persistence may be retried, but
+   * Stage-1 classification, discovery-budget consumption and signal routing
+   * are one-shot for that host run.
+   */
+  private readonly processedRuns = new Map<string, ProcessedSignalRun>();
+
+  /** Zero-hit discovery budget for this workspace's host process. */
   private discoveryBucket: RateLimitBucket = { count: 0, windowStart: 0 };
 
   constructor(wctx: WorkspaceContext, options: SignalCollectorHostOptions = {}) {
@@ -183,20 +213,42 @@ export class SignalCollectorHost {
     userMessage: string,
     sessionId: string,
     trigger: string,
-    options?: { referencesAssistantTurnId?: number | null; turnIndex?: number },
-  ): void {
+    options?: { referencesAssistantTurnId?: number | null; turnIndex?: number; idempotencyKey?: string },
+  ): SignalSyncOutcome {
     // 1. trigger 门控:仅处理真实用户交互(user/api/undefined)。
     //    与 prompt.ts 共享 isUserInteractionTrigger,避免两处门控不一致导致
     //    api/undefined 触发的纠正信号在 detectSync 内部被静默丢弃。
     if (!isUserInteractionTrigger(trigger)) {
-      return;
+      return { status: 'not_user_interaction' };
     }
 
-    // 2. Stage1 关键词快扫 (同步,零成本)。detectedAt 由 plugin 层注入(core 不取时间,CodeRabbit #11)
-    //    词库经 provider 按次解析(P0-B: learned cues 无需重启即生效)。
-    const detectedAt = new Date().toISOString();
-    const store = this.storeProvider();
-    const output = collectSync(userMessage, sessionId, store, this.config, detectedAt);
+    // 2. Stage1 关键词快扫 (同步,零成本)。The first invocation snapshots
+    // the live keyword store; a retry reuses that exact classification.
+    const idempotencyKey = options?.idempotencyKey;
+    const userMessageDigest = createHash('sha256').update(userMessage, 'utf8').digest('hex');
+    const cachedRun = idempotencyKey ? this.processedRuns.get(idempotencyKey) : undefined;
+    if (cachedRun && cachedRun.userMessageDigest !== userMessageDigest) {
+      const reason = 'run_id_reused_with_different_message';
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_RUN_ID_CONFLICT', reason);
+      return { status: 'user_turn_persist_failed', reason };
+    }
+    if (cachedRun?.userTurnRowid !== undefined) {
+      return { status: 'user_turn_persisted', userTurnRowid: cachedRun.userTurnRowid };
+    }
+    const output = cachedRun?.output ?? collectSync(
+      userMessage, sessionId, this.storeProvider(), this.config, new Date().toISOString(),
+    );
+    const occurrenceId = cachedRun?.occurrenceId ?? this.resolveOccurrenceId(sessionId, userMessage, options);
+    const runState: ProcessedSignalRun | undefined = cachedRun ?? (idempotencyKey
+      ? { userMessageDigest, output, occurrenceId }
+      : undefined);
+    if (!cachedRun && idempotencyKey && runState) {
+      this.processedRuns.set(idempotencyKey, runState);
+      if (this.processedRuns.size > MAX_PROCESSED_SIGNAL_RUNS) {
+        const oldestKey = this.processedRuns.keys().next().value;
+        if (typeof oldestKey === 'string') this.processedRuns.delete(oldestKey);
+      }
+    }
 
     // 3. 写 user_turns (复用 recordUserTurn)
     //    correctionDetected 含义扩展:isSignal && strength=STRONG (spec §5.2)
@@ -210,50 +262,70 @@ export class SignalCollectorHost {
       referencesAssistantTurnId: options?.referencesAssistantTurnId ?? null,
     };
     let userTurnRowid: number | undefined;
+    let persistFailureReason: string | undefined;
     try {
-      userTurnRowid = this.wctx.trajectory?.recordUserTurn?.(turnInput);
+      const rowid = this.wctx.trajectory?.recordUserTurn?.(turnInput);
+      if (typeof rowid === 'number' && Number.isInteger(rowid)) {
+        userTurnRowid = rowid;
+        if (runState) {
+          runState.userTurnRowid = rowid;
+          // The first LLM attempt may still be awaiting its verdict. Updating
+          // the shared pending object lets that verdict attach to the row
+          // created by a successful retry instead of losing its write-back.
+          if (runState.pendingSignal) runState.pendingSignal.userTurnRowid = rowid;
+        }
+      } else {
+        // No writer / no rowid is a persistence FAILURE, never a silent success.
+        persistFailureReason = 'trajectory_writer_unavailable';
+      }
     } catch (e) {
+      persistFailureReason = `record_user_turn_threw: ${String(e)}`;
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_TRAJECTORY_FAIL', `recordUserTurn threw: ${String(e)}`);
     }
+    const persistence: SignalSyncOutcome = userTurnRowid !== undefined
+      ? { status: 'user_turn_persisted', userTurnRowid }
+      : { status: 'user_turn_persist_failed', reason: persistFailureReason ?? 'record_user_turn_returned_no_rowid' };
 
     // 5. 高精度短语命中 (high, STRONG) → 直接走 STRONG 分流 (同步)
-    if (output.isSignal && output.strength === 'STRONG' && output.matchedPrecision === 'high') {
+    if (!cachedRun && output.isSignal && output.strength === 'STRONG' && output.matchedPrecision === 'high') {
       // PRI-788 G4: 健康度计数（旁路，失败不阻塞）。
       // updateSignalHealth 是同步文件 I/O（readFileSync + mkdirSync + 原子写），
       // 不能留在 before_prompt_build 的同步检测路径上；交由 countStage1Strong
       // 推迟到微任务队列执行（与 hooks/trajectory-collector.ts 同一惯例），
       // routeStrong 与 hook 返回不再被磁盘延迟放大。
       this.countStage1Strong();
-      this.routeStrong(output, sessionId, userMessage, this.resolveOccurrenceId(sessionId, userMessage, options), {
+      this.routeStrong(output, sessionId, userMessage, occurrenceId, {
         turnIndex: options?.turnIndex,
         referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
       });
-      return;
+      return persistence;
     }
 
     // 6. 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞 prompt hook)
-    if (output.needsLlmConfirmation) {
+    if (!cachedRun && output.needsLlmConfirmation) {
       // 零命中(Stage1 没有任何候选词)只有「发现新纠正词」这一种价值,不是确认:
       // 按小时配额放行,超出直接返回(计数可见,不静默)。歧义命中是确认调用,不受限。
       // 分类器不可用时本来就不会发生 LLM 调用,不消耗配额(降级语义保持原样)。
       const willCallLlm = this.llmClassifier !== null && this.config.enableLlmStage;
       if (willCallLlm && output.matchedTerms.length === 0 && !this.takeDiscoveryBudget()) {
         this.countStage2DiscoverySkipped();
-        return;
+        return persistence;
       }
       const pending: PendingSignal = {
         output,
         sessionId,
         text: userMessage,
-        occurrenceId: this.resolveOccurrenceId(sessionId, userMessage, options),
+        occurrenceId,
         traceId: createTraceId(),
         userTurnRowid,
         turnIndex: options?.turnIndex,
         referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
       };
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
+      if (runState) runState.pendingSignal = pending;
       void this.detectAsyncAndRoute(pending);
     }
+    return persistence;
   }
 
   /**

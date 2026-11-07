@@ -14,14 +14,17 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import {
-  validateActivationRecord,
-  validateActivationsData,
   validateLifecycleRuleMetric,
   validateLifecycleAdherence,
   validateLifecycleMetricsData,
   isReversibleChannel,
   isRecord,
 } from "../../src/ui/pages/activation/ActivationValidators.js";
+// PRI-1137 final review (P1-3): the activation page's data path IS the central
+// wire parser — the retired page-local duplicate silently dropped the per-row
+// `promptInjection` facts and `promptInjectionRoute`, so the injection-status
+// lines and the rotation state could never render on this page.
+import { validateActivations } from "../../src/ui/utils/validators.js";
 import enJson from "../../src/ui/i18n/en.json" with { type: "json" };
 import zhJson from "../../src/ui/i18n/zh-CN.json" with { type: "json" };
 import { validateRuleCodeOwnerReview } from '../../src/ui/utils/validators.js';
@@ -38,14 +41,6 @@ function makeActivationRecord(overrides?: Record<string, unknown>) {
     targetRef: "THINKING_OS.md",
     activatedAt: "2026-06-01T10:00:00.000Z",
     status: "active",
-    ...overrides,
-  };
-}
-
-function makeActivationsData(overrides?: Record<string, unknown>) {
-  return {
-    activations: [makeActivationRecord()],
-    status: "ok",
     ...overrides,
   };
 }
@@ -99,126 +94,69 @@ describe("isRecord", () => {
   });
 });
 
-// ── validateActivationRecord ─────────────────────────────────────────────────
+// ── the page's data path: central validateActivations (P1-3 consistency) ─────
 
-describe("validateActivationRecord", () => {
-  it("validates a well-formed activation record", () => {
-    const result = validateActivationRecord(makeActivationRecord());
-    expect(result).not.toBeNull();
-    expect(result?.activationId).toBe("act-001");
-    expect(result?.channel).toBe("prompt");
-    expect(result?.status).toBe("active");
-  });
-
-  it("validates record with null activatedAt", () => {
-    const result = validateActivationRecord(makeActivationRecord({ activatedAt: null }));
-    expect(result).not.toBeNull();
-    expect(result?.activatedAt).toBeNull();
-  });
-
-  it("validates record with deactivated status", () => {
-    const result = validateActivationRecord(makeActivationRecord({ status: "deactivated" }));
-    expect(result).not.toBeNull();
-    expect(result?.status).toBe("deactivated");
-  });
-
-  it("rejects null input", () => {
-    expect(validateActivationRecord(null)).toBeNull();
-  });
-
-  it("rejects non-object input", () => {
-    expect(validateActivationRecord("string")).toBeNull();
-    expect(validateActivationRecord(42)).toBeNull();
-  });
-
-  it("rejects array input", () => {
-    expect(validateActivationRecord([1, 2, 3])).toBeNull();
-  });
-
-  it("rejects record with missing activationId", () => {
-    const { activationId, ...rest } = makeActivationRecord();
-    expect(validateActivationRecord(rest)).toBeNull();
-  });
-
-  it("rejects record with empty activationId", () => {
-    expect(validateActivationRecord(makeActivationRecord({ activationId: "" }))).toBeNull();
-  });
-
-  it("rejects record with invalid status", () => {
-    expect(validateActivationRecord(makeActivationRecord({ status: "pending" }))).toBeNull();
-  });
-
-  it("rejects record with non-string activatedAt", () => {
-    expect(validateActivationRecord(makeActivationRecord({ activatedAt: 123 }))).toBeNull();
-  });
-
-  it("rejects record with non-string channel", () => {
-    expect(validateActivationRecord(makeActivationRecord({ channel: 42 }))).toBeNull();
-  });
-
-  it("rejects record with non-string principleId", () => {
-    expect(validateActivationRecord(makeActivationRecord({ principleId: true }))).toBeNull();
-  });
-});
-
-// ── validateActivationsData ──────────────────────────────────────────────────
-
-describe("validateActivationsData", () => {
-  it("validates well-formed activations data", () => {
-    const result = validateActivationsData(makeActivationsData());
-    expect(result).not.toBeNull();
-    expect(result?.activations).toHaveLength(1);
-    expect(result?.status).toBe("ok");
-  });
-
-  it("validates data with optional reason", () => {
-    const result = validateActivationsData(makeActivationsData({ reason: "degraded" }));
-    expect(result).not.toBeNull();
-    expect(result?.reason).toBe("degraded");
-  });
-
-  it("validates data with empty activations array", () => {
-    const result = validateActivationsData(makeActivationsData({ activations: [] }));
-    expect(result).not.toBeNull();
-    expect(result?.activations).toHaveLength(0);
-  });
-
-  it("rejects null input", () => {
-    expect(validateActivationsData(null)).toBeNull();
-  });
-
-  it("rejects missing activations field", () => {
-    const { activations, ...rest } = makeActivationsData();
-    expect(validateActivationsData(rest)).toBeNull();
-  });
-
-  it("rejects missing status field", () => {
-    const { status, ...rest } = makeActivationsData();
-    expect(validateActivationsData(rest)).toBeNull();
-  });
-
-  it("rejects non-array activations", () => {
-    expect(validateActivationsData(makeActivationsData({ activations: "not-array" }))).toBeNull();
-  });
-
-  it("rejects non-string status", () => {
-    expect(validateActivationsData(makeActivationsData({ status: 123 }))).toBeNull();
-  });
-
-  it("rejects data with any invalid activation record (fail loud, ERR-009)", () => {
-    const data = makeActivationsData({
+describe("activation page data path: central validateActivations", () => {
+  it("keeps per-row promptInjection so the injection-status lines can render", () => {
+    const result = validateActivations({
       activations: [
-        makeActivationRecord(),
-        { activationId: 123 }, // invalid record
+        makeActivationRecord({
+          promptInjection: {
+            activationId: "act-001",
+            status: "window_excluded",
+            inCurrentWindow: false,
+            costChars: 953,
+            budget: 4000,
+            budgetScope: "full_directive_context",
+            route: "shared_render",
+          },
+        }),
       ],
+      status: "ok",
     });
-    expect(validateActivationsData(data)).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result?.activations[0]?.promptInjection?.status).toBe("window_excluded");
+    expect(result?.activations[0]?.promptInjection?.costChars).toBe(953);
   });
 
-  it("ignores non-string reason field", () => {
-    const result = validateActivationsData(makeActivationsData({ reason: 42 }));
-    expect(result).not.toBeNull();
-    expect(result?.reason).toBeUndefined();
+  it("keeps promptInjectionRoute incl. the three-state productionRotation (Focus/Activation consistency)", () => {
+    const result = validateActivations({
+      activations: [makeActivationRecord()],
+      status: "ok",
+      promptInjectionRoute: {
+        status: "confirmed",
+        route: "shared_render",
+        productionRotation: "unknown",
+        budgetCapacityStatus: "unknown",
+        budgetFallbackReason: "host_capacity_absent",
+      },
+    });
+    expect(result?.promptInjectionRoute?.productionRotation).toBe("unknown");
+    // A bound rotating host resolves to 'rotates' — the page must never read
+    // absent as FIFO.
+    const bound = validateActivations({
+      activations: [makeActivationRecord()],
+      status: "ok",
+      promptInjectionRoute: { status: "confirmed", hostKind: "openclaw", route: "shared_render", productionRotation: "rotates" },
+    });
+    expect(bound?.promptInjectionRoute?.productionRotation).toBe("rotates");
+  });
+
+  it("drops a present-but-invalid rotation value instead of propagating it (rc-1/rc-2)", () => {
+    const result = validateActivations({
+      activations: [makeActivationRecord()],
+      status: "ok",
+      promptInjectionRoute: { status: "confirmed", productionRotation: "yes" },
+    });
+    expect(result?.promptInjectionRoute?.productionRotation).toBeUndefined();
+  });
+
+  it("still rejects a structurally invalid payload (fail loud preserved)", () => {
+    expect(validateActivations({ status: "ok" })).toBeNull();
+    expect(validateActivations({ activations: "not-array", status: "ok" })).toBeNull();
+    expect(
+      validateActivations({ activations: [makeActivationRecord(), { activationId: 123 }], status: "ok" }),
+    ).toBeNull();
   });
 });
 

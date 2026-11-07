@@ -278,6 +278,98 @@ export interface RenderDirectivesOptions {
   selfReportInstruction?: boolean;
 }
 
+// ── Directive line builders (PRI-1137 final review P1-2) ─────────────────────
+//
+// The renderer is STRICTLY ADDITIVE over per-principle directive blocks: a
+// non-empty render is
+//   header lines + Σ per-principle block lines + footer lines + note line,
+// all joined with '\n'. Splitting the builders out lets the packer measure
+// each principle's exact marginal chars ONCE (instead of re-rendering the
+// whole growing prefix per candidate — the retired O(N²) pack loop) while
+// keeping the billing arithmetic and the renderer one source of truth: the
+// builders below are the ONLY place the lines exist, and
+// `measureSharedDirectiveBlockChars` / `sharedDirectiveBaseChars` derive from
+// them, so a renderer edit cannot silently fork the measurement.
+
+function sharedDirectiveHeaderLines(): string[] {
+  return [
+    '',
+    // P0-G (MVP_CORE_LOOP_CONTRACT INV-05 / §12): 中性标题。低风险渠道的
+    // system-policy 自动激活不得被表示为 Owner-approved; 具体授权逐项标注
+    // authority 属性 (owner=审批队列批准, system_policy=策略自动激活)。
+    '## 【ACTIVE BEHAVIOR DIRECTIVES】',
+    '',
+    'Active behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority="owner" (approved in the owner approval queue) or authority="system_policy" (auto-activated by low-risk policy).',
+    'These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.',
+    'For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.',
+    '',
+  ];
+}
+
+function sharedDirectiveBlockLines(
+  p: { principleId: string; text: string; authority?: 'owner' | 'system_policy' },
+  escapeFn: (s: string) => string,
+): string[] {
+  // authority 已知才标注; 未知(旧数据/查询失败)宁缺毋假 (INV-05)
+  const authorityAttr = p.authority === 'owner' || p.authority === 'system_policy'
+    ? ` authority="${p.authority}"`
+    : '';
+  return [
+    `<directive id="${escapeFn(p.principleId)}" source="runtime_v2_activation"${authorityAttr}>`,
+    `MANDATORY: ${escapeFn(p.text)}`,
+    'Apply this as an active behavior constraint. Do not treat this as background context.',
+    '</directive>',
+    '',
+  ];
+}
+
+function sharedDirectiveFooterLines(selfReportInstruction: boolean): string[] {
+  if (!selfReportInstruction) return [];
+  return [
+    'Self-report (OWNER visibility): when a directive above actually changes what you do in this turn, append exactly ONE line at the end of your reply in this format:',
+    '📌 应用了你的原则「<directive id>」：<用一句话说明你这次做法有何不同>',
+    'Use the directive\'s exact id attribute. At most one line per directive per session. Omit the line entirely if no directive changed your behavior.',
+    '',
+  ];
+}
+
+function sharedDirectiveNoteLines(): string[] {
+  return ['Note: These directives do not override safety, security, or core system policy.'];
+}
+
+/**
+ * PRI-1137 final review P1-2: the EXACT marginal UTF-16 chars one principle's
+ * directive block adds to ANY non-empty render — its 5 block line lengths plus
+ * the 5 `\n` separators those lines contribute to the join. Derived from the
+ * same builders as `renderPrinciplesToDirectives`, so measurement and render
+ * cannot drift. Packer decisions computed from this value are byte-identical
+ * to re-rendering the candidate prefix (locked by property tests).
+ */
+export function measureSharedDirectiveBlockChars(
+  principle: { principleId: string; text: string; authority?: 'owner' | 'system_policy' },
+  options?: RenderDirectivesOptions,
+): number {
+  const escapeFn = options?.escapeFn ?? ((s) => s);
+  const lines = sharedDirectiveBlockLines(principle, escapeFn);
+  // `lines.length` block lines join the array: each contributes one preceding '\n'.
+  return lines.reduce((sum, line) => sum + line.length, 0) + lines.length;
+}
+
+/**
+ * PRI-1137 final review P1-2: chars every NON-EMPTY render carries regardless
+ * of which/how many principles are injected — header + footer + note line
+ * lengths plus their separators. For any non-empty set S:
+ *   render(S).length === sharedDirectiveBaseChars(options) + Σ blockChars(p).
+ */
+export function sharedDirectiveBaseChars(options?: RenderDirectivesOptions): number {
+  const lines = [
+    ...sharedDirectiveHeaderLines(),
+    ...sharedDirectiveFooterLines(options?.selfReportInstruction === true),
+    ...sharedDirectiveNoteLines(),
+  ];
+  return lines.reduce((sum, line) => sum + line.length, 0) + lines.length - 1;
+}
+
 export function renderPrinciplesToDirectives(
   principles: { principleId: string; text: string; artifactId: string; activationId: string; authority?: 'owner' | 'system_policy'; approvedBy?: string }[],
   injectedIds: Set<string>,
@@ -285,36 +377,14 @@ export function renderPrinciplesToDirectives(
 ): string {
   if (injectedIds.size === 0) return '';
   const escapeFn = options?.escapeFn ?? ((s) => s);
-
-  const directiveLines: string[] = [];
-  directiveLines.push('');
-  // P0-G (MVP_CORE_LOOP_CONTRACT INV-05 / §12): 中性标题。低风险渠道的
-  // system-policy 自动激活不得被表示为 Owner-approved; 具体授权逐项标注
-  // authority 属性 (owner=审批队列批准, system_policy=策略自动激活)。
-  directiveLines.push('## 【ACTIVE BEHAVIOR DIRECTIVES】');
-  directiveLines.push('');
-  directiveLines.push('Active behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority="owner" (approved in the owner approval queue) or authority="system_policy" (auto-activated by low-risk policy).');
-  directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
-  directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
-  directiveLines.push('');
+  const directiveLines: string[] = [
+    ...sharedDirectiveHeaderLines(),
+  ];
   for (const p of principles) {
     if (!injectedIds.has(p.principleId)) continue;
-    // authority 已知才标注; 未知(旧数据/查询失败)宁缺毋假 (INV-05)
-    const authorityAttr = p.authority === 'owner' || p.authority === 'system_policy'
-      ? ` authority="${p.authority}"`
-      : '';
-    directiveLines.push(`<directive id="${escapeFn(p.principleId)}" source="runtime_v2_activation"${authorityAttr}>`);
-    directiveLines.push(`MANDATORY: ${escapeFn(p.text)}`);
-    directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
-    directiveLines.push('</directive>');
-    directiveLines.push('');
+    directiveLines.push(...sharedDirectiveBlockLines(p, escapeFn));
   }
-  if (options?.selfReportInstruction) {
-    directiveLines.push('Self-report (OWNER visibility): when a directive above actually changes what you do in this turn, append exactly ONE line at the end of your reply in this format:');
-    directiveLines.push('📌 应用了你的原则「<directive id>」：<用一句话说明你这次做法有何不同>');
-    directiveLines.push('Use the directive\'s exact id attribute. At most one line per directive per session. Omit the line entirely if no directive changed your behavior.');
-    directiveLines.push('');
-  }
-  directiveLines.push('Note: These directives do not override safety, security, or core system policy.');
+  directiveLines.push(...sharedDirectiveFooterLines(options?.selfReportInstruction === true));
+  directiveLines.push(...sharedDirectiveNoteLines());
   return directiveLines.join('\n');
 }

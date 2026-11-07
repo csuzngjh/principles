@@ -303,8 +303,10 @@ describe('shared production active-principle prompt kernel', () => {
     try {
       const now = new Date().toISOString();
       const principleId = 'P_EXACT_FIT';
+      // PRI-1137: the production read annotates authority, so the exact-fit
+      // measurement must include it.
       const emptyRendered = renderPrinciplesToDirectives([
-        { principleId, text: '', artifactId: 'art-exact-fit', activationId: 'act-exact-fit' },
+        { principleId, text: '', artifactId: 'art-exact-fit', activationId: 'act-exact-fit', authority: 'system_policy' },
       ], new Set([principleId]));
       const text = 'x'.repeat(RUNTIME_PRINCIPLE_BUDGET - emptyRendered.length);
       connection.getDb().prepare(`

@@ -119,7 +119,7 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
       { principleId: 'FILLER', text: 'f'.repeat(900) },
       { principleId: 'TARGET', text: 't'.repeat(900), approved: true },
     ]);
-    const candidates = await readPromptActivationCandidates({ workspaceDir });
+    const candidates = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
     const target = candidates.principles.find((principle) => principle.principleId === 'TARGET')!;
     const promptBudget = constrainedBudget(candidates.principles, target);
     const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
@@ -141,7 +141,8 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
     expect(prioritized.adaptivePacking?.targetSnapshot).toMatchObject({ principleId: 'TARGET', authority: 'owner', approvedBy: 'owner-1' });
     expect(prioritized.additionalContext).toContain(prioritized.adaptivePacking?.targetBody);
     expect(prioritized.additionalContext).toContain('t'.repeat(100));
-    expect(prioritized.additionalContext).not.toMatch(/<directive [^>]*authority=/);
+    // PRI-1137: the shared production read annotates authority.
+    expect(prioritized.additionalContext).toMatch(/<directive id="TARGET"[^>]*authority="owner"/);
   });
 
   it('keeps an already included target byte-identical to Native', async () => {
@@ -157,7 +158,8 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
     expect(adaptive.additionalContext).toBe(native.additionalContext);
     expect(adaptive.adaptivePacking?.nativeBaseline).toEqual(native);
     expect(adaptive.activationIds).toEqual(native.activationIds);
-    expect(adaptive.additionalContext).not.toMatch(/<directive [^>]*authority=/);
+    // PRI-1137: the shared production read annotates authority.
+    expect(adaptive.additionalContext).toMatch(/<directive id="PRESENT"[^>]*authority="owner"/);
   });
 
   it('falls back to Native when the target cannot fit or its key is invalid/unavailable', async () => {
@@ -166,7 +168,7 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
       { principleId: 'SMALL', text: 'small' },
       { principleId: 'TOO_BIG', text: 'x'.repeat(2500), approved: true },
     ]);
-    const candidates = await readPromptActivationCandidates({ workspaceDir });
+    const candidates = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
     const target = candidates.principles.find((principle) => principle.principleId === 'TOO_BIG')!;
     const targetCost = renderPrinciplesToDirectives([target], new Set([target.principleId]), { escapeFn: escapeXml }).length;
     const promptBudget = { ...resolvePromptBudget(), budgetChars: targetCost - 1 };
@@ -203,7 +205,7 @@ describe('buildActivePrinciplePromptContext adaptive single-target packing', () 
       { principleId: 'MANDATORY', text: 'm'.repeat(900) },
       { principleId: 'PRIORITY', text: 'p'.repeat(900), approved: true },
     ]);
-    const candidates = await readPromptActivationCandidates({ workspaceDir });
+    const candidates = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
     const target = candidates.principles.find((principle) => principle.principleId === 'PRIORITY')!;
     const promptBudget = constrainedBudget(candidates.principles, target);
     const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });

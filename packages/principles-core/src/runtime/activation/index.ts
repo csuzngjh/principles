@@ -134,6 +134,10 @@ export {
   trimToBudget,
   listEntryLine,
   renderPrinciplesToDirectives,
+  // PRI-1137 final review P1-2: exact additive measurement of the shared
+  // directive render — same line builders as the renderer, one source.
+  measureSharedDirectiveBlockChars,
+  sharedDirectiveBaseChars,
 } from './prompt-activation-reader-contract.js';
 
 export type {

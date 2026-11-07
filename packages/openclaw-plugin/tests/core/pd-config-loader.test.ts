@@ -336,7 +336,7 @@ describe('Feature flag loading from .pd/config.yaml', () => {
     } finally { rmTmpDir(tmp); }
   });
 
-  it('honors explicit abstraction_layer_v1=false as the OpenClaw legacy rollback', () => {
+  it('reports abstraction_layer_v1=false from user config, and it no longer selects a route (PRI-1137 gone tombstone)', () => {
     const tmp = mkTmpDir();
     const parsed = yaml.load(makeValidConfigWithObserverDisabled()) as Record<string, unknown>;
     const features = parsed.features as Record<string, unknown>;

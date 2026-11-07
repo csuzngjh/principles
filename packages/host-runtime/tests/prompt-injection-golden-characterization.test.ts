@@ -69,8 +69,9 @@ const SELF_REPORT_BLOCK =
   + '📌 应用了你的原则「<directive id>」：<用一句话说明你这次做法有何不同>\n'
   + 'Use the directive\'s exact id attribute. At most one line per directive per session. Omit the line entirely if no directive changed your behavior.\n\n';
 
-function directiveBlock(escapedText: string): string {
-  return `<directive id="T-K" source="runtime_v2_activation">\nMANDATORY: ${escapedText}\n`
+function directiveBlock(escapedText: string, authority?: 'owner' | 'system_policy'): string {
+  const authorityAttr = authority === undefined ? '' : ` authority="${authority}"`;
+  return `<directive id="T-K" source="runtime_v2_activation"${authorityAttr}>\nMANDATORY: ${escapedText}\n`
     + 'Apply this as an active behavior constraint. Do not treat this as background context.\n</directive>\n\n';
 }
 
@@ -177,13 +178,15 @@ describe('AC-04 golden characterization — production prompt builders must stay
     const context = await buildActivePrinciplePromptContext({ workspaceDir });
     const expected =
       DIRECTIVE_HEADER
-      + directiveBlock(escT01).replaceAll('id="T-K"', 'id="T-01"')
-      + directiveBlock(escT02).replaceAll('id="T-K"', 'id="T-02"')
-      + directiveBlock(escT03).replaceAll('id="T-K"', 'id="T-03"')
-      + directiveBlock(T04).replaceAll('id="T-K"', 'id="T-04"')
+      + directiveBlock(escT01, 'system_policy').replaceAll('id="T-K"', 'id="T-01"')
+      + directiveBlock(escT02, 'system_policy').replaceAll('id="T-K"', 'id="T-02"')
+      + directiveBlock(escT03, 'system_policy').replaceAll('id="T-K"', 'id="T-03"')
+      + directiveBlock(T04, 'system_policy').replaceAll('id="T-K"', 'id="T-04"')
       + DIRECTIVE_NOTE;
     expect(context.additionalContext).toBe(expected);
-    expect(context.additionalContext.length).toBe(1476);
+    // PRI-1137: the shared prompt annotates authority (P0-G INV-05), so every
+    // directive carries ` authority="system_policy"` (+26 chars each).
+    expect(context.additionalContext.length).toBe(1580);
     expect(context.principleIds).toEqual(['T-01', 'T-02', 'T-03', 'T-04']);
     expect(context.activationIds).toEqual(['act-T-01', 'act-T-02', 'act-T-03', 'act-T-04']);
     expect(context.truncated).toBe(false);
@@ -196,10 +199,10 @@ describe('AC-04 golden characterization — production prompt builders must stay
     const context = await buildActivePrinciplePromptContext({ workspaceDir, roundKey: 2 });
     const expected =
       DIRECTIVE_HEADER
-      + directiveBlock(escT03).replaceAll('id="T-K"', 'id="T-03"')
-      + directiveBlock(T04).replaceAll('id="T-K"', 'id="T-04"')
-      + directiveBlock(escT01).replaceAll('id="T-K"', 'id="T-01"')
-      + directiveBlock(escT02).replaceAll('id="T-K"', 'id="T-02"')
+      + directiveBlock(escT03, 'system_policy').replaceAll('id="T-K"', 'id="T-03"')
+      + directiveBlock(T04, 'system_policy').replaceAll('id="T-K"', 'id="T-04"')
+      + directiveBlock(escT01, 'system_policy').replaceAll('id="T-K"', 'id="T-01"')
+      + directiveBlock(escT02, 'system_policy').replaceAll('id="T-K"', 'id="T-02"')
       + DIRECTIVE_NOTE;
     expect(context.additionalContext).toBe(expected);
     expect(context.principleIds).toEqual(['T-03', 'T-04', 'T-01', 'T-02']);
@@ -216,6 +219,7 @@ describe('AC-04 golden characterization — production prompt builders must stay
     expect(context.droppedActivationIds ?? []).toEqual([]);
     expect(context.truncated).toBe(false);
     expect(context.principleIds).toEqual(['T-01', 'T-02', 'T-03', 'T-04']);
-    expect(context.additionalContext.length).toBe(1476);
+    // PRI-1137: authority annotation adds 26 chars per directive.
+    expect(context.additionalContext.length).toBe(1580);
   });
 });
