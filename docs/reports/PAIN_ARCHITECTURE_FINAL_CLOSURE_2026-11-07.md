@@ -1,6 +1,7 @@
 # PD Pain Architecture 最终架构收敛报告（2026-11-07）
 
-**Status:** READY_FOR_OWNER_REVIEW（文档 PR 保持 OPEN，不合并、不部署）
+**Status:** READY_FOR_OWNER_REVIEW（文档 PR #2401 保持 OPEN，不合并、不部署）
+**Pull Request:** https://github.com/csuzngjh/principles/pull/2401
 **Code Baseline:** `origin/main@86b6208042b6083d4a7bbf840730d060188a1517`（含 PRI-1136 `runtime-v2` → `runtime` 改名）
 **Method:** 以当前生产代码、测试实跑、PR 合并记录与 Linear 状态为准；不以历史 PR 描述推断完成度。
 **Companion artifacts:**
