@@ -1,7 +1,8 @@
 /**
  * Anonymous Product Telemetry v1 — store / eligibility / readers / exporter
  * / workspace-scope unit tests (PRI-597/598/599; review remediation:
- * workspace measurement unit, tri-state facts).
+ * workspace measurement unit, tri-state facts; PRI-1138 single-format
+ * consent-store convergence with real-file migration round-trips).
  */
 
 import fs from 'node:fs';
@@ -15,6 +16,7 @@ import {
   getProductTelemetryStatePath,
   grantedControlState,
   pruneWorkspaceExports,
+  PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION,
   readProductTelemetryControlState,
   resetControlState,
   writeProductTelemetryControlState,
@@ -173,7 +175,7 @@ describe('control-state store', () => {
     if (!read.ok) expect(read.reason).toContain('at most');
   });
 
-  it('migrates a v1 machine-global state to v2: consent+secret kept, export bookkeeping dropped', () => {
+  it('migrates a v1 machine-global state to v2 on load: identity kept, bookkeeping dropped, disk converged (PRI-1138)', () => {
     const statePath = getProductTelemetryStatePath(homeDir);
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     const secret = generateTelemetrySecretHex();
@@ -203,9 +205,15 @@ describe('control-state store', () => {
     // attributed to a workspace; operational state, not a governance fact).
     expect(read.state.workspaceExports).toBeUndefined();
     expect(read.state.schemaVersion).toBe('2');
-    // Persisted as v2 on the next write.
-    expect(writeProductTelemetryControlState(homeDir, read.state).ok).toBe(true);
-    expect(fs.readFileSync(statePath, 'utf8')).toContain('"schemaVersion": "2"');
+    // PRI-1138: the load itself persists the migration — the real on-disk
+    // file is already the current format, with the historical identity
+    // (consent / consentVersion / telemetrySecret) intact.
+    const onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    expect(onDisk.consent).toBe('granted');
+    expect(onDisk.consentVersion).toBe('1');
+    expect(onDisk.telemetrySecret).toBe(secret);
+    expect(onDisk.lastSucceededAt).toBeUndefined();
     // A v1 file with garbage export fields is still migrated (those fields
     // are dropped, not validated): the identity fields carry the decision.
     fs.writeFileSync(
@@ -215,6 +223,170 @@ describe('control-state store', () => {
     const migrated = readProductTelemetryControlState(homeDir);
     expect(migrated.ok).toBe(true);
     if (migrated.ok) expect(migrated.state.consent).toBe('denied');
+    expect((JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>).schemaVersion).toBe('2');
+  });
+
+  it('legacy migration is idempotent: a second load does not rewrite the file (PRI-1138)', () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const secret = generateTelemetrySecretHex();
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ consent: 'granted', consentVersion: '1', telemetrySecret: secret, lastSucceededAt: '2026-08-25T10:00:00.000Z', schemaVersion: '1' }),
+    );
+    const first = readProductTelemetryControlState(homeDir);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const contentAfterFirst = fs.readFileSync(statePath, 'utf8');
+    const mtimeAfterFirst = fs.statSync(statePath).mtimeMs;
+    expect((JSON.parse(contentAfterFirst) as Record<string, unknown>).schemaVersion).toBe('2');
+    // The second load recognizes the current format: no re-migration, no
+    // identity drift, and no meaningless rewrite of the migrated file.
+    const second = readProductTelemetryControlState(homeDir);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.state).toEqual(first.state);
+    expect(second.state.consent).toBe('granted');
+    expect(second.state.consentVersion).toBe('1');
+    expect(second.state.telemetrySecret).toBe(secret);
+    expect(fs.readFileSync(statePath, 'utf8')).toBe(contentAfterFirst);
+    expect(fs.statSync(statePath).mtimeMs).toBe(mtimeAfterFirst);
+    // The final state stays stable on a third load.
+    expect(readProductTelemetryControlState(homeDir)).toEqual(first);
+  });
+
+  it('reads a current-format file without touching it (no migration, no rewrite)', () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const secret = generateTelemetrySecretHex();
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        consent: 'granted',
+        consentVersion: '2',
+        schemaVersion: '2',
+        telemetrySecret: secret,
+        workspaceExports: {
+          aaaa0000aaaa0000: { lastAttemptedAt: '2026-08-26T10:00:00.000Z', lastSucceededAt: '2026-08-26T10:00:00.000Z' },
+        },
+      }),
+    );
+    const contentBefore = fs.readFileSync(statePath, 'utf8');
+    const mtimeBefore = fs.statSync(statePath).mtimeMs;
+    const read = readProductTelemetryControlState(homeDir);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.state.consent).toBe('granted');
+    expect(read.state.consentVersion).toBe('2');
+    expect(read.state.telemetrySecret).toBe(secret);
+    expect(read.state.schemaVersion).toBe('2');
+    expect(read.state.workspaceExports?.aaaa0000aaaa0000?.lastSucceededAt).toBe('2026-08-26T10:00:00.000Z');
+    // A current-format load never produces a file write.
+    expect(fs.readFileSync(statePath, 'utf8')).toBe(contentBefore);
+    expect(fs.statSync(statePath).mtimeMs).toBe(mtimeBefore);
+  });
+
+  it('fails loud on illegal schemaVersion and incomplete legacy files (no silent fallback, PRI-1138)', () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const cases: Array<{ name: string; doc: Record<string, unknown>; expectError: RegExp }> = [
+      { name: 'missing schemaVersion', doc: { consent: 'granted', consentVersion: '1' }, expectError: /schemaVersion must be/ },
+      { name: 'future schemaVersion', doc: { consent: 'granted', consentVersion: '1', schemaVersion: '3' }, expectError: /schemaVersion must be/ },
+      { name: 'non-string schemaVersion', doc: { consent: 'granted', consentVersion: '1', schemaVersion: 2 }, expectError: /schemaVersion must be/ },
+      { name: 'legacy file missing consent', doc: { consentVersion: '1', schemaVersion: '1' }, expectError: /consent must be/ },
+      { name: 'legacy file violating the legacy field whitelist', doc: { consent: 'granted', consentVersion: '1', schemaVersion: '1', unexpected: 'x' }, expectError: /unknown field/ },
+      { name: 'current file carrying legacy top-level bookkeeping', doc: { consent: 'granted', consentVersion: '1', schemaVersion: '2', lastSucceededAt: '2026-08-25T10:00:00.000Z' }, expectError: /unknown field/ },
+    ];
+    for (const { name, doc, expectError } of cases) {
+      const raw = JSON.stringify(doc);
+      fs.writeFileSync(statePath, raw);
+      const read = readProductTelemetryControlState(homeDir);
+      expect(read.ok, name).toBe(false);
+      if (!read.ok) {
+        expect(read.reason, name).toMatch(expectError);
+        // Fail-loud contract: the operator is told to fix or delete; invalid
+        // data is never treated as an empty/default consent state.
+        expect(read.nextAction, name).toContain('Fix or delete');
+      }
+      // The invalid file is left untouched — no migration, no reset, no repair.
+      expect(fs.readFileSync(statePath, 'utf8'), name).toBe(raw);
+    }
+  });
+
+  it('writes only the current format and refuses legacy-shaped states (single writable schema, PRI-1138)', () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    // New and updated files through the real write entry are always current.
+    expect(writeProductTelemetryControlState(homeDir, grantedControlState(defaultProductTelemetryControlState())).ok).toBe(true);
+    let onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    expect(writeProductTelemetryControlState(homeDir, deniedControlState()).ok).toBe(true);
+    onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    // A legacy-shaped state has no write path: the write is refused loud and
+    // the file on disk is left untouched.
+    const beforeRefusal = fs.readFileSync(statePath, 'utf8');
+    const legacyShaped: ProductTelemetryControlState = {
+      consent: 'granted',
+      consentVersion: '1',
+      telemetrySecret: generateTelemetrySecretHex(),
+      schemaVersion: PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION,
+    };
+    const refused = writeProductTelemetryControlState(homeDir, legacyShaped);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.reason).toContain('product_telemetry_state_write_refused');
+      expect(refused.reason).toContain(`'${PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION}'`);
+    }
+    expect(fs.readFileSync(statePath, 'utf8')).toBe(beforeRefusal);
+    // A completed migration cannot regress: after a legacy file is migrated,
+    // the next normal consent transition still writes only the current format.
+    fs.writeFileSync(statePath, JSON.stringify({ consent: 'denied', consentVersion: '1', schemaVersion: '1' }));
+    const migrated = readProductTelemetryControlState(homeDir);
+    expect(migrated.ok).toBe(true);
+    const next = grantedControlState(migrated.ok ? migrated.state : defaultProductTelemetryControlState());
+    expect(writeProductTelemetryControlState(homeDir, next).ok).toBe(true);
+    onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    expect(onDisk.consent).toBe('granted');
+  });
+
+  it('a failed migration write fails loud, loses nothing, and retries (PRI-1138)', () => {
+    // POSIX-only real-failure injection: a read-only state directory makes the
+    // temp-file write fail. Windows directory ACLs do not map to POSIX write
+    // bits, so this adversarial path is exercised on the POSIX CI runners.
+    if (process.platform === 'win32') return;
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const secret = generateTelemetrySecretHex();
+    const v1Raw = JSON.stringify({ consent: 'granted', consentVersion: '1', telemetrySecret: secret, schemaVersion: '1' });
+    fs.writeFileSync(statePath, v1Raw);
+    fs.chmodSync(path.dirname(statePath), 0o500);
+    try {
+      const read = readProductTelemetryControlState(homeDir);
+      expect(read.ok).toBe(false);
+      if (!read.ok) {
+        // Migration write failure is exposed loud — never a silent fallback
+        // to running on the old format, never a fake success.
+        expect(read.reason).toContain('product_telemetry_state_legacy_migration_write_failed');
+        expect(read.nextAction.length).toBeGreaterThan(0);
+      }
+      // The original legacy file is byte-identical: the failed migration
+      // lost nothing (atomic temp+rename never touched it)...
+      expect(fs.readFileSync(statePath, 'utf8')).toBe(v1Raw);
+      // ...and once the directory is writable again, the next load retries
+      // the idempotent migration and preserves the identity fields.
+      fs.chmodSync(path.dirname(statePath), 0o700);
+      const retried = readProductTelemetryControlState(homeDir);
+      expect(retried.ok).toBe(true);
+      if (retried.ok) {
+        expect(retried.state.consent).toBe('granted');
+        expect(retried.state.consentVersion).toBe('1');
+        expect(retried.state.telemetrySecret).toBe(secret);
+      }
+      expect((JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>).schemaVersion).toBe('2');
+    } finally {
+      fs.chmodSync(path.dirname(statePath), 0o700);
+    }
   });
 
   it('prunes workspace export entries untouched beyond the max age', () => {
