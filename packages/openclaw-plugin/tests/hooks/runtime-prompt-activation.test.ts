@@ -638,25 +638,27 @@ describe('Adaptive activation — actual local prompt entry', () => {
     expect(targetEntry?.bodyComplete).toBe(true);
   });
 
-  it('presence expectations: plugin-local restore keeps baseline bodies and drops the removed target', async () => {
-    await seed();
+  it('presence expectations: shared-route restore (hook-final revalidate fails) drops the removed target', async () => {
+    // PRI-1137 merge: the plugin-local route is retired — the restore path is
+    // exercised through the shared route, the only remaining authority.
+    const { target, packed } = await sharedPrepared();
     const hostRuntime = await import('@principles/host-runtime');
-    // Packing revalidate passes (first call); the hook-final revalidate fails
-    // (second call) → restore('target_changed') with the Native baseline.
-    const spy = vi.spyOn(hostRuntime, 'revalidateAdaptivePrinciple')
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+    // Packing revalidate already consumed its call inside sharedPrepared; the
+    // hook-final revalidate is the next call → force it to fail
+    // → restore('target_changed') with the Native baseline.
+    const spy = vi.spyOn(hostRuntime, 'revalidateAdaptivePrinciple').mockResolvedValue(false);
     try {
       const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-      const result = await handleBeforePromptBuild(admitted(), configured('AA-19'));
+      const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+      expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
       const expectations = result?.injectedExpectations ?? [];
-      expect(expectations.find((e) => e.activationId === 'act_prompt_AA-19')).toBeUndefined();
-      // Plugin-local route: per-principle bodies are in scope, so the retained
-      // baseline entries ARE expected and complete in the final assembly.
-      expect(expectations.length).toBeGreaterThan(0);
+      expect(expectations.find((e) => e.activationId === `act_prompt_${target}`)).toBeUndefined();
+      // Post-PRI-1137 the plugin has no per-principle raw bodies for non-target
+      // principles (shared-route gap; Path A design covers it) — the restored
+      // baseline contributes no plugin-side expectations, and none may claim a
+      // body that is not in the final assembly.
       const assembled = result?.prependSystemContext ?? '';
       for (const entry of expectations) {
-        expect(entry.bodyComplete).toBe(true);
         expect(assembled).toContain(entry.bodyText);
       }
     } finally {
