@@ -7,33 +7,22 @@ import {
   RUNTIME_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
-  SqlitePIArtifactStore,
-  filterPromptActivations,
   getDefaultPdConfig,
-  resolvePrincipleFromArtifact,
-  trimToBudget,
-  type ActivatedPrinciple,
 } from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
   buildLivePromptInjectionProjection,
+  packSharedDirectives,
   resolvePromptInjectionRouteDecision,
 } from '../src/index.js';
 
 const tempDirs: string[] = [];
 
-function tempWorkspace(opts?: { sharedRoute?: boolean }): string {
+function tempWorkspace(): string {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-projection-'));
   tempDirs.push(workspaceDir);
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
-  const config = getDefaultPdConfig();
-  if (opts?.sharedRoute) {
-    // getDefaultPdConfig() shallow-spreads DEFAULT_FEATURE_FLAGS — the flag
-    // objects are module-shared, so replace the entry instead of mutating it.
-    config.features.abstraction_layer_v1 = { ...config.features.abstraction_layer_v1, enabled: true };
-  }
-  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
+  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(getDefaultPdConfig()), 'utf8');
   return workspaceDir;
 }
 
@@ -72,45 +61,22 @@ async function seedPromptActivations(
 }
 
 /**
- * Independent replay of the LIVE OpenClaw legacy injection path
- * (openclaw-plugin/src/hooks/prompt.ts): PromptActivationReader-equivalent
- * primitives (same FIFO activation query → filterPromptActivations →
- * resolvePrincipleFromArtifact) then the real trimToBudget with escapeXml —
- * the exact chain the plugin executes when abstraction_layer_v1 is OFF.
+ * PRI-1137: the retired OpenClaw plugin-local list-render expectation
+ * (`trimToBudget` over `- [id] text` lines) is NOT replayed here — it no
+ * longer exists in production, so asserting against it would prove parity
+ * with a deleted path. Equivalence is asserted against the live shared
+ * projection (`buildActivePrinciplePromptContext`) instead.
  */
-async function replayLiveInjectionExpectation(workspaceDir: string): Promise<{
-  lines: string[]; injectedIds: Set<string>; truncated: boolean;
-}> {
-  const connection = new SqliteConnection(workspaceDir);
-  try {
-    const activations = filterPromptActivations(await new SqliteActivationStateStore(connection).listPromptActivations());
-    const artifactStore = new SqlitePIArtifactStore(connection);
-    const principles: ActivatedPrinciple[] = [];
-    for (const activation of activations) {
-      const artifact = await artifactStore.getArtifactById(activation.artifactId);
-      if (artifact === null) continue;
-      const resolved = resolvePrincipleFromArtifact({
-        artifact_id: artifact.artifactId,
-        artifact_kind: artifact.artifactKind,
-        content_json: artifact.contentJson,
-        validation_status: artifact.validationStatus,
-      }, activation);
-      if (resolved.ok) principles.push(resolved.principle);
-    }
-    return trimToBudget(principles, RUNTIME_PRINCIPLE_BUDGET, escapeXml);
-  } finally {
-    connection.close();
-  }
-}
 
-// Each entry bills ~413 chars on the legacy route, so the active 4000-char
-// budget admits 9 of 11 — the same 9/2 split the old 2000-char budget produced
-// with 200-char texts. Scaling the fixture keeps the FIFO/rotation contrast
-// meaningful across a policy recalibration.
+// PRI-1137 characterization: under the shared directive render (fixed wrapper
+// 755 chars + 394 per 400-char entry), a 4000-char budget admits 5 of 11
+// entries (3444 chars). The old fixture assumed the deleted list route billed
+// ~413/entry and admitted 9.
 const FIFO_11 = Array.from({ length: 11 }, (_, i) => ({
   principleId: `P_FIFO_${String(i + 1).padStart(2, '0')}`,
   text: 'X'.repeat(400),
 }));
+const FIFO_11_INJECTED = 5;
 
 describe('buildLivePromptInjectionProjection (PR #1844 production path alignment)', () => {
   it('fails route preflight closed when config is unreadable, even with an explicit host', () => {
@@ -143,22 +109,8 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(decision.unconfirmedReason).toContain('prompt_feature_disabled');
   });
 
-  it('Case 1a — legacy route: ids/usedChars/truncated match the live PromptActivationReader→trimToBudget chain', async () => {
+  it('Case 1 — the projection mirrors buildActivePrinciplePromptContext exactly (the one shared route)', async () => {
     const workspaceDir = tempWorkspace();
-    await seedPromptActivations(workspaceDir, FIFO_11);
-
-    const projection = await buildLivePromptInjectionProjection({ workspaceDir });
-    const expected = await replayLiveInjectionExpectation(workspaceDir);
-
-    expect(projection.route).toBe('legacy_trim');
-    expect([...projection.injectedPrincipleIds].sort()).toEqual([...expected.injectedIds].sort());
-    expect(projection.usedChars).toBe(expected.lines.join('\n').length);
-    expect(projection.truncated).toBe(expected.truncated);
-    expect(projection.budget).toBe(RUNTIME_PRINCIPLE_BUDGET);
-  });
-
-  it('Case 1b — shared route: projection mirrors buildActivePrinciplePromptContext exactly', async () => {
-    const workspaceDir = tempWorkspace({ sharedRoute: true });
     await seedPromptActivations(workspaceDir, FIFO_11);
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir });
@@ -169,33 +121,27 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     expect(projection.injectedActivationIds).toEqual(context.activationIds);
     expect(projection.usedChars).toBe(context.additionalContext.length);
     expect(projection.truncated).toBe(context.truncated);
+    expect(projection.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(projection.budgetScope).toBe('full_directive_context');
+    expect(projection.budget).toBe(RUNTIME_PRINCIPLE_BUDGET);
   });
 
-  it('Case 2 — regression: 11 activations under the live flag forecast 9 injected / 2 excluded, not the shared renderer count', async () => {
+  it('Case 2 — characterization: 11 activations under the shared renderer inject 5 / exclude 6', async () => {
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, FIFO_11);
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir });
 
-    // trimToBudget arithmetic: header 32c + 11 × ("- [P_FIFO_NN] " + 400c + \n)
-    // = each 413c → exactly 9 fit under the active budget, the 10th does not.
-    expect(projection.route).toBe('legacy_trim');
+    // Shared render arithmetic: wrapper 755c + 11 × (394c entry) — 5 fit under
+    // the active 4000-char budget (3444c), the 6th would cross it.
+    expect(projection.route).toBe('shared_render');
     expect(projection.truncated).toBe(true);
-    expect(projection.injectedPrincipleIds).toHaveLength(9);
-    expect(projection.injectedPrincipleIds).toEqual(FIFO_11.slice(0, 9).map((e) => e.principleId));
-    expect(projection.injectedPrincipleIds).not.toContain('P_FIFO_10');
-    expect(projection.injectedPrincipleIds).not.toContain('P_FIFO_11');
-    expect(projection.injectedActivationIds).toHaveLength(9);
+    expect(projection.injectedPrincipleIds).toHaveLength(FIFO_11_INJECTED);
+    expect(projection.injectedPrincipleIds).toEqual(FIFO_11.slice(0, FIFO_11_INJECTED).map((e) => e.principleId));
+    expect(projection.injectedPrincipleIds).not.toContain(`P_FIFO_${String(FIFO_11_INJECTED + 1).padStart(2, '0')}`);
+    expect(projection.injectedActivationIds).toHaveLength(FIFO_11_INJECTED);
     expect(projection.usedChars).toBeLessThanOrEqual(RUNTIME_PRINCIPLE_BUDGET);
-    expect(projection.usedChars).toBeGreaterThan(1800);
-
-    // The divergence this PR fixes: on the SAME activations the shared-route
-    // renderer (previous forecast source) truncates far earlier.
-    const sharedDir = tempWorkspace({ sharedRoute: true });
-    await seedPromptActivations(sharedDir, FIFO_11);
-    const shared = await buildLivePromptInjectionProjection({ workspaceDir: sharedDir });
-    expect(shared.route).toBe('shared_render');
-    expect(shared.injectedPrincipleIds.length).toBeLessThan(projection.injectedPrincipleIds.length);
+    expect(projection.usedChars).toBeGreaterThan(3000);
   });
 
   // ── PR-1894: the console/production policy divergence ──────────────────────
@@ -209,12 +155,14 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, FIFO_11);
 
-    const withKey = await buildLivePromptInjectionProjection({ workspaceDir, roundKey: 3 });
+    // PRI-1137: only OpenClaw owns an advancing round authority; host
+    // attribution must ride the projection so `productionRotation` is truthful.
+    const withKey = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw', roundKey: 3 });
     expect(withKey.selectionPolicy).toBe('fair_rotation_v1');
-    expect(withKey.productionRotates).toBe(true);
+    expect(withKey.productionRotation).toEqual({ state: 'rotates' });
     expect(withKey.eligibleCount).toBe(11);
 
-    const withoutKey = await buildLivePromptInjectionProjection({ workspaceDir });
+    const withoutKey = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw' });
     expect(withoutKey.selectionPolicy).toBe('legacy_fifo_prefix_v1');
   });
 
@@ -223,7 +171,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     await seedPromptActivations(workspaceDir, FIFO_11);
 
     // No round key — exactly the console's situation.
-    const projection = await buildLivePromptInjectionProjection({ workspaceDir });
+    const projection = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw' });
     const newest = FIFO_11[FIFO_11.length - 1]!;
     expect(projection.injectedActivationIds).not.toContain(`act-${newest.principleId}`);
     // ...yet production reaches it within the ring, so the console must report
@@ -239,30 +187,42 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
       { principleId: 'P_HUGE', text: 'H'.repeat(RUNTIME_PRINCIPLE_BUDGET * 2) },
     ]);
 
-    const projection = await buildLivePromptInjectionProjection({ workspaceDir });
-    expect(projection.productionRotates).toBe(true);
+    const projection = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw' });
+    expect(projection.productionRotation).toEqual({ state: 'rotates' });
     // Oversized entries can never fit in any round — rotation does not save them.
     expect(projection.eventuallyInjectedActivationIds).not.toContain('act-P_HUGE');
   });
 
-  it('PR-1894: the shared route genuinely does not rotate and claims no reachability', async () => {
-    const workspaceDir = tempWorkspace({ sharedRoute: true });
+  it('a workspace without OpenClaw attribution claims no rotation and no reachability', async () => {
+    const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, FIFO_11);
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir });
     expect(projection.route).toBe('shared_render');
-    expect(projection.productionRotates).toBe(false);
+    expect(projection.productionRotation).toEqual({ state: 'unknown', reason: 'no_bound_host' });
     expect(projection.eventuallyInjectedActivationIds).toEqual([]);
   });
 
-  it('Case 3 — exact budget boundary: an entry that exactly fills the cap injects; one char over discards it', async () => {
-    // entry = "- [id] text"; fit rule: remaining >= entry.length + 1.
-    // With a 10-char id, text 1952c → entry 1967c → joined content is
-    // exactly RUNTIME_PRINCIPLE_BUDGET chars.
+  it('Case 3 — exact budget boundary: an entry that exactly fills the cap injects; one char over is oversized', async () => {
+    // PRI-1137: derive the exact boundary from the real shared packer instead of
+    // hard-coding wrapper arithmetic, so the test tracks the renderer.
     const exactId = 'P_BOUNDARY';
+    const emptyCost = packSharedDirectives({
+      scanOrder: [{
+        principleId: exactId,
+        text: '',
+        artifactId: 'artifact-P_BOUNDARY',
+        activationId: 'act-P_BOUNDARY',
+        authority: 'system_policy',
+      }],
+      budgetChars: Number.MAX_SAFE_INTEGER,
+      selfReportEnabled: false,
+      continueOnNonFit: false,
+    }).additionalContext.length;
+    const exactTextLen = RUNTIME_PRINCIPLE_BUDGET - emptyCost;
     const fits = await (async () => {
       const workspaceDir = tempWorkspace();
-      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(RUNTIME_PRINCIPLE_BUDGET - 48) }]);
+      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(exactTextLen) }]);
       return buildLivePromptInjectionProjection({ workspaceDir });
     })();
     expect(fits.truncated).toBe(false);
@@ -271,18 +231,21 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
 
     const over = await (async () => {
       const workspaceDir = tempWorkspace();
-      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(RUNTIME_PRINCIPLE_BUDGET - 47) }]);
+      await seedPromptActivations(workspaceDir, [{ principleId: exactId, text: 'Y'.repeat(exactTextLen + 1) }]);
       return buildLivePromptInjectionProjection({ workspaceDir });
     })();
-    expect(over.truncated).toBe(true);
+    // A single entry that cannot fit even an empty payload is OVERSIZED, not
+    // merely truncated: rotation/fairness cannot rescue it.
+    expect(over.truncated).toBe(false);
     expect(over.injectedPrincipleIds).toEqual([]);
+    expect(over.oversizedActivationIds).toEqual([`act-${exactId}`]);
   });
 
   it('degrades observably when there are no candidates and when the state db is missing (rc-9)', async () => {
     const empty = tempWorkspace();
     const emptyProjection = await buildLivePromptInjectionProjection({ workspaceDir: empty });
     expect(emptyProjection).toMatchObject({
-      route: 'legacy_trim', budget: RUNTIME_PRINCIPLE_BUDGET, usedChars: 0, truncated: false,
+      route: 'shared_render', budget: RUNTIME_PRINCIPLE_BUDGET, usedChars: 0, truncated: false,
     });
     expect(emptyProjection.injectedPrincipleIds).toEqual([]);
 

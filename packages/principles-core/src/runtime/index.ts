@@ -1630,6 +1630,9 @@ export {
   trimToBudget,
   listEntryLine,
   renderPrinciplesToDirectives,
+  // PRI-1137 final review P1-2: exact additive render measurement.
+  measureSharedDirectiveBlockChars,
+  sharedDirectiveBaseChars,
   PROMPT_BUDGET_POLICY_VERSION,
   PROMPT_BUDGET_BASE_CHARS,
   PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,

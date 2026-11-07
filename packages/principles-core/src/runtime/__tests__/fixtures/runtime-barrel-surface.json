@@ -1,6 +1,6 @@
 {
  "barrel": "src/runtime/index.ts",
- "count": 1978,
+ "count": 1980,
  "names": [
   "ADAPTIVE_DELIVERY_RECORD_ENUMS",
   "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1827,6 +1827,7 @@
   "mapSourceKind",
   "markOwnerResolutionApplied",
   "maxEvidencePreviewLength",
+  "measureSharedDirectiveBlockChars",
   "mergeDecisions",
   "mergePITaskMetadata",
   "migrateLegacyGfiSchema",
@@ -1931,6 +1932,7 @@
   "selectLearnedPrincipleV0",
   "selectLearnedPrincipleV1",
   "serializePITaskMetadata",
+  "sharedDirectiveBaseChars",
   "shouldCreateTask",
   "shouldShortCircuitEmptyEvidence",
   "status",

@@ -430,6 +430,11 @@ export class ApprovalsConsoleModel {
         workspaceDir: this.workspaceDir,
         artifactId,
         targetHost,
+        // PRI-1137 final review P2: this precheck measures the artifact THIS
+        // owner decision is about to stamp `authority="owner"` on — billing
+        // the pre-approval default (system_policy) overstated the entry by
+        // the attribute delta and could refuse a borderline-fitting entry.
+        authority: 'owner',
       });
     } catch (error) {
       // rc-9: a crashed precheck is NOT a pass — refuse with the reason.
@@ -570,23 +575,47 @@ export class ApprovalsConsoleModel {
     // PR-1894: fair rotation is the live plugin-local policy (PRI-904). An
     // activation that SOME round does inject is rotated out of the current
     // window, not starved — report that bounded fact instead of the old FIFO
-    // starvation claim. The shared route genuinely does not rotate, so its
-    // empty reachability set falls through to the starvation branch below.
-    if (projection.productionRotates && projection.eventuallyInjectedActivationIds.includes(activationId)) {
+    // starvation claim. Final review P1-1: the decision branches on the
+    // THREE-STATE production rotation — an unbound multi-host workspace is
+    // 'unknown', which must never be read as "all hosts are FIFO" (P1-4).
+    const rotation = projection.productionRotation;
+    if (rotation.state === 'rotates' && projection.eventuallyInjectedActivationIds.includes(activationId)) {
       const window = projection.eligibleCount;
-      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1).${budgetBasisNote} Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
+      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1).${budgetBasisNote} Fair rotation advances the window by one position per RECORDED user turn, so while the session's user-turn records keep succeeding this principle will enter agent behavior within at most ${window} consecutive user turns — a round that degrades to FIFO (missing sessionId / failed user_turns write / unreadable ordinal) does not advance the window, and deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
+    }
+    if (rotation.state === 'unknown') {
+      // Final review P1-4: no single host is bound, so NO single
+      // queue-vs-starved conclusion exists. Report the per-host judgments
+      // (each entry ran under ITS OWN budget basis) instead of a blended
+      // permanent-queue claim. The entry format avoids "word: " after "; "
+      // so the UI warning splitter never cuts mid-message.
+      const perHostNotes = (resolution.perHost ?? []).map((entry) => {
+        const p = entry.projection;
+        const reach = p.productionRotation.state === 'rotates'
+          ? (p.eventuallyInjectedActivationIds.includes(activationId)
+            ? `queued behind fair_rotation_v1 and enters within at most ${p.eligibleCount} recorded user turns`
+            : 'not reachable in any rotation round (its own entry exceeds the budget)')
+          : p.productionRotation.state === 'does_not_rotate'
+            ? 'FIFO by activated_at — stays out until capacity frees up'
+            : 'rotation not attributable';
+        return `${entry.hostKind}=${reach} (${p.usedChars}c/${p.budget}c ${describeBudgetBasis(entry.hostKind, budgetFacts, declaredBudgetByHost.get(entry.hostKind))})`;
+      }).join('; ');
+      const unknownCause = rotation.reason === 'host_facts_unreadable'
+        ? 'workspace host facts are unreadable'
+        : 'this workspace binds no single host';
+      return `injection_budget_rotation_unknown: the activation is committed but the prompt injection budget (${projection.budget}c) is full and ${unknownCause}, so a single queue-vs-starved conclusion cannot be drawn for the whole workspace. per-host judgment: ${perHostNotes}. nextAction=pass an explicit target host (openclaw|codex|workbuddy) for a binding verdict, or review the per-host capacity details on the focus page`;
     }
     // PR-1894: report the PRODUCTION policy, not the policy this forecast
     // happened to run. The console holds no session round key, so its own
     // projection is always `legacy_fifo_prefix_v1` even on a route where
     // production rotates — labelling that value "the current production
     // selection policy" would reintroduce exactly the lie this fix removes.
-    const policyNote = projection.productionRotates
+    const policyNote = rotation.state === 'rotates'
       ? 'production selection policy fair_rotation_v1'
       : 'production selection policy legacy_fifo_prefix_v1 (FIFO by activated_at)';
     // On a rotating route the only unreachable entries are oversized ones, so
     // say WHY rather than implying a positional problem that rotation solves.
-    const unreachableNote = projection.productionRotates
+    const unreachableNote = rotation.state === 'rotates'
       ? ' (this forecast ran without a round key, so the window shown is the legacy FIFO prefix; the entry is unreachable because it exceeds the budget on its own, not because of its position)'
       : '';
     return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c) is full and this activation is not reachable under the ${policyNote}; ${projection.injectedActivationIds.length}/${projection.eligibleCount} eligible injected${unreachableNote}.${budgetBasisNote} This principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles`;

@@ -18,10 +18,10 @@ import {
 } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { computePromptSingleItemFit } from './prompt-activation-deliverability.js';
+import { readPromptActivationAuthority } from './prompt-activation-authority.js';
 import {
   PROMPT_INJECTION_TARGET_HOSTS,
   buildLivePromptInjectionProjection,
-  promptRouteForHost,
   resolvePromptInjectionRouteDecision,
   type PromptInjectionBudgetScope,
   type PromptInjectionRouteDecision,
@@ -149,7 +149,7 @@ export async function readPromptActivationInjectionStatuses(input: {
   }
 
   type Row =
-    | { activationId: string; principleId: string; text: string }
+    | { activationId: string; principleId: string; text: string; authority?: 'owner' | 'system_policy' }
     | { activationId: string; failure: string };
   const rows: Row[] = [];
   let connection: SqliteConnection | undefined;
@@ -185,10 +185,20 @@ export async function readPromptActivationInjectionStatuses(input: {
         rows.push({ activationId: activation.activationId, failure: resolved.warning });
         continue;
       }
+      // PRI-1137: cost is measured exactly as the ONE shared prompt renders it,
+      // so an approval row must contribute its `authority` attribute here too.
+      // Unknown authority stays unannotated (never inferred).
+      let authority: 'owner' | 'system_policy' | undefined;
+      try {
+        ({ authority } = readPromptActivationAuthority(connection, artifact.artifactId, 'prompt'));
+      } catch {
+        authority = undefined;
+      }
       rows.push({
         activationId: activation.activationId,
         principleId: resolved.principle.principleId,
         text: resolved.principle.text,
+        ...(authority !== undefined ? { authority } : {}),
       });
     }
   } catch (error) {
@@ -209,10 +219,8 @@ export async function readPromptActivationInjectionStatuses(input: {
         return { activationId: row.activationId, status: 'resolution_failed', reason: row.failure };
       }
       const perHostFits = PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => {
-        const hostRoute = promptRouteForHost(hostKind, route.flagEnabled);
         const { costChars } = computePromptSingleItemFit({
-          principle: { principleId: row.principleId, text: row.text, artifactId: '', activationId: row.activationId },
-          route: hostRoute,
+          principle: { principleId: row.principleId, text: row.text, artifactId: '', activationId: row.activationId, ...(row.authority !== undefined ? { authority: row.authority } : {}) },
           selfReportEnabled,
         });
         return { hostKind, tierFit: classifySingleItemBudgetTier(costChars) };
@@ -241,14 +249,13 @@ export async function readPromptActivationInjectionStatuses(input: {
       return { activationId: row.activationId, status: 'resolution_failed', reason: row.failure };
     }
     const { fits, costChars } = computePromptSingleItemFit({
-      principle: { principleId: row.principleId, text: row.text, artifactId: '', activationId: row.activationId },
-      route: projection.route,
+      principle: { principleId: row.principleId, text: row.text, artifactId: '', activationId: row.activationId, ...(row.authority !== undefined ? { authority: row.authority } : {}) },
       selfReportEnabled,
       budget: projection.budget,
     });
     const inCurrentWindow = projection.injectedActivationIds.includes(row.activationId);
     const budgetScope: PromptInjectionBudgetScope = projection.budgetScope;
-    const serialization = projection.route === 'shared_render' ? 'full directive render' : 'list entry';
+    const serialization = 'full directive render';
     // Tier verdict FIRST (SPEC §6.3): the projection budget on this surface
     // is the fixed fallback (2000) unless the caller passed a runtime budget
     // OBSERVATION (PRI-1017) — and even then an entry in (MIN, fallback]

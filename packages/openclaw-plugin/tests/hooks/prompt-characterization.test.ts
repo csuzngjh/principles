@@ -33,7 +33,7 @@ const {
   mockListAssistantTurns,
   mockListUserTurnsForSession,
 } = vi.hoisted(() => ({
-  mockDetectSync: vi.fn(),
+  mockDetectSync: vi.fn(() => ({ status: 'user_turn_persisted', userTurnRowid: 1 })),
   mockListAssistantTurns: vi.fn().mockReturnValue([]),
   mockListUserTurnsForSession: vi.fn().mockReturnValue([]),
 }));
