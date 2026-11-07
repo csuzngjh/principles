@@ -12,9 +12,9 @@
     "baseCommit": "86b6208042b6083d4a7bbf840730d060188a1517",
     "headCommit": "本检查点提交前的文档提交；最终 head 以 PR 页面为准。",
     "dirtyPaths": [],
-    "prUrl": "PENDING",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2399",
     "prState": "OPEN",
-    "remoteChecks": "PR 创建后读取；不得在本地测试通过时宣称 CI 通过。"
+    "remoteChecks": "head 57288af90：docs-only，绝大多数 job 被 CI Impact Gate 跳过（skipping）；CI Impact Gate / Dependency Audit / PR <-> Linear link 等 PASS；Verify Merge Gate 创建时为 pending，最终以 PR 页面为准。"
   },
   "tasks": [
     {
@@ -183,11 +183,11 @@
     {
       "id": "evidence-pr",
       "kind": "INLINE",
-      "locator": "PENDING",
-      "observedAt": "2026-11-07T00:13:00Z",
+      "locator": "https://github.com/csuzngjh/principles/pull/2399",
+      "observedAt": "2026-11-07T00:20:00Z",
       "sha256": null,
-      "supports": "新 PR OPEN，不合并。",
-      "limitations": "创建后回填 URL。"
+      "supports": "PR #2399 OPEN，head 57288af90，mergeable=MERGEABLE，不合并。",
+      "limitations": "Verify Merge Gate 在记录时为 pending；以 PR 页面最终状态为准。"
     }
   ],
   "artifacts": [
