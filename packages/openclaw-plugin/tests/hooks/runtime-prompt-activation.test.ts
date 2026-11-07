@@ -13,6 +13,8 @@ import {
 } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import { PromptActivationReader, RUNTIME_PRINCIPLE_BUDGET } from '../../src/core/runtime-prompt-activation-reader.js';
+import { TrajectoryRegistry } from '../../src/core/trajectory.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as yaml from 'js-yaml';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 
@@ -54,6 +56,11 @@ afterEach(() => {
     sqliteConn?.close();
   } catch {
     // best-effort
+  }
+  try {
+    TrajectoryRegistry.dispose(tempWorkspaceDir);
+  } catch {
+    // best-effort: release the real trajectory connection before deleting the dir
   }
   try {
     fs.rmSync(tempWorkspaceDir, { recursive: true, force: true });
@@ -102,7 +109,7 @@ vi.mock('../../src/core/workspace-context.js', async () => {
         workspaceDir: tempWorkspaceDir,
         stateDir: tempStateDir,
         resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
-        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn().mockReturnValue(1) },
         config: { get: vi.fn() },
         eventLog: mockEventLog,
         evolutionReducer: {
@@ -114,7 +121,7 @@ vi.mock('../../src/core/workspace-context.js', async () => {
         workspaceDir: tempWorkspaceDir,
         stateDir: tempStateDir,
         resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
-        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn().mockReturnValue(1) },
         config: { get: vi.fn() },
         eventLog: mockEventLog,
         evolutionReducer: {
@@ -1877,38 +1884,21 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
   }
 
   /**
-   * Real production round fact: the same trajectory.db table, path and index
-   * the production writer (TrajectoryDatabase.recordUserTurn) uses. Rows are
-   * inserted exactly as a recorded user turn, so the hook reads a real
-   * advancing ordinal — not a synthetic key search.
+   * Real production round fact: rows go through the REAL TrajectoryDatabase
+   * writer into `<workspace>/.state/trajectory.db`, the same table and schema
+   * `nextSessionTurnOrdinal` reads. A hand-rolled subset schema used to make
+   * the production insert fail while the test still passed on a stale ordinal —
+   * exactly the PRI-1137 bug.
    */
   function recordUserTurnRow(sessionId: string, turnIndex: number): void {
-    const stateDir = path.join(tempWorkspaceDir, '.state');
-    fs.mkdirSync(stateDir, { recursive: true });
-    const dbPath = path.join(stateDir, 'trajectory.db');
-    if (!fs.existsSync(dbPath)) {
-      const bootstrap = new Database(dbPath);
-      bootstrap.exec(`
-        CREATE TABLE IF NOT EXISTS user_turns (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL,
-          turn_index INTEGER NOT NULL,
-          raw_text TEXT,
-          correction_detected INTEGER DEFAULT 0,
-          created_at TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
-      `);
-      bootstrap.close();
-    }
-    const db = new Database(dbPath);
-    try {
-      db.prepare(
-        'INSERT INTO user_turns (session_id, turn_index, raw_text, correction_detected, created_at) VALUES (?, ?, ?, 0, ?)',
-      ).run(sessionId, turnIndex, `user message ${turnIndex}`, new Date().toISOString());
-    } finally {
-      db.close();
-    }
+    TrajectoryRegistry.get(tempWorkspaceDir).recordUserTurn({
+      sessionId,
+      turnIndex,
+      rawText: `user message ${turnIndex}`,
+      correctionDetected: false,
+      correctionCue: null,
+      referencesAssistantTurnId: null,
+    });
   }
 
   it('T-PROD-01: 16 real user turns give bounded coverage — every fixture principle reaches the prompt', async () => {
@@ -1999,6 +1989,65 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
     expect(payload.injectedCount).toBeGreaterThan(0);
     expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
+  });
+
+  it('P1-A: a failed user_turns write yields NO round key, FIFO selection, and an unclaimed run', async () => {
+    await seedPri904Fixture();
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
+    const { handleBeforePromptBuild, prepareOpenClawPromptRound } = await import('../../src/hooks/prompt.js');
+    const { nextSessionTurnOrdinal } = await import('@principles/core/trajectory-store');
+
+    const sessionId = 'pri1137-write-failure';
+    recordUserTurnRow(sessionId, 1);
+    recordUserTurnRow(sessionId, 2);
+    recordUserTurnRow(sessionId, 3);
+
+    // The historical ordinal is still readable (4) — exactly why a swallowed
+    // write failure used to look like a legitimate fair-rotation round.
+    expect(nextSessionTurnOrdinal(tempWorkspaceDir, sessionId)).toBe(4);
+
+    // Make the trajectory writer FAIL for this test while the real DB stays
+    // readable. This is the same shape as production `recordUserTurn` throwing.
+    const wcModule = await import('../../src/core/workspace-context.js');
+    const mockedFromHook = vi.mocked(wcModule.WorkspaceContext.fromHookContext);
+    const defaultImpl = mockedFromHook.getMockImplementation()!;
+    mockedFromHook.mockImplementation((ctx: Parameters<typeof defaultImpl>[0]) => {
+      const base = defaultImpl(ctx) as { trajectory: Record<string, unknown> };
+      return {
+        ...(base as object),
+        trajectory: {
+          ...base.trajectory,
+          recordUserTurn: () => { throw new Error('user_turns write blocked by test'); },
+        },
+      } as ReturnType<typeof defaultImpl>;
+    });
+
+    try {
+      spy.mockClear();
+      const evt = makeMinimalEvent({ sessionId });
+      const ctx = makeCtx({ sessionId, runId: 'run-write-failure' });
+      expect(prepareOpenClawPromptRound(evt, ctx)).toBeUndefined();
+
+      const prompt = await buildSharedPrompt(ctx);
+      const result = await handleBeforePromptBuild(evt, ctx, prompt);
+      const payload = spy.mock.calls[0]![0] as {
+        selectionPolicy: string; rotationStartIndex?: number; selectionRoundOrdinal?: number;
+      };
+      expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+      expect(payload.rotationStartIndex).toBeUndefined();
+      expect(payload.selectionRoundOrdinal).toBeUndefined();
+      expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
+
+      // Same run, NEW event: the failed attempt must NOT have claimed the run.
+      // If it had, the retry would take the "already collected" branch and reuse
+      // ordinal 4 — i.e. claim fair rotation for a round that was never written.
+      const retryEvt = makeMinimalEvent({ sessionId });
+      const retryCtx = makeCtx({ sessionId, runId: 'run-write-failure' });
+      expect(prepareOpenClawPromptRound(retryEvt, retryCtx)).toBeUndefined();
+    } finally {
+      mockedFromHook.mockImplementation(defaultImpl);
+    }
   });
 
   it('the injected event matches the shared packer exactly for the same round ordinal (one selector, no second arithmetic)', async () => {

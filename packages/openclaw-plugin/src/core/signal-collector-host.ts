@@ -126,6 +126,18 @@ interface PendingSignal {
 export type SignalLlmClassifier = (text: string, promptTemplate: string) =>
   Promise<{ is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string } | null>;
 
+/**
+ * PRI-1137: `detectSync` must report whether THIS invocation's `user_turns`
+ * row was actually persisted. A `void` return made a swallowed write failure
+ * indistinguishable from success, so the shared round-key provider could read
+ * a PREVIOUS ordinal and claim fair rotation for a round that was never
+ * recorded. Only `user_turn_persisted` authorises a round key / run claim.
+ */
+export type SignalSyncOutcome =
+  | { readonly status: 'not_user_interaction' }
+  | { readonly status: 'user_turn_persisted'; readonly userTurnRowid: number }
+  | { readonly status: 'user_turn_persist_failed'; readonly reason: string };
+
 export interface SignalCollectorHostOptions {
   keywordStore?: UnifiedKeywordStore;
   /**
@@ -184,12 +196,12 @@ export class SignalCollectorHost {
     sessionId: string,
     trigger: string,
     options?: { referencesAssistantTurnId?: number | null; turnIndex?: number },
-  ): void {
+  ): SignalSyncOutcome {
     // 1. trigger 门控:仅处理真实用户交互(user/api/undefined)。
     //    与 prompt.ts 共享 isUserInteractionTrigger,避免两处门控不一致导致
     //    api/undefined 触发的纠正信号在 detectSync 内部被静默丢弃。
     if (!isUserInteractionTrigger(trigger)) {
-      return;
+      return { status: 'not_user_interaction' };
     }
 
     // 2. Stage1 关键词快扫 (同步,零成本)。detectedAt 由 plugin 层注入(core 不取时间,CodeRabbit #11)
@@ -210,11 +222,22 @@ export class SignalCollectorHost {
       referencesAssistantTurnId: options?.referencesAssistantTurnId ?? null,
     };
     let userTurnRowid: number | undefined;
+    let persistFailureReason: string | undefined;
     try {
-      userTurnRowid = this.wctx.trajectory?.recordUserTurn?.(turnInput);
+      const rowid = this.wctx.trajectory?.recordUserTurn?.(turnInput);
+      if (typeof rowid === 'number' && Number.isInteger(rowid)) {
+        userTurnRowid = rowid;
+      } else {
+        // No writer / no rowid is a persistence FAILURE, never a silent success.
+        persistFailureReason = 'trajectory_writer_unavailable';
+      }
     } catch (e) {
+      persistFailureReason = `record_user_turn_threw: ${String(e)}`;
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_TRAJECTORY_FAIL', `recordUserTurn threw: ${String(e)}`);
     }
+    const persistence: SignalSyncOutcome = userTurnRowid !== undefined
+      ? { status: 'user_turn_persisted', userTurnRowid }
+      : { status: 'user_turn_persist_failed', reason: persistFailureReason ?? 'record_user_turn_returned_no_rowid' };
 
     // 5. 高精度短语命中 (high, STRONG) → 直接走 STRONG 分流 (同步)
     if (output.isSignal && output.strength === 'STRONG' && output.matchedPrecision === 'high') {
@@ -228,7 +251,7 @@ export class SignalCollectorHost {
         turnIndex: options?.turnIndex,
         referencesAssistantTurnId: options?.referencesAssistantTurnId ?? undefined,
       });
-      return;
+      return persistence;
     }
 
     // 6. 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞 prompt hook)
@@ -239,7 +262,7 @@ export class SignalCollectorHost {
       const willCallLlm = this.llmClassifier !== null && this.config.enableLlmStage;
       if (willCallLlm && output.matchedTerms.length === 0 && !this.takeDiscoveryBudget()) {
         this.countStage2DiscoverySkipped();
-        return;
+        return persistence;
       }
       const pending: PendingSignal = {
         output,
@@ -254,6 +277,7 @@ export class SignalCollectorHost {
       // fire-and-forget,失败不影响用户消息处理 (spec §4.2)
       void this.detectAsyncAndRoute(pending);
     }
+    return persistence;
   }
 
   /**
