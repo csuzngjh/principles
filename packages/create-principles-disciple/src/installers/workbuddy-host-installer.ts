@@ -53,6 +53,11 @@ import {
   mergeInstallManifestWorkspaces,
   parseInstallManifest,
   INSTALL_LAYOUT_VERSION,
+  WORKBUDDY_PLUGIN_KEY,
+  WORKBUDDY_PLUGIN_NAME,
+  WORKBUDDY_MARKETPLACE_NAME,
+  interpretWorkbuddyPluginState,
+  getWorkbuddyHostConfigPaths,
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
@@ -73,12 +78,11 @@ import type {
 // package ships self-contained without @principles/core (PRI-625/PRI-669).
 
 // ─── Frozen host contract constants ─────────────────────────────────────────
-/** Plugin name inside the PD-owned marketplace (kebab-case per plugin.json contract). */
-export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
-/** PD-owned local marketplace name. enabledPlugins keys use "plugin@marketplace". */
-export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
-/** Registry/settings key: "principles-disciple@principles-disciple-market". */
-export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
+/**
+ * Re-exported from @principles/install-layout — the ONE state/path definition
+ * shared with pd-cli health (2026-11-07). Same values, single authority.
+ */
+export { WORKBUDDY_PLUGIN_KEY, WORKBUDDY_PLUGIN_NAME, WORKBUDDY_MARKETPLACE_NAME };
 const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 
 /**
@@ -261,24 +265,18 @@ export interface WorkbuddyPaths {
 
 export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
   const layout = getInstallLayoutPaths(homeDir);
+  // HOST CONFIG PATHS (2026-11-07): delegated to install-layout's single
+  // authority (getWorkbuddyHostConfigPaths) so pd-cli health resolves the
+  // same settings/registry paths the installer writes — never a second truth.
   // The frozen governance dir (~/.workbuddy/pd-workspace) defines the host
-  // config root; deriving configDir from it keeps one path authority.
-  //
-  // HOST BOUNDARY (review P3, probe P0 fact): this installer targets the
-  // WorkBuddy DESKTOP host, whose registration root is ~/.workbuddy (real
-  // desktop plugins observed there). The standalone CLI engine's user-scope
-  // root is ~/.codebuddy (CODEBUDDY_CONFIG_DIR); a CLI-only user's engine
-  // will not read a registration written here. WORKBUDDY_CONFIG_DIR remains
-  // the isolation override (Phase 0 lab discipline).
-  const configDir = process.env.WORKBUDDY_CONFIG_DIR && process.env.WORKBUDDY_CONFIG_DIR.length > 0
-    ? path.resolve(process.env.WORKBUDDY_CONFIG_DIR)
-    : path.dirname(getWorkbuddyWorkspaceDir(homeDir));
+  // config root; WORKBUDDY_CONFIG_DIR remains the isolation override.
+  const hostPaths = getWorkbuddyHostConfigPaths(homeDir, process.env.WORKBUDDY_CONFIG_DIR);
   return {
     homeDir: layout.homeDir,
-    configDir,
-    settingsPath: path.join(configDir, 'settings.json'),
-    registryPath: path.join(configDir, 'plugins', 'installed_plugins.json'),
-    cachePluginRoot: path.join(configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME),
+    configDir: hostPaths.configDir,
+    settingsPath: hostPaths.settingsPath,
+    registryPath: hostPaths.registryPath,
+    cachePluginRoot: path.join(hostPaths.configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME),
     marketplaceRoot: path.join(layout.pdDir, 'workbuddy-marketplace'),
     governanceDir: getWorkbuddyWorkspaceDir(homeDir),
     runtimeAdapterDir: layout.workbuddyAdapterDir,
@@ -1078,17 +1076,15 @@ export function ensureWorkbuddyGovernanceEnabled(
  */
 export function readWorkbuddyPluginState(p: WorkbuddyPaths): HostPluginStateSummary {
   const registry = readHostJsonFile(p.registryPath);
-  const registered = registry.ok && registry.existed && isRecord(registry.value.plugins)
-    ? Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)
-    : false;
   const settings = readHostJsonFile(p.settingsPath);
-  const enabledPlugins = settings.ok && isRecord(settings.value?.enabledPlugins) ? settings.value.enabledPlugins : undefined;
-  const raw = enabledPlugins === undefined ? undefined : enabledPlugins[WORKBUDDY_PLUGIN_KEY];
-  return {
-    registered,
+  // The judgment is the SHARED install-layout interpreter (2026-11-07) —
+  // pd-cli health reports the same three facts from the same rules.
+  const view = interpretWorkbuddyPluginState({
+    registryParsed: registry.ok ? registry.value : undefined,
+    settingsParsed: settings.ok ? settings.value : undefined,
     registryReadable: registry.ok,
-    enabled: typeof raw === 'boolean' ? raw : null,
-  };
+  });
+  return { registered: view.registered, registryReadable: view.registryReadable, enabled: view.enabled };
 }
 
 /**
