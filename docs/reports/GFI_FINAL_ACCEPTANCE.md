@@ -124,3 +124,27 @@
 | Console 三个模型 | `pd-console/src/server/models/*.ts` | 读 | 不适用 | 不受影响（只读投影） |
 
 **结论：没有第三处同类风险。** 但有一处**主动选择不收敛**的入口（`reviewCorrectionSample` / `governance-observation-store`）：它们在不迁移的旧库上也能正确工作，强加迁移会扩大改动面且无收益，按 P3 保持现状。
+
+---
+
+## 8. 2026-11-07 状态追加（最终架构收敛复核）
+
+> 本节为**追加状态**，不改写 §1–§7 的历史验收记录。
+
+- **代码基线**：`origin/main@9c07876207655b4ac9757fb3510a69f3bb9dfa30`（PR #2401 rebase 后基线）。
+- **路径注记**：§7.4 表中的 `runtime-v2/gfi/` 在 PRI-1136 改名后的现行路径为
+  `runtime/gfi/`；该目录**已完全不存在**（非“仅剩空 `__tests__` 占位”）。
+- **§7.4 断言更正**：`COMPONENTS.md` 中的“仅剩空 `__tests__`”描述已过期；
+  本轮已更新架构文档为“目录不存在，仅保留 `gone` 墓碑”。
+- **历史 JSON 数据**：`.state/sessions/*.json` 与 `.state/logs/daily-stats.json`
+  的 GFI 字段清理**仍未实施**；本轮不触碰真实 Owner 数据。
+  独立跟踪：**Linear PRI-1149**。
+- **`gfi` 墓碑**：Owner 2026-11-07 正式批准**方案 A**（保留纯防御性 `gone`
+  tombstone）；`GFI_COMPLETE_REMOVAL_SPEC.md` v1.3 §5.1 已从“不保留 tombstone”
+  改为“允许纯防御性墓碑、不得具有任何执行能力”。状态：
+  `OWNER_APPROVED / SPEC_ALIGNMENT_REQUIRED → 已对齐`。
+- **总体状态**：`PASS_WITH_LIMITATIONS` 的历史裁定对**代码侧**仍然成立；
+  但“历史数据清理”仍未闭合，因此 GFI 完整退役整体裁定为 **PARTIALLY_IMPLEMENTED**。
+  该状态不因 DC-01 获批而改变。
+
+完整证据见 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。
