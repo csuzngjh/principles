@@ -1094,23 +1094,13 @@ export async function handleBeforePromptBuild(
     }
   );
 
+  // Pre-guard snapshot for truncated-fragment classification (presence forensics).
+  const preGuardPrependSystemContext = prependSystemContext;
+  let presenceFallbackApplied = false;
+
   prependSystemContext = result.prependSystemContext;
   prependContext = result.prependContext;
   appendSystemContext = result.appendSystemContext;
-
-  // ──── 8.5 PRESENCE EXPECTATIONS (prompt presence forensics, design v1.2) ────
-  // Frozen AFTER the size guard: bodyText is exactly what this hook returns;
-  // bodyComplete=false marks a truncated fragment (never yields a full_hit).
-  // Fail-open, memory-only; see prompt-presence-expectations.ts.
-  const injectedExpectations = buildInjectedExpectations({
-    assembledPrependSystemContext: prependSystemContext,
-    target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
-      ? { activationId: adaptiveExpectedTarget.activationId, body: adaptiveTargetBody }
-      : undefined,
-    rendered: dedupedV2
-      .filter((p) => runtimePrincipleIds.has(p.principleId))
-      .map((p) => ({ activationId: p.activationId, body: escapeXml(p.text) })),
-  });
 
   if (result.truncated) {
     const logEntry = result.truncationLog.join(', ');
@@ -1134,6 +1124,10 @@ export async function handleBeforePromptBuild(
       prependSystemContext = guarded.prependSystemContext;
       prependContext = guarded.prependContext;
       appendSystemContext = guarded.appendSystemContext;
+      // Presence forensics: a fallback REPLACED the assembly — the pre-guard
+      // snapshot no longer describes what was returned, so truncated-fragment
+      // classification must not apply.
+      presenceFallbackApplied = true;
       runtimePrincipleIds.clear();
       for (const id of fallback.ids) runtimePrincipleIds.add(id);
       runtimePrinciplesContent = fallback.text;
@@ -1171,6 +1165,24 @@ export async function handleBeforePromptBuild(
     }
   }
 
+  // ──── 8.6 PRESENCE EXPECTATIONS (prompt presence forensics, design v1.2) ────
+  // Frozen AFTER all body, authorization, timeout and budget fallbacks: the
+  // classification runs against the FINAL text this hook returns. Candidates no
+  // longer present after a fallback are excluded entirely; pre-guard fragments
+  // (truncation without fallback) are marked bodyComplete=false and can never
+  // yield a full_hit. Fail-open, memory-only; see prompt-presence-expectations.ts.
+  const presenceExpectations = buildInjectedExpectations({
+    finalAssembly: prependSystemContext,
+    preGuardAssembly: presenceFallbackApplied ? undefined : preGuardPrependSystemContext,
+    target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
+      ? { activationId: adaptiveExpectedTarget.activationId, body: adaptiveTargetBody }
+      : undefined,
+    rendered: dedupedV2
+      .filter((p) => runtimePrincipleIds.has(p.principleId))
+      .map((p) => ({ activationId: p.activationId, body: p.text })),
+    escape: escapeXml,
+  });
+
   // Commit only the final selection, including a late deadline/revision/budget fallback.
   try { commitRuntimeEvidence?.(); } catch (error) {
     logger?.warn?.(`[PD:Runtime] Final prompt evidence unavailable: ${String(error)}`);
@@ -1204,6 +1216,13 @@ export async function handleBeforePromptBuild(
     prependSystemContext,
     prependContext,
     appendSystemContext,
-    ...(injectedExpectations ? { injectedExpectations } : {})
+    ...(presenceExpectations && presenceExpectations.expectations.length > 0
+      ? {
+          injectedExpectations: presenceExpectations.expectations,
+          ...(presenceExpectations.overflowCount > 0
+            ? { injectedExpectationsOverflow: presenceExpectations.overflowCount }
+            : {}),
+        }
+      : {})
   };
 }

@@ -191,3 +191,14 @@ type PresenceCheck = {
 ## 12. 真实运行卡（仅为草案，本轮不执行、不请求批准）
 
 待离线实现验收后，如需在真实宿主验证：专用单 agent、1 次 responses 路径 + 1 次 completions 路径真实请求、预算上限、时长上限、停用方式（revert + 重装官方版本）、验收=事件含 presenceCheck 且字段与离线 fixture 一致。**本轮不出卡、不申请。**
+
+## 13. v1.2.1 实施修订记录（2026-11-07 评审收口轮）
+
+评审收口轮对已批准 v1.2 的实施修订（均随 openclaw PR 与 PD PR 落地，测试先红后绿）：
+
+1. **正文匹配 per-API 契约**：completions 读标准 `{type:"text"}` 部件（宿主缓存路径实际生成该格式），responses 读 `input_text`；互不越界。合法角色不可解析内容 → 整次检查 `unknown:unparseable_content`（不能完整排除目标时禁止 `checked_missing`）；空/空白 bodyText → `unknown:invalid_body`（`includes("")` 恒真，绝不允许空正文充数）。
+2. **逻辑请求序数绑定 streamFn 调用边界**：最外层 wrapper 层经 options-keyed request token 每次调用只递增一次；内层观察到 token 即传播。同 run 多请求序数递增、重试保持同一 requestIndex 且 attemptIndex 递增、并发 run 隔离、工具后第二次请求复用当前装配快照。测试通过**同一生产 wrapper 连续两次调用**驱动，不手动改生产计数器。
+3. **最终装配快照**：PD 冻结移到尺寸守卫、最终重验、deadline/最终预算回退**全部完成之后**；分类=最终装配包含→bodyComplete=true；仅 pre-guard 存在（截断、无回退）→bodyComplete=false；两者皆非（回退撤下）→**整条排除**。残片永不重定义为完整正文。
+4. **有界性与溢出事实**：收集期有界（escape/normalize 只对保留条目执行），64 条上限溢出以 `injectedExpectationsOverflow` 贯穿 hook 结果→白名单→carrier→`presenceCheck.expectationsOverflow` 事件字段；不再静默丢弃。
+5. **shared route 缺口**：默认主路径的逐原则正文在 host-runtime 内部，插件不可见——需 host-runtime 接口增量，见 [PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md](./PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md)（**待 Owner 批准**，未实施）。
+6. **交付范围修正**：openclaw 上游贡献改为基于 upstream main 的最小移植分支（新 PR）；`ai/prompt-presence-check`（release/2026.11.1 基线）保留为本地版本验证分支；旧 PR #194566 处置见 PR 正文与 Linear。
