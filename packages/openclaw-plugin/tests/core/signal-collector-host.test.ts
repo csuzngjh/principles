@@ -136,6 +136,65 @@ describe('SignalCollectorHost.detectSync', () => {
   // real turn → NEW pain occurrence (the "principle didn't take" signal must
   // not be swallowed by permanent dedup).
 
+  it('same-run retry after user_turn persistence failure reuses Stage1 and the pending LLM decision', async () => {
+    const wctx = makeMockWctx();
+    const recordUserTurn = vi.fn().mockReturnValueOnce(undefined).mockReturnValueOnce(42);
+    const markUserTurnCorrection = vi.fn().mockReturnValue(true);
+    wctx.trajectory.recordUserTurn = recordUserTurn;
+    (wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>).markUserTurnCorrection = markUserTurnCorrection;
+
+    let resolveClassifier: ((value: {
+      is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string;
+    } | null) => void) | undefined;
+    const llmClassifier = vi.fn(() => new Promise<{
+      is_feedback: boolean; type: 'correction' | 'none'; confidence: number; reason: string;
+    } | null>((resolve) => { resolveClassifier = resolve; }));
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig, llmClassifier });
+    const options = { turnIndex: 10, idempotencyKey: 'sess-retry\u0000run-1' };
+
+    const first = host.detectSync('这个不对', 'sess-retry', 'user', options);
+    expect(first.status).toBe('user_turn_persist_failed');
+    expect(llmClassifier).toHaveBeenCalledTimes(1);
+
+    const retry = host.detectSync('这个不对', 'sess-retry', 'user', options);
+    expect(retry).toEqual({ status: 'user_turn_persisted', userTurnRowid: 42 });
+    expect(recordUserTurn).toHaveBeenCalledTimes(2);
+    expect(llmClassifier).toHaveBeenCalledTimes(1);
+
+    resolveClassifier?.({ is_feedback: true, type: 'correction', confidence: 0.9, reason: 'confirmed correction' });
+    await flushAsync();
+
+    // The in-flight Stage2 verdict is rebound to the row created by the retry.
+    expect(markUserTurnCorrection).toHaveBeenCalledWith(42, '不对');
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+
+    // A later duplicate callback reuses the successful persistence result too.
+    const replay = host.detectSync('这个不对', 'sess-retry', 'user', options);
+    expect(replay).toEqual({ status: 'user_turn_persisted', userTurnRowid: 42 });
+    expect(recordUserTurn).toHaveBeenCalledTimes(2);
+    expect(llmClassifier).toHaveBeenCalledTimes(1);
+  });
+
+  it('same-run retry after a failed user_turn write does not route a STRONG signal twice', async () => {
+    const wctx = makeMockWctx();
+    const recordUserTurn = vi.fn().mockReturnValueOnce(undefined).mockReturnValueOnce(77);
+    wctx.trajectory.recordUserTurn = recordUserTurn;
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });
+    const options = { turnIndex: 4, idempotencyKey: 'sess-strong\u0000run-strong' };
+
+    const first = host.detectSync('这是错的', 'sess-strong', 'user', options);
+    expect(first.status).toBe('user_turn_persist_failed');
+    await flushAsync();
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+
+    const retry = host.detectSync('这是错的', 'sess-strong', 'user', options);
+    expect(retry).toEqual({ status: 'user_turn_persisted', userTurnRowid: 77 });
+    await flushAsync();
+
+    expect(recordUserTurn).toHaveBeenCalledTimes(2);
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+  });
+
   it('P1-3 same occurrence retry (same session, same turnIndex) → same canonical pain id', async () => {
     const wctx = makeMockWctx();
     const host = makeHost(wctx, { keywordStore: testStore, config: testConfig });

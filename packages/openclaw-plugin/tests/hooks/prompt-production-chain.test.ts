@@ -55,6 +55,14 @@ vi.mock('../../src/core/event-log.js', () => {
   };
 });
 
+vi.mock('../../src/hooks/pain.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/hooks/pain.js')>();
+  return {
+    ...actual,
+    emitPainDetectedEvent: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 // The workspace context seam is mocked so the prompt chain runs against the
 // REAL TrajectoryDatabase (the user_turns authority) while the event log stays
 // a capture point. The trajectory is resolved lazily per property through a
@@ -163,6 +171,7 @@ vi.mock('../../src/core/product-telemetry-trigger.js', () => ({
 }));
 
 const { EventLogService } = await import('../../src/core/event-log.js');
+const { emitPainDetectedEvent } = await import('../../src/hooks/pain.js');
 const { default: plugin } = await import('../../src/index.js');
 
 const TEST_PRINCIPLE_TEXT = 'UNIQUE_PROD_CHAIN_PRINCIPLE_4k8z1';
@@ -337,6 +346,30 @@ describe('PRI-1137 P2: the real registration → shared-runtime prompt productio
     expect(payload.selectionRoundOrdinal).toBeUndefined();
     // FIFO degradation still injects — the prompt build never fails on the round authority.
     expect(result?.prependSystemContext).toContain(text);
+  });
+
+  it('same-run retry after a user_turn write failure persists once and routes STRONG only once', async () => {
+    await seedOnePrinciple();
+    const sessionId = 'prod-chain-session-signal-retry';
+    trajectoryControl.mode = 'fail_write';
+
+    const firstEvent = { ...makeEvent(sessionId, 'run-signal-retry'), prompt: '这是错的' };
+    const first = await hook?.(firstEvent, makeHookCtx(sessionId, 'run-signal-retry')) as
+      { prependSystemContext?: string } | undefined;
+    expect(first?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    expect(userTurnRows(sessionId).count).toBe(0);
+
+    // The same host run retries its failed durable write. Stage-1 classification
+    // and STRONG routing are reused; only user_turn persistence is retried.
+    trajectoryControl.mode = 'real';
+    const retryEvent = { ...makeEvent(sessionId, 'run-signal-retry'), prompt: '这是错的' };
+    const retry = await hook?.(retryEvent, makeHookCtx(sessionId, 'run-signal-retry')) as
+      { prependSystemContext?: string } | undefined;
+    expect(retry?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    expect(userTurnRows(sessionId).count).toBe(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
 
   it('missing sessionId: no round key is fabricated and nothing is written', async () => {

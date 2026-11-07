@@ -485,7 +485,11 @@ export function prepareOpenClawPromptRound(
   try {
     const outcome = getSignalCollectorHost(wctx, logger).detectSync(
       currentUserMessage, sessionId, trigger ?? 'api',
-      { referencesAssistantTurnId, turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages) },
+      {
+        referencesAssistantTurnId,
+        turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages),
+        ...(runId ? { idempotencyKey: `${sessionKey ?? sessionId}\u0000${runId}` } : {}),
+      },
     );
     if (outcome?.status !== 'user_turn_persisted') {
       // The write did not land (threw / no rowid / stub returned nothing):
@@ -917,12 +921,14 @@ export async function handleBeforePromptBuild(
         }
       }
       if (admissionHandoffMissing && sharedActivePrinciplePrompt.adaptivePacking?.nativeBaseline) {
-        runtimePrinciplesContent = sharedActivePrinciplePrompt.adaptivePacking.nativeBaseline.additionalContext;
-        for (const id of sharedActivePrinciplePrompt.adaptivePacking.nativeBaseline.principleIds) runtimePrincipleIds.add(id);
-      } else {
-        runtimePrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
-        for (const id of sharedActivePrinciplePrompt.principleIds) runtimePrincipleIds.add(id);
+        // The Native fallback is the effective prompt, not just replacement
+        // text. Rebind the result before any evidence writer runs so content,
+        // principle/activation/artifact IDs, budget and selection metadata all
+        // describe the same prompt that will be returned to the host.
+        sharedActivePrinciplePrompt = sharedActivePrinciplePrompt.adaptivePacking.nativeBaseline;
       }
+      runtimePrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
+      for (const id of sharedActivePrinciplePrompt.principleIds) runtimePrincipleIds.add(id);
       v2Truncated = sharedActivePrinciplePrompt.truncated;
       v2SelectionPolicy = sharedActivePrinciplePrompt.selectionPolicy;
       v2EligibleCount = sharedActivePrinciplePrompt.eligibleCount;

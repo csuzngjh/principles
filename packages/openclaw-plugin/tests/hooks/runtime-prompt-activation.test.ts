@@ -132,13 +132,17 @@ vi.mock('../../src/core/workspace-context.js', async () => {
   };
 });
 
-vi.mock('../../src/core/session-tracker.js', () => ({
-  getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),
-  resetFriction: vi.fn(),
-  trackFriction: vi.fn(),
-  decayGfi: vi.fn(),
-  getGfiDecayElapsed: vi.fn().mockReturnValue(0),
-}));
+vi.mock('../../src/core/session-tracker.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/session-tracker.js')>();
+  return {
+    ...actual,
+    getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),
+    resetFriction: vi.fn(),
+    trackFriction: vi.fn(),
+    decayGfi: vi.fn(),
+    getGfiDecayElapsed: vi.fn().mockReturnValue(0),
+  };
+});
 
 vi.mock('../../src/core/path-resolver.js', () => ({
   PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
@@ -680,8 +684,8 @@ describe('Controlled admission — real local/shared entries', () => {
     }
   }
 
-  function configuredWith(principleId: string) {
-    const ctx = makeCtx();
+  function configuredWith(principleId: string, sessionId = 'test-session-v2') {
+    const ctx = makeCtx({ sessionId });
     if (!ctx.api) throw new Error('test requires plugin API');
     ctx.api.pluginConfig = { adaptiveActivation: {
       enabled: true, workspaceDir: tempWorkspaceDir, artifactId: `art-${principleId}`,
@@ -819,11 +823,48 @@ describe('Controlled admission — real local/shared entries', () => {
     expect(takeControlledAdmissionHandoff(event, packed.adaptivePacking.hookInvocationId)).toBeNull();
 
     // A duplicate callback for the same packed round cannot re-apply the target.
-    const replayEvent = { ...event };
-    const replay = await handleBeforePromptBuild(replayEvent, ctx, packed);
+    // Use a fresh session so every receipt below belongs only to the fallback
+    // invocation (the first, valid invocation legitimately recorded the target).
+    const replaySessionId = 'test-session-v2-replay';
+    const replayEvent = { ...event, sessionId: replaySessionId };
+    const replayCtx = configuredWith(target, replaySessionId);
+    const replay = await handleBeforePromptBuild(replayEvent, replayCtx, packed);
     expect(replay?.prependSystemContext).not.toContain(`${target}-body-`);
+    expect(replay?.prependSystemContext).toContain(baseline.additionalContext.slice(0, 80));
     const replayEnd = journal.mock.calls[journal.mock.calls.length - 1]![1] as Record<string, unknown>;
     expect(replayEnd).toMatchObject({ reason: 'admission_handoff_missing' });
+
+    // Every downstream evidence surface must use the exact Native selection:
+    // runtime event, session membership, legacy presence ledger and normalized
+    // delivery evidence must not claim the rejected Adaptive target.
+    const eventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const injectionEvents = eventLog.recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
+    const injection = injectionEvents.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(injection).toMatchObject({
+      principleIds: baseline.principleIds,
+      activationIds: baseline.activationIds,
+      artifactIds: baseline.artifactIds,
+      injectedCount: baseline.principleIds.length,
+      injectedCharCount: baseline.additionalContext.length,
+    });
+
+    const sessionTracker = await import('../../src/core/session-tracker.js');
+    expect(sessionTracker.getInjectedPrincipleIds(replaySessionId)).toEqual(baseline.principleIds);
+    expect(sessionTracker.getInjectedActivationIds(replaySessionId)).toEqual(baseline.activationIds);
+
+    const presenceRows = sqliteConn.getDb().prepare(`
+      SELECT principle_id, activation_id FROM principle_applications
+      WHERE channel = 'prompt' AND level = 'presence' AND kind = 'prompt_injected' AND session_id = ?
+    `).all(replaySessionId) as Array<{ principle_id: string; activation_id: string | null }>;
+    expect(new Set(presenceRows.map(row => row.principle_id))).toEqual(new Set(baseline.principleIds));
+    expect(presenceRows.some(row => row.principle_id === target)).toBe(false);
+
+    const deliveryRows = sqliteConn.getDb().prepare(`
+      SELECT principle_id, activation_id FROM intervention_evidence_records
+      WHERE record_kind = 'delivery' AND source_locator = ?
+    `).all(`openclaw-plugin-event-log:${replaySessionId}`) as Array<{ principle_id: string; activation_id: string | null }>;
+    expect(new Set(deliveryRows.map(row => row.principle_id))).toEqual(new Set(baseline.principleIds));
+    expect(deliveryRows.some(row => row.principle_id === target)).toBe(false);
   });
 
   function mappingExpiresAt(ctx: Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1]): string {
