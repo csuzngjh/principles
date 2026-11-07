@@ -1,8 +1,12 @@
 # PD Adaptive Activation — PRI-1119 G2 限域真实使用预注册（草稿）
 
 - 日期：2026-11-07
-- 状态：**草案，仅定义，不采集**
-- 工单：PRI-1119（保持 `Backlog`，本草案不改状态、不表示授权）
+- 状态：**草案，仅定义，不采集**（已被 2026-11-07 执行层方案继承；本文件保留为历史底稿，不删除）
+- 工单：PRI-1119
+- 后续文档（本草案的执行层补齐）：
+  - `docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md`（入口可行性 CONDITIONAL）
+  - `docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md`（六项固化、场景卡、纳入/排除、记录口径）
+  - `docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md`（四层批准卡）
 - 依据：`docs/specs/PD Adaptive Activation SPEC v0.6.md` §2（场景卡）、§6（T/V/O/D 与 unknown）、§7（停用与恢复）、§8（G2 入口）
 - 边界：**不启用生产、不运行宿主、不调用模型、不采集任何真实数据、不改预算/冻结证据/历史判定**
 
