@@ -14,7 +14,6 @@ import {
 import Database from 'better-sqlite3';
 import { PromptActivationReader, RUNTIME_PRINCIPLE_BUDGET } from '../../src/core/runtime-prompt-activation-reader.js';
 import { TrajectoryRegistry } from '../../src/core/trajectory.js';
-import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as yaml from 'js-yaml';
 import { getDefaultPdConfig } from '@principles/core/runtime';
 
