@@ -10,11 +10,11 @@
     "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
     "branch": "ai/PRI-1119-g2-entry-feasibility",
     "baseCommit": "cdd0276508e510190f4e0ac9df527ab13ce5d739",
-    "headCommit": "本检查点提交；最终 head 以 PR 页面为准。",
+    "headCommit": "PR #2404：初始 head c1ed4b6bc52eeebdc4fb29391a178db6ff11972a；本检查点追补本文件后 head 前移，最终以 PR 页面为准。",
     "dirtyPaths": [],
-    "prUrl": "本检查点提交后创建；不合并。",
-    "prState": "TO_BE_CREATED",
-    "remoteChecks": "docs-only；以实际 PR head 的 CI 结果为准；CI 通过不等于运行效果。"
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2404",
+    "prState": "OPEN",
+    "remoteChecks": "PR #2404：Verify Merge Gate PASS（3m8s）；CI Impact Gate / PR Size / Dependency Audit / Repository Size / Telemetry Union Guard / Auto Label / PR<->Linear link PASS；其余 jobs SKIPPED（docs-only）。CI 通过不等于运行效果。"
   },
   "tasks": [
     {
