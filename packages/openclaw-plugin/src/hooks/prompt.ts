@@ -68,7 +68,16 @@ const _staticFileCache = new Map<string, Map<string, CachedFile>>();
 // Match OpenClaw's bounded per-run prompt cache. The session identity is part of
 // the key because protocol run IDs may be reused after a run terminates.
 const MAX_PROCESSED_SIGNAL_RUNS_PER_WORKSPACE = 256;
-const _processedSignalRunKeys = new Map<string, Set<string>>();
+/**
+ * PRI-1137 final review P1-3: run claims now carry the PERSISTED ordinal the
+ * claimed write produced. A duplicate callback for the same run reuses THAT
+ * ordinal instead of re-reading the global `max(turn_index)+1` — the global
+ * value may have advanced because a DIFFERENT run wrote a turn in between, and
+ * a retry selecting on a foreign round would mislabel the invocation's window.
+ * In-process by design (both callbacks of one run arrive in this plugin
+ * process); no new persisted state is introduced.
+ */
+const _processedSignalRunKeys = new Map<string, Map<string, number | undefined>>();
 
 function getOwnValue(value: object, key: string): unknown {
   if (!Object.hasOwn(value, key)) return undefined;
@@ -105,18 +114,18 @@ function nextUserTurnIndex(wctx: WorkspaceContext, sessionId: string, messages: 
   return messages.filter((message) => hasMessageRole(message, 'user')).length + 1;
 }
 
-function claimSignalRun(workspaceDir: string, sessionIdentity: string, runId: string): boolean {
+function claimSignalRun(workspaceDir: string, sessionIdentity: string, runId: string, ordinal?: number): boolean {
   let runKeys = _processedSignalRunKeys.get(workspaceDir);
   if (!runKeys) {
-    runKeys = new Set<string>();
+    runKeys = new Map<string, number | undefined>();
     _processedSignalRunKeys.set(workspaceDir, runKeys);
   }
   const runKey = `${sessionIdentity}\u0000${runId}`;
   if (runKeys.has(runKey)) return false;
 
-  runKeys.add(runKey);
+  runKeys.set(runKey, ordinal);
   if (runKeys.size > MAX_PROCESSED_SIGNAL_RUNS_PER_WORKSPACE) {
-    const oldestRunKey = runKeys.values().next().value;
+    const oldestRunKey = runKeys.keys().next().value;
     if (typeof oldestRunKey === 'string') runKeys.delete(oldestRunKey);
   }
   return true;
@@ -124,6 +133,15 @@ function claimSignalRun(workspaceDir: string, sessionIdentity: string, runId: st
 
 function hasClaimedSignalRun(workspaceDir: string, sessionIdentity: string, runId: string): boolean {
   return _processedSignalRunKeys.get(workspaceDir)?.has(`${sessionIdentity}\u0000${runId}`) ?? false;
+}
+
+/**
+ * PRI-1137 final review P1-3: the ordinal persisted by THIS run's own
+ * `user_turns` write (undefined when the claim carries none — e.g. a claim
+ * recorded by a code path that did not read the ordinal).
+ */
+function claimedSignalRunOrdinal(workspaceDir: string, sessionIdentity: string, runId: string): number | undefined {
+  return _processedSignalRunKeys.get(workspaceDir)?.get(`${sessionIdentity}\u0000${runId}`);
 }
 
 /**
@@ -371,14 +389,23 @@ const _roundPreparedEvents = new WeakSet<object>();
  * The returned ordinal is exactly `max(turn_index) + 1` AFTER this turn is
  * persisted — the same derivation the former plugin-local route used, so the
  * two routes agreed turn-for-turn. No unconditional `+1` offset is applied
- * anywhere. A round key is returned ONLY when `detectSync` reports that this
- * invocation's `user_turns` row was genuinely persisted (or the same run was
- * already persisted and claimed by an earlier invocation). A swallowed write
- * failure therefore degrades to `legacy_fifo_prefix_v1` instead of reading a
- * previous ordinal and claiming fair rotation on an unrecorded round.
- * `undefined` (write failure / missing sessionId / unreadable trajectory DB /
- * non-integer ordinal) is the observable degraded case; a constant round is
- * never fabricated.
+ * anywhere.
+ *
+ * PRI-1137 final review P1-3 — a round key is returned ONLY when this
+ * invocation has a real, persisted round of its own:
+ *   - a run already claimed here reuses ITS OWN persisted ordinal (never the
+ *     global counter, which a concurrent run's write may have advanced);
+ *   - a fresh user-interaction write that reports `user_turn_persisted`
+ *     claims the ordinal it just produced;
+ *   - EVERYTHING ELSE — no sessionId, no resolvable user message, a message
+ *     resolution failure, a non-interactive trigger (heartbeat/cron), an
+ *     agent-to-agent message, a write that did not persist, an unreadable
+ *     trajectory DB, a non-integer ordinal — returns `undefined` and the
+ *     selection degrades to `legacy_fifo_prefix_v1`. Previously a write-free
+ *     invocation still read the global ordinal and claimed fair rotation on a
+ *     round it never recorded (a heartbeat could re-present the last window
+ *     as a fresh fair rotation, and an empty session yielded a fabricated
+ *     round 1). A constant round is never fabricated.
  */
 export function prepareOpenClawPromptRound(
   event: PluginHookBeforePromptBuildEvent,
@@ -396,77 +423,95 @@ export function prepareOpenClawPromptRound(
     return undefined;
   }
 
+  // ── idempotent replay: reuse THIS run's own persisted ordinal ──
+  // P1-3: never re-read the global counter here — a concurrent run may have
+  // recorded a further turn since, and the retry must select on the round its
+  // own write produced, not on a foreign one.
+  const sessionIdentity = sessionKey ?? sessionId;
+  if (runId !== undefined && sessionIdentity !== undefined && hasClaimedSignalRun(wctx.workspaceDir, sessionIdentity, runId)) {
+    const replayed = claimedSignalRunOrdinal(wctx.workspaceDir, sessionIdentity, runId);
+    if (typeof replayed === 'number' && Number.isInteger(replayed) && replayed >= 1) {
+      logger?.info?.(`[PD:Prompt] round key replayed for claimed run: round=${replayed}, sessionId=${sessionId?.substring(0, 20)}`);
+      _roundPreparedEvents.add(event);
+      return replayed;
+    }
+    logger?.warn?.('[PD:Prompt] claimed run carries no valid ordinal → legacy_fifo_prefix_v1');
+    _roundPreparedEvents.add(event);
+    return undefined;
+  }
+
   // ── pre-selection half: the ONE signal-collection write for this invocation ──
-  // Stays `true` when this invocation performs no write at all (non-interactive
-  // trigger), preserving the previous round-authority read. A write attempt
-  // that is not persisted flips it to `false`.
-  let roundKeyEligible = true;
   let currentUserMessage = '';
   let isAgentToAgent = false;
+  let messageResolvable = true;
   try {
     const resolved = resolveCurrentUserMessage(event, sessionId);
     currentUserMessage = resolved.message;
     isAgentToAgent = resolved.isAgentToAgent;
   } catch (error) {
-    logger?.warn?.(`[PD:Prompt] pre-selection user message resolution failed: ${String(error)}`);
+    // P1-3: an unresolvable message means the round fact for THIS invocation
+    // cannot be established — degrade to FIFO instead of reading an ordinal
+    // whose owning write never happened.
+    messageResolvable = false;
+    logger?.warn?.(`[PD:Prompt] pre-selection user message resolution failed: ${String(error)} → legacy_fifo_prefix_v1`);
   }
   const isUserInteraction = isUserInteractionTrigger(trigger);
-  if (currentUserMessage && sessionId && isUserInteraction && !isAgentToAgent) {
-    if (runId && hasClaimedSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId)) {
-      // Another hook invocation for this run already collected AND persisted
-      // the signal; the existing ordinal is that round's ordinal (idempotent).
-    } else {
-      if (!runId) {
-        logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId.substring(0, 20)}`);
-      }
-      let referencesAssistantTurnId: number | null = null;
-      try {
-        if (event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
-          const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
-          referencesAssistantTurnId = turns[turns.length - 1]?.id ?? null;
-        }
-      } catch (error) {
-        logger?.warn?.(`[PD:Prompt] pre-selection assistant-turn anchor unavailable: ${String(error)}`);
-      }
-      try {
-        const outcome = getSignalCollectorHost(wctx, logger).detectSync(
-          currentUserMessage, sessionId, trigger ?? 'api',
-          { referencesAssistantTurnId, turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages) },
-        );
-        if (outcome?.status === 'user_turn_persisted') {
-          if (runId) claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId);
-        } else {
-          // The write did not land (threw / no rowid / stub returned nothing):
-          // no new round exists to key on, and the run must NOT be claimed so a
-          // later retry can still collect.
-          roundKeyEligible = false;
-          const reason = outcome?.status === 'user_turn_persist_failed'
-            ? outcome.reason
-            : `collector_status_${String(outcome?.status ?? 'missing')}`;
-          logger?.warn?.(
-            `[PD:Prompt] pre-selection user_turns not persisted (${reason}) → legacy_fifo_prefix_v1`,
-          );
-        }
-      } catch (error) {
-        // Detection failure means "no confirmed persistence" — the ordinal
-        // below must not be treated as this round's.
-        roundKeyEligible = false;
-        logger?.warn?.(`[PD:Prompt] pre-selection signal collection failed: ${String(error)} → legacy_fifo_prefix_v1`);
-      }
-    }
-  }
   _roundPreparedEvents.add(event);
 
-  if (!roundKeyEligible) return undefined;
-
-  // ── round authority: only the persisted OpenClaw user_turns counter ──
-  if (!sessionId) {
-    logger?.warn?.('[PD:Prompt] round key unavailable: no sessionId → legacy_fifo_prefix_v1');
+  if (!messageResolvable) return undefined;
+  if (!(currentUserMessage && sessionId && isUserInteraction && !isAgentToAgent)) {
+    // P1-3: no write will happen for this invocation (empty message,
+    // heartbeat/cron trigger, agent-to-agent traffic, missing sessionId) — so
+    // it has NO round of its own and must not claim fair rotation on one.
+    if (isUserInteraction && !isAgentToAgent && !currentUserMessage) {
+      logger?.info?.('[PD:Prompt] no resolvable user message this invocation → no round key (legacy_fifo_prefix_v1)');
+    } else if (!isUserInteraction) {
+      logger?.info?.(`[PD:Prompt] non-interactive trigger (${trigger ?? 'unknown'}) records no round → legacy_fifo_prefix_v1`);
+    }
     return undefined;
   }
+  if (!runId) {
+    logger?.warn?.(`[PD:Prompt] runId missing; signal collection cannot be deduplicated: sessionId=${sessionId.substring(0, 20)}`);
+  }
+  let referencesAssistantTurnId: number | null = null;
+  try {
+    if (event.messages.some((message) => hasMessageRole(message, 'assistant'))) {
+      const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+      referencesAssistantTurnId = turns[turns.length - 1]?.id ?? null;
+    }
+  } catch (error) {
+    logger?.warn?.(`[PD:Prompt] pre-selection assistant-turn anchor unavailable: ${String(error)}`);
+  }
+  try {
+    const outcome = getSignalCollectorHost(wctx, logger).detectSync(
+      currentUserMessage, sessionId, trigger ?? 'api',
+      { referencesAssistantTurnId, turnIndex: nextUserTurnIndex(wctx, sessionId, event.messages) },
+    );
+    if (outcome?.status !== 'user_turn_persisted') {
+      // The write did not land (threw / no rowid / stub returned nothing):
+      // no new round exists to key on, and the run must NOT be claimed so a
+      // later retry can still collect.
+      const reason = outcome?.status === 'user_turn_persist_failed'
+        ? outcome.reason
+        : `collector_status_${String(outcome?.status ?? 'missing')}`;
+      logger?.warn?.(
+        `[PD:Prompt] pre-selection user_turns not persisted (${reason}) → legacy_fifo_prefix_v1`,
+      );
+      return undefined;
+    }
+  } catch (error) {
+    // Detection failure means "no confirmed persistence" — no round key.
+    logger?.warn?.(`[PD:Prompt] pre-selection signal collection failed: ${String(error)} → legacy_fifo_prefix_v1`);
+    return undefined;
+  }
+
+  // ── round authority: only the persisted OpenClaw user_turns counter ──
   try {
     const ordinal = nextSessionTurnOrdinal(wctx.workspaceDir, sessionId);
     if (typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 1) {
+      // Claim with the ordinal THIS write produced — retries of the same run
+      // replay exactly this round (P1-3 race fix).
+      if (runId) claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId, ordinal);
       logger?.info?.(`[PD:Prompt] round key resolved: round=${ordinal}, sessionId=${sessionId.substring(0, 20)}`);
       return ordinal;
     }
@@ -584,8 +629,16 @@ export async function handleBeforePromptBuild(
   // ─────────────────────────────────────────────────3. User message extraction
   // Extract actual user message from prompt (handles boot checks + Feishu wrappers)
   // and detect agent-to-agent messages.
-  const { message: currentUserMessage, isAgentToAgent } =
-    resolveCurrentUserMessage(event, sessionId);
+  // PRI-1137 final review P1-3: a resolution failure must degrade THIS concern
+  // (no message-scoped behavior) instead of failing the whole prompt build —
+  // the shared selection already degraded to FIFO via the pre-selection phase.
+  let currentUserMessage = '';
+  let isAgentToAgent = false;
+  try {
+    ({ message: currentUserMessage, isAgentToAgent } = resolveCurrentUserMessage(event, sessionId));
+  } catch (error) {
+    logger?.warn?.(`[PD:Prompt] post-selection user message resolution failed: ${String(error)} — message-scoped injection skipped`);
+  }
 
   // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
   // 注:原 empathy 检测门控(empathyEnabled)已移除,检测职责由 SignalCollectorHost 接管。
@@ -623,8 +676,20 @@ export async function handleBeforePromptBuild(
         },
       );
       // PRI-1137: a run is claimed only when its user_turns row really landed,
-      // so a failed write stays retryable instead of looking "already collected".
-      if (runId && outcome?.status === 'user_turn_persisted') claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId);
+      // so a failed write stays retryable instead of looking "already
+      // collected". P1-3: the claim carries the ordinal this write produced,
+      // so a retry of the same run replays THIS round.
+      if (runId && outcome?.status === 'user_turn_persisted') {
+        let claimedOrdinal: number | undefined;
+        try {
+          const ordinal = nextSessionTurnOrdinal(wctx.workspaceDir, sessionId);
+          if (typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 1) claimedOrdinal = ordinal;
+        } catch {
+          // Claim without an ordinal — a replay of this run then degrades to
+          // FIFO rather than selecting on a foreign round (P1-3).
+        }
+        claimSignalRun(wctx.workspaceDir, sessionKey ?? sessionId, runId, claimedOrdinal);
+      }
     }
   }
 

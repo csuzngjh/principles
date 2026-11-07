@@ -430,6 +430,11 @@ export class ApprovalsConsoleModel {
         workspaceDir: this.workspaceDir,
         artifactId,
         targetHost,
+        // PRI-1137 final review P2: this precheck measures the artifact THIS
+        // owner decision is about to stamp `authority="owner"` on — billing
+        // the pre-approval default (system_policy) overstated the entry by
+        // the attribute delta and could refuse a borderline-fitting entry.
+        authority: 'owner',
       });
     } catch (error) {
       // rc-9: a crashed precheck is NOT a pass — refuse with the reason.
@@ -576,7 +581,7 @@ export class ApprovalsConsoleModel {
     const rotation = projection.productionRotation;
     if (rotation.state === 'rotates' && projection.eventuallyInjectedActivationIds.includes(activationId)) {
       const window = projection.eligibleCount;
-      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1).${budgetBasisNote} Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
+      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1).${budgetBasisNote} Fair rotation advances the window by one position per RECORDED user turn, so while the session's user-turn records keep succeeding this principle will enter agent behavior within at most ${window} consecutive user turns — a round that degrades to FIFO (missing sessionId / failed user_turns write / unreadable ordinal) does not advance the window, and deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
     }
     if (rotation.state === 'unknown') {
       // Final review P1-4: no single host is bound, so NO single

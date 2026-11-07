@@ -1,14 +1,16 @@
 import {
   computeFeatureFlagsFromConfig,
+  measureSharedDirectiveBlockChars,
   resolvePromptBudget,
   type ActivatedPrinciple,
   type PromptBudgetResolution,
   type PromptSelectionPolicy,
 } from '@principles/core/runtime';
+import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import {
   buildActivePrinciplePromptContext,
-  packSharedDirectives,
+  planSharedDirectivePacking,
   readPromptActivationCandidates,
   MAX_SHARED_DIAGNOSTIC_IDS,
 } from './active-principle-prompt.js';
@@ -294,10 +296,13 @@ export interface PromptInjectionProjection {
    * entry within N turns. So this is computed under the production policy
    * (fair rotation whenever the route actually rotates) and is therefore
    * non-empty even for a caller that supplied no round key — which is
-   * exactly the console's situation. Empty when the production route
-   * genuinely does not rotate, when no single host is bound
-   * (`productionRotation.state === 'unknown'` — no attributable ring), or
-   * when nothing is eligible.
+   * exactly the console's situation. Final review P1-1: this is a CAPABILITY
+   * bound, not a per-round guarantee — it holds while the session's
+   * user-turn records keep succeeding; a round degraded to FIFO (missing
+   * sessionId / failed write / unreadable ordinal) does not advance the
+   * window. Empty when the production route genuinely does not rotate, when
+   * no single host is bound (`productionRotation.state === 'unknown'` — no
+   * attributable ring), or when nothing is eligible.
    */
   eventuallyInjectedActivationIds: string[];
   /** Number of eligible candidates that reached the selector. */
@@ -364,22 +369,34 @@ export interface PromptInjectionProjection {
  * PRI-1137: reachability is replayed with the SHARED packer the production
  * route actually runs (`packSharedDirectives`), not the retired list-route
  * `trimToBudget` arithmetic — a forecast may not measure a deleted path.
+ *
+ * PRI-1137 final review P1-2 (CodeRabbit Major): the pack decision runs per
+ * round key via the string-free `planSharedDirectivePacking` over block costs
+ * measured ONCE — O(N²) integer adds total. The retired shape re-ran the full
+ * `packSharedDirectives` render per round (O(N³) cumulative string work),
+ * which made the console capacity read slower as the activation count grew.
  */
 function collectReachableActivationIds(
   principles: ActivatedPrinciple[],
   budget: number,
   selfReportEnabled: boolean,
 ): string[] {
+  // One measurement per principle, shared by every simulated round.
+  const blockChars = new Map(principles.map((principle) => [
+    principle.activationId,
+    measureSharedDirectiveBlockChars(principle, { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }),
+  ] as const));
   const reachable = new Set<string>();
   const n = principles.length;
   for (let roundKey = 0; roundKey < n; roundKey += 1) {
     const rotationStartIndex = ((roundKey % n) + n) % n;
     const scanOrder = principles.slice(rotationStartIndex).concat(principles.slice(0, rotationStartIndex));
-    const { included } = packSharedDirectives({
+    const { included } = planSharedDirectivePacking({
       scanOrder,
       budgetChars: budget,
       selfReportEnabled,
       continueOnNonFit: true,
+      blockCharsByActivationId: blockChars,
     });
     for (const principle of included) reachable.add(principle.activationId);
   }
@@ -437,7 +454,19 @@ export async function buildLivePromptInjectionProjection(input: {
   // `legacy_trim` projection is gone, so the forecast can no longer describe
   // a path production does not run.
   const rotation = productionRouteRotationState(input);
-  const context = await buildActivePrinciplePromptContext({ ...input, promptBudget });
+  // PRI-1137 final review P2: a round key is only meaningful on a host that
+  // OWNS a round authority. A caller-supplied key against an explicitly bound
+  // FIFO host (codex/workbuddy) would forecast `fair_rotation_v1` on a host
+  // whose real selection is FIFO — clamp it to `undefined` so the forecast
+  // can never diverge from that host's production policy. An UNBOUND caller
+  // (no targetHost) keeps its key: OpenClaw is the only key-owning host.
+  const roundKeyUsable = input.targetHost === undefined
+    || hostRotationCapability(input.targetHost).state === 'rotates';
+  const context = await buildActivePrinciplePromptContext({
+    ...input,
+    promptBudget,
+    ...(roundKeyUsable ? {} : { roundKey: undefined }),
+  });
   const oversized = context.oversizedActivationIds ?? [];
   const dropped = context.droppedActivationIds ?? [];
   // Reachability is a property of the PRODUCTION rotation, not of this

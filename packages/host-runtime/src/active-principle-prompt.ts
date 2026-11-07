@@ -5,6 +5,10 @@ import {
   computeFeatureFlagsFromConfig,
   filterPromptActivations,
   renderPrinciplesToDirectives,
+  // PRI-1137 final review P1-2: exact additive measurement of the shared
+  // directive render — the packer decides by arithmetic, renders once.
+  measureSharedDirectiveBlockChars,
+  sharedDirectiveBaseChars,
   resolvePrincipleFromArtifact,
   resolvePromptBudget,
   type ActivatedPrinciple,
@@ -194,38 +198,70 @@ export interface SharedDirectivePacking {
 }
 
 /**
- * PRI-1137: THE shared directive packer. `buildActivePrinciplePromptContext`
- * selects through it, and the console projection reuses it to answer "which
- * activations this route reaches across rounds". One policy implementation —
- * the retired list-route `trimToBudget` arithmetic must not survive as a
- * second forecast authority.
+ * PRI-1137 final review P1-5: did the AUTHORIZATION FACTS of the adaptive
+ * priority target change between the native snapshot (first read) and the
+ * authorized snapshot (second read)? The packed directive is annotated from
+ * the facts as of packing time, so a drift in `authority` (e.g. owner →
+ * system_policy after an approval-state change) or `approvedBy` means the
+ * first snapshot's annotation would be a stale authorization claim — the
+ * caller must exclude the target rather than inject it. Content drift
+ * (text/sha) is checked separately (`target_changed`).
  */
-export function packSharedDirectives(input: {
+export function adaptiveTargetAuthorizationChanged(
+  native: { authority?: 'owner' | 'system_policy'; approvedBy?: string },
+  authorized: { authority?: 'owner' | 'system_policy'; approvedBy?: string },
+): boolean {
+  return native.authority !== authorized.authority || native.approvedBy !== authorized.approvedBy;
+}
+
+/**
+ * PRI-1137 final review P1-2: the packing DECISION without the final render —
+ * the rotation reachability replay runs this once per round key over the SAME
+ * precomputed block costs (via `blockCharsByActivationId`), so N rounds cost
+ * O(N²) integer adds instead of O(N³) string work. The decision mirrors the
+ * render exactly because both derive from the same additive measurement
+ * (`baseChars + Σ blockChars === render(set).length` for any non-empty set).
+ * Declared before `packSharedDirectives` (no-use-before-define).
+ */
+export function planSharedDirectivePacking(input: {
   scanOrder: ActivatedPrinciple[];
   budgetChars: number;
   selfReportEnabled: boolean;
-  /** Fair rotation continues past a non-fit; legacy FIFO stops at the first one. */
   continueOnNonFit: boolean;
-}): SharedDirectivePacking {
+  /**
+   * Precomputed exact marginal chars per activationId (P1-2 fast path). When
+   * absent each candidate is measured once here — still one render per
+   * PRINCIPLE, never per prefix.
+   */
+  blockCharsByActivationId?: ReadonlyMap<string, number>;
+}): Omit<SharedDirectivePacking, 'additionalContext'> {
   const { scanOrder, budgetChars, selfReportEnabled, continueOnNonFit } = input;
+  const blockChars = input.blockCharsByActivationId
+    ?? new Map(scanOrder.map((principle) => [
+      principle.activationId,
+      measureSharedDirectiveBlockChars(principle, { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }),
+    ] as const));
+  // Chars any non-empty render carries (header + footer + note). An empty
+  // included set renders '' (the renderer's own empty contract).
+  const baseChars = sharedDirectiveBaseChars({ escapeFn: escapeXml, selfReportInstruction: selfReportEnabled });
   const included: ActivatedPrinciple[] = [];
-  let additionalContext = '';
+  let runningChars = baseChars;
   let truncated = false;
   const dropped: string[] = [];
   const oversized: string[] = [];
-  const standaloneFits = (principle: ActivatedPrinciple): boolean =>
-    renderPrinciplesToDirectives([principle], new Set([principle.principleId]), { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }).length
-    <= budgetChars;
-
   for (const principle of scanOrder) {
-    const candidate = [...included, principle];
-    const candidateContext = renderPrinciplesToDirectives(
-      candidate,
-      new Set(candidate.map((entry) => entry.principleId)),
-      { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
-    );
-    if (candidateContext.length > budgetChars) {
-      if (standaloneFits(principle)) {
+    const marginal = blockChars.get(principle.activationId);
+    if (marginal === undefined) {
+      // Unknown cost must never silently pass as zero (rc-3): treat as
+      // oversized-for-planning and record it.
+      if (oversized.length < MAX_SHARED_DIAGNOSTIC_IDS) oversized.push(principle.activationId);
+      if (!continueOnNonFit) break;
+      continue;
+    }
+    if (runningChars + marginal > budgetChars) {
+      // Standalone fit = base + own block within budget — the same fact the
+      // single-principle render expresses, derived additively.
+      if (baseChars + marginal <= budgetChars) {
         truncated = true;
         if (dropped.length < MAX_SHARED_DIAGNOSTIC_IDS) dropped.push(principle.activationId);
       } else if (oversized.length < MAX_SHARED_DIAGNOSTIC_IDS) {
@@ -235,10 +271,43 @@ export function packSharedDirectives(input: {
       continue;
     }
     included.push(principle);
-    additionalContext = candidateContext;
+    runningChars += marginal;
   }
-  return { included, additionalContext, truncated, dropped, oversized };
+  return { included, truncated, dropped, oversized };
 }
+
+/**
+ * PRI-1137: THE shared directive packer. `buildActivePrinciplePromptContext`
+ * selects through it, and the console projection reuses it to answer "which
+ * activations this route reaches across rounds". One policy implementation —
+ * the retired list-route `trimToBudget` arithmetic must not survive as a
+ * second forecast authority.
+ *
+ * PRI-1137 final review P1-2 (CodeRabbit Major): the previous loop re-rendered
+ * the ENTIRE growing prefix per candidate — O(N²) render work per pack, and
+ * the rotation reachability replay called it once per round key. The render is
+ * strictly additive over per-principle directive blocks (see
+ * `measureSharedDirectiveBlockChars`), so inclusion is decided by integer
+ * arithmetic over per-block costs measured ONCE, and the string is rendered a
+ * single time at the end. Output is byte-identical to the retired loop
+ * (locked by characterization tests); only the work profile changed.
+ */
+export function packSharedDirectives(input: {
+  scanOrder: ActivatedPrinciple[];
+  budgetChars: number;
+  selfReportEnabled: boolean;
+  /** Fair rotation continues past a non-fit; legacy FIFO stops at the first one. */
+  continueOnNonFit: boolean;
+}): SharedDirectivePacking {
+  const plan = planSharedDirectivePacking(input);
+  const additionalContext = renderPrinciplesToDirectives(
+    plan.included,
+    new Set(plan.included.map((entry) => entry.principleId)),
+    { escapeFn: escapeXml, selfReportInstruction: input.selfReportEnabled },
+  );
+  return { ...plan, additionalContext };
+}
+
 
 export async function buildActivePrinciplePromptContext(input: {
   workspaceDir: string;
@@ -269,6 +338,14 @@ export async function buildActivePrinciplePromptContext(input: {
   // or the fixed-fallback default — never a per-line constant read.
   const promptBudget = input.promptBudget ?? resolvePromptBudget();
   const { budgetChars } = promptBudget;
+  // PRI-1137 final review P2 (deliberate): this FIRST read keeps the default
+  // busy_timeout (≈5s) instead of noBusyWait. It is the source of the WHOLE
+  // injection — failing it on a transient SQLite lock would abort every
+  // principle (aborted ⇒ empty context), which is a far worse degradation
+  // than the bounded wait. Only the adaptive REVALIDATION read opts into
+  // noBusyWait (line ~459): that one is an optional enhancement whose
+  // fast-fail falls back to the native baseline, so waiting there would risk
+  // the hook timeout for no injection benefit.
   const { principles, warnings, aborted, selfReportEnabled } =
     await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true });
   if (aborted) {
@@ -397,6 +474,14 @@ export async function buildActivePrinciplePromptContext(input: {
   if (authorityRead.aborted || authorityRead.warnings.length > 0 || authorizedMatches.length !== 1 || !authorizedTarget
     || authorityRead.principles.filter((principle) => principle.principleId === authorizedTarget.principleId).length !== 1) {
     return withoutTarget('authority_unavailable');
+  }
+  // PRI-1137 final review P1-5: the second read must prove the AUTHORIZATION
+  // FACTS unchanged, not merely present. The packed directive carries the
+  // first snapshot's authority annotation, so an approval-state change
+  // between the two reads (owner → system_policy, or a different approver)
+  // must exclude the priority target instead of injecting stale authorization.
+  if (adaptiveTargetAuthorizationChanged(nativeTarget, authorizedTarget)) {
+    return withoutTarget('target_authority_changed');
   }
   if (!authorizedTarget.authority
     || authorizedTarget.principleId !== nativeTarget.principleId

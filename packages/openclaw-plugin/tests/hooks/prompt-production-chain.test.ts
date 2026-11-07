@@ -45,6 +45,8 @@ vi.mock('../../src/core/event-log.js', () => {
     recordAdaptiveDelivery: vi.fn(),
     recordHookExecution: vi.fn(),
     recordTrajectoryObservabilityFailure: vi.fn(),
+    // P1-4: the after-tool enrichment path emits receipt/tool events too.
+    recordToolCall: vi.fn(),
   };
   return {
     EventLogService: {
@@ -59,29 +61,33 @@ vi.mock('../../src/core/event-log.js', () => {
 // Proxy so a closed/disposed connection is re-opened exactly like production.
 vi.mock('../../src/core/workspace-context.js', async () => {
   const { TrajectoryRegistry } = await import('../../src/core/trajectory.js');
+  const buildContext = () => ({
+    workspaceDir: tempWorkspaceDir,
+    stateDir: tempStateDir,
+    resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
+    config: { get: vi.fn(() => undefined) },
+    eventLog: EventLogService.get(tempWorkspaceDir),
+    evolutionReducer: {
+      getActivePrinciples: vi.fn(() => []),
+      getProbationPrinciples: vi.fn(() => []),
+    },
+    trajectory: new Proxy({}, {
+      get: (_target, prop) => {
+        if (trajectoryControl.mode === 'fail_write' && prop === 'recordUserTurn') {
+          return () => { throw new Error('user_turns write blocked by test'); };
+        }
+        const db = TrajectoryRegistry.get(tempWorkspaceDir);
+        const value = Reflect.get(db as object, prop);
+        return typeof value === 'function' ? value.bind(db) : value;
+      },
+    }),
+  });
   return {
     WorkspaceContext: {
-      fromHookContext: vi.fn(() => ({
-        workspaceDir: tempWorkspaceDir,
-        stateDir: tempStateDir,
-        resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
-        config: { get: vi.fn(() => undefined) },
-        eventLog: EventLogService.get(tempWorkspaceDir),
-        evolutionReducer: {
-          getActivePrinciples: vi.fn(() => []),
-          getProbationPrinciples: vi.fn(() => []),
-        },
-        trajectory: new Proxy({}, {
-          get: (_target, prop) => {
-            if (trajectoryControl.mode === 'fail_write' && prop === 'recordUserTurn') {
-              return () => { throw new Error('user_turns write blocked by test'); };
-            }
-            const db = TrajectoryRegistry.get(tempWorkspaceDir);
-            const value = Reflect.get(db as object, prop);
-            return typeof value === 'function' ? value.bind(db) : value;
-          },
-        }),
-      })),
+      fromHookContext: vi.fn(() => buildContext()),
+      // P1-4: the after-tool enrichment provider resolves its context through
+      // the explicit-workspace entry — same fixture workspace.
+      fromHookContextExplicit: vi.fn(() => buildContext()),
     },
   };
 });
@@ -96,6 +102,10 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   trackFriction: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
+  // P1-4: the after-tool enrichment/receipt path also touches these —
+  // best-effort no-ops keep the evidence kernel on its real write path.
+  setInjectedPrincipleIds: vi.fn(),
+  trackSessionControlActivity: vi.fn(),
 }));
 
 vi.mock('../../src/core/path-resolver.js', () => ({
@@ -161,6 +171,8 @@ let tempWorkspaceDir = '';
 let tempStateDir = '';
 let sqliteConn: SqliteConnection;
 let hook: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+let afterToolCallHook: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
+let fakeLogger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 const priorPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
 
 beforeEach(async () => {
@@ -181,12 +193,13 @@ beforeEach(async () => {
   process.env.PD_WORKSPACE_DIR = tempWorkspaceDir;
 
   const hooks = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
+  fakeLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const api = {
     id: 'principles-disciple',
     rootDir: '/plugin',
     pluginConfig: { language: 'en' },
     config: { plugins: { entries: { 'principles-disciple': { hooks: { allowConversationAccess: true } } } } },
-    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    logger: fakeLogger,
     registerCommand: vi.fn(), registerService: vi.fn(), registerTool: vi.fn(), registerHttpRoute: vi.fn(),
     on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => { hooks.set(name, handler); },
   } as never;
@@ -194,6 +207,9 @@ beforeEach(async () => {
   const captured = hooks.get('before_prompt_build');
   expect(captured).toBeDefined();
   hook = captured;
+  const capturedAfter = hooks.get('after_tool_call');
+  expect(capturedAfter).toBeDefined();
+  afterToolCallHook = capturedAfter as (event: unknown, ctx: unknown) => Promise<void>;
 });
 
 afterEach(() => {
@@ -241,10 +257,10 @@ function makeEvent(sessionId: string | undefined, runId?: string): Record<string
   };
 }
 
-function makeHookCtx(sessionId: string | undefined, runId?: string): Record<string, unknown> {
+function makeHookCtx(sessionId: string | undefined, runId?: string, trigger: string = 'user'): Record<string, unknown> {
   return {
     workspaceDir: tempWorkspaceDir,
-    trigger: 'user',
+    trigger,
     ...(sessionId !== undefined ? { sessionId } : {}),
     ...(runId !== undefined ? { runId } : {}),
     agentId: 'agent-1',
@@ -345,5 +361,187 @@ describe('PRI-1137 P2: the real registration → shared-runtime prompt productio
         db.close();
       }
     }
+  });
+
+  // ── PRI-1137 final review P1-3: write-free invocations must not claim a
+  // fair-rotation round they never recorded; run retries must replay THEIR OWN
+  // ordinal even when a concurrent run advanced the global counter. ──────────
+
+  it('P1-3: heartbeat records no user turn → FIFO selection, no fabricated round', async () => {
+    await seedOnePrinciple();
+    const spy = await injectionSpy();
+    const sessionId = 'prod-chain-session-heartbeat';
+
+    // A PRIOR real user turn exists — the old code would have read its ordinal
+    // and claimed fair rotation on an already-consumed round.
+    const prior = hook === undefined ? undefined : await hook?.(
+      { prompt: 'real user turn', messages: [], trigger: 'user', sessionId } as never,
+      makeHookCtx(sessionId, 'run-prior'),
+    );
+    expect(prior).toBeDefined();
+    spy.mockClear();
+
+    await hook?.(
+      { prompt: 'heartbeat probe', messages: [], trigger: 'heartbeat', sessionId } as never,
+      makeHookCtx(sessionId, 'run-hb', 'heartbeat'),
+    );
+
+    expect(userTurnRows(sessionId).count).toBe(1);
+    const payload = (spy.mock.calls as [{ selectionPolicy?: string; selectionRoundOrdinal?: number }[]])[0]![0]!;
+    expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(payload.selectionRoundOrdinal).toBeUndefined();
+  });
+
+  it('P1-3: an empty user message yields no round key (FIFO), never a fabricated round 1', async () => {
+    await seedOnePrinciple();
+    const spy = await injectionSpy();
+    const sessionId = 'prod-chain-session-empty';
+
+    await hook?.({ prompt: '', messages: [], trigger: 'user', sessionId } as never, makeHookCtx(sessionId, 'run-empty'));
+
+    expect(userTurnRows(sessionId).count).toBe(0);
+    const payload = (spy.mock.calls as [{ selectionPolicy?: string; selectionRoundOrdinal?: number }[]])[0]![0]!;
+    // nextSessionTurnOrdinal on an empty session returns 1 — the fix must not
+    // surface that as a real fair-rotation round.
+    expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(payload.selectionRoundOrdinal).toBeUndefined();
+  });
+
+  it('P1-3: a user-message resolution failure degrades to FIFO instead of failing the build', async () => {
+    await seedOnePrinciple();
+    const spy = await injectionSpy();
+    const sessionId = 'prod-chain-session-throw';
+    const throwingEvent = {
+      messages: [],
+      trigger: 'user',
+      sessionId,
+      get prompt(): string {
+        throw new Error('malformed host payload');
+      },
+    };
+
+    const result = await hook?.(throwingEvent as never, makeHookCtx(sessionId, 'run-throw')) as
+      { prependSystemContext?: string } | undefined;
+
+    // The whole hook still delivers the shared injection — fail-open like the
+    // other observability side channels.
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    const payload = (spy.mock.calls as [{ selectionPolicy?: string; selectionRoundOrdinal?: number }[]])[0]![0]!;
+    expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+    expect(payload.selectionRoundOrdinal).toBeUndefined();
+  });
+
+  it('P1-3: a retried run replays ITS OWN ordinal even after a concurrent run advanced the counter', async () => {
+    await seedOnePrinciple();
+    const spy = await injectionSpy();
+    const sessionId = 'prod-chain-session-interleave';
+
+    const ordinals: number[] = [];
+    const capture = async (runId: string, prompt: string): Promise<void> => {
+      spy.mockClear();
+      await hook?.({ prompt, messages: [], trigger: 'user', sessionId } as never, makeHookCtx(sessionId, runId));
+      const payload = (spy.mock.calls as [{ selectionPolicy?: string; selectionRoundOrdinal?: number }[]])[0]![0]!;
+      expect(payload.selectionPolicy).toBe('fair_rotation_v1');
+      ordinals.push(payload.selectionRoundOrdinal as number);
+    };
+
+    await capture('run-a', 'first user turn');
+    await capture('run-b', 'second user turn');
+    // Retry of run A: the global counter now reads 3 because run B wrote a
+    // turn — run A must still select on the round ITS OWN write produced.
+    await capture('run-a', 'first user turn');
+
+    expect(userTurnRows(sessionId).count).toBe(2);
+    expect(ordinals).toEqual([2, 3, 2]);
+  });
+
+  // ── PRI-1137 final review P1-4: the after_tool_call production chain —
+  // toolArgs fidelity (params_json) and honest degradation observability. ────
+
+  /**
+   * Bootstrap the REAL production trajectory.db (canonical schema via
+   * TrajectoryRegistry's own migrations) by running one prompt invocation —
+   * the same store the shared after-tool kernel writes into. No hand-rolled
+   * schema: a subset schema once made the production insert fail while the
+   * test still passed (see the PRI-1137 round-key regression note).
+   */
+  async function bootstrapTrajectoryViaPrompt(): Promise<void> {
+    const sessionId = 'bootstrap-session';
+    await hook?.({ prompt: 'bootstrap turn', messages: [], trigger: 'user', sessionId } as never, makeHookCtx(sessionId, 'run-bootstrap'));
+    expect(fs.existsSync(path.join(tempWorkspaceDir, '.state', 'trajectory.db'))).toBe(true);
+  }
+
+  function toolCallsRows(): { paramsJson: string; toolName: string }[] {
+    const dbPath = path.join(tempWorkspaceDir, '.state', 'trajectory.db');
+    if (!fs.existsSync(dbPath)) return [];
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const rows = db.prepare('SELECT params_json, tool_name FROM tool_calls').all() as unknown as { params_json: string; tool_name: string }[];
+      return rows.map((row) => ({ paramsJson: row.params_json, toolName: row.tool_name }));
+    } finally {
+      db.close();
+    }
+  }
+
+  function hookExecutionRecords(): { hook?: string; error?: string }[] {
+    const mock = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    return (mock.recordHookExecution as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0] as { hook?: string; error?: string });
+  }
+
+  async function invokeAfterToolCall(event: Record<string, unknown>): Promise<void> {
+    expect(afterToolCallHook).toBeDefined();
+    await afterToolCallHook?.(event, {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: 'after-chain-session',
+      agentId: 'agent-1',
+      trigger: 'user',
+    });
+  }
+
+  it('P1-4: toolArgs reach the shared evidence kernel — params_json keeps the real arguments', async () => {
+    await bootstrapTrajectoryViaPrompt();
+    await invokeAfterToolCall({
+      toolName: 'write_file',
+      toolArgs: { path: 'src/important.ts', content: 'x'.repeat(40) },
+      result: 'ok',
+      durationMs: 12,
+    });
+
+    const rows = toolCallsRows();
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    const row = rows.find((entry) => entry.toolName === 'write_file');
+    expect(row).toBeDefined();
+    // The pre-fix adapter read `event.params` (absent on after events) and
+    // persisted '{}' — the real arguments must now survive (P1-4).
+    expect(row!.paramsJson).toContain('src/important.ts');
+    // Healthy path records a clean hook execution.
+    const afterRecords = hookExecutionRecords().filter((record) => record.hook === 'after_tool_call');
+    expect(afterRecords).toHaveLength(1);
+    expect(afterRecords[0]!.error).toBeUndefined();
+  });
+
+  it('P1-4: a missing trajectory DB is OBSERVABLE — warned, recorded as degraded, never a silent success', async () => {
+    // No .state/trajectory.db in this fresh workspace.
+    await invokeAfterToolCall({ toolName: 'write_file', toolArgs: { path: 'x' }, result: 'ok', durationMs: 5 });
+
+    expect(toolCallsRows()).toEqual([]);
+    const warnCalls = (fakeLogger.warn as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => String(call[0]))
+      .filter((text) => text.includes('after_tool_call'));
+    expect(warnCalls.join('\n')).toContain('trajectory');
+    const afterRecords = hookExecutionRecords().filter((record) => record.hook === 'after_tool_call');
+    expect(afterRecords).toHaveLength(1);
+    expect(afterRecords[0]!.error).toContain('evidence degraded');
+  });
+
+  it('P1-4: an event without toolArgs still records evidence honestly (no crash, empty args)', async () => {
+    await bootstrapTrajectoryViaPrompt();
+    await invokeAfterToolCall({ toolName: 'bash', result: 'done', durationMs: 3 });
+
+    const rows = toolCallsRows();
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    const afterRecords = hookExecutionRecords().filter((record) => record.hook === 'after_tool_call');
+    expect(afterRecords).toHaveLength(1);
+    expect(afterRecords[0]!.error).toBeUndefined();
   });
 });

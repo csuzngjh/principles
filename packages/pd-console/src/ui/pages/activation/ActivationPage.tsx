@@ -420,7 +420,7 @@ function ActivationFactCard({
               {record.promptInjection.status === "window_excluded" &&
                 (productionRotation === "rotates"
                   ? t("pages.activation.injectionWindowRotates", {
-                      defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），后续轮次会轮到（预测）",
+                      defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符）；该宿主支持公平轮转，轮次记录持续成功时后续轮次会轮到（预测，降级轮不前进）",
                       cost: record.promptInjection.costChars ?? 0,
                       budget: record.promptInjection.budget ?? 0,
                     })

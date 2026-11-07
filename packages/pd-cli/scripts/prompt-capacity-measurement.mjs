@@ -242,12 +242,17 @@ async function budgetBeforeAfterReplay() {
       const ctx = await buildActivePrinciplePromptContext({ workspaceDir: dir, roundKey: k, promptBudget: resolutionAt(budgetChars) });
       rotationSum += ctx.principleIds.length;
     }
+    // PRI-1137 final review P2: the oversized count must cover the WHOLE
+    // corpus. The FIFO projection's `oversizedActivationIds` only covers
+    // candidates seen before the first non-fit (FIFO stops there), so entries
+    // after the stop point were silently missing from this statistic.
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir: dir, includeAuthority: true });
     return {
       fifoInjected: fifo.principleIds.length,
       fifoUsedChars: fifo.additionalContext.length,
       fifoTruncated: fifo.truncated,
       rotationAvgInjected: +(rotationSum / rounds).toFixed(2),
-      oversized: (fifo.oversizedActivationIds ?? []).length,
+      oversized: countOversizedCandidates(principles, selfReportEnabled),
     };
   };
   // Historical baseline (pre-recalibration v1 base = 2000). Deliberately a

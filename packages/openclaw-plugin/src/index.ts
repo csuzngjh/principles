@@ -634,7 +634,20 @@ const plugin = {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({ hook: 'after_tool_call' }, { flushImmediately: true });
             return;
           }
-          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then(() => {
+          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then((dispatched) => {
+            // PRI-1137 final review P1-4: the shared kernel's degradation
+            // (trajectory DB missing/unreadable/schema-invalid) must be
+            // OBSERVABLE — an evidence row that never persisted may not be
+            // recorded as a clean hook success (rc-9).
+            const warnings = dispatched?.warnings ?? [];
+            if (dispatched?.outcome === 'unavailable' || warnings.length > 0) {
+              const degraded = `after_tool_call evidence degraded: ${warnings.join('; ')}${dispatched?.nextAction ? ` nextAction=${dispatched.nextAction}` : ''}`;
+              api.logger.warn(`[PD:after_tool_call] ${degraded}`);
+              WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+                hook: 'after_tool_call', error: degraded.slice(0, 500),
+              }, { flushImmediately: true });
+              return;
+            }
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'after_tool_call'
             }, { flushImmediately: true });

@@ -40,10 +40,17 @@ describe('OpenClaw shared pain readiness boundary', () => {
       onAfterToolResult,
     });
 
-    await expect(runtime.dispatchAfterToolCall(
+    // PRI-1137 final review P1-4: the dispatch no longer resolves to an
+    // opaque void — it returns the shared kernel's degradation facts so the
+    // registration layer can warn and record an HONEST hook execution.
+    const degraded = await runtime.dispatchAfterToolCall(
       { toolName: 'write_file', params: { file_path: 'src/a.ts' }, error: 'denied' },
       { workspaceDir, sessionId: 'session-readiness' },
-    )).resolves.toBeUndefined();
+    );
+    expect(degraded.outcome).toBe('unavailable');
+    expect(degraded.warnings.length).toBeGreaterThan(0);
+    expect(degraded.warnings.join('; ')).toMatch(/trajectory/);
+    expect(typeof degraded.nextAction).toBe('string');
 
     expect(painEnrichmentProvider).not.toHaveBeenCalled();
     expect(onAfterToolResult).not.toHaveBeenCalled();

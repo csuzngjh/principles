@@ -184,19 +184,24 @@ const MODEL_DEPENDENT_NEXT_ACTION =
  * PRI-1137: the production prompt annotates each directive with its authority,
  * so an approval-time cost that omitted the attribute would understate the real
  * bytes. Unknown/unreadable stays unannotated — never inferred.
+ *
+ * PRI-1137 final review P2: a BROKEN authority read is distinguished from
+ * "no annotation" — the caller refuses as unconfirmed instead of silently
+ * billing an unannotated (cheaper) entry (rc-3/rc-9).
  */
 function readAuthorityForArtifact(
   workspaceDir: string,
   artifactId: string,
-): 'owner' | 'system_policy' | undefined {
+): { ok: true; authority: 'owner' | 'system_policy' | undefined } | { ok: false; reason: string } {
   const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
-  if (!fs.existsSync(stateDbPath)) return undefined;
+  if (!fs.existsSync(stateDbPath)) return { ok: true, authority: undefined };
   let connection: SqliteConnection | undefined;
   try {
     connection = new SqliteConnection({ workspaceDir, readonly: true, bootstrapIfMissing: false, busyTimeoutMs: 0 });
-    return readPromptActivationAuthority(connection, artifactId, 'prompt').authority;
-  } catch {
-    return undefined;
+    return { ok: true, authority: readPromptActivationAuthority(connection, artifactId, 'prompt').authority };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `authority_read_failed: ${message.slice(0, 160)}` };
   } finally {
     connection?.close();
   }
@@ -210,6 +215,16 @@ export async function checkPromptArtifactDeliverability(input: {
   workspaceDir: string;
   targetHost?: PromptInjectionTargetHost;
   artifact: PromptDeliverabilityCandidateArtifact | null | undefined;
+  /**
+   * PRI-1137 final review P2: the authority the DECISION under measurement
+   * will stamp on this artifact. Approve-time callers pass `'owner'` (the
+   * console/CLI approval IS an owner decision — the post-approval directive
+   * bills `authority="owner"`, and billing the pre-approval default
+   * `system_policy` overstated the entry by the attribute delta and could
+   * refuse a borderline-fitting entry). Absent → the current DB fact (the
+   * honest pre-decision view for candidate-fit surfaces).
+   */
+  authority?: 'owner' | 'system_policy';
 }): Promise<PromptArtifactDeliverability> {
   if (!input.artifact) {
     return {
@@ -227,7 +242,17 @@ export async function checkPromptArtifactDeliverability(input: {
     };
   }
   const selfReportEnabled = selfReportEnabledFor(input.workspaceDir);
-  const authority = readAuthorityForArtifact(input.workspaceDir, input.artifact.artifactId);
+  const authorityRead = readAuthorityForArtifact(input.workspaceDir, input.artifact.artifactId);
+  if (!authorityRead.ok) {
+    // A broken authority read must not be billed as "unannotated" — the cost
+    // evidence would be fabricated-cheap (final review P2, rc-3).
+    return {
+      status: 'unconfirmed',
+      reason: `${authorityRead.reason}; the single-entry cost cannot be measured with the authority annotation this route bills`,
+      nextAction: 'repair the workspace state.db readability (the authority join read failed), then retry',
+    };
+  }
+  const authority = input.authority ?? authorityRead.authority;
   const principle: ActivatedPrinciple = authority === undefined
     ? resolved.principle
     : { ...resolved.principle, authority };
@@ -341,6 +366,8 @@ export async function checkPromptArtifactDeliverabilityById(input: {
   workspaceDir: string;
   artifactId: string;
   targetHost?: PromptInjectionTargetHost;
+  /** See `checkPromptArtifactDeliverability.authority` (approve-time = 'owner'). */
+  authority?: 'owner' | 'system_policy';
 }): Promise<PromptArtifactDeliverability> {
   const loaded = await loadPromptArtifactById(input.workspaceDir, input.artifactId);
   if (!loaded.ok) {
@@ -350,5 +377,8 @@ export async function checkPromptArtifactDeliverabilityById(input: {
       nextAction: 'fix the artifact store readability, then retry the approval',
     };
   }
-  return checkPromptArtifactDeliverability({ ...input, artifact: loaded.artifact });
+  return checkPromptArtifactDeliverability({
+    ...input,
+    artifact: loaded.artifact,
+  });
 }

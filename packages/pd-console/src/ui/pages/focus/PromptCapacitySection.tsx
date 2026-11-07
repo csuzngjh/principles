@@ -104,7 +104,7 @@ export function PromptCapacitySection({
             >
               {entry.rotation === "rotates"
                 ? t("pages.focus.promptCapacityPerHostRotationRotates", {
-                    defaultValue: "轮转：公平轮转（该宿主持有轮次权威，未入窗条目按轮次轮到）",
+                    defaultValue: "轮转：支持公平轮转（该宿主持有轮次权威；每轮需轮次记录成功——缺 sessionId、写入失败或轮次不可读时该轮降级 FIFO、窗口不前进，未入窗条目在轮次持续成功时才会轮到）",
                   })
                 : t("pages.focus.promptCapacityPerHostRotationFifo", {
                     defaultValue: "轮转：FIFO（该宿主按激活顺序注入，需腾出容量才有空位）",
