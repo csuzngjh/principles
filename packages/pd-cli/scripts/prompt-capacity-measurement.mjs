@@ -107,13 +107,17 @@ function seedCandidates(workspaceDir, mix) {
  * `full_directive_context` basis the shared route reports. Measuring each
  * candidate alone keeps the corpus-wide count independent of FIFO prefix fill.
  */
-export function countOversizedCandidates(principles, selfReportEnabled) {
+export function countOversizedCandidates(
+  principles,
+  selfReportEnabled,
+  budgetChars = RUNTIME_PRINCIPLE_BUDGET,
+) {
   return principles.filter((principle) =>
     packSharedDirectives({
       scanOrder: [principle],
-      // Same fallback the production route resolves when the caller holds no
-      // model facts (SPEC §6.1 default).
-      budgetChars: RUNTIME_PRINCIPLE_BUDGET,
+      // Use the exact tier budget being reported. The fixed runtime fallback
+      // is only the default for scenarios without a model-capacity fact.
+      budgetChars,
       selfReportEnabled,
       continueOnNonFit: true,
     }).oversized.includes(principle.activationId),
@@ -252,7 +256,7 @@ async function budgetBeforeAfterReplay() {
       fifoUsedChars: fifo.additionalContext.length,
       fifoTruncated: fifo.truncated,
       rotationAvgInjected: +(rotationSum / rounds).toFixed(2),
-      oversized: countOversizedCandidates(principles, selfReportEnabled),
+      oversized: countOversizedCandidates(principles, selfReportEnabled, budgetChars),
     };
   };
   // Historical baseline (pre-recalibration v1 base = 2000). Deliberately a
@@ -285,7 +289,7 @@ async function budgetBeforeAfterReplay() {
 const TIER_MIX = { short: 14, long: 2, oversized: 0 };
 const TIER_ROUNDS = 40;
 
-async function modelAwareTierScenario(windowTokens, selfReport) {
+export async function modelAwareTierScenario(windowTokens, selfReport) {
   const resolution = windowTokens === null
     ? resolvePromptBudget()
     : resolvePromptBudget({ hostCapacity: { contextTokenBudget: windowTokens, contextWindowSource: 'model' } });
@@ -293,34 +297,45 @@ async function modelAwareTierScenario(windowTokens, selfReport) {
   const label = windowTokens === null ? 'unknown' : `${Math.round(windowTokens / 1000)}K`;
 
   const sharedDir = makeWorkspace({ selfReport });
-  const candidates = seedCandidates(sharedDir, TIER_MIX);
-  let rotationSum = 0;
-  for (let k = 0; k < TIER_ROUNDS; k += 1) {
-    const ctx = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, roundKey: k, promptBudget: resolution });
-    rotationSum += ctx.principleIds.length;
-  }
-  const shared = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, promptBudget: resolution });
-  fs.rmSync(sharedDir, { recursive: true, force: true });
+  try {
+    const activationIds = seedCandidates(sharedDir, TIER_MIX);
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({
+      workspaceDir: sharedDir,
+      includeAuthority: true,
+    });
+    let rotationSum = 0;
+    for (let k = 0; k < TIER_ROUNDS; k += 1) {
+      const ctx = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, roundKey: k, promptBudget: resolution });
+      rotationSum += ctx.principleIds.length;
+    }
+    const shared = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, promptBudget: resolution });
 
-  return {
-    label,
-    windowTokens,
-    budgetChars,
-    capacitySource: resolution.capacitySource,
-    capacityStatus: resolution.capacityStatus,
-    fallbackReason: resolution.fallbackReason ?? null,
-    policyVersion: resolution.policyVersion,
-    candidates: candidates.length,
-    rotationAvgInjected: +(rotationSum / TIER_ROUNDS).toFixed(2),
-    shared: {
-      injected: shared.principleIds.length,
-      usedChars: shared.additionalContext.length,
-      truncated: shared.truncated,
-      oversized: shared.oversizedActivationIds?.length ?? 0,
-      dropped: shared.droppedActivationIds?.length ?? 0,
-      selectionPolicy: shared.selectionPolicy,
-    },
-  };
+    return {
+      label,
+      windowTokens,
+      budgetChars,
+      capacitySource: resolution.capacitySource,
+      capacityStatus: resolution.capacityStatus,
+      fallbackReason: resolution.fallbackReason ?? null,
+      policyVersion: resolution.policyVersion,
+      candidates: activationIds.length,
+      rotationAvgInjected: +(rotationSum / TIER_ROUNDS).toFixed(2),
+      shared: {
+        injected: shared.principleIds.length,
+        usedChars: shared.additionalContext.length,
+        truncated: shared.truncated,
+        // The production FIFO scan stops at its first non-fit candidate, so its
+        // per-run diagnostic list cannot represent oversized candidates later
+        // in the corpus. Measure every candidate independently at THIS tier's
+        // resolved budget while retaining the production full-directive packer.
+        oversized: countOversizedCandidates(principles, selfReportEnabled, budgetChars),
+        dropped: shared.droppedActivationIds?.length ?? 0,
+        selectionPolicy: shared.selectionPolicy,
+      },
+    };
+  } finally {
+    fs.rmSync(sharedDir, { recursive: true, force: true });
+  }
 }
 
 async function modelAwareSharedDispatchEvidence() {

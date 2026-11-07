@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03T13:19:43.161Z",
+  "generatedAt": "2026-11-07T11:53:44.378Z",
   "spec": "SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001",
   "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
   "policy": {
@@ -16,7 +16,7 @@
       "1M": 31250
     }
   },
-  "scenario": "16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, 40 forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext",
+  "scenario": "16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, 40 forced round keys through buildActivePrinciplePromptContext (the only production route)",
   "tiers": [
     {
       "selfReport": false,
@@ -27,18 +27,13 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 12.7,
-        "avgUsedChars": 1111,
-        "truncatedRounds": 40,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 2,
       "shared": {
         "injected": 2,
-        "usedChars": 1056,
+        "usedChars": 1108,
         "truncated": true,
-        "oversized": 0,
+        "oversized": 2,
         "dropped": 1,
         "selectionPolicy": "legacy_fifo_prefix_v1"
       }
@@ -52,18 +47,13 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 12.7,
-        "avgUsedChars": 1111,
-        "truncatedRounds": 40,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 1,
       "shared": {
         "injected": 1,
-        "usedChars": 1180,
+        "usedChars": 1206,
         "truncated": true,
-        "oversized": 0,
+        "oversized": 2,
         "dropped": 1,
         "selectionPolicy": "legacy_fifo_prefix_v1"
       }
@@ -77,16 +67,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 11.5,
-        "avgUsedChars": 1618,
-        "truncatedRounds": 40,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 4.6,
       "shared": {
-        "injected": 6,
-        "usedChars": 1980,
+        "injected": 5,
+        "usedChars": 1879,
         "truncated": true,
         "oversized": 0,
         "dropped": 1,
@@ -102,18 +87,13 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 11.5,
-        "avgUsedChars": 1618,
-        "truncatedRounds": 40,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 4,
       "shared": {
         "injected": 4,
-        "usedChars": 1873,
+        "usedChars": 1977,
         "truncated": true,
-        "oversized": 0,
+        "oversized": 2,
         "dropped": 1,
         "selectionPolicy": "legacy_fifo_prefix_v1"
       }
@@ -127,16 +107,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 10.03,
       "shared": {
-        "injected": 14,
-        "usedChars": 3828,
+        "injected": 13,
+        "usedChars": 3935,
         "truncated": true,
         "oversized": 0,
         "dropped": 1,
@@ -152,16 +127,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 9,
       "shared": {
-        "injected": 13,
-        "usedChars": 3952,
+        "injected": 11,
+        "usedChars": 3776,
         "truncated": true,
         "oversized": 0,
         "dropped": 1,
@@ -177,16 +147,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 16,
       "shared": {
         "injected": 16,
-        "usedChars": 6568,
+        "usedChars": 6984,
         "truncated": false,
         "oversized": 0,
         "dropped": 0,
@@ -202,16 +167,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 16,
       "shared": {
         "injected": 16,
-        "usedChars": 6923,
+        "usedChars": 7339,
         "truncated": false,
         "oversized": 0,
         "dropped": 0,
@@ -227,16 +187,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 16,
       "shared": {
         "injected": 16,
-        "usedChars": 6568,
+        "usedChars": 6984,
         "truncated": false,
         "oversized": 0,
         "dropped": 0,
@@ -252,16 +207,11 @@
       "capacityStatus": "confirmed",
       "fallbackReason": null,
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 16,
       "shared": {
         "injected": 16,
-        "usedChars": 6923,
+        "usedChars": 7339,
         "truncated": false,
         "oversized": 0,
         "dropped": 0,
@@ -277,16 +227,11 @@
       "capacityStatus": "unknown",
       "fallbackReason": "host_capacity_absent",
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 10.03,
       "shared": {
-        "injected": 14,
-        "usedChars": 3828,
+        "injected": 13,
+        "usedChars": 3935,
         "truncated": true,
         "oversized": 0,
         "dropped": 1,
@@ -302,16 +247,11 @@
       "capacityStatus": "unknown",
       "fallbackReason": "host_capacity_absent",
       "policyVersion": "model_aware_v2",
-      "list": {
-        "candidates": 16,
-        "avgInjected": 16,
-        "avgUsedChars": 3526,
-        "truncatedRounds": 0,
-        "avgOversizedPerRound": 0
-      },
+      "candidates": 16,
+      "rotationAvgInjected": 9,
       "shared": {
-        "injected": 13,
-        "usedChars": 3952,
+        "injected": 11,
+        "usedChars": 3776,
         "truncated": true,
         "oversized": 0,
         "dropped": 1,
@@ -320,32 +260,24 @@
     }
   ],
   "beforeAfter": {
-    "scenario": "same 16 persisted candidates (14 × 60 chars, 2 × 1200 chars), 40 forced round keys, both routes via the REAL production serializers",
+    "scenario": "same 16 persisted candidates (14 × 60 chars, 2 × 1200 chars), 40 forced round keys, the unified shared production route",
     "beforeChars": 2000,
     "afterChars": 4000,
     "before": {
-      "list": {
-        "avgInjected": 11.5,
-        "avgUsedChars": 1618
-      },
       "shared": {
-        "fifoInjected": 6,
-        "fifoUsedChars": 1980,
+        "fifoInjected": 5,
+        "fifoUsedChars": 1879,
         "fifoTruncated": true,
-        "rotationAvgInjected": 5.5,
+        "rotationAvgInjected": 4.6,
         "oversized": 0
       }
     },
     "after": {
-      "list": {
-        "avgInjected": 16,
-        "avgUsedChars": 3526
-      },
       "shared": {
-        "fifoInjected": 14,
-        "fifoUsedChars": 3828,
+        "fifoInjected": 13,
+        "fifoUsedChars": 3935,
         "fifoTruncated": true,
-        "rotationAvgInjected": 10.5,
+        "rotationAvgInjected": 10.03,
         "oversized": 0
       }
     }

@@ -2,20 +2,29 @@ import { describe, expect, it } from 'vitest';
 import {
   RUNTIME_PRINCIPLE_BUDGET,
   renderPrinciplesToDirectives,
+  resolvePromptBudget,
   trimToBudget,
 } from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { packSharedDirectives, type ActivatedPrinciple } from '@principles/host-runtime';
 
 const script = await import('../../scripts/prompt-capacity-measurement.mjs') as unknown as {
-  countOversizedCandidates: (principles: ActivatedPrinciple[], selfReportEnabled: boolean) => number;
+  countOversizedCandidates: (
+    principles: ActivatedPrinciple[],
+    selfReportEnabled: boolean,
+    budgetChars?: number,
+  ) => number;
+  modelAwareTierScenario: (
+    windowTokens: number | null,
+    selfReport: boolean,
+  ) => Promise<{ budgetChars: number; shared: { oversized: number } }>;
 };
 
-function principle(text: string): ActivatedPrinciple {
+function principle(text: string, activationId = 'act-boundary'): ActivatedPrinciple {
   return {
-    principleId: 'P-boundary',
-    activationId: 'act-boundary',
-    artifactId: 'art-boundary',
+    principleId: `P-${activationId}`,
+    activationId,
+    artifactId: `art-${activationId}`,
     text,
     authority: 'owner',
   };
@@ -47,6 +56,29 @@ describe('PRI-1137 prompt capacity measurement — shared packer is the only ove
 
     // The script must follow the shared route, not the retired arithmetic.
     expect(script.countOversizedCandidates([candidate], false)).toBe(1);
+  });
+
+  it('counts both oversized 32K candidates using the tier budget', async () => {
+    const budget32k = resolvePromptBudget({
+      hostCapacity: { contextTokenBudget: 32_000, contextWindowSource: 'model' },
+    }).budgetChars;
+    expect(budget32k).toBe(1250);
+
+    const longA = principle('l'.repeat(1200), 'act-long-a');
+    const longB = principle('l'.repeat(1200), 'act-long-b');
+
+    // The report must inspect the entire corpus independently, at the actual
+    // 32K tier budget (not the 4K fallback used by other scenarios). Each
+    // 1200-character body is oversized once the full directive wrapper is
+    // charged against the 1250-character 32K tier budget.
+    expect(script.countOversizedCandidates([longA, longB], false, budget32k)).toBe(2);
+    expect(script.countOversizedCandidates([longA, longB], false)).toBe(0);
+
+    // Exercise the exact tier-report call site with the real 16-candidate
+    // workspace fixture, not only the counting helper in isolation.
+    const scenario = await script.modelAwareTierScenario(32_000, false);
+    expect(scenario.budgetChars).toBe(1250);
+    expect(scenario.shared.oversized).toBe(2);
   });
 
   it('charges the authority annotation and the real self-report state to the budget', () => {
