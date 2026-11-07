@@ -184,19 +184,19 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     const token = {};
     payloads.set(token, payload);
     const modelContext = modelContextFor(payload.context);
+    // PRI-1137 final review P1-4: `PluginHookAfterToolCallEvent` carries
+    // `toolArgs` (the SDK's `params` field exists only on the BEFORE events) —
+    // reading `params` here silently downgraded every shared after-tool
+    // evidence row to `params_json = '{}'`. Narrowed by the discriminated
+    // union, no `as` cast (ERR-001).
+    const afterEvent = payload.kind === 'after_tool_call' ? payload.event : undefined;
     const event: HostEvent = {
       kind: payload.kind,
       context: {
         ...contextFor(workspaceDir, sessionId, payload.kind === 'before_prompt_build' ? undefined : payload.event.toolName),
-        ...(payload.kind === 'after_tool_call' ? {
-          // PRI-1137 final review P1-4: `PluginHookAfterToolCallEvent` carries
-          // `toolArgs` (the SDK's `params` field exists only on the BEFORE
-          // events) — reading `params` here silently downgraded every shared
-          // after-tool evidence row to `params_json = '{}'`.
-          toolInput: (payload.event as PluginHookAfterToolCallEvent).toolArgs
-            ?? (payload.event as { params?: Record<string, unknown> }).params
-            ?? {},
-          toolOutput: { error: payload.event.error, result: payload.event.result, durationMs: payload.event.durationMs },
+        ...(afterEvent !== undefined ? {
+          toolInput: afterEvent.toolArgs ?? {},
+          toolOutput: { error: afterEvent.error, result: afterEvent.result, durationMs: afterEvent.durationMs },
         } : {}),
         ...(modelContext !== undefined ? { modelContext } : {}),
       },
