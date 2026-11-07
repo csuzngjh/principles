@@ -3,6 +3,8 @@
 - 日期：2026-11-07
 - 状态：**待 Owner 决定（未授权执行）**
 - 依据：主报告 §0/§6/§9；[最小阻断清单](PD-AA-PRI-1117-MINIMAL-BLOCKERS-20261107.md)
+- 判据澄清：[正例/对照臂成功与停止判据](PD-AA-PRI-1117-STOP-CRITERIA-20261107.md)（本卡 §7/§10 按该文件执行）
+- 新增离线证据：[M2 离线调查](PD-AA-PRI-1117-M2-OFFLINE-INVESTIGATION-20261107.md)、[1258 事后只读生产库审计](PD-AA-PRI-1117-POST-RUN-AUDIT-20261107.md)
 - 本卡不启动任何宿主回合、不调用模型、不安装、不写生产库、不修改历史判定。
 
 ---
@@ -73,7 +75,7 @@
 
 **目的**
 
-1. control 臂是否在无原则注入时返回 `AA-DONE` 且不使用工具；
+1. 对照臂接线是否在**无准入、无指令、无工具**下、恰好一次请求返回最终答案（`evaluateControlGate` 10 项，见判据文件 §3）；
 2. 在**离线**补齐后，能否用固定身份与时间戳证明“含 target 的请求先于关键行动”；
 3. 运行前后生产库只读审计是否存在可复核的零写入证据。
 
@@ -139,9 +141,11 @@
 3. 子进程环境仍含 host-overridable key（尤其 `PD_WORKSPACE_DIR`）；
 4. 出现第二次 host turn、第二个 HTTP 请求或任何 tool call（超出本卡额度）；
 5. 出现外部 provider、付费调用或非 `127.0.0.1` 端点；
-6. admission 未被一次性消费，或出现 `ambiguous_admission` / `ambiguous_identity`；
+6. **仅正例臂**：admission 未被一次性消费，或出现 `ambiguous_admission` / `ambiguous_identity`。**对照臂不适用**——对照臂按设计不提供 admission（`run-experiment.mjs` 的 control 隔离环境不传 `admissionPath`；`evaluateControlGate` 不接收 `admission` 参数），其有效性由 `no-intervention` 等 10 项独立判定（见判据文件 §3.2）。
 7. 生产库出现任何本 run 的写入迹象；
 8. 超时、异常回退无法解释或出现静默 fallback。
+
+> “正例失败 → 对照不启动”是 `runPositiveThenControl` 的时序规则，不是对照臂的成功判据；不得据此推断对照臂一定失败。
 
 ---
 
@@ -191,14 +195,22 @@
 |---|---|
 | positive：target body 出现在请求 | 可 `confirmed`（端点观察） |
 | positive：run 级关联 | 可 `confirmed`（admission 消费 + hook 调用） |
-| positive：`timely` | **仅** B1 离线补齐后可为 `confirmed`；否则 `unknown` |
-| control：`returned` | **仅** B2 执行后可为 `confirmed`；否则 `NOT_RUN` |
+| positive：`timely` | **仅**正例臂；B1 离线补齐后可为 `confirmed`；否则 `unknown`。对照臂不适用 timely |
+| control：`returned` | **仅** B2 执行且对照 10 项 PASS 后可为 `confirmed (harness)`；否则 `NOT_RUN` |
+| control：无指令 / 无工具 / 单请求 | 由 `no-intervention` / `no-tool` / `http-count` 直接判定；**不需要** admission 消费 |
+| control-only 运行 | 必须标注 `control-only`；正例保持历史 FAIL，不得表述为成对协议通过 |
 | 字节级同一输入 | `unknown`（除 B 捕获原始请求） |
-| 零生产写入 | 仅前后只读审计可支持；否则 `unknown` |
+| 零生产写入 | 1258 事后审计结论为“未发现”，仍为 `unknown`；不得写成“已证明不存在”或“零” |
 | 行为收益 | 一律 `NOT_APPLICABLE`（G2/G3） |
 
 ---
 
-## 11. 一句话
+## 11. 补跑 control 的决策价值（供 Owner 判断是否动用剩余 `1 host / 1 HTTP / 0 tool`）
+
+补跑一次对照臂能新增的具体结论只有一条：**在同一个冻结的宿主 / 配置 / 端点 / 工具暴露下，无准入、无指令、无工具时，harness 可以恰好一次请求正常结束并通过 `evaluateControlGate` 的全部 10 项**；它影响的是 C04 中 `control=returned` 这个仍为 `NOT_RUN` 的待定判断，以及“正例臂的第二次请求与工具调用不是所有臂的固定产物”这一接线层面的判断。若不跑，M3 将永久为 `NOT_RUN`，C04 的对照侧永远没有原始证据，剩余 `1/1/0` 额度随本实验结束而失效；但必须先说清上限：fake provider 对 control 分支**硬编码**返回 `AA-DONE`（`fake-provider.mjs#L394-L401`），且对照任务指令与正例不同，所以即使 10 项全 PASS，也只能证明“对照接线可执行、无指令无工具”，**不能**得出“原则导致正例的工具调用”或任何因果/行为收益结论；它也不能修复正例的历史 FAIL。是否动用剩余额度由 Owner 决定，本轮不启动。
+
+---
+
+## 12. 一句话
 
 **推荐 A：用剩余 1/1/0 预算只跑 control，M2 在现有证据上离线补齐，M1 收窄为 unknown；这样下一阶段可以开始，但不得宣告 G1/C04 通过。**
