@@ -218,7 +218,7 @@ runtime-v2/
 │       ├── skill-file-writer.ts
 │       ├── rule-host-writer.ts
 │       └── training-exporter.ts
-├── gfi/                             ← 已删除（GFI-COMPLETE-REMOVAL-001，仅剩空 __tests__）
+├── gfi/                             ← 已完全删除（GFI-COMPLETE-REMOVAL-001；目录不存在）
 └── cli/                             ← Diagnose / Probe CLI 接口（被 pd-cli 调用）
     ├── index.ts
     ├── diagnose-run.ts

@@ -89,11 +89,11 @@
 **仍是现行权威契约、但仍有未完项或未获执行授权（13 篇）**
 
 - `SPEC-PD-EXAMINER-001-v0.10.1.md`：Console `/lab` 已随包出厂，真实模型执行仍 `403 real_execution_not_authorized`。
-- `SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.3.md` / `-v0.3.1.md`：Phase 0+B 已落，**Phase A、Phase C 未做**（`gate-block-helper.ts:234` 仍自动造 rulehost_block Pain；GFI 仍喂 Pain 写点）。
+- `SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.3.md` / `-v0.3.1.md`：**2026-11-07 复核更新**——Phase 0 / A 已实施（PR #2296、#2316）；Phase B 代码与单测/集成已实施（PR #2308、#2347），但真实 LLM BDD 与三宿主最终验收未完成；Phase C（GFI）生产逻辑已移除（PR #2332），历史 JSON 迁移与 `gone` 墓碑例外未闭合。当前实施状态与证据见 `-v0.3.1.md` §8 与 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。（此前"Phase A、Phase C 未做"的记述已过期，保留作历史对照。）
 - `SPEC-PD-PRR-001-principle-pain-recall-v1.3.md` + `Gate-A-to-B-admission-matrix` + `Gate-B-experiment-plan` + `Gate-B-owner-decision-card` + `Gate-B0-AC-preregistration`：Gate B 真实执行 NOT_RUN，决策卡 D-01–D-05 全 PENDING。
 - `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md`：Gate 3 现行契约。
 - `PRI-917-semantic-reuse-adjudication-v0.3.3.md`：Reuse Review Gate 现行权威（`reuse-gated-intake.ts` 已接生产自动路径）。
-- `SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.2.md`：机制已实现但生产开关未开，仍是该机制的权威规格。
+- `SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.2.md`：机制已实现但生产开关未开；**2026-11-07 复核更新**——WorkBuddy 自动关键词 Pain 明确不支持（非待开发），唯一入口为手动前缀 `PD记录痛苦：`；能力边界见该文 §6 Amendment，最终验收由 PRI-1147/PRI-1148 跟踪。
 - `SPEC-RULECODE-QUALITY-001-v0.2.md` + `v0.2-ZCODE-EXECUTION.md`：A/B1 已落，B2/B3/B4 待前提成立。
 
 **未实现或仅部分实现，剩余范围明确未开工（15 篇）**

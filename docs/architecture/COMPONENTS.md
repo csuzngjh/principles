@@ -328,7 +328,7 @@ PD 系统有 5 类组件：
 
 ### 3.6 GFI（Global Friction Index）— 已退役
 
-`runtime-v2/gfi/` 下的 `GfiKernel`、`GfiPolicy`、`GfiReadModel` 与 plugin 的 `GfiSessionAdapter`（`core/session-tracker.ts`）已在 **GFI-COMPLETE-REMOVAL-001**（SPEC §2 / §3.2）中删除，目录仅剩空的 `__tests__` 占位。当前没有任何生产消费方；`gfi` feature flag 仅以 `gone` 墓碑保留（`feature-flag-contract.ts`），不驱动行为。
+`runtime-v2/gfi/`（PRI-1136 改名后为 `runtime/gfi/`）下的 `GfiKernel`、`GfiPolicy`、`GfiReadModel` 与 plugin 的 `GfiSessionAdapter`（`core/session-tracker.ts`）已在 **GFI-COMPLETE-REMOVAL-001**（SPEC §2 / §3.2）中删除。**目录已完全不存在**（不再有 `__tests__` 占位）。当前没有任何生产消费方；`gfi` feature flag 仅以 `gone` 墓碑保留（`feature-flag-contract.ts`），不驱动行为。历史 workspace JSON 中可能仍残留 GFI 字段（未迁移，跟踪 PRI-1149）。
 
 ### 3.7 Prompt Builder Primitives
 
