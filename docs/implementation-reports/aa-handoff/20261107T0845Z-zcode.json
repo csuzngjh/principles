@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0845Z-zcode",
+  "previousCheckpoint": "20261107T0810Z-zcode",
+  "generatedAt": "2026-11-07T08:45:00Z",
+  "agent": "zcode",
+  "overallStatus": "IMPLEMENTATION_COMPLETE_OFFLINE_READY_FOR_REVIEW",
+  "summary": "PRI-1119 设计 v1.2 Tier B 离线实施完成（Owner 书面批准 L1-L6 + 四项附加验收条件）。OpenClaw 宿主侧：上游 PR openclaw/openclaw#194566（branch csuzngjh:ai/prompt-presence-check，base origin/release/2026.11.1）——有界检查器纯函数（三值资格+四类上限+32MiB 累计 UTF-8 扫描上限+assembly_truncated 规则+异常 fail-open）、responses egress observer 接线（attemptIndex）、completions 提交点（onPayload 替换后 encode 前）、symbol carrier、hook 结果 injectedExpectations 字段+白名单透传+多插件合并、runner 请求序数与 carrier 绑定。PD 插件侧（本 PR）：守卫后冻结 helper（host 归一化规则复制+bodyComplete 包含判定+64 条上限+fail-open）、hook 返回字段、类型镜像、7 用例单测、changeset patch。四项附加条件落点：①32MiB 累计上限（超限禁 checked_missing）②bodyComplete 残片强制 unknown:assembly_truncated ③runId+requestIndex+attemptIndex+payloadVariant 身份（测试覆盖同 run 多请求/并发/重试）④事件字节 UTF-8 实测。验证：openclaw 检查器 20/20 + wrapper 6/6 + 现有回归 36/36 + tsc 触碰文件 0 错；PD 新测试 7/7 + hooks 回归 588/588 + tsc exit 0 + eslint 0。实测：18×2.2KiB 代表性 0.111ms median/2994 UTF-8 字节；64×64KiB 边界 128.620ms median/10702 字节（如实记录）。两仓依赖：宿主先行（或 fork 分支安装），PD 旧宿主静默兼容。真实宿主/模型调用 0；未改安装目录/生产配置/生产库。不宣称 D/G1/C04/G2 通过。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations",
+    "branch": "ai/PRI-1119-evidence-expectations",
+    "baseCommit": "main e02fe63b3（#2404 已被 Owner 合并入 main）",
+    "headCommit": "本检查点提交后以 PR 页面为准",
+    "dirtyPaths": [],
+    "prUrl": "以 PR 创建结果为准（独立实现 PR）",
+    "prState": "OPEN",
+    "remoteChecks": "推送后以 PR head 实际 CI 为准。",
+    "openclawPr": "https://github.com/openclaw/openclaw/pull/194566（branch csuzngjh:ai/prompt-presence-check，不合并）"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "Tier B 离线实施：OpenClaw 双路径正文存在性取证 + PD 守卫后冻结；四项附加验收条件全部落地",
+      "status": "IMPLEMENTATION_COMPLETE_OFFLINE_READY_FOR_REVIEW",
+      "owner": "zcode",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0845Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T0845Z-zcode.md",
+        ".changeset/presence-expectations.md",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-expectations.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/src/openclaw-sdk.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-expectations.test.ts"
+      ],
+      "acceptance": [
+        {"criterion": "条件1 累计扫描上限（超限禁 checked_missing）", "result": "PASS", "evidenceRefs": ["evidence-openclaw-tests"]},
+        {"criterion": "条件2 bodyComplete 残片强制 unknown:assembly_truncated（PD 守卫后冻结）", "result": "PASS", "evidenceRefs": ["evidence-openclaw-tests", "evidence-pd-tests"]},
+        {"criterion": "条件3 身份（runId/requestIndex/attemptIndex/payloadVariant；同 run 多请求/并发/重试测试）", "result": "PASS", "evidenceRefs": ["evidence-openclaw-tests"]},
+        {"criterion": "条件4 事件字节 UTF-8 实测", "result": "PASS", "evidenceRefs": ["evidence-measure"]},
+        {"criterion": "两路径接线（responses egress 帧 + completions onPayload 后）", "result": "PASS", "evidenceRefs": ["evidence-openclaw-tests"]},
+        {"criterion": "PD 守卫后冻结 + 旧宿主向后兼容", "result": "PASS", "evidenceRefs": ["evidence-pd-tests"]},
+        {"criterion": "真实宿主/模型调用", "result": "0（未启动）", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "D/G1/C04/G2 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": [
+        "Owner 评审 openclaw PR #194566 与本 PR。",
+        "真实宿主验收运行卡：待 Owner 另行授权（本轮未出、未执行）。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-openclaw-tests", "cwd": "D:\\Code\\_worktrees\\openclaw\\prompt-presence-check", "command": "node scripts/run-vitest.mjs run packages/ai/src/transports/prompt-presence-check.test.ts（20/20）; provider-prompt-state.presence.test.ts（6/6）; 现有 observer/transport 回归 4 文件 36/36", "result": "PASS", "category": "宿主侧测试", "freshThisRound": true, "evidenceRefs": ["evidence-openclaw-tests"]},
+    {"id": "check-pd-tests", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations\\packages\\openclaw-plugin", "command": "npx vitest run tests/hooks/prompt-presence-expectations.test.ts（7/7）; tests/hooks/ 回归 588/588; npx tsc --noEmit exit 0; npx eslint 触碰文件 0", "result": "PASS", "category": "PD 侧测试与类型", "freshThisRound": true, "evidenceRefs": ["evidence-pd-tests"]},
+    {"id": "check-measure", "cwd": "D:\\Code\\_worktrees\\openclaw\\prompt-presence-check", "command": "node --import ./scripts/tsx.mjs packages/ai/src/transports/prompt-presence-measure.mts", "result": "PASS", "category": "耗时与事件字节实测", "freshThisRound": true, "evidenceRefs": ["evidence-measure"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A - 未启动真实宿主/模型", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-openclaw-tests", "kind": "LOCAL_TEST", "locator": "D:/Code/_worktrees/openclaw/prompt-presence-check（run-vitest 输出：20/20、6/6、36/36 全 PASS）", "observedAt": "2026-11-07T17:26:00+08:00", "supports": "检查器矩阵、wrapper/carrier/身份、回归。", "limitations": "离线 fixture；非真实宿主。"},
+    {"id": "evidence-pd-tests", "kind": "LOCAL_TEST", "locator": "D:/Code/_worktrees/principles/PRI-1119-evidence-expectations/packages/openclaw-plugin（7/7、588/588、tsc exit 0、eslint 0）", "observedAt": "2026-11-07T17:23:00+08:00", "supports": "PD 冻结 helper 与回归。", "limitations": null},
+    {"id": "evidence-measure", "kind": "LOCAL_TEST", "locator": "packages/ai/src/transports/prompt-presence-measure.mts 输出（本机）", "observedAt": "2026-11-07T17:35:00+08:00", "supports": "0.111ms/2994B（18 条代表性）；128.620ms/10702B（64×64KiB 边界）；UTF-8 字节制。", "limitations": "机器相关数值；脚本已入库可复跑。"},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮真实宿主/模型调用 0；安装目录/dist 未改；生产配置/生产库未改；Owner 主检出未改", "observedAt": "2026-11-07T08:45:00Z", "supports": "边界遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-openclaw-pr", "kind": "CHECKPOINT", "locator": "https://github.com/openclaw/openclaw/pull/194566", "persistence": "remote", "notes": "宿主侧实现（不合并）。"},
+    {"id": "artifact-design-v12", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md（v1.2：四项附加条件入文）", "persistence": "committed", "notes": "批准记录与条件同步。"},
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0845Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "openclaw PR #194566 与本 PR 均待评审（Owner 不自动合并）。",
+    "真实宿主验收需 Owner 另行授权。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 评审两仓 PR。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "评审完成/合并决定。"},
+    {"order": 2, "issue": "PRI-1119", "action": "如需真实宿主验证，Owner 另行授权运行卡。", "dependsOn": [1], "authorization": "NEEDS_OWNER", "doneWhen": "书面决定。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-07 批准 v1.2 Tier B 实施（L1-L6 + 四项附加验收条件）：编码/测试/构建/假传输捕获/测量/提交/推送/PR；不修改安装目录、不修补 dist、不改生产配置或生产库、不启动真实宿主或模型调用、不安装、不发布、不自动合并、不宣称 D/G1/C04/G2 通过。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0845Z-zcode\",\"kind\":\"pri-1119-tierb-implementation-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（owner=zcode:PRI-1119-evidence-expectations）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

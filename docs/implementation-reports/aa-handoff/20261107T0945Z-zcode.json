@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0945Z-zcode",
+  "previousCheckpoint": "20261107T0845Z-zcode",
+  "generatedAt": "2026-11-07T09:45:00Z",
+  "agent": "zcode",
+  "overallStatus": "REVIEW_FIXES_COMPLETE_INCREMENT_CARD_PENDING",
+  "summary": "PRI-1119 取证实现收口（Owner 第六轮指令）：五项已确认缺陷中四项完成修复并有先红后绿证据，一项（shared route 逐原则期望集）需 host-runtime 接口增量——精简设计增量卡已提交待 Owner 批准，未实施；被禁替代方案（事后读库/反向解析展示文本/全局最新值缓存）已排除。缺陷1 正文匹配 per-API 契约（completions 标准 text 部件 + 合法角色不可解析降级 unknown + invalid_body 禁空正文恒真命中）——检查器 26/26。缺陷2 requestIndex 绑定 streamFn 调用边界（最外层 wrapper 层经 options-keyed token 单次递增；堆叠链单计数；重试同 requestIndex+attemptIndex 递增；并发隔离；工具后二请求复用快照）——重写后 7/7，测试以同一生产 wrapper 连续两调驱动、不手动改生产计数器。缺陷3 PD 冻结移到守卫+最终重验+deadline/预算回退全部之后（最终包含=true；仅 pre-guard=false；皆非=整条排除；presenceFallbackApplied 抑制回退后残片分类）——helper 10/10 + hooks 591/591。缺陷4 收集期有界 + injectedExpectationsOverflow 贯穿 hook 结果→白名单→carrier→事件字段——70→64+6 反例、escape 只对保留条目执行。openclaw PR 交付范围修正：upstream main 382b76bdf73 无同类机制（grep 0 命中）、release→main 15533 commits 确认 5016 文件差异为基线错位；新分支 ai/prompt-presence-check-main（main 基线、仅本功能 11 文件）cherry-pick 两提交+手工解冲突+call-site 对齐；旧分支 release 基线保留为本地版本验证分支（fast-forward 推送、未强推）；旧 PR #194566 未关闭，处置建议随 PR/Linear 报告。真实宿主/模型调用 0。不宣称 D/G1/C04/G2 通过。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations",
+    "branch": "ai/PRI-1119-evidence-expectations",
+    "baseCommit": "main e02fe63b3",
+    "headCommit": "本轮推送后以 PR #2406 页面为准",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2406",
+    "prState": "OPEN",
+    "remoteChecks": "推送后以 PR head 实际 CI 为准。",
+    "openclawBranches": {
+      "releaseBaselineVerificationBranch": "ai/prompt-presence-check（base release/2026.11.1；70230a32 + 8c2c52a3a07，fast-forward）",
+      "upstreamContributionBranch": "ai/prompt-presence-check-main（base upstream main 382b76bdf73；7d35091e140 + 552b505bda5，仅本功能 11 文件）"
+    }
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "取证实现收口：五缺陷修复（4 完成+1 待批增量卡）+ openclaw PR 范围修正 + 反例/测试/构建/推送",
+      "status": "REVIEW_FIXES_COMPLETE_INCREMENT_CARD_PENDING",
+      "owner": "zcode",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0945Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T0945Z-zcode.md",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-expectations.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/src/openclaw-sdk.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-expectations.test.ts"
+      ],
+      "acceptance": [
+        {"criterion": "缺陷1 per-API 部件+不可解析降级+invalid_body", "result": "PASS", "evidenceRefs": ["evidence-checker"]},
+        {"criterion": "缺陷2 序数绑定调用边界（同 wrapper 连续两调、堆叠单计数、重试、并发）", "result": "PASS", "evidenceRefs": ["evidence-wrapper"]},
+        {"criterion": "缺陷3 冻结移至全部回退后（回退撤下=整条排除；截断无回退=false）", "result": "PASS", "evidenceRefs": ["evidence-pd-helper"]},
+        {"criterion": "缺陷4 溢出事实贯穿+收集期有界", "result": "PASS", "evidenceRefs": ["evidence-pd-helper"]},
+        {"criterion": "缺陷5 shared route 期望集", "result": "INCREMENT_CARD_PENDING（待 Owner 批准，未实施）", "evidenceRefs": ["evidence-increment-card"]},
+        {"criterion": "假传输字节捕获（双 API 真实生产 transport + fake fetch）", "result": "PASS（4/4）", "evidenceRefs": ["evidence-capture"]},
+        {"criterion": "openclaw PR 范围修正（main 基线移植+新 PR+旧 PR 处置建议）", "result": "PASS", "evidenceRefs": ["evidence-port"]},
+        {"criterion": "真实宿主/模型调用", "result": "0", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "D/G1/C04/G2 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": [
+        "Owner 批准 shared-route 增量卡后实施。",
+        "Owner 评审 openclaw 新 PR 与 PD #2406；处置旧 PR #194566。",
+        "真实宿主验收运行卡待 Owner 另行授权。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-checker-matrix", "cwd": "D:\\Code\\_worktrees\\openclaw\\prompt-presence-check", "command": "node scripts/run-vitest.mjs run packages/ai/src/transports/prompt-presence-check.test.ts", "result": "PASS", "category": "检查器矩阵", "freshThisRound": true, "passed": 26, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-checker"]},
+    {"id": "check-wrapper", "cwd": "D:\\Code\\_worktrees\\openclaw\\prompt-presence-check", "command": "node scripts/run-vitest.mjs run src/agents/embedded-agent-runner/provider-prompt-state.presence.test.ts", "result": "PASS", "category": "wrapper/身份", "freshThisRound": true, "passed": 7, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-wrapper"]},
+    {"id": "check-capture", "cwd": "D:\\Code\\_worktrees\\openclaw\\prompt-presence-check", "command": "node scripts/run-vitest.mjs run packages/ai/src/transports/prompt-presence-transport-capture.test.ts", "result": "PASS", "category": "假传输字节捕获", "freshThisRound": true, "passed": 4, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-capture"]},
+    {"id": "check-regressions", "cwd": "D:\\Code\\_worktrees\\openclaw\\prompt-presence-check", "command": "provider-prompt-state.test.ts + observer + completions transport 3 文件", "result": "PASS", "category": "回归", "freshThisRound": true, "passed": 36, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-wrapper"]},
+    {"id": "check-pd", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations\\packages\\openclaw-plugin", "command": "npx vitest run tests/hooks/prompt-presence-expectations.test.ts + tests/hooks/ 全量 + tsc --noEmit", "result": "PASS", "category": "PD 测试与类型", "freshThisRound": true, "passed": 601, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-pd-helper"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-checker", "kind": "LOCAL_TEST", "locator": "openclaw worktree run-vitest 输出", "observedAt": "2026-11-07T18:47:00+08:00", "supports": "26/26（含 6 新反例）。", "limitations": null},
+    {"id": "evidence-wrapper", "kind": "LOCAL_TEST", "locator": "run-vitest 输出（7/7 + 旧套件 36/36 含新 requestIndex 契约）", "observedAt": "2026-11-07T19:05:00+08:00", "supports": "调用边界序数/堆叠单计数/重试/并发。", "limitations": "首跑组合出现 1 例跨 shard flake，隔离与组合复跑均绿，如实记录。"},
+    {"id": "evidence-capture", "kind": "LOCAL_TEST", "locator": "prompt-presence-transport-capture.test.ts（4/4）", "observedAt": "2026-11-07T18:56:00+08:00", "supports": "真实生产 transport + fake fetch：双 API 提交字节含/不含目标、onPayload 替换双反映、fail-open 照常提交。", "limitations": "responses 用例由 fake responder 拒绝响应（检查点与字节捕获先于响应）。"},
+    {"id": "evidence-pd-helper", "kind": "LOCAL_TEST", "locator": "PD worktree vitest/tsc 输出（10/10 + 591/591 + tsc 0）", "observedAt": "2026-11-07T18:43:00+08:00", "supports": "回退分类/溢出/有界收集。", "limitations": null},
+    {"id": "evidence-increment-card", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md", "observedAt": "2026-11-07T19:10:00+08:00", "supports": "缺陷5 增量卡待批。", "limitations": "未实施。"},
+    {"id": "evidence-port", "kind": "GIT", "locator": "ai/prompt-presence-check-main：7d35091e140 + 552b505bda5（base 382b76bdf73；11 文件）", "observedAt": "2026-11-07T19:20:00+08:00", "supports": "上游贡献最小移植；release 基线分支保留为本地验证。", "limitations": "新 PR 的 CI 以 PR 页面为准。"},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮真实宿主/模型 0；安装目录/dist 未改；生产配置/库未改；未强推；旧 PR 未关闭", "observedAt": "2026-11-07T09:45:00Z", "supports": "边界遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-increment-card", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md", "persistence": "committed", "notes": "缺陷5 增量卡（待批）。"},
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0945Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "shared-route 增量卡待 Owner 批准（主路径逐原则期望集缺口）。",
+    "openclaw 新 PR 与 PD #2406 待评审；旧 PR #194566 处置待 Owner。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅增量卡并书面批准/否决。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面决定。"},
+    {"order": 2, "issue": "PRI-1119", "action": "评审两仓 PR；处置旧 PR。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "评审完成。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "sharedBranchForcePushed": false,
+    "oldPrClosed": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-07 收口指令：修复已确认问题、反例先行、假传输字节捕获、PR 范围修正；不强推共享分支、不覆盖他人提交、不关闭旧 PR；增量卡待批不阻塞其他修复；不宣称 D/G1/C04/G2。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0945Z-zcode\",\"kind\":\"pri-1119-review-fixes-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

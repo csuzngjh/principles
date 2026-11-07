@@ -1,7 +1,7 @@
 # PRI-1119 交付证据最小设计（wire 边界存在性核验）v1.1
 
 - 文档 ID：`pd-aa-pri-1119-delivery-evidence-minimal-design-20261107`
-- 版本：v1.1（2026-11-07，按 Owner 第三轮设计修正指令完成七项契约修订；**仍未实现**）
+- 版本：v1.2（2026-11-07；**v1.1 Tier B 已获 Owner 书面批准**（实施卡 L1–L6），附加四项验收条件随本版同步入文；实现进行中）
 - 状态：**待 Owner 书面明确批准后方可编码**（本指令只授权调查与设计修订，不替代设计批准）
 - v1.0 → v1.1 差异表见 §10；v1.0 全文见 git 历史（PR #2404 commit `8f20b9f98`）
 
@@ -64,6 +64,7 @@ buildOpenAICompletionsRequest → params
   - completions：`params.messages[]` 中**每一条** `role === "system"`（如宿主扩展 developer 角色则一并纳入）；
   - **不做跨消息拼接**：正文横跨两条消息 → 按缺失记录（避免拼接制造虚假命中）；
   - 命中语义：完整 `bodyText` 原文出现在**单条**合法角色消息文本内 → 该 activation 记 `full_hit`（并记录命中的消息序号与角色）；
+- **完整正文 vs 实际装配文本的区别（Owner 附加条件 2）**：期望集条目携带 `bodyComplete`（PD 在尺寸守卫后判定该 activation 的**完整原则正文**是否原样存活于实际装配文本）。`bodyComplete=false`（装配被截断，期望集只含残片）→ 该条结果强制 `unknown`，`reason=assembly_truncated`，**禁止用残片做包含检查取得 `full_hit`**；
   - 命中出现在 user/tool 角色消息 → `presentInWrongRole=true`，**不改变** `full_hit=false`；
   - 匹配用原文精确子串（`String.prototype.includes`），无正则、无归一化、无模糊匹配。
 
@@ -77,6 +78,7 @@ buildOpenAICompletionsRequest → params
 | 单条 bodyText 长度 | 64 KiB | 该条 → `unknown`，`reason=body_over_limit`（记录实际长度；**禁止截断后把前缀命中算作完整命中**） |
 | 扫描区域总字节（单消息文本） | 8 MiB | 该消息跳过并在结果中记 `skipped_over_limit`；若因此无法完整检查 → `unknown`，`reason=scan_region_over_limit` |
 | 合法角色消息数 | 512 | 超出部分记 `skipped_over_limit`；同上降级 |
+| **累计扫描字节（整次检查，覆盖合法+错误角色全部被扫文本）** | **32 MiB** | **一旦超过：整次检查 → `unknown`，`reason=cumulative_scan_over_limit`（记录实际累计值）。绝不在超限后输出 `checked_missing`（Owner 附加条件 1）** |
 
 - 结果资格（契约 4 修订）：每条 activation 只有三种互斥结果：
   - `full_hit` —— 完整检查执行且完整正文命中；
@@ -120,6 +122,7 @@ buildOpenAICompletionsRequest → params
 - **payloadVariant 不是唯一尝试身份**（同一 kind 可重复出现）：检查点事件增加 wrapper 闭包内单调 `attemptIndex`（在 observePrompt 触发时递增——时序上先于 encodeBody 的 `++attempts`，故必须独立计数）。
 - **期望集隔离**：期望集经 options carrier 只绑定本次逻辑模型请求；并发 run → runId 不同 + 状态 Map 分键 + closure 分离，**无串用路径**；同 run 第二次模型请求 → 新 wrapper 闭包 + 新 carrier；失败/重试 → 同闭包内同期望集逐尝试重检（期望集不变，结果逐尝试记录）。清理：carrier 随调用对象生命周期结束；run 级 `clearProviderPromptState` 已有。
 - completions：每次调用一次 encode+create（已核实无内层 attempt loop）；SDK 层重试（若有）不经检查点，如实列为边界外。
+- **身份复用（Owner 附加条件 3）**：事件优先复用既有身份字段——run=`runId`（信封既有）、逻辑模型请求=`requestIndex`（wrapper 闭包次序，同 run 内单调）、传输尝试=`attemptIndex`+`payloadVariant`；测试必须覆盖同 run 多请求（requestIndex 递增且期望集各自独立）、并发 run（互不串用）、重试（attemptIndex 递增、逐尝试独立结果）。
 
 ## 7. 检查器纯函数与事件（接口冻结，实现按此）
 
@@ -149,7 +152,7 @@ type PresenceCheck = {
 
 **测量（必须给出实测数字，不得沿用 v1.0 的"<1ms / ≤1.5KiB"宣称）**：
 - 耗时：vitest bench 或 `performance.now()` 环绕，代表性 fixture（system 区 53–65k 字符 × 18 期望 × 2.2KiB body）+ 边界 fixture（64×64KiB 超限），各 ≥30 次取中位/p95；
-- 事件字节：`JSON.stringify(event.data.presenceCheck).length` 实测（18 结果满载与空载两档）；
+- 事件字节：**按 UTF-8 字节实测（Owner 附加条件 4）**——`Buffer.byteLength(JSON.stringify(event.data.presenceCheck), "utf8")`（18 结果满载与空载两档；presenceCheck 净增量单独给出）；
 - 报告表：`测量方法/输入/次数/中位/p95/字节数`，写入实现 PR。
 
 ## 9. 成本、验收、回滚（v1.1 修订）
@@ -188,3 +191,14 @@ type PresenceCheck = {
 ## 12. 真实运行卡（仅为草案，本轮不执行、不请求批准）
 
 待离线实现验收后，如需在真实宿主验证：专用单 agent、1 次 responses 路径 + 1 次 completions 路径真实请求、预算上限、时长上限、停用方式（revert + 重装官方版本）、验收=事件含 presenceCheck 且字段与离线 fixture 一致。**本轮不出卡、不申请。**
+
+## 13. v1.2.1 实施修订记录（2026-11-07 评审收口轮）
+
+评审收口轮对已批准 v1.2 的实施修订（均随 openclaw PR 与 PD PR 落地，测试先红后绿）：
+
+1. **正文匹配 per-API 契约**：completions 读标准 `{type:"text"}` 部件（宿主缓存路径实际生成该格式），responses 读 `input_text`；互不越界。合法角色不可解析内容 → 整次检查 `unknown:unparseable_content`（不能完整排除目标时禁止 `checked_missing`）；空/空白 bodyText → `unknown:invalid_body`（`includes("")` 恒真，绝不允许空正文充数）。
+2. **逻辑请求序数绑定 streamFn 调用边界**：最外层 wrapper 层经 options-keyed request token 每次调用只递增一次；内层观察到 token 即传播。同 run 多请求序数递增、重试保持同一 requestIndex 且 attemptIndex 递增、并发 run 隔离、工具后第二次请求复用当前装配快照。测试通过**同一生产 wrapper 连续两次调用**驱动，不手动改生产计数器。
+3. **最终装配快照**：PD 冻结移到尺寸守卫、最终重验、deadline/最终预算回退**全部完成之后**；分类=最终装配包含→bodyComplete=true；仅 pre-guard 存在（截断、无回退）→bodyComplete=false；两者皆非（回退撤下）→**整条排除**。残片永不重定义为完整正文。
+4. **有界性与溢出事实**：收集期有界（escape/normalize 只对保留条目执行），64 条上限溢出以 `injectedExpectationsOverflow` 贯穿 hook 结果→白名单→carrier→`presenceCheck.expectationsOverflow` 事件字段；不再静默丢弃。
+5. **shared route 缺口**：默认主路径的逐原则正文在 host-runtime 内部，插件不可见——需 host-runtime 接口增量，见 [PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md](./PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md)（**待 Owner 批准**，未实施）。
+6. **交付范围修正**：openclaw 上游贡献改为基于 upstream main 的最小移植分支（新 PR）；`ai/prompt-presence-check`（release/2026.11.1 基线）保留为本地版本验证分支；旧 PR #194566 处置见 PR 正文与 Linear。
