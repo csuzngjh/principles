@@ -16,7 +16,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 export const PHASES = Object.freeze({
   codexChain: 'codex_chain',
@@ -60,11 +59,13 @@ export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, p
   fs.mkdirSync(runDir, { recursive: true });
   const metaPath = path.join(runDir, 'run-meta.json');
   let meta;
+  let createdNew;
   if (fs.existsSync(metaPath)) {
     meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     if (meta.run_id !== runId) {
       throw new Error(`run-meta.json run_id mismatch: file says '${meta.run_id}', requested '${runId}'`);
     }
+    createdNew = false;
   } else {
     meta = {
       run_id: runId,
@@ -77,8 +78,9 @@ export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, p
       phases: {},
     };
     fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    createdNew = true;
   }
-  return { runId, runDir, meta, metaPath, createdNew: !fs.existsSync(path.join(runDir, 'run-meta.json')) || Object.keys(meta.phases).length === 0 };
+  return { runId, runDir, meta, metaPath, createdNew };
 }
 
 /**
