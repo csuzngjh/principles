@@ -121,7 +121,7 @@ if (!isPartial && gates.dataset_ok) {
     provider: runMeta?.provider ?? null,
     model: runMeta?.model ?? null,
     generated_at: new Date().toISOString(),
-    desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；不含样本文本、日志或凭据（文本见冻结数据集 golden-dataset.json）',
+    desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；不含样本完整原文、日志或凭据。final_outcome_reason 仅为 Stage-1 命中词（词表见冻结数据集）或模型一句话理由；样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json',
     samples: buildEvidenceRows(chain),
   }, null, 2));
   fs.writeFileSync(path.join(evidenceDir, 'metrics-summary.json'), JSON.stringify(metricsSummary, null, 2));
