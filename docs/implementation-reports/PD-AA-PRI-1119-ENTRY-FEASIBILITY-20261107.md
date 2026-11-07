@@ -19,8 +19,8 @@
 
 | 问题 | 结论 | 最强依据 |
 |---|---|---|
-| 普通真实任务能否通过正常入口注入“已授权、已激活”的原则？ | **GO** | 生产 8 天 238 个真实轮次均产生 `runtime_v2_prompt_activations_injected`；11/07 样本 `injectedCount=16`、`runId` 为真实 UUID |
-| 能否可靠激活“指定的一条”原则？ | **NO-GO（现状）** | 同一原则 8 天 238 轮中 97 轮被注入（40.8%），141 轮被 `droppedActivationIds` 明确丢弃；无 allowlist 配置 |
+| 普通真实任务能否通过正常入口注入“已授权、已激活”的原则？ | **GO（仅注入机制）** | 生产 8 天 238 次 prompt 构建均产生 `runtime_v2_prompt_activations_injected`；`runId` 为真实 UUID，`eligibleCount` 恒为 18 |
+| 能否可靠激活“指定的一条”原则？ | **待场景样本核实（原 NO-GO 撤回）** | 97/238 = 40.8% 仅是该日志范围内的**目标注入比例**，不是交付场景覆盖率；预算在 2000/4000/15625/31250 间变化，丢弃条数不固定；fair rotation 不是随机分组或行为对照 |
 | 能否独立确认“该请求正文里确有目标文本”？ | **NO-GO（现状）** | PD 只返回 `prependSystemContext` 片段，最终请求由宿主组装；仓库与安装产物中无请求正文/哈希捕获 |
 | 能否把上述缺口改造成可用入口？ | **CONDITIONAL** | 存在两条最小修正路径（§7），均需 Owner 批准，且第二条落在 PD 边界之外 |
 
@@ -39,7 +39,7 @@
 | 已安装插件版本 | `2.6.4`（mtime 2026-11-06T14:34:54+08:00） | `~/.openclaw/extensions/principles-disciple/package.json` |
 | OpenClaw | `2026.11.1 (4ffdd20)` | `openclaw --version` |
 | 宿主模式 | gateway `local`；单 agent `main` | `~/.openclaw/openclaw.json` |
-| 主模型 | `zai/glm-5.3-flash`（外部付费） | 同上 |
+| 主模型 | 配置主模型 = `zai/glm-5.3-flash`（外部付费）；**实际运行漂移**：样本窗口（10-30..11-06）runtime 主要使用 `amd-radeon-cn` 本地网关模型（`DeepSeek-V4-Flash` / `Qwen3.8-Flash-Next`），`zai/glm-5.3-flash` 仅 2 run（见 provider 取证报告 §1） | `openclaw.json` `agents.entries.main.model` + `trace.metadata` 逐 run 统计 |
 | 本地 provider | `ninfer` / `lmstudio` / `llamacpp` | 同上（provider keys） |
 | 生产 prompt 开关 | `features.prompt.enabled=true` | `D:/.openclaw/workspace/.pd/config.yaml` L5-L7 |
 | 生产 `adaptiveActivation` | **未配置**（config.yaml 无该键） | 同上全文检索 `adaptive` = 0 命中 |
@@ -146,7 +146,7 @@ content_json length = 2173（候选排序口径，非正文精确字节数）
 
 统计口径：`events_YYYY-MM-DD.jsonl` 中 `runtime_v2_prompt_activations_injected`，按 `data.activationIds` 是否包含该 activationId（注入）与 `data.droppedActivationIds` 是否包含（丢弃）。快照时间 2026-11-07T03:07Z（本地 11:07）；生产仍在运行，计数会随时新增轮次而增长。
 
-| 日期 | 轮次 | 注入 | 丢弃 |
+| 日期 | 注入事件数（每次 prompt 构建/run） | 注入 | 丢弃 |
 |---|---:|---:|---:|
 | 2026-10-31 | 46 | 17 | 29 |
 | 2026-11-01 | 33 | 0 | 33 |
@@ -156,17 +156,13 @@ content_json length = 2173（候选排序口径，非正文精确字节数）
 | 2026-11-05 | 25 | 17 | 8 |
 | 2026-11-06 | 26 | 26 | 0 |
 | 2026-11-07 | 5 | 5 | 0 |
-| **合计** | **238** | **97（40.8%）** | **141（59.2%）** |
+| **合计** | **238** | **97（占本日志范围 40.8%）** | **141（59.2%）** |
 
-注入 + 丢弃 = 238，全部轮次都有明确归属（没有“既未注入也未记录丢弃”的第三态）。单轮样本（11/07 00:02:25）：
+注入 + 丢弃 = 238，全部事件都有明确归属（没有“既未注入也未记录丢弃”的第三态）。但 238 是**日志范围内的事件数**，不是“交付场景数”：其中大量事件来自心跳/自主续跑，不等于用户交付请求。
 
-```
-eligibleCount=18  injectedCount=16  budget=4000
-selectionPolicy=fair_rotation_v1  selectionRoundOrdinal=72
-droppedActivationIds=[act_prompt_a819fc44…, act_prompt_151a9c0b…]
-```
+预算并非固定 4000：窗口内 `budget` 分布为 2000×157、4000×46、15625×33、31250×2；`eligibleCount` 恒为 18，不同轮次的 `injectedCount` 为 4/5/8/9/14/16/18 不等（对应丢弃 14/13/10/9/4/2/0 条）。单个 `eligibleCount=18 / injectedCount=16` 样本不足以推断“所有轮次固定丢两条”。
 
-**结论**：`fair_rotation_v1` 在 18 条候选、4000 字符预算下每轮固定丢 2 条；目标原则的注入是轮转结果，不是确定性结果。**因此“普通真实任务可可靠激活指定原则”在现状下不成立。**
+**结论（修订）**：97/238 只能报告为“该日志范围内的目标注入比例”。它既不是交付场景覆盖率，也不构成“指定原则不可靠”的因果证据；`fair_rotation_v1` 是公平轮转，不是随机分组或行为对照。**“单目标不可靠、必须先建单原则工作区”降级为待场景样本核实的判断，不再是本轮默认结论；每轮必注入也不是本次研究的默认要求。**
 
 这不是缺陷报告，而是设计事实：`filterPromptActivations` 没有任何 allowlist / 单目标限制（`prompt-activation-reader-contract.ts#L54-L60`），配置里也没有这类开关（生产 config.yaml `adaptive` = 0 命中）。
 
@@ -176,20 +172,20 @@ droppedActivationIds=[act_prompt_a819fc44…, act_prompt_151a9c0b…]
 
 | ID | 缺口 | 为什么是缺口 | 现状可否绕过 |
 |---|---|---|---|
-| **G-A** | 单目标不可靠：18 条候选竞争 4000 字符预算，目标 97/238 | 普通任务无法把“指定原则”变成确定性送达 | 只能靠“工作区里只有一条 active prompt 原则”，但见 G-A2 |
+| **G-A** | 目标注入比例 97/238（仅日志范围），预算 2000–31250 可变 | 是否构成“交付场景漏注入”**待场景样本核实**；已核实的唯一明确交付机会（报告任务）在可观测轮次均注入目标 | 先做只读样本清单（已完成），不默认工作区迁移 |
 | **G-A2** | 新工作区无法通过官方路径种入既有 artifact | `pd artifact` 只有 `show`；`pd runtime activation dispatch` 要求该工作区已有 artifact；无 artifact 导入命令 | 只能走该工作区自身的诊断→提案→Owner 批准流程（得到的是**新**原则/revision），或改动生产工作区的 18 条激活（治理变更，爆炸半径大） |
 | **G-B** | 无最终请求正文证据 | PD 只返回片段；宿主组装最终请求；G1/C04 要求“独立比对同一请求正文” | PD 边界内**不可能**自证；必须宿主/provider 侧只读观测 |
 | **G-C** | 无请求级身份 | embedded 无 `requestId`/`currentUserMessageId`；`tool_use_id` 0/22438 | 只能到 turn 级；顺序退化为同机时钟 |
 | **G-D** | 版本能力差 | 已安装 2.6.4 无 controlled admission；仓库/发布 2.7.1 有 | 需官方安装/升级（未授权），且 controlled admission 本身仍属受控实验路径 |
 | **G-E** | 普通路径无最终重验 | `revalidateAdaptivePrinciple` 仅单目标分支调用 | 读取到装配之间无失效/改版复核；窗口内若改原则正文，旧正文可能被带入 |
 
-**最小缺口（阻断 G2 的部分）**：G-A + G-B。G-C/G-D/G-E 是“证据降级/能力缺失”，可记录为 unknown，不单独阻断；但 G-B 是 SPEC G1 的硬条件，**不能降级**。
+**最小缺口（阻断 G2 的部分）**：**G-B**（无最终请求正文证据）是当前唯一硬阻断；G-A 降级为待场景样本核实，本轮只读样本未发现可证实的“交付场景漏注入”。G-C/G-D/G-E 是“证据降级/能力缺失”，可记录为 unknown，不单独阻断。
 
 ---
 
 ## 7. 最小修正方案（只给方案，不实施）
 
-### 7.1 方案 A（推荐底座）：专用真实工作区 + 单一 active prompt 原则
+### 7.1 方案 A（候选底座，非默认下一步）：专用真实工作区 + 单一 active prompt 原则
 
 **改动属性**：0 代码、0 新平台；一次配置/治理操作。
 
@@ -256,7 +252,7 @@ droppedActivationIds=[act_prompt_a819fc44…, act_prompt_151a9c0b…]
 | evidence-trajectory | RAW | `D:/.openclaw/workspace/.state/trajectory.db`（只读；`assistant_turns.run_id` 4316/4316；`tool_calls.tool_use_id` 0/22438） |
 | evidence-installed | RAW | `C:/Users/Administrator/.openclaw/extensions/principles-disciple`（2.6.4；controlled admission 0 命中） |
 | evidence-config | RAW | `D:/.openclaw/workspace/.pd/config.yaml`（`features.prompt.enabled=true`；无 `adaptiveActivation`） |
-| evidence-host-config | RAW | `C:/Users/Administrator/.openclaw/openclaw.json`（gateway local；agent main；zai/glm-5.3-flash） |
+| evidence-host-config | RAW | `C:/Users/Administrator/.openclaw/openclaw.json`（gateway local；agent main；配置主模型 `zai/glm-5.3-flash` + `modelPolicy.allow` 含 `amd-radeon-cn` 系列本地模型；runtime 实际以 `amd-radeon-cn` 为主，见 provider 取证报告 §1 配置-运行漂移） |
 | evidence-spec | SPEC | `docs/specs/PD Adaptive Activation SPEC v0.6.md#L171,L190,L191,L203` |
 
 只读脚本（不提交）：`.tmp/pri-1119/{inspect-state,candidates,trajectory-aggregate}.cjs`。

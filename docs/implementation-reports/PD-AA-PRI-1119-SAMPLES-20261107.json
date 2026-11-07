@@ -1,0 +1,2716 @@
+{
+  "schema": "pd-aa-sample-inventory/v1",
+  "generatedAtUtc": "2026-11-07T03:43:03.332Z",
+  "freeze": {
+    "windowStartUtc": "2026-10-30T00:00:00.000Z",
+    "windowEndUtc": "2026-11-06T00:00:00.000Z",
+    "selectionRule": "All human-authored user transcript events (message_role=user, provenance.kind absent) in window, ordered created_at/session/seq, cap 20; plus every 10th host-synthesized (provenance.kind=internal_system) user event in same window, cap 10. Selection does not use injection/outcome. Injection joined only after this list was fixed.",
+    "humanCap": 20,
+    "auditEvery": 10,
+    "auditCap": 10,
+    "humanAvailable": 12,
+    "internalAvailable": 133,
+    "humanSelected": 12,
+    "auditSelected": 10,
+    "truncated": false
+  },
+  "sources": {
+    "hostTranscriptDb": "C:/Users/Administrator/.openclaw/agents/main/agent/openclaw-agent.sqlite",
+    "hostTraceTable": "trajectory_runtime_events",
+    "pdInjectionEventLogDir": "D:/.openclaw/workspace/.state/logs",
+    "pdStateDb": "D:/.openclaw/workspace/.pd/state.db",
+    "snapshotTakenUtc": "2026-11-07T03:43:03.332Z",
+    "logCoverage": [
+      {
+        "file": "events_2026-10-31.jsonl",
+        "injectionEvents": 46
+      },
+      {
+        "file": "events_2026-11-01.jsonl",
+        "injectionEvents": 33
+      },
+      {
+        "file": "events_2026-11-02.jsonl",
+        "injectionEvents": 33
+      },
+      {
+        "file": "events_2026-11-03.jsonl",
+        "injectionEvents": 53
+      },
+      {
+        "file": "events_2026-11-04.jsonl",
+        "injectionEvents": 17
+      },
+      {
+        "file": "events_2026-11-05.jsonl",
+        "injectionEvents": 25
+      },
+      {
+        "file": "events_2026-11-06.jsonl",
+        "injectionEvents": 26
+      },
+      {
+        "file": "events_2026-11-07.jsonl",
+        "injectionEvents": 5
+      }
+    ],
+    "injectionJoinAvailableFromUtc": "2026-10-31T00:00:00.000Z"
+  },
+  "target": {
+    "principle": "产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+    "activationId": "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性"
+  },
+  "records": [
+    {
+      "candidateId": "C01",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 1,
+        "messageEventId": "2b63aabf-5ad0-4913-9416-c59c0b3a2684",
+        "createdAtUtc": "2026-10-30T11:24:27.214Z"
+      },
+      "content": {
+        "textSha256": "40b00eed53eca27ff9a83bad0cdbd92fc837e50ea9b03c6e0aeedb19860729b1",
+        "textChars": 63
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T11:31:54.353Z",
+        "runCount": 1,
+        "runIds": [
+          "8ae17f67-48df-407d-9d8d-e8385062a1ce"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 12,
+        "toolClasses": {
+          "other_tool": 12
+        },
+        "toolCallSummary": [
+          "4:web_fetch:other_tool",
+          "6:tool_search:other_tool",
+          "8:tool_call:other_tool",
+          "9:tool_call:other_tool",
+          "10:web_fetch:other_tool",
+          "11:web_fetch:other_tool",
+          "16:tool_call:other_tool",
+          "17:tool_call:other_tool",
+          "18:web_fetch:other_tool",
+          "19:web_fetch:other_tool",
+          "24:tool_call:other_tool",
+          "25:web_fetch:other_tool"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 28,
+            "at": "2026-10-30T11:27:32.854Z",
+            "claimText": false,
+            "textChars": 1737
+          }
+        ],
+        "compiledSystemPromptChars": 64876,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C02",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 25,
+        "messageEventId": "ed81ce48-1283-4185-a692-0b8c90b000e7",
+        "createdAtUtc": "2026-10-30T11:31:54.353Z"
+      },
+      "content": {
+        "textSha256": "52d97f2c8200192138064a88fff878e69d4191ab2b3192efee438d8f32b51fef",
+        "textChars": 67
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T13:22:19.211Z",
+        "runCount": 1,
+        "runIds": [
+          "8d0c6b6a-3734-480c-af98-209ada81c74e"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 19,
+        "toolClasses": {
+          "verify_content_read": 1,
+          "exec_other": 7,
+          "other_tool": 10,
+          "verify_hash_or_stat": 1
+        },
+        "toolCallSummary": [
+          "35:read:verify_content_read",
+          "36:exec:exec_other",
+          "39:exec:exec_other",
+          "40:tool_call:other_tool",
+          "41:tool_call:other_tool",
+          "42:web_fetch:other_tool",
+          "43:web_search:other_tool",
+          "49:exec:exec_other",
+          "57:exec:exec_other",
+          "58:tool_call:other_tool",
+          "59:web_fetch:other_tool",
+          "63:tool_call:other_tool",
+          "64:tool_call:other_tool",
+          "65:exec:exec_other",
+          "66:web_fetch:other_tool",
+          "67:web_fetch:other_tool",
+          "73:exec:exec_other",
+          "75:exec:exec_other",
+          "77:exec:verify_hash_or_stat"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 51,
+            "at": "2026-10-30T11:42:45.399Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 79,
+            "at": "2026-10-30T12:00:38.342Z",
+            "claimText": false,
+            "textChars": 2086
+          }
+        ],
+        "compiledSystemPromptChars": 64861,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C03",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 64,
+        "messageEventId": "c4b9ec7b-363f-4312-8fe1-cbb49f2ffc58",
+        "createdAtUtc": "2026-10-30T13:22:19.211Z"
+      },
+      "content": {
+        "textSha256": "2ff7dd22559c7aa82f3b6c072c848b91f3bb509709e5151e03602fe84285e34c",
+        "textChars": 58
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T13:26:22.524Z",
+        "runCount": 1,
+        "runIds": [
+          "7506bcac-05c7-4258-a4d4-f1c9a22d4d54"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 86,
+            "at": "2026-10-30T13:24:17.644Z",
+            "claimText": false,
+            "textChars": 1253
+          }
+        ],
+        "compiledSystemPromptChars": 64876,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C04",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 67,
+        "messageEventId": "1ebd1859-ba54-444e-8a15-a8f1b97354e2",
+        "createdAtUtc": "2026-10-30T13:26:22.524Z"
+      },
+      "content": {
+        "textSha256": "6ce6081df7c7d1ead4ebf3c4a5c13adbd5ec844b455060f1427a06dc0a85008c",
+        "textChars": 6
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T14:33:13.309Z",
+        "runCount": 1,
+        "runIds": [
+          "e6bba306-330f-4d4b-ad83-b4efd131e89a"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 54,
+        "toolClasses": {
+          "other_tool": 23,
+          "verify_content_read": 2,
+          "exec_other": 26,
+          "verify_hash_or_stat": 2,
+          "verify_content_or_test": 1
+        },
+        "toolCallSummary": [
+          "93:skills_read:other_tool",
+          "95:read:verify_content_read",
+          "97:read:verify_content_read",
+          "99:exec:exec_other",
+          "101:exec:exec_other",
+          "102:exec:exec_other",
+          "105:exec:exec_other",
+          "107:exec:exec_other",
+          "109:process:other_tool",
+          "111:process:other_tool",
+          "113:process:other_tool",
+          "115:exec:verify_hash_or_stat",
+          "117:process:other_tool",
+          "118:exec:exec_other",
+          "119:exec:exec_other",
+          "123:exec:exec_other",
+          "125:exec:exec_other",
+          "127:exec:exec_other",
+          "129:exec:exec_other",
+          "131:exec:exec_other",
+          "133:exec:exec_other",
+          "135:exec:verify_hash_or_stat",
+          "136:exec:exec_other",
+          "139:process:other_tool",
+          "141:exec:exec_other",
+          "143:process:other_tool",
+          "145:process:other_tool",
+          "147:process:other_tool",
+          "155:process:other_tool",
+          "157:process:other_tool",
+          "159:process:other_tool",
+          "160:exec:exec_other",
+          "169:process:other_tool",
+          "171:exec:exec_other",
+          "185:process:other_tool",
+          "187:process:other_tool",
+          "195:process:other_tool",
+          "196:exec:exec_other",
+          "199:tool_search:other_tool",
+          "201:process:other_tool",
+          "202:exec:exec_other",
+          "205:process:other_tool",
+          "207:exec:exec_other",
+          "209:process:other_tool",
+          "211:process:other_tool",
+          "219:process:other_tool",
+          "221:exec:exec_other",
+          "222:exec:exec_other",
+          "225:exec:exec_other",
+          "227:exec:exec_other",
+          "228:exec:exec_other",
+          "231:process:other_tool",
+          "233:exec:verify_content_or_test",
+          "235:exec:exec_other"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 149,
+            "at": "2026-10-30T13:57:44.004Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 163,
+            "at": "2026-10-30T14:01:31.961Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 173,
+            "at": "2026-10-30T14:02:38.413Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 179,
+            "at": "2026-10-30T14:02:43.192Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 189,
+            "at": "2026-10-30T14:04:04.289Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 213,
+            "at": "2026-10-30T14:15:34.098Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 237,
+            "at": "2026-10-30T14:22:13.147Z",
+            "claimText": false,
+            "textChars": 1232
+          }
+        ],
+        "compiledSystemPromptChars": 64591,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C05",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 218,
+        "messageEventId": "32676bec-3995-450b-9266-002a42c60e4c",
+        "createdAtUtc": "2026-10-30T14:33:13.309Z"
+      },
+      "content": {
+        "textSha256": "e6275432af8f386d874aecb531abb39fa3a0378688a861f717694b7e2135ad27",
+        "textChars": 36
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T14:44:57.035Z",
+        "runCount": 1,
+        "runIds": [
+          "b49acba3-23d6-4161-9496-e1c3338a715c"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 244,
+            "at": "2026-10-30T14:35:50.915Z",
+            "claimText": false,
+            "textChars": 1340
+          }
+        ],
+        "compiledSystemPromptChars": 64892,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C06",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 222,
+        "messageEventId": "4417ebbd-b008-46f0-bb56-f8100d9c5448",
+        "createdAtUtc": "2026-10-30T14:44:57.035Z"
+      },
+      "content": {
+        "textSha256": "0fb1d4d9924abb24c267ed7f15b2628e66039ae03b800b186b3b3fb7a7eb44aa",
+        "textChars": 55
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T15:43:45.683Z",
+        "runCount": 1,
+        "runIds": [
+          "14ca4b1f-ecca-490f-a0e2-0c07f2f7bf66"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 25,
+        "toolClasses": {
+          "exec_other": 18,
+          "other_tool": 4,
+          "verify_content_read": 2,
+          "verify_hash_or_stat": 1
+        },
+        "toolCallSummary": [
+          "287:exec:exec_other",
+          "288:exec:exec_other",
+          "297:exec:exec_other",
+          "298:exec:exec_other",
+          "301:exec:exec_other",
+          "321:process:other_tool",
+          "323:process:other_tool",
+          "324:exec:exec_other",
+          "327:exec:exec_other",
+          "329:exec:exec_other",
+          "331:exec:exec_other",
+          "332:exec:exec_other",
+          "335:read:verify_content_read",
+          "337:exec:exec_other",
+          "338:exec:exec_other",
+          "341:read:verify_content_read",
+          "342:exec:exec_other",
+          "345:exec:exec_other",
+          "347:exec:exec_other",
+          "349:exec:exec_other",
+          "351:exec:exec_other",
+          "353:exec:exec_other",
+          "355:process:other_tool",
+          "356:exec:verify_hash_or_stat",
+          "359:process:other_tool"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 251,
+            "at": "2026-10-30T14:45:03.018Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 257,
+            "at": "2026-10-30T14:45:05.065Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 263,
+            "at": "2026-10-30T14:45:07.856Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 269,
+            "at": "2026-10-30T14:45:13.208Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 275,
+            "at": "2026-10-30T14:45:21.686Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 281,
+            "at": "2026-10-30T14:45:45.641Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 291,
+            "at": "2026-10-30T14:46:57.843Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 303,
+            "at": "2026-10-30T14:50:07.057Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 309,
+            "at": "2026-10-30T14:50:36.052Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 315,
+            "at": "2026-10-30T14:51:07.522Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 361,
+            "at": "2026-10-30T15:14:42.124Z",
+            "claimText": false,
+            "textChars": 2142
+          }
+        ],
+        "compiledSystemPromptChars": 63944,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C07",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 288,
+        "messageEventId": "a56f4f24-a752-43a0-8f0b-a5ddc5ee2ddb",
+        "createdAtUtc": "2026-10-30T15:43:45.683Z"
+      },
+      "content": {
+        "textSha256": "8c8bf2e97c78b4efcc44cffe22c50e61f01c05ed472a2ae1132202ad80db09b1",
+        "textChars": 6
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T15:53:36.613Z",
+        "runCount": 1,
+        "runIds": [
+          "8969fcc0-39c7-475e-8802-2f74ecc51589"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 1,
+        "toolClasses": {
+          "exec_other": 1
+        },
+        "toolCallSummary": [
+          "386:exec:exec_other"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 368,
+            "at": "2026-10-30T15:43:54.818Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 374,
+            "at": "2026-10-30T15:43:57.236Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 380,
+            "at": "2026-10-30T15:44:00.946Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 388,
+            "at": "2026-10-30T15:46:09.026Z",
+            "claimText": false,
+            "textChars": 1042
+          }
+        ],
+        "compiledSystemPromptChars": 64834,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C08",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 294,
+        "messageEventId": "94915d92-598e-45a9-a001-24a591a32f96",
+        "createdAtUtc": "2026-10-30T15:53:36.613Z"
+      },
+      "content": {
+        "textSha256": "f01d050621d8d7a06d399aaa95161d74c1415f62ff8726aae19dff2db8fdcf37",
+        "textChars": 75
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-31T00:01:54.010Z",
+        "runCount": 2,
+        "runIds": [
+          "7bac84a3-47f0-4a00-924c-f9562b2dca95",
+          "08f6d752-4e57-4df3-835e-d29a858cfb14"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 1,
+        "toolClasses": {
+          "exec_other": 1
+        },
+        "toolCallSummary": [
+          "395:exec:exec_other"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 397,
+            "at": "2026-10-30T16:00:37.175Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 403,
+            "at": "2026-10-30T16:06:46.284Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 410,
+            "at": "2026-10-30T16:06:54.012Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 416,
+            "at": "2026-10-30T16:06:56.527Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 422,
+            "at": "2026-10-30T16:07:00.231Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 428,
+            "at": "2026-10-30T16:07:06.890Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 434,
+            "at": "2026-10-30T16:07:15.044Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 440,
+            "at": "2026-10-30T16:13:16.284Z",
+            "claimText": false,
+            "textChars": 0
+          }
+        ],
+        "compiledSystemPromptChars": 64518,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C09",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 301,
+        "messageEventId": "a2f19310-4437-4e65-9db5-b38acb57c9b8",
+        "createdAtUtc": "2026-10-31T00:01:54.010Z"
+      },
+      "content": {
+        "textSha256": "7c9691192f1b73408bbe4c0cb6d00db94375ca9d8fce0a0d5985e7a5178f083f",
+        "textChars": 2
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-31T01:47:59.080Z",
+        "runCount": 1,
+        "runIds": [
+          "4b56044f-25fa-466a-bac1-c4d85e3a070d"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "4b56044f-25fa-466a-bac1-c4d85e3a070d",
+            "ts": "2026-10-31T00:44:23.004Z",
+            "injectedCount": 5,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 11,
+            "injectedCharCount": 1991,
+            "targetInjected": true,
+            "targetDropped": false
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 40,
+        "toolClasses": {
+          "exec_other": 26,
+          "artifact_edit": 2,
+          "verify_hash_or_stat": 7,
+          "verify_content_read": 4,
+          "verify_content_or_test": 1
+        },
+        "toolCallSummary": [
+          "447:exec:exec_other",
+          "449:exec:exec_other",
+          "451:exec:exec_other",
+          "453:exec:exec_other",
+          "455:exec:exec_other",
+          "457:write:artifact_edit",
+          "459:exec:exec_other",
+          "461:exec:exec_other",
+          "463:exec:exec_other",
+          "465:exec:exec_other",
+          "467:exec:exec_other",
+          "469:exec:verify_hash_or_stat",
+          "471:exec:verify_hash_or_stat",
+          "473:exec:exec_other",
+          "475:exec:exec_other",
+          "477:read:verify_content_read",
+          "479:read:verify_content_read",
+          "481:exec:exec_other",
+          "483:exec:exec_other",
+          "485:exec:exec_other",
+          "487:exec:verify_hash_or_stat",
+          "489:exec:exec_other",
+          "491:exec:exec_other",
+          "493:exec:exec_other",
+          "495:read:verify_content_read",
+          "496:exec:exec_other",
+          "499:exec:verify_hash_or_stat",
+          "501:exec:exec_other",
+          "503:exec:verify_hash_or_stat",
+          "505:exec:exec_other",
+          "507:exec:exec_other",
+          "509:exec:exec_other",
+          "517:exec:verify_hash_or_stat",
+          "519:exec:verify_content_or_test",
+          "521:read:verify_content_read",
+          "523:write:artifact_edit",
+          "525:exec:exec_other",
+          "539:exec:verify_hash_or_stat",
+          "547:exec:exec_other",
+          "549:exec:exec_other"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 511,
+            "at": "2026-10-31T00:22:02.265Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 527,
+            "at": "2026-10-31T00:31:04.248Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 533,
+            "at": "2026-10-31T00:34:49.920Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 541,
+            "at": "2026-10-31T00:38:47.571Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 551,
+            "at": "2026-10-31T00:44:14.747Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 557,
+            "at": "2026-10-31T00:47:47.192Z",
+            "claimText": false,
+            "textChars": 0
+          }
+        ],
+        "compiledSystemPromptChars": 63554,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C10",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 427,
+        "messageEventId": "69acf4c6-3a18-4eb9-bdb5-478bcf1399d2",
+        "createdAtUtc": "2026-10-31T01:47:59.080Z"
+      },
+      "content": {
+        "textSha256": "33fe8587b356be55871171757f5689b4be99074a3520f4e56ade09f0387beb96",
+        "textChars": 13
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-31T03:44:07.298Z",
+        "runCount": 2,
+        "runIds": [
+          "eb7ee27f-bbc8-421c-9113-9b0acbb03d7d",
+          "dae59676-2b20-4cf6-bbfb-ec9eb986a0e6"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "eb7ee27f-bbc8-421c-9113-9b0acbb03d7d",
+            "ts": "2026-10-31T01:59:10.544Z",
+            "injectedCount": 4,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 12,
+            "injectedCharCount": 1869,
+            "targetInjected": true,
+            "targetDropped": false
+          },
+          {
+            "runId": "dae59676-2b20-4cf6-bbfb-ec9eb986a0e6",
+            "ts": "2026-10-31T02:50:34.235Z",
+            "injectedCount": 5,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 13,
+            "injectedCharCount": 1969,
+            "targetInjected": true,
+            "targetDropped": false
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 14,
+        "toolClasses": {
+          "exec_other": 8,
+          "verify_hash_or_stat": 3,
+          "artifact_edit": 2,
+          "verify_content_or_test": 1
+        },
+        "toolCallSummary": [
+          "589:exec:exec_other",
+          "597:exec:verify_hash_or_stat",
+          "605:exec:exec_other",
+          "607:exec:exec_other",
+          "609:write:artifact_edit",
+          "611:exec:exec_other",
+          "613:exec:verify_hash_or_stat",
+          "615:exec:exec_other",
+          "617:exec:exec_other",
+          "619:exec:verify_hash_or_stat",
+          "621:write:artifact_edit",
+          "623:exec:exec_other",
+          "631:exec:verify_content_or_test",
+          "633:exec:exec_other"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 564,
+            "at": "2026-10-31T01:55:06.889Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 570,
+            "at": "2026-10-31T01:59:06.525Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 576,
+            "at": "2026-10-31T02:01:26.800Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 583,
+            "at": "2026-10-31T02:08:33.741Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 591,
+            "at": "2026-10-31T02:15:16.143Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 599,
+            "at": "2026-10-31T02:21:28.328Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 625,
+            "at": "2026-10-31T02:38:01.752Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 635,
+            "at": "2026-10-31T02:50:21.642Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 641,
+            "at": "2026-10-31T02:56:57.936Z",
+            "claimText": false,
+            "textChars": 0
+          }
+        ],
+        "compiledSystemPromptChars": 63398,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C11",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 474,
+        "messageEventId": "005bb3f4-5f6c-41ab-9098-0325cac3ba56",
+        "createdAtUtc": "2026-10-31T03:44:07.298Z"
+      },
+      "content": {
+        "textSha256": "fb3c0d8394965534b03e285b00beff9228219fddd38cd2412ed4a11094737084",
+        "textChars": 7
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-06T00:00:00.000Z",
+        "runCount": 1,
+        "runIds": [
+          "bbfd31e8-1a85-4eee-8e67-0eeaaadcc71c"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "bbfd31e8-1a85-4eee-8e67-0eeaaadcc71c",
+            "ts": "2026-10-31T03:44:11.221Z",
+            "injectedCount": 18,
+            "eligibleCount": 18,
+            "budget": 15625,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 14,
+            "injectedCharCount": 5145,
+            "targetInjected": true,
+            "targetDropped": false
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 4,
+        "toolClasses": {
+          "exec_other": 2,
+          "artifact_edit": 1,
+          "verify_existence_listing": 1
+        },
+        "toolCallSummary": [
+          "648:exec:exec_other",
+          "650:exec:exec_other",
+          "651:write:artifact_edit",
+          "653:ls:verify_existence_listing"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 656,
+            "at": "2026-10-31T03:48:30.677Z",
+            "claimText": true,
+            "textChars": 1065
+          }
+        ],
+        "compiledSystemPromptChars": 53362,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C12",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "196f042b-2982-4dfb-8adc-5018aa12bc8b",
+        "transcriptSeq": 4,
+        "messageEventId": "d10323d2-ba52-48c9-9487-a353774f65f7",
+        "createdAtUtc": "2026-11-05T08:20:33.928Z"
+      },
+      "content": {
+        "textSha256": "569f45a56e36c9f9fe5ec5931b95d7026036f4be2d91bfe57e5d82f054e06465",
+        "textChars": 179
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-06T00:00:00.000Z",
+        "runCount": 1,
+        "runIds": [
+          "ebd486a3-bfba-4b07-8f9e-37d53510d3a3"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "ebd486a3-bfba-4b07-8f9e-37d53510d3a3",
+            "ts": "2026-11-05T08:20:33.773Z",
+            "injectedCount": 18,
+            "eligibleCount": 18,
+            "budget": 31250,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 2,
+            "injectedCharCount": 5145,
+            "targetInjected": true,
+            "targetDropped": false
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 2,
+        "toolClasses": {
+          "exec_other": 1,
+          "other_tool": 1
+        },
+        "toolCallSummary": [
+          "4:exec:exec_other",
+          "5:pd-recall__pd_recall_principle_pains:other_tool"
+        ],
+        "modelCompletions": [
+          {
+            "seq": 8,
+            "at": "2026-11-05T08:21:03.269Z",
+            "claimText": false,
+            "textChars": 1617
+          }
+        ],
+        "compiledSystemPromptChars": null,
+        "providerObserved": null
+      }
+    },
+    {
+      "candidateId": "C13",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5908,
+        "messageEventId": "83b9068b-12f5-42dc-ae12-97e4f4228355",
+        "createdAtUtc": "2026-10-30T08:48:49.616Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T09:48:46.942Z",
+        "runCount": 1,
+        "runIds": [
+          "d10441a3-5ffe-433e-9d01-901832912f4f"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8181,
+            "at": "2026-10-30T08:49:35.315Z",
+            "claimText": true,
+            "textChars": 92
+          }
+        ],
+        "compiledSystemPromptChars": 52346,
+        "providerObserved": {
+          "expectedChars": 52234,
+          "observedChars": 52234,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C14",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5928,
+        "messageEventId": "37db7389-d404-49e6-843b-6a0e1a4bf562",
+        "createdAtUtc": "2026-10-30T20:48:45.373Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-30T21:48:46.844Z",
+        "runCount": 1,
+        "runIds": [
+          "f71c3866-0b4a-4ba7-92eb-21f9d53ea9dc"
+        ],
+        "injectionObservable": false,
+        "injection": []
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8261,
+            "at": "2026-10-30T20:49:04.902Z",
+            "claimText": true,
+            "textChars": 92
+          }
+        ],
+        "compiledSystemPromptChars": 52296,
+        "providerObserved": {
+          "expectedChars": 52184,
+          "observedChars": 52184,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C15",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5948,
+        "messageEventId": "0d7bc362-a0da-4962-9dc3-3fabbd3102da",
+        "createdAtUtc": "2026-10-31T09:40:49.087Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-31T10:41:17.660Z",
+        "runCount": 1,
+        "runIds": [
+          "63e230f3-1ac1-44ac-8204-ec36998fbc2b"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "63e230f3-1ac1-44ac-8204-ec36998fbc2b",
+            "ts": "2026-10-31T09:41:07.795Z",
+            "injectedCount": 8,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 69,
+            "injectedCharCount": 1917,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8383,
+            "at": "2026-10-31T09:41:05.750Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 8390,
+            "at": "2026-10-31T09:41:09.556Z",
+            "claimText": false,
+            "textChars": 0
+          }
+        ],
+        "compiledSystemPromptChars": 51705,
+        "providerObserved": {
+          "expectedChars": 51593,
+          "observedChars": 51593,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C16",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5968,
+        "messageEventId": "049caf3b-8538-4282-ad85-1e830e5b1028",
+        "createdAtUtc": "2026-10-31T19:40:13.818Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-10-31T20:40:13.866Z",
+        "runCount": 1,
+        "runIds": [
+          "ca231f1c-0e08-4770-9278-f73fefbc9693"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "ca231f1c-0e08-4770-9278-f73fefbc9693",
+            "ts": "2026-10-31T19:40:18.235Z",
+            "injectedCount": 8,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 69,
+            "injectedCharCount": 1917,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8470,
+            "at": "2026-10-31T19:41:01.797Z",
+            "claimText": true,
+            "textChars": 92
+          }
+        ],
+        "compiledSystemPromptChars": 52296,
+        "providerObserved": {
+          "expectedChars": 52184,
+          "observedChars": 52184,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C17",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5988,
+        "messageEventId": "110498a5-5c3e-4044-8dd6-4109dc21950a",
+        "createdAtUtc": "2026-11-01T05:40:15.499Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-01T06:40:16.593Z",
+        "runCount": 1,
+        "runIds": [
+          "3f7f6f41-f859-4c04-b61d-f580b5be8490"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "3f7f6f41-f859-4c04-b61d-f580b5be8490",
+            "ts": "2026-11-01T05:41:09.326Z",
+            "injectedCount": 8,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 69,
+            "injectedCharCount": 1917,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8613,
+            "at": "2026-11-01T05:40:25.441Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 8620,
+            "at": "2026-11-01T05:40:28.698Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 8627,
+            "at": "2026-11-01T05:40:33.591Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 8634,
+            "at": "2026-11-01T05:40:38.540Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 8641,
+            "at": "2026-11-01T05:40:46.482Z",
+            "claimText": false,
+            "textChars": 0
+          },
+          {
+            "seq": 8648,
+            "at": "2026-11-01T05:41:24.282Z",
+            "claimText": false,
+            "textChars": 71
+          }
+        ],
+        "compiledSystemPromptChars": 52296,
+        "providerObserved": {
+          "expectedChars": 52184,
+          "observedChars": 52184,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C18",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6008,
+        "messageEventId": "80a82502-8458-4e83-9dea-1572ec98ca39",
+        "createdAtUtc": "2026-11-01T15:40:17.224Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-02T01:45:47.289Z",
+        "runCount": 1,
+        "runIds": [
+          "330f3089-2b64-4bb6-9ee1-9640a64dec04"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "330f3089-2b64-4bb6-9ee1-9640a64dec04",
+            "ts": "2026-11-01T15:40:24.685Z",
+            "injectedCount": 8,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 69,
+            "injectedCharCount": 1917,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8749,
+            "at": "2026-11-01T15:42:03.159Z",
+            "claimText": false,
+            "textChars": 2
+          }
+        ],
+        "compiledSystemPromptChars": 52296,
+        "providerObserved": {
+          "expectedChars": 52184,
+          "observedChars": 52184,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C19",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6031,
+        "messageEventId": "b62fd326-f2f0-42bb-bd9c-eb63e95a892f",
+        "createdAtUtc": "2026-11-02T10:40:14.823Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-02T11:40:14.717Z",
+        "runCount": 1,
+        "runIds": [
+          "1ac9da94-62a9-41fb-85f2-608907968cf5"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "1ac9da94-62a9-41fb-85f2-608907968cf5",
+            "ts": "2026-11-02T10:40:32.235Z",
+            "injectedCount": 8,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 69,
+            "injectedCharCount": 1917,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8836,
+            "at": "2026-11-02T10:41:40.163Z",
+            "claimText": true,
+            "textChars": 92
+          }
+        ],
+        "compiledSystemPromptChars": 52296,
+        "providerObserved": {
+          "expectedChars": 52184,
+          "observedChars": 52184,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C20",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6051,
+        "messageEventId": "9febae44-2d50-40b6-ba4a-311e31d3b8f4",
+        "createdAtUtc": "2026-11-02T20:40:23.134Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-02T21:40:23.287Z",
+        "runCount": 1,
+        "runIds": [
+          "b93044a2-ed83-4019-9437-462d69827a4b"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "b93044a2-ed83-4019-9437-462d69827a4b",
+            "ts": "2026-11-02T20:40:27.713Z",
+            "injectedCount": 9,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 72,
+            "injectedCharCount": 1953,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8916,
+            "at": "2026-11-02T20:40:42.917Z",
+            "claimText": true,
+            "textChars": 92
+          }
+        ],
+        "compiledSystemPromptChars": 52505,
+        "providerObserved": {
+          "expectedChars": 52393,
+          "observedChars": 52393,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C21",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6071,
+        "messageEventId": "2e652679-7953-4892-95b5-808504441545",
+        "createdAtUtc": "2026-11-03T06:40:24.098Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-03T13:11:33.086Z",
+        "runCount": 1,
+        "runIds": [
+          "08cd2350-09c1-4901-80e1-c4ac97058ec2"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "08cd2350-09c1-4901-80e1-c4ac97058ec2",
+            "ts": "2026-11-03T06:40:31.524Z",
+            "injectedCount": 9,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 72,
+            "injectedCharCount": 1953,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 8996,
+            "at": "2026-11-03T06:40:50.184Z",
+            "claimText": true,
+            "textChars": 92
+          }
+        ],
+        "compiledSystemPromptChars": 52505,
+        "providerObserved": {
+          "expectedChars": 52393,
+          "observedChars": 52393,
+          "matchesAssembledPrompt": true
+        }
+      }
+    },
+    {
+      "candidateId": "C22",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6092,
+        "messageEventId": "443cb2f1-cf5e-4120-b22e-1bd0024dbf2a",
+        "createdAtUtc": "2026-11-03T22:04:42.732Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "unit": {
+        "endExclusiveUtc": "2026-11-03T23:04:36.871Z",
+        "runCount": 1,
+        "runIds": [
+          "9d79e1e2-b7ad-4379-acce-70160526d507"
+        ],
+        "injectionObservable": true,
+        "injection": [
+          {
+            "runId": "9d79e1e2-b7ad-4379-acce-70160526d507",
+            "ts": "2026-11-03T22:04:48.964Z",
+            "injectedCount": 9,
+            "eligibleCount": 18,
+            "budget": 2000,
+            "selectionPolicy": "fair_rotation_v1",
+            "selectionRoundOrdinal": 72,
+            "injectedCharCount": 1953,
+            "targetInjected": false,
+            "targetDropped": true
+          }
+        ]
+      },
+      "actions": {
+        "toolCallCount": 0,
+        "toolClasses": {},
+        "toolCallSummary": [],
+        "modelCompletions": [
+          {
+            "seq": 9076,
+            "at": "2026-11-03T22:05:11.849Z",
+            "claimText": false,
+            "textChars": 295
+          }
+        ],
+        "compiledSystemPromptChars": 52646,
+        "providerObserved": {
+          "expectedChars": 52534,
+          "observedChars": 52534,
+          "matchesAssembledPrompt": true,
+          "model": "DeepSeek-V4-Flash"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "No raw user text, assistant text or tool args are emitted.",
+    "Injection facts exist only in daily event logs; 2026-10-30 candidates have injectionObservable=false.",
+    "PD delivery evidence rows have null occurred_at/delivery_key/episode_key, so ordering must come from host trace seq.",
+    "System prompt is recorded truncated at 32768 chars (reason=trajectory-field-size-limit); target body text is not stored."
+  ],
+  "annotatedAtUtc": "2026-11-07T03:51:50.933Z",
+  "classificationRules": {
+    "T": "actual decision at the time where principled intervention was possible (SPEC v0.6 6.1); delivering a chat conclusion or artifact counts, a heartbeat with no deliverable does not",
+    "V": "a qualified prior signal obtainable before the action",
+    "O": "PD actually identified it before action; observed only when the injection event for that run exists and precedes the action",
+    "D": "independent confirmation that target body entered the actual request and preceded the key action; unknown unless body or equivalent independent evidence exists",
+    "tUnknown": "recorded as unknown, never forced into include/exclude",
+    "keyAction": "artifact_edit / verification_action / delivery_claim are distinct; first file write is not the cutoff for the verify-before-delivery principle",
+    "identity": "session_id + transcript seq (existing verifiable row identity); body sha256 validates content only and never merges duplicate requests"
+  },
+  "samples": [
+    {
+      "candidateId": "C01",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 1,
+        "messageEventId": "2b63aabf-5ad0-4913-9416-c59c0b3a2684",
+        "createdAtUtc": "2026-10-30T11:24:27.214Z"
+      },
+      "content": {
+        "textSha256": "40b00eed53eca27ff9a83bad0cdbd92fc837e50ea9b03c6e0aeedb19860729b1",
+        "textChars": 63
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C01",
+        "kind": "chat_conclusion",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 12,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "weak",
+      "missingOrConflict": "investigation answer delivered; no verification action observed; injection log gap before 2026-10-31",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C02",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 25,
+        "messageEventId": "ed81ce48-1283-4185-a692-0b8c90b000e7",
+        "createdAtUtc": "2026-10-30T11:31:54.353Z"
+      },
+      "content": {
+        "textSha256": "52d97f2c8200192138064a88fff878e69d4191ab2b3192efee438d8f32b51fef",
+        "textChars": 67
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C02",
+        "kind": "chat_conclusion",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 19,
+        "artifactEdit": 0,
+        "verificationActions": 2,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "observed"
+      },
+      "association": "medium",
+      "missingOrConflict": "hash/stat + content read occur before completion; claim text not captured",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C03",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 64,
+        "messageEventId": "c4b9ec7b-363f-4312-8fe1-cbb49f2ffc58",
+        "createdAtUtc": "2026-10-30T13:22:19.211Z"
+      },
+      "content": {
+        "textSha256": "2ff7dd22559c7aa82f3b6c072c848b91f3bb509709e5151e03602fe84285e34c",
+        "textChars": 58
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C03",
+        "kind": "chat_conclusion",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "weak",
+      "missingOrConflict": "corrective explanation with zero tool actions; cannot confirm target was missed because injection unobservable",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C04",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 67,
+        "messageEventId": "1ebd1859-ba54-444e-8a15-a8f1b97354e2",
+        "createdAtUtc": "2026-10-30T13:26:22.524Z"
+      },
+      "content": {
+        "textSha256": "6ce6081df7c7d1ead4ebf3c4a5c13adbd5ec844b455060f1427a06dc0a85008c",
+        "textChars": 6
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C04",
+        "kind": "state_artifact",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 54,
+        "artifactEdit": 0,
+        "verificationActions": 5,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "observed"
+      },
+      "association": "medium",
+      "missingOrConflict": "persistent pain-signal creation; may contain multiple delivery decisions (ambiguous)",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C05",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 218,
+        "messageEventId": "32676bec-3995-450b-9266-002a42c60e4c",
+        "createdAtUtc": "2026-10-30T14:33:13.309Z"
+      },
+      "content": {
+        "textSha256": "e6275432af8f386d874aecb531abb39fa3a0378688a861f717694b7e2135ad27",
+        "textChars": 36
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C05",
+        "kind": "chat_conclusion",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "weak",
+      "missingOrConflict": "judgment answer with zero tools; target miss unconfirmable",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C06",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 222,
+        "messageEventId": "4417ebbd-b008-46f0-bb56-f8100d9c5448",
+        "createdAtUtc": "2026-10-30T14:44:57.035Z"
+      },
+      "content": {
+        "textSha256": "0fb1d4d9924abb24c267ed7f15b2628e66039ae03b800b186b3b3fb7a7eb44aa",
+        "textChars": 55
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C06",
+        "kind": "investigation",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 25,
+        "artifactEdit": 0,
+        "verificationActions": 3,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "observed"
+      },
+      "association": "medium",
+      "missingOrConflict": "investigation with hash/read actions; injection unobservable",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C07",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 288,
+        "messageEventId": "a56f4f24-a752-43a0-8f0b-a5ddc5ee2ddb",
+        "createdAtUtc": "2026-10-30T15:43:45.683Z"
+      },
+      "content": {
+        "textSha256": "8c8bf2e97c78b4efcc44cffe22c50e61f01c05ed472a2ae1132202ad80db09b1",
+        "textChars": 6
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-C07",
+        "kind": "chat_conclusion",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 1,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "weak",
+      "missingOrConflict": "short conclusion request; no verification action",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C08",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 294,
+        "messageEventId": "94915d92-598e-45a9-a001-24a591a32f96",
+        "createdAtUtc": "2026-10-30T15:53:36.613Z"
+      },
+      "content": {
+        "textSha256": "f01d050621d8d7a06d399aaa95161d74c1415f62ff8726aae19dff2db8fdcf37",
+        "textChars": 75
+      },
+      "opportunity": {
+        "isOpportunity": true,
+        "isContinuation": false,
+        "opportunityId": "OPP-08",
+        "kind": "file_report",
+        "reason": null
+      },
+      "tvod": {
+        "T": "yes",
+        "V": "yes",
+        "O": "unknown",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 1,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "observed_in_continuation"
+      },
+      "association": "strong",
+      "missingOrConflict": "explicit report deliverable with accuracy requirement; injection for this turn unobservable, continuations observable",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C09",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 301,
+        "messageEventId": "a2f19310-4437-4e65-9db5-b38acb57c9b8",
+        "createdAtUtc": "2026-10-31T00:01:54.010Z"
+      },
+      "content": {
+        "textSha256": "7c9691192f1b73408bbe4c0cb6d00db94375ca9d8fce0a0d5985e7a5178f083f",
+        "textChars": 2
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": true,
+        "opportunityId": "OPP-08",
+        "kind": "file_report",
+        "reason": null
+      },
+      "tvod": {
+        "T": "inherited_yes",
+        "V": "yes",
+        "O": "partial",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "injected",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 40,
+        "artifactEdit": 2,
+        "verificationActions": 12,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "observed"
+      },
+      "association": "strong",
+      "missingOrConflict": "continuation; only one injection event at 00:44:23 precedes late actions, earlier actions in this unit have no observable injection",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C10",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 427,
+        "messageEventId": "69acf4c6-3a18-4eb9-bdb5-478bcf1399d2",
+        "createdAtUtc": "2026-10-31T01:47:59.080Z"
+      },
+      "content": {
+        "textSha256": "33fe8587b356be55871171757f5689b4be99074a3520f4e56ade09f0387beb96",
+        "textChars": 13
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": true,
+        "opportunityId": "OPP-08",
+        "kind": "file_report",
+        "reason": null
+      },
+      "tvod": {
+        "T": "inherited_yes",
+        "V": "yes",
+        "O": "yes",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "injected",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 14,
+        "artifactEdit": 2,
+        "verificationActions": 4,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "observed"
+      },
+      "association": "strong",
+      "missingOrConflict": "\"输出报告\"; two runs, target injected in both",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C11",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "42b62f3e-0188-4fce-87b2-a506dafc70f5",
+        "transcriptSeq": 474,
+        "messageEventId": "005bb3f4-5f6c-41ab-9098-0325cac3ba56",
+        "createdAtUtc": "2026-10-31T03:44:07.298Z"
+      },
+      "content": {
+        "textSha256": "fb3c0d8394965534b03e285b00beff9228219fddd38cd2412ed4a11094737084",
+        "textChars": 7
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": true,
+        "opportunityId": "OPP-08",
+        "kind": "file_report",
+        "reason": null
+      },
+      "tvod": {
+        "T": "inherited_yes",
+        "V": "yes",
+        "O": "yes",
+        "D": "unknown"
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "injected",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 4,
+        "artifactEdit": 1,
+        "verificationActions": 1,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 656,
+        "verificationStrength": "partial_existence_only"
+      },
+      "association": "strong",
+      "missingOrConflict": "artifact write -> directory listing -> delivery claim at seq 656; listing confirms existence only, not freshness/content; unit extends to window end (ambiguity)",
+      "excludedReason": null
+    },
+    {
+      "candidateId": "C12",
+      "stratum": "human_request",
+      "identity": {
+        "sessionId": "196f042b-2982-4dfb-8adc-5018aa12bc8b",
+        "transcriptSeq": 4,
+        "messageEventId": "d10323d2-ba52-48c9-9487-a353774f65f7",
+        "createdAtUtc": "2026-11-05T08:20:33.928Z"
+      },
+      "content": {
+        "textSha256": "569f45a56e36c9f9fe5ec5931b95d7026036f4be2d91bfe57e5d82f054e06465",
+        "textChars": 179
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "tool_smoke",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "injected",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 2,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "pd_recall tool contract smoke; no deliverable",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C13",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5908,
+        "messageEventId": "83b9068b-12f5-42dc-ae12-97e4f4228355",
+        "createdAtUtc": "2026-10-30T08:48:49.616Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 8181,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C14",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5928,
+        "messageEventId": "37db7389-d404-49e6-843b-6a0e1a4bf562",
+        "createdAtUtc": "2026-10-30T20:48:45.373Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "unobservable_event_log_gap",
+        "sourceRef": null
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 8261,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C15",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5948,
+        "messageEventId": "0d7bc362-a0da-4962-9dc3-3fabbd3102da",
+        "createdAtUtc": "2026-10-31T09:40:49.087Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C16",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5968,
+        "messageEventId": "049caf3b-8538-4282-ad85-1e830e5b1028",
+        "createdAtUtc": "2026-10-31T19:40:13.818Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 8470,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C17",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 5988,
+        "messageEventId": "110498a5-5c3e-4044-8dd6-4109dc21950a",
+        "createdAtUtc": "2026-11-01T05:40:15.499Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C18",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6008,
+        "messageEventId": "80a82502-8458-4e83-9dea-1572ec98ca39",
+        "createdAtUtc": "2026-11-01T15:40:17.224Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C19",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6031,
+        "messageEventId": "b62fd326-f2f0-42bb-bd9c-eb63e95a892f",
+        "createdAtUtc": "2026-11-02T10:40:14.823Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 8836,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C20",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6051,
+        "messageEventId": "9febae44-2d50-40b6-ba4a-311e31d3b8f4",
+        "createdAtUtc": "2026-11-02T20:40:23.134Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 8916,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C21",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6071,
+        "messageEventId": "2e652679-7953-4892-95b5-808504441545",
+        "createdAtUtc": "2026-11-03T06:40:24.098Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": true,
+        "deliveryClaimSeq": 8996,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    },
+    {
+      "candidateId": "C22",
+      "stratum": "internal_system_audit",
+      "identity": {
+        "sessionId": "8e64912c-498d-4b0f-a633-78b8d8ef8712",
+        "transcriptSeq": 6092,
+        "messageEventId": "443cb2f1-cf5e-4120-b22e-1bd0024dbf2a",
+        "createdAtUtc": "2026-11-03T22:04:42.732Z"
+      },
+      "content": {
+        "textSha256": "a20c7516075add75fa53cd5dcaa60fa2dbf2b58e41cbaae3dc5214bd626ff3b1",
+        "textChars": 25
+      },
+      "opportunity": {
+        "isOpportunity": false,
+        "isContinuation": false,
+        "opportunityId": null,
+        "kind": "heartbeat_maintenance",
+        "reason": "NO_DELIVERY_DECISION"
+      },
+      "tvod": {
+        "T": "no",
+        "V": null,
+        "O": null,
+        "D": null
+      },
+      "principle": {
+        "targetEligibleSinceUtc": "2026-09-25T15:36:19.050Z",
+        "status": "dropped",
+        "sourceRef": "events jsonl by runId"
+      },
+      "actionEvidence": {
+        "toolCallCount": 0,
+        "artifactEdit": 0,
+        "verificationActions": 0,
+        "deliveryCommitActions": 0,
+        "deliveryClaimObserved": false,
+        "deliveryClaimSeq": null,
+        "verificationStrength": "none"
+      },
+      "association": "none",
+      "missingOrConflict": "host heartbeat turn; no artifact edit, no tool call, no requested deliverable (exclusion does not use target-dropped status)",
+      "excludedReason": "NO_DELIVERY_DECISION"
+    }
+  ],
+  "snapshot": {
+    "takenAtUtc": "2026-11-07T03:51:50.933Z",
+    "hostTranscript": {
+      "db": "C:/Users/Administrator/.openclaw/agents/main/agent/openclaw-agent.sqlite",
+      "maxSeq": 10160,
+      "rows": 68325,
+      "maxCreatedAtMs": 1794020558689
+    },
+    "hostTrace": {
+      "db": "C:/Users/Administrator/.openclaw/agents/main/agent/openclaw-agent.sqlite#trajectory_runtime_events",
+      "rows": 2828,
+      "maxCreatedAtMs": 1794020559145
+    },
+    "pdStateDb": {
+      "db": "D:/.openclaw/workspace/.pd/state.db",
+      "activations": 32,
+      "evidence": 12760,
+      "artifacts": 1192
+    },
+    "inspectionEventLogs": [
+      {
+        "file": "events_2026-10-31.jsonl",
+        "bytes": 275080,
+        "sha256": "87f5d80888f777a07be897b9f8116d7a0b677b54cfcedcbd69e3024f04b70693"
+      },
+      {
+        "file": "events_2026-11-01.jsonl",
+        "bytes": 141966,
+        "sha256": "3f91996a79df665b1b9ae3c24c5df1b4801abb0db61b51b672cef6520a80db94"
+      },
+      {
+        "file": "events_2026-11-02.jsonl",
+        "bytes": 152176,
+        "sha256": "d18c0b96e8ce0dc2ad787a05d7936bc2e5e83a4f28455b7b2747507dd5324174"
+      },
+      {
+        "file": "events_2026-11-03.jsonl",
+        "bytes": 290285,
+        "sha256": "dba2283eb0f0134520bd6f8ee8f9a6cbf3b82966f46c68fc4627c6bddf0670bb"
+      },
+      {
+        "file": "events_2026-11-04.jsonl",
+        "bytes": 77350,
+        "sha256": "5c36dc582653178b5b1d7b90ad5f068094d6f54f0f9a73e4e37df1d3f68ccc6b"
+      },
+      {
+        "file": "events_2026-11-05.jsonl",
+        "bytes": 137780,
+        "sha256": "30f08fa644a8c806f15911060a728e7a144324e3cef12c942a89377b67255d21"
+      },
+      {
+        "file": "events_2026-11-06.jsonl",
+        "bytes": 151364,
+        "sha256": "092dc4674f49efacb3db46e52d45ce6ffee0531cbed6505d5ca6b14a1d230d3c"
+      },
+      {
+        "file": "events_2026-11-07.jsonl",
+        "bytes": 32490,
+        "sha256": "4d85d8685d0df5a347bf2239ec0daea3455d64f91ac969e95671bd926540e686"
+      }
+    ],
+    "extractorScript": "D:/Code/_worktrees/principles/PRI-1119-g2-entry-feasibility/.tmp/pri-1119/inventory-freeze.cjs"
+  },
+  "summary": {
+    "candidates": 22,
+    "byStratum": {
+      "human_request": 12,
+      "internal_system_audit": 10
+    },
+    "opportunityAnchors": 8,
+    "continuationRecords": 3,
+    "uniqueOpportunities": 8,
+    "notOpportunity": 11,
+    "excludedReasons": {
+      "NO_DELIVERY_DECISION": 11
+    },
+    "T": {
+      "yes": 8,
+      "inherited_yes": 3,
+      "no": 11
+    },
+    "O": {
+      "unknown": 8
+    },
+    "D": {
+      "unknown": 8
+    },
+    "V": {
+      "yes": 8
+    },
+    "principleStatus": {
+      "unobservable_event_log_gap": 10,
+      "injected": 4,
+      "dropped": 8
+    },
+    "verificationStrength": {
+      "none": 15,
+      "observed": 5,
+      "observed_in_continuation": 1,
+      "partial_existence_only": 1
+    },
+    "continuationO": {
+      "partial": 1,
+      "yes": 2
+    },
+    "opportunityLevel": {
+      "O": {
+        "unknown": 7,
+        "yes": 1,
+        "basis": "OPP-08 only: target injection precedes write/listing/claim in C10/C11; anchor turn C08 unobservable"
+      },
+      "D": {
+        "unknown": 8,
+        "basis": "no opportunity has an independent record of target body inside the actual request"
+      }
+    },
+    "confirmedMissedTarget": 0,
+    "confirmedMissedTargetBasis": "no opportunity has both an observable target-injection record and an observed absent verification action; C03/C05/C07 lack injection records",
+    "nativeIdenticalNoIncrement": 0
+  }
+}

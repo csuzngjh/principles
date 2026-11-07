@@ -39,7 +39,7 @@
 |---|---|---|
 | **原则文本身份** | `产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性` | 生产 `state.db`：active + `validated` + `approval.status=approved` |
 | **现有 Artifact / Activation / revision** | artifact `pi-art-scribe-21bc6e76-ed9c-45a9-afef-eeeae6c30831-prompt-run_scribe-21bc6e76-ed9c-45a9-afef-eeeae6c30831-prompt_2`；activation `act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性`；`revision_epoch=0`；`activatedAt=2026-09-25T15:36:19.050Z` | 同上（只读查询，未改） |
-| **场景** | `delivery-closure/v1`：以“交付收口”为决策点的单场景；决策点=首次声明完成/可交付/可合并之前的核验动作 | 见 §3 |
+| **场景** | `delivery-closure/v1`：以“交付收口”为决策点的单场景；决策点=交付声明/提交承诺，不是首次写文件（见 §3） | 见 §3 |
 | **宿主模式** | OpenClaw embedded，gateway `local`，单 agent | `openclaw.json`（现状即如此） |
 
 > 注意：上述 artifact/activation 属于**生产工作区** `D:/.openclaw/workspace`。若 Owner 选择“专用新工作区”，该工作区不会有同 ID 的 artifact/activation（无官方导入路径，见入口报告 G-A2）；届时必须在开窗前用该工作区自身治理流程产出新 revision，并把**新的 artifactId/activationId/revision**写入本预注册的固定栏后才可开窗。**未写入新 ID 前，本预注册对专用工作区不生效。**
@@ -62,11 +62,11 @@
 | 字段 | 定义 |
 |---|---|
 | `sceneId` | `delivery-closure/v1` |
-| 决策点 | 一次交付的“收口”时刻：Agent 即将声明完成/可交付/可合并，或即将执行提交/发布前的最后一步 |
-| 事前可见信号（`t_observable`） | 授权工作区内的一条 user turn，其 `raw_text` 同时满足：① 明确要求一个具体可交付物（文件/报告/PR/提交）；② 明确指向一个已存在或将被写的目标。信号在行动之前写入 `trajectory.db`，可事前判定 |
-| `signalSource` | `user_turn_narrow_mapping`（窄映射，非未来信息）；不读取 assistant 后续结论 |
-| 行动（`t_action`） | 该 user turn 之后、该机会内首次满足任一：`shell` 写/提交/推送命令、`write/edit` 目标产物、PR 创建、发布命令 |
-| 机会结束 | 出现下一条 user turn，或该次交付的最终声明已产生 |
+| 决策点 | 一次交付的“收口”时刻：Agent 即将声明完成/可交付/可合并，或即将执行提交/发布承诺。**首次写文件不是决策点**；对“交付前核验”原则，核验应早于交付声明，而不是早于写文件 |
+| 事前可见信号（`t_observable`） | 一条 user turn（现有可核实行身份：`session_id + transcript seq`，或 `user_turns.id`），其内容同时满足：① 明确要求一个具体可交付物（文件/报告/PR/提交/结论）；② 明确指向一个已存在或将被写的目标。信号在行动之前已落盘，可事前判定 |
+| `signalSource` | 宿主 transcript 的 user 行（`transcript_events.session_id+seq`）或 `user_turns` 行；不读取 assistant 后续结论。正文摘要只校验内容；`host_transcript_user_turn/v1` 是现状可直接使用的锚 |
+| 行动三分（`t_action`） | ① 产物编辑：`write/edit/apply_patch`；② 核验动作：读取/重算/重跑/哈希/测试/版本核对；③ 交付声明或提交承诺：`git commit/push`、PR 创建、发布命令、assistant 明确说“已完成/已交付/可合并”。**“交付前核验”场景截止点 = ③，不是 ①** |
+| 机会结束 | 出现下一条**人类** user turn（心跳/系统续跑不截断），或该交付的最终交付声明已产生；跨多轮的同一交付不重复计机会 |
 | 不在场景内 | 纯问答、纯阅读、纯诊断、探索性草稿（无交付声明）、非授权工作区 |
 
 **为什么用 user turn 而不是“场景标记”**：真实任务里没有操作者注入的标记；`[PD-AA:delivery-review:v1]` 属于 controlled admission，不能借用（SPEC L171/L179）。user turn 窄映射是当前唯一“行动前已落盘且独立于 agent 自述”的信号。
@@ -92,11 +92,25 @@ opportunityKey = sha256("pd-aa-opp/v1" | sceneId | workspaceId | sessionId | anc
 | 优先级 | anchorKind | 现状可得性 |
 |---:|---|---|
 | 1 | `host_message_id` | **不可得**（embedded 无原生 message/request id） |
-| 2 | `user_message_sha256` | **可得**（`user_turns.raw_text`）；本窗口实际使用此级 |
+| 2 | `user_turn_row_id` | **可得且已验证**：宿主 transcript 的 `session_id + seq`（`transcript_events`，`message_role=user`）；或 `user_turns.id`。本窗口样本使用前者 |
 | 3 | `session_turn_ordinal` | 可得（`turn_index`），仅在 2 不可得时用 |
 | 4 | `unavailable` | 不生成键、不计数、不事后补锚 |
 
-规则：键在 `t_observable` 生成并落盘；不同锚不合并；不得用 `t_action` 之后的信息构造；键只用于去重，不承担身份证明。
+规则：
+
+- 键在 `t_observable` 生成并落盘；不同锚不合并；不得用 `t_action` 之后的信息构造；键只用于去重，不承担身份证明。
+- **正文摘要（`textSha256`）只用于校验内容一致，不作为身份**；同一 session 中两次相同请求必须按 `seq` 区分为两个发生次数，不得因正文哈希相同而合并。
+- 不新增数据库或身份平台；宿主 transcript 与 `user_turns` 均为既有存储。
+
+### 4.3 多决策 / 多轮交付的处理
+
+| 情形 | 处理 |
+|---|---|
+| 一条请求含多个可交付决定 | 若能按产物/目标拆开，按拆开的每个交付各记一个机会并共享同一 anchor；拆不开则在记录中列 `ambiguous_multi_delivery=true`，不补造精确性 |
+| 多轮共同完成一次交付 | 以**首次明确要求该交付物**的 user turn 为 anchor；后续“继续/再输出”属于同一机会的 continuation 记录，不单独计机会；每轮的注入/行动证据仍分别保留 |
+| 同一交付中提交/发布/口头声明先后出现 | 同属③类交付动作，记**同一机会**：以最早出现的③类动作作为该机会的截止点（`t_action`）；`git commit`/`push`/PR/发布命令与口头“已完成/已交付”声明分别保留证据，但不拆成多个机会；仅当出现新的 user 交付要求才另立机会 |
+| 同一 session 重复相同请求 | 按 `seq` 分别记录发生次数；只有明确同一交付的连续追问才合并为 continuation |
+| 无法判定 | 记 `unknown`，保留在清单中，不用删除困难案例来提高覆盖率 |
 
 ---
 
@@ -107,7 +121,7 @@ opportunityKey = sha256("pd-aa-opp/v1" | sceneId | workspaceId | sessionId | anc
 1. 发生在授权工作区、授权 session、窗口内；
 2. 命中 §3 事前信号；
 3. 目标原则在 `t_observable` 时仍为 approved + validated + revision 与固定值一致；
-4. `t_observable` 早于 `t_action`（同机时钟，记录原始时间戳，不做时区换算“修正”）；
+4. `t_observable` 早于**交付声明/提交承诺**（③），不要求早于首次写文件；同机时钟，记录原始时间戳，不做时区换算“修正”；
 5. 该交付有实际后果（写入/提交/发布/不可逆变更）；
 6. `opportunityKey` 可生成，且未被更早机会覆盖。
 
@@ -115,23 +129,25 @@ opportunityKey = sha256("pd-aa-opp/v1" | sceneId | workspaceId | sessionId | anc
 
 | 码 | 条件 | 记法 |
 |---|---|---|
-| X1 | 目标内容在 Native 中本已存在（C03） | `already_present`，单列 |
-| X2 | 只有事后才可识别信号 | `post_hoc` / `missed` |
+| X1 | 目标内容在 Native 中本已存在 | **不排除机会**；记 `native_identical=true`，仅表示“无新增提示增量”，不影响 T |
+| X2 | 只有事后才可识别事前信号 | 主要影响 V：记 `V=unknown/no`；**不自动否定 T**，T 仍可成立 |
 | X3 | 原则未授权/撤销/revision 变更 | `unauthorized_principle` |
 | X4 | 工作区/session/窗口外 | `out_of_scope` |
-| X5 | 非交付收口任务 | `out_of_scope` |
-| X6 | 同 `opportunityKey` 重复 | 去重 |
-| X7 | 关键行动无独立证据 | `unknown_action` |
+| X5 | 非交付收口任务（无交付决定） | `out_of_scope` |
+| X6 | 同 `opportunityKey` 重复 | 去重（continuation 单列，不合并发生次数） |
+| X7 | 关键行动无独立证据 | **保留机会，记 `unknown_action_evidence`**，不得当作“行动不存在”而排除 |
 | X8 | 需要改原则正文/授权 | 走治理流程，不计入 |
 | X9 | 假 provider 指定/脚本注入的行动 | `not_autonomous`，不计入改善证据 |
+| X10 | 目标未选中/被预算丢弃 | **不是排除理由**；记 `target_not_selected`，机会仍保留 |
+| X11 | 无法判定 T | 记 `T=unknown`，保留在清单中，不强行纳入或排除 |
 
 ---
 
 ## 6. 空缺抽查（防“只记录看到的”）
 
-1. **反向抽查**：窗口结束后，在授权工作区内按 `user_turns` 时间序列抽取**未生成机会键**的交付类 turn，逐个判断是“漏触发（missed）”还是“本不在场景（out_of_scope）”，比例写入复盘。
+1. **反向抽查**：窗口结束后，在授权工作区内按宿主 transcript `session_id+seq`（或 `user_turns`）时间序列抽取**未生成机会键**的交付类 turn，逐个判断是“漏触发（missed）”还是“本不在场景（out_of_scope）”，比例写入复盘。
 2. **样本上限**：抽查不超过 10 条或机会数的 20%，取小者；不做全量普查（不建 census 系统）。
-3. **材料支持 T**：`user_turns.raw_text`、`tool_calls`（params/时间）、产物只读复核（哈希/大小/mtime/版本）。**模型自述、receipt、报告里的“已完成”文字不作为 T 或行动证据。**
+3. **材料支持 T**：宿主 transcript 的 user 行与 `user_turns.raw_text`、`trajectory_runtime_events` 的 `tool.call` 参数（本地读取，提交版只放脱敏摘要）、产物只读复核（哈希/大小/mtime/版本）。**模型自述、receipt、报告里的“已完成”文字不作为 T 或行动证据。**
 
 ---
 
