@@ -1,0 +1,297 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T065736Z-trae",
+  "previousCheckpoint": "20261106T061229Z-trae",
+  "generatedAt": "2026-11-06T06:57:36Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "按 Owner 指令完成 PRI-1118 设计与 PRI-1116 验收矩阵：受控准入设计升级 v1.2，补齐本轮输入可信来源（冻结文件+原始字节哈希+解析一致性+端点正文证据+三条身份线分离）、一次性与重放边界（原子消费+最小进程内 claim 缓存+场景矩阵+路径/字节/大小上限）、默认共享入口接线（真实调用链+最小文件集与唯一写者+双入口正反例+harness 入口成本比较）；冻结 journal 语义、四口径预算与假 provider 工具调用/超时/停止/清理协议。新增 C01–C09 矩阵，逐条引用 SPEC §8.1 原文、既有实现入口、测试与 commit、证据层级、状态与剩余最小动作，真实运行缺口标待 PRI-1118。仅文档：未写接线代码、未启动宿主、未调模型、未改安装目录、未发版、未合并。PR #2386 OPEN。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-design",
+    "branch": "ai/PRI-1118-controlled-admission-design",
+    "baseCommit": "3c04ff93abbde31dcca25c8ad0809d00807b5015",
+    "headCommit": "3cc1fef01",
+    "dirtyPaths": [],
+    "pushedCommit": "3cc1fef01",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2386",
+    "remoteChecks": "UNKNOWN at write: Verify Merge Gate IN_PROGRESS；docs-only，多数 job 为 SKIPPED（不计为通过）。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1118",
+      "scope": "受控准入接线设计 v1.2：三缺口一次补齐 + 冻结验证语义/预算/实验协议；不编码、不运行",
+      "status": "NEEDS_OWNER",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+        "docs/implementation-reports/PD-AA-REAL-HOST-EVIDENCE-CARD-20261106.md"
+      ],
+      "commits": ["3cc1fef01"],
+      "acceptance": [
+        {"criterion": "缺口一：冻结正文来源、精确字节提交控制器、原始 event.prompt 哈希+解析逐字节一致、端点正文证据、workspace/session/run/目标/配置绑定、启动后身份校验时点、三条身份线分离", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "缺口二：加载/绑定/消费/失效、重复回调/新 run/跨 session/超时/工具后第二请求矩阵、失败不重试、路径与大小上限、最小进程内状态生命周期与清理、不建表", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "缺口三：真实调用链覆盖共享与本地入口、生产者/消费者、最小文件集与唯一写者、数据到 core、Native/授权/预算/重验/停用、真实入口正反例、原生 harness 入口成本比较", "result": "PASS", "evidenceRefs": ["evidence-design", "evidence-code-chain"]},
+        {"criterion": "冻结 journal 语义（行为来源截断可保留 strong_run；journal 自身不完整降 unknown）与四口径预算、假 provider 工具调用/超时/停止/清理", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "Owner 批准设计 v1.2 与实现范围", "result": "NOT_RUN", "evidenceRefs": ["evidence-pr-2386"]},
+        {"criterion": "按批准实现接线并通过双入口测试", "result": "NOT_RUN", "evidenceRefs": []},
+        {"criterion": "在预算内执行正例+对照", "result": "NOT_RUN", "evidenceRefs": []}
+      ],
+      "remaining": [
+        "Owner 审阅 PR #2386 并按批准卡一次批准：实现范围、环境、预算、停止条件、清理/回滚。",
+        "获批前不写新接线代码、不启动宿主、不调模型、不改安装目录。",
+        "G1 历史两次宿主额度已消耗，本轮不复用。"
+      ]
+    },
+    {
+      "issue": "PRI-1116",
+      "scope": "C01–C09 验收矩阵：逐条 SPEC 原文 + 实现入口 + 既有测试/commit + 证据层级 + 状态 + 剩余动作；不新建平台、不重跑全仓",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-C01-C09-ACCEPTANCE-MATRIX-20261106.md"
+      ],
+      "commits": ["3cc1fef01"],
+      "acceptance": [
+        {"criterion": "C01–C09 逐条引用 SPEC §8.1 原文，不改写通过条件", "result": "PASS", "evidenceRefs": ["evidence-matrix", "evidence-spec"]},
+        {"criterion": "每项列实现入口、既有测试/日志及 commit、证据层级、状态、剩余最小动作与负责工单", "result": "PASS", "evidenceRefs": ["evidence-matrix"]},
+        {"criterion": "缺真实运行证据标待 PRI-1118；C05 归 G2/PRI-1119；代码缺陷单列 D1–D5", "result": "PASS", "evidenceRefs": ["evidence-matrix"]},
+        {"criterion": "真实宿主 C04 正例、C05 行为抽样、C08 Examiner 真实案例", "result": "NOT_RUN", "evidenceRefs": []}
+      ],
+      "remaining": [
+        "C04 待 PRI-1118 隔离宿主正例；C05 待 G2；C08 待 Examiner 已知例验证。",
+        "矩阵状态基于既有记录与 commit，本轮未重跑测试，不声称当前 HEAD 全绿。"
+      ]
+    },
+    {
+      "issue": "PRI-1114",
+      "scope": "只读引用：整合矩阵引用其 journal/关联语义；本轮不修改、不重开、不关闭",
+      "status": "UNCHANGED",
+      "owner": "trae",
+      "writePaths": [],
+      "acceptance": [
+        {"criterion": "当前状态 Done 由既有合并自动化产生；本任务未改状态、未删依赖", "result": "PASS", "evidenceRefs": ["evidence-linear"]}
+      ],
+      "remaining": [
+        "无本任务动作。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-docs-structure",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-design",
+      "command": "node scripts/check-docs-structure.cjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-docs-check"]
+    },
+    {
+      "id": "check-diff",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-design",
+      "command": "git diff --check",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-docs-check"]
+    },
+    {
+      "id": "check-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-design",
+      "command": "未运行任何测试套件（docs-only）",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-matrix"]
+    },
+    {
+      "id": "check-verify-merge",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-design",
+      "command": "npm run verify:merge",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-pr-2386"]
+    },
+    {
+      "id": "check-host-experiment",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-design",
+      "command": "未启动宿主、未调模型（未获批准）",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-pr-2386",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2386",
+      "observedAt": "2026-11-06T06:57:36Z",
+      "sha256": null,
+      "supports": "文档 PR OPEN，base=3c04ff93abbde31dcca25c8ad0809d00807b5015，head=3cc1fef01；未合并。",
+      "limitations": "Verify Merge Gate 写入时 IN_PROGRESS；skipped jobs 不计为通过。"
+    },
+    {
+      "id": "evidence-design",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+      "observedAt": "2026-11-06T06:57:36Z",
+      "sha256": null,
+      "supports": "v1.2 §3.4–§3.6 三缺口闭合；§5–§6 冻结语义/预算/实验协议；§3.6.6 harness 入口比较与不切换理由。",
+      "limitations": "DRAFT/NEEDS_OWNER；不含实现或运行证据。"
+    },
+    {
+      "id": "evidence-matrix",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-C01-C09-ACCEPTANCE-MATRIX-20261106.md",
+      "observedAt": "2026-11-06T06:57:36Z",
+      "sha256": null,
+      "supports": "C01–C09 原文、实现入口、测试与 commit、证据层级、状态、剩余动作；D1–D5 最小反例；未来方向不阻断。",
+      "limitations": "状态基于既有记录，未在本轮重跑。"
+    },
+    {
+      "id": "evidence-code-chain",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/index.ts; packages/openclaw-plugin/src/hooks/prompt.ts; packages/principles-core/src/runtime-v2/activation/adaptive-principle-intervention.ts",
+      "observedAt": "2026-11-06T06:45:00Z",
+      "sha256": null,
+      "supports": "共享 provider 原生 ID 门（index.ts 361–388/371–373）、回调（389–393）、分流（503–506）；本地干预门（prompt.ts 760–763/773）；core 准入校验（52–59）；解析函数（441–442）。",
+      "limitations": "静态阅读，未运行。"
+    },
+    {
+      "id": "evidence-spec",
+      "kind": "REPORT",
+      "locator": "docs/specs/PD Adaptive Activation SPEC v0.6.md",
+      "observedAt": "2026-11-06T06:40:00Z",
+      "sha256": null,
+      "supports": "C01–C09 原始验收条文；§5 证据分级与 §5.1 四维状态。",
+      "limitations": "未改通过条件。"
+    },
+    {
+      "id": "evidence-docs-check",
+      "kind": "LOCAL_TEST",
+      "locator": "inline: node scripts/check-docs-structure.cjs; git diff --check",
+      "observedAt": "2026-11-06T06:57:36Z",
+      "sha256": null,
+      "supports": "文档结构 PASS；无空白/冲突标记问题。",
+      "limitations": "不覆盖运行时行为。"
+    },
+    {
+      "id": "evidence-linear",
+      "kind": "INLINE",
+      "locator": "Linear PRI-1118 / PRI-1116 / PRI-1114",
+      "observedAt": "2026-11-06T06:55:53Z",
+      "sha256": null,
+      "supports": "PRI-1118 Todo→In Progress；PRI-1116 Backlog→In Progress；PRI-1114 当前 Done（合并自动化），本轮未修改。",
+      "limitations": "状态读取时为事实快照。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-design",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-CONTROLLED-ADMISSION-WIRING-DESIGN-20261106.md",
+      "persistence": "committed",
+      "notes": "v1.2：三缺口闭合 + 冻结协议。"
+    },
+    {
+      "id": "artifact-matrix",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-C01-C09-ACCEPTANCE-MATRIX-20261106.md",
+      "persistence": "committed",
+      "notes": "C01–C09 证据矩阵。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T065736Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T065736Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点同名 Markdown。"
+    }
+  ],
+  "blockers": [
+    "Owner 尚未批准设计 v1.2 与实现范围（PRI-1118）。",
+    "C04 真实请求正例、C05 真实行为抽样、C08 Examiner 真实案例未运行。",
+    "PR #2386 未合并；合并由 Owner 执行，AI 不合并。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1118",
+      "action": "Owner 审阅 PR #2386 并按批准卡一次性批准设计 v1.2、实现范围、环境、预算、停止条件与清理/回滚。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 书面批准或拒绝。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1118",
+      "action": "获批后实现 controlled-admission 模块、prompt.ts 本地入口、index.ts 共享入口、core 纯校验函数提取与双入口测试。",
+      "dependsOn": [1],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "lint/typecheck/定向测试全绿；默认关闭与拒绝路径有断言。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1118",
+      "action": "实现验证通过后执行 P0 预检（0 模型请求）；未通过即停止。",
+      "dependsOn": [1, 2],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "hook 已注册、入口可按文件提交、工具/超时/端点预检齐全。"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1118",
+      "action": "P0 通过后在预算内执行 1 正例 + 1 对照；任一停止条件命中即停止，不重试。",
+      "dependsOn": [3],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "证据包、三条身份线、journal 语义与清理记录齐全。"
+    },
+    {
+      "order": 5,
+      "issue": "PRI-1116",
+      "action": "C04 证据回填矩阵；C05/C08 保持待 G2/Examiner，不阻断 G1。",
+      "dependsOn": [4],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "矩阵状态更新且区分组件级/真实运行。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-06：补齐 PRI-1118 三缺口、并行整理 PRI-1116 C01–C09、创建文档 PR；批准前不写接线代码、不启动宿主、不调模型、不改安装目录、不发版。",
+      "AGENTS.md §23A：独立 worktree、one writer、lease、identity、readiness、.tmp 产物。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": null,
+    "report": "{\"report\":\"20261106T065736Z-trae\",\"kind\":\"final\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "LATEST.json 保持他人共享指针，本任务未覆盖。",
+      "历史检查点未覆盖。"
+    ]
+  }
+}
