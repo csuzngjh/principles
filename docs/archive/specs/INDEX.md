@@ -89,7 +89,7 @@
 **仍是现行权威契约、但仍有未完项或未获执行授权（13 篇）**
 
 - `SPEC-PD-EXAMINER-001-v0.10.1.md`：Console `/lab` 已随包出厂，真实模型执行仍 `403 real_execution_not_authorized`。
-- `SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.3.md` / `-v0.3.1.md`：**2026-11-07 复核更新**——Phase 0 / A 已实施（PR #2296、#2316）；Phase B 代码与单测/集成已实施（PR #2308、#2347），但真实 LLM BDD 与三宿主最终验收未完成；Phase C（GFI）生产逻辑已移除（PR #2332），历史 JSON 迁移与 `gone` 墓碑例外未闭合。当前实施状态与证据见 `-v0.3.1.md` §8 与 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。（此前"Phase A、Phase C 未做"的记述已过期，保留作历史对照。）
+- `SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.3.md` / `-v0.3.1.md`：**2026-11-07 复核 + Owner 决策更新**——Phase 0 / A 已实施（PR #2296、#2316）；Phase B 代码与单测/集成已实施（PR #2308、#2347），D5/D6 已获 `OWNER_APPROVED / IMPLEMENTATION_ACCEPTED`，但真实 LLM BDD 与三宿主最终验收仍未完成（PRI-1147/PRI-1148）；Phase C（GFI）核心生产逻辑已移除（PR #2332），DC-01 方案 A（纯防御性 `gone` 墓碑）已获批，历史 JSON 迁移仍未完成（PRI-1149）。当前实施状态与证据见 `-v0.3.1.md` §8 与 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。（此前"Phase A、Phase C 未做"的记述已过期，保留作历史对照。）
 - `SPEC-PD-PRR-001-principle-pain-recall-v1.3.md` + `Gate-A-to-B-admission-matrix` + `Gate-B-experiment-plan` + `Gate-B-owner-decision-card` + `Gate-B0-AC-preregistration`：Gate B 真实执行 NOT_RUN，决策卡 D-01–D-05 全 PENDING。
 - `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md`：Gate 3 现行契约。
 - `PRI-917-semantic-reuse-adjudication-v0.3.3.md`：Reuse Review Gate 现行权威（`reuse-gated-intake.ts` 已接生产自动路径）。

@@ -145,5 +145,8 @@ WorkBuddy live-keyword 检测词表 = **共享 live 词库**（`createSharedCorr
 
 - 2026-11-05 审计：`docs/reviews/2026-11-05-workbuddy-pain-detection-boundary-audit.md`
 - 2026-11-07 最终收敛报告：`docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`
+- 共享 Correction Detection 的 D5/D6：Owner 已批准为
+  `OWNER_APPROVED / IMPLEMENTATION_ACCEPTED`（见 Pain v0.3.1 §8.7）；
+  获批不改变 WorkBuddy 自动关键词 Pain **不支持**的边界。
 - 三宿主最终验收（OpenClaw/Codex 自动 + WorkBuddy 手动）：Linear **PRI-1148**
 - 支持宿主真实 LLM BDD：Linear **PRI-1147**

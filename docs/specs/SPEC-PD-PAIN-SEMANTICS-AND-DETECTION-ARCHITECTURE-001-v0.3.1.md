@@ -1,9 +1,9 @@
 # PD Pain Semantics & Detection Architecture v1.0
 ## Final Contract Closure (v0.3.1)
 
-**Status:** Implemented (code + unit/integration) — Final cross-host acceptance pending（实现状态见 §8；D5/D6 的产品行为仍以 §3 的 Owner 决策记录为准）
-**Revision:** v0.3.1（v0.3 的最后一次实施前契约收口）+ 2026-11-07 Implementation Closure（仅追加状态与证据，不改设计条款）
-**Code Baseline:** 起草时 HEAD=`457bbf0fcd8df85c069b78ce60858acf742fe970`；2026-11-07 最终收敛基线 `origin/main@86b6208042b6083d4a7bbf840730d060188a1517`（PRI-1136 已把 `runtime-v2/` 改名为 `runtime/`；本文相关代码路径按当前路径复核）。
+**Status:** IMPLEMENTED (code + unit/integration) — FINAL ACCEPTANCE PENDING. D5/D6: `OWNER_APPROVED / IMPLEMENTATION_ACCEPTED`（Owner 2026-11-07）。Phase B 整体仍为 **PARTIALLY_IMPLEMENTED**（真实 LLM BDD 与三宿主最终验收未完成）。
+**Revision:** v0.3.1（v0.3 的最后一次实施前契约收口）+ 2026-11-07 Implementation Closure + 2026-11-07 Owner Decision Closure（仅追加状态与证据，不改设计条款）
+**Code Baseline:** 起草时 HEAD=`457bbf0fcd8df85c069b78ce60858acf742fe970`；2026-11-07 最终收敛基线 `origin/main@9c07876207655b4ac9757fb3510a69f3bb9dfa30`（PRI-1136 已把 `runtime-v2/` 改名为 `runtime/`；本文相关代码路径按当前路径复核）。
 **Implementation Evidence:** 见 §8 与 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。
 **Evidence Base:**
 - `docs/reviews/2026-11-02-pain-architecture-spec-v0.1-audit.md`
@@ -202,7 +202,7 @@ v0.3 允许"≤2 条/周期 × 单次 60s"→ 最坏 120s ≥ 周期 120s，会�
 
 ### 8.1 基线
 
-- 代码基线：`origin/main@86b6208042b6083d4a7bbf840730d060188a1517`。
+- 代码基线：`origin/main@9c07876207655b4ac9757fb3510a69f3bb9dfa30`（PR #2401 rebase 后基线）。
 - 路径变更：PRI-1136 已把 `packages/principles-core/src/runtime-v2/` 改名为
   `packages/principles-core/src/runtime/`；本文与报告中的现行路径均按新目录。
 - 生产代码未在本轮修改；本轮只做事实核查、状态裁定与文档校准。
@@ -213,8 +213,8 @@ v0.3 允许"≤2 条/周期 × 单次 60s"→ 最坏 120s ≥ 周期 120s，会�
 | --- | --- | --- | --- |
 | Phase 0 — Safe Cleanup | **IMPLEMENTED** | PR #2296；`llm-pain-source-retirement` 套件通过 | 无 |
 | Phase A — Legacy Retirement | **IMPLEMENTED** | PR #2316；`phase-a-default-production-path` 套件通过；RuleHost Block / Tool Failure / Repeated Failure 自动 Pain 已退役；Owner 显式入口保留 | 无 |
-| Phase B — Shared Correction Detection | **IMPLEMENTED（代码/单测/集成）**；最终验收 **PARTIALLY_IMPLEMENTED** | PR #2308、#2347；core 546 passed、host-runtime 89 passed、openclaw-plugin 19 passed（本轮实跑，见 §8.6） | 真实 LLM BDD（PRI-1147）；三宿主最终验收与 startsWith 判定（PRI-1148）；D5/D6 Owner 追认（DC-02） |
-| Phase C — GFI Complete Removal | **PARTIALLY_IMPLEMENTED** | PR #2332：GFI 生产逻辑、SQLite 列、CLI/Console 表面、指标与命令已移除；`gfi` 仅 `gone` 墓碑 | 历史 workspace JSON 迁移（SPEC §6.2/§6.3，PRI-1149）；墓碑与 §5.1 的例外需 Owner 裁定（DC-01） |
+| Phase B — Shared Correction Detection | **PARTIALLY_IMPLEMENTED**（整体）；代码/单测/集成 **COMPLETE**；D5/D6 `OWNER_APPROVED / IMPLEMENTATION_ACCEPTED` | PR #2308、#2347；core 546 passed、host-runtime 89 passed、openclaw-plugin 19 passed（本轮实跑，见 §8.6） | 真实 LLM BDD（PRI-1147）；三宿主最终验收与 startsWith 判定（PRI-1148） |
+| Phase C — GFI Complete Removal | **PARTIALLY_IMPLEMENTED** | PR #2332：GFI 生产逻辑、SQLite 列、CLI/Console 表面、指标与命令已移除；纯防御性 `gfi` `gone` 墓碑经 Owner 批准保留（DC-01 方案 A） | 历史 workspace JSON 迁移（SPEC §6.2/§6.3，PRI-1149） |
 
 **结论：** 不得把 Phase B 整体标为 COMPLETE；也不得把 Phase C 标为完整 IMPLEMENTED。
 代码实施、单元/集成测试、真实 LLM BDD、三宿主最终验收是四个独立层。
@@ -251,15 +251,25 @@ v0.3 允许"≤2 条/周期 × 单次 60s"→ 最坏 120s ≥ 周期 120s，会�
 
 ### 8.5 剩余工作（独立跟踪）
 
-- **PRI-1147**：支持宿主（OpenClaw/Codex）真实 LLM BDD。
+- **PRI-1147**：支持宿主（OpenClaw/Codex）真实 LLM BDD（未完成）。
 - **PRI-1148**：三宿主最终验收（OpenClaw/Codex 自动 + WorkBuddy 手动）与
-  startsWith 退役判定。
-- **PRI-1149**：GFI 历史 workspace JSON 数据迁移。
-- **DC-01**：GFI `gone` 墓碑保留 vs SPEC §5.1 的例外裁定（见最终报告）。
-- **DC-02**：D5（学习词不再 STRONG 直通）与 D6（pending payload 最小化）的
-  Owner 追认；PR #2308 自述"D6 待 Owner 认可"，本轮未找到已批准记录。
+  startsWith 退役判定（未完成）。
+- **PRI-1149**：GFI 历史 workspace JSON 数据迁移（未完成）。
+- **DC-01**：**已批准**（方案 A：保留纯防御性 `gone` 墓碑）；SPEC §5.1 已同步。
+- **DC-02（D5/D6）**：**已批准**（Owner 2026-11-07）；无剩余审批动作。
 
-### 8.6 本轮验证命令
+### 8.7 Owner Decision Closure（2026-11-07）
+
+| 决策 | 结论 | 状态 | 影响 |
+| --- | --- | --- | --- |
+| D5 — Learning Phrase Admission | 历史精度高的学习词不得直接获得 STRONG 准入；只能作为 Stage 2 优先候选，必须经 Correction Detection 与语境判断 | `OWNER_APPROVED / IMPLEMENTATION_ACCEPTED` | 现有代码/测试即最终接受实现，不改代码 |
+| D6 — Pending Marker Persistence | Payload 最小化、TTL 72h、保留次数限制与终态清理；已为 audit/recovery 保留必要证据 | `OWNER_APPROVED / IMPLEMENTATION_ACCEPTED` | 不扩大 Pending 状态机范围 |
+| DC-01 — GFI Defensive Tombstone | 方案 A：保留纯防御性 `gone` tombstone | `OWNER_APPROVED / SPEC_ALIGNMENT_REQUIRED` → 本轮已对齐 | 墓碑无执行能力、不可被启用；测试需证明 |
+
+**Phase B 整体仍为 PARTIALLY_IMPLEMENTED**：D5/D6 获批不改变真实 LLM BDD
+与三宿主最终验收尚未完成的事实。
+
+### 8.8 本轮验证命令
 
 ```text
 packages/principles-core: npx vitest run pain-ingress-spec-matrix / pain-ingress-workbuddy /

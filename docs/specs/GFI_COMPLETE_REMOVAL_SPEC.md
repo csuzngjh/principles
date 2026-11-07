@@ -1,12 +1,12 @@
 # GFI_COMPLETE_REMOVAL_SPEC
 
-## v1.2 — Complete Removal & Behavioral Preservation（v1.1 设计条款保留，Post-Implementation Closure 见 §15）
+## v1.3 — Complete Removal & Behavioral Preservation（v1.1/v1.2 设计条款保留；DC-01 方案 A 已批准，Post-Implementation Closure 见 §15）
 
 | 属性 | 内容 |
 |---|---|
 | SPEC ID | GFI-COMPLETE-REMOVAL-001 |
-| Version | 1.2（代码实施已合并；见 §15 Post-Implementation Closure） |
-| Status | **Partially Implemented** — 生产逻辑/DB/CLI/Console 已移除（PR #2332）；GFI-1 历史 JSON 迁移未实施、GFI-2 gone 墓碑例外待 Owner 裁定（DC-01） |
+| Version | 1.3（代码实施已合并；DC-01 方案 A 已批准并完成 SPEC 对齐；见 §15 Post-Implementation Closure） |
+| Status | **Partially Implemented** — 生产逻辑/DB/CLI/Console 已移除（PR #2332）；纯防御性 `gone` 墓碑经 Owner 批准保留；GFI-1 历史 JSON 迁移未实施（PRI-1149） |
 | Priority | P1 |
 | Target | Principles Disciple |
 | Strategy | Complete Removal + Behavior-Preserving Simplification |
@@ -727,22 +727,44 @@ GateBlockItem.gateType 中的历史 `gfi` 类型必须先核实其语义：如�
 
 ## 5.1 Feature Flag
 
-删除：
+目标：GFI **不得作为有效 Feature Flag 存在**；允许保留**纯防御性 `gone` tombstone**。
 
-- feature-flag-contract.ts 中 gfi。
-- feature-flag-lifecycle.ts 中 gfi 生命周期记录。
-- 所有 GFI flag 测试。
-- 配置模板中的 GFI flag。
+删除 / 退役：
 
-当前 gfi flag 为 quiet / disabled，但 GFI 生产者并未被它统一控制。Canary 可以跳过 GFI Snapshot，而实际 trackFriction 仍然执行。
+- 所有 GFI flag 的 quiet / disabled 执行路径，以及配置模板中的 GFI flag；
+- `feature-flag-lifecycle.ts` 中任何可执行 GFI 生命周期；
+- 依赖 GFI flag 开启 / 关闭行为的测试（替换为墓碑防御性测试）。
 
-因此不得以 flag=false 作为 GFI 已停止的证据。
+保留（Owner 2026-11-07 批准，DC-01 方案 A）：
 
-不保留 gone tombstone。通用 Feature Flag Loader 已有 unknown flag warning，旧 gfi override 应被识别为未知配置，不执行任何旧逻辑。
+- `feature-flag-contract.ts` 中的 `gfi` 条目，`category: 'gone'`；
+- 仅用于**旧配置识别**：旧 override 被明确拒绝，不执行任何 GFI 逻辑；
+- 不得作为有效 Feature Flag 被启用；`gone` 不可被 override 重新启用。
 
-> **2026-11-07 实施状态偏差：** 实际合并代码保留了 `gfi` 的 `gone` tombstone（无执行能力）。
-> 本轮不擅自删除；建议把本节修改为“允许保留纯防御性 tombstone，但不得具有任何执行能力”，
-> 需 Owner 裁定（Decision Card DC-01）。详见 §15.3 GFI-2。
+保留理由：
+
+- 旧 `gfi` override 可能残留在用户配置中；墓碑使失败模式可观测且稳定（明确拒绝），
+  优于依赖 unknown-flag warning 的隐式忽略；
+- 墓碑无执行能力，无法重新激活旧逻辑；删除墓碑只降低可观测性，不降低风险。
+
+行为边界：
+
+1. `gfi` 不驱动任何生产路径；
+2. 旧配置不得重新激活 GFI；
+3. 不得将 `gfi` 重新标为 `quiet` / `active`。
+
+测试要求：
+
+- 必须保留测试证明 `gfi` 为 `gone` 且不可被 override 重新启用；
+- 必须证明加载旧 `gfi` 配置不会产生任何 GFI 行为。
+
+> **历史对照：** v1.2 曾规定“不保留 gone tombstone”。2026-11-07 Owner 批准方案 A，
+> 本版（v1.3）将规定修改为“允许纯防御性墓碑，但不得具有任何执行能力”。
+> 该变更不删除历史决策记录；历史验收报告与审计证据保持原样。
+
+> **2026-11-07 实施状态：** 实际合并代码保留了 `gfi` 的 `gone` tombstone（无执行能力），
+> 与本版一致。状态：`OWNER_APPROVED / SPEC_ALIGNMENT_REQUIRED` → 本轮已对齐。
+> 详见 §15.3 GFI-2。
 
 ## 5.2 PainConfig
 
@@ -1432,7 +1454,7 @@ PD 应当直接使用真实行为证据，而不是依靠一个综合摩擦分�
 
 ## 15.1 基线
 
-- 代码基线：`origin/main@86b6208042b6083d4a7bbf840730d060188a1517`。
+- 代码基线：`origin/main@9c07876207655b4ac9757fb3510a69f3bb9dfa30`（PR #2401 rebase 后基线）。
 - 实施 PR：**#2332**（GFI Complete Removal，已合并）。
 - 路径变更：PRI-1136 已把 `packages/principles-core/src/runtime-v2/` 改名为
   `packages/principles-core/src/runtime/`；§6.1 中 `runtime-v2/trajectory-schema.ts`
@@ -1460,15 +1482,19 @@ PD 应当直接使用真实行为证据，而不是依靠一个综合摩擦分�
 - 独立跟踪：**Linear PRI-1149**（备份 / 原子写入 / 完整性校验 / 回滚策略）。
   该事项**不归入** PRI-1104（V1/V2 架构任务）。
 
-### GFI-2 — `gone` tombstone（SPEC §5.1 例外，待 Owner 裁定）
+### GFI-2 — `gone` tombstone（**OWNER_APPROVED / SPEC_ALIGNMENT_REQUIRED → 已对齐**）
 
-- §5.1 要求“不保留 gone tombstone”；实际代码保留了 `gfi` 的 `gone` 墓碑。
-- 本轮**不擅自删除**。评估结论：
-  - 保留墓碑可让旧 `gfi` override 被**可观测地拒绝**（未知配置告警覆盖不到已知墓碑语义）；
-  - 删除墓碑会改变旧配置的失败模式，兼容风险更高；
-  - 墓碑本身无任何执行能力，无法重新激活旧逻辑。
-- 因此建议将 SPEC 正式修改为：**允许保留纯防御性 tombstone，但不得具有任何执行能力**。
-- 该修改需 Owner 批准：**Decision Card DC-01**（见最终报告 §G）。
+- Owner 2026-11-07 正式选择**方案 A**：保留 `gfi` 的纯防御性 `gone` tombstone。
+- 已同步 §5.1：允许保留墓碑，但必须满足——
+  1. 保留旧配置识别能力；
+  2. 明确标记为 `gone`；
+  3. 不执行任何 GFI 逻辑；
+  4. 旧配置不得重新激活 GFI；
+  5. 不得作为有效 Feature Flag 被启用；
+  6. 保留测试证明墓碑无执行能力。
+- 保留理由：旧 override 的失败模式可观测且稳定；墓碑无执行能力，删除只降低可观测性。
+- 相关测试：`feature-flag-lifecycle.test.ts`、`architecture-regression.test.ts`（须覆盖
+  `gone` 不可被 override 重新启用、旧配置不产生 GFI 行为）。
 
 ### GFI-3 — 文档与索引不一致（本轮修复）
 
