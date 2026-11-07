@@ -42,7 +42,8 @@
  *   result reason; every result carries reason + nextAction.
  */
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import semver from 'semver';
@@ -451,6 +452,283 @@ export function writeHostJsonFileProtected(filePath: string, content: string): {
   }
 }
 
+// ─── Install transaction compensation (2026-11-07) ──────────────────────────
+/**
+ * The registration transaction inside directWriteRegistration covers only the
+ * cache + settings + registry commit. Every LATER stage (governance workspace
+ * init, runtime profile, install manifest, governance flags) previously
+ * failed LOUD but left the just-completed registration in place — a plugin
+ * registered against a governance state that never materialized.
+ *
+ * The install transaction closes that gap: before the FIRST host-visible
+ * mutation (registration), openWorkbuddyInstallTxn snapshots every PD-owned
+ * mutation target (settings.json, installed_plugins.json, the incoming cache
+ * version dir, ~/.pd/install.json, the governance config). Each later stage
+ * records what it wrote; a post-registration failure restores the snapshots
+ * in reverse order under HASH GUARDS — a file that changed after PD wrote it
+ * is never clobbered (concurrent host/Owner modifications survive) and the
+ * rollback reports ROLLBACK_INCOMPLETE with the evidence path instead.
+ *
+ * The governance workspace DIRECTORY is never deleted: a fresh workspace
+ * created by a failed attempt is preserved and reported (it may hold
+ * runtime-init databases), matching the data-preservation guideline.
+ */
+
+interface WorkbuddyFileSnapshot {
+  existed: boolean;
+  bytes: string | undefined;
+}
+
+interface WorkbuddyInstallTxn {
+  /** Evidence dir for the pre-existing cache payload (kept on partial rollback). */
+  readonly evidenceDir: string;
+  /** Earliest observed bytes per path — the restore target. */
+  readonly fileSnapshots: Map<string, WorkbuddyFileSnapshot>;
+  /** Chronological list of paths PD wrote (deduped at restore time). */
+  readonly writtenPaths: string[];
+  /** The bytes PD last left on each path — the concurrency hash guard. */
+  readonly lastWrittenBytes: Map<string, string>;
+  readonly governanceDir: string;
+  readonly governanceDirExistedBefore: boolean;
+  readonly cacheVersionDir: string | undefined;
+  readonly cacheExisted: boolean;
+  /** Copy of the pre-existing cache payload (undefined when absent or the snapshot copy failed). */
+  cacheBackupDir: string | undefined;
+  /** Digest of the pre-existing cache payload (verify the restore landed). */
+  readonly cacheDigestBefore: string | undefined;
+  /** Digest observed right after registration — the cache hash guard. */
+  cacheDigestAfterRegistration: string | undefined;
+}
+
+function workbuddyDigestTree(root: string): string {
+  const hash = createHash('sha256');
+  const walk = (dir: string, relative: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      hash.update('unreadable:' + relative + '\n');
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = relative.length === 0 ? entry.name : relative + '/' + entry.name;
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+      else if (entry.isFile()) {
+        try {
+          hash.update(rel + ':' + createHash('sha256').update(readFileSync(path.join(dir, entry.name))).digest('hex') + '\n');
+        } catch {
+          hash.update(rel + ':unreadable\n');
+        }
+      }
+    }
+  };
+  walk(root, '');
+  return hash.digest('hex');
+}
+
+/** Byte snapshot of one file (undefined bytes when absent). */
+function snapshotWorkbuddyFile(filePath: string): WorkbuddyFileSnapshot {
+  try {
+    return { existed: true, bytes: readFileSync(filePath, 'utf-8') };
+  } catch {
+    return { existed: false, bytes: undefined };
+  }
+}
+
+function openWorkbuddyInstallTxn(p: WorkbuddyPaths, version: string): WorkbuddyInstallTxn {
+  const snapshots = new Map<string, WorkbuddyFileSnapshot>();
+  for (const filePath of [p.settingsPath, p.registryPath, p.installManifestPath]) {
+    snapshots.set(filePath, snapshotWorkbuddyFile(filePath));
+  }
+  const governanceConfigPath = path.join(p.governanceDir, '.pd', 'config.yaml');
+  const governanceDirExistedBefore = existsSync(p.governanceDir);
+  snapshots.set(governanceConfigPath, snapshotWorkbuddyFile(governanceConfigPath));
+
+  const versionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
+  let cacheExisted = false;
+  let cacheDigestBefore: string | undefined;
+  let cacheBackupDir: string | undefined;
+  if (versionDir !== undefined && existsSync(versionDir)) {
+    cacheExisted = true;
+    cacheDigestBefore = workbuddyDigestTree(versionDir);
+    cacheBackupDir = path.join(path.dirname(path.resolve(p.cachePluginRoot)), `.pd-txn-backup-${process.pid}-${Date.now()}`);
+    try {
+      rmSync(cacheBackupDir, { recursive: true, force: true });
+      cpSync(versionDir, cacheBackupDir, { recursive: true });
+    } catch {
+      // A failed cache snapshot must not silently disable compensation: the
+      // transaction degrades to file-only restore and says so at rollback.
+      cacheBackupDir = undefined;
+    }
+  }
+
+  return {
+    evidenceDir: cacheBackupDir ?? '(no pre-existing cache payload — fresh install)',
+    fileSnapshots: snapshots,
+    writtenPaths: [],
+    lastWrittenBytes: new Map(),
+    governanceDir: p.governanceDir,
+    governanceDirExistedBefore,
+    cacheVersionDir: versionDir,
+    cacheExisted,
+    cacheBackupDir,
+    cacheDigestBefore,
+    cacheDigestAfterRegistration: undefined,
+  };
+}
+
+/** Record a successful PD write (rc-7: current state, not a prior iteration). */
+function recordWorkbuddyTxnWrite(txn: WorkbuddyInstallTxn, filePath: string, bytesAfterWrite: string): void {
+  if (!txn.writtenPaths.includes(filePath)) txn.writtenPaths.push(filePath);
+  txn.lastWrittenBytes.set(filePath, bytesAfterWrite);
+}
+
+/** After registration committed, pin the guard baselines PD must restore against.
+ *
+ * Known limit (documented, accepted): the baselines are pinned by reading the
+ * files right after registration. Within this process the read is synchronous
+ * with the write (no yield point), so only a CROSS-PROCESS host write landing
+ * inside that sub-millisecond window can be pinned as "what PD wrote" — the
+ * same unavoidable FS race class writeHostJsonFileProtected already accepts.
+ * Every modification AFTER the pin is correctly detected by the guard. */
+function captureWorkbuddyPostRegistration(txn: WorkbuddyInstallTxn, p: WorkbuddyPaths): void {
+  for (const filePath of [p.settingsPath, p.registryPath]) {
+    const after = snapshotWorkbuddyFile(filePath);
+    if (after.existed && after.bytes !== undefined) {
+      txn.lastWrittenBytes.set(filePath, after.bytes);
+      if (!txn.writtenPaths.includes(filePath)) txn.writtenPaths.push(filePath);
+    }
+  }
+  if (txn.cacheVersionDir !== undefined && existsSync(txn.cacheVersionDir)) {
+    txn.cacheDigestAfterRegistration = workbuddyDigestTree(txn.cacheVersionDir);
+  }
+}
+
+/** Restore one file snapshot under the concurrency hash guard. Returns an error detail or undefined. */
+function restoreWorkbuddyFileSnapshot(txn: WorkbuddyInstallTxn, filePath: string): string | undefined {
+  const snapshot = txn.fileSnapshots.get(filePath);
+  if (snapshot === undefined) return undefined; // never tracked — not ours to touch
+  const expected = txn.lastWrittenBytes.get(filePath);
+  if (expected === undefined) return undefined; // PD never wrote it in this txn — nothing to undo
+
+  let current: WorkbuddyFileSnapshot;
+  try {
+    current = snapshotWorkbuddyFile(filePath);
+  } catch {
+    return filePath + ': unreadable during rollback';
+  }
+  if (current.existed !== true || current.bytes !== expected) {
+    return filePath + ': changed after PD wrote it (concurrent modification) — restore skipped to avoid clobbering';
+  }
+  if (current.bytes === snapshot.bytes && snapshot.existed) return undefined; // already the target state
+  try {
+    if (!snapshot.existed || snapshot.bytes === undefined) {
+      rmSync(filePath, { force: true });
+    } else {
+      const restored = writeHostJsonFileProtected(filePath, snapshot.bytes);
+      if (!restored.ok) return filePath + ': ' + restored.reason;
+    }
+    return undefined;
+  } catch (error) {
+    return filePath + ': restore failed (' + (error instanceof Error ? error.message : String(error)) + ')';
+  }
+}
+
+/** Restore the cache payload snapshot. Returns an error detail or undefined. */
+function restoreWorkbuddyCacheSnapshot(txn: WorkbuddyInstallTxn): string | undefined {
+  if (txn.cacheVersionDir === undefined) return undefined;
+  if (txn.cacheDigestAfterRegistration === undefined) {
+    return txn.cacheExisted ? 'cache: post-registration digest missing — restore skipped' : undefined;
+  }
+  let currentDigest: string;
+  try {
+    currentDigest = existsSync(txn.cacheVersionDir) ? workbuddyDigestTree(txn.cacheVersionDir) : 'absent';
+  } catch {
+    return 'cache: unreadable during rollback';
+  }
+  if (currentDigest !== txn.cacheDigestAfterRegistration) {
+    return 'cache: changed after PD wrote it (concurrent modification) — restore skipped to avoid clobbering';
+  }
+  // No-change short-circuit: an already-registered fast-path install (or any
+  // run whose registration left the payload identical) has nothing to undo —
+  // skip the destructive rm+cp cycle entirely instead of risking a healthy
+  // cache on a no-op restore.
+  if (currentDigest === txn.cacheDigestBefore) return undefined;
+  try {
+    if (txn.cacheExisted && txn.cacheDigestBefore !== undefined) {
+      rmSync(txn.cacheVersionDir, { recursive: true, force: true });
+      if (txn.cacheBackupDir === undefined) return 'cache: pre-install evidence copy missing — restore skipped';
+      cpSync(txn.cacheBackupDir, txn.cacheVersionDir, { recursive: true });
+      if (workbuddyDigestTree(txn.cacheVersionDir) !== txn.cacheDigestBefore) {
+        return 'cache: restored payload digest mismatch — previous version may be unusable';
+      }
+    } else {
+      rmSync(txn.cacheVersionDir, { recursive: true, force: true });
+    }
+    return undefined;
+  } catch (error) {
+    return 'cache: restore failed (' + (error instanceof Error ? error.message : String(error)) + ')';
+  }
+}
+
+interface WorkbuddyCompensation {
+  /** True ONLY when every tracked surface was verified restored. */
+  readonly complete: boolean;
+  /** Operator-facing rollback outcome for the failure reason (rc-9). */
+  readonly summary: string;
+  /** Next action for the operator (manual recovery on partial rollback). */
+  readonly nextAction: string;
+  /** Governance-workspace disposition note (preserved / restored). */
+  readonly governanceNote: string;
+}
+
+/** Reverse-order, hash-guarded restore of every surface this transaction touched. */
+function compensateWorkbuddyInstall(txn: WorkbuddyInstallTxn): WorkbuddyCompensation {
+  const errors: string[] = [];
+
+  // 1. Later-stage file writes, reverse chronological, deduped.
+  const seen = new Set<string>();
+  for (let index = txn.writtenPaths.length - 1; index >= 0; index--) {
+    const rawPath = txn.writtenPaths[index];
+    if (rawPath === undefined) continue;
+    if (seen.has(rawPath)) continue;
+    seen.add(rawPath);
+    const filePath: string = rawPath;
+    // The governance config inside a workspace CREATED by this attempt is
+    // part of the preserved fresh workspace (never auto-deleted) — skip the
+    // byte restore, report the preserved dir instead.
+    if (filePath === path.join(txn.governanceDir, '.pd', 'config.yaml') && !txn.governanceDirExistedBefore) continue;
+    const error = restoreWorkbuddyFileSnapshot(txn, filePath);
+    if (error !== undefined) errors.push(error);
+  }
+
+  // 2. Registration surfaces: settings + registry + cache payload.
+  const cacheError = restoreWorkbuddyCacheSnapshot(txn);
+  if (cacheError !== undefined) errors.push(cacheError);
+
+  // 3. Evidence retention: a complete rollback discards the cache evidence
+  //    copy; an incomplete one keeps it as the manual-recovery source.
+  if (errors.length === 0 && txn.cacheBackupDir !== undefined) {
+    try { rmSync(txn.cacheBackupDir, { recursive: true, force: true }); } catch { /* kept — reported below */ }
+  }
+
+  const governanceNote = txn.governanceDirExistedBefore
+    ? 'The pre-existing governance workspace was preserved untouched (only PD flag/profile edits were reverted).'
+    : 'The governance workspace created by this attempt is PRESERVED at ' + txn.governanceDir + ' (never auto-deleted; it holds no prior user data) — remove it manually or re-run the installer to complete initialization.';
+
+  const complete = errors.length === 0;
+  return {
+    complete,
+    summary: complete
+      ? 'Previous cache and registration state restored.'
+      : 'ROLLBACK_INCOMPLETE: ' + errors.join('; ') + '. Rollback evidence (pre-install cache payload) preserved at ' + txn.evidenceDir + '.',
+    nextAction: complete
+      ? 'Fix the reported cause and re-run the installer (idempotent).'
+      : 'Do not treat the WorkBuddy plugin as installed or usable. Restore the listed surfaces from the preserved evidence directory (or manually), then re-run the installer.',
+    governanceNote,
+  };
+}
+
 // ─── Plugin payload (adapter package contract) ──────────────────────────────
 
 /**
@@ -584,7 +862,11 @@ export function mergeWorkbuddyIntoInstallManifest(
   };
   try {
     mkdirSync(path.dirname(manifestPath), { recursive: true });
-    writeFileSync(manifestPath, JSON.stringify(payload, null, 2) + '\n', 'utf-8');
+    // Atomic replace (temp + rename): a mid-write ENOSPC/EPERM must leave the
+    // previous manifest intact — a truncated install.json would otherwise
+    // survive a compensated failure (the transaction restore relies on the
+    // writer being atomic).
+    atomicReplaceTextFile(manifestPath, JSON.stringify(payload, null, 2) + '\n');
     return { ok: true };
   } catch (error) {
     return {
@@ -1853,8 +2135,20 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const mcpBinding = writeWorkbuddyMcpBinding(p.marketplaceRoot, this.deps.homeDir());
 
     // 5. Register: engine commands first; observable direct-write fallback.
+    //    2026-11-07: before this FIRST host-visible mutation the install
+    //    transaction snapshots every PD-owned mutation target; a failure in
+    //    any LATER stage compensates in reverse order (see
+    //    compensateWorkbuddyInstall). Registration-internal failures keep
+    //    their own established rollback (directWriteRegistration).
+    const txn = openWorkbuddyInstallTxn(p, payload.version);
     const registration = this.registerPlugin(details, payload.version, payload.defaultEnabled);
     if (!registration.ok) {
+      // Registration-internal failures ran their own established rollback
+      // (directWriteRegistration). The transaction never started mutating —
+      // discard the evidence copy so this attempt leaves no residue.
+      if (txn.cacheBackupDir !== undefined) {
+        try { rmSync(txn.cacheBackupDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
       return {
         success: false,
         hostId: this.hostId,
@@ -1864,6 +2158,22 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         nextAction: registration.nextAction,
       };
     }
+    captureWorkbuddyPostRegistration(txn, p);
+
+    // Compensated failure: roll this transaction back, then report the
+    // original cause TOGETHER WITH the verified rollback outcome (rc-9:
+    // "restored" is only claimed after real state verification).
+    const compensated = (cause: { reason: string; nextAction: string }, settingsAction: 'created' | 'updated' | 'preserved'): HostInstallResult => {
+      const rollback = compensateWorkbuddyInstall(txn);
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: settingsAction,
+        reason: cause.reason + ' ' + rollback.summary + ' ' + rollback.governanceNote,
+        nextAction: rollback.complete ? cause.nextAction : rollback.nextAction,
+      };
+    };
 
     // 6. Initialize the governance workspace (OD-07 explicit creation) with
     //    the FULL loader-valid state the hook/console/worker chain reads:
@@ -1873,14 +2183,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     //    uninitialized workspace.
     const governance = this.initializeGovernanceWorkspace(p.governanceDir);
     if (!governance.ok) {
-      return {
-        success: false,
-        hostId: this.hostId,
-        configPath: p.settingsPath,
-        configAction: registration.settingsAction,
-        reason: governance.reason,
-        nextAction: governance.nextAction,
-      };
+      // B2 row 2: a governance-init failure must not strand the just-completed
+      // registration — restore the pre-registration host state.
+      return compensated(governance, registration.settingsAction);
     }
 
     // 6.5 Round-3 remediation P1: the install-collected LLM runtime profile
@@ -1899,15 +2204,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (ctx.runtimeProfile) {
       const applied = applyWorkbuddyGovernanceRuntimeProfile(p.governanceDir, ctx.runtimeProfile);
       if (!applied.ok) {
-        return {
-          success: false,
-          hostId: this.hostId,
-          configPath: p.settingsPath,
-          configAction: registration.settingsAction,
-          reason: applied.reason,
-          nextAction: applied.nextAction,
-        };
+        return compensated(applied, registration.settingsAction);
       }
+      recordWorkbuddyTxnWrite(txn, applied.configPath, snapshotWorkbuddyFile(applied.configPath).bytes ?? '');
       profileNote = ` LLM runtime profile '${applied.profileId}' (provider ${ctx.runtimeProfile.provider}, model ${applied.model}) written to ${applied.configPath}.`;
       if (applied.pendingAgents.length > 0) {
         profilePendingAgents = applied.pendingAgents;
@@ -1918,15 +2217,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // 7. Record host + governance workspace in the install manifest (set union).
     const manifest = mergeWorkbuddyIntoInstallManifest(p.installManifestPath, p.governanceDir);
     if (!manifest.ok) {
-      return {
-        success: false,
-        hostId: this.hostId,
-        configPath: p.settingsPath,
-        configAction: registration.settingsAction,
-        reason: manifest.reason,
-        nextAction: manifest.nextAction,
-      };
+      return compensated(manifest, registration.settingsAction);
     }
+    recordWorkbuddyTxnWrite(txn, p.installManifestPath, snapshotWorkbuddyFile(p.installManifestPath).bytes ?? '');
 
     // 8. Install ⇒ governance ON by default (PRI-1064, Owner directive
     //    2026-10-31): the ONLY preserved-off state is an explicit opt-out the
@@ -1937,8 +2230,17 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const governanceConfigExists = existsSync(path.join(p.governanceDir, '.pd', 'config.yaml'));
     const governanceDefaults = governanceConfigExists ? ensureWorkbuddyGovernanceEnabled(p.governanceDir) : null;
     if (governanceDefaults !== null && !governanceDefaults.ok) {
-      return { success: false, hostId: this.hostId, configPath: p.settingsPath,
-        configAction: registration.settingsAction, reason: governanceDefaults.reason, nextAction: governanceDefaults.nextAction };
+      // B2 row 5: a governance-flag failure compensates EVERYTHING this
+      // transaction changed, in reverse order.
+      return compensated(governanceDefaults, registration.settingsAction);
+    }
+    if (governanceDefaults !== null && governanceDefaults.configPath !== undefined) {
+      recordWorkbuddyTxnWrite(txn, governanceDefaults.configPath, snapshotWorkbuddyFile(governanceDefaults.configPath).bytes ?? '');
+    }
+    // The install has committed: the transaction evidence copy is stale —
+    // discard it so a successful install leaves no residue.
+    if (txn.cacheBackupDir !== undefined) {
+      try { rmSync(txn.cacheBackupDir, { recursive: true, force: true }); } catch { /* best effort; a locked copy is inert */ }
     }
     const governanceDefaultsNote = describeGovernanceDefaults(governanceDefaults, p.governanceDir);
     const effectiveNote = 'Registration takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).';

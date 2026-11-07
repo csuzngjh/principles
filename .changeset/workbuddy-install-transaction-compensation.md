@@ -1,0 +1,5 @@
+---
+"create-principles-disciple": patch
+---
+
+Close the WorkBuddy install-transaction gap: a failure in any post-registration stage (governance workspace init, LLM runtime profile, install manifest, governance flags) used to leave the just-completed plugin registration in place against a governance state that never materialized. The install now snapshots every PD-owned mutation target (settings.json, installed_plugins.json, the incoming cache version dir, ~/.pd/install.json, the governance config) BEFORE the first host mutation and restores them in reverse order under hash guards — files changed concurrently after PD wrote them are never clobbered and the failure reports ROLLBACK_INCOMPLETE with the preserved evidence path instead of a claimed restore. First installs remove this attempt's registration/cache; upgrades restore the previous payload byte-identically (verified by digest). The governance workspace directory is never auto-deleted: a fresh workspace from a failed attempt is preserved and reported. Successful installs discard the transaction evidence copy.
