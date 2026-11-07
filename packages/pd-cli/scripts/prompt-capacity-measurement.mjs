@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import {
   RUNTIME_PRINCIPLE_BUDGET,
@@ -34,13 +35,12 @@ import {
   getDefaultPdConfig,
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
-  trimToBudget,
   appendEventLogLine,
 } from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
   createProductionHostRuntime,
+  packSharedDirectives,
   readPromptActivationCandidates,
   resolvePromptInjectionRouteDecision,
   readInjectionEventEvidence,
@@ -98,11 +98,25 @@ function seedCandidates(workspaceDir, mix) {
   }
 }
 
-function countOversizedCandidates(principles) {
-  // Selector diagnostics are bounded and may stop scanning after a FIFO
-  // prefix fills. Measure each candidate alone for a corpus-wide count.
+/**
+ * PRI-1137: oversized candidates are measured with THE production shared
+ * packer, not the retired list-route `trimToBudget` arithmetic. The packer
+ * renders each candidate through the same full directive serializer the
+ * runtime uses, so the wrapper, the authority attribute (`authority="..."`)
+ * and the self-report instruction all participate in the budget — exactly the
+ * `full_directive_context` basis the shared route reports. Measuring each
+ * candidate alone keeps the corpus-wide count independent of FIFO prefix fill.
+ */
+export function countOversizedCandidates(principles, selfReportEnabled) {
   return principles.filter((principle) =>
-    trimToBudget([principle], RUNTIME_PRINCIPLE_BUDGET, escapeXml).oversizedActivationIds.includes(principle.activationId),
+    packSharedDirectives({
+      scanOrder: [principle],
+      // Same fallback the production route resolves when the caller holds no
+      // model facts (SPEC §6.1 default).
+      budgetChars: RUNTIME_PRINCIPLE_BUDGET,
+      selfReportEnabled,
+      continueOnNonFit: true,
+    }).oversized.includes(principle.activationId),
   ).length;
 }
 
@@ -114,12 +128,12 @@ function countOversizedCandidates(principles) {
 async function sharedRouteScenario(mix, selfReport, forcedRotationRounds) {
   const dir = makeWorkspace({ selfReport });
   const activationIds = seedCandidates(dir, mix);
-  const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
+  const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir: dir, includeAuthority: true });
   const results = { route: 'shared', selfReport, candidates: activationIds.length, fifoInjected: 0, fifoUsedChars: 0, oversized: 0, avgInjectedForcedRotation: null, evidenceRows: null, forcedRoundKeySource: 'controlled_simulation' };
   const fifo = await buildActivePrinciplePromptContext({ workspaceDir: dir });
   results.fifoInjected = fifo.principleIds.length;
   results.fifoUsedChars = fifo.additionalContext.length;
-  results.oversized = countOversizedCandidates(principles);
+  results.oversized = countOversizedCandidates(principles, selfReportEnabled);
   results.fifoPolicy = fifo.selectionPolicy;
   if (forcedRotationRounds > 0) {
     let sum = 0;
@@ -494,7 +508,7 @@ async function main() {
   ma.push(`- 未知容量档位如实回退 ${RUNTIME_PRINCIPLE_BUDGET} 字符（\`legacy_fallback\` / \`unknown\` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。`);
   ma.push(`- 1M 档位预算按公式精确为 ${promptBudgetCharsForContextWindow(1_000_000)} 字符（≥${Math.ceil(PROMPT_BUDGET_MAX_CHARS * PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS / PROMPT_BUDGET_BASE_CHARS)} token 才触顶 ${PROMPT_BUDGET_MAX_CHARS}）——上限是目标边界，不是必须达到的固定值。`);
   ma.push('- 32K 档位（=下限 1250）经真实生产构建器验证：共享路由在自报开/关两种状态下均至少完整注入一条最小有效原则（v0.1 的 500 下限在该档位注入 0 条，已修复并以回归测试钉住）。');
-  ma.push('- 超长排除/截断语义在各档位下与既有选择器一致（同一 `trimToBudget` 与共享渲染路径，只是预算数值变化）。');
+  ma.push('- 超长排除/截断语义在各档位下与生产共享选择器一致（同一 `packSharedDirectives` 完整 directive 序列化；超长候选按 `full_directive_context` 口径单独测量）。');
   ma.push('');
   ma.push('## 改动前后对比（同一批候选，真实生产序列化器实测）');
   ma.push('');
@@ -523,4 +537,8 @@ async function main() {
   console.log(`[measure] wrote ${OUT_JSON_MA}`);
 }
 
-await main();
+// Run only when invoked as a script; importing the module (tests) must not
+// rewrite the audit reports.
+const isEntryPoint = process.argv[1] !== undefined
+  && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isEntryPoint) await main();
