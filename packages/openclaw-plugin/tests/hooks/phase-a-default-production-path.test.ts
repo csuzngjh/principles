@@ -30,6 +30,7 @@ import { applyTrajectorySchemaBase } from '@principles/core/runtime';
 import { isolatePdCanonicalConfig } from '../utils/isolate-pd-canonical.js';
 isolatePdCanonicalConfig();
 import plugin from '../../src/index';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import type {
   OpenClawPluginApi,
   PluginCommandDefinition,
@@ -52,19 +53,19 @@ interface Harness {
 const tempDirs: string[] = [];
 const priorWorkspaceDir = process.env.PD_WORKSPACE_DIR;
 
-function createWorkspace(): string {
+function createWorkspace(options: { initializeTrajectory?: boolean } = {}): string {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-phase-a-default-'));
   tempDirs.push(workspaceDir);
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
-  // PRI-1137: after_tool_call now runs entirely through the shared runtime,
-  // whose evidence kernel requires the workspace's canonical trajectory store
-  // to already exist (the retired plugin-local handler used to bootstrap it).
-  // Production workspaces are initialized before hooks run, so mirror that.
-  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
-  try {
-    applyTrajectorySchemaBase(db);
-  } finally {
-    db.close();
+  if (options.initializeTrajectory !== false) {
+    // Existing production-path fixtures model a workspace already initialized
+    // by normal startup. The fresh-workspace case below deliberately omits it.
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      applyTrajectorySchemaBase(db);
+    } finally {
+      db.close();
+    }
   }
   return workspaceDir;
 }
@@ -123,6 +124,74 @@ afterEach(() => {
 });
 
 describe('Phase A default production path (unified shared runtime)', () => {
+  it('bootstraps the canonical trajectory store before the first shared tool evidence on a fresh workspace', async () => {
+    const workspaceDir = createWorkspace({ initializeTrajectory: false });
+    const trajectoryPath = path.join(workspaceDir, '.state', 'trajectory.db');
+    expect(fs.existsSync(trajectoryPath)).toBe(false);
+    const { afterToolCall } = registerPlugin(workspaceDir);
+    const sessionId = 'phase-a-default-first-tool';
+
+    try {
+      await afterToolCall(
+        {
+          toolName: 'Bash',
+          toolArgs: { command: 'echo first' },
+          result: { exitCode: 0, stdout: 'first' },
+          sessionId,
+          agentId: 'main',
+          durationMs: 12,
+          toolCallId: 'call_first_1',
+        },
+        toolContext(workspaceDir, sessionId),
+      );
+
+      expect(fs.existsSync(trajectoryPath)).toBe(true);
+      const db = openDb(workspaceDir);
+      try {
+        expect(tableExists(db, 'tool_calls')).toBe(true);
+        const rows = db.prepare('SELECT tool_name, outcome, exit_code, params_json FROM tool_calls').all() as
+          Array<{ tool_name: string; outcome: string; exit_code: number; params_json: string }>;
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ tool_name: 'Bash', outcome: 'success', exit_code: 0 });
+        expect(JSON.parse(rows[0]!.params_json)).toMatchObject({ command: 'echo first' });
+      } finally {
+        db.close();
+      }
+    } finally {
+      WorkspaceContext.dispose(workspaceDir);
+    }
+  });
+
+  it('preserves explicit legacy params and falls back to native toolArgs', async () => {
+    const workspaceDir = createWorkspace();
+    const { afterToolCall } = registerPlugin(workspaceDir);
+    const sessionId = 'phase-a-params-priority';
+
+    await afterToolCall(
+      {
+        toolName: 'Bash',
+        params: { command: 'explicit-params' },
+        toolArgs: { command: 'native-tool-args' },
+        result: { exitCode: 0, stdout: 'ok' },
+        sessionId,
+        agentId: 'main',
+        durationMs: 12,
+        toolCallId: 'call_params_priority',
+      },
+      toolContext(workspaceDir, sessionId),
+    );
+
+    const db = openDb(workspaceDir);
+    try {
+      const row = db.prepare('SELECT params_json FROM tool_calls').get() as { params_json: string } | undefined;
+      expect(row).toBeDefined();
+      expect(JSON.parse(row!.params_json)).toMatchObject({ command: 'explicit-params' });
+    } finally {
+      db.close();
+      WorkspaceContext.dispose(workspaceDir);
+    }
+  });
+
   it('A: a real failed tool call is trajectory evidence only — no Pain, no task', async () => {
     const workspaceDir = createWorkspace();
     const { afterToolCall } = registerPlugin(workspaceDir);

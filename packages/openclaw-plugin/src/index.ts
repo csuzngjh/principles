@@ -634,6 +634,11 @@ const plugin = {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({ hook: 'after_tool_call' }, { flushImmediately: true });
             return;
           }
+          // The shared evidence kernel deliberately opens an existing
+          // trajectory store without bootstrapping it. The OpenClaw host owns
+          // workspace initialization, so ensure the selected workspace's
+          // canonical store exists before dispatching the first tool event.
+          void WorkspaceContext.fromHookContext({ workspaceDir, logger: api.logger }).trajectory;
           return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then((dispatched) => {
             // PRI-1137 final review P1-4: the shared kernel's degradation
             // (trajectory DB missing/unreadable/schema-invalid) must be

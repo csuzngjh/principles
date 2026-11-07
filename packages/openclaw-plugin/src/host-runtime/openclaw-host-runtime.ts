@@ -184,18 +184,18 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     const token = {};
     payloads.set(token, payload);
     const modelContext = modelContextFor(payload.context);
-    // PRI-1137 final review P1-4: `PluginHookAfterToolCallEvent` declares
-    // `toolArgs` (the SDK's `params` field is documented on the BEFORE
-    // events), but the host/parity fixtures also deliver `params` on after
-    // events (SDK index signature) — read BOTH, `toolArgs` first, so the
-    // shared evidence kernel never degrades to `params_json = '{}'`. The
-    // legacy read goes through a runtime record guard (rc-1), never a cast.
+    // PRI-1137 final review P1-4: the SDK's native after-tool field is
+    // `toolArgs`; parity/legacy hosts may still supply `params`. Preserve an
+    // explicitly supplied params object as the authoritative legacy payload,
+    // and use toolArgs only when params is absent/invalid. Both paths are
+    // runtime-guarded before the shared evidence sanitizer receives them.
     const afterEvent = payload.kind === 'after_tool_call' ? payload.event : undefined;
     const legacyAfterParams: unknown = afterEvent !== undefined ? afterEvent.params : undefined;
     const isRecordValue = (value: unknown): value is Record<string, unknown> =>
       typeof value === 'object' && value !== null && !Array.isArray(value);
-    const afterToolInput = afterEvent?.toolArgs
-      ?? (isRecordValue(legacyAfterParams) ? legacyAfterParams : {});
+    const afterToolInput = isRecordValue(legacyAfterParams)
+      ? legacyAfterParams
+      : isRecordValue(afterEvent?.toolArgs) ? afterEvent.toolArgs : {};
     const event: HostEvent = {
       kind: payload.kind,
       context: {
