@@ -1,13 +1,16 @@
 ---
 "principles-disciple": patch
 "create-principles-disciple": patch
+"@principles/core": patch
+"@principles/host-runtime": patch
 ---
 
 feat(openclaw-plugin,host-runtime): PD-self assembly presence observation via official llm_input (PRI-1150, Path A)
 
 - host-runtime: `buildActivePrinciplePromptContext` freezes per-principle
   presence expectations same-source with `additionalContext` (bounded at 64,
-  overflow fact, bodyComplete containment); PD-internal contract.
+  overflow fact, bodyComplete containment); PD-internal contract. Core gains
+  the `PromptPresenceObservedEventData` event contract (union + schema).
 - openclaw-plugin: bounded in-memory assembly snapshot registry keyed by
   runId+sessionId (global key/snapshot/body-byte caps + TTL, sticky history
   loss), minimal single-string containment checker (three-value outcomes),
