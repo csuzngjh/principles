@@ -15,6 +15,7 @@ import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPol
 import { prepareAdaptiveIntervention, type ActivatedPrinciple, type AdaptiveInterventionResult, type AdaptiveDeliveryRecord } from '@principles/core/runtime';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
+import { buildInjectedExpectations } from './prompt-presence-expectations.js';
 import { PromptActivationReader } from '../core/runtime-prompt-activation-reader.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
@@ -1097,6 +1098,20 @@ export async function handleBeforePromptBuild(
   prependContext = result.prependContext;
   appendSystemContext = result.appendSystemContext;
 
+  // ──── 8.5 PRESENCE EXPECTATIONS (prompt presence forensics, design v1.2) ────
+  // Frozen AFTER the size guard: bodyText is exactly what this hook returns;
+  // bodyComplete=false marks a truncated fragment (never yields a full_hit).
+  // Fail-open, memory-only; see prompt-presence-expectations.ts.
+  const injectedExpectations = buildInjectedExpectations({
+    assembledPrependSystemContext: prependSystemContext,
+    target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
+      ? { activationId: adaptiveExpectedTarget.activationId, body: adaptiveTargetBody }
+      : undefined,
+    rendered: dedupedV2
+      .filter((p) => runtimePrincipleIds.has(p.principleId))
+      .map((p) => ({ activationId: p.activationId, body: escapeXml(p.text) })),
+  });
+
   if (result.truncated) {
     const logEntry = result.truncationLog.join(', ');
     if (result.appendSystemContext.includes('[WARNING: Context sections stripped')) {
@@ -1188,6 +1203,7 @@ export async function handleBeforePromptBuild(
   return {
     prependSystemContext,
     prependContext,
-    appendSystemContext
+    appendSystemContext,
+    ...(injectedExpectations ? { injectedExpectations } : {})
   };
 }
