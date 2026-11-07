@@ -1,0 +1,295 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T001332Z-trae",
+  "previousCheckpoint": "20261106T0826Z-trae",
+  "generatedAt": "2026-11-07T00:13:32Z",
+  "agent": "trae",
+  "overallStatus": "READY_FOR_REVIEW",
+  "summary": "在最新 origin/main 86b620804 上完成 PRI-1116 离线验收增量。C08：用既有离线确定性评分器验证行动/最终结果/不必要代价三列可区分，21 tests PASS；8 个 fixture 完成 reviewer assessment，确认「符合原则 / 无效或有害遵循 / 证据未知」可区分，但明确不是真实行为改善；集中列出 3 处判据分歧等待 Owner 裁决。机会分母：现有获准材料不足以形成范围明确、可复核的离线机会清单，T 保持 unknown，不用调用数/运行数/事后错误充当 T，不建 census、不加采集。C04/G1：保留原正例 gate 失败、无对照、端点用户消息哈希与冻结输入不一致、请求级关联 unknown 的事实，列出 E1-E4 缺口。C01/C03/C05/C06/C07 组件与跨模块复跑 111 tests PASS，受控准入夹具 34 tests PASS。未启动宿主、未调用模型、未写生产库、未安装、未发布、未合并。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1116-offline-acceptance",
+    "branch": "ai/PRI-1116-offline-acceptance",
+    "baseCommit": "86b6208042b6083d4a7bbf840730d060188a1517",
+    "headCommit": "本检查点提交前的文档提交；最终 head 以 PR 页面为准。",
+    "dirtyPaths": [],
+    "prUrl": "PENDING",
+    "prState": "OPEN",
+    "remoteChecks": "PR 创建后读取；不得在本地测试通过时宣称 CI 通过。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1116",
+      "scope": "C01-C09 离线验收增量：C08 已知案例核对、机会分母可得性、C04/G1 边界；不执行新宿主回合、不调用模型",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1116-OFFLINE-ACCEPTANCE-20261107.md",
+        "docs/implementation-reports/PD-AA-C08-KNOWN-CASE-REVIEW-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T001332Z-trae.md",
+        "docs/implementation-reports/aa-handoff/20261107T001332Z-trae.json",
+        "docs/implementation-reports/aa-handoff/LATEST.json"
+      ],
+      "acceptance": [
+        {"criterion": "C08 三列区分能力用既有评价方式离线复核", "result": "PASS", "evidenceRefs": ["evidence-c08-tests"]},
+        {"criterion": "F-01…F-08 完成 reviewer assessment 并标 fixture", "result": "PASS", "evidenceRefs": ["evidence-c08-cases"]},
+        {"criterion": "机会分母可得性判断并保持 unknown", "result": "PASS", "evidenceRefs": ["evidence-denominator"]},
+        {"criterion": "C04/G1 缺口精确到证据与影响结论", "result": "PASS", "evidenceRefs": ["evidence-c04-audit"]},
+        {"criterion": "C01/C03/C05/C06/C07 组件与跨模块复跑", "result": "PASS", "evidenceRefs": ["evidence-component-tests"]},
+        {"criterion": "受控准入夹具复跑", "result": "PASS", "evidenceRefs": ["evidence-controlled-admission"]},
+        {"criterion": "C01-C09 逐项矩阵含精确测试与 commit", "result": "PASS", "evidenceRefs": ["evidence-matrix-pr2386", "evidence-report"]},
+        {"criterion": "新 PR 创建并保持 OPEN，不合并", "result": "PASS", "evidenceRefs": ["evidence-pr"]},
+        {"criterion": "C08 判据争议集中列明", "result": "PASS", "evidenceRefs": ["evidence-c08-cases"]},
+        {"criterion": "G1 通过", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-c04-audit"]}
+      ],
+      "remaining": [
+        "D-C08-1/2/3 需 Owner 裁决。",
+        "C02 专用重验、C03 大小守卫、C09 配置边界可在当前 HEAD 继续离线复跑。",
+        "E1 正例、E2 对照、E3 输入一致性复跑需新运行授权；E4 请求级关联按设计保持 unknown。",
+        "G2 真实任务抽样与 G3 行为效果未运行。",
+        "PR 未合并；合并由 Owner 执行。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-c08-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1116-offline-acceptance",
+      "command": "npx vitest run scripts/__tests__/principle-learning-lab-challenge-v2.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 21,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-c08-tests"]
+    },
+    {
+      "id": "check-controlled-admission",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1116-offline-acceptance",
+      "command": "npx vitest run scripts/__tests__/aa-controlled-admission.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-controlled-admission"]
+    },
+    {
+      "id": "check-component-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1116-offline-acceptance",
+      "command": "npx vitest run packages/principles-core/src/runtime/activation/__tests__/adaptive-principle-intervention.test.ts packages/host-runtime/tests/adaptive-behavior-linkage.test.ts packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 111,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-component-tests"]
+    },
+    {
+      "id": "check-host-positive",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1116-offline-acceptance",
+      "command": "N/A - 未授权新宿主回合",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "check-verify-merge",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1116-offline-acceptance",
+      "command": "npm run verify:merge",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-c08-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "scripts/__tests__/principle-learning-lab-challenge-v2.test.ts; scripts/dev/principle-learning-lab/lib/examiner-v2-cases.mjs",
+      "observedAt": "2026-11-07T00:12:30Z",
+      "sha256": null,
+      "supports": "21 passed / 0 failed / 0 skipped；6 个 calibration strategy 覆盖 action/outcome/negativeTransfer 三列；缺失观测保持 unknown；叙述不当证据。",
+      "limitations": "只证明离线判分逻辑，不证明生产路径已产出独立请求证据，不代表真实行为。"
+    },
+    {
+      "id": "evidence-c08-cases",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-C08-KNOWN-CASE-REVIEW-20261107.md",
+      "observedAt": "2026-11-07T00:13:00Z",
+      "sha256": null,
+      "supports": "F-01…F-08 全部 fixture；三类可区分；D-C08-1/2/3 分歧列明。",
+      "limitations": "reviewer assessment 由 AI 执行，不是 Owner 裁决，也不是行为效果。"
+    },
+    {
+      "id": "evidence-component-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "inline command output",
+      "observedAt": "2026-11-07T00:12:30Z",
+      "sha256": null,
+      "supports": "core 15 + host-runtime 30 + plugin 66 = 111 passed / 0 failed / 0 skipped。",
+      "limitations": "未覆盖 C02 专用重验、C03 大小守卫、C09 配置专测；非宿主观察。"
+    },
+    {
+      "id": "evidence-controlled-admission",
+      "kind": "LOCAL_TEST",
+      "locator": "scripts/__tests__/aa-controlled-admission.test.mjs",
+      "observedAt": "2026-11-07T00:12:30Z",
+      "sha256": null,
+      "supports": "34 passed / 0 failed / 0 skipped；受控准入夹具、预算与编号。",
+      "limitations": "夹具/模拟，不是一次真实请求。"
+    },
+    {
+      "id": "evidence-matrix-pr2386",
+      "kind": "REPORT",
+      "locator": "PR #2386 分支 docs/implementation-reports/PD-AA-C01-C09-ACCEPTANCE-MATRIX-20261106.md（未合并）",
+      "observedAt": "2026-11-07T00:10:00Z",
+      "sha256": null,
+      "supports": "C01-C09 原始要求、既有测试名与 commit。",
+      "limitations": "未合并产物；建议合并顺序 #2386 → 本 PR。"
+    },
+    {
+      "id": "evidence-c04-audit",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1118-INDEPENDENT-AUDIT-20261106.md",
+      "observedAt": "2026-11-06T00:00:00Z",
+      "sha256": null,
+      "supports": "原正例 gate 失败、无对照、端点用户消息哈希不等于冻结输入、请求级关联 unknown；13 项离线重算为派生结果。",
+      "limitations": "原始审计 JSON 未入库，无法在仓库内复核原始文件哈希。"
+    },
+    {
+      "id": "evidence-denominator",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1116-OFFLINE-ACCEPTANCE-20261107.md §6",
+      "observedAt": "2026-11-07T00:13:00Z",
+      "sha256": null,
+      "supports": "无版本化运行记录/独立机会清单；T=unknown；不建 census、不加采集。",
+      "limitations": "只读检查仓库已有材料，未读取生产库或本地 artifacts。"
+    },
+    {
+      "id": "evidence-report",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1116-OFFLINE-ACCEPTANCE-20261107.md",
+      "observedAt": "2026-11-07T00:13:00Z",
+      "sha256": null,
+      "supports": "C01-C09 增量矩阵、证据层级、剩余事项分类与下一张工单。",
+      "limitations": "文档整理，不新增测试平台。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "INLINE",
+      "locator": "PENDING",
+      "observedAt": "2026-11-07T00:13:00Z",
+      "sha256": null,
+      "supports": "新 PR OPEN，不合并。",
+      "limitations": "创建后回填 URL。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-report",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1116-OFFLINE-ACCEPTANCE-20261107.md",
+      "persistence": "committed",
+      "notes": "主报告。"
+    },
+    {
+      "id": "artifact-c08-review",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/PD-AA-C08-KNOWN-CASE-REVIEW-20261107.md",
+      "persistence": "committed",
+      "notes": "C08 案例核对。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261107T001332Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261107T001332Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点 Markdown。"
+    }
+  ],
+  "blockers": [
+    "D-C08-1/2/3 需 Owner 裁决，裁决前不把三类标签用于正式验收结论。",
+    "E1/E2/E3 需新运行授权；历史实验 stop 仍有效，剩余额度不构成恢复授权。",
+    "PR #2386 未合并；矩阵引用为跨 PR 依赖，建议 #2386 → 本 PR。",
+    "PR #2396 仍在另一会话修复；本 PR 不依赖其报告、不夹带其代码。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1116",
+      "action": "Owner 裁决 D-C08-1（合并标签）、D-C08-2（诚实未知 vs 违规断言）、D-C08-3（代价是否单独构成无效遵循）。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "三个分歧各有一个明确判据，或 Owner 指定替代判据。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1116",
+      "action": "在当前 HEAD 复跑 C02 专用重验、C03 大小守卫、C09 配置边界并归档结果。",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "三组结果写入报告，失败项如实记录。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1119",
+      "action": "产出 G2 事前样本清单预注册（仅定义纳入/排除条件、窗口、事前字段、稳定机会键与 unknown 规则，不采集）。",
+      "dependsOn": [1],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "Owner 能据此判断哪些机会算 T，且无需改 SPEC。"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1118",
+      "action": "获得新运行授权后执行 E1 正例、E2 对照、E3 输入一致性复跑。",
+      "dependsOn": [1],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "受控宿主正例与对照按协议完成，或明确记录 NOT_RUN。"
+    },
+    {
+      "order": 5,
+      "issue": "PRI-1116",
+      "action": "Owner 审阅并合并 PR；AI 不合并。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PR 被合并或关闭。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-07：只做 PRI-1116 中不需要新宿主实验的离线验收，产出独立分支与 PR；禁止生产库写入、数据清理、安装、发布、新宿主回合、模型请求。",
+      "不改 PRI-1115 工作树/分支/文件；不合并任何 PR；不提前关闭 PRI-1116；不宣称 G1 通过。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T001332Z-trae\",\"kind\":\"offline-acceptance-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "未覆盖 20261106T0826Z-trae.json/.md 或其他 writer 的检查点。",
+      "LATEST.json 仅在本次提交中从上一 trae 检查点指向本检查点。"
+    ]
+  }
+}
