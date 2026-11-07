@@ -1,0 +1,368 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0151Z-trae",
+  "previousCheckpoint": "20261107T005147Z-trae",
+  "generatedAt": "2026-11-07T01:51:20Z",
+  "agent": "trae",
+  "overallStatus": "READY_FOR_REVIEW",
+  "summary": "PRI-1117 独立审查完成，结论 CONDITIONAL：可进入「现有 1258 证据上离线补齐 M2 + 剩余预算内 control-only（需 Owner 授权）+ 限域 positive 报告」；不可宣告 G1/C04 通过，不可启动新 positive 宿主运行或 PRI-1119/Native 试用。核实 #2389/#2393/#2396/#2399 均已合并并记录实际 merge SHA，base 为最新 origin/main 9c0787620。治理链路（默认关闭、双 env、scene marker、字节哈希、session/admission/manifest/target/activation/expires/一次性消费/路径 confined、授权重验、目标撤销、预算、软截止、异常回退、Native 恢复）经代码复核 PASS；受控准入不是普通任务可用的身份绕过入口。隔离事故根因（继承生产 PD_WORKSPACE_DIR）已由 env-isolation + 路径断言 + 插件/MCP 运行前检查结构性修复；缺 1258 事后生产库只读审计，故「零写入」仍为 unknown。M1 只限制字节级/request-level C04；M2 阻断 timely 签收但可离线补齐；M3 阻断完整协议但预算上可行、需 control-only 路径与 Owner 授权。验收边界未发现重复抬高；C08 已知案例复核符合 SPEC，T/V/O/D unknown 只限制覆盖率。本轮未新增宿主回合、未调用模型、未写生产库、未安装、未发布、未合并。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1117-aa-independent-review",
+    "branch": "ai/PRI-1117-aa-independent-review",
+    "baseCommit": "9c07876207655b4ac9757fb3510a69f3bb9dfa30",
+    "headCommit": "本检查点提交；最终 head 以 PR 页面为准。",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2402",
+    "prState": "OPEN",
+    "remoteChecks": "docs-only；以实际 PR head 的 CI 结果为准，不得以 CI 通过替代实际运行效果。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1117",
+      "scope": "独立审查 PD Adaptive Activation 当前实现与证据，回答能否进入指定范围内下一阶段，并给出最小阻断清单与 Owner 执行决策卡；不重做架构评审、不重开发组件",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1117-INDEPENDENT-REVIEW-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1117-MINIMAL-BLOCKERS-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1117-OWNER-DECISION-CARD-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0151Z-trae.json",
+        "docs/implementation-reports/aa-handoff/20261107T0151Z-trae.md"
+      ],
+      "acceptance": [
+        {"criterion": "核实 #2389/#2393/#2396/#2399 合并状态、merge SHA 与最新 main", "result": "PASS", "evidenceRefs": ["evidence-merge-state", "evidence-main"]},
+        {"criterion": "治理与正常工作受保护（授权重验/撤销/预算/默认关闭/停用恢复 Native/软截止/异常回退）", "result": "PASS", "evidenceRefs": ["evidence-governance"]},
+        {"criterion": "受控准入不是普通任务可用的身份绕过入口", "result": "PASS", "evidenceRefs": ["evidence-governance"]},
+        {"criterion": "隔离事故沿 launcher→env→workspace/config/state→插件/MCP 复核", "result": "PASS", "evidenceRefs": ["evidence-isolation"]},
+        {"criterion": "M1 已知事实/解释/未知/影响主张/是否阻断逐项裁定", "result": "PASS", "evidenceRefs": ["evidence-m1"]},
+        {"criterion": "M2 逐项裁定并指出可离线补齐的最小验收", "result": "PASS", "evidenceRefs": ["evidence-m2"]},
+        {"criterion": "M3 逐项裁定并说明预算与授权约束", "result": "PASS", "evidenceRefs": ["evidence-m3"]},
+        {"criterion": "验收边界未被重复抬高（C08 已知案例、T 未知、五类结果分开）", "result": "PASS", "evidenceRefs": ["evidence-c08-review", "evidence-owner-brief"]},
+        {"criterion": "交付审查报告 + 最小阻断清单 + Owner 执行决策卡", "result": "PASS", "evidenceRefs": ["evidence-report", "evidence-blockers", "evidence-card"]},
+        {"criterion": "G1/C04 通过", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-report"]},
+        {"criterion": "PRI-1119/Native 试用授权", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-card"]},
+        {"criterion": "PR 创建且不合并", "result": "PASS", "evidenceRefs": ["evidence-pr"]}
+      ],
+      "remaining": [
+        "Owner 需在 A/B/C 中做一次选择（见执行决策卡 §0）。",
+        "B1（M2 固定身份/顺序）需离线补齐并用 1258 原始证据复核。",
+        "B2（control-only）需 control-only 路径 + Owner 单独授权；或明确接受 M3 NOT_RUN。",
+        "B3（M1）保持 unknown，声明收窄；如需字节级需新运行捕获原始请求。",
+        "1258 事后生产库只读审计缺失；未补齐前不得宣称零生产写入。",
+        "PR 未合并；合并由 Owner 执行。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-controlled-admission-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1117-aa-independent-review",
+      "command": "npx vitest run scripts/__tests__/aa-controlled-admission.test.mjs",
+      "result": "PASS",
+      "category": "组件测试（夹具）",
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-tests"]
+    },
+    {
+      "id": "check-raw-asset-hashes",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "只读 sha256：input.txt、transcript_events row 5、endpoint userMessageSha256、toolCallIdRef",
+      "result": "PASS",
+      "category": "原始证据离线复核",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-m1", "evidence-m2"]
+    },
+    {
+      "id": "check-isolation-artifacts",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1118-controlled-admission-impl",
+      "command": "只读复核 config.json / p0-inspect.json / evidence/positive.environment.json / plan.json",
+      "result": "PASS",
+      "category": "隔离链路证据复核",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-isolation"]
+    },
+    {
+      "id": "check-host-observation",
+      "cwd": "N/A",
+      "command": "N/A - 本轮禁止启动真实宿主回合",
+      "result": "NOT_RUN",
+      "category": "受控宿主观察",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": false,
+      "evidenceRefs": ["evidence-m1"]
+    },
+    {
+      "id": "check-control-arm",
+      "cwd": "N/A",
+      "command": "N/A - control 从未执行，且 launcher 无 control-only 路径",
+      "result": "NOT_RUN",
+      "category": "完整协议实验",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": false,
+      "evidenceRefs": ["evidence-m3"]
+    },
+    {
+      "id": "check-production-db-audit",
+      "cwd": "N/A",
+      "command": "N/A - 本轮不写生产库、不新增审计",
+      "result": "NOT_RUN",
+      "category": "生产库零写入审计",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": false,
+      "evidenceRefs": ["evidence-isolation"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-main",
+      "kind": "INLINE",
+      "locator": "origin/main 9c07876207655b4ac9757fb3510a69f3bb9dfa30",
+      "observedAt": "2026-11-07T01:40:00Z",
+      "sha256": null,
+      "supports": "审查 base 为最新 origin/main；fetch 后被删除的分支仅为已合并分支。",
+      "limitations": "main 可能在本检查点后继续前进。"
+    },
+    {
+      "id": "evidence-merge-state",
+      "kind": "INLINE",
+      "locator": "gh pr view 2389/2393/2396/2399",
+      "observedAt": "2026-11-07T01:30:00Z",
+      "sha256": null,
+      "supports": "#2389 MERGED 0508343b7；#2393 MERGED d689cb0e8；#2396 MERGED 1046ac7d1；#2399 MERGED 0db84deff（head b63b5893c）。",
+      "limitations": "以 GitHub 页面为准。"
+    },
+    {
+      "id": "evidence-governance",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/hooks/controlled-admission.ts#L15-L20; packages/principles-core/src/runtime/activation/adaptive-principle-intervention.ts#L60-L158; packages/openclaw-plugin/src/hooks/prompt.ts#L800-L845,L1147-L1150",
+      "observedAt": "2026-11-07T01:10:00Z",
+      "sha256": null,
+      "supports": "默认关闭、双 env 必需、scene marker、字节哈希、session/manifest/target/activation/expires/一次性消费/路径 confined；ambiguous_admission 拒绝；授权重验、目标撤销、预算、软截止、异常回退、Native 恢复。",
+      "limitations": "代码事实，不等于运行效果。"
+    },
+    {
+      "id": "evidence-isolation",
+      "kind": "CODE",
+      "locator": "scripts/dev/aa-controlled-admission/lib/env-isolation.mjs#L2-L35,L156-L175; run-experiment.mjs#L529,L641,L692; p0-preflight.mjs#L183,L189,L343-L380,L529-L562; artifacts/aa-run-20261106T1258Z/{config.json,p0-inspect.json,evidence/positive.environment.json,plan.json}",
+      "observedAt": "2026-11-07T01:20:00Z",
+      "sha256": null,
+      "supports": "移除全部 host-overridable key 后显式设置隔离值；所有路径 inside experiment root；插件 load path 隔离；pd-recall 禁用；tools 仅 read。",
+      "limitations": "v4 污染审计生成于 12:37Z，早于 1258 运行（12:58Z），不能证明 1258 零写入。"
+    },
+    {
+      "id": "evidence-m1",
+      "kind": "RAW_ARTIFACT",
+      "locator": "aa-run-20261106T1258Z/{input.txt,evidence/positive.endpoint-requests.json,state/positive/agents/main/agent/openclaw-agent.sqlite}",
+      "observedAt": "2026-11-07T01:25:00Z",
+      "sha256": null,
+      "supports": "冻结输入 458dac4f7d14…；宿主 transcript row 5 = 同一哈希；端点 userMessageSha256 = 77f64517a091…；CRLF/trim 候选均不匹配；原始请求正文未保留。",
+      "limitations": "无法解释宿主包装字节；request-level 同一正文仍 unknown。"
+    },
+    {
+      "id": "evidence-m2",
+      "kind": "RAW_ARTIFACT",
+      "locator": "aa-run-20261106T1258Z/{evidence/positive.endpoint-requests.json,run-record.json,evidence/admission-consumed.json}",
+      "observedAt": "2026-11-07T01:25:00Z",
+      "sha256": null,
+      "supports": "http-003 含 target receivedAt 13:00:06.313Z；工具事件 13:00:06.671Z toolCallId=call_1；toolCallIdRef 74196fe72e4c=sha256(\"call_1\")[:12]；端点/run-record 为 call1；门禁无 ordering 检查。",
+      "limitations": "call1 与 call_1 的显式映射未知；只能离线补齐，不升级为 confirmed。"
+    },
+    {
+      "id": "evidence-m3",
+      "kind": "RAW_ARTIFACT",
+      "locator": "aa-run-20261106T1258Z/{failure.json,plan.json}; scripts/dev/aa-controlled-admission/lib/gate.mjs#L491",
+      "observedAt": "2026-11-07T01:25:00Z",
+      "sha256": null,
+      "supports": "原始 positive 失败（tool-invocation、admission-identity）；control 从未运行；剩余 1 host/1 HTTP/0 tool；control 预算 1/1/0；launcher 无 control-only 路径。",
+      "limitations": "事后离线 13/13 不改变原始失败判定。"
+    },
+    {
+      "id": "evidence-c08-review",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-C08-KNOWN-CASE-REVIEW-20261107.md",
+      "observedAt": "2026-11-07T01:15:00Z",
+      "sha256": null,
+      "supports": "C08 只声明已知案例/离线分类，不宣称行为效果，符合 SPEC 边界。",
+      "limitations": "派生文档，非原始运行资产。"
+    },
+    {
+      "id": "evidence-owner-brief",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/OWNER-BRIEF-20261106.md",
+      "observedAt": "2026-11-07T01:15:00Z",
+      "sha256": null,
+      "supports": "1258 admissionConsumed/targetBody confirmed 与 T/V/O/D unknown 分开记录；无机会普查。",
+      "limitations": "派生报告；原始 JSON 未入库。"
+    },
+    {
+      "id": "evidence-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "scripts/__tests__/aa-controlled-admission.test.mjs",
+      "observedAt": "2026-11-07T01:35:00Z",
+      "sha256": null,
+      "supports": "34 passed / 0 failed / 0 skipped。",
+      "limitations": "夹具测试，不代表真实宿主请求。"
+    },
+    {
+      "id": "evidence-report",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1117-INDEPENDENT-REVIEW-20261107.md",
+      "observedAt": "2026-11-07T01:45:00Z",
+      "sha256": null,
+      "supports": "四个问题复核、M1/M2/M3 裁定、验收边界、最终 CONDITIONAL 与适用范围。",
+      "limitations": "AI 审查，不是 Owner 裁决。"
+    },
+    {
+      "id": "evidence-blockers",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1117-MINIMAL-BLOCKERS-20261107.md",
+      "observedAt": "2026-11-07T01:48:00Z",
+      "sha256": null,
+      "supports": "B1/B2/B3 的触发条件、影响、位置、最小验收与类别。",
+      "limitations": "不含新架构设计。"
+    },
+    {
+      "id": "evidence-card",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1117-OWNER-DECISION-CARD-20261107.md",
+      "observedAt": "2026-11-07T01:50:00Z",
+      "sha256": null,
+      "supports": "A/B/C 三选一；宿主/工作区/身份/场景/目的/样本/额度/硬停止/隔离/安装路径。",
+      "limitations": "未获 Owner 授权前不得执行。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2402",
+      "observedAt": "2026-11-07T01:51:00Z",
+      "sha256": null,
+      "supports": "PR 创建后保持 OPEN，不合并。",
+      "limitations": "URL 以 GitHub 页面为准。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-report",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1117-INDEPENDENT-REVIEW-20261107.md",
+      "persistence": "committed",
+      "notes": "主审查报告。"
+    },
+    {
+      "id": "artifact-blockers",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1117-MINIMAL-BLOCKERS-20261107.md",
+      "persistence": "committed",
+      "notes": "最小阻断清单。"
+    },
+    {
+      "id": "artifact-card",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1117-OWNER-DECISION-CARD-20261107.md",
+      "persistence": "committed",
+      "notes": "Owner 执行决策卡。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261107T0151Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261107T0151Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点 Markdown。"
+    }
+  ],
+  "blockers": [
+    "B1：M2 请求↔关键行动固定身份/顺序未编码（call1 vs call_1；门禁无 ordering；读模型 unknown），阻断 G1 timely/C04 顺序签收；可离线补齐。",
+    "B2：M3 control 未执行且 launcher 无 control-only 路径，阻断完整协议/C04 control；需 control-only 路径 + Owner 授权。",
+    "B3：M1 端点 user message 77f64517a091 与冻结输入 458dac4f7d14 不同，阻断字节级/request-level C04；不阻断限域 positive。",
+    "1258 事后生产库只读审计缺失；不得宣称零生产写入。",
+    "C04/G1 未通过；PRI-1119/Native 试用未获授权。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1117",
+      "action": "Owner 在 A/B/C 中做一次选择（执行决策卡 §0）。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 明确选项与是否允许 1 次只读 read 工具。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1117",
+      "action": "若选 A：离线补齐 B1 的固定身份映射与 ordering 检查，并用 1258 原始证据复核归档。",
+      "dependsOn": [1],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "门禁具备 ordering 检查、映射显式记录、1258 离线结果为 PASS/FAIL 如实记录。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1117",
+      "action": "若选 A：在剩余 1 host/1 HTTP/0 tool 内执行 control-only；先确认 control-only 执行路径存在。",
+      "dependsOn": [1, 2],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "control returned 有原始证据，或明确 NOT_RUN 并收窄结论。"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1119",
+      "action": "并行准备 G2 事前样本预注册（只定义纳入/排除、窗口、字段、稳定机会键、unknown 规则），不启用生产、不运行宿主、不调用模型。",
+      "dependsOn": [],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "Owner 能据此判断哪些机会算 T，且无需改 SPEC。"
+    },
+    {
+      "order": 5,
+      "issue": "PRI-1117",
+      "action": "Owner 审阅并合并 PR；AI 不合并。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PR 合并或关闭，结论有 Owner 明确依据。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": [
+      "Owner 2026-11-07：PRI-1117 独立审查；只读核实、独立工作树、保留他人工作与原始证据；不写生产库、不删除污染记录、不操作安装目录、不安装不发布、不启动真实宿主回合、不调用模型；不改预算/冻结证据/历史判定。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0151Z-trae\",\"kind\":\"independent-review-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "LATEST.json 保持 main 的 20261107T0018Z-trae，不覆盖他人指针。",
+      "保留 20261107T005147Z-trae 与其他既有检查点，不改写。"
+    ]
+  }
+}
