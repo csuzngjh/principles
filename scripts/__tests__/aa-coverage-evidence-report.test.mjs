@@ -163,19 +163,6 @@ function writeCase(name, files) {
   return { dir, files: written };
 }
 
-function writeRawCase(name, rawFiles) {
-  const dir = path.join(TMP, `${caseCounter++}-${name}`);
-  fs.mkdirSync(dir, { recursive: true });
-  const written = {};
-  for (const [role, value] of Object.entries(rawFiles)) {
-    const file = path.join(dir, `${role}.json`);
-    fs.writeFileSync(file, value);
-    written[role] = file;
-  }
-  return { dir, files: written };
-}
-
-
 function runCli(args) {
   return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', cwd: ROOT });
 }
