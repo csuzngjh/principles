@@ -257,7 +257,7 @@ async function main() {
   const keys = { decision: process.env.OPENROUTER_API_KEY, glm: process.env.ZAI_CODING_CN_API_KEY || process.env.ZAI_API_KEY };
   if (!keys.decision || !keys.glm) reject('MISSING_CREDENTIAL_REFERENCE');
   process.env.ZAI_CODING_CN_API_KEY = keys.glm;
-  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime-v2/adapter/pi-ai-runtime-adapter.js');
+  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js');
   // Public metadata only; refuse before inference if the approved model is no longer free.
   const catalogResponse = await fetch('https://openrouter.ai/api/v1/models?output_modalities=decisions', { signal: AbortSignal.timeout(15000), redirect: 'error' });
   if (!catalogResponse.ok) reject('CATALOG_UNAVAILABLE');

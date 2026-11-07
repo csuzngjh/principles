@@ -29,7 +29,7 @@ import {
   SqliteActivationStateStore,
   SqliteConnection,
   type RuleContextV2,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { createProductionHostRuntime } from '../src/index.js';
 
 const tempDirs: string[] = [];

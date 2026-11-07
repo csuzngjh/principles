@@ -8,8 +8,8 @@
  * Never acquires leases or mutates any task/run/artifact/ledger state.
  */
 import * as path from 'path';
-import { createInternalizationQueueReadModel } from '@principles/core/runtime-v2';
-import type { InternalizationQueueSnapshot } from '@principles/core/runtime-v2';
+import { createInternalizationQueueReadModel } from '@principles/core/runtime';
+import type { InternalizationQueueSnapshot } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 

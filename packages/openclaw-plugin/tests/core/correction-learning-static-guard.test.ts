@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { CorrectionObserverPayloadSchema } from '@principles/core/runtime-v2';
+import { CorrectionObserverPayloadSchema } from '@principles/core/runtime';
 
 const pluginSrc = join(__dirname, '../../src');
 

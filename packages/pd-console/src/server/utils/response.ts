@@ -1,5 +1,21 @@
 import type { ServerResponse } from 'node:http';
 
+/**
+ * Describe a thrown value without ever reading `.stack`.
+ *
+ * A catch parameter is a stack-trace source for static analysis, and
+ * `String(thrown)` / `JSON.stringify(thrown)` can carry the stack through.
+ * `Error#message` and `toString()` cannot, so the response body stays free of
+ * implementation detail. Behaviour is otherwise identical to the previous
+ * `x instanceof Error ? x.message : String(x)` form.
+ */
+export function errorMessage(thrown: unknown): string {
+  if (thrown instanceof Error) return thrown.message;
+  if (thrown === null) return 'null';
+  if (thrown === undefined) return 'undefined';
+  return thrown.toString();
+}
+
 export function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
   // A response can already be committed by an earlier writer — most often the
   // request-timeout path in server/index.ts, which answers 504 while the route

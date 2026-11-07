@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runStoryADemo } from '../services/demo-story-a-runner.js';
-import type { MvpChannel } from '@principles/core/runtime-v2';
+import type { MvpChannel } from '@principles/core/runtime';
 
 interface DemoStoryAOptions {
   workspace?: string;
@@ -43,6 +43,17 @@ function formatChannelOutcome(ch: { channel: string; status: string; failureReas
   return lines.join('\n');
 }
 
+/**
+ * Keep the pre-PRI-1136 JSON field for existing CLI consumers while exposing
+ * the generation-neutral name. The old field is deprecated, not authoritative.
+ */
+function formatJsonOutput<T extends { isRuntimeExclusive: boolean }>(result: T): string {
+  return JSON.stringify({
+    ...result,
+    isRuntimeV2Exclusive: result.isRuntimeExclusive,
+  }, null, 2);
+}
+
 function formatTextOutput(result: Record<string, unknown>): string {
   const lines: string[] = [];
   const status = result.status as string;
@@ -74,7 +85,7 @@ function formatTextOutput(result: Record<string, unknown>): string {
   }
 
   lines.push('');
-  lines.push(`Runtime V2 Exclusive: ${result.isRuntimeV2Exclusive ? 'Yes' : 'No'}`);
+  lines.push(`Runtime V2 Exclusive: ${result.isRuntimeExclusive ? 'Yes' : 'No'}`);
 
   lines.push('');
   lines.push('--- Narrative ---');
@@ -134,7 +145,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       storyDescription: 'Demo isolation guard',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       refusal: {
         reason: 'demo_write_to_existing_workspace',
         message: 'This command would write demo artifacts into an existing PD workspace.',
@@ -143,7 +154,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       },
     };
     if (opts.json) {
-      console.log(JSON.stringify(errorResult, null, 2));
+      console.log(formatJsonOutput(errorResult));
     } else {
       console.error('Refused: this command would write demo artifacts into an existing PD workspace.');
       console.error(`Target: ${workspaceDir}`);
@@ -164,7 +175,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       storyDescription: 'Input validation failed',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       inputValidationFailure: {
         reason: 'empty_channels',
         message: 'No channels specified. At least one MVP channel required.',
@@ -172,7 +183,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       },
     };
     if (opts.json) {
-      console.log(JSON.stringify(errorResult, null, 2));
+      console.log(formatJsonOutput(errorResult));
     } else {
       console.error('Error: No channels specified. At least one MVP channel required.');
       console.error('Valid channels: prompt, code_tool_hook, defer_archive');
@@ -193,7 +204,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       storyDescription: 'Input validation failed',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       inputValidationFailure: {
         reason: 'unknown_channels',
         message: `Unknown channels: ${parsed.unknowns.join(', ')}. Valid: prompt, code_tool_hook, defer_archive`,
@@ -202,7 +213,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
       },
     };
     if (opts.json) {
-      console.log(JSON.stringify(errorResult, null, 2));
+      console.log(formatJsonOutput(errorResult));
     } else {
       console.error(`Error: Unknown channels: ${parsed.unknowns.join(', ')}`);
       console.error('Valid channels: prompt, code_tool_hook, defer_archive');
@@ -221,7 +232,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
     });
 
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(formatJsonOutput(result));
     } else {
       console.log(formatTextOutput(result as unknown as Record<string, unknown>));
     }

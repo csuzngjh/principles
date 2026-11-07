@@ -7,7 +7,7 @@ import {
   PROMPT_BUDGET_FALLBACK_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
-  RuntimeV2PromptActivationsInjectedEventDataSchema,
+  RuntimePromptActivationsInjectedEventDataSchema,
   SqliteActivationStateStore,
   SqliteConnection,
   classifySingleItemBudgetTier,
@@ -15,8 +15,8 @@ import {
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
   type PromptBudgetResolution,
-  type RuntimeV2PromptActivationsInjectedEventData,
-} from '@principles/core/runtime-v2';
+  type RuntimePromptActivationsInjectedEventData,
+} from '@principles/core/runtime';
 import { Value } from '@sinclair/typebox/value';
 import {
   buildActivePrinciplePromptContext,
@@ -299,12 +299,12 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
 });
 
 describe('AC-02/AC-04/AC-06: the shared production path resolves from modelContext', () => {
-  function captureEmitter(): { events: HostEventEmitter; injected: RuntimeV2PromptActivationsInjectedEventData[] } {
-    const injected: RuntimeV2PromptActivationsInjectedEventData[] = [];
+  function captureEmitter(): { events: HostEventEmitter; injected: RuntimePromptActivationsInjectedEventData[] } {
+    const injected: RuntimePromptActivationsInjectedEventData[] = [];
     return {
       injected,
       events: {
-        recordRuntimeV2ActivationsInjected(data) { injected.push(data); },
+        recordRuntimeActivationsInjected(data) { injected.push(data); },
         recordToolCall() { /* not under test */ },
       },
     };
@@ -341,7 +341,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     expect(event.budgetPolicyVersion).toBe('model_aware_v2');
     expect(event.injectedCharCount).toBeLessThanOrEqual(8000);
     // The recorded event validates against the TypeBox wire schema.
-    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, event)).toBe(true);
+    expect(Value.Check(RuntimePromptActivationsInjectedEventDataSchema, event)).toBe(true);
   });
 
   it('PRI-1020 tier 0: an Owner declaration outranks trusted host facts and drives the event provenance', async () => {
@@ -366,7 +366,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     expect(event.budgetCapacityStatus).toBe('confirmed');
     expect(event.budgetContextWindowTokens).toBe(400_000);
     expect(event.budgetPolicyVersion).toBe('model_aware_v2');
-    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, event)).toBe(true);
+    expect(Value.Check(RuntimePromptActivationsInjectedEventDataSchema, event)).toBe(true);
   });
 
   it('PRI-1020: the global declaration backs a host with no model facts at all', async () => {

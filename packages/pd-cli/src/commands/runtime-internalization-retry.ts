@@ -22,7 +22,7 @@
  */
 
 import * as path from 'path';
-import { RuntimeStateManager, ownerRetryNeedsHumanReviewTask } from '@principles/core/runtime-v2';
+import { RuntimeStateManager, ownerRetryNeedsHumanReviewTask } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 export interface InternalizationRetryOptions {

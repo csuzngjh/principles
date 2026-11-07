@@ -7,7 +7,7 @@ import {
   createInternalizationQueueReadModel,
   InternalizationChainIntegrityReadModel,
   auditCandidateLedgerConsistency,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runCanaryChecks } from './runtime-canary.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -76,7 +76,10 @@ async function collectArtifact(ctx: CollectArtifactContext): Promise<void> {
     const data = await ctx.collector();
     const sanitized = sanitizeForExport(data);
     const filePath = path.join(ctx.outputDir, ctx.fileName);
-    fs.writeFileSync(filePath, JSON.stringify(sanitized, null, 2), 'utf8');
+    // PRI-1136: diagnostics bundles can carry redacted-but-sensitive runtime
+    // data. 0600 keeps them owner-only even when --out points at a shared or
+    // temp directory; content and layout are unchanged.
+    fs.writeFileSync(filePath, JSON.stringify(sanitized, null, 2), { encoding: 'utf8', mode: 0o600 });
     ctx.artifacts.push({ name: ctx.name, path: ctx.fileName, status: 'ok' });
   } catch (err) {
     ctx.artifacts.push({ name: ctx.name, path: ctx.fileName, status: 'failed', error: String(err) });
@@ -168,10 +171,12 @@ export async function exportDiagnosticsBundle(workspaceDir: string, outDir: stri
     artifacts,
   };
 
+  // PRI-1136: same 0600 hardening as collectArtifact — content and layout are
+  // unchanged.
   fs.writeFileSync(
     path.join(resolvedOut, 'manifest.json'),
     JSON.stringify(manifest, null, 2),
-    'utf8',
+    { encoding: 'utf8', mode: 0o600 },
   );
 
   return manifest;

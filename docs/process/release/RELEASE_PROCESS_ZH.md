@@ -104,6 +104,17 @@ runtime pin、或"因为一起发布就让版本相同"。
   工作流对 schedule 事件拒绝 `mode=publish`；定时运行从线上频道指针推导
   `data_schema_forward_readable_from`，手动 dispatch 仍必须显式传入（盲填的
   默认值不是证据，PRI-853）。
+- **签名频道产物发布**（`release-metadata.yml`，手动 `mode=publish`）：自
+  PRI-1103 起，构建 commit **不再**取 dispatch 的 `ref`——工作流先问 registry：
+  该产品版本实际由哪个 cohort 发出（`create-principles-disciple` 已发布
+  manifest 的 `gitHead`），再构建那个 commit。于是「控制台更新通道」与「新装
+  通道」不可能在同一版本号下携带不同字节。`ref` 只选发布工具链；`cohort_sha`
+  是对「当前 npm `latest` 指向的提交」的显式身份断言（用于确定性重建、频道未
+  变时的重复发布、同一 cohort 的密钥轮换/重签名），**不是**历史版本选择器：
+  `latest` 一旦指向其他提交，旧 cohort 会被拒绝（`EXPLICIT_NOT_LATEST`），
+  因为那会让控制台更新通道与新装通道代码身份不一致。`allow_version_drift`
+  不改变 npm latest 的提交身份。若 npm 侧尚未发出该版本：publish 直接拒绝，
+  预演带 `::warning::` 退回构建 ref。
 
 Version PR 机器人（`changesets/action`，已锁版本）**必须**配置
 `PD_VERSION_PR_TOKEN` secret（细粒度 PAT：contents:write +

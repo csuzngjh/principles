@@ -1,0 +1,394 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261106T1625Z-trae",
+  "previousCheckpoint": "20261106T1537Z-trae",
+  "generatedAt": "2026-11-06T16:25:00Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "PRI-1115 最后一轮有界修复：Owner 简报改为完全由输入推导（零运行不再复述历史运行编号或结论）；关联匹配只把可信 hookInvocationId 或分字段一致的 run identity 认定为实验级强关联，session 相同与 5 秒时间邻近只输出弱候选，多候选报 ambiguous；同调用编号的重复只在 scope 与语义事实一致时去重，冲突内容/scope 显式失败，报告时诊断字段与键顺序/输入顺序不影响事实；V/O/D 恢复 SPEC v0.6 §6.1 定义。真实 CLI 反例测试 24/24 PASS（旧实现 13 项失败）。已用既有离线证据重新生成 JSON/简报/字段映射并核对来源哈希。PRI-1116 在同一轮补齐 C01–C09 精确测试引用矩阵；C04/G1 仍 pending，C08 行为收益需新运行授权。未合并 PR。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+    "branch": "ai/PRI-1115-coverage-evidence-report",
+    "baseCommit": "36d86a23e1a2366193ff19d79bce97afe18aea38",
+    "headCommit": "06fbfe36d36946d95639142489e634f7d3a61b7a",
+    "headCommitNote": "该值为本轮代码提交；紧随其后的检查点 JSON/MD 与 LATEST.json 提交会使 head 前移，最终 head 以 PR #2396 页面为准。",
+    "dirtyPaths": [],
+    "pushedCommit": "06fbfe36d36946d95639142489e634f7d3a61b7a",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2396",
+    "prState": "OPEN",
+    "remoteChecks": "PR #2396 head 06fbfe36d：本轮推送后 CI 重新触发；本检查点提交前各 required gate 仍 pending，未把 pending 当作绿。最终 head 的 CI 结论在交付回复中报告。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1115",
+      "scope": "最后一轮有界修复：简报由输入推导、关联不得升级弱证据、矛盾 linkage 不得静默去重、恢复 SPEC V/O/D 定义；同轮重新生成离线产物",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "scripts/dev/principle-learning-lab/lib/adaptive/adaptive-evidence-adapter.mjs",
+        "scripts/dev/principle-learning-lab/summarize-aa-evidence.mjs",
+        "scripts/__tests__/aa-coverage-evidence-report.test.mjs",
+        "docs/implementation-reports/pri-1115/FIELD-MAPPING-20261106.md",
+        "docs/implementation-reports/pri-1115/coverage-summary-20261106.json",
+        "docs/implementation-reports/pri-1115/OWNER-BRIEF-20261106.md",
+        "docs/implementation-reports/PD-AA-PRI-1116-NEXT-STAGE-20261106.md"
+      ],
+      "commits": [
+        "8a5f6fbf1 (feat(aa): PRI-1115 adapt recorded evidence to coverage report)",
+        "3eec94e36 (docs(aa): PRI-1115 handoff checkpoint for coverage evidence report)",
+        "7cf0d0910 (fix(aa): PRI-1115 derive the brief from inputs and stop upgrading weak evidence)",
+        "06fbfe36d (chore(aa): PRI-1115 drop dead identifiers flagged by CodeQL)"
+      ],
+      "acceptance": [
+        {"criterion": "简报不得写死历史结论：零运行时不得出现任何历史运行编号/数量/结论；单运行与不同编号/判定均由输入推导", "result": "PASS", "evidenceRefs": ["evidence-tests", "evidence-owner-brief"]},
+        {"criterion": "原始运行判定、受控接线事实、端点观察、事后离线复核、独立观察分层陈述，互不替代", "result": "PASS", "evidenceRefs": ["evidence-owner-brief", "evidence-coverage-summary"]},
+        {"criterion": "session 相同不得单独确认同一次 run；不同身份字段不得互相替代；5 秒时间邻近只输出弱候选；多候选报 ambiguous；无可信匹配保持未关联", "result": "PASS", "evidenceRefs": ["evidence-adapter-code", "evidence-tests"]},
+        {"criterion": "同调用编号冲突内容或不同 workspace/host/config scope 必须显式失败；键顺序与报告生成时间不制造冲突；输入顺序不改变事实与冲突结论", "result": "PASS", "evidenceRefs": ["evidence-adapter-code", "evidence-tests"]},
+        {"criterion": "V/O/D 按 SPEC v0.6 §6.1：可见≠送达、识别≠遵循、D 需独立确认目标正文进入实际请求且早于关键行动；缺证据 unknown；不改统计公式", "result": "PASS", "evidenceRefs": ["evidence-owner-brief", "evidence-field-mapping", "evidence-coverage-summary"]},
+        {"criterion": "用真实 CLI 跑定向反例；旧实现必须失败，修复后通过", "result": "PASS", "evidenceRefs": ["evidence-tests", "evidence-cli-entry"]},
+        {"criterion": "用已有离线证据重新生成 JSON/简报/字段映射并核对来源哈希；保留原始实验、账本与失败记录", "result": "PASS", "evidenceRefs": ["evidence-offline-run", "evidence-source-hashes"]},
+        {"criterion": "同步最新 main、推送同一 PR、不自行合并、不新增宿主/HTTP/工具/模型调用、不操作生产库或安装目录", "result": "PASS", "evidenceRefs": ["evidence-pr", "evidence-boundaries"]}
+      ],
+      "remaining": [
+        "决策机会 census 不存在，T/V/O/D 全部 unknown；总体覆盖率仍不可计算。",
+        "1105 只有 22ms 时间邻近的弱候选；未建立可信 hookInvocationId，保持 weak_candidate。",
+        "对照实验未执行；收益/损害 not_evaluated。",
+        "端点 user-message 摘要与冻结输入不同，作为限制保留，不参与 D 判定。",
+        "PR #2396 未合并；合并由 Owner 执行。"
+      ]
+    },
+    {
+      "issue": "PRI-1116",
+      "scope": "不依赖新实验的部分：补齐 C01–C09 精确入口/测试名称/源 commit/证据层级/剩余缺口，并补入修正后的报告引用",
+      "status": "IN_PROGRESS",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1116-NEXT-STAGE-20261106.md"
+      ],
+      "commits": [
+        "7cf0d0910 (fix(aa): PRI-1115 derive the brief from inputs and stop upgrading weak evidence)"
+      ],
+      "acceptance": [
+        {"criterion": "C01–C09 每项给出原验收要求、实际入口、精确测试名称、源 commit、证据层级与剩余缺口", "result": "PASS", "evidenceRefs": ["evidence-pri1116-matrix"]},
+        {"criterion": "修正后的 PRI-1115 报告引用补入矩阵，且不把报告生成/原失败/离线复核/受控观察/G1/行为收益混为同一状态", "result": "PASS", "evidenceRefs": ["evidence-pri1116-matrix"]},
+        {"criterion": "C04/G1 保持 pending，不因本轮修复重开已完成组件开发", "result": "PASS", "evidenceRefs": ["evidence-pri1116-matrix"]}
+      ],
+      "remaining": [
+        "C04/G1 仍待真实受控运行与对照臂证据；本轮未运行新实验。",
+        "C08 行为收益需要独立评价证据，需 Owner 明确的新运行授权。",
+        "C09 本轮未独立重审生产库与全部出网路径，污染边界仍沿用 v4 审计。",
+        "未新增 census 系统、评价平台或实验审批。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "npx vitest run scripts/__tests__/aa-coverage-evidence-report.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-tests"]
+    },
+    {
+      "id": "check-related-node-suites",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "node --test scripts/dev/principle-learning-lab/summarize-adaptive-coverage.test.mjs scripts/dev/principle-learning-lab/lib/adaptive/adaptive-activation-coverage.test.mjs scripts/dev/principle-learning-lab/verify-adaptive-delivery.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "evidenceRefs": ["evidence-related-suites"]
+    },
+    {
+      "id": "check-eslint",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "npx eslint scripts/dev/principle-learning-lab/summarize-aa-evidence.mjs scripts/dev/principle-learning-lab/lib/adaptive/adaptive-evidence-adapter.mjs scripts/__tests__/aa-coverage-evidence-report.test.mjs",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-adapter-code", "evidence-cli-entry"]
+    },
+    {
+      "id": "check-offline-run",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "node scripts/dev/principle-learning-lab/summarize-aa-evidence.mjs --linkage ... --budget ... --run-record ... --offline-reevaluation ... --plan ... --pollution-audit ... --output ... --brief ...",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-offline-run"]
+    },
+    {
+      "id": "check-error-context",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "npm run error:context -- --json",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-error-context"]
+    },
+    {
+      "id": "check-prepush",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "git push origin ai/PRI-1115-coverage-evidence-report",
+      "result": "PASS",
+      "exitCode": 0,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": ["evidence-pr"]
+    },
+    {
+      "id": "check-verify-merge",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+      "command": "npm run verify:merge",
+      "result": "NOT_RUN",
+      "exitCode": null,
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "evidenceRefs": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-field-mapping",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/FIELD-MAPPING-20261106.md",
+      "observedAt": "2026-11-06T16:05:00Z",
+      "sha256": "966dfacd15a8ad08aa0f900857396044e787eb840a37abb12ea828c6ab209da6",
+      "supports": "T/V/O/D 定义恢复为 SPEC v0.6 §6.1；匹配强度强弱分级、scope/语义冲突与输入顺序无关的规则写入文档。",
+      "limitations": "文档本身不是运行时校验。"
+    },
+    {
+      "id": "evidence-coverage-summary",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/coverage-summary-20261106.json",
+      "observedAt": "2026-11-06T16:05:00Z",
+      "sha256": "edf60b9c561098be9200a209938d167c030ea8eb7452bf102ebb55e283e07372",
+      "supports": "1105=weak_candidate(action_timestamp_proximity,22ms)；1258=matched_by_run(hook_invocation_id)；definitions 已写入；duplicates.invocations=0；runs.state=recorded；多值 window/workspace 以 canonical hash 聚合。",
+      "limitations": "证据来自本机既有 artifact；无决策机会 census。"
+    },
+    {
+      "id": "evidence-owner-brief",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/OWNER-BRIEF-20261106.md",
+      "observedAt": "2026-11-06T16:05:00Z",
+      "sha256": "c070b7ebda0dba77e6f46d40050ec0a2af0b54ef4442bc5d67d8a6eaacd5fdd4",
+      "supports": "中文简报由输入推导；V/O/D 定义、证据层级互不替代、weak candidate 与强关联区分、unknown 与 not_evaluated 保持。",
+      "limitations": "由 JSON 渲染；不新增判断。"
+    },
+    {
+      "id": "evidence-adapter-code",
+      "kind": "CODE",
+      "locator": "scripts/dev/principle-learning-lab/lib/adaptive/adaptive-evidence-adapter.mjs",
+      "observedAt": "2026-11-06T16:20:00Z",
+      "sha256": "f34624902580f15710e0abc61c2fd08a7422b50c011a3588ea9b48c0bffbab40",
+      "supports": "matchingInvocation 分字段身份匹配、弱候选/歧义/矛盾输出；linkageInvocations 语义 hash + scope 冲突 fail-loud；输入顺序无关聚合。",
+      "limitations": "不重算覆盖率数学，委托既有统计器。"
+    },
+    {
+      "id": "evidence-cli-entry",
+      "kind": "CODE",
+      "locator": "scripts/dev/principle-learning-lab/summarize-aa-evidence.mjs",
+      "observedAt": "2026-11-06T16:20:00Z",
+      "sha256": "70dd2d315aabf6f7a441ae01a0e22d98234e17a7338a682d28fd10dae0e31548",
+      "supports": "零运行可运行；stdout 恰好一份 JSON；失败 exit 1 且带 reason/nextAction；简报动态渲染。",
+      "limitations": "离线只读脚本，不参与生产运行时。"
+    },
+    {
+      "id": "evidence-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "scripts/__tests__/aa-coverage-evidence-report.test.mjs",
+      "observedAt": "2026-11-06T16:20:00Z",
+      "sha256": "526ce0b79cd89dd8b1870fa82603e62e4639231afeb0b9548f3519f6c3e16485",
+      "supports": "24/24 PASS；旧实现 13 项失败：零运行历史结论、session-only/cross-field 强匹配、时间邻近强绑定、多候选 find 取首、同 id 冲突静默去重、跨 scope 合并、输入顺序改变聚合、V/O/D 旧定义、非事实诊断字段被当冲突。",
+      "limitations": "fixture 均标注 FIXTURE-PRI-1115-*，只验证适配语义，不替代真实实验。"
+    },
+    {
+      "id": "evidence-related-suites",
+      "kind": "LOCAL_TEST",
+      "locator": "scripts/dev/principle-learning-lab/summarize-adaptive-coverage.test.mjs; scripts/dev/principle-learning-lab/lib/adaptive/adaptive-activation-coverage.test.mjs; scripts/dev/principle-learning-lab/verify-adaptive-delivery.test.mjs",
+      "observedAt": "2026-11-06T16:18:00Z",
+      "sha256": null,
+      "supports": "44/44 PASS，0 skipped；复用现有 T/V/O/D 与送达顺序测试，未新增统计器。",
+      "limitations": "组件/报告层测试，不是宿主观察。"
+    },
+    {
+      "id": "evidence-offline-run",
+      "kind": "REPORT",
+      "locator": ".tmp/pri-1115/coverage-summary.json; .tmp/pri-1115/OWNER-BRIEF.md（与已提交副本 SHA-256 一致）",
+      "observedAt": "2026-11-06T15:55:00Z",
+      "sha256": "edf60b9c561098be9200a209938d167c030ea8eb7452bf102ebb55e283e07372",
+      "supports": "使用真实本地证据（非合成）重新生成；输出与提交副本哈希一致；provenance 中全部输入 SHA-256 核对一致。",
+      "limitations": "依赖 PRI-1118 实验 artifact 在本机的存在；换机需重新提供。"
+    },
+    {
+      "id": "evidence-source-hashes",
+      "kind": "REPORT",
+      "locator": "artifacts/aa-controlled-admission/（run-record / offline-reevaluation / experiment-budget / pollution audit）; .tmp/pri-1115/linkage-*.json",
+      "observedAt": "2026-11-06T15:55:00Z",
+      "sha256": "run-1105=0ad44b19bd7a6ab5d156b02b0e7a28702f1a89e6cc0c47566c6f79fc71545346; run-1258=9b339ff239c210ada4a733f417588b2f21b9b0a5e3e1ef08f2987a010669f736; reevaluation=5b7ade6c7ba5e2586b6c923ac8fd948d06b57ce6cf81cc33e6836e161c70d24c; budget=e2b948dcccdfb653222ff1a24f876ccd134d783e10c666834505f1bc28899e38; pollution=604453fea3a5a04bad7d2b6ddf502dc9494925c4f493a61d914abe1493138524; linkage-1105=122f3b8bb042e316b1f381a15f1e01ed8e4123da53c2d902c3acc10dbdadb785; linkage-1258=18159a3c109db81ac94adbedb6ae69c681463a090fc61d1fd763aa518f9cb462",
+      "supports": "每个结论可追到来源文件哈希、运行编号与关联 hookInvocationId。",
+      "limitations": "原始资产未复制进仓库，避免提交生产数据。"
+    },
+    {
+      "id": "evidence-error-context",
+      "kind": "INLINE",
+      "locator": "npm run error:context -- --json (diff mode)",
+      "observedAt": "2026-11-06T16:22:00Z",
+      "sha256": null,
+      "supports": "命中 EP-12 medium、EP-08 low；均为语义提示，已按 Required Evidence 自检（未写宿主路径、未截断掩盖）。",
+      "limitations": "router 只做语义提示，不替代人工阅读 Pattern Index。"
+    },
+    {
+      "id": "evidence-boundaries",
+      "kind": "INLINE",
+      "locator": "git diff --stat origin/main...HEAD",
+      "observedAt": "2026-11-06T16:20:00Z",
+      "sha256": null,
+      "supports": "仅 scripts/docs/tests；无 packages 生产运行时代码、无安装目录、无发布、无生产 DB 写入。",
+      "limitations": "边界为静态 diff 判定。"
+    },
+    {
+      "id": "evidence-pri1116-matrix",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1116-NEXT-STAGE-20261106.md",
+      "observedAt": "2026-11-06T16:10:00Z",
+      "sha256": "00f60a0e7f221b2211d26a304f5ba204affeaca294bc7faf208ba32c505f99e5",
+      "supports": "C01–C09 矩阵：原验收要求、实际入口、精确测试名称、源 commit、证据层级、报告引用与剩余缺口；C04/G1 pending。",
+      "limitations": "只补证据引用，不改变验收结论；不是整票完成。"
+    },
+    {
+      "id": "evidence-pr",
+      "kind": "INLINE",
+      "locator": "https://github.com/csuzngjh/principles/pull/2396",
+      "observedAt": "2026-11-06T16:20:00Z",
+      "sha256": null,
+      "supports": "PR #2396 OPEN，base main@36d86a23e，head ai/PRI-1115-coverage-evidence-report@06fbfe36d；未合并。",
+      "limitations": "最终 head 的 CI 结果在交付回复中报告；不把 pending 当绿。"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-coverage-summary",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/coverage-summary-20261106.json",
+      "persistence": "committed",
+      "notes": "机器可读汇总（pd-aa-coverage-summary/v1）。"
+    },
+    {
+      "id": "artifact-owner-brief",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/OWNER-BRIEF-20261106.md",
+      "persistence": "committed",
+      "notes": "一页中文 Owner 简报。"
+    },
+    {
+      "id": "artifact-field-mapping",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/pri-1115/FIELD-MAPPING-20261106.md",
+      "persistence": "committed",
+      "notes": "字段映射表与 V/O/D 定义。"
+    },
+    {
+      "id": "artifact-pri1116-matrix",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1116-NEXT-STAGE-20261106.md",
+      "persistence": "committed",
+      "notes": "PRI-1116 C01–C09 证据矩阵。"
+    },
+    {
+      "id": "artifact-checkpoint-json",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T1625Z-trae.json",
+      "persistence": "committed",
+      "notes": "本检查点。"
+    },
+    {
+      "id": "artifact-checkpoint-md",
+      "kind": "CHECKPOINT",
+      "locator": "docs/implementation-reports/aa-handoff/20261106T1625Z-trae.md",
+      "persistence": "committed",
+      "notes": "本检查点同名 Markdown。"
+    }
+  ],
+  "blockers": [
+    "无阻塞实现的阻塞项。决策机会 census 缺失是已记录的数据缺口，不是本 PR 的失败。",
+    "PR #2396 未合并；是否合并由 Owner 决定。"
+  ],
+  "nextActions": [
+    {
+      "order": 1,
+      "issue": "PRI-1115",
+      "action": "Owner 审阅 PR #2396、修正后的 JSON/简报/字段映射；合并由 Owner 执行，AI 不合并。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "PR #2396 被合并或关闭。"
+    },
+    {
+      "order": 2,
+      "issue": "PRI-1116",
+      "action": "补齐决策机会 census 与独立 request+action 顺序证据，才能计算 T 与 D；需新运行/数据授权。",
+      "dependsOn": [1],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "存在可复核的机会分母与独立送达顺序证据。"
+    },
+    {
+      "order": 3,
+      "issue": "PRI-1116",
+      "action": "C04/G1 的真实受控运行与对照臂证据；C08 的独立行为评价需显式新运行授权。",
+      "dependsOn": [1],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "C04 正例与对照臂均有可复核运行记录；C08 有独立评价证据。"
+    },
+    {
+      "order": 4,
+      "issue": "PRI-1116",
+      "action": "C09 的生产库与出网路径独立复审（本轮未重审，沿用 v4 审计边界）。",
+      "dependsOn": [1],
+      "authorization": "WITHIN_APPROVED_SCOPE",
+      "doneWhen": "有独立复审记录或明确沿用边界的 Owner 决定。"
+    },
+    {
+      "order": 5,
+      "issue": "PRI-1113",
+      "action": "评价规则未确认前保持 unknown，不自行裁决。",
+      "dependsOn": [],
+      "authorization": "NEEDS_OWNER",
+      "doneWhen": "Owner 明确评价规则。"
+    }
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "productionDbWritesThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-06 PRI-1115 最后一轮有界修复指令：四项修复范围、真实 CLI 反例、重新生成离线产物、同步 main、同一 PR、不合并。",
+      "不新增模型调用、宿主回合、HTTP 请求、只读工具或生产数据库写入；不操作安装目录。",
+      "不修改冻结证据、历史判定或实验预算；不删除生产记录。",
+      "PR #2396 由 Owner 合并；AI 不合并，不提前把 PRI-1115 标为 Done。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261106T1625Z-trae\",\"kind\":\"implementation-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "未覆盖 20261106T1537Z-trae.json/.md 或其他 writer 的检查点。",
+      "LATEST.json 仅在本次提交中从上一 trae 检查点指向本检查点。"
+    ]
+  }
+}

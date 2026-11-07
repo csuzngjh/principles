@@ -5,7 +5,7 @@
  * and the end-to-end handler behavior (JSON shape, defaults, exit codes) over
  * synthetic workspaces. The service behavior groups (association graph /
  * availability / information semantics / ranking) migrated with the read
- * model into @principles-core (`src/runtime-v2/__tests__/pain-recall-service.test.ts`,
+ * model into @principles-core (`src/runtime/__tests__/pain-recall-service.test.ts`,
  * SPEC-PD-AGENT-CAPABILITY-API-001 v0.5 §11); this file keeps the shell
  * boundary and consumes the read model through the dedicated subpath, exactly
  * like the production command.
@@ -25,7 +25,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
 
 import { handlePainRecall, parsePainRecallLimit } from '../../src/commands/pain-recall.js';
 import { resolveWorkspaceDir } from '../../src/resolve-workspace.js';
-import { recallPains, PAIN_RECALL_SCHEMA_VERSION } from '@principles/core/runtime-v2/pain-recall';
+import { recallPains, PAIN_RECALL_SCHEMA_VERSION } from '@principles/core/runtime/pain-recall';
 
 // ── Fixture builders ─────────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ async function writeStateDb(dir: string, spec: WorkspaceSpec): Promise<void> {
   // mode; getDb() is lazy so force it to materialize the schema), then seed
   // rows through raw SQL on a separate connection with FKs off (fixture
   // seeding only — the recall path itself never writes).
-  const { RuntimeStateManager } = await import('@principles/core/runtime-v2');
+  const { RuntimeStateManager } = await import('@principles/core/runtime');
   const manager = new RuntimeStateManager({ workspaceDir: dir });
   await manager.initialize();
   manager.connection.getDb();

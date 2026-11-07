@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime-v2';
+import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime';
 
 /**
  * PRI-634 A3 — workspace-scoped durable observability for critical runner

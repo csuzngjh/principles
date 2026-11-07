@@ -5,13 +5,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 // ADR-0022 (PRI-578): the owner-identity route imports the core module via
-// `@principles/core/runtime-v2`, which resolves to the built package dist.
+// `@principles/core/runtime`, which resolves to the built package dist.
 // This test injects the REAL core source implementations (relative import,
 // same pattern as the PR-577 event-log alias) so the route test exercises the
 // actual file I/O + resolution logic without depending on a dist rebuild.
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
-  const ownerIdentity = await import('../../../../principles-core/src/runtime-v2/owner-identity.js');
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/core/runtime')>();
+  const ownerIdentity = await import('../../../../principles-core/src/runtime/owner-identity.js');
   return {
     ...actual,
     resolveOwnerIdentity: ownerIdentity.resolveOwnerIdentity,

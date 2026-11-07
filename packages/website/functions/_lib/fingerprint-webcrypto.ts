@@ -18,13 +18,13 @@
 
 /**
  * Mirrors core's FEEDBACK_FINGERPRINT_DEFAULT_AREA. MUST stay in sync with
- * `packages/principles-core/src/runtime-v2/feedback/fingerprint.ts`.
+ * `packages/principles-core/src/runtime/feedback/fingerprint.ts`.
  */
 export const FEEDBACK_FINGERPRINT_DEFAULT_AREA = 'general';
 
 /**
  * Mirrors core's FEEDBACK_FINGERPRINT_TITLE_LIMIT. MUST stay in sync with
- * `packages/principles-core/src/runtime-v2/feedback/fingerprint.ts`.
+ * `packages/principles-core/src/runtime/feedback/fingerprint.ts`.
  */
 export const FEEDBACK_FINGERPRINT_TITLE_LIMIT = 80;
 

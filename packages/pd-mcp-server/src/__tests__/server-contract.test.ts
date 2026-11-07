@@ -14,7 +14,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import { createPdMcpServer, TOOL_NAME } from '../server.js';
-import type { PainRecallCapabilityResult } from '@principles/core/runtime-v2/pain-recall-capability';
+import type { PainRecallCapabilityResult } from '@principles/core/runtime/pain-recall-capability';
 
 function envelope(status: PainRecallCapabilityResult['status'], error?: { code: string; message: string }): PainRecallCapabilityResult {
   return {

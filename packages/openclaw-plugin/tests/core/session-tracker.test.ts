@@ -124,7 +124,7 @@ describe('Session Tracker', () => {
         setInjectedPrincipleIds('sess-pri755', ['T-01']);
         expect(getInjectedPrincipleIds('sess-pri755')).toEqual(['T-01']);
 
-        // An empty round (no Runtime V2 injection this turn) must OVERWRITE the
+        // An empty round (no Runtime injection this turn) must OVERWRITE the
         // stale set — a marker for T-01 after this point is unverifiable.
         setInjectedPrincipleIds('sess-pri755', []);
         expect(getInjectedPrincipleIds('sess-pri755')).toEqual([]);

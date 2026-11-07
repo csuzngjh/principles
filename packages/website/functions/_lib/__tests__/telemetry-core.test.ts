@@ -24,7 +24,7 @@ import {
   PRODUCT_TELEMETRY_TOP_LEVEL_FIELDS,
   type ProductTelemetrySnapshotV1,
   type ProductTelemetryMilestoneInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // ── D1 shim over real SQLite (all migrations applied in order) ───────────────
 

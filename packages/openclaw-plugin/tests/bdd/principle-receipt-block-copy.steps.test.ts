@@ -7,7 +7,7 @@ import { beforeEach, afterEach, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime';
 import * as yaml from 'js-yaml';
 import { recordGateBlockAndReturn } from '../../src/hooks/gate-block-helper.js';
 import type { WorkspaceContext } from '../../src/core/workspace-context.js';

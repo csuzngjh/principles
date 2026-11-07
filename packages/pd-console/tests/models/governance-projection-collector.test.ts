@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import {
   createPITaskDiagnosticJson,
   SqliteConnection,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { GovernanceProjectionCollector } from '../../src/server/models/GovernanceProjectionCollector.js';
 
 const AS_OF = '2026-08-20T10:00:00.000Z';

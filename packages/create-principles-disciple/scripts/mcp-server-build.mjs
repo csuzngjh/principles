@@ -44,7 +44,7 @@ export function buildMcpServer() {
   if (!npmCliJs) {
     throw new Error(`npm-cli.js not found near ${process.execPath} — run this script with a complete Node.js installation`);
   }
-  // The capability subpath (`@principles/core/runtime-v2/pain-recall-capability`)
+  // The capability subpath (`@principles/core/runtime/pain-recall-capability`)
   // is resolved from core's emitted declarations, which a clean checkout does
   // not have. Build the dependency first so prepack/bundle never depend on a
   // pre-existing core dist either.

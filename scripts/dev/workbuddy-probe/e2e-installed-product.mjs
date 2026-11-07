@@ -17,8 +17,8 @@ import { createRequire } from 'node:module';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(path.join(REPO, 'package.json'));
-const Database = require('better-sqlite3');
-const { getDefaultPdConfig, SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime-v2');
+require('better-sqlite3');
+const { SqliteConnection, SqliteActivationStateStore } = require('@principles/core/runtime');
 // Top-level import: the engine-turn section was promoted out of a
 // fire-and-forget IIFE into main()'s await chain (review P2-1).
 
@@ -99,8 +99,6 @@ async function main() {
   // refuses bare npm-pack tarballs — the payload must carry the stamped
   // _release/product-identity.json, which only build-release-asset /
   // build-self-contained-release produce.
-  const nodeDir = path.dirname(process.execPath);
-  const npmCli = path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js');
   const releaseOut = path.join(LAB_ROOT, 'release-asset');
   // NOTE: do NOT pre-create releaseOut — build-self-contained-release refuses
   // to replace an existing output directory (immutable assets).
@@ -132,8 +130,6 @@ async function main() {
     encoding: 'utf8', timeout: 600_000,
     env: { ...engineEnvBase(), PD_INSTALL_PLUGIN_DIR: assetPayload, PD_SKIP_NPM_UPGRADE: '1', PD_SKIP_GLOBAL_SHIM: '1' },
   });
-  let installJson = {};
-  try { installJson = JSON.parse((install.stdout || '').split('\n').filter((l) => l.startsWith('{')).at(-1) ?? '{}'); } catch { /* non-JSON tail */ }
   record('installer-run', install.status === 0 ? 'PASS' : 'FAIL',
     `exit=${install.status} stdout tail=${(install.stdout || '').slice(-300)} stderr=${(install.stderr || '').slice(-300)}`);
 
@@ -260,7 +256,7 @@ async function main() {
         choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
       });
       before = reqCount();
-      run = runTurn('inst-deny', 'hello again', 'write the protected file', [
+      runTurn('inst-deny', 'hello again', 'write the protected file', [
         toolCallReply('inst1', 'Write', { file_path: path.join(PROJECT, 'installed-protected-9f2.txt'), content: 'x' }),
         textReply('inst2', 'ok'),
       ]);
@@ -276,7 +272,6 @@ async function main() {
   finalize();
 }
 
-import { pathToFileURL } from 'node:url';
 try {
   await main();
 } catch (error) {

@@ -6,7 +6,7 @@ import { localizeApprovalWarning } from '../../utils/approval-warning-localizati
 import { truncateByCodePoints } from '../../utils/reading-layout.js';
 import type { ApprovalsGroupedData } from '../../api.js';
 import type { ApprovalReviewData } from '../../utils/approval-review.js';
-import type { OwnerDecisionViewCore, NarrativeField } from '@principles/core/runtime-v2';
+import type { OwnerDecisionViewCore, NarrativeField } from '@principles/core/runtime';
 
 export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, allowedActions, budgetNotice, promptInjection, sourceUnlinked, showPrincipleLink = true }: {
   principleId: string; approvalId: string; artifactId: string; channel: string; lockedReason?: string;

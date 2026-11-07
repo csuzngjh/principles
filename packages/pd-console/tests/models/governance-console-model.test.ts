@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { GovernanceConsoleModel } from '../../src/server/models/GovernanceConsoleModel.js';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
 

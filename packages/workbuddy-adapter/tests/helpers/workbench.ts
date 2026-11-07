@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 
 /**

@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
-import { sanitizeString, sanitizeValue } from '@principles/core/runtime-v2';
+import { sanitizeString, sanitizeValue } from '@principles/core/runtime';
 
 // ─── Retention policy constants (Owner-approved, SPEC rev 2 §11) ────────────
 export const GOVERNANCE_RETENTION_MAX_TURNS = 32;

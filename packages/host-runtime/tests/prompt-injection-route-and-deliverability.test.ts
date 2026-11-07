@@ -7,11 +7,11 @@ import * as yaml from 'js-yaml';
 import {
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
   getDefaultPdConfig,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   saveHostToolDeclaration,
   resolvePromptInjectionRouteDecision,
@@ -528,7 +528,7 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
   it('window full but single-item deliverable → window_excluded, not oversized (mid-band filler is model_dependent, keeping its window fact)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const header = 'Runtime V2 activated principles:';
-    const bigLen = RUNTIME_V2_PRINCIPLE_BUDGET - header.length - 1 - '- [W-1] '.length - 1;
+    const bigLen = RUNTIME_PRINCIPLE_BUDGET - header.length - 1 - '- [W-1] '.length - 1;
     await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满（成本 3999 ∈ (1250,4000] 当前投影窗口）
     await seedActivation(dir, 'W-2', '第二条原则');
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });

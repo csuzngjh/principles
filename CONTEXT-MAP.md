@@ -31,7 +31,7 @@ Read-first global entry points:
 
 - **Console requests**: browser callers → `packages/pd-console/src/ui/api.ts` (shared request transport) → `src/server/routes/*.ts`; response validators in `src/ui/utils/validators.ts`. Tests: `tests/ui/*.test.ts`, `tests/server/routes/*.test.ts`.
 - **Install / update**: Console trigger/presentation `packages/pd-console/src/server/routes/update.ts` (+ `update-transaction.ts`, `update-history.ts`) → ReleaseManager authority (`packages/create-principles-disciple/src/update/release-manager-authority.ts`; `check` + `apply-full`) → deployment authority `packages/create-principles-disciple/src/installer.ts`; transaction journal `src/update/transaction-journal.ts`. Tests: `packages/pd-console/tests/server/routes/update*.test.ts`, `packages/pd-console/tests/server/update/`, installer/journal/release-manager tests in create-principles-disciple.
-- **Pain evidence**: host events → `packages/openclaw-plugin/src/hooks/pain.ts` + `src/commands/pain.ts` (OpenClaw) and `packages/pd-cli/src/commands/pain-record.ts` (CLI) → semantic authority `packages/principles-core/src/runtime-v2/pain-ingress.ts`; persistence via runtime-v2 stores. Tests: colocated package tests + `tests/` in each package.
+- **Pain evidence**: host events → `packages/openclaw-plugin/src/hooks/pain.ts` + `src/commands/pain.ts` (OpenClaw) and `packages/pd-cli/src/commands/pain-record.ts` (CLI) → semantic authority `packages/principles-core/src/runtime/pain-ingress.ts`; persistence via runtime stores. Tests: colocated package tests + `tests/` in each package.
 
 ## Retired domains
 

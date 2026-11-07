@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
-import { applyTrajectorySchemaBase, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime';
 import {
   createProductionPainEvidenceHandler,
   hasProductionPainSchema,

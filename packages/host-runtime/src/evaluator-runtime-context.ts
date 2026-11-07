@@ -37,7 +37,7 @@ import {
   createProductionGateDeps,
   type RefinerRuleHostGateDeps,
   type ToolSemanticRegistry,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { resolveWorkspaceHostToolSemantics } from './host-tool-semantic-resolver.js';
 
 export interface EvaluatorRuntimeContextInput {

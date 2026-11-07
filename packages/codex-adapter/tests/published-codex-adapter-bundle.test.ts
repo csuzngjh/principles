@@ -83,7 +83,7 @@ describe('published @principles/codex-adapter bundle safety', () => {
     }
     const installLayoutTarball = packTarballPath(installLayoutPackDir, (ilPacked[0] as Record<string, unknown>).filename);
 
-    // host-runtime's telemetry modules import new @principles/core/runtime-v2
+    // host-runtime's telemetry modules import new @principles/core/runtime
     // exports that the npm-registry core may not yet carry; pack core from the
     // worktree too so the standalone consumer resolves the same code the repo
     // tests against (same fallback pattern as host-runtime above).

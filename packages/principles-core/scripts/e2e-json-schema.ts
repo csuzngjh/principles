@@ -5,9 +5,9 @@
  * 用真实 PD schema（PhilosopherOutputV1）实测 llamacpp 的 json_schema 输出。
  */
 import { Value } from '@sinclair/typebox/value';
-import { PhilosopherOutputV1Schema } from '../src/runtime-v2/internalization/philosopher-output.js';
-import { ScribeOutputV1Schema } from '../src/runtime-v2/internalization/scribe-output.js';
-import { typeboxToOpenAIJsonSchema } from '../src/runtime-v2/adapter/schema-json-converter.js';
+import { PhilosopherOutputV1Schema } from '../src/runtime/internalization/philosopher-output.js';
+import { ScribeOutputV1Schema } from '../src/runtime/internalization/scribe-output.js';
+import { typeboxToOpenAIJsonSchema } from '../src/runtime/adapter/schema-json-converter.js';
 
 const BASE = 'http://127.0.0.1:8080/v1';
 

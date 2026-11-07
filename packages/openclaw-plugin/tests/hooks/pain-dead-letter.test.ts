@@ -25,8 +25,8 @@ import * as os from 'os';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
 import { SystemLogger, disposeAllSystemLoggers } from '../../src/core/system-logger.js';
 import type { EvolutionLoopEvent } from '../../src/core/evolution-types.js';
-import { SqliteConnection, SqliteDeadLetterStore } from '@principles/core/runtime-v2';
-import type { PainToPrincipleServiceOptions } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteDeadLetterStore } from '@principles/core/runtime';
+import type { PainToPrincipleServiceOptions } from '@principles/core/runtime';
 
 let lastPainServiceOptions: PainToPrincipleServiceOptions | null = null;
 
@@ -35,9 +35,9 @@ let lastPainServiceOptions: PainToPrincipleServiceOptions | null = null;
 // (via importActual spread); only override PainToPrincipleService and
 // PrincipleTreeLedgerAdapter so the factory does no real I/O before the mock
 // recordPain rejects.
-vi.mock('@principles/core/runtime-v2', async () => {
-  const actual = await vi.importActual<typeof import('@principles/core/runtime-v2')>(
-    '@principles/core/runtime-v2',
+vi.mock('@principles/core/runtime', async () => {
+  const actual = await vi.importActual<typeof import('@principles/core/runtime')>(
+    '@principles/core/runtime',
   );
   return {
     ...actual,

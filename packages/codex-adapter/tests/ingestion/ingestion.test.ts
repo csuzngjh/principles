@@ -380,7 +380,7 @@ describe('degradation contract (SPEC §20)', () => {
 describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §10)', () => {
   it('the ingest entry is never reached when the flag is off — spied port receives zero calls', async () => {
     const { processHookInvocation } = await import('../../src/pd-hook.js');
-    const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig } = await import('@principles/core/runtime');
     const flagOffWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-flagoff-'));
     try {
       fs.mkdirSync(path.join(flagOffWorkspace, '.pd'), { recursive: true });
@@ -416,7 +416,7 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
 
   it('negative control: with the flag explicitly enabled the same payload DOES reach the transcript boundary', async () => {
     const { processHookInvocation } = await import('../../src/pd-hook.js');
-    const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig } = await import('@principles/core/runtime');
     const flagOnWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-flagon-'));
     try {
       fs.mkdirSync(path.join(flagOnWorkspace, '.pd'), { recursive: true });
@@ -462,7 +462,7 @@ describe('hard privacy invariant: flag-off means zero transcript reads (SPEC §1
 
   it('refuses a transcript replaced after validation with a structured transcript_replaced degradation (post-open TOCTOU, PR #1455 review P1)', async () => {
     const { processHookInvocation } = await import('../../src/pd-hook.js');
-    const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig } = await import('@principles/core/runtime');
     const { TranscriptReplacedError } = await import('../../src/ingestion/transcript-decoder.js');
     const swappedWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-codex-swap-'));
     try {

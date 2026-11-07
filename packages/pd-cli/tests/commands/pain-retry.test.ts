@@ -18,7 +18,7 @@ import { Command } from 'commander';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
-const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetCandidateImpl } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetTask, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockGetRunsByTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation } = vi.hoisted(() => {
   const mockGetTask = vi.fn().mockResolvedValue(null);
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
@@ -176,7 +176,7 @@ const { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId } = vi.hoisted(() =
   return { MockSqliteDeadLetterStore, mockDeadLetterGetByPainId };
 });
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   return {
     ...(await importOriginal<object>()),
     RuntimeStateManager: vi.fn().mockImplementation(function () {
@@ -1255,8 +1255,8 @@ describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeli
 describe('PRI-638: pd pain retry when Diagnostician capability is disabled', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReturnValue({
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReturnValue({
       available: false,
       reason: 'capability_disabled',
       message: "Agent 'diagnostician' is disabled",
@@ -1265,8 +1265,8 @@ describe('PRI-638: pd pain retry when Diagnostician capability is disabled', () 
   });
 
   afterEach(async () => {
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReset();
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReset();
   });
 
   it('RETRY-638-01: --json refuses with capability_disabled, not missing_runtime', async () => {
@@ -1304,9 +1304,9 @@ describe('PRI-638: pd pain retry when Diagnostician capability is disabled', () 
 
     const out = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(out).toContain('capability_disabled');
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    expect(runtimeV2.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
-    expect(runtimeV2.SplitDiagnosticianRunner).not.toHaveBeenCalled();
+    const coreRuntime = await import('@principles/core/runtime');
+    expect(coreRuntime.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
+    expect(coreRuntime.SplitDiagnosticianRunner).not.toHaveBeenCalled();
 
     errSpy.mockRestore();
     exitSpy.mockRestore();
@@ -1674,8 +1674,8 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
 
   it('LEDGER-01: flag on + diagnosis output → persist dispatched before intake with the requested painId, JSON says attempted', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(true);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -1699,7 +1699,7 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
     const output = JSON.parse(logSpy.mock.calls[0][0]);
     expect(output.painDiagnosisLedgerWrite).toBe('attempted');
     // The handler must consult the canonical flag name, not a CLI-local one.
-    expect(vi.mocked(runtimeV2.isFeatureEnabled).mock.calls.some((call) => call[1] === 'pain_diagnosis_persistence')).toBe(true);
+    expect(vi.mocked(coreRuntime.isFeatureEnabled).mock.calls.some((call) => call[1] === 'pain_diagnosis_persistence')).toBe(true);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
@@ -1707,8 +1707,8 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
 
   it('LEDGER-04: task.inputRef diverges from CLI painId → ledger uses canonical inputRef (rc-6)', async () => {
     mockGetTask.mockResolvedValue({ ...RETRY_WAIT_TASK, inputRef: 'pain-authoritative-9' });
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(true);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -1731,8 +1731,8 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
 
   it('LEDGER-02: flag off (default) → no ledger dispatch, JSON says disabled', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(false);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -1767,8 +1767,8 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
       retryCount: 0,
       retriedAt: null,
     });
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(true);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
@@ -1813,8 +1813,8 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
       retryCount: 0,
       retriedAt: null,
     });
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(false);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);

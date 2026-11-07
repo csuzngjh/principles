@@ -15,7 +15,7 @@
  * - rc-5: consumers use Object.hasOwn() to look up metadata by agent name
  */
 
-import type { InternalAgentName } from '@principles/core/runtime-v2';
+import type { InternalAgentName } from '@principles/core/runtime';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

@@ -16,7 +16,7 @@ vi.mock('principles-disciple/governance-audit', () => ({
   authorizeGovernanceAction: vi.fn(async (_stateDir, _data, mutation) => mutation()),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   const original = await importOriginal() as Record<string, unknown>;
   return {
     ...original,

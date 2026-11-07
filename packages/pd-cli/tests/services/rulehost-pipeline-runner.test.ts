@@ -19,8 +19,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirementGaps } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId } from '@principles/core/runtime';
 import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
@@ -841,7 +841,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
 //   - no config → the zh-CN default applies.
 // Deleting the pipeline's language resolution makes these fail.
 
-function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
+function writeLanguageConfig(dir: string, outputLanguage: 'en' = 'en'): void {
   fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
   // Full valid-config shape (mirrors pd-config-loader.test.ts) so validation
   // keeps `principles` intact instead of degrading to defaults.
@@ -872,7 +872,7 @@ function writeLanguageConfig(dir: string, outputLanguage?: 'en'): void {
     },
     ui: { diagnostics: { mode: 'simple' } },
   };
-  if (outputLanguage !== undefined) config.principles = { outputLanguage };
+  config.principles = { outputLanguage };
   // JSON is valid YAML — same trick the shared executor tests use.
   fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), JSON.stringify(config));
 }

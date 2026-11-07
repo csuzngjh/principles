@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolvePdPath, PD_FILES } from './paths.js';
-import { guardWorkspaceLeak } from '@principles/core/runtime-v2';
+import { guardWorkspaceLeak } from '@principles/core/runtime';
 
 /**
  * System Logger for Principles Disciple

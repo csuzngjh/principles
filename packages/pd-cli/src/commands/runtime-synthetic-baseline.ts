@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runSyntheticBaseline } from '../services/synthetic-baseline-runner.js';
-import type { SyntheticBaselineSummary } from '@principles/core/runtime-v2';
+import type { SyntheticBaselineSummary } from '@principles/core/runtime';
 
 interface CliSyntheticBaselineOptions {
   workspace?: string;

@@ -3,7 +3,7 @@
  *
  * The barrel narrowing that cut ~5.6 MB of LLM SDK code out of
  * governance-audit.js / rulehost-evidence.js holds only while nobody puts a
- * VALUE import of `@principles/core/runtime-v2` back on a satellite path.
+ * VALUE import of `@principles/core/runtime` back on a satellite path.
  * This file pins the build-level assertion that makes such a regression fail
  * the build instead of relying on engineering discipline:
  *   1. the checker judges the real esbuild metafile shape (violations named,
@@ -171,7 +171,7 @@ describe('assertSatellitePurity', () => {
     expect(message).toContain('[satellite-purity] FAIL');
     expect(message).toContain('governance-audit.js');
     expect(message).toContain('@earendil-works/pi-ai');
-    expect(message).toContain('runtime-v2');
+    expect(message).toContain('runtime');
     // bounded output: <=3 example lines per package
     const examples = message.split('\n').filter((l) => l.trimStart().startsWith('e.g.'));
     expect(examples.length).toBeLessThanOrEqual(3 * 5);

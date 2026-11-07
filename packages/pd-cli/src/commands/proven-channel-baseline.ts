@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runProvenChannelBaseline } from '../services/proven-channel-baseline-runner.js';
-import { parseChannels, type ProvenChannelBaselineSummary, type MvpChannel } from '@principles/core/runtime-v2';
+import { parseChannels, type ProvenChannelBaselineSummary, type MvpChannel } from '@principles/core/runtime';
 
 interface ProvenChannelBaselineCliOptions {
   workspace?: string;

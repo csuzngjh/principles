@@ -13,7 +13,8 @@ import {
   type IntentDocWarning,
   type IntentDocVersion,
   type IntentLang,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import { errorMessage } from '../utils/response.js';
 
 export interface IntentPageResult {
   ok: boolean;
@@ -68,6 +69,59 @@ function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
 }
 
+/**
+ * Size-check and read an intent document through ONE open handle.
+ *
+ * `statSync(path)` followed by `readFileSync(path)` can observe two different
+ * files: a swap between the two calls bypasses the 32KB cap (TOCTOU).
+ */
+function readIntentFileBounded(
+  filePath: string,
+  maxBytes: number,
+): { raw: string; mtimeMs: number } | { oversized: number } {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.size > maxBytes) {
+      return { oversized: stat.size };
+    }
+    // Read at most maxBytes + 1 bytes. The same descriptor prevents a path
+    // swap, while the fixed buffer also prevents concurrent file growth from
+    // turning the size check into an unbounded allocation.
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+    const finalStat = fs.fstatSync(fd);
+    if (bytesRead > maxBytes || finalStat.size > maxBytes) {
+      return { oversized: Math.max(stat.size, finalStat.size, bytesRead) };
+    }
+    return { raw: buffer.toString('utf8', 0, bytesRead), mtimeMs: finalStat.mtimeMs };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Node's fs error `code`, read without an `in` check or an unvalidated cast. */
+function fsErrorCode(err: unknown): string | undefined {
+  if (!(err instanceof Error)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(err, 'code');
+  return typeof descriptor?.value === 'string' ? descriptor.value : undefined;
+}
+
+/**
+ * True when the intent document provably is not there: the path is missing
+ * (ENOENT) or a parent component is not a directory (ENOTDIR). Both used to
+ * surface as `existsSync === false`, so they must stay `not_found`.
+ */
+function isNotFound(err: unknown): boolean {
+  const code = fsErrorCode(err);
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/** True when an exclusive create failed because the path already exists. */
+function isEexists(err: unknown): boolean {
+  return fsErrorCode(err) === 'EEXIST';
+}
+
 /** Best-effort version record — never blocks save on failure. */
 function recordVersion(args: {
   workspaceDir: string;
@@ -115,7 +169,13 @@ export class IntentPageModel {
     const filePath = path.join(this.workspaceDir, INTENT_DIR, getIntentFilename(lang));
 
     try {
-      if (!fs.existsSync(filePath)) {
+      let read: ReturnType<typeof readIntentFileBounded>;
+      try {
+        read = readIntentFileBounded(filePath, INTENT_MAX_BYTES);
+      } catch (err) {
+        // The bounded read opens the path once; ENOENT *is* not-found, so no
+        // separate existsSync check is needed (or wanted).
+        if (!isNotFound(err)) throw err;
         return {
           ok: false,
           found: false,
@@ -125,20 +185,18 @@ export class IntentPageModel {
           nextAction: `Create .principles/${getIntentFilename(lang)} using "pd intent init".`,
         };
       }
-
-      const stat = fs.statSync(filePath);
-      if (stat.size > INTENT_MAX_BYTES) {
+      if ('oversized' in read) {
         return {
           ok: false,
           found: true,
           flagEnabled: true,
           warnings: [],
           reason: 'oversized',
-          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${read.oversized} bytes). Reduce content.`,
         };
       }
 
-      const raw = fs.readFileSync(filePath, 'utf8');
+      const { raw } = read;
       const sections: IntentDocSections = parseIntentDocSections(raw);
       const warnings = validateIntentDocSections(sections);
       const contentHash = computeIntentContentHash(raw);
@@ -156,7 +214,7 @@ export class IntentPageModel {
         warnings,
         path: filePath,
         contentHash,
-        lastEditedAt: stat.mtime.toISOString(),
+        lastEditedAt: new Date(read.mtimeMs).toISOString(),
         sections: sectionRecord,
       };
     } catch (err) {
@@ -184,27 +242,28 @@ export class IntentPageModel {
     const filePath = path.join(this.workspaceDir, INTENT_DIR, getIntentFilename(lang));
 
     try {
-      if (!fs.existsSync(filePath)) {
+      let read: ReturnType<typeof readIntentFileBounded>;
+      try {
+        read = readIntentFileBounded(filePath, INTENT_MAX_BYTES);
+      } catch (err) {
+        if (!isNotFound(err)) throw err;
         return {
           ok: false,
           reason: 'not_found',
           nextAction: `${getIntentFilename(lang)} does not exist. Create it first using POST /api/v1/intent/init.`,
         };
       }
-
-      const stat = fs.statSync(filePath);
-      if (stat.size > INTENT_MAX_BYTES) {
+      if ('oversized' in read) {
         return {
           ok: false,
           reason: 'oversized',
-          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content before opening the editor.`,
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${read.oversized} bytes). Reduce content before opening the editor.`,
         };
       }
 
-      const content = fs.readFileSync(filePath, 'utf8');
-      return { ok: true, content, path: filePath };
+      return { ok: true, content: read.raw, path: filePath };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[IntentPageModel] failed to read raw ${getIntentFilename(lang)}:`, err);
       return {
         ok: false,
@@ -228,22 +287,31 @@ export class IntentPageModel {
     const filePath = path.join(dirPath, getIntentFilename(lang));
 
     try {
-      if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true });
-      }
-
-      if (fs.existsSync(filePath) && !force) {
-        return {
-          ok: true,
-          created: false,
-          path: filePath,
-          reason: 'already_exists',
-          nextAction: 'Use force=true to overwrite, or edit the existing file instead.',
-        };
-      }
+      fs.mkdirSync(dirPath, { recursive: true });
 
       const templateContent = createIntentTemplate(lang);
-      fs.writeFileSync(filePath, templateContent, 'utf8');
+      // Exclusive create ('wx') when force is off: the create itself decides
+      // whether the file already exists, so no path check can be raced.
+      let fd: number;
+      try {
+        fd = fs.openSync(filePath, force ? 'w' : 'wx');
+      } catch (err) {
+        if (!force && isEexists(err)) {
+          return {
+            ok: true,
+            created: false,
+            path: filePath,
+            reason: 'already_exists',
+            nextAction: 'Use force=true to overwrite, or edit the existing file instead.',
+          };
+        }
+        throw err;
+      }
+      try {
+        fs.writeFileSync(fd, templateContent, 'utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
       recordVersion({ workspaceDir: this.workspaceDir, lang, content: templateContent, reason: 'init' });
       return {
         ok: true,
@@ -354,7 +422,7 @@ export class IntentPageModel {
         try { connection.close(); } catch { /* best-effort */ }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[IntentPageModel] failed to list versions:`, err);
       return {
         ok: false,

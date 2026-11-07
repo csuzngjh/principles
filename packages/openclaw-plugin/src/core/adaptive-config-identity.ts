@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, openSync, readSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isSurfaceEnabled } from '@principles/core/runtime-v2';
+import { isSurfaceEnabled } from '@principles/core/runtime';
 
 export type AdaptiveEvidenceCoverage = 'complete' | 'partial' | 'unknown';
 

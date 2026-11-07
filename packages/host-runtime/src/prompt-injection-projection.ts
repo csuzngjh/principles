@@ -6,7 +6,7 @@ import {
   type ActivatedPrinciple,
   type PromptBudgetResolution,
   type PromptSelectionPolicy,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { buildActivePrinciplePromptContext, readPromptActivationCandidates, MAX_SHARED_DIAGNOSTIC_IDS } from './active-principle-prompt.js';

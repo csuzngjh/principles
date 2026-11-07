@@ -18,7 +18,7 @@ import { Value } from '@sinclair/typebox/value';
 import {
   LearningLabActorActionV1Schema,
   LEARNING_LAB_ACTOR_ACTION_NAMES,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 import {
   DEFAULT_REAL_ACTOR_CAPS,

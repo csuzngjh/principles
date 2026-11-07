@@ -37,9 +37,9 @@ import {
   SqlitePIArtifactStore,
   ApprovalQueue,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
-import type { LedgerPrincipleEntry } from '@principles/core/runtime-v2';
+import type { LedgerPrincipleEntry } from '@principles/core/runtime';
 import { createProductionHostRuntime, saveHostToolDeclaration } from '@principles/host-runtime';
 // REAL v1 writer, resolved to openclaw-plugin source via vitest alias — the
 // component production uses to emit injection events.
@@ -204,7 +204,7 @@ async function dispatchRuntimeInjection(
     const runtime = createProductionHostRuntime({
       hostKind: 'openclaw',
       events: {
-        recordRuntimeV2ActivationsInjected: (data) => eventLog.recordRuntimeV2ActivationsInjected(data),
+        recordRuntimeActivationsInjected: (data) => eventLog.recordRuntimeActivationsInjected(data),
         recordToolCall: () => { /* not under test */ },
       },
     });

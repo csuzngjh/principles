@@ -18,7 +18,7 @@ import * as os from 'node:os';
 import Database from 'better-sqlite3';
 import { ReceiptsConsoleModel } from '../../src/server/models/ReceiptsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 
 let tempDir: string;
 let workspaceDir: string;

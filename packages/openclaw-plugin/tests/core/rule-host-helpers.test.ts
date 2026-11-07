@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createRuleHostHelpers } from '@principles/core/runtime-v2';
-import type { RuleHostInput } from '@principles/core/runtime-v2';
+import { createRuleHostHelpers } from '@principles/core/runtime';
+import type { RuleHostInput } from '@principles/core/runtime';
 
 function makeInput(overrides?: Partial<RuleHostInput>): RuleHostInput {
   return {

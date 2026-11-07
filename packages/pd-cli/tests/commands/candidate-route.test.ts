@@ -28,7 +28,7 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
   return { mockStateManager, MockRuntimeStateManager };
 });
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   RuntimeStateManager: MockRuntimeStateManager,
   decideInternalizationRoute: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
 }));
 
-import { decideInternalizationRoute } from '@principles/core/runtime-v2';
+import { decideInternalizationRoute } from '@principles/core/runtime';
 
 // ── Test fixtures ───────────────────────────────────────────────────────────
 

@@ -4,11 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
+import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
 import { createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
@@ -57,7 +57,7 @@ function redactStringFields(data: object): Record<string, unknown> {
  */
 function codexEventEmitter(stateDir: string, evidence?: CodexEvidenceContext): HostEventEmitter {
   return {
-    recordRuntimeV2ActivationsInjected(data) {
+    recordRuntimeActivationsInjected(data) {
       appendEventLogLine(stateDir, {
         ts: new Date().toISOString(),
         type: 'runtime_v2_prompt_activations_injected',

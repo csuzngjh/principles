@@ -457,7 +457,7 @@ async function confirmGatewayStopped(
   const pid = observed?.pid;
 
   try {
-    let listening = true;
+    let listening: boolean;
     let holderAlive = false;
     const deadline = Date.now() + confirmTimeoutMs;
     for (;;) {

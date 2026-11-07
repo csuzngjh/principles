@@ -17,7 +17,7 @@
 // The selected tests use scripted adapters and temp SQLite workspaces only.
 //
 // Prerequisites: `npm run build --workspace=@principles/core` (the openclaw-plugin
-// tests import `@principles/core/runtime-v2` from dist). verify:merge runs this
+// tests import `@principles/core/runtime` from dist). verify:merge runs this
 // after the full workspace build, so the prerequisite holds on the merge path.
 
 import { spawnSync } from 'node:child_process';
@@ -69,8 +69,8 @@ const GROUPS = [
     invariants: ['I3', 'I5', 'I6'],
     journeys: ['J1'],
     filters: [
-      'tests/hooks/runtime-v2-prompt-triple-proof.test.ts',
-      'tests/hooks/runtime-v2-prompt-activation.test.ts',
+      'tests/hooks/runtime-prompt-triple-proof.test.ts',
+      'tests/hooks/runtime-prompt-activation.test.ts',
     ],
     timeoutMs: 300_000,
     expect:
@@ -94,14 +94,14 @@ const GROUPS = [
     invariants: ['I3', 'I4'],
     journeys: ['J1', 'J2'],
     filters: [
-      'src/runtime-v2/activation/__tests__/sqlite-activation-safety-store.test.ts',
-      'src/runtime-v2/activation/__tests__/activation-dispatcher.test.ts',
-      'src/runtime-v2/activation/__tests__/approval-completion-service.test.ts',
-      'src/runtime-v2/activation/__tests__/rulecode-owner-decision-service.test.ts',
-      'src/runtime-v2/activation/__tests__/promotion-readiness-evaluator.test.ts',
-      'src/runtime-v2/activation/__tests__/promotion-readiness-reader.test.ts',
-      'src/runtime-v2/activation/writers/__tests__/rule-host-writer.test.ts',
-      'src/runtime-v2/activation/__tests__/story-a-acceptance.test.ts',
+      'src/runtime/activation/__tests__/sqlite-activation-safety-store.test.ts',
+      'src/runtime/activation/__tests__/activation-dispatcher.test.ts',
+      'src/runtime/activation/__tests__/approval-completion-service.test.ts',
+      'src/runtime/activation/__tests__/rulecode-owner-decision-service.test.ts',
+      'src/runtime/activation/__tests__/promotion-readiness-evaluator.test.ts',
+      'src/runtime/activation/__tests__/promotion-readiness-reader.test.ts',
+      'src/runtime/activation/writers/__tests__/rule-host-writer.test.ts',
+      'src/runtime/activation/__tests__/story-a-acceptance.test.ts',
     ],
     timeoutMs: 420_000,
     expect:
@@ -114,8 +114,8 @@ const GROUPS = [
     invariants: ['I1', 'I4'],
     journeys: [],
     filters: [
-      'src/runtime-v2/internalization/__tests__/mvp-core-loop-journeys.test.ts',
-      'src/runtime-v2/internalization/__tests__/diag-chain-e2e.test.ts',
+      'src/runtime/internalization/__tests__/mvp-core-loop-journeys.test.ts',
+      'src/runtime/internalization/__tests__/diag-chain-e2e.test.ts',
     ],
     timeoutMs: 420_000,
     expect:
@@ -149,7 +149,7 @@ if (!fs.existsSync(vitestEntry)) {
 const coreDist = path.join(ROOT, 'packages', 'principles-core', 'dist');
 if (!fs.existsSync(coreDist)) {
   failFast(
-    '@principles/core has no dist build — the selected openclaw-plugin tests import `@principles/core/runtime-v2` from dist.',
+    '@principles/core has no dist build — the selected openclaw-plugin tests import `@principles/core/runtime` from dist.',
     'run `npm run build --workspace=@principles/core` and retry.',
   );
 }

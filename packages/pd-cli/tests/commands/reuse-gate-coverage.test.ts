@@ -189,7 +189,7 @@ const { WORKSPACE,
   };
 });
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => ({
+vi.mock('@principles/core/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   CandidateIntakeService: MockCandidateIntakeService,
   CandidateIntakeError: MockCandidateIntakeError,

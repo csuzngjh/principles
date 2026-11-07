@@ -33,8 +33,13 @@ import {
   type IntentDocSections,
   type IntentDocWarning,
   type IntentLang,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadFeatureFlagFromConfig } from './pd-config-loader.js';
+
+/** True when a filesystem call failed because the path does not exist. */
+function isEnoent(err: unknown): boolean {
+  return err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -208,8 +213,14 @@ export function safeReadIntentDoc(
 
   // Fresh read path
   try {
-    // Check existence first
-    if (!fs.existsSync(filePath)) {
+    // Open once and let ENOENT be the not-found signal: a path-based
+    // `existsSync` before the open is a check/use race, and the open itself
+    // already tells us the file is gone.
+    let fd: number;
+    try {
+      fd = fs.openSync(filePath, 'r', 0o600);
+    } catch (err) {
+      if (!isEnoent(err)) throw err;
       // Invalidate stale cache entry if any
       _intentDocCache.delete(cacheKey);
       return {
@@ -221,57 +232,60 @@ export function safeReadIntentDoc(
         warnings: [],
       };
     }
+    try {
+      const stat = fs.fstatSync(fd);
 
-    const stat = fs.statSync(filePath);
+      // SPEC §12 — 32KB size cap
+      if (stat.size > INTENT_MAX_BYTES) {
+        _intentDocCache.delete(cacheKey);
+        return {
+          ok: false,
+          found: true,
+          flagEnabled: true,
+          reason: 'oversized',
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
+          warnings: [],
+        };
+      }
 
-    // SPEC §12 — 32KB size cap
-    if (stat.size > INTENT_MAX_BYTES) {
-      _intentDocCache.delete(cacheKey);
+      // Read at most INTENT_MAX_BYTES + 1 bytes. The same descriptor
+      // prevents a path swap; the fixed buffer also prevents concurrent file
+      // growth from turning the size check into an unbounded allocation.
+      const buffer = Buffer.allocUnsafe(INTENT_MAX_BYTES + 1);
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+      const finalStat = fs.fstatSync(fd);
+      if (bytesRead > INTENT_MAX_BYTES || finalStat.size > INTENT_MAX_BYTES) {
+        _intentDocCache.delete(cacheKey);
+        return {
+          ok: false,
+          found: true,
+          flagEnabled: true,
+          reason: 'oversized',
+          nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${Math.max(stat.size, finalStat.size, bytesRead)} bytes observed). Reduce content.`,
+          warnings: [],
+        };
+      }
+      const raw = buffer.toString('utf8', 0, bytesRead);
+
+      const doc = buildDocFromRaw(raw, filePath, new Date(now).toISOString());
+
+      // Update cache
+      _intentDocCache.set(cacheKey, {
+        doc,
+        mtime: finalStat.mtimeMs,
+        loadedAt: now,
+      });
+
       return {
-        ok: false,
+        ok: true,
         found: true,
         flagEnabled: true,
-        reason: 'oversized',
-        nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
-        warnings: [],
+        doc,
+        warnings: doc.warnings,
       };
+    } finally {
+      fs.closeSync(fd);
     }
-
-    const raw = fs.readFileSync(filePath, 'utf8');
-
-    // PRI-467 review fix (P2): TOCTOU guard — re-check actual byte length
-    // after readFileSync. The file may have grown between statSync() and
-    // readFileSync(), bypassing the stat.size oversized check. Without this,
-    // an oversized file would enter parse/hash/cache as ok:true.
-    const actualBytes = Buffer.byteLength(raw, 'utf8');
-    if (actualBytes > INTENT_MAX_BYTES) {
-      _intentDocCache.delete(cacheKey);
-      return {
-        ok: false,
-        found: true,
-        flagEnabled: true,
-        reason: 'oversized',
-        nextAction: `${getIntentFilename(lang)} exceeds ${INTENT_MAX_BYTES} bytes (${actualBytes} bytes after read). Reduce content.`,
-        warnings: [],
-      };
-    }
-
-    const doc = buildDocFromRaw(raw, filePath, new Date(now).toISOString());
-
-    // Update cache
-    _intentDocCache.set(cacheKey, {
-      doc,
-      mtime: stat.mtimeMs,
-      loadedAt: now,
-    });
-
-    return {
-      ok: true,
-      found: true,
-      flagEnabled: true,
-      doc,
-      warnings: doc.warnings,
-    };
   } catch (err) {
     // ERR-002 — graceful degradation with reason + nextAction
     _intentDocCache.delete(cacheKey);

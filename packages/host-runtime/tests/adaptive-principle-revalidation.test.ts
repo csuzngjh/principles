@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivatedPrinciple } from '@principles/core/runtime-v2';
+import type { ActivatedPrinciple } from '@principles/core/runtime';
 import type { PromptActivationCandidates } from '../src/active-principle-prompt.js';
 import {
   createAdaptivePrincipleRevalidator,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
+import type { CorrectionObserverResult } from '@principles/core/runtime';
 
 // Shared mock objects so tests can mutate them after vi.mock runs
 const mockLearner = { add: vi.fn(() => []), updateWeight: vi.fn(() => true), remove: vi.fn(() => true), recordFalsePositive: vi.fn(() => true), recordTruePositive: vi.fn(() => true), find: vi.fn(() => undefined), getStore: vi.fn(() => ({ keywords: [] })) };

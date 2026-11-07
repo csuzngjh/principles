@@ -16,7 +16,7 @@ import {
   resolveRuntimeConfig,
   isRuntimeConfigError,
   validateRuntimeConfig,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 describe('PRI-228: PD-owned config resolution cutover', () => {
   describe('PD-owned config consumed by runtime entrypoint', () => {

@@ -290,7 +290,7 @@ describe('installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5
     copyPackageWithDeps(path.join(repoRoot, 'packages', 'principles-core'), path.join(nm, '@principles', 'core'), nm, rootNm);
     // 3. Workspace: host.codex ON + one approved prompt principle in SQLite.
     fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
-    const { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } = await import('@principles/core/runtime');
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
     fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
@@ -989,27 +989,12 @@ describe('first-run $pd-control setup (real user flow)', () => {
     fs.cpSync(pluginDir, cachePlugin, { recursive: true });
     const workspace = tempDir('pd-firstrun-ws-');
     fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
-    // @principles/pd-mcp-server ships on the same release train as the other
-    // pins but is younger than the published cohort on this branch — feed the
-    // flow a minimal LOCAL source package (name/version per the pin file) via
-    // the documented env fallback. The real install path stays exercised, and
-    // the launcher probe below replaces the placeholder bytes with the real
-    // built server to prove discovery (server behavior also has its own suite).
-    const pinsForSource: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8'));
-    if (!isRecord(pinsForSource) || typeof pinsForSource.mcpServer !== 'string') {
-      throw new Error('runtime pin file is missing the mcpServer version');
-    }
-    const mcpSource = tempDir('pd-firstrun-mcp-src-');
-    fs.mkdirSync(path.join(mcpSource, 'dist'), { recursive: true });
-    fs.writeFileSync(path.join(mcpSource, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: pinsForSource.mcpServer }, null, 2), 'utf8');
-    fs.writeFileSync(path.join(mcpSource, 'dist', 'index.js'), '// stub entry for the first-run flow test\n', 'utf8');
-
     const result = spawnSync(process.execPath, [path.join(cachePlugin, 'scripts', 'pd-setup.cjs'), '--workspace', workspace, '--skip-init', '--json'], {
       cwd: workspace,
       encoding: 'utf8',
       timeout: 240_000,
       // Redirect the home dir cross-platform: os.homedir() reads HOME on POSIX and USERPROFILE/HOMEDRIVE+HOMEPATH on Windows.
-      env: { ...process.env, CODEX_HOME: path.join(fakeHome, '.codex'), HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined, PD_SETUP_MCP_SERVER_SOURCE: mcpSource },
+      env: { ...process.env, CODEX_HOME: path.join(fakeHome, '.codex'), HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined },
     });
     expect(result.status, result.stderr.slice(0, 400)).toBe(0);
     const report: unknown = JSON.parse(result.stdout);
@@ -1076,21 +1061,8 @@ describe('first-run $pd-control setup (real user flow)', () => {
 
     // CodeRabbit (PR #2304): a first-run fixture that ships a comment-only
     // dist/index.js proves nothing about the installed MCP server. Launch the
-    // REAL built server bytes through the shipped launcher and require discovery,
-    // so a placeholder install can no longer pass this test.
-    const realServerDist = path.join(repoRoot, 'packages', 'pd-mcp-server', 'dist');
-    const installedServerDist = path.join(pluginData, 'runtime', 'node_modules', '@principles', 'pd-mcp-server', 'dist');
-    fs.cpSync(realServerDist, installedServerDist, { recursive: true });
-    // The npm-installed package has no nested node_modules (deps are hoisted in
-    // the runtime tree); link the registry deps the server imports so the launch
-    // resolves exactly as it does from the installed runtime directory.
-    for (const dep of ['@modelcontextprotocol/server', 'zod']) {
-      const link = path.join(pluginData, 'runtime', 'node_modules', dep);
-      if (!fs.existsSync(link)) {
-        fs.mkdirSync(path.dirname(link), { recursive: true });
-        fs.symlinkSync(path.join(repoRoot, 'node_modules', dep), link, 'junction');
-      }
-    }
+    // REAL npm-installed pinned server bytes through the shipped launcher and
+    // require discovery, so a placeholder install can no longer pass this test.
     const discovery = spawnSync(process.execPath, [path.join(cachePlugin, 'mcp', 'launcher.cjs')], {
       cwd: workspace,
       encoding: 'utf8',
@@ -1128,7 +1100,7 @@ describe('pd-disable.cjs kill switch', () => {
   it('flips host.codex.enabled in the nearest .pd/config.yaml and is idempotent', async () => {
     const workspace = tempDir('pd-disable-ws-');
     fs.mkdirSync(path.join(workspace, '.pd', 'sub'), { recursive: true });
-    const { getDefaultPdConfig } = await import('@principles/core/runtime-v2');
+    const { getDefaultPdConfig } = await import('@principles/core/runtime');
     const config = getDefaultPdConfig();
     config.features['host.codex'].enabled = true;
     // js-yaml 5 is ESM-only: no default export — use the namespace.

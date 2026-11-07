@@ -34,8 +34,8 @@ import {
   isFeatureEnabled,
   isBuiltinPiAiProvider,
   evaluatePainIngress,
-} from '@principles/core/runtime-v2';
-import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';

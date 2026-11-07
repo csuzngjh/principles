@@ -63,7 +63,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   PruningReadModel: vi.fn().mockImplementation(function () {
     return new MockPruningReadModel();
   }),
@@ -85,7 +85,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
 }));
 
 import { handlePruningReport, handlePruningExplain, handlePruningOrphans } from '../../src/commands/runtime-pruning.js';
-import { PruningReadModel } from '@principles/core/runtime-v2';
+import { PruningReadModel } from '@principles/core/runtime';
 
 // ── pd runtime pruning report ───────────────────────────────────────────────
 

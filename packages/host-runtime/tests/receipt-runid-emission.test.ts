@@ -35,18 +35,18 @@ function makeEvent(kind: 'before_prompt_build' | 'after_tool_call', workspaceDir
 describe('PRI-750 shared-path event emission (Codex host)', () => {
   it('emits the injection event with turnId mapped to runId on before_prompt_build', async () => {
     const workspaceDir = tempWorkspace();
-    const events: HostEventEmitter = { recordRuntimeV2ActivationsInjected: vi.fn(), recordToolCall: vi.fn() };
+    const events: HostEventEmitter = { recordRuntimeActivationsInjected: vi.fn(), recordToolCall: vi.fn() };
     const runtime = createProductionHostRuntime({ events });
     const result = await runtime.dispatch(makeEvent('before_prompt_build', workspaceDir) as never);
     expect(result).toMatchObject({ decision: 'allow' });
-    expect(events.recordRuntimeV2ActivationsInjected).toHaveBeenCalledWith(
+    expect(events.recordRuntimeActivationsInjected).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'sess-1', runId: 'turn-1' }),
     );
   });
 
   it('emits the tool event with turnId/toolCallId on after_tool_call', async () => {
     const workspaceDir = tempWorkspace();
-    const events: HostEventEmitter = { recordRuntimeV2ActivationsInjected: vi.fn(), recordToolCall: vi.fn() };
+    const events: HostEventEmitter = { recordRuntimeActivationsInjected: vi.fn(), recordToolCall: vi.fn() };
     const runtime = createProductionHostRuntime({
       events,
       painDatabaseFactory: () => new Database(':memory:'),
@@ -69,7 +69,7 @@ describe('PRI-750 shared-path event emission (Codex host)', () => {
   it('keeps the prompt result when the injection emitter throws (receipt write failure, rc-9)', async () => {
     const workspaceDir = tempWorkspace();
     const events: HostEventEmitter = {
-      recordRuntimeV2ActivationsInjected: vi.fn(() => {
+      recordRuntimeActivationsInjected: vi.fn(() => {
         throw new Error('ENOSPC: no space left on device');
       }),
       recordToolCall: vi.fn(),
@@ -83,7 +83,7 @@ describe('PRI-750 shared-path event emission (Codex host)', () => {
   it('preserves emission warnings when a custom beforePromptBuild overrides the result (rc-9)', async () => {
     const workspaceDir = tempWorkspace();
     const events: HostEventEmitter = {
-      recordRuntimeV2ActivationsInjected: vi.fn(() => {
+      recordRuntimeActivationsInjected: vi.fn(() => {
         throw new Error('EIO: i/o error');
       }),
       recordToolCall: vi.fn(),
@@ -100,7 +100,7 @@ describe('PRI-750 shared-path event emission (Codex host)', () => {
   it('keeps the tool dispatch when the tool emitter throws (receipt write failure, rc-9)', async () => {
     const workspaceDir = tempWorkspace();
     const events: HostEventEmitter = {
-      recordRuntimeV2ActivationsInjected: vi.fn(),
+      recordRuntimeActivationsInjected: vi.fn(),
       recordToolCall: vi.fn(() => {
         throw new Error('EACCES: permission denied');
       }),

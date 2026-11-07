@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FilesystemLifecycleDatasource, LineageSourceRetiredError } from '../../../src/core/principle-internalization/filesystem-lifecycle-datasource.js';
-import { buildLifecycleReadModel } from '@principles/core/runtime-v2';
+import { buildLifecycleReadModel } from '@principles/core/runtime';
 
 describe('LineageSourceRetiredError regression guard (PRI-230)', () => {
   it('listLineageRecords throws LineageSourceRetiredError, not return []', () => {

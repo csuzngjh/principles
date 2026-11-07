@@ -20,7 +20,7 @@ vi.mock('os', async () => {
 
 import { RuleHost } from '../../src/core/rule-host.js';
 import { markerPathFor } from '../../src/core/degraded-enforcement-marker.js';
-import type { RuleHostInput } from '@principles/core/runtime-v2';
+import type { RuleHostInput } from '@principles/core/runtime';
 
 let tempWorkspaceDir: string;
 let testHome: string;

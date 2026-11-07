@@ -36,13 +36,13 @@ import {
   resolveAgentRuntimeBinding,
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
-} from '@principles/core/runtime-v2';
-import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
-import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
-import { storeEmitter } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime';
+import type { BehaviorExamplePack } from '@principles/core/runtime';
+import { storeEmitter } from '@principles/core/runtime';
 // FR-07 (PRI-983): the shared Evidence Readiness judgment — same authority as
 // the consumer preflight and the evidence recovery commands.
-import { assessEvidenceReadiness } from '@principles/core/runtime-v2';
+import { assessEvidenceReadiness } from '@principles/core/runtime';
 import { WorkspaceTelemetryEmitter, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';

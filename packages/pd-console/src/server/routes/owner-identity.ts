@@ -26,7 +26,7 @@ import {
   type OwnerIdentityResolved,
   type OwnerIdentityRecord,
   type OwnerConfigSnapshot,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { sendSuccess, sendError, sendBadRequest, sendMethodNotAllowed } from '../utils/response.js';
 import { resolveOwnerConfigSnapshot } from './governance.js';
 

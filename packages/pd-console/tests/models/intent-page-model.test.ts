@@ -1,4 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    fstatSync: vi.fn(actual.fstatSync),
+    readSync: vi.fn(actual.readSync),
+  };
+});
+
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -272,6 +282,27 @@ describe('IntentPageModel — getRawContent', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('oversized');
     expect(result.nextAction).toContain('32768');
+  });
+
+  it('reads at most 32KB + 1 when the file grows after the initial size check', async () => {
+    fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'x'.repeat(33 * 1024), 'utf8');
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockReturnValueOnce({
+      size: 0,
+      mtimeMs: Date.now(),
+    } as fs.Stats);
+    const readSpy = vi.spyOn(fs, 'readSync');
+
+    try {
+      const model = new IntentPageModel(workspaceDir);
+      const result = await model.getRawContent(true, 'zh-CN');
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe('oversized');
+      expect(readSpy.mock.calls[0]?.[3]).toBe(32 * 1024 + 1);
+      expect(fstatSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fstatSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 
   it('returns flag_disabled when flag is off', async () => {

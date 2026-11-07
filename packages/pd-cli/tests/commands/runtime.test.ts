@@ -31,7 +31,7 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeWithOverrides: mockResolveRuntimeWithOverrides,
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   probeRuntime: vi.fn().mockResolvedValue({
     runtimeKind: 'pi-ai',
     health: {
@@ -144,7 +144,7 @@ describe('pd runtime probe', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
-    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    const { probeRuntime } = await import('@principles/core/runtime');
     vi.mocked(probeRuntime).mockResolvedValueOnce({
       runtimeKind: 'pi-ai',
       health: {
@@ -193,7 +193,7 @@ describe('pd runtime probe', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
-    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    const { probeRuntime } = await import('@principles/core/runtime');
     vi.mocked(probeRuntime).mockResolvedValueOnce({
       runtimeKind: 'pi-ai',
       health: {
@@ -293,7 +293,7 @@ describe('pd runtime probe', () => {
   // ── pi-ai probe: maxRetries backfill from .pd/config.yaml ───────────────
   it('PRI-393: pi-ai probe reads maxRetries from .pd/config.yaml when --maxRetries not passed', async () => {
     process.env.TEST_API_KEY = 'test-value';
-    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    const { probeRuntime } = await import('@principles/core/runtime');
     vi.mocked(probeRuntime).mockResolvedValue({
       runtimeKind: 'pi-ai',
       provider: 'test-provider',
@@ -327,7 +327,7 @@ describe('pd runtime probe', () => {
 
   it('PRI-393: CLI --maxRetries overrides .pd/config.yaml maxRetries', async () => {
     process.env.TEST_API_KEY = 'test-value';
-    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    const { probeRuntime } = await import('@principles/core/runtime');
     vi.mocked(probeRuntime).mockResolvedValue({
       runtimeKind: 'pi-ai',
       provider: 'test-provider',
@@ -359,7 +359,7 @@ describe('pd runtime probe', () => {
   });
 
   it('PRI-393: env var missing → process.exit(1) and does NOT call probeRuntime', async () => {
-    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    const { probeRuntime } = await import('@principles/core/runtime');
     vi.mocked(probeRuntime).mockClear();
 
     // Ensure NONEXISTENT_VAR is NOT set

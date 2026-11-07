@@ -20,7 +20,7 @@ import { getProductTelemetryStatePath, readProductTelemetryControlState, writePr
 import { workspaceExportLockPath, workspaceScopeIdFor } from '../src/product-telemetry/workspace-scope.js';
 import type { TelemetryFetchFn } from '../src/product-telemetry/exporter.js';
 import { loadPdConfigForPlugin } from '../src/pd-config.js';
-import { validateProductTelemetrySnapshot, bucketDateFromTime } from '@principles/core/runtime-v2';
+import { validateProductTelemetrySnapshot, bucketDateFromTime } from '@principles/core/runtime';
 
 let homeDir: string;
 let workspaceDir: string;

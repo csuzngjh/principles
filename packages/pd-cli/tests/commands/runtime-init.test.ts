@@ -38,8 +38,8 @@ vi.mock('principles-disciple', () => ({
   initTrajectorySchema: mockState.initTrajectorySchema,
 }));
 
-vi.mock('@principles/core/runtime-v2', async () => {
-  const actual = await vi.importActual<typeof import('@principles/core/runtime-v2')>('@principles/core/runtime-v2');
+vi.mock('@principles/core/runtime', async () => {
+  const actual = await vi.importActual<typeof import('@principles/core/runtime')>('@principles/core/runtime');
   return {
     ...actual,
     SqliteConnection: mockState.sqliteConnectionCtor,
@@ -363,7 +363,7 @@ describe('pd runtime init', () => {
         const configPath = path.join(tmp, '.pd', 'config.yaml');
         // js-yaml 5 is ESM-only: no default export — use the namespace.
         const yaml = await import('js-yaml');
-        const { validatePdConfig } = await import('@principles/core/runtime-v2');
+        const { validatePdConfig } = await import('@principles/core/runtime');
         const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
         const result = validatePdConfig(parsed);
         expect(result.ok).toBe(true);
@@ -377,7 +377,7 @@ describe('pd runtime init', () => {
         const configPath = path.join(tmp, '.pd', 'config.yaml');
         // js-yaml 5 is ESM-only: no default export — use the namespace.
         const yaml = await import('js-yaml');
-        const { computeEffectivePdConfig, validatePdConfig } = await import('@principles/core/runtime-v2');
+        const { computeEffectivePdConfig, validatePdConfig } = await import('@principles/core/runtime');
         const parsed: unknown = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
         const parsedFeatures = (parsed as { features?: unknown }).features;
         // Raw invariant: zero default-equivalent snapshot entries (was: full

@@ -22,7 +22,7 @@
  * task store, no private retry queue, no second scheduler state.
  *
  * Correctness under concurrent consumers (OpenClaw auto-consumer + this
- * worker on one workspace) is owned by the durable Runtime V2 task lease —
+ * worker on one workspace) is owned by the durable Runtime task lease —
  * never by process-local state.
  */
 import fs from 'node:fs';
@@ -35,7 +35,7 @@ import {
   PrincipleTreeLedgerAdapter,
   resolveDiagnosticianCapability,
   type TaskRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   createWorkspaceBehaviorEvidencePort,
   createCodexArtificerTrustedFactsPort,

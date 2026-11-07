@@ -15,10 +15,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   createRuntimeStateHandle,
   applyOwnerResolution,
-} from '@principles/core/runtime-v2';
-import type { OwnerResolutionOutcome } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { OwnerResolutionOutcome } from '@principles/core/runtime';
 import { OwnerDecisionConsoleModel } from '../models/OwnerDecisionConsoleModel.js';
-import { sendSuccess, sendError, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
+import { sendSuccess, sendError, sendMethodNotAllowed, sendBadRequest, errorMessage } from '../utils/response.js';
 import { readBody } from '../utils/request.js';
 
 const models = new Map<string, OwnerDecisionConsoleModel>();
@@ -218,7 +218,7 @@ export async function handleOwnerDecisionsRoute(
       const result = await getModel(workspaceDir).listOwnerDecisionItems({ servedThroughAuthenticatedConsoleRoute: true });
       sendSuccess(res, result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'owner_decisions_list_error', message, {
         nextAction: 'Inspect the workspace state (.pd/state.db) and retry.',
       });
@@ -264,7 +264,7 @@ export async function handleOwnerDecisionsRoute(
       );
       sendOutcome(res, outcome);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       sendError(res, 500, 'owner_resolution_error', message, {
         nextAction: 'Inspect the workspace state (.pd/state.db) and retry.',
       });

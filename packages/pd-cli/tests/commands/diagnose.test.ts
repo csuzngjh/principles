@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 
-const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetCandidateImpl, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
+const { MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
   const mockCreateTask = vi.fn().mockResolvedValue(undefined);
@@ -136,7 +136,7 @@ const { buildDreamerSeedCalls, mockResolveSourcePainId } = vi.hoisted(() => {
 
 // PRI-935: capture the pain_diagnoses ledger dispatch through the single
 // authority (persistPainDiagnosis) — the barrel mock must provide it because
-// diagnose.ts imports it from the runtime-v2 entry.
+// diagnose.ts imports it from the runtime entry.
 const { mockPersistPainDiagnosis } = vi.hoisted(() => {
   const mockPersistPainDiagnosis = vi.fn().mockResolvedValue(undefined);
   return { mockPersistPainDiagnosis };
@@ -146,7 +146,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   return {
     ...(await importOriginal<object>()),
     RuntimeStateManager: vi.fn().mockImplementation(function () {
@@ -322,10 +322,10 @@ describe('pd diagnose run --runtime routing', () => {
       taskId: 'test-task-1', status: 'pending', attemptCount: 0, maxAttempts: 3, lastError: null,
       diagnosticJson: JSON.stringify({ sourcePainId: 'pain-test', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
     });
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    mockResolveRuntimeConfig = vi.mocked(runtimeV2.resolveRuntimeConfig);
-    mockIsRuntimeConfigError = vi.mocked(runtimeV2.isRuntimeConfigError);
-    const { run } = runtimeV2;
+    const coreRuntime = await import('@principles/core/runtime');
+    mockResolveRuntimeConfig = vi.mocked(coreRuntime.resolveRuntimeConfig);
+    mockIsRuntimeConfigError = vi.mocked(coreRuntime.isRuntimeConfigError);
+    const { run } = coreRuntime;
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -618,7 +618,7 @@ describe('pd diagnose run --runtime routing', () => {
 describe('pd diagnose run — auto-intake after success', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -1072,7 +1072,7 @@ describe('pd diagnose run — auto-intake after success', () => {
   });
 
   it('INTAKE-12: failed diagnosis does not trigger intake (process.exit stubbed)', async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValueOnce({
       status: 'failed',
       taskId: 'test-task-1',
@@ -1144,8 +1144,8 @@ describe('pd status stalled-threshold validation', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.status).mockResolvedValueOnce({
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.status).mockResolvedValueOnce({
       taskId: 'test-task-1',
       status: 'pending',
       attemptCount: 0,
@@ -1213,17 +1213,17 @@ const EXPECTED_MAX_RETRY_CALLS = 11;
 describe('ERR-067: pd diagnose run retry loop for retried status', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
   });
 
   afterEach(async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(DEFAULT_SUCCEEDED_RUN_RESULT);
   });
 
   it('ERR-067-01: retried status triggers retry loop, succeeds on second attempt', async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     const runMock = vi.mocked(run);
     runMock
       .mockResolvedValueOnce({
@@ -1252,7 +1252,7 @@ describe('ERR-067: pd diagnose run retry loop for retried status', () => {
   });
 
   it('ERR-067-02: retried status loops until maxRetryLoops, then converts to failed (P0-1 fix)', async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     const runMock = vi.mocked(run);
     runMock.mockResolvedValue({
       status: 'retried' as const,
@@ -1279,7 +1279,7 @@ describe('ERR-067: pd diagnose run retry loop for retried status', () => {
   });
 
   it('ERR-067-03: retried with failureReason propagates to failed status (P0-1 fix)', async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     const runMock = vi.mocked(run);
     runMock.mockResolvedValue({
       status: 'retried' as const,
@@ -1318,7 +1318,7 @@ describe('ERR-067: pd diagnose run retry loop for retried status', () => {
   });
 
   it('ERR-067-04: succeeded status does NOT trigger retry loop', async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     const runMock = vi.mocked(run);
     runMock.mockResolvedValue(SUCCEEDED_RESULT);
 
@@ -1341,7 +1341,7 @@ describe('ERR-067: pd diagnose run retry loop for retried status', () => {
   });
 
   it('ERR-067-05: failed status does NOT trigger retry loop', async () => {
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     const runMock = vi.mocked(run);
     runMock.mockResolvedValue({
       status: 'failed' as const,
@@ -1373,7 +1373,7 @@ describe('ERR-067: pd diagnose run retry loop for retried status', () => {
 describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -1533,7 +1533,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
 describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candidates dreamer seed', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { run, evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    const { run, evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -1556,7 +1556,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
   // `admitted` again. Without this, a `mockReturnValue({deferred})` from
   // DEFECT-005-B would leak into BUG-2 and refuse all its candidates.
   afterEach(async () => {
-    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime');
     vi.mocked(evaluateCandidateAdmissionFromRecord).mockReturnValue({
       decision: 'admitted',
       reason: 'mock_admitted',
@@ -1567,7 +1567,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
 
   it('DEFECT-005-A: defer deferred + principle/rule/prompt consumed — principle/rule/prompt still dreamer_seeded', async () => {
     // Admission gate defers ONLY defer candidates; admits everything else.
-    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime');
     vi.mocked(evaluateCandidateAdmissionFromRecord).mockImplementation((record) => {
       if (record.recommendationKind === 'defer') {
         return {
@@ -1642,7 +1642,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
 
   it('DEFECT-005-B: all candidates intake_failed — 0 dreamer_seeded (boundary)', async () => {
     // Refuse everything via admission gate
-    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime-v2');
+    const { evaluateCandidateAdmissionFromRecord } = await import('@principles/core/runtime');
     vi.mocked(evaluateCandidateAdmissionFromRecord).mockReturnValue({
       decision: 'deferred',
       reason: 'mock_deferred',
@@ -1692,7 +1692,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
 describe('BUG-1 (PRI-442): effectiveConfig wiring to split-pipeline runners', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -1803,7 +1803,7 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
     vi.clearAllMocks();
     buildDreamerSeedCalls.length = 0;
     rearmGateSeams();
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -1859,8 +1859,8 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
 describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReturnValue({
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReturnValue({
       available: false,
       reason: 'capability_disabled',
       message: "Agent 'diagnostician' is disabled",
@@ -1869,8 +1869,8 @@ describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', (
   });
 
   afterEach(async () => {
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.resolveDiagnosticianCapability).mockReset();
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReset();
   });
 
   it('DIAG-638-01: --json emits a structured capability_disabled result and exits 1', async () => {
@@ -1894,9 +1894,9 @@ describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', (
     expect(parsed.message).toContain('disabled');
 
     // Kill switch fires before any runtime machinery: no adapter, no runner.
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    expect(runtimeV2.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
-    expect(runtimeV2.SplitDiagnosticianRunner).not.toHaveBeenCalled();
+    const coreRuntime = await import('@principles/core/runtime');
+    expect(coreRuntime.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
+    expect(coreRuntime.SplitDiagnosticianRunner).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
@@ -1919,8 +1919,8 @@ describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', (
     expect(out).toContain('capability_disabled');
     expect(out).toContain('internalAgents.agents.diagnostician.enabled');
 
-    const runtimeV2b = await import('@principles/core/runtime-v2');
-    expect(runtimeV2b.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
+    const coreRuntimeB = await import('@principles/core/runtime');
+    expect(coreRuntimeB.TestDoubleRuntimeAdapter).not.toHaveBeenCalled();
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     errSpy.mockRestore();
@@ -1940,7 +1940,7 @@ describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     rearmGateSeams();
-    const { run } = await import('@principles/core/runtime-v2');
+    const { run } = await import('@principles/core/runtime');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -1950,8 +1950,8 @@ describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
     // isFeatureEnabled and resolveSourcePainId are cleared by vi.clearAllMocks()
     // — re-prime the defaults these tests assume (flag ON, lineage resolves).
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(true);
     mockResolveSourcePainId.mockResolvedValue('pain_test-source-1');
     // SPEC review round-3 P1: the full admission write gate reads the task's
     // persisted diagnosis — re-point it at an admitting payload AFTER the
@@ -2004,8 +2004,8 @@ describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
   });
 
   it('LEDGER-02: flag off (default) → no ledger dispatch, JSON says disabled', async () => {
-    const runtimeV2 = await import('@principles/core/runtime-v2');
-    vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(false);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isFeatureEnabled).mockReturnValue(false);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);

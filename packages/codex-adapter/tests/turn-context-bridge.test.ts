@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { processHookInvocation } from '../src/pd-hook.js';
 import { registerCurrentTurnOwnerStatement, writeCurrentTurnContext, TURN_CONTEXT_FILENAME_PREFIX, TURN_CONTEXT_MAX_AGE_MS } from '../src/ingestion/turn-context.js';
 import { MAX_OWNER_STATEMENT_CHARS } from '../src/ingestion/explicit-owner-statement.js';

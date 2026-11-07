@@ -6,11 +6,11 @@ import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js
 import type { EmpathyEventStats } from '../types/event-types.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import { computeHash } from '../utils/hashing.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 import { createIntentDocReader, resolveIntentLang } from '../core/intent-doc-reader-adapter.js';
 import { ingressDecisionForPluginPain } from '../hooks/pain-ingress-adapter.js';
-import type { PainEvidenceEntry } from '@principles/core/runtime-v2';
+import type { PainEvidenceEntry } from '@principles/core/runtime';
 
 /**
  * Creates a mini bar for daily trends

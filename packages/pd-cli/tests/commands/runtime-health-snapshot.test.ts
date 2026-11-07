@@ -16,7 +16,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   OperatorHealthReadModel: vi.fn().mockImplementation(function () {
     return { getSnapshot: mockSnapshotFn, close: mockCloseFn };
   }),

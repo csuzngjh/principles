@@ -8,7 +8,7 @@ import { addPrincipleToLedger } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { createDefaultKeywordStore, saveKeywordStore } from './empathy-keyword-matcher.js';
-import { CORE_PRINCIPLES } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES } from '@principles/core/runtime';
 
 /**
  * Default PROFILE.json content

@@ -10,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { sendSuccess, sendMethodNotAllowed, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendMethodNotAllowed, sendNotFound, errorMessage } from '../utils/response.js';
 import type * as updateSurfaceModule from 'create-principles-disciple/update-console';
 
 type JournalModule = typeof updateSurfaceModule;
@@ -104,7 +104,7 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
       lastAt: null,
       productVersion: null,
       transitions: [],
-      reason: error instanceof Error ? `${error.message}` : String(error),
+      reason: errorMessage(error),
     });
   }
 }
@@ -198,7 +198,7 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
       }
       unfinished.push(fact);
     } catch (error) {
-      broken.push({ transactionId, reason: error instanceof Error ? error.message : String(error) });
+      broken.push({ transactionId, reason: errorMessage(error) });
     }
   }
   unfinished.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
@@ -304,7 +304,7 @@ async function recoveryResolve(res: ServerResponse, req: IncomingMessage): Promi
     sendSuccess(res, {
       ok: false,
       reason: 'journal_unreadable',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
       nextAction: 'Run the official installer (npx create-principles-disciple repair-update-chain) to inspect and repair the installation.',
     });
   }

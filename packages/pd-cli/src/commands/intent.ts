@@ -36,8 +36,8 @@ import {
   computeIntentContentHash,
   validateIntentDocSections,
   isFeatureEnabled,
-} from '@principles/core/runtime-v2';
-import type { IntentDocSections, IntentDocWarning, IntentLang } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { IntentDocSections, IntentDocWarning, IntentLang } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { emitResult } from '../services/cli-output.js';
@@ -45,6 +45,54 @@ import { emitResult } from '../services/cli-output.js';
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const INTENT_DIR = '.principles';
+
+/**
+ * Size-check and read an intent document through ONE open handle.
+ *
+ * `statSync(path)` followed by `readFileSync(path)` can observe two different
+ * files: a swap between the two calls bypasses the byte cap (TOCTOU).
+ */
+function readIntentFileBounded(
+  filePath: string,
+  maxBytes: number,
+): { raw: string; mtimeMs: number } | { oversized: number } {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.size > maxBytes) {
+      return { oversized: stat.size };
+    }
+    // Read at most maxBytes + 1 bytes. The same descriptor prevents a path
+    // swap, while the fixed buffer also prevents concurrent file growth from
+    // turning the size check into an unbounded allocation.
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.byteLength, 0);
+    const finalStat = fs.fstatSync(fd);
+    if (bytesRead > maxBytes || finalStat.size > maxBytes) {
+      return { oversized: Math.max(stat.size, finalStat.size, bytesRead) };
+    }
+    return { raw: buffer.toString('utf8', 0, bytesRead), mtimeMs: finalStat.mtimeMs };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Node's fs error `code`, read without an `in` check or an unvalidated cast. */
+function fsErrorCode(err: unknown): string | undefined {
+  if (!(err instanceof Error)) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(err, 'code');
+  return typeof descriptor?.value === 'string' ? descriptor.value : undefined;
+}
+
+/** True when a filesystem call failed because the path does not exist. */
+function isEnoent(err: unknown): boolean {
+  return fsErrorCode(err) === 'ENOENT';
+}
+
+/** True when an exclusive create failed because the path already exists. */
+function isEexists(err: unknown): boolean {
+  return fsErrorCode(err) === 'EEXIST';
+}
 
 /**
  * Parse and validate the --lang option.
@@ -206,23 +254,34 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
   const isDryRun = opts.dryRun === true || opts.confirm !== true;
 
   try {
-    if (fs.existsSync(filePath) && !opts.force) {
-      const output: IntentInitOutput = {
-        status: 'skipped',
-        path: filePath,
-        overwritten: false,
-        reason: 'file_exists',
-        nextAction: `Use --force to overwrite: pd intent init --force --confirm --lang ${lang} --workspace "${workspaceDir}"`,
-      };
-      emitResult(output, {
-        json: opts.json ?? false,
-        formatText: (o) => `${filename} already exists at ${o.path}\n→ ${o.nextAction}`,
-      });
-      process.exitCode = 1;
-      return;
-    }
-
     if (isDryRun) {
+      // A dry-run only needs existence metadata; never read the document
+      // contents just to decide whether an exclusive create would succeed.
+      // Treat only ENOENT as absent. Permission, ENOTDIR, and other failures
+      // must remain visible instead of being misreported as a missing file.
+      let exists = false;
+      try {
+        fs.lstatSync(filePath);
+        exists = true;
+      } catch (err) {
+        if (!isEnoent(err)) throw err;
+      }
+      if (exists && !opts.force) {
+        const output: IntentInitOutput = {
+          status: 'skipped',
+          path: filePath,
+          overwritten: false,
+          reason: 'file_exists',
+          nextAction: `Use --force to overwrite: pd intent init --force --confirm --lang ${lang} --workspace "${workspaceDir}"`,
+        };
+        emitResult(output, {
+          json: opts.json ?? false,
+          formatText: (o) => `${filename} already exists at ${o.path}\n→ ${o.nextAction}`,
+        });
+        process.exitCode = 1;
+        return;
+      }
+
       const output: IntentInitOutput = {
         status: 'dry_run',
         path: filePath,
@@ -238,7 +297,35 @@ export async function handleIntentInit(opts: IntentInitOptions): Promise<void> {
     }
 
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, createIntentTemplate(lang), 'utf8');
+    // Exclusive create ('wx') when overwrite was not requested: the
+    // "already exists" decision is made by the create itself, so no separate
+    // path check can be raced.
+    let fd: number;
+    try {
+      fd = fs.openSync(filePath, opts.force === true ? 'w' : 'wx');
+    } catch (err) {
+      if (opts.force !== true && isEexists(err)) {
+        const output: IntentInitOutput = {
+          status: 'skipped',
+          path: filePath,
+          overwritten: false,
+          reason: 'file_exists',
+          nextAction: `Use --force to overwrite: pd intent init --force --confirm --lang ${lang} --workspace "${workspaceDir}"`,
+        };
+        emitResult(output, {
+          json: opts.json ?? false,
+          formatText: (o) => `${filename} already exists at ${o.path}\n→ ${o.nextAction}`,
+        });
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
+    try {
+      fs.writeFileSync(fd, createIntentTemplate(lang), 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
 
     const output: IntentInitOutput = {
       status: 'ok',
@@ -342,7 +429,13 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
   const filePath = getIntentFilePath(workspaceDir, lang);
 
   try {
-    if (!fs.existsSync(filePath)) {
+    let read: ReturnType<typeof readIntentFileBounded>;
+    try {
+      read = readIntentFileBounded(filePath, INTENT_MAX_BYTES);
+    } catch (err) {
+      // The bounded read opens the path once; ENOENT *is* the not-found case,
+      // so no separate existsSync check is needed (or wanted).
+      if (!isEnoent(err)) throw err;
       const output: IntentShowOutput = {
         status: 'not_found',
         flagEnabled: true,
@@ -357,16 +450,14 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
       });
       return;
     }
-
-    const stat = fs.statSync(filePath);
-    if (stat.size > INTENT_MAX_BYTES) {
+    if ('oversized' in read) {
       const output: IntentShowOutput = {
         status: 'oversized',
         flagEnabled: true,
         found: true,
         warnings: [],
         reason: 'oversized',
-        nextAction: `${filename} exceeds ${INTENT_MAX_BYTES} bytes (${stat.size} bytes). Reduce content.`,
+        nextAction: `${filename} exceeds ${INTENT_MAX_BYTES} bytes (${read.oversized} bytes). Reduce content.`,
       };
       emitResult(output, {
         json: opts.json ?? false,
@@ -375,7 +466,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
       return;
     }
 
-    const raw = fs.readFileSync(filePath, 'utf8');
+    const { raw } = read;
     const sections = parseIntentDocSections(raw);
     const warnings = validateIntentDocSections(sections);
     const contentHash = computeIntentContentHash(raw);
@@ -386,7 +477,7 @@ export async function handleIntentShow(opts: IntentShowOptions): Promise<void> {
       found: true,
       path: filePath,
       contentHash,
-      lastEditedAt: stat.mtime.toISOString(),
+      lastEditedAt: new Date(read.mtimeMs).toISOString(),
       sections: sectionsToRecord(sections),
       warnings,
     };

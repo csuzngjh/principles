@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 import { processHookInvocation } from '../src/pd-hook.js';
 
 const roots: string[] = [];

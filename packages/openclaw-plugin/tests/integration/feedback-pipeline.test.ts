@@ -31,22 +31,22 @@
  *   'failed_tasks_page' would fail validation, so it is carried via
  *   context.page instead.
  *
- * @see packages/principles-core/src/runtime-v2/feedback/pending-agent-draft-store.ts
- * @see packages/principles-core/src/runtime-v2/feedback/create-report.ts
- * @see packages/principles-core/src/runtime-v2/feedback/render-markdown.ts
+ * @see packages/principles-core/src/runtime/feedback/pending-agent-draft-store.ts
+ * @see packages/principles-core/src/runtime/feedback/create-report.ts
+ * @see packages/principles-core/src/runtime/feedback/render-markdown.ts
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import {
   PendingAgentDraftStore,
   createFeedbackReport,
   renderReportMarkdown,
   type AgentDraftPayload,
   type FeedbackReport,
-} from '@principles/core/runtime-v2/feedback';
+} from '@principles/core/runtime/feedback';
 import { safeRmDir } from '../test-utils.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -265,7 +265,7 @@ export class WorkspaceContext {
 
     /**
      * Creates a WorkspaceContext requiring explicit workspaceDir.
-     * For Runtime V2 entrypoints where implicit PathResolver fallback is unacceptable.
+     * For Runtime entrypoints where implicit PathResolver fallback is unacceptable.
      * @throws Error if workspaceDir is not provided in the context.
      */
     static fromHookContextExplicit(ctx: { workspaceDir?: string; logger?: { error?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void; info?: (...args: unknown[]) => void } }): WorkspaceContext {

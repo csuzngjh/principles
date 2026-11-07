@@ -26,12 +26,12 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { createRuleHostHelpers } from '@principles/core/runtime-v2';
-import { mergeDecisions } from '@principles/core/runtime-v2';
-import { validateRuleHostResult } from '@principles/core/runtime-v2';
-import { SqliteConnection } from '@principles/core/runtime-v2';
-import { scanLegacyRuleContractDependencies } from '@principles/core/runtime-v2';
-import { verifyPiArtifactRowDigest } from '@principles/core/runtime-v2';
+import { createRuleHostHelpers } from '@principles/core/runtime';
+import { mergeDecisions } from '@principles/core/runtime';
+import { validateRuleHostResult } from '@principles/core/runtime';
+import { SqliteConnection } from '@principles/core/runtime';
+import { scanLegacyRuleContractDependencies } from '@principles/core/runtime';
+import { verifyPiArtifactRowDigest } from '@principles/core/runtime';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import { EventLogService } from './event-log.js';
@@ -41,10 +41,10 @@ import type {
   RuleHostResult,
   RuleHostMeta,
   LoadedImplementation,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
-import type { RuleHostLogger } from '@principles/core/runtime-v2';
-export type { RuleHostLogger } from '@principles/core/runtime-v2';
+import type { RuleHostLogger } from '@principles/core/runtime';
+export type { RuleHostLogger } from '@principles/core/runtime';
 
 export interface RuleHostOptions {
   /** Workspace directory for SQLite access. Required for RuleHost to load active code_tool_hook activations. */

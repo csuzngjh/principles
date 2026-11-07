@@ -12,7 +12,7 @@
  * 结构化告警口）。CLI 进程单工作区，workspaceDir 天然在作用域，归属正确。
  */
 import { WorkspaceTelemetryEmitter } from '@principles/host-runtime';
-import { storeEmitter } from '@principles/core/runtime-v2';
+import { storeEmitter } from '@principles/core/runtime';
 
 export function createWorkspaceTelemetryEmitter(workspaceDir: string): WorkspaceTelemetryEmitter {
   return new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {

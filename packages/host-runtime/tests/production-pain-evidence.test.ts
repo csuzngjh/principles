@@ -4,7 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
-import { applyTrajectorySchemaBase, extractFilePathFromParams, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase, extractFilePathFromParams, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime';
 import { createProductionHostRuntime } from '../src/index.js';
 import { recordVerifiedToolOutcomes, type PainDatabaseFactory } from '../src/production-pain-evidence.js';
 

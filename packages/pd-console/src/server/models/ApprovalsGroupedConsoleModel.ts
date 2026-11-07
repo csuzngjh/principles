@@ -3,11 +3,11 @@ import {
   SqliteApprovalQueueStore,
   SqlitePIArtifactStore,
   ApprovalQueue,
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  RUNTIME_PRINCIPLE_BUDGET,
   detectPromptReplacementTarget,
   computeArtifactDigest,
   SqliteActivationStateStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   checkPromptArtifactDeliverability,
   operatorDeclaredBudgetResolution,
@@ -17,10 +17,11 @@ import {
   selectConsoleRuntimeBudgetFacts,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
-import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
+import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
-import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
+import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime';
 import { loadPdConfig } from '../config/pd-config-store.js';
+import { errorMessage } from '../utils/response.js';
 import {
   createArtifactPrincipleResolutionDeps,
   resolveArtifactPrincipleId,
@@ -523,7 +524,7 @@ export class ApprovalsGroupedConsoleModel {
         const reference = resolution.perHost[0]?.projection;
         return {
           promptInjection: {
-            budget: reference?.budget ?? RUNTIME_V2_PRINCIPLE_BUDGET,
+            budget: reference?.budget ?? RUNTIME_PRINCIPLE_BUDGET,
             usedChars: reference?.usedChars ?? 0,
             truncated: reference?.truncated ?? false,
             capacityStatus: 'unconfirmed',
@@ -602,7 +603,7 @@ export class ApprovalsGroupedConsoleModel {
     } catch (err: unknown) {
       // rc-9: degradation is observable to operators even though it stays
       // invisible in the UI payload (the badge is advisory only).
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.warn(`[pd-console] prompt injection forecast unavailable, omitting promptInjection: ${message}`);
       return {};
     }

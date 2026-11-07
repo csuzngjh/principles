@@ -35,13 +35,12 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import {
   runRuleHostPipeline,
-  createSandboxGateDeps,
 } from '../../src/services/rulehost-pipeline-runner.js';
 import { RuleHost } from '../../../openclaw-plugin/src/core/rule-host.js';
 import { OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../../../openclaw-plugin/src/constants/tool-semantics.js';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
-import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime';
 import {
   RuntimeStateManager,
   SqliteApprovalQueueStore,
@@ -55,8 +54,8 @@ import {
   createProductionGateDeps,
   makeIdempotencyKey,
   createPITaskDiagnosticJson,
-} from '@principles/core/runtime-v2';
-import type { PIArtifactSnapshot, RuleHostInput } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PIArtifactSnapshot, RuleHostInput } from '@principles/core/runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 
 // ── Scripted adapter (same pattern as rulehost-pipeline-runner.test.ts) ──────
@@ -248,12 +247,12 @@ function makeTmpDir(): string {
   return dir;
 }
 
-async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string, candidateId?: string): Promise<void> {
-  if (candidateId) await seedCandidateMaterial(sm, candidateId);
+async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string, candidateId: string): Promise<void> {
+  await seedCandidateMaterial(sm, candidateId);
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
     dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;
-  const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId, ...(candidateId ? { candidateId } : {}) });
+  const diagnosticJson = JSON.stringify({ ...baseMetadata, sourcePainId: painId, candidateId });
   await sm.createTask({ taskId, taskKind: 'dreamer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson });
 }
 

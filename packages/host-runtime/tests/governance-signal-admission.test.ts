@@ -16,7 +16,7 @@ import {
 } from '../src/governance-signal-admission.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import { deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
-import { getDefaultPdConfig, invalidatePainSignalBridge, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, invalidatePainSignalBridge, TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime';
 
 /**
  * Slice B admission matrix (SPEC §18/§19, PRI-623): detector semantics,

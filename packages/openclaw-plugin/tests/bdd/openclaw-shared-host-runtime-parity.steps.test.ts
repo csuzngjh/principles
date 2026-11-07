@@ -8,7 +8,7 @@ import {
   getDefaultPdConfig,
   SqliteActivationStateStore,
   SqliteConnection,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import plugin from '../../src/index.js';
 import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
@@ -196,7 +196,7 @@ registry.then('the returned system context contains that activated principle', (
   const append = Object.getOwnPropertyDescriptor(result, 'appendSystemContext')?.value;
   if (typeof prepend !== 'string' || typeof append !== 'string') throw new Error('Expected prompt context strings');
   expect(`${prepend}\n${append}`.split(PRINCIPLE_TEXT)).toHaveLength(2);
-  // Runtime V2 is the single injection authority: the directive is rendered in
+  // Runtime is the single injection authority: the directive is rendered in
   // prependSystemContext even though the legacy reducer also knows the principle.
   expect(prepend).toContain(`<directive id="P_SHARED_523"`);
 

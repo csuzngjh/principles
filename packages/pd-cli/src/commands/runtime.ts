@@ -12,7 +12,7 @@
  */
 import * as path from 'path';
 import type { Command } from 'commander';
-import { probeRuntime, PDRuntimeError, isRuntimeConfigError } from '@principles/core/runtime-v2';
+import { probeRuntime, PDRuntimeError, isRuntimeConfigError } from '@principles/core/runtime';
 import { resolveRuntimeFromPdConfig, resolveRuntimeWithOverrides } from '../services/resolve-runtime-from-pd-config.js';
 
 interface RuntimeProbeOptions {

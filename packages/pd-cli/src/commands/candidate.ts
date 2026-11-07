@@ -41,7 +41,7 @@ import {
   type LedgerPrincipleEntry,
   type ReuseDecision,
   type CandidateIntakeResult,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';

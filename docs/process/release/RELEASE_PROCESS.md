@@ -125,6 +125,64 @@ versions equal "because they ship together".
   scheduled run derives `data_schema_forward_readable_from` from the live
   channel pointer (an operator dispatch must still pass it explicitly,
   PRI-853).
+- **Signed-channel asset publication** (`release-metadata.yml`, manual
+  `mode=publish`): since PRI-1103 the build commit is NOT the dispatched
+  `ref` — the workflow asks the registry which cohort
+  `create-principles-disciple` actually shipped for that product version and
+  builds that commit, so the console-update channel and the fresh-install
+  channel cannot ship different bytes under one version number. `ref` picks
+  the release tooling; `cohort_sha` is an explicit identity assertion that
+  this commit IS the commit npm `latest` currently points at — legal for a
+  deterministic rebuild, a repeat publication of the unchanged channel, or a
+  key-rotation re-sign of that same cohort. It is NOT a historical selector:
+  once `latest` has moved to another commit, an older published cohort is
+  refused (`EXPLICIT_NOT_LATEST`) because it would ship different bytes than
+  a fresh npm install receives. If the npm side has not shipped yet, a publish
+  dispatch refuses and a preflight rehearses the ref with a warning.
+- **Publication mutex and cohort re-checks** (PRI-1103, race hardening):
+  npm `latest` is one global fact, so `publish-npm.yml` and
+  `release-metadata.yml` `mode=publish` share the single Actions concurrency
+  group `pd-release-publication-global` (`cancel-in-progress: false`, stable
+  and candidate alike). Release-metadata dry-runs and `publish-preflight`
+  keep their own groups and never take the production lock.
+  **Actions concurrency is NOT a queue**: it keeps one running plus at most
+  one pending run per group; a newer pending run REPLACES the older pending
+  one (which is cancelled). Serialisation is guaranteed, delivery of every
+  queued publication is not — a replaced pending run must be re-dispatched.
+  No persistent lock service is introduced; the repository has none, and a
+  second lock would become a competing truth. The legacy manual
+  `scripts/release.sh` publishes outside Actions and therefore cannot be
+  serialised by a concurrency group: operators must not run it while a
+  publication workflow is in flight (a drift it causes is still caught by
+  the cohort gates before the pointer push).
+- **Cohort re-verification gates** (`scripts/release/verify-publication-cohort.mjs`,
+  same script at both points): gate 1 runs after every platform asset is
+  built/downloaded/identity-verified and BEFORE any side effect; gate 2 runs
+  INSIDE the `Publish to metadata source` shell, after `git commit` and
+  immediately before `git push origin gh-pages` — nothing else executes
+  between the gate and the push. Both re-read npm through the existing
+  resolver and registry client and require the full `productVersion` +
+  40-char `gitHead` to still equal what the run built.
+  **Every cohort query is force-revalidated**: the registry client appends
+  npm's documented `?write=true` marker (the npm client's "give me the
+  current value" mechanism before a write) plus `Cache-Control: no-cache`
+  as a complement — a repeated query is not a fresh query, and a cached
+  packument would make both gates no-ops. Initial resolution, gate 1 and
+  gate 2 are separate processes, so each issues its own revalidated request
+  and never reuses an earlier result. Ordinary (non-cohort) registry reads
+  keep the default behaviour.
+  Auto mode (`cohort_sha` empty) and explicit mode apply the SAME rule: the
+  commit must be the one npm `latest` currently serves, with a readable
+  manifest whose root product version equals the expected version. Explicit
+  mode may only name that current commit (repeat build / re-sign); it can
+  never revive an older published cohort, and `allow_version_drift` does not
+  change the npm latest commit identity. 404 / 503 / timeout / network failure
+  / malformed JSON / missing `gitHead` / version or commit drift / unreadable
+  commit all fail closed, reporting expected vs actual identity, the mode, and
+  whether external side effects (asset bytes) already happened. A dry-run
+  result is advisory only and is explicitly labelled NOT publication
+  evidence, and a dry-run never executes the mode=publish shell;
+  `mode=publish` never takes that fallback.
 
 The Version PR bot (`changesets/action`, pinned) requires the
 `PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +

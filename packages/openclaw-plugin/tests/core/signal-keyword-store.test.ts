@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime-v2';
+import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime';
 
 // mock 掉 host 依赖的副作用模块(与 signal-collector-host.test.ts 一致)
 vi.mock('../../src/hooks/pain.js', () => ({
@@ -25,7 +25,7 @@ import {
 } from '../../src/core/signal-keyword-store.js';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
 import { saveCorrectionKeywordStore, _resetCorrectionCueCache } from '../../src/core/correction-cue-learner.js';
-import type { CorrectionKeywordStore } from '@principles/core/runtime-v2';
+import type { CorrectionKeywordStore } from '@principles/core/runtime';
 
 /**
  * P0-B: Learn→Detect 反馈闭环 (MVP_CORE_LOOP_CONTRACT INV-01 §3 / Gate A)。

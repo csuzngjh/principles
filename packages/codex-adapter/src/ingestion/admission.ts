@@ -6,7 +6,7 @@
  * observations onto the host-neutral admission candidates of
  * `@principles/host-runtime` (`admitGovernanceSignals`), then driving the
  * admitted pains through the existing continuation seams —
- * `ensureGovernanceDiagnosticianTask` (Runtime V2 async enqueue, never an
+ * `ensureGovernanceDiagnosticianTask` (Runtime async enqueue, never an
  * LLM) and `promoteAdmittedGovernanceEvidence` (Slice A's ≤12 + trigger +
  * next-assistant window with its durable pending tail).
  *

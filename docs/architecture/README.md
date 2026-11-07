@@ -257,7 +257,7 @@
 | Peer Runner | `GLOSSARY.md` §2 + `INTERNALIZATION_PIPELINE.md` §3.4 | Active |
 | RuntimeAdapter | `GLOSSARY.md` §2 + `COMPONENTS.md` §3.5 | Active |
 | PDErrorCategory | `ERROR_ARCHITECTURE.md` §1 | Active |
-| GFI | `PD_ARCHITECTURE_OVERVIEW.md` + `COMPONENTS.md` §3.6 | Active |
+| GFI | `PD_ARCHITECTURE_OVERVIEW.md` + `COMPONENTS.md` §3.6 | Retired（2026-11-04 移除；仅 `gfi` `gone` 墓碑，无执行能力） |
 
 ---
 

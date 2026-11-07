@@ -75,7 +75,7 @@ export interface TrajectoryPainEventInput {
   createdAt?: string;
   /** PRI-406: Canonical pain identity (e.g. manual_<ts>_<hash> or pain_<ts>_<hash>). */
   canonicalPainId?: string;
-  /** PRI-406: Runtime V2 diagnostician task ID linked to this pain event. */
+  /** PRI-406: Runtime diagnostician task ID linked to this pain event. */
   runtimeTaskId?: string;
   /** PRI-640: Host attribution ('openclaw' | 'codex' | 'workbuddy'); omit for manual/legacy (persists NULL = unknown). */
   hostKind?: 'openclaw' | 'codex' | 'workbuddy';

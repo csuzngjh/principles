@@ -1,6 +1,6 @@
 /** Shared validated history assembly; host vocabulary is supplied by its owner. */
-import { buildRuleHostAction } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
-import type { CanonicalKind, RuleHistoryWindow, RuleToolCallRecord, RuleToolOutcome, ToolSemanticRegistry } from '@principles/core/runtime-v2';
+import { buildRuleHostAction } from '@principles/core/runtime/internalization/rule-host-input-builder';
+import type { CanonicalKind, RuleHistoryWindow, RuleToolCallRecord, RuleToolOutcome, ToolSemanticRegistry } from '@principles/core/runtime';
 import type { RuleHostContextRow } from '@principles/core/trajectory-types';
 const VALID_OUTCOMES: ReadonlySet<string> = new Set<RuleToolOutcome>(['success', 'failure', 'blocked']);
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -25,8 +25,8 @@ import { createHash } from 'node:crypto';
 //
 // The usable-entry check MUST follow the Core authority's status enum, not a
 // local copy. The canonical authority is the exported `PRINCIPLE_STATUSES`
-// constant (`runtime-v2/types/principle-enums.ts`, re-exported from
-// `@principles/core/runtime-v2`); its own doc comment requires every other
+// constant (`runtime/types/principle-enums.ts`, re-exported from
+// `@principles/core/runtime`); its own doc comment requires every other
 // representation to DERIVE from it — never re-type the literals. The TypeBox
 // `PrincipleStatusSchema` is itself built from this array, so consuming the
 // constant directly is the strictest, single-source binding. Resolution
@@ -34,7 +34,7 @@ import { createHash } from 'node:crypto';
 // allowlist.
 const CORE_PRINCIPLE_STATUSES = await (async () => {
   try {
-    const governance = await import('@principles/core/runtime-v2');
+    const governance = await import('@principles/core/runtime');
     const statuses = governance?.PRINCIPLE_STATUSES;
     if (!Array.isArray(statuses) || statuses.length === 0 || statuses.some((s) => typeof s !== 'string' || s === '')) {
       throw new Error('PRINCIPLE_STATUSES is not a non-empty string array');

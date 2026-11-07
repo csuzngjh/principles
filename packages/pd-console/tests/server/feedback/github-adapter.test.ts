@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
+import type { FeedbackReport } from '@principles/core/runtime/feedback';
 import {
   detectGithubCli,
   submitToGithub,

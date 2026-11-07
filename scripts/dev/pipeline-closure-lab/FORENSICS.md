@@ -111,7 +111,7 @@ pd activation approve --approval-id <id> -w "$WS" --json
 ```bash
 cd <repo>/packages/pd-cli && node -e "
 (async()=>{
-  const { createRecoverySweepService } = await import('@principles/core/runtime-v2');
+  const { createRecoverySweepService } = await import('@principles/core/runtime');
   const h = await createRecoverySweepService({ workspaceDir: '<WS>' });
   const r = await h.service.recoverFailedTask('<taskId>', true); // force: attempts 耗尽时 +3
   console.log(JSON.stringify(r));
@@ -144,7 +144,7 @@ cd <repo>/packages/pd-cli && node -e "
 
 ```bash
 # 代码判定行为运行时验证（example: canonicalizeToolKind）
-node -e "const {canonicalizeToolKind}=require('<repo>/packages/principles-core/dist/runtime-v2/internalization/rule-context-v2.js');
+node -e "const {canonicalizeToolKind}=require('<repo>/packages/principles-core/dist/runtime/internalization/rule-context-v2.js');
 console.log(canonicalizeToolKind('execute_command'))"        # → 'other'（634-E 审计基线）
 
 # 原则注入统计（agent 是否真的被注入影响）

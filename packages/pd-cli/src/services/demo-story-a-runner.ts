@@ -18,7 +18,7 @@ import {
   buildDemoNarrative,
   validateDemoChannels,
   evaluateDemoGoldenTrace,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { randomUUID } from 'node:crypto';
 import type {
   MvpChannel,
@@ -29,8 +29,8 @@ import type {
   PIArtifactSnapshot,
   DispatchInput,
   ApprovalDecisionResult,
-} from '@principles/core/runtime-v2';
-import type { PIArtifactRecord } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { PIArtifactRecord } from '@principles/core/runtime';
 
 function toSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
   return {
@@ -333,7 +333,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
       storyDescription: isUnknown ? `Unknown channels: ${(validationFailure as { unknownChannels: string[] }).unknownChannels.join(', ')}` : 'Demo requires at least one MVP channel.',
       stages: [],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       workspaceDir: opts.workspaceDir,
       inputValidationFailure: validationFailure,
     };
@@ -546,7 +546,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
       storyDescription: 'Demo proves: (1) artifact persistence via SqlitePIArtifactStore, (2) activation dispatch via ActivationDispatcher.dispatch() with real gate logic, (3) approval queue via SqliteApprovalQueueStore.approve() + ApprovalCompletionService approved dispatch (PRI-811 Phase B: every channel queues for Owner approval), (4) sandbox enforcement via evaluateInRefinerSandbox against golden trace. Evidence seed and owner review are narrative fixtures (simulated: true).',
       stages,
       channelOutcomes,
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
       workspaceDir: opts.workspaceDir,
     };
   } finally {

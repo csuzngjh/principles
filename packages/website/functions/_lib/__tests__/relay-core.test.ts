@@ -36,7 +36,7 @@ import { computeFeedbackFingerprintWebCrypto } from '../fingerprint-webcrypto.js
 
 /**
  * Shared cross-implementation vectors — MUST mirror
- * `packages/principles-core/src/runtime-v2/feedback/__tests__/fingerprint.test.ts`
+ * `packages/principles-core/src/runtime/feedback/__tests__/fingerprint.test.ts`
  * (CORE_VECTORS). Do not change without updating that fixture.
  */
 const CORE_VECTORS: {

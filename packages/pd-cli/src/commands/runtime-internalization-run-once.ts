@@ -18,13 +18,13 @@ import {
   DefaultRolloutReviewerValidator,
   TestDoubleRuntimeAdapter,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime-v2';
-import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, OutputLanguage, ArtificerHostSemanticContext } from '@principles/core/runtime';
+import { resolveRuntimeConfigForAgent, AGENT_NAME_FOR_TASK_KIND, isRuntimeConfigError, buildArtificerHostSemanticContext } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { loadPdConfig } from '../services/pd-config-loader.js';
-import type { EffectivePdConfig } from '@principles/core/runtime-v2';
+import type { EffectivePdConfig } from '@principles/core/runtime';
 import {
   resolveRuntimeAdapterFromConfig,
   ConfigResolutionError,
@@ -40,7 +40,7 @@ import { createEvaluatorRunnerDeps } from '../services/rulehost-pipeline-runner.
 // PRI-713: same factory now also supplies dispatchActivation; the durable
 // workspace host-tool-semantics resolver is the shared provenance source.
 import { createEvaluatorRuntimeContext, createRolloutGovernanceDeps, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
-import type { RefinerRuleHostGateDeps } from '@principles/core/runtime-v2';
+import type { RefinerRuleHostGateDeps } from '@principles/core/runtime';
 
 interface RunOnceOptions {
   workspace?: string;

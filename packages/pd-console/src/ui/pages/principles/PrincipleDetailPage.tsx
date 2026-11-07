@@ -19,14 +19,14 @@ import {
 } from "../../api.js";
 import { ApprovalSubjectReading } from "../focus/ApprovalSubjectReading.js";
 import type { PrincipleReceiptsData, EvidenceAuditData } from "../../api.js";
-import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime-v2";
+import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
 import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
 import { IS_DEV } from "../../utils/runtime-mode.js";
-import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
+import type { OwnerGovernanceView } from '@principles/core/runtime';
 import type {
   PrincipleDetail,
   PrincipleDetailData,

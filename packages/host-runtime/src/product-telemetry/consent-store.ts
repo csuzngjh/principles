@@ -28,7 +28,7 @@ import {
   isValidBucketDate,
   isValidTelemetrySecretHex,
   PRODUCT_TELEMETRY_CONSENT_VERSION,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export const PRODUCT_TELEMETRY_STATE_FILENAME = 'product-telemetry.json';
 export const PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION = '2';

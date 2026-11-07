@@ -5,7 +5,7 @@
  * in the canonical install manifest it spawns ONE system-node child running
  * `pd codex worker` (the Slice C governance worker) and keeps it alive with
  * bounded restart. Correctness never depends on this module — the durable
- * Runtime V2 task lease owns exactly-once execution even if two workers
+ * Runtime task lease owns exactly-once execution even if two workers
  * briefly overlap. This module only owns process lifecycle:
  *
  *   - at most one worker child per CANONICAL workspace path (realpath);

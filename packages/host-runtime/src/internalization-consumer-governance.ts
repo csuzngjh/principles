@@ -38,7 +38,7 @@ import {
   type RuntimeStateManager,
   type InternalizationOrchestrator,
   type ToolSemanticRegistry,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
 /** Structural logger port — PluginLogger satisfies this without adaptation. */

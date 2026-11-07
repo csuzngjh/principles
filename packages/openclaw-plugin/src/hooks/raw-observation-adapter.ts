@@ -2,7 +2,7 @@
  * Raw Observation Adapter — PRI-362 / PRI-446
  *
  * The source-kind resolution logic and RawObservation builders have been
- * migrated to principles-core (runtime-v2/evidence-triage/observation-resolver.ts).
+ * migrated to principles-core (runtime/evidence-triage/observation-resolver.ts).
  *
  * This file is now a thin re-export adapter. It preserves the original export
  * names (resolveSourceKind, buildToolFailureObservation, RawObservation) so
@@ -19,7 +19,7 @@ export {
   resolveSourceKind,
   buildToolFailureObservation,
   buildManualPainObservation,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // Re-export RawObservation for plugin consumers
 export type { RawObservation } from './raw-observation-types.js';

@@ -17,7 +17,7 @@
  */
 
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, cpSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, cpSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -137,13 +137,24 @@ function sh(cmd, opts = {}) {
   }
 }
 
-function shJson(cmd, opts = {}) {
-  const raw = sh(cmd, opts);
-  try { return JSON.parse(raw); } catch { return null; }
+function pdJson(subcmd, ws, opts = {}) {
+  const result = spawnSync(process.execPath, [PD_CLI, ...subcmd.split(' '), '--workspace', ws, '--json'], {
+    encoding: 'utf-8',
+    timeout: opts.timeout ?? 30000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
+  });
+  try { return JSON.parse(result.stdout ?? ''); } catch { return null; }
 }
 
-function pdCmd(subcmd, ws) {
-  return `node "${PD_CLI}" ${subcmd} --workspace "${ws}" --json`;
+function nodeJson(script, extraArgs, opts = {}) {
+  const result = spawnSync(process.execPath, ['-e', script, ...extraArgs], {
+    encoding: 'utf-8',
+    timeout: opts.timeout ?? 10000,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
+  });
+  try { return JSON.parse(result.stdout ?? ''); } catch { return null; }
 }
 
 function log(phase, msg) {
@@ -224,9 +235,9 @@ function phase1() {
 
 function phase2(ws) {
   const pdWs = ws;
-  const canary = shJson(pdCmd('runtime canary', pdWs));
-  const integrity = shJson(pdCmd('runtime internalization integrity', pdWs));
-  const queue = shJson(pdCmd('runtime internalization queue', pdWs));
+  const canary = pdJson('runtime canary', pdWs);
+  const integrity = pdJson('runtime internalization integrity', pdWs);
+  const queue = pdJson('runtime internalization queue', pdWs);
 
   return {
     canary: canary ?? { overallStatus: 'unavailable' },
@@ -360,7 +371,7 @@ function phase3b(trap, runId, ws, model, sessionKey) {
 
 function phase4(ws, sessionKey, sinceTs) {
   const pdWs = ws;
-  const queue = shJson(pdCmd('runtime internalization queue', pdWs));
+  const queue = pdJson('runtime internalization queue', pdWs);
 
   const today = new Date().toISOString().slice(0, 10);
   const eventLogPaths = [
@@ -403,12 +414,12 @@ function phase4(ws, sessionKey, sinceTs) {
   for (const dbPath of dbSearchPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const dbResult = shJson(pdCmd('runtime internalization queue', pdWs));
+      const dbResult = pdJson('runtime internalization queue', pdWs);
       const tasks = dbResult?.tasks ?? dbResult?.pendingTasks ?? [];
       for (const task of tasks.slice(0, 3)) {
         const taskId = task.taskId ?? task.id;
         if (!taskId) continue;
-        const detail = shJson(pdCmd(`task show ${taskId}`, pdWs));
+        const detail = pdJson(`task show ${taskId}`, pdWs);
         if (detail?.diagnosticJson) {
           try {
             const dj = typeof detail.diagnosticJson === 'string'
@@ -463,8 +474,8 @@ function phase5(ws, sinceTs) {
   for (const dbPath of dbPaths) {
     if (!existsSync(dbPath)) continue;
     try {
-      const tasksJson = sh(`node -e "const Database = require('better-sqlite3'); const db = new Database('${dbPath.replace(/\\/g, '\\\\')}', {readonly:true}); const rows = db.prepare('SELECT task_id, task_kind, status, created_at, diagnostic_json FROM tasks ORDER BY rowid DESC LIMIT 10').all(); console.log(JSON.stringify(rows));"`, { timeout: 10000 });
-      const tasks = JSON.parse(tasksJson || '[]');
+      const tasksRows = nodeJson(`const Database = require('better-sqlite3'); const db = new Database(process.argv[1], {readonly:true}); const rows = db.prepare('SELECT task_id, task_kind, status, created_at, diagnostic_json FROM tasks ORDER BY rowid DESC LIMIT 10').all(); console.log(JSON.stringify(rows));`, [dbPath], { timeout: 10000 });
+      const tasks = Array.isArray(tasksRows) ? tasksRows : [];
       for (const task of tasks) {
         let dj = null;
         try { dj = typeof task.diagnostic_json === 'string' ? JSON.parse(task.diagnostic_json) : task.diagnostic_json; } catch { /* skip */ }
@@ -484,8 +495,8 @@ function phase5(ws, sinceTs) {
         });
       }
 
-      const candsJson = sh(`node -e "const Database = require('better-sqlite3'); const db = new Database('${dbPath.replace(/\\/g, '\\\\')}', {readonly:true}); const rows = db.prepare('SELECT candidate_id, task_id, title, description, status, recommendation_kind, abstracted_principle, trigger_pattern, action FROM principle_candidates ORDER BY rowid DESC LIMIT 10').all(); console.log(JSON.stringify(rows));"`, { timeout: 10000 });
-      const candidates = JSON.parse(candsJson || '[]');
+      const candsRows = nodeJson(`const Database = require('better-sqlite3'); const db = new Database(process.argv[1], {readonly:true}); const rows = db.prepare('SELECT candidate_id, task_id, title, description, status, recommendation_kind, abstracted_principle, trigger_pattern, action FROM principle_candidates ORDER BY rowid DESC LIMIT 10').all(); console.log(JSON.stringify(rows));`, [dbPath], { timeout: 10000 });
+      const candidates = Array.isArray(candsRows) ? candsRows : [];
       for (const cand of candidates) {
         results.candidates.push({
           candidateId: cand.candidate_id,
@@ -529,8 +540,8 @@ function phase5(ws, sinceTs) {
     hasOnlyPdInternalCandidates: pdInternalCandidateCount > 0 && agentBehaviorCandidateCount === 0,
   };
 
-  results.integrity = shJson(pdCmd('runtime internalization integrity', pdWs));
-  results.canary = shJson(pdCmd('runtime canary', pdWs));
+  results.integrity = pdJson('runtime internalization integrity', pdWs);
+  results.canary = pdJson('runtime canary', pdWs);
 
   return results;
 }
@@ -549,7 +560,7 @@ function generateEvidence({ runId, trap, phase0R, phase1R, phase2R, phase3R, pha
   // Compute verdict via the strict, unit-tested computation extracted to
   // e2e-story-a-verdict.mjs. The previous inline verdict block was removed
   // because it was unconditionally overwritten by strictResult below.
-  let verdict = 'story_a_validated';
+  let verdict;
   const verdictNotes = [];
 
   const strictResult = computeStoryAVerdict({
@@ -727,7 +738,6 @@ Traps:
   }
 
   const runId = opts.runId;
-  const evidenceLines = [];
 
   console.log('╔══════════════════════════════════════════════════════════╗');
   console.log('║     E2E Story A\' Harness — Real PD Validation           ║');
@@ -793,7 +803,6 @@ Traps:
   log('4', 'Checking pain emission...');
   let phase4R = null;
   const phase4MaxWaitMs = 90000;
-  const phase4PollIntervalMs = 5000;
   const phase4Start = Date.now();
   while (Date.now() - phase4Start < phase4MaxWaitMs) {
     sh('sleep 5', { timeout: 10000 });

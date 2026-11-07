@@ -616,7 +616,7 @@ const FEATURES_EMPTY_MAPPING_LINE = /^features:\s*\{\s*\}\s*(?:#.*)?$/;
 
 /**
  * Registry-required category for the host.workbuddy flag entry. SSoT:
- * packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts
+ * packages/principles-core/src/runtime/feature-flags/feature-flag-contract.ts
  * ({ id: 'host.workbuddy', category: 'quiet', ... }). The production config
  * validator (pd-config-validate) REJECTS feature entries without a category,
  * so an enabled-only override makes every hook invocation degrade (review R1).

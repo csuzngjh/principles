@@ -263,8 +263,8 @@
           <li>
             <strong>{{ isZh ? '插件启用：' : 'Plugin enabled:' }}</strong>
             {{ isZh
-              ? '安装器同时把 settings.json 的 enabledPlugins["principles-disciple@<marketplace>"] 写成 true——装完即启用，新会话生效。插件清单里的 defaultEnabled=false 只对「不走 PD 安装器」的宿主安装方式生效。'
-              : 'the installer also writes enabledPlugins["principles-disciple@<marketplace>"] = true in settings.json — installed means enabled, effective in a new session. The manifest\'s defaultEnabled=false applies only when a host installs the plugin WITHOUT the PD installer.'
+              ? '安装器把 settings.json 的 enabledPlugins["principles-disciple@<marketplace>"] 记录为「已有选择优先，否则用插件清单默认值」。插件清单默认 defaultEnabled=false，所以全新安装是「已安装但未启用」，需要你在 WorkBuddy 插件管理里启用后 hook 才执行、手动入口才生效；已经显式启用或禁用过的选择会被原样保留。'
+              : 'the installer records enabledPlugins["principles-disciple@<marketplace>"] in settings.json, preferring an existing Owner true/false choice and otherwise applying the manifest default. The manifest default is defaultEnabled=false, so a fresh install is INSTALLED but NOT ENABLED — it must be enabled in WorkBuddy\'s plugin manager before its hooks run and the manual entry takes effect. An explicit Owner enable or disable is preserved unchanged.'
             }}
           </li>
           <li>

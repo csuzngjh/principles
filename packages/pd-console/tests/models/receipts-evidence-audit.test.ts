@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
-import { SqliteConnection, SqliteInterventionEvidenceStore, getDefaultPdConfig } from '@principles/core/runtime-v2';
-import { normalizeInterventionEvidenceBatch } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteInterventionEvidenceStore, getDefaultPdConfig } from '@principles/core/runtime';
+import { normalizeInterventionEvidenceBatch } from '@principles/core/runtime';
 import { ReceiptsConsoleModel } from '../../src/server/models/ReceiptsConsoleModel.js';
 
 let workspaceDir = '';

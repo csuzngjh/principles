@@ -1,10 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticianOutputV1Schema } from '../packages/principles-core/src/runtime-v2/diagnostician-output.ts';
-import { RuntimeStateManager } from '../packages/principles-core/src/runtime-v2/store/runtime-state-manager.js';
-import { SqliteHistoryQuery } from '../packages/principles-core/src/runtime-v2/store/history/sqlite-history-query.js';
-import { SqliteContextAssembler } from '../packages/principles-core/src/runtime-v2/store/context/sqlite-context-assembler.js';
+import { DiagnosticianOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
+import { RuntimeStateManager } from '../packages/principles-core/src/runtime/store/runtime-state-manager.js';
+import { SqliteHistoryQuery } from '../packages/principles-core/src/runtime/store/history/sqlite-history-query.js';
+import { SqliteContextAssembler } from '../packages/principles-core/src/runtime/store/context/sqlite-context-assembler.js';
 
 // Parse CLI Arguments
 const args = process.argv.slice(2);

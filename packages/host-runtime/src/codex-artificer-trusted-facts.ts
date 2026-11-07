@@ -1,4 +1,4 @@
-import type { ArtificerTrustedFactsPort } from '@principles/core/runtime-v2';
+import type { ArtificerTrustedFactsPort } from '@principles/core/runtime';
 import { describeCodexRuleContextFact } from './design-gate-facts.js';
 
 /**

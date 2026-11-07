@@ -11,7 +11,7 @@ import {
   SqliteActivationStateStore,
   ApprovalQueue,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { sendJson, sendNotFound } from '../../src/server/utils/response.js';

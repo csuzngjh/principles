@@ -2496,7 +2496,7 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
     // activation arrives at commit. Strict behavior is preserved whenever an
     // active record already exists (upgrades).
     const activeRecordPath = path.join(getPdDir(), 'active.json');
-    if (!localOk && detail.includes('no active release record') && !existsSync(activeRecordPath)) {
+    if (detail.includes('no active release record') && !existsSync(activeRecordPath)) {
       localOk = true;
       localError = undefined;
       logger.info('PD CLI executed without an activation record (first install); the record is written at commit.');

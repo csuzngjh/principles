@@ -22,7 +22,7 @@
  *   - Track principle value ranking (pain prevented, adherence rate)
  */
 
-import type { Principle as CorePrinciple } from '@principles/core/runtime-v2';
+import type { Principle as CorePrinciple } from '@principles/core/runtime';
 import type { PrincipleDetectorSpec } from '../core/evolution-types.js';
 
 // Re-exported from core (PRI-51) for plugin consumers
@@ -41,7 +41,7 @@ export type {
   PrincipleEventType,
   PrincipleLifecycleEvent,
   PrincipleTreeStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 // =========================================================================
 // 1. PRINCIPLE (Tree Root) — Highly abstract, cross-scenario, value-driven

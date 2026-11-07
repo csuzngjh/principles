@@ -18,8 +18,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
-import type { RuleHostInput } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
+import type { RuleHostInput } from '@principles/core/runtime';
 import { RuleHost } from '../../src/core/rule-host.js';
 import { EventLogService } from '../../src/core/event-log.js';
 

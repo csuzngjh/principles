@@ -1,11 +1,11 @@
 /**
- * pd health command implementation — Runtime V2 edition.
+ * pd health command implementation — Runtime edition.
  *
  * Usage: pd health [--workspace <path>] [--json]
  *
  * Reads workspace/.pd/state.db and workspace/.state/principle_training_state.json
- * to provide Runtime V2 health diagnostics.
- * Uses read models from @principles/core/runtime-v2 (no direct ledger access).
+ * to provide Runtime health diagnostics.
+ * Uses read models from @principles/core/runtime (no direct ledger access).
  */
 
 import * as fs from 'fs';
@@ -13,8 +13,8 @@ import * as path from 'path';
 import Database from 'better-sqlite3';
 import type { Command } from 'commander';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime-v2';
-import type { PainChainTrace } from '@principles/core/runtime-v2';
+import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency } from '@principles/core/runtime';
+import type { PainChainTrace } from '@principles/core/runtime';
 import { getLedgerFilePathPublic } from '@principles/core/principle-tree-ledger';
 import {
   createEvaluatorRuntimeContext,

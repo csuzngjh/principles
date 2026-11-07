@@ -18,7 +18,7 @@ import {
   SqliteDiagnosticianCommitter,
   type RunnerResult,
   type DiagnosticianOutputV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { BehaviorExamplePackAssembler } from '@principles/host-runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
@@ -238,7 +238,7 @@ afterEach(async () => {
   // Release any cached-bridge handles the cycle created before removing temp
   // dirs; Windows may also release closed SQLite handles asynchronously, so
   // cleanup retries briefly before declaring a pinned file (a real leak).
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   for (const dir of [...dirs]) {
     await disposePainSignalBridgesForWorkspace(dir).catch(() => {});
   }
@@ -851,7 +851,7 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
 
   it('PRI-634 A3 via the Codex path (AC-4): evaluator critical telemetry lands in THIS workspace sink through the shared cycle', async () => {
     const ws = makeWorkspace();
-    const { EvaluatorRunner, createPITaskDiagnosticJson } = await import('@principles/core/runtime-v2');
+    const { EvaluatorRunner, createPITaskDiagnosticJson } = await import('@principles/core/runtime');
     // Seed artificer(succeeded) → evaluator(pending) through the real state
     // manager; only the LLM boundary is doubled, and the double emits its
     // critical telemetry through the REAL emitter the shared cycle wired into

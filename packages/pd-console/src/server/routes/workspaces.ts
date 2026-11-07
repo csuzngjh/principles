@@ -1,11 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WorkspaceConfigStore } from '../config/WorkspaceConfigStore.js';
 import type { WorkspaceService } from '../models/WorkspaceService.js';
-import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
-
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+import { sendSuccess, sendError, sendNotFound, sendBadRequest, errorMessage } from '../utils/response.js';
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -56,7 +52,7 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
         const entry = configStore.getWorkspace(parsed.name);
         sendSuccess(res, entry);
       } catch (err: unknown) {
-        sendError(res, 409, 'workspace_exists', getErrorMessage(err));
+        sendError(res, 409, 'workspace_exists', errorMessage(err));
       }
       return;
     }
@@ -98,7 +94,7 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
         const entry = configStore.getWorkspace(decodedWsName);
         sendSuccess(res, entry);
       } catch (err: unknown) {
-        sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
+        sendError(res, 404, 'workspace_not_found', errorMessage(err));
       }
       return;
     }
@@ -108,7 +104,7 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
         configStore.removeWorkspace(decodedWsName);
         sendSuccess(res, { removed: decodedWsName });
       } catch (err: unknown) {
-        sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
+        sendError(res, 404, 'workspace_not_found', errorMessage(err));
       }
       return;
     }
@@ -118,7 +114,7 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
         const result = await workspaceService.syncWorkspace(decodedWsName);
         sendSuccess(res, result);
       } catch (err: unknown) {
-        sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
+        sendError(res, 404, 'workspace_not_found', errorMessage(err));
       }
       return;
     }

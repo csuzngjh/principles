@@ -26,13 +26,13 @@ import {
 } from './GovernanceProjectionCollector.js';
 import {
   deriveOwnerDecisionView,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   OwnerDecisionInputs,
   OwnerDecisionViewCore,
   GovernanceFacts,
-} from '@principles/core/runtime-v2';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import { SqliteConnection } from '@principles/core/runtime';
 
 const ISO_NOW = () => new Date().toISOString();
 
@@ -730,10 +730,10 @@ function parseScribeContent(artifactId: string, contentJson: string, updatedAt: 
   if (draftRecord === undefined || readOwnString(draftRecord, 'statement') === undefined) return null;
   const risksValue = parsed.risks;
   const risks = Array.isArray(risksValue) ? risksValue.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [];
-  const applicability = draftRecord !== undefined && Array.isArray(draftRecord.applicability)
+  const applicability = Array.isArray(draftRecord.applicability)
     ? draftRecord.applicability.filter((item): item is string => typeof item === 'string')
     : [];
-  const antiPatterns = draftRecord !== undefined && Array.isArray(draftRecord.antiPatterns)
+  const antiPatterns = Array.isArray(draftRecord.antiPatterns)
     ? draftRecord.antiPatterns.filter((item): item is string => typeof item === 'string')
     : [];
   const intentContract = isRecord(parsed.intentContract) ? parsed.intentContract : undefined;
@@ -741,7 +741,7 @@ function parseScribeContent(artifactId: string, contentJson: string, updatedAt: 
   return {
     artifactId,
     statement: readOwnString(draftRecord, 'statement'),
-    ...(draftRecord !== undefined && readOwnString(draftRecord, 'rationale') !== undefined ? { rationale: readOwnString(draftRecord, 'rationale') } : {}),
+    ...(readOwnString(draftRecord, 'rationale') !== undefined ? { rationale: readOwnString(draftRecord, 'rationale') } : {}),
     applicability,
     antiPatterns,
     risks,

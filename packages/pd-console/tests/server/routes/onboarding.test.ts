@@ -166,7 +166,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
       storyDescription: 'Demo story',
       stages: [{ name: 'evidence_seed', status: 'passed' }],
       channelOutcomes: [],
-      isRuntimeV2Exclusive: true,
+      isRuntimeExclusive: true,
     };
     vi.mocked(spawn).mockReturnValue(makeMockChildEmitSuccess(demoResult) as never);
 

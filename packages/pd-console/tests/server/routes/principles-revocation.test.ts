@@ -19,7 +19,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import { handlePrinciplesRoute, disposePrinciplesModels } from '../../../src/server/routes/principles.js';
 
 let workspaceDir: string;

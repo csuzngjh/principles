@@ -15,7 +15,17 @@
  * EP-03: every degraded path returns structured reason + nextAction
  * EP-09: tests use real fs, not mocks, to catch real I/O bugs
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    fstatSync: vi.fn(actual.fstatSync),
+    readSync: vi.fn(actual.readSync),
+  };
+});
+
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -184,6 +194,27 @@ describe('safeReadIntentDoc (PRI-467)', () => {
     expect(result.reason).toBe('oversized');
     expect(result.nextAction).toBeTruthy();
     expect(result.doc).toBeUndefined();
+  });
+
+  it('reads at most INTENT_MAX_BYTES + 1 when the file grows after the initial size check', () => {
+    writeConfig(workspaceDir, true);
+    writeIntentMd(workspaceDir, 'A'.repeat(33000));
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockReturnValueOnce({
+      size: 0,
+      mtimeMs: Date.now(),
+    } as fs.Stats);
+    const readSpy = vi.spyOn(fs, 'readSync');
+
+    try {
+      const result = safeReadIntentDoc(workspaceDir, 'zh-CN');
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe('oversized');
+      expect(readSpy.mock.calls[0]?.[3]).toBe(32 * 1024 + 1);
+      expect(fstatSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fstatSpy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 
   // SPEC §12 — flag on + malformed content (no sections) → ok=true with warnings

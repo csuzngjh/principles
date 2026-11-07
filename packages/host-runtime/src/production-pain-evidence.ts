@@ -7,11 +7,11 @@ import {
   migrateLegacyGfiSchema,
   sanitizeToolParams,
   sanitizeValue,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 // PRI-1135: the canonical column declaration lives with the DDL owner. Import
-// the subpath directly so the public runtime-v2 barrel surface stays unchanged.
-import { TRAJECTORY_REQUIRED_COLUMNS } from '@principles/core/runtime-v2/trajectory-schema';
-import type { GovernanceHostKind } from '@principles/core/runtime-v2';
+// the subpath directly so the public runtime barrel surface stays unchanged.
+import { TRAJECTORY_REQUIRED_COLUMNS } from '@principles/core/runtime/trajectory-schema';
+import type { GovernanceHostKind } from '@principles/core/runtime';
 import type { HostEvent, HostEventEmitter, HostEventResult } from '@principles/core/host';
 
 const MAX_PREVIEW = 500;

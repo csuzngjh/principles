@@ -9,11 +9,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
-import { SqliteConnection } from '../core-mirror/packages/principles-core/src/runtime-v2/store/sqlite-connection.ts';
+import { SqliteConnection } from '../core-mirror/packages/principles-core/src/runtime/store/sqlite-connection.ts';
 import { openTrajectoryDbReadonly } from '../core-mirror/packages/principles-core/src/trajectory-store.ts';
 import { listGovernanceObservations } from '../core-mirror/packages/host-runtime/src/governance-observation-store.ts';
 import { createWorkspaceBehaviorEvidencePort } from '../core-mirror/packages/host-runtime/src/workspace-behavior-evidence.ts';
-import { buildToolSemanticRegistry } from '../core-mirror/packages/principles-core/src/runtime-v2/internalization/tool-semantic-registry.ts';
+import { buildToolSemanticRegistry } from '../core-mirror/packages/principles-core/src/runtime/internalization/tool-semantic-registry.ts';
 
 const results: { name: string; expect: string; actual: string; pass: boolean }[] = [];
 function record(name: string, expect: string, actual: string) {
@@ -67,7 +67,6 @@ function exists(p: string): boolean { return fs.existsSync(p); }
     seed.exec('CREATE TABLE unrelated_seed_table (id INTEGER PRIMARY KEY)');
     seed.close();
   }
-  const sizeBefore = fs.statSync(traj4).size;
   const listRes = listGovernanceObservations({ workspaceDir: ws4 } as never) as Record<string, unknown>;
   let sideEffectTables: string[] | null = null;
   let journalMode: string | null = null;

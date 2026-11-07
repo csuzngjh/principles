@@ -13,10 +13,10 @@
  * unapproved rule code escape via `input.constructor.constructor`.
  */
 
-import type { RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
-import type { RuleHostHelpers } from '@principles/core/runtime-v2';
-import type { ReplayEvaluateFn } from '@principles/core/runtime-v2';
-import { compileHardenedRuleEvaluator, safeStringifyPreview, validateRuleHostResult } from '@principles/core/runtime-v2';
+import type { RuleHostInput, RuleHostResult } from '@principles/core/runtime';
+import type { RuleHostHelpers } from '@principles/core/runtime';
+import type { ReplayEvaluateFn } from '@principles/core/runtime';
+import { compileHardenedRuleEvaluator, safeStringifyPreview, validateRuleHostResult } from '@principles/core/runtime';
 
 /**
  * Compile rule implementation code and return a typed evaluate function.

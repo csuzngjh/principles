@@ -378,7 +378,7 @@ function startSupervision(): void {
 // ─── Workspace worker supervision (PRI-624 Slice C) ──────────────────────────
 // The Companion schedules ONE `pd codex worker` child per canonical workspace
 // listed in the install manifest. Lifecycle only — execution correctness is
-// owned by the durable Runtime V2 task lease inside the worker.
+// owned by the durable Runtime task lease inside the worker.
 
 const WORKSPACE_WORKER_SYNC_INTERVAL_MS = 60_000;
 const WORKSPACE_WORKER_CYCLE_INTERVAL_MS = 120_000;
@@ -386,7 +386,7 @@ let workspaceWorkers: WorkspaceWorkerRegistry | undefined;
 // WorkBuddy third host (SPEC workbuddy-host-adapter §5): the Companion
 // schedules ONE `pd workbuddy worker` child for the WorkBuddy governance
 // workspace, supervised by the same registry lifecycle. Execution
-// correctness stays owned by the durable Runtime V2 task lease, so a
+// correctness stays owned by the durable Runtime task lease, so a
 // workspace theoretically listed for both hosts can never double-execute a
 // task — worst case is benign lease contention.
 let workbuddyWorkspaceWorkers: WorkspaceWorkerRegistry | undefined;

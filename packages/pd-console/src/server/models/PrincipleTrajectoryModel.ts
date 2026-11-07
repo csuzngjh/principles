@@ -17,9 +17,10 @@
  * - ERR-014/016/017: Previews bounded, no raw JSON.stringify on unknown values
  */
 
-import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { errorMessage } from '../utils/response.js';
 
 // ── Output types ─────────────────────────────────────────────────────────────
 
@@ -176,7 +177,7 @@ export class PrincipleTrajectoryModel {
         db = conn.getDb();
         stateDbAvailable = true;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         degradedReasons.push(`State database unavailable: ${msg}`);
         degradedNextActions.push('Check .pd/state.db integrity.');
       }
@@ -207,7 +208,7 @@ export class PrincipleTrajectoryModel {
           degradedReasons.push('principle_candidates table missing');
           degradedNextActions.push('Workspace may need initialization.');
         } else {
-          degradedReasons.push(`Candidate query failed: ${err instanceof Error ? err.message : String(err)}`);
+          degradedReasons.push(`Candidate query failed: ${errorMessage(err)}`);
           degradedNextActions.push('Check state.db integrity.');
         }
       }
@@ -227,7 +228,7 @@ export class PrincipleTrajectoryModel {
         }
       } catch (err) {
         if (!isMissingTableError(err) && !isMissingColumnError(err)) {
-          degradedReasons.push(`Task query failed: ${err instanceof Error ? err.message : String(err)}`);
+          degradedReasons.push(`Task query failed: ${errorMessage(err)}`);
         }
       }
 
@@ -240,7 +241,7 @@ export class PrincipleTrajectoryModel {
         }
       } catch (err) {
         if (!isMissingTableError(err) && !isMissingColumnError(err)) {
-          degradedReasons.push(`Artifact query failed: ${err instanceof Error ? err.message : String(err)}`);
+          degradedReasons.push(`Artifact query failed: ${errorMessage(err)}`);
         }
       }
     }
@@ -273,7 +274,7 @@ export class PrincipleTrajectoryModel {
           ).all(principleId);
         } catch (err) {
           if (!isMissingTableError(err) && !isMissingColumnError(err)) {
-            degradedReasons.push(`Approval query failed: ${err instanceof Error ? err.message : String(err)}`);
+            degradedReasons.push(`Approval query failed: ${errorMessage(err)}`);
           }
         }
 
@@ -286,7 +287,7 @@ export class PrincipleTrajectoryModel {
           ).all(principleId);
         } catch (err) {
           if (!isMissingTableError(err) && !isMissingColumnError(err)) {
-            degradedReasons.push(`Activation query failed: ${err instanceof Error ? err.message : String(err)}`);
+            degradedReasons.push(`Activation query failed: ${errorMessage(err)}`);
           }
         }
       }

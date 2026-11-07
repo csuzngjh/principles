@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 import { runHookExecutable, type HookRunResult } from './helpers/pd-hook-runner.js';

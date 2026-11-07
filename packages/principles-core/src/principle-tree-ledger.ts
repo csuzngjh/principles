@@ -17,8 +17,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'node:crypto';
-import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime-v2/principle-tree/rule-candidate-binding.js';
-import type { RuleCandidateBinding, RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime-v2/types/rule-candidate-binding.js';
+import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime/principle-tree/rule-candidate-binding.js';
+import type { RuleCandidateBinding, RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime/types/rule-candidate-binding.js';
 
 // PRI-443: Types and constants now live in the pure module
 import type {
@@ -32,12 +32,12 @@ import type {
   LegacyPrincipleTrainingState,
   LegacyPrincipleTrainingStore,
   HybridLedgerStore,
-} from './runtime-v2/types/ledger-store.js';
-import { TREE_NAMESPACE } from './runtime-v2/types/ledger-store.js';
+} from './runtime/types/ledger-store.js';
+import { TREE_NAMESPACE } from './runtime/types/ledger-store.js';
 // PRI-459: lifecycle enum is the core SSOT (values match the transition table)
-import type { ImplementationLifecycleState } from './runtime-v2/types/principle-enums.js';
+import type { ImplementationLifecycleState } from './runtime/types/principle-enums.js';
 // PRI-917 PR3B: reuse evidence contract lives with the Principle schema SSOT
-import type { ReuseEvidenceActor, ReuseEvidenceEntry } from './runtime-v2/types/principle-schema.js';
+import type { ReuseEvidenceActor, ReuseEvidenceEntry } from './runtime/types/principle-schema.js';
 
 // PRI-443: Pure parse/serialize functions extracted to codec module
 import {
@@ -46,7 +46,7 @@ import {
   createEmptyTree,
   parseHybridLedger,
   serializeLedger,
-} from './runtime-v2/principle-tree/ledger-codec.js';
+} from './runtime/principle-tree/ledger-codec.js';
 
 // Re-export for backward compatibility — existing imports from
 // @principles/core/principle-tree-ledger continue to work.
@@ -67,6 +67,11 @@ export type { ReuseEvidenceActor, ReuseEvidenceEntry };
 export { TREE_NAMESPACE };
 
 const PRINCIPLE_TRAINING_FILE = 'principle_training_state.json';
+
+// Keys that resolve through the object prototype chain instead of the ledger.
+// `principles['__proto__']` yields Object.prototype, so an update would treat
+// it as an existing principle and then write through it.
+const RESERVED_PRINCIPLE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
 // ---------------------------------------------------------------------------
 // Atomic file write (inlined PRI-443 Phase 4)
@@ -511,6 +516,9 @@ export function addPrincipleToLedger(stateDir: string, principle: LedgerPrincipl
 
 export function updatePrinciple(stateDir: string, principleId: string, updates: Partial<LedgerPrinciple>): LedgerPrinciple {
   return mutateLedger(stateDir, (store) => {
+    if (RESERVED_PRINCIPLE_KEYS.has(principleId)) {
+      throw new Error(`Cannot update principle with reserved id "${principleId}".`);
+    }
     const existing = store.tree.principles[principleId];
     if (!existing) throw new Error(`Cannot update missing principle "${principleId}".`);
     const next: LedgerPrinciple = {
@@ -523,7 +531,13 @@ export function updatePrinciple(stateDir: string, principleId: string, updates: 
       derivedFromPainIds: updates.derivedFromPainIds
         ? uniqueStrings(updates.derivedFromPainIds) : existing.derivedFromPainIds,
     };
-    store.tree.principles[principleId] = next;
+    // PRI-1136: the id is caller-supplied, so it must not reach a property-write
+    // sink. Object.fromEntries rebuilds the map without naming a property per
+    // key; a duplicate id keeps the last entry, exactly like the old assignment.
+    store.tree.principles = Object.fromEntries([
+      ...Object.entries(store.tree.principles),
+      [principleId, next],
+    ]);
     return next;
   });
 }

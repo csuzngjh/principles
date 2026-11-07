@@ -5,8 +5,8 @@ import {
   isPeerRunnerKind,
   hydratePITaskRecord,
   PD_TASK_STATUSES,
-} from '@principles/core/runtime-v2';
-import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { CommitNextTaskResult, PDTaskStatus } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface EnqueueSuccessorsOptions {

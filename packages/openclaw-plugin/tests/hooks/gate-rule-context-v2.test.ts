@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import { loadPdConfigForPlugin } from '../../src/core/pd-config-loader.js';
 import { buildProductionRuleContext } from '../../src/core/rule-context-assembler.js';
-import type { RuleContextV2, EffectivePdConfig } from '@principles/core/runtime-v2';
+import type { RuleContextV2, EffectivePdConfig } from '@principles/core/runtime';
 
 // Type aliases for test fixture construction (avoids `any` per project convention).
 // `as unknown as T` is acceptable here: these are test fixtures with known shape,

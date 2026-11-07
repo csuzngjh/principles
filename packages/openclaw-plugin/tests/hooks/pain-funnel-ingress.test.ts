@@ -23,14 +23,14 @@ import * as os from 'os';
 import Database from 'better-sqlite3';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
 import type { EvolutionLoopEvent } from '../../src/core/evolution-types.js';
-import type { PainToPrincipleInput, PainToPrincipleServiceOptions } from '@principles/core/runtime-v2';
+import type { PainToPrincipleInput, PainToPrincipleServiceOptions } from '@principles/core/runtime';
 
 let lastRecordPainInput: PainToPrincipleInput | null = null;
 const recordPainCalls: PainToPrincipleInput[] = [];
 
-vi.mock('@principles/core/runtime-v2', async () => {
-  const actual = await vi.importActual<typeof import('@principles/core/runtime-v2')>(
-    '@principles/core/runtime-v2',
+vi.mock('@principles/core/runtime', async () => {
+  const actual = await vi.importActual<typeof import('@principles/core/runtime')>(
+    '@principles/core/runtime',
   );
   return {
     ...actual,

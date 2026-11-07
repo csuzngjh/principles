@@ -28,7 +28,7 @@ import type {
   InterventionCapabilityDeclaration,
   InterventionEvidenceBatchInput,
   InterventionObservationInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 /** Evidence adapter surface version (major-series label; exact package version lives in package.json). */
 export const OPENCLAW_EVIDENCE_ADAPTER_VERSION = 'openclaw-plugin@2';

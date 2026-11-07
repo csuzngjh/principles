@@ -24,14 +24,14 @@ import * as path from 'node:path';
 import {
   SqliteConnection,
   SqliteIntentDecisionStore,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   IntentDecisionInput,
   IntentDecisionRecord,
   IntentDecisionRecordResult,
   IntentDecisionSummary,
   FollowUpPatch,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));

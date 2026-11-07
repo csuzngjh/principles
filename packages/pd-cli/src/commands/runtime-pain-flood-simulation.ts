@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runPainFloodSimulation } from '../services/pain-flood-simulation-runner.js';
-import type { PainFloodSimulationSummary } from '@principles/core/runtime-v2';
+import type { PainFloodSimulationSummary } from '@principles/core/runtime';
 
 interface CliPainFloodOptions {
   workspace?: string;

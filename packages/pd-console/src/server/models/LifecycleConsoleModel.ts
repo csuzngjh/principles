@@ -2,8 +2,8 @@ import {
   buildLifecycleReadModel,
   computePrincipleAdherence,
   computeRuleMetrics,
-} from '@principles/core/runtime-v2';
-import type { RuleMetricResult } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { RuleMetricResult } from '@principles/core/runtime';
 import { ConsoleLifecycleDatasource } from './ConsoleLifecycleDatasource.js';
 
 export interface LifecycleMetricsResponse {

@@ -9,9 +9,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { compileHardenedRuleEvaluator } from '@principles/core/runtime-v2';
-import { createSyntheticRuleHostInput } from '@principles/core/runtime-v2';
-import type { RuleHostHelpers, RuleHostInput, RuleHostResult } from '@principles/core/runtime-v2';
+import { compileHardenedRuleEvaluator } from '@principles/core/runtime';
+import { createSyntheticRuleHostInput } from '@principles/core/runtime';
+import type { RuleHostHelpers, RuleHostInput, RuleHostResult } from '@principles/core/runtime';
 import { loadRuleImplementationModule } from '../../src/core/rule-implementation-runtime.js';
 
 // PRI-809 review: the parity rule reads every dimension the replay/live

@@ -34,7 +34,7 @@ import {
   getDefaultPdConfig,
   type BehaviorExamplePack,
   type OwnerEvidenceSelection,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
 
 const dirs: string[] = [];
@@ -246,7 +246,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   for (const dir of dirs) {
     await disposePainSignalBridgesForWorkspace(dir).catch(() => undefined);
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decodeWorkbuddyInput } from '../src/codec/index.js';
-import { getPromptModelCatalog, promptBudgetCharsForContextWindow, resolvePromptBudget } from '@principles/core/runtime-v2';
+import { getPromptModelCatalog, promptBudgetCharsForContextWindow, resolvePromptBudget } from '@principles/core/runtime';
 
 /**
  * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §5.3 (WorkBuddy): `model` is an

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createProductionGateDeps, validateRuleContextV2, buildGoldenTraceFromArtificer } from '@principles/core/runtime-v2';
+import { createProductionGateDeps, validateRuleContextV2, buildGoldenTraceFromArtificer } from '@principles/core/runtime';
 
 import { CODEX_TOOL_SEMANTICS } from '../../codex-adapter/src/tool-semantics.js';
 

@@ -16,7 +16,7 @@ const runsDir = path.join(DATA, 'runs');
 const sha = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
 // Arm identity hashes: the CONSTANT system prompts (what actually differs
 // between arms). Per-call prompt hashes (system+message) live in the run files.
-const CORE = path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2');
+const CORE = path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime');
 const { buildScribeProtocolInstruction } = await import(`file://${CORE}/internalization/scribe-prompt-builder.js`.replace(/\\/g, '/'));
 const { B_ADDENDUM, B_ADDENDUM_VERSION } = await import(`file://${path.join(ROOT, 'scripts/pri-815/b-addendum.mjs')}`.replace(/\\/g, '/'));
 const armAHash = sha(buildScribeProtocolInstruction({ coreGrounding: true }));

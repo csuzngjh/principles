@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { handleActivationsRoute, disposeActivationsModels } from '../../../src/server/routes/activations.js';
-import { SqliteConnection, RECOVERY_CONTROL_SURFACES } from '@principles/core/runtime-v2';
+import { SqliteConnection, RECOVERY_CONTROL_SURFACES } from '@principles/core/runtime';
 
 function createMockRequest(method: string, options?: { body?: unknown; subPath?: string }): IncomingMessage {
   const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';

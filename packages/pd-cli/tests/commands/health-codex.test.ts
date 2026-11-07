@@ -143,7 +143,7 @@ vi.mock('@principles/install-layout', () => ({
   parseInstallManifest: mockParseInstallManifest,
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   SqliteConnection: class {},
   SqliteTaskStore: class {
     listTasks = vi.fn().mockResolvedValue([]);
@@ -294,14 +294,14 @@ describe('pd health --host codex — §15 ready semantics', () => {
 
   it('diagnostician needs_human_review tasks ⇒ not ready with review blocker', async () => {
     // Override the task store default via the mocked class instance.
-    const coreModule = (await vi.importMock('@principles/core/runtime-v2')) as { SqliteTaskStore: new () => { listTasks: (filter: { status: string }) => Promise<unknown[]> } };
+    const coreModule = (await vi.importMock('@principles/core/runtime')) as { SqliteTaskStore: new () => { listTasks: (filter: { status: string }) => Promise<unknown[]> } };
     const original = coreModule.SqliteTaskStore;
     class FakeStore {
       listTasks(filter: { status: string }): Promise<unknown[]> {
         return Promise.resolve(filter.status === 'needs_human_review' ? [{ id: 't1' }] : []);
       }
     }
-    vi.doMock('@principles/core/runtime-v2', () => ({ SqliteConnection: class {}, SqliteTaskStore: FakeStore, computeFeatureFlagsFromConfig: mockComputeFeatureFlagsFromConfig, isFeatureEnabled: mockIsFeatureEnabled }));
+    vi.doMock('@principles/core/runtime', () => ({ SqliteConnection: class {}, SqliteTaskStore: FakeStore, computeFeatureFlagsFromConfig: mockComputeFeatureFlagsFromConfig, isFeatureEnabled: mockIsFeatureEnabled }));
     void original;
     vi.resetModules();
     const { handleHealthCodex: freshHandler } = await import('../../src/commands/health-codex.js');

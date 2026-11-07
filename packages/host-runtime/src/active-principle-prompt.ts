@@ -10,7 +10,7 @@ import {
   type ActivatedPrinciple,
   type PromptBudgetResolution,
   type PromptSelectionPolicy,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import fs from 'node:fs';
 import path from 'node:path';
 import { escapeXml } from '@principles/core/prompt-builder';

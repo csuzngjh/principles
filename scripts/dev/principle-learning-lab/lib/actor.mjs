@@ -287,7 +287,7 @@ export async function createAuthorizedPiTransport({ authorization, prereg, datas
 
   // Dynamic import: the offline fake path never loads core; here it is
   // required — the budgeted fetch wraps the REAL PRI-683 transport.
-  const core = await import('@principles/core/runtime-v2');
+  const core = await import('@principles/core/runtime');
   const { PiAiRuntimeAdapter, getPiAiFetchForApi, StoreEventEmitter } = core;
   if (typeof PiAiRuntimeAdapter !== 'function' || typeof getPiAiFetchForApi !== 'function' || typeof StoreEventEmitter !== 'function') {
     throw new Error('createAuthorizedPiTransport: @principles/core dist is missing PiAiRuntimeAdapter/getPiAiFetchForApi/StoreEventEmitter — build the core package first');

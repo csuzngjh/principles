@@ -26,7 +26,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { Database } from 'better-sqlite3';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { RuntimeStateManager } from '@principles/core/runtime';
 import { assertSafeDirectoryRoot, isPathInside } from '../utils/path-security.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────

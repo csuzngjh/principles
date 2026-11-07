@@ -10,7 +10,7 @@ import {
   type RuntimeStateHandle,
   type RuleCandidateMaterial,
   type DiagnosticianOutputV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { addPrincipleToLedger, appendReuseEvidence, loadLedger } from '@principles/core/principle-tree-ledger';
 import { OwnerDecisionConsoleModel } from '../../src/server/models/OwnerDecisionConsoleModel.js';
 import { ApprovalsGroupedConsoleModel } from '../../src/server/models/ApprovalsGroupedConsoleModel.js';

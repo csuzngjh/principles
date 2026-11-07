@@ -44,7 +44,7 @@ import {
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
 import { formatHostStateSummary } from '../src/install-summary.js';
-import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
 function parseYaml(text: string): Record<string, unknown> {
@@ -1544,12 +1544,18 @@ describe('WorkBuddy user-facing copy guard', () => {
     // "governance off by default" claim must never come back.
     expect(text, 'InstallGuide must not claim governance is off by default').not.toContain('治理默认关闭');
     expect(text, 'InstallGuide must not claim governance is off by default').not.toContain('governance is OFF by default');
+    expect(text, 'InstallGuide must not claim install equals enable').not.toContain('installed means enabled');
+    expect(text, 'InstallGuide must not claim install equals enable (zh)').not.toContain('装完即启用');
+    expect(text, 'InstallGuide must state a fresh install is not enabled (zh)').toContain('已安装但未启用');
+    expect(text, 'InstallGuide must state a fresh install is not enabled (en)').toContain('INSTALLED but NOT ENABLED');
     expect(text, 'InstallGuide must show the default ON value').toContain('enabled: true');
   });
 
   it('plugin manifest separates installed / enabled / governance and drops the "inactive until" conflation', () => {
     const text = fs.readFileSync(path.join(REPO_ROOT, 'packages/workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json'), 'utf8');
-    expect(text).toContain('installed means enabled');
+    expect(text, 'manifest must not claim install equals enable').not.toContain('installed means enabled');
+    expect(text, 'manifest must not claim the manifest default only applies outside the PD installer').not.toContain('applies only when a host installs this plugin WITHOUT the PD installer');
+    expect(text, 'manifest must state a fresh install is not enabled').toContain('a fresh install is INSTALLED but NOT ENABLED');
     expect(text).toContain('governance is ON by default at install');
     expect(text).toContain('automatic pain detection/correction is NOT available');
     expect(text).not.toContain('inactive until');

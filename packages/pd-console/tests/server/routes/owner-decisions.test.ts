@@ -21,7 +21,7 @@ import {
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { handleOwnerDecisionsRoute } from '../../../src/server/routes/owner-decisions.js';
 import type { OwnerDecisionRouteContext } from '../../../src/server/routes/owner-decisions.js';
 import { ActivationsConsoleModel } from '../../../src/server/models/ActivationsConsoleModel.js';

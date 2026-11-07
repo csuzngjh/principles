@@ -2,9 +2,9 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { SqliteConnection } from '@principles/core/runtime-v2';
-import { createOwnerEvidenceScopeError } from '@principles/core/runtime-v2/internalization/evidence-readiness';
-import type { BehaviorEvidencePort, ToolSemanticRegistry } from '@principles/core/runtime-v2';
+import { SqliteConnection } from '@principles/core/runtime';
+import { createOwnerEvidenceScopeError } from '@principles/core/runtime/internalization/evidence-readiness';
+import type { BehaviorEvidencePort, ToolSemanticRegistry } from '@principles/core/runtime';
 import type { RuleHostEvidenceRow, RuleHostContextRow } from '@principles/core/trajectory-types';
 import { BehaviorExamplePackAssembler, type BehaviorExampleDataSource } from './behavior-example-pack-assembler.js';
 import { resolveWorkspaceHostToolSemantics } from './host-tool-semantic-resolver.js';

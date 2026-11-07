@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import type { HostLivenessContract } from '@principles/core/runtime-v2';
+import type { HostLivenessContract } from '@principles/core/runtime';
 import { loadHostToolDeclarations } from './host-tool-declaration.js';
 
 /** Adapter-owned facts consumed by the non-bypassable RuleCode promotion gate. */

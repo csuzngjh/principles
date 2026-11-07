@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
 import { extractFields, isRecord } from './ingestion-fields.js';

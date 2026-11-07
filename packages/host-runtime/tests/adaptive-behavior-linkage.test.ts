@@ -12,7 +12,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyTrajectorySchemaBase } from '@principles/core/runtime-v2';
+import { applyTrajectorySchemaBase } from '@principles/core/runtime';
 import {
   ADAPTIVE_BEHAVIOR_LINKAGE_SCHEMA_VERSION,
   type BehaviorLinkageReport,

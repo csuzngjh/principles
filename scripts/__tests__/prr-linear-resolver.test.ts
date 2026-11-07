@@ -295,6 +295,6 @@ describe('linear-owner-resolver (stable-id identity binding, round 8)', () => {
     // (kept from round 3/4 guard) — statuses continue to derive from the
     // schema constant; asserted via the resolver's exported helper.
     const { authoritativePrincipleStatuses } = await import('../dev/principle-learning-lab/prr/lib/prr-readonly.mjs');
-    expect(authoritativePrincipleStatuses()).toEqual([...(await import('@principles/core/runtime-v2')).PRINCIPLE_STATUSES].sort());
+    expect(authoritativePrincipleStatuses()).toEqual([...(await import('@principles/core/runtime')).PRINCIPLE_STATUSES].sort());
   });
 });

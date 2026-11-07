@@ -28,8 +28,8 @@ import {
   measureLedgerPrinciples,
   snapshotTree,
 } from '../dev/principle-learning-lab/prr/lib/prr-readonly.mjs';
-import { PRINCIPLE_STATUSES } from '@principles/core/runtime-v2';
-import { buildPrrDatasetFiles, writePrrDataset } from './prr-test-fixtures';
+import { PRINCIPLE_STATUSES } from '@principles/core/runtime';
+import { writePrrDataset } from './prr-test-fixtures';
 import { loadPrrDataset } from '../dev/principle-learning-lab/prr/lib/prr-dataset.mjs';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-prr-freeze-ro-'));
@@ -346,11 +346,11 @@ describe('freeze real-run gate (fail-closed)', () => {
   });
 
   it('FZ-11 complete-pair denominator: 12 complete pairs (13 tasks − 1 unauthorized exclusion)', () => {
-    const { freeze, verifier } = frozenWithApproval();
+    const { freeze } = frozenWithApproval();
     // minPairs = 13 → exceeds the 12 complete pairs → UNPROVEN, never padded.
     const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
     fz11.value = { minPairs: 13, derivationBasis: 'owner-frozen detectable difference' };
-    const { saved: savedShort, verifier: vShort } = approveOnce(freeze, preregBody);
+    const { verifier: vShort } = approveOnce(freeze, preregBody);
     const short = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: vShort, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(short.pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
     expect(short.minPairsEligible).toBe(false);
@@ -645,10 +645,9 @@ describe('ledger availability four-way classification', () => {
 
   it('status validity follows the Core authoritative enum, not a local list (P1-3, rounds 3+4)', () => {
     // Round 4: the allowlist must be exactly the canonical Core export
-    // PRINCIPLE_STATUSES (runtime-v2/types/principle-enums.ts) — no local copy.
+    // PRINCIPLE_STATUSES (runtime/types/principle-enums.ts) — no local copy.
     expect(authoritativePrincipleStatuses()).toEqual([...PRINCIPLE_STATUSES].sort());
 
-    const ok = { availability: { status: 'ok' } };
     const ledgerOf = (status: unknown) => ({
       availability: { status: 'ok' },
       ledger: { tree: { principles: { p1: { id: 'p1', status: status as never } } } },

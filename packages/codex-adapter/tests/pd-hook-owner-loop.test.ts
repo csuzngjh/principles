@@ -2,7 +2,7 @@ import { afterEach, expect } from 'vitest';import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig } from '@principles/core/runtime';
 import {
   catchUpCodexIngestion,
 } from '@principles/codex-adapter';

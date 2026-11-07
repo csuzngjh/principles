@@ -17,7 +17,7 @@ import {
   computeFeedbackFingerprint,
   type FeedbackReport,
   type FeedbackSubmittedVia,
-} from '@principles/core/runtime-v2/feedback';
+} from '@principles/core/runtime/feedback';
 import type * as childProcessNS from 'node:child_process';
 import type * as fsNS from 'node:fs';
 import type * as osNS from 'node:os';

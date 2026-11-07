@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
+import type { FeedbackReport } from '@principles/core/runtime/feedback';
 import {
   probeIngestHealth,
   submitToIngest,

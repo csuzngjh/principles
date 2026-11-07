@@ -25,17 +25,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  applyTrajectorySchemaBase,
-  buildToolSemanticRegistry,
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
   ArtificerRunner,
-  PDRuntimeError,
   getDefaultPdConfig,
   type BehaviorExamplePack,
   type OwnerEvidenceSelection,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
 
 const dirs: string[] = [];
@@ -278,7 +275,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime');
   for (const dir of dirs) {
     await disposePainSignalBridgesForWorkspace(dir).catch(() => undefined);
   }

@@ -638,7 +638,7 @@ interface LedgerAdapter {
 | `ApprovalQueueReadModel` (新增) | 审批队列 | 无 |
 | `ActivationStatusReadModel` (新增) | 激活状态 | 无 |
 | `EventLogReadModel` | 事件流（pd-console）| 无 |
-| `GfiWorkspaceReadModel` | GFI 状态 | 无 |
+| ~~`GfiWorkspaceReadModel`~~ | 已删除（GFI-COMPLETE-REMOVAL-001，SPEC §2） | — |
 
 **读取原则**：
 

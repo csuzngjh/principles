@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { CORE_PRINCIPLES, CORE_PRINCIPLE_IDS } from '@principles/core/runtime-v2';
+import { CORE_PRINCIPLES, CORE_PRINCIPLE_IDS } from '@principles/core/runtime';
 import { ensureCorePrinciples } from '../../src/core/init.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -38,7 +38,7 @@ describe('AC-01/02: registry core axioms stay canonical (A)', () => {
 
   it('canonical source stays in runtime registry, not markdown', () => {
     const registryFile = path.join(
-      PACKAGE_ROOT, '..', 'principles-core', 'src', 'runtime-v2',
+      PACKAGE_ROOT, '..', 'principles-core', 'src', 'runtime',
       'core-principles', 'core-principle-registry.ts',
     );
     expect(fs.existsSync(registryFile)).toBe(true);
@@ -101,7 +101,7 @@ describe('AC-04/05: principle templates (B/C)', () => {
 describe('AC-06: runtime prompt injection does not depend on core PRINCIPLES.md', () => {
   it('prompt.ts injects from Runtime V2 activations, not the legacy reducer or markdown template', () => {
     const promptSrc = fs.readFileSync(path.join(PACKAGE_ROOT, 'src', 'hooks', 'prompt.ts'), 'utf8');
-    // Runtime V2 activations are the single injection authority.
+    // Runtime activations are the single injection authority.
     expect(promptSrc).toContain('readActivatedPrinciples');
     // The legacy evolution reducer is no longer an injection source.
     expect(promptSrc).not.toContain('getActivePrinciples');

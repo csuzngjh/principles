@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
-import { RECOVERY_CONTROL_SURFACES } from '@principles/core/runtime-v2';
+import { RECOVERY_CONTROL_SURFACES } from '@principles/core/runtime';
 
 function runPdHelp(args: string[]): string | null {
   try {

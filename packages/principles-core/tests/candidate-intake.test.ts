@@ -6,9 +6,9 @@ import {
   CandidateIntakeError,
   INTAKE_ERROR_CODES,
   LedgerPrincipleEntrySchema,
-} from '../src/runtime-v2/candidate-intake.js';
-import type { CandidateIntakeInput, CandidateIntakeOutput, LedgerPrincipleEntry, LedgerAdapter } from '../src/runtime-v2/candidate-intake.js';
-import type { ReuseEvidenceEntry } from '../src/runtime-v2/types/principle-schema.js';
+} from '../src/runtime/candidate-intake.js';
+import type { CandidateIntakeInput, CandidateIntakeOutput, LedgerPrincipleEntry, LedgerAdapter } from '../src/runtime/candidate-intake.js';
+import type { ReuseEvidenceEntry } from '../src/runtime/types/principle-schema.js';
 
 describe('INTAKE-01 — CandidateIntakeInputSchema', () => {
   it('validates correct shape: { candidateId, workspaceDir }', () => {

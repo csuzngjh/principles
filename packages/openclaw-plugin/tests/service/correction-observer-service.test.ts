@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as yaml from 'js-yaml';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 const mockLearner = {
@@ -36,7 +35,7 @@ vi.mock('../../src/service/keyword-optimization-service.js', () => ({
   KeywordOptimizationService: { get: vi.fn(() => mockOptimizationService) },
 }));
 
-// PRI-307: Mock the pd-config-loader instead of @principles/core/runtime-v2
+// PRI-307: Mock the pd-config-loader instead of @principles/core/runtime
 // The service now reads .pd/config.yaml via resolveObserverConfig
 vi.mock('../../src/core/pd-config-loader.js', () => {
   return {
@@ -125,8 +124,8 @@ const mockDispatch = vi.fn().mockResolvedValue({
 
 const mockRegister = vi.fn();
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+vi.mock('@principles/core/runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/core/runtime')>();
   return {
     ...actual,
     PiAiRuntimeAdapter: class {},

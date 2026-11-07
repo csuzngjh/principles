@@ -20,7 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { deriveWorkspaceScopeId } from '@principles/core/runtime-v2';
+import { deriveWorkspaceScopeId } from '@principles/core/runtime';
 
 /**
  * Canonicalize a workspace directory for scope derivation.

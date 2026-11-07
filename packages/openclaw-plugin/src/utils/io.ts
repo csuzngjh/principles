@@ -158,7 +158,7 @@ export function serializeKvLines(data: Record<string, any>): string {
     }
     if (Array.isArray(v)) {
       lines.push(`${k}: ${v.join(',')}`);
-    } else if (typeof v === 'object' && v !== null) {
+    } else if (typeof v === 'object') {
       lines.push(`${k}: ${JSON.stringify(v)}`);
     } else {
       lines.push(`${k}: ${v}`);

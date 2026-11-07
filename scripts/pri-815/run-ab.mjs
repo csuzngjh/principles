@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { chat, extractJson } from './llm.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const CORE = path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime-v2');
+const CORE = path.join(ROOT, 'packages', 'principles-core', 'dist', 'runtime');
 const DATA_DIR = path.join(ROOT, 'docs', 'audit', 'pri-815-quality-first', 'data');
 
 const { DreamerPromptBuilder } = await import(`file://${CORE}/internalization/dreamer-prompt-builder.js`.replace(/\\/g, '/'));

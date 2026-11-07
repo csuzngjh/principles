@@ -13,8 +13,8 @@ import {
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
   listRecoveryActions,
-} from '@principles/core/runtime-v2';
-import type { SqliteTaskStore, PITaskMetadata } from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
+import type { SqliteTaskStore, PITaskMetadata } from '@principles/core/runtime';
 
 // ---------------------------------------------------------------------------
 // Test utilities

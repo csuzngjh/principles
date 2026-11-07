@@ -23,7 +23,7 @@ import {
   buildToolSemanticRegistry,
   createProductionGateDeps,
   type ToolSemanticMappingV1,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import {
   createEvaluatorRuntimeContext,
   saveHostToolDeclaration,

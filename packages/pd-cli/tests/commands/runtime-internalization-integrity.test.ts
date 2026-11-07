@@ -13,7 +13,7 @@ vi.mock('../../src/services/mainline-snapshot-assembler.js', () => ({
   assertMainlineContract: vi.fn(),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   InternalizationChainIntegrityReadModel: vi.fn().mockImplementation(function () {
     return { check: mockCheck };
   }),
@@ -21,7 +21,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
 }));
 
 import { handleRuntimeInternalizationIntegrity } from '../../src/commands/runtime-internalization-integrity.js';
-import { InternalizationChainIntegrityReadModel } from '@principles/core/runtime-v2';
+import { InternalizationChainIntegrityReadModel } from '@principles/core/runtime';
 
 const WS = '/fake/workspace';
 

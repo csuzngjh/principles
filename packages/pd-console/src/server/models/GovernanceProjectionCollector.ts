@@ -10,7 +10,7 @@ import {
   PD_TASK_STATUSES,
   PRINCIPLE_STATUSES,
   isPDTaskStatus,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   ActivationFact,
   ApprovalFact,
@@ -23,7 +23,7 @@ import type {
   SourceRef,
   TaskFact,
   TimelineEvent,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 export const GOVERNANCE_TASK_KINDS = new Set([
   'dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer',

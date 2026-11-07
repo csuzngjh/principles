@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { TrajectoryDatabase, initTrajectorySchema, TrajectoryRegistry } from '../../src/core/trajectory.js';
-import { TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime-v2';
+import { TRAJECTORY_SCHEMA_VERSION } from '@principles/core/runtime';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 describe('TrajectoryDatabase', () => {

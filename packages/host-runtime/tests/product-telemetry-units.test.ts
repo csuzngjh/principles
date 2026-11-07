@@ -40,7 +40,7 @@ import {
   PRODUCT_TELEMETRY_MAX_BODY_BYTES,
   type TelemetryFetchFn,
 } from '../src/product-telemetry/exporter.js';
-import { deriveDailyTelemetryId, deriveWorkspaceScopeId, generateTelemetrySecretHex, buildProductTelemetrySnapshot } from '@principles/core/runtime-v2';
+import { deriveDailyTelemetryId, deriveWorkspaceScopeId, generateTelemetrySecretHex, buildProductTelemetrySnapshot } from '@principles/core/runtime';
 
 let homeDir: string;
 let workspaceDir: string;

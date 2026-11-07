@@ -23,13 +23,13 @@ import * as path from 'node:path';
 import { safeReadIntentDoc } from './intent-doc-reader.js';
 import {
   getIntentFilename,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   IntentDocReader,
   IntentDocReadResult,
   IntentDocReference,
   IntentLang,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 const INTENT_DIR = '.principles';
 

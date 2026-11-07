@@ -13,7 +13,7 @@ import {
   SqliteConnection,
   SqliteDesignGateStore,
   type PiArtifactRow,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { CODEX_TOOL_SEMANTICS } from '../../codex-adapter/src/tool-semantics.js';
 import { createCodexRuleContextProvider } from '../src/codex-rule-context-provider.js';
 import { createProductionHostRuntime } from '../src/index.js';

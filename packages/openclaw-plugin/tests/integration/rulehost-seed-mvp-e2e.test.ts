@@ -61,9 +61,8 @@ import {
   createProductionGateDeps,
   ApprovalCompletionService,
   getChannelRiskLevel,
-  SqliteConnection,
   PrincipleTreeLedgerAdapter,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import type {
   PDRuntimeAdapter,
   RunHandle,
@@ -83,7 +82,7 @@ import type {
   WriterInput,
   ActivationActor,
   ApprovalEnqueueInput,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 
 import { RuleHost } from '../../src/core/rule-host.js';
 import { TrajectoryRegistry } from '../../src/core/trajectory.js';
@@ -509,7 +508,7 @@ beforeAll(async () => {
   // Seed: read_file(src/auth.ts) → write_file(src/auth.ts) → write_file(src/other.ts)
   // The positive case (write src/auth.ts) has a prior read → priorReadOfTarget = 'yes'
   // The negative case (write src/other.ts) has NO prior read → priorReadOfTarget = 'no'
-  const readCallId = trajectory.recordToolCall({
+  trajectory.recordToolCall({
     sessionId: SESSION_ID,
     toolName: 'read_file',
     outcome: 'success',

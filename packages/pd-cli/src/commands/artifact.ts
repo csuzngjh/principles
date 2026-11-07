@@ -7,7 +7,7 @@
 import {
   RuntimeStateManager,
   artifactShow,
-} from '@principles/core/runtime-v2';
+} from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface ArtifactShowOptions {

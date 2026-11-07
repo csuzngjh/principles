@@ -8,7 +8,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   createRecoverySweepService: vi.fn().mockResolvedValue({
     service: {
       detectExpiredLeases: mockDetectExpiredLeases,

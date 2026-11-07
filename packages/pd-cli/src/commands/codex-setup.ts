@@ -46,7 +46,7 @@ import {
   type CodexIngestionConsentState,
   type CodexIngestionDisclosureLanguage,
 } from '@principles/host-runtime';
-import { computeEffectivePdConfig, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
+import { computeEffectivePdConfig, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime';
 
 export interface CodexSetupOptions {
   workspace?: string;

@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { createRuntimeStateHandle, SqliteDesignGateStore, DesignGateStoreError } from '@principles/core/runtime-v2';
-import type { DesignGateDecision, DesignGateScope } from '@principles/core/runtime-v2';
+import { createRuntimeStateHandle, SqliteDesignGateStore, DesignGateStoreError } from '@principles/core/runtime';
+import type { DesignGateDecision, DesignGateScope } from '@principles/core/runtime';
 import { listObservedDesignGateSessions, readDesignGateSpecSnapshot } from '@principles/host-runtime';
 import { readBody } from '../utils/request.js';
 import { sendSuccess, sendError, sendBadRequest, sendMethodNotAllowed } from '../utils/response.js';

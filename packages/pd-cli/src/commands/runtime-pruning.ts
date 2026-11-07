@@ -8,8 +8,8 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, removeOrphanReferencesFromLedger } from '@principles/core/runtime-v2';
-import type { OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
+import { PruningReadModel, removeOrphanReferencesFromLedger } from '@principles/core/runtime';
+import type { OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
 

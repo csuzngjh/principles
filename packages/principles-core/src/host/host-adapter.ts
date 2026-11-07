@@ -23,9 +23,9 @@
  */
 
 import type {
-  RuntimeV2PromptActivationsInjectedEventData,
+  RuntimePromptActivationsInjectedEventData,
   ToolCallEventData,
-} from '../runtime-v2/types/event-types.js';
+} from '../runtime/types/event-types.js';
 
 // ─── Unified event kinds ───────────────────────────────────────────────────
 /**
@@ -59,7 +59,7 @@ export const HOST_EVENT_KINDS: readonly HostEventKind[] = [
  *
  * All fields are UNTRUSTED runtime values (rc-1): decoders only forward what
  * the raw payload carried; every consumer must validate through
- * `resolvePromptBudget` (runtime-v2/activation/prompt-budget-policy.ts),
+ * `resolvePromptBudget` (runtime/activation/prompt-budget-policy.ts),
  * which is the single authority that decides trust and clamping. A missing
  * modelContext is valid — the budget resolves to the legacy fixed fallback.
  */
@@ -207,7 +207,7 @@ export interface HostEventResult {
  * silent (the OpenClaw plugin path owns its own EventLog emission).
  */
 export interface HostEventEmitter {
-  recordRuntimeV2ActivationsInjected(data: RuntimeV2PromptActivationsInjectedEventData): void;
+  recordRuntimeActivationsInjected(data: RuntimePromptActivationsInjectedEventData): void;
   recordToolCall(sessionId: string | undefined, data: ToolCallEventData): void;
 }
 

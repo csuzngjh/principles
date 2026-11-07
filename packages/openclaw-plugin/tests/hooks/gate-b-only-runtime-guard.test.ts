@@ -62,7 +62,7 @@ describe('PRI-651-B1: runtime hooks are Gate B only (no Gate A fallback selectio
 
   it('Owner-driven paths still reach the TriggerController', () => {
     // Real production call site: packages/openclaw-plugin/src/hooks/pain.ts
-    //   import  : :31  (from principles-core runtime-v2)
+    //   import  : :31  (from principles-core runtime)
     //   call    : :450 (evaluateTriggerController inside handleManualPain)
     // Verified by grep over packages/*/src: no other non-test caller exists.
     expect(hookSource('pain.ts')).toMatch(/evaluateTriggerController/);

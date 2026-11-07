@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { measureTextBytes, RESPONSE_BUDGET_BYTES } from '../budget.js';
 import { assembleResult, adapterFailureEnvelope } from '../envelope.js';
-import type { PainRecallCapabilityResult } from '@principles/core/runtime-v2/pain-recall-capability';
+import type { PainRecallCapabilityResult } from '@principles/core/runtime/pain-recall-capability';
 
 function envelopeWithRequestedId(requestedId: string): PainRecallCapabilityResult {
   return {

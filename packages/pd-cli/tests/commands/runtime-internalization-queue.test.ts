@@ -16,7 +16,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('@principles/core/runtime', () => ({
   createInternalizationQueueReadModel: vi.fn().mockResolvedValue({
     readModel: { getSnapshot: mockGetSnapshot, close: mockClose },
     close: mockClose,

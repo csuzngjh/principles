@@ -1,4 +1,4 @@
-import type { previewApprovedRuleRevision, reviseApprovedRuleOnce } from '@principles/core/runtime-v2';
+import type { previewApprovedRuleRevision, reviseApprovedRuleOnce } from '@principles/core/runtime';
 
 /** Wire projections of the core authority; no independent revision state. */
 export type ApprovedRuleRevisionPreview = Awaited<ReturnType<typeof previewApprovedRuleRevision>>;

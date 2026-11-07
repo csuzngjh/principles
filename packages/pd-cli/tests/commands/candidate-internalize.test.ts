@@ -21,7 +21,7 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
   return { mockStateManager, MockRuntimeStateManager };
 });
 
-vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+vi.mock('@principles/core/runtime', async (importOriginal) => {
   const original = await importOriginal() as Record<string, unknown>;
   return {
     ...original,
@@ -35,7 +35,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
 }));
 
-import { decideInternalizationRoute } from '@principles/core/runtime-v2';
+import { decideInternalizationRoute } from '@principles/core/runtime';
 
 const mockCandidate = (overrides: Partial<{
   candidateId: string;

@@ -5,8 +5,8 @@
 // workspace scan (check-workspace-artifacts.mjs).
 //
 // Deliberately NOT matched: production modules whose name merely contains
-// "fixtures" (e.g. runtime-v2/internalization/golden-dogfood-fixtures.ts,
-// runtime-v2/adapter/split-pipeline-fixtures.ts) — both are imported from
+// "fixtures" (e.g. runtime/internalization/golden-dogfood-fixtures.ts,
+// runtime/adapter/split-pipeline-fixtures.ts) — both are imported from
 // production barrels and must stay in dist (ERR-149 / EP-14).
 import { readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';

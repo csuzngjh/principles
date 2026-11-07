@@ -19,7 +19,7 @@ import {
   PAIN_RECALL_MIN_LIMIT,
   PAIN_RECALL_MAX_LIMIT,
   type PainRecallResult,
-} from '@principles/core/runtime-v2/pain-recall';
+} from '@principles/core/runtime/pain-recall';
 
 export interface PainRecallOptions {
   principleId?: string;
