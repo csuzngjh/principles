@@ -1,7 +1,7 @@
-# 设计增量卡（待 Owner 批准）：默认 shared route 的逐原则期望集
+# 设计增量卡（已并入 Path A 设计 v2）：默认 shared route 的逐原则期望集
 
 - 文档 ID：`pd-aa-pri-1119-shared-route-increment-20261107`
-- 状态：**待 Owner 书面批准**（超出已批准设计 v1.2 §5 的 host-runtime 接口变更）；未实施
+- 状态：**已并入** [PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md](./PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md) v2 §2（2026-11-07，按 Owner 第七轮指令"不要另起多份方案"）；本卡保留为历史记录，不再单独审批——以 v2 设计的批准为准
 - 依据：Owner 第六轮指令 §2.5——"若需要超出已批准设计的 host-runtime 接口变更，先提交一张精简设计增量卡"；本卡不阻塞其他已批准修复
 
 ## 1. 问题
