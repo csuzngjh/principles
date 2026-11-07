@@ -1,9 +1,10 @@
 # PD Pain Semantics & Detection Architecture v1.0
 ## Final Contract Closure (v0.3.1)
 
-**Status:** Proposed — Owner Final Review（本文本身待 Owner 批准；其中 D5/D6 明确标记"待 Owner 最终批准"）
-**Revision:** v0.3.1（v0.3 的最后一次实施前契约收口：PainIngress 执行顺序、Worker 总执行预算、D5/D6 Owner 决策、Pending Marker 保留策略、兼容性验收契约）
-**Code Baseline:** 起草时 HEAD=`457bbf0fcd8df85c069b78ce60858acf742fe970`；origin/main 在本轮工作期间已前移至 `fd8fe301f`（版本发布提交），本轮承重函数一手读取均在 `457bbf0f` 上完成。fd8fe301f 相对本 SPEC 五项议题所涉函数（pain-ingress.ts / gsa 的 admitCorrection、insertCorrectionPain、ensureGovernanceDiagnosticianTask、isGovernanceTaskPayload、readGovernanceAdmissionCounts）无相关改动，结论有效；实施分支须另行基于最新 origin/main 创建。
+**Status:** Implemented (code + unit/integration) — Final cross-host acceptance pending（实现状态见 §8；D5/D6 的产品行为仍以 §3 的 Owner 决策记录为准）
+**Revision:** v0.3.1（v0.3 的最后一次实施前契约收口）+ 2026-11-07 Implementation Closure（仅追加状态与证据，不改设计条款）
+**Code Baseline:** 起草时 HEAD=`457bbf0fcd8df85c069b78ce60858acf742fe970`；2026-11-07 最终收敛基线 `origin/main@86b6208042b6083d4a7bbf840730d060188a1517`（PRI-1136 已把 `runtime-v2/` 改名为 `runtime/`；本文相关代码路径按当前路径复核）。
+**Implementation Evidence:** 见 §8 与 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。
 **Evidence Base:**
 - `docs/reviews/2026-11-02-pain-architecture-spec-v0.1-audit.md`
 - `docs/reviews/2026-11-02-pain-architecture-v0.2-targeted-review.md`
@@ -26,7 +27,11 @@
 
 ### 1.1 现状核实（一手读取）
 
-- `evaluatePainIngress`（principles-core/runtime-v2/pain-ingress.ts:157-239）是**纯函数**：模块头明示 no I/O / no persistence / no identity minting（pain-ingress.ts:21-23）。四种 action：submit / degrade / refuse / observation_only。
+> **历史说明（2026-11-07）：** 以下"现状"是 v0.3.1 起草时的基线（`457bbf0f`），
+> 不是 2026-11-07 的实现状态。Phase B 已把 PainIngress 接入治理准入链；
+> 当前状态、PR 与测试证据见 §11。保留本节用于追溯设计前提。
+
+- `evaluatePainIngress`（principles-core/src/runtime/pain-ingress.ts）是**纯函数**：模块头明示 no I/O / no persistence / no identity minting（pain-ingress.ts:21-23）。四种 action：submit / degrade / refuse / observation_only。
 - 当前生产链路**不含** PainIngress：`ensureGovernanceDiagnosticianTask` 硬编码 `provenance:'host_context_bound'`（gsa:1269）；evaluatePainIngress 现有调用点仅为 openclaw-plugin/hooks/pain-ingress-adapter.ts:72 与 pd-cli pain-record——governance 路径的接入是 v0.3 §5 的**计划项**，不是现状。
 - `admitCorrection` 单事务（gsa:790-818）：pain 去重探针 → 限流（`tryConsumeRateLimit`，RateLimitedSignal 回滚）→ `insertCorrectionPain` → marker INSERT（'admitted' 硬编码 :699-705）。
 - `ensureGovernanceDiagnosticianTask`（gsa:1210-1318）：marker 探针幂等（:1217-1221）+ 确定性 task id（:1236）+ Case B 崩溃收敛（:1286-1297）；reconcile Case A/B（:1650-1657）只扫 `decision='admitted'`。
@@ -186,3 +191,90 @@ v0.3 允许"≤2 条/周期 × 单次 60s"→ 最坏 120s ≥ 周期 120s，会�
 3. **D1-D6 哪些需要 Owner 批准？** 全部六项均为 Owner 决策门：D1（Tool Failure 退役时机）、D2（GFI 健康面去留）、D3（确认队列定位——推荐已给，批准即冻结）、D4（外部 RuleCode 只读扫描授权）、**D5（G3 逆转批准——行为契约变更）**、**D6（Pending 保留与最小化——有条件批准）**。D5/D6 未批准前，对应实施项（P-2、pending payload 保留策略）不得实施。
 4. **Phase 0、B、A、C 是否可以进入实施？** Phase 0（Semantic/Paralysis 停写、Fatal Intercept/Sample Reject 下线、双键收敛、可选文件名小修）：**可立即实施**（不依赖任何 Owner 决策）。Phase B：待 D5/D6 批准后实施（D5 门=学习词条款；D6 门=pending 保留策略）。Phase A：以 Phase B 验收为前置（另有 D1 认可其时机）。Phase C 第一阶段可随 Phase A 后实施；**GFI 第二阶段（剩余面删除）必须等 D4 只读扫描**。
 5. **哪些功能必须等 D4 只读扫描后才能实施？** 仅 GFI 第二阶段：健康观测面去留、剩余输入契约（`rule-host-contracts.ts:43`、`production-rulehost-gate.ts` 注入）的删除。Phase 0/B/A 与 Phase C 第一阶段（GFI Pain 触发删除+停写，健康面保留）均不依赖 D4。
+
+---
+
+## 8. Implementation Closure（2026-11-07）
+
+> 本节只追加**实现状态、证据与剩余工作**，不改变 v0.3/v0.3.1 的设计条款。
+> 完整逐项「SPEC 要求 → 实际代码 → 测试证据 → 真实运行证据 → 裁定」矩阵见
+> `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。
+
+### 8.1 基线
+
+- 代码基线：`origin/main@86b6208042b6083d4a7bbf840730d060188a1517`。
+- 路径变更：PRI-1136 已把 `packages/principles-core/src/runtime-v2/` 改名为
+  `packages/principles-core/src/runtime/`；本文与报告中的现行路径均按新目录。
+- 生产代码未在本轮修改；本轮只做事实核查、状态裁定与文档校准。
+
+### 8.2 Phase 状态（实施 ≠ 最终验收）
+
+| Phase | 状态 | 已交付 | 未完成 / 不计入 |
+| --- | --- | --- | --- |
+| Phase 0 — Safe Cleanup | **IMPLEMENTED** | PR #2296；`llm-pain-source-retirement` 套件通过 | 无 |
+| Phase A — Legacy Retirement | **IMPLEMENTED** | PR #2316；`phase-a-default-production-path` 套件通过；RuleHost Block / Tool Failure / Repeated Failure 自动 Pain 已退役；Owner 显式入口保留 | 无 |
+| Phase B — Shared Correction Detection | **IMPLEMENTED（代码/单测/集成）**；最终验收 **PARTIALLY_IMPLEMENTED** | PR #2308、#2347；core 546 passed、host-runtime 89 passed、openclaw-plugin 19 passed（本轮实跑，见 §8.6） | 真实 LLM BDD（PRI-1147）；三宿主最终验收与 startsWith 判定（PRI-1148）；D5/D6 Owner 追认（DC-02） |
+| Phase C — GFI Complete Removal | **PARTIALLY_IMPLEMENTED** | PR #2332：GFI 生产逻辑、SQLite 列、CLI/Console 表面、指标与命令已移除；`gfi` 仅 `gone` 墓碑 | 历史 workspace JSON 迁移（SPEC §6.2/§6.3，PRI-1149）；墓碑与 §5.1 的例外需 Owner 裁定（DC-01） |
+
+**结论：** 不得把 Phase B 整体标为 COMPLETE；也不得把 Phase C 标为完整 IMPLEMENTED。
+代码实施、单元/集成测试、真实 LLM BDD、三宿主最终验收是四个独立层。
+
+### 8.3 关键代码与测试映射
+
+| 契约 | 现行代码 | 测试证据 |
+| --- | --- | --- |
+| PainIngress 纯函数与四 action | `packages/principles-core/src/runtime/pain-ingress.ts` | `pain-ingress-spec-matrix.test.ts`（属 core 套件，本轮合计 546 passed） |
+| P-1 引用/转述/第三人称/否定防护 | `runtime/signal-collector/keyword-stage.ts` | `keyword-stage.test.ts` |
+| 学习词 P-2 门（不再 STRONG 直通） | `runtime/signal-collector/keyword-stage.ts` + `correction-types.ts` | `keyword-stage.test.ts`、`pain-ingress-shared-semantics.test.ts` |
+| 置信度门 / pending 状态机 | `runtime/signal-collector/confidence-gate.ts` | `confidence-gate.test.ts`、`governance-signal-admission.pending.test.ts` |
+| Stage-2 分类与周期预算 | `host-runtime/src/signal-stage2-cycle.ts` | `signal-stage2-cycle.test.ts` |
+| 治理准入 + Diagnostician 单写点 | `host-runtime/src/governance-signal-admission.ts` | `governance-signal-admission.test.ts` |
+| Owner 显式 Pain（OpenClaw/CLI） | `openclaw-plugin/src/hooks/pain-ingress-adapter.ts`、`pd-cli` pain record | `phase-a-default-production-path.test.ts` 等 |
+| Codex / WorkBuddy worker Stage-2 接入 | `codex-adapter`、`workbuddy-adapter`、`pd-cli workbuddy-worker` | `signal-stage2-cycle.test.ts`、`workbuddy-worker-registration.test.ts` |
+| no evidence → observation_only（不写 Pain） | `governance-signal-admission.ts` 的 `persistedBehaviorTraceEvidence` + `evaluatePainIngress` | `governance-signal-admission.workbuddy-live.test.ts` |
+| GFI 无生产逻辑 | 全仓 `packages/**/src/**/*.ts` 扫描：仅 `feature-flag-contract.ts` 的 `gfi` gone 墓碑与迁移防御 | `architecture-regression.test.ts`、`feature-flag-lifecycle.test.ts` |
+
+### 8.4 WorkBuddy 边界（正式）
+
+1. **自动关键词 Pain 识别 / 自动准入：明确不支持**（Owner 2026-11-05 决定）。
+   - `feature-flag-contract.ts` 的 `workbuddy_live_keyword_pain` 描述已改为
+     "UNSUPPORTED ... manual explicit prefix only"；默认 `false`。
+   - 安装器对新建与已有 governance 配置均写入 `workbuddy_live_keyword_pain: false`，
+     不再默认启用。
+   - 即使手工打开 flag，WorkBuddy ingress 没有持久化 observation writer，
+     自动候选恒为 `observation_only` → abandoned marker，不写 `pain_events`。
+   - 不得通过修改默认 flag 重新把自动识别描述为已交付能力。
+2. **支持范围：** 插件安装、显式插件启用、Owner 手动入口 `PD记录痛苦：`、
+   以及该入口之后由实际代码支持的 Pain 准入/后续治理。
+3. **不支持范围：** 自动关键词 Pain、自动 Pain Admission、"自动识别已交付"的陈述。
+4. OpenClaw / Codex 的自动能力边界单独描述；三宿主共享代码不等于能力完全一致。
+
+### 8.5 剩余工作（独立跟踪）
+
+- **PRI-1147**：支持宿主（OpenClaw/Codex）真实 LLM BDD。
+- **PRI-1148**：三宿主最终验收（OpenClaw/Codex 自动 + WorkBuddy 手动）与
+  startsWith 退役判定。
+- **PRI-1149**：GFI 历史 workspace JSON 数据迁移。
+- **DC-01**：GFI `gone` 墓碑保留 vs SPEC §5.1 的例外裁定（见最终报告）。
+- **DC-02**：D5（学习词不再 STRONG 直通）与 D6（pending payload 最小化）的
+  Owner 追认；PR #2308 自述"D6 待 Owner 认可"，本轮未找到已批准记录。
+
+### 8.6 本轮验证命令
+
+```text
+packages/principles-core: npx vitest run pain-ingress-spec-matrix / pain-ingress-workbuddy /
+  pain-ingress-shared-semantics / keyword-stage / architecture-regression /
+  feature-flag-lifecycle  -> 546 passed
+packages/host-runtime: npx vitest run signal-stage2-cycle /
+  governance-signal-admission.pending / governance-signal-admission.workbuddy-live /
+  governance-signal-admission -> 89 passed
+packages/openclaw-plugin: npx vitest run phase-a-default-production-path /
+  llm-pain-source-retirement / gate-b-only-runtime-guard -> 19 passed
+packages/create-principles-disciple: workbuddy-host-installer /
+  workbuddy-governance-chain / install-status-three-state / install-summary -> passed
+packages/workbuddy-adapter: live-keyword-pain / explicit-owner-statement -> passed
+packages/pd-cli: workbuddy-worker-registration -> passed
+```
+
+真实 LLM 调用、真实三宿主验收、`verify:merge` 全链不因本轮文档收敛而视为已运行；
+未执行项在最终报告中标记 NOT RUN。
