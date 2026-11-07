@@ -397,12 +397,22 @@ export async function buildActivePrinciplePromptContext(input: {
     if (packing.truncated) {
       resultWarnings.push('prompt_context_truncated: production_prompt_cap; nextAction=reduce_active_prompt_principles');
     }
-    const injectedIds = new Set(packing.included.map((principle) => principle.principleId));
+    // Evidence arrays are positional tuples (principle, activation, artifact).
+    // A principle can have multiple activated artifacts, so deduplicate the
+    // candidate objects once and derive every identity array from that same
+    // first-selected entry; independently deduplicating only principleIds
+    // would shift later activation/artifact associations.
+    const seenPrincipleIds = new Set<string>();
+    const injectedPrinciples = packing.included.filter((principle) => {
+      if (seenPrincipleIds.has(principle.principleId)) return false;
+      seenPrincipleIds.add(principle.principleId);
+      return true;
+    });
     return {
       additionalContext: packing.additionalContext,
-      principleIds: [...injectedIds],
-      activationIds: packing.included.map((principle) => principle.activationId),
-      artifactIds: packing.included.map((principle) => principle.artifactId),
+      principleIds: injectedPrinciples.map((principle) => principle.principleId),
+      activationIds: injectedPrinciples.map((principle) => principle.activationId),
+      artifactIds: injectedPrinciples.map((principle) => principle.artifactId),
       warnings: resultWarnings,
       budget: budgetChars,
       truncated: packing.truncated,
