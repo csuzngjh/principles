@@ -78,7 +78,7 @@ describe('C4 — top-level install status is truthful for WorkBuddy installs', (
     const presentRows = status.paths.filter((p) => p.exists);
     expect(presentRows.length).toBeGreaterThanOrEqual(3);
     expect(presentRows.some((p) => p.path.includes('.openclaw'))).toBe(true);
-    expect(presentRows.some((p) => p.path.includes('.pd', 'codex') || p.path.includes('codex'))).toBe(true);
+    expect(presentRows.some((p) => p.path.includes('codex'))).toBe(true);
     expect(presentRows.some((p) => p.path.includes('workbuddy-marketplace'))).toBe(true);
   });
 

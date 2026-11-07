@@ -1,6 +1,6 @@
 ---
 "@principles/install-layout": minor
-"pd-cli": minor
+"@principles/pd-cli": minor
 "create-principles-disciple": patch
 ---
 
