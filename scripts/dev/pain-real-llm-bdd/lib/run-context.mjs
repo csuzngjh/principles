@@ -60,8 +60,16 @@ export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, p
   const metaPath = path.join(runDir, 'run-meta.json');
   let meta;
   let createdNew;
-  if (fs.existsSync(metaPath)) {
-    meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  // Read-first (ENOENT = absent): avoids the existsSync→write check-then-act
+  // race shape entirely — the only writer gate is the run_id match below.
+  let existingText = null;
+  try {
+    existingText = fs.readFileSync(metaPath, 'utf8');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (existingText !== null) {
+    meta = JSON.parse(existingText);
     if (meta.run_id !== runId) {
       throw new Error(`run-meta.json run_id mismatch: file says '${meta.run_id}', requested '${runId}'`);
     }
