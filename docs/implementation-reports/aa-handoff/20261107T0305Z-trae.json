@@ -1,0 +1,360 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0305Z-trae",
+  "previousCheckpoint": "20261107T0222Z-trae",
+  "generatedAt": "2026-11-07T03:05:45Z",
+  "agent": "trae",
+  "overallStatus": "READY_FOR_OWNER_DECISION",
+  "summary": "PRI-1119 只读调查与预注册：核实 main=cdd027650、PR #2402 MERGED、仓库/发布 2.7.1 与已安装 2.6.4、SPEC §7/G1/G2/C04、Linear In Progress + PRI-1118 blocker。入口可行性结论 CONDITIONAL：正常入口真实存在且生产 8 天 238 轮均有注入事件（GO 部分）；但指定原则不可靠（目标原则 97/238=40.8%，141 轮被 droppedActivationIds 明确丢弃，eligibleCount=18 vs injectedCount=16）；PD 只返回片段、宿主组装最终请求，仓库/安装产物无请求正文或哈希捕获（G1/C04 不可签收）；embedded 无原生 requestId/currentUserMessageId，安装版 2.6.4 无 controlled admission（0 命中）。产出入口可行性报告、观察方案与预注册、四层批准卡、检查点。未开窗、未运行、未安装、未写生产库、未改预算/冻结证据/历史判定。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+    "branch": "ai/PRI-1119-g2-entry-feasibility",
+    "baseCommit": "cdd0276508e510190f4e0ac9df527ab13ce5d739",
+    "headCommit": "PR #2404：初始 head c1ed4b6bc52eeebdc4fb29391a178db6ff11972a；本检查点追补本文件后 head 前移，最终以 PR 页面为准。",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2404",
+    "prState": "OPEN",
+    "remoteChecks": "PR #2404：Verify Merge Gate PASS（3m8s）；CI Impact Gate / PR Size / Dependency Audit / Repository Size / Telemetry Union Guard / Auto Label / PR<->Linear link PASS；其余 jobs SKIPPED（docs-only）。CI 通过不等于运行效果。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "限域 Native 真实使用的入口可行性、最小观察方案、预注册与四层批准卡；只读调查，不启动试用、不新增宿主回合或模型调用",
+      "status": "READY_FOR_OWNER_DECISION",
+      "owner": "trae",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-G2-PREREGISTRATION-DRAFT-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0305Z-trae.json",
+        "docs/implementation-reports/aa-handoff/20261107T0305Z-trae.md"
+      ],
+      "acceptance": [
+        {"criterion": "核实最新 main / PR #2402 / 版本 / SPEC / Linear 依赖", "result": "PASS", "evidenceRefs": ["evidence-baseline", "evidence-installed", "evidence-linear"]},
+        {"criterion": "给出精确正常入口调用链及代码行证据", "result": "PASS", "evidenceRefs": ["evidence-code-entry", "evidence-code-hook", "evidence-code-reader", "evidence-code-filter"]},
+        {"criterion": "身份/内容/顺序三类证据能力分别判断，不以缺 requestId 否定全部取证", "result": "PASS", "evidenceRefs": ["evidence-code-hook", "evidence-trajectory", "evidence-events"]},
+        {"criterion": "不以受控实验成功替代真实入口可用", "result": "PASS", "evidenceRefs": ["evidence-installed", "evidence-native-identity"]},
+        {"criterion": "给出仓库/发布/安装三档能力矩阵", "result": "PASS", "evidenceRefs": ["evidence-baseline", "evidence-installed"]},
+        {"criterion": "给出最小缺口清单与最小修正方案（调用链/IO/成本/回退/验收/回滚），不实施", "result": "PASS", "evidenceRefs": ["evidence-entry-report"]},
+        {"criterion": "单目标可靠性实证（只读事件统计）", "result": "PASS", "evidenceRefs": ["evidence-events"]},
+        {"criterion": "六项固化：3 项由现有材料固定，3 项列为 Owner 待决，不虚构身份/授权/日期/费用", "result": "PASS", "evidenceRefs": ["evidence-observation-plan", "evidence-approval-card"]},
+        {"criterion": "四层批准卡区分设计/安装配置/运行费用/观察窗口", "result": "PASS", "evidenceRefs": ["evidence-approval-card"]},
+        {"criterion": "G1 条件、可接受 unknown 与阻断项分列", "result": "PASS", "evidenceRefs": ["evidence-approval-card"]},
+        {"criterion": "未开窗、未运行、未安装、未写生产库", "result": "PASS", "evidenceRefs": ["evidence-baseline"]},
+        {"criterion": "G1/C04 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-entry-report"]},
+        {"criterion": "G2 窗口启动", "result": "NOT_STARTED", "evidenceRefs": ["evidence-observation-plan"]},
+        {"criterion": "专用工作区单目标可落地性", "result": "UNKNOWN", "evidenceRefs": ["evidence-entry-report"]},
+        {"criterion": "本地 provider 请求日志是否含完整 body", "result": "UNKNOWN", "evidenceRefs": ["evidence-entry-report"]}
+      ],
+      "remaining": [
+        "Owner 决定四层批准卡：工作区、窗口起止、费用/超时上限、Executor/Examiner。",
+        "Owner 接受 CONDITIONAL，并选择 G-B 处置（接受 unknown，或批准 B 类请求观测）。",
+        "V1：只读核实本地 provider 日志能力（0 代码）。",
+        "V2：若选专用工作区，需官方治理流程产出并批准目标 revision（0 代码）。",
+        "V3：若 V1 不成立，provider 边界只读 tap（代码，需单独确认）。",
+        "PR 创建后由 Owner 合并；AI 不合并。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-git-baseline",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "git fetch origin --prune; git rev-parse origin/main; gh pr view 2402 --json state,mergeCommit",
+      "result": "PASS",
+      "category": "基线核实",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-baseline"]
+    },
+    {
+      "id": "check-versions",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "读取 repo/openclaw-plugin/package.json、已安装 package.json、npm view、openclaw --version",
+      "result": "PASS",
+      "category": "版本与安装产物",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-baseline", "evidence-installed"]
+    },
+    {
+      "id": "check-installed-bundle-markers",
+      "cwd": "C:\\Users\\Administrator\\.openclaw\\extensions\\principles-disciple",
+      "command": "Select-String 全 bundle：PD_AA_ADMISSION_FILE / PD-AA:delivery-review:v1 / adaptiveActivation / runtime_v2_prompt_activations_injected / currentUserMessageId",
+      "result": "PASS",
+      "category": "安装版能力抽查",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-installed"]
+    },
+    {
+      "id": "check-single-target-empiric",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "只读统计 events_2026-10-31..11-07 的激活事件：目标 activationId 在 activationIds vs droppedActivationIds",
+      "result": "PASS",
+      "category": "单目标可靠性实证",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-events"]
+    },
+    {
+      "id": "check-state-db-readonly",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "node:sqlite readOnly：activations/pi_artifacts/approvals 联表",
+      "result": "PASS",
+      "category": "生产库只读读取",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-state-db"]
+    },
+    {
+      "id": "check-trajectory-readonly",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "node:sqlite readOnly：sessions/user_turns/assistant_turns/tool_calls 计数与身份字段覆盖",
+      "result": "PASS",
+      "category": "轨迹库只读读取",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-trajectory"]
+    },
+    {
+      "id": "check-controlled-admission-tests",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "未在本轮重跑；沿用 2026-11-07 上一轮 34/34 passed",
+      "result": "NOT_RUN_THIS_ROUND",
+      "category": "组件测试（夹具）",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": false,
+      "evidenceRefs": ["evidence-prior-tests"]
+    },
+    {
+      "id": "check-real-entry-run",
+      "cwd": "N/A",
+      "command": "N/A - 本轮禁止新增宿主/模型调用",
+      "result": "NOT_RUN",
+      "category": "真实入口运行",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": false,
+      "evidenceRefs": ["evidence-entry-report"]
+    },
+    {
+      "id": "check-g2-window",
+      "cwd": "N/A",
+      "command": "N/A - 未获 Owner 授权，未开窗",
+      "result": "NOT_RUN",
+      "category": "G2 观察窗口",
+      "passed": null,
+      "failed": null,
+      "skipped": null,
+      "freshThisRound": false,
+      "evidenceRefs": ["evidence-observation-plan"]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-baseline",
+      "kind": "GIT",
+      "locator": "origin/main = cdd0276508e510190f4e0ac9df527ab13ce5d739; PR #2402 state=MERGED mergeCommit=cdd0276508e510190f4e0ac9df527ab13ce5d739",
+      "observedAt": "2026-11-07T02:50:00Z",
+      "sha256": null,
+      "supports": "分支 base 即最新 main；PR #2402 已合并。",
+      "limitations": "只读 git/GitHub 查询；不等于 CI 结果。"
+    },
+    {
+      "id": "evidence-installed",
+      "kind": "RAW_ARTIFACT",
+      "locator": "C:/Users/Administrator/.openclaw/extensions/principles-disciple/package.json; 全 bundle Select-String",
+      "observedAt": "2026-11-07T02:52:00Z",
+      "sha256": null,
+      "supports": "已安装 2.6.4（mtime 2026-11-06T14:34:54+08:00）；有正常注入事件与 adaptiveActivation 读取；PD_AA_ADMISSION_FILE=0、PD_AA_ADMISSION=0（无 controlled admission）。",
+      "limitations": "字符串命中不等于运行时行为已验证。"
+    },
+    {
+      "id": "evidence-code-entry",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/index.ts#L459-L476,L371-L399",
+      "observedAt": "2026-11-07T02:56:00Z",
+      "sha256": null,
+      "supports": "hook:before_prompt_build 注册与 workspaceDir 解析；adaptivePriorityProvider 读取 currentUserMessageId/requestId；embedded 无原生身份时要求 controlled admission。",
+      "limitations": "代码事实，不等于已运行。"
+    },
+    {
+      "id": "evidence-code-hook",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/hooks/prompt.ts#L348-L364,L649-L652,L889-L933,L1113-L1156,L1173-L1186",
+      "observedAt": "2026-11-07T02:57:00Z",
+      "sha256": null,
+      "supports": "输入来自 event.prompt；身份 sessionId/runId；普通路径无最终重验；journal 仅在 adaptiveInvocationId 时写；事件无请求正文/哈希。",
+      "limitations": "代码事实，不等于已运行。"
+    },
+    {
+      "id": "evidence-code-reader",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/core/runtime-prompt-activation-reader.ts#L26-L71",
+      "observedAt": "2026-11-07T02:58:00Z",
+      "sha256": null,
+      "supports": "按工作区打开 SQLite，读 activations → pi_artifacts → approvals 推导授权。",
+      "limitations": "代码事实。"
+    },
+    {
+      "id": "evidence-code-filter",
+      "kind": "CODE",
+      "locator": "packages/principles-core/src/runtime/activation/prompt-activation-reader-contract.ts#L54-L60,L140,L153-L156",
+      "observedAt": "2026-11-07T02:58:00Z",
+      "sha256": null,
+      "supports": "只过滤 channel/action/deactivatedAt，无 allowlist；selection policy 两档；droppedActivationIds 字段。",
+      "limitations": "代码事实。"
+    },
+    {
+      "id": "evidence-native-identity",
+      "kind": "CODE",
+      "locator": "packages/openclaw-plugin/src/index.ts#L378-L399",
+      "observedAt": "2026-11-07T02:58:00Z",
+      "sha256": null,
+      "supports": "hasNativeIdentity 判定与 controlled admission 回退；embedded 不提供原生消息身份。",
+      "limitations": "代码事实。"
+    },
+    {
+      "id": "evidence-events",
+      "kind": "RAW_ARTIFACT",
+      "locator": "D:/.openclaw/workspace/.state/logs/events_2026-10-31..2026-11-07.jsonl",
+      "observedAt": "2026-11-07T03:00:00Z",
+      "sha256": null,
+      "supports": "238 轮；目标原则注入 97、丢弃 141；11/07 样本 eligibleCount=18 / injectedCount=16 / injectedCharCount=3481 / budget=4000 / fair_rotation_v1 / droppedActivationIds 2 条 / runId 为真实 UUID。",
+      "limitations": "只读解析既有日志；不证明模型采用目标；不做因果推断。"
+    },
+    {
+      "id": "evidence-state-db",
+      "kind": "RAW_ARTIFACT",
+      "locator": "D:/.openclaw/workspace/.pd/state.db（readOnly）",
+      "observedAt": "2026-11-07T02:59:00Z",
+      "sha256": null,
+      "supports": "32 activation / 18 active prompt；14 条 validated+approved；目标原则 revision_epoch=0、activated 2026-09-25T15:36:19.050Z。",
+      "limitations": "只读查询，未写；content_json length 非正文字节数。"
+    },
+    {
+      "id": "evidence-trajectory",
+      "kind": "RAW_ARTIFACT",
+      "locator": "D:/.openclaw/workspace/.state/trajectory.db（readOnly）",
+      "observedAt": "2026-11-07T03:00:00Z",
+      "sha256": null,
+      "supports": "sessions 845 / user_turns 1213 / assistant_turns 4316（run_id 4316）/ tool_calls 22438（tool_use_id 0）。",
+      "limitations": "无编译后请求正文/requestId；行动身份靠 name+params+ts。"
+    },
+    {
+      "id": "evidence-entry-report",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md",
+      "observedAt": "2026-11-07T03:02:00Z",
+      "sha256": null,
+      "supports": "CONDITIONAL 结论、调用链、三档能力矩阵、缺口 G-A..G-E、方案 A/B、证据索引与未验证项。",
+      "limitations": "方案未实施。"
+    },
+    {
+      "id": "evidence-observation-plan",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md",
+      "observedAt": "2026-11-07T03:03:00Z",
+      "sha256": null,
+      "supports": "六项固化（3 固定/3 Owner 待决）、场景卡 delivery-closure/v1、机会键、纳入排除、四维记录、特殊情形、批次隔离、停用与少样本规则。",
+      "limitations": "预注册，未采集。"
+    },
+    {
+      "id": "evidence-approval-card",
+      "kind": "REPORT",
+      "locator": "docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md",
+      "observedAt": "2026-11-07T03:04:00Z",
+      "sha256": null,
+      "supports": "四层批准范围、官方安装路径、安全隔离、硬预算/超时/停用/升级、G1 六条件、可接受 unknown vs 阻断项、一次批准勾选表。",
+      "limitations": "批准卡；无已执行动作。"
+    },
+    {
+      "id": "evidence-linear",
+      "kind": "EXTERNAL",
+      "locator": "Linear PRI-1119（In Progress；blockedBy PRI-1118；blocks PRI-1120；parent PRI-1105）",
+      "observedAt": "2026-11-07T03:02:00Z",
+      "sha256": null,
+      "supports": "状态与依赖关系；PRI-1118 blocker 保留。",
+      "limitations": "Linear 读取快照。"
+    },
+    {
+      "id": "evidence-prior-tests",
+      "kind": "LOCAL_TEST",
+      "locator": "scripts/__tests__/aa-controlled-admission.test.mjs",
+      "observedAt": "2026-11-07T01:35:00Z",
+      "sha256": null,
+      "supports": "上一轮 34 passed / 0 failed / 0 skipped。",
+      "limitations": "本轮未重跑；夹具不代表真实宿主请求。"
+    }
+  ],
+  "artifacts": [
+    {"id": "artifact-entry-feasibility", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md", "persistence": "committed", "notes": "入口可行性 CONDITIONAL。"},
+    {"id": "artifact-observation-plan", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md", "persistence": "committed", "notes": "最小观察方案与预注册。"},
+    {"id": "artifact-approval-card", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md", "persistence": "committed", "notes": "四层批准卡。"},
+    {"id": "artifact-prereg-draft", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-G2-PREREGISTRATION-DRAFT-20261107.md", "persistence": "committed", "notes": "草稿保留；仅头部指向新文档。"},
+    {"id": "artifact-checkpoint-json", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0305Z-trae.json", "persistence": "committed", "notes": "本检查点。"},
+    {"id": "artifact-checkpoint-md", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0305Z-trae.md", "persistence": "committed", "notes": "本检查点 Markdown。"}
+  ],
+  "blockers": [
+    "G-A：单目标不可靠（目标原则 97/238；18 候选 vs 16 注入；无 allowlist 配置）。",
+    "G-A2：无官方 artifact 导入路径；专用工作区需自身治理流程产出新 revision。",
+    "G-B：PD 边界内无法取得最终请求正文；SPEC G1/C04 硬条件未满足。",
+    "G-C：embedded 无原生 requestId/currentUserMessageId；tool_calls.tool_use_id 0/22438。",
+    "G-D：已安装 2.6.4 无 controlled admission；仓库/发布 2.7.1 有。",
+    "G-E：普通路径无最终重验；窗口内改版可能带入旧正文。",
+    "PRI-1118 blocker 未解除（设计准备并行不等于依赖解除）。",
+    "G1/C04 未签收；G2 未启动。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅 CONDITIONAL 结论并选择 G-B 处置（接受 unknown 或批准 B 类请求观测）。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "Owner 书面选择一种处置。"},
+    {"order": 2, "issue": "PRI-1119", "action": "Owner 在批准卡勾选四层：工作区、窗口起止、费用/超时、Executor/Examiner。", "dependsOn": [1], "authorization": "NEEDS_OWNER", "doneWhen": "四层勾选齐全或明确拒绝。"},
+    {"order": 3, "issue": "PRI-1119", "action": "V1：只读核实本地 provider（lmstudio/ninfer/llamacpp）日志是否含完整请求 body 与 request id。", "dependsOn": [1], "authorization": "WITHIN_APPROVED_SCOPE", "doneWhen": "给出 B1 可用/不可用的只读结论。"},
+    {"order": 4, "issue": "PRI-1119", "action": "V2：若选专用工作区，走官方治理流程产出并批准目标 revision，并把新 ID 写入预注册固定栏。", "dependsOn": [2], "authorization": "NEEDS_OWNER", "doneWhen": "新 artifactId/activationId/revision 写入固定栏。"},
+    {"order": 5, "issue": "PRI-1119", "action": "V3：若 V1 不成立，实现 provider 边界只读 tap。", "dependsOn": [3], "authorization": "NEEDS_OWNER", "doneWhen": "tap 验收：目标正文哈希命中 + 行动在其后 + Examiner 复核。"},
+    {"order": 6, "issue": "PRI-1119", "action": "PR 创建后由 Owner 合并；AI 不合并。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "PR 合并或关闭。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": true,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "positiveRerun": false,
+    "trialEnabled": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": [
+      "Owner 2026-11-07 指派 PRI-1119：只读调查、方案与预注册；不启动试用、不新增宿主回合或模型调用；使用独立工作树；PRI-1119 转 In Progress 并保留 PRI-1118 blocker；不自行合并。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0305Z-trae\",\"kind\":\"pri-1119-entry-feasibility-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "LATEST.json 保持他人指针，不覆盖。",
+      "保留 20261107T0222Z-trae、20261107T0151Z-trae 与其他既有检查点，不改写。"
+    ]
+  }
+}

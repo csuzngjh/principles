@@ -1,0 +1,159 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0653Z-zcode",
+  "previousCheckpoint": "20261107T0305Z-trae",
+  "generatedAt": "2026-11-07T06:53:00Z",
+  "agent": "zcode",
+  "overallStatus": "READY_FOR_OWNER_DECISION",
+  "summary": "PRI-1119 / PR #2404 有界修订 + 离线样本调查：修正四项定义（97/238 只报告为日志范围目标注入比例；T/V/O/D 严格对齐 SPEC v0.6 §6.1，Native 同文不排 T、缺行动证据保留 unknown、事前信号只影响 V、目标被丢弃不排除机会、T=unknown 单列；机会身份=既有 session_id+transcript seq，正文哈希只校验不合并；关键行动三分，交付前核验截止点=交付声明/提交承诺而非首次写文件，提交/发布/口头声明同属③类同一机会）。冻结规则先于注入联结完成 22 候选有限样本清单：8 机会锚点 / 3 continuation / 11 非机会；确认漏注入=0；OPP-08 可观测 run 全部注入目标。只读核实当前 provider 取证能力：最终请求正文不可得（systemPrompt 截断 limitChars=32768，跨 2026.10.5/10.10/11.1 一致），session+seq+runId 联结可用，provider.prompt.observed 155/155 run 均无工具调用（恰好不在交付 run 上，原因未知）；发现配置-运行漂移（配置主模型 zai/glm-5.3-flash，runtime 实际以 amd-radeon-cn 本地网关为主）。G-A 降级为待场景样本核实，G-B 仍为唯一硬阻断；最小下一步=扩大只读窗口，不默认单目标工作区迁移。本轮独立重算与前一 writer 统计逐字一致（按快照时刻过滤）。未开启新日志、未改配置、未发请求、未写生产库。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+    "branch": "ai/PRI-1119-g2-entry-feasibility",
+    "baseCommit": "PR 建立时 base=cdd0276508e510190f4e0ac9df527ab13ce5d739；本轮开始时 origin/main=62e85329dd76fb2bce87468ceb2c9fc6007a0b36（合并前按 git-7 刷新）",
+    "headCommit": "本检查点提交后以 PR 页面为准",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2404",
+    "prState": "OPEN",
+    "remoteChecks": "推送后以 PR head 实际 CI 为准（docs-only，预期 Verify Merge Gate 为 required）。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "PR #2404 有界修订（四项定义修正）+ 有限样本清单 + 当前 provider 取证能力只读核查 + 最小决策更新；接手前一 writer 未提交同题修订稿并复核修正",
+      "status": "READY_FOR_OWNER_DECISION",
+      "owner": "zcode",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-G2-PREREGISTRATION-DRAFT-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-SAMPLE-INVENTORY-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-SAMPLES-20261107.json",
+        "docs/implementation-reports/PD-AA-PRI-1119-PROVIDER-EVIDENCE-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0653Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T0653Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "97/238 不得称为交付场景覆盖率；不得由单样本推断固定丢两条；fair rotation 非随机对照", "result": "PASS", "evidenceRefs": ["evidence-injstats"]},
+        {"criterion": "T/V/O/D 与排除条件逐条对齐 SPEC v0.6 §6.1；T=unknown 保留不强判", "result": "PASS", "evidenceRefs": ["evidence-spec"]},
+        {"criterion": "机会身份用既有可核实行标识；正文摘要只校验；多决策/多轮规则显式化；不新增库", "result": "PASS", "evidenceRefs": ["evidence-obsplan"]},
+        {"criterion": "关键行动三分 + 交付前核验截止点=③ + 提交/发布/口头声明同一机会显式化", "result": "PASS", "evidenceRefs": ["evidence-obsplan"]},
+        {"criterion": "冻结规则先于注入联结；候选选择不使用注入/结果/错误", "result": "PASS", "evidenceRefs": ["evidence-freeze-script"]},
+        {"criterion": "有限样本清单交付（含样本不足与限制），未以'需先建 census'代交", "result": "PASS", "evidenceRefs": ["evidence-inventory"]},
+        {"criterion": "计数由确定性脚本产出；本轮独立重算一致", "result": "PASS", "evidenceRefs": ["evidence-independent-verify"]},
+        {"criterion": "provider 取证只读：正文/关联/时间戳/开启代价四问有结论；未换模型/provider、未开新日志", "result": "PASS", "evidenceRefs": ["evidence-provider"]},
+        {"criterion": "样本期模型/版本事实修正（非单一 zai；harness 三版本；配置-运行漂移）", "result": "PASS", "evidenceRefs": ["evidence-provider"]},
+        {"criterion": "确认漏注入机会数", "result": "0（8 机会中无可证实遗漏；10-30 锚点注入不可观测记 unknown，未强行排除）", "evidenceRefs": ["evidence-inventory"]},
+        {"criterion": "G1/C04 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-provider"]},
+        {"criterion": "G2 窗口启动", "result": "NOT_STARTED", "evidenceRefs": ["evidence-inventory"]}
+      ],
+      "remaining": [
+        "Owner 决定是否批准'扩大只读窗口'（P0，零宿主改动）。",
+        "Owner 决定 G-B 处置：P1 promptBodySha256 哈希方案批准与否（宿主侧字段，需单独批准）。",
+        "合并前 git-7 刷新 base；Owner 合并，AI 不合并。"
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "id": "check-independent-recount",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "node .tmp/pri-1119/aa-verify-independent.cjs（独立代码路径：窗口计数/预算分布/逐 run 注入/provider.observed 逐 run 工具计数/harness 时间线/按快照时刻重筛）",
+      "result": "PASS",
+      "category": "样本计数独立复核",
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-independent-verify"]
+    },
+    {
+      "id": "check-config-runtime-drift",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "openclaw.json（只读解析）+ trace.metadata 逐 run 对照",
+      "result": "PASS",
+      "category": "配置-运行漂移核实",
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-provider"]
+    },
+    {
+      "id": "check-truncation-both-eras",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "context.compiled systemPrompt 字段抽查（10.5 期与 11.1 期）",
+      "result": "PASS",
+      "category": "截断机制跨版本核实",
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-provider"]
+    },
+    {
+      "id": "check-db-readonly",
+      "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+      "command": "所有 sqlite 连接均 readOnly:true（宿主 transcript/trace + PD state.db）",
+      "result": "PASS",
+      "category": "生产库只读",
+      "freshThisRound": true,
+      "evidenceRefs": ["evidence-independent-verify"]
+    },
+    {
+      "id": "check-real-entry-run",
+      "cwd": "N/A",
+      "command": "N/A - 本轮禁止新增宿主/HTTP/模型调用",
+      "result": "NOT_RUN",
+      "category": "真实入口运行",
+      "freshThisRound": false
+    }
+  ],
+  "evidence": [
+    {"id": "evidence-injstats", "kind": "RAW_ARTIFACT", "locator": "D:/.openclaw/workspace/.state/logs/events_2026-10-31..2026-11-07.jsonl（快照时刻过滤=238/97/141，budget 2000×157/4000×46/15625×33/31250×2；快照后 +3 心跳事件）", "observedAt": "2026-11-07T06:25:00Z", "supports": "注入比例口径修正与预算可变性。", "limitations": "生产仍在运行，计数随时间增长。"},
+    {"id": "evidence-spec", "kind": "SPEC", "locator": "docs/specs/PD Adaptive Activation SPEC v0.6.md#L136-L145（§6.1 T/V/O/D）", "observedAt": "2026-11-07T06:35:00Z", "supports": "四项定义修正的 Intent Truth 对齐。", "limitations": null},
+    {"id": "evidence-freeze-script", "kind": "CODE", "locator": ".tmp/pri-1119/inventory-freeze.cjs（Step1 选候选→Step2 联结注入；readOnly；无原文输出）", "observedAt": "2026-11-07T03:43:03Z", "supports": "冻结先于联结。", "limitations": "session 工件，不入库。"},
+    {"id": "evidence-inventory", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SAMPLE-INVENTORY-20261107.md + PD-AA-PRI-1119-SAMPLES-20261107.json", "observedAt": "2026-11-07T03:52:00Z", "supports": "22 候选（12 人类 + 10 审计）；8 机会锚点；确认漏注入=0；O/D 限制如实记录；逐文件 sha256 快照索引。", "limitations": "历史样本观察，非前瞻预注册；不估计总体覆盖率。"},
+    {"id": "evidence-independent-verify", "kind": "LOCAL_TEST", "locator": ".tmp/pri-1119/aa-verify-independent.cjs（本轮独立重算）", "observedAt": "2026-11-07T06:25:00Z", "supports": "窗口 12/133；OPP-08 四 run 全事件 T1（无隐藏丢弃）；C11 链 03:44:11 注入→651 写→653 清单→656 声明；155/155 observed run 零工具。", "limitations": "只覆盖抽查声明，非全字段重算。"},
+    {"id": "evidence-provider", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-PROVIDER-EVIDENCE-20261107.md", "observedAt": "2026-11-07T06:45:00Z", "supports": "正文不可得（32768 截断跨版本一致）；session+seq+runId 联结可用；observed 事件跨三版本、均零工具；配置-运行漂移（primary=zai 但 runtime=amd-radeon-cn 为主）；harness 10.5→10.10→11.1。", "limitations": "P1/P2 均未实施、需 Owner 批准。"},
+    {"id": "evidence-obsplan", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md §4.3", "observedAt": "2026-11-07T06:48:00Z", "supports": "机会身份与多决策/多轮/同一交付多③类动作规则。", "limitations": "预注册文本，未采集。"},
+    {"id": "evidence-linear", "kind": "EXTERNAL", "locator": "Linear PRI-1119（In Progress；blockedBy PRI-1118 保留）", "observedAt": "2026-11-07T06:10:00Z", "supports": "状态未变；本检查点后追加事实进展评论。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-sample-inventory", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SAMPLE-INVENTORY-20261107.md", "persistence": "committed", "notes": "有限样本清单。"},
+    {"id": "artifact-samples-json", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SAMPLES-20261107.json", "persistence": "committed", "notes": "脱敏样本 + 快照索引。"},
+    {"id": "artifact-provider-evidence", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-PROVIDER-EVIDENCE-20261107.md", "persistence": "committed", "notes": "取证能力核查 + P0..P3 最小方案。"},
+    {"id": "artifact-checkpoint-json", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0653Z-zcode.json", "persistence": "committed", "notes": "本检查点。"},
+    {"id": "artifact-checkpoint-md", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0653Z-zcode.md", "persistence": "committed", "notes": "本检查点 Markdown。"}
+  ],
+  "blockers": [
+    "G-B：无最终请求正文证据（唯一硬阻断；D 全 unknown）。",
+    "provider.prompt.observed 恰好不在交付 run 上出现，发射条件未知。",
+    "10-30 注入日志缺口：8 个机会锚点 O/D 只能 unknown。",
+    "PRI-1118 blocker 未解除（设计准备并行不等于依赖解除）。",
+    "配置-运行漂移：涉及 provider 的成本/隔离论证需以 runtime 实际路由为准。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅样本清单 + 决策卡，决定是否批准扩大只读窗口（P0）。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "Owner 书面批准或拒绝。"},
+    {"order": 2, "issue": "PRI-1119", "action": "Owner 决定 G-B 处置：批准 P1 promptBodySha256（宿主侧哈希字段）或接受 D=unknown。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面选择。"},
+    {"order": 3, "issue": "PRI-1119", "action": "合并前 git-7 刷新 base（main 已前移 62e85329d）；Owner 合并。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "PR 合并或关闭。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": true,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": [
+      "Owner 2026-11-07 指派 PRI-1119 / PR #2404 有界修订与离线样本调查：只读、不新增宿主/HTTP/模型调用、不 G2 开窗、不写生产库、不治理变更、不安装发布、不换模型/provider、不改冻结证据；更新同一 PR；Linear 保持 In Progress；独立 aa-handoff 检查点。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0653Z-zcode\",\"kind\":\"pri-1119-bounded-revision-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（owner=zcode/PRI-1119-bounded-revision）",
+    "untouchedPointers": [
+      "LATEST.json 保持 20261107T0018Z-trae 指针，不覆盖。",
+      "保留 20261107T0305Z-trae 及全部既有检查点，不改写。"
+    ]
+  }
+}

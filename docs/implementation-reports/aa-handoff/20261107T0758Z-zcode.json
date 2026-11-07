@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0758Z-zcode",
+  "previousCheckpoint": "20261107T0653Z-zcode",
+  "generatedAt": "2026-11-07T07:58:00Z",
+  "agent": "zcode",
+  "overallStatus": "READY_FOR_OWNER_DECISION",
+  "summary": "PR #2404 集中修复第三轮：(1) O 证据资格修复——样本 JSON v2 将全部 8 机会 + 3 续轮的 O 降级为 unknown（注入事件只证明 fair rotation 装配，不证明机会识别；native 路径无识别记录，activationIds 成员不是识别证据；无法为任何样本给出识别入口/事前信号/机会身份/时间依据，如实降级不补造）；G2-PREREG §9 删除错误的 O 观测口径；T/V、装配事实、行动证据全部保留。(2) D 哈希方案修复——删除'两摘要即可证明包含'表述，新最小设计改为 wire 边界存在性核验（responses 复用现有 egress observer 帧、completions 新增提交点检查），七点逐条回答，仅布尔+摘要不落正文，记录不自动升级 confirmed/timely，附 A1–A8 离线验收反例（设计示例）。(3) 样本完整性修复——统一为'已观测续轮中未发现漏注入；其余机会或阶段无法判定'：机会 8 / 可观测 4 续 run（16 注入事件全部含目标）/ 缺失阶段=锚点轮+其余 7 机会全阶段+全部识别记录 / 确认注入 4run·16 事件 / 确认丢弃 0（仅限可观测 run）/ 其余 unknown；样本选择规则未重选。(4) provider.prompt.observed 发射条件根因（只读，2026.11.1 安装产物逐文件核实）：根因=API 路径而非工具调用——事件仅由 openai-responses 传输链发射（每次尝试发出前，含重试），openai-completions 客户端与 client.chat.completions.create 零观测钩子；实证 191 条 observed 事件信封全为 openai-responses，交付会话 659 条+冒烟 11 条全为 openai-completions（0 混合），'与无工具调用相关'为伪相关；截断在轨迹记录器入库前（32768 字符/finalPromptText 4096 字节）；存储 prompt 与实际请求不同边界；finalPromptText 实为 user-turn 文本非 wire prompt；10.5/10.10 版本产物已不在本机、如实标注不可直接核实。本轮真实运行 0 次、新日志 0、配置变更 0、模型切换 0。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+    "branch": "ai/PRI-1119-g2-entry-feasibility",
+    "baseCommit": "origin/main=62e85329dd76fb2bce87468ceb2c9fc6007a0b36（本轮以 merge 方式同步，git-7，不用 force）",
+    "headCommit": "本检查点提交+merge 后以 PR 页面为准",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2404",
+    "prState": "OPEN",
+    "remoteChecks": "推送后以 PR head 实际 CI 为准。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "O 证据资格修复 / D 哈希方案重写（七点最小设计）/ 样本完整性限定 / provider 事件发射条件只读根因 / 最小取证设计与验收反例",
+      "status": "READY_FOR_OWNER_DECISION",
+      "owner": "zcode",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1119-SAMPLES-20261107.json",
+        "docs/implementation-reports/PD-AA-PRI-1119-SAMPLE-INVENTORY-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-G2-PREREGISTRATION-DRAFT-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-PROVIDER-EVIDENCE-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0758Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T0758Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "O：装配/选中/识别三件事分列记录；注入事件只支持装配事实；无识别依据时 O=unknown；样本 JSON/计数/清单/方案/报告/批准卡同步", "result": "PASS", "evidenceRefs": ["evidence-o-fix"]},
+        {"criterion": "O：未发现任何可主张 O=yes 的样本（无识别入口/事前信号/机会身份/时间依据）", "result": "PASS", "evidenceRefs": ["evidence-o-fix"]},
+        {"criterion": "D：删除'两摘要即证明包含'表述；新设计覆盖七点；不因哈希升级 confirmed/timely", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "样本完整性：统一限定表述；分别报告机会数/可观测阶段/缺失阶段/确认注入/确认丢弃/未知；未观测≠零；不重选窗口", "result": "PASS", "evidenceRefs": ["evidence-o-fix"]},
+        {"criterion": "发射条件：已证实根因（API 路径），交付 run 缺席原因定位到 openai-completions 无观测钩子；逐文件行号证据；版本限定诚实标注", "result": "PASS", "evidenceRefs": ["evidence-codechain"]},
+        {"criterion": "最小设计：文件级接线/输入输出/四类信息作用/上限/隐私回退不阻塞/成本验收回滚/8 反例 fixture（设计示例）/信任边界", "result": "PASS", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "本轮真实运行次数", "result": "0", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "G1/C04 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "G2 窗口启动", "result": "NOT_STARTED", "evidenceRefs": ["evidence-o-fix"]}
+      ],
+      "remaining": [
+        "Owner 审阅并批准最小设计（批准卡 L1–L4）；实现另票，A1–A8 先红后绿。",
+        "Owner 决定是否批准扩大只读窗口（P0，统计'漏装配'，结论限定已观测阶段）。",
+        "O 缺口的解决（机会级登记）属独立设计决策。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-o-json-consistency", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility", "command": "node .tmp/pri-1119/o-fix-json.cjs + 解析复核（22 样本、O 全 unknown、completeness 8/4/16、revision=2）", "result": "PASS", "category": "样本 JSON 修复一致性", "freshThisRound": true, "evidenceRefs": ["evidence-o-fix"]},
+    {"id": "check-codechain", "cwd": "C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw（只读 grep/sed）", "command": "bundle 逐文件定位：builtin-openclaw-22_LOBKS.mjs:3279（observer 注册）、openai-responses-shared-CD3Sd1NC.mjs:2265/2272（尝试级发射+提交）、openai-completions-transport-BVV8L-MO.mjs:2887/2982/3320、openai-responses-request-lifecycle:195-210（观测构造）、runtime-DAy6DM_q.mjs:504/604-650（截断）", "result": "PASS", "category": "发射条件源码链", "freshThisRound": true, "evidenceRefs": ["evidence-codechain"]},
+    {"id": "check-empirical-api-split", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility", "command": "事件信封逐条核对：191 observed 全 openai-responses；42b62f3e 659 条/196f042b 11 条全 openai-completions；逐 run（4b56044f/eb7ee27f/dae59676/bbfd31e8/ebd486a3）复核", "result": "PASS", "category": "API 路径实证", "freshThisRound": true, "evidenceRefs": ["evidence-codechain"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A - 本轮禁止", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-o-fix", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SAMPLES-20261107.json（v2）+ PD-AA-PRI-1119-SAMPLE-INVENTORY-20261107.md §2.1/§4/§6 + G2-PREREG §9 + ENTRY-FEASIBILITY G-A 行 + APPROVAL-CARD §4", "observedAt": "2026-11-07T07:40:00Z", "supports": "O 降级 + 完整性限定 + 版本记录（v1→v2 及依据）。", "limitations": "O 修复不改变 T/V 与装配/行动事实。"},
+    {"id": "evidence-codechain", "kind": "CODE", "locator": "安装产物 C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw@2026.11.1（dist 只读）", "observedAt": "2026-11-07T07:15:00Z", "supports": "发射链：runner 注册 observer→responses 传输每尝试发射（SSE :2265 / ws :2982）→completions 零钩子（:3320 提交点无观测）；截断在记录器（:604-650）；观测字段仅长度/全等布尔。", "limitations": "2026.10.5/10.10 产物已卸载，不可直接核实（如实标注）。"},
+    {"id": "evidence-design", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md", "observedAt": "2026-11-07T07:50:00Z", "supports": "七点设计 + 文件级接线 + 上限 + 隐私回退 + A1–A8 反例（设计示例）+ 批准卡 L1–L4 + 回滚。", "limitations": "设计稿未实现；fixture 未进入测试树。"},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮全部 sqlite 连接 readOnly:true；未改宿主/安装目录；未开日志；未发请求；未切模型", "observedAt": "2026-11-07T07:58:00Z", "supports": "边界遵守；真实运行 0。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-design", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md", "persistence": "committed", "notes": "最小取证设计（未实现）。"},
+    {"id": "artifact-samples-v2", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-SAMPLES-20261107.json", "persistence": "committed", "notes": "v2：O 降级 + completeness。"},
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0758Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "G-B：无 wire 边界正文证据（设计已备，实现待批）。",
+    "O 结构性缺口：native 路径无机会识别记录（扩窗/补日志无效）。",
+    "PRI-1118 blocker 未解除。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅最小设计并勾选批准卡 L1–L4。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面批准或拒绝。"},
+    {"order": 2, "issue": "PRI-1119", "action": "Owner 决定 P0 扩大只读窗口。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面决定。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": true,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": [
+      "Owner 2026-11-07 第三轮指派：#2404 集中修复 + 请求取证缺口只读根因调查；不改宿主/安装目录、不开新日志、不改生产配置、不发请求、不切模型/provider；真实运行必须为 0；不实现新取证调用链。"
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0758Z-zcode\",\"kind\":\"pri-1119-o-d-fix-and-forensic-design-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（owner=zcode/PRI-1119-o-d-fix-round）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

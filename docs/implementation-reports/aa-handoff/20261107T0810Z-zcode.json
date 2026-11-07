@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0810Z-zcode",
+  "previousCheckpoint": "20261107T0758Z-zcode",
+  "generatedAt": "2026-11-07T08:10:00Z",
+  "agent": "zcode",
+  "overallStatus": "BLOCKED_ON_OWNER_DESIGN_APPROVAL",
+  "summary": "PRI-1119 第四轮（设计修正与接线核实，未编码）：按 Owner 七项契约修正设计 v1.0→v1.1。契约1 观测边界定性为传输提交前请求对象（encodeBody=JSON.stringify→Blob body 覆盖→SDK 原样发送，编码字节==观测对象 stringify；completions onPayload 可替换 params 故检查点须在其后；SDK 层重试不在边界内）。契约2 删除无效的整区域哈希判据，改为全部合法角色消息完整正文包含检查（禁止跨消息拼接/只查首条）。契约3 四类显式上限+超限一律 unknown:limit_exceeded，禁止截断后前缀算完整命中，历史最大值不作上限。契约4 三值资格 full_hit/checked_missing/unknown（必带 reason+实际值），事件存在≠命中、发送尝试≠送达。契约5 已核实 PD 零改动假设不成立（宿主白名单丢弃额外字段）：Tier B=宿主契约字段+symbol carrier+PD 尺寸守卫后冻结；Tier A=宿主独立块级检查；禁止事后读库。契约6 三层身份（run=providerPromptState Map；逻辑请求=wrapper 闭包；尝试=observePrompt 调用）+attemptIndex（payloadVariant 非唯一身份）。契约7 可构建源码=origin/release/2026.11.1（head d10d3d9a642，构建戳 4ffdd20 为其祖先；trace gitSha=2282d26 跨发布不变属陈旧戳）；源码↔bundle 抽查一致；实施用独立 git worktree 不触 Owner 主检出/安装目录/dist；构建 pnpm build:runtime。实施卡 L1-L6 待 Owner 书面批准后编码；本轮真实运行 0。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-g2-entry-feasibility",
+    "branch": "ai/PRI-1119-g2-entry-feasibility",
+    "baseCommit": "origin/main=df934461e（本轮 merge 同步）",
+    "headCommit": "本检查点提交+merge 后以 PR 页面为准",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2404",
+    "prState": "OPEN",
+    "remoteChecks": "推送后以 PR head 实际 CI 为准。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "两条模型请求路径正文存在性取证：设计修正（七契约）与接线核实；授权范围=调查+设计修订，编码待实施卡批准",
+      "status": "BLOCKED_ON_OWNER_DESIGN_APPROVAL",
+      "owner": "zcode",
+      "writePaths": [
+        "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-PROVIDER-EVIDENCE-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T0810Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T0810Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "契约1 观测边界（提交前请求对象+不能证明项）", "result": "PASS", "evidenceRefs": ["evidence-contract1"]},
+        {"criterion": "契约2 匹配规则（删除哈希判据/全角色/禁拼接）", "result": "PASS", "evidenceRefs": ["evidence-design-v11"]},
+        {"criterion": "契约3 有界检查（四上限/unknown:limit_exceeded/禁前缀充数）", "result": "PASS", "evidenceRefs": ["evidence-design-v11"]},
+        {"criterion": "契约4 结果资格（三值/事件≠命中/尝试≠送达）", "result": "PASS", "evidenceRefs": ["evidence-design-v11"]},
+        {"criterion": "契约5 期望集接线（白名单已核实、PD 零改动不成立、Tier A/B、禁事后读库）", "result": "PASS", "evidenceRefs": ["evidence-contract5"]},
+        {"criterion": "契约6 请求归属（三层身份/attemptIndex/并发隔离）", "result": "PASS", "evidenceRefs": ["evidence-contract6"]},
+        {"criterion": "契约7 源码与交付（release/2026.11.1+构建戳+worktree 方式+构建入口）", "result": "PASS", "evidenceRefs": ["evidence-contract7"]},
+        {"criterion": "编码", "result": "NOT_RUN（待实施卡书面批准）", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "真实运行次数", "result": "0", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": [
+        "Owner 勾选实施卡 L1-L6（含 Tier B/A 档位选择）后编码：检查器+双路径接线+假传输捕获+测试矩阵+实测表。",
+        "真实宿主验收：另行运行卡，本轮不出、不申请。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-source-anchor", "cwd": "D:/Code/openclaw（只读 git）", "command": "git cat-file/merge-base --is-ancestor 4ffdd20 origin/release/2026.11.1; git show release:packages/ai/src/transports/openai-responses-prompt-observer-internal.ts 抽查与 bundle 逻辑一致", "result": "PASS", "category": "源码锚点", "freshThisRound": true, "evidenceRefs": ["evidence-contract7"]},
+    {"id": "check-hook-whitelist", "cwd": "D:/Code/openclaw（只读 git show）", "command": "attempt-prompt-helpers.ts:80-124 白名单字段枚举 + PD openclaw-sdk.ts:209 类型镜像 + hooks/prompt.ts 守卫后冻结点", "result": "PASS", "category": "契约5 接线核实", "freshThisRound": true, "evidenceRefs": ["evidence-contract5"]},
+    {"id": "check-state-scope", "cwd": "D:/Code/openclaw（只读 git show）", "command": "provider-prompt-state.ts:47-59（runId Map+清理）+ attempt-stream-settle.ts:522（wrapper 应用）+ attempt-stream.ts:196", "result": "PASS", "category": "契约6 请求归属", "freshThisRound": true, "evidenceRefs": ["evidence-contract6"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A - 未获实施卡批准，未编码未运行", "result": "NOT_RUN", "category": "实现与运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-contract1", "kind": "CODE", "locator": "release/2026.11.1: openai-completions-transport.ts:340-388 / model-request-body.ts:50-78 / provider-prompt-serialization.ts:156-159", "observedAt": "2026-11-07T08:00:00Z", "supports": "观测边界=提交前请求对象；编码字节==观测对象 stringify；onPayload 可替换；SDK 重试边界外。", "limitations": null},
+    {"id": "evidence-contract5", "kind": "CODE", "locator": "release/2026.11.1: attempt-prompt-helpers.ts:80-124（白名单）；PD: openclaw-sdk.ts:209 + hooks/prompt.ts（truncateInjectionToBudget 守卫）", "observedAt": "2026-11-07T08:02:00Z", "supports": "PD 零改动不成立；Tier B 冻结点=守卫后返回值；Tier A=宿主独立块级检查。", "limitations": "carrier 精确落点在实现期对齐（attempt-stream-settle/attempt-stream）"},
+    {"id": "evidence-contract6", "kind": "CODE", "locator": "release/2026.11.1: provider-prompt-state.ts:47-59 + attempt-stream-settle.ts:522 + attempt-stream.ts:196", "observedAt": "2026-11-07T08:03:00Z", "supports": "runId 分键 Map+显式清理；wrapper 闭包=逻辑请求作用域；observePrompt=尝试级。", "limitations": null},
+    {"id": "evidence-contract7", "kind": "GIT", "locator": "D:/Code/openclaw: origin/release/2026.11.1（head d10d3d9a642；4ffdd2047d1 为祖先落后 3）；trace gitSha 2282d26 与 2026.10.5 相同（陈旧戳）", "observedAt": "2026-11-07T07:55:00Z", "supports": "可构建源码锚点与版本限定声明。", "limitations": "gitSha 不可用作提交锚；升级 2026.11.2+ 需重验"},
+    {"id": "evidence-design-v11", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md（v1.1，§10 差异表 9 项）", "observedAt": "2026-11-07T08:05:00Z", "supports": "七契约修订 + 实施卡 L1-L6 + 测量方法要求。", "limitations": "未实现；待 Owner 书面批准"},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮未编码、未运行、Owner 主检出与安装目录未改、生产库只读", "observedAt": "2026-11-07T08:10:00Z", "supports": "授权范围遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-design-v11", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md", "persistence": "committed", "notes": "v1.1：七契约修订+实施卡。"},
+    {"id": "artifact-checkpoint-json", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0810Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "实施卡 L1-L6 未获 Owner 书面批准（编码前置）。",
+    "Tier B/A 档位需 Owner 明确选择（默认 Tier B）。",
+    "PRI-1118 blocker 未解除。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅设计 v1.1 并勾选实施卡（L1-L6，含档位选择）。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面批准或拒绝。"},
+    {"order": 2, "issue": "PRI-1119", "action": "批准后一次完成离线实现与验收（另轮执行）。", "dependsOn": [1], "authorization": "WITHIN_APPROVED_SCOPE", "doneWhen": "测试全绿+实测表+双路径核对。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": true,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-07 指令：调查和设计修订授权，不替代设计批准；等待期间完成源码/接口/构建入口核实；禁止编码、真实宿主、安装目录修改。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0810Z-zcode\",\"kind\":\"pri-1119-design-v11-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（owner=zcode/PRI-1119-evidence-impl-design）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

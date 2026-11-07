@@ -1,8 +1,12 @@
 # PD Adaptive Activation — PRI-1119 G2 限域真实使用预注册（草稿）
 
 - 日期：2026-11-07
-- 状态：**草案，仅定义，不采集**
-- 工单：PRI-1119（保持 `Backlog`，本草案不改状态、不表示授权）
+- 状态：**草案，仅定义，不采集**（已被 2026-11-07 执行层方案继承；本文件保留为历史底稿，不删除）
+- 工单：PRI-1119
+- 后续文档（本草案的执行层补齐）：
+  - `docs/implementation-reports/PD-AA-PRI-1119-ENTRY-FEASIBILITY-20261107.md`（入口可行性 CONDITIONAL）
+  - `docs/implementation-reports/PD-AA-PRI-1119-OBSERVATION-PLAN-20261107.md`（六项固化、场景卡、纳入/排除、记录口径）
+  - `docs/implementation-reports/PD-AA-PRI-1119-APPROVAL-CARD-20261107.md`（四层批准卡）
 - 依据：`docs/specs/PD Adaptive Activation SPEC v0.6.md` §2（场景卡）、§6（T/V/O/D 与 unknown）、§7（停用与恢复）、§8（G2 入口）
 - 边界：**不启用生产、不运行宿主、不调用模型、不采集任何真实数据、不改预算/冻结证据/历史判定**
 
@@ -37,7 +41,7 @@ G2 需要一个限域 Native 真实使用窗口。若不在开窗前固定纳入
 1. 任务发生在已授权工作区与会话内，且时间在窗口内。
 2. 任务到达**交付/提交类决策点**，该决策点在关键行动之前可观察；判断依据必须是场景卡事先定义的显式标记或窄映射，不得读取未来结论。
 3. 场景匹配的唯一有效原则可读，且 artifact / activation / revision 与批准值一致。
-4. 在 `t_action` 之前存在可观察的事前信号；信号来源与置信规则由场景卡固定。
+4. T 只要求当时存在有干预可能的实际决定；**前置信号是否可取得只影响 V，不作为 T 的纳入门槛**。信号来源与置信规则由场景卡固定。
 5. 该行动有实际后果（交付、提交、发布、不可逆变更等），且属于授权范围。
 6. 同一决策单元未被更早的机会键覆盖（见 §6）。
 
@@ -47,14 +51,16 @@ G2 需要一个限域 Native 真实使用窗口。若不在开窗前固定纳入
 
 | # | 排除条件 | 记录为 | 不得写成 |
 |---|---|---|---|
-| X1 | 任务在 Native 路径下**本来就包含**目标内容（C03） | `already_present`，另列 | 干预增量 / 命中 |
-| X2 | 只有事后才可识别信号，行动已发生 | `post_hoc` 或 `missed` | timely |
+| X1 | 任务在 Native 路径下本来已包含目标内容 | **不排除 T**；记 `native_identical=true`，表示“无新增提示增量” | 干预增量 / 命中 |
+| X2 | 只有事后才可识别事前信号 | 记 `V=unknown/no`；**不自动否定 T** | 漏触发 / 0 |
 | X3 | 原则未授权、已撤销、revision 变更或不在有效集合 | `unauthorized_principle` | 命中 |
 | X4 | 工作区 / 会话 / 时间窗之外 | `out_of_scope` | 漏触发 |
-| X5 | 任务类型不在场景卡范围 | `out_of_scope` | T |
-| X6 | 同一 `opportunityKey` 的重复消息 | 去重，不重复计数 | 多个机会 |
-| X7 | 关键行动无独立证据，只有模型自述或 receipt | `unknown_action` | 已发生/未发生 |
+| X5 | 任务类型不在场景卡范围（无交付决定） | `out_of_scope` | T |
+| X6 | 同一 `opportunityKey` 的重复消息 | 去重；continuation 单列但不合并发生次数 | 多个机会 |
+| X7 | 关键行动无独立证据，只有模型自述或 receipt | **保留机会，记 `action=unknown`**；不得当作“行动不存在” | 已发生/未发生 |
 | X8 | 场景需要治理变更（改原则正文/授权） | 走原治理流程，不计入本窗 | 运行时改写 |
+| X9 | 目标未选中或被预算丢弃 | **不是排除理由**；记 `target_not_selected`，机会保留 | 漏触发 |
+| X10 | 无法判定 T | 记 `T=unknown`，保留在清单，不强行纳入或排除 | 0 / 漏触发 |
 
 ---
 
@@ -83,7 +89,7 @@ opportunityKey = sha256(
 | 优先级 | anchorKind | anchorValue | 说明 |
 |---:|---|---|---|
 | 1 | `host_message_id` | 宿主提供且可复核的消息/请求 id | 首选；若宿主不提供则降级 |
-| 2 | `user_message_sha256` | 该决策单元首条 user message 的 SHA-256 | 不再做归一化“修正” |
+| 2 | `user_turn_row_id` | 宿主 transcript 的 `session_id + seq`（`transcript_events`，`message_role=user`），或 `user_turns.id` | **现状可得且已验证**；正文摘要只校验内容 |
 | 3 | `session_turn_ordinal` | `sessionId` 内的单调轮次 | 仅在 1/2 都不可得时使用 |
 | 4 | `unavailable` | 无 | **不生成机会键，不计数，不事后补锚** |
 
@@ -94,6 +100,8 @@ opportunityKey = sha256(
 3. 不得用 `t_action` 之后的信息（结果、产物、事后结论）构造键。
 4. 键只用于去重，不承担身份证明；它不能替代 admission / session 绑定。
 5. 同一决策单元内的多条消息共享一个键；进入新决策单元才有新键。
+6. **正文摘要（`textSha256`）不是身份**：同一 session 中两次相同请求按 `seq` 分别计数，不得因正文相同而合并。
+7. 多轮共同完成一次交付：以首次明确要求该交付物的 user turn 为 anchor，后续为 continuation；一条请求含多个交付决定时能拆则拆、拆不开记 `ambiguous_multi_delivery=true`。
 
 ---
 
@@ -108,12 +116,12 @@ opportunityKey = sha256(
 | `t_change` | 事后可补 | 实际目标/风险变化或机会出现 |
 | `t_observable` | 事前 | 按可得信息首次可识别机会 |
 | `t_delivery` | 事前/请求级 | 目标文本送达时点 |
-| `t_action` | 行动时或事后证据 | 首次关键行动；无证据 → `unknown` |
+| `t_action` | 行动时或事后证据 | 关键行动必须分三类：①产物编辑（`write/edit/apply_patch`）；②核验动作（读取/重算/重跑/哈希/测试/版本核对）；③交付声明或提交承诺（commit/push/PR/发布/明确声明）。**“交付前核验”场景的截止点是 ③，不是 ①**；提交/发布/口头声明同属③类，同一机会内以最早出现者截止，不拆分为多个机会；无证据 → `unknown` |
+| `actionKind` | 行动时 | `artifact_edit` / `verification` / `delivery_claim` / `commit_or_release` / 其他 |
 | `principleId` / `activationId` / `revision` | 事前 | 必须匹配批准值 |
 | `deliveryPath` | 请求级 | `native` / `controlled` / `none` / `unknown` |
 | `signalSource` | 事前 | 显式标记 / 窄映射 / 其他场景卡定义 |
-| `actionKind` | 行动时 | 交付 / 提交 / 发布 / 不可逆变更 / 其他 |
-| `exclusionReason` | 判定时 | §4 的 X1–X8 或空 |
+| `exclusionReason` | 判定时 | §4 的 X1–X10 或空 |
 | `unknownReasons` | 判定时 | §8 的 U1–U7 列表 |
 
 **禁止**：用 `t_action` 后的观察倒填 `t_observable`；用模型自述替代行动证据；用 `receivedAt` 冒充模型开始生成时间。
@@ -138,12 +146,19 @@ opportunityKey = sha256(
 
 ## 9. 计数与复盘口径
 
-- T：审阅判断当时存在可改变的实际决定，且授权原则在行动前有合理干预可能；不要求后来一定犯错。
-- V：T 中 PD 确实在行动前识别。
-- O：V 中目标在行动前送达且可关联该决策单元。
-- D：O 中后续行动/产物可关联；区分有帮助、无变化、伤害、未知。
+严格按 SPEC v0.6 §6.1：
+
+- **T（理论机会）**：审阅判断当时存在可改变的实际决定，且已授权原则在行动前有合理干预可能；依据场景与前置事实认定，不要求后来一定犯错。不可干预、范围外另列；无法判定记 `T=unknown`。
+- **V（事前可见）**：T 中在选定 profile 上有可取得且早于行动的合格信号。信号不可见主要影响 V，不自动否定 T。
+- **O（实际识别）**：V 中 PD 确实在行动前识别的机会。**识别与装配是三件不同的事：fair rotation 选中目标、目标被装配进 prompt、PD 识别当前机会，三者互不蕴含。**注入事件只支持装配/返回事实，不能作为 O 的观测口径；native 路径没有任何机会识别记录（无识别入口、无逐机会信号、无机会身份绑定），因此在现有机制下 O 一律记 `unknown`，除非出现带识别入口、事前信号、机会身份与时间依据的识别记录（仅 `activationIds` 成员关系不算）。误触发与只在事后识别另列。
+- **D（及时送达）**：O 中独立确认目标正文位于同一决策的实际模型请求，且送达先于关键行动。仅 returned、延迟送达、未知分别列示。
+
+主指标为 **D/T**；同时给出 V/T、O/V、D/O 及各自计数。按抽样审阅得到的 T 只报告该样本内的覆盖率，并说明抽样与漏检限制；**不得把 D/O 改名为总体覆盖率**；分母为零写“不适用”；未知不算失败也不算成功。
+
+- Native 同文：分别报告覆盖与“真正新增及时提示”的次数，不把同文算作新增增量。
 - 必要介入 / 多余打扰 / 不必要返工分开计数。
 - 相关性不支持因果；少量或混合结果也可结束复盘。
+- 计数必须由确定性代码或既有统计器产出，不用模型心算。
 - 无代表性案例直接写明，不编造案例。
 
 ---
