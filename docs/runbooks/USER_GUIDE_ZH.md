@@ -68,7 +68,7 @@ npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPI
 - `/pd-rollback last`：回滚当前会话最近一次情绪惩罚
 - `/pd-rollback <eventId>`：回滚指定事件
 
-它只影响 empathy 相关的 GFI，不会把整段会话状态全部清空。
+它只撤销指定的情绪惩罚事件，不会把整段会话状态全部清空。
 
 ## 代码实现运维流程
 
@@ -140,11 +140,13 @@ disable 会保留账本记录，但停止它继续参与运行。
 
 当当前 active implementation 需要撤回，并恢复到上一个 active 版本时，用这个命令。
 
-如果没有 previous active implementation，系统会退回到宿主硬边界继续保护：
+如果没有 previous active implementation，系统会退回到仍然存在的宿主硬约束继续保护：
 
-- GFI
-- Progressive Gate
+- RuleHost 原则拦截
+- Edit verification
 - 其他已有硬约束
+
+> 注：GFI 与 Progressive Gate 已退役，不再作为回退边界。
 
 ### 第六步：归档实现
 
@@ -213,12 +215,13 @@ Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以�
 
 ### “明明 disable 了，实现为什么还像被限制住？”
 
-这是正常现象。disable code implementation 以后，系统的宿主硬边界仍然存在，例如：
+这是正常现象。disable code implementation 以后，系统的宿主硬约束仍然存在，例如：
 
-- Thinking checkpoint
-- GFI
-- Progressive Gate
+- RuleHost 原则拦截
 - Edit verification
+- 其他已有硬约束
+
+> 注：Thinking checkpoint、GFI 与 Progressive Gate 已退役，不再属于当前硬边界。
 
 ### “我只是想知道系统健不健康”
 
