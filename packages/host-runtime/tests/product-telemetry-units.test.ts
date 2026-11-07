@@ -58,6 +58,21 @@ afterEach(() => {
 });
 
 describe('control-state store', () => {
+  /**
+   * Content + mtime from ONE open file descriptor, so "nothing rewrote the
+   * file" assertions observe a single consistent snapshot of the same inode
+   * (two separate path-based syscalls would be a check/use race window —
+   * js/file-system-race, PRI-1138 review round 3).
+   */
+  function snapshotFile(statePath: string): { content: string; mtimeMs: number } {
+    const fd = fs.openSync(statePath, 'r');
+    try {
+      return { content: fs.readFileSync(fd, 'utf8'), mtimeMs: fs.fstatSync(fd).mtimeMs };
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
   it('reads a missing file as the never-configured default (consent unset)', () => {
     const read = readProductTelemetryControlState(homeDir);
     expect(read.ok).toBe(true);
@@ -237,9 +252,8 @@ describe('control-state store', () => {
     const first = readProductTelemetryControlState(homeDir);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    const contentAfterFirst = fs.readFileSync(statePath, 'utf8');
-    const mtimeAfterFirst = fs.statSync(statePath).mtimeMs;
-    expect((JSON.parse(contentAfterFirst) as Record<string, unknown>).schemaVersion).toBe('2');
+    const snapAfterFirst = snapshotFile(statePath);
+    expect((JSON.parse(snapAfterFirst.content) as Record<string, unknown>).schemaVersion).toBe('2');
     // The second load recognizes the current format: no re-migration, no
     // identity drift, and no meaningless rewrite of the migrated file.
     const second = readProductTelemetryControlState(homeDir);
@@ -249,8 +263,9 @@ describe('control-state store', () => {
     expect(second.state.consent).toBe('granted');
     expect(second.state.consentVersion).toBe('1');
     expect(second.state.telemetrySecret).toBe(secret);
-    expect(fs.readFileSync(statePath, 'utf8')).toBe(contentAfterFirst);
-    expect(fs.statSync(statePath).mtimeMs).toBe(mtimeAfterFirst);
+    const snapAfterSecond = snapshotFile(statePath);
+    expect(snapAfterSecond.content).toBe(snapAfterFirst.content);
+    expect(snapAfterSecond.mtimeMs).toBe(snapAfterFirst.mtimeMs);
     // The final state stays stable on a third load.
     expect(readProductTelemetryControlState(homeDir)).toEqual(first);
   });
@@ -271,8 +286,7 @@ describe('control-state store', () => {
         },
       }),
     );
-    const contentBefore = fs.readFileSync(statePath, 'utf8');
-    const mtimeBefore = fs.statSync(statePath).mtimeMs;
+    const snapBefore = snapshotFile(statePath);
     const read = readProductTelemetryControlState(homeDir);
     expect(read.ok).toBe(true);
     if (!read.ok) return;
@@ -282,8 +296,9 @@ describe('control-state store', () => {
     expect(read.state.schemaVersion).toBe('2');
     expect(read.state.workspaceExports?.aaaa0000aaaa0000?.lastSucceededAt).toBe('2026-08-26T10:00:00.000Z');
     // A current-format load never produces a file write.
-    expect(fs.readFileSync(statePath, 'utf8')).toBe(contentBefore);
-    expect(fs.statSync(statePath).mtimeMs).toBe(mtimeBefore);
+    const snapAfter = snapshotFile(statePath);
+    expect(snapAfter.content).toBe(snapBefore.content);
+    expect(snapAfter.mtimeMs).toBe(snapBefore.mtimeMs);
   });
 
   it('fails loud on illegal schemaVersion and incomplete legacy files (no silent fallback, PRI-1138)', () => {
@@ -351,9 +366,11 @@ describe('control-state store', () => {
   });
 
   it('a failed migration write fails loud, loses nothing, and retries (PRI-1138)', () => {
-    // POSIX-only real-failure injection: a read-only state directory makes the
-    // temp-file write fail. Windows directory ACLs do not map to POSIX write
-    // bits, so this adversarial path is exercised on the POSIX CI runners.
+    // Real-failure injection via a read-only state directory (POSIX write
+    // bits). Windows directory ACLs do not map to POSIX bits, and a root
+    // runner (CAP_DAC_OVERRIDE) ignores them too — so PROBE the injection
+    // with a real write first and skip only when the environment genuinely
+    // cannot produce the failure (no mock, no fake green).
     if (process.platform === 'win32') return;
     const statePath = getProductTelemetryStatePath(homeDir);
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
@@ -362,6 +379,18 @@ describe('control-state store', () => {
     fs.writeFileSync(statePath, v1Raw);
     fs.chmodSync(path.dirname(statePath), 0o500);
     try {
+      const probePath = `${statePath}.inject-probe`;
+      let injectionEffective = false;
+      try {
+        fs.writeFileSync(probePath, 'x');
+      } catch {
+        injectionEffective = true;
+      }
+      if (!injectionEffective) {
+        // This environment (e.g. root) cannot produce EACCES; the failure
+        // contract is exercised on the non-root POSIX CI runners.
+        return;
+      }
       const read = readProductTelemetryControlState(homeDir);
       expect(read.ok).toBe(false);
       if (!read.ok) {

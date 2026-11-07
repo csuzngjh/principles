@@ -358,42 +358,75 @@ export function writeProductTelemetryControlState(homeDir: string, state: Produc
   }
 }
 
+/** Outcome of trying to persist a just-performed legacy migration. */
+type LegacyMigrationPersistOutcome =
+  /** Migration persisted through the normal atomic write. */
+  | { kind: 'persisted' }
+  /** Another process rewrote the file first; the caller must re-parse it. */
+  | { kind: 'superseded' }
+  /** Re-read failed mid-flight; the state already parsed from the bytes this
+   *  load actually read is the best available answer (same staleness as any
+   *  pre-PRI-1138 read). */
+  | { kind: 'serve-read' }
+  /** The write failed loud (details carried for the caller to return). */
+  | { kind: 'failed'; read: Extract<ControlStateRead, { ok: false }> };
+
 /**
  * Persist a just-performed legacy migration through the normal atomic write
  * (the migrator itself never writes, PRI-1138). The file is re-read first:
  * if another process already rewrote it (its own migration or a consent
- * transition), this load does NOT overwrite that newer result — it returns
- * the migrated state and leaves the disk alone. A failed write is loud and
- * leaves the legacy file on disk so the next load retries (idempotent).
+ * transition), the migration is superseded — it must NOT overwrite that
+ * newer result, and the caller re-parses the current bytes instead of
+ * returning the superseded identity. A failed write is loud (returned by the
+ * caller) and leaves the legacy file on disk so the next load retries
+ * (idempotent).
+ *
+ * Residual window (documented, PRI-1138 review): between the byte-compare
+ * and the rename another process's consent transition can still land and be
+ * overwritten — the same last-writer-wins exposure the service's existing
+ * read→write consent transitions (enable/disable/reset) already have. Closing
+ * it fully means unifying ALL control-state writes under the service-layer
+ * state-update lock; the reader is itself called inside that lock today, so
+ * that redesign is deliberately out of scope here.
  */
 function persistLegacyMigration(args: {
   homeDir: string;
   filePath: string;
   rawAtRead: string;
   migrated: ProductTelemetryControlState;
-}): ControlStateRead {
+}): LegacyMigrationPersistOutcome {
   let rawNow: string;
   try {
     rawNow = fs.readFileSync(args.filePath, 'utf8');
   } catch {
     // Unreadable mid-flight (external tampering): skip the write-back; the
-    // in-memory migrated state still serves this caller and the next load
-    // retries the migration.
-    return { ok: true, state: args.migrated, existed: true };
+    // state parsed from the bytes this load did read still serves the caller
+    // and the next load retries the migration.
+    return { kind: 'serve-read' };
   }
   if (rawNow !== args.rawAtRead) {
-    return { ok: true, state: args.migrated, existed: true };
+    return { kind: 'superseded' };
   }
   const written = writeProductTelemetryControlState(args.homeDir, args.migrated);
   if (!written.ok) {
     return {
-      ok: false,
-      reason: `product_telemetry_state_legacy_migration_write_failed: ${written.reason}`,
-      nextAction: written.nextAction,
+      kind: 'failed',
+      read: {
+        ok: false,
+        reason: `product_telemetry_state_legacy_migration_write_failed: ${written.reason}`,
+        nextAction: written.nextAction,
+      },
     };
   }
-  return { ok: true, state: args.migrated, existed: true };
+  return { kind: 'persisted' };
 }
+
+/**
+ * Bound on the legacy-migration convergence loop: a file that keeps changing
+ * under a migrating load (flapping concurrent writers) is reported loud
+ * instead of looping forever.
+ */
+const MAX_LEGACY_MIGRATION_ATTEMPTS = 3;
 
 /**
  * Read and validate the control state. A missing file is the normal
@@ -404,55 +437,76 @@ function persistLegacyMigration(args: {
  * Legacy v1 files (PRI-1138): parsed by the one-way legacy migrator
  * (identity preserved, export bookkeeping dropped) and immediately persisted
  * back as the current format through the normal atomic write, so the file on
- * disk converges on the very load that performed the migration. A failed
- * migration write is a loud failure — never a silent fallback to running on
- * the old format — and leaves the legacy file untouched (temp+rename write),
- * so the next load retries the idempotent migration.
+ * disk converges on the very load that performed the migration. If another
+ * process rewrites the file mid-migration, the load re-parses the CURRENT
+ * bytes (never returning a superseded identity), bounded by
+ * MAX_LEGACY_MIGRATION_ATTEMPTS. A failed migration write is a loud failure
+ * — never a silent fallback to running on the old format — and leaves the
+ * legacy file untouched (temp+rename write), so the next load retries the
+ * idempotent migration.
  */
 export function readProductTelemetryControlState(homeDir: string): ControlStateRead {
   const filePath = getProductTelemetryStatePath(homeDir);
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch (error) {
-    // Guarded code access (rc-1/rc-2: runtime check before use; rc-5:
-    // Object.hasOwn on untrusted objects; no NodeJS namespace in this config).
-    const codeValue =
-      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
-        ? (error as Record<string, unknown>).code
-        : undefined;
-    const code = typeof codeValue === 'string' ? codeValue : undefined;
-    if (code === 'ENOENT') {
-      return { ok: true, state: defaultProductTelemetryControlState(), existed: false };
+  for (let attempt = 1; ; attempt += 1) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(filePath, 'utf8');
+    } catch (error) {
+      // Guarded code access (rc-1/rc-2: runtime check before use; rc-5:
+      // Object.hasOwn on untrusted objects; no NodeJS namespace in this config).
+      const codeValue =
+        typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+          ? (error as Record<string, unknown>).code
+          : undefined;
+      const code = typeof codeValue === 'string' ? codeValue : undefined;
+      if (code === 'ENOENT') {
+        return { ok: true, state: defaultProductTelemetryControlState(), existed: false };
+      }
+      return {
+        ok: false,
+        reason: `product_telemetry_state_unreadable: ${code ?? String(error)}`,
+        nextAction: `Check permissions on ${filePath}`,
+      };
     }
-    return {
-      ok: false,
-      reason: `product_telemetry_state_unreadable: ${code ?? String(error)}`,
-      nextAction: `Check permissions on ${filePath}`,
-    };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return {
+        ok: false,
+        reason: 'product_telemetry_state_malformed_json',
+        nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
+      };
+    }
+    const result = parseConsentState(parsed);
+    if (!result.ok) {
+      return {
+        ok: false,
+        reason: `product_telemetry_state_malformed: ${result.errors.join('; ')}`,
+        nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
+      };
+    }
+    if (!result.migratedFromLegacy) {
+      return { ok: true, state: result.state, existed: true };
+    }
+    const persistOutcome = persistLegacyMigration({ homeDir, filePath, rawAtRead: raw, migrated: result.state });
+    if (persistOutcome.kind === 'persisted' || persistOutcome.kind === 'serve-read') {
+      return { ok: true, state: result.state, existed: true };
+    }
+    if (persistOutcome.kind === 'failed') {
+      return persistOutcome.read;
+    }
+    // superseded: another process rewrote the file before our write — do not
+    // return (or overwrite with) the superseded state; re-parse the current
+    // bytes, bounded so a flapping file cannot loop forever.
+    if (attempt >= MAX_LEGACY_MIGRATION_ATTEMPTS) {
+      return {
+        ok: false,
+        reason: `product_telemetry_state_legacy_migration_unstable: the file kept changing across ${MAX_LEGACY_MIGRATION_ATTEMPTS} attempts`,
+        nextAction: `Retry the operation; if it persists, inspect ${filePath}`,
+      };
+    }
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return {
-      ok: false,
-      reason: 'product_telemetry_state_malformed_json',
-      nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
-    };
-  }
-  const result = parseConsentState(parsed);
-  if (!result.ok) {
-    return {
-      ok: false,
-      reason: `product_telemetry_state_malformed: ${result.errors.join('; ')}`,
-      nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
-    };
-  }
-  if (!result.migratedFromLegacy) {
-    return { ok: true, state: result.state, existed: true };
-  }
-  return persistLegacyMigration({ homeDir, filePath, rawAtRead: raw, migrated: result.state });
 }
 
 /**
