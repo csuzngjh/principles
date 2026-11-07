@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
   "version": "0.2.2",
-  "description": "Principles Disciple — Owner-governed behavior internalization for AI agents (WorkBuddy host adapter, ADR-0020 third host). Three independent states: (1) the PD installer registers this plugin AND sets enabledPlugins=true, so installed means enabled; (2) governance is ON by default at install (features.host.workbuddy.enabled=true) and an explicit false opt-out is preserved; (3) automatic pain detection/correction is NOT available in WorkBuddy — record pain only with the explicit \"PD记录痛苦：\" prefix. The manifest defaultEnabled=false applies only when a host installs this plugin WITHOUT the PD installer. Ships the read-only pd-recall MCP server (Gate 4).",
+  "description": "Principles Disciple — Owner-governed behavior internalization for AI agents (WorkBuddy host adapter, ADR-0020 third host). Three independent states: (1) the PD installer registers this plugin and records enablement in settings.json (enabledPlugins[key]) — an existing Owner true/false choice is preserved, otherwise the manifest defaultEnabled=false applies, so a fresh install is INSTALLED but NOT ENABLED and must be enabled in WorkBuddy before its hooks run; (2) governance is ON by default at install (features.host.workbuddy.enabled=true) and an explicit false opt-out is preserved; (3) automatic pain detection/correction is NOT available in WorkBuddy — record pain only with the explicit \"PD记录痛苦：\" prefix. Ships the read-only pd-recall MCP server (Gate 4).",
   "defaultEnabled": false
 }
