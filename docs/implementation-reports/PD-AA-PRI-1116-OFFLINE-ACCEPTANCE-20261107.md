@@ -8,49 +8,52 @@
 
 ## 1. 结论（先看这里）
 
-1. **C08 的评分区分能力已在组件层实测确认**：行动、最终结果、不必要代价三列可区分；证据缺失保持 `unknown`，自述与 receipt 不会被当作证据。但这是判分逻辑，不是真实行为改善。
-2. **机会分母 T 仍为 `unknown`**：现有获准材料不足以形成范围明确、可复核的离线机会清单；本轮不补造机会，不用调用数/运行数/事后错误充当 T。
-3. **C04/G1 仍是唯一硬缺口**：原始正例在 gate 层失败、没有对照组、端点用户消息哈希与冻结输入不一致、请求级关联为 `unknown`。这些事实全部保留，不重开已完成接线。
-4. **本轮实际运行 166 个离线测试，0 failed / 0 skipped**：C01/C03/C05/C06/C07 相关组件 111 个、C08 相关 21 个、受控准入 34 个。
-5. 本轮最高证据层级为 **L2 跨模块回归**；L3 受控宿主观察、L4 完整实验、L5 行为效果均未运行。
+1. **本轮离线验收材料可交付。** C01–C09 的已有证据、精确引用、已验证结论与未满足条件已整理成可复核矩阵；C08 已知案例完成分维度核对。
+2. **PRI-1116 整票尚未满足完成条件，不得标 Done。** 阻断项是 C04/G1 的真实证据缺口与 C08 真实行为未运行；但 C01/C02/C03/C05/C06/C07/C09 的已完成部分不应因 G1 未通过而一直被当作开发中任务。
+3. **C04/G1 未通过。** 历史受控运行确实发生过，原始在线门禁判定为失败；事后复核不改变原判定，也没有补出对照臂。缺少的是请求正文一致性、请求与行动顺序、对照臂三类证据，不是「没有正例」。
+4. **机会分母 T 仍为 `unknown`。** 现有获准材料不足以形成范围明确、可复核的离线机会清单；不补造机会，不用调用数/运行数/事后错误充当 T。
+5. **C08 的评分维度可分列记录。** 组件测试确认行动、最终结果、代价分别记录；但这只是判分逻辑，不是真实行为改善。
+6. **本轮实际运行 166 个离线测试，0 failed / 0 skipped**：C01/C03/C05/C06/C07 相关组件与跨模块 111 个、C08 相关 21 个、受控准入 34 个。
 
-## 2. 证据层级（不可互相替代）
+## 2. 证据类别（不新造分级编号）
 
-| 层级 | 定义 | 本轮是否取得 |
+术语沿用 SPEC v0.6 §8.1 与既有验收矩阵的表述，不把自定义编号当作项目证据等级：
+
+| 类别 | 本文含义 | 本轮是否取得 |
 | --- | --- | --- |
-| L1 组件测试 | 单模块/夹具级确定性测试 | 是（C08、受控准入） |
-| L2 跨模块回归 | 真实本地入口/共享入口/读模型的集成测试 | 是（C01/C03/C05/C06/C07） |
-| L3 受控宿主观察 | 隔离宿主中一次正例的真实请求/回调观察 | 否（NOT_RUN） |
-| L4 完整实验 | 正例 + 对照，按预注册协议 | 否（NOT_RUN） |
-| L5 行为效果 | 真实任务中的行为改变 | 否（NOT_RUN） |
+| 组件测试 | 单模块/夹具级确定性测试 | 是（C08、受控准入） |
+| 跨模块回归 | 真实本地入口/共享入口/读模型的集成测试 | 是（C01/C03/C05/C06/C07） |
+| 受控宿主观察 | 隔离宿主中真实请求/回调的观察 | 本轮未新增；历史有一次受控运行（见 §7） |
+| 完整协议实验 | 正例 + 对照，按预注册协议 | 未运行 |
+| 真实行为效果 | 真实任务中的行为改变 | 未运行 |
 
-任何 L1/L2 结果都不能替代 L3/L4/L5，也不能写成「C08 通过」「G1 通过」。
+这些类别不可互相替代：组件测试与跨模块回归不能升级成受控宿主观察、完整协议实验或真实行为效果，也不能据此写成「C08 通过」「G1 通过」。
 
 ## 3. 本轮实测摘要
 
-| 命令 | 覆盖 | 结果 | 层级 |
+| 命令 | 覆盖 | 结果 | 类别 |
 | --- | --- | --- | --- |
-| `npx vitest run scripts/__tests__/principle-learning-lab-challenge-v2.test.ts` | C08 离线评分校准 | 21 passed / 0 failed / 0 skipped | L1 |
-| `npx vitest run scripts/__tests__/aa-controlled-admission.test.mjs` | 受控准入夹具/预算/编号 | 34 passed / 0 failed / 0 skipped | L1（夹具） |
-| `npx vitest run packages/principles-core/src/runtime/activation/__tests__/adaptive-principle-intervention.test.ts packages/host-runtime/tests/adaptive-behavior-linkage.test.ts packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts` | C01/C03/C05/C06/C07 组件与跨模块 | 111 passed / 0 failed / 0 skipped | L2 |
+| `npx vitest run scripts/__tests__/principle-learning-lab-challenge-v2.test.ts` | C08 离线评分校准 | 21 passed / 0 failed / 0 skipped | 组件测试 |
+| `npx vitest run scripts/__tests__/aa-controlled-admission.test.mjs` | 受控准入夹具/预算/编号 | 34 passed / 0 failed / 0 skipped | 组件测试（夹具） |
+| `npx vitest run packages/principles-core/src/runtime/activation/__tests__/adaptive-principle-intervention.test.ts packages/host-runtime/tests/adaptive-behavior-linkage.test.ts packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts` | C01/C03/C05/C06/C07 组件与跨模块 | 111 passed / 0 failed / 0 skipped | 组件测试 / 跨模块回归 |
 
-合计：**166 passed / 0 failed / 0 skipped**。
+合计：**166 passed / 0 failed / 0 skipped**。本轮未新增宿主、HTTP、工具或模型调用。
 
 ## 4. C01–C09 本轮增量矩阵
 
-「既有证据」来自 `docs/implementation-reports/PD-AA-C01-C09-ACCEPTANCE-MATRIX-20261106.md`（PR #2386 分支产物，未合并）；本文不复制其全文，只记录本轮增量与当前 HEAD 的路径漂移。
+「已具备证据」引用 `docs/implementation-reports/PD-AA-C01-C09-ACCEPTANCE-MATRIX-20261106.md`（PR #2386 分支产物，未合并）；本文不复制其全文，只补本轮引用与当前 HEAD 的路径漂移。
 
-| ID | 原始验收要求（摘要） | 实现入口 | 既有精确证据（测试名 / commit） | 本轮实测 | 本轮结论 | 剩余缺口 | 负责 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| C01 | 只选配置的有效目标；正常任务走 Native；不凭关键词或回调推定风险 | `adaptive-activation-config.ts`、core `adaptive-principle-intervention.ts`、plugin `index.ts` | plugin `does not interpret a quoted scene marker as operator admission`；`preserves Native when identity unavailable`（@`440aa6354`）；core `never triggers from missing message identity or quoted/history marker`（@`3e81b1115`）；config 2 项（@`7c84f20f1`） | 111 套件内通过（plugin 66 + core 15） | 组件级 PASS | 隔离宿主一次正例命中未运行 | PRI-1118 |
-| C02 | 不把旧正文带入目标请求；不改治理记录；拒绝/回退原因可追溯 | `host-runtime/src/adaptive-principle-revalidation.ts`、plugin `prompt.ts`、Runtime Reader | `removes a shared target whose artifact changes between selection and final commit`（@`440aa6354`）；`adaptive-principle-revalidation.test.ts` 6 项（@`4a7c584dd`） | 未单独复跑专用重验套件；plugin 66 中相关路径通过 | 部分复核 | 选择后提交前撤销在隔离宿主中的一次回退观察 | PRI-1118 |
-| C03 | 已有内容只出现一次；不可安全装配时无增量；不挤掉必需约束 | `host-runtime/src/active-principle-prompt.ts`、core packer、plugin 最终预算 | `adaptive-principle-priority-prompt.test.ts` 6 项（@`3e81b1115`）；`prompt-size-guard.test.ts`（@`0d47c7de3`） | core 15 通过；大小守卫未单独复跑 | 部分复核 | 真实宿主最终 payload 的独立比对（归 C04） | PRI-1118 / C04 |
-| C04 | 独立比对同一请求正文、配置身份和行动顺序；后者只取 returned，缺证保持未知 | `verify-adaptive-delivery.mjs`、`probe-local-transport.mjs`、`prompt.ts` 返回边界 | `verify-adaptive-delivery.test.mjs`（夹具）；历史探针 1 次本地 HTTP、宿主回调未出现 | 受控准入 34 通过（夹具/模拟） | **L3 NOT_RUN** | 一次真实隔离宿主正例，由假 provider 记录 `endpointRequestId/bodySha256/userMessageSha256`，并明确 `requestAssociation=unknown` | PRI-1118 |
-| C05 | 不补记为及时；能通过任务产物抽查漏触发机会；T 不完整只报可观测部分 | `host-runtime/src/adaptive-behavior-linkage.ts`、EventLog 读模型 | `adaptive-behavior-linkage.test.ts`（@`fda71df92`）；读模型覆盖率行为 | 30 passed | 组件/读模型 PASS | G2 真实任务抽样；完整 T/V/O/D 仍未知 | PRI-1119 / G2 |
-| C06 | 无跨界、无重复投递、无虚构合并；请求不能借用旧确认；配置变化后旧成功不作数 | `adaptive-behavior-linkage.ts`、`adaptive_delivery` journal、`adaptive-config-identity.test.mjs` | `adaptive-journal-reconciliation.test.ts`（@`440aa6354`）；linkage 跨 session/配置 A→B/requestId 借用 | 30 + 66 通过 | 组件级 PASS | 隔离宿主重放/并发/超时未运行；一次性准入在 #2396 仍修复中 | PRI-1118 / PRI-1115 |
-| C07 | 增量失败不阻塞正常任务；无独立证据不伪造成功/阻塞；撤映射后 Native 可用 | core `prepareAdaptiveIntervention`、plugin `prompt.ts` 停用路径 | core intervention 第 1/4/6/7 项（@`3e81b1115`）；`restores the native prompt after mapping is disabled between selection and final commit`；`production-host-runtime.test.ts`（@`679f6833a`） | 111 套件内通过 | 组件级 PASS | 宿主侧依赖失败/软截止未注入 | PRI-1118 |
-| C08 | Examiner 能区分行动、最终结果和不必要代价；证据缺失不以自述/receipt 补齐 | Examiner v0.10.1、`examiner-v2-cases.mjs`、用例草案 @`ed761d631` | `calibrates {correct, known-failure-wrong-object, surface-compliance-task-failed, over-execution, legal-alternative, unsupported-certainty} without a model` 等 10 项 | 21 passed；8 个 fixture 完成 reviewer assessment | **组件级 PASS（仅判分）** | 真实案例要等 G2/G3；3 处判据分歧待裁决 | PRI-1116 / Examiner |
-| C09 | 只在批准范围/期限运行；不自动开 Shadow/Live；不外发到未授权目的地 | `adaptive-activation-config.ts`、`index.ts` 默认关闭、设计 §4 隔离边界 | config 2 项（@`7c84f20f1`）；`abstraction_layer_v1` 默认关闭 | plugin 66 含默认关闭/停用路径；配置专测未单独复跑 | 部分复核 | 宿主模式切换与外发审计未运行 | PRI-1118（环境边界） |
+| ID | SPEC 原验收要求（摘要） | 已具备的精确证据及源 commit | 已验证结论 | 未满足条件 | 剩余动作与负责工单 |
+| --- | --- | --- | --- | --- | --- |
+| C01 | 只选配置的有效目标；正常任务走 Native；不凭关键词或回调推定风险 | plugin `does not interpret a quoted scene marker as operator admission`、`preserves Native when identity unavailable`（@`440aa6354`）；core `never triggers from missing message identity or quoted/history marker`（@`3e81b1115`）；config 2 项（@`7c84f20f1`） | 组件测试与跨模块回归通过（本轮 111 套件内覆盖） | 未新增受控宿主观察中的一次命中；现有结论不依赖它，但宿主命中仍未被观察 | 需要时由 PRI-1118 补受控宿主命中；不重跑已有组件测试 |
+| C02 | 不把旧正文带入目标请求；不改治理记录；拒绝/回退原因可追溯 | `removes a shared target whose artifact changes between selection and final commit`（@`440aa6354`）；`adaptive-principle-revalidation.test.ts` 6 项（@`4a7c584dd`） | plugin 66 中相关路径通过；专用重验套件本轮未单独复跑 | 「选择后、提交前撤销」在受控宿主中的一次回退未观察 | 离线复跑专用重验并归档（可继续离线）；宿主观察归 PRI-1118 |
+| C03 | 已有内容只出现一次；不可安全装配时无增量；不挤掉必需约束 | `adaptive-principle-priority-prompt.test.ts` 6 项（@`3e81b1115`）；`prompt-size-guard.test.ts`（@`0d47c7de3`） | core 15 通过；大小守卫本轮未单独复跑 | 真实宿主最终 payload 的独立比对未完成（归 C04） | 离线复跑大小守卫；payload 比对随 C04 缺口处理（PRI-1118） |
+| C04 | 独立比对同一请求正文、配置身份和行动顺序；后者只取 returned，缺证保持未知 | 历史受控运行 `aa-run-20261106T1258Z`（原始审计 JSON 未入库）；run record 离线重算 `evaluatePositiveGate` 13 项（派生结果）；受控准入 34 项（@ 当前基线） | 历史受控运行确实发生；准入被消费；目标 directive 正文到达本地假 provider；一次成功 `read` 属于该 run；run 级关联成立；原在线 gate 判失败 | ① 端点用户消息摘要不等于冻结输入摘要，不能声称同一请求正文；② 请求与行动顺序未知，不能声称 timely/ordered；③ 无对照臂，不能形成配对结论；请求级关联仍为 `unknown` | 只有 Owner 需要关闭 C04/G1 时才补这三类证据；不重新制造已有观察。负责：PRI-1118 |
+| C05 | 不补记为及时；能通过任务产物抽查漏触发机会；T 不完整只报可观测部分 | `adaptive-behavior-linkage.test.ts`（@`fda71df92`）；读模型覆盖率行为 | 跨模块回归 30 项通过 | G2 真实任务抽样未运行；完整 T/V/O/D 仍为 `unknown` | G2 抽样与分母预注册：PRI-1119 |
+| C06 | 无跨界、无重复投递、无虚构合并；请求不能借用旧确认；配置变化后旧成功不作数 | `adaptive-journal-reconciliation.test.ts`（@`440aa6354`）；linkage 跨 session/配置 A→B/requestId 借用 | 组件与跨模块 30 + 66 项通过 | 受控宿主重放/并发/超时未观察；一次性准入的修复在 #2396，不计入本 PR | 宿主观察归 PRI-1118；#2396 由另一会话处理 |
+| C07 | 增量失败不阻塞正常任务；无独立证据不伪造成功/阻塞；撤映射后 Native 可用 | core intervention 第 1/4/6/7 项（@`3e81b1115`）；`restores the native prompt after mapping is disabled between selection and final commit`；`production-host-runtime.test.ts`（@`679f6833a`） | 本轮 111 套件内通过 | 宿主侧依赖失败/软截止未注入（受控宿主观察） | PRI-1118 |
+| C08 | Examiner 能区分行动、最终结果和不必要代价；证据缺失不以自述/receipt 补齐 | Examiner v0.10.1、`examiner-v2-cases.mjs`、用例草案 @`ed761d631` | 组件测试 21 项通过；F-01…F-08 完成分维度 reviewer assessment | 真实案例与行为效果未运行；生产路径的独立请求证据来源未建立（草案 §5） | G2/G3；不新增标签。负责：PRI-1116 / Examiner |
+| C09 | 只在批准范围/期限运行；不自动开 Shadow/Live；不外发到未授权目的地 | config 2 项（@`7c84f20f1`）；`abstraction_layer_v1` 默认关闭 | plugin 66 含默认关闭/停用路径；配置专测本轮未单独复跑 | 宿主模式切换与外发审计未观察；配置专测未单独复跑 | 离线复跑配置边界并归档；环境边界归 PRI-1118 |
 
 路径漂移说明：矩阵中的 `runtime-v2/...` 在当前 HEAD 已由 `d36724c60`（PRI-1136，#2391）改名为 `runtime/...`，测试文件名 `runtime-v2-prompt-activation.test.ts` 现为 `runtime-prompt-activation.test.ts`。语义未变；以现行路径为准。
 
@@ -58,13 +61,13 @@
 
 详见 `PD-AA-C08-KNOWN-CASE-REVIEW-20261107.md`。
 
-- 三类可区分：符合原则（F-01、F-05）、无效或有害遵循（F-02、F-03、F-04、F-06、F-07）、证据未知（F-08）。
-- 全部案例标 `fixture`；分类判断标 `reviewer assessment`；不包装成真实行为改善。
-- 需要裁决的分歧集中列出，不阻塞其余项：
-  - **D-C08-1**：C08 的「无效/有害遵循」能否合并成一个标签（会掩盖「结果是否真的更差」）。
-  - **D-C08-2**：「诚实的证据未知」与「证据不足却断言成功」是否共用同一标签。
-  - **D-C08-3**：不必要代价是否单独构成「无效遵循」（`over-execution` 的结果仍为 PASS）。
-- 关键限制：离线判分逻辑可区分，但生产路径的独立请求证据来源尚未建立（用例草案 §5 已记录），因此不能据此宣称 C08 全部满足。
+- 每个案例按五个独立维度记录：行动是否符合原则 / 任务结果 / 是否有新增提示或可归因收益 / 额外代价或伤害 / 哪些证据未知。
+- F-03「原本做对」不等于不遵循原则；F-04「Native 同文」不自动证明新增干预或额外成本。两者只记录「无增量 / 新增干预未建立」，不强行归入三类。
+- F-01、F-05 可对应「符合原则」；F-02 为「有害遵循」，F-06、F-07 为「无效遵循」；F-08 为「证据未知」。
+- 不必要代价与客观结果 PASS 分别记录（F-06、F-07 的结果为 PASS，同时记录打扰/返工成本），两项不互相覆盖。
+- 诚实的 unknown（F-08）与「证据不足却断言成功」（`unsupported-certainty`）分别记录，不合并成同一标签。
+- 本轮不新增需要 Owner 裁决的标签体系；未发现具体规范文本冲突。
+- 关键限制：离线判分逻辑可分列记录，但生产路径的独立请求证据来源尚未建立（用例草案 §5 已记录），不能据此宣称 C08 全部满足。
 
 ## 6. B. 机会分母可得性
 
@@ -92,54 +95,59 @@
 
 ## 7. C. C04 / G1 剩余边界
 
-保留的事实（全部来自 `PD-AA-PRI-1118-INDEPENDENT-AUDIT-20261106.md` 与 `PD-AA-PRI-1116-NEXT-STAGE-20261106.md`）：
+先固定三个事实，避免把「本轮没有新增宿主运行」误写成「从未运行」：
 
-1. 原始正例在它自己的 gate 层**失败**，判定保留，不因后续离线复核而改写。
-2. **没有对照组**，因此不能形成配对实验结论。
-3. 端点投影的用户消息哈希**不等于**冻结输入哈希；不得声称用户输入按字节一致送达。
-4. 已确认的窄观察：受控准入被消费；目标 directive 正文在本地假 provider 被观察到；一次成功 `read` 属于该 run。
-5. 请求级关联、遵循、改善仍为 `unknown`。
-6. 审计者用原始 run record 离线重算 `evaluatePositiveGate`，13 项通过；这是**派生离线结果**，不是真实请求。
-7. 原始审计 JSON 只在本地产物目录，未进入仓库；仓库内无法复核其原始文件哈希。
+1. **本轮没有新增宿主运行。** 本轮只做只读材料核对与既有测试引用，未启动宿主、未发 HTTP、未调用模型。
+2. **历史受控运行确实发生过。** `aa-run-20261106T1258Z` 是一次真实的受控运行；原始审计 JSON 只在本地产物目录，未进入仓库。
+3. **原在线门禁判定为失败。** 该判定保留，不因事后离线复核而改写。
 
-还缺什么证据、影响哪个结论：
+原始证据仍然支持以下窄结论：
 
-| 缺口 | 需要的证据 | 影响的结论 | 是否需新运行授权 |
+- 受控准入被消费；
+- 目标 directive 正文在本地假 provider 被观察到；
+- 一次成功 `read` 属于该 run；
+- **run 级**关联成立。
+
+事后复核不改变原判定，也没有补出对照臂；不能把这些窄结论升级成完整 C04/G1 通过。
+
+还缺什么证据、影响哪个结论（三类分别描述）：
+
+| 缺口 | 缺的具体证据 | 影响的结论 | 是否需新运行授权 |
 | --- | --- | --- | --- |
-| E1 真实正例 | 隔离宿主一次真实 `before_prompt_build`，假 provider 记录端点请求 | C04 正例、L3 | 是 |
-| E2 对照 | 同一协议下 Native 对照回合 | L4、G1 配对结论 | 是 |
-| E3 输入一致性 | 端点用户消息与冻结输入同哈希，或明确接受不可比 | 「同一请求正文」结论 | 是（重跑或改协议） |
-| E4 请求级关联 | 宿主可证明的 request identity；否则保持 `unknown` | C04 的 confirmed/timely | 不一定；当前设计预期为 `unknown` |
+| M1 请求正文一致性 | 端点用户消息摘要与冻结输入摘要一致，或明确接受不可比 | 「同一请求正文」结论；C04 的输入一致性 | 是（需新观察或改协议）；不是重新制造已存在的观察 |
+| M2 请求与行动顺序 | 可证明 request identity 与行动先后顺序的证据；否则保持 `unknown` | 「action comes later / timely」结论；C04 的 confirmed/timely | 是（需新观察）；现有 run 级关联不足以推出请求级顺序 |
+| M3 对照臂 | 同一协议下的 Native 对照回合 | 完整协议实验与 G1 配对结论 | 是 |
+
+不是缺口、也不要求重做的事项：历史受控运行本身、准入消费、目标正文到达端点、一次工具行动、run 级关联。这些已经存在，不重新制造，也不升级为完整通过。
 
 边界：
 
 - 不重开已完成的接线，不因缺对照而否定组件证据。
 - 不自动动用剩余实验额度；历史 stop 仍然有效。
-- 不把整份 C01–C09 离线整理说成需要新运行授权：C01/C02/C03/C05/C06/C07/C08/C09 的大部分离线工作可继续；只有 E1/E2/E3 需要新运行授权。
+- 不把整份 C01–C09 离线整理说成需要新运行授权：C01/C02/C03/C05/C06/C07/C08/C09 的离线工作可继续；只有 M1/M2/M3 需要新运行授权。
 
 ## 8. 与其它 PR 的依赖与合并顺序
 
 1. **PR #2386（PRI-1118 设计/验收矩阵）**：本文引用其矩阵小节。建议合并顺序 #2386 → 本 PR；若本 PR 先合并，矩阵引用保留为跨 PR 指针，不复制其正文。本文不含 #2386 的代码。
-2. **PR #2396（PRI-1115 覆盖率报告）**：另一个会话正在修复 `matchingInvocation` 身份矛盾分支；本轮的 B 节结论不依赖该修复，也不引用其未合并报告作为事实。本 PR 不夹带其代码。若后续引用其覆盖报告，合并顺序应为 #2396 → 引用方。
+2. **PR #2396（PRI-1115 覆盖率报告）**：另一会话处理中；本轮的 B 节结论不依赖该修复，也不引用其未合并报告作为事实。本 PR 不夹带其代码。若后续引用其覆盖报告，合并顺序应为 #2396 → 引用方。
 3. **历史提交/文件**：保留 `PD-AA-PRI-1116-NEXT-STAGE-20261106.md`、`PD-AA-PRI-1118-INDEPENDENT-AUDIT-20261106.md` 与既有 aa-handoff 检查点，不覆盖他人指针。
 
 ## 9. 剩余事项分类
 
 ### 9.1 可继续离线完成
 
-- C02 专用重验套件与 C03 大小守卫、C09 配置边界在当前 HEAD 的复跑与结果归档。
-- 把 C08 的 8 个 fixture 按裁决后的 rubric 生成正式核对表（当前已完成 reviewer assessment，待裁决后可定稿）。
-- 为 E3 设计「输入不可比时如何上报」的离线判据（不重跑）。
+- C02 专用重验套件、C03 大小守卫、C09 配置边界在当前 HEAD 的复跑与结果归档。
+- C08 已完成分维度 reviewer assessment；若后续规范文本有明确冲突，再按原文补充，不新增标签。
 
-### 9.2 需要判据裁决
+### 9.2 需 Owner 判断（不新增标签）
 
-- D-C08-1、D-C08-2、D-C08-3（见 C08 核对文件 §4）。
-- C08 合并标签是否可用于正式验收结论。
+- 本轮未新增需要 Owner 裁决的标签或分级体系；F-03/F-04 只按维度记录。
+- PRI-1116 整票何时关闭由 Owner 按现有完成条件判断；本文不把文档合并等同于整票 Done。
 
 ### 9.3 确需新运行授权
 
-- E1 隔离宿主正例、E2 对照、E3 输入一致性复跑。
-- G2 真实任务抽样（C05 的完整 T/V/O/D）与 G3 行为效果。
+- M1 请求正文一致性、M2 请求与行动顺序、M3 对照臂。
+- G2 真实任务抽样（C05 的完整 T/V/O/D）与 G3 真实行为效果。
 
 ## 10. 下一张可执行工单
 
@@ -147,10 +155,10 @@
 
 - 产出：一页 preregistration，冻结机会分母的纳入/排除条件、观察窗口、事前字段、稳定机会键与 `unknown` 处理规则。
 - 不包含：采集代码、census 系统、宿主回合、模型请求。
-- 依赖：Owner 对 D-C08-1…3 的裁决；G2 启动授权。
+- 依赖：G2 启动授权；不需要新增判据标签。
 - 完成标准：Owner 能据此判断「哪些机会算 T、哪些不算」，且无需修改 SPEC。
 
-在裁决前，可立即执行的是 §9.1 的离线复跑与归档，不依赖新授权。
+在授权前，可立即执行的是 §9.1 的离线复跑与归档，不依赖新运行。
 
 ## 11. 本轮边界
 
