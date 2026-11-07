@@ -65,7 +65,7 @@
 | 选项 | 做法 | 决策价值 | 成本/风险 | 结论 |
 |---|---|---|---|---|
 | **P0（推荐先做）** | 维持现状，用 `systemPrompt.originalChars` + `injectedCharCount` + 注入事件做**长度级关联**，D 保持 `unknown` | 零成本；可支持“注入未注入”和“是否在请求规模内”的判断 | 不能证明正文；D 永远 unknown | 不新增能力 |
-| **P1（最小新增，v2 重写）** | ~~`promptBodySha256` + `injectedBlockSha256`~~ 两个摘要**不能单独证明包含关系**；改为在**传输 wire 边界**做有界存在性核验（对冻结来源的目标正文做 `includes` 检查 + 双边界摘要投影），详细七点设计见 [PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md](./PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md) | 使 D 的“正文进入实际请求”可判定（存在/缺失/变更分别可见）；**不自动升级 confirmed/timely**（仍需机会身份与时序） | 需要宿主侧最小改动（两条传输路径各一个检查点）；仅记布尔+摘要，不落正文 | 需 Owner 批准宿主改动后才可实现 |
+| **P1（最小新增，v2 重写）** | ~~`promptBodySha256` + `injectedBlockSha256`~~ 两个摘要**不能单独证明包含关系**；改为对**传输提交前请求对象**做有界存在性核验（对冻结来源的完整目标正文在全部合法角色消息中做包含检查；完整命中/完整检查后缺失/无法完整检查三值资格），v1.1 设计见 [PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md](./PD-AA-PRI-1119-DELIVERY-EVIDENCE-MINIMAL-DESIGN-20261107.md) | 使"目标正文进入提交请求对象"可判定（full_hit/checked_missing/unknown 分别可见）；**不自动升级 confirmed/timely**（仍需机会身份与时序） | 需要 PD hook 契约字段 + 宿主 carrier/检查点最小改动（"PD 零改动"已核实不成立）；仅记资格+摘要，不落正文 | 需 Owner 书面批准设计（实施卡 L1–L6）后才可编码 |
 | **P2** | 放宽 `systemPrompt` 记录上限或单独存注入块正文 | 正文级 D 证据 | 敏感正文落库；容量/隐私/性能上升 | 不建议作为首选 |
 | **P3** | 不补 D，改用产物侧核验（哈希/mtime/重跑）判断遵循 | 可观察行为结果，不可证明请求送达 | 零宿主改动；只能支持 O/行为层 | 与 P1 并行仍不足 D |
 
