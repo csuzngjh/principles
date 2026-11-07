@@ -12,7 +12,7 @@
     "baseCommit": "9c07876207655b4ac9757fb3510a69f3bb9dfa30",
     "headCommit": "本检查点提交；最终 head 以 PR 页面为准。",
     "dirtyPaths": [],
-    "prUrl": "见 PR 页面（创建后回填；本检查点提交时尚未创建）",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2402",
     "prState": "OPEN",
     "remoteChecks": "docs-only；以实际 PR head 的 CI 结果为准，不得以 CI 通过替代实际运行效果。"
   },
@@ -248,7 +248,7 @@
     {
       "id": "evidence-pr",
       "kind": "INLINE",
-      "locator": "PR（本检查点提交后创建）",
+      "locator": "https://github.com/csuzngjh/principles/pull/2402",
       "observedAt": "2026-11-07T01:51:00Z",
       "sha256": null,
       "supports": "PR 创建后保持 OPEN，不合并。",

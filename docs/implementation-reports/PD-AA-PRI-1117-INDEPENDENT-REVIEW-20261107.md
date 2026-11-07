@@ -2,6 +2,7 @@
 
 - 审查日期：2026-11-07
 - 审查人：Trae（独立任务工作树 `ai/PRI-1117-aa-independent-review`）
+- PR：https://github.com/csuzngjh/principles/pull/2402（OPEN，不合并）
 - Base：`9c07876207655b4ac9757fb3510a69f3bb9dfa30`（最新 `origin/main`）
 - 审查范围：PRI-1118 受控准入设计/实现、真实宿主运行证据、PRI-1115 汇总、PRI-1116 C01–C09 矩阵、C08 已知案例复核、隔离事故与污染排除记录
 - 非范围：不重做架构评审、不重新实现已完成组件、不启动新宿主回合、不调用模型、不写生产库、不改安装目录、不合并 PR
