@@ -22,6 +22,7 @@ export type {
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
   RuntimePromptActivationsInjectedEventData,
+  PromptPresenceObservedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
   TrajectoryObservabilityFailureEventData,

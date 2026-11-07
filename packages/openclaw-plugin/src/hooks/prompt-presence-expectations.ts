@@ -53,6 +53,11 @@ export type FrozenExpectationCandidate = {
   activationId: string;
   /** Raw (pre-escape) body; `escape` is applied only to kept entries. */
   body: string;
+  /**
+   * PRI-1150: true when `body` is ALREADY rendered/escaped text (e.g. the
+   * host-runtime frozen set) — the escape callback must not run again.
+   */
+  preEscaped?: boolean;
 };
 
 export function buildInjectedExpectations(params: {
@@ -68,7 +73,7 @@ export function buildInjectedExpectations(params: {
    * again; re-escaping would double-escape and hide a fully assembled target.
    */
   target?: { activationId: string; body: string; preEscaped?: boolean } | undefined;
-  /** Raw candidates from the render path (escape applied to kept entries only). */
+  /** Candidates from the render path or the host-runtime frozen set (escape applied to kept RAW entries only). */
   rendered: FrozenExpectationCandidate[];
   /** Escape applied to a raw body exactly as the renderer would (e.g. escapeXml). */
   escape?: (text: string) => string;

@@ -21,6 +21,7 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 // PRI-1137 retired the plugin-local activation reader; the shared runtime is
 // the only ordinary Runtime principle authority (main's resolution, kept).
 import { buildInjectedExpectations } from './prompt-presence-expectations.js';
+import { getPromptPresenceRegistry } from './prompt-presence-registry.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
 import {
@@ -1229,10 +1230,11 @@ export async function handleBeforePromptBuild(
   // yield a full_hit. Fail-open, memory-only; see prompt-presence-expectations.ts.
   //
   // PRI-1137 merge note: the plugin-local activation reader (dedupedV2) is
-  // retired — per-principle raw bodies are no longer available in the plugin,
-  // so non-target expectations come exclusively from the shared-route frozen
-  // field (Path A design, pending owner approval). Reverse-parsing the merged
-  // additionalContext is forbidden (design §3.1).
+  // retired — per-principle raw bodies come exclusively from the PD-internal
+  // host-runtime freeze (`injectedExpectations` on ActivePrinciplePromptResult,
+  // PRI-1150), which is already escaped rendered text (preEscaped). The
+  // hook-result field of the same name that OpenClaw whitelist-drops is NOT a
+  // Path A dependency: the registry below is PD-internal memory.
   const presenceExpectations = buildInjectedExpectations({
     finalAssembly: prependSystemContext,
     preGuardAssembly: presenceFallbackApplied ? undefined : preGuardPrependSystemContext,
@@ -1245,8 +1247,33 @@ export async function handleBeforePromptBuild(
           preEscaped: true,
         }
       : undefined,
-    rendered: [],
+    rendered: (sharedActivePrinciplePrompt?.injectedExpectations ?? []).map((entry) => ({
+      activationId: entry.activationId,
+      body: entry.bodyText,
+      preEscaped: true,
+    })),
   });
+
+  // PRI-1150 Path A: register the FINAL calibrated snapshot for this run so the
+  // official llm_input callback (async, no assembly identity) can bind under
+  // the registry's verdict rules. Memory-only; requires both identity fields.
+  if (runId && sessionId && (presenceExpectations?.expectations.length || presenceExpectations?.overflowCount)) {
+    try {
+      getPromptPresenceRegistry().registerAssemblySnapshot({
+        runId,
+        sessionId,
+        expectations: presenceExpectations.expectations.map((entry) => ({
+          activationId: entry.activationId,
+          bodyText: entry.bodyText,
+          bodyChars: entry.bodyChars,
+          bodyComplete: entry.bodyComplete,
+        })),
+        overflowCount: presenceExpectations.overflowCount,
+      });
+    } catch (registryErr) {
+      logger?.warn?.(`[PD:presence] snapshot registration failed (observation skipped this build): ${String(registryErr)}`);
+    }
+  }
 
   // Commit only the final selection, including a late deadline/revision/budget fallback.
   try { commitRuntimeEvidence?.(); } catch (error) {
