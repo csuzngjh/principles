@@ -1,12 +1,12 @@
 # GFI_COMPLETE_REMOVAL_SPEC
 
-## v1.1 — Complete Removal & Behavioral Preservation
+## v1.2 — Complete Removal & Behavioral Preservation（v1.1 设计条款保留，Post-Implementation Closure 见 §15）
 
 | 属性 | 内容 |
 |---|---|
 | SPEC ID | GFI-COMPLETE-REMOVAL-001 |
-| Version | 1.1 |
-| Status | Proposed — Owner Approval |
+| Version | 1.2（代码实施已合并；见 §15 Post-Implementation Closure） |
+| Status | **Partially Implemented** — 生产逻辑/DB/CLI/Console 已移除（PR #2332）；GFI-1 历史 JSON 迁移未实施、GFI-2 gone 墓碑例外待 Owner 裁定（DC-01） |
 | Priority | P1 |
 | Target | Principles Disciple |
 | Strategy | Complete Removal + Behavior-Preserving Simplification |
@@ -740,6 +740,10 @@ GateBlockItem.gateType 中的历史 `gfi` 类型必须先核实其语义：如�
 
 不保留 gone tombstone。通用 Feature Flag Loader 已有 unknown flag warning，旧 gfi override 应被识别为未知配置，不执行任何旧逻辑。
 
+> **2026-11-07 实施状态偏差：** 实际合并代码保留了 `gfi` 的 `gone` tombstone（无执行能力）。
+> 本轮不擅自删除；建议把本节修改为“允许保留纯防御性 tombstone，但不得具有任何执行能力”，
+> 需 Owner 裁定（Decision Card DC-01）。详见 §15.3 GFI-2。
+
 ## 5.2 PainConfig
 
 目标：
@@ -1418,3 +1422,70 @@ PD 应当直接使用真实行为证据，而不是依靠一个综合摩擦分�
 最终目标：更少的状态、更少的算法、更少的依赖、更清晰的职责，以及不降低任何 PD 核心能力的长期行为治理系统。
 
 本 SPEC 是本次实施的唯一范围依据。Owner 保留最终合并和部署授权。
+
+---
+
+# 15. Post-Implementation Closure（2026-11-07）
+
+> 本节只追加**实施后状态与剩余事项**，不改变 §1–§14 的设计条款。
+> 完整矩阵见 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。
+
+## 15.1 基线
+
+- 代码基线：`origin/main@86b6208042b6083d4a7bbf840730d060188a1517`。
+- 实施 PR：**#2332**（GFI Complete Removal，已合并）。
+- 路径变更：PRI-1136 已把 `packages/principles-core/src/runtime-v2/` 改名为
+  `packages/principles-core/src/runtime/`；§6.1 中 `runtime-v2/trajectory-schema.ts`
+  的现行路径为 `runtime/trajectory-schema.ts`（历史写法保留，不改原文）。
+
+## 15.2 已完成（IMPLEMENTED）
+
+| 项 | 证据 |
+| --- | --- |
+| GFI 评分内核 / session state / 观测面删除 | `packages/principles-core/src/runtime/gfi/` 目录已完全不存在 |
+| SQLite GFI 列删除 | `runtime/trajectory-schema.ts`；迁移器与防御性拒绝见 `host-runtime/src/production-pain-evidence.ts` |
+| CLI / Console GFI 表面与命令删除 | 全仓 `packages/**/src/**/*.ts` 扫描无 GFI 打分逻辑 |
+| RuleHost / Manual Pain / Receipt / Diagnostician 不受损 | 既有测试套件通过（见 §15.4） |
+| `gfi` flag 无执行能力 | `feature-flag-contract.ts:235` 为 `category: 'gone'`；`gone` 不可被 override 重新启用 |
+
+## 15.3 未完成 / 例外（PARTIALLY_IMPLEMENTED）
+
+### GFI-1 — 历史 workspace JSON 数据清理（NOT_IMPLEMENTED）
+
+- §6.2 `.state/sessions/*.json` 与 §6.3 `.state/logs/daily-stats.json` 的 GFI 字段
+  **未执行迁移**。
+- 现状：`session-tracker.ts` / `event-log.ts` 读取原始对象后原样写回，会保留未知历史键
+  （GFI 字段可能仍留在 Owner 工作区文件中）。
+- 本轮**不触碰真实 Owner 数据**；没有可靠迁移方案前不实施。
+- 独立跟踪：**Linear PRI-1149**（备份 / 原子写入 / 完整性校验 / 回滚策略）。
+  该事项**不归入** PRI-1104（V1/V2 架构任务）。
+
+### GFI-2 — `gone` tombstone（SPEC §5.1 例外，待 Owner 裁定）
+
+- §5.1 要求“不保留 gone tombstone”；实际代码保留了 `gfi` 的 `gone` 墓碑。
+- 本轮**不擅自删除**。评估结论：
+  - 保留墓碑可让旧 `gfi` override 被**可观测地拒绝**（未知配置告警覆盖不到已知墓碑语义）；
+  - 删除墓碑会改变旧配置的失败模式，兼容风险更高；
+  - 墓碑本身无任何执行能力，无法重新激活旧逻辑。
+- 因此建议将 SPEC 正式修改为：**允许保留纯防御性 tombstone，但不得具有任何执行能力**。
+- 该修改需 Owner 批准：**Decision Card DC-01**（见最终报告 §G）。
+
+### GFI-3 — 文档与索引不一致（本轮修复）
+
+- 本 SPEC 状态：`Proposed` → `Partially Implemented`（本文件头部）。
+- `docs/archive/specs/INDEX.md` 中“Phase A / Phase C 未做、GFI 仍喂 Pain 写点”为过期结论，本轮更正。
+- `docs/architecture/README.md` 将 GFI 标为 `Active` → 更正为 `Retired`。
+- `docs/architecture/COMPONENTS.md` 称 `runtime-v2/gfi/` “仅剩空 `__tests__` 占位”
+  → 更正为“目录已完全不存在，仅保留 `gone` 墓碑”。
+- `docs/reports/GFI_FINAL_ACCEPTANCE.md` 仅在末尾追加 2026-11-07 状态；历史正文不改。
+
+## 15.4 本轮验证命令
+
+```text
+packages/principles-core: npx vitest run architecture-regression /
+  feature-flag-lifecycle  -> passed（随 core 套件 546 passed）
+packages/host-runtime: npx vitest run governance-signal-admission 系列 -> 89 passed
+```
+
+真实模型验证、三宿主最终验收、`verify:merge` 全链**未在本轮运行**；
+未执行项在最终报告中标记 NOT RUN。

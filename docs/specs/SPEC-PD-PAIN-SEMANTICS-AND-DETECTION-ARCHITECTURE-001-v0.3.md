@@ -1,9 +1,10 @@
 # PD Pain Semantics & Detection Architecture v1.0
 ## Evidence-driven Revision (v0.3)
 
-**Status:** Proposed — Owner Final Review
+**Status:** Superseded for implementation by v0.3.1（v0.3.1 为增量实施契约；本文保留为历史设计基线，不作当前生产状态声明）
 **Revision:** v0.3（v0.2 定点证伪修订：Pending 状态机、事务与幂等契约、OpenClaw 兜底能力边界、词表与引用防护、跨宿主语义契约、GFI 阶段去重）
 **Code Baseline:** `main@457bbf0fcd8df85c069b78ce60858acf742fe970`（交付时已复核 HEAD == origin/main == 此 SHA，无源码漂移）
+**Current Implementation Status:** 见 `SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.3.1.md` §8（2026-11-07 最终收敛）与 `docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`。
 **Evidence Base:**
 - `docs/reviews/2026-11-02-pain-architecture-spec-v0.1-audit.md`（v0.1 全仓审计）
 - `docs/reviews/2026-11-02-pain-architecture-v0.2-targeted-review.md`（本轮定点审查，含对上轮审计两处结论的修正）

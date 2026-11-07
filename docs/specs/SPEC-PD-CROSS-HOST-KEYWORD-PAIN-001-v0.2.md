@@ -1,10 +1,10 @@
 # SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001 — v0.2（WorkBuddy 共享学习词库接入）
 
-> 版本：v0.2（2026-10-21）
-> 状态：**Implemented / Owner Review**（随 PD 痛苦感知机制专项整改交付；未打开任何生产开关）
-> 基线：`origin/main@c754ef50e`
+> 版本：v0.2.1（2026-11-07 WorkBuddy 能力边界正式收敛；v0.2 的机制设计作为历史记录保留）
+> 状态：**Superseded（能力声明部分）by §6 2026-11-07 Amendment**；机制实现状态 = Implemented，但 WorkBuddy 自动关键词 Pain **明确不支持**（非待开发）
+> 基线：`origin/main@c754ef50e`（v0.2 起草）；2026-11-07 复核基线 `origin/main@86b6208042b6083d4a7bbf840730d060188a1517`
 > 前版：`docs/archive/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.1.md`（2026-10-19，Draft/Owner Review）
-> 本文只记录 v0.1 → v0.2 的**增量**；未提及的 v0.1 条款全部沿用。
+> 本文只记录 v0.1 → v0.2 的**增量**；未提及的 v0.1 条款全部沿用。能力边界以 §6 为准。
 
 > **实现现状（2026-11-05 审计）**：本文描述的词表与判定逻辑已实现，但 WorkBuddy
 > 的 ingress 证据门没有 observation writer，自动候选恒为 `observation_only`
@@ -103,3 +103,47 @@ WorkBuddy live-keyword 检测词表 = **共享 live 词库**（`createSharedCorr
 
 不打开任何生产开关；不改 OpenClaw 词库学习闭环；不为 WorkBuddy 增加 Stage2 LLM
 或队列；不做历史回扫。
+
+---
+
+## 6. 2026-11-07 Amendment — WorkBuddy 能力边界正式收敛（取代本文能力声明）
+
+> 本节由 Owner 2026-11-05 决定 + 2026-11-07 最终架构收敛执行确认。
+> v0.2 §0–§5 的**机制设计**保留为历史记录，不再构成"WorkBuddy 自动 Pain 已交付或将交付"的声明。
+
+### 6.1 结论
+
+| 能力 | 状态 |
+| --- | --- |
+| WorkBuddy 自动关键词 Pain 识别 | **明确不支持（Not Supported）**，不是"待开发"、不是"部分交付" |
+| WorkBuddy 自动 Pain Admission | **明确不支持** |
+| WorkBuddy 插件安装 | 支持 |
+| 显式插件启用 | 支持 |
+| Owner 手动入口 `PD记录痛苦：` | 支持（唯一自动之外的正式入口） |
+| 该手动入口之后的 Pain 准入与后续治理 | 以实际代码支持范围为准 |
+
+### 6.2 代码与配置事实（2026-11-07 基线复核）
+
+- `packages/principles-core/src/runtime/feature-flags/feature-flag-contract.ts`：
+  `workbuddy_live_keyword_pain` 描述为 **UNSUPPORTED / manual explicit prefix only**，默认 `false`。
+- `packages/create-principles-disciple/src/installers/workbuddy-host-installer.ts`：
+  新建与已有 governance 配置均写入 `workbuddy_live_keyword_pain: false`。
+- `packages/workbuddy-adapter/src/pd-hook.ts`：自动入口受双 flag 门控；
+  无持久化 observation writer，自动候选恒为 `observation_only`，
+  只落 abandoned marker，不写 `pain_events`。
+- `packages/workbuddy-adapter/README.md` 与 CLI 状态展示：自动关键词标注为不可用。
+- 手动前缀 `PD记录痛苦：` 的链路仍可用。
+
+### 6.3 硬性约束
+
+1. **不得通过修改默认 Feature Flag 重新启用自动关键词 Pain**，
+   也不得把它重新描述为已交付能力。
+2. 三宿主**代码共享 ≠ 能力一致**：OpenClaw、Codex、WorkBuddy 的可用能力必须各自独立描述。
+3. OpenClaw / Codex 的自动检测能力边界不在本 SPEC 范围，按各自 SPEC 与最终验收任务跟踪。
+
+### 6.4 证据与跟踪
+
+- 2026-11-05 审计：`docs/reviews/2026-11-05-workbuddy-pain-detection-boundary-audit.md`
+- 2026-11-07 最终收敛报告：`docs/reports/PAIN_ARCHITECTURE_FINAL_CLOSURE_2026-11-07.md`
+- 三宿主最终验收（OpenClaw/Codex 自动 + WorkBuddy 手动）：Linear **PRI-1148**
+- 支持宿主真实 LLM BDD：Linear **PRI-1147**
