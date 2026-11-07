@@ -1617,7 +1617,7 @@
   "classificationRules": {
     "T": "actual decision at the time where principled intervention was possible (SPEC v0.6 6.1); delivering a chat conclusion or artifact counts, a heartbeat with no deliverable does not",
     "V": "a qualified prior signal obtainable before the action",
-    "O": "PD actually identified it before action; observed only when the injection event for that run exists and precedes the action",
+    "O": "PD actually identified the opportunity before action (SPEC v0.6 6.1). An injection event is an assembly/return fact only: fair-rotation selection, prompt assembly, and opportunity identification are distinct events. A native-path injection event does NOT prove identification, because the native path has no opportunity-detection records at all. O stays unknown unless an identification record exists with entry point, prior signal, opportunity identity and timing (activationIds membership alone is not evidence).",
     "D": "independent confirmation that target body entered the actual request and preceded the key action; unknown unless body or equivalent independent evidence exists",
     "tUnknown": "recorded as unknown, never forced into include/exclude",
     "keyAction": "artifact_edit / verification_action / delivery_claim are distinct; first file write is not the cutoff for the verify-before-delivery principle",
@@ -1999,7 +1999,7 @@
       "tvod": {
         "T": "inherited_yes",
         "V": "yes",
-        "O": "partial",
+        "O": "unknown",
         "D": "unknown"
       },
       "principle": {
@@ -2043,7 +2043,7 @@
       "tvod": {
         "T": "inherited_yes",
         "V": "yes",
-        "O": "yes",
+        "O": "unknown",
         "D": "unknown"
       },
       "principle": {
@@ -2087,7 +2087,7 @@
       "tvod": {
         "T": "inherited_yes",
         "V": "yes",
-        "O": "yes",
+        "O": "unknown",
         "D": "unknown"
       },
       "principle": {
@@ -2695,14 +2695,12 @@
       "partial_existence_only": 1
     },
     "continuationO": {
-      "partial": 1,
-      "yes": 2
+      "unknown": 3
     },
     "opportunityLevel": {
       "O": {
-        "unknown": 7,
-        "yes": 1,
-        "basis": "OPP-08 only: target injection precedes write/listing/claim in C10/C11; anchor turn C08 unobservable"
+        "unknown": 8,
+        "basis": "native path emits no opportunity-identification records (no entry point, no per-opportunity signal, no opportunity-scoped admission); injection events prove assembly only. No sample can claim O=yes; per-candidate identification evidence requested by Owner is absent, so none is asserted."
       },
       "D": {
         "unknown": 8,
@@ -2710,7 +2708,37 @@
       }
     },
     "confirmedMissedTarget": 0,
-    "confirmedMissedTargetBasis": "no opportunity has both an observable target-injection record and an observed absent verification action; C03/C05/C07 lack injection records",
-    "nativeIdenticalNoIncrement": 0
+    "confirmedMissedTargetBasis": "not observable as a negative: in the only observable stages (4 continuation runs of OPP-08) the target was always assembled, and identification is unprovable everywhere; remaining opportunities/stages are unknown, not zero.",
+    "nativeIdenticalNoIncrement": 0,
+    "completeness": {
+      "opportunitiesTotal": 8,
+      "observableContinuationRuns": 4,
+      "observableContinuationInjectionEvents": 16,
+      "missingStages": [
+        "OPP-08 anchor unit (C08 turn window 2026-10-30T15:53..10-31T00:01): no injection log for 10-30",
+        "all stages of the other 7 opportunities (C01..C07, all on 2026-10-30): no injection log for 10-30",
+        "no identification records for any stage (structural: native path has none)"
+      ],
+      "confirmedInjected": {
+        "runs": 4,
+        "injectionEvents": 16,
+        "detail": "all 16 injection events of runs 4b56044f/eb7ee27f/dae59676/bbfd31e8 include the target activation"
+      },
+      "confirmedDropped": {
+        "runs": 0,
+        "injectionEvents": 0
+      },
+      "unknown": "every stage not listed as confirmed above, including all 8 anchor turns and 7 of 8 opportunities end-to-end"
+    },
+    "revision": {
+      "revisedAtUtc": "2026-11-07T07:30:41.199Z",
+      "revision": 2,
+      "changes": [
+        "O downgraded to unknown for all 8 opportunities and 3 continuations: injection events (fair-rotation assembly) are not opportunity-identification evidence; native path has no identification records.",
+        "Added completeness block: observable stages limited to 4 continuation runs (16 injection events, all target-injected); anchor unit and 7 other opportunities unobservable; unknown is not counted as zero.",
+        "Assembly facts (principle.status, unit.injection, timing) and T/V/action evidence unchanged."
+      ],
+      "basis": "Owner round-3 instruction: fix O evidence qualification and sample completeness; keep historical selection rules frozen."
+    }
   }
 }
