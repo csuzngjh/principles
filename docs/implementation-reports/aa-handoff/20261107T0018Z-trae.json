@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T0018Z-trae",
+  "previousCheckpoint": "20261106T1625Z-trae",
+  "generatedAt": "2026-11-07T00:18:00Z",
+  "agent": "trae",
+  "overallStatus": "NEEDS_OWNER",
+  "summary": "PRI-1115 final bounded fix: a trusted hookInvocationId no longer establishes an experiment-level strong link on its own. After the hook id matches, already-declared run/session identities are still checked; a declared mismatch, or several mutually conflicting declarations in one record, yields contradictory_identity with experimentLevelStrongLink=false. Missing identities stay unknown and no new required fields were added. Two real-CLI regression tests failed on the old implementation and pass after the minimal fix. Weak candidates, ambiguity reporting, semantic-conflict deduplication and the dynamic brief are unchanged. PR #2396 is rebased onto latest main, CI is green, and it is not merged.",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report",
+    "branch": "ai/PRI-1115-coverage-evidence-report",
+    "baseCommit": "86b6208042b6083d4a7bbf840730d060188a1517",
+    "headCommit": "cc32da5daf4eb67f5b56468d3c3d844a32487b04",
+    "headCommitNote": "Value at checkpoint generation; this checkpoint commit advances the head. Final head is reported in the delivery reply and on the PR page.",
+    "dirtyPaths": [],
+    "pushedCommit": "cc32da5daf4eb67f5b56468d3c3d844a32487b04",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2396",
+    "prState": "OPEN",
+    "remoteChecks": "Head cc32da5da: all required checks pass; CodeRabbit skipped. The checkpoint commit triggers a fresh CI run on the new head."
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1115",
+      "scope": "Hook-invocation matching must validate already-declared run/session identities; contradictory identities must not produce an experiment-level strong link",
+      "status": "READY_FOR_REVIEW",
+      "owner": "trae",
+      "writePaths": [
+        "scripts/dev/principle-learning-lab/lib/adaptive/adaptive-evidence-adapter.mjs",
+        "scripts/__tests__/aa-coverage-evidence-report.test.mjs",
+        "docs/implementation-reports/pri-1115/FIELD-MAPPING-20261106.md",
+        "docs/implementation-reports/pri-1115/coverage-summary-20261106.json",
+        "docs/implementation-reports/pri-1115/OWNER-BRIEF-20261106.md"
+      ],
+      "commits": [
+        "d7b187ac1 (fix(aa): PRI-1115 reject hook matches with contradictory run or session identity)",
+        "rebased as cc32da5da (fix(aa): PRI-1115 reject hook matches with contradictory run or session identity)"
+      ],
+      "acceptance": [
+        {"criterion": "Real CLI regression tests fail on the old implementation before the fix", "result": "PASS", "evidenceRefs": ["evidence-tests"]},
+        {"criterion": "Same hook id with explicitly different run and session -> contradictory_identity, no experiment-level strong link", "result": "PASS", "evidenceRefs": ["evidence-tests", "evidence-adapter"]},
+        {"criterion": "Multiple conflicting identity declarations are not accepted merely because one value matches", "result": "PASS", "evidenceRefs": ["evidence-tests", "evidence-adapter"]},
+        {"criterion": "Missing fields are not treated as conflicts; no new required fields", "result": "PASS", "evidenceRefs": ["evidence-adapter"]},
+        {"criterion": "Weak candidates, ambiguity, semantic-conflict deduplication and dynamic brief behavior preserved", "result": "PASS", "evidenceRefs": ["evidence-tests", "evidence-coverage-summary"]},
+        {"criterion": "Minimal change: no adjacent refactor, no statistics formula change", "result": "PASS", "evidenceRefs": ["evidence-diff"]},
+        {"criterion": "Offline reports regenerated from existing evidence; real-data linkage states unchanged", "result": "PASS", "evidenceRefs": ["evidence-coverage-summary"]},
+        {"criterion": "Rebased onto latest main, pushed to the same PR, CI confirmed, not merged", "result": "PASS", "evidenceRefs": ["evidence-pr"]}
+      ],
+      "remaining": [
+        "No decision-opportunity census; T/V/O/D remain unknown.",
+        "1105 remains a weak candidate (22ms proximity); no trusted hook id for that run.",
+        "Control arm not executed; benefit/harm not_evaluated.",
+        "PR #2396 awaits Owner review and merge."
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-targeted-tests", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report", "command": "npx vitest run scripts/__tests__/aa-coverage-evidence-report.test.mjs", "result": "PASS", "exitCode": 0, "passed": 26, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-tests"]},
+    {"id": "check-statistics-regressions", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report", "command": "node --test scripts/dev/principle-learning-lab/summarize-adaptive-coverage.test.mjs scripts/dev/principle-learning-lab/lib/adaptive/adaptive-activation-coverage.test.mjs scripts/dev/principle-learning-lab/verify-adaptive-delivery.test.mjs", "result": "PASS", "exitCode": 0, "passed": 44, "failed": 0, "skipped": 0, "evidenceRefs": []},
+    {"id": "check-eslint", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report", "command": "npx eslint scripts/dev/principle-learning-lab/lib/adaptive/adaptive-evidence-adapter.mjs scripts/__tests__/aa-coverage-evidence-report.test.mjs", "result": "PASS", "exitCode": 0, "passed": null, "failed": null, "skipped": null, "evidenceRefs": []},
+    {"id": "check-offline-report", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report", "command": "node scripts/dev/principle-learning-lab/summarize-aa-evidence.mjs (linkage/budget/run-record/reevaluation/plan/pollution-audit, output+brief)", "result": "PASS", "exitCode": 0, "passed": null, "failed": null, "skipped": null, "evidenceRefs": ["evidence-coverage-summary"]},
+    {"id": "check-prepush", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report", "command": "git push --force-with-lease origin ai/PRI-1115-coverage-evidence-report", "result": "PASS", "exitCode": 0, "passed": null, "failed": null, "skipped": null, "evidenceRefs": ["evidence-pr"]},
+    {"id": "check-verify-merge", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1115-coverage-evidence-report", "command": "npm run verify:merge", "result": "NOT_RUN", "exitCode": null, "passed": null, "failed": null, "skipped": null, "evidenceRefs": []}
+  ],
+  "evidence": [
+    {"id": "evidence-adapter", "kind": "CODE", "locator": "scripts/dev/principle-learning-lab/lib/adaptive/adaptive-evidence-adapter.mjs", "observedAt": "2026-11-07T00:10:00Z", "sha256": "a4f63ec65b5b3fada9125b9c7f666421fe60b97963feda44e929e7f68fcebf98", "supports": "hookIdentityConflict checks declared run/session against the matched invocation; multiple declared run or session ids are contradictory; missing fields stay unknown.", "limitations": "Does not prove request-level delivery or ordering."},
+    {"id": "evidence-tests", "kind": "LOCAL_TEST", "locator": "scripts/__tests__/aa-coverage-evidence-report.test.mjs", "observedAt": "2026-11-07T00:12:00Z", "sha256": "407540bcafe1e26e0249bba931cfa4fd2ccc6c4b7b884681c88bca5f17f7c8e8", "supports": "26/26 PASS after fix; the two new real-CLI cases failed before the fix with matched_by_run on contradictory identities.", "limitations": "Fixtures are synthetic and marked as fixtures."},
+    {"id": "evidence-coverage-summary", "kind": "REPORT", "locator": "docs/implementation-reports/pri-1115/coverage-summary-20261106.json", "observedAt": "2026-11-07T00:11:00Z", "sha256": "35545c0c6313197240f96795dae1c7b9d9ba0f143d6cef38abe77b32b4028076", "supports": "Regenerated from existing offline evidence: 1105 weak_candidate, 1258 matched_by_run, all checks consistent, duplicates.invocations=0.", "limitations": "Only registered observed runs; no population denominator."},
+    {"id": "evidence-diff", "kind": "INLINE", "locator": "git diff 87e89e77f..cc32da5da --stat", "observedAt": "2026-11-07T00:12:00Z", "sha256": null, "supports": "Adapter + tests + field mapping + regenerated JSON/brief only; no packages runtime or statistics code changed.", "limitations": "Static diff boundary."},
+    {"id": "evidence-pr", "kind": "INLINE", "locator": "https://github.com/csuzngjh/principles/pull/2396", "observedAt": "2026-11-07T00:16:00Z", "sha256": null, "supports": "PR OPEN, base main@86b620804, head cc32da5da, mergeable CLEAN; all required checks pass; not merged.", "limitations": "Checkpoint commit will move the head and trigger a new CI run."}
+  ],
+  "artifacts": [
+    {"id": "artifact-coverage-summary", "kind": "REPORT", "locator": "docs/implementation-reports/pri-1115/coverage-summary-20261106.json", "persistence": "committed", "notes": "Regenerated machine-readable summary."},
+    {"id": "artifact-owner-brief", "kind": "REPORT", "locator": "docs/implementation-reports/pri-1115/OWNER-BRIEF-20261106.md", "persistence": "committed", "notes": "Regenerated one-page Chinese brief."},
+    {"id": "artifact-field-mapping", "kind": "REPORT", "locator": "docs/implementation-reports/pri-1115/FIELD-MAPPING-20261106.md", "persistence": "committed", "notes": "Section 3 updated with hook identity contradiction rule."},
+    {"id": "artifact-checkpoint-json", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0018Z-trae.json", "persistence": "committed", "notes": "This checkpoint."},
+    {"id": "artifact-checkpoint-md", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T0018Z-trae.md", "persistence": "committed", "notes": "Markdown copy."}
+  ],
+  "blockers": [
+    "No implementation blocker. Awaiting Owner review/merge on PR #2396."
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1115", "action": "Owner reviews PR #2396 and merges; AI does not merge.", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "PR #2396 merged or closed."},
+    {"order": 2, "issue": "PRI-1116", "action": "Offline acceptance continues in its own branch/worktree (C08 known cases, opportunity denominator availability, C04/G1 boundaries).", "dependsOn": [1], "authorization": "WITHIN_APPROVED_SCOPE", "doneWhen": "Offline matrix and remaining gaps recorded without new runs."},
+    {"order": 3, "issue": "PRI-1116", "action": "New controlled runs / control arm / behavioral evaluation require explicit authorization.", "dependsOn": [1], "authorization": "NEEDS_OWNER", "doneWhen": "Owner grants new run budget."}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "actualAgentRoundsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "productionDbWritesThisRun": 0,
+    "authorizationRefs": [
+      "Owner 2026-11-07 instruction: one bounded defect fix on PR #2396; regressions and reports; rebase and push; no merge.",
+      "No new host rounds, model requests, HTTP calls, tool calls, production DB writes, installs, releases or data cleanup.",
+      "PRI-1116 offline acceptance is owned by a separate session/worktree; not touched here."
+    ]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T0018Z-trae\",\"kind\":\"implementation-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json",
+    "untouchedPointers": [
+      "Historical checkpoints 20261106T1537Z-trae and 20261106T1625Z-trae are preserved.",
+      "LATEST.json is updated from 20261106T1625Z-trae to this checkpoint only."
+    ]
+  }
+}
