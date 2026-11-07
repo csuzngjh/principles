@@ -1,5 +1,6 @@
 ---
 "principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 feat(openclaw-plugin): freeze prompt presence expectations in before_prompt_build (PRI-1119)
