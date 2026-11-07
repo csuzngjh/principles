@@ -184,18 +184,24 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     const token = {};
     payloads.set(token, payload);
     const modelContext = modelContextFor(payload.context);
-    // PRI-1137 final review P1-4: `PluginHookAfterToolCallEvent` carries
-    // `toolArgs` (the SDK's `params` field exists only on the BEFORE events) —
-    // reading `params` here silently downgraded every shared after-tool
-    // evidence row to `params_json = '{}'`. Narrowed by the discriminated
-    // union, no `as` cast (ERR-001).
+    // PRI-1137 final review P1-4: `PluginHookAfterToolCallEvent` declares
+    // `toolArgs` (the SDK's `params` field is documented on the BEFORE
+    // events), but the host/parity fixtures also deliver `params` on after
+    // events (SDK index signature) — read BOTH, `toolArgs` first, so the
+    // shared evidence kernel never degrades to `params_json = '{}'`. The
+    // legacy read goes through a runtime record guard (rc-1), never a cast.
     const afterEvent = payload.kind === 'after_tool_call' ? payload.event : undefined;
+    const legacyAfterParams: unknown = afterEvent !== undefined ? afterEvent.params : undefined;
+    const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value);
+    const afterToolInput = afterEvent?.toolArgs
+      ?? (isRecordValue(legacyAfterParams) ? legacyAfterParams : {});
     const event: HostEvent = {
       kind: payload.kind,
       context: {
         ...contextFor(workspaceDir, sessionId, payload.kind === 'before_prompt_build' ? undefined : payload.event.toolName),
         ...(afterEvent !== undefined ? {
-          toolInput: afterEvent.toolArgs ?? {},
+          toolInput: afterToolInput,
           toolOutput: { error: afterEvent.error, result: afterEvent.result, durationMs: afterEvent.durationMs },
         } : {}),
         ...(modelContext !== undefined ? { modelContext } : {}),
