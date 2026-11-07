@@ -53,6 +53,15 @@ function writeGovernanceConfig(home: string, hostWorkbuddyYaml: string): void {
     + 'internalAgents:\n  defaultRuntime: pd.default\n  agents:\n    diagnostician:\n      enabled: true\n      runtimeProfile: pd.default\n');
 }
 
+/** Loader-valid governance config that never mentions host.workbuddy. */
+function writeGovernanceConfigWithoutHostFlag(home: string): void {
+  fs.mkdirSync(path.join(governanceDir(home), '.pd'), { recursive: true });
+  fs.writeFileSync(governanceConfig(home), GOVERNANCE_HEADER
+    + '  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n'
+    + 'runtimeProfiles:\n  pd.default:\n    type: pi-ai\n    provider: openai\n    model: m\n    apiKeyEnv: K\n'
+    + 'internalAgents:\n  defaultRuntime: pd.default\n  agents:\n    diagnostician:\n      enabled: true\n      runtimeProfile: pd.default\n');
+}
+
 function snapshotTree(root: string): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
@@ -182,6 +191,27 @@ describe('assessWorkbuddyHostFacts — four independent facts (real fixtures)', 
       assessWorkbuddyHostFacts({ homeDir: home, configDirOverride: path.join(home, '.workbuddy') });
       expect(snapshotTree(home)).toEqual(before);
       expect(fSExists(governanceDir(home))).toBe(false); // governance dir never created
+    });
+  });
+
+  it('C5.15 loader-valid config WITHOUT the flag key → DEFAULT_OFF, never a fabricated opt-out', () => {
+    withHome((home) => {
+      // Loader-valid governance config that never mentions host.workbuddy.
+      writeGovernanceConfigWithoutHostFlag(home);
+      const facts = assessWorkbuddyHostFacts({ homeDir: home, configDirOverride: path.join(home, '.workbuddy') });
+      expect(facts.governance.state).toBe('DEFAULT_OFF');
+    });
+  });
+
+  it('C5.14b read-only proof over the FULL fixture (governance loader + flag computation included)', () => {
+    withHome((home) => {
+      writeJson(registryPath(home), { version: 2, plugins: { [PLUGIN_KEY]: { scope: 'user' } } });
+      writeJson(settingsPath(home), { enabledPlugins: { [PLUGIN_KEY]: false } });
+      writeGovernanceConfig(home, '  host.workbuddy:\n    enabled: false\n    category: quiet\n');
+      const before = snapshotTree(home);
+      const facts = assessWorkbuddyHostFacts({ homeDir: home, configDirOverride: path.join(home, '.workbuddy') });
+      expect(facts.governance.state).toBe('EXPLICITLY_DISABLED');
+      expect(snapshotTree(home)).toEqual(before);
     });
   });
 

@@ -29,6 +29,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 import {
   getWorkbuddyHostConfigPaths,
   getWorkbuddyWorkspaceDir,
@@ -66,6 +67,31 @@ export interface WorkbuddyHostFacts {
 
 function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The RAW user `features:` section of the governance config (rc-1: parsed as
+ * unknown, validated). The merged effective config fabricates default entries
+ * for every registered flag, so provenance ("did the Owner write this key?")
+ * can only come from this raw read. Returns undefined when the file cannot be
+ * read/parsed into an object with a features mapping.
+ */
+function readRawFeaturesSection(configPath: string): Record<string, unknown> | undefined {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+  } catch {
+    return undefined;
+  }
+  if (!isPlainJsonObject(parsed)) return undefined;
+  const features = isPlainJsonObject(parsed.features) ? parsed.features : undefined;
+  return features;
 }
 
 /** Read + parse a JSON host file. Returns { ok:false } when unreadable/unparsable/non-object. */
@@ -124,26 +150,32 @@ export function assessWorkbuddyHostFacts(options: {
       };
     } else {
       const flag = computeFeatureFlagsFromConfig(loaded.effective).flags['host.workbuddy'];
-      // Explicit-vs-default distinction reads the loader-VALIDATED config
-      // (rc-2: no second YAML parse): the presence of the flat
-      // `features.host.workbuddy` key means the Owner's config wrote it.
-      const configFeatures = isPlainJsonObject(loaded.effective.config) && isPlainJsonObject(loaded.effective.config.features)
-        ? loaded.effective.config.features
-        : undefined;
-      const explicitEntry = configFeatures !== undefined && Object.hasOwn(configFeatures, 'host.workbuddy')
-        ? configFeatures['host.workbuddy']
-        : undefined;
-      const explicitOff = explicitEntry !== undefined && isPlainJsonObject(explicitEntry) && explicitEntry.enabled === false;
-      if (flag === undefined) {
-        governance = { state: 'UNKNOWN', configPath: governanceConfigPath, reason: 'host.workbuddy flag missing from the effective flag set' };
-      } else if (flag.enabled === true) {
-        governance = { state: 'ENABLED', configPath: governanceConfigPath };
-      } else if (explicitOff) {
-        // The Owner's config explicitly disables the flag — reported as its
-        // own state, never folded into a generic OFF.
-        governance = { state: 'EXPLICITLY_DISABLED', configPath: governanceConfigPath };
+      // Explicit-vs-default distinction reads the RAW USER config — the
+      // merged effective config fabricates a default entry for EVERY
+      // registered flag (computeEffectivePdConfig), so key presence there
+      // proves nothing about authorship. This is the one deliberate second
+      // YAML read: provenance can only come from the file the Owner wrote.
+      const rawFeatures = readRawFeaturesSection(governanceConfigPath);
+      if (rawFeatures === undefined) {
+        governance = {
+          state: 'UNKNOWN',
+          configPath: governanceConfigPath,
+          reason: 'the governance config could not be re-read for provenance',
+        };
       } else {
-        governance = { state: 'DEFAULT_OFF', configPath: governanceConfigPath };
+        const explicitEntry = Object.hasOwn(rawFeatures, 'host.workbuddy') ? rawFeatures['host.workbuddy'] : undefined;
+        const explicitOff = explicitEntry !== undefined && isPlainJsonObject(explicitEntry) && explicitEntry.enabled === false;
+        if (flag === undefined) {
+          governance = { state: 'UNKNOWN', configPath: governanceConfigPath, reason: 'host.workbuddy flag missing from the effective flag set' };
+        } else if (flag.enabled === true) {
+          governance = { state: 'ENABLED', configPath: governanceConfigPath };
+        } else if (explicitOff) {
+          // The Owner's config explicitly disables the flag — reported as its
+          // own state, never folded into a generic OFF.
+          governance = { state: 'EXPLICITLY_DISABLED', configPath: governanceConfigPath };
+        } else {
+          governance = { state: 'DEFAULT_OFF', configPath: governanceConfigPath };
+        }
       }
     }
   }
