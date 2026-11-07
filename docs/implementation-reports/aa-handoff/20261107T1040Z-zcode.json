@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T1040Z-zcode",
+  "previousCheckpoint": "20261107T0945Z-zcode",
+  "generatedAt": "2026-11-07T10:40:00Z",
+  "agent": "zcode",
+  "overallStatus": "PART1_FIXES_LANDED_PART2_DESIGN_PENDING_OWNER",
+  "summary": "PD 自有取证路径收口。Part 1（已落地 PR #2406）：①目标正文双重转义修复——packing.targetBody 是渲染器已转义的 directive 切片，helper 再跑 escapeXml 导致完整在装的目标无法匹配、期望消失；helper 新增 preEscaped 区分预渲染目标文本与原始 render 路径正文（恰好转义一次），红反例用真实 renderPrinciplesToDirectives + XML 特殊字符 + 双原则，截断/移除目标仍不产生虚假 full_hit——helper 13/13。②真实 hook 回退测试——生产 handleBeforePromptBuild 直调（真实 SQLite + 真实 host-runtime packing）：prioritized 成功冻结 body==装配 directive 精确切片、最终重验失败排除、hook-final deadline 排除、plugin-local restore（spy revalidate）baseline 全保留且移除目标缺席；hook-final 预算分支经不变量测试证明真实路径不可达（guard 使 assembled≤budget+7000 且 prioritized 以同一 budget 封顶），不以手拼状态假冒——71/71。③有界性钉住——无效条目不输出、溢出计数、保留条目完整——13/13 覆盖。回归 599/599、tsc 0、eslint 0、build 0、CI 5713d2eaf 24/24 与 d1b4479c0 24/24。Part 2（待批设计）：未修改官方宿主能力矩阵（release/2026.11.1 源码）——llm_input 事件含完整装配后 systemPromptText、异步派发、incognito 不派发、需 allowConversationAccess；before_prompt_build ctx 与 llm_input 共有 runId+sessionId 可联结；provider wrapStreamFn 按 provider 归属作用域（需 registerProvider，不可透明包装他人 provider，zai 为捆绑插件拥有）；onPayload 插件不可达。推荐 Path A：PD 注册 llm_input + runId+sessionId 联结冻结登记 + 移植有界检查器 + PD 自有事件 runtime_v2_prompt_presence_observed；仅更新 PD + 一行配置；边界如实标注为装配后文本观察、D 维持 unknown。Tier B wire 检查点降级为可选上游贡献（#194594）；injectedExpectations 字段保留（官方宿主静默丢弃向后兼容）。真实宿主/模型调用 0。不宣称 D/G1/C04/G2 通过。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations",
+    "branch": "ai/PRI-1119-evidence-expectations",
+    "baseCommit": "main e02fe63b3",
+    "headCommit": "d1b4479c039ab2cbc7646ef8ff67c094e5e623af",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2406",
+    "prState": "OPEN",
+    "remoteChecks": "d1b4479c0：24/24 全绿（Verify Merge Gate PASS 3m6s）。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "Part 1 三缺陷修复（已落地）+ Part 2 官方宿主能力核实与 PD 独立交付设计（待批）",
+      "status": "PART1_LANDED_PART2_DESIGN_PENDING_OWNER",
+      "owner": "zcode",
+      "writePaths": [
+        "packages/openclaw-plugin/src/hooks/prompt-presence-expectations.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-expectations.test.ts",
+        "packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts",
+        "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T1040Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T1040Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "缺陷1 双重转义：真实渲染器反例红→绿；区分原始正文与已渲染目标；不取消全部转义/不模糊匹配", "result": "PASS", "evidenceRefs": ["evidence-helper"]},
+        {"criterion": "缺陷2 真实 handleBeforePromptBuild 驱动重验失败/deadline/restore 分支，断言最终正文+选择+期望集一致", "result": "PASS（4 分支直测 + 预算分支不变量证明不可达）", "evidenceRefs": ["evidence-realhook"]},
+        {"criterion": "缺陷3 有界性/溢出/空期望钉住", "result": "PASS", "evidenceRefs": ["evidence-helper"]},
+        {"criterion": "官方宿主能力矩阵（llm_input/provider/onPayload/身份/异步/配置代价）", "result": "PASS（源码逐一核实）", "evidenceRefs": ["evidence-matrix"]},
+        {"criterion": "PD 独立交付设计（A/B/C 评估+批准卡+边界标注）", "result": "DELIVERED_PENDING_OWNER_APPROVAL", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "不混淆装配观察/请求提交/送达/遵循/改善", "result": "PASS（事件边界标注 post_assembly，D 维持 unknown）", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "真实宿主/模型调用", "result": "0", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "D/G1/C04/G2 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": [
+        "Owner 书面批准/否决 Path A 设计（L1-L4）。",
+        "评审 #2406；处置 openclaw 旧 PR #194566（建议关闭或改 base）。",
+        "真实宿主验收运行卡待 Owner 另行授权。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-helper", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations\\packages\\openclaw-plugin", "command": "npx vitest run tests/hooks/prompt-presence-expectations.test.ts", "result": "PASS", "category": "helper 红转绿+钉住", "freshThisRound": true, "passed": 13, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-helper"]},
+    {"id": "check-realhook", "cwd": "同上", "command": "npx vitest run tests/hooks/runtime-prompt-activation.test.ts", "result": "PASS", "category": "真实 hook 回退分支", "freshThisRound": true, "passed": 71, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-realhook"]},
+    {"id": "check-hooks-all", "cwd": "同上", "command": "npx vitest run tests/hooks/ + npx tsc --noEmit + npx eslint(5 文件) + npm run build", "result": "PASS", "category": "回归/类型/lint/构建", "freshThisRound": true, "passed": 599, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-helper"]},
+    {"id": "check-ci", "cwd": "N/A", "command": "gh pr checks 2406", "result": "PASS", "category": "远端 CI", "freshThisRound": true, "evidenceRefs": ["evidence-ci"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-helper", "kind": "LOCAL_TEST", "locator": "PD worktree vitest 输出（13/13，含 2 例红转绿与钉住用例）", "observedAt": "2026-11-07T19:45:00+08:00", "supports": "双重转义修复+有界钉住。", "limitations": null},
+    {"id": "evidence-realhook", "kind": "LOCAL_TEST", "locator": "runtime-prompt-activation.test.ts（71/71，5 个新真实 hook 用例）", "observedAt": "2026-11-07T20:00:00+08:00", "supports": "最终重验失败/deadline/restore 分支直测；预算分支不可达不变量。", "limitations": "预算分支的不可达是守卫构造性质的证明，非运行时触发。"},
+    {"id": "evidence-matrix", "kind": "CODE", "locator": "release/2026.11.1：hook-types.ts:232-241 / attempt-prompt-support.ts:353-381 / attempt-prompt-build.ts:575 / hook-agent-context.types.ts:26-31 / provider-plugin.types.ts:332-345 / provider-transport.types.ts:27-38 / docs/plugins/hooks.md", "observedAt": "2026-11-07T20:30:00+08:00", "supports": "llm_input 字段/派发/权限/身份；wrapStreamFn 归属作用域；onPayload 不可达。", "limitations": "运行时触发频次为源码判读，列入设计待验证项。"},
+    {"id": "evidence-design", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md", "observedAt": "2026-11-07T20:35:00+08:00", "supports": "Path A 推荐设计+批准卡 L1-L4+与 Tier B 替代关系。", "limitations": "待 Owner 书面批准，未编码。"},
+    {"id": "evidence-ci", "kind": "REMOTE_CI", "locator": "PR #2406 checks：5713d2eaf 24/24（VMG 3m31s）；d1b4479c0 24/24（VMG 3m6s）", "observedAt": "2026-11-07T20:55:00+08:00", "supports": "最终 head CI。", "limitations": null},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮真实宿主/模型 0；安装目录/dist 未改；生产配置/库未改；OpenClaw 工作树零改动", "observedAt": "2026-11-07T10:40:00Z", "supports": "边界遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-design", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md", "persistence": "committed", "notes": "Path A 设计（待批）。"},
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T1040Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "Path A 设计待 Owner 书面批准（实现前置）。",
+    "真实宿主验收待 Owner 另行授权。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅 Path A 设计并书面批准/否决。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面决定。"},
+    {"order": 2, "issue": "PRI-1119", "action": "批准后实施 llm_input 装配观察（PD 仓内）+ 离线验收。", "dependsOn": [1], "authorization": "WITHIN_APPROVED_SCOPE", "doneWhen": "设计 §3.5 验收全绿。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "openclawWorktreeModified": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-07 指令：Part 1 立即修复（普通问题不停顿）；Part 2 仅调查与设计、批准后编码；不启动真实宿主/模型/新增外发；不宣称 D/G1/C04/G2。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T1040Z-zcode\",\"kind\":\"pri-1119-pd-self-delivery-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（zcode:PRI-1119-evidence-expectations）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

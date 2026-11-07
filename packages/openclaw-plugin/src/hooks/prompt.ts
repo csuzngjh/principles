@@ -18,6 +18,9 @@ import type { ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/
 import type { ActivatedPrinciple, AdaptiveInterventionResult, AdaptiveDeliveryRecord } from '@principles/core/runtime';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
+// PRI-1137 retired the plugin-local activation reader; the shared runtime is
+// the only ordinary Runtime principle authority (main's resolution, kept).
+import { buildInjectedExpectations } from './prompt-presence-expectations.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
 import {
@@ -1147,6 +1150,10 @@ export async function handleBeforePromptBuild(
     }
   );
 
+  // Pre-guard snapshot for truncated-fragment classification (presence forensics).
+  const preGuardPrependSystemContext = prependSystemContext;
+  let presenceFallbackApplied = false;
+
   prependSystemContext = result.prependSystemContext;
   prependContext = result.prependContext;
   appendSystemContext = result.appendSystemContext;
@@ -1173,6 +1180,10 @@ export async function handleBeforePromptBuild(
       prependSystemContext = guarded.prependSystemContext;
       prependContext = guarded.prependContext;
       appendSystemContext = guarded.appendSystemContext;
+      // Presence forensics: a fallback REPLACED the assembly — the pre-guard
+      // snapshot no longer describes what was returned, so truncated-fragment
+      // classification must not apply.
+      presenceFallbackApplied = true;
       runtimePrincipleIds.clear();
       for (const id of fallback.ids) runtimePrincipleIds.add(id);
       runtimePrinciplesContent = fallback.text;
@@ -1210,6 +1221,33 @@ export async function handleBeforePromptBuild(
     }
   }
 
+  // ──── 8.6 PRESENCE EXPECTATIONS (prompt presence forensics, design v1.2) ────
+  // Frozen AFTER all body, authorization, timeout and budget fallbacks: the
+  // classification runs against the FINAL text this hook returns. Candidates no
+  // longer present after a fallback are excluded entirely; pre-guard fragments
+  // (truncation without fallback) are marked bodyComplete=false and can never
+  // yield a full_hit. Fail-open, memory-only; see prompt-presence-expectations.ts.
+  //
+  // PRI-1137 merge note: the plugin-local activation reader (dedupedV2) is
+  // retired — per-principle raw bodies are no longer available in the plugin,
+  // so non-target expectations come exclusively from the shared-route frozen
+  // field (Path A design, pending owner approval). Reverse-parsing the merged
+  // additionalContext is forbidden (design §3.1).
+  const presenceExpectations = buildInjectedExpectations({
+    finalAssembly: prependSystemContext,
+    preGuardAssembly: presenceFallbackApplied ? undefined : preGuardPrependSystemContext,
+    target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
+      ? {
+          activationId: adaptiveExpectedTarget.activationId,
+          body: adaptiveTargetBody,
+          // Renderer contract (adaptive-principle-intervention.ts): targetBody is
+          // the ALREADY ESCAPED <directive> slice — re-escaping would hide it.
+          preEscaped: true,
+        }
+      : undefined,
+    rendered: [],
+  });
+
   // Commit only the final selection, including a late deadline/revision/budget fallback.
   try { commitRuntimeEvidence?.(); } catch (error) {
     logger?.warn?.(`[PD:Runtime] Final prompt evidence unavailable: ${String(error)}`);
@@ -1242,6 +1280,14 @@ export async function handleBeforePromptBuild(
   return {
     prependSystemContext,
     prependContext,
-    appendSystemContext
+    appendSystemContext,
+    ...(presenceExpectations && presenceExpectations.expectations.length > 0
+      ? {
+          injectedExpectations: presenceExpectations.expectations,
+          ...(presenceExpectations.overflowCount > 0
+            ? { injectedExpectationsOverflow: presenceExpectations.overflowCount }
+            : {}),
+        }
+      : {})
   };
 }
