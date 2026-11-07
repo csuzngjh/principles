@@ -382,6 +382,21 @@ function linkageFromMatch(match) {
   };
 }
 
+function hookIdentityConflict(invocation, ids) {
+  // A trusted hook id proves which invocation was referenced, not which run or
+  // session contained it. Missing identities stay unknown; contradictory ones
+  // are rejected instead of being accepted through set membership.
+  if (ids.runIds.size > 1) return 'multiple_run_ids_declared';
+  if (ids.sessionIds.size > 1) return 'multiple_session_ids_declared';
+  if (text(invocation.runId) && ids.runIds.size === 1 && !ids.runIds.has(invocation.runId)) {
+    return 'hook_id_matches_but_run_id_differs';
+  }
+  if (text(invocation.sessionId) && ids.sessionIds.size === 1 && !ids.sessionIds.has(invocation.sessionId)) {
+    return 'hook_id_matches_but_session_id_differs';
+  }
+  return null;
+}
+
 function matchingInvocation(invocations, record) {
   const ids = hostIdentities(record);
 
@@ -391,6 +406,15 @@ function matchingInvocation(invocations, record) {
   if (ids.hookInvocationIds.size > 0) {
     const byHook = invocations.filter((invocation) => ids.hookInvocationIds.has(invocation.hookInvocationId));
     if (byHook.length === 1) {
+      const conflict = hookIdentityConflict(byHook[0], ids);
+      if (conflict) {
+        return {
+          state: 'contradictory_identity',
+          basis: 'hook_invocation_id',
+          reason: conflict,
+          candidateHookInvocationIds: [byHook[0].hookInvocationId],
+        };
+      }
       return { state: 'matched', strength: 'strong', basis: 'hook_invocation_id', invocation: byHook[0] };
     }
     if (byHook.length > 1) return ambiguousMatch('hook_invocation_id', byHook, 'multiple_hook_id_candidates');

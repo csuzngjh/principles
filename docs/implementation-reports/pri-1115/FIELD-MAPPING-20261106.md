@@ -52,7 +52,10 @@
 “该 linkage 是否属于本条实验记录”的实验级匹配。两者不得互相升级。
 
 1. `hook_invocation_id`：门禁证据中存在可信 `hookInvocationId` 且与 linkage 调用
-   相等 → `matched_by_run`，实验级强关联。1258 使用此方式。
+   相等时，仍校验记录已声明的 run/session 身份；身份未声明保持 unknown（缺失
+   不等于冲突），明确不同、或同一记录声明多个互相冲突的 run/session 值 →
+   `contradictory_identity`，不建立实验级强关联；无矛盾才 `matched_by_run`。
+   1258 使用此方式（run/session 与 linkage 一致）。
 2. `run_identity`：`consumedBy.runId` 只与 linkage `intervention.runId` 比较；
    若两边的 session 都有值且不相等 → `contradictory_identity`，不建立关联。
    运行号与 session 号不放入同一集合互相替代。

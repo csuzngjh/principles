@@ -630,6 +630,74 @@ describe('PRI-1115 AA coverage report entry', () => {
     expect(json.runs[0].linkage.experimentLevelStrongLink).toBe(false);
   });
 
+  it('refuses a hook-invocation match whose recorded run and session identities contradict', () => {
+    const run = runFixture({
+      runId: 'aa-run-hook-conflict',
+      positiveGate: {
+        ok: false,
+        checks: [{
+          id: 'admission-consumed', status: 'PASS',
+          evidence: { consumedBy: { hookInvocationId: 'hook-id-conflict', runId: 'host-run-recorded', sessionId: 'session-recorded' } },
+        }],
+        failures: [],
+      },
+      toolCalls: [{ id: 'tool-hook-conflict', runId: 'aa-run-hook-conflict', recordedAt: '2026-11-06T18:00:00.000Z' }],
+      httpRequests: [], hostTurns: [],
+    });
+    const linkage = linkageFixture({
+      invocations: [{
+        intervention: {
+          hookInvocationId: 'hook-id-conflict', runId: 'host-run-linkage', sessionId: 'session-linkage',
+          configIdentity: { hostVersion: 'unknown', pluginVersion: 'fixture-plugin', effectiveHookSetFingerprint: 'fixture-fingerprint', evidenceCoverage: 'partial' },
+        },
+        association: 'strong_run',
+        evidenceLayers: { requestAssociation: 'unknown', principleAdherence: 'unknown' },
+        facts: { actions: [{ toolName: 'read', ordering: 'unknown' }] },
+      }],
+    });
+    const { files } = writeCase('hook-identity-conflict', { linkage, budget: budgetFixture(), run_record: run });
+    const json = parse(runCli(baseArgs(files)));
+    expect(json.runs[0].linkage.state).toBe('contradictory_identity');
+    expect(json.runs[0].linkage.experimentLevelStrongLink).toBe(false);
+  });
+
+  it('refuses multiple conflicting run declarations even when one value matches', () => {
+    const run = runFixture({
+      runId: 'aa-run-multi-identity',
+      positiveGate: {
+        ok: false,
+        checks: [
+          {
+            id: 'admission-consumed', status: 'PASS',
+            evidence: { consumedBy: { hookInvocationId: 'hook-multi-identity', runId: 'host-run-match', sessionId: 'session-match' } },
+          },
+          {
+            id: 'delivery-observed', status: 'PASS',
+            evidence: { consumedBy: { hookInvocationId: 'hook-multi-identity', runId: 'host-run-other', sessionId: 'session-match' } },
+          },
+        ],
+        failures: [],
+      },
+      toolCalls: [{ id: 'tool-multi-identity', runId: 'aa-run-multi-identity', recordedAt: '2026-11-06T18:10:00.000Z' }],
+      httpRequests: [], hostTurns: [],
+    });
+    const linkage = linkageFixture({
+      invocations: [{
+        intervention: {
+          hookInvocationId: 'hook-multi-identity', runId: 'host-run-match', sessionId: 'session-match',
+          configIdentity: { hostVersion: 'unknown', pluginVersion: 'fixture-plugin', effectiveHookSetFingerprint: 'fixture-fingerprint', evidenceCoverage: 'partial' },
+        },
+        association: 'strong_run',
+        evidenceLayers: { requestAssociation: 'unknown', principleAdherence: 'unknown' },
+        facts: { actions: [{ toolName: 'read', ordering: 'unknown' }] },
+      }],
+    });
+    const { files } = writeCase('hook-multiple-run-identities', { linkage, budget: budgetFixture(), run_record: run });
+    const json = parse(runCli(baseArgs(files)));
+    expect(json.runs[0].linkage.state).toBe('contradictory_identity');
+    expect(json.runs[0].linkage.experimentLevelStrongLink).toBe(false);
+  });
+
   it('fails loudly when the same invocation id carries different factual content', () => {
     const first = linkageFixture();
     const second = linkageFixture({
