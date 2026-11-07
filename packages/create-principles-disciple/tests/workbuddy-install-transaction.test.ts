@@ -141,9 +141,7 @@ function seedForeignState(): void {
     plugins: { [FOREIGN_PLUGIN]: { scope: 'user', installPath: '/elsewhere/foreign', version: '9.9.9', installedAt: '2026-01-01T00:00:00.000Z', lastUpdated: '2026-01-01T00:00:00.000Z' } },
   }, null, 2));
   fs.mkdirSync(path.join(home, '.pd'), { recursive: true });
-  fs.writeFileSync(manifestPath(), JSON.stringify({
-    layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: ['C:/owner/codex-ws'],
-  }, null, 2));
+  fs.writeFileSync(manifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: [] }, null, 2));
 }
 
 interface ScenarioDeps {
@@ -242,32 +240,27 @@ describe('WorkBuddy install-transaction compensation (real fault injection)', ()
     expect(result.reason).toContain('PRESERVED');
   });
 
-  it('B4 #3 fresh install: manifest-write failure restores registration (other hosts preserved)', async () => {
+  it('B4 #3 fresh install: manifest-stage failure restores registration (other hosts preserved)', async () => {
     seedForeignState();
-    // Pre-create the manifest as a read-only file inside a read-only dir —
-    // the proven cross-platform fault recipe (Windows: file attribute blocks
-    // the replace; POSIX: dir mode blocks the temp+rename).
+    // Cross-platform manifest-stage fault, no chmod: the seeded manifest is
+    // valid JSON but carries an INVALID hosts array (string) — the merge
+    // refuses loudly at stage 7 (install_manifest_malformed), AFTER
+    // registration and cache landed, so the compensation must undo them.
     fs.mkdirSync(path.join(home, '.pd'), { recursive: true });
-    fs.writeFileSync(manifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: ['C:/owner/codex-ws'] }, null, 2));
-    fs.chmodSync(manifestPath(), 0o444);
-    fs.chmodSync(path.join(home, '.pd'), 0o555);
+    fs.writeFileSync(manifestPath(), JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts: 'codex', workspaces: [] }, null, 2));
 
     const seed = captureSeed(false, false);
     const installer = freshScenario();
-    try {
-      const result = await installer.install(installCtx());
-      expect(result.success).toBe(false);
-      expect(result.reason).toContain('install_manifest_write_failed');
-      expect(result.reason).toContain('Previous cache and registration state restored');
+    const result = await installer.install(installCtx());
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('install_manifest_malformed');
+    expect(result.reason).toContain('Previous cache and registration state restored');
 
-      expect(sha256File(settingsPath())).toBe(seed.settings);
-      expect(sha256File(registryPath())).toBe(seed.registry);
-      expect(fs.existsSync(cacheVersionDirPath())).toBe(false);
-      assertResidueFree(true);
-    } finally {
-      fs.chmodSync(path.join(home, '.pd'), 0o755);
-      fs.chmodSync(manifestPath(), 0o644);
-    }
+    expect(sha256File(settingsPath())).toBe(seed.settings);
+    expect(sha256File(registryPath())).toBe(seed.registry);
+    expect(fs.readFileSync(manifestPath(), 'utf-8')).toBe(seed.manifest);
+    expect(fs.existsSync(cacheVersionDirPath())).toBe(false);
+    assertResidueFree(true);
   });
 
   it('B4 #4 fresh install: governance-flag failure preserves the Owner flag state byte-identically', async () => {
