@@ -365,13 +365,14 @@ describe('control-state store', () => {
     expect(onDisk.consent).toBe('granted');
   });
 
-  it('a failed migration write fails loud, loses nothing, and retries (PRI-1138)', () => {
+  it('a failed migration write fails loud, loses nothing, and retries (PRI-1138)', (context) => {
     // Real-failure injection via a read-only state directory (POSIX write
     // bits). Windows directory ACLs do not map to POSIX bits, and a root
     // runner (CAP_DAC_OVERRIDE) ignores them too — so PROBE the injection
-    // with a real write first and skip only when the environment genuinely
-    // cannot produce the failure (no mock, no fake green).
-    if (process.platform === 'win32') return;
+    // with a real write first and SKIP explicitly (not silently pass) when
+    // the environment genuinely cannot produce the failure. The non-root
+    // POSIX CI runners report this test as passed (executed), not skipped.
+    if (process.platform === 'win32') context.skip('windows ACLs do not map to POSIX write bits');
     const statePath = getProductTelemetryStatePath(homeDir);
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     const secret = generateTelemetrySecretHex();
@@ -389,7 +390,7 @@ describe('control-state store', () => {
       if (!injectionEffective) {
         // This environment (e.g. root) cannot produce EACCES; the failure
         // contract is exercised on the non-root POSIX CI runners.
-        return;
+        context.skip('environment (root/CAP_DAC_OVERRIDE) cannot produce a real write failure');
       }
       const read = readProductTelemetryControlState(homeDir);
       expect(read.ok).toBe(false);
