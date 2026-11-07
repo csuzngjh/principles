@@ -60,11 +60,17 @@ export function buildInjectedExpectations(params: {
   finalAssembly: string;
   /** Pre-guard assembly snapshot, for the truncated-fragment classification. */
   preGuardAssembly?: string;
-  /** Target priority body when the adaptive path prioritized one activation. */
-  target?: { activationId: string; body: string } | undefined;
+  /**
+   * Target priority body when the adaptive path prioritized one activation.
+   * `preEscaped: true` marks the body as ALREADY RENDERED text (the renderer
+   * contract applies escapeXml inside the directive slice — see
+   * adaptive-principle-intervention.ts), so the escape callback must NOT run
+   * again; re-escaping would double-escape and hide a fully assembled target.
+   */
+  target?: { activationId: string; body: string; preEscaped?: boolean } | undefined;
   /** Raw candidates from the render path (escape applied to kept entries only). */
   rendered: FrozenExpectationCandidate[];
-  /** Escape applied to a body exactly as the renderer would (e.g. escapeXml). */
+  /** Escape applied to a raw body exactly as the renderer would (e.g. escapeXml). */
   escape?: (text: string) => string;
   /** Revision is unknown at this layer; recorded verbatim for the event. */
   revision?: number | string;
@@ -78,9 +84,13 @@ export function buildInjectedExpectations(params: {
       ? normalizeForWireMatch(params.preGuardAssembly)
       : undefined;
     const escape = params.escape ?? ((text: string) => text);
-    const ordered: FrozenExpectationCandidate[] = [];
+    const ordered: (FrozenExpectationCandidate & { preEscaped?: boolean })[] = [];
     if (params.target && params.target.activationId && params.target.body) {
-      ordered.push({ activationId: params.target.activationId, body: params.target.body });
+      ordered.push({
+        activationId: params.target.activationId,
+        body: params.target.body,
+        preEscaped: params.target.preEscaped === true,
+      });
     }
     for (const item of params.rendered) {
       if (!item.activationId || !item.body) {
@@ -104,7 +114,9 @@ export function buildInjectedExpectations(params: {
         continue;
       }
       seen.add(item.activationId);
-      const bodyText = normalizeForWireMatch(escape(item.body));
+      // Pre-rendered target text is already escaped by the renderer contract;
+      // only raw render-path bodies go through the escape callback.
+      const bodyText = normalizeForWireMatch(item.preEscaped ? item.body : escape(item.body));
       if (!bodyText) {
         continue;
       }

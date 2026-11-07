@@ -456,6 +456,130 @@ describe('Adaptive activation — actual local prompt entry', () => {
     }
   });
 
+  // ── Presence expectations against the REAL hook (no hand-built fallbacks) ──
+
+  function targetDirectiveSlice(assembled: string, principleId: string): string {
+    const start = assembled.indexOf(`<directive id="${principleId}"`);
+    const end = assembled.indexOf('</directive>', start);
+    if (start === -1 || end === -1) {
+      throw new Error(`directive for ${principleId} not found in assembly`);
+    }
+    return assembled.slice(start, end + '</directive>'.length);
+  }
+
+  it('presence expectations: the assembled target directive is frozen with bodyComplete=true', async () => {
+    const { target, packed } = await sharedPrepared();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    const expectations = result?.injectedExpectations ?? [];
+    const targetEntry = expectations.find((e) => e.activationId === `act_prompt_${target}`);
+    expect(targetEntry).toBeDefined();
+    expect(targetEntry?.bodyComplete).toBe(true);
+    // The frozen body is exactly the assembled <directive> slice (single-escaped).
+    const assembled = result?.prependSystemContext ?? '';
+    const slice = targetDirectiveSlice(assembled, target);
+    expect(targetEntry?.bodyText).toBe(slice);
+    for (const entry of expectations) {
+      expect(assembled).toContain(entry.bodyText);
+      expect(entry.bodyComplete).toBe(true);
+    }
+  });
+
+  it('presence expectations: a target failing final revalidation is excluded, not misreported', async () => {
+    const { target, packed } = await sharedPrepared();
+    // Mutate after packing, before the hook: the hook's own final revalidation
+    // reads the changed artifact and fails → restore('target_changed').
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify({ principleId: target, text: 'changed after pack' }), `art-${target}`);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+    const expectations = result?.injectedExpectations ?? [];
+    expect(expectations.find((e) => e.activationId === `act_prompt_${target}`)).toBeUndefined();
+  });
+
+  it('presence expectations: the hook-final deadline fallback excludes the target', async () => {
+    const { target, packed } = await sharedPrepared();
+    if (!packed.adaptivePacking) throw new Error('requires prepared packing');
+    // Packing succeeded with a future deadline; the deadline passes before the
+    // hook runs, so the hook's OWN final fallback fires (not the packing one).
+    packed.adaptivePacking.deadlineAt = Date.now() - 5;
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+    const expectations = result?.injectedExpectations ?? [];
+    expect(expectations.find((e) => e.activationId === `act_prompt_${target}`)).toBeUndefined();
+  });
+
+  it('presence expectations: post-guard assemblies provably satisfy the final budget precondition (branch unreachable via real path)', async () => {
+    // The hook-final budget branch fires only when the assembled lengths exceed
+    // resolveTotalInjectionBudgetChars(budget). The guard runs with the SAME
+    // budget and fits the sum by construction, and the prioritized selection is
+    // capped at that budget — so the precondition cannot occur through the real
+    // shared route. This test proves that invariant on a real assembly instead
+    // of hand-crafting an "already fell back" state (forbidden).
+    for (let i = 0; i < 20; i++) {
+      const principleId = `AC-${String(i).padStart(2, '0')}`;
+      insertValidatedPrincipleArtifact({ artifactId: `art-${principleId}`, principleId, text: `${principleId}-body-${'Z'.repeat(560)}` });
+      await insertPromptActivation({ artifactId: `art-${principleId}`, principleId });
+    }
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const native = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AC-${String(i).padStart(2, '0')}`)
+      .find(id => !native.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside the Native pack');
+    const packed = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir,
+      promptBudget: {
+        budgetChars: 2_000,
+        capacitySource: 'operator_declared',
+        capacityStatus: 'confirmed',
+        contextWindowTokens: 1_048_576,
+        policyVersion: 'model_aware_v2',
+      },
+      adaptivePriority: { artifactId: `art-${target}`, activationId: `act_prompt_${target}` }, deadlineAt: Date.now() + 15000 });
+    expect(packed.adaptivePacking?.status).toBe('prioritized');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    const { resolveTotalInjectionBudgetChars } = await import('@principles/core/runtime');
+    const assembledLength =
+      (result?.prependSystemContext?.length ?? 0) +
+      (result?.prependContext?.length ?? 0) +
+      (result?.appendSystemContext?.length ?? 0);
+    // The final budget branch requires assembledLength > this number; the guard
+    // keeps the assembly within it, so the branch stays defensive-only here.
+    expect(assembledLength).toBeLessThanOrEqual(resolveTotalInjectionBudgetChars(packed.budget));
+    // The target survives (the branch never fired) and stays frozen completely.
+    const expectations = result?.injectedExpectations ?? [];
+    const targetEntry = expectations.find((e) => e.activationId === `act_prompt_${target}`);
+    expect(targetEntry?.bodyComplete).toBe(true);
+  });
+
+  it('presence expectations: plugin-local restore keeps baseline bodies and drops the removed target', async () => {
+    await seed();
+    const hostRuntime = await import('@principles/host-runtime');
+    // Packing revalidate passes (first call); the hook-final revalidate fails
+    // (second call) → restore('target_changed') with the Native baseline.
+    const spy = vi.spyOn(hostRuntime, 'revalidateAdaptivePrinciple')
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    try {
+      const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+      const result = await handleBeforePromptBuild(admitted(), configured('AA-19'));
+      const expectations = result?.injectedExpectations ?? [];
+      expect(expectations.find((e) => e.activationId === 'act_prompt_AA-19')).toBeUndefined();
+      // Plugin-local route: per-principle bodies are in scope, so the retained
+      // baseline entries ARE expected and complete in the final assembly.
+      expect(expectations.length).toBeGreaterThan(0);
+      const assembled = result?.prependSystemContext ?? '';
+      for (const entry of expectations) {
+        expect(entry.bodyComplete).toBe(true);
+        expect(assembled).toContain(entry.bodyText);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('binds the terminal record to the snapshot taken when the invocation opened', async () => {
     const { target, packed } = await sharedPrepared();
     const identityModule = await import('../../src/core/adaptive-config-identity.js');

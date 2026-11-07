@@ -1,7 +1,53 @@
 import { describe, expect, it } from 'vitest';
+import { renderPrinciplesToDirectives } from '@principles/core/runtime';
+import { escapeXml } from '@principles/core/prompt-builder';
 import { buildInjectedExpectations, normalizeForWireMatch } from '../../src/hooks/prompt-presence-expectations.js';
 
 const BODY = '产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性';
+
+describe('buildInjectedExpectations (target double-escape regression)', () => {
+  it('does not re-escape the already-rendered target directive (real renderer output)', () => {
+    const rawBody = '必须将 "auto-fix" <b>关闭</b>，并保留 & 符号与 <tag>';
+    const rendered = renderPrinciplesToDirectives(
+      [{ principleId: 'p-target', text: rawBody, artifactId: 'art-t', activationId: 'act-t', authority: 'owner' }],
+      new Set(['p-target']),
+      { escapeFn: escapeXml },
+    );
+    const directiveSlice = rendered.slice(
+      rendered.indexOf('<directive '),
+      rendered.indexOf('</directive>') + '</directive>'.length,
+    );
+    // The renderer already escaped the body inside the directive: the slice is
+    // exactly what assembly embeds. Re-escaping it must not happen.
+    expect(directiveSlice).toContain(escapeXml(rawBody));
+    expect(directiveSlice).not.toContain(escapeXml(escapeXml(rawBody)));
+    const out = buildInjectedExpectations({
+      finalAssembly: `governance header\n${directiveSlice}\nplain other body\ntail`,
+      target: { activationId: 'act-t', body: directiveSlice, preEscaped: true },
+      rendered: [{ activationId: 'act-other', body: 'plain other body' }],
+      escape: escapeXml,
+    });
+    const target = out?.expectations.find((e) => e.activationId === 'act-t');
+    expect(target).toBeDefined();
+    expect(target?.bodyComplete).toBe(true);
+    expect(target?.bodyText).toBe(directiveSlice);
+    const other = out?.expectations.find((e) => e.activationId === 'act-other');
+    expect(other?.bodyComplete).toBe(true);
+    expect(other?.bodyText).toContain('plain other body');
+  });
+
+  it('raw rendered-path bodies still get escaped exactly once', () => {
+    const rawBody = 'keep <this> & that';
+    const out = buildInjectedExpectations({
+      finalAssembly: `x ${escapeXml(rawBody)} y`,
+      target: undefined,
+      rendered: [{ activationId: 'act-raw', body: rawBody }],
+      escape: escapeXml,
+    });
+    expect(out?.expectations[0]).toMatchObject({ activationId: 'act-raw', bodyComplete: true });
+    expect(out?.expectations[0]?.bodyText).toBe(escapeXml(rawBody));
+  });
+});
 
 describe('buildInjectedExpectations (prompt presence forensics, review-round fixes)', () => {
   it('complete body present in the final assembly: bodyComplete=true', () => {
@@ -145,5 +191,32 @@ describe('buildInjectedExpectations (prompt presence forensics, review-round fix
         rendered: null as unknown as { activationId: string; body: string }[],
       }),
     ).not.toThrow();
+  });
+
+  it('pinned: output entries are never empty-bodied and overflow never materializes entries', () => {
+    // Mixed candidates: a valid one, an empty one, and enough entries to hit the cap.
+    const rendered = [
+      { activationId: 'act_valid', body: 'real body' },
+      { activationId: 'act_empty', body: '   ' },
+      ...Array.from({ length: 80 }, (_, i) => ({ activationId: `act_bulk_${i}`, body: `bulk ${i}` })),
+    ];
+    const out = buildInjectedExpectations({
+      finalAssembly: 'real body ' + Array.from({ length: 80 }, (_, i) => `bulk ${i}`).join(' '),
+      target: undefined,
+      rendered,
+      escape: (t) => t,
+    });
+    expect(out?.expectations.length).toBeLessThanOrEqual(64);
+    expect(out?.overflowCount).toBeGreaterThanOrEqual(17);
+    for (const entry of out?.expectations ?? []) {
+      // No invalid (empty) entries may masquerade as expectations.
+      expect(entry.bodyText.trim().length).toBeGreaterThan(0);
+      expect(entry.bodyComplete === true || entry.bodyComplete === false).toBe(true);
+    }
+    expect(out?.expectations.find((e) => e.activationId === 'act_valid')).toMatchObject({
+      bodyComplete: true,
+    });
+    // act_empty was skipped, not emitted as an invalid expectation.
+    expect(out?.expectations.find((e) => e.activationId === 'act_empty')).toBeUndefined();
   });
 });

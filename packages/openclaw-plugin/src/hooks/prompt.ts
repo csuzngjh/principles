@@ -1175,7 +1175,13 @@ export async function handleBeforePromptBuild(
     finalAssembly: prependSystemContext,
     preGuardAssembly: presenceFallbackApplied ? undefined : preGuardPrependSystemContext,
     target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
-      ? { activationId: adaptiveExpectedTarget.activationId, body: adaptiveTargetBody }
+      ? {
+          activationId: adaptiveExpectedTarget.activationId,
+          body: adaptiveTargetBody,
+          // Renderer contract (adaptive-principle-intervention.ts): targetBody is
+          // the ALREADY ESCAPED <directive> slice — re-escaping would hide it.
+          preEscaped: true,
+        }
       : undefined,
     rendered: dedupedV2
       .filter((p) => runtimePrincipleIds.has(p.principleId))
