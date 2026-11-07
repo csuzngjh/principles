@@ -10,6 +10,7 @@ import {
 } from '@principles/core/runtime';
 import {
   checkPromptArtifactDeliverability,
+  hostRotationCapability,
   operatorDeclaredBudgetResolution,
   resolveLivePromptInjectionProjection,
   RUNTIME_BUDGET_OBSERVATION_STALE_REASON,
@@ -545,6 +546,10 @@ export class ApprovalsGroupedConsoleModel {
                 usedChars: entry.projection.usedChars,
                 truncated: entry.projection.truncated,
                 budget: entry.projection.budget,
+                // Final review P1-3: THIS host's own rotation state (static
+                // host capability) — an unbound workspace shows per-host
+                // behavior instead of one blended aggregate.
+                rotation: hostRotationCapability(entry.hostKind).state,
                 ...(entry.projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: entry.projection.budgetCapacitySource } : {}),
                 ...(entry.projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: entry.projection.budgetCapacityStatus } : {}),
                 ...(observation !== undefined ? { budgetObservedAt: observation.observedAt } : {}),
@@ -575,7 +580,9 @@ export class ApprovalsGroupedConsoleModel {
           truncated: projection.truncated,
           // PR-1894: the badge must describe what the PRODUCTION route will do,
           // not which policy this session-less forecast happened to run.
-          productionRotates: projection.productionRotates,
+          // Final review P1-1: three-state — unbound workspaces carry
+          // 'unknown', never a flattened "all hosts are FIFO".
+          productionRotation: projection.productionRotation.state,
           eligibleCount: projection.eligibleCount,
           capacityStatus: 'confirmed',
           ...(resolution.decision.hostKind !== undefined ? { hostKind: resolution.decision.hostKind } : {}),
@@ -617,6 +624,9 @@ export class ApprovalsGroupedConsoleModel {
                   usedChars: entry.projection.usedChars,
                   truncated: entry.projection.truncated,
                   budget: entry.projection.budget,
+                  // Final review P1-3: per-host rotation state, same meaning
+                  // as the unconfirmed branch — a static host capability.
+                  rotation: hostRotationCapability(entry.hostKind).state,
                   ...(entry.projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: entry.projection.budgetCapacitySource } : {}),
                   ...(entry.projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: entry.projection.budgetCapacityStatus } : {}),
                   ...(observation !== undefined ? { budgetObservedAt: observation.observedAt } : {}),

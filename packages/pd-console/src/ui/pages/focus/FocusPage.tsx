@@ -861,8 +861,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         sourceUnlinked={showsUnlinkedCandidateNote(group)}
         promptInjection={groupedData?.promptInjection}
         budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(
-          groupedData.promptInjection.productionRotates === true ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
-            ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : 'pages.focus.approveQueueBadge',
+          // PRI-1137 final review (P1-1/P1-3): three-state rotation copy —
+          // 'unknown' (unbound multi-host) never renders the FIFO-flavoured
+          // generic badge; it says a single conclusion cannot be drawn.
+          groupedData.promptInjection.productionRotation === 'rotates' ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
+            ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : groupedData.promptInjection.productionRotation === 'does_not_rotate' ? 'pages.focus.approveQueueBadge' : 'pages.focus.approveQueueBadgeRotationUnknown',
           { used: groupedData.promptInjection.usedChars, budget: groupedData.promptInjection.budget }) : undefined}
         onResolved={message => { setCompletedMessage({ key: `approval:${record.id}`, message }); void loadData(); }} />,
     }))),

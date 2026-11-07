@@ -156,10 +156,10 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     await seedPromptActivations(workspaceDir, FIFO_11);
 
     // PRI-1137: only OpenClaw owns an advancing round authority; host
-    // attribution must ride the projection so `productionRotates` is truthful.
+    // attribution must ride the projection so `productionRotation` is truthful.
     const withKey = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw', roundKey: 3 });
     expect(withKey.selectionPolicy).toBe('fair_rotation_v1');
-    expect(withKey.productionRotates).toBe(true);
+    expect(withKey.productionRotation).toEqual({ state: 'rotates' });
     expect(withKey.eligibleCount).toBe(11);
 
     const withoutKey = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw' });
@@ -188,7 +188,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
     ]);
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir, targetHost: 'openclaw' });
-    expect(projection.productionRotates).toBe(true);
+    expect(projection.productionRotation).toEqual({ state: 'rotates' });
     // Oversized entries can never fit in any round — rotation does not save them.
     expect(projection.eventuallyInjectedActivationIds).not.toContain('act-P_HUGE');
   });
@@ -199,7 +199,7 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir });
     expect(projection.route).toBe('shared_render');
-    expect(projection.productionRotates).toBe(false);
+    expect(projection.productionRotation).toEqual({ state: 'unknown', reason: 'no_bound_host' });
     expect(projection.eventuallyInjectedActivationIds).toEqual([]);
   });
 

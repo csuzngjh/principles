@@ -31,13 +31,20 @@ import type {
 } from "../../api.js";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import {
-  validateActivationsData,
   validateLifecycleMetricsData,
   isReversibleChannel,
 } from "./ActivationValidators.js";
+// PRI-1137 final review (P1-3): the activation page validated its payload
+// through a page-local duplicate that silently DROPPED the per-row
+// `promptInjection` facts and `promptInjectionRoute` — the injection-status
+// lines and the rotation state could never render, so this page could not
+// stay consistent with the Focus page. One wire contract, one UI parser: the
+// central `validateActivations` (which parses both fields, drop-on-invalid).
+import { validateActivations } from "../../utils/validators.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import { formatDate } from "../../utils/format-date.js";
 import type { ApprovedRuleRevisionPreview, ApprovedRuleRevisionRequest } from '../../../shared/approved-rule-revision-contract.js';
+import type { PromptProductionRotationName } from '../../../shared/prompt-injection-contract.js';
 
 // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: per-host fit is a TIER verdict, not
 // a bare boolean — "depends on the model" must render as its own state,
@@ -217,7 +224,7 @@ function ActivationFactCard({
   onDisable,
   disabling,
   onChanged,
-  productionRotates,
+  productionRotation,
 }: {
   record: ActivationRecord;
   lifecycleData: LifecycleMetricsData | null | undefined;
@@ -229,8 +236,10 @@ function ActivationFactCard({
   onChanged: () => void;
   /** PRI-1137: the ONE shared production route's rotation truth (from the
    * page-level projection), so a window-excluded row explains queueing vs
-   * permanent starvation without re-deriving a route per row. */
-  productionRotates: boolean;
+   * FIFO vs "no single conclusion" without re-deriving a route per row.
+   * Final review P1-1: three-state — absent/'unknown' must NOT render the
+   * FIFO starvation copy. */
+  productionRotation?: PromptProductionRotationName;
 }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -409,17 +418,26 @@ function ActivationFactCard({
                   budget: record.promptInjection.budget ?? 0,
                 })}
               {record.promptInjection.status === "window_excluded" &&
-                (productionRotates === true
+                (productionRotation === "rotates"
                   ? t("pages.activation.injectionWindowRotates", {
                       defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），后续轮次会轮到（预测）",
                       cost: record.promptInjection.costChars ?? 0,
                       budget: record.promptInjection.budget ?? 0,
                     })
-                  : t("pages.activation.injectionWindowFifo", {
-                      defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），当前路由不轮转，需腾出容量才会注入",
-                      cost: record.promptInjection.costChars ?? 0,
-                      budget: record.promptInjection.budget ?? 0,
-                    }))}
+                  : productionRotation === "does_not_rotate"
+                    ? t("pages.activation.injectionWindowFifo", {
+                        defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符），当前路由不轮转，需腾出容量才会注入",
+                        cost: record.promptInjection.costChars ?? 0,
+                        budget: record.promptInjection.budget ?? 0,
+                      })
+                    // Final review P1-1/P1-3: an unbound multi-host workspace
+                    // must NOT be described as FIFO — say no single conclusion
+                    // exists and point at the per-host facts.
+                    : t("pages.activation.injectionWindowRotationUnknown", {
+                        defaultValue: "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符）；工作区绑定多个宿主，无法归属单一轮转事实——OpenClaw 会按轮次轮到，Codex/WorkBuddy 需腾出容量",
+                        cost: record.promptInjection.costChars ?? 0,
+                        budget: record.promptInjection.budget ?? 0,
+                      }))}
               {record.promptInjection.status === "oversized" &&
                 t("pages.activation.injectionOversized", {
                   defaultValue: "超长不可注入：单条已 {{cost}} 字符 > 上限 {{budget}} 字符，轮转也救不了——需精简正文",
@@ -666,7 +684,7 @@ export function ActivationPage() {
       return;
     }
 
-    const validated = validateActivationsData(result.data);
+    const validated = validateActivations(result.data);
     if (validated === null) {
       setLoadingState("error");
       setErrorMessage("Activation data has unexpected shape");
@@ -929,8 +947,8 @@ export function ActivationPage() {
         </div>
       )}
 
-      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true} />)}</div></section>}
-      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true} />)}</div></section>}
+      {pendingRuleCode.length > 0 && <section className="mt-8" aria-labelledby="section-pending-rulecode"><SectionTitle id="section-pending-rulecode">{t('pages.activation.pendingRules')}</SectionTitle><p className="mb-3 text-[12px] text-ink-3">{t('pages.activation.pendingRulesDescription')}</p><div className="space-y-[14px]">{pendingRuleCode.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
+      {safetyAlerts.length > 0 && <section className="mt-8" aria-labelledby="section-safety-alerts"><SectionTitle id="section-safety-alerts">{t('pages.activation.safetyAlerts')}</SectionTitle><p className="mb-3 text-[12px] text-danger">{t('pages.activation.safetyAlertsDescription')}</p><div className="space-y-[14px]">{safetyAlerts.map(record => <ActivationFactCard key={record.activationId} record={record} lifecycleData={lifecycleCache[record.principleId]} receiptCount={undefined} onDisable={handleDisable} disabling={disablingIds.has(record.activationId)} onChanged={() => void loadData()} productionRotation={activationsData?.promptInjectionRoute?.productionRotation} />)}</div></section>}
 
       {/* Section: Active activations */}
       <section className="mt-8" aria-labelledby="section-active">
@@ -1006,7 +1024,7 @@ export function ActivationPage() {
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
                 onChanged={() => void loadData()}
-                productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true}
+                productionRotation={activationsData?.promptInjectionRoute?.productionRotation}
               />
             ))}
           </div>
@@ -1033,7 +1051,7 @@ export function ActivationPage() {
                 onDisable={handleDisable}
                 disabling={disablingIds.has(record.activationId)}
                 onChanged={() => void loadData()}
-                productionRotates={activationsData?.promptInjectionRoute?.productionRotates === true}
+                productionRotation={activationsData?.promptInjectionRoute?.productionRotation}
               />
             ))}
           </div>

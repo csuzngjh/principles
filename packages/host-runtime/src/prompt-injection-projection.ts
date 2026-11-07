@@ -31,19 +31,68 @@ export function isPromptInjectionTargetHost(kind: unknown): kind is PromptInject
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 
 /**
- * PRI-1137: the ONE production route rotates only when its host supplies a
- * trusted round authority — today only OpenClaw (nextSessionTurnOrdinal).
- * Codex/WorkBuddy deliberately do NOT fabricate a round key; several possible
- * hosts mean no single authority can be attributed, so no rotation is claimed.
- * Console copy and the CLI use this single predicate instead of re-deriving
- * route/flag state.
+ * PRI-1137 final review (P1-1): rotation semantics of the production route as
+ * a THREE-STATE fact, never a boolean. A boolean conflates two different
+ * answers — "the bound host cannot rotate" (a real FIFO statement about a
+ * known host) and "no single host is bound, so rotation cannot be attributed"
+ * (an unknown). Downstream copy that reads the second as the first tells an
+ * OpenClaw Owner their principle is permanently FIFO-queued when it is not.
+ *
+ * This is the STATIC host capability. Whether a real OpenClaw round actually
+ * rotated is a runtime fact the plugin owns: a missing sessionId, a failed
+ * `user_turns` write, or an unreadable ordinal degrade that round to
+ * `legacy_fifo_prefix_v1` (existing FIFO fallback) — never fabricated here.
  */
-export function productionRouteRotates(input: { workspaceDir: string; targetHost?: PromptInjectionTargetHost }): boolean {
+export type PromptProductionRotationState =
+  | { readonly state: 'rotates' }
+  | { readonly state: 'does_not_rotate' }
+  | {
+    readonly state: 'unknown';
+    /** Bounded reason rotation cannot be attributed (rc-3: fail loud, no silent guess). */
+    readonly reason: 'no_bound_host' | 'host_facts_unreadable';
+  };
+
+/**
+ * A host's STATIC rotation capability (final review P1-1.4/P1-1.5): only
+ * OpenClaw supplies a trusted round authority (`nextSessionTurnOrdinal` over
+ * trajectory.db `user_turns`); Codex/WorkBuddy inject FIFO by their own
+ * policy and never fabricate a round key. One mapping, typed by the roster —
+ * consumers must not re-derive host capabilities from route names. A bound
+ * host always resolves to a definite state (never `unknown`).
+ */
+export function hostRotationCapability(
+  hostKind: PromptInjectionTargetHost,
+): Extract<PromptProductionRotationState, { state: 'rotates' | 'does_not_rotate' }> {
+  return hostKind === 'openclaw' ? { state: 'rotates' } : { state: 'does_not_rotate' };
+}
+
+/**
+ * PRI-1137 final review: the rotation truth of the ONE production route.
+ * Explicit host binding resolves that host's actual capability; otherwise a
+ * workspace with exactly one applicable host resolves to that host's
+ * capability, and anything else (no host has ever operated here, several
+ * applicable hosts, unreadable host facts) stays `unknown` — aggregate host
+ * facts are never flattened into "all hosts are FIFO" (P1-1.6). Route
+ * confirmation (`shared_render` for everyone) and host binding are separate
+ * facts; this function only answers the binding question.
+ */
+export function productionRouteRotationState(input: {
+  workspaceDir: string;
+  targetHost?: PromptInjectionTargetHost;
+}): PromptProductionRotationState {
+  if (input.targetHost !== undefined) {
+    return hostRotationCapability(input.targetHost);
+  }
   const facts = readWorkspaceHostKindFacts(input.workspaceDir);
-  const hosts = input.targetHost !== undefined
-    ? [input.targetHost]
-    : facts.ok ? [...facts.effectiveKinds].filter(isPromptInjectionTargetHost) : [];
-  return hosts.length === 1 && hosts[0] === 'openclaw';
+  if (!facts.ok) {
+    return { state: 'unknown', reason: 'host_facts_unreadable' };
+  }
+  const hosts = [...facts.effectiveKinds].filter(isPromptInjectionTargetHost);
+  const [host] = hosts;
+  if (hosts.length === 1 && host !== undefined) {
+    return hostRotationCapability(host);
+  }
+  return { state: 'unknown', reason: 'no_bound_host' };
 }
 
 /**
@@ -245,8 +294,10 @@ export interface PromptInjectionProjection {
    * entry within N turns. So this is computed under the production policy
    * (fair rotation whenever the route actually rotates) and is therefore
    * non-empty even for a caller that supplied no round key — which is
-   * exactly the console's situation. Empty only when the production route
-   * genuinely does not rotate (shared route) or nothing is eligible.
+   * exactly the console's situation. Empty when the production route
+   * genuinely does not rotate, when no single host is bound
+   * (`productionRotation.state === 'unknown'` — no attributable ring), or
+   * when nothing is eligible.
    */
   eventuallyInjectedActivationIds: string[];
   /** Number of eligible candidates that reached the selector. */
@@ -258,8 +309,12 @@ export interface PromptInjectionProjection {
    * round key; this answers "will the agent's real injection rotate",
    * which is what determines whether an out-of-window activation is queued
    * or starved. They differ exactly in the case this whole fix is about.
+   *
+   * PRI-1137 final review (P1-1): three-state — `unknown` when no single host
+   * is bound, which consumers MUST NOT read as "does not rotate". Consumers
+   * branch on `.state`; the wire string is exactly the `state` value.
    */
-  productionRotates: boolean;
+  productionRotation: PromptProductionRotationState;
   /** R-A2: the unit `usedChars`/`budget` are counted in. */
   unit: typeof PROMPT_INJECTION_UNIT;
   /** R-A2: which serialization the budget is charged against on this route. */
@@ -342,14 +397,14 @@ function isDiagnosticCapHit(ids: readonly string[]): boolean {
  * projection source for every standard host.
  *
  * `targetHost` is host attribution only. It narrows which host's round
- * authority the forecast may assume (see `productionRouteRotates`); it never
- * selects a different injection route.
+ * authority the forecast may assume (see `productionRouteRotationState`); it
+ * never selects a different injection route.
  *
  * PR-1894 — round-key alignment. Production derives its fair-rotation round
  * key from the CURRENT session's turn ordinal. The console has no access to
  * it, so passing no key selects `legacy_fifo_prefix_v1` for THIS forecast while
  * production runs `fair_rotation_v1` on OpenClaw. The result therefore exposes
- * both `selectionPolicy` (what this projection ran) and `productionRotates`
+ * both `selectionPolicy` (what this projection ran) and `productionRotation`
  * (what the real injection will do) — never a single blended claim.
  */
 export async function buildLivePromptInjectionProjection(input: {
@@ -381,15 +436,17 @@ export async function buildLivePromptInjectionProjection(input: {
   // PRI-1137: ONE production route for every host. The retired plugin-local
   // `legacy_trim` projection is gone, so the forecast can no longer describe
   // a path production does not run.
-  const rotates = productionRouteRotates(input);
+  const rotation = productionRouteRotationState(input);
   const context = await buildActivePrinciplePromptContext({ ...input, promptBudget });
   const oversized = context.oversizedActivationIds ?? [];
   const dropped = context.droppedActivationIds ?? [];
   // Reachability is a property of the PRODUCTION rotation, not of this
   // forecast (a console holds no session round key). It is computed only when
-  // the production host genuinely rotates, from the same candidate set.
+  // the production host genuinely rotates, from the same candidate set. An
+  // `unknown` rotation (no bound host) computes nothing — an unattributable
+  // route cannot claim any reachability ring either.
   let eventuallyInjectedActivationIds: string[] = [];
-  if (rotates) {
+  if (rotation.state === 'rotates') {
     const candidates = await readPromptActivationCandidates({ workspaceDir: input.workspaceDir, includeAuthority: true });
     if (!candidates.aborted) {
       eventuallyInjectedActivationIds = collectReachableActivationIds(
@@ -410,7 +467,7 @@ export async function buildLivePromptInjectionProjection(input: {
     selectionPolicy: context.selectionPolicy ?? 'legacy_fifo_prefix_v1',
     eventuallyInjectedActivationIds,
     eligibleCount: context.eligibleCount ?? 0,
-    productionRotates: rotates,
+    productionRotation: rotation,
     unit: PROMPT_INJECTION_UNIT,
     budgetScope: 'full_directive_context',
     oversizedActivationIds: oversized,

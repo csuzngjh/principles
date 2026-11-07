@@ -834,6 +834,39 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(warning).toContain('deactivating older principles is NOT required');
   });
 
+  // PRI-1137 final review P1-4: with SEVERAL hosts bound the workspace has no
+  // single rotation authority, so the post-approval warning must NOT flatten
+  // the aggregate into "all hosts are FIFO" (the pre-fix boolean behaviour).
+  // It must report the per-host judgments instead — OpenClaw queues behind
+  // fair rotation, Codex stays FIFO — and never claim a permanent queue.
+  it('approve on a multi-host workspace reports per-host rotation judgments, not a FIFO starvation claim', async () => {
+    deactivateActivePromptActivations();
+    ensureDefaultConfig();
+    const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'codex.json');
+    const saved = saveHostToolDeclaration(tmpDir, {
+      version: 1,
+      hostKind: 'codex',
+      mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' }],
+      declaredAt: new Date().toISOString(),
+    });
+    expect(saved.ok).toBe(true);
+    try {
+      await seedActivePromptFillers('multirot', 40, 220);
+      const warning = await approveFreshPromptPrinciple('multirot', 'N'.repeat(220));
+      expect(warning).withContext('saturated multi-host workspace must surface a warning').toBeDefined();
+      expect(warning).toContain('injection_budget_rotation_unknown');
+      expect(warning).toContain('binds no single host');
+      // Per-host judgments, each under its own budget basis:
+      expect(warning).toContain('openclaw=queued behind fair_rotation_v1');
+      expect(warning).toContain('codex=FIFO by activated_at');
+      // The flattened starvation claim is exactly what must be gone.
+      expect(warning).not.toContain('injection_budget_excluded');
+    } finally {
+      // Restore the openclaw-only workspace the other tests in this file assume.
+      fs.rmSync(declarationPath, { force: true });
+    }
+  });
+
   // PRI-1017 review finding P2-1: the post-approval warning is the THIRD
   // console surface changed by this PR and previously had no test that wrote a
   // runtime budget observation. These tests drive the real approve route (real
@@ -1143,7 +1176,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // policy wording (fair rotation, never legacy FIFO) is asserted on AC-09.
   it('approve refuses an oversized candidate pre-write on a rotating route (no activation, no FIFO-labeled warning possible)', async () => {
     // Fresh workspace: only oversized entries, so the new activation is
-    // unreachable and the starvation branch is taken with productionRotates=true.
+    // unreachable and the starvation branch would have been taken with productionRotation=rotates.
     sqliteConn.getDb()
       .prepare("UPDATE activations SET deactivated_at = ? WHERE channel = 'prompt' AND deactivated_at IS NULL")
       .run(new Date().toISOString());

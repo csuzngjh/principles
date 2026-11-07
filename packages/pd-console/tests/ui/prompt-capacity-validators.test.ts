@@ -20,7 +20,7 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
   it('keeps every valid capacity field (confirmed payload)', () => {
     const v = validatePromptInjectionBudgetStatus({
       ...baseStatus(),
-      productionRotates: true,
+      productionRotation: 'rotates',
       eligibleCount: 12,
       capacityStatus: 'confirmed',
       hostKind: 'openclaw',
@@ -33,6 +33,7 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
     });
     expect(v).not.toBeNull();
     expect(v?.capacityStatus).toBe('confirmed');
+    expect(v?.productionRotation).toBe('rotates');
     expect(v?.hostKind).toBe('openclaw');
     expect(v?.route).toBe('legacy_trim');
     expect(v?.unit).toBe('utf16_code_units');
@@ -49,15 +50,15 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
       unconfirmedReason: 'multi_host_routes_differ: openclaw legacy vs codex/workbuddy shared',
       nextAction: 'pass an explicit target host (openclaw|codex|workbuddy)',
       perHost: [
-        { hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true },
-        { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: true },
-        { hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true },
+        { hostKind: 'openclaw', route: 'shared_render', usedChars: 1855, truncated: true, rotation: 'rotates' },
+        { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: true, rotation: 'does_not_rotate' },
+        { hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true, rotation: 'does_not_rotate' },
       ],
     });
     expect(v?.capacityStatus).toBe('unconfirmed');
     expect(v?.perHost).toHaveLength(3);
-    expect(v?.perHost?.[0]).toEqual({ hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true });
-    expect(v?.perHost?.[2]).toEqual({ hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true });
+    expect(v?.perHost?.[0]).toEqual({ hostKind: 'openclaw', route: 'shared_render', usedChars: 1855, truncated: true, rotation: 'rotates' });
+    expect(v?.perHost?.[2]).toEqual({ hostKind: 'workbuddy', route: 'shared_render', usedChars: 1980, truncated: true, rotation: 'does_not_rotate' });
   });
 
   it('keeps workbuddy as a valid hostKind on the confirmed payload (roster third host)', () => {

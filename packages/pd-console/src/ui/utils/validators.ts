@@ -48,6 +48,7 @@ import type {
   PromptInjectionPerHostForecast,
   PromptActivationInjectionStatusWire,
   PromptInjectionRouteSummaryWire,
+  PromptProductionRotationName,
 } from '../../shared/prompt-injection-contract.js';
 export type { PromptInjectionBudgetStatus };
 
@@ -155,6 +156,12 @@ function isPromptBudgetCapacitySource(value: unknown): value is PromptBudgetCapa
 
 function isPromptBudgetCapacityStatus(value: unknown): value is PromptBudgetCapacityStatusWire {
   return value === 'confirmed' || value === 'unknown';
+}
+
+// PRI-1137 final review (P1-1): three-state rotation truth — absent behaves
+// as 'unknown', never as FIFO.
+function isPromptProductionRotation(value: unknown): value is PromptProductionRotationName {
+  return value === 'rotates' || value === 'does_not_rotate' || value === 'unknown';
 }
 
 function isStringEnum(value: unknown, allowed: Set<string>): value is string {
@@ -1415,9 +1422,12 @@ export function validateActivations(v: unknown): ActivationsData | null {
       if (Object.hasOwn(route, 'budgetFallbackReason') && isPromptBudgetFallbackReason(route.budgetFallbackReason)) {
         summary.budgetFallbackReason = route.budgetFallbackReason;
       }
-      // PRI-1137: rotation truth of the ONE shared route.
-      if (Object.hasOwn(route, 'productionRotates') && typeof route.productionRotates === 'boolean') {
-        summary.productionRotates = route.productionRotates;
+      // PRI-1137: rotation truth of the ONE shared route. Final review P1-1:
+      // three-state string ('rotates'|'does_not_rotate'|'unknown'); absent
+      // behaves as 'unknown' (the pre-fix boolean payloads degrade to the
+      // no-single-conclusion copy, never to FIFO).
+      if (Object.hasOwn(route, 'productionRotation') && isPromptProductionRotation(route.productionRotation)) {
+        summary.productionRotation = route.productionRotation;
       }
       result.promptInjectionRoute = summary;
     }
@@ -2151,8 +2161,10 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   // validates (backward compatibility). A present-but-invalid value is
   // DROPPED, never propagated (rc-1/rc-2): the UI then falls back to
   // policy-agnostic copy rather than rendering an unverified policy claim.
-  if (Object.hasOwn(v, 'productionRotates') && typeof v.productionRotates === 'boolean') {
-    result.productionRotates = v.productionRotates;
+  // Final review P1-1: the boolean became a three-state string; absent
+  // behaves as 'unknown' (never FIFO).
+  if (Object.hasOwn(v, 'productionRotation') && isPromptProductionRotation(v.productionRotation)) {
+    result.productionRotation = v.productionRotation;
   }
   if (Object.hasOwn(v, 'eligibleCount') && typeof v.eligibleCount === 'number' && Number.isInteger(v.eligibleCount) && v.eligibleCount >= 0) {
     result.eligibleCount = v.eligibleCount;
@@ -2240,6 +2252,11 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
       }
       if (Object.hasOwn(entry, 'budgetFallbackReason') && isPromptBudgetFallbackReason(entry.budgetFallbackReason)) {
         forecast.budgetFallbackReason = entry.budgetFallbackReason;
+      }
+      // Final review P1-3: this host's own rotation state (static host
+      // capability). Drop-on-invalid — absent behaves as 'unknown'.
+      if (Object.hasOwn(entry, 'rotation') && (entry.rotation === 'rotates' || entry.rotation === 'does_not_rotate')) {
+        forecast.rotation = entry.rotation;
       }
       perHost.push(forecast);
     }

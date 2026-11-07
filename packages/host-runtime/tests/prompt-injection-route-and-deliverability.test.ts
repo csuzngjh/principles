@@ -16,6 +16,7 @@ import {
   saveHostToolDeclaration,
   resolvePromptInjectionRouteDecision,
   resolveLivePromptInjectionProjection,
+  productionRouteRotationState,
   checkPromptArtifactDeliverability,
   readPromptActivationInjectionStatuses,
   computePromptSingleItemFit,
@@ -283,7 +284,7 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(resolution.projection.injectedActivationIds).toEqual(['act-M-1']);
     // No single host owns the advancing round authority, so production
     // rotation is not claimed for an unattributed workspace.
-    expect(resolution.projection.productionRotates).toBe(false);
+    expect(resolution.projection.productionRotation).toEqual({ state: 'unknown', reason: 'no_bound_host' });
     expect(resolution.projection.selectionPolicy).toBe('legacy_fifo_prefix_v1');
   });
 
@@ -297,7 +298,55 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(resolution.projection.route).toBe('shared_render');
     // OpenClaw owns trajectory.db::user_turns, so its real injection rotates;
     // Codex/WorkBuddy supply no round key (see AC-01 decision tests above).
-    expect(resolution.projection.productionRotates).toBe(true);
+    expect(resolution.projection.productionRotation).toEqual({ state: 'rotates' });
+  });
+
+  // ── PRI-1137 final review (P1-1): three-state rotation matrix ──────────────
+  // The pre-fix boolean flattened "no single bound host" into "does not
+  // rotate", so multi-host workspaces produced wrong FIFO/permanent-queue
+  // copy. Each state below is a distinct Owner-facing fact.
+  it('P1-1 matrix: explicit host binding resolves THAT host capability (openclaw rotates; codex/workbuddy FIFO)', () => {
+    const dir = tempWorkspace({ declare: ['openclaw', 'codex', 'workbuddy'] });
+    expect(productionRouteRotationState({ workspaceDir: dir, targetHost: 'openclaw' })).toEqual({ state: 'rotates' });
+    expect(productionRouteRotationState({ workspaceDir: dir, targetHost: 'codex' })).toEqual({ state: 'does_not_rotate' });
+    expect(productionRouteRotationState({ workspaceDir: dir, targetHost: 'workbuddy' })).toEqual({ state: 'does_not_rotate' });
+  });
+
+  it('P1-1 matrix: multi-host and zero-host workspaces stay unknown — never aggregate FIFO', async () => {
+    const multi = tempWorkspace({ declare: ['openclaw', 'codex'] });
+    await seedActivation(multi, 'MX-1', '多宿主原则');
+    expect(productionRouteRotationState({ workspaceDir: multi })).toEqual({ state: 'unknown', reason: 'no_bound_host' });
+    // The multi-host confirmed resolution keeps per-host budgets AND rotation;
+    // the headline never claims rotation on a host it has not identified.
+    const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: multi });
+    if (resolution.status !== 'confirmed') throw new Error('multi-host route must be confirmed (single shared route)');
+    expect(resolution.projection.productionRotation.state).toBe('unknown');
+    expect(resolution.perHost).toBeDefined();
+    const oc = resolution.perHost?.find((entry) => entry.hostKind === 'openclaw');
+    const cx = resolution.perHost?.find((entry) => entry.hostKind === 'codex');
+    expect(oc?.projection.productionRotation).toEqual({ state: 'rotates' });
+    expect(cx?.projection.productionRotation).toEqual({ state: 'does_not_rotate' });
+    // OpenClaw must not lend its budget window to Codex (P1-2.3).
+    expect(oc?.projection.budget).toBeGreaterThan(0);
+    expect(cx?.projection.budget).toBeGreaterThan(0);
+
+    const zero = tempWorkspace();
+    expect(productionRouteRotationState({ workspaceDir: zero })).toEqual({ state: 'unknown', reason: 'no_bound_host' });
+  });
+
+  it('P1-1 matrix: unreadable host facts are unknown, not FIFO; single codex evidence binds FIFO honestly', async () => {
+    const dir = tempWorkspace();
+    fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), 'features: [broken', 'utf8');
+    // Config unreadable → host facts resolve but route decision is unconfirmed;
+    // the rotation state itself must not guess FIFO.
+    const codexOnly = tempWorkspace({ codexEvidence: true });
+    await seedActivation(codexOnly, 'CX-1', 'codex 原则内容');
+    expect(productionRouteRotationState({ workspaceDir: codexOnly })).toEqual({ state: 'does_not_rotate' });
+    const resolution = await resolveLivePromptInjectionProjection({ workspaceDir: codexOnly });
+    if (resolution.status !== 'confirmed') throw new Error('single-host route must be confirmed');
+    expect(resolution.decision.hostKind).toBe('codex');
+    expect(resolution.projection.productionRotation).toEqual({ state: 'does_not_rotate' });
+    expect(resolution.projection.eventuallyInjectedActivationIds).toEqual([]);
   });
 });
 
