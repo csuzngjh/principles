@@ -32,6 +32,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { createRequire } from 'node:module';
+import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 import { fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
@@ -50,16 +51,10 @@ const {
   releasePendingCorrectionClaim,
   settlePendingCorrection,
   runStage2CorrectionCycle,
-  evaluateCorrectionSignal,
   ingestGovernanceObservations,
 } = hostRuntime;
 const { processHookInvocation } = codexAdapter;
 const { PENDING_CANDIDATE_TTL_MS, STAGE2_MAX_ATTEMPTS } = coreRuntime;
-
-// PENDING_REVIEW_CLAIM_TTL_MS（10 分钟）是 governance-signal-admission.ts 的
-// 模块内常量，未从公共 API 导出；此处仅用于“陈旧 claim 接管”的注入时钟，
-// 数值与生产实现一致（10 * 60 * 1000）。
-const PENDING_REVIEW_CLAIM_TTL_MS = 10 * 60 * 1000;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataset = JSON.parse(fs.readFileSync(path.join(here, 'golden-dataset.json'), 'utf8'));
@@ -72,6 +67,9 @@ function argValue(name, fallback) {
   const idx = args.indexOf(name);
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : fallback;
 }
+function argFlag(name) {
+  return args.includes(name);
+}
 
 const provider = argValue('--provider', 'zai');
 const model = argValue('--model', 'glm-5.3-flash');
@@ -80,16 +78,33 @@ const reasoning = argValue('--reasoning', 'low');
 const baseUrl = argValue('--base-url', '');
 const timeoutMs = Number(argValue('--timeout-ms', '60000'));
 const maxTokens = Number(argValue('--max-tokens', '4096'));
-const resultsDir = argValue('--results-dir', path.join('.tmp', 'pri-1147', 'results'));
+const runIdArg = argValue('--run-id', null);
+const appendAuthorized = argFlag('--append');
+const resultsRoot = argValue('--results-root', path.join('.tmp', 'pri-1147'));
 
 if (!process.env[apiKeyEnv]) {
   console.error(JSON.stringify({ ok: false, reason: 'missing_api_key_env', nextAction: `export ${apiKeyEnv} before running the real-LLM D6 acceptance.` }));
   process.exit(1);
 }
 
+const repoRoot = path.resolve(here, '..', '..', '..');
+let runCtx;
+try {
+  runCtx = openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath: path.join(here, 'golden-dataset.json'), phaseInfo: { provider, model, apiKeyEnv } });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
+  process.exit(1);
+}
+const { runId, runDir, meta, metaPath } = runCtx;
+const summaryFile = path.join(runDir, 'd6-pending.summary.json');
+try {
+  assertFreshOutputs({ runDir, outputs: [summaryFile], appendAuthorized });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code, details: String(error.message), nextAction: error.nextAction }));
+  process.exit(1);
+}
+
 const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pri1147-d6-'));
-fs.mkdirSync(resultsDir, { recursive: true });
-const summaryFile = path.join(resultsDir, 'd6-pending.summary.json');
 
 const config = lib.buildWorkspaceConfig({
   provider, model, apiKeyEnv, timeoutMs, maxTokens,
@@ -265,11 +280,11 @@ if (s1) {
       });
 
       // cycle 级交叉验证：classifier 不可用的 cycle 同样只释放、不消耗 attempt。
+      // P1-3：生产默认预算（不传 aggregateBudgetMs/classificationTimeoutMs）。
       const unavailableCycle = await runStage2CorrectionCycle({
         workspaceDir: s1.env.workspaceDir,
         classifier: null,
         classifierState: 'unavailable',
-        aggregateBudgetMs: 120_000,
       });
       const afterUnavailable = parsePayload(readRawMarker(s1.env.workspaceDir, s1.key)?.task_payload_json);
       record('S2a-cycle-unavailable', '恢复(a): classifier 不可用的真实 cycle 释放且 attempts 不变',
@@ -425,10 +440,8 @@ try {
       workspaceDir: envCap.workspaceDir,
       classifier: measured.fn,
       classifierState: 'used',
-      classificationTimeoutMs: 60_000,
-      // 显式 120s 聚合预算 > 60s 分类超时：不触发 D-DEF1（非整数 timeoutMs 缺陷，
-      // 见 run-fault-injection.mjs 头注），使本检查度量的是候选上限语义本身。
-      aggregateBudgetMs: 120_000,
+      // P1-3：生产默认预算。D-DEF1 已在生产代码修复（整数钳制，ERR-191），
+      // 默认预算下分类超时为整数毫秒，见 run-fault-injection.mjs D-DEF1-postfix。
     });
     const after = readRawMarkers(envCap.workspaceDir);
     const stillPending = after.filter((m) => m.decision === 'pending_llm_review');
@@ -712,6 +725,7 @@ const blockedCount = checks.filter((c) => c.blocked === true).length;
 const failed = checks.filter((c) => c.pass === false && c.blocked !== true).length;
 const summary = {
   ok: failed === 0 && blockedCount === 0 && passed === checks.length && checks.length > 0,
+  run_id: runId,
   experiment: 'PRI-1147 Phase 4 — D6 pending lifecycle acceptance (real-LLM)',
   provider,
   model,
@@ -721,10 +735,11 @@ const summary = {
   totals: { checks: checks.length, passed, failed, blocked: blockedCount },
   stage2_max_attempts: STAGE2_MAX_ATTEMPTS,
   pending_candidate_ttl_ms: PENDING_CANDIDATE_TTL_MS,
-  discovered_defects_note: '实验中发现生产缺陷 D-DEF1（cycle 浮点 timeoutMs → AbortSignal.timeout RangeError → 瞬时 null 消耗 attempt）；本脚本全部直接 cycle 调用显式传 aggregateBudgetMs=120s 规避以度量预期语义；复现与证据见 run-fault-injection.mjs 的 D-DEF1 场景与 discovered_defects 记录',
+  budget_note: '全部直接 cycle 调用使用生产默认预算（不传 aggregateBudgetMs/classificationTimeoutMs）；D-DEF1 已在生产代码修复（ERR-191），修复后回归见 run-fault-injection.mjs 的 D-DEF1-postfix 场景',
   checks,
   run_root: runRoot,
 };
 fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+recordPhase(metaPath, meta, PHASES.d6Pending, { finished_at: summary.finished_at, ok: summary.ok, totals: summary.totals });
 console.log(JSON.stringify({ ok: summary.ok, totals: summary.totals, summary_file: summaryFile }, null, 2));
 process.exit(summary.ok ? 0 : 1);

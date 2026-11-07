@@ -36,6 +36,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
+import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worktreeRoot = path.resolve(here, '..', '..', '..');
@@ -45,6 +46,9 @@ function argValue(name, fallback) {
   const idx = args.indexOf(name);
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : fallback;
 }
+function argFlag(name) {
+  return args.includes(name);
+}
 
 const provider = argValue('--provider', 'zai');
 const model = argValue('--model', 'glm-5.3-flash');
@@ -53,13 +57,24 @@ const reasoning = argValue('--reasoning', 'low');
 const baseUrl = argValue('--base-url', '');
 const timeoutMs = Number(argValue('--timeout-ms', '60000'));
 const maxTokens = Number(argValue('--max-tokens', '4096'));
-const resultsDir = argValue('--results-dir', path.join('.tmp', 'pri-1147', 'results'));
+const runIdArg = argValue('--run-id', null);
+const appendAuthorized = argFlag('--append');
+const resultsRoot = argValue('--results-root', path.join('.tmp', 'pri-1147'));
 const pollSeconds = Number(argValue('--poll-seconds', '90'));
 
 if (!process.env[apiKeyEnv]) {
   console.error(JSON.stringify({ ok: false, reason: 'missing_api_key_env', nextAction: `export ${apiKeyEnv} before running the OpenClaw host subset.` }));
   process.exit(1);
 }
+
+let runCtx;
+try {
+  runCtx = openRunContext({ runIdArg, resultsRoot, repoRoot: worktreeRoot, datasetPath: path.join(here, 'golden-dataset.json'), phaseInfo: { provider, model, apiKeyEnv } });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
+  process.exit(1);
+}
+const { runId, runDir, meta, metaPath } = runCtx;
 
 // ─── 插件 dist 深路径导入（包根 exports map 不提供深路径；按文件 URL 导入） ───
 
@@ -72,7 +87,6 @@ async function importDist(fileName) {
   return import(pathToFileURL(file).href);
 }
 
-const pluginRuntime = await import('principles-disciple');
 const { TrajectoryDatabase } = await importDist('trajectory.js');
 const { EvolutionReducerImpl } = await importDist('evolution-reducer.js');
 const { SignalCollectorHost, DEFAULT_SIGNAL_CONFIG, createSignalLlmClassifierFromConfig } = await importDist('signal-collector-host.js');
@@ -86,9 +100,14 @@ const SUBSET = ['A1', 'A2', 'A6', 'B1', 'B4', 'C1', 'C4', 'D2', 'G1', 'H4'];
 // ─── 运行环境 ────────────────────────────────────────────────────────────────
 
 const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pri1147-openclaw-'));
-fs.mkdirSync(resultsDir, { recursive: true });
-const resultsFile = path.join(resultsDir, 'openclaw-host.jsonl');
-const summaryFile = path.join(resultsDir, 'openclaw-host.summary.json');
+const resultsFile = path.join(runDir, 'openclaw-host.jsonl');
+const summaryFile = path.join(runDir, 'openclaw-host.summary.json');
+try {
+  assertFreshOutputs({ runDir, outputs: [resultsFile, summaryFile], appendAuthorized });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code, details: String(error.message), nextAction: error.nextAction }));
+  process.exit(1);
+}
 
 const config = lib.buildWorkspaceConfig({
   provider, model, apiKeyEnv, timeoutMs, maxTokens,
@@ -266,9 +285,6 @@ for (const sampleId of SUBSET) {
     });
 
     const sessionId = `sess-openclaw-${sampleId.toLowerCase()}`;
-    const expectLlm = sample.expected_stage !== 'stage1_strong_direct' && sample.expected_stage !== 'stage1_no_hit_reject'
-      ? true
-      : sample.expected_stage === 'stage1_no_hit_reject'; // 零命中在 OpenClaw 走 discovery 调用（有配额）
     host.detectSync(sample.text, sessionId, 'user', { turnIndex: 1 });
     await waitForRouting({ calls }, sample.expected_stage === 'stage2_via_pending' || sample.expected_stage === 'stage1_no_hit_reject');
 
@@ -337,7 +353,7 @@ for (const sampleId of SUBSET) {
 // ─── STRONG rate limit 门控（真实 seam 行为，无 LLM 调用） ────────────────────
 // 单 session 每小时 strongRateLimitPerHour=5：第 6 次 STRONG 直发必须被抑制，
 // SIGNAL_STRONG_RATE_LIMITED 进 SYSTEM 日志。
-let rateLimitCheck = { pass: false, evidence: null };
+let rateLimitCheck;
 try {
   const env = lib.bootstrapSampleEnv({ runRoot, sampleId: 'openclaw-rate-limit', config });
   const stateDir = path.join(env.workspaceDir, '.state');
@@ -386,6 +402,7 @@ const okCalls = llmCallsAll.filter((c) => c.status === 'ok');
 const latencies = okCalls.map((c) => c.latency_ms).sort((a, b) => a - b);
 const summary = {
   ok: seamMismatched === 0 && errored === 0 && rateLimitCheck.pass === true,
+  run_id: runId,
   experiment: 'PRI-1147 — OpenClaw SignalCollectorHost real-seam subset (real provider LLM)',
   seam: {
     host: 'packages/openclaw-plugin/dist/core/signal-collector-host.js (real SignalCollectorHost)',
@@ -424,5 +441,6 @@ const summary = {
   records,
 };
 fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+recordPhase(metaPath, meta, PHASES.openclawHost, { finished_at: summary.finished_at ?? new Date().toISOString(), ok: summary.ok, totals: summary.totals });
 console.log(JSON.stringify({ ok: summary.ok, totals: summary.totals, llm_summary: summary.llm_summary, summary_file: summaryFile }, null, 2));
 process.exit(summary.ok ? 0 : 1);

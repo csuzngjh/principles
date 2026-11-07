@@ -139,11 +139,26 @@ export function buildUserPromptSubmitPayload({ workspaceDir, transcriptPath, ses
  */
 export async function driveHook({ payload, workspaceDir, codexHome }) {
   const env = { ...process.env, CODEX_HOME: codexHome };
-  const result = await processHookInvocation(JSON.stringify(payload), env, workspaceDir);
+  let result;
+  try {
+    result = await processHookInvocation(JSON.stringify(payload), env, workspaceDir);
+  } catch (error) {
+    return {
+      exitCode: null,
+      stdout: {},
+      stderr: [redactSecrets(`processHookInvocation threw: ${String(error).slice(0, 200)}`)],
+      failed: true,
+      failureReason: 'hook_threw',
+    };
+  }
+  const stderr = (result.stderr ?? []).map((line) => redactSecrets(String(line)));
+  const failed = result.exitCode !== 0;
   return {
     exitCode: result.exitCode,
     stdout: result.stdout ?? {},
-    stderr: (result.stderr ?? []).map((line) => redactSecrets(String(line))),
+    stderr,
+    failed,
+    ...(failed ? { failureReason: `hook_exit_${result.exitCode}` } : {}),
   };
 }
 
@@ -217,16 +232,21 @@ function parseJsonSafe(text) {
  * decision, capturing per-cycle reports and per-call LLM measurements.
  *
  * classifierWrap must be the REAL classifier from createSignalClassifierForWorkspace.
+ *
+ * P1-3: NO aggregateBudgetMs / classificationTimeoutMs overrides are passed —
+ * the production DEFAULTS (60s aggregate == 60s per classification) apply,
+ * exactly like a real worker cycle. (The former explicit 120s budget masked
+ * the D-DEF1 fractional-timeout defect; the fix is in production code and
+ * covered by the host-runtime regression test + the fault-injection
+ * post-fix regression.)
  */
-export async function runStage2UntilTerminal({ workspaceDir, classifierWrap, maxCycles = 8, classificationTimeoutMs = 60_000 }) {
+export async function runStage2UntilTerminal({ workspaceDir, classifierWrap, maxCycles = 8 }) {
   const cycles = [];
   for (let i = 0; i < maxCycles; i += 1) {
     const report = await runStage2CorrectionCycle({
       workspaceDir,
       classifier: classifierWrap.fn,
       classifierState: 'used',
-      aggregateBudgetMs: 120_000,
-      classificationTimeoutMs,
     });
     cycles.push({
       cycle: i + 1,
@@ -277,6 +297,7 @@ export function buildMeasuredClassifier(workspaceDir) {
     calls.push({
       latencyMs,
       status: errorText !== null ? 'threw' : result === null ? 'no_verdict' : 'ok',
+      timeout_ms: options?.timeoutMs ?? null,
       ...(result ? { verdict: { is_feedback: result.is_feedback, type: result.type, confidence: result.confidence, reason: result.reason } } : {}),
       ...(errorText ? { error: redactSecrets(errorText) } : {}),
     });

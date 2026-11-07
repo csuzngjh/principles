@@ -3,17 +3,25 @@
  *
  * Per sample:
  *   1. isolated workspace + CODEX_HOME (bootstrapSampleEnv)
- *   2. processHookInvocation(UserPromptSubmit) — REAL ingestion + admission
+ *   2. processHookInvocation(UserPromptSubmit) — REAL ingestion + admission;
+ *      a failed/throwing hook or a missing observation is an EXECUTION ERROR,
+ *      never a semantic result (P1-1)
  *   3. capture Stage-1 outcome + pending marker state (pre-Stage-2 evidence)
  *   4. runStage2CorrectionCycle with the REAL workspace-resolved classifier
- *      until terminal decision (correction → admitted / none → resolved_none /
- *      low-confidence or LLM error → retry up to STAGE2_MAX_ATTEMPTS)
- *   5. terminal state + per-call LLM measurements → results JSONL
+ *      under PRODUCTION DEFAULT budgets (P1-3), up to maxCycles; a marker
+ *      still pending after the cycle budget is pending_unresolved, never NONE
+ *   5. terminal state + per-call LLM measurements → results JSONL, with one
+ *      final_outcome per sample from the frozen taxonomy (lib/outcomes.mjs)
+ *
+ * Result isolation (P1-2): every run writes ONLY inside
+ * .tmp/pri-1147/runs/<run_id>/; existing outputs refuse to run unless
+ * --append is passed explicitly. Partial runs (--samples) are recorded as
+ * partial_run and are never a full acceptance.
  *
  * Usage:
  *   node scripts/dev/pain-real-llm-bdd/run-codex-chain.mjs \
  *     --provider zai --model glm-5.3-flash --apiKeyEnv ZAI_API_KEY \
- *     --reasoning low [--samples A1,A2] [--results-dir .tmp/pri-1147/results]
+ *     --reasoning low [--run-id run-...] [--samples A1,A2] [--append]
  *
  * Expected labels come ONLY from scripts/dev/pain-real-llm-bdd/golden-dataset.json
  * (frozen before the first model call). This script never modifies them.
@@ -25,8 +33,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
+import { classifySampleOutcome } from './lib/outcomes.mjs';
+import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '..', '..', '..');
 const datasetPath = path.join(here, 'golden-dataset.json');
 const dataset = JSON.parse(fs.readFileSync(datasetPath, 'utf8'));
 
@@ -46,19 +57,40 @@ const reasoning = argValue('--reasoning', 'low');
 const baseUrl = argValue('--base-url', '');
 const timeoutMs = Number(argValue('--timeout-ms', '60000'));
 const maxTokens = Number(argValue('--max-tokens', '4096'));
-const onlySamples = argValue('--samples', '') ? argValue('--samples', '').split(',').map((s) => s.trim()) : null;
-const resultsDir = argValue('--results-dir', path.join('.tmp', 'pri-1147', 'results'));
-const keepRoot = argFlag('--keep-root');
-const runLabel = argValue('--label', 'codex');
+const runIdArg = argValue('--run-id', null);
+const appendAuthorized = argFlag('--append');
+const resultsRoot = argValue('--results-root', path.join('.tmp', 'pri-1147'));
+const onlySamples = argValue('--samples', '') ? argValue('--samples', '').split(',').map((s) => s.trim()).filter((s) => s.length > 0) : null;
+const isPartialRun = onlySamples !== null;
 
 if (!process.env[apiKeyEnv]) {
   console.error(JSON.stringify({ ok: false, reason: 'missing_api_key_env', nextAction: `export ${apiKeyEnv} before running the real-LLM experiment.` }));
   process.exit(1);
 }
 
-const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), `pri1147-${runLabel}-`));
-fs.mkdirSync(resultsDir, { recursive: true });
-const resultsFile = path.join(resultsDir, `codex-chain-${runLabel}.jsonl`);
+const requestedSamples = onlySamples ?? dataset.samples.map((s) => s.sample_id);
+const unknownSamples = requestedSamples.filter((id) => !dataset.samples.some((s) => s.sample_id === id));
+if (unknownSamples.length > 0) {
+  console.error(JSON.stringify({ ok: false, reason: 'unknown_sample_ids', details: unknownSamples, nextAction: 'Check --samples against golden-dataset.json sample ids.' }));
+  process.exit(1);
+}
+
+let runContext;
+try {
+  runContext = openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, phaseInfo: { provider, model, apiKeyEnv } });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
+  process.exit(1);
+}
+const { runId, runDir, meta, metaPath } = runContext;
+const resultsFile = path.join(runDir, 'codex-chain.jsonl');
+const summaryFile = path.join(runDir, 'codex-chain.summary.json');
+try {
+  assertFreshOutputs({ runDir, outputs: [resultsFile, summaryFile], appendAuthorized });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code, details: String(error.message), nextAction: error.nextAction }));
+  process.exit(1);
+}
 
 const config = lib.buildWorkspaceConfig({
   provider,
@@ -70,25 +102,23 @@ const config = lib.buildWorkspaceConfig({
   ...(baseUrl ? { baseUrl } : {}),
 });
 const learnedSamples = new Set(dataset.samples.filter((s) => s.category === 'G').map((s) => s.sample_id));
-
-const samples = dataset.samples.filter((s) => (onlySamples ? onlySamples.includes(s.sample_id) : true));
-if (samples.length === 0) {
-  console.error(JSON.stringify({ ok: false, reason: 'no_samples_matched', nextAction: 'Check --samples against golden-dataset.json sample ids.' }));
-  process.exit(1);
-}
+const samplesById = new Map(dataset.samples.map((s) => [s.sample_id, s]));
+const samples = requestedSamples.map((id) => samplesById.get(id));
 
 const startedAt = new Date().toISOString();
+recordPhase(metaPath, meta, PHASES.codexChain, { started_at: startedAt, partial_run: isPartialRun, requested_samples: requestedSamples.length, provider, model });
+
+const outcomes = {};
+const executionFailures = [];
 let index = 0;
-const failures = [];
 
 for (const sample of samples) {
   index += 1;
   const ids = lib.sampleIds(sample.sample_id, index);
-  const logicalKey = `codex|${'ROLLOUT'}|${ids.turnId}|user`;
-  let record = {
+  const record = {
+    run_id: runId,
     sample_id: sample.sample_id,
     category: sample.category,
-    text: sample.text,
     input_hash: lib.sha256(sample.text),
     provider,
     model,
@@ -100,9 +130,10 @@ for (const sample of samples) {
     },
     started_at: new Date().toISOString(),
   };
+  let observed = null;
   try {
     const env = lib.bootstrapSampleEnv({
-      runRoot,
+      runRoot: fs.mkdtempSync(path.join(os.tmpdir(), `pri1147-sample-`)),
       sampleId: `${sample.category}-${sample.sample_id}`,
       config,
       learnedKeywords: learnedSamples.has(sample.sample_id) ? dataset.learnedKeywordsSeed : null,
@@ -117,7 +148,7 @@ for (const sample of samples) {
     const hook = await lib.driveHook({ payload, workspaceDir: env.workspaceDir, codexHome: env.codexHome });
     const key = `codex|${env.rolloutIdentity}|${ids.turnId}|user`;
     record.logical_observation_key = key;
-    record.hook = { exitCode: hook.exitCode, stderr: hook.stderr };
+    record.hook = { exitCode: hook.exitCode, failed: hook.failed === true, stderr: hook.stderr };
 
     const preStage2 = lib.readAdmissionState(env.workspaceDir, key);
     record.stage1 = {
@@ -126,27 +157,33 @@ for (const sample of samples) {
       marker_reason_pre: preStage2.marker?.reason ?? null,
       rule_version: preStage2.marker?.ruleVersion ?? null,
     };
-    record.pending_pre_stage2 = preStage2.marker?.decision === 'pending_llm_review';
+    const pendingExisted = preStage2.marker?.decision === 'pending_llm_review';
+    record.pending_pre_stage2 = pendingExisted;
 
     let postStage2 = preStage2;
-    if (preStage2.marker?.decision === 'pending_llm_review') {
+    let classifierUnavailable = false;
+    let stage2Unfinished = false;
+    if (pendingExisted) {
       const measured = lib.buildMeasuredClassifier(env.workspaceDir);
       if (!measured.ok) {
+        classifierUnavailable = true;
         record.classifier_resolution = { ok: false, readiness: measured.readiness, reason: measured.reason };
-        record.stage2 = { error: 'classifier_unavailable', reason: measured.reason };
       } else {
         record.classifier_profile = { provider: measured.profile.provider, model: measured.profile.model, api_key_env: measured.profile.apiKeyEnv, timeout_ms: measured.profile.timeoutMs };
         record.stage2 = { cycles: await lib.runStage2UntilTerminal({ workspaceDir: env.workspaceDir, classifierWrap: measured }) };
         record.llm_calls = measured.calls.map((c) => ({ latency_ms: c.latencyMs, status: c.status, ...(c.verdict ? { verdict: c.verdict } : {}), ...(c.error ? { error: c.error } : {}) }));
         record.llm_summary = measured.summary();
         postStage2 = lib.readAdmissionState(env.workspaceDir, key);
+        stage2Unfinished = postStage2.marker?.decision === 'pending_llm_review';
       }
     }
 
     record.stage2_result = {
       marker_decision_post: postStage2.marker?.decision ?? null,
       marker_reason_post: postStage2.marker?.reason ?? null,
-      attempts: postStage2.marker?.payloadPreview?.review?.attempts ?? null,
+      attempts: postStage2.marker?.payloadPreview?.review?.attempts
+        ?? postStage2.marker?.payloadPreview?.attempts
+        ?? null,
       verdict: postStage2.marker?.payloadPreview?.review?.reviewResult?.verdict ?? null,
       confidence: postStage2.marker?.payloadPreview?.review?.reviewResult?.confidence ?? null,
       verdict_reason: postStage2.marker?.payloadPreview?.review?.reviewResult?.reason ?? null,
@@ -154,34 +191,71 @@ for (const sample of samples) {
     record.pain_created = postStage2.pain !== null;
     record.pain = postStage2.pain;
     record.pain_count_in_workspace = postStage2.painCount;
+
+    observed = classifySampleOutcome({
+      hookFailed: hook.failed === true,
+      observationPersisted: preStage2.observation !== null,
+      pendingExisted,
+      classifierUnavailable,
+      stage2Unfinished,
+      markerDecision: postStage2.marker?.decision ?? null,
+      markerReason: postStage2.marker?.reason ?? null,
+    });
     record.completed_at = new Date().toISOString();
   } catch (error) {
     record.error = lib.redactSecrets(String(error).slice(0, 400));
     record.completed_at = new Date().toISOString();
-    failures.push(sample.sample_id);
+    observed = { outcome: 'execution_error', reason: lib.redactSecrets(String(error).slice(0, 200)) };
+  }
+
+  record.final_outcome = observed.outcome;
+  record.final_outcome_reason = observed.reason;
+  record.provider_status = record.final_outcome === 'classifier_unavailable'
+    ? 'unavailable'
+    : (record.llm_calls ?? []).every((c) => c.status === 'ok') && (record.llm_calls ?? []).length > 0
+      ? 'ok'
+      : (record.llm_calls ?? []).some((c) => c.status !== 'ok')
+        ? 'degraded'
+        : 'not_called';
+  record.latency_ms = (record.llm_calls ?? []).length > 0
+    ? (record.llm_calls ?? []).reduce((s, c) => s + c.latency_ms, 0)
+    : null;
+
+  outcomes[record.final_outcome] = (outcomes[record.final_outcome] ?? 0) + 1;
+  if (record.final_outcome === 'execution_error' || record.final_outcome === 'classifier_unavailable' || record.final_outcome === 'pending_unresolved') {
+    executionFailures.push({ sample_id: record.sample_id, outcome: record.final_outcome, reason: record.final_outcome_reason });
   }
   fs.appendFileSync(resultsFile, JSON.stringify(record) + '\n');
-  const decision = record.stage2_result?.marker_decision_post ?? record.stage1?.marker_decision_pre ?? '?';
-  const label = record.pain_created === true ? 'pain' : record.pain_created === false ? 'no_pain' : 'error';
-  console.log(`[${String(index).padStart(2, '0')}/${samples.length}] ${sample.sample_id} (${sample.category}) → ${decision} / ${label}`);
+  console.log(`[${String(index).padStart(2, '0')}/${samples.length}] ${sample.sample_id} (${sample.category}) → ${record.final_outcome} / pain=${record.pain_created}`);
 }
 
+const finishedAt = new Date().toISOString();
+const runOk = executionFailures.length === 0;
 const summary = {
-  ok: failures.length === 0,
-  run_label: runLabel,
+  ok: runOk,
+  run_id: runId,
+  partial_run: isPartialRun,
   started_at: startedAt,
-  finished_at: new Date().toISOString(),
+  finished_at: finishedAt,
   provider,
   model,
   api_key_env: apiKeyEnv,
+  git_commit_sha: meta.git_commit_sha,
+  dataset_sha256: meta.dataset_sha256,
   sample_count: samples.length,
-  failure_count: failures.length,
-  failures,
+  expected_sample_count: isPartialRun ? samples.length : dataset.samples.length,
+  outcome_counts: outcomes,
+  execution_failures: executionFailures,
   results_file: resultsFile,
-  run_root: keepRoot ? runRoot : '(temp root kept for evidence; remove after report)',
 };
-fs.writeFileSync(path.join(resultsDir, `codex-chain-${runLabel}.summary.json`), JSON.stringify(summary, null, 2));
+fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+recordPhase(metaPath, meta, PHASES.codexChain, {
+  finished_at: finishedAt,
+  ok: runOk,
+  sample_count: samples.length,
+  partial_run: isPartialRun,
+  outcome_counts: outcomes,
+  execution_failures: executionFailures,
+});
 console.log(JSON.stringify(summary, null, 2));
-if (!keepRoot) {
-  console.log(`run_root=${runRoot} (kept; delete manually after evidence review)`);
-}
+process.exitCode = runOk ? 0 : 1;

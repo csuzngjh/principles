@@ -32,23 +32,21 @@
  *   F-RESTART                             claim 后模拟进程重启：新鲜 claim 跳过 →
  *                                         陈旧 claim 接管（fencing）→ 真实恢复
  *
- * 实验过程中发现并如实记录的生产缺陷（本脚本不修改生产代码）：
- *   D-DEF1  signal-stage2-cycle.ts 以 performance.now() 浮点差值计算
- *           classificationTimeoutMs（remaining = budgetMs - elapsed）；
- *           当剩余预算 < classificationTimeoutMs 时，浮点 timeoutMs 经
- *           pi-ai-runtime-adapter.ts:669 的 AbortSignal.timeout(effectiveTimeoutMs)
- *           抛出 Node ERR_OUT_OF_RANGE（"delay must be an integer"）→ 分类器
- *           瞬时（0-4ms，无网络往返）返回 null → cycle 记 pending_llm_error
- *           并消耗 attempt。触发条件：单 cycle 内候选开始分类时聚合预算剩余
- *           已小于单次分类超时（多候选 / 预算即将耗尽时必现）。D-DEF1 场景
- *           以真实分类器确定性复现该签名（失败发生在任何网络 I/O 之前），
- *           证据交 Owner 决策修复（候选修复：对 timeoutMs 取整）。
- *           其余场景显式传 aggregateBudgetMs=120s > classificationTimeoutMs，
- *           使被测语义不被该缺陷污染。
+ * D-DEF1（ERR-191，已在生产代码修复）：signal-stage2-cycle.ts 曾以
+ *   performance.now() 浮点差值计算分类超时，剩余预算 < classificationTimeoutMs
+ *   时浮点值直达 AbortSignal.timeout → ERR_OUT_OF_RANGE → 分类器瞬时（<50ms，
+ *   无网络往返）null → 消耗 attempt → 五轮后静默 abandoned(llm_error)。
+ *   修复前签名由真实分类器确定性复现（证据：提交 f1797cb37 之前的一轮运行，
+ *   见验收报告 §九/§十与 ERR-191 记录）。本脚本的 D-DEF1-postfix 场景现在是
+ *   修复后回归：默认预算（不传 aggregateBudgetMs）下分类器必须收到正整数
+ *   timeoutMs、真实请求必须进入网络（有真实延迟与判定）、行收敛到终态。
+ *   其余场景同样使用生产默认预算；仅 F-TIMEOUT 保留 2s classificationTimeoutMs
+ *   （该测试的目的就是超时形状本身）。
  *
  * Usage:
  *   node scripts/dev/pain-real-llm-bdd/run-fault-injection.mjs \
- *     --provider zai --model glm-5.3-flash --apiKeyEnv ZAI_API_KEY --reasoning low
+ *     --provider zai --model glm-5.3-flash --apiKeyEnv ZAI_API_KEY --reasoning low \
+ *     [--run-id run-...] [--append]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -58,6 +56,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
+import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const hostRuntime = await import('@principles/host-runtime');
 const codexAdapter = await import('@principles/codex-adapter');
@@ -81,6 +80,9 @@ function argValue(name, fallback) {
   const idx = args.indexOf(name);
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : fallback;
 }
+function argFlag(name) {
+  return args.includes(name);
+}
 
 const provider = argValue('--provider', 'zai');
 const model = argValue('--model', 'glm-5.3-flash');
@@ -89,16 +91,33 @@ const reasoning = argValue('--reasoning', 'low');
 const baseUrl = argValue('--base-url', '');
 const timeoutMs = Number(argValue('--timeout-ms', '60000'));
 const maxTokens = Number(argValue('--max-tokens', '4096'));
-const resultsDir = argValue('--results-dir', path.join('.tmp', 'pri-1147', 'results'));
+const runIdArg = argValue('--run-id', null);
+const appendAuthorized = argFlag('--append');
+const resultsRoot = argValue('--results-root', path.join('.tmp', 'pri-1147'));
 
 if (!process.env[apiKeyEnv]) {
   console.error(JSON.stringify({ ok: false, reason: 'missing_api_key_env', nextAction: `export ${apiKeyEnv} before running the fault-injection experiment.` }));
   process.exit(1);
 }
 
+const repoRoot = path.resolve(here, '..', '..', '..');
+let runCtx;
+try {
+  runCtx = openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath: path.join(here, 'golden-dataset.json'), phaseInfo: { provider, model, apiKeyEnv } });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
+  process.exit(1);
+}
+const { runId, runDir, meta, metaPath } = runCtx;
+const summaryFile = path.join(runDir, 'fault-injection.summary.json');
+try {
+  assertFreshOutputs({ runDir, outputs: [summaryFile], appendAuthorized });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code, details: String(error.message), nextAction: error.nextAction }));
+  process.exit(1);
+}
+
 const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pri1147-fault-'));
-fs.mkdirSync(resultsDir, { recursive: true });
-const summaryFile = path.join(resultsDir, 'fault-injection.summary.json');
 
 const config = lib.buildWorkspaceConfig({
   provider, model, apiKeyEnv, timeoutMs, maxTokens,
@@ -108,7 +127,6 @@ const config = lib.buildWorkspaceConfig({
 
 const dataset = JSON.parse(fs.readFileSync(path.join(here, 'golden-dataset.json'), 'utf8'));
 const a1 = dataset.samples.find((s) => s.sample_id === 'A1');
-const a2 = dataset.samples.find((s) => s.sample_id === 'A2');
 
 // ─── 记录结构 ────────────────────────────────────────────────────────────────
 
@@ -210,8 +228,9 @@ async function runTwoArmScenario({ id, faultLabel, faultShape, faultCalls = 1, c
       workspaceDir: env.workspaceDir,
       classifier: faulted.fn,
       classifierState: 'used',
-      classificationTimeoutMs,
-      aggregateBudgetMs: 120_000,
+      // classificationTimeoutMs 仅在 F-TIMEOUT 场景有意收窄（该测试的目的就是
+      // 超时形状）；aggregateBudgetMs 始终使用生产默认（P1-3，D-DEF1 已修复）。
+      ...(classificationTimeoutMs !== 60_000 ? { classificationTimeoutMs } : {}),
     });
     const markerAfterFault = readRawMarker(env.workspaceDir, key);
     const attemptsAfterFault = markerAfterFault?.payload?.review?.attempts ?? null;
@@ -316,8 +335,7 @@ try {
 // （另一 cycle claimed=0、零 LLM 调用）。真实 provider 的瞬时故障（如连续真实
 // 调用后的限流，表现为 seam no_verdict）会诚实走 pending_llm_error 可重试路径，
 // 因此终态验证用后续恢复轮次完成——每轮都重新验证 CAS 恰一性，终态恰一 pain。
-// 注：显式 aggregateBudgetMs=120s > classificationTimeoutMs，避免把 D-DEF1
-// （非整数 timeoutMs 缺陷，见文件头）混入本场景的并发语义。
+// P1-3：生产默认预算（D-DEF1 已修复，整数钳制，ERR-191）。
 try {
   const { env, key } = await bootstrapPending('concurrent-retry');
   const c1 = lib.buildMeasuredClassifier(env.workspaceDir);
@@ -326,8 +344,8 @@ try {
     blocked('F-CONCURRENT-RETRY', '两个真实 cycle 并发抢同一 pending 行', `classifier 不可用: ${!c1.ok ? c1.reason : c2.reason}`);
   } else {
     const [report1, report2] = await Promise.all([
-      runStage2CorrectionCycle({ workspaceDir: env.workspaceDir, classifier: c1.fn, classifierState: 'used', classificationTimeoutMs: 60_000, aggregateBudgetMs: 120_000 }),
-      runStage2CorrectionCycle({ workspaceDir: env.workspaceDir, classifier: c2.fn, classifierState: 'used', classificationTimeoutMs: 60_000, aggregateBudgetMs: 120_000 }),
+      runStage2CorrectionCycle({ workspaceDir: env.workspaceDir, classifier: c1.fn, classifierState: 'used' }),
+      runStage2CorrectionCycle({ workspaceDir: env.workspaceDir, classifier: c2.fn, classifierState: 'used' }),
     ]);
     const roundLlmCalls = c1.calls.length + c2.calls.length;
     const raceOk = report1.claimed + report2.claimed === 1
@@ -484,72 +502,60 @@ try {
   blocked('F-RESTART', 'claim 后进程重启：陈旧 claim 接管 + fencing', String(error).slice(0, 300));
 }
 
-// ═══ D-DEF1（实验发现的生产缺陷复现记录，非 simulated 故障、非产品验收）═════
-// 复现条件：runStage2CorrectionCycle 使用默认 aggregateBudgetMs(60s) =
-// classificationTimeoutMs(60s) —— 第一个候选开始分类时 remaining = 60000 -
-// performance.now() 差值（浮点）< classificationTimeoutMs → 浮点 timeoutMs 进
-// adapter 的 AbortSignal.timeout → Node ERR_OUT_OF_RANGE → 瞬时 null。
-// 失败发生在任何网络 I/O 之前（0-4ms），真实分类器即可确定性复现。
-// 记录 pass = "缺陷签名按预测复现"；缺陷本身交 Owner 决策（见文件头 D-DEF1）。
+// ═══ D-DEF1-postfix（修复后回归：默认预算下整数超时 + 真实网络调用）═════════
+// 历史（保留的修复前证据，详见验收报告 §九/§十 + ERR-191）：修复前
+// runStage2CorrectionCycle 默认预算(60s==60s)下 remaining 为浮点 →
+// AbortSignal.timeout 抛 ERR_OUT_OF_RANGE → 分类器 <50ms 瞬时 null（无网络）
+// → 消耗 attempt → 五轮后静默 abandoned(llm_error)。该签名曾在真实分类器下
+// 确定性复现（提交 f1797cb37 之前的一轮 fault 运行记录）。
+// 现在验证修复后的生产行为：不传 aggregateBudgetMs（生产默认），分类器必须
+// 收到【正整数】timeoutMs，真实请求必须进入网络（有真实延迟与判定），
+// pending 行在默认预算下收敛到终态。
 try {
-  const { env, key } = await bootstrapPending('def1-float-timeout');
+  const { env, key } = await bootstrapPending('def1-postfix-regression');
   const measured = lib.buildMeasuredClassifier(env.workspaceDir);
   if (!measured.ok) {
-    blocked('D-DEF1', '生产缺陷复现: 非整数 timeoutMs → AbortSignal.timeout RangeError', `classifier 不可用: ${measured.reason}`);
+    blocked('D-DEF1-postfix-integer-timeout', '修复后回归: 默认预算下分类器收到正整数 timeoutMs', `classifier 不可用: ${measured.reason}`);
+    blocked('D-DEF1-postfix-real-network', '修复后回归: 真实 provider 请求进入网络（非瞬时 no_verdict）', `classifier 不可用: ${measured.reason}`);
   } else {
-    const startedCycle = Date.now();
     const report = await runStage2CorrectionCycle({
       workspaceDir: env.workspaceDir,
       classifier: measured.fn,
       classifierState: 'used',
-      classificationTimeoutMs: 60_000,
-      // 刻意不传 aggregateBudgetMs：默认 60s == classificationTimeoutMs → 触发条件
+      // 刻意不传 aggregateBudgetMs/classificationTimeoutMs：生产默认预算
     });
-    const cycleMs = Date.now() - startedCycle;
     const marker = readRawMarker(env.workspaceDir, key);
-    const firstCall = measured.calls[0] ?? null;
-    const signature = firstCall !== null
-      && firstCall.status === 'no_verdict'
-      && firstCall.latencyMs < 50
-      && cycleMs < 5_000
-      && report.claimed === 1
-      && (marker?.payload?.review?.attempts ?? 0) === 1
-      && marker?.decision === 'pending_llm_review';
-    record('D-DEF1', '生产缺陷复现: 非整数 timeoutMs → AbortSignal.timeout RangeError（瞬时 null，消耗 attempt）', signature, {
-      cycleMs,
-      firstCall,
-      report: lib.safePreview(report, 400),
-      attempts: marker?.payload?.review?.attempts ?? null,
-      lastReason: marker?.payload?.review?.lastReason ?? null,
-      defectRecord: 'signal-stage2-cycle.ts 浮点 remaining → AbortSignal.timeout ERR_OUT_OF_RANGE（Node 26 要求整数 delay）；修复建议：对传给分类器的 timeoutMs 取整（Math.floor/Math.max(1, ...))',
-      honestLabel: 'defect_reproduction_record — 非产品验收项，交 Owner 决策',
+    const calls = measured.calls;
+    const integerTimeouts = calls.length > 0
+      && calls.every((c) => Number.isInteger(c.timeout_ms) && c.timeout_ms > 0);
+    record('D-DEF1-postfix-integer-timeout', '修复后回归: 默认预算下分类器收到正整数 timeoutMs（ERR-191 修复）', integerTimeouts, {
+      receivedTimeouts: calls.map((c) => c.timeout_ms),
+      report: lib.safePreview(report, 300),
+      honestLabel: 'post_fix_regression — D-DEF1 已修复（f1797cb37 / ERR-191）',
     });
 
-    // 交叉验证：显式 aggregateBudgetMs=120s（剩余 119997 > classificationTimeoutMs
-    // → timeout 取整值 60000）时同一 pending 行正常分类——证明缺陷由预算形状触发，
-    // 与 provider 无关。真实分类器推进到终态。
-    let crossDecision = null;
-    for (let round = 0; round < STAGE2_MAX_ATTEMPTS + 2; round += 1) {
-      const rep = await runStage2CorrectionCycle({
-        workspaceDir: env.workspaceDir,
-        classifier: measured.fn,
-        classifierState: 'used',
-        classificationTimeoutMs: 60_000,
-        aggregateBudgetMs: 120_000,
-      });
-      crossDecision = readRawMarker(env.workspaceDir, key)?.decision ?? null;
-      if (crossDecision === 'admitted' || crossDecision === 'resolved_none' || crossDecision === 'abandoned') break;
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
-    const crossCallCount = measured.calls.slice(1).filter((c) => c.status === 'ok').length;
-    record('D-DEF1-crosscheck', '交叉验证: aggregateBudgetMs > classificationTimeoutMs 时同一行正常分类', crossDecision === 'admitted' && crossCallCount >= 1, {
-      crossDecision,
-      crossOkCalls: crossCallCount,
-      honestNote: '缺陷由预算剩余形状触发（浮点 remaining < classificationTimeoutMs），非 provider 故障',
+    const firstCall = calls[0] ?? null;
+    const realNetwork = firstCall !== null
+      && firstCall.status === 'ok'
+      && firstCall.latencyMs >= 200
+      && firstCall.verdict !== undefined;
+    record('D-DEF1-postfix-real-network', '修复后回归: 默认预算下真实 provider 请求进入网络（ok + 真实延迟 + 判定）', realNetwork, {
+      firstCall,
+      latencyThresholdMs: 200,
+      instantFailureSignature: 'no_verdict 且 <50ms（修复前签名）不得出现',
+    });
+
+    const terminal = marker?.decision === 'admitted' || marker?.decision === 'resolved_none' || marker?.decision === 'abandoned';
+    record('D-DEF1-postfix-terminal', '修复后回归: 默认预算下 pending 行收敛到终态（不再静默 abandoned(llm_error)）', terminal && marker?.decision !== 'abandoned', {
+      decision: marker?.decision ?? null,
+      attempts: marker?.payload?.review?.attempts ?? null,
+      painCount: lib.readPainCount(env.workspaceDir),
     });
   }
 } catch (error) {
-  blocked('D-DEF1', '生产缺陷复现: 非整数 timeoutMs → AbortSignal.timeout RangeError', String(error).slice(0, 300));
+  blocked('D-DEF1-postfix-integer-timeout', '修复后回归: 默认预算下分类器收到正整数 timeoutMs', String(error).slice(0, 300));
+  blocked('D-DEF1-postfix-real-network', '修复后回归: 真实 provider 请求进入网络', String(error).slice(0, 300));
+  blocked('D-DEF1-postfix-terminal', '修复后回归: 默认预算下收敛到终态', String(error).slice(0, 300));
 }
 
 // ─── 汇总 ───────────────────────────────────────────────────────────────────
@@ -559,6 +565,7 @@ const blockedCount = checks.filter((c) => c.blocked === true).length;
 const failed = checks.filter((c) => c.pass === false && c.blocked !== true).length;
 const summary = {
   ok: failed === 0 && blockedCount === 0 && passed === checks.length && checks.length > 0,
+  run_id: runId,
   experiment: 'PRI-1147 Phase 5 — fault injection at the LLM classifier seam',
   honesty: {
     fault_mode: 'simulated_fault',
@@ -574,15 +581,18 @@ const summary = {
   stage2_max_attempts: STAGE2_MAX_ATTEMPTS,
   discovered_defects: [{
     id: 'D-DEF1',
-    severity: 'P1-candidate',
-    area: 'packages/host-runtime/src/signal-stage2-cycle.ts → packages/principles-core/src/runtime/adapter/pi-ai-runtime-adapter.ts:669',
-    symptom: 'cycle 以 performance.now() 浮点差值计算分类超时；剩余预算 < classificationTimeoutMs 时 AbortSignal.timeout(浮点) 在 Node 26 抛 ERR_OUT_OF_RANGE → 分类器瞬时 null（无网络往返）→ pending_llm_error 消耗 attempt；多候选 cycle 的后续候选或预算临近耗尽时必现',
-    evidence: 'run-fault-injection.mjs D-DEF1 场景：真实分类器 0-4ms no_verdict、attempt=1；显式 aggregateBudgetMs=120s 交叉验证恢复正常分类',
-    owner_decision: '候选修复为对 timeoutMs 取整；本实验不修改生产代码',
+    status: 'FIXED_IN_THIS_BRANCH',
+    severity: 'P1（已修复）',
+    area: 'packages/host-runtime/src/signal-stage2-cycle.ts → packages/principles-core/src/runtime/adapter/pi-ai-runtime-adapter.ts:680',
+    symptom: '修复前：cycle 以 performance.now() 浮点差值计算分类超时，剩余预算 < classificationTimeoutMs 时 AbortSignal.timeout(浮点) 抛 ERR_OUT_OF_RANGE → 分类器瞬时 null（无网络往返）→ pending_llm_error 消耗 attempt → 五轮后静默 abandoned(llm_error)',
+    historical_evidence: '修复前真实分类器确定性复现（<50ms no_verdict、attempt 消耗、120s 预算交叉验证正常）——证据保留在验收报告 §九/§十与 ERR-191',
+    fix: '整数钳制（Math.floor）于生产者处 + host-runtime 回归测试（分类器收到整数 timeoutMs）+ 本脚本 D-DEF1-postfix 三个修复后回归检查',
+    reference: 'ERR-191 / 提交 f1797cb37',
   }],
   checks,
   run_root: runRoot,
 };
 fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
+recordPhase(metaPath, meta, PHASES.faultInjection, { finished_at: summary.finished_at, ok: summary.ok, totals: summary.totals });
 console.log(JSON.stringify({ ok: summary.ok, totals: summary.totals, summary_file: summaryFile }, null, 2));
 process.exit(summary.ok ? 0 : 1);
