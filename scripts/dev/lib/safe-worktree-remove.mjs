@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { listWorktrees, normalizeGitPath, runGit } from './git.mjs';
+import { gitCommonDirAbsolute, listWorktrees, normalizeGitPath, runGit } from './git.mjs';
 import { readLeaseState } from './workspace-lifecycle.mjs';
-import { removeResidueTree, REMOVAL_REASONS } from './residue-delete.mjs';
+import { classifyReparsePoints, removeResidueTree, REMOVAL_REASONS } from './residue-delete.mjs';
 
 /** Re-read both halves of writer ownership immediately before a path mutation. */
 async function ownershipError(cwd, worktreePath, stage) {
@@ -45,7 +45,9 @@ async function ownershipError(cwd, worktreePath, stage) {
  *
  * The worktree is first renamed (not recursively traversed) into a unique
  * quarantine sibling. A no-follow filesystem walk deletes that private tree.
- * Git is then asked to remove only the now-absent worktree's admin metadata.
+ * Its exact Git admin directory is then resolved from the moved .git marker,
+ * cross-checked against the admin directory's reverse gitdir pointer, and
+ * removed with the same no-follow walker. No recursive Git deletion is used.
  *
  * The caller MUST hold the repository mutation lock for this entire operation.
  * MUTATION-GUARDED-HELPER: both callers invoke this function inside the same
@@ -53,13 +55,14 @@ async function ownershipError(cwd, worktreePath, stage) {
  *
  * @param {{cwd: string, worktreePath: string, primaryPath: string,
  *          onProgress?: (p: object) => void,
- *          onQuarantined?: (quarantinePath: string) => void | Promise<void>}} opts
+ *          onQuarantined?: (quarantinePath: string) => void | Promise<void>,
+ *          onTreeRemoved?: (worktreePath: string) => void | Promise<void>}} opts
  * @returns {Promise<{ok: boolean, reason?: string, reasonCode?: string,
  *          quarantinePath?: string, restoredPath?: string, removal?: object,
  *          notes: string[]}>}
  */
 
-export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onProgress = null, onQuarantined = null }) {
+export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onProgress = null, onQuarantined = null, onTreeRemoved = null }) {
   const notes = [];
   const beforeMoveError = await ownershipError(cwd, worktreePath, 'before quarantine move');
   if (beforeMoveError) return { ok: false, ...beforeMoveError, notes };
@@ -222,20 +225,77 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     };
   }
 
-  // The no-follow walk has removed the entire filesystem tree. --force here is
-  // ONLY for clearing Git's now-stale admin record; the path is verified absent,
-  // so Git has no directory it could recurse through.
+  if (onTreeRemoved) {
+    // Test seam: model a non-cooperating process recreating the original path
+    // after quarantine deletion but before branch cleanup is allowed to proceed.
+    await onTreeRemoved(worktreePath);
+  }
+
+  // Remove ONLY the admin directory named by the moved .git marker. A
+  // git worktree remove --force call, even against a path checked absent one
+  // line earlier, would reopen a late-Junction race between that check and Git's
+  // recursive delete. The reverse pointer proves this is the exact worktree
+  // admin directory for our quarantine path, not another worktree's metadata.
+  let adminDir;
   try {
-    if (fs.existsSync(quarantinePath)) {
-      throw new Error('quarantine path reappeared before Git metadata removal');
+    const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
+    if (!markerLine) throw new Error('moved .git marker has no gitdir pointer');
+    const rawAdminGitDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
+    const commonDir = await gitCommonDirAbsolute(cwd);
+    const commonStat = fs.lstatSync(commonDir);
+    if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
+      throw new Error('repository Git common directory is not a real directory');
     }
-    await runGit(['worktree', 'remove', '--force', quarantinePath], { cwd });
+    const canonicalCommonDir = fs.realpathSync.native(commonDir);
+    const adminRoot = path.resolve(commonDir, 'worktrees');
+    const adminRootStat = fs.lstatSync(adminRoot);
+    if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()) {
+      throw new Error('repository worktrees admin root is not a real directory (refusing to follow a junction/symlink)');
+    }
+    const canonicalAdminRoot = fs.realpathSync.native(adminRoot);
+    const expectedAdminRoot = path.join(canonicalCommonDir, 'worktrees');
+    if (normalizeGitPath(canonicalAdminRoot) !== normalizeGitPath(expectedAdminRoot)) {
+      throw new Error('repository worktrees admin root resolves outside the canonical Git common directory');
+    }
+    const candidateAdminDir = path.resolve(path.dirname(markerPath), rawAdminGitDir);
+    const relativeAdmin = path.relative(adminRoot, candidateAdminDir);
+    if (!relativeAdmin || relativeAdmin === '..' || relativeAdmin.startsWith('..' + path.sep) || path.isAbsolute(relativeAdmin)) {
+      throw new Error('gitdir pointer does not resolve to a child of the repository worktrees admin directory');
+    }
+    const candidateStat = fs.lstatSync(candidateAdminDir);
+    if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
+      throw new Error('worktree admin directory is not a real directory');
+    }
+    adminDir = fs.realpathSync.native(candidateAdminDir);
+    const canonicalRelativeAdmin = path.relative(canonicalAdminRoot, adminDir);
+    if (!canonicalRelativeAdmin || canonicalRelativeAdmin === '..' ||
+      canonicalRelativeAdmin.startsWith('..' + path.sep) || path.isAbsolute(canonicalRelativeAdmin) ||
+      canonicalRelativeAdmin.includes(path.sep)) {
+      throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
+    }
+    const adminGitDir = path.join(adminDir, 'gitdir');
+    const adminGitDirStat = fs.lstatSync(adminGitDir);
+    if (!adminGitDirStat.isFile() || adminGitDirStat.isSymbolicLink()) {
+      throw new Error('worktree admin reverse gitdir pointer is not a regular file');
+    }
+    const reversePointer = fs.readFileSync(adminGitDir, 'utf-8').trim();
+    if (normalizeGitPath(reversePointer) !== normalizeGitPath(markerPath)) {
+      throw new Error('admin gitdir reverse pointer does not match the moved worktree marker');
+    }
+    const adminScan = classifyReparsePoints(adminDir);
+    if (!adminScan.complete || adminScan.links > 0) {
+      throw new Error('worktree admin directory contains unreadable entries or reparse points; refusing metadata deletion');
+    }
+    const metadataRemoval = removeResidueTree(adminDir, { primaryPath });
+    if (!metadataRemoval.ok || fs.existsSync(adminDir)) {
+      throw new Error(metadataRemoval.error || 'worktree admin directory remains after no-follow metadata removal');
+    }
   } catch (err) {
     return {
       ok: false,
       reasonCode: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL,
-      reason: 'filesystem tree is gone but Git could not unregister its quarantine worktree: ' + String((err && err.message) || err),
-      quarantinePath,
+      reason: 'filesystem tree is gone but its exact Git admin directory could not be safely removed: ' + String((err && err.message) || err),
+      quarantinePath: adminDir || quarantinePath,
       removal,
       notes,
     };
@@ -246,8 +306,8 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     return {
       ok: false,
       reasonCode: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL,
-      reason: 'Git still lists the quarantine worktree after metadata removal',
-      quarantinePath,
+      reason: 'Git still lists the quarantine worktree after its admin directory was removed',
+      quarantinePath: adminDir,
       removal,
       notes,
     };
@@ -257,6 +317,21 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     fs.rmdirSync(quarantineParent);
   } catch (err) {
     notes.push('empty quarantine parent could not be removed: ' + String((err && err.message) || err));
+  }
+
+  // A non-cooperating writer can recreate the original pathname after the
+  // atomic move. The worktree is no longer registered, so this is now an
+  // unknown residue shell; callers MUST refuse branch deletion.
+  if (fs.existsSync(worktreePath)) {
+    return {
+      ok: false,
+      reasonCode: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL,
+      reason: 'the original worktree path was recreated after quarantine removal; preserving it as an unknown residue shell and blocking branch deletion',
+      removedPath: worktreePath,
+      quarantinePath: worktreePath,
+      removal,
+      notes,
+    };
   }
 
   if (!removal.ok) {

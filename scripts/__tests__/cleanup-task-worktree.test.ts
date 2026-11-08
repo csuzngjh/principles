@@ -500,4 +500,79 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     expect(fingerprintTree(outside)).toBe(before);
     expect(fs.existsSync(wt)).toBe(true);
   }, 120_000);
+
+  it('refuses to delete Git admin metadata through a junctioned worktrees parent', async () => {
+    const { wt, branch } = await makeTask('admin-root-junction');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const adminRoot = path.join(commonDir, 'worktrees');
+    const externalAdminRoot = path.join(path.dirname(commonDir), '.pd-test-worktrees-admin-' + crypto.randomUUID());
+    let redirected = false;
+    let adminRootMoved = false;
+    try {
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({
+          cwd: primary,
+          worktreePath: wt,
+          primaryPath: primary,
+          onTreeRemoved: () => {
+            // Simulate a non-cooperating process redirecting the Git admin
+            // parent after the worktree tree is gone but before metadata cleanup.
+            fs.renameSync(adminRoot, externalAdminRoot);
+            adminRootMoved = true;
+            makeJunction(adminRoot, externalAdminRoot);
+            redirected = true;
+          },
+        }),
+      );
+      expect(redirected).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.reasonCode).toBe('REMOVAL_FAILED_RESIDUE_SHELL');
+      // The admin metadata outside .git must remain untouched.
+      expect(fs.readdirSync(externalAdminRoot).length).toBeGreaterThan(0);
+    } finally {
+      if (adminRootMoved) {
+        if (fs.existsSync(adminRoot)) {
+          if (process.platform === 'win32') fs.rmdirSync(adminRoot);
+          else fs.unlinkSync(adminRoot);
+        }
+        if (fs.existsSync(externalAdminRoot) && !fs.existsSync(adminRoot)) {
+          fs.renameSync(externalAdminRoot, adminRoot);
+        }
+      }
+      await git(primary, 'worktree', 'prune').catch(() => undefined);
+      await git(primary, 'branch', '-D', branch).catch(() => undefined);
+    }
+  }, 120_000);
+
+  it('preserves a recreated original path and leaves its branch undeleted', async () => {
+    const { wt, branch } = await makeTask('recreated-original-path');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let recreated = false;
+    try {
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({
+          cwd: primary,
+          worktreePath: wt,
+          primaryPath: primary,
+          onTreeRemoved: (originalPath) => {
+            fs.mkdirSync(originalPath, { recursive: true });
+            fs.writeFileSync(path.join(originalPath, 'late-owner-file.txt'), 'preserve me\n', 'utf-8');
+            recreated = true;
+          },
+        }),
+      );
+      expect(recreated).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.reasonCode).toBe('REMOVAL_FAILED_RESIDUE_SHELL');
+      expect(fs.readFileSync(path.join(wt, 'late-owner-file.txt'), 'utf-8')).toBe('preserve me\n');
+      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(false);
+      const branchSha = await git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch);
+      expect(branchSha.trim().length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(wt, { recursive: true, force: true });
+      await git(primary, 'branch', '-D', branch).catch(() => undefined);
+    }
+  }, 120_000);
 });

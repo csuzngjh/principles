@@ -455,6 +455,31 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     expect(result.detached).toEqual([]);
   });
 
+  it('keeps an external junction when a nested directory makes the scan incomplete', () => {
+    const { tree, outside } = buildTree('incomplete-with-link');
+    const blockedDirectory = path.join(tree, 'node_modules', 'real-pkg');
+    const externalLink = path.join(tree, 'node_modules', 'external-pkg');
+    makeJunction(externalLink, outside);
+    const originalOpenDir = fs.opendirSync.bind(fs);
+    const spy = vi.spyOn(fs, 'opendirSync').mockImplementation((dir, ...args) => {
+      if (path.resolve(String(dir)) === path.resolve(blockedDirectory)) {
+        throw Object.assign(new Error('simulated nested directory read denial'), { code: 'EACCES' });
+      }
+      return originalOpenDir(dir, ...args);
+    });
+    try {
+      const result = detachExternalLinks(tree);
+      expect(result.ok).toBe(false);
+      expect(result.complete).toBe(false);
+      expect(result.unreadable.some((item) => item.path === blockedDirectory)).toBe(true);
+      expect(result.detached).toEqual([]);
+      expect(fs.existsSync(externalLink)).toBe(true);
+      expect(fs.existsSync(path.join(outside, 'keep.txt'))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('detachInternalLinks removes the link git would otherwise leave behind', () => {
     const { tree } = buildTree('internal-detach');
     const target = path.join(tree, 'node_modules', 'real-pkg');
