@@ -452,7 +452,7 @@ export function createPiAdapterTransport({ adapter }) {
     async complete(request) {
       roundSeq += 1;
       const handle = await adapter.startRun({
-        agentSpec: { agentId: 'learning-lab-actor', schemaVersion: 'v1' },
+        agentSpec: { agentId: 'learning-lab-actor', schemaVersion: 'current' },
         taskRef: { taskId: request.taskId ?? `lab-actor-round-${roundSeq}` },
         inputPayload: request.userPrompt,
         contextItems: [],

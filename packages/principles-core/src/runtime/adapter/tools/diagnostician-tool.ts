@@ -27,7 +27,7 @@ export function buildSchemaToolDefinition(
   schema: TSchema,
   adapter: SchemaPromptAdapter,
 ): Tool {
-  // Convert schemaRef (e.g. 'dreamer-output-v1') to a tool-safe name
+  // Convert schemaRef (e.g. 'dreamer-output') to a tool-safe name
   const toolName = `record_${schemaRef.replace(/-/g, '_')}`;
   return {
     name: toolName,
