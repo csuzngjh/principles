@@ -7,7 +7,7 @@
     "files": [
       {
         "name": "actor.mjs",
-        "sha256": "9ecffd152e4e6def80a727c3098fe9eaa0c5ff37ff3dbe1b462dc54473247a22"
+        "sha256": "decd5aa1e829ad5d4f5854f226c1d5c586fd574814980831e609c0abade7fc44"
       },
       {
         "name": "ceb002-cli.mjs",
@@ -210,7 +210,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "9be73ca62dfe92621915bf8da504d9681c948ef3c7e0198fad6ea99591dbad7d"
+      "sha256": "9d5148644e5c1d9cf3f7a8af705d21b40345991f05f4580aaea8efc5d1c1fde7"
     },
     {
       "path": "blind-review/review-form.json",
@@ -218,7 +218,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "010b9c6d4746abbb05760a1df04366ba0ce18e92cb01f21692757a3fa621dfd8"
+      "sha256": "598b6607e50c8942aa5991584ffa47d53fadb95d453c73d0004f8d57f4f07701"
     },
     {
       "path": "gold-review.json",
@@ -262,7 +262,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "d949acbb60322d71850f0a8ef94de03fa22c8248125532ca9241f673b57408f6"
+      "sha256": "5949695d74596f118864ca20ef322739c8b221e4c4534fb03519807eff1ec299"
     },
     {
       "path": "revision.json",
@@ -277,5 +277,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "c2d62c63dabfa7a0dbea871e509eeea5d6d3ac7793f5aa3a2f1e2248367a7b1f"
+  "packageHash": "c4b3fc03fafcf2438fae76ae7200b0d05e2b00dac66aed847fc0c2e2131bf343"
 }
