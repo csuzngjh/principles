@@ -343,6 +343,29 @@ for (const file of devFiles) {
   }
 }
 
+// Imported destructive helpers are guarded at their CALL SITES too. The helper
+// definition cannot prove that an entry point invokes it under the repository
+// mutation mutex; check every imported removeWorktreeSafely() call independently.
+for (const file of devFiles) {
+  const source = fs.readFileSync(file, 'utf8');
+  if (!/import\s*\{[^}]*\bremoveWorktreeSafely\b[^}]*\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su.test(source)) {
+    continue;
+  }
+  const masked = blankNonCode(source);
+  const spans = mutationLockSpans(masked);
+  const rel = path.relative(ROOT, file);
+  const lineOf = (at) => source.slice(0, at).split('\n').length;
+  const callRe = /\bremoveWorktreeSafely\s*\(/g;
+  for (const call of source.matchAll(callRe)) {
+    if (!spans.some(([start, end]) => call.index >= start && call.index < end)) {
+      fail(
+        'git-mutation-mutex',
+        rel + ':' + lineOf(call.index) + ' calls imported removeWorktreeSafely() outside a withMutationLock() span'
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // H. The governance IDs this change introduced are actually documented.
 // ---------------------------------------------------------------------------

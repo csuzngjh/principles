@@ -155,6 +155,25 @@ describe('workspace tools gate', () => {
     expect(result.stderr).toContain('MUTATION-GUARDED-HELPER');
   }, 60_000);
 
+  it.each(['cleanup-task-worktree.mjs', 'workspace-cleanup.mjs'])(
+    'fails when %s calls the imported destructive helper outside the mutation lock',
+    async (entrypoint) => {
+      const target = path.join(fixture, 'scripts', 'dev', entrypoint);
+      fs.writeFileSync(
+        target,
+        fs.readFileSync(target, 'utf-8') +
+          "\nremoveWorktreeSafely({ cwd: '/somewhere', worktreePath: '/wt', primaryPath: '/somewhere' });\n",
+        'utf-8',
+      );
+      const result = await runGate(fixture);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('git-mutation-mutex');
+      expect(result.stderr).toContain('calls imported removeWorktreeSafely() outside');
+      expect(result.stderr).toContain(entrypoint);
+    },
+    60_000,
+  );
+
   it('fails when a background service is introduced', async () => {
     const target = path.join(fixture, 'scripts', 'dev', 'worktree-snapshot.mjs');
     fs.writeFileSync(target, fs.readFileSync(target, 'utf-8') + '\nsetInterval(() => {}, 1000);\n', 'utf-8');
