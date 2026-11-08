@@ -1,4 +1,9 @@
-# Historical frozen-asset SHA-256 baseline — v8 (post-rebind, PR #2301 security/single-active round), 2026-11-03
+# Historical frozen-asset SHA-256 baseline — v9 (post-rebind, PRI-1139 actor.mjs binding move), 2026-11-08
+# v8→v9 delta = EXACTLY the same four files again, rebind-exm-v4-freeze.mjs after
+# the PRI-1139 canonical-contract cutover moved lib/actor.mjs (agentSpec
+# schemaVersion 'v1' → 'current'). executionsHash is unchanged
+# (97e2d4e78710616a18945fcbb9d823420a3cd716d2e58de67e1c817d15844751); only the
+# implementationHash binding metadata moved. Precedent: v7→v8.
 # v7→v8 delta = EXACTLY the same four files, rebind-exm-v4-freeze.mjs after the
 # challenge-runner.mjs admission-check insertion (offline↔async single-active).
 # executionsHash is unchanged (97e2d4e78710616a18945fcbb9d823420a3cd716d2e58de67e1c817d15844751)
@@ -545,12 +550,12 @@ c84d1a7e492bf315ef426f58066d958e337427ecea198eecb6462bae1f272819 *scripts/dev/pr
 26d34218194688f6cc253c426c9347b4fa8113db42bfd3c64f672dff69f666fc *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/cases.json
 b6a8095b6cf75577c8b8492a083f4ebcffcf7fa8dd84c6fbf398fffdc930afff *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/mapping.json
 f2d089dfeea1e12736739190eadea012ff0c54a43cb84dcb805861cd4b6bffab *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/observed-traces.json
-9be73ca62dfe92621915bf8da504d9681c948ef3c7e0198fad6ea99591dbad7d *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/receipts.template.json
+9d5148644e5c1d9cf3f7a8af705d21b40345991f05f4580aaea8efc5d1c1fde7 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/receipts.template.json
 b31e2f489bd88bf05b69e32ea086ac01b017b443d1db0f22a589a966a7d83eaf *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/review-form.json
-010b9c6d4746abbb05760a1df04366ba0ce18e92cb01f21692757a3fa621dfd8 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/expected-replay.json
+598b6607e50c8942aa5991584ffa47d53fadb95d453c73d0004f8d57f4f07701 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/expected-replay.json
 b1ef7f906a2828850fb768db6a34fad78cec3d9b035c6390ce992f5399ceb0dc *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/gold-review.json
 e7bb7539e3778b8e5c5a33f3cdeaba15270e0401bd2c2557b16741275f271087 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/inputs.json
-6ce135c29ad9167c384b723707be21d1e5eb1d211812cccda73637fe41d4b877 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/package-manifest.json
+bcf632081f2f9f4ab02e6d24120ebf99e096b56f1710ecf648c51ff2569211b3 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/package-manifest.json
 571fa5a953c35e6338895cc9450491d7001766b33d9815557150667e4631487e *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/assistant_turns.json
 b413cc37dded6bd45af97777a212ff778e97d817d2c0e6cf8e2b6399e0d9d996 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/dreamer.json
 a8481b7c14e793c4244725b59955aef1c9771d97c1ac11a9618e36c48b1a72bb *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/pain44.json
@@ -559,7 +564,7 @@ b94590464e8e861c61f2638d8f4df877d3e8f555268b8eeb97e17b508fa41f79 *scripts/dev/pr
 81aed2fd2a17638fed1ead42001e8f2dd652c623d21886ab0d5b36e43952f3ac *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/scribe.json
 d97f733304640bba4cdfcb5d526dce16fd98a11632701a7b9ab310a30ffc13bc *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/tool_calls.json
 c84d1a7e492bf315ef426f58066d958e337427ecea198eecb6462bae1f272819 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/user_turns.json
-d949acbb60322d71850f0a8ef94de03fa22c8248125532ca9241f673b57408f6 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/review-subject.json
+5949695d74596f118864ca20ef322739c8b221e4c4534fb03519807eff1ec299 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/review-subject.json
 f1065b13d3615fbe6408631e9aa764ce15928791c21b6f233e99db689d1fe9b4 *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/revision.json
 fc5fb797030c359968335ee97d2b070c6bf08f9824e05c852344e6315eb0f85f *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/source-audit.json
 8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c *scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/source-verification.json
