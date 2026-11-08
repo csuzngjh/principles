@@ -34,7 +34,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   // 运行；pain-intent-flow.spec.ts 同时兼容 flag-on/flag-off 两种状态，但为保持
   // 测试隔离性，结束后应恢复 flag 到默认 off 状态。
   test.afterAll(async () => {
-    const resp = await apiRequest('PATCH', '/api/v1/config/features/intent_engineering', { enabled: false });
+    const resp = await apiRequest('PATCH', '/api/config/features/intent_engineering', { enabled: false });
     if (resp.status !== 200) {
       console.error(`[afterAll] Failed to restore intent_engineering=false: ${resp.status}`, resp.body);
     }
@@ -43,7 +43,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   // ── Step 1: flag-off 403 paths (初始状态 flag 默认 off) ─────────────────────
 
   test('flag-off: GET /intent/content returns 403', async () => {
-    const resp = await apiRequest('GET', '/api/v1/intent/content');
+    const resp = await apiRequest('GET', '/api/intent/content');
     expect(resp.status).toBe(403);
     const body = resp.body as { success: boolean; reason: string; nextAction: string };
     expect(body.success).toBe(false);
@@ -52,7 +52,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('flag-off: POST /intent/init returns 403', async () => {
-    const resp = await apiRequest('POST', '/api/v1/intent/init', {});
+    const resp = await apiRequest('POST', '/api/intent/init', {});
     expect(resp.status).toBe(403);
     const body = resp.body as { success: boolean; reason: string };
     expect(body.success).toBe(false);
@@ -60,7 +60,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('flag-off: PUT /intent/content returns 403', async () => {
-    const resp = await apiRequest('PUT', '/api/v1/intent/content', { content: 'test' });
+    const resp = await apiRequest('PUT', '/api/intent/content', { content: 'test' });
     expect(resp.status).toBe(403);
     const body = resp.body as { success: boolean; reason: string };
     expect(body.success).toBe(false);
@@ -72,7 +72,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   test('enable intent_engineering flag (toggles false → true)', async () => {
     // seed 写入了 .pd/config.yaml，features section 已存在（intent_engineering=false）
     // PATCH 将 intent_engineering 从 false 切换为 true
-    const resp = await apiRequest('PATCH', '/api/v1/config/features/intent_engineering', { enabled: true });
+    const resp = await apiRequest('PATCH', '/api/config/features/intent_engineering', { enabled: true });
     expect(resp.status).toBe(200);
     const body = resp.body as { success: boolean; data: { feature: string; enabled: boolean } };
     expect(body.success).toBe(true);
@@ -83,7 +83,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   // ── Step 3: flag-on 但 INTENT.md 不存在 ─────────────────────────────────────
 
   test('flag-on: GET /intent returns not_found state', async () => {
-    const resp = await apiRequest('GET', '/api/v1/intent');
+    const resp = await apiRequest('GET', '/api/intent');
     expect(resp.status).toBe(200);
     const body = resp.body as {
       success: boolean;
@@ -96,7 +96,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('flag-on: GET /intent/content returns 404 (file not found)', async () => {
-    const resp = await apiRequest('GET', '/api/v1/intent/content');
+    const resp = await apiRequest('GET', '/api/intent/content');
     expect(resp.status).toBe(404);
     const body = resp.body as { success: boolean; reason: string; nextAction: string };
     expect(body.success).toBe(false);
@@ -107,7 +107,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   // ── Step 4: POST /intent/init 创建模板 ─────────────────────────────────────
 
   test('POST /intent/init creates INTENT.md template (201)', async () => {
-    const resp = await apiRequest('POST', '/api/v1/intent/init', {});
+    const resp = await apiRequest('POST', '/api/intent/init', {});
     expect(resp.status).toBe(201);
     const body = resp.body as {
       success: boolean;
@@ -122,7 +122,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('POST /intent/init idempotent — already_exists without force', async () => {
-    const resp = await apiRequest('POST', '/api/v1/intent/init', {});
+    const resp = await apiRequest('POST', '/api/intent/init', {});
     expect(resp.status).toBe(200);
     const body = resp.body as {
       success: boolean;
@@ -134,7 +134,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('POST /intent/init with force=true overwrites (201)', async () => {
-    const resp = await apiRequest('POST', '/api/v1/intent/init', { force: true });
+    const resp = await apiRequest('POST', '/api/intent/init', { force: true });
     expect(resp.status).toBe(201);
     const body = resp.body as { success: boolean; data: { created: boolean } };
     expect(body.success).toBe(true);
@@ -144,7 +144,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   // ── Step 5: GET /intent/content 读取原始内容 ───────────────────────────────
 
   test('GET /intent/content returns raw template content', async () => {
-    const resp = await apiRequest('GET', '/api/v1/intent/content');
+    const resp = await apiRequest('GET', '/api/intent/content');
     expect(resp.status).toBe(200);
     const body = resp.body as {
       success: boolean;
@@ -162,7 +162,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
 
   test('PUT /intent/content saves valid content (200)', async () => {
     const newContent = '# Test Intent\n\n## 1. Why\n\nTest why content\n\n## 2. Desired Outcome\n\nTest outcome\n';
-    const resp = await apiRequest('PUT', '/api/v1/intent/content', { content: newContent });
+    const resp = await apiRequest('PUT', '/api/intent/content', { content: newContent });
     expect(resp.status).toBe(200);
     const body = resp.body as {
       success: boolean;
@@ -176,7 +176,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('PUT /intent/content rejects empty content (400 empty_content)', async () => {
-    const resp = await apiRequest('PUT', '/api/v1/intent/content', { content: '' });
+    const resp = await apiRequest('PUT', '/api/intent/content', { content: '' });
     expect(resp.status).toBe(400);
     const body = resp.body as { success: boolean; reason: string; nextAction: string };
     expect(body.success).toBe(false);
@@ -185,7 +185,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('PUT /intent/content rejects missing content field (400 missing_content)', async () => {
-    const resp = await apiRequest('PUT', '/api/v1/intent/content', { notContent: 'foo' });
+    const resp = await apiRequest('PUT', '/api/intent/content', { notContent: 'foo' });
     expect(resp.status).toBe(400);
     const body = resp.body as { success: boolean; reason: string };
     expect(body.success).toBe(false);
@@ -193,7 +193,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   });
 
   test('PUT /intent/content rejects non-string content (400 invalid_content)', async () => {
-    const resp = await apiRequest('PUT', '/api/v1/intent/content', { content: 123 });
+    const resp = await apiRequest('PUT', '/api/intent/content', { content: 123 });
     expect(resp.status).toBe(400);
     const body = resp.body as { success: boolean; reason: string };
     expect(body.success).toBe(false);
@@ -203,7 +203,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
   test('PUT /intent/content rejects oversized content (400 oversized)', async () => {
     // INTENT_MAX_BYTES = 32768 (32KB)
     const oversized = 'x'.repeat(33000);
-    const resp = await apiRequest('PUT', '/api/v1/intent/content', { content: oversized });
+    const resp = await apiRequest('PUT', '/api/intent/content', { content: oversized });
     expect(resp.status).toBe(400);
     const body = resp.body as { success: boolean; reason: string };
     expect(body.success).toBe(false);
@@ -212,7 +212,7 @@ test.describe.serial('PRI-477 Intent onboarding flow', () => {
 
   test('PUT /intent/content rejects invalid JSON body (400 invalid_json)', async () => {
     // 直接发送非 JSON 字符串
-    const resp = await fetch(`${BASE_URL}/api/v1/intent/content`, {
+    const resp = await fetch(`${BASE_URL}/api/intent/content`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: '{not valid json',

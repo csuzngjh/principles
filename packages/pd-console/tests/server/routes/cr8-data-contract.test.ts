@@ -177,24 +177,24 @@ describe('CR8 Backend Data Contract Routes', () => {
     server = http.createServer((req, res) => {
       const urlPath = req.url?.split('?')[0] ?? '/';
 
-      if (urlPath.startsWith('/api/v1/lifecycle')) {
-        const subPath = urlPath.slice('/api/v1/lifecycle'.length);
+      if (urlPath.startsWith('/api/lifecycle')) {
+        const subPath = urlPath.slice('/api/lifecycle'.length);
         asyncHandler(() => handleLifecycleRoute(req, res, tmpDir, subPath))(req, res);
         return;
       }
 
-      if (urlPath.startsWith('/api/v1/activations')) {
-        const subPath = urlPath.slice('/api/v1/activations'.length);
+      if (urlPath.startsWith('/api/activations')) {
+        const subPath = urlPath.slice('/api/activations'.length);
         asyncHandler(() => handleActivationsRoute(req, res, tmpDir, subPath))(req, res);
         return;
       }
 
-      if (urlPath === '/api/v1/approvals/grouped') {
+      if (urlPath === '/api/approvals/grouped') {
         asyncHandler(() => handleApprovalsGroupedRoute(req, res, tmpDir))(req, res);
         return;
       }
 
-      if (urlPath === '/api/v1/governance/queue') {
+      if (urlPath === '/api/governance/queue') {
         asyncHandler(() => handleGovernanceRoute(req, res, tmpDir))(req, res);
         return;
       }
@@ -225,7 +225,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   // ── 1. Lifecycle route returns single JSON object with correct structure ──
 
-  describe('GET /api/v1/lifecycle/principles/:principleId — structure', () => {
+  describe('GET /api/lifecycle/principles/:principleId — structure', () => {
     it('returns 200 with correct top-level keys for a known principle', async () => {
       // Seed a principle into the ledger
       const stateDir = path.join(tmpDir, '.state');
@@ -262,7 +262,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       };
       fs.writeFileSync(ledgerPath, JSON.stringify(ledgerData, null, 2), 'utf-8');
 
-      const { status, body } = await fetchJson(`/api/v1/lifecycle/principles/${principleId}`);
+      const { status, body } = await fetchJson(`/api/lifecycle/principles/${principleId}`);
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -283,7 +283,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   // ── 2. No-rule principle returns insufficientData + note + adherenceRate: null ──
 
-  describe('GET /api/v1/lifecycle/principles/:principleId — no rules', () => {
+  describe('GET /api/lifecycle/principles/:principleId — no rules', () => {
     it('returns insufficientData=true with note and adherenceRate=null when principle has no rules', async () => {
       const principleId = 'cr8-no-rules-principle';
       const stateDir = path.join(tmpDir, '.state');
@@ -319,7 +319,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       };
       fs.writeFileSync(ledgerPath, JSON.stringify(ledgerData, null, 2), 'utf-8');
 
-      const { status, body } = await fetchJson(`/api/v1/lifecycle/principles/${principleId}`);
+      const { status, body } = await fetchJson(`/api/lifecycle/principles/${principleId}`);
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -335,7 +335,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   // ── 3. Activations route joins artifactId → principleId ─────────────
 
-  describe('GET /api/v1/activations — principleId join', () => {
+  describe('GET /api/activations — principleId join', () => {
     it('joins artifactId to principleId from PIArtifactSnapshot', async () => {
       const artifactId = `artifact-join-test-${Date.now()}`;
       const principleId = 'principle-from-artifact';
@@ -346,7 +346,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       // Seed activation referencing that artifact
       seedActivation('prompt', artifactId, 'inject', `principles/${principleId}.md`);
 
-      const { status, body } = await fetchJson('/api/v1/activations');
+      const { status, body } = await fetchJson('/api/activations');
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -366,7 +366,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   // ── 4. Missing principleId is converted to 'unlinked' ───────
 
-  describe('GET /api/v1/activations — missing principleId', () => {
+  describe('GET /api/activations — missing principleId', () => {
     it('returns principleId="unlinked" when artifact has no sourcePrincipleId', async () => {
       const artifactId = `artifact-no-principle-${Date.now()}`;
 
@@ -376,7 +376,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       // Seed activation referencing that artifact
       seedActivation('defer_archive', artifactId, 'archive', `deferred/${artifactId}.json`);
 
-      const { status, body } = await fetchJson('/api/v1/activations');
+      const { status, body } = await fetchJson('/api/activations');
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -398,7 +398,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   // ── 5. Approvals grouped returns one principle-level item with channel records ──
 
-  describe('GET /api/v1/approvals/grouped — structure', () => {
+  describe('GET /api/approvals/grouped — structure', () => {
     it('returns groups with principleId, principleTitle, status, and records', async () => {
       const principleId = '6d2f3fe6-b465-4a77-ad6b-af10aac5fc7d';
       const artifactId1 = `artifact-grouped-1-${Date.now()}`;
@@ -452,7 +452,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       seedApproval('prompt', 'pending', artifactId1);
       seedApproval('code_tool_hook', 'approved', artifactId2);
 
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      const { status, body } = await fetchJson('/api/approvals/grouped');
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -484,7 +484,7 @@ describe('CR8 Backend Data Contract Routes', () => {
     });
 
     it('PRI-908: carries the prompt injection budget status for the pre-approval forecast', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      const { status, body } = await fetchJson('/api/approvals/grouped');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -533,7 +533,7 @@ describe('CR8 Backend Data Contract Routes', () => {
         'utf8',
       );
 
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped?host=workbuddy');
+      const { status, body } = await fetchJson('/api/approvals/grouped?host=workbuddy');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -546,7 +546,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(promptInjection!['budgetContextWindowTokens']).toBe(256000);
       expect(typeof promptInjection!['budgetObservedAt']).toBe('string');
 
-      const unknown = await fetchJson('/api/v1/approvals/grouped?host=cursor');
+      const unknown = await fetchJson('/api/approvals/grouped?host=cursor');
       expect(unknown.status).toBe(400);
     });
 
@@ -560,7 +560,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       const missingArtifactId = `artifact-gone-${Date.now()}`;
       seedApproval('prompt', 'pending', missingArtifactId);
 
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      const { status, body } = await fetchJson('/api/approvals/grouped');
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -587,7 +587,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       seedArtifact(artifactId, null);
       seedApproval('prompt', 'pending', artifactId);
 
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      const { status, body } = await fetchJson('/api/approvals/grouped');
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -613,7 +613,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       seedArtifact(artifactId, null);
       seedApproval('prompt', 'pending', artifactId);
 
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      const { status, body } = await fetchJson('/api/approvals/grouped');
       expect(status).toBe(200);
 
       const validated = validateApprovalsGroupedData(getDataObject(body));
@@ -632,9 +632,9 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   // ── 6. Governance queue returns required fields ───────────────────────────
 
-  describe('GET /api/v1/governance/queue — structure', () => {
+  describe('GET /api/governance/queue — structure', () => {
     it('returns pendingReviewCount, behaviorDeviationCount, stagnationSignals', async () => {
-      const { status, body } = await fetchJson('/api/v1/governance/queue');
+      const { status, body } = await fetchJson('/api/governance/queue');
       expect(status).toBe(200);
 
       const data = getDataObject(body);
@@ -657,7 +657,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       // causes the browser to log a console error that frontend try/catch
       // cannot suppress. The 200 response still carries a structured reason
       // via `note` (EP-03 / ERR-002 — no silent degradation).
-      const { status, body } = await fetchJson('/api/v1/lifecycle/principles/nonexistent-principle-xyz');
+      const { status, body } = await fetchJson('/api/lifecycle/principles/nonexistent-principle-xyz');
       expect(status).toBe(200);
       const rec = body as Record<string, unknown>;
       expect(rec.success).toBe(true);
@@ -689,7 +689,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
       freshServer = http.createServer((req, res) => {
         const urlPath = req.url?.split('?')[0] ?? '/';
-        if (urlPath === '/api/v1/governance/queue') {
+        if (urlPath === '/api/governance/queue') {
           asyncHandler(() => handleGovernanceRoute(req, res, freshTmp))(req, res);
           return;
         }
@@ -706,7 +706,7 @@ describe('CR8 Backend Data Contract Routes', () => {
         });
       });
 
-      const res = await fetch(`${freshBaseUrl}/api/v1/governance/queue`);
+      const res = await fetch(`${freshBaseUrl}/api/governance/queue`);
       const resBody = await res.json() as Record<string, unknown>;
 
       // Must return 200 with zeros, not 500

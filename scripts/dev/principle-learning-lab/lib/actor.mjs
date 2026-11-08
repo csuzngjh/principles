@@ -314,7 +314,7 @@ export async function createAuthorizedPiTransport({ authorization, prereg, datas
 
 /**
  * Structural validation of one actor round output against the action space
- * (mirrors learning-lab-actor-action-v1; the production adapter validated the
+ * (mirrors learning-lab-actor-action; the production adapter validated the
  * same shape on the wire — this re-check keeps fake-transport rehearsals and
  * any adapter-free future caller equally honest, rc-2/rc-3).
  */
@@ -452,7 +452,7 @@ export function createPiAdapterTransport({ adapter }) {
     async complete(request) {
       roundSeq += 1;
       const handle = await adapter.startRun({
-        agentSpec: { agentId: 'learning-lab-actor', schemaVersion: 'v1' },
+        agentSpec: { agentId: 'learning-lab-actor', schemaVersion: 'current' },
         taskRef: { taskId: request.taskId ?? `lab-actor-round-${roundSeq}` },
         inputPayload: request.userPrompt,
         contextItems: [],
@@ -561,7 +561,7 @@ export async function runRealActorOpportunity({
       round = await transport.complete({
         systemPrompt,
         userPrompt,
-        outputSchemaRef: 'learning-lab-actor-action-v1',
+        outputSchemaRef: 'learning-lab-actor-action',
         maxTokens: caps.maxTokensPerRequest,
         timeoutMs: caps.timeoutMsPerRequest,
         taskId: `${delivery.armId}#${opportunityId}#turn${modelRounds + 1}`,

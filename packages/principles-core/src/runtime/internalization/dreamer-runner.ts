@@ -15,6 +15,7 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
@@ -211,11 +212,11 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     });
 
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'dreamer-output-v1',
+      outputSchemaRef: 'dreamer-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

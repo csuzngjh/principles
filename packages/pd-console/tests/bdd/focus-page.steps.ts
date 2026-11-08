@@ -36,9 +36,9 @@ registry.given('pd-console 服务已启动在 http://127.0.0.1:3100', async (ctx
 });
 
 // ── Background:governance queue 至少 2 条 pending ────────────────────────────
-// 对应 e2e 测试步骤 1(GET /api/v1/governance/queue + 验证 pendingReviewCount >= 2)
+// 对应 e2e 测试步骤 1(GET /api/governance/queue + 验证 pendingReviewCount >= 2)
 registry.given('governance queue 有 2 条待审批项', async (ctx, page, api) => {
-  const resp = await api.get('/api/v1/governance/queue');
+  const resp = await api.get('/api/governance/queue');
   expect(resp.ok()).toBeTruthy();
   const body = (await resp.json()) as {
     success: boolean;
@@ -50,12 +50,12 @@ registry.given('governance queue 有 2 条待审批项', async (ctx, page, api) 
 });
 
 // ── When:获取 pending approvals + approve 第一条 prompt channel ───────────────
-// 对应 e2e 测试步骤 3-4(GET /api/v1/approvals?status=pending + POST /approve)
+// 对应 e2e 测试步骤 3-4(GET /api/approvals?status=pending + POST /approve)
 // 选取 prompt channel:e2e 测试证实这是最可靠的 happy path
 // (code_tool_hook 要求 artifact_kind='rule',seed 数据不满足)
 registry.when('owner 在 FocusPage 点击第一条审批通过按钮', async (ctx, page, api) => {
   // 获取 pending approvals 列表
-  const approvalsResp = await api.get('/api/v1/approvals?status=pending');
+  const approvalsResp = await api.get('/api/approvals?status=pending');
   expect(approvalsResp.ok()).toBeTruthy();
   const approvalsBody = (await approvalsResp.json()) as {
     success: boolean;
@@ -80,7 +80,7 @@ registry.when('owner 在 FocusPage 点击第一条审批通过按钮', async (ct
 
   // approve 端点要求 JSON body(空对象即可),否则返回 400 bad_request
   const approveResp = await api.post(
-    `/api/v1/approvals/${firstApproval.approvalId}/approve`,
+    `/api/approvals/${firstApproval.approvalId}/approve`,
     { data: {} },
   );
   expect(approveResp.ok()).toBeTruthy();
@@ -112,9 +112,9 @@ registry.when('owner 在 FocusPage 点击第一条审批通过按钮', async (ct
 });
 
 // ── Then:pending count 减少 1 ────────────────────────────────────────────────
-// 对应 e2e 测试步骤 5(GET /api/v1/governance/queue + 验证 count 减少)
+// 对应 e2e 测试步骤 5(GET /api/governance/queue + 验证 count 减少)
 registry.then('governance queue 的 pending 数量减少 1', async (ctx, page, api) => {
-  const resp = await api.get('/api/v1/governance/queue');
+  const resp = await api.get('/api/governance/queue');
   expect(resp.ok()).toBeTruthy();
   const body = (await resp.json()) as {
     success: boolean;
@@ -126,9 +126,9 @@ registry.then('governance queue 的 pending 数量减少 1', async (ctx, page, a
 });
 
 // ── And:ActivationPage 出现新的激活项 ────────────────────────────────────────
-// 对应 e2e 测试步骤 6(GET /api/v1/activations + 验证至少 1 个 active)
+// 对应 e2e 测试步骤 6(GET /api/activations + 验证至少 1 个 active)
 registry.then('ActivationPage 出现新的激活项', async (ctx, page, api) => {
-  const resp = await api.get('/api/v1/activations');
+  const resp = await api.get('/api/activations');
   expect(resp.ok()).toBeTruthy();
   const body = (await resp.json()) as {
     success: boolean;

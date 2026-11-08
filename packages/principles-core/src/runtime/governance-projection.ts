@@ -1,4 +1,5 @@
 import { Value } from '@sinclair/typebox/value';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from './schema-version.js';
 import { GovernanceFactsSchema, OwnerGovernanceViewSchema } from './governance-projection-contract.js';
 import type { ActivationFact, DataQualityIssue, GovernanceFacts, OwnerGovernanceView, SourceRef, TaskFact } from './governance-projection-contract.js';
 
@@ -126,7 +127,7 @@ export function deriveOwnerGovernanceView(input: unknown): OwnerGovernanceView {
   const timeline = facts.timelineEvents.filter(event => event.lineageConfidence !== 'unknown').sort((a, b) => (a.occurredAt ?? a.recordedAt).localeCompare(b.occurredAt ?? b.recordedAt) || a.sourceRef.type.localeCompare(b.sourceRef.type) || a.sourceRef.id.localeCompare(b.sourceRef.id) || a.code.localeCompare(b.code));
   const sortedIssues = stableIssues(issues);
   const view: OwnerGovernanceView = {
-    schemaVersion: '1', principleId: facts.principleId, asOf: facts.asOf,
+    schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, principleId: facts.principleId, asOf: facts.asOf,
     summary: { headlineCode, reasonCode, nextActionCode, ownerActionRequired: attentionPrimary !== 'none', sourceRefs: stableRefs(summaryRefs) },
     principleState: { value: facts.principle.state, sourceRefs: [facts.principle.sourceRef] },
     process: { ...(stage === undefined ? {} : { stage }), ...(currentTask === undefined ? {} : { currentTaskKind: currentTask.taskKind }), sourceRefs: processRefs },

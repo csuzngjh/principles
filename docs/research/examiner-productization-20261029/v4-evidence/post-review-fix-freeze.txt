@@ -1,22 +1,24 @@
-{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"c2d62c63dabfa7a0dbea871e509eeea5d6d3ac7793f5aa3a2f1e2248367a7b1f","reportHash":"6e140926c6f9b76028d186fce23197524e413f32755a88b58e15255cc59fff25","executions":9,"observedNodeVersion":"26.12.1"}
+{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"c4b3fc03fafcf2438fae76ae7200b0d05e2b00dac66aed847fc0c2e2131bf343","reportHash":"3c6e02cf6301f954dd7cce4833560755bbb99f535c3cebb9931655822bc09f31","executions":9,"observedNodeVersion":"26.12.1"}
 replay exit=0
-{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"f8ea90b11897d1cbe00aae9aa150c1af1f699658cf09166c59aaffb34df294e3","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
+{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"42715bd2144227f445fc3323b2220e4a3fb941f52c54de00d19554f15a7790ac","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
 human-gate exit=1
 
-[1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90mD:/Code/_worktrees/principles/PRI-1136-runtime-rename-ci-fixes/scripts[39m
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90mD:/Code/_worktrees/principles/PRI-1139-b-contract-cutover/scripts[39m
 
-[temp-lifecycle] test-runs: nothing to do
-[temp-lifecycle] TMPDIR -> D:\Code\.pd-tmp\principles\test-runs\vitest-20261106-170830-39f0b2
- [32m✓[39m __tests__/principle-learning-lab-owner-content-review.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 12[2mms[22m[39m
- [32m✓[39m __tests__/principle-learning-lab-examiner-productization-entry.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 127[2mms[22m[39m
- [32m✓[39m __tests__/principle-learning-lab-frozen-package.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 244[2mms[22m[39m
- [32m✓[39m __tests__/principle-learning-lab-human-review-intake.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 381[2mms[22m[39m
+[temp-lifecycle] test-runs: kept 7
+[temp-lifecycle] TMPDIR -> D:\Code\.pd-tmp\principles\test-runs\vitest-20261108-185947-d56eed
+ [32m✓[39m __tests__/principle-learning-lab-owner-content-review.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m __tests__/principle-learning-lab-examiner-productization-entry.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 125[2mms[22m[39m
+ [32m✓[39m __tests__/principle-learning-lab-frozen-package.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 635[2mms[22m[39m
+ [32m✓[39m __tests__/principle-learning-lab-human-review-intake.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 1408[2mms[22m[39m
+   [32m✓[39m complete frozen Gold intake, with ephemeral test identities only [2m(5)[22m
+     [33m[2m✓[22m[39m keeps the actual package pending without independently supplied human credentials[33m 318[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
 [2m      Tests [22m [1m[32m50 passed[39m[22m[90m (50)[39m
-[2m   Start at [22m 17:08:30
-[2m   Duration [22m 759ms[2m (tests 54%, transform 30%, import 14%, worker 1%)[22m
+[2m   Start at [22m 18:59:47
+[2m   Duration [22m 1.83s[2m (tests 77%, transform 16%, import 7%, worker 1%)[22m
 executions identical to the previous freeze: true
 report rows identical to the previous freeze (only implementationHash moved): true
-zip subjectHash f8ea90b11897d1cbe00aae9aa150c1af1f699658cf09166c59aaffb34df294e3 matches receipts.template.json
-GOLD-BLIND-REVIEW-v4.zip sha256 f8ff28d51b9d16ba0911a3fcec3f9663194ddb4c790b39e0e29ec5a73cc060e7 (19 entries)
+zip subjectHash 42715bd2144227f445fc3323b2220e4a3fb941f52c54de00d19554f15a7790ac matches receipts.template.json
+GOLD-BLIND-REVIEW-v4.zip sha256 67a6d944b6f49d0aacbc1bc3c0d762d81f359b482fab4540cabdc7d6cf3d33bd (19 entries)

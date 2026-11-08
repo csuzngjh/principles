@@ -76,12 +76,14 @@ export type { CorrectionSampleRecord, CorrectionSampleReviewStatus } from './tra
 // Import via '@principles/core/runtime' for the full contract set,
 // or import individual types and schemas from this barrel export.
 
-// Versioning + error categories
+// Versioning + error categories (PRI-1139: schemaRef()/RUNTIME_SCHEMA_VERSION
+// and their schemas retired from the public barrel)
 export {
-  RUNTIME_SCHEMA_VERSION,
-  schemaRef,
-  SchemaVersionRefSchema,
-  RuntimeSchemaVersionSchema,
+  RUNTIME_CONTRACT_SCHEMA_VERSION,
+  LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION,
+  RuntimeContractSchemaVersionSchema,
+  isRuntimeContractSchemaVersion,
+  type RuntimeContractSchemaVersion,
   PDErrorCategorySchema,
   PD_ERROR_CATEGORIES,
   PDRuntimeError,

@@ -1197,7 +1197,7 @@ async function pollTick(): Promise<void> {
   const s = supervisor.getState();
   if (s.kind !== 'running' || currentPort === undefined) return;
   const base = `http://127.0.0.1:${currentPort}`;
-  const body = await fetchJson(`${base}/api/v1/approvals?status=pending`);
+  const body = await fetchJson(`${base}/api/approvals?status=pending`);
   if (body === undefined) {
     consecutivePollFailures += 1;
     log('poll_failed', { consecutive: consecutivePollFailures });

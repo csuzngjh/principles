@@ -14,13 +14,13 @@ test('Two approvals in the same principle group keep independent success and ref
   let firstPosts = 0;
   let secondPosts = 0;
   page.on('request', req => { if (req.method() === 'POST' && req.url().endsWith('/apr-isolated-a/approve')) firstPosts++; });
-  await page.route('**/api/v1/approvals/apr-isolated-b/reject', async route => {
+  await page.route('**/api/approvals/apr-isolated-b/reject', async route => {
     secondPosts++;
     expect(route.request().postDataJSON()).toMatchObject({ expectedReview: { approvalId: 'apr-isolated-b', artifactId: 'artifact-isolated-b' } });
     await route.fulfill({ status: 409, json: { success: false, error: 'This version requires another check.', reason: 'fixture_refusal', nextAction: 'Read the current version before deciding.' } });
   });
   await login(page);
-  const grouped = await request.get('/api/v1/approvals/grouped', { headers: auth });
+  const grouped = await request.get('/api/approvals/grouped', { headers: auth });
   const data: unknown = await grouped.json();
   if (!record(data) || !record(data.data) || !Array.isArray(data.data.groups)) throw new Error('Invalid grouped fixture');
   expect(data.data.groups.some(group => record(group) && Array.isArray(group.records)
@@ -35,15 +35,15 @@ test('Two approvals in the same principle group keep independent success and ref
   await page.getByRole('button', { name: '确认提交', exact: true }).click();
   await expect(page.getByTestId('owner-work-reading')).toContainText('This version requires another check.');
   expect(firstPosts).toBe(1); expect(secondPosts).toBe(1);
-  const first = await request.get('/api/v1/approvals/apr-isolated-a', { headers: auth });
-  const second = await request.get('/api/v1/approvals/apr-isolated-b', { headers: auth });
+  const first = await request.get('/api/approvals/apr-isolated-a', { headers: auth });
+  const second = await request.get('/api/approvals/apr-isolated-b', { headers: auth });
   expect(await first.json()).toMatchObject({ data: { status: 'approved', artifactId: 'artifact-isolated-a' } });
   expect(await second.json()).toMatchObject({ data: { status: 'pending', artifactId: 'artifact-isolated-b' } });
 });
 
 test('A lost approval response is reconciled from persisted status without another approval POST', async ({ page, request }) => {
   let posts = 0;
-  await page.route('**/api/v1/approvals/apr-lost-response/approve', async route => {
+  await page.route('**/api/approvals/apr-lost-response/approve', async route => {
     posts++;
     const response = await route.fetch();
     expect(response.status()).toBe(200);
@@ -56,9 +56,9 @@ test('A lost approval response is reconciled from persisted status without anoth
   await expect(page.getByTestId('owner-work-reading')).toContainText('已重新读取');
   await expect(page.getByTestId('owner-work-reading')).toContainText('实际激活与投递请查看生效情况');
   expect(posts).toBe(1);
-  const persisted = await request.get('/api/v1/approvals/apr-lost-response', { headers: auth });
+  const persisted = await request.get('/api/approvals/apr-lost-response', { headers: auth });
   expect(await persisted.json()).toMatchObject({ data: { status: 'approved' } });
-  const runtime: unknown = await (await request.get('/api/v1/activations', { headers: auth })).json();
+  const runtime: unknown = await (await request.get('/api/activations', { headers: auth })).json();
   if (!record(runtime) || !record(runtime.data) || !Array.isArray(runtime.data.activations)) throw new Error('Invalid activation fixture');
   expect(runtime.data.activations.some(row => record(row) && row.artifactId === 'artifact-lost-response' && row.status === 'active')).toBe(true);
 });
@@ -88,9 +88,9 @@ test('Keyboard can open an exact item, read disclosures, submit and receive its 
 
 test('A refused rejection reports another completed approval without claiming the Owner rejection succeeded', async ({ page, request }) => {
   let posts = 0;
-  await page.route('**/api/v1/approvals/apr-race/reject', async route => {
+  await page.route('**/api/approvals/apr-race/reject', async route => {
     posts++;
-    const competing = await request.post('/api/v1/approvals/apr-race/approve', { headers: auth, data: {} });
+    const competing = await request.post('/api/approvals/apr-race/approve', { headers: auth, data: {} });
     expect(competing.status()).toBe(200);
     const response = await route.fetch();
     expect(response.status()).toBe(409);
@@ -107,6 +107,6 @@ test('A refused rejection reports another completed approval without claiming th
   await expect(reading).not.toContainText('已拒绝这个版本');
   await expect(reading.getByRole('heading', { name: '处理结果', exact: true })).toBeVisible();
   expect(posts).toBe(1);
-  const persisted = await request.get('/api/v1/approvals/apr-race', { headers: auth });
+  const persisted = await request.get('/api/approvals/apr-race', { headers: auth });
   expect(await persisted.json()).toMatchObject({ data: { status: 'approved' } });
 });

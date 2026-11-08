@@ -38,7 +38,7 @@ test.describe('PRI-629: Focus routes Owner decisions to their existing authoriti
     // principle detail page (which renders no decision buttons) — the
     // pending approval group renders the inline PendingReviewCard with
     // approve/reject/revise actions directly in the Focus decision section.
-    const grouped = await apiGet('/api/v1/approvals/grouped');
+    const grouped = await apiGet('/api/approvals/grouped');
     expect(grouped.status).toBe(200);
     const group = grouped.body.data.groups.find(
       (g: any) => g.status === 'pending'
@@ -69,7 +69,7 @@ test.describe('PRI-629: Focus routes Owner decisions to their existing authoriti
   });
 
   test('pending RuleCode shadow decision is visible and locates its activation card', async ({ page }) => {
-    const decisions = await apiGet('/api/v1/governance/owner-decisions');
+    const decisions = await apiGet('/api/governance/owner-decisions');
     expect(decisions.status).toBe(200);
     const shadow = decisions.body.data.items.find((entry: any) => entry.kind === 'rulecode_decision');
     expect(shadow).toBeTruthy();

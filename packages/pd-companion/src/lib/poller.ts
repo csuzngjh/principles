@@ -20,7 +20,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Validate a /api/v1/approvals?status=pending response body.
+ * Validate a /api/approvals?status=pending response body.
  * Returns undefined on malformed input — callers skip the tick and count a
  * consecutive failure instead of silently treating it as "no approvals".
  */

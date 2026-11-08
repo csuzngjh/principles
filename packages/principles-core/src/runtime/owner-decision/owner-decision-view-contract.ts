@@ -13,6 +13,7 @@
  */
 import { Type, type Static } from '@sinclair/typebox';
 import { GovernanceTimestampSchema } from '../governance-timestamp-schema.js';
+import { RuntimeContractSchemaVersionSchema } from '../schema-version.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Timestamp = GovernanceTimestampSchema;
@@ -372,7 +373,7 @@ export const DecisionStateSchema = Type.Union([
 export type DecisionState = Static<typeof DecisionStateSchema>;
 
 export const OwnerDecisionViewCoreSchema = Type.Object({
-  schemaVersion: Type.Literal('1'),
+  schemaVersion: RuntimeContractSchemaVersionSchema, // PRI-1139: 'current' writes, legacy '1' reads
   principleId: NonEmptyString,
   asOf: Timestamp,
   sourceReadStatus: SourceReadStatusSchema,
