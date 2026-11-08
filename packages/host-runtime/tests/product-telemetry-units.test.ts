@@ -1,7 +1,8 @@
 /**
  * Anonymous Product Telemetry v1 — store / eligibility / readers / exporter
  * / workspace-scope unit tests (PRI-597/598/599; review remediation:
- * workspace measurement unit, tri-state facts).
+ * workspace measurement unit, tri-state facts; PRI-1138 single-format
+ * consent-store convergence with real-file migration round-trips).
  */
 
 import fs from 'node:fs';
@@ -14,9 +15,12 @@ import {
   defaultProductTelemetryControlState,
   getProductTelemetryStatePath,
   grantedControlState,
+  migrateLegacyControlState,
   pruneWorkspaceExports,
+  PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION,
   readProductTelemetryControlState,
   resetControlState,
+  withControlStateLock,
   writeProductTelemetryControlState,
   MAX_WORKSPACE_EXPORT_ENTRIES,
   WORKSPACE_EXPORT_STATE_MAX_AGE_DAYS,
@@ -56,6 +60,21 @@ afterEach(() => {
 });
 
 describe('control-state store', () => {
+  /**
+   * Content + mtime from ONE open file descriptor, so "nothing rewrote the
+   * file" assertions observe a single consistent snapshot of the same inode
+   * (two separate path-based syscalls would be a check/use race window —
+   * js/file-system-race, PRI-1138 review round 3).
+   */
+  function snapshotFile(statePath: string): { content: string; mtimeMs: number } {
+    const fd = fs.openSync(statePath, 'r');
+    try {
+      return { content: fs.readFileSync(fd, 'utf8'), mtimeMs: fs.fstatSync(fd).mtimeMs };
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
   it('reads a missing file as the never-configured default (consent unset)', () => {
     const read = readProductTelemetryControlState(homeDir);
     expect(read.ok).toBe(true);
@@ -173,29 +192,28 @@ describe('control-state store', () => {
     if (!read.ok) expect(read.reason).toContain('at most');
   });
 
-  it('migrates a v1 machine-global state to v2: consent+secret kept, export bookkeeping dropped', () => {
+  it('reads a v1 file as migrated semantics WITHOUT writing; the locked migration converges the disk (PRI-1138/PRI-1151)', async () => {
     const statePath = getProductTelemetryStatePath(homeDir);
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     const secret = generateTelemetrySecretHex();
-    fs.writeFileSync(
-      statePath,
-      JSON.stringify({
-        consent: 'granted',
-        consentVersion: '1',
-        telemetrySecret: secret,
-        lastAttemptedAt: '2026-08-25T10:00:00.000Z',
-        lastSucceededAt: '2026-08-25T10:00:00.000Z',
-        lastFailureCode: 'http_5xx',
-        nextRetryAt: '2026-08-25T16:00:00.000Z',
-        dailyAttemptCount: 3,
-        attemptBucketDate: '2026-08-25',
-        schemaVersion: '1',
-      }),
-    );
+    const v1Raw = JSON.stringify({
+      consent: 'granted',
+      consentVersion: '1',
+      telemetrySecret: secret,
+      lastAttemptedAt: '2026-08-25T10:00:00.000Z',
+      lastSucceededAt: '2026-08-25T10:00:00.000Z',
+      lastFailureCode: 'http_5xx',
+      nextRetryAt: '2026-08-25T16:00:00.000Z',
+      dailyAttemptCount: 3,
+      attemptBucketDate: '2026-08-25',
+      schemaVersion: '1',
+    });
+    fs.writeFileSync(statePath, v1Raw);
+    const snapBefore = snapshotFile(statePath);
     const read = readProductTelemetryControlState(homeDir);
     expect(read.ok).toBe(true);
     if (!read.ok) return;
-    // Identity preserved...
+    // Identity preserved in the parsed state...
     expect(read.state.consent).toBe('granted');
     expect(read.state.consentVersion).toBe('1');
     expect(read.state.telemetrySecret).toBe(secret);
@@ -203,18 +221,378 @@ describe('control-state store', () => {
     // attributed to a workspace; operational state, not a governance fact).
     expect(read.state.workspaceExports).toBeUndefined();
     expect(read.state.schemaVersion).toBe('2');
-    // Persisted as v2 on the next write.
-    expect(writeProductTelemetryControlState(homeDir, read.state).ok).toBe(true);
-    expect(fs.readFileSync(statePath, 'utf8')).toContain('"schemaVersion": "2"');
+    // PRI-1151: a read NEVER writes — the v1 file is untouched on disk.
+    const snapAfterRead = snapshotFile(statePath);
+    expect(snapAfterRead.content).toBe(v1Raw);
+    expect(snapAfterRead.mtimeMs).toBe(snapBefore.mtimeMs);
+    // The locked migration transaction persists the convergence with the
+    // historical identity intact.
+    await expect(migrateLegacyControlState(homeDir)).resolves.toEqual({ ok: true });
+    const onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    expect(onDisk.consent).toBe('granted');
+    expect(onDisk.consentVersion).toBe('1');
+    expect(onDisk.telemetrySecret).toBe(secret);
+    expect(onDisk.lastSucceededAt).toBeUndefined();
     // A v1 file with garbage export fields is still migrated (those fields
     // are dropped, not validated): the identity fields carry the decision.
     fs.writeFileSync(
       statePath,
       JSON.stringify({ consent: 'denied', consentVersion: '1', schemaVersion: '1', lastSucceededAt: 'garbage-but-dropped' }),
     );
+    await expect(migrateLegacyControlState(homeDir)).resolves.toEqual({ ok: true });
+    const migratedRead = readProductTelemetryControlState(homeDir);
+    expect(migratedRead.ok).toBe(true);
+    if (migratedRead.ok) expect(migratedRead.state.consent).toBe('denied');
+    expect((JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>).schemaVersion).toBe('2');
+  });
+
+  it('locked migration is idempotent: a second transaction does not rewrite the file (PRI-1151)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const secret = generateTelemetrySecretHex();
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ consent: 'granted', consentVersion: '1', telemetrySecret: secret, lastSucceededAt: '2026-08-25T10:00:00.000Z', schemaVersion: '1' }),
+    );
+    const readBefore = readProductTelemetryControlState(homeDir);
+    await expect(migrateLegacyControlState(homeDir)).resolves.toEqual({ ok: true });
+    const snapAfterFirst = snapshotFile(statePath);
+    expect((JSON.parse(snapAfterFirst.content) as Record<string, unknown>).schemaVersion).toBe('2');
+    // The second transaction recognizes the current format: no re-migration,
+    // no identity drift, and no meaningless rewrite of the migrated file.
+    await expect(migrateLegacyControlState(homeDir)).resolves.toEqual({ ok: true });
+    const snapAfterSecond = snapshotFile(statePath);
+    expect(snapAfterSecond.content).toBe(snapAfterFirst.content);
+    expect(snapAfterSecond.mtimeMs).toBe(snapAfterFirst.mtimeMs);
+    const readAfter = readProductTelemetryControlState(homeDir);
+    expect(readAfter.ok).toBe(true);
+    if (readAfter.ok && readBefore.ok) {
+      expect(readAfter.state).toEqual(readBefore.state);
+      expect(readAfter.state.telemetrySecret).toBe(secret);
+    }
+  });
+
+  it('reads a current-format file without touching it (no migration, no rewrite)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const secret = generateTelemetrySecretHex();
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        consent: 'granted',
+        consentVersion: '2',
+        schemaVersion: '2',
+        telemetrySecret: secret,
+        workspaceExports: {
+          aaaa0000aaaa0000: { lastAttemptedAt: '2026-08-26T10:00:00.000Z', lastSucceededAt: '2026-08-26T10:00:00.000Z' },
+        },
+      }),
+    );
+    const snapBefore = snapshotFile(statePath);
+    const read = readProductTelemetryControlState(homeDir);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.state.consent).toBe('granted');
+    expect(read.state.consentVersion).toBe('2');
+    expect(read.state.telemetrySecret).toBe(secret);
+    expect(read.state.schemaVersion).toBe('2');
+    expect(read.state.workspaceExports?.aaaa0000aaaa0000?.lastSucceededAt).toBe('2026-08-26T10:00:00.000Z');
+    // Neither the read nor a migration transaction on an already-current
+    // file produces a write.
+    await expect(migrateLegacyControlState(homeDir)).resolves.toEqual({ ok: true });
+    const snapAfter = snapshotFile(statePath);
+    expect(snapAfter.content).toBe(snapBefore.content);
+    expect(snapAfter.mtimeMs).toBe(snapBefore.mtimeMs);
+  });
+
+  it('fails loud on illegal schemaVersion and incomplete legacy files (no silent fallback, PRI-1138)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const cases: Array<{ name: string; doc: Record<string, unknown>; expectError: RegExp }> = [
+      { name: 'missing schemaVersion', doc: { consent: 'granted', consentVersion: '1' }, expectError: /schemaVersion must be/ },
+      { name: 'future schemaVersion', doc: { consent: 'granted', consentVersion: '1', schemaVersion: '3' }, expectError: /schemaVersion must be/ },
+      { name: 'non-string schemaVersion', doc: { consent: 'granted', consentVersion: '1', schemaVersion: 2 }, expectError: /schemaVersion must be/ },
+      { name: 'legacy file missing consent', doc: { consentVersion: '1', schemaVersion: '1' }, expectError: /consent must be/ },
+      { name: 'legacy file violating the legacy field whitelist', doc: { consent: 'granted', consentVersion: '1', schemaVersion: '1', unexpected: 'x' }, expectError: /unknown field/ },
+      { name: 'current file carrying legacy top-level bookkeeping', doc: { consent: 'granted', consentVersion: '1', schemaVersion: '2', lastSucceededAt: '2026-08-25T10:00:00.000Z' }, expectError: /unknown field/ },
+    ];
+    for (const { name, doc, expectError } of cases) {
+      const raw = JSON.stringify(doc);
+      fs.writeFileSync(statePath, raw);
+      const read = readProductTelemetryControlState(homeDir);
+      expect(read.ok, name).toBe(false);
+      if (!read.ok) {
+        expect(read.reason, name).toMatch(expectError);
+        // Fail-loud contract: the operator is told to fix or delete; invalid
+        // data is never treated as an empty/default consent state.
+        expect(read.nextAction, name).toContain('Fix or delete');
+      }
+      // Neither the read nor the locked migration transaction touches the
+      // invalid file — no migration, no reset, no repair.
+      const migrated = await migrateLegacyControlState(homeDir);
+      expect(migrated.ok, name).toBe(false);
+      if (!migrated.ok) expect(migrated.reason, name).toMatch(expectError);
+      expect(fs.readFileSync(statePath, 'utf8'), name).toBe(raw);
+    }
+  });
+
+  it('writes only the current format and refuses legacy-shaped states (single writable schema, PRI-1138)', () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    // New and updated files through the real write entry are always current.
+    expect(writeProductTelemetryControlState(homeDir, grantedControlState(defaultProductTelemetryControlState())).ok).toBe(true);
+    let onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    expect(writeProductTelemetryControlState(homeDir, deniedControlState()).ok).toBe(true);
+    onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    // A legacy-shaped state has no write path: the write is refused loud and
+    // the file on disk is left untouched.
+    const beforeRefusal = fs.readFileSync(statePath, 'utf8');
+    const legacyShaped: ProductTelemetryControlState = {
+      consent: 'granted',
+      consentVersion: '1',
+      telemetrySecret: generateTelemetrySecretHex(),
+      schemaVersion: PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION,
+    };
+    const refused = writeProductTelemetryControlState(homeDir, legacyShaped);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.reason).toContain('product_telemetry_state_write_refused');
+      expect(refused.reason).toContain(`'${PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION}'`);
+    }
+    expect(fs.readFileSync(statePath, 'utf8')).toBe(beforeRefusal);
+    // A completed migration cannot regress: after a legacy file is migrated,
+    // the next normal consent transition still writes only the current format.
+    fs.writeFileSync(statePath, JSON.stringify({ consent: 'denied', consentVersion: '1', schemaVersion: '1' }));
     const migrated = readProductTelemetryControlState(homeDir);
     expect(migrated.ok).toBe(true);
-    if (migrated.ok) expect(migrated.state.consent).toBe('denied');
+    const next = grantedControlState(migrated.ok ? migrated.state : defaultProductTelemetryControlState());
+    expect(writeProductTelemetryControlState(homeDir, next).ok).toBe(true);
+    onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(onDisk.schemaVersion).toBe('2');
+    expect(onDisk.consent).toBe('granted');
+  });
+
+  it('a migration transaction blocked by the environment fails loud, loses nothing, and retries (PRI-1151)', async (context) => {
+    // Real-failure injection via a read-only state directory (POSIX write
+    // bits): the locked migration cannot even create its lock file, so the
+    // transaction fails loud. Windows directory ACLs do not map to POSIX
+    // bits, and a root runner (CAP_DAC_OVERRIDE) ignores them too — so PROBE
+    // the injection with a real write first and SKIP explicitly (not
+    // silently pass) when the environment genuinely cannot produce the
+    // failure. The non-root POSIX CI runners report this test as passed
+    // (executed), not skipped.
+    if (process.platform === 'win32') context.skip('windows ACLs do not map to POSIX write bits');
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const secret = generateTelemetrySecretHex();
+    const v1Raw = JSON.stringify({ consent: 'granted', consentVersion: '1', telemetrySecret: secret, schemaVersion: '1' });
+    fs.writeFileSync(statePath, v1Raw);
+    fs.chmodSync(path.dirname(statePath), 0o500);
+    try {
+      const probePath = `${statePath}.inject-probe`;
+      let injectionEffective = false;
+      try {
+        fs.writeFileSync(probePath, 'x');
+      } catch {
+        injectionEffective = true;
+      }
+      if (!injectionEffective) {
+        // This environment (e.g. root) cannot produce EACCES; the failure
+        // contract is exercised on the non-root POSIX CI runners.
+        context.skip('environment (root/CAP_DAC_OVERRIDE) cannot produce a real write failure');
+      }
+      // The read itself still succeeds (read-only dir) and writes nothing;
+      // the locked migration fails loud on lock acquisition — with the fs
+      // error distinguished from contention (never misreported as a busy
+      // lock, never a lock-free write, never a fake success).
+      const read = readProductTelemetryControlState(homeDir);
+      expect(read.ok).toBe(true);
+      const migrated = await migrateLegacyControlState(homeDir);
+      expect(migrated.ok).toBe(false);
+      if (!migrated.ok) {
+        expect(migrated.reason).toContain('product_telemetry_state_lock_unwritable');
+        expect(migrated.nextAction.length).toBeGreaterThan(0);
+      }
+      // The original legacy file is byte-identical: the blocked transaction
+      // lost nothing (no lock-free fallback ever touched it)...
+      expect(fs.readFileSync(statePath, 'utf8')).toBe(v1Raw);
+      // ...and once the directory is writable again, the next transaction
+      // retries the idempotent migration and preserves the identity fields.
+      fs.chmodSync(path.dirname(statePath), 0o700);
+      await expect(migrateLegacyControlState(homeDir)).resolves.toEqual({ ok: true });
+      const onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+      expect(onDisk.schemaVersion).toBe('2');
+      expect(onDisk.consent).toBe('granted');
+      expect(onDisk.consentVersion).toBe('1');
+      expect(onDisk.telemetrySecret).toBe(secret);
+    } finally {
+      fs.chmodSync(path.dirname(statePath), 0o700);
+    }
+  });
+
+  it('serializes concurrent in-process transactions on the lock (mutual exclusion)', async () => {
+    let firstEntered = false;
+    let secondEntered = false;
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = withControlStateLock(homeDir, async () => {
+      firstEntered = true;
+      await firstGate;
+      return 'first';
+    });
+    // Give the first transaction time to acquire before starting the second.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const second = withControlStateLock(homeDir, async () => {
+      secondEntered = true;
+      return 'second';
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // While the first body is parked, the second must NOT have entered.
+    expect(firstEntered).toBe(true);
+    expect(secondEntered).toBe(false);
+    releaseFirst();
+    await expect(first).resolves.toEqual({ ok: true, value: 'first' });
+    await expect(second).resolves.toEqual({ ok: true, value: 'second' });
+    expect(secondEntered).toBe(true);
+    // The lock is released: a follow-up transaction acquires immediately.
+    await expect(withControlStateLock(homeDir, () => 'third')).resolves.toEqual({ ok: true, value: 'third' });
+  });
+
+  it('bounded lock wait: a contended transaction fails loud and writes nothing', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({ consent: 'denied', consentVersion: '1', schemaVersion: '2' }));
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = withControlStateLock(homeDir, async () => {
+      await firstGate;
+      return 'held';
+    });
+    const before = fs.readFileSync(statePath, 'utf8');
+    const second = withControlStateLock(
+      homeDir,
+      () => {
+        throw new Error('must not run — lock is held');
+      },
+      { timeoutMs: 150 },
+    );
+    const outcome = await second;
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toContain('product_telemetry_state_lock_timeout');
+      expect(outcome.nextAction.length).toBeGreaterThan(0);
+    }
+    // No lock-free degradation: the state file is untouched.
+    expect(fs.readFileSync(statePath, 'utf8')).toBe(before);
+    releaseFirst();
+    await expect(first).resolves.toEqual({ ok: true, value: 'held' });
+  });
+
+  it('stale lock takeover recovers a crashed holder; a fresh foreign lock is never taken over', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    const lockPath = `${statePath}.state-lock`;
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    // Simulate a crashed holder: old mtime, foreign body.
+    fs.writeFileSync(lockPath, '999999 deadbeefdeadbeef 2026-01-01T00:00:00.000Z\n');
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(lockPath, old, old);
+    // The next transaction takes the stale lock over and proceeds.
+    await expect(withControlStateLock(homeDir, () => 'recovered', { timeoutMs: 1000 })).resolves.toEqual({ ok: true, value: 'recovered' });
+    expect(fs.existsSync(lockPath)).toBe(false); // released cleanly afterwards
+    // A FRESH foreign lock is not taken over: the transaction times out
+    // without removing it.
+    fs.writeFileSync(lockPath, '999999 livebeefdeadbeef 2026-01-01T00:00:00.000Z\n');
+    const fresh = fs.readFileSync(lockPath, 'utf8');
+    const blocked = await withControlStateLock(homeDir, () => 'must-not-run', { timeoutMs: 150 });
+    expect(blocked.ok).toBe(false);
+    expect(fs.readFileSync(lockPath, 'utf8')).toBe(fresh);
+    fs.rmSync(lockPath, { force: true });
+  });
+
+  it('a transaction that outlives its lock refuses to commit after a takeover (PRI-1151 review round 2)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({ consent: 'granted', consentVersion: '1', schemaVersion: '2' }));
+    let writeOutcome: { ok: boolean; reason?: string } | undefined;
+    let releaseTx1: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseTx1 = resolve;
+    });
+    const tx1 = withControlStateLock(homeDir, async (tx) => {
+      await gate; // park LONGER than the stale threshold
+      writeOutcome = tx.write({ consent: 'denied', consentVersion: '1', schemaVersion: '2' });
+      return 'tx1';
+    });
+    // Force tx1's lock stale and let a second transaction take it over and
+    // commit its own state change.
+    const lockPath = `${statePath}.state-lock`;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const stale = new Date(Date.now() - 60_000);
+    fs.utimesSync(lockPath, stale, stale);
+    const tx2 = await withControlStateLock(homeDir, (tx) => tx.write({ consent: 'granted', consentVersion: '2', schemaVersion: '2' }), { timeoutMs: 8000 });
+    expect(tx2.ok).toBe(true);
+    releaseTx1();
+    expect(await tx1).toEqual({ ok: true, value: 'tx1' });
+    // tx1's write was REFUSED — committing without the mutex is forbidden.
+    expect(writeOutcome?.ok).toBe(false);
+    expect(writeOutcome && !writeOutcome.ok && writeOutcome.reason).toContain('product_telemetry_state_lock_lost');
+    // The disk carries tx2's committed state, not tx1's parked one.
+    expect((JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>).consentVersion).toBe('2');
+  });
+
+  it('orphaned lock sidecars are swept once stale, never while fresh (PRI-1151 review round 2)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    const lockPath = `${statePath}.state-lock`;
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const staleSidecar = `${lockPath}.take-deadbeefdeadbeef`;
+    const freshSidecar = `${lockPath}.rel-livebeeflivebeef`;
+    fs.writeFileSync(staleSidecar, 'old orphan\n');
+    fs.writeFileSync(freshSidecar, 'maybe still in a live protocol step\n');
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(staleSidecar, old, old);
+    const outcome = await withControlStateLock(homeDir, () => 'swept');
+    expect(outcome).toEqual({ ok: true, value: 'swept' });
+    expect(fs.existsSync(staleSidecar)).toBe(false);
+    expect(fs.existsSync(freshSidecar)).toBe(true);
+    fs.rmSync(freshSidecar, { force: true });
+  });
+
+  it('ownership-checked release: a superseded holder cannot delete the successor lock', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    const lockPath = `${statePath}.state-lock`;
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    // Holder A acquires legitimately.
+    let releaseA: () => void = () => {};
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const a = withControlStateLock(homeDir, async () => {
+      await gateA;
+      return 'A';
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const bodyA = fs.readFileSync(lockPath, 'utf8');
+    // While A is parked (not stale), tamper: replace the lock body so a late
+    // release by A would see a foreign owner.
+    fs.writeFileSync(lockPath, bodyA.replace(/^[0-9]+/, '1'));
+    // A's release path is exercised through the lock module directly: it
+    // must restore/not delete a lock it no longer owns. We simulate A being
+    // fully taken over by unlinking its file and creating a successor lock.
+    fs.rmSync(lockPath, { force: true });
+    fs.writeFileSync(lockPath, '42 successor 2026-01-01T00:00:00.000Z\n');
+    const successorBody = fs.readFileSync(lockPath, 'utf8');
+    releaseA();
+    await a;
+    // The successor lock is still exactly as the successor wrote it — A's
+    // release restored/kept it rather than deleting it.
+    expect(fs.readFileSync(lockPath, 'utf8')).toBe(successorBody);
+    fs.rmSync(lockPath, { force: true });
   });
 
   it('prunes workspace export entries untouched beyond the max age', () => {
