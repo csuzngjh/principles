@@ -779,10 +779,13 @@ describe('candidate registration source — parsing and verdict', () => {
 
   it('reads only bytes appended after the baseline, through one fd', () => {
     const file = join(root, 'host.log');
-    writeFileSync(file, `${line(candidateRoot)}\n`);
-    const baseline = statSync(file).size;
-    appendFileSync(file, 'other output\n');
-    expect(readAppended(file, baseline).text).toBe('other output\n');
+    // The baseline is the known byte length of the first chunk, not a stat of
+    // the file: writer and reader then use the same size source.
+    const first = `${line(candidateRoot)}\n`;
+    const second = 'other output\n';
+    writeFileSync(file, `${first}${second}`);
+    const baseline = Buffer.byteLength(first, 'utf8');
+    expect(readAppended(file, baseline).text).toBe(second);
     expect(verdictOf(['host-log', readAppended(file, baseline).text])).toMatchObject({ status: 'missing' });
     // No exists/stat race: a file that vanishes between calls is reported empty.
     rmSync(file);
