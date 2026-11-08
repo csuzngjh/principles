@@ -45,7 +45,7 @@ import {
 } from './lib/workspace-lifecycle.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
 import { CODES } from './lib/preflight.mjs';
-import { formatProgress, removeResidueTree, scanReparsePoints } from './lib/residue-delete.mjs';
+import { formatProgress, removeResidueTree, scanReparsePoints, classifyReparsePoints } from './lib/residue-delete.mjs';
 
 function parseArgs(argv) {
   const args = { apply: false, json: false, graceDays: GRACE_DAYS_DEFAULT, skipGh: false, residue: null, ackUnknown: false };
@@ -108,7 +108,8 @@ async function removeWorktree(cwd, worktreePath, notes) {
     removeError = err && err.message ? err.message : String(err);
   }
   if (!removeError) return true;
-  // Porcelain was clean at apply time, so only ignored build output (e.g.
+  // Porcelain was clean at apply time AND the ERR-098 preflight at the call site
+  // found no link leaving the worktree, so only ignored build output (e.g.
   // node_modules) can block removal; one --force retry is safe in exactly
   // that situation. Double --force is never used.
   try {
@@ -339,6 +340,28 @@ async function main() {
       }
       if (await isLockedAtApplyTime(cwd, worktreePath)) {
         refused.push({ action, reason: 'worktree is Git-locked at apply time — release the claim first (never auto-unlocked)' });
+        continue;
+      }
+      // ERR-098 / PRI-1143 — the same removal primitive the per-target tool uses,
+      // so the same preflight: `git worktree remove` recurses through junctions
+      // and would delete through them. A sweep never remediates destructively, so
+      // an external link is a per-target REFUSAL; detaching stays the explicit,
+      // per-target decision (`npm run dev:worktree:cleanup <path> --detach-external-links`).
+      const linkScan = classifyReparsePoints(worktreePath);
+      if (linkScan.external.length > 0) {
+        const first = linkScan.external[0];
+        refused.push({
+          action,
+          reason:
+            linkScan.external.length +
+            ' reparse point(s) point OUTSIDE the worktree (ERR-098: git worktree remove follows them) — first: ' +
+            first.path +
+            ' -> ' +
+            (first.target || '<unreadable target>') +
+            '; detach the links, then run: npm run dev:worktree:cleanup "' +
+            worktreePath +
+            '" --detach-external-links',
+        });
         continue;
       }
       try {

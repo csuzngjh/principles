@@ -205,7 +205,10 @@ npm run dev:workspace:cleanup -- --apply
 Removal requires PROVEN completion — GitHub `PR MERGED` first (the only evidence
 that covers a squash merge, where the branch tip can never be an ancestor), else
 ancestry to `origin/main` — plus: clean, not primary, no active lease, not
-Git-locked, and status readable. Every one of those is re-checked at apply time,
+Git-locked, status readable, and free of any reparse point whose target lies
+outside the worktree (ERR-098: `git worktree remove` follows links out of the
+tree, so porcelain-clean is not by itself evidence that deleting is safe). Every
+one of those is re-checked at apply time,
 because a snapshot from minutes ago is not evidence. An open PR is never swept.
 
 ### 4.6 Migrate
@@ -281,6 +284,15 @@ to a recursive remover:
 Acceptance criterion: a residue directory containing a junction to important data
 is removed, and the target is bit-for-bit intact. This is covered by a test.
 
+The same rule gates the **removal** path (PRI-1143). Before `dev:worktree:cleanup`
+hands a worktree to `git worktree remove`, it classifies every reparse point in the
+tree (`classifyReparsePoints`) and refuses with `EXTERNAL_LINKS_PRESENT`, listing each
+link and its target, if any of them leaves the tree. `--detach-external-links` opts
+into detaching them first — one at a time, each target re-verified present, and every
+external target checked again after the delete. A link that stays inside the tree
+never blocks a removal: it dies with the tree. The batch sweep (`dev:workspace:cleanup
+-- --apply`) refuses the same way and never detaches on its own.
+
 ### 5.2 Observability of long deletions
 
 Deleting 50k+ files on Windows takes minutes. The walk prints progress inline —
@@ -318,6 +330,7 @@ deleted live one.
 | --- | --- | --- |
 | Share `node_modules` with the primary to save time | readiness would report `PRIMARY_LEAKAGE`; tests would exercise the wrong build | `npm run dev:worktree:bootstrap` (npm cache is shared automatically) |
 | `git worktree remove --force` on a dirty tree | destroys unknown work (git-4) | commit a WIP commit, or remove the files yourself |
+| `git worktree remove` on a worktree whose ignored output junctions out of it | git recurses through those links and deletes files that were never in the worktree (ERR-098) | the removal already refuses with `EXTERNAL_LINKS_PRESENT` and lists each link plus its target; re-run with `--detach-external-links` only after reading that list |
 | unlock + remove a locked worktree | the lock means an active claim | `npm run dev:worktree:release`, after confirming the writer is gone |
 | delete a residue directory to reclaim ~800 MB | its dirtiness is unprovable | review the snapshot, then `--residue <path> --ack-unknown --apply` |
 | hand-write `.git/worktrees/<name>/` to "repair" it | unsupported; git's own state must stay git's | report it as UNKNOWN and decide with `--ack-unknown` |

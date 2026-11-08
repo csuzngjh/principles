@@ -4,7 +4,7 @@
   "recordType": "pattern",
   "recordId": "P-ERR-098",
   "displayId": "ERR-098",
-  "title": "Destructive cleanup with junction-following recursive delete wiped a shared repo's working tree — cleanup must use `git worktree remove`, never recursive deletes on junction-bearing directories, and must not silence errors on critical cleanup steps",
+  "title": "Destructive cleanup followed junctions and deleted files outside the target — no delete may traverse a link pointing outside what it deletes, `git worktree remove` included; scan reparse points, refuse or detach first, and never silence errors on critical cleanup",
   "status": "active",
   "category": "Process & Workflow",
   "ep": null,
@@ -14,3 +14,16 @@
 -->
 
 **Recurrence**: Yes — shared-repo reparse-point hazard re-encountered (caught before damage this time).
+
+**Prevention rule (corrected 2026-11-06, OCC-20261106T025529Z-g9kvsgn43c / PRI-1143)**: the invariant is
+"deletion never traverses reparse points", not "use a git command to delete". `git worktree remove`
+violates it on Windows: it recursed through a MERGED, porcelain-clean worktree's gitignored fixture
+junctions and deleted real files of the global install, on the first non-forced removal, exit 0.
+Before any deletion: enumerate reparse points (`classifyReparsePoints` in
+`scripts/dev/lib/residue-delete.mjs`) and check each link's direction — a link whose target is inside
+the tree being deleted is harmless, a link whose target is outside it means STOP (an unresolvable
+target counts as outside: unknown direction is never trusted, git-14). Removal proceeds only after
+the external links are detached one at a time with their targets re-verified
+(`detachExternalLinks`, opt-in `--detach-external-links`), and the tool re-checks every external
+target after the delete. Recursive filesystem deletes (`Remove-Item -Recurse`, `rm -rf`) and
+`git clean -fdx` remain forbidden on such trees, and cleanup steps must still never silence errors.

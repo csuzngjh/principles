@@ -11,7 +11,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PROGRESS_INTERVAL_MS,
   assertDeletableRoot,
+  classifyReparsePoints,
+  detachExternalLinks,
   formatProgress,
+  isPathInsideRoot,
   removeResidueTree,
   scanReparsePoints,
 } from '../dev/lib/residue-delete.mjs';
@@ -227,6 +230,102 @@ describe('removeResidueTree', () => {
     const residue = path.join(root, 'residue');
     makeResidue(residue);
     expect(() => removeResidueTree(residue)).not.toThrow();
+  });
+});
+
+// ERR-098 / PRI-1143: `git worktree remove` is not junction-safe, so the same
+// scan also decides whether git may be handed a tree at all. The direction each
+// link points in is the whole contract: internal = harmless, external = refuse.
+describe('isPathInsideRoot', () => {
+  it('does not let a sibling path with a shared prefix pass as inside', () => {
+    const rootDir = path.join(root, 'tree');
+    expect(isPathInsideRoot(rootDir, path.join(rootDir, 'node_modules'))).toBe(true);
+    expect(isPathInsideRoot(rootDir, rootDir)).toBe(true);
+    expect(isPathInsideRoot(rootDir, path.join(root, 'tree-other'))).toBe(false);
+    expect(isPathInsideRoot(rootDir, path.join(root, 'elsewhere'))).toBe(false);
+  });
+
+  it('compares case-insensitively on Windows, where junctions live', () => {
+    const rootDir = path.join(root, 'Tree');
+    if (process.platform !== 'win32') {
+      expect(isPathInsideRoot(rootDir, path.join(root, 'tree', 'x'))).toBe(false);
+      return;
+    }
+    expect(isPathInsideRoot(rootDir, path.join(root, 'tree', 'NODE_MODULES'))).toBe(true);
+  });
+});
+
+describe('classifyReparsePoints / detachExternalLinks (ERR-098)', () => {
+  const buildTree = (name: string) => {
+    const tree = path.join(root, name);
+    const outside = path.join(root, name + '-outside');
+    fs.mkdirSync(path.join(outside, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'cli-root-options.mjs'), 'export const x = 1;\n', 'utf-8');
+    fs.writeFileSync(path.join(outside, 'nested', 'SKILL.md'), '# skill\n', 'utf-8');
+    fs.mkdirSync(path.join(tree, 'node_modules', 'real-pkg'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'node_modules', 'real-pkg', 'index.js'), 'real\n', 'utf-8');
+    fs.writeFileSync(path.join(tree, 'a.txt'), 'a\n', 'utf-8');
+    return { tree, outside };
+  };
+
+  it('splits links by direction, so only the ones leaving the tree are refused', () => {
+    const { tree, outside } = buildTree('classify');
+    makeJunction(path.join(tree, 'node_modules', 'openclaw'), outside);
+    makeJunction(path.join(tree, 'node_modules', 'linked-pkg'), path.join(tree, 'node_modules', 'real-pkg'));
+
+    const verdict = classifyReparsePoints(tree);
+    expect(verdict.links).toBe(2);
+    expect(verdict.external.map((l) => path.basename(l.path))).toEqual(['openclaw']);
+    expect(verdict.external[0].targetExists).toBe(true);
+    expect(verdict.internal.map((l) => path.basename(l.path))).toEqual(['linked-pkg']);
+    // The target tree's own files are never counted as part of `tree`.
+    expect(verdict.files).toBe(2);
+  });
+
+  it('counts a dangling external link as external — an unknown direction is never trusted', () => {
+    const { tree } = buildTree('classify-dangling');
+    const gone = path.join(root, 'classify-dangling-gone');
+    fs.mkdirSync(gone, { recursive: true });
+    makeJunction(path.join(tree, 'node_modules', 'openclaw'), gone);
+    fs.rmSync(gone, { recursive: true, force: true });
+
+    const verdict = classifyReparsePoints(tree);
+    expect(verdict.external).toHaveLength(1);
+    expect(verdict.external[0].targetExists).toBe(false);
+    expect(verdict.internal).toEqual([]);
+  });
+
+  it('detaches every external link and proves its target survived, leaving internal links alone', () => {
+    const { tree, outside } = buildTree('detach');
+    const externalLink = path.join(tree, 'node_modules', 'openclaw');
+    const internalLink = path.join(tree, 'node_modules', 'linked-pkg');
+    makeJunction(externalLink, outside);
+    makeJunction(internalLink, path.join(tree, 'node_modules', 'real-pkg'));
+
+    const result = detachExternalLinks(tree);
+
+    expect(result.ok).toBe(true);
+    expect(result.detached).toHaveLength(1);
+    expect(result.detached[0].path).toBe(externalLink);
+    expect(result.detached[0].targetExistedBefore).toBe(true);
+    expect(result.detached[0].targetStillExists).toBe(true);
+    expect(result.brokenTargets).toEqual([]);
+    expect(result.remainingExternal).toEqual([]);
+
+    expect(fs.existsSync(externalLink)).toBe(false); // the link is gone
+    expect(fs.lstatSync(internalLink).isSymbolicLink()).toBe(true); // the internal one is untouched
+    // The external install is whole, not merely "still present".
+    expect(fs.readFileSync(path.join(outside, 'cli-root-options.mjs'), 'utf-8')).toBe('export const x = 1;\n');
+    expect(fs.readFileSync(path.join(outside, 'nested', 'SKILL.md'), 'utf-8')).toBe('# skill\n');
+  });
+
+  it('is a no-op on a tree with no links, and does not call it a failure', () => {
+    const { tree } = buildTree('detach-none');
+    const result = detachExternalLinks(tree);
+    expect(result.ok).toBe(true);
+    expect(result.detached).toEqual([]);
+    expect(result.remainingExternal).toEqual([]);
+    expect(fs.existsSync(path.join(tree, 'a.txt'))).toBe(true);
   });
 });
 

@@ -12,12 +12,14 @@
 // workspace-lifecycle classifier tests.
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { normalizeGitPath } from '../dev/lib/git.mjs';
 import {
   commitFile,
   git,
+  makeJunction,
   removeFixture,
   runDevScript,
   setupOriginFixture,
@@ -248,4 +250,131 @@ describe('cleanup-task-worktree', () => {
     const out = JSON.parse(r.stdout) as { error: string };
     expect(out.error).toContain('No worktree or branch matches');
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// ERR-098 / PRI-1143 — the removal primitive itself is the defect.
+//
+// `git worktree remove` is NOT junction-safe. On 2026-11-06 it recursed through a
+// MERGED worktree's gitignored fixture junctions and deleted real files in the
+// global install — on the FIRST, non-forced removal, with a clean porcelain
+// (OCC-20261106T025529Z-g9kvsgn43c). So these cases put a link that LEAVES the
+// worktree into an otherwise clean, merged worktree: the tool must refuse by
+// default, remove nothing, and leave the external tree byte-identical.
+// ---------------------------------------------------------------------------
+
+const createdLinks: string[] = [];
+
+/** Create a junction and remember it, so teardown detaches it before rm -r. */
+function trackJunction(link: string, target: string): void {
+  makeJunction(link, target);
+  createdLinks.push(link);
+}
+
+afterEach(() => {
+  // A fixture tree containing a junction is not something `removeFixture` should
+  // be asked to recurse through: detach every link this suite created first.
+  while (createdLinks.length > 0) {
+    const link = createdLinks.pop() as string;
+    try {
+      fs.unlinkSync(link);
+    } catch {
+      /* already detached by the code under test */
+    }
+  }
+});
+
+/** Content-level fingerprint: relative path + sha256 of every file under `dir`. */
+function fingerprintTree(dir: string): string {
+  const rows: string[] = [];
+  const walk = (current: string): void => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else rows.push(path.relative(dir, full) + '=' + crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex'));
+    }
+  };
+  walk(dir);
+  return rows.sort().join('\n');
+}
+
+/** The 2026-11-06 shape: a global install with root entries and nested skill files. */
+function makeExternalInstall(label: string): string {
+  const outside = path.join(root, 'outside-install-' + label);
+  const skills = path.join(outside, 'dist', 'extensions', 'browser', 'skills', 'browser-automation');
+  fs.mkdirSync(skills, { recursive: true });
+  fs.writeFileSync(path.join(outside, '.openclaw-lifecycle-pending'), 'pending\n', 'utf-8');
+  fs.writeFileSync(path.join(outside, 'CHANGELOG.md'), '# changelog\n', 'utf-8');
+  fs.writeFileSync(path.join(outside, 'cli-root-options.mjs'), 'export const rootOptions = 1;\n', 'utf-8');
+  fs.writeFileSync(path.join(skills, 'SKILL.md'), '# skill\n', 'utf-8');
+  return outside;
+}
+
+describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
+  it('REFUSES a clean merged worktree whose junction points outside it, and destroys nothing', async () => {
+    const { wt, branch } = await makeTask('junction-refuse');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-junction-refuse');
+
+    const outside = makeExternalInstall('refuse');
+    const before = fingerprintTree(outside);
+    trackJunction(path.join(wt, 'node_modules', 'openclaw'), outside);
+    expect((await git(wt, 'status', '--porcelain')).trim(), 'the link must sit in ignored output so porcelain stays clean').toBe('');
+
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
+    expect(r.code, r.stdout + r.stderr).toBe(1);
+    const out = JSON.parse(r.stdout) as { ok: boolean; reason?: string; error: string; externalLinkCount?: number };
+    expect(out.ok).toBeFalsy();
+    expect(out.reason).toBe('EXTERNAL_LINKS_PRESENT');
+    expect(out.externalLinkCount).toBe(1);
+    expect(out.error).toContain('OUTSIDE');
+
+    // Nothing was removed and nothing outside was touched.
+    expect(fs.existsSync(wt)).toBe(true);
+    const list = await worktreeList(primary);
+    expect(list.some((w) => normalizeGitPath(w.path) === normalizeGitPath(wt))).toBe(true);
+    const branchSha = await git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch);
+    expect(branchSha.trim().length).toBeGreaterThan(0);
+    expect(fingerprintTree(outside)).toBe(before);
+  }, 120_000);
+
+  it('--detach-external-links removes ONLY the links: worktree gone, external target byte-identical', async () => {
+    const { wt, branch } = await makeTask('junction-detach');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-junction-detach');
+
+    const outside = makeExternalInstall('detach');
+    const before = fingerprintTree(outside);
+    trackJunction(path.join(wt, 'node_modules', 'openclaw'), outside);
+
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--detach-external-links', '--json'], {
+      cwd: primary,
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout) as { ok: boolean; detachedExternalLinks: number; notes: string[] };
+    expect(out.ok).toBe(true);
+    expect(out.detachedExternalLinks).toBe(1);
+    expect(out.notes.join(' ')).toContain('every target re-verified present');
+
+    expect(fs.existsSync(wt)).toBe(false);
+    // The hard acceptance criterion: 4 external files, same hashes, still there.
+    expect(fingerprintTree(outside)).toBe(before);
+  }, 120_000);
+
+  it('does NOT refuse when a junction stays inside the worktree it is removing', async () => {
+    const { wt, branch } = await makeTask('junction-internal');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-junction-internal');
+
+    fs.mkdirSync(path.join(wt, 'node_modules', 'real-pkg'), { recursive: true });
+    fs.writeFileSync(path.join(wt, 'node_modules', 'real-pkg', 'index.js'), 'real\n', 'utf-8');
+    trackJunction(path.join(wt, 'node_modules', 'linked-pkg'), path.join(wt, 'node_modules', 'real-pkg'));
+
+    const r = await runDevScript('cleanup-task-worktree.mjs', [branch, '--delete-branch', '--skip-gh', '--json'], { cwd: primary });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout) as { ok: boolean; notes: string[] };
+    expect(out.ok).toBe(true);
+    expect(out.notes.join(' ')).toContain('internal reparse point');
+    expect(fs.existsSync(wt)).toBe(false);
+  }, 120_000);
 });

@@ -22,6 +22,13 @@
 //
 // The walk is post-order: children first, then the directory itself. A symlink is
 // NEVER recursed into, so its target tree is out of scope by construction.
+//
+// The scan is NOT only for residue deletion. ERR-098's recurrence
+// (OCC-20261106T025529Z-g9kvsgn43c) showed `git worktree remove` recurses
+// through junctions too, so `classifyReparsePoints` + `detachExternalLinks`
+// below are the shared pre-flight that every worktree removal runs first: a link
+// pointing OUTSIDE the tree being removed must be detached before git is handed
+// that tree, or the removal must not happen at all.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -90,6 +97,104 @@ export function scanReparsePoints(root) {
     }
   }
   return { links, files, dirs };
+}
+
+/**
+ * Is `candidate` inside `root`? Case-insensitive on Windows (the platform where
+ * reparse points exist), and tolerant of both separators, because a junction's
+ * readlink target can be written either way.
+ */
+export function isPathInsideRoot(root, candidate) {
+  const normalize = (p) => {
+    const resolved = path.resolve(p);
+    const withoutTrailing = resolved.length > 3 && /[\\/]$/.test(resolved) ? resolved.slice(0, -1) : resolved;
+    return process.platform === 'win32' ? withoutTrailing.toLowerCase() : withoutTrailing;
+  };
+  const r = normalize(root);
+  const c = normalize(candidate);
+  if (c === r) return true;
+  const prefix = r.endsWith(path.sep) ? r : r + path.sep;
+  return c.startsWith(prefix);
+}
+
+/**
+ * Pre-flight for anything that is about to hand a tree to a recursive deleter —
+ * including `git worktree remove`, which is NOT junction-safe on Windows.
+ *
+ * Splits every reparse point in the tree by the direction its target lies:
+ *   * `internal` — target inside `root`: whatever it reaches is already doomed
+ *     with the tree, so it cannot carry the deletion somewhere else;
+ *   * `external` — target outside `root`: this is the ERR-098 direction, and
+ *     following it destroys files the caller has no claim on.
+ * A link whose target cannot be resolved is counted EXTERNAL on purpose: an
+ * unprovable direction is an unknown, and git-14 forbids acting on unknowns.
+ *
+ * @returns {{external: Array<object>, internal: Array<object>, links: number,
+ *            files: number, dirs: number}}
+ */
+export function classifyReparsePoints(root) {
+  const scan = scanReparsePoints(root);
+  const resolvedRoot = path.resolve(root);
+  const external = [];
+  const internal = [];
+  for (const link of scan.links) {
+    const resolvedTarget = resolveLinkTarget(link.path, link.target);
+    const inside = resolvedTarget !== null && isPathInsideRoot(resolvedRoot, resolvedTarget);
+    const row = {
+      path: link.path,
+      target: link.target,
+      resolvedTarget,
+      targetExists: link.targetExists,
+      inside,
+    };
+    (inside ? internal : external).push(row);
+  }
+  return { external, internal, links: scan.links.length, files: scan.files, dirs: scan.dirs };
+}
+
+/**
+ * Detach every reparse point in `root` that points outside it, and prove the
+ * targets survived. Removing a link removes ONLY the link — that is the property
+ * `removeResidueTree` relies on and the reason detaching is safe while recursing
+ * is not. Each target is checked before and after its unlink; a target that
+ * vanished means something traversed the link, and that fails loud.
+ *
+ * @returns {{detached: Array<object>, brokenTargets: Array<object>,
+ *            remainingExternal: Array<object>, ok: boolean}}
+ */
+export function detachExternalLinks(root) {
+  const before = classifyReparsePoints(root);
+  const detached = [];
+  const brokenTargets = [];
+  for (const link of before.external) {
+    const existedBefore = link.resolvedTarget !== null ? fs.existsSync(link.resolvedTarget) : null;
+    let error = null;
+    try {
+      fs.unlinkSync(link.path);
+    } catch (err) {
+      error = String((err && err.message) || err);
+    }
+    const stillExists = link.resolvedTarget !== null ? fs.existsSync(link.resolvedTarget) : null;
+    detached.push({
+      path: link.path,
+      target: link.target,
+      targetExistedBefore: existedBefore,
+      targetStillExists: stillExists,
+      error,
+    });
+    if (existedBefore === true && stillExists === false) {
+      brokenTargets.push({ path: link.path, target: link.target });
+    }
+  }
+  const after = classifyReparsePoints(root);
+  const failed = detached.filter((d) => d.error !== null);
+  return {
+    detached,
+    brokenTargets,
+    failedToDetach: failed,
+    remainingExternal: after.external,
+    ok: brokenTargets.length === 0 && failed.length === 0 && after.external.length === 0,
+  };
 }
 
 /** Refuse the paths that must never be deleted, whatever the caller asks. */
