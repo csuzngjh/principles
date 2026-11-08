@@ -33,7 +33,7 @@ afterEach(async () => { await new Promise<void>(resolve => server.close(() => re
 async function review() {
   const detail = await model.getApprovalDetail(approvalId);
   if (!detail) throw new Error('missing approval review');
-  expect(detail.writeGuardVersion).toBe('approval-review-v1');
+  expect(detail.writeGuardVersion).toBe('approval-review');
   expect(isApprovalReviewGuard(detail.review.expectedReview)).toBe(true);
   return detail;
 }
@@ -42,7 +42,7 @@ it('GET returns same-object exact material and guard without raw private metadat
   const response = await fetch(base);
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
-  expect(body).toMatchObject({ data: { writeGuardVersion: 'approval-review-v1', review: { expectedReview: { artifactState: 'present', artifactId: 'a' }, material: { exactBody: { kind: 'principle', text: 'Statement a' }, rationale: 'Reason', scope: ['local'], risks: ['Risk a'] } } } });
+  expect(body).toMatchObject({ data: { writeGuardVersion: 'approval-review', review: { expectedReview: { schemaVersion: 'approval-review', artifactState: 'present', artifactId: 'a' }, material: { exactBody: { kind: 'principle', text: 'Statement a' }, rationale: 'Reason', scope: ['local'], risks: ['Risk a'] } } } });
   expect(JSON.stringify(body)).not.toContain('not-for-ui');
 });
 it('route rejects stale approve, reject and edit without changing the winner', async () => {

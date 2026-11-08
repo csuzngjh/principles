@@ -347,7 +347,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     expect(event.budgetCapacitySource).toBe('host_effective_window');
     expect(event.budgetCapacityStatus).toBe('confirmed');
     expect(event.budgetContextWindowTokens).toBe(256_000);
-    expect(event.budgetPolicyVersion).toBe('model_aware_v2');
+    expect(event.budgetPolicyVersion).toBe('model_aware');
     expect(event.injectedCharCount).toBeLessThanOrEqual(8000);
     // The recorded event validates against the TypeBox wire schema.
     expect(Value.Check(RuntimePromptActivationsInjectedEventDataSchema, event)).toBe(true);
@@ -373,7 +373,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     expect(event.budgetCapacitySource).toBe('operator_declared');
     expect(event.budgetCapacityStatus).toBe('confirmed');
     expect(event.budgetContextWindowTokens).toBe(400_000);
-    expect(event.budgetPolicyVersion).toBe('model_aware_v2');
+    expect(event.budgetPolicyVersion).toBe('model_aware');
     expect(Value.Check(RuntimePromptActivationsInjectedEventDataSchema, event)).toBe(true);
   });
 

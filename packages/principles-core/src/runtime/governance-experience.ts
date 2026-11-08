@@ -1,4 +1,5 @@
 import { Value } from '@sinclair/typebox/value';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from './schema-version.js';
 import type { GovernanceExperienceInputs, GovernanceExperienceReasonCode, GovernanceExperienceNextActionCode, GovernanceExperienceSnapshot, GovernanceActivityCategory, GovernanceActivityCategorySummary, GovernanceActivityItem, GovernanceDataQualityIssueGroup, GovernancePrimaryAttention, OwnerGovernanceReadiness } from './governance-experience-contract.js';
 import {
   GovernanceExperienceInputsSchema,
@@ -279,7 +280,7 @@ export function deriveGovernanceExperienceSnapshot(input: unknown): GovernanceEx
   const lineageConfidence = sortedViews.length === 0 || unknownViewCount > 0 ? 'unknown' : weakViewCount > 0 ? 'weak' : 'strong';
 
   const snapshot: GovernanceExperienceSnapshot = {
-    schemaVersion: '1',
+    schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION,
     snapshotId: `gov-exp:${inputs.workspaceHash}:${inputs.asOf}`,
     asOf: inputs.asOf,
     summary: {

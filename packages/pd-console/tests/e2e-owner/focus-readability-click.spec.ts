@@ -49,7 +49,7 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
   const response = await approveResponse;
   expect(response.status()).toBe(200);
   const submitted: unknown = response.request().postDataJSON();
-  expect(submitted).toMatchObject({ note: '看过这份确切草案后批准。', expectedReview: { schemaVersion: 'approval-review-v1', approvalId: 'apr-click-approve', artifactState: 'present' } });
+  expect(submitted).toMatchObject({ note: '看过这份确切草案后批准。', expectedReview: { schemaVersion: 'approval-review', approvalId: 'apr-click-approve', artifactState: 'present' } });
   const responseBody: unknown = await response.json();
   const data = isRecord(responseBody) && isRecord(responseBody.data) ? responseBody.data : {};
   // 审批结果与激活结果分层断言：审批 approved，激活已派发成功

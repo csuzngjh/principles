@@ -19,7 +19,7 @@ test('Principle detail rejects the exact reviewed approval through the guarded r
   await reading.getByRole('button', { name: '确认提交', exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
-  expect(response.request().postDataJSON()).toMatchObject({ expectedReview: { schemaVersion: 'approval-review-v1', approvalId: 'apr-click-reject', artifactId: 'artifact-click-reject', artifactState: 'present' } });
+  expect(response.request().postDataJSON()).toMatchObject({ expectedReview: { schemaVersion: 'approval-review', approvalId: 'apr-click-reject', artifactId: 'artifact-click-reject', artifactState: 'present' } });
   const persisted = await request.get('/api/v1/approvals/apr-click-reject', { headers: authorization });
   expect(await persisted.json()).toMatchObject({ data: { status: 'rejected' } });
   await expect(page.getByTestId('owner-decision-history')).toContainText('已拒绝');

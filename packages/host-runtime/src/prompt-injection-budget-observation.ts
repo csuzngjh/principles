@@ -19,10 +19,11 @@ import {
 } from './prompt-injection-projection.js';
 
 /**
- * PRI-1104 Stage 0 (expand): accepted budget policy provenance versions.
+ * PRI-1104 Stage 0 (expand) / PRI-1139 (PR-6 cutover): accepted budget policy
+ * provenance versions.
  *
  * Injection events written to the JSONL event log carry `budgetPolicyVersion`
- * as a durable wire literal. PR-6 renames the CURRENT policy id from
+ * as a durable wire literal. PR-6 renamed the CURRENT policy id from
  * `model_aware_v2` to a version-neutral `model_aware`; without this read-side
  * allowance, every historical event would suddenly be classified as
  * "computed under a different policy" and silently skipped (and a revert of
@@ -30,13 +31,14 @@ import {
  *
  * These are FROZEN WIRE LITERALS, not a second policy definition: they exist
  * only so events remain readable across the PR-6 rename AND its revert. The
- * PR-6 target id `model_aware` is listed up front (PR #2367 CodeRabbit #2):
- * if PR-6 is reverted after it wrote `model_aware` events, a reader accepting
- * only `model_aware_v2` would silently skip those observations and the console
- * would fall back to a stale budget.
+ * pre-cutover id `model_aware_v2` is listed explicitly (PR #2367 CodeRabbit
+ * #2): if PR-6 is reverted, a reader accepting only the then-current
+ * `model_aware` would silently skip every historical observation and the
+ * console would fall back to a stale budget.
  *
- * Today the writer emits only `model_aware_v2`, so listing the future and
- * historical literals does not change any current read result.
+ * Since the PRI-1139 cutover the writer emits `model_aware`; both spellings
+ * denote the SAME formula, so an accepted event of either id is valid
+ * evidence about the current budget math.
  */
 const ACCEPTED_BUDGET_POLICY_VERSIONS: ReadonlySet<string> = new Set<string>([
   PROMPT_BUDGET_POLICY_VERSION,

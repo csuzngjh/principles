@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type Database from 'better-sqlite3';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '@principles/core/runtime';
 import { Value } from '@sinclair/typebox/value';
 import {
   GovernanceFactsSchema,
@@ -278,7 +279,7 @@ export class GovernanceProjectionCollector {
           revisionIdentities.push(identity);
           materializedRevisionSources.add(sourceTaskId);
           derivedRelations.push({
-            schemaVersion: '1', family: 'derived_relation', sourceRef: { type: 'task', id: task.taskId }, principleId,
+            schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'derived_relation', sourceRef: { type: 'task', id: task.taskId }, principleId,
             taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
             revisionIdentity: identity, relation: 'revision_materialized',
             evidenceRefs: [
@@ -294,7 +295,7 @@ export class GovernanceProjectionCollector {
           });
         }
         const fact: TaskFact = {
-          schemaVersion: '1', family: 'task', sourceRef: { type: 'task', id: task.taskId }, principleId,
+          schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'task', sourceRef: { type: 'task', id: task.taskId }, principleId,
           taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
           occurredAt: task.createdAt, taskKind: task.taskKind, channel: task.channel, status: task.status,
           attemptCount: task.attemptCount, maxAttempts: task.maxAttempts,
@@ -309,7 +310,7 @@ export class GovernanceProjectionCollector {
         sourceRefs.push(fact.sourceRef);
         if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.runnerDecision !== undefined) {
           runnerVerdicts.push({
-            schemaVersion: '1', family: 'runner_verdict', sourceRef: fact.sourceRef, principleId,
+            schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'runner_verdict', sourceRef: fact.sourceRef, principleId,
             taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
             runnerKind: task.taskKind, outcome: task.runnerDecision,
           });
@@ -325,7 +326,7 @@ export class GovernanceProjectionCollector {
           }
         } else if ((task.taskKind === 'evaluator' || task.taskKind === 'rollout_reviewer') && task.status === 'succeeded') {
           derivedRelations.push({
-            schemaVersion: '1', family: 'derived_relation', sourceRef: fact.sourceRef, principleId,
+            schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'derived_relation', sourceRef: fact.sourceRef, principleId,
             taskId: task.taskId, lineageConfidence: taskLineageConfidence, recordedAt: task.updatedAt,
             relation: 'verdict_missing', evidenceRefs: [fact.sourceRef],
           });
@@ -344,7 +345,7 @@ export class GovernanceProjectionCollector {
         const {taskId} = task;
         if (taskId === undefined || task.completionIntent?.status !== 'pending' || materializedRevisionSources.has(taskId)) continue;
         derivedRelations.push({
-          schemaVersion: '1', family: 'derived_relation', sourceRef: task.sourceRef, principleId,
+          schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'derived_relation', sourceRef: task.sourceRef, principleId,
           taskId, lineageConfidence: 'strong', recordedAt: task.recordedAt,
           relation: 'revision_pending', evidenceRefs: [task.sourceRef],
         });
@@ -354,7 +355,7 @@ export class GovernanceProjectionCollector {
         for (const dependencyTaskId of [...successor.dependencyTaskIds].sort()) {
           if (!strongTaskIds.has(dependencyTaskId)) continue;
           derivedRelations.push({
-            schemaVersion: '1', family: 'derived_relation', sourceRef: { type: 'task', id: dependencyTaskId }, principleId,
+            schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'derived_relation', sourceRef: { type: 'task', id: dependencyTaskId }, principleId,
             taskId: dependencyTaskId, lineageConfidence: 'strong', recordedAt: successor.updatedAt,
             relation: 'successor_present',
             evidenceRefs: [{ type: 'task', id: dependencyTaskId }, { type: 'task', id: successor.taskId }],
@@ -384,7 +385,7 @@ export class GovernanceProjectionCollector {
         }
         const strongApprovalRef: SourceRef = { type: 'approval', id: approvalId };
         const fact: ApprovalFact = {
-          schemaVersion: '1', family: 'approval', sourceRef: strongApprovalRef, principleId, artifactId,
+          schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'approval', sourceRef: strongApprovalRef, principleId, artifactId,
           approvalId, channel, outcome, lineageConfidence: 'strong', recordedAt: decidedAt ?? requestedAt,
         };
         if (decidedAt !== undefined) fact.occurredAt = decidedAt;
@@ -416,7 +417,7 @@ export class GovernanceProjectionCollector {
         }
         const strongActivationRef: SourceRef = { type: 'activation', id: activationId };
         const fact: ActivationFact = {
-          schemaVersion: '1', family: 'activation', sourceRef: strongActivationRef, principleId, artifactId,
+          schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'activation', sourceRef: strongActivationRef, principleId, artifactId,
           activationId, channel, outcome: deactivatedAt === undefined ? 'active' : 'deactivated',
           activatedAt, lineageConfidence: 'strong', recordedAt: deactivatedAt ?? activatedAt,
         };
@@ -493,7 +494,7 @@ export class GovernanceProjectionCollector {
     if (state !== 'candidate' && state !== 'active' && state !== 'archived' && state !== 'deprecated' && state !== 'probation') {
       throw new GovernanceProjectionCollectionError('governance_projection_error', 'repair_principle_status');
     }
-    return { schemaVersion: '1', family: 'principle', sourceRef: { type: 'principle', id: principleId }, principleId, lineageConfidence: 'strong', recordedAt, state };
+    return { schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, family: 'principle', sourceRef: { type: 'principle', id: principleId }, principleId, lineageConfidence: 'strong', recordedAt, state };
   }
 
   private static parseStringArrayJson(value: string | undefined): string[] | null {
@@ -615,7 +616,7 @@ export class GovernanceProjectionCollector {
   }): GovernanceFacts {
     const hasArtifacts = (input.artifactIds?.length ?? 0) > 0;
     const facts: GovernanceFacts = {
-      schemaVersion: '1', principleId: input.principleId, asOf: input.asOf,
+      schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, principleId: input.principleId, asOf: input.asOf,
       lineage: {
         principleId: input.principleId, artifactIds: input.artifactIds ?? [], taskIds: input.taskIds ?? [],
         revisionIdentities: input.revisionIdentities ?? [],

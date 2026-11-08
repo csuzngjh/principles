@@ -14,6 +14,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '@principles/core/runtime';
 import {
   deriveGovernanceExperienceSnapshot,
   deriveOwnerGovernanceView,
@@ -271,7 +272,7 @@ export class GovernanceExperienceCollector {
       : { environment: 'unknown' as const, source: 'missing' as const, configIssue: 'config_invalid' };
 
     return {
-      schemaVersion: '1',
+      schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION,
       asOf,
       workspaceHash: hashWorkspacePath(this.workspaceDir),
       governanceViews: views,

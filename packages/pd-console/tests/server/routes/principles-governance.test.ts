@@ -71,7 +71,7 @@ describe('PRI-552 GET /api/v1/principles/:id/governance', () => {
     const res = response();
     await handlePrinciplesRoute({ req: request(), res, workspaceDir, subPath: '/principle-1/governance', featureFlags: enableFlag(true), now: () => AS_OF });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toMatchObject({ success: true, data: { schemaVersion: '1', principleId: 'principle-1', automation: { state: 'queued' } } });
+    expect(JSON.parse(res.body)).toMatchObject({ success: true, data: { schemaVersion: 'current', principleId: 'principle-1', automation: { state: 'queued' } } });
   });
 
   it('returns a structured missing-principle response', async () => {

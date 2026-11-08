@@ -54,7 +54,15 @@
  */
 import { RUNTIME_PRINCIPLE_BUDGET } from './prompt-activation-reader-contract.js';
 
-export const PROMPT_BUDGET_POLICY_VERSION = 'model_aware_v2' as const;
+/**
+ * The policy provenance id every current writer stamps into injection events
+ * (`budgetPolicyVersion`). PRI-1139 (PR-6) renamed the id from the generational
+ * `model_aware_v2` to the version-neutral `model_aware` — the FORMULA is
+ * unchanged. Historical `model_aware_v2` events stay readable through the
+ * observation whitelist (prompt-injection-budget-observation.ts), which also
+ * keeps `model_aware` events readable if this cutover is ever reverted.
+ */
+export const PROMPT_BUDGET_POLICY_VERSION = 'model_aware' as const;
 
 /**
  * Baseline budget at the reference context window (SPEC §4.1).

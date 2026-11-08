@@ -10,9 +10,20 @@
  */
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
 
+/**
+ * PRI-1139 read-side whitelist for governance/owner-decision `schemaVersion`
+ * values. Servers mint 'current'; responses minted before the cutover carry
+ * the legacy '1' and stay valid reads. Kept local (not a core value import)
+ * because this module ships in the browser bundle.
+ */
+const RUNTIME_CONTRACT_SCHEMA_VERSIONS: ReadonlySet<string> = new Set(['current', '1']);
+function isRuntimeContractSchemaVersion(value: unknown): boolean {
+  return typeof value === 'string' && RUNTIME_CONTRACT_SCHEMA_VERSIONS.has(value);
+}
+
 /** Browser-local structural type for the compact inbox response (SPEC §11.1). */
 export interface OwnerDecisionInboxData {
-  schemaVersion: '1';
+  schemaVersion: 'current' | '1';
   generatedAt: string;
   totalPrinciples: number;
   groups: {
@@ -196,7 +207,7 @@ function isTimelineEvent(value: unknown): boolean {
 
 function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
   if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'principleId', 'asOf', 'summary', 'principleState', 'process', 'automation', 'attention', 'activationSummary', 'timeline', 'sourceRefs', 'dataQuality'])) return false;
-  if (value.schemaVersion !== '1' || typeof value.principleId !== 'string' || value.principleId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
+  if (!isRuntimeContractSchemaVersion(value.schemaVersion) || typeof value.principleId !== 'string' || value.principleId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
   const {
     summary, principleState: principle, process, automation, attention,
     activationSummary: activation, dataQuality: quality,
@@ -291,7 +302,7 @@ export function isOwnerDecisionViewCore(value: unknown): value is OwnerDecisionV
     'incidentSummary', 'learnedPrinciple', 'rationale', 'applicability', 'nonApplicabilityOrUnknown', 'expectedBehavior',
     'currentEnforcement', 'evidenceSummary', 'uncertainty', 'risk', 'rollback', 'decisionState', 'decisionSubjects',
     'availableActions', 'blockers', 'nextAction', 'inbox', 'technicalDetails'])) return false;
-  if (value.schemaVersion !== '1' || !isString(value.principleId) || !isString(value.asOf)) return false;
+  if (!isRuntimeContractSchemaVersion(value.schemaVersion) || !isString(value.principleId) || !isString(value.asOf)) return false;
   if (value.sourceReadStatus !== 'complete' && value.sourceReadStatus !== 'partial') return false;
   if (!isStringEnum(value.decisionState, ownerDecisionStates)) return false;
   if (!Array.isArray(value.availableActions) || !value.availableActions.every(isOwnerAction)) return false;
@@ -309,7 +320,7 @@ export function validateOwnerDecisionViewCore(value: unknown): OwnerDecisionView
 export function isOwnerDecisionInbox(value: unknown): value is OwnerDecisionInboxData {
   return isObject(value)
     && hasOwnFields(value, ['schemaVersion', 'generatedAt', 'totalPrinciples', 'groups', 'historicalUnknown'])
-    && value.schemaVersion === '1'
+    && isRuntimeContractSchemaVersion(value.schemaVersion)
     && isString(value.generatedAt)
     && typeof value.totalPrinciples === 'number'
     && isObject(value.groups) && hasOwnFields(value.groups, ['decision', 'blocked', 'recovery'])
@@ -326,7 +337,7 @@ export function validateOwnerDecisionInbox(value: unknown): OwnerDecisionInboxDa
 
 /** Browser-local structural type for the compact library projection (SPEC §11.2). */
 export interface OwnerDecisionLibraryData {
-  schemaVersion: '1';
+  schemaVersion: 'current' | '1';
   generatedAt: string;
   entries: Record<string, {
     decisionState: string;
@@ -347,7 +358,7 @@ function isOwnerDecisionLibraryEntry(value: unknown): boolean {
 export function isOwnerDecisionLibrary(value: unknown): value is OwnerDecisionLibraryData {
   return isObject(value)
     && hasOwnFields(value, ['schemaVersion', 'generatedAt', 'entries'])
-    && value.schemaVersion === '1'
+    && isRuntimeContractSchemaVersion(value.schemaVersion)
     && isString(value.generatedAt)
     && isObject(value.entries)
     && Object.values(value.entries).every(isOwnerDecisionLibraryEntry);
@@ -410,7 +421,7 @@ function isEnvironmentContext(value: unknown): boolean {
 
 function isGovernanceExperienceSnapshot(value: unknown): value is GovernanceExperienceSnapshot {
   if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'snapshotId', 'asOf', 'summary', 'readiness', 'activity', 'trustContext', 'dataQuality'])) return false;
-  if (value.schemaVersion !== '1' || typeof value.snapshotId !== 'string' || value.snapshotId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
+  if (!isRuntimeContractSchemaVersion(value.schemaVersion) || typeof value.snapshotId !== 'string' || value.snapshotId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
   const { summary, readiness, activity, trustContext, dataQuality } = value;
   if (!isObject(summary) || !hasOwnFields(summary, ['primaryAttention', 'headlineCode', 'reasonCode', 'nextActionCode'])
     || !isStringEnum(summary.primaryAttention, governancePrimaryAttentions)

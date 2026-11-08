@@ -212,7 +212,7 @@ export class ApprovalsConsoleModel {
     };
   }
 
-  async getApprovalDetail(approvalId: string): Promise<(ApprovalWithContext & { isMvpProven: boolean; writeGuardVersion: 'approval-review-v1'; review: { expectedReview: ApprovalReviewGuard; material: ApprovalReviewMaterial } }) | null> {
+  async getApprovalDetail(approvalId: string): Promise<(ApprovalWithContext & { isMvpProven: boolean; writeGuardVersion: 'approval-review'; review: { expectedReview: ApprovalReviewGuard; material: ApprovalReviewMaterial } }) | null> {
     if (!stateDbExists(this.workspaceDir)) return null;
     const { queue, connection } = this.createReadContext();
     const db = connection.getDb();
@@ -221,14 +221,17 @@ export class ApprovalsConsoleModel {
       const record = await queue.getById(approvalId);
       if (!record) { db.exec('COMMIT'); return null; }
       const artifact = await new SqlitePIArtifactStore(connection).getArtifactById(record.artifactId);
-      const common = { schemaVersion: 'approval-review-v1' as const, approvalId, artifactId: record.artifactId, channel: record.channel };
+      // PRI-1139: the guard minted here carries the version-neutral
+      // 'approval-review'; the core guard schema still accepts the pre-cutover
+      // spelling submitted by in-flight older clients.
+      const common = { schemaVersion: 'approval-review' as const, approvalId, artifactId: record.artifactId, channel: record.channel };
       const expectedReview: ApprovalReviewGuard = artifact
         ? { ...common, artifactState: 'present', artifactDigest: computeArtifactDigest(artifact) }
         : { ...common, artifactState: 'missing' };
       const material = approvalReviewMaterial(record.artifactId, record.channel, artifact?.contentJson ?? null);
       db.exec('COMMIT');
       return { ...record, confidenceLabel: mapConfidenceToLabel(record.confidence), isMvpProven: MVP_PROVEN_CHANNELS.has(record.channel),
-        writeGuardVersion: 'approval-review-v1', review: { expectedReview, material } };
+        writeGuardVersion: 'approval-review', review: { expectedReview, material } };
     } catch (error) { try { db.exec('ROLLBACK'); } catch { /* Preserve the original read failure. */ } if (isMissingTableError(error)) return null; throw error;
     } finally { connection.close(); }
   }

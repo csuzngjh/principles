@@ -19,6 +19,7 @@
 /* eslint-disable @typescript-eslint/class-methods-use-this -- lifecycle-style methods; kept on the model for cohesion */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '@principles/core/runtime';
 import {
   GovernanceProjectionCollector,
   isRecord,
@@ -53,7 +54,7 @@ export interface OwnerDecisionInboxItem {
 }
 
 export interface OwnerDecisionInboxResponse {
-  schemaVersion: '1';
+  schemaVersion: typeof RUNTIME_CONTRACT_SCHEMA_VERSION;
   generatedAt: string;
   totalPrinciples: number;
   groups: {
@@ -143,7 +144,7 @@ export class OwnerDecisionViewModel {
       // No readable ledger: degrade observably instead of an empty success
       // (SPEC §15 — an unavailable ledger is not "zero principles, all fine").
       return {
-        schemaVersion: '1', generatedAt: now, totalPrinciples: 0,
+        schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, generatedAt: now, totalPrinciples: 0,
         groups: { decision: [], blocked: [], recovery: [] },
         historicalUnknown: { count: 0, reasonText: '' },
         degraded: { reason: 'principle ledger unavailable', nextAction: '检查原则账本文件。' },
@@ -152,7 +153,7 @@ export class OwnerDecisionViewModel {
     const principlesTree = GovernanceProjectionCollector.principleTreeFromLedger(ledgerParsed);
     if (principlesTree === null) {
       return {
-        schemaVersion: '1', generatedAt: now, totalPrinciples: 0,
+        schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, generatedAt: now, totalPrinciples: 0,
         groups: { decision: [], blocked: [], recovery: [] },
         historicalUnknown: { count: 0, reasonText: '' },
         degraded: { reason: 'principle ledger unavailable', nextAction: '检查原则账本文件。' },
@@ -199,7 +200,7 @@ export class OwnerDecisionViewModel {
       }
     }
     return {
-      schemaVersion: '1',
+      schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION,
       generatedAt: now,
       totalPrinciples: total,
       groups: { decision, blocked, recovery },
@@ -214,7 +215,7 @@ export class OwnerDecisionViewModel {
 
   /** Compact per-principle projection for the Library list (§11.2). */
   async getLibraryCompact(now: string = ISO_NOW()): Promise<{
-    schemaVersion: '1';
+    schemaVersion: typeof RUNTIME_CONTRACT_SCHEMA_VERSION;
     generatedAt: string;
     entries: Record<string, { decisionState: OwnerDecisionViewCore['decisionState']; learnedPrinciple: OwnerDecisionInboxItem['learnedPrinciple'] }>;
     degraded?: { reason: string };
@@ -224,11 +225,11 @@ export class OwnerDecisionViewModel {
     try {
       ledgerParsed = this.parseLedger();
     } catch {
-      return { schemaVersion: '1', generatedAt: now, entries: {}, degraded: { reason: 'principle ledger unavailable' } };
+      return { schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, generatedAt: now, entries: {}, degraded: { reason: 'principle ledger unavailable' } };
     }
     const principlesTree = GovernanceProjectionCollector.principleTreeFromLedger(ledgerParsed);
     if (principlesTree === null) {
-      return { schemaVersion: '1', generatedAt: now, entries: {}, degraded: { reason: 'principle ledger unavailable' } };
+      return { schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, generatedAt: now, entries: {}, degraded: { reason: 'principle ledger unavailable' } };
     }
     const entries: Record<string, { decisionState: OwnerDecisionViewCore['decisionState']; learnedPrinciple: OwnerDecisionInboxItem['learnedPrinciple'] }> = {};
     for (const principleId of Object.keys(principlesTree).sort()) {
@@ -244,7 +245,7 @@ export class OwnerDecisionViewModel {
         // Skip unreadable entries — the Library falls back to neutral copy.
       }
     }
-    return { schemaVersion: '1', generatedAt: now, entries };
+    return { schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION, generatedAt: now, entries };
   }
 
   // ── input assembly ────────────────────────────────────────────────────────
@@ -384,7 +385,7 @@ export class OwnerDecisionViewModel {
     });
 
     return {
-      schemaVersion: '1',
+      schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION,
       principleId,
       asOf: now,
       ledger: {

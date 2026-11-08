@@ -33,6 +33,7 @@ import type {
   OwnerSourceRef, Reason, StringField,
 } from './owner-decision-view-contract.js';
 import { OwnerDecisionViewCoreSchema } from './owner-decision-view-contract.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION, RuntimeContractSchemaVersionSchema } from '../schema-version.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Timestamp = GovernanceFactsSchema.properties.asOf;
@@ -89,7 +90,7 @@ export const OwnerDecisionApplicationsSchema = Type.Object({
   })),
 });
 export const OwnerDecisionInputsSchema = Type.Object({
-  schemaVersion: Type.Literal('1'),
+  schemaVersion: RuntimeContractSchemaVersionSchema, // PRI-1139: 'current' writes, legacy '1' reads
   principleId: NonEmptyString,
   asOf: Timestamp,
   ledger: Type.Object({
@@ -933,7 +934,7 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
   })();
 
   const view: OwnerDecisionViewCore = {
-    schemaVersion: '1',
+    schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION,
     principleId,
     asOf,
     sourceReadStatus,
