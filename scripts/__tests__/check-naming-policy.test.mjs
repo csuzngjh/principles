@@ -161,6 +161,14 @@ describe('check-naming-policy controlled scan roots (PR #2367 CodeRabbit #3/#4/#
     expect(parsed.inventory['versioned-output-ref']).toBeGreaterThan(0);
     expect(parsed.findings.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
   });
+  it('gates a future -v3 spelling too — version digits are not capped at 1-2', () => {
+    const root = tempScanRoot();
+    fs.writeFileSync(path.join(root, 'runner.ts'), "const input = { outputSchemaRef: 'foo-output-v3' };\n");
+    const result = runRoot(root, '--strict', '--json');
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.findings.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
+  });
 });
 
 describe('check-naming-policy config surface (PRI-1136 scan redesign)', () => {

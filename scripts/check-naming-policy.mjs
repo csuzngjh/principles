@@ -316,7 +316,7 @@ const RULES = [
   {
     id: 'versioned-output-ref',
     why: '带 -vN 的 outputSchemaRef 写入（PRI-1139 / PR-6 写入侧已切换，再出现即为回退）',
-    re: /outputSchemaRef:\s*['"`][^'"`]*-v[12]['"`]/g,
+    re: /outputSchemaRef:\s*['"`][^'"`]*-v\d+['"`]/g,
     gated: true,
     frozenExempt: false,
     // PR #2367 CodeRabbit #6: scan the whole file so the property name and

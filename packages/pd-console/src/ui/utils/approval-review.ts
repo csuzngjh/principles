@@ -49,9 +49,8 @@ export function validateApprovalReview(value: unknown): ApprovalReviewData | nul
   if (exactBody !== null && (channel === 'code_tool_hook') !== (exactBody.kind === 'rule_code')) return null;
   // Echo the guard's own schemaVersion verbatim (PRI-1139): whichever spelling
   // the minting server used must round-trip byte-identically on submission.
-  const guardVersion = APPROVAL_REVIEW_GUARD_VERSIONS.has(String(guard.schemaVersion))
-    ? (guard.schemaVersion as ApprovalReviewGuardSchemaVersion)
-    : 'approval-review';
+  // The value is already constrained to this union by the guards above.
+  const guardVersion = guard.schemaVersion as ApprovalReviewGuardSchemaVersion;
   const expectedReview: ApprovalReviewGuard = guard.artifactState === 'present' && typeof guard.artifactDigest === 'string'
     ? { schemaVersion: guardVersion, approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'present', artifactDigest: guard.artifactDigest }
     : { schemaVersion: guardVersion, approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'missing' };

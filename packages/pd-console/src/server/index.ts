@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from './update-timeout.js';
 import {
   loadPdConfig,
@@ -768,7 +768,26 @@ export async function main(): Promise<void> {
   });
 }
 
-main().catch((err: unknown) => {
-  console.error('[pd-console] Fatal startup error:', err);
-  process.exit(1);
-});
+// cli-7 / PRI-892 precedent: importing this module (a test driving
+// handleRequest directly, for example) must NOT start a production console.
+// The unguarded call bound port 3100 and initialized the first registered
+// workspace — including the real ~/.pd history reconciliation and the
+// ~/.openclaw/extensions backup migration — as an import side effect.
+// Node hands argv[1] as the unresolved link path while import.meta.url is the
+// realpath, so canonicalize before comparing.
+function isMainModuleEntry(): boolean {
+  const [, entry] = process.argv;
+  if (!entry) return false;
+  try {
+    return pathToFileURL(fs.realpathSync(entry)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModuleEntry()) {
+  main().catch((err: unknown) => {
+    console.error('[pd-console] Fatal startup error:', err);
+    process.exit(1);
+  });
+}
