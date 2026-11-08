@@ -299,8 +299,10 @@ describe("PRI-641: /api/principles/core dispatch ordering (source contract)", ()
 
   it("index.ts dispatches /api/principles/core before the /api/principles catch-all", () => {
     const source = fs.readFileSync(serverIndexPath, "utf8");
-    const coreIdx = source.indexOf("urlPath === '/api/principles/core'");
-    const catchAllIdx = source.indexOf("urlPath.startsWith('/api/principles/')");
+    // PRI-1139: dispatch runs on the canonical routePath (the deprecated
+    // /api/v1 prefix is stripped at the entry normalization).
+    const coreIdx = source.indexOf("routePath === '/api/principles/core'");
+    const catchAllIdx = source.indexOf("routePath.startsWith('/api/principles/')");
     expect(coreIdx).toBeGreaterThan(-1);
     expect(catchAllIdx).toBeGreaterThan(-1);
     expect(coreIdx).toBeLessThan(catchAllIdx);
