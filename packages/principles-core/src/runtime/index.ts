@@ -125,7 +125,7 @@ export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, Pri
 // Hygiene types schemas
 export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-types.js';
 // Event types schemas
-export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimePromptActivationsInjectedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
+export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RulePromotionEventDataSchema, GovernanceActionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimePromptActivationsInjectedEventDataSchema, PromptPresenceObservedEventDataSchema, RuleHostUnhealthyEventDataSchema, RuleHostSkippedEventDataSchema, TrajectoryObservabilityFailureEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, EmpathyEventStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
 export { DiscriminatedEventLogEntrySchema } from './types/event-payload.js';
 
@@ -1912,6 +1912,7 @@ export type {
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
   RuntimePromptActivationsInjectedEventData,
+  PromptPresenceObservedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
   TrajectoryObservabilityFailureEventData,
