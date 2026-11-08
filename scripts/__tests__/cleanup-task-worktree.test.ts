@@ -782,9 +782,39 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     const pointer = marker.split('gitdir: ')[1].trim();
     const resolved = path.resolve(worktreePath, pointer);
     const adminRoot = path.join(commonDir, 'worktrees');
-    if (!resolved.startsWith(adminRoot + path.sep)) throw new Error('admin dir escaped the repository admin root');
+    if (!resolved.startsWith(adminRoot + path.sep)) throw new Error('admin dir escaped the repository root check');
     return resolved;
   }
+
+  it('restores the worktree when a non-cooperating writer adds an untracked file after the move', async () => {
+    // Two-check protocol: the pre-move status check cannot see a writer that
+    // commits bytes between that check and the rename — the rename does not
+    // stop an open handle. The post-move status check inside the quarantine
+    // catches the late untracked file and the worktree goes back INTACT.
+    const { wt } = await makeTask('late-untracked-writer');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let wrote = false;
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: primary,
+        worktreePath: wt,
+        primaryPath: primary,
+        onQuarantined: (quarantined) => {
+          fs.writeFileSync(path.join(quarantined, 'late-writer.txt'), 'written during quarantine\n', 'utf-8');
+          wrote = true;
+        },
+      }),
+    );
+    expect(wrote).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.reasonCode).toBe('OWNERSHIP_CHANGED');
+    expect(result.reason).toContain('non-cooperating writer');
+    // The late write survived: the worktree was restored intact.
+    expect(result.restoredPath).toBe(wt);
+    expect(fs.readFileSync(path.join(wt, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+  }, 120_000);
 
   it('removes a worktree containing an initialized submodule via a verified manual rename', async () => {
     // git refuses `git worktree move` for worktrees with initialized submodules
