@@ -422,6 +422,27 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     expect(fs.existsSync(link)).toBe(false);
     expect(fs.readFileSync(path.join(target, 'index.js'), 'utf-8')).toBe('real\n');
   });
+
+  it('refuses when the tree root itself is a reparse point (a swapped worktree root)', () => {
+    const { outside } = buildTree('swapped-root');
+    const link = path.join(root, 'swapped-root-link');
+    makeJunction(link, outside);
+    const verdict = classifyReparsePoints(link);
+    expect(verdict.complete).toBe(false);
+    expect(verdict.safe).toBe(false);
+    expect(verdict.unreadable[0].error).toContain('reparse point');
+  });
+
+  it('does not treat a backslash as a .. separator on POSIX', () => {
+    if (process.platform === 'win32') return; // \ is a separator on Windows
+    const { tree } = buildTree('posix-backslash');
+    const link = path.join(tree, 'pkg-data');
+    fs.symlinkSync('pkg\\..\\data', link, 'dir');
+    const verdict = classifyReparsePoints(tree);
+    const row = verdict.external.find((l) => l.path === link);
+    expect(row, 'the link must still be reported as unsafe').toBeDefined();
+    expect(row?.unsafeReason).not.toBe('non-lexical');
+  });
 });
 
 describe('formatProgress', () => {

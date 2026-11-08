@@ -113,8 +113,12 @@ function fail(args, code, message, nextAction, extra) {
 
 /** Paths containing shell metacharacters are never inlined into a paste-ready command. */
 const UNSAFE_SHELL_CHARS = /["&|%!^<>$`'\r\n]/;
+// On POSIX a trailing backslash escapes the closing quote of a double-quoted
+// argument; on Windows it is an ordinary path separator.
+const UNSAFE_POSIX_PATH_CHARS = /[\\"&|%!^<>$`'\r\n]/;
 function shellPath(p) {
-  return UNSAFE_SHELL_CHARS.test(p) ? '"<copy path from JSON output; it contains shell metacharacters>"' : '"' + p + '"';
+  const unsafe = process.platform === 'win32' ? UNSAFE_SHELL_CHARS : UNSAFE_POSIX_PATH_CHARS;
+  return unsafe.test(p) ? '"<copy path from JSON output; it contains shell metacharacters>"' : '"' + p + '"';
 }
 
 /** Format the first few unsafe links so the operator sees the danger, not a count. */
@@ -333,6 +337,24 @@ async function main() {
     let targetSnapshots = [];
     try {
       await withMutationLock({ commonDir, operation: 'worktree-remove', target: target.path }, async () => {
+        // Re-check ownership INSIDE the lock, immediately before any mutation.
+        const liveLease = readLeaseState(target.path);
+        if (liveLease.phase === 'active' || liveLease.phase === 'invalid') {
+          throw new PreflightRefusal(
+            'A write lease became ' + liveLease.phase + ' after the pre-lock check; refusing to detach links or remove the worktree.',
+            'Coordinate with the lease holder and retry once it is released.',
+            { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED, leasePhase: liveLease.phase }
+          );
+        }
+        const liveList = await listWorktrees(cwd);
+        const liveEntry = liveList.find((w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(target.path, cwd));
+        if (liveEntry && liveEntry.locked) {
+          throw new PreflightRefusal(
+            'The worktree became Git-locked after the pre-lock check; refusing to detach links or remove it.',
+            'Release the claim deliberately, then retry.',
+            { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED }
+          );
+        }
         const linkScan = classifyReparsePoints(target.path);
 
         if (!linkScan.complete) {
@@ -431,7 +453,9 @@ async function main() {
         // (CodeRabbit), and existsSync alone cannot detect the 2026-11-06 shape
         // where files INSIDE the target were deleted while the directory stayed.
         targetSnapshots = linkScan.external
-          .filter((l) => l.canonicalTarget)
+          // Only targets genuinely OUTSIDE the tree. A cyclic link points at the
+          // worktree itself, which is expected to disappear with it.
+          .filter((l) => l.canonicalTarget && l.unsafeReason === 'outside')
           .map((l) => {
             const existedBefore = fs.existsSync(l.canonicalTarget);
             return {
@@ -448,9 +472,16 @@ async function main() {
           removeError = err && err.message ? err.message : String(err);
         }
         if (removeError) {
-          // Porcelain was clean AND the just-completed, complete scan proved no
-          // unsafe link remains, so only ignored build output can be blocking
-          // the removal. Double --force is never used.
+          // Never force past a NEW untracked file created after our first
+          // porcelain check: re-prove cleanliness, or stop instead of retrying.
+          const freshStatus = await runGit(['status', '--porcelain'], { cwd: target.path, allowFailure: true });
+          if (freshStatus === null || freshStatus.trim().length > 0) {
+            const changed = new Error(
+              'git worktree remove refused and the worktree changed during the run (porcelain no longer clean); NOT retrying with --force'
+            );
+            changed.reason = REMOVAL_REASONS.REMOVAL_FAILED;
+            throw changed;
+          }
           await runGit(['worktree', 'remove', '--force', target.path], { cwd });
           notes.push('removal needed one --force pass for ignored build output (porcelain was clean)');
         }
@@ -477,7 +508,7 @@ async function main() {
           String(err.message),
           'Do NOT delete it with a recursive delete. The junction-safe, explicitly acked residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
             shellPath(target.path) +
-            ' --ack-unknown --apply . If it reports "not a discovered residue shell" (an out-of-pool worktree), do NOT bypass the gate: re-run npm run dev:workspace:snapshot so the tool can classify the directory, then retry --residue with --ack-unknown. Both gates must stay intact.',
+            ' --ack-unknown --apply . NOTE: --residue only accepts shells the tool discovered inside its pool roots; an OUT-OF-POOL worktree is not discoverable and re-running the snapshot does not change that. This PR deliberately adds no bypass — preserve the directory and escalate for an Owner decision. Never weaken the discovery or --ack-unknown gates.',
           { reason: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL, removedWorktree: null }
         );
         return;
@@ -517,7 +548,7 @@ async function main() {
         shellRemains
           ? 'Do NOT delete it with a recursive delete. The junction-safe residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
             shellPath(target.path) +
-            ' --ack-unknown --apply . If it reports "not a discovered residue shell" (an out-of-pool worktree), do NOT bypass the gate: re-run npm run dev:workspace:snapshot so the tool can classify the directory, then take the --residue path with --ack-unknown. Both the discovery and the acknowledgement gates must stay intact.'
+            ' --ack-unknown --apply . NOTE: --residue only accepts shells the tool discovered inside its pool roots; an OUT-OF-POOL worktree is not discoverable and re-running the snapshot does not change that. This PR deliberately adds no bypass — preserve the directory and escalate for an Owner decision. Never weaken the discovery or --ack-unknown gates.'
           : 'Do NOT retry with a bare `git worktree remove` — it skips the ERR-098 preflight. Re-run npm run dev:worktree:cleanup -- ' +
             shellPath(args.target) + ' after resolving the error above.',
         {

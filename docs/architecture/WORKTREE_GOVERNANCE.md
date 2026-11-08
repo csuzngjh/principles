@@ -305,7 +305,8 @@ before the delete, so partial deletion INSIDE a still-present directory is
 detected. Targets that were already missing are not reported as lost. A link
 proven to stay inside the tree, non-cyclically, never blocks a removal: it dies
 with the tree. The batch sweep (`dev:workspace:cleanup -- --apply`) refuses the
-same way, under the same lock, and never detaches on its own.
+same way, under the same lock, and never auto-detaches an UNSAFE link (it does
+detach links proven internal, which cannot carry the deletion elsewhere).
 
 ### 5.2 Observability of long deletions
 

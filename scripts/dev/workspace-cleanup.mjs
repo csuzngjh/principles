@@ -82,6 +82,15 @@ function print(args, payload, lines) {
   else console.log(lines.join('\n'));
 }
 
+/** Never inline a path containing shell metacharacters into a paste-ready command. */
+function shellPath(p) {
+  const unsafeChars = process.platform === 'win32' ? '"&|%!^<>$`\'' : '\\"&|%!^<>$`\'';
+  for (const ch of p) {
+    if (unsafeChars.includes(ch) || ch === '\n' || ch === '\r') return '"<copy path from JSON output>"';
+  }
+  return '"' + p + '"';
+}
+
 function describeAction(action) {
   const lines = [];
   if (action.kind === 'remove-worktree') {
@@ -374,9 +383,9 @@ async function main() {
                 (first.target || '<unreadable target>') +
                 ' [' + (first.unsafeReason || 'outside') + ']; ' +
                 REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT +
-                '; detach the links, then run: npm run dev:worktree:cleanup "' +
-                worktreePath +
-                '" --detach-external-links',
+                '; detach the links, then run: npm run dev:worktree:cleanup -- ' +
+                shellPath(worktreePath) +
+                ' --detach-external-links',
             };
           }
           // Even an internal link must not be traversed by git: on Windows it

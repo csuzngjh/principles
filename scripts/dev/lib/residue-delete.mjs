@@ -139,11 +139,17 @@ export function canonicalPath(p) {
   }
 }
 
+// A `..` component cannot be normalised lexically when a link precedes it. On
+// POSIX a backslash is an ordinary FILENAME character, so only `/` separates
+// components there; on Windows both separators count.
+const NON_LEXICAL_TARGET = process.platform === 'win32' ? /(^|[\\/])\.\.([\\/]|$)/ : /(^|\/)\.\.(\/|$)/;
+
 /** Machine-readable refusal reasons shared by both cleanup entry points. */
 export const REMOVAL_REASONS = Object.freeze({
   EXTERNAL_LINKS_PRESENT: 'EXTERNAL_LINKS_PRESENT',
   EXTERNAL_TARGET_LOST: 'EXTERNAL_TARGET_LOST',
   SCAN_INCOMPLETE: 'SCAN_INCOMPLETE',
+  OWNERSHIP_CHANGED: 'OWNERSHIP_CHANGED',
   MUTATION_LOCK_UNAVAILABLE: 'MUTATION_LOCK_UNAVAILABLE',
   REMOVAL_FAILED: 'REMOVAL_FAILED',
   REMOVAL_FAILED_RESIDUE_SHELL: 'REMOVAL_FAILED_RESIDUE_SHELL',
@@ -172,20 +178,36 @@ export const REMOVAL_REASONS = Object.freeze({
  *            complete: boolean, safe: boolean}}
  */
 export function classifyReparsePoints(root) {
+  // The tree root itself must be a REAL directory. If it was replaced by a
+  // junction pointing elsewhere, every "inside" comparison below would be
+  // measured against the WRONG tree and git could delete the target's files.
+  let rootStat = null;
+  try { rootStat = fs.lstatSync(root); } catch { /* reported below */ }
+  if (!rootStat || rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    return {
+      external: [], internal: [], links: 0, files: 0, dirs: 0,
+      unreadable: [{ path: root, error: 'root is not a readable real directory (or is itself a reparse point)' }],
+      complete: false, safe: false,
+    };
+  }
   const scan = scanReparsePoints(root);
   const canonicalRoot = canonicalPath(root);
   const external = [];
   const internal = [];
   for (const link of scan.links) {
     const lexical = resolveLinkTarget(link.path, link.target);
-    const nonLexical = typeof link.target === 'string' && /(^|[\\/])\.\.([\\/]|$)/.test(link.target);
+    const nonLexical = typeof link.target === 'string' && NON_LEXICAL_TARGET.test(link.target);
     const canonicalTarget = lexical !== null && !nonLexical ? canonicalPath(lexical) : null;
     // Both sides come from realpath, so compare case-SENSITIVELY.
     const inside =
       canonicalRoot !== null &&
       canonicalTarget !== null &&
       isPathInsideRoot(canonicalRoot, canonicalTarget, { caseSensitive: true });
-    const cycle = inside && isPathInsideRoot(canonicalTarget, link.path);
+    // Canonicalise the link's own parent too: on a case-sensitive Windows
+    // directory, comparing a raw lexical link path would invent a false cycle.
+    const canonicalParent = canonicalPath(path.dirname(link.path));
+    const canonicalLink = canonicalParent ? path.join(canonicalParent, path.basename(link.path)) : link.path;
+    const cycle = inside && isPathInsideRoot(canonicalTarget, canonicalLink, { caseSensitive: true });
     const unsafeReason = nonLexical
       ? 'non-lexical'
       : canonicalTarget === null
@@ -366,6 +388,13 @@ export function removeResidueTree(root, opts = {}) {
 
   const started = now();
   const preflight = scanReparsePoints(guard.resolved);
+  if (preflight.unreadable.length > 0) {
+    return {
+      ok: false, removedFiles: 0, removedLinks: 0, dirs: 0, elapsedMs: 0, detachedLinks: [], brokenTargets: [],
+      error: 'preflight incomplete: ' + preflight.unreadable.length + ' unreadable directory/directories (first: ' +
+        preflight.unreadable[0].path + ') — refusing to delete a partly unreadable tree',
+    };
+  }
   const total = preflight.files + preflight.dirs + preflight.links.length;
 
   let removedFiles = 0;
