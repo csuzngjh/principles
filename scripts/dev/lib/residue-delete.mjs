@@ -654,7 +654,7 @@ export function removeResidueTree(root, opts = {}) {
   // If a directory is swapped for a junction between enumeration and descent,
   // the handle may have opened the target, but the post-open lstat detects the
   // reparse point and the handle is closed without reading a single entry.
-  const walk = (dir, isRoot = false) => {
+  const walk = (dir, isRoot = false, expectedIdentity = null) => {
     let handle;
     try {
       handle = fs.opendirSync(dir);
@@ -687,6 +687,14 @@ export function removeResidueTree(root, opts = {}) {
     } catch (err) {
       handle.closeSync();
       throw err;
+    }
+    // The caller's enumeration recorded this directory's identity immediately
+    // before descending. Adopting whatever the path NOW names would let a
+    // non-cooperating writer redirect the whole subtree deletion — verify
+    // first, refuse on any mismatch (CodeRabbit round 4, adoption window).
+    if (expectedIdentity && (stat.dev !== expectedIdentity.dev || stat.ino !== expectedIdentity.ino)) {
+      handle.closeSync();
+      throw new Error('directory ' + dir + ' was replaced between the scan and this walk; refusing to adopt it (fail-closed)');
     }
     if (stat.isSymbolicLink()) {
       handle.closeSync();
@@ -739,7 +747,7 @@ export function removeResidueTree(root, opts = {}) {
         } else if (childStat.isDirectory()) {
           assertParentStable();
           assertChildUnchanged(full, childStat);
-          if (walk(full)) {
+          if (walk(full, false, { dev: childStat.dev, ino: childStat.ino })) {
             assertParentStable();
             assertChildUnchanged(full, childStat);
             fs.rmdirSync(full);
@@ -762,7 +770,7 @@ export function removeResidueTree(root, opts = {}) {
   };
 
   try {
-    walk(guard.resolved, true);
+    walk(guard.resolved, true, rootIdentity);
     // The final rmdir resolves the root path through its ancestors too. Verify
     // the root still names the directory this walk emptied before removing it.
     const rootNow = fs.lstatSync(guard.resolved);

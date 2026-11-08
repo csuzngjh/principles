@@ -348,7 +348,27 @@ for (const file of devFiles) {
 // mutation mutex; check every imported removeWorktreeSafely() call independently.
 for (const file of devFiles) {
   const source = fs.readFileSync(file, 'utf8');
-  if (!/import\s*\{[^}]*\bremoveWorktreeSafely\b[^}]*\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su.test(source)) {
+  const namedImport = source.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su);
+  const namespaceImport = source.match(/import\s*\*\s*as\s*(\w+)\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su);
+  if (namedImport && /\bremoveWorktreeSafely\s+as\s+\w+/.test(namedImport[1])) {
+    // An alias renames every call site out of the scan below — a blind spot,
+    // so the import form is refused outright instead of being silently skipped.
+    fail(
+      'git-mutation-mutex',
+      path.relative(ROOT, file) + ' imports removeWorktreeSafely with an alias; the call-site mutation-lock scan cannot verify it. Import it under its own name.',
+    );
+    continue;
+  }
+  if (namespaceImport) {
+    // swr.removeWorktreeSafely(...) escapes the identifier scan below.
+    fail(
+      'git-mutation-mutex',
+      path.relative(ROOT, file) + ' imports safe-worktree-remove.mjs as a namespace (' + namespaceImport[1] +
+        '); the call-site mutation-lock scan cannot verify member calls. Use a named import.',
+    );
+    continue;
+  }
+  if (!namedImport) {
     continue;
   }
   const masked = blankNonCode(source);
@@ -356,7 +376,10 @@ for (const file of devFiles) {
   const rel = path.relative(ROOT, file);
   const lineOf = (at) => source.slice(0, at).split('\n').length;
   const callRe = /\bremoveWorktreeSafely\s*\(/g;
-  for (const call of source.matchAll(callRe)) {
+  // Scan the MASKED source so mentions inside comments and strings are not
+  // misreported as unlocked calls, while real call sites keep their offsets
+  // (blankNonCode preserves string length and therefore every index).
+  for (const call of masked.matchAll(callRe)) {
     if (!spans.some(([start, end]) => call.index >= start && call.index < end)) {
       fail(
         'git-mutation-mutex',

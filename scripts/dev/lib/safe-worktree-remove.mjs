@@ -95,6 +95,10 @@ async function moveWorktreeIntoQuarantineManually({ worktreePath, quarantinePath
   fs.renameSync(worktreePath, quarantinePath);
   let submoduleRollbackEntries = [];
   let adminDir = null;
+  // Only restore the admin reverse pointer when THIS call actually rewrote it:
+  // rolling back a pointer we never touched would clobber another process's
+  // (or another worktree's) registration (CodeRabbit round 4).
+  let pointerRewritten = false;
   try {
     const commonStat = fs.lstatSync(commonDir);
     if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
@@ -140,6 +144,7 @@ async function moveWorktreeIntoQuarantineManually({ worktreePath, quarantinePath
     const temp = path.join(adminDir, 'gitdir.pd-retarget-' + process.pid + '-' + Math.random().toString(36).slice(2));
     fs.writeFileSync(temp, pointerValue, 'utf-8');
     fs.renameSync(temp, pointerFile);
+    pointerRewritten = true;
     if (normalizeGitPath(readRegularFileNoFollow(pointerFile).trim()) !== normalizeGitPath(markerPath)) {
       throw new Error('admin reverse pointer retarget did not stick');
     }
@@ -158,7 +163,7 @@ async function moveWorktreeIntoQuarantineManually({ worktreePath, quarantinePath
     try {
       if (fs.existsSync(quarantinePath) && !fs.existsSync(worktreePath)) {
         fs.renameSync(quarantinePath, worktreePath);
-        if (adminDir) {
+        if (adminDir && pointerRewritten) {
           const pointerFile = path.join(adminDir, 'gitdir');
           const temp = path.join(adminDir, 'gitdir.pd-restore-' + process.pid + '-' + Math.random().toString(36).slice(2));
           fs.writeFileSync(temp, path.join(worktreePath, '.git').split(path.sep).join('/') + '\n', 'utf-8');
@@ -225,6 +230,17 @@ function isWithinRoot(root, candidate) {
 }
 
 /**
+ * Render a value for a git-config `key = value` line. `$`-tokens in the
+ * replacement string are neutralised by using a replace callback, and values
+ * containing git-config comment starters (`#`, `;`) are double-quoted with
+ * backslash escaping so the path parses as one value (CodeRabbit round 4).
+ */
+function gitConfigValue(value) {
+  if (!/[#;]/.test(value)) return value;
+  return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+/**
  * Re-anchor a worktree's initialized submodules for the quarantine rename.
  * Two admin layouts exist (probed on git 2.40, Windows):
  *  - PER-WORKTREE admin: `<parentAdminDir>/modules/<name>`, referenced by a
@@ -280,9 +296,14 @@ function retargetSubmodulesForQuarantine({ parentAdminDir, commonDir, worktreePa
         const absAdmin = adminDir.split(path.sep).join('/');
         const absCheckout = path.join(quarantinePath, subPath).split(path.sep).join('/');
         writeAtomic(markerFile, 'gitdir: ' + absAdmin + '\n');
-        writeAtomic(configFile, configBytes.replace(/^(\s*)worktree\s*=.*$/m, '$1worktree = ' + absCheckout));
+        writeAtomic(configFile, configBytes.replace(/^(\s*)worktree\s*=.*$/m, (_line, indent) =>
+          indent + 'worktree = ' + gitConfigValue(absCheckout)
+        ));
+        // Rollback writes target the RESTORED worktree position: the rename
+        // back has already happened by the time rollback entries run, and the
+        // old quarantine path no longer exists then.
         rollbackEntries.push(() => {
-          writeAtomic(markerFile, markerBytes);
+          writeAtomic(path.join(worktreePath, subPath, '.git'), markerBytes);
           writeAtomic(configFile, configBytes);
         });
         notes.push('re-anchored per-worktree submodule admin for ' + subPath);
@@ -441,6 +462,9 @@ export async function removeWorktreeSafely({
   const quarantinePath = path.join(quarantineParent, 'worktree');
   const markerPath = path.join(quarantinePath, '.git');
   let markerContents = null;
+  // The original marker bytes captured before the forward move — the rollback
+  // authority that proves a quarantine marker was not substituted mid-flow.
+  let originalMarkerBytes = null;
   // Git refuses to move worktrees that contain initialized submodules, so such
   // worktrees take the manual rename + admin-retarget path. The choice also
   // decides which mechanism every rollback uses.
@@ -483,6 +507,10 @@ export async function removeWorktreeSafely({
     } else {
       // git worktree move is a rename of the directory entry, not a recursive
       // delete. It isolates the tree from writers still using the original path.
+      // The marker bytes are captured BEFORE the move so any rollback can prove
+      // the quarantine marker is still OURS — never Git-follow a substituted
+      // symlink back over another worktree's metadata (CodeRabbit round 4).
+      originalMarkerBytes = readRegularFileNoFollow(path.join(worktreePath, '.git'));
       await runGitCommand(['worktree', 'move', worktreePath, quarantinePath], { cwd: gitCwd });
     }
   } catch (err) {
@@ -499,6 +527,21 @@ export async function removeWorktreeSafely({
     }
     if (quarantineStat && quarantineStat.isDirectory() && !quarantineStat.isSymbolicLink()
       && !fs.existsSync(worktreePath)) {
+      // A quarantine whose .git entry cannot be proven to be the original
+      // regular marker is never handed back to Git: a symlink swapped in
+      // before the move-back could make Git truncate an external target.
+      let rollbackMarkerTrusted = movedManually;
+      if (!movedManually) {
+        try {
+          rollbackMarkerTrusted = originalMarkerBytes !== null
+            && readRegularFileNoFollow(markerPath) === originalMarkerBytes;
+        } catch {
+          rollbackMarkerTrusted = false;
+        }
+        if (!rollbackMarkerTrusted) {
+          notes.push('quarantine .git marker is not the original regular file; refusing to let Git move it back (quarantine preserved)');
+        }
+      }
       // Git may have renamed the directory but failed while updating its
       // administrative pointers. Only attempt rollback when Git itself still
       // recognizes the quarantine path as this registered worktree.
@@ -507,7 +550,7 @@ export async function removeWorktreeSafely({
         const quarantineEntry = registered.find(
           (entry) => normalizeGitPath(entry.path, gitCwd) === normalizeGitPath(quarantinePath, gitCwd)
         );
-        if (quarantineEntry && !quarantineEntry.locked) {
+        if (quarantineEntry && !quarantineEntry.locked && rollbackMarkerTrusted) {
           if (movedManually) {
             fs.renameSync(quarantinePath, worktreePath);
             if (fs.existsSync(worktreePath) && !fs.existsSync(quarantinePath)) {
@@ -559,7 +602,13 @@ export async function removeWorktreeSafely({
   }
 
   const restore = async () => {
-    if (!fs.existsSync(quarantinePath) || fs.existsSync(worktreePath)) return false;
+    if (!fs.existsSync(quarantinePath) || fs.existsSync(worktreePath)) {
+      // Disk truth: a git move-back can commit its rename and only then report
+      // failure — the tree may already be back at the original path with the
+      // quarantine gone. That IS a completed restore, not a preserved one.
+      if (fs.existsSync(worktreePath) && !fs.existsSync(quarantinePath)) return true;
+      return false;
+    }
     try {
       // Without the original marker bytes there is no safe rollback authority.
       // Never ask Git to move a quarantine whose .git entry failed no-follow
@@ -822,22 +871,11 @@ export async function removeWorktreeSafely({
       throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
     }
     const adminGitDir = path.join(adminDir, 'gitdir');
-    // Open one stable file descriptor and compare its identity with the
-    // directory entry after reading. A path-based lstat-then-read can follow a
-    // symlink swapped into place in between those separate operations.
-    let reversePointer;
-    const pointerFd = fs.openSync(adminGitDir, 'r');
-    try {
-      const opened = fs.fstatSync(pointerFd);
-      reversePointer = fs.readFileSync(pointerFd, 'utf-8').trim();
-      const named = fs.lstatSync(adminGitDir);
-      if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
-        || opened.dev !== named.dev || opened.ino !== named.ino) {
-        throw new Error('worktree admin reverse gitdir pointer changed or is not a regular file');
-      }
-    } finally {
-      fs.closeSync(pointerFd);
-    }
+    // The shared one-fd snapshot primitive: fstat the descriptor, read through
+    // it, compare against a fresh lstat. O_NOFOLLOW|O_NONBLOCK on POSIX also
+    // refuses FIFO/symlink substitutions instead of blocking on them (CodeRabbit
+    // round 4: a FIFO swap here would block while holding the mutation lock).
+    const reversePointer = readRegularFileNoFollow(adminGitDir).trim();
     const resolvedReversePointer = resolveAdminReversePointer(adminDir, reversePointer);
     if (normalizeGitPath(resolvedReversePointer) !== normalizeGitPath(markerPath)) {
       throw new Error('admin gitdir reverse pointer does not match the moved worktree marker');

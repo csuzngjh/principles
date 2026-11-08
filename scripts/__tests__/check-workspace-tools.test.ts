@@ -155,10 +155,18 @@ describe('workspace tools gate', () => {
     expect(result.stderr).toContain('MUTATION-GUARDED-HELPER');
   }, 60_000);
 
+  /** Resolve a fixture dev-entry target with an explicit containment check. */
+  function devEntryTarget(name: string): string {
+    const devDir = path.join(fixture, 'scripts', 'dev');
+    const resolved = path.join(devDir, name);
+    if (!resolved.startsWith(devDir + path.sep)) throw new Error('fixture target escaped the dev directory');
+    return resolved;
+  }
+
   it.each(['cleanup-task-worktree.mjs', 'workspace-cleanup.mjs'])(
     'fails when %s calls the imported destructive helper outside the mutation lock',
     async (entrypoint) => {
-      const target = path.join(fixture, 'scripts', 'dev', entrypoint);
+      const target = devEntryTarget(entrypoint);
       fs.writeFileSync(
         target,
         fs.readFileSync(target, 'utf-8') +
@@ -173,6 +181,52 @@ describe('workspace tools gate', () => {
     },
     60_000,
   );
+
+  it('refuses an aliased import of the destructive helper (the scan cannot verify renamed call sites)', async () => {
+    const target = devEntryTarget('cleanup-task-worktree.mjs');
+    fs.writeFileSync(
+      target,
+      fs.readFileSync(target, 'utf-8').replace(
+        "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
+        "import { removeWorktreeSafely as removeSafely } from './lib/safe-worktree-remove.mjs';",
+      ),
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('git-mutation-mutex');
+    expect(result.stderr).toContain('imports removeWorktreeSafely with an alias');
+  }, 60_000);
+
+  it('refuses a namespace import of the destructive helper module (member calls escape the scan)', async () => {
+    const target = devEntryTarget('cleanup-task-worktree.mjs');
+    fs.writeFileSync(
+      target,
+      fs.readFileSync(target, 'utf-8').replace(
+        "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
+        "import * as safeRemoval from './lib/safe-worktree-remove.mjs';",
+      ) + '\nvoid safeRemoval;\n',
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('git-mutation-mutex');
+    expect(result.stderr).toContain('as a namespace');
+  }, 60_000);
+
+  it('does not misreport removeWorktreeSafely mentions inside comments or strings', async () => {
+    const target = devEntryTarget('cleanup-task-worktree.mjs');
+    fs.writeFileSync(
+      target,
+      fs.readFileSync(target, 'utf-8') +
+        '\n// removeWorktreeSafely({ cwd: "/x", worktreePath: "/y", primaryPath: "/z" }) is guarded at its real call site.\n' +
+        "const note = 'removeWorktreeSafely() must stay inside the lock';\nvoid note;\n",
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain('calls imported removeWorktreeSafely() outside');
+  }, 60_000);
 
   it('fails when a background service is introduced', async () => {
     const target = path.join(fixture, 'scripts', 'dev', 'worktree-snapshot.mjs');

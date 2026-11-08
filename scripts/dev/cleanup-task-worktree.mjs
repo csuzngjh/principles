@@ -210,7 +210,7 @@ function resolveWorktreeAdminDir(worktreePath, commonDir) {
     || path.relative(canonicalRoot, canonicalCandidate).includes(path.sep)) {
     throw new Error('worktree admin directory is not a direct child of the canonical admin root');
   }
-  const reversePointer = fs.readFileSync(path.join(canonicalCandidate, 'gitdir'), 'utf8').trim();
+  const reversePointer = readRegularFileNoFollow(path.join(canonicalCandidate, 'gitdir')).trim();
   const reversePath = path.isAbsolute(reversePointer)
     ? path.resolve(reversePointer)
     : path.resolve(canonicalCandidate, reversePointer);

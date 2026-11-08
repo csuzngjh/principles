@@ -696,40 +696,55 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
   });
 });
 
-describe('POSIX-only deletion guarantees (CI ubuntu; skipped on Windows)', () => {
-  it.skipIf(process.platform === 'win32')(
-    'removeResidueTree refuses an unreadable directory, deletes NOTHING, and leaves no handle behind',
-    () => {
-      const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-residue-unreadable-'));
-      try {
-        fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
-        fs.writeFileSync(path.join(tree, 'sub', 'keep.txt'), 'KEEP\n', 'utf-8');
-        fs.writeFileSync(path.join(tree, 'keep.txt'), 'KEEP\n', 'utf-8');
-        fs.mkdirSync(path.join(tree, 'blocked'));
-        fs.writeFileSync(path.join(tree, 'blocked', 'data.txt'), 'data\n', 'utf-8');
-        fs.chmodSync(path.join(tree, 'blocked'), 0o000);
-
-        const result = removeResidueTree(tree);
-        expect(result.ok).toBe(false);
-        expect(result.error).toContain('preflight incomplete');
-        // Zero mutations: the readable files all survive.
-        expect(result.removedFiles).toBe(0);
-        expect(result.removedLinks).toBe(0);
-        expect(fs.readFileSync(path.join(tree, 'keep.txt'), 'utf-8')).toBe('KEEP\n');
-        expect(fs.readFileSync(path.join(tree, 'sub', 'keep.txt'), 'utf-8')).toBe('KEEP\n');
-
-        // No leaked directory handle: the tree can still be renamed (on Linux a
-        // leaked opendir handle does not block rename, but a leaked handle on
-        // the SAME file would; this doubles as a smoke check that every open
-        // failed-path closed its handle).
-        fs.chmodSync(path.join(tree, 'blocked'), 0o755);
-        expect(() => fs.renameSync(tree, tree + '-renamed')).not.toThrow();
-        fs.renameSync(tree + '-renamed', tree);
-      } finally {
-        fs.rmSync(tree, { recursive: true, force: true });
+describe('deletion guarantees under unreadable directories (spy-injected EACCES, platform-independent)', () => {
+  it('removeResidueTree refuses an unreadable directory, deletes NOTHING, and closes every directory handle', () => {
+    // EACCES is injected via a spy instead of mode-000 permissions: a test
+    // identity with CAP_DAC_OVERRIDE (or an Administrator token) would read
+    // and delete a mode-000 directory anyway, making the refusal unobservable
+    // (CodeRabbit round 4). The spy is deterministic on every platform.
+    const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-residue-unreadable-'));
+    const blockedDirectory = path.join(tree, 'blocked');
+    const realOpenDir = fs.opendirSync.bind(fs);
+    const realClose = fs.Dir.prototype.closeSync;
+    const openedHandles: fs.Dir[] = [];
+    const closedHandles: fs.Dir[] = [];
+    const spy = vi.spyOn(fs, 'opendirSync').mockImplementation(((dir: fs.PathLike, ...args: unknown[]) => {
+      if (path.resolve(String(dir)) === path.resolve(blockedDirectory)) {
+        throw Object.assign(new Error('simulated directory read denial'), { code: 'EACCES' });
       }
-    },
-  );
+      const handle = (realOpenDir as (...a: unknown[]) => fs.Dir)(dir, ...args);
+      openedHandles.push(handle);
+      return handle;
+    }) as typeof fs.opendirSync);
+    vi.spyOn(fs.Dir.prototype, 'closeSync').mockImplementation(function closeTracked(this: fs.Dir) {
+      closedHandles.push(this);
+      return realClose.call(this);
+    });
+    try {
+      fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
+      fs.writeFileSync(path.join(tree, 'sub', 'keep.txt'), 'KEEP\n', 'utf-8');
+      fs.writeFileSync(path.join(tree, 'keep.txt'), 'KEEP\n', 'utf-8');
+      fs.mkdirSync(blockedDirectory);
+      fs.writeFileSync(path.join(blockedDirectory, 'data.txt'), 'data\n', 'utf-8');
+
+      const result = removeResidueTree(tree);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('preflight incomplete');
+      // Zero mutations: the readable files all survive.
+      expect(result.removedFiles).toBe(0);
+      expect(result.removedLinks).toBe(0);
+      expect(fs.readFileSync(path.join(tree, 'keep.txt'), 'utf-8')).toBe('KEEP\n');
+      expect(fs.readFileSync(path.join(tree, 'sub', 'keep.txt'), 'utf-8')).toBe('KEEP\n');
+      expect(fs.readFileSync(path.join(blockedDirectory, 'data.txt'), 'utf-8')).toBe('data\n');
+      // Every directory handle opened during the failed run was closed.
+      const closedSet = new Set(closedHandles);
+      expect(closedSet.size).toBe(openedHandles.length);
+      for (const handle of openedHandles) expect(closedSet.has(handle)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tree, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('formatProgress', () => {
