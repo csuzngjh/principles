@@ -25,7 +25,7 @@ import {
 import { PRESENCE_FIXTURE } from '../dev/aa-controlled-admission/lib/presence-fixture.mjs';
 import {
   CARD_VERSION, EXECUTION_CODE_TRUST_BOUNDARY, EXECUTION_SCRIPT_FILES, EXECUTION_WORKSPACE_BUILDS, PRESENCE_CODE_ROOT, PREFLIGHT_REQUIRED_CHECKS,
-  candidateEntryViolations, classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, presenceSurface, summarizePreflight, verifyPack,
+  candidateEntryViolations, classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, presenceSurface, summarizePreflight,
 } from '../dev/aa-controlled-admission/lib/presence-pack.mjs';
 import { runProtocolSelftest } from '../dev/aa-controlled-admission/lib/protocol-selftest.mjs';
 import {
@@ -777,13 +777,16 @@ describe('candidate registration source — parsing and verdict', () => {
     expect(verdictOf(['host-stderr', `${line(candidateRoot)}\n${line(candidateRoot)}`])).toMatchObject({ status: 'confirmed', lineCount: 2 });
   });
 
-  it('reads only bytes appended after the baseline', () => {
+  it('reads only bytes appended after the baseline, through one fd', () => {
     const file = join(root, 'host.log');
     writeFileSync(file, `${line(candidateRoot)}\n`);
     const baseline = statSync(file).size;
     appendFileSync(file, 'other output\n');
     expect(readAppended(file, baseline).text).toBe('other output\n');
     expect(verdictOf(['host-log', readAppended(file, baseline).text])).toMatchObject({ status: 'missing' });
+    // No exists/stat race: a file that vanishes between calls is reported empty.
+    rmSync(file);
+    expect(readAppended(file, baseline)).toMatchObject({ text: '', bytes: 0 });
   });
 });
 

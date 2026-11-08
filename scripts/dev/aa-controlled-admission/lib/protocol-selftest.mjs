@@ -99,6 +99,9 @@ async function runCase({ transports, endpoint, row, fakeApiKey, modelId, timeout
     stopReason: message?.stopReason ?? null,
     text,
     errorMessage: message?.errorMessage ?? thrown,
+    // A timeout is a load symptom, not a protocol verdict: report it so an
+    // overloaded machine is visible instead of silently counted as rejected.
+    timedOut: thrown === 'selftest_timeout',
     events,
     requests: observation.map((rec) => ({ path: rec.path, decision: rec.decision, terminalSent: rec.terminalSent ?? null, streamRequested: rec.streamRequested ?? null, authMatchesFakeKey: rec.authMatchesFakeKey ?? null })),
   };
@@ -108,7 +111,7 @@ async function runCase({ transports, endpoint, row, fakeApiKey, modelId, timeout
  * Run every case once. `aiPackageDir` is the staged host's
  * node_modules/@openclaw/ai directory (never a repository dependency).
  */
-export async function runProtocolSelftest({ aiPackageDir, ledgerPersistPath = null, fakeApiKey, modelId = 'isolated-presence-model', timeoutMs = 15_000 }) {
+export async function runProtocolSelftest({ aiPackageDir, ledgerPersistPath = null, fakeApiKey, modelId = 'isolated-presence-model', timeoutMs = 60_000 }) {
   if (typeof fakeApiKey !== 'string' || fakeApiKey.length < 16) throw new Error('protocol selftest: a generated fake key is required');
   const transportsPath = join(aiPackageDir, 'dist', 'transports.mjs');
   const ledger = createExperimentLedger({

@@ -24,7 +24,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -177,22 +177,34 @@ export function eventLogSizes(workspaceDir) {
 
 const MAX_ROUND_DELTA_BYTES = 32 * 1024 * 1024;
 
-/** The bytes appended to `path` after `fromByte` (bounded). A shrunken file is read whole and flagged. */
+/**
+ * The bytes appended to `path` after `fromByte` (bounded). A shrunken file is
+ * read whole and flagged. The append is detected through the same single fd the
+ * read uses (fstat after open), so there is no exists/stat/open race: a file
+ * removed between checks makes openSync throw and is reported as empty, never
+ * as a confirmed absence.
+ */
 export function readAppended(path, fromByte = 0, maxBytes = MAX_ROUND_DELTA_BYTES) {
-  if (!existsSync(path)) return { text: '', fromByte, bytes: 0, truncated: false, shrunk: false };
-  const size = statSync(path).size;
-  const shrunk = size < fromByte;
-  const start = shrunk ? 0 : fromByte;
-  const length = Math.min(size - start, maxBytes);
-  if (length <= 0) return { text: '', fromByte, bytes: 0, truncated: false, shrunk };
-  const buffer = Buffer.alloc(length);
-  const fd = openSync(path, 'r');
+  let fd;
+  let size;
   try {
+    fd = openSync(path, 'r');
+    size = fstatSync(fd).size;
+  } catch {
+    if (fd !== undefined) closeSync(fd);
+    return { text: '', fromByte, bytes: 0, truncated: false, shrunk: false };
+  }
+  try {
+    const shrunk = size < fromByte;
+    const start = shrunk ? 0 : fromByte;
+    const length = Math.min(size - start, maxBytes);
+    if (length <= 0) return { text: '', fromByte, bytes: 0, truncated: false, shrunk };
+    const buffer = Buffer.alloc(length);
     readSync(fd, buffer, 0, length, start);
+    return { text: buffer.toString('utf8'), fromByte: start, bytes: length, truncated: size - start > maxBytes, shrunk };
   } finally {
     closeSync(fd);
   }
-  return { text: buffer.toString('utf8'), fromByte: start, bytes: length, truncated: size - start > maxBytes, shrunk };
 }
 
 /** Presence events appended to the isolated workspace's event logs since `baseline` was taken. */
