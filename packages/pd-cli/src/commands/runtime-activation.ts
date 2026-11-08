@@ -1478,6 +1478,10 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
           workspaceDir,
           artifactId: pendingApproval.artifactId,
           ...(opts.targetHost !== undefined ? { targetHost: opts.targetHost } : {}),
+          // PRI-1137 final review P2: this approve decision stamps
+          // `authority="owner"` on the artifact — bill that annotation, not
+          // the pre-approval system_policy default.
+          authority: 'owner',
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);

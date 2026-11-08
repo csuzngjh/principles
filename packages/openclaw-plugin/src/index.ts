@@ -11,6 +11,7 @@ import type {
   PluginHookBeforeCompactionEvent,
   PluginHookAfterCompactionEvent,
   PluginHookLlmOutputEvent,
+  PluginHookLlmInputEvent,
   PluginHookBeforeMessageWriteEvent,
 } from './openclaw-sdk.js';
 import * as path from 'path';
@@ -24,12 +25,13 @@ export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccess
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
-import { handleBeforePromptBuild, beginAdaptivePromptInvocation } from './hooks/prompt.js';
+import { handleBeforePromptBuild, beginAdaptivePromptInvocation, prepareOpenClawPromptRound } from './hooks/prompt.js';
 import { createAdaptiveHookRegistrationRecorder, setAdaptiveHookSet } from './core/adaptive-config-identity.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
+import { makeLlmInputPresenceRegistration } from './hooks/llm-input-presence.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
@@ -146,24 +148,6 @@ export function shouldStartInternalizationAutoConsumer(
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
-export function shouldUseSharedHostRuntime(
-  workspaceDir: string,
-  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
-): { enabled: boolean; source: string; rollbackReason: string | null } {
-  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'abstraction_layer_v1', logger);
-  if (flag.enabled) return { enabled: true, source: flag.source, rollbackReason: null };
-  return {
-    enabled: false,
-    source: flag.source,
-    rollbackReason: JSON.stringify({
-      reason: 'abstraction_layer_v1_disabled',
-      nextAction: 'set features.abstraction_layer_v1.enabled=true in .pd/config.yaml for controlled shared-runtime parity validation',
-      route: 'openclaw_legacy',
-      flagSource: flag.source,
-    }),
-  };
-}
-
 /**
  * Gate 4 (PRI-1071): keep the host-wide launcher binding in lockstep with an
  * EXPLICITLY DECLARED PD workspace only.
@@ -243,6 +227,79 @@ export function syncMcpBindingFromExplicitWorkspace(options: {
   };
 }
 
+/**
+ * PRI-1137: the OpenClaw-specific adaptive-priority decision, extracted from
+ * the inline provider so the SAME decision runs on the shared-runtime path.
+ * The pre-selection half claims the operator admission (or begins a native
+ * delivery invocation) BEFORE the shared selector builds the prompt; the
+ * resulting priority is handed to `buildActivePrinciplePromptContext`.
+ */
+export function resolveAdaptivePriorityForHook(
+  event: PluginHookBeforePromptBuildEvent,
+  context: PluginHookAgentContext,
+  api: Parameters<typeof handleBeforePromptBuild>[1]['api'],
+): { artifactId: string; activationId: string; hookInvocationId?: string; signal?: AbortSignal; deadlineAt?: number } | undefined {
+  const startedAt = Date.now();
+  if (!api) return undefined;
+  const workspaceDir = context.workspaceDir;
+  const sessionId = context.sessionId;
+  const ownValue = (value: unknown, key: string): unknown => {
+    if (!value || typeof value !== 'object') return undefined;
+    return Object.getOwnPropertyDescriptor(value, key)?.value;
+  };
+  const currentMessage = ownValue(event, 'currentUserMessage');
+  const currentMessageId = ownValue(event, 'currentUserMessageId');
+  const requestId = ownValue(event, 'requestId');
+  if (!workspaceDir || !sessionId?.trim() || !isUserInteractionTrigger(context.trigger) || isMinimalTrigger(context.trigger, sessionId)) return undefined;
+  const mapping = readAdaptiveActivationConfig(ownValue(api, 'pluginConfig'), workspaceDir, startedAt);
+  if (!mapping) return undefined;
+
+  const hasNativeIdentity = (typeof currentMessageId === 'string' && currentMessageId.trim().length > 0)
+    || (typeof requestId === 'string' && requestId.trim().length > 0);
+  if (!hasNativeIdentity) {
+    // Embedded OpenClaw supplies no native message identity. The operator
+    // admission covers exactly one frozen input; consumption happens here
+    // (the earliest selection point) and is handed to the same-round
+    // beforePromptBuild callback through the claim cache.
+    if (!isControlledAdmissionConfigured()) return undefined;
+    const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
+    if (deadlineAt - Date.now() <= 0) return undefined;
+    const hookInvocationId = randomUUID();
+    const admission = claimControlledAdmission({
+      event, workspaceDir, sessionId, runId: context.runId ?? null, mapping, hookInvocationId, now: startedAt,
+    });
+    if (admission.status !== 'claimed') {
+      api.logger.warn(`[PD:AA] controlled admission refused: ${JSON.stringify({
+        status: admission.status,
+        ...(admission.status === 'rejected' ? { reason: admission.reason, detail: admission.detail } : {}),
+      })}`);
+      return undefined;
+    }
+    beginAdaptivePromptInvocation({ ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] }, mapping, 'shared', hookInvocationId);
+    return {
+      artifactId: mapping.artifactId,
+      activationId: mapping.activationId,
+      hookInvocationId,
+      signal: AbortSignal.timeout(Math.max(1, deadlineAt - Date.now())),
+      deadlineAt,
+    };
+  }
+
+  if (typeof currentMessage !== 'string') return undefined;
+  const resolved = resolveCurrentUserMessage(event, sessionId);
+  if (resolved.isAgentToAgent || currentMessage.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return undefined;
+  const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) return undefined;
+  return {
+    artifactId: mapping.artifactId,
+    activationId: mapping.activationId,
+    hookInvocationId: beginAdaptivePromptInvocation({ ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] }, mapping, 'shared'),
+    signal: AbortSignal.timeout(remainingMs),
+    deadlineAt,
+  };
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -317,25 +374,11 @@ const plugin = {
     }, 1000);
     healthCheckTimer.unref(); // Don't keep process alive for health check
 
-    // Cache the shared-runtime gate per workspace so the hot-path tool hooks
-    // (before_tool_call / after_tool_call) don't re-read the feature flag on
-    // every call, and so the disabled-path rollback log is emitted once per
-    // workspace. PD loads feature flags at startup, so a config change requires
-    // a gateway restart to take effect.
-    const runtimeGateCache = new Map<string, ReturnType<typeof shouldUseSharedHostRuntime>>();
-    const loggedRollbackWorkspaces = new Set<string>();
-    const runtimeGateFor = (workspaceDir: string): ReturnType<typeof shouldUseSharedHostRuntime> => {
-      let gate = runtimeGateCache.get(workspaceDir);
-      if (!gate) {
-        gate = shouldUseSharedHostRuntime(workspaceDir, api.logger);
-        runtimeGateCache.set(workspaceDir, gate);
-      }
-      if (!gate.enabled && !loggedRollbackWorkspaces.has(workspaceDir)) {
-        loggedRollbackWorkspaces.add(workspaceDir);
-        api.logger.info(`[PD:host-runtime] OpenClaw legacy route selected. ${gate.rollbackReason}`);
-      }
-      return gate;
-    };
+    // PRI-1137: the per-workspace shared/legacy route gate
+    // (`shouldUseSharedHostRuntime` + `runtimeGateCache` + `runtimeGateFor`) is
+    // retired. Every OpenClaw ordinary prompt/tool hook now enters the shared
+    // runtime; `abstraction_layer_v1` is a gone tombstone and cannot resurrect
+    // the legacy route.
 
     // ── MVP Surface Guard (PRI-289): Verify surface classification ──
     const surfaceGuard = checkSurfaceGuard();
@@ -360,66 +403,23 @@ const plugin = {
     // every install that never set plugin config language (ERR-075 family).
     const language = (api.pluginConfig?.language as string) || 'zh';
     const sharedHostRuntime = createOpenClawHostRuntime({
-      adaptivePriorityProvider: (event, context) => {
-        const startedAt = Date.now();
-        const workspaceDir = context.workspaceDir;
-        const sessionId = context.sessionId;
-        const ownValue = (value: unknown, key: string): unknown => {
-          if (!value || typeof value !== 'object') return undefined;
-          return Object.getOwnPropertyDescriptor(value, key)?.value;
-        };
-        const currentMessage = ownValue(event, 'currentUserMessage');
-        const currentMessageId = ownValue(event, 'currentUserMessageId');
-        const requestId = ownValue(event, 'requestId');
-        if (!workspaceDir || !sessionId?.trim() || !isUserInteractionTrigger(context.trigger) || isMinimalTrigger(context.trigger, sessionId)) return undefined;
-        const mapping = readAdaptiveActivationConfig(ownValue(api, 'pluginConfig'), workspaceDir, startedAt);
-        if (!mapping) return undefined;
-
-        const hasNativeIdentity = (typeof currentMessageId === 'string' && currentMessageId.trim().length > 0)
-          || (typeof requestId === 'string' && requestId.trim().length > 0);
-        if (!hasNativeIdentity) {
-          // Embedded OpenClaw supplies no native message identity. The operator
-          // admission covers exactly one frozen input; consumption happens here
-          // (the earliest selection point) and is handed to the same-round
-          // beforePromptBuild callback through the claim cache.
-          if (!isControlledAdmissionConfigured()) return undefined;
-          const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
-          if (deadlineAt - Date.now() <= 0) return undefined;
-          const hookInvocationId = randomUUID();
-          const admission = claimControlledAdmission({
-            event, workspaceDir, sessionId, runId: context.runId ?? null, mapping, hookInvocationId, now: startedAt,
-          });
-          if (admission.status !== 'claimed') {
-            api.logger.warn(`[PD:AA] controlled admission refused: ${JSON.stringify({
-              status: admission.status,
-              ...(admission.status === 'rejected' ? { reason: admission.reason, detail: admission.detail } : {}),
-            })}`);
-            return undefined;
-          }
-          beginAdaptivePromptInvocation({ ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] }, mapping, 'shared', hookInvocationId);
-          return {
-            artifactId: mapping.artifactId,
-            activationId: mapping.activationId,
-            hookInvocationId,
-            signal: AbortSignal.timeout(Math.max(1, deadlineAt - Date.now())),
-            deadlineAt,
-          };
-        }
-
-        if (typeof currentMessage !== 'string') return undefined;
-        const resolved = resolveCurrentUserMessage(event, sessionId);
-        if (resolved.isAgentToAgent || currentMessage.split(/\r?\n/, 1)[0] !== '[PD-AA:delivery-review:v1]') return undefined;
-        const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
-        const remainingMs = deadlineAt - Date.now();
-        if (remainingMs <= 0) return undefined;
-        return {
-          artifactId: mapping.artifactId,
-          activationId: mapping.activationId,
-          hookInvocationId: beginAdaptivePromptInvocation({ ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] }, mapping, 'shared'),
-          signal: AbortSignal.timeout(remainingMs),
-          deadlineAt,
-        };
-      },
+      // PRI-1137: OpenClaw owns a real advancing user-turn authority
+      // (`trajectory.db` user_turns). Hand it to the shared selector so the
+      // round key matches the actual session-turn order; the provider's
+      // pre-selection half performs the ONE signal collection write for this
+      // invocation. Codex / WorkBuddy adapters supply no round key at all.
+      roundKeyProvider: (event, context) => prepareOpenClawPromptRound(event, {
+        ...context,
+        api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
+      }),
+      // PRI-1137: the adaptive priority decision is a NAMED production function
+      // (not an inline callback) so the OpenClaw-specific decision can be
+      // exercised on the shared-runtime path instead of the deleted local one.
+      adaptivePriorityProvider: (event, context) => resolveAdaptivePriorityForHook(
+        event,
+        context,
+        api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
+      ),
       beforePromptBuild: async (event, context, activePrinciplePrompt) =>
         handleBeforePromptBuild(event, {
           ...context,
@@ -534,10 +534,8 @@ const plugin = {
           }
 
           const hookContext = { ...ctx, workspaceDir };
-          const runtimeGate = runtimeGateFor(workspaceDir);
-          const result = runtimeGate.enabled
-            ? await sharedHostRuntime.dispatchBeforePromptBuild(event, hookContext)
-            : await handleBeforePromptBuild(event, { ...hookContext, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] });
+          // PRI-1137: single route — the shared runtime owns prompt selection.
+          const result = await sharedHostRuntime.dispatchBeforePromptBuild(event, hookContext);
           
           // Record success
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
@@ -580,14 +578,6 @@ const plugin = {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
           const hookContext = { ...ctx, workspaceDir, pluginConfig, logger };
-          const runtimeGate = runtimeGateFor(workspaceDir);
-          if (!runtimeGate.enabled) {
-            const result = handleBeforeToolCall(event, hookContext);
-            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-              hook: 'before_tool_call'
-            }, { flushImmediately: true });
-            return result;
-          }
           return sharedHostRuntime.dispatchBeforeToolCall(event, hookContext).then((result) => {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'before_tool_call'
@@ -639,14 +629,6 @@ const plugin = {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
           const hookContext = { ...ctx, workspaceDir, pluginConfig };
-          const runtimeGate = runtimeGateFor(workspaceDir);
-          if (!runtimeGate.enabled) {
-            handleAfterToolCall(event, hookContext, api);
-            WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-              hook: 'after_tool_call'
-            }, { flushImmediately: true });
-            return;
-          }
           // Manual Owner pain remains an OpenClaw-owned path; PRI-523 shares
           // only ordinary after-tool classification/admission/evidence.
           if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
@@ -654,7 +636,25 @@ const plugin = {
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({ hook: 'after_tool_call' }, { flushImmediately: true });
             return;
           }
-          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then(() => {
+          // The shared evidence kernel deliberately opens an existing
+          // trajectory store without bootstrapping it. The OpenClaw host owns
+          // workspace initialization, so ensure the selected workspace's
+          // canonical store exists before dispatching the first tool event.
+          void WorkspaceContext.fromHookContext({ workspaceDir, logger: api.logger }).trajectory;
+          return sharedHostRuntime.dispatchAfterToolCall(event, hookContext).then((dispatched) => {
+            // PRI-1137 final review P1-4: the shared kernel's degradation
+            // (trajectory DB missing/unreadable/schema-invalid) must be
+            // OBSERVABLE — an evidence row that never persisted may not be
+            // recorded as a clean hook success (rc-9).
+            const warnings = dispatched?.warnings ?? [];
+            if (dispatched?.outcome === 'unavailable' || warnings.length > 0) {
+              const degraded = `after_tool_call evidence degraded: ${warnings.join('; ')}${dispatched?.nextAction ? ` nextAction=${dispatched.nextAction}` : ''}`;
+              api.logger.warn(`[PD:after_tool_call] ${degraded}`);
+              WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+                hook: 'after_tool_call', error: degraded.slice(0, 500),
+              }, { flushImmediately: true });
+              return;
+            }
             WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
               hook: 'after_tool_call'
             }, { flushImmediately: true });
@@ -720,6 +720,36 @@ const plugin = {
         }
       }),
       { timeoutMs: 10_000 },
+    );
+
+    // ── Hook: llm_input presence observation (PRI-1150, PD-self Path A) ──
+    // Fact-only post-assembly observation on the official llm_input hook.
+    // Never blocks the caller; body text stays in memory; the emitted event
+    // carries containment facts only. Binding follows the owner-amended
+    // registry rules (unique + complete history, else unknown).
+    const llmInputPresence = makeLlmInputPresenceRegistration({
+      logger: api.logger,
+      getEventLog: (workspaceDir: string) => WorkspaceContext.fromHookContext({ workspaceDir }).eventLog,
+    });
+    hookRegistrations.register(
+      llmInputPresence.surfaceId,
+      llmInputPresence.event,
+      guardHook('hook:llm_input_presence', api.logger, (event: PluginHookLlmInputEvent, ctx: PluginHookAgentContext): void => {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'llm_input');
+        if (!wsResult.ok) {
+          api.logger.warn(
+            `[PD:llm_input] workspaceDir resolution failed. ` +
+            `reason=${wsResult.reason} sessionId=${ctx.sessionId ?? '(missing)'}. Presence observation skipped.`,
+          );
+          return;
+        }
+        if (wsResult.consistencyWarning) {
+          api.logger.warn(`[PD:llm_input] ${wsResult.consistencyWarning}`);
+        }
+        llmInputPresence.onResolved(event, ctx, wsResult.workspaceDir);
+      }),
+      // No timeoutMs: the registration records a void handler; the official
+      // dispatch is already fire-and-forget on the host side.
     );
 
     // ── Hook: Lifecycle ──

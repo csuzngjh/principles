@@ -44,7 +44,6 @@ import type { HostEvent, HostEventEmitter } from '@principles/core/host';
 const tempDirs: string[] = [];
 
 interface WorkspaceOpts {
-  sharedFlag?: boolean;
   selfReport?: boolean;
   declare?: PromptInjectionTargetHost[];
   /** PRI-1020: Owner-declared capacity written into .pd/config.yaml. */
@@ -58,9 +57,6 @@ function tempWorkspace(opts?: WorkspaceOpts): string {
   const config = getDefaultPdConfig();
   if (opts?.promptBudget !== undefined) {
     config.promptBudget = opts.promptBudget;
-  }
-  if (opts?.sharedFlag) {
-    config.features.abstraction_layer_v1 = { ...config.features.abstraction_layer_v1, enabled: true };
   }
   if (opts?.selfReport) {
     config.features.principle_receipt_self_report = { ...config.features.principle_receipt_self_report, enabled: true };
@@ -148,7 +144,7 @@ describe('THE 32K zero-injection regression (Owner fix round)', () => {
 
   for (const selfReport of [false, true]) {
     it(`a 32K-window model injects >=1 short principle on the shared route (selfReport=${selfReport})`, async () => {
-      const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'], selfReport });
+      const dir = tempWorkspace({ declare: ['codex'], selfReport });
       await seedActivation(dir, 'min-viable', SHORT_TEXT);
       const result = await buildActivePrinciplePromptContext({ workspaceDir: dir, promptBudget: WINDOW_32K });
       expect(result.budget).toBe(PROMPT_BUDGET_MIN_CHARS);
@@ -159,7 +155,7 @@ describe('THE 32K zero-injection regression (Owner fix round)', () => {
   }
 
   it('the budget stays an upper bound: the full render never exceeds it', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
+    const dir = tempWorkspace({ declare: ['codex'] });
     for (let i = 0; i < 10; i += 1) {
       await seedActivation(dir, `s-${String(i).padStart(2, '0')}`, `principle ${i} ${'x'.repeat(60)}`);
     }
@@ -170,7 +166,7 @@ describe('THE 32K zero-injection regression (Owner fix round)', () => {
 
 describe('AC-07: one resolution flows through injection, projection, precheck, status', () => {
   it('shared route: an 8000-char budget (256K window) injects strictly more than the fixed 4000', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
+    const dir = tempWorkspace({ declare: ['codex'] });
     for (let i = 0; i < 60; i += 1) {
       await seedActivation(dir, `p-${String(i).padStart(2, '0')}`, `principle text ${i} ${'x'.repeat(40)}`);
     }
@@ -213,13 +209,12 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
   });
 
   it('deliverability classifies against the SUPPORTED tier range, not one number (AC-08)', async () => {
-    // List route (openclaw, flag off): header + entry serialization can sit
-    // under the 500 floor, so fits_all_tiers is reachable here.
-    const listDir = tempWorkspace({ declare: ['openclaw'] });
+    // PRI-1137: every standard host bills the SAME shared directive render, so
+    // openclaw and codex classify identically. A tiny rule still sits under
+    // the measured floor → fits_all_tiers.
+    const shortDir = tempWorkspace({ declare: ['openclaw'] });
     const short = 'tiny rule';
-    const shortArt = seedArtifact(listDir, 'tier-short', short);
-    // Shared route (codex): the full directive template wrapper already
-    // exceeds the floor, so realistic single items land in model_dependent.
+    const shortArt = seedArtifact(shortDir, 'tier-short', short);
     const dir = tempWorkspace({ declare: ['codex'] });
     const mid = 'm'.repeat(900);
     const huge = 'h'.repeat(33_000);
@@ -229,7 +224,7 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
     const check = async (workspaceDir: string, artifactId: string, targetHost: PromptInjectionTargetHost) =>
       checkPromptArtifactDeliverability({ workspaceDir, targetHost, artifact: loadArtifactIn(workspaceDir, artifactId) });
 
-    const small = await check(listDir, shortArt, 'openclaw');
+    const small = await check(shortDir, shortArt, 'openclaw');
     expect(small.status).toBe('deliverable');
     if (small.status === 'deliverable') {
       expect(small.budget).toBe(PROMPT_BUDGET_MIN_CHARS);
@@ -251,10 +246,24 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
       expect(oversized.overByChars).toBe(oversized.costChars - PROMPT_BUDGET_MAX_CHARS);
     }
 
-    // Route-unconfirmed: per-host facts are TIER verdicts now.
+    // No host facts: the ROUTE is still confirmed (one route serves every
+    // standard host); only host attribution is unknown, so the verdict is one
+    // tier fact. Only unreadable config / disabled prompt can be unconfirmed.
     const dir2 = tempWorkspace({});
     const art = seedArtifact(dir2, 'tier-mid-2', 'm'.repeat(900));
-    const unconfirmed = await checkPromptArtifactDeliverability({ workspaceDir: dir2, artifact: loadArtifactIn(dir2, art) });
+    const single = await checkPromptArtifactDeliverability({ workspaceDir: dir2, artifact: loadArtifactIn(dir2, art) });
+    expect(single.status).toBe('model_dependent');
+    if (single.status === 'model_dependent') {
+      expect(single.basis).toBe('single_route_all_hosts');
+      expect(single.hostKind).toBeUndefined();
+    }
+
+    // Route-unconfirmed (unreadable config): per-host facts are still TIER
+    // verdicts, never a guessed single budget (R-A1).
+    const broken = tempWorkspace({});
+    const brokenArt = seedArtifact(broken, 'tier-broken', 'm'.repeat(900));
+    fs.writeFileSync(path.join(broken, '.pd', 'config.yaml'), 'features: [broken', 'utf8');
+    const unconfirmed = await checkPromptArtifactDeliverability({ workspaceDir: broken, artifact: loadArtifactIn(broken, brokenArt) });
     expect(unconfirmed.status).toBe('unconfirmed');
     if (unconfirmed.status === 'unconfirmed') {
       expect(unconfirmed.perHost?.length).toBe(3);
@@ -266,16 +275,16 @@ describe('AC-07: one resolution flows through injection, projection, precheck, s
 
   it('single-item fit respects an explicit budget and defaults to the fixed fallback', () => {
     const principle = { principleId: 'p', text: 'x'.repeat(5000), artifactId: 'a', activationId: 'act' };
-    const fallback = computePromptSingleItemFit({ principle, route: 'shared_render', selfReportEnabled: false });
+    const fallback = computePromptSingleItemFit({ principle, selfReportEnabled: false });
     expect(fallback.costChars).toBeGreaterThan(4000);
     expect(fallback.fits).toBe(false);
-    const wide = computePromptSingleItemFit({ principle, route: 'shared_render', selfReportEnabled: false, budget: 8000 });
+    const wide = computePromptSingleItemFit({ principle, selfReportEnabled: false, budget: 8000 });
     expect(wide.fits).toBe(true);
     expect(wide.costChars).toBe(fallback.costChars);
   });
 
   it('activation statuses: mid-band misses are model_dependent; only >32000 is oversized (AC-08)', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
+    const dir = tempWorkspace({ declare: ['codex'] });
     await seedActivation(dir, 'fits', 'tiny rule');
     await seedActivation(dir, 'mid', 'm'.repeat(4500));
     await seedActivation(dir, 'huge', 'h'.repeat(33_000));
@@ -320,7 +329,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
   }
 
   it('a trusted host effective window drives the dynamic budget and the recorded event carries provenance', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
+    const dir = tempWorkspace({ declare: ['codex'] });
     for (let i = 0; i < 14; i += 1) {
       await seedActivation(dir, `e-${String(i).padStart(2, '0')}`, `principle text ${i} ${'z'.repeat(40)}`);
     }
@@ -346,7 +355,6 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
 
   it('PRI-1020 tier 0: an Owner declaration outranks trusted host facts and drives the event provenance', async () => {
     const dir = tempWorkspace({
-      sharedFlag: true,
       declare: ['codex'],
       promptBudget: { declaredContextWindowTokens: 262_144, hosts: { codex: 400_000 } },
     });
@@ -371,7 +379,6 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
 
   it('PRI-1020: the global declaration backs a host with no model facts at all', async () => {
     const dir = tempWorkspace({
-      sharedFlag: true,
       declare: ['workbuddy'],
       promptBudget: { declaredContextWindowTokens: 262_144 },
     });
@@ -387,7 +394,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
   });
 
   it('an untrusted host source falls back honestly (fixed budget, unknown status, observable bounded reason)', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
+    const dir = tempWorkspace({ declare: ['codex'] });
     await seedActivation(dir, 'fb-1', 'fallback principle');
     const { events, injected } = captureEmitter();
     const runtime = createProductionHostRuntime({ hostKind: 'codex', events });
@@ -408,7 +415,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
   });
 
   it('no modelContext at all (WorkBuddy contract today) resolves the legacy fixed budget (AC-04)', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['workbuddy'] });
+    const dir = tempWorkspace({ declare: ['workbuddy'] });
     await seedActivation(dir, 'wb-1', 'workbuddy principle');
     const { events, injected } = captureEmitter();
     const runtime = createProductionHostRuntime({ hostKind: 'workbuddy', events });
@@ -422,7 +429,7 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
   });
 
   it('model identity alone resolves via the installed catalog (exact match, then unanimous name-only)', async () => {
-    const dir = tempWorkspace({ sharedFlag: true, declare: ['codex'] });
+    const dir = tempWorkspace({ declare: ['codex'] });
     await seedActivation(dir, 'mi-1', 'model identity principle');
     const { events, injected } = captureEmitter();
     const runtime = createProductionHostRuntime({ hostKind: 'codex', events });

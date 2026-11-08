@@ -70,14 +70,18 @@ describe('prompt activation authority shared read', () => {
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
-  it('opt-in authority makes owner approval observable to revalidation while default prompt bytes stay unchanged', async () => {
+  it('authority is observable in the one shared prompt and to revalidation', async () => {
     const workspaceDir = tempWorkspace();
     await seedOwnerApprovedPrompt(workspaceDir);
 
     const nativeCandidates = await readPromptActivationCandidates({ workspaceDir });
     expect(nativeCandidates.principles[0]?.authority).toBeUndefined();
+    // PRI-1137: every host now renders through the shared prompt, so the
+    // production read must annotate authority exactly as the retired OpenClaw
+    // list route did (P0-G INV-05).
     const nativePrompt = await buildActivePrinciplePromptContext({ workspaceDir });
-    expect(nativePrompt.additionalContext).not.toMatch(/<directive [^>]*authority=/);
+    expect(nativePrompt.additionalContext).toMatch(/<directive [^>]*authority="owner"/);
+    expect(nativePrompt.principleIds).toEqual(['PRINCIPLE_AUTH_1']);
 
     const verifiedCandidates = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
     const expected = verifiedCandidates.principles[0]!;

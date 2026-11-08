@@ -2,19 +2,17 @@
  * PD_PROMPT_CAPACITY_V1 Phase C — reproducible prompt-capacity measurement
  * entry (SPEC §6 / AC-13).
  *
- * Runs the REAL production prompt builders over synthetic controlled
- * workspaces and emits a JSON + Markdown comparison report:
- *   - list route (OpenClaw flag-off): readPromptActivationCandidates →
- *     trimToBudget → renderPrinciplesToDirectives, the exact chain
- *     openclaw-plugin/src/hooks/prompt.ts runs (rotation via session round
- *     keys; roundKey omitted = the plugin's lost-turn-source FIFO degrade);
- *   - shared route (Codex / flag-on): the production host-runtime path via
+ * Runs the REAL production prompt builder over synthetic controlled
+ * workspaces and emits a JSON + Markdown comparison report. PRI-1137: the
+ * retired plugin-local list route is NOT simulated any more — production has
+ * exactly one route:
+ *   - shared route (all hosts): the production host-runtime path via
  *     createProductionHostRuntime().dispatch(before_prompt_build) with a REAL
  *     appendEventLogLine emitter, then the honest evidence read-model over the
  *     emitted events (AC-12 wiring proof);
- *   - budget-candidate comparison: current defaults vs full-render-2000 vs
- *     forced shared rotation, on a fixed 16-candidate / 40-round replay
- *     (scenario equivalent of the SPEC §2 snapshot, labeled as such).
+ *   - budget-candidate comparison: current defaults vs full-render-2000, on a
+ *     fixed 16-candidate / 40-round replay (scenario equivalent of the SPEC §2
+ *     snapshot, labeled as such).
  *
  * PD token cost is recorded as null: the measurement holds no tokenizer/model
  * binding, and whole-request usage can never be attributed to PD output
@@ -23,6 +21,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
 import {
   RUNTIME_PRINCIPLE_BUDGET,
@@ -36,14 +35,12 @@ import {
   getDefaultPdConfig,
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
-  trimToBudget,
-  renderPrinciplesToDirectives,
   appendEventLogLine,
 } from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
 import {
   buildActivePrinciplePromptContext,
   createProductionHostRuntime,
+  packSharedDirectives,
   readPromptActivationCandidates,
   resolvePromptInjectionRouteDecision,
   readInjectionEventEvidence,
@@ -60,7 +57,8 @@ function makeWorkspace(opts) {
   fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.state'), { recursive: true });
   const config = getDefaultPdConfig();
-  if (opts.sharedFlag) config.features.abstraction_layer_v1 = { ...config.features.abstraction_layer_v1, enabled: true };
+  // PRI-1137: `abstraction_layer_v1` is a gone tombstone — there is no route to
+  // switch, so the measurement never toggles it.
   if (opts.selfReport) config.features.principle_receipt_self_report = { ...config.features.principle_receipt_self_report, enabled: true };
   fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
   return dir;
@@ -100,62 +98,46 @@ function seedCandidates(workspaceDir, mix) {
   }
 }
 
-function countOversizedCandidates(principles) {
-  // Selector diagnostics are bounded and may stop scanning after a FIFO
-  // prefix fills. Measure each candidate alone for a corpus-wide count.
+/**
+ * PRI-1137: oversized candidates are measured with THE production shared
+ * packer, not the retired list-route `trimToBudget` arithmetic. The packer
+ * renders each candidate through the same full directive serializer the
+ * runtime uses, so the wrapper, the authority attribute (`authority="..."`)
+ * and the self-report instruction all participate in the budget — exactly the
+ * `full_directive_context` basis the shared route reports. Measuring each
+ * candidate alone keeps the corpus-wide count independent of FIFO prefix fill.
+ */
+export function countOversizedCandidates(
+  principles,
+  selfReportEnabled,
+  budgetChars = RUNTIME_PRINCIPLE_BUDGET,
+) {
   return principles.filter((principle) =>
-    trimToBudget([principle], RUNTIME_PRINCIPLE_BUDGET, escapeXml).oversizedActivationIds.includes(principle.activationId),
+    packSharedDirectives({
+      scanOrder: [principle],
+      // Use the exact tier budget being reported. The fixed runtime fallback
+      // is only the default for scenarios without a model-capacity fact.
+      budgetChars,
+      selfReportEnabled,
+      continueOnNonFit: true,
+    }).oversized.includes(principle.activationId),
   ).length;
 }
 
-async function listRouteScenario(mix, selfReport, rounds) {
-  const dir = makeWorkspace({ selfReport });
-  seedCandidates(dir, mix);
-  const { principles, aborted } = await readPromptActivationCandidates({ workspaceDir: dir });
-  const results = { route: 'list', selfReport, candidates: principles.length, aborted, avgInjected: 0, avgUsedChars: 0, avgFullRenderChars: 0, oversized: 0, policy: 'fair_rotation_v1', roundKeySource: 'controlled_simulation' };
-  let injectedSum = 0, usedSum = 0, fullSum = 0;
-  for (let k = 0; k < rounds; k += 1) {
-    const trimmed = trimToBudget(principles, RUNTIME_PRINCIPLE_BUDGET, escapeXml, k % Math.max(principles.length, 1));
-    const injected = principles.filter((p) => trimmed.injectedIds.has(p.principleId));
-    const full = renderPrinciplesToDirectives(injected, trimmed.injectedIds, { escapeFn: escapeXml, selfReportInstruction: selfReport });
-    injectedSum += injected.length;
-    usedSum += trimmed.lines.join('\n').length;
-    fullSum += full.length;
-  }
-  results.avgInjected = +(injectedSum / rounds).toFixed(2);
-  results.avgUsedChars = Math.round(usedSum / rounds);
-  results.avgFullRenderChars = Math.round(fullSum / rounds);
-  results.oversized = countOversizedCandidates(principles);
-  results.templateOverheadChars = results.avgFullRenderChars - results.avgUsedChars;
-  fs.rmSync(dir, { recursive: true, force: true });
-  return results;
-}
-
-async function listRouteFifoDegraded(mix) {
-  const dir = makeWorkspace({});
-  seedCandidates(dir, mix);
-  const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
-  const trimmed = trimToBudget(principles, RUNTIME_PRINCIPLE_BUDGET, escapeXml, undefined);
-  fs.rmSync(dir, { recursive: true, force: true });
-  return {
-    route: 'list-fifo',
-    policy: 'legacy_fifo_prefix_v1 (lost turn source / restart degrade)',
-    candidates: principles.length,
-    injected: principles.filter((p) => trimmed.injectedIds.has(p.principleId)).length,
-    usedChars: trimmed.lines.join('\n').length,
-    oversized: countOversizedCandidates(principles),
-  };
-}
+// PRI-1137: the plugin-local "list" route (OpenClaw legacy_trim) and its
+// FIFO-degraded variant are RETIRED — production runs the shared runtime for
+// every host. Measuring them here would describe a path users cannot take, so
+// both scenarios were removed. Only the shared route is measured.
 
 async function sharedRouteScenario(mix, selfReport, forcedRotationRounds) {
-  const dir = makeWorkspace({ sharedFlag: true, selfReport });
+  const dir = makeWorkspace({ selfReport });
   const activationIds = seedCandidates(dir, mix);
-  const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
+  const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir: dir, includeAuthority: true });
   const results = { route: 'shared', selfReport, candidates: activationIds.length, fifoInjected: 0, fifoUsedChars: 0, oversized: 0, avgInjectedForcedRotation: null, evidenceRows: null, forcedRoundKeySource: 'controlled_simulation' };
   const fifo = await buildActivePrinciplePromptContext({ workspaceDir: dir });
   results.fifoInjected = fifo.principleIds.length;
   results.fifoUsedChars = fifo.additionalContext.length;
-  results.oversized = countOversizedCandidates(principles);
+  results.oversized = countOversizedCandidates(principles, selfReportEnabled);
   results.fifoPolicy = fifo.selectionPolicy;
   if (forcedRotationRounds > 0) {
     let sum = 0;
@@ -171,7 +153,7 @@ async function sharedRouteScenario(mix, selfReport, forcedRotationRounds) {
 
 /** Real shared-path drive incl. event emission + honest evidence read-model. */
 async function sharedPathWithEvents(mix) {
-  const dir = makeWorkspace({ sharedFlag: true });
+  const dir = makeWorkspace({});
   seedCandidates(dir, mix);
   const events = [];
   const runtime = createProductionHostRuntime({
@@ -219,14 +201,11 @@ async function sharedPathWithEvents(mix) {
 async function budgetCandidateReplay() {
   // Simulation only: both serializers use the same persisted candidates,
   // text and FIFO order (14 × 60 chars, 2 × 1200 chars).
-  const replayWorkspace = makeWorkspace({ sharedFlag: true });
+  const replayWorkspace = makeWorkspace({});
   seedCandidates(replayWorkspace, { short: 14, long: 2, oversized: 0 });
-  const { principles: candidates } = await readPromptActivationCandidates({ workspaceDir: replayWorkspace });
   const rounds = 40;
-  let listSum = 0, sharedRotationSum = 0, sharedFifoSum = 0;
+  let sharedRotationSum = 0, sharedFifoSum = 0;
   for (let k = 0; k < rounds; k += 1) {
-    const t = trimToBudget(candidates, RUNTIME_PRINCIPLE_BUDGET, escapeXml, k % candidates.length);
-    listSum += [...t.injectedIds].length;
     const shared = await buildActivePrinciplePromptContext({ workspaceDir: replayWorkspace, roundKey: k });
     sharedRotationSum += shared.principleIds.length;
   }
@@ -234,8 +213,7 @@ async function budgetCandidateReplay() {
   sharedFifoSum = fifo.principleIds.length;
   fs.rmSync(replayWorkspace, { recursive: true, force: true });
   return {
-    scenario: 'controlled simulation only: same persisted 16 candidates (14 × 60 chars, 2 × 1200 chars), same FIFO order, 40 forced round keys',
-    listRouteAvgInjected: +(listSum / rounds).toFixed(2),
+    scenario: 'controlled simulation only: same persisted 16 candidates (14 × 60 chars, 2 × 1200 chars), same FIFO order, 40 forced round keys (shared route)',
     sharedForcedRotationAvgInjected: +(sharedRotationSum / rounds).toFixed(2),
     sharedFifoInjected: sharedFifoSum,
   };
@@ -244,25 +222,15 @@ async function budgetCandidateReplay() {
 /**
  * PRI-1066: before/after comparison on the SAME candidates, through the REAL
  * production serializers. `BEFORE = 2000` is the pre-recalibration baseline
- * (base 2000 / max 16000); `AFTER` is the live policy constant. Both routes
- * are run explicitly under each budget so the delta is measured, not
- * extrapolated: the list route via `trimToBudget(charBudget)`, the shared
- * route via `buildActivePrinciplePromptContext({promptBudget})`.
+ * (base 2000 / max 16000); `AFTER` is the live policy constant. The unified
+ * production route is run explicitly under each budget via
+ * `buildActivePrinciplePromptContext({promptBudget})`, so the delta is
+ * measured, not extrapolated.
  */
 async function budgetBeforeAfterReplay() {
-  const dir = makeWorkspace({ sharedFlag: true });
+  const dir = makeWorkspace({});
   seedCandidates(dir, { short: 14, long: 2, oversized: 0 });
-  const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
   const rounds = 40;
-  const listAt = (budgetChars) => {
-    let injectedSum = 0, usedSum = 0;
-    for (let k = 0; k < rounds; k += 1) {
-      const trimmed = trimToBudget(principles, budgetChars, escapeXml, k % Math.max(principles.length, 1));
-      injectedSum += [...trimmed.injectedIds].length;
-      usedSum += trimmed.lines.join('\n').length;
-    }
-    return { avgInjected: +(injectedSum / rounds).toFixed(2), avgUsedChars: Math.round(usedSum / rounds) };
-  };
   const resolutionAt = (budgetChars) => ({
     budgetChars,
     capacitySource: 'legacy_fallback',
@@ -278,12 +246,17 @@ async function budgetBeforeAfterReplay() {
       const ctx = await buildActivePrinciplePromptContext({ workspaceDir: dir, roundKey: k, promptBudget: resolutionAt(budgetChars) });
       rotationSum += ctx.principleIds.length;
     }
+    // PRI-1137 final review P2: the oversized count must cover the WHOLE
+    // corpus. The FIFO projection's `oversizedActivationIds` only covers
+    // candidates seen before the first non-fit (FIFO stops there), so entries
+    // after the stop point were silently missing from this statistic.
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({ workspaceDir: dir, includeAuthority: true });
     return {
       fifoInjected: fifo.principleIds.length,
       fifoUsedChars: fifo.additionalContext.length,
       fifoTruncated: fifo.truncated,
       rotationAvgInjected: +(rotationSum / rounds).toFixed(2),
-      oversized: (fifo.oversizedActivationIds ?? []).length,
+      oversized: countOversizedCandidates(principles, selfReportEnabled, budgetChars),
     };
   };
   // Historical baseline (pre-recalibration v1 base = 2000). Deliberately a
@@ -291,11 +264,11 @@ async function budgetBeforeAfterReplay() {
   const beforeChars = 2000;
   const afterChars = RUNTIME_PRINCIPLE_BUDGET;
   const result = {
-    scenario: 'same 16 persisted candidates (14 × 60 chars, 2 × 1200 chars), 40 forced round keys, both routes via the REAL production serializers',
+    scenario: 'same 16 persisted candidates (14 × 60 chars, 2 × 1200 chars), 40 forced round keys, the unified shared production route',
     beforeChars,
     afterChars,
-    before: { list: listAt(beforeChars), shared: await sharedAt(beforeChars) },
-    after: { list: listAt(afterChars), shared: await sharedAt(afterChars) },
+    before: { shared: await sharedAt(beforeChars) },
+    after: { shared: await sharedAt(afterChars) },
   };
   fs.rmSync(dir, { recursive: true, force: true });
   return result;
@@ -306,73 +279,70 @@ async function budgetBeforeAfterReplay() {
  *
  * For each tier (32K/64K/128K/256K/1M/unknown) resolve the budget through
  * the PRODUCTION resolver (host_effective_window for the numeric tiers,
- * no-facts legacy fallback for "unknown") and run BOTH real routes under
- * that resolution:
- *   - list route: the real trimToBudget selector, 40 forced round keys;
- *   - shared route: buildActivePrinciplePromptContext with the same
- *     resolution (the exact object the production entry points pass).
+ * no-facts legacy fallback for "unknown") and run the real production route
+ * under that resolution: buildActivePrinciplePromptContext with the exact
+ * object the production entry points pass, plus 40 forced round keys for the
+ * rotation figures.
  * Reports budget/source/status + injected counts / chars / oversized /
  * truncation per tier. Character counts are UTF-16 units, NOT tokens.
  */
 const TIER_MIX = { short: 14, long: 2, oversized: 0 };
 const TIER_ROUNDS = 40;
 
-async function modelAwareTierScenario(windowTokens, selfReport) {
+export async function modelAwareTierScenario(windowTokens, selfReport) {
   const resolution = windowTokens === null
     ? resolvePromptBudget()
     : resolvePromptBudget({ hostCapacity: { contextTokenBudget: windowTokens, contextWindowSource: 'model' } });
   const budgetChars = resolution.budgetChars;
   const label = windowTokens === null ? 'unknown' : `${Math.round(windowTokens / 1000)}K`;
 
-  const listDir = makeWorkspace({ selfReport });
-  seedCandidates(listDir, TIER_MIX);
-  const { principles: listPrinciples } = await readPromptActivationCandidates({ workspaceDir: listDir });
-  let injectedSum = 0, usedSum = 0, truncatedRounds = 0, oversizedSum = 0;
-  for (let k = 0; k < TIER_ROUNDS; k += 1) {
-    const trimmed = trimToBudget(listPrinciples, budgetChars, escapeXml, k % Math.max(listPrinciples.length, 1));
-    injectedSum += [...trimmed.injectedIds].length;
-    usedSum += trimmed.lines.join('\n').length;
-    if (trimmed.truncated) truncatedRounds += 1;
-    oversizedSum += trimmed.oversizedActivationIds.length;
+  const sharedDir = makeWorkspace({ selfReport });
+  try {
+    const activationIds = seedCandidates(sharedDir, TIER_MIX);
+    const { principles, selfReportEnabled } = await readPromptActivationCandidates({
+      workspaceDir: sharedDir,
+      includeAuthority: true,
+    });
+    let rotationSum = 0;
+    for (let k = 0; k < TIER_ROUNDS; k += 1) {
+      const ctx = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, roundKey: k, promptBudget: resolution });
+      rotationSum += ctx.principleIds.length;
+    }
+    const shared = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, promptBudget: resolution });
+
+    return {
+      label,
+      windowTokens,
+      budgetChars,
+      capacitySource: resolution.capacitySource,
+      capacityStatus: resolution.capacityStatus,
+      fallbackReason: resolution.fallbackReason ?? null,
+      policyVersion: resolution.policyVersion,
+      candidates: activationIds.length,
+      rotationAvgInjected: +(rotationSum / TIER_ROUNDS).toFixed(2),
+      shared: {
+        injected: shared.principleIds.length,
+        usedChars: shared.additionalContext.length,
+        truncated: shared.truncated,
+        // The production FIFO scan stops at its first non-fit candidate, so its
+        // per-run diagnostic list cannot represent oversized candidates later
+        // in the corpus. Measure every candidate independently at THIS tier's
+        // resolved budget while retaining the production full-directive packer.
+        oversized: countOversizedCandidates(principles, selfReportEnabled, budgetChars),
+        dropped: shared.droppedActivationIds?.length ?? 0,
+        selectionPolicy: shared.selectionPolicy,
+      },
+    };
+  } finally {
+    fs.rmSync(sharedDir, { recursive: true, force: true });
   }
-  fs.rmSync(listDir, { recursive: true, force: true });
-
-  const sharedDir = makeWorkspace({ sharedFlag: true, selfReport });
-  seedCandidates(sharedDir, TIER_MIX);
-  const shared = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, promptBudget: resolution });
-  fs.rmSync(sharedDir, { recursive: true, force: true });
-
-  return {
-    label,
-    windowTokens,
-    budgetChars,
-    capacitySource: resolution.capacitySource,
-    capacityStatus: resolution.capacityStatus,
-    fallbackReason: resolution.fallbackReason ?? null,
-    policyVersion: resolution.policyVersion,
-    list: {
-      candidates: listPrinciples.length,
-      avgInjected: +(injectedSum / TIER_ROUNDS).toFixed(2),
-      avgUsedChars: Math.round(usedSum / TIER_ROUNDS),
-      truncatedRounds,
-      avgOversizedPerRound: +(oversizedSum / TIER_ROUNDS).toFixed(2),
-    },
-    shared: {
-      injected: shared.principleIds.length,
-      usedChars: shared.additionalContext.length,
-      truncated: shared.truncated,
-      oversized: shared.oversizedActivationIds?.length ?? 0,
-      dropped: shared.droppedActivationIds?.length ?? 0,
-      selectionPolicy: shared.selectionPolicy,
-    },
-  };
 }
 
 async function modelAwareSharedDispatchEvidence() {
   // AC-12-style real-path proof for the model-aware wiring: dispatch the
   // production host runtime with a HostEventContext.modelContext host window
   // and read back the emitted event's budget provenance.
-  const dir = makeWorkspace({ sharedFlag: true });
+  const dir = makeWorkspace({});
   seedCandidates(dir, { short: 6, long: 2, oversized: 1 });
   const events = [];
   const runtime = createProductionHostRuntime({
@@ -422,10 +392,8 @@ async function main() {
   ];
   for (const m of mixes) {
     for (const selfReport of [false, true]) {
-      scenarios.push({ name: `${m.name}/list/selfReport=${selfReport}`, ...(await listRouteScenario(m.mix, selfReport, 40)) });
       scenarios.push({ name: `${m.name}/shared/selfReport=${selfReport}`, ...(await sharedRouteScenario(m.mix, selfReport, 40)) });
     }
-    scenarios.push({ name: `${m.name}/list-fifo-degraded`, ...(await listRouteFifoDegraded(m.mix)) });
   }
   const withEvents = await sharedPathWithEvents({ short: 6, long: 2, oversized: 1 });
   const replay = await budgetCandidateReplay();
@@ -458,7 +426,7 @@ async function main() {
     scenarios,
     sharedPathWithEvents: withEvents,
     budgetCandidateReplay: replay,
-    decision: `defaults unchanged: both routes keep their existing ${RUNTIME_PRINCIPLE_BUDGET} budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)`,
+    decision: `PRI-1137: one production route (shared). The retired plugin-local list route is no longer measured; the ${RUNTIME_PRINCIPLE_BUDGET}-char budget scope and selector are unchanged.`,
   };
   fs.mkdirSync(path.dirname(OUT_JSON), { recursive: true });
   fs.writeFileSync(OUT_JSON, JSON.stringify(payload, null, 2), 'utf8');
@@ -472,24 +440,18 @@ async function main() {
   lines.push('');
   lines.push('## 场景对照（40 轮）');
   lines.push('');
-  lines.push('轮转行使用连续 round keys 做受控模拟；这些轮次不代表真实用户 turn。列表与共享路由的对照使用相同长度、顺序和文本的候选集。');
+  lines.push('轮转行使用连续 round keys 做受控模拟；这些轮次不代表真实用户 turn。PRI-1137 后只有一个生产路由（shared），已退役的插件本地列表路由不再测量。');
   lines.push('');
-  lines.push('| 场景 | 路由 | 自报 | 候选 | 平均注入条数 | 列表口径字符 | 完整注入块字符 | 模板开销 | 超长 |');
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  lines.push('| 场景 | 路由 | 自报 | 候选 | 平均注入条数 | 完整注入块字符 | 超长 |');
+  lines.push('| --- | --- | --- | --- | --- | --- | --- |');
   for (const s of scenarios) {
-    if (s.route === 'list-fifo') {
-      lines.push(`| ${s.name} | 列表(FIFO降级,轮次丢失) | – | ${s.candidates} | ${s.injected}(固定前缀,无轮转) | ${s.usedChars} | n/a | n/a | ${s.oversized} |`);
-    } else if (s.route === 'list') {
-      lines.push(`| ${s.name} | 列表(轮转) | ${s.selfReport} | ${s.candidates} | ${s.avgInjected} | ${s.avgUsedChars} | ${s.avgFullRenderChars} | ${s.templateOverheadChars} | ${s.oversized} |`);
-    } else {
-      const avg = s.avgInjectedForcedRotation === null ? s.fifoInjected : `${s.fifoInjected}(FIFO) / ${s.avgInjectedForcedRotation}(强制轮转模拟均值)`;
-      lines.push(`| ${s.name} | 共享 | ${s.selfReport} | ${s.candidates} | ${avg} | –(按完整块计费) | ${s.fifoUsedChars} | 0(口径即完整块) | ${s.oversized} |`);
-    }
+    const avg = s.avgInjectedForcedRotation === null ? s.fifoInjected : `${s.fifoInjected}(FIFO) / ${s.avgInjectedForcedRotation}(强制轮转模拟均值)`;
+    lines.push(`| ${s.name} | 共享 | ${s.selfReport} | ${s.candidates} | ${avg} | ${s.fifoUsedChars} | ${s.oversized} |`);
   }
   lines.push('');
   lines.push('要点：');
-  lines.push('- 列表路由按选中行计费，共享路由按完整注入块计费——同一候选集合的“占用”两个数字差异即模板开销（包装+自报脚注），不能混称。');
-  lines.push('- `list-fifo-degraded` = 轮次来源丢失（会话重启/无 user_turn）时插件的真实降级路径：FIFO 前缀打包，尾部候选结构性饥饿——这就是 AC-03 要求区分“轮转机会”与“FIFO 不承诺”的实证。');
+  lines.push('- 共享路由按完整注入块计费（包装+自报脚注计入预算），计量口径即完整块。');
+  lines.push('- 轮次来源缺失（会话重启/无 sessionId/user_turn）时，共享选择器如实报告 `legacy_fifo_prefix_v1`：FIFO 前缀打包，尾部候选结构性饥饿——轮转机会与 FIFO 不承诺必须区分。');
   lines.push('- 超长候选由本次测量按当前预算实测判定（`oversizedActivationIds`），与轮转无关（AC-02/AC-05 实证）；不假定任何固定正文字符数必然超长。');
   lines.push('');
   lines.push('## 受控共享路径 + 事件证据（AC-12 接线证明）');
@@ -505,9 +467,9 @@ async function main() {
   lines.push('```');
   lines.push('');
   lines.push('结论（本任务固定决策，未发起迁移确认）：');
-  lines.push(`- 保持两条路由各自的 ${RUNTIME_PRINCIPLE_BUDGET} 计费口径、serializer 与选择器不变。`);
-  lines.push(`- 受控模拟中完整渲染口径平均注入 ${replay.sharedForcedRotationAvgInjected} 条，列表口径平均 ${replay.listRouteAvgInjected} 条；两条路使用相同 16 个持久化候选，forced round keys 是模拟输入，不代表真实用户轮次。`);
-  lines.push('- 模板收益：共享口径把包装/脚注计入预算，计量更诚实，但等价于隐性降预算；回退成本：路由口径迁移影响所有已激活原则的装入性判定，需要独立迁移任务与真实行为数据。');
+  lines.push(`- 统一使用共享路由的 ${RUNTIME_PRINCIPLE_BUDGET} 计费口径、serializer 与选择器；已退役路由不再保留口径。`);
+  lines.push(`- 受控模拟中完整渲染口径平均注入 ${replay.sharedForcedRotationAvgInjected} 条（同一 16 个持久化候选）；forced round keys 是模拟输入，不代表真实用户轮次。`);
+  lines.push('- 模板开销：共享口径把包装/脚注计入预算，计量更诚实，但等价于隐性降预算；该口径现为唯一生产口径。');
   lines.push('- 未验证行为改善：本报告只有注入/字符事实；模型遵守率、历史真实注入率、最佳预算均未知（unknown），不得以“平均选中更多/更少”当作行为改善。');
   lines.push('');
   fs.writeFileSync(OUT_MD, lines.join('\n') + '\n', 'utf8');
@@ -536,7 +498,7 @@ async function main() {
         '1M': promptBudgetCharsForContextWindow(1_000_000),
       },
     },
-    scenario: `16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, ${TIER_ROUNDS} forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext`,
+    scenario: `16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, ${TIER_ROUNDS} forced round keys through buildActivePrinciplePromptContext (the only production route)`,
     tiers: tierScenarios,
     beforeAfter,
     sharedDispatchEvidence,
@@ -554,19 +516,19 @@ async function main() {
   ma.push('');
   ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 ${promptBudgetCharsForContextWindow(1_000_000)}，不假装恰好等于上限。`);
   ma.push('');
-  ma.push('## 容量档位 × 两路由对照');
+  ma.push('## 容量档位 × 统一生产路由');
   ma.push('');
-  ma.push('| 容量档位 | 自报 | 预算(字符) | 来源 | 状态 | 列表:平均注入 | 列表:平均字符 | 列表:截断轮次 | 共享:注入 | 共享:字符 | 共享:截断 |');
-  ma.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  ma.push('| 容量档位 | 自报 | 预算(字符) | 来源 | 状态 | 候选 | 轮转平均值注入 | 单次注入 | 单次字符 | 单次截断 |');
+  ma.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const t of tierScenarios) {
-    ma.push(`| ${t.label} | ${t.selfReport ? '开' : '关'} | ${t.budgetChars} | ${t.capacitySource} | ${t.capacityStatus} | ${t.list.avgInjected} | ${t.list.avgUsedChars} | ${t.list.truncatedRounds}/${TIER_ROUNDS} | ${t.shared.injected} | ${t.shared.usedChars} | ${t.shared.truncated} |`);
+    ma.push(`| ${t.label} | ${t.selfReport ? '开' : '关'} | ${t.budgetChars} | ${t.capacitySource} | ${t.capacityStatus} | ${t.candidates} | ${t.rotationAvgInjected} | ${t.shared.injected} | ${t.shared.usedChars} | ${t.shared.truncated} |`);
   }
   ma.push('');
   ma.push('要点：');
   ma.push(`- 未知容量档位如实回退 ${RUNTIME_PRINCIPLE_BUDGET} 字符（\`legacy_fallback\` / \`unknown\` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。`);
   ma.push(`- 1M 档位预算按公式精确为 ${promptBudgetCharsForContextWindow(1_000_000)} 字符（≥${Math.ceil(PROMPT_BUDGET_MAX_CHARS * PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS / PROMPT_BUDGET_BASE_CHARS)} token 才触顶 ${PROMPT_BUDGET_MAX_CHARS}）——上限是目标边界，不是必须达到的固定值。`);
   ma.push('- 32K 档位（=下限 1250）经真实生产构建器验证：共享路由在自报开/关两种状态下均至少完整注入一条最小有效原则（v0.1 的 500 下限在该档位注入 0 条，已修复并以回归测试钉住）。');
-  ma.push('- 超长排除/截断语义在各档位下与既有选择器一致（同一 `trimToBudget` 与共享渲染路径，只是预算数值变化）。');
+  ma.push('- 超长排除/截断语义在各档位下与生产共享选择器一致（同一 `packSharedDirectives` 完整 directive 序列化；超长候选按 `full_directive_context` 口径单独测量）。');
   ma.push('');
   ma.push('## 改动前后对比（同一批候选，真实生产序列化器实测）');
   ma.push('');
@@ -574,8 +536,8 @@ async function main() {
   ma.push('');
   ma.push('| 路由 | 旧预算注入条数 | 新预算注入条数 | 旧预算占用字符 | 新预算占用字符 |');
   ma.push('| --- | --- | --- | --- | --- |');
-  ma.push(`| 列表路由（轮转均值） | ${beforeAfter.before.list.avgInjected} | ${beforeAfter.after.list.avgInjected} | ${beforeAfter.before.list.avgUsedChars} | ${beforeAfter.after.list.avgUsedChars} |`);
   ma.push(`| 共享路由（FIFO 单次构建） | ${beforeAfter.before.shared.fifoInjected} | ${beforeAfter.after.shared.fifoInjected} | ${beforeAfter.before.shared.fifoUsedChars} | ${beforeAfter.after.shared.fifoUsedChars} |`);
+  ma.push(`| 共享路由（40 轮强制轮转均值） | ${beforeAfter.before.shared.rotationAvgInjected} | ${beforeAfter.after.shared.rotationAvgInjected} | – | – |`);
   ma.push('');
   ma.push(`共享路由 FIFO 注入：旧 ${beforeAfter.before.shared.fifoInjected} 条 → 新 ${beforeAfter.after.shared.fifoInjected} 条；旧预算截断=${beforeAfter.before.shared.fifoTruncated}，新预算截断=${beforeAfter.after.shared.fifoTruncated}。`);
   ma.push('');
@@ -595,4 +557,8 @@ async function main() {
   console.log(`[measure] wrote ${OUT_JSON_MA}`);
 }
 
-await main();
+// Run only when invoked as a script; importing the module (tests) must not
+// rewrite the audit reports.
+const isEntryPoint = process.argv[1] !== undefined
+  && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isEntryPoint) await main();

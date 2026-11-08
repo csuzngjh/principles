@@ -161,7 +161,14 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
           skipped += 1;
           continue;
         }
-        const timeoutMs = Math.max(1, Math.min(classificationTimeoutMs, remaining));
+        // AbortSignal.timeout (pi-ai-runtime-adapter startRun) rejects
+        // fractional delays with ERR_OUT_OF_RANGE, and `remaining` is a
+        // performance.now() float — under the default 60s budget it is
+        // virtually always fractional, which made every classification fail
+        // before any network I/O (PRI-1147 real-LLM BDD, ERR-PRI-1147-D1).
+        // Clamp to whole milliseconds so the remaining budget reaches the
+        // adapter request itself instead of throwing.
+        const timeoutMs = Math.max(1, Math.floor(Math.min(classificationTimeoutMs, remaining)));
         // The remaining budget goes INTO the adapter request as well as the
         // outer race (v0.3.1 §2.2); an outer timeout does not cancel a
         // provider request that the adapter does not support cancelling.

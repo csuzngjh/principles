@@ -10,7 +10,7 @@ import {
   ApprovalQueue,
   PrincipleTreeLedgerAdapter,
 } from '@principles/core/runtime';
-import { saveHostToolDeclaration } from '@principles/host-runtime';
+import { checkPromptArtifactDeliverability, resolvePromptInjectionRouteDecision, saveHostToolDeclaration } from '@principles/host-runtime';
 import { Command } from 'commander';
 import { registerRuntimeActivationApproveCommand, handleActivationApprove } from '../../src/commands/runtime-activation.js';
 
@@ -168,8 +168,10 @@ describe('pd activation approve — prompt capacity write gate (B1/AC-07, real w
     expect(approvalRow.status).toBe('approved');
   });
 
-  it('refuses with route_unconfirmed when host facts are absent and no --target-host is given; --target-host codex restores the shared-route verdict', async () => {
-    // 该用例使用独立工作区(无宿主声明、flag off → 路由无法确认)。
+  it('confirms the single shared route (single_route_all_hosts) when host facts are absent, without guessing a host, and still binds an explicit --target-host', async () => {
+    // PRI-1137: no host attribution is NOT "route unconfirmed" any more. Every
+    // standard host takes the one shared route, so approval proceeds; the host
+    // stays unbound unless the request names it.
     const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-capacity-bare-'));
     try {
       fs.mkdirSync(path.join(bareDir, '.state'), { recursive: true });
@@ -206,22 +208,46 @@ describe('pd activation approve — prompt capacity write gate (B1/AC-07, real w
         summary: 'bare', triggerReason: 'test',
       }, now);
       conn.getDb().prepare('UPDATE approvals SET approval_id = ? WHERE approval_id = ?').run('apr-bare', 'apr_prompt_art-bare');
+
+      // 1) Route decision: confirmed shared route, NO guessed hostKind.
+      const decision = resolvePromptInjectionRouteDecision({ workspaceDir: bareDir });
+      expect(decision.status).toBe('confirmed');
+      if (decision.status !== 'confirmed') throw new Error('expected confirmed route');
+      expect(decision.route).toBe('shared_render');
+      expect(decision.basis).toBe('single_route_all_hosts');
+      expect(decision.hostKind).toBeUndefined();
+
+      // 2) Deliverability uses the real shared full-directive serialization and
+      //    the workspace's real selfReportEnabled state; short text is deliverable.
+      const artifact = {
+        artifactId: 'art-bare', artifactKind: 'principle',
+        contentJson: JSON.stringify({ principleId, text: 'bare short text' }),
+        validationStatus: 'validated',
+      };
+      const fit = await checkPromptArtifactDeliverability({ workspaceDir: bareDir, artifact });
+      expect(fit.status).toBe('deliverable');
+      if (fit.status !== 'deliverable') throw new Error('expected deliverable');
+      expect(fit.route).toBe('shared_render');
+      expect(fit.basis).toBe('single_route_all_hosts');
+      expect(fit.hostKind).toBeUndefined();
+      expect(fit.budgetScope).toBe('full_directive_context');
+      expect(fit.costChars).toBeGreaterThan(0);
       conn.close();
 
+      // 3) No --target-host: the approval is NOT refused by uncertainty.
       await handleActivationApprove({ workspace: bareDir, approvalId: 'apr-bare', json: true });
-      const refused = JSON.parse(consoleLogSpy.mock.calls[0][0] as string) as { ok: boolean; reason: string };
-      expect(refused.ok).toBe(false);
-      expect(refused.reason).toContain('prompt_capacity_refused');
-      expect(refused.reason).toContain('route_unconfirmed');
-      expect(process.exitCode).toBe(1);
+      const approved = JSON.parse(consoleLogSpy.mock.calls[0][0] as string) as { ok: boolean; activationId?: string };
+      expect(approved.ok).toBe(true);
+      expect(typeof approved.activationId).toBe('string');
+      expect(process.exitCode).toBe(0);
 
-      // 显式请求级目标宿主(codex → 恒为共享路由)解除不确定:短正文可交付 → 预检通过。
-      consoleLogSpy.mockClear();
-      process.exitCode = 0;
-      await handleActivationApprove({ workspace: bareDir, approvalId: 'apr-bare', json: true, targetHost: 'codex' });
-      const okResult = JSON.parse(consoleLogSpy.mock.calls[0][0] as string) as { ok: boolean; activationId?: string };
-      expect(okResult.ok).toBe(true);
-      expect(typeof okResult.activationId === 'string').toBe(true);
+      // 4) Explicit request-level host still binds attribution (and its own route).
+      const bound = resolvePromptInjectionRouteDecision({ workspaceDir: bareDir, targetHost: 'codex' });
+      expect(bound).toMatchObject({ status: 'confirmed', hostKind: 'codex', route: 'shared_render', basis: 'explicit_target' });
+      const boundFit = await checkPromptArtifactDeliverability({ workspaceDir: bareDir, targetHost: 'codex', artifact });
+      expect(boundFit).toMatchObject({
+        status: 'deliverable', hostKind: 'codex', route: 'shared_render', basis: 'explicit_target',
+      });
     } finally {
       try { fs.rmSync(bareDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }

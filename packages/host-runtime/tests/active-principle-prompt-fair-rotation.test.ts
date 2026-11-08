@@ -44,7 +44,7 @@ afterEach(() => {
 
 async function seedPromptActivations(
   workspaceDir: string,
-  entries: { principleId: string; text: string }[],
+  entries: { principleId: string; text: string; artifactId?: string; activationId?: string }[],
 ): Promise<void> {
   const connection = new SqliteConnection(workspaceDir);
   try {
@@ -56,11 +56,12 @@ async function seedPromptActivations(
     const store = new SqliteActivationStateStore(connection);
     for (let i = 0; i < entries.length; i += 1) {
       const { principleId, text } = entries[i]!;
-      const artifactId = `art-${principleId}`;
+      const artifactId = entries[i]!.artifactId ?? `art-${principleId}`;
+      const activationId = entries[i]!.activationId ?? `act-${principleId}`;
       const at = new Date(base + i * 60_000).toISOString();
-      insertArtifact.run(artifactId, 'principle', `task-${principleId}`, principleId, null, '[]', 'validated', JSON.stringify({ principleId, text }), at, at);
+      insertArtifact.run(artifactId, 'principle', `task-${artifactId}`, principleId, null, '[]', 'validated', JSON.stringify({ principleId, text }), at, at);
       await store.recordActivation({
-        activationId: `act-${principleId}`, idempotencyKey: `${artifactId}::prompt`, artifactId,
+        activationId, idempotencyKey: `${artifactId}::prompt`, artifactId,
         channel: 'prompt', action: 'prompt_activate', targetRef: `ledger://${principleId}`,
         activatedAt: at, deactivatedAt: null,
       });
@@ -71,6 +72,25 @@ async function seedPromptActivations(
 }
 
 describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared route)', () => {
+  it('keeps principle, activation and artifact evidence arrays aligned when multiple activations share one principle', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedPromptActivations(workspaceDir, [
+      { principleId: 'SH_DUP', text: 'first activation', artifactId: 'art-dup-1', activationId: 'act-dup-1' },
+      { principleId: 'SH_DUP', text: 'second activation', artifactId: 'art-dup-2', activationId: 'act-dup-2' },
+      { principleId: 'SH_AFTER', text: 'later distinct principle', artifactId: 'art-after', activationId: 'act-after' },
+    ]);
+
+    const result = await buildActivePrinciplePromptContext({ workspaceDir });
+
+    expect(result.principleIds).toEqual(['SH_DUP', 'SH_AFTER']);
+    expect(result.activationIds).toEqual(['act-dup-1', 'act-after']);
+    expect(result.artifactIds).toEqual(['art-dup-1', 'art-after']);
+    expect(result.principleIds).toHaveLength(result.activationIds.length);
+    expect(result.principleIds).toHaveLength(result.artifactIds.length);
+    expect(result.additionalContext).toContain('first activation');
+    expect(result.additionalContext).toContain('second activation');
+  });
+
   it('without a round key it keeps the legacy FIFO prefix policy (rollback baseline)', async () => {
     const workspaceDir = tempWorkspace();
     await seedPromptActivations(workspaceDir, [

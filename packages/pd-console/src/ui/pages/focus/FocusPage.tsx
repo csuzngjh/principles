@@ -861,8 +861,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         sourceUnlinked={showsUnlinkedCandidateNote(group)}
         promptInjection={groupedData?.promptInjection}
         budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(
-          groupedData.promptInjection.productionRotates === true ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
-            ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : 'pages.focus.approveQueueBadge',
+          // PRI-1137 final review (P1-1/P1-3): three-state rotation copy —
+          // 'unknown' (unbound multi-host) never renders the FIFO-flavoured
+          // generic badge; it says a single conclusion cannot be drawn.
+          groupedData.promptInjection.productionRotation === 'rotates' ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
+            ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : groupedData.promptInjection.productionRotation === 'does_not_rotate' ? 'pages.focus.approveQueueBadge' : 'pages.focus.approveQueueBadgeRotationUnknown',
           { used: groupedData.promptInjection.usedChars, budget: groupedData.promptInjection.budget }) : undefined}
         onResolved={message => { setCompletedMessage({ key: `approval:${record.id}`, message }); void loadData(); }} />,
     }))),
@@ -970,11 +973,12 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
         {ownerDecisionError !== null && <p role="alert" className="text-amber text-[13px]">{t('pages.focus.ownerDecision.loadError')}</p>}
         {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
-        {/* PD_PROMPT_CAPACITY_V1 R-A1 / PRI-1066: the host picker must stay
-            reachable whenever the capacity route is unconfirmed — it is the
-            only way to request approvals while `abstraction_layer_v1` is OFF.
-            The starvation banner is rendered by the section only for a true
-            `usedChars === 0` case; `truncated` alone is normal rotation. */}
+        {/* PD_PROMPT_CAPACITY_V1 R-A1 / PRI-1066 / PRI-1137: the host picker
+            must stay reachable whenever the capacity route is unconfirmed — it
+            is the only way to request approvals when the workspace's host
+            facts are unusable. The starvation banner is rendered by the
+            section only for a true `usedChars === 0` case; `truncated` alone
+            is normal rotation. */}
         <PromptCapacitySection
           promptInjection={groupedData?.promptInjection}
           promptTargetHost={promptTargetHost}

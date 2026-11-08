@@ -29,6 +29,7 @@ import type {
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
   RuntimePromptActivationsInjectedEventData,
+  PromptPresenceObservedEventData,
   RuleHostUnhealthyEventData,
   RuleHostSkippedEventData,
   TrajectoryObservabilityFailureEventData,
@@ -221,6 +222,16 @@ export class EventLog {
 
   recordRuntimeActivationsInjected(data: RuntimePromptActivationsInjectedEventData): void {
     this.record('runtime_v2_prompt_activations_injected', 'injected', data.sessionId, data);
+  }
+
+  /**
+   * PRI-1150: fact-only post-assembly presence observation (PD-self Path A).
+   * Boundary is fixed at post_assembly_system_prompt_via_llm_input; this event
+   * never asserts the actual request, delivery, adherence or D/confirmed.
+   * Data carries no body text — containment facts only.
+   */
+  recordPromptPresenceObserved(data: PromptPresenceObservedEventData): void {
+    this.record('runtime_v2_prompt_presence_observed', 'injected', data.sessionId, data);
   }
 
   /**

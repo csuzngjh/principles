@@ -38,7 +38,9 @@ export type EventType =
       // PRI-491: RuleHost skipped — active activation skipped at load (flag-off, unsupported action, etc.)
       | 'rulehost_skipped'
       // PRI-647: trajectory observability failed (closed/disposed connection) but prompt build continued (fail-open)
-      | 'trajectory_observability_failure';
+      | 'trajectory_observability_failure'
+      // PRI-1150: post-assembly principle-body presence observation (PD-self path A; fact-only)
+      | 'runtime_v2_prompt_presence_observed';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -67,6 +69,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rulehost_unhealthy'),
   Type.Literal('rulehost_skipped'),
   Type.Literal('trajectory_observability_failure'),
+  Type.Literal('runtime_v2_prompt_presence_observed'),
 ]);
 
 export type EventCategory =
@@ -625,6 +628,104 @@ export type RuleHostAutoCorrectAppliedEventDataStatic = Static<typeof RuleHostAu
  * artifactIds[i] describe the SAME injected principle — the three arrays are
  * index-aligned and each length equals injectedCount.
  */
+/**
+ * PRI-1150: fact-only record of the post-assembly principle-body presence
+ * check (PD-self Path A). Boundary is fixed at
+ * post_assembly_system_prompt_via_llm_input — this event never asserts the
+ * actual request, network delivery, model adherence, D/confirmed/timely.
+ * No body text, credentials or prompt content may enter any field.
+ */
+export interface PromptPresenceObservedEventData {
+  runId: string;
+  sessionId: string;
+  provider?: string;
+  model?: string;
+  boundary: 'post_assembly_system_prompt_via_llm_input';
+  /** unique = single complete candidate; ambiguous = multi-candidate or incomplete history; none = no binding attempted. */
+  binding: 'unique' | 'ambiguous' | 'none';
+  /** Live (non-expired, non-evicted) snapshots considered for this callback. */
+  liveSnapshots: number;
+  /** PD-internal per-key ordinals of the candidates (diagnostic; the host event carries no assembly identity). */
+  assemblySeqCandidates: number[];
+  checked: boolean;
+  /** Present when checked=false or when an individual result degraded. Closed set, see the plugin checker. */
+  reason?:
+    | 'missing_identity'
+    | 'missing_expectations'
+    | 'expectations_expired'
+    | 'history_incomplete'
+    | 'ambiguous_binding'
+    | 'empty_snapshot'
+    | 'snapshot_over_limit'
+    | 'observation_over_limit'
+    | 'unparseable_observation'
+    | 'invalid_body'
+    | 'assembly_truncated'
+    | 'body_over_limit'
+    | 'check_failed'
+    | 'shared_field_absent'
+    | 'target_removed_by_fallback'
+    | 'generation_failed'
+    | 'workspace_unresolved'
+    | 'check_failed';
+  results?: {
+    activationId: string;
+    outcome: 'full_hit' | 'checked_missing' | 'unknown';
+    reason?: string;
+    actualBodyChars?: number;
+  }[];
+  /** Host-runtime-side entries dropped at its own freeze cap. */
+  expectationsOverflow?: number;
+  /** Registry-side evictions/expiries observable at callback time. */
+  evictedCount?: number;
+  expiredCount?: number;
+  registryKeys?: number;
+  nextAction?: string;
+}
+
+export const PromptPresenceObservedEventDataSchema = Type.Object({
+  runId: Type.String(),
+  sessionId: Type.String(),
+  provider: Type.Optional(Type.String()),
+  model: Type.Optional(Type.String()),
+  boundary: Type.Literal('post_assembly_system_prompt_via_llm_input'),
+  binding: Type.Union([Type.Literal('unique'), Type.Literal('ambiguous'), Type.Literal('none')]),
+  liveSnapshots: Type.Number(),
+  // Bounded: the registry keeps at most 8 snapshots per key.
+  assemblySeqCandidates: Type.Array(Type.Number(), { maxItems: 8 }),
+  checked: Type.Boolean(),
+  reason: Type.Optional(Type.Union([
+    Type.Literal('missing_identity'),
+    Type.Literal('missing_expectations'),
+    Type.Literal('expectations_expired'),
+    Type.Literal('history_incomplete'),
+    Type.Literal('ambiguous_binding'),
+    Type.Literal('empty_snapshot'),
+    Type.Literal('snapshot_over_limit'),
+    Type.Literal('observation_over_limit'),
+    Type.Literal('unparseable_observation'),
+    Type.Literal('invalid_body'),
+    Type.Literal('assembly_truncated'),
+    Type.Literal('body_over_limit'),
+    Type.Literal('check_failed'),
+    Type.Literal('shared_field_absent'),
+    Type.Literal('target_removed_by_fallback'),
+    Type.Literal('generation_failed'),
+    Type.Literal('workspace_unresolved'),
+  ])),
+  results: Type.Optional(Type.Array(Type.Object({
+    activationId: Type.String(),
+    outcome: Type.Union([Type.Literal('full_hit'), Type.Literal('checked_missing'), Type.Literal('unknown')]),
+    reason: Type.Optional(Type.String()),
+    actualBodyChars: Type.Optional(Type.Number()),
+  }), { maxItems: 64 })),
+  expectationsOverflow: Type.Optional(Type.Number()),
+  evictedCount: Type.Optional(Type.Number()),
+  expiredCount: Type.Optional(Type.Number()),
+  registryKeys: Type.Optional(Type.Number()),
+  nextAction: Type.Optional(Type.String()),
+});
+
 export interface RuntimePromptActivationsInjectedEventData {
   /** Invocation journal identity, distinct from admission and model request IDs. */
   hookInvocationId?: string;

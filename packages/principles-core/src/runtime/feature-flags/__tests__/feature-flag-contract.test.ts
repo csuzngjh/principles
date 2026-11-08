@@ -744,20 +744,32 @@ describe('new_user_onboarding flag', () => {
   });
 });
 
-describe('PRI-523 shared host runtime rollout flag', () => {
-  it('registers abstraction_layer_v1 as quiet, default-off, and dated to the accepted exception', () => {
+describe('PRI-1137 shared host runtime rollout flag', () => {
+  it('registers abstraction_layer_v1 as a gone tombstone, default-off, keeping its original date', () => {
     const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'abstraction_layer_v1');
     expect(flag).toMatchObject({
       id: 'abstraction_layer_v1',
-      category: 'quiet',
+      category: 'gone',
       enabled: false,
       since: '2026-08-13',
     });
   });
 
-  it('honors an explicit abstraction_layer_v1 rollback', () => {
+  it('a stale enabled:true in an old config cannot resurrect the legacy route', () => {
     const result = computeEffectiveFlags(
-      { abstraction_layer_v1: { category: 'quiet', enabled: false } },
+      { abstraction_layer_v1: { category: 'gone', enabled: true } },
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/config.yaml',
+    );
+    // Gone tombstone: the override is rejected observably and the computed
+    // value stays false — no runtime consumer may read it as a route switch.
+    expect(result.flags.abstraction_layer_v1?.enabled).toBe(false);
+    expect(result.warnings.some(w => w.includes('abstraction_layer_v1') && w.includes('cannot be re-enabled'))).toBe(true);
+  });
+
+  it('an explicit abstraction_layer_v1 rollback stays false', () => {
+    const result = computeEffectiveFlags(
+      { abstraction_layer_v1: { category: 'gone', enabled: false } },
       DEFAULT_FEATURE_FLAGS,
       '/test/.pd/config.yaml',
     );

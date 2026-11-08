@@ -3,13 +3,19 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
-import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, trimToBudget } from '@principles/core/runtime';
+import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget } from '@principles/core/runtime';
 import type { ActivationStatusRecord } from '@principles/core/runtime';
+import {
+  buildActivePrinciplePromptContext,
+  loadPdConfigForPlugin,
+  packSharedDirectives,
+  type ActivePrinciplePromptResult,
+} from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import { PromptActivationReader, RUNTIME_PRINCIPLE_BUDGET } from '../../src/core/runtime-prompt-activation-reader.js';
+import { TrajectoryRegistry } from '../../src/core/trajectory.js';
 import * as yaml from 'js-yaml';
 import { getDefaultPdConfig } from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
 
 const TEST_PRINCIPLE_TEXT = 'UNIQUE_RUNTIME_TEST_PRINCIPLE_7x9k2';
 
@@ -49,6 +55,11 @@ afterEach(() => {
     sqliteConn?.close();
   } catch {
     // best-effort
+  }
+  try {
+    TrajectoryRegistry.dispose(tempWorkspaceDir);
+  } catch {
+    // best-effort: release the real trajectory connection before deleting the dir
   }
   try {
     fs.rmSync(tempWorkspaceDir, { recursive: true, force: true });
@@ -97,7 +108,7 @@ vi.mock('../../src/core/workspace-context.js', async () => {
         workspaceDir: tempWorkspaceDir,
         stateDir: tempStateDir,
         resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
-        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn().mockReturnValue(1) },
         config: { get: vi.fn() },
         eventLog: mockEventLog,
         evolutionReducer: {
@@ -109,7 +120,7 @@ vi.mock('../../src/core/workspace-context.js', async () => {
         workspaceDir: tempWorkspaceDir,
         stateDir: tempStateDir,
         resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
-        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+        trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn().mockReturnValue(1) },
         config: { get: vi.fn() },
         eventLog: mockEventLog,
         evolutionReducer: {
@@ -121,13 +132,17 @@ vi.mock('../../src/core/workspace-context.js', async () => {
   };
 });
 
-vi.mock('../../src/core/session-tracker.js', () => ({
-  getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),
-  resetFriction: vi.fn(),
-  trackFriction: vi.fn(),
-  decayGfi: vi.fn(),
-  getGfiDecayElapsed: vi.fn().mockReturnValue(0),
-}));
+vi.mock('../../src/core/session-tracker.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/session-tracker.js')>();
+  return {
+    ...actual,
+    getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),
+    resetFriction: vi.fn(),
+    trackFriction: vi.fn(),
+    decayGfi: vi.fn(),
+    getGfiDecayElapsed: vi.fn().mockReturnValue(0),
+  };
+});
 
 vi.mock('../../src/core/path-resolver.js', () => ({
   PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
@@ -213,6 +228,65 @@ function makeCtx(overrides: {
     },
   } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 }
+/**
+ * PRI-1137: the shared host runtime is the ONLY prompt route. Tests drive the
+ * same two production steps the OpenClaw adapter runs:
+ *   1. the runtime builds the prompt (budget resolved from the host's own
+ *      facts exactly as `createProductionHostRuntime` does), and
+ *   2. the OpenClaw hook assembles the final payload from that prompt.
+ * The retired plugin-local reader + trimToBudget injection path is gone, so
+ * a hook invocation without a shared prompt injects nothing (see prompt.ts).
+ */
+type AgentCtx = Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
+
+interface SharedPromptCtx {
+  workspaceDir: string;
+  contextTokenBudget?: number;
+  contextWindowSource?: string;
+  modelProviderId?: string;
+  modelId?: string;
+}
+
+interface AdaptivePriority {
+  artifactId: string;
+  activationId: string;
+  hookInvocationId?: string;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+}
+
+async function buildSharedPrompt(ctx: AgentCtx, extra: { roundKey?: number; adaptivePriority?: AdaptivePriority } = {}): Promise<ActivePrinciplePromptResult> {
+  const facts = ctx as unknown as SharedPromptCtx;
+  const declaredWindow = operatorDeclaredContextWindow(
+    loadPdConfigForPlugin(facts.workspaceDir).effective.config.promptBudget,
+    'openclaw',
+  );
+  const hasModelContext = facts.modelId !== undefined || facts.modelProviderId !== undefined
+    || facts.contextTokenBudget !== undefined || facts.contextWindowSource !== undefined;
+  return buildActivePrinciplePromptContext({
+    workspaceDir: facts.workspaceDir,
+    ...(extra.roundKey !== undefined ? { roundKey: extra.roundKey } : {}),
+    ...(extra.adaptivePriority ? {
+      adaptivePriority: { artifactId: extra.adaptivePriority.artifactId, activationId: extra.adaptivePriority.activationId },
+      ...(extra.adaptivePriority.hookInvocationId ? { hookInvocationId: extra.adaptivePriority.hookInvocationId } : {}),
+      ...(extra.adaptivePriority.signal ? { signal: extra.adaptivePriority.signal } : {}),
+      ...(extra.adaptivePriority.deadlineAt !== undefined ? { deadlineAt: extra.adaptivePriority.deadlineAt } : {}),
+    } : {}),
+    promptBudget: resolvePromptBudget({
+      ...(declaredWindow !== undefined ? { operatorDeclared: { contextWindowTokens: declaredWindow } } : {}),
+      hostCapacity: !hasModelContext ? undefined : {
+        contextTokenBudget: facts.contextTokenBudget,
+        contextWindowSource: facts.contextWindowSource,
+      },
+      modelIdentity: !hasModelContext ? undefined : {
+        providerId: facts.modelProviderId,
+        modelId: facts.modelId,
+      },
+      catalog: getPromptModelCatalog(),
+    }),
+  });
+}
+
 async function insertPromptActivation(overrides: {
   artifactId: string;
   principleId: string;
@@ -305,15 +379,22 @@ describe('Adaptive activation — actual local prompt entry', () => {
   it('prioritizes an omitted authorized target and records only final selected IDs', async () => {
     await seed();
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const native = await handleBeforePromptBuild(admitted(), makeCtx());
+    const nativeEvt = admitted() as Parameters<typeof handleBeforePromptBuild>[0];
+    const nativeCtx = makeCtx();
+    const native = await handleBeforePromptBuild(nativeEvt, nativeCtx, await buildSharedPrompt(nativeCtx));
     const target = Array.from({ length: 20 }, (_, i) => `AA-${String(i).padStart(2, '0')}`)
       .find(id => !native?.prependSystemContext?.includes(`${id}-body-`));
     expect(target).toBeDefined();
     const { EventLogService } = await import('../../src/core/event-log.js');
     const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
     spy.mockClear();
+    // PRI-1137: the OpenClaw adaptive decision runs in the shared runtime's
+    // pre-selection phase, never in the deleted plugin-local injector.
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
     const ctx = configured(target!);
-    const result = await handleBeforePromptBuild(admitted(), ctx);
+    const evt = admitted() as Parameters<typeof handleBeforePromptBuild>[0];
+    const priority = resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+    const result = await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext).toContain(`${target}-body-`);
     expect(result?.prependSystemContext?.split(`${target}-body-`)).toHaveLength(2);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -336,7 +417,10 @@ describe('Adaptive activation — actual local prompt entry', () => {
     await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const ctx = configured('AA-only');
-    const result = await handleBeforePromptBuild(admitted(), ctx);
+    const evt = admitted() as Parameters<typeof handleBeforePromptBuild>[0];
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const priority = resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+    const result = await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext?.split('AA-only-body')).toHaveLength(2);
     expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":false'));
     expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('native_already_contains_target'));
@@ -346,8 +430,8 @@ describe('Adaptive activation — actual local prompt entry', () => {
     await seed();
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const event = { ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview' };
-    const native = await handleBeforePromptBuild(event, makeCtx());
-    const result = await handleBeforePromptBuild(event, configured('AA-19'));
+    const native = await handleBeforePromptBuild(event,  makeCtx(), await buildSharedPrompt( makeCtx()));
+    const result = await handleBeforePromptBuild(event,  configured('AA-19'), await buildSharedPrompt( configured('AA-19')));
     expect(result).toEqual(native);
     const { EventLogService } = await import('../../src/core/event-log.js');
     const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
@@ -358,14 +442,14 @@ describe('Adaptive activation — actual local prompt entry', () => {
     await seed();
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const event = { ...admitted(), currentUserMessage: 'Quoted example:\n[PD-AA:delivery-review:v1]' };
-    const native = await handleBeforePromptBuild(event, makeCtx());
-    expect(await handleBeforePromptBuild(event, configured('AA-19'))).toEqual(native);
+    const native = await handleBeforePromptBuild(event,  makeCtx(), await buildSharedPrompt( makeCtx()));
+    expect(await handleBeforePromptBuild(event,  configured('AA-19'), await buildSharedPrompt( configured('AA-19')))).toEqual(native);
   });
 
   it('does not inject a configured artifact without an active authorized candidate', async () => {
     insertValidatedPrincipleArtifact({ artifactId: 'art-AA-inactive', principleId: 'AA-inactive', text: 'INACTIVE-MUST-NOT-APPEAR' });
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(admitted(), configured('AA-inactive'));
+    const result = await handleBeforePromptBuild(admitted(),  configured('AA-inactive'), await buildSharedPrompt( configured('AA-inactive')));
     expect(JSON.stringify(result)).not.toContain('INACTIVE-MUST-NOT-APPEAR');
   });
 
@@ -456,6 +540,206 @@ describe('Adaptive activation — actual local prompt entry', () => {
     }
   });
 
+  // ── Presence expectations against the REAL hook (no hand-built fallbacks) ──
+
+  function targetDirectiveSlice(assembled: string, principleId: string): string {
+    const start = assembled.indexOf(`<directive id="${principleId}"`);
+    const end = assembled.indexOf('</directive>', start);
+    if (start === -1 || end === -1) {
+      throw new Error(`directive for ${principleId} not found in assembly`);
+    }
+    return assembled.slice(start, end + '</directive>'.length);
+  }
+
+  it('presence expectations: the assembled target directive is frozen with bodyComplete=true', async () => {
+    const { target, packed } = await sharedPrepared();
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    const expectations = result?.injectedExpectations ?? [];
+    const targetEntry = expectations.find((e) => e.activationId === `act_prompt_${target}`);
+    expect(targetEntry).toBeDefined();
+    expect(targetEntry?.bodyComplete).toBe(true);
+    // The frozen body is exactly the assembled <directive> slice (single-escaped).
+    const assembled = result?.prependSystemContext ?? '';
+    const slice = targetDirectiveSlice(assembled, target);
+    expect(targetEntry?.bodyText).toBe(slice);
+    for (const entry of expectations) {
+      expect(assembled).toContain(entry.bodyText);
+      expect(entry.bodyComplete).toBe(true);
+    }
+  });
+
+  it('PRI-1150 end-to-end: real shared freeze → registry → unique llm_input handler → containment event', async () => {
+    const { target, packed } = await sharedPrepared();
+    const configuredCtx = configured(target);
+    const runId = 'e2e-run-1150';
+    const sessionId = 'e2e-session-1150';
+    const ctx = {
+      ...configuredCtx,
+      runId,
+      sessionId,
+    } as typeof configuredCtx;
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), ctx, packed);
+    const assembled = result?.prependSystemContext ?? '';
+
+    // The freeze point registered the snapshot for this run (production side effect).
+    const { getPromptPresenceRegistry } = await import('../../src/hooks/prompt-presence-registry.js');
+    const registry = getPromptPresenceRegistry();
+    const binding = registry.resolveBinding({ runId, sessionId, workspaceDir: tempWorkspaceDir });
+    expect(binding.status).toBe('unique');
+
+    // The official llm_input callback (simulated event, real production handler
+    // and emission path — no hand-picked snapshot, no fabricated binding).
+    const { handleLlmInputPresence } = await import('../../src/hooks/llm-input-presence.js');
+    const recorded: Record<string, unknown>[] = [];
+    handleLlmInputPresence({
+      event: {
+        runId,
+        sessionId,
+        provider: 'test-provider',
+        model: 'test-model',
+        systemPrompt: assembled,
+        prompt: 'user prompt text',
+        historyMessages: [],
+        imagesCount: 0,
+      },
+      ctx: { runId, sessionId } as Parameters<typeof handleLlmInputPresence>[0]['ctx'],
+      workspaceDir: tempWorkspaceDir,
+      eventLog: { recordPromptPresenceObserved: (data: Record<string, unknown>) => recorded.push(data) } as unknown as EventLog,
+    });
+    expect(recorded).toHaveLength(1);
+    const event = recorded[0] as Record<string, unknown>;
+    expect(event).toMatchObject({
+      runId,
+      sessionId,
+      boundary: 'post_assembly_system_prompt_via_llm_input',
+      binding: 'unique',
+      checked: true,
+    });
+    const results = event.results as Array<Record<string, unknown>>;
+    expect(results.length).toBeGreaterThan(0);
+    const targetResult = results.find((r) => r.activationId === `act_prompt_${target}`);
+    expect(targetResult).toMatchObject({ outcome: 'full_hit' });
+    for (const entry of results) expect(entry.outcome).toBe('full_hit');
+    // Privacy: no body text in the emitted event.
+    expect(JSON.stringify(event)).not.toContain(`${target}-body-`);
+
+    // A second assembly in the SAME run makes the next callback ambiguous
+    // (owner constraint: no silent latest-snapshot binding).
+    const result2 = await handleBeforePromptBuild(admitted(), ctx, packed);
+    expect(result2?.prependSystemContext).toBe(assembled);
+    const recorded2: Record<string, unknown>[] = [];
+    handleLlmInputPresence({
+      event: {
+        runId, sessionId, provider: 'test-provider', model: 'test-model',
+        systemPrompt: assembled, prompt: '', historyMessages: [], imagesCount: 0,
+      },
+      ctx: { runId, sessionId } as Parameters<typeof handleLlmInputPresence>[0]['ctx'],
+      workspaceDir: tempWorkspaceDir,
+      eventLog: { recordPromptPresenceObserved: (data: Record<string, unknown>) => recorded2.push(data) } as unknown as EventLog,
+    });
+    // Two live snapshots (first + second assembly) → ambiguous_binding.
+    expect(recorded2[0]).toMatchObject({ binding: 'ambiguous', checked: false, reason: 'ambiguous_binding' });
+  });
+
+  it('presence expectations: a target failing final revalidation is excluded, not misreported', async () => {
+    const { target, packed } = await sharedPrepared();
+    // Mutate after packing, before the hook: the hook's own final revalidation
+    // reads the changed artifact and fails → restore('target_changed').
+    sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?')
+      .run(JSON.stringify({ principleId: target, text: 'changed after pack' }), `art-${target}`);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+    const expectations = result?.injectedExpectations ?? [];
+    expect(expectations.find((e) => e.activationId === `act_prompt_${target}`)).toBeUndefined();
+  });
+
+  it('presence expectations: the hook-final deadline fallback excludes the target', async () => {
+    const { target, packed } = await sharedPrepared();
+    if (!packed.adaptivePacking) throw new Error('requires prepared packing');
+    // Packing succeeded with a future deadline; the deadline passes before the
+    // hook runs, so the hook's OWN final fallback fires (not the packing one).
+    packed.adaptivePacking.deadlineAt = Date.now() - 5;
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+    const expectations = result?.injectedExpectations ?? [];
+    expect(expectations.find((e) => e.activationId === `act_prompt_${target}`)).toBeUndefined();
+  });
+
+  it('presence expectations: post-guard assemblies provably satisfy the final budget precondition (branch unreachable via real path)', async () => {
+    // The hook-final budget branch fires only when the assembled lengths exceed
+    // resolveTotalInjectionBudgetChars(budget). The guard runs with the SAME
+    // budget and fits the sum by construction, and the prioritized selection is
+    // capped at that budget — so the precondition cannot occur through the real
+    // shared route. This test proves that invariant on a real assembly instead
+    // of hand-crafting an "already fell back" state (forbidden).
+    for (let i = 0; i < 20; i++) {
+      const principleId = `AC-${String(i).padStart(2, '0')}`;
+      insertValidatedPrincipleArtifact({ artifactId: `art-${principleId}`, principleId, text: `${principleId}-body-${'Z'.repeat(560)}` });
+      await insertPromptActivation({ artifactId: `art-${principleId}`, principleId });
+    }
+    const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
+    const native = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir });
+    const target = Array.from({ length: 20 }, (_, i) => `AC-${String(i).padStart(2, '0')}`)
+      .find(id => !native.principleIds.includes(id));
+    if (!target) throw new Error('fixture requires a target outside the Native pack');
+    const packed = await buildActivePrinciplePromptContext({ workspaceDir: tempWorkspaceDir,
+      promptBudget: {
+        budgetChars: 2_000,
+        capacitySource: 'operator_declared',
+        capacityStatus: 'confirmed',
+        contextWindowTokens: 1_048_576,
+        policyVersion: 'model_aware_v2',
+      },
+      adaptivePriority: { artifactId: `art-${target}`, activationId: `act_prompt_${target}` }, deadlineAt: Date.now() + 15000 });
+    expect(packed.adaptivePacking?.status).toBe('prioritized');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+    const { resolveTotalInjectionBudgetChars } = await import('@principles/core/runtime');
+    const assembledLength =
+      (result?.prependSystemContext?.length ?? 0) +
+      (result?.prependContext?.length ?? 0) +
+      (result?.appendSystemContext?.length ?? 0);
+    // The final budget branch requires assembledLength > this number; the guard
+    // keeps the assembly within it, so the branch stays defensive-only here.
+    expect(assembledLength).toBeLessThanOrEqual(resolveTotalInjectionBudgetChars(packed.budget));
+    // The target survives (the branch never fired) and stays frozen completely.
+    const expectations = result?.injectedExpectations ?? [];
+    const targetEntry = expectations.find((e) => e.activationId === `act_prompt_${target}`);
+    expect(targetEntry?.bodyComplete).toBe(true);
+  });
+
+  it('presence expectations: shared-route restore (hook-final revalidate fails) drops the removed target', async () => {
+    // PRI-1137 merge: the plugin-local route is retired — the restore path is
+    // exercised through the shared route, the only remaining authority.
+    const { target, packed } = await sharedPrepared();
+    const hostRuntime = await import('@principles/host-runtime');
+    // Packing revalidate already consumed its call inside sharedPrepared; the
+    // hook-final revalidate is the next call → force it to fail
+    // → restore('target_changed') with the Native baseline.
+    const spy = vi.spyOn(hostRuntime, 'revalidateAdaptivePrinciple').mockResolvedValue(false);
+    try {
+      const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+      const result = await handleBeforePromptBuild(admitted(), configured(target), packed);
+      expect(result?.prependSystemContext).not.toContain(`${target}-body-`);
+      const expectations = result?.injectedExpectations ?? [];
+      expect(expectations.find((e) => e.activationId === `act_prompt_${target}`)).toBeUndefined();
+      // Post-PRI-1137 the plugin has no per-principle raw bodies for non-target
+      // principles (shared-route gap; Path A design covers it) — the restored
+      // baseline contributes no plugin-side expectations, and none may claim a
+      // body that is not in the final assembly.
+      const assembled = result?.prependSystemContext ?? '';
+      for (const entry of expectations) {
+        expect(assembled).toContain(entry.bodyText);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('binds the terminal record to the snapshot taken when the invocation opened', async () => {
     const { target, packed } = await sharedPrepared();
     const identityModule = await import('../../src/core/adaptive-config-identity.js');
@@ -498,13 +782,13 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const identityModule = await import('../../src/core/adaptive-config-identity.js');
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
-    const baseline = await handleBeforePromptBuild(admitted(), configured('AA-only'));
+    const baseline = await handleBeforePromptBuild(admitted(),  configured('AA-only'), await buildSharedPrompt( configured('AA-only')));
 
     vi.mocked(identityModule.buildAdaptiveConfigIdentitySnapshot).mockImplementationOnce(() => {
       throw new Error('collector unavailable');
     });
     const failingCtx = configured('AA-only');
-    const degraded = await handleBeforePromptBuild(admitted(), failingCtx);
+    const degraded = await handleBeforePromptBuild(admitted(),  failingCtx, await buildSharedPrompt( failingCtx));
 
     expect(degraded).toEqual(baseline);
     expect(failingCtx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('Config identity unavailable'));
@@ -518,7 +802,7 @@ describe('Adaptive activation — actual local prompt entry', () => {
     journal.mockImplementationOnce(() => { throw new Error('storage unavailable'); });
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const ctx = configured('AA-only');
-    const result = await handleBeforePromptBuild(admitted(), ctx);
+    const result = await handleBeforePromptBuild(admitted(),  ctx, await buildSharedPrompt( ctx));
     expect(result?.prependSystemContext).toContain('AA-only-body');
     expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('Invocation journal unavailable'));
   });
@@ -600,8 +884,8 @@ describe('Controlled admission — real local/shared entries', () => {
     }
   }
 
-  function configuredWith(principleId: string) {
-    const ctx = makeCtx();
+  function configuredWith(principleId: string, sessionId = 'test-session-v2') {
+    const ctx = makeCtx({ sessionId });
     if (!ctx.api) throw new Error('test requires plugin API');
     ctx.api.pluginConfig = { adaptiveActivation: {
       enabled: true, workspaceDir: tempWorkspaceDir, artifactId: `art-${principleId}`,
@@ -661,14 +945,18 @@ describe('Controlled admission — real local/shared entries', () => {
     return JSON.parse(fs.readFileSync(path.join(root, 'admission.json'), 'utf8'));
   }
 
-  it('local entry consumes the admission and records the operator admission separately', async () => {
+  it('the shared pre-selection phase consumes the admission and records the operator admission separately', async () => {
     await seedTwenty();
     const inputText = '[PD-AA:delivery-review:v1]\nReview delivery';
     const ctx = configuredWith('AA-19');
     const { event, mapping } = await makeAdmission({ inputText, artifactId: 'art-AA-19', activationId: 'act_prompt_AA-19',
       softTimeoutMs: mappingSoftTimeout(ctx), expiresAt: mappingExpiresAt(ctx) });
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(event, ctx);
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    // PRI-1137: admission is claimed by the production provider in the
+    // pre-selection phase; the same event instance carries the claim handoff.
+    const priority = resolveAdaptivePriorityForHook(event, ctx, ctx.api!);
+    const result = await handleBeforePromptBuild(event, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext).toContain('AA-19-body-');
     expect(consumed().consumedAt).toBeTruthy();
     expect(consumed().consumedBy).toMatchObject({ sessionId: 'test-session-v2' });
@@ -680,7 +968,7 @@ describe('Controlled admission — real local/shared entries', () => {
     expect(mapping.artifactId).toBe('art-AA-19');
   });
 
-  it('local entry keeps the native path when a native message identity is present', async () => {
+  it('keeps the native path when a native message identity is present', async () => {
     await seedTwenty();
     const inputText = '[PD-AA:delivery-review:v1]\nReview delivery';
     const ctx = configuredWith('AA-19');
@@ -689,7 +977,9 @@ describe('Controlled admission — real local/shared entries', () => {
     const event = { ...makeMinimalEvent(), prompt: inputText, currentUserMessage: inputText,
       currentUserMessageId: 'native-1' } as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(event, ctx);
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const priority = resolveAdaptivePriorityForHook(event, ctx, ctx.api!);
+    const result = await handleBeforePromptBuild(event, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext).toContain('AA-19-body-');
     expect(consumed().consumedAt).toBeNull();
     const { EventLogService } = await import('../../src/core/event-log.js');
@@ -733,11 +1023,48 @@ describe('Controlled admission — real local/shared entries', () => {
     expect(takeControlledAdmissionHandoff(event, packed.adaptivePacking.hookInvocationId)).toBeNull();
 
     // A duplicate callback for the same packed round cannot re-apply the target.
-    const replayEvent = { ...event };
-    const replay = await handleBeforePromptBuild(replayEvent, ctx, packed);
+    // Use a fresh session so every receipt below belongs only to the fallback
+    // invocation (the first, valid invocation legitimately recorded the target).
+    const replaySessionId = 'test-session-v2-replay';
+    const replayEvent = { ...event, sessionId: replaySessionId };
+    const replayCtx = configuredWith(target, replaySessionId);
+    const replay = await handleBeforePromptBuild(replayEvent, replayCtx, packed);
     expect(replay?.prependSystemContext).not.toContain(`${target}-body-`);
+    expect(replay?.prependSystemContext).toContain(baseline.additionalContext.slice(0, 80));
     const replayEnd = journal.mock.calls[journal.mock.calls.length - 1]![1] as Record<string, unknown>;
     expect(replayEnd).toMatchObject({ reason: 'admission_handoff_missing' });
+
+    // Every downstream evidence surface must use the exact Native selection:
+    // runtime event, session membership, legacy presence ledger and normalized
+    // delivery evidence must not claim the rejected Adaptive target.
+    const eventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const injectionEvents = eventLog.recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
+    const injection = injectionEvents.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(injection).toMatchObject({
+      principleIds: baseline.principleIds,
+      activationIds: baseline.activationIds,
+      artifactIds: baseline.artifactIds,
+      injectedCount: baseline.principleIds.length,
+      injectedCharCount: baseline.additionalContext.length,
+    });
+
+    const sessionTracker = await import('../../src/core/session-tracker.js');
+    expect(sessionTracker.getInjectedPrincipleIds(replaySessionId)).toEqual(baseline.principleIds);
+    expect(sessionTracker.getInjectedActivationIds(replaySessionId)).toEqual(baseline.activationIds);
+
+    const presenceRows = sqliteConn.getDb().prepare(`
+      SELECT principle_id, activation_id FROM principle_applications
+      WHERE channel = 'prompt' AND level = 'presence' AND kind = 'prompt_injected' AND session_id = ?
+    `).all(replaySessionId) as Array<{ principle_id: string; activation_id: string | null }>;
+    expect(new Set(presenceRows.map(row => row.principle_id))).toEqual(new Set(baseline.principleIds));
+    expect(presenceRows.some(row => row.principle_id === target)).toBe(false);
+
+    const deliveryRows = sqliteConn.getDb().prepare(`
+      SELECT principle_id, activation_id FROM intervention_evidence_records
+      WHERE record_kind = 'delivery' AND source_locator = ?
+    `).all(`openclaw-plugin-event-log:${replaySessionId}`) as Array<{ principle_id: string; activation_id: string | null }>;
+    expect(new Set(deliveryRows.map(row => row.principle_id))).toEqual(new Set(baseline.principleIds));
+    expect(deliveryRows.some(row => row.principle_id === target)).toBe(false);
   });
 
   function mappingExpiresAt(ctx: Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1]): string {
@@ -786,7 +1113,7 @@ describe('Runtime V2 prompt activation injection', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     // Runtime principles are now in prependSystemContext (highest attention)
     expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
@@ -799,7 +1126,7 @@ describe('Runtime V2 prompt activation injection', () => {
     insertValidatedPrincipleArtifact({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
   });
@@ -818,7 +1145,7 @@ describe('Runtime V2 prompt activation injection', () => {
     });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
   });
@@ -882,7 +1209,7 @@ describe('Runtime V2 prompt activation injection', () => {
     } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  ctx, await buildSharedPrompt( ctx));
 
     expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
 
@@ -917,25 +1244,27 @@ describe('Runtime V2 prompt activation injection', () => {
       null,
     );
 
-    const infoSpy = vi.fn();
+    const warnSpy = vi.fn();
     const ctx = {
       workspaceDir: tempWorkspaceDir,
       trigger: 'user',
       sessionId: 'test-session-v2',
       api: {
-        logger: { info: infoSpy, warn: vi.fn(), error: vi.fn() },
+        logger: { info: vi.fn(), warn: warnSpy, error: vi.fn() },
         runtime: {},
         config: {},
       },
     } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  ctx, await buildSharedPrompt( ctx));
 
     expect(result).toBeDefined();
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
-    const infoCalls = infoSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-    const hasActivationWarning = infoCalls.some((c: string) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation'));
+    // PRI-1137: a missing artifact is a data-integrity degradation, so the
+    // shared reader's warning is logged at warn (not info).
+    const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    const hasActivationWarning = warnCalls.some((c: string) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation'));
     expect(hasActivationWarning).toBe(true);
   });
 
@@ -963,12 +1292,15 @@ describe('Runtime V2 prompt activation injection', () => {
     } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  ctx, await buildSharedPrompt( ctx));
 
     expect(result).toBeDefined();
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
     const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-    const hasParseWarning = warnCalls.some((c: string) => c.includes('json_parse_error') || c.includes('activation'));
+    // PRI-1137: the alert now comes from the shared reader, whose integrity
+    // token is `artifact_content_json_parse_error` (the retired plugin-local
+    // reader emitted `json_parse_error`).
+    const hasParseWarning = warnCalls.some((c: string) => c.includes('artifact_content_json_parse_error'));
     expect(hasParseWarning).toBe(true);
   });
 
@@ -988,7 +1320,7 @@ describe('Runtime V2 prompt activation injection', () => {
     }
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
     expect(promoteSpy).not.toHaveBeenCalled();
@@ -1043,7 +1375,7 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     expect(result.principles.length).toBe(5);
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const hookResult = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const hookResult = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     // Runtime principles are now in prependSystemContext
     const injected = hookResult?.prependSystemContext ?? '';
@@ -1191,7 +1523,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     const spy = mockEventLog.recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1223,12 +1555,17 @@ describe('Runtime V2 prompt activation observability events', () => {
     spy.mockClear();
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx({
       contextTokenBudget: 256_000,
       contextWindowSource: 'model',
       modelProviderId: 'anthropic',
       modelId: 'claude-sonnet-4-5',
-    }));
+    }), await buildSharedPrompt( makeCtx({
+      contextTokenBudget: 256_000,
+      contextWindowSource: 'model',
+      modelProviderId: 'anthropic',
+      modelId: 'claude-sonnet-4-5',
+    })));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1260,12 +1597,17 @@ describe('Runtime V2 prompt activation observability events', () => {
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     // The host ALSO reports a trusted window — the per-host declaration wins.
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx({
       contextTokenBudget: 256_000,
       contextWindowSource: 'model',
       modelProviderId: 'anthropic',
       modelId: 'claude-sonnet-4-5',
-    }));
+    }), await buildSharedPrompt( makeCtx({
+      contextTokenBudget: 256_000,
+      contextWindowSource: 'model',
+      modelProviderId: 'anthropic',
+      modelId: 'claude-sonnet-4-5',
+    })));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1289,7 +1631,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     spy.mockClear();
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1308,7 +1650,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     spy.mockClear();
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1337,7 +1679,7 @@ describe('Runtime V2 prompt activation observability events', () => {
       spy.mockClear();
 
       const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-      const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+      const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
       expect(spy).toHaveBeenCalled();
       const payload = spy.mock.calls[0][0];
@@ -1370,7 +1712,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     spy.mockClear();
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1391,7 +1733,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     spy.mockClear();
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1414,7 +1756,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     spy.mockClear();
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
@@ -1439,7 +1781,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
     expect(result?.prependSystemContext).toContain('<directive');
@@ -1454,7 +1796,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain('MANDATORY');
@@ -1473,7 +1815,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain('do not override safety');
@@ -1488,7 +1830,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     // Directives should be in prependSystemContext, NOT in appendSystemContext
     const prependCtx = result?.prependSystemContext ?? '';
@@ -1507,7 +1849,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     const ctx = result?.prependSystemContext ?? '';
     // main (PRI-547) renamed AGENT IDENTITY → PD GOVERNANCE CONTEXT; this
@@ -1529,7 +1871,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     await insertPromptActivation({ artifactId, principleId });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain('<directive id="princ-mvp-acceptance-confirm-first" source="runtime_v2_activation"');
@@ -1538,7 +1880,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
 
   it('no directive section when no activations exist', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     const prependCtx = result?.prependSystemContext ?? '';
     expect(prependCtx).not.toContain('ACTIVE BEHAVIOR DIRECTIVES');
@@ -1546,7 +1888,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
 
   it('legacy evolution_principles block is no longer rendered', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result).toBeDefined();
     expect(result?.appendSystemContext ?? '').not.toContain('<evolution_principles>');
@@ -1567,7 +1909,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     );
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result).toBeDefined();
   });
@@ -1613,7 +1955,7 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
     insertApproval({ artifactId, decidedBy: 'owner-safety-net-test' });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
     // The directive TAG carries the derived authority; the boilerplate
@@ -1632,7 +1974,7 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
     // deliberately NO approvals row — prompt channel low-risk auto-activation
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const result = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
 
     expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
     // Directive tag must carry system_policy and must NEVER carry owner —
@@ -1665,7 +2007,7 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
     insertApproval({ artifactId: artifactIdOld });
 
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const before = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+    const before = await handleBeforePromptBuild(makeMinimalEvent(),  makeCtx(), await buildSharedPrompt( makeCtx()));
     expect(before?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
 
     expect(before?.prependSystemContext).toContain(`<directive id="${principleId}" source="runtime_v2_activation" authority="owner">`);
@@ -1706,7 +2048,7 @@ describe('Runtime V2 authority derivation + artifact recycling (Safety Net v1.2,
       },
     } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 
-    const after = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
+    const after = await handleBeforePromptBuild(makeMinimalEvent(),  ctx, await buildSharedPrompt( ctx));
     expect(after).toBeDefined();
     expect(after?.prependSystemContext).not.toContain(newText);
     expect(after?.prependSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
@@ -1746,55 +2088,57 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
         text: 'F'.repeat(len - prefix.length),
         artifactId: `art-${principleId}`,
         activationId: `act_prompt_${principleId}`,
+        // PRI-1137: production reads annotate authority; the seeded fixture has
+        // no approval row, so the shared reader yields system_policy.
+        authority: 'system_policy' as const,
       };
     });
   }
 
-  async function captureInjectionPayload(ctxOverrides: { runId?: string }) {
+  /**
+   * PRI-1137 production sequence for one invocation:
+   *   pre-selection provider (SignalCollectorHost + nextSessionTurnOrdinal) →
+   *   shared runtime builds the prompt with that trusted round key →
+   *   post-selection callback assembles the payload (and must NOT re-collect).
+   * The SAME native event instance ties the two halves, exactly as production.
+   */
+  async function runProductionPrompt(ctxOverrides: { runId?: string; sessionId?: string } = {}) {
+    const { handleBeforePromptBuild, prepareOpenClawPromptRound } = await import('../../src/hooks/prompt.js');
+    const evt = makeMinimalEvent();
+    const ctx = makeCtx(ctxOverrides);
+    const roundKey = prepareOpenClawPromptRound(evt, ctx);
+    const prompt = await buildSharedPrompt(ctx, roundKey !== undefined ? { roundKey } : {});
+    const result = await handleBeforePromptBuild(evt, ctx, prompt);
+    return { result, roundKey };
+  }
+
+  async function captureInjectionPayload(ctxOverrides: { runId?: string; sessionId?: string } = {}) {
     const { EventLogService } = await import('../../src/core/event-log.js');
     const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
     const spy = mockEventLog.recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
     spy.mockClear();
 
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx(ctxOverrides));
+    const { result } = await runProductionPrompt(ctxOverrides);
     expect(spy).toHaveBeenCalledTimes(1);
     return { payload: spy.mock.calls[0]![0] as Record<string, unknown>, result };
   }
 
   /**
-   * Real production round fact: the same trajectory.db table, path and index
-   * the production writer (TrajectoryDatabase.recordUserTurn) uses. Rows are
-   * inserted exactly as a recorded user turn, so the hook reads a real
-   * advancing ordinal — not a synthetic key search.
+   * Real production round fact: rows go through the REAL TrajectoryDatabase
+   * writer into `<workspace>/.state/trajectory.db`, the same table and schema
+   * `nextSessionTurnOrdinal` reads. A hand-rolled subset schema used to make
+   * the production insert fail while the test still passed on a stale ordinal —
+   * exactly the PRI-1137 bug.
    */
   function recordUserTurnRow(sessionId: string, turnIndex: number): void {
-    const stateDir = path.join(tempWorkspaceDir, '.state');
-    fs.mkdirSync(stateDir, { recursive: true });
-    const dbPath = path.join(stateDir, 'trajectory.db');
-    if (!fs.existsSync(dbPath)) {
-      const bootstrap = new Database(dbPath);
-      bootstrap.exec(`
-        CREATE TABLE IF NOT EXISTS user_turns (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL,
-          turn_index INTEGER NOT NULL,
-          raw_text TEXT,
-          correction_detected INTEGER DEFAULT 0,
-          created_at TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
-      `);
-      bootstrap.close();
-    }
-    const db = new Database(dbPath);
-    try {
-      db.prepare(
-        'INSERT INTO user_turns (session_id, turn_index, raw_text, correction_detected, created_at) VALUES (?, ?, ?, 0, ?)',
-      ).run(sessionId, turnIndex, `user message ${turnIndex}`, new Date().toISOString());
-    } finally {
-      db.close();
-    }
+    TrajectoryRegistry.get(tempWorkspaceDir).recordUserTurn({
+      sessionId,
+      turnIndex,
+      rawText: `user message ${turnIndex}`,
+      correctionDetected: false,
+      correctionCue: null,
+      referencesAssistantTurnId: null,
+    });
   }
 
   it('T-PROD-01: 16 real user turns give bounded coverage — every fixture principle reaches the prompt', async () => {
@@ -1812,7 +2156,7 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
       // The turn this build is about to record advances the round fact.
       recordUserTurnRow(sessionId, round + 1);
       spy.mockClear();
-      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId }));
+      await runProductionPrompt({ sessionId });
       const payload = spy.mock.calls[0]![0] as {
         principleIds: string[]; selectionPolicy: string; rotationStartIndex: number;
         selectionRoundOrdinal: number; selectionRoundSource: string; injectedCharCount: number;
@@ -1846,7 +2190,7 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     for (let round = 0; round < 16; round++) {
       recordUserTurnRow(sessionId, round + 1);
       spy.mockClear();
-      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId }));
+      await runProductionPrompt({ sessionId });
       const ids = (spy.mock.calls[0]![0] as { principleIds: string[] }).principleIds;
       if (ids.includes(target)) targetRounds++;
       if (ids.includes(oldest)) oldestRounds++;
@@ -1862,14 +2206,20 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
     expect(payload.rotationStartIndex).toBeUndefined();
     expect(payload.selectionRoundOrdinal).toBeUndefined();
-    // Expected values derive from the pure selector at the SAME budget the
-    // production path resolved — no second hard-coded capacity number.
-    const expected = trimToBudget(fixturePrinciples(), RUNTIME_PRINCIPLE_BUDGET, escapeXml);
-    expect(payload.injectedCount).toBe(expected.injectedIds.size);
-    expect(payload.injectedCharCount).toBe(expected.lines.join('\n').length);
+    // PRI-1137: expected values derive from the ONE shared packer at the SAME
+    // budget the production path resolved — the deleted list-route
+    // `trimToBudget` arithmetic is not a forecast authority any more.
+    const expected = packSharedDirectives({
+      scanOrder: fixturePrinciples(),
+      budgetChars: RUNTIME_PRINCIPLE_BUDGET,
+      selfReportEnabled: false,
+      continueOnNonFit: false,
+    });
+    expect(payload.injectedCount).toBe(expected.included.length);
+    expect(payload.injectedCharCount).toBe(expected.additionalContext.length);
     expect(payload.v2Truncated).toBe(expected.truncated);
-    expect(payload.principleIds).toEqual(Array.from(expected.injectedIds));
-    expect(payload.droppedActivationIds ?? []).toEqual(expected.droppedActivationIds);
+    expect(payload.principleIds).toEqual(expected.included.map((p) => p.principleId));
+    expect(payload.droppedActivationIds ?? []).toEqual(expected.dropped);
   });
 
   it('unreadable trajectory db: degrades observably to legacy instead of failing the prompt build', async () => {
@@ -1881,11 +2231,69 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
   });
 
-  it('the fair payload matches the pure selector exactly for the same round ordinal', async () => {
+  it('P1-A: a failed user_turns write yields NO round key, FIFO selection, and an unclaimed run', async () => {
     await seedPri904Fixture();
     const { EventLogService } = await import('../../src/core/event-log.js');
     const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { handleBeforePromptBuild, prepareOpenClawPromptRound } = await import('../../src/hooks/prompt.js');
+    const { nextSessionTurnOrdinal } = await import('@principles/core/trajectory-store');
+
+    const sessionId = 'pri1137-write-failure';
+    recordUserTurnRow(sessionId, 1);
+    recordUserTurnRow(sessionId, 2);
+    recordUserTurnRow(sessionId, 3);
+
+    // The historical ordinal is still readable (4) — exactly why a swallowed
+    // write failure used to look like a legitimate fair-rotation round.
+    expect(nextSessionTurnOrdinal(tempWorkspaceDir, sessionId)).toBe(4);
+
+    // Make the trajectory writer FAIL for this test while the real DB stays
+    // readable. This is the same shape as production `recordUserTurn` throwing.
+    const wcModule = await import('../../src/core/workspace-context.js');
+    const mockedFromHook = vi.mocked(wcModule.WorkspaceContext.fromHookContext);
+    const defaultImpl = mockedFromHook.getMockImplementation()!;
+    mockedFromHook.mockImplementation((ctx: Parameters<typeof defaultImpl>[0]) => {
+      const base = defaultImpl(ctx) as { trajectory: Record<string, unknown> };
+      return {
+        ...(base as object),
+        trajectory: {
+          ...base.trajectory,
+          recordUserTurn: () => { throw new Error('user_turns write blocked by test'); },
+        },
+      } as ReturnType<typeof defaultImpl>;
+    });
+
+    try {
+      spy.mockClear();
+      const evt = makeMinimalEvent({ sessionId });
+      const ctx = makeCtx({ sessionId, runId: 'run-write-failure' });
+      expect(prepareOpenClawPromptRound(evt, ctx)).toBeUndefined();
+
+      const prompt = await buildSharedPrompt(ctx);
+      const result = await handleBeforePromptBuild(evt, ctx, prompt);
+      const payload = spy.mock.calls[0]![0] as {
+        selectionPolicy: string; rotationStartIndex?: number; selectionRoundOrdinal?: number;
+      };
+      expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
+      expect(payload.rotationStartIndex).toBeUndefined();
+      expect(payload.selectionRoundOrdinal).toBeUndefined();
+      expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
+
+      // Same run, NEW event: the failed attempt must NOT have claimed the run.
+      // If it had, the retry would take the "already collected" branch and reuse
+      // ordinal 4 — i.e. claim fair rotation for a round that was never written.
+      const retryEvt = makeMinimalEvent({ sessionId });
+      const retryCtx = makeCtx({ sessionId, runId: 'run-write-failure' });
+      expect(prepareOpenClawPromptRound(retryEvt, retryCtx)).toBeUndefined();
+    } finally {
+      mockedFromHook.mockImplementation(defaultImpl);
+    }
+  });
+
+  it('the injected event matches the shared packer exactly for the same round ordinal (one selector, no second arithmetic)', async () => {
+    await seedPri904Fixture();
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const spy = (EventLogService.get as ReturnType<typeof vi.fn>)().recordRuntimeActivationsInjected as ReturnType<typeof vi.fn>;
     const sessionId = 'pri904-selector-parity';
     recordUserTurnRow(sessionId, 1);
     recordUserTurnRow(sessionId, 2);
@@ -1895,11 +2303,28 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     recordUserTurnRow(sessionId, 6);
     recordUserTurnRow(sessionId, 7); // next ordinal = 8
     spy.mockClear();
-    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId }));
-    const payload = spy.mock.calls[0]![0] as { selectionRoundOrdinal: number };
+    const { roundKey } = await runProductionPrompt({ sessionId });
+    const payload = spy.mock.calls[0]![0] as {
+      principleIds: string[]; injectedCount: number; selectionPolicy: string;
+      rotationStartIndex: number; selectionRoundOrdinal: number;
+    };
 
-    const expected = trimToBudget(fixturePrinciples(), RUNTIME_PRINCIPLE_BUDGET, escapeXml, 8);
+    expect(roundKey).toBe(8);
     expect(payload.selectionRoundOrdinal).toBe(8);
-    expect(expected.rotationStartIndex).toBe(8 % 16);
+    expect(payload.selectionPolicy).toBe('fair_rotation_v1');
+    const start = 8 % 16;
+    expect(payload.rotationStartIndex).toBe(start);
+    // PRI-1137: parity is against the SHARED packer, the one production
+    // selector. Comparing to the deleted list-route trim would prove parity
+    // with a path that no longer exists.
+    const scanOrder = fixturePrinciples();
+    const expected = packSharedDirectives({
+      scanOrder: scanOrder.slice(start).concat(scanOrder.slice(0, start)),
+      budgetChars: RUNTIME_PRINCIPLE_BUDGET,
+      selfReportEnabled: false,
+      continueOnNonFit: true,
+    });
+    expect(payload.injectedCount).toBe(expected.included.length);
+    expect(payload.principleIds).toEqual(expected.included.map((p) => p.principleId));
   });
 });

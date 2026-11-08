@@ -163,7 +163,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
 
   it('makes zero requests when consent is denied', async () => {
     const service = makeService();
-    service.disable();
+    await service.disable();
     const outcome = await service.maybeExportDaily(workspaceDir);
     expect(outcome).toEqual({ attempted: false, skipReason: 'consent_denied' });
     expect(requests).toHaveLength(0);
@@ -172,7 +172,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
   it('makes zero requests when the feature flag is off', async () => {
     freshWorkspace(FLAG_OFF_CONFIG);
     const service = makeService();
-    service.enable();
+    await service.enable();
     const outcome = await service.maybeExportDaily(workspaceDir);
     expect(outcome).toEqual({ attempted: false, skipReason: 'feature_flag_disabled' });
     expect(requests).toHaveLength(0);
@@ -180,7 +180,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
 
   it('makes zero requests under the environment kill switch (overrides local enable)', async () => {
     const service = makeService({ env: { PD_TELEMETRY_DISABLED: '1' } });
-    service.enable();
+    await service.enable();
     const outcome = await service.maybeExportDaily(workspaceDir);
     expect(outcome.attempted).toBe(false);
     if (!outcome.attempted) {
@@ -194,7 +194,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
     for (const env of [{ CI: 'true' }, { VITEST: 'true' }, { PD_E2E_MODE: '1' }]) {
       requests = [];
       const service = makeService({ env });
-      service.enable();
+      await service.enable();
       const outcome = await service.maybeExportDaily(workspaceDir);
       expect(outcome.attempted).toBe(false);
       if (!outcome.attempted) expect(outcome.skipReason.startsWith('environment_suppressed')).toBe(true);
@@ -211,7 +211,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
       const loaded = loadPdConfigForPlugin(workspaceDir);
       expect(loaded.ok).toBe(true);
       const service = makeService();
-      service.enable();
+      await service.enable();
       const outcome = await service.maybeExportDaily(workspaceDir);
       expect(outcome.attempted).toBe(false);
       if (!outcome.attempted) expect(outcome.skipReason).toContain('workspace_environment');
@@ -224,7 +224,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
     fs.mkdirSync(path.join(repoRoot, 'packages', 'principles-core'), { recursive: true });
     fs.mkdirSync(path.join(repoRoot, 'packages', 'host-runtime'), { recursive: true });
     const service = makeService({ moduleDir: path.join(repoRoot, 'packages', 'host-runtime', 'dist') });
-    service.enable();
+    await service.enable();
     const outcome = await service.maybeExportDaily(workspaceDir);
     expect(outcome.attempted).toBe(false);
     if (!outcome.attempted) expect(outcome.skipReason).toContain('repo_checkout');
@@ -233,7 +233,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
     const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-tel-empty-'));
     try {
       const missing = makeService({ homeDir: emptyHome, moduleDir: emptyHome });
-      missing.enable();
+      await missing.enable();
       const missingOutcome = await missing.maybeExportDaily(workspaceDir);
       expect(missingOutcome.attempted).toBe(false);
       if (!missingOutcome) expect(missingOutcome.skipReason).toContain('install_layout_missing');
@@ -247,7 +247,7 @@ describe('gate matrix — zero network requests unless every gate is open', () =
 describe('daily export flow — bounded frequency, identity rotation, resilience', () => {
   it('exports once per day: second same-day trigger is skipped (client-side bound)', async () => {
     const service = makeService();
-    service.enable();
+    await service.enable();
     const first = await service.maybeExportDaily(workspaceDir);
     expect(first).toMatchObject({ attempted: true, ok: true, httpStatus: 204 });
     expect(requests).toHaveLength(1);
@@ -259,7 +259,7 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
   it('hard-caps failed attempts at 5/day per workspace via dailyAttemptCount (review round 2)', async () => {
     fetchStatus = async () => 500;
     const service = makeService();
-    service.enable();
+    await service.enable();
     // Simulate 5 prior same-day failures recorded in THIS workspace's entry.
     const stateRead = readProductTelemetryControlState(homeDir);
     expect(stateRead.ok).toBe(true);
@@ -299,7 +299,7 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
     };
     const serviceA = makeService({ fetchFn: slowFetch });
     const serviceB = makeService({ fetchFn: slowFetch });
-    serviceA.enable();
+    await serviceA.enable();
 
     const [outcomeA, outcomeB] = await Promise.all([
       serviceA.maybeExportDaily(workspaceDir),
@@ -318,7 +318,7 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
   it('derives a different (unlinkable) daily ID on the next day', async () => {
     let now = T0;
     const service = makeService({ now: () => now });
-    service.enable();
+    await service.enable();
     await service.maybeExportDaily(workspaceDir);
     const day1Id = JSON.parse(requests[0].body).dailyTelemetryId;
     expect(JSON.parse(requests[0].body).bucketDate).toBe('2026-08-26');
@@ -336,7 +336,7 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
     fetchStatus = async () => 500;
     let now = T0;
     const service = makeService({ now: () => now });
-    service.enable();
+    await service.enable();
     const failed = await service.maybeExportDaily(workspaceDir);
     expect(failed).toEqual({ attempted: true, ok: false, failureCode: 'http_5xx' });
 
@@ -359,7 +359,7 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
   it('recovers after a success following failures (failure state cleared)', async () => {
     fetchStatus = async () => 429;
     const service = makeService();
-    service.enable();
+    await service.enable();
     await service.maybeExportDaily(workspaceDir);
 
     fetchStatus = async () => 204;
@@ -381,7 +381,7 @@ describe('daily export flow — bounded frequency, identity rotation, resilience
       throw new TypeError('getaddrinfo ENOTFOUND collector');
     };
     const service = makeService({ fetchFn: refusing });
-    service.enable();
+    await service.enable();
     const outcome = await service.maybeExportDaily(workspaceDir);
     expect(outcome).toEqual({ attempted: true, ok: false, failureCode: 'network_error' });
     const status = service.getStatus(workspaceDir);
@@ -401,7 +401,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
     const wsB = secondWorkspace();
     try {
       const service = makeService();
-      service.enable();
+      await service.enable();
       const first = await service.maybeExportDaily(workspaceDir);
       expect(first).toMatchObject({ attempted: true, ok: true });
       expect(requests).toHaveLength(1);
@@ -423,7 +423,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
     const wsB = secondWorkspace();
     try {
       const service = makeService();
-      service.enable();
+      await service.enable();
       const failed = await service.maybeExportDaily(workspaceDir);
       expect(failed).toMatchObject({ attempted: true, ok: false, failureCode: 'http_5xx' });
       // B is NOT in A's retry backoff.
@@ -443,7 +443,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
     const wsB = secondWorkspace();
     try {
       const service = makeService();
-      service.enable();
+      await service.enable();
       const scopeA = scopeKeyFor(workspaceDir);
       const lockPathA = workspaceExportLockPath(getProductTelemetryStatePath(homeDir), scopeA);
       fs.mkdirSync(path.dirname(lockPathA), { recursive: true });
@@ -466,7 +466,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
 
   it('Case D: same workspace + same day dedupes to one request', async () => {
     const service = makeService();
-    service.enable();
+    await service.enable();
     await service.maybeExportDaily(workspaceDir);
     const again = await service.maybeExportDaily(workspaceDir);
     expect(again).toEqual({ attempted: false, skipReason: 'already_succeeded_today' });
@@ -476,7 +476,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
   it('Case E: same workspace on the next day derives a new unlinkable ID', async () => {
     let now = T0;
     const service = makeService({ now: () => now });
-    service.enable();
+    await service.enable();
     await service.maybeExportDaily(workspaceDir);
     const day1Id = JSON.parse(requests[0].body).dailyTelemetryId;
     now = T0 + DAY_MS;
@@ -490,7 +490,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
     const wsB = secondWorkspace();
     try {
       const service = makeService();
-      service.enable();
+      await service.enable();
       await service.maybeExportDaily(workspaceDir);
       await service.maybeExportDaily(wsB);
       expect(requests).toHaveLength(2);
@@ -525,7 +525,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
       expect(overlapped).toBe(false);
       const serviceA = makeService({ fetchFn: slowFetch });
       const serviceB = makeService({ fetchFn: slowFetch });
-      serviceA.enable();
+      await serviceA.enable();
 
       const [outcomeA, outcomeB] = await Promise.all([
         serviceA.maybeExportDaily(workspaceDir),
@@ -557,7 +557,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
       return { status: 204 };
     };
     const service = makeService({ fetchFn: slowFetch });
-    service.enable();
+    await service.enable();
     const secretBefore = (() => {
       const read = readProductTelemetryControlState(homeDir);
       if (!read.ok || read.state.telemetrySecret === undefined) throw new Error('missing secret');
@@ -568,7 +568,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
     // the secret underneath it.
     const flight = service.maybeExportDaily(workspaceDir);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    service.reset();
+    await service.reset();
     expect(readProductTelemetryControlState(homeDir).ok && readProductTelemetryControlState(homeDir).state.telemetrySecret).not.toBe(secretBefore);
 
     await flight;
@@ -584,7 +584,7 @@ describe('workspace-scoped measurement — Case A–F (review remediation P1-1)'
 describe('control plane — enable / disable / reset / status / preview', () => {
   it('status shows gates and bounded export status without ever exposing the secret', async () => {
     const service = makeService();
-    service.enable();
+    await service.enable();
     await service.maybeExportDaily(workspaceDir);
     const status = service.getStatus(workspaceDir);
     expect(status.ok).toBe(true);
@@ -602,9 +602,9 @@ describe('control plane — enable / disable / reset / status / preview', () => 
     expect(status.view.canExport).toBe(true);
   });
 
-  it('names an unresolved flag distinctly from a disabled flag (review round 2)', () => {
+  it('names an unresolved flag distinctly from a disabled flag (review round 2)', async () => {
     const service = makeService();
-    service.enable();
+    await service.enable();
     // No workspace → the workspace-scope flag cannot be resolved at all.
     const status = service.getStatus(undefined);
     expect(status.ok).toBe(true);
@@ -625,8 +625,8 @@ describe('control plane — enable / disable / reset / status / preview', () => 
 
   it('disable immediately stops future exports and deletes identity (SPEC §19)', async () => {
     const service = makeService();
-    service.enable();
-    service.disable();
+    await service.enable();
+    await service.disable();
     const outcome = await service.maybeExportDaily(workspaceDir);
     expect(outcome).toEqual({ attempted: false, skipReason: 'consent_denied' });
     expect(requests).toHaveLength(0);
@@ -636,10 +636,10 @@ describe('control plane — enable / disable / reset / status / preview', () => 
 
   it('reset rotates the secret so future daily IDs are unrelated to previous ones', async () => {
     const service = makeService();
-    service.enable();
+    await service.enable();
     const before = readProductTelemetryControlState(homeDir);
     const secretBefore = before.ok ? before.state.telemetrySecret : undefined;
-    service.reset();
+    await service.reset();
     const after = readProductTelemetryControlState(homeDir);
     const secretAfter = after.ok ? after.state.telemetrySecret : undefined;
     expect(secretAfter).toBeDefined();
@@ -653,7 +653,7 @@ describe('control plane — enable / disable / reset / status / preview', () => 
 
   it('preview shows the exact outbound payload (valid schema) and never sends', async () => {
     const service = makeService();
-    service.enable();
+    await service.enable();
     const preview = service.preview(workspaceDir);
     expect(preview.banner).toBe(PREVIEW_BANNER);
     expect(validateProductTelemetrySnapshot(preview.snapshot).ok).toBe(true);

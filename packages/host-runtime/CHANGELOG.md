@@ -1,5 +1,64 @@
 # @principles/host-runtime
 
+## 3.0.3
+
+### Patch Changes
+
+- f7cdc5a: feat(openclaw-plugin,host-runtime): PD-self assembly presence observation via official llm_input (PRI-1150, Path A)
+  
+  - host-runtime: `buildActivePrinciplePromptContext` freezes per-principle
+    presence expectations same-source with `additionalContext` (bounded at 64,
+    overflow fact, bodyComplete containment); PD-internal contract. Core gains
+    the `PromptPresenceObservedEventData` event contract (union + schema).
+  - openclaw-plugin: bounded in-memory assembly snapshot registry keyed by
+    runId+sessionId (global key/snapshot/body-byte caps + TTL, sticky history
+    loss), minimal single-string containment checker (three-value outcomes),
+    official llm_input registration, and a PD-owned forensic event
+    `runtime_v2_prompt_presence_observed` (boundary
+    post_assembly_system_prompt_via_llm_input; containment facts only, no body
+    text; unique binding requires complete candidate history, everything else
+    degrades to unknown:ambiguous_binding / history_incomplete / expired).
+  - Not dependent on hook-result fields the official host drops. Fact-only: no
+    D/confirmed/timely, no delivery/adherence claims. Existing llm_output
+    behavior unchanged.
+- Updated dependencies [f7cdc5a]
+  - @principles/core@5.1.1
+
+## 3.0.2
+
+### Patch Changes
+
+- ee9e62b: Consent-store single-format convergence + global control-state write mutex (PRI-1138, PRI-1104/5, PRI-1151).
+  
+  Single writable format (PRI-1138): `writeProductTelemetryControlState` refuses any non-current schemaVersion, so no code path can persist or regenerate a legacy v1 file; parsing converges into one `parseConsentState` entry with a single current-format whitelist; legacy v1 files remain readable through the strictly one-way, read-only migrator (`migrateLegacyConsentFile`), preserving consent/consentVersion/telemetrySecret verbatim.
+  
+  Global write mutex (PRI-1151): every control-state writer now serializes on ONE cross-process lock (`product-telemetry.json.state-lock`) via the new `withControlStateLock` transaction entry — the legacy v1→v2 migration write-back, `pd telemetry enable/disable/reset` (now async locked transactions awaited through the CLI), and workspace export bookkeeping merges. `readProductTelemetryControlState` is now a pure read (v1 parsed in memory, never written); persistence happens exclusively inside locked transactions, so no writer can build its write from a stale read — once disable succeeds, no concurrent migration/enable/reset/merge can restore the previous granted consent or secret. The lock uses an ownership-checked protocol (owner token in the lock body, atomic rename-claim for stale takeover and for release): a crashed holder is recovered after the stale threshold, a live holder's lock is never deleted by another process, a late release cannot delete a successor's lock, acquisition waits are bounded and fail loud (never degrading into lock-free writes). The per-workspace export lock adopts the same takeover/release protocol. Verified by real multi-process tests (deterministic stdio barriers): migration vs disable/reset/enable/workspace-merge races, 6-way cross-process mutual exclusion with zero lost updates, bounded-timeout loud failure, and stale-lock recovery. No wire values, snapshot payloads, or export behavior changed.
+
+## 3.0.1
+
+### Patch Changes
+
+- 34b35d9: Fix Stage-2 correction review silently consuming attempts under production default budgets: the per-classification timeout derived from the aggregate-budget remainder was fractional (`performance.now()` float arithmetic), and the pi-ai adapter hands it straight to `AbortSignal.timeout`, which rejects non-integer delays with `ERR_OUT_OF_RANGE` before any network I/O. Every classification then failed instantly, each failure consumed a durable attempt via `pending_llm_error`, and after five cycles the pending candidate was abandoned (`llm_error`) without a single real model call. The remainder is now clamped to whole milliseconds at the producer (PRI-1147 real-LLM BDD, ERR-191), with a regression test asserting the classifier receives an integer timeout under the default budgets.
+
+## 3.0.0
+
+### Major Changes
+
+- 6278ec3: core: `abstraction_layer_v1` is retired to a `gone` tombstone (PRI-1137). The flag ID stays in the contract, but a stale `enabled: true` in user config can no longer re-enable the legacy prompt route — it yields the existing "cannot be re-enabled" warning instead. No config migration is shipped and user `.pd/config.yaml` is never rewritten.
+  
+  host-runtime: **major** — the published barrel (`export *`) removes public API: `shouldUseSharedHostRuntime`-era helpers are gone from the plugin surface and the rotation signal changed shape (`productionRotates: boolean` → `productionRotation: 'rotates' | 'does_not_rotate' | 'unknown'`, `productionRouteRotates()` → `productionRouteRotationState()` / `hostRotationCapability()`), because a boolean could not express "no single host is bound" without lying that every host is FIFO. OpenClaw gains a single shared prompt route with an optional `roundKeyProvider` (PRI-1137); only OpenClaw injects a real session-turn ordinal and Codex/WorkBuddy remain FIFO without round authority. A round key is issued ONLY for a persisted user turn of this invocation (heartbeat/empty-message/resolution-failure/write-failure all degrade to `legacy_fifo_prefix_v1` observably); run retries replay their own persisted ordinal. The shared packer decides by exact additive arithmetic over per-block measurements (one render per pack instead of O(N²)) — output byte-identical. `checkPromptArtifactDeliverability` accepts an `authority` override (approve-time prechecks bill the `owner` annotation they stamp) and refuses `unconfirmed` when the authority join read breaks.
+  
+  pd-cli: `prompt-capacity-measurement.mjs` measures the same single production route; the per-budget oversized statistic now covers the whole corpus (FIFO's early stop hid later oversized candidates).
+  
+  principles-disciple: **major** — the plugin's public module surface removes the deleted route-gate exports (`shouldUseSharedHostRuntime`, `runtimeGateCache`, `runtimeGateFor`). The three prompt hooks no longer branch between plugin-local and shared rendering; every standard host goes through the shared runtime. Signal collection, adaptive activation, controlled admission, manual owner pain, prompt enrichment, receipts and delivery evidence are retained. Frozen wire literals (`legacy_fifo_prefix_v1`, `fair_rotation_v1`, `runtime_v2_prompt_activations_injected`, …) are unchanged. The after_tool_call adapter now forwards `toolArgs` (the SDK's after-event field) to the shared evidence kernel and surfaces its degradation (`trajectory_db_not_found` etc.) in logs and hook-execution records instead of recording a blind success.
+  
+  create-principles-disciple: bundles the plugin, so it follows the same version pass.
+
+### Patch Changes
+
+- Updated dependencies [6278ec3]
+  - @principles/core@5.1.0
+
 ## 2.2.3
 
 ### Patch Changes

@@ -55,6 +55,21 @@ describe('localizeApprovalWarning (PRI-908)', () => {
     expect(result.body).toBe('pages.focus.approveWarning.queuedBodySimple');
   });
 
+  it('maps injection_budget_rotation_unknown to the no-single-conclusion copy (PRI-1137 final review P1-4)', () => {
+    // Live server text for an unbound multi-host workspace: per-host
+    // judgments enumerated, no "all hosts are FIFO" claim, and the entry
+    // format must survive splitApprovalWarnings (no "word: " after "; ").
+    const warning =
+      'injection_budget_rotation_unknown: the activation is committed but the prompt injection budget (4000c) is full and this workspace binds no single host, so a single queue-vs-starved conclusion cannot be drawn for the whole workspace. per-host judgment: openclaw=queued behind fair_rotation_v1 and enters within at most 3 recorded user turns (3080c/4000c budget basis=fixed_fallback (no runtime budget observation for openclaw)); codex=FIFO by activated_at — stays out until capacity frees up (3899c/3899c budget basis=fixed_fallback (no runtime budget observation for codex)). nextAction=pass an explicit target host (openclaw|codex|workbuddy) for a binding verdict, or review the per-host capacity details on the focus page';
+    expect(splitApprovalWarnings(warning)).toHaveLength(1);
+    const result = localizeApprovalWarning(warning, fakeT);
+    expect(result.code).toBe('injection_budget_rotation_unknown');
+    expect(result.title).toBe('pages.focus.approveWarning.rotationUnknownTitle');
+    expect(result.body).toBe('pages.focus.approveWarning.rotationUnknownBody');
+    expect(result.activationAction).toBe(true);
+    expect(result.detail).toBe(warning);
+  });
+
   it('localizes non-budget exclusion, check-failure and ledger warnings', () => {
     expect(localizeApprovalWarning('injection_excluded_non_budget: artifact resolution skipped it', fakeT)).toMatchObject({
       code: 'injection_excluded_non_budget',
@@ -153,13 +168,13 @@ describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
     expect(result?.groups[0]?.fitsPromptBudget).toBeUndefined();
   });
 
-  it('carries the PR-1894 rotation facts when present (productionRotates drives truthful badge copy)', () => {
+  it('carries the PR-1894 rotation facts when present (productionRotation drives truthful badge copy)', () => {
     const result = validateApprovalsGrouped({
       ...base,
-      promptInjection: { budget: 2000, usedChars: 1947, truncated: true, productionRotates: true, eligibleCount: 19 },
+      promptInjection: { budget: 2000, usedChars: 1947, truncated: true, productionRotation: 'rotates', eligibleCount: 19 },
     });
     expect(result?.promptInjection).toEqual({
-      budget: 2000, usedChars: 1947, truncated: true, productionRotates: true, eligibleCount: 19,
+      budget: 2000, usedChars: 1947, truncated: true, productionRotation: 'rotates', eligibleCount: 19,
     });
   });
 
@@ -168,7 +183,7 @@ describe('validateApprovalsGrouped promptInjection (PRI-908)', () => {
     // renders the policy-agnostic badge rather than asserting rotation.
     const result = validateApprovalsGrouped({
       ...base,
-      promptInjection: { budget: 2000, usedChars: 1940, truncated: true, productionRotates: 'yes', eligibleCount: -3 },
+      promptInjection: { budget: 2000, usedChars: 1940, truncated: true, productionRotation: 'yes', eligibleCount: -3 },
     });
     expect(result).not.toBeNull();
     expect(result?.promptInjection).toEqual({ budget: 2000, usedChars: 1940, truncated: true });
