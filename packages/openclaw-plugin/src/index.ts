@@ -11,6 +11,7 @@ import type {
   PluginHookBeforeCompactionEvent,
   PluginHookAfterCompactionEvent,
   PluginHookLlmOutputEvent,
+  PluginHookLlmInputEvent,
   PluginHookBeforeMessageWriteEvent,
 } from './openclaw-sdk.js';
 import * as path from 'path';
@@ -30,6 +31,7 @@ import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBefo
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
+import { makeLlmInputPresenceRegistration } from './hooks/llm-input-presence.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
@@ -718,6 +720,36 @@ const plugin = {
         }
       }),
       { timeoutMs: 10_000 },
+    );
+
+    // ── Hook: llm_input presence observation (PRI-1150, PD-self Path A) ──
+    // Fact-only post-assembly observation on the official llm_input hook.
+    // Never blocks the caller; body text stays in memory; the emitted event
+    // carries containment facts only. Binding follows the owner-amended
+    // registry rules (unique + complete history, else unknown).
+    const llmInputPresence = makeLlmInputPresenceRegistration({
+      logger: api.logger,
+      getEventLog: (workspaceDir: string) => WorkspaceContext.fromHookContext({ workspaceDir }).eventLog,
+    });
+    hookRegistrations.register(
+      llmInputPresence.surfaceId,
+      llmInputPresence.event,
+      guardHook('hook:llm_input_presence', api.logger, (event: PluginHookLlmInputEvent, ctx: PluginHookAgentContext): void => {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'llm_input');
+        if (!wsResult.ok) {
+          api.logger.warn(
+            `[PD:llm_input] workspaceDir resolution failed. ` +
+            `reason=${wsResult.reason} sessionId=${ctx.sessionId ?? '(missing)'}. Presence observation skipped.`,
+          );
+          return;
+        }
+        if (wsResult.consistencyWarning) {
+          api.logger.warn(`[PD:llm_input] ${wsResult.consistencyWarning}`);
+        }
+        llmInputPresence.onResolved(event, ctx, wsResult.workspaceDir);
+      }),
+      // No timeoutMs: the registration records a void handler; the official
+      // dispatch is already fire-and-forget on the host side.
     );
 
     // ── Hook: Lifecycle ──

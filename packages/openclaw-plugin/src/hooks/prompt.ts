@@ -21,6 +21,7 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 // PRI-1137 retired the plugin-local activation reader; the shared runtime is
 // the only ordinary Runtime principle authority (main's resolution, kept).
 import { buildInjectedExpectations } from './prompt-presence-expectations.js';
+import { getPromptPresenceRegistry } from './prompt-presence-registry.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
 import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
 import {
@@ -1229,24 +1230,97 @@ export async function handleBeforePromptBuild(
   // yield a full_hit. Fail-open, memory-only; see prompt-presence-expectations.ts.
   //
   // PRI-1137 merge note: the plugin-local activation reader (dedupedV2) is
-  // retired — per-principle raw bodies are no longer available in the plugin,
-  // so non-target expectations come exclusively from the shared-route frozen
-  // field (Path A design, pending owner approval). Reverse-parsing the merged
-  // additionalContext is forbidden (design §3.1).
-  const presenceExpectations = buildInjectedExpectations({
-    finalAssembly: prependSystemContext,
-    preGuardAssembly: presenceFallbackApplied ? undefined : preGuardPrependSystemContext,
-    target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
-      ? {
-          activationId: adaptiveExpectedTarget.activationId,
-          body: adaptiveTargetBody,
-          // Renderer contract (adaptive-principle-intervention.ts): targetBody is
-          // the ALREADY ESCAPED <directive> slice — re-escaping would hide it.
-          preEscaped: true,
-        }
-      : undefined,
-    rendered: [],
-  });
+  // retired — per-principle raw bodies come exclusively from the PD-internal
+  // host-runtime freeze (`injectedExpectations` on ActivePrinciplePromptResult,
+  // PRI-1150), which is already escaped rendered text (preEscaped). The
+  // hook-result field of the same name that OpenClaw whitelist-drops is NOT a
+  // Path A dependency: the registry below is PD-internal memory.
+  //
+  // PRI-1150 review (D3): EVERY applicable assembly registers its snapshot —
+  // including empty ones — so a callback can never inherit a previous
+  // assembly's sole snapshot. The empty KIND is distinguished:
+  //   none_injected              → confirmed: no principles assembled this build;
+  //   shared_field_absent        → shared result carried principles but the frozen
+  //                                per-principle field was absent (cannot obtain
+  //                                expectations — NOT evidence of zero injection);
+  //   target_removed_by_fallback → a fallback replaced the assembly and the
+  //                                prioritized target is gone;
+  //   generation_failed          → expectation generation threw (fail-open).
+  // Registration requires trusted workspace + run + session identity.
+  let presenceSnapshotKind: 'none_injected' | 'shared_field_absent' | 'target_removed_by_fallback' | 'generation_failed' | undefined;
+  let presenceExpectations: ReturnType<typeof buildInjectedExpectations> | undefined;
+  try {
+    const sharedHasPrinciples = (sharedActivePrinciplePrompt?.principleIds.length ?? 0) > 0;
+    const sharedFieldPresent = Array.isArray(sharedActivePrinciplePrompt?.injectedExpectations);
+    if (presenceFallbackApplied) {
+      presenceSnapshotKind = 'target_removed_by_fallback';
+    } else if (!sharedHasPrinciples && !adaptiveExpectedTarget) {
+      presenceSnapshotKind = 'none_injected';
+    } else if (sharedActivePrinciplePrompt && !sharedFieldPresent) {
+      presenceSnapshotKind = 'shared_field_absent';
+    }
+    presenceExpectations = buildInjectedExpectations({
+      finalAssembly: prependSystemContext,
+      preGuardAssembly: presenceFallbackApplied ? undefined : preGuardPrependSystemContext,
+      target: adaptiveTargetBody && adaptiveExpectedTarget?.activationId
+        ? {
+            activationId: adaptiveExpectedTarget.activationId,
+            body: adaptiveTargetBody,
+            // Renderer contract (adaptive-principle-intervention.ts): targetBody is
+            // the ALREADY ESCAPED <directive> slice — re-escaping would hide it.
+            preEscaped: true,
+          }
+        : undefined,
+      rendered: (sharedActivePrinciplePrompt?.injectedExpectations ?? []).map((entry) => ({
+        activationId: entry.activationId,
+        body: entry.bodyText,
+        preEscaped: true,
+      })),
+    });
+    if (!presenceExpectations && presenceSnapshotKind === undefined) {
+      presenceSnapshotKind = 'generation_failed';
+    }
+  } catch (presenceErr) {
+    // Fail-open: expectation generation must never break the prompt hook.
+    logger?.warn?.(`[PD:presence] expectation generation failed (observation degraded): ${String(presenceErr)}`);
+    presenceSnapshotKind = 'generation_failed';
+    presenceExpectations = undefined;
+  }
+
+  // PRI-1150 Path A: register the FINAL calibrated snapshot for this run so the
+  // official llm_input callback (async, no assembly identity) can bind under
+  // the registry's verdict rules. Memory-only; requires trusted workspace,
+  // run and session identity (all three) — anything less is skipped with a
+  // diagnostic, never silently.
+  if (workspaceDir && runId && sessionId) {
+    try {
+      const registration = getPromptPresenceRegistry().registerAssemblySnapshot({
+        runId,
+        sessionId,
+        workspaceDir,
+        expectations: (presenceExpectations?.expectations ?? []).map((entry) => ({
+          activationId: entry.activationId,
+          bodyText: entry.bodyText,
+          bodyChars: entry.bodyChars,
+          bodyComplete: entry.bodyComplete,
+        })),
+        overflowCount: presenceExpectations?.overflowCount ?? 0,
+        emptyKind: presenceExpectations?.expectations.length
+          ? undefined
+          : (presenceSnapshotKind ?? 'none_injected'),
+      });
+      if (registration.degradedReason) {
+        logger?.warn?.(`[PD:presence] snapshot registered DEGRADED (${registration.degradedReason}): assemblySeq=${registration.assemblySeq}`);
+      }
+    } catch (registryErr) {
+      logger?.warn?.(`[PD:presence] snapshot registration failed (observation skipped this build): ${String(registryErr)}`);
+    }
+  } else if (runId || sessionId) {
+    logger?.warn?.(
+      `[PD:presence] snapshot registration skipped — incomplete identity: workspaceDir=${!!workspaceDir} runId=${!!runId} sessionId=${!!sessionId}. ` +
+      `nextAction: presence observation for this build is unavailable (unknown), not zero-injection.`,
+    );
+  }
 
   // Commit only the final selection, including a late deadline/revision/budget fallback.
   try { commitRuntimeEvidence?.(); } catch (error) {

@@ -25,6 +25,22 @@ import { revalidateAdaptivePrinciple } from './adaptive-principle-revalidation.j
 /** PRI-904 SPEC §10: bounded diagnostic id lists (mirrors the core selector's cap of 16). */
 export const MAX_SHARED_DIAGNOSTIC_IDS = 16;
 
+/** PRI-1150: bounded per-assembly presence-expectation entries (design v2 §2.1). */
+export const MAX_SHARED_PRESENCE_EXPECTATIONS = 64;
+
+/** PRI-1150: one frozen per-principle expectation for prompt presence forensics. */
+export interface SharedInjectedExpectation {
+  activationId: string;
+  /**
+   * The EXACT escaped `<directive>` slice this assembly embedded (renderer
+   * contract — already escaped once; consumers must not re-escape).
+   */
+  bodyText: string;
+  bodyChars: number;
+  /** False when the assembly truncated this directive (never yields a full_hit). */
+  bodyComplete: boolean;
+}
+
 export interface ActivePrinciplePromptResult {
   additionalContext: string;
   principleIds: string[];
@@ -66,6 +82,16 @@ export interface ActivePrinciplePromptResult {
   budgetFallbackDetail?: string;
   /** Assembly-only status; it does not assert that the host delivered the prompt. */
   adaptivePacking?: AdaptivePackingReport;
+  /**
+   * PRI-1150: per-principle frozen expectation set, rendered SAME-SOURCE with
+   * `additionalContext` (one render pass, no second read). Revision is not
+   * available at this layer and is deliberately absent — consumers record
+   * unknown rather than inventing one. Memory-only forensics; PD-internal
+   * contract, never sent to the OpenClaw host.
+   */
+  injectedExpectations?: SharedInjectedExpectation[];
+  /** PRI-1150: injected directives dropped by the frozen-set cap (visibility fact). */
+  injectedExpectationsOverflow?: number;
 }
 
 export interface AdaptivePackingReport {
@@ -408,6 +434,36 @@ export async function buildActivePrinciplePromptContext(input: {
       seenPrincipleIds.add(principle.principleId);
       return true;
     });
+    // PRI-1150: freeze per-principle presence expectations SAME-SOURCE with the
+    // additionalContext above — one render pass over the already-included
+    // principles, no second read. Each entry is the exact escaped `<directive>`
+    // slice this assembly embedded; `bodyComplete` is containment against the
+    // assembly, so a truncated directive can never yield a full_hit downstream.
+    // Bounded at MAX_SHARED_PRESENCE_EXPECTATIONS with an overflow fact.
+    const injectedExpectations: SharedInjectedExpectation[] = [];
+    let injectedExpectationsOverflow = 0;
+    for (const principle of injectedPrinciples) {
+      if (injectedExpectations.length >= MAX_SHARED_PRESENCE_EXPECTATIONS) {
+        injectedExpectationsOverflow += 1;
+        continue;
+      }
+      const rendered = renderPrinciplesToDirectives(
+        [principle],
+        new Set([principle.principleId]),
+        { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
+      );
+      const start = rendered.indexOf('<directive ');
+      const end = rendered.indexOf('</directive>');
+      if (start === -1 || end === -1) continue;
+      const bodyText = rendered.slice(start, end + '</directive>'.length);
+      if (!bodyText) continue;
+      injectedExpectations.push({
+        activationId: principle.activationId,
+        bodyText,
+        bodyChars: bodyText.length,
+        bodyComplete: packing.additionalContext.includes(bodyText),
+      });
+    }
     return {
       additionalContext: packing.additionalContext,
       principleIds: injectedPrinciples.map((principle) => principle.principleId),
@@ -418,6 +474,12 @@ export async function buildActivePrinciplePromptContext(input: {
       truncated: packing.truncated,
       selectionPolicy,
       eligibleCount: eligiblePrinciples.length,
+      ...(injectedExpectations.length > 0 || injectedExpectationsOverflow > 0
+        ? {
+            injectedExpectations,
+            ...(injectedExpectationsOverflow > 0 ? { injectedExpectationsOverflow } : {}),
+          }
+        : {}),
       ...(rotationStartIndex !== undefined ? { rotationStartIndex } : {}),
       ...(selectionPolicy === 'fair_rotation_v1' && roundKey !== undefined ? { selectionRoundOrdinal: roundKey } : {}),
       ...(packing.dropped.length > 0 ? { droppedActivationIds: packing.dropped } : {}),

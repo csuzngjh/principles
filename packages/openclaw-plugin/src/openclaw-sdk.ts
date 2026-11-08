@@ -206,6 +206,24 @@ export interface PluginHookBeforePromptBuildEvent {
   messages: unknown[];
 }
 
+/**
+ * PRI-1150: local mirror of the official llm_input observation contract
+ * (release/2026.11.1 `PluginHookLlmInputEvent`). systemPrompt is the FULL
+ * assembled system-prompt text (post-guard/post-fallback); historyMessages is
+ * the host's isolated snapshot. Read-only observation surface.
+ */
+export interface PluginHookLlmInputEvent {
+  runId: string;
+  sessionId: string;
+  provider: string;
+  model: string;
+  systemPrompt?: string;
+  prompt: string;
+  historyMessages: unknown[];
+  imagesCount: number;
+  tools?: unknown[];
+}
+
 export interface PluginHookBeforePromptBuildResult {
   systemPrompt?: string;
   prependContext?: string;
