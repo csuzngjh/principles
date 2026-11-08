@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -7,6 +8,10 @@ import * as path from 'path';
 import { EventLog } from '../../src/core/event-log.js';
 
 const PRESENCE_EVENT_TYPE = 'runtime_v2_prompt_presence_observed';
+// Resolved from this file, so the test also runs from the repository root.
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Well below the vitest timeout: a child that never exits is killed and reported.
+const CHILD_DEADLINE_MS = 20_000;
 
 const presenceData = {
   runId: 'run-1',
@@ -30,12 +35,21 @@ function eventLines(stateDir: string): Record<string, unknown>[] {
 
 async function runChildToNaturalExit(bundlePath: string, stateDir: string, mode: string) {
   const startedAt = Date.now();
-  const child = fork('tests/core/event-log-natural-exit-child.mjs', [], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+  const child = fork('tests/core/event-log-natural-exit-child.mjs', [], { cwd: PACKAGE_ROOT, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
   let stderr = '';
   child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-  child.stdin?.end(JSON.stringify({ bundlePath, stateDir, mode }));
-  const exitCode = await new Promise<number | null>((resolve) => { child.on('exit', (code) => resolve(code)); });
-  return { exitCode, elapsedMs: Date.now() - startedAt, stderr };
+  const exited = new Promise<number | null>((resolve) => { child.once('exit', (code) => resolve(code)); });
+  // A launch failure rejects at once and is reported as the test failure.
+  const launchFailed = new Promise<never>((_resolve, reject) => { child.once('error', reject); });
+  let timedOut = false;
+  const deadline = setTimeout(() => { timedOut = true; child.kill(); }, CHILD_DEADLINE_MS);
+  try {
+    child.stdin?.end(JSON.stringify({ bundlePath, stateDir, mode }));
+    const exitCode = await Promise.race([exited, launchFailed]);
+    return { exitCode, timedOut, elapsedMs: Date.now() - startedAt, stderr };
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 describe('EventLog presence event durability (PRI-1152 B1)', () => {
@@ -47,7 +61,7 @@ describe('EventLog presence event durability (PRI-1152 B1)', () => {
     bundlePath = path.join(tempDir, 'event-log.bundle.mjs');
     // The same bundler and format as the production plugin bundle.
     await build({
-      entryPoints: ['src/core/event-log.ts'],
+      entryPoints: [path.join(PACKAGE_ROOT, 'src', 'core', 'event-log.ts')],
       outfile: bundlePath,
       bundle: true,
       platform: 'node',
@@ -60,6 +74,7 @@ describe('EventLog presence event durability (PRI-1152 B1)', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -67,6 +82,7 @@ describe('EventLog presence event durability (PRI-1152 B1)', () => {
     const stateDir = path.join(tempDir, 'state');
     const result = await runChildToNaturalExit(bundlePath, stateDir, 'presence');
     expect(result.stderr).toBe('');
+    expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
     // Well below the 30 s interval: the write cannot have come from the flush timer.
     expect(result.elapsedMs).toBeLessThan(30_000);
@@ -80,15 +96,27 @@ describe('EventLog presence event durability (PRI-1152 B1)', () => {
     const stateDir = path.join(tempDir, 'state');
     const result = await runChildToNaturalExit(bundlePath, stateDir, 'buffered-control');
     expect(result.stderr).toBe('');
+    expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
     expect(eventLines(stateDir)).toEqual([]);
   }, 60_000);
 
+  it('a presence write keeps the events buffered before it, in order', async () => {
+    const stateDir = path.join(tempDir, 'state');
+    const result = await runChildToNaturalExit(bundlePath, stateDir, 'mixed');
+    expect(result.stderr).toBe('');
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(eventLines(stateDir).map((entry) => entry['type'])).toEqual(['tool_call', PRESENCE_EVENT_TYPE]);
+  }, 60_000);
+
   it('a failed write does not throw, reports the error and keeps the event buffered for the next write', () => {
+    // A fixed clock keeps the blocked path and the write on the same daily file.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-08T12:00:00.000Z') });
     const stateDir = path.join(tempDir, 'state-failing');
     const error = vi.fn();
     const eventLog = new EventLog(stateDir, { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } as never);
-    const blocker = path.join(stateDir, 'logs', `events_${new Date().toISOString().slice(0, 10)}.jsonl`);
+    const blocker = path.join(stateDir, 'logs', 'events_2026-11-08.jsonl');
     // A directory at the events path makes the real append fail on every platform.
     fs.mkdirSync(blocker);
     expect(() => eventLog.recordPromptPresenceObserved(presenceData)).not.toThrow();
