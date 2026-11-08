@@ -53,13 +53,25 @@ import {
   mergeInstallManifestWorkspaces,
   parseInstallManifest,
   INSTALL_LAYOUT_VERSION,
-  WORKBUDDY_PLUGIN_KEY,
-  WORKBUDDY_PLUGIN_NAME,
-  WORKBUDDY_MARKETPLACE_NAME,
-  interpretWorkbuddyPluginState,
-  getWorkbuddyHostConfigPaths,
   type InstallHost,
 } from '@principles/install-layout';
+// 2026-11-08: the shared state DEFINITIONS for pd-cli health live in
+// @principles/install-layout (interpretWorkbuddyPluginState /
+// getWorkbuddyHostConfigPaths). The installer does NOT import them at
+// runtime: its packaged dist must keep loading against the PUBLISHED
+// install-layout (registry-parity smoke, PRI-669/RF-02), and a normal PR
+// cannot raise the version floor (release-intent guard N-version). The
+// local constants/judgment below are the pinned mirror — a CI parity test
+// pins installer state == install-layout state on a fixture matrix (the
+// same discipline as the Codex legacy-registration parser mirror).
+
+/** Plugin name inside the PD-owned marketplace (kebab-case per plugin.json contract). */
+export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
+/** PD-owned local marketplace name. enabledPlugins keys use "plugin@marketplace". */
+export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
+/** Registry/settings key: "principles-disciple@principles-disciple-market". */
+export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
+const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
 import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
@@ -76,14 +88,6 @@ import type {
 
 // Type-only import from @principles/core — erased at compile time; this
 // package ships self-contained without @principles/core (PRI-625/PRI-669).
-
-// ─── Frozen host contract constants ─────────────────────────────────────────
-/**
- * Re-exported from @principles/install-layout — the ONE state/path definition
- * shared with pd-cli health (2026-11-07). Same values, single authority.
- */
-export { WORKBUDDY_PLUGIN_KEY, WORKBUDDY_PLUGIN_NAME, WORKBUDDY_MARKETPLACE_NAME };
-const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 
 /**
  * Files the host needs to load this plugin. One list serves both the
@@ -265,18 +269,24 @@ export interface WorkbuddyPaths {
 
 export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
   const layout = getInstallLayoutPaths(homeDir);
-  // HOST CONFIG PATHS (2026-11-07): delegated to install-layout's single
-  // authority (getWorkbuddyHostConfigPaths) so pd-cli health resolves the
-  // same settings/registry paths the installer writes — never a second truth.
   // The frozen governance dir (~/.workbuddy/pd-workspace) defines the host
-  // config root; WORKBUDDY_CONFIG_DIR remains the isolation override.
-  const hostPaths = getWorkbuddyHostConfigPaths(homeDir, process.env.WORKBUDDY_CONFIG_DIR);
+  // config root; deriving configDir from it keeps one path authority.
+  //
+  // HOST BOUNDARY (review P3, probe P0 fact): this installer targets the
+  // WorkBuddy DESKTOP host, whose registration root is ~/.workbuddy (real
+  // desktop plugins observed there). The standalone CLI engine's user-scope
+  // root is ~/.codebuddy (CODEBUDDY_CONFIG_DIR); a CLI-only user's engine
+  // will not read a registration written here. WORKBUDDY_CONFIG_DIR remains
+  // the isolation override (Phase 0 lab discipline).
+  const configDir = process.env.WORKBUDDY_CONFIG_DIR && process.env.WORKBUDDY_CONFIG_DIR.length > 0
+    ? path.resolve(process.env.WORKBUDDY_CONFIG_DIR)
+    : path.dirname(getWorkbuddyWorkspaceDir(homeDir));
   return {
     homeDir: layout.homeDir,
-    configDir: hostPaths.configDir,
-    settingsPath: hostPaths.settingsPath,
-    registryPath: hostPaths.registryPath,
-    cachePluginRoot: path.join(hostPaths.configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME),
+    configDir,
+    settingsPath: path.join(configDir, 'settings.json'),
+    registryPath: path.join(configDir, 'plugins', 'installed_plugins.json'),
+    cachePluginRoot: path.join(configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME),
     marketplaceRoot: path.join(layout.pdDir, 'workbuddy-marketplace'),
     governanceDir: getWorkbuddyWorkspaceDir(homeDir),
     runtimeAdapterDir: layout.workbuddyAdapterDir,
@@ -1075,16 +1085,26 @@ export function ensureWorkbuddyGovernanceEnabled(
  * exactly one implementation.
  */
 export function readWorkbuddyPluginState(p: WorkbuddyPaths): HostPluginStateSummary {
+  // Pinned mirror of install-layout's interpretWorkbuddyPluginState — the
+  // shared judgment pd-cli health applies. A CI parity test
+  // (workbuddy-plugin-state-parity.test.ts) pins the two implementations to
+  // identical outputs on a fixture matrix; a runtime import cannot exist
+  // here because the packaged installer must keep loading against the
+  // PUBLISHED install-layout (registry-parity smoke, PRI-669/RF-02; the
+  // release-intent guard N-version forbids raising the version floor in a
+  // normal PR).
   const registry = readHostJsonFile(p.registryPath);
+  const registered = registry.ok && registry.existed && isRecord(registry.value.plugins)
+    ? Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)
+    : false;
   const settings = readHostJsonFile(p.settingsPath);
-  // The judgment is the SHARED install-layout interpreter (2026-11-07) —
-  // pd-cli health reports the same three facts from the same rules.
-  const view = interpretWorkbuddyPluginState({
-    registryParsed: registry.ok ? registry.value : undefined,
-    settingsParsed: settings.ok ? settings.value : undefined,
+  const enabledPlugins = settings.ok && isRecord(settings.value?.enabledPlugins) ? settings.value.enabledPlugins : undefined;
+  const raw = enabledPlugins === undefined ? undefined : enabledPlugins[WORKBUDDY_PLUGIN_KEY];
+  return {
+    registered,
     registryReadable: registry.ok,
-  });
-  return { registered: view.registered, registryReadable: view.registryReadable, enabled: view.enabled };
+    enabled: typeof raw === 'boolean' ? raw : null,
+  };
 }
 
 /**
