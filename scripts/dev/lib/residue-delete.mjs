@@ -369,10 +369,17 @@ export function detachInternalLinks(root) {
   }
   const detached = [];
   const failedToDetach = [];
-  for (const link of before.internal) {
+  // A verified ancestor cycle is inside this tree but cannot be traversed.
+  // It is safe to unlink the link itself: its target remains part of the tree
+  // and will be removed with the tree. Unresolvable cycles remain fail-closed.
+  const safeToDetach = [
+    ...before.internal,
+    ...before.external.filter((link) => link.unsafeReason === 'cycle'),
+  ];
+  for (const link of safeToDetach) {
     try {
       fs.unlinkSync(link.path);
-      detached.push({ path: link.path, target: link.target });
+      detached.push({ path: link.path, target: link.target, unsafeReason: link.unsafeReason || null });
     } catch (err) {
       failedToDetach.push({ path: link.path, error: String((err && err.message) || err) });
     }

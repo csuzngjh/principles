@@ -13,11 +13,17 @@
 
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { gitCommonDirAbsolute, normalizeGitPath } from '../dev/lib/git.mjs';
+import { gitCommonDirAbsolute, normalizeGitPath, runGit } from '../dev/lib/git.mjs';
 import { withMutationLock } from '../dev/lib/git-mutation-lock.mjs';
-import { removeWorktreeSafely } from '../dev/lib/safe-worktree-remove.mjs';
+import { removeWorktreeSafely, resolveAdminReversePointer } from '../dev/lib/safe-worktree-remove.mjs';
+import {
+  changedExternalTargets,
+  fingerprintExternalTarget,
+  snapshotExternalTargets,
+} from '../dev/cleanup-task-worktree.mjs';
 import {
   commitFile,
   git,
@@ -300,6 +306,58 @@ function fingerprintTree(dir: string): string {
   return rows.sort().join('\n');
 }
 
+describe('external target fingerprints', () => {
+  it('detects a file truncated after the snapshot even when the file still exists', () => {
+    const outside = path.join(root, 'external-fingerprint-truncate');
+    fs.mkdirSync(outside, { recursive: true });
+    const targetFile = path.join(outside, 'large-package.bin');
+    fs.writeFileSync(targetFile, Buffer.alloc(4096, 0x41));
+    const snapshot = snapshotExternalTargets([{ canonicalTarget: outside, unsafeReason: 'outside' }]);
+    expect(snapshot).toHaveLength(1);
+    fs.writeFileSync(targetFile, Buffer.from('x'));
+    expect(fs.existsSync(targetFile)).toBe(true);
+    expect(changedExternalTargets(snapshot)).toEqual([outside]);
+    expect(fingerprintExternalTarget(outside)).not.toBe(snapshot[0].fingerprint);
+  });
+
+  it('deduplicates multiple links to the same canonical external target', () => {
+    const outside = path.join(root, 'external-fingerprint-deduplicate');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+    const snapshot = snapshotExternalTargets([
+      { canonicalTarget: outside, unsafeReason: 'outside' },
+      { canonicalTarget: outside, unsafeReason: 'outside' },
+    ]);
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0].path).toBe(outside);
+  });
+
+  it('detects truncation when the external target itself is a regular file', () => {
+    const outsideFile = path.join(root, 'external-file-target.bin');
+    fs.writeFileSync(outsideFile, Buffer.alloc(2048, 0x41));
+    const snapshot = snapshotExternalTargets([{ canonicalTarget: outsideFile, unsafeReason: 'outside' }]);
+    expect(snapshot).toHaveLength(1);
+    fs.writeFileSync(outsideFile, Buffer.from('x'));
+    expect(changedExternalTargets(snapshot)).toEqual([outsideFile]);
+  });
+
+  it('ignores only the expected worktree subtree while still checking external siblings', () => {
+    const outside = path.join(root, 'external-parent-target');
+    const expectedWorktree = path.join(outside, 'pool', 'task-worktree');
+    fs.mkdirSync(expectedWorktree, { recursive: true });
+    fs.writeFileSync(path.join(expectedWorktree, 'expected-to-disappear.txt'), 'expected');
+    fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+    const snapshot = snapshotExternalTargets(
+      [{ canonicalTarget: outside, unsafeReason: 'outside' }],
+      { excludePaths: [expectedWorktree] },
+    );
+    fs.rmSync(expectedWorktree, { recursive: true, force: true });
+    expect(changedExternalTargets(snapshot)).toEqual([]);
+    fs.writeFileSync(path.join(outside, 'keep.txt'), 'changed');
+    expect(changedExternalTargets(snapshot)).toEqual([outside]);
+  });
+});
+
 /** The 2026-11-06 shape: a global install with root entries and nested skill files. */
 function makeExternalInstall(label: string): string {
   const outside = path.join(root, 'outside-install-' + label);
@@ -400,6 +458,34 @@ describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
     await expect(git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
   }, 120_000);
 
+  it('can clean a target worktree when the CLI itself was launched from that worktree', async () => {
+    const { wt, branch } = await makeTask('cleanup-from-target-cwd');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-from-target-cwd');
+
+    const r = await runDevScript(
+      'cleanup-task-worktree.mjs',
+      [branch, '--delete-branch', '--skip-gh', '--json'],
+      { cwd: wt },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout) as { ok: boolean; removedWorktree: string; deletedBranch: string };
+    expect(out.ok).toBe(true);
+    expect(normalizeGitPath(out.removedWorktree)).toBe(normalizeGitPath(wt));
+    expect(out.deletedBranch).toBe(branch);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(false);
+  }, 120_000);
+
+  it('resolves a relative Git admin reverse pointer from adminDir, not process cwd', () => {
+    const adminDir = path.join(root, 'repo', '.git', 'worktrees', 'task');
+    const relativePointer = path.join('..', '..', '..', '..', 'task-worktree', '.git');
+    expect(resolveAdminReversePointer(adminDir, relativePointer))
+      .toBe(path.resolve(adminDir, relativePointer));
+    const absolutePointer = path.join(root, 'task-worktree', '.git');
+    expect(resolveAdminReversePointer(adminDir, absolutePointer)).toBe(path.resolve(absolutePointer));
+  });
+
   it('does NOT report EXTERNAL_TARGET_LOST when the external target was already missing', async () => {
     const { wt, branch } = await makeTask('junction-dangling');
     await mergeIntoMain(branch);
@@ -426,6 +512,80 @@ describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
 
 
 describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
+  it('restores a worktree when Git reports failure after the quarantine rename completed', async () => {
+    const { wt } = await makeTask('partial-quarantine-move');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let injected = false;
+    const runGitCommand = async (args: string[], options: { cwd: string; allowFailure?: boolean }) => {
+      if (!injected && args[0] === 'worktree' && args[1] === 'move' && args[2] === wt) {
+        await runGit(args, options);
+        injected = true;
+        throw new Error('simulated failure after directory and Git metadata move');
+      }
+      return runGit(args, options);
+    };
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({ cwd: wt, worktreePath: wt, primaryPath: primary, runGitCommand }),
+    );
+    expect(injected).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.restoredPath).toBe(wt);
+    expect(result.quarantinePath).toBeUndefined();
+    expect(fs.existsSync(wt)).toBe(true);
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+  }, 120_000);
+
+  it('accepts only the tracked deletion explicitly authorized by the detach pass', async () => {
+    const { wt } = await makeTask('expected-tracked-link-delete-only');
+    const expectedPath = path.join(wt, 'expected-link');
+    fs.writeFileSync(expectedPath, 'link target placeholder\n', 'utf-8');
+    await git(wt, 'add', 'expected-link');
+    await git(wt, 'commit', '-m', 'track link path for deletion-status contract');
+    fs.unlinkSync(expectedPath);
+
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: wt,
+        worktreePath: wt,
+        primaryPath: primary,
+        expectedDeletedPaths: [expectedPath],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(false);
+  }, 120_000);
+
+  it('refuses unrelated work when a caller-authorized tracked deletion is present', async () => {
+    const { wt } = await makeTask('expected-tracked-link-delete');
+    const expectedPath = path.join(wt, 'expected-link');
+    const unexpectedPath = path.join(wt, 'unexpected-wip');
+    fs.writeFileSync(expectedPath, 'link target placeholder\n', 'utf-8');
+    fs.writeFileSync(unexpectedPath, 'uncommitted work\n', 'utf-8');
+    await git(wt, 'add', 'expected-link', 'unexpected-wip');
+    await git(wt, 'commit', '-m', 'track files for deletion-status contract');
+    fs.unlinkSync(expectedPath);
+    fs.writeFileSync(unexpectedPath, 'changed after commit\n', 'utf-8');
+
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const accepted = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: wt,
+        worktreePath: wt,
+        primaryPath: primary,
+        expectedDeletedPaths: [expectedPath],
+      }),
+    );
+    expect(accepted.ok).toBe(false);
+    expect(accepted.reasonCode).toBe('OWNERSHIP_CHANGED');
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(fs.existsSync(unexpectedPath)).toBe(true);
+  }, 120_000);
+
   it('never follows a Junction created AFTER the caller preflight', async () => {
     // The production helper performs its own final status/ownership check and
     // moves the worktree before unlinking. This deterministic seam models a
@@ -483,7 +643,10 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
         }),
       );
       expect(result.ok).toBe(false);
+      expect(result.quarantinePath).toBe(quarantine);
       expect(fingerprintTree(outside)).toBe(before);
+      const listed = await worktreeList(primary);
+      expect(listed.some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(quarantine))).toBe(true);
     } finally {
       if (quarantine && fs.existsSync(quarantine)) {
         const marker = path.join(quarantine, '.git');
@@ -499,6 +662,43 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     }
     expect(fingerprintTree(outside)).toBe(before);
     expect(fs.existsSync(wt)).toBe(true);
+  }, 120_000);
+
+  it.skipIf(process.platform === 'win32')('does not block when a non-cooperating writer replaces the .git marker with a FIFO', async () => {
+    const { wt } = await makeTask('marker-fifo');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let quarantine = '';
+    let originalMarker = '';
+    try {
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({
+          cwd: wt,
+          worktreePath: wt,
+          primaryPath: primary,
+          onQuarantined: (moved) => {
+            quarantine = moved;
+            const marker = path.join(moved, '.git');
+            originalMarker = fs.readFileSync(marker, 'utf-8');
+            fs.unlinkSync(marker);
+            execFileSync('mkfifo', [marker]);
+          },
+        }),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.quarantinePath).toBe(quarantine);
+      expect(result.reason).toContain('not a regular file');
+      expect(fs.existsSync(quarantine)).toBe(true);
+      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(quarantine))).toBe(true);
+    } finally {
+      if (quarantine && fs.existsSync(quarantine)) {
+        const marker = path.join(quarantine, '.git');
+        try { fs.unlinkSync(marker); } catch { /* already detached */ }
+        fs.writeFileSync(marker, originalMarker, 'utf-8');
+        await git(primary, 'worktree', 'move', quarantine, wt);
+        fs.rmdirSync(path.dirname(quarantine));
+      }
+    }
   }, 120_000);
 
   it('refuses to delete Git admin metadata through a junctioned worktrees parent', async () => {

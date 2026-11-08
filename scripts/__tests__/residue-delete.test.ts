@@ -492,6 +492,20 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     expect(fs.readFileSync(path.join(target, 'index.js'), 'utf-8')).toBe('real\n');
   });
 
+  it('detaches a verified ancestor-cycle junction in the same safe internal-link pass', () => {
+    const { tree } = buildTree('ancestor-cycle-detach');
+    const link = path.join(tree, 'node_modules', 'ancestor-cycle');
+    makeJunction(link, tree);
+    const before = classifyReparsePoints(tree);
+    expect(before.external.some((item) => item.path === link && item.unsafeReason === 'cycle')).toBe(true);
+
+    const result = detachInternalLinks(tree);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.detached.some((item) => item.path === link && item.unsafeReason === 'cycle')).toBe(true);
+    expect(fs.existsSync(link)).toBe(false);
+    expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(true);
+  });
+
   it('refuses when the tree root itself is a reparse point (a swapped worktree root)', () => {
     const { outside } = buildTree('swapped-root');
     const link = path.join(root, 'swapped-root-link');

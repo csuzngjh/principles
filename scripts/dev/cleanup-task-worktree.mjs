@@ -165,8 +165,62 @@ function describeLinks(links, limit = 8) {
  * so `existsSync` alone would have reported success. Relative path + byte size
  * detects that shape without hashing every byte of a large install.
  */
-function fingerprintExternalTarget(dir) {
+function isWithinPath(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+}
+
+/**
+ * Resolve the exact Git admin directory for a registered worktree. It is
+ * excluded from external-target fingerprints only after both pointer directions
+ * prove the directory belongs to this worktree and this repository.
+ */
+function resolveWorktreeAdminDir(worktreePath, commonDir) {
+  const markerPath = path.join(worktreePath, '.git');
+  const markerStat = fs.lstatSync(markerPath);
+  if (!markerStat.isFile() || markerStat.isSymbolicLink()) {
+    throw new Error('worktree .git marker is not a regular file');
+  }
+  const markerContents = fs.readFileSync(markerPath, 'utf8');
+  const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
+  if (!markerLine) throw new Error('worktree .git marker has no gitdir pointer');
+  const rawAdminDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
+  const candidate = path.resolve(path.dirname(markerPath), rawAdminDir);
+  const adminRoot = path.resolve(commonDir, 'worktrees');
+  const adminRootStat = fs.lstatSync(adminRoot);
+  const candidateStat = fs.lstatSync(candidate);
+  if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()
+    || !candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
+    throw new Error('worktree admin directory or its parent is not a real directory');
+  }
+  const canonicalRoot = fs.realpathSync.native(adminRoot);
+  const canonicalCandidate = fs.realpathSync.native(candidate);
+  if (!isWithinPath(canonicalRoot, canonicalCandidate)
+    || path.relative(canonicalRoot, canonicalCandidate).includes(path.sep)) {
+    throw new Error('worktree admin directory is not a direct child of the canonical admin root');
+  }
+  const reversePointer = fs.readFileSync(path.join(canonicalCandidate, 'gitdir'), 'utf8').trim();
+  const reversePath = path.isAbsolute(reversePointer)
+    ? path.resolve(reversePointer)
+    : path.resolve(canonicalCandidate, reversePointer);
+  if (path.resolve(reversePath) !== path.resolve(markerPath)) {
+    throw new Error('worktree admin reverse pointer does not resolve to the original .git marker');
+  }
+  return canonicalCandidate;
+}
+
+export function fingerprintExternalTarget(dir, { excludePaths = [] } = {}) {
   const rows = [];
+  const excluded = excludePaths.map((item) => path.resolve(item));
+  const isExcluded = (candidate) => excluded.some((item) => isWithinPath(item, candidate));
+  let rootStat;
+  try {
+    rootStat = fs.lstatSync(dir);
+  } catch {
+    return 'UNREADABLE:.';
+  }
+  if (rootStat.isSymbolicLink()) return 'l:.';
+  if (!rootStat.isDirectory()) return 'f:.' + ':' + rootStat.size;
   const walk = (current) => {
     let entries;
     try {
@@ -178,15 +232,24 @@ function fingerprintExternalTarget(dir) {
     for (const entry of entries) {
       const full = path.join(current, entry.name);
       const rel = path.relative(dir, full);
-      if (entry.isDirectory()) {
+      // Worktree contents and its exact Git admin directory are expected to
+      // disappear during this operation. Exclude only those exact subtrees;
+      // every sibling in the external target remains fingerprinted.
+      if (isExcluded(full)) continue;
+      let stat;
+      try {
+        stat = fs.lstatSync(full);
+      } catch {
+        rows.push('UNREADABLE:' + rel);
+        continue;
+      }
+      if (stat.isSymbolicLink()) {
+        rows.push('l:' + rel);
+      } else if (stat.isDirectory()) {
         rows.push('d:' + rel);
         walk(full);
-      } else if (entry.isSymbolicLink()) {
-        rows.push('l:' + rel);
       } else {
-        let size = -1;
-        try { size = fs.statSync(full).size; } catch { /* unreadable file */ }
-        rows.push('f:' + rel + ':' + size);
+        rows.push('f:' + rel + ':' + stat.size);
       }
     }
   };
@@ -194,21 +257,54 @@ function fingerprintExternalTarget(dir) {
   return rows.sort().join('\n');
 }
 
+export function snapshotExternalTargets(links, { excludePaths = [] } = {}) {
+  const snapshots = new Map();
+  for (const link of links) {
+    if (!link.canonicalTarget || link.unsafeReason !== 'outside') continue;
+    const target = path.resolve(link.canonicalTarget);
+    const key = process.platform === 'win32' ? target.toLowerCase() : target;
+    if (snapshots.has(key)) continue;
+    const existedBefore = fs.existsSync(target);
+    snapshots.set(key, {
+      path: target,
+      existedBefore,
+      excludePaths: excludePaths.map((item) => path.resolve(item)),
+      fingerprint: existedBefore ? fingerprintExternalTarget(target, { excludePaths }) : null,
+    });
+  }
+  return [...snapshots.values()];
+}
+
+export function changedExternalTargets(snapshots) {
+  return snapshots
+    .filter((snapshot) => snapshot.existedBefore
+      && (!fs.existsSync(snapshot.path)
+        || fingerprintExternalTarget(snapshot.path, { excludePaths: snapshot.excludePaths }) !== snapshot.fingerprint))
+    .map((snapshot) => snapshot.path);
+}
+
 async function main() {
   const args = parseArgs(process.argv);
-  const cwd = process.cwd();
+  let cwd = process.cwd();
 
   const worktrees = await listWorktrees(cwd);
   const primary = worktrees.find((w) => !w.bare);
   if (!primary) {
     fail(args, CODES.ENVIRONMENT_INVALID, 'Could not identify the primary worktree.', 'Run from any worktree of the PD repository.');
   }
+  const invocationCwd = cwd;
+  // All Git commands after target discovery use the primary checkout. The
+  // invocation directory may itself be the worktree that this command moves.
+  cwd = primary.path;
+  // On Windows, a process whose OS current directory is the target cannot
+  // rename that directory even when all child Git processes use the primary.
+  process.chdir(cwd);
 
   // Resolve the target: exact path match, or the worktree whose checked-out
   // branch matches (accept both 'ai/foo' and 'refs/heads/ai/foo').
   const target = worktrees.find(
     (w) =>
-      normalizeGitPath(w.path, cwd) === normalizeGitPath(args.target, cwd) ||
+      normalizeGitPath(w.path, cwd) === normalizeGitPath(args.target, invocationCwd) ||
       w.branch === args.target ||
       w.branch === 'refs/heads/' + args.target
   );
@@ -360,6 +456,7 @@ async function main() {
     // and reported only after the lock has been released.
     let detached = null;
     let targetSnapshots = [];
+    const expectedDeletedPaths = [];
     try {
       await withMutationLock({ commonDir, operation: 'worktree-remove', target: target.path }, async () => {
         // The first ownership re-check is inside the lock. The same check is
@@ -400,10 +497,33 @@ async function main() {
           );
         }
 
+        // Capture each approved external target exactly once BEFORE the first
+        // link is detached. Exclude only the worktree being removed and its
+        // verified Git admin directory when either is nested under that target;
+        // the target's other contents remain fingerprinted.
+        const externalTargets = linkScan.external.filter(
+          (link) => link.canonicalTarget && link.unsafeReason === 'outside'
+        );
+        const expectedRemovalPaths = [target.path];
+        if (externalTargets.some((link) => isWithinPath(link.canonicalTarget, commonDir))) {
+          try {
+            expectedRemovalPaths.push(resolveWorktreeAdminDir(target.path, commonDir));
+          } catch (error) {
+            throw new PreflightRefusal(
+              'An approved external target contains the repository Git common directory, but the worktree admin directory could not be proven: ' +
+                String((error && error.message) || error),
+              'Do not detach links or remove this worktree until the .git marker and reverse admin pointer are verified.',
+              { reason: REMOVAL_REASONS.SCAN_INCOMPLETE }
+            );
+          }
+        }
+        targetSnapshots = snapshotExternalTargets(linkScan.external, { excludePaths: expectedRemovalPaths });
+
         if (linkScan.external.length > 0) {
           await assertWorktreeRemovalOwnership(cwd, target.path, 'before detaching external or cyclic reparse points');
           detached = detachExternalLinks(target.path);
           detachedLinks = detached.detached;
+          expectedDeletedPaths.push(...detached.detached.map((item) => item.path));
           if (detached.brokenTargets.length > 0) {
             throw new PreflightRefusal(
               'Detaching an unsafe reparse point destroyed its target — the link WAS followed. Nothing more was removed:\n' +
@@ -441,8 +561,12 @@ async function main() {
         // on Windows it can return exit 0 and still leave the junction directory
         // (and its parent) behind — a NO_GIT_MARKER residue shell. Detach
         // internal links unconditionally; their targets die with the tree anyway.
-        if (linkScan.internal.length > 0) {
-          await assertWorktreeRemovalOwnership(cwd, target.path, 'before detaching internal reparse points');
+        const safeInternalLinks = [
+          ...linkScan.internal,
+          ...linkScan.external.filter((link) => link.unsafeReason === 'cycle'),
+        ];
+        if (safeInternalLinks.length > 0) {
+          await assertWorktreeRemovalOwnership(cwd, target.path, 'before detaching internal/cycle reparse points');
           const internal = detachInternalLinks(target.path);
           if (!internal.ok) {
             throw new PreflightRefusal(
@@ -452,36 +576,21 @@ async function main() {
               'Resolve the unreadable/undetachable link, then retry. Never fall back to a recursive delete.',
               {
                 reason: internal.complete ? REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT : REMOVAL_REASONS.SCAN_INCOMPLETE,
-                internalLinks: linkScan.internal.slice(0, 20),
+                internalLinks: safeInternalLinks.slice(0, 20),
               }
             );
           }
+          expectedDeletedPaths.push(...internal.detached.map((item) => item.path));
           notes.push(
-            'detached ' + internal.detached.length + ' internal reparse point(s) before removal so git never traverses a link'
+            'detached ' + internal.detached.length + ' internal reparse point(s), including verified cycles, before removal so git never traverses a link'
           );
         }
-
-        // Snapshot EVERY external target before deletion, remembering which ones
-        // existed. A dangling link must not be reported as "lost" afterwards
-        // (CodeRabbit), and existsSync alone cannot detect the 2026-11-06 shape
-        // where files INSIDE the target were deleted while the directory stayed.
-        targetSnapshots = linkScan.external
-          // Only targets genuinely OUTSIDE the tree. A cyclic link points at the
-          // worktree itself, which is expected to disappear with it.
-          .filter((l) => l.canonicalTarget && l.unsafeReason === 'outside')
-          .map((l) => {
-            const existedBefore = fs.existsSync(l.canonicalTarget);
-            return {
-              path: l.canonicalTarget,
-              existedBefore,
-              fingerprint: existedBefore ? fingerprintExternalTarget(l.canonicalTarget) : null,
-            };
-          });
 
         const safeRemoval = await removeWorktreeSafely({
           cwd,
           worktreePath: target.path,
           primaryPath: primary.path,
+          expectedDeletedPaths,
           onProgress: args.json ? null : (progress) => console.log(formatProgress(progress)),
         });
         notes.push(...safeRemoval.notes);
@@ -496,16 +605,56 @@ async function main() {
           removalError.reason = safeRemoval.reasonCode || REMOVAL_REASONS.REMOVAL_FAILED;
           removalError.quarantinePath = safeRemoval.quarantinePath;
           removalError.restoredPath = safeRemoval.restoredPath;
+          removalError.adminDirPath = safeRemoval.adminDirPath;
+          removalError.residueKind = safeRemoval.residueKind;
           throw removalError;
         }
         removedWorktree = target.path;
       });
     } catch (err) {
+      const changedTargets = changedExternalTargets(targetSnapshots);
+      if (changedTargets.length > 0) {
+        fail(
+          args,
+          CODES.CHECK_FAILED,
+          'An external reparse-point target changed during cleanup; stop and restore or investigate these targets:\n' +
+            changedTargets.map((target) => '    ' + target).join('\n') +
+            '\nOriginal failure: ' + (err && err.message ? err.message : String(err)),
+          'Do not retry cleanup until the external target contents have been restored or independently verified.' +
+            (err && err.adminDirPath ? ' Git admin metadata also remains at ' + err.adminDirPath + '.' : ''),
+          {
+            reason: REMOVAL_REASONS.EXTERNAL_TARGET_LOST,
+            lostTargets: changedTargets,
+            originalReason: err && err.reason ? err.reason : null,
+            ...(err && err.adminDirPath ? { residueKind: 'git-admin-directory', adminDirPath: err.adminDirPath } : {}),
+            ...(err && err.quarantinePath ? { quarantinePath: err.quarantinePath } : {}),
+            detachedLinks,
+          }
+        );
+        return;
+      }
       if (err instanceof PreflightRefusal) {
         fail(args, CODES.CHECK_FAILED, err.message, err.nextAction, err.payload);
         return;
       }
       if (err && err.reason === REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL) {
+        if (err.adminDirPath) {
+          fail(
+            args,
+            CODES.CHECK_FAILED,
+            'The worktree contents were removed, but its Git admin directory remains and was preserved at: ' + err.adminDirPath +
+              '\nDo not treat the worktree path as a residue shell; the remaining object is Git metadata.',
+            'Do not run --residue against the old worktree path. Inspect the exact adminDirPath and git worktree list --porcelain; only remove that metadata after confirming it is not referenced by another worktree. Preserve it if ownership is uncertain.',
+            {
+              reason: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL,
+              residueKind: 'git-admin-directory',
+              adminDirPath: err.adminDirPath,
+              quarantinePath: err.quarantinePath || null,
+              removedWorktree: target.path,
+            }
+          );
+          return;
+        }
         fail(
           args,
           CODES.CHECK_FAILED,
@@ -513,7 +662,7 @@ async function main() {
           'Do NOT delete it with a recursive delete. The junction-safe, explicitly acked residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
             shellPath(target.path) +
             ' --ack-unknown --apply . NOTE: --residue only accepts shells the tool discovered inside its pool roots; an OUT-OF-POOL worktree is not discoverable and re-running the snapshot does not change that. This PR deliberately adds no bypass — preserve the directory and escalate for an Owner decision. Never weaken the discovery or --ack-unknown gates.',
-          { reason: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL, removedWorktree: null }
+          { reason: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL, removedWorktree: null, quarantinePath: err.quarantinePath || null }
         );
         return;
       }
@@ -541,22 +690,33 @@ async function main() {
         /* the original failure is the useful signal */
       }
       const shellRemains = fs.existsSync(target.path) && !stillRegistered;
+      const failureReason = err && err.reason
+        ? err.reason
+        : shellRemains ? REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL : REMOVAL_REASONS.REMOVAL_FAILED;
+      const nextAction = failureReason === REMOVAL_REASONS.OWNERSHIP_CHANGED
+        ? 'The worktree ownership or contents changed during cleanup. Preserve it, inspect git status --porcelain, lease state and git worktree list --porcelain, then retry only after the owner change is understood.'
+        : failureReason === REMOVAL_REASONS.EXTERNAL_TARGET_LOST
+          ? 'An external target may have been damaged. Stop cleanup and restore or independently verify every reported target before any retry.'
+          : shellRemains
+            ? 'Do NOT delete it with a recursive delete. The junction-safe residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
+              shellPath(target.path) +
+              ' --ack-unknown --apply . NOTE: --residue only accepts shells discovered inside its pool roots; an OUT-OF-POOL worktree is not discoverable. Preserve it and escalate for an Owner decision.'
+            : 'Do NOT retry with a bare git worktree remove — it skips the ERR-098 preflight. Re-run npm run dev:worktree:cleanup -- ' +
+              shellPath(args.target) + ' after resolving the error above.';
       fail(
         args,
         CODES.CHECK_FAILED,
-        'git worktree remove failed (porcelain was clean, preflight proved no unsafe reparse point):\n' +
+        'git worktree cleanup failed:\n' +
           (err && err.message ? err.message : String(err)) +
           (shellRemains
             ? '\n' + target.path + ' is still on disk but git has no admin metadata for it any more: it is now a NO_GIT_MARKER residue shell.'
             : ''),
-        shellRemains
-          ? 'Do NOT delete it with a recursive delete. The junction-safe residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
-            shellPath(target.path) +
-            ' --ack-unknown --apply . NOTE: --residue only accepts shells the tool discovered inside its pool roots; an OUT-OF-POOL worktree is not discoverable and re-running the snapshot does not change that. This PR deliberately adds no bypass — preserve the directory and escalate for an Owner decision. Never weaken the discovery or --ack-unknown gates.'
-          : 'Do NOT retry with a bare `git worktree remove` — it skips the ERR-098 preflight. Re-run npm run dev:worktree:cleanup -- ' +
-            shellPath(args.target) + ' after resolving the error above.',
+        nextAction,
         {
-          reason: shellRemains ? REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL : REMOVAL_REASONS.REMOVAL_FAILED,
+          reason: failureReason,
+          ...(err && err.adminDirPath ? { residueKind: 'git-admin-directory', adminDirPath: err.adminDirPath } : {}),
+          ...(err && err.quarantinePath ? { quarantinePath: err.quarantinePath } : {}),
+          ...(err && err.restoredPath ? { restoredPath: err.restoredPath } : {}),
           ...(detached ? { detachedLinks } : {}),
         }
       );
@@ -564,9 +724,7 @@ async function main() {
 
     // Tripwire: git removed the tree — did every external target survive WHOLE?
     if (removedWorktree && targetSnapshots.length > 0) {
-      const lost = targetSnapshots
-        .filter((s) => s.existedBefore && (!fs.existsSync(s.path) || fingerprintExternalTarget(s.path) !== s.fingerprint))
-        .map((s) => s.path);
+      const lost = changedExternalTargets(targetSnapshots);
       if (lost.length > 0) {
         fail(
           args,

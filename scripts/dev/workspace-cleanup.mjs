@@ -158,7 +158,7 @@ async function runResidueMode(args) {
         ...entry.reasons.map((r) => '    note: ' + r),
         '',
         '  Deleting it destroys any uncommitted work irrecoverably. If you have reviewed it and accept that:',
-        '    npm run dev:workspace:cleanup -- --residue "' + entry.path + '" --ack-unknown --apply',
+        '    npm run dev:workspace:cleanup -- --residue ' + shellPath(entry.path) + ' --ack-unknown --apply',
       ]
     );
     process.exit(1);
@@ -264,8 +264,13 @@ async function main() {
     return;
   }
 
-  const cwd = process.cwd();
-  const state = await collectWorkspaceState({ cwd, skipGh: args.skipGh });
+  const invocationCwd = process.cwd();
+  const state = await collectWorkspaceState({ cwd: invocationCwd, skipGh: args.skipGh });
+  // A batch may remove the worktree from which it was launched. All subsequent
+  // Git operations therefore use the stable primary checkout as control plane.
+  const cwd = state.primaryPath || invocationCwd;
+  // A batch may remove its original cwd; release that directory handle first.
+  process.chdir(cwd);
   const others = state.records.filter((r) => !(r.kind === 'worktree' && r.isPrimary));
   const classified = classifyRecords(others, { graceDays: args.graceDays, now: state.now });
   const plan = planCleanup(classified);
@@ -410,7 +415,12 @@ async function main() {
             };
           }
 
-          if (linkScan.internal.length > 0) {
+          const expectedDeletedPaths = [];
+          const safeInternalLinks = [
+            ...linkScan.internal,
+            ...linkScan.external.filter((link) => link.unsafeReason === 'cycle'),
+          ];
+          if (safeInternalLinks.length > 0) {
             // A second ownership check is deliberately adjacent to the unlink.
             const leaseBeforeDetach = readLeaseState(worktreePath);
             if (leaseBeforeDetach.phase === 'active' || leaseBeforeDetach.phase === 'invalid') {
@@ -425,17 +435,19 @@ async function main() {
             if (!internal.ok) {
               return {
                 ok: false,
-                reason: 'could not detach ' + linkScan.internal.length + ' internal reparse point(s) before safe removal; ' +
+                reason: 'could not detach ' + safeInternalLinks.length + ' verified internal/cycle reparse point(s) before safe removal; ' +
                   (internal.complete ? REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT : REMOVAL_REASONS.SCAN_INCOMPLETE),
               };
             }
-            notes.push('detached ' + internal.detached.length + ' internal reparse point(s) before safe removal');
+            expectedDeletedPaths.push(...internal.detached.map((item) => item.path));
+            notes.push('detached ' + internal.detached.length + ' verified internal/cycle reparse point(s) before safe removal');
           }
 
           const safeRemoval = await removeWorktreeSafely({
             cwd,
             worktreePath,
             primaryPath,
+            expectedDeletedPaths,
             onProgress: args.json ? null : (progress) => console.log(formatProgress(progress)),
           });
           notes.push(...safeRemoval.notes);
@@ -445,6 +457,8 @@ async function main() {
             removedPath: safeRemoval.removedPath,
             quarantinePath: safeRemoval.quarantinePath,
             restoredPath: safeRemoval.restoredPath,
+            adminDirPath: safeRemoval.adminDirPath,
+            residueKind: safeRemoval.residueKind,
           };
         });
         if (verdict.ok) applied.push(action);

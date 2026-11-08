@@ -21,19 +21,22 @@ violates it on Windows: it recursed through a MERGED, porcelain-clean worktree's
 junctions and deleted real files of the global install, on the first non-forced removal, exit 0.
 Before any deletion: enumerate reparse points (`classifyReparsePoints` in
 `scripts/dev/lib/residue-delete.mjs`) and check each link's direction — a link whose target is inside
-the tree being deleted is harmless, a link whose target is outside it means STOP (an unresolvable
-target counts as outside: unknown direction is never trusted, git-14). Removal proceeds only after
-the external links are detached one at a time with their targets re-verified
+the tree being deleted and is not a self/ancestor cycle is safe for the recursive walk. A verified
+self/ancestor cycle is unsafe to traverse, but may be detached as a link because its target is proven
+inside the same tree. A link whose target is outside it means STOP (an unresolvable target counts as
+outside: unknown direction is never trusted, git-14). Removal proceeds only after external links are
+detached one at a time with their targets re-verified
 (`detachExternalLinks`, opt-in `--detach-external-links`), and the tool re-checks every external
 target after the delete. Recursive filesystem deletes (`Remove-Item -Recurse`, `rm -rf`) and
 `git clean -fdx` remain forbidden on such trees, and cleanup steps must still never silence errors.
 
 **Review hardening (PRI-1143, 2026-11-08)**: the preflight must FAIL CLOSED, not
 merely classify the links it happened to see. An unreadable directory, an
-unresolvable target, a relative target containing `..`, a self/ancestor cycle,
-or a case-mismatched path on a case-sensitive Windows directory is UNKNOWN and
-refuses the deletion (`SCAN_INCOMPLETE` / `EXTERNAL_LINKS_PRESENT`). Direction is
-decided from `realpath` on BOTH sides and compared case-sensitively. The scan,
+unresolvable target, a relative target containing `..`, or a case-mismatched path on a
+case-sensitive Windows directory is UNKNOWN and refuses the deletion (`SCAN_INCOMPLETE` /
+`EXTERNAL_LINKS_PRESENT`). A self/ancestor cycle whose target is proven inside the same tree is
+not UNKNOWN: it is detached as a link (never traversed), both by per-worktree cleanup and by the
+batch sweep. Direction is decided from `realpath` on BOTH sides and compared case-sensitively. The scan,
 the refusal decision, quarantine move, no-follow deletion and Git metadata
 unregistration must share ONE mutation lock. A mutex alone cannot stop a writer
 that does not use that mutex: never hand a live directory to recursive Git

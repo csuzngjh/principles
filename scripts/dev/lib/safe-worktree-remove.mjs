@@ -40,6 +40,55 @@ async function ownershipError(cwd, worktreePath, stage) {
 }
 
 /**
+ * Open a marker without following a symlink/reparse point and prove that the
+ * opened file is still the regular file named by the path. O_NONBLOCK prevents
+ * a malicious FIFO from hanging the cleanup process on POSIX.
+ */
+function readRegularFileNoFollow(filePath) {
+  const flags = fs.constants.O_RDONLY
+    | (process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  const fd = fs.openSync(filePath, flags);
+  try {
+    const opened = fs.fstatSync(fd);
+    const named = fs.lstatSync(filePath);
+    if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
+      || opened.dev !== named.dev || opened.ino !== named.ino) {
+      throw new Error('marker changed or is not a regular file');
+    }
+    return fs.readFileSync(fd, 'utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Resolve Git's reverse gitdir pointer, which may be relative to adminDir. */
+export function resolveAdminReversePointer(adminDir, reversePointer) {
+  return path.isAbsolute(reversePointer)
+    ? path.resolve(reversePointer)
+    : path.resolve(adminDir, reversePointer);
+}
+
+/**
+ * Accept only worktree deletions that were produced by the caller's verified
+ * reparse-point detach pass. Any other staged, unstaged or untracked change
+ * remains a hard refusal.
+ */
+function statusContainsOnlyExpectedLinkDeletions(status, worktreePath, expectedDeletedPaths) {
+  if (status === null) return false;
+  const expected = new Set(expectedDeletedPaths.map((item) => normalizeGitPath(item)));
+  if (status.length === 0) return true;
+  const records = status.split('\0').filter(Boolean);
+  for (const record of records) {
+    // Porcelain-v1 -z records are "XY PATH\\0". The only mutation generated
+    // by unlinking a tracked symlink is an unstaged deletion (" D").
+    if (record.slice(0, 2) !== ' D') return false;
+    const relativePath = record.slice(3);
+    if (!expected.has(normalizeGitPath(path.resolve(worktreePath, relativePath)))) return false;
+  }
+  return true;
+}
+
+/**
  * Remove an already-authorized, porcelain-clean worktree without giving Git a
  * recursive delete over a directory that can acquire a junction after preflight.
  *
@@ -56,20 +105,29 @@ async function ownershipError(cwd, worktreePath, stage) {
  * @param {{cwd: string, worktreePath: string, primaryPath: string,
  *          onProgress?: (p: object) => void,
  *          onQuarantined?: (quarantinePath: string) => void | Promise<void>,
- *          onTreeRemoved?: (worktreePath: string) => void | Promise<void>}} opts
+ *          onTreeRemoved?: (worktreePath: string) => void | Promise<void>,
+ *          expectedDeletedPaths?: string[],
+ *          runGitCommand?: typeof runGit}} opts
  * @returns {Promise<{ok: boolean, reason?: string, reasonCode?: string,
  *          quarantinePath?: string, restoredPath?: string, removal?: object,
  *          notes: string[]}>}
  */
 
-export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onProgress = null, onQuarantined = null, onTreeRemoved = null }) {
+export async function removeWorktreeSafely({
+  cwd, worktreePath, primaryPath, onProgress = null, onQuarantined = null, onTreeRemoved = null,
+  expectedDeletedPaths = [], runGitCommand = runGit,
+}) {
   const notes = [];
-  const beforeMoveError = await ownershipError(cwd, worktreePath, 'before quarantine move');
+  // Never use the target worktree as the Git process cwd after it is moved.
+  // The primary checkout is the stable control plane for all post-quarantine
+  // ownership checks, rollback commands and metadata reads.
+  const gitCwd = path.resolve(primaryPath || cwd);
+  const beforeMoveError = await ownershipError(gitCwd, worktreePath, 'before quarantine move');
   if (beforeMoveError) return { ok: false, ...beforeMoveError, notes };
   // The earlier caller preflight can become stale even within the mutation
   // lock: non-cooperating writers may add a tracked or untracked file.
-  const liveStatus = await runGit(['status', '--porcelain'], { cwd: worktreePath, allowFailure: true });
-  if (liveStatus === null || liveStatus.trim().length > 0) {
+  const liveStatus = await runGit(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: worktreePath, allowFailure: true });
+  if (!statusContainsOnlyExpectedLinkDeletions(liveStatus, worktreePath, expectedDeletedPaths)) {
     return {
       ok: false,
       reasonCode: REMOVAL_REASONS.OWNERSHIP_CHANGED,
@@ -96,17 +154,54 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
   try {
     // git worktree move is a rename of the directory entry, not a recursive
     // delete. It isolates the tree from writers still using the original path.
-    await runGit(['worktree', 'move', worktreePath, quarantinePath], { cwd });
+    await runGitCommand(['worktree', 'move', worktreePath, quarantinePath], { cwd: gitCwd });
   } catch (err) {
+    let restoredPath = null;
+    let preservedQuarantine = null;
+    let quarantineStat = null;
     try {
-      if (!fs.existsSync(quarantinePath)) fs.rmdirSync(quarantineParent);
+      quarantineStat = fs.lstatSync(quarantinePath);
     } catch {
-      /* retain the quarantine directory for inspection */
+      /* no partial directory rename occurred */
+    }
+    if (quarantineStat && quarantineStat.isDirectory() && !quarantineStat.isSymbolicLink()
+      && !fs.existsSync(worktreePath)) {
+      // Git may have renamed the directory but failed while updating its
+      // administrative pointers. Only attempt rollback when Git itself still
+      // recognizes the quarantine path as this registered worktree.
+      try {
+        const registered = await listWorktrees(gitCwd);
+        const quarantineEntry = registered.find(
+          (entry) => normalizeGitPath(entry.path, gitCwd) === normalizeGitPath(quarantinePath, gitCwd)
+        );
+        if (quarantineEntry && !quarantineEntry.locked) {
+          await runGitCommand(['worktree', 'move', quarantinePath, worktreePath], { cwd: gitCwd });
+          if (fs.existsSync(worktreePath) && !fs.existsSync(quarantinePath)) {
+            restoredPath = worktreePath;
+            fs.rmdirSync(quarantineParent);
+          }
+        }
+      } catch (restoreError) {
+        notes.push('partial quarantine move could not be safely rolled back: ' + String((restoreError && restoreError.message) || restoreError));
+      }
+      if (!restoredPath && fs.existsSync(quarantinePath)) {
+        preservedQuarantine = quarantinePath;
+        notes.push('preserved partially moved worktree for manual recovery at ' + quarantinePath);
+      }
+    } else {
+      try {
+        if (!quarantineStat) fs.rmdirSync(quarantineParent);
+      } catch {
+        /* retain the quarantine directory for inspection */
+      }
     }
     return {
       ok: false,
       reasonCode: REMOVAL_REASONS.REMOVAL_FAILED,
-      reason: 'could not move the worktree into quarantine: ' + String((err && err.message) || err),
+      reason: 'could not move the worktree into quarantine: ' + String((err && err.message) || err) +
+        (preservedQuarantine ? '; worktree preserved at ' + preservedQuarantine : ''),
+      ...(restoredPath ? { restoredPath } : {}),
+      ...(preservedQuarantine ? { quarantinePath: preservedQuarantine } : {}),
       notes,
     };
   }
@@ -114,25 +209,37 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
   const restore = async () => {
     if (!fs.existsSync(quarantinePath) || fs.existsSync(worktreePath)) return false;
     try {
-      if (markerContents !== null) {
-        // Exclusive creation is atomic: checking existsSync and then writing
-        // would follow a Junction/symlink introduced in between and overwrite
-        // a file outside this quarantine directory.
-        let markerFd;
-        try {
-          markerFd = fs.openSync(markerPath, 'wx', 0o600);
-        } catch (error) {
-          if (error && error.code !== 'EEXIST') throw error;
-        }
-        if (markerFd !== undefined) {
-          try {
-            fs.writeFileSync(markerFd, markerContents, 'utf-8');
-          } finally {
-            fs.closeSync(markerFd);
-          }
+      // Without the original marker bytes there is no safe rollback authority.
+      // Never ask Git to move a quarantine whose .git entry failed no-follow
+      // validation: Git may follow a substituted link and overwrite another
+      // worktree's metadata.
+      if (markerContents === null) {
+        throw new Error('original .git marker was not captured; preserving quarantine');
+      }
+      // Exclusive creation is atomic: checking existsSync and then writing
+      // would follow a Junction/symlink introduced in between and overwrite
+      // a file outside this quarantine directory.
+      let markerFd;
+      try {
+        markerFd = fs.openSync(markerPath, 'wx', 0o600);
+      } catch (error) {
+        if (!error || error.code !== 'EEXIST') throw error;
+        // EEXIST is not proof that a safe marker already exists. In
+        // particular, never let Git follow an attacker-supplied .git symlink
+        // while moving the quarantine back into the registered worktree.
+        const existingMarker = readRegularFileNoFollow(markerPath);
+        if (existingMarker !== markerContents) {
+          throw new Error('existing quarantine .git marker does not match the original marker; preserving quarantine');
         }
       }
-      await runGit(['worktree', 'move', quarantinePath, worktreePath], { cwd });
+      if (markerFd !== undefined) {
+        try {
+          fs.writeFileSync(markerFd, markerContents, 'utf-8');
+        } finally {
+          fs.closeSync(markerFd);
+        }
+      }
+      await runGitCommand(['worktree', 'move', quarantinePath, worktreePath], { cwd: gitCwd });
       fs.rmdirSync(quarantineParent);
       return true;
     } catch {
@@ -168,18 +275,7 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     // Open one stable file descriptor and compare its identity with the
     // directory entry after reading. A path-based lstat-then-read can follow
     // a symlink swapped into place in between those separate operations.
-    const markerFd = fs.openSync(markerPath, 'r');
-    try {
-      const opened = fs.fstatSync(markerFd);
-      markerContents = fs.readFileSync(markerFd, 'utf-8');
-      const named = fs.lstatSync(markerPath);
-      if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
-        || opened.dev !== named.dev || opened.ino !== named.ino) {
-        throw new Error('worktree .git marker changed or is not a regular file');
-      }
-    } finally {
-      fs.closeSync(markerFd);
-    }
+    markerContents = readRegularFileNoFollow(markerPath);
     if (!/^\s*gitdir:/m.test(markerContents)) {
       throw new Error('worktree .git marker does not contain a gitdir pointer');
     }
@@ -197,7 +293,7 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     };
   }
 
-  const afterMoveError = await ownershipError(cwd, quarantinePath, 'before no-follow deletion');
+  const afterMoveError = await ownershipError(gitCwd, quarantinePath, 'before no-follow deletion');
   if (afterMoveError) {
     const restored = await restore();
     return {
@@ -241,7 +337,7 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
     if (!markerLine) throw new Error('moved .git marker has no gitdir pointer');
     const rawAdminGitDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
-    const commonDir = await gitCommonDirAbsolute(cwd);
+    const commonDir = await gitCommonDirAbsolute(gitCwd);
     const commonStat = fs.lstatSync(commonDir);
     if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
       throw new Error('repository Git common directory is not a real directory');
@@ -290,7 +386,8 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
     } finally {
       fs.closeSync(pointerFd);
     }
-    if (normalizeGitPath(reversePointer) !== normalizeGitPath(markerPath)) {
+    const resolvedReversePointer = resolveAdminReversePointer(adminDir, reversePointer);
+    if (normalizeGitPath(resolvedReversePointer) !== normalizeGitPath(markerPath)) {
       throw new Error('admin gitdir reverse pointer does not match the moved worktree marker');
     }
     const adminScan = classifyReparsePoints(adminDir);
@@ -307,12 +404,13 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
       reasonCode: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL,
       reason: 'filesystem tree is gone but its exact Git admin directory could not be safely removed: ' + String((err && err.message) || err),
       quarantinePath: adminDir || quarantinePath,
+      ...(adminDir ? { adminDirPath: adminDir, residueKind: 'git-admin-directory' } : {}),
       removal,
       notes,
     };
   }
 
-  const remaining = await listWorktrees(cwd);
+  const remaining = await listWorktrees(gitCwd);
   if (remaining.some((entry) => normalizeGitPath(entry.path, cwd) === normalizeGitPath(quarantinePath, cwd))) {
     return {
       ok: false,
