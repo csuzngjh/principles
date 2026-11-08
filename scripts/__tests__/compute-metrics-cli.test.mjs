@@ -41,6 +41,7 @@ function frozenSample(sampleId) {
 /** Build one realistic chain row for a sample (frozen-derived expected). */
 function chainRow(sampleId, overrides = {}) {
   const frozen = frozenSample(sampleId);
+  const finalOutcome = frozen.expected_final === 'admitted' ? 'admitted' : 'resolved_none';
   return {
     run_id: 'run-cli',
     sample_id: sampleId,
@@ -52,10 +53,15 @@ function chainRow(sampleId, overrides = {}) {
     },
     pending_pre_stage2: frozen.expected_stage === 'stage2_via_pending',
     pain_created: frozen.expected_final === 'admitted',
-    final_outcome: frozen.expected_final === 'admitted' ? 'admitted' : 'resolved_none',
+    final_outcome: finalOutcome,
     final_outcome_reason: null,
     stage1: { marker_decision_pre: 'pending_llm_review', marker_reason_pre: null, observation_persisted: true },
-    stage2_result: { marker_decision_post: frozen.expected_final === 'admitted' ? 'admitted' : 'resolved_none' },
+    stage2_result: {
+      marker_decision_post: finalOutcome,
+      attempts: 1,
+      confidence: 0.9,
+      verdict: finalOutcome === 'admitted' ? 'correction' : 'none',
+    },
     llm_calls: [{ latency_ms: 100, status: 'ok', verdict: { type: frozen.expected_label, confidence: 0.9 } }],
     input_hash: `hash-${sampleId}`,
     provider_status: 'ok',

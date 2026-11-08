@@ -30,17 +30,23 @@ function row(overrides = {}) {
   const sampleId = overrides.sample_id ?? 'A1';
   const frozenSample = dataset.samples.find((s) => s.sample_id === sampleId)
     ?? { expected_label: 'correction', expected_stage: 'stage2_via_pending', expected_final: 'admitted' };
+  const finalOutcome = overrides.final_outcome ?? 'admitted';
   return {
     run_id: 'run-test',
     sample_id: sampleId,
     category: frozenSample.category ?? 'A',
     expected: { label: frozenSample.expected_label, stage: frozenSample.expected_stage, final: frozenSample.expected_final },
-    pending_pre_stage2: true,
-    pain_created: true,
-    final_outcome: 'admitted',
+    pending_pre_stage2: frozenSample.expected_stage === 'stage2_via_pending',
+    pain_created: finalOutcome === 'admitted',
+    final_outcome: finalOutcome,
     final_outcome_reason: null,
     stage1: { marker_decision_pre: 'pending_llm_review', marker_reason_pre: null, observation_persisted: true },
-    stage2_result: { marker_decision_post: 'admitted' },
+    stage2_result: {
+      marker_decision_post: finalOutcome,
+      attempts: 1,
+      confidence: 0.9,
+      verdict: finalOutcome === 'resolved_none' ? 'none' : 'correction',
+    },
     llm_calls: [{ latency_ms: 3000, status: 'ok', verdict: { type: 'correction', confidence: 0.9 } }],
     input_hash: 'deadbeef',
     provider_status: 'ok',
@@ -148,6 +154,45 @@ describe('dataset validation (P1-2)', () => {
     expect(v.problems).toEqual([]);
     expect(v.executionFailures).toEqual([]);
     expect(v.missingIds).toEqual([]);
+  });
+
+  it('fails closed when a decided Stage-2 row is missing attempts, confidence, or verdict', () => {
+    const rows = allIds();
+    rows.find((r) => r.sample_id === 'A1').stage2_result = {
+      marker_decision_post: 'admitted',
+      attempts: null,
+      confidence: null,
+      verdict: null,
+    };
+    const validation = validateDatasetRows(rows, dataset);
+    const problem = validation.problems.find((p) => p.kind === 'stage2_evidence_incomplete');
+    expect(problem).toBeDefined();
+    expect(problem.samples[0].sample_id).toBe('A1');
+    expect(problem.samples[0].fields).toEqual(expect.arrayContaining([
+        { field: 'attempts', problem: 'missing_or_invalid' },
+        { field: 'confidence', problem: 'missing_or_invalid' },
+        { field: 'verdict', problem: 'missing_or_invalid' },
+    ]));
+    const gates = computeGates({
+      datasetMetrics: computeDatasetMetrics(rows, dataset),
+      validation,
+      d6Summary: { ok: true, run_id: 'run-test' },
+      faultSummary: { ok: true, run_id: 'run-test' },
+      openclawSummary: { ok: true, run_id: 'run-test' },
+      runId: 'run-test',
+      mode: 'full',
+    });
+    expect(gates.dataset_ok).toBe(false);
+    expect(gates.overall_ok).toBe(false);
+  });
+
+  it('rejects a Stage-2 verdict that contradicts the persisted terminal decision', () => {
+    const rows = allIds();
+    rows.find((r) => r.sample_id === 'A1').stage2_result.verdict = 'none';
+    const validation = validateDatasetRows(rows, dataset);
+    expect(validation.problems.some((p) => p.kind === 'stage2_evidence_incomplete'
+      && p.samples.some((s) => s.sample_id === 'A1'
+        && s.fields.some((f) => f.problem === 'contradicts_terminal_decision')))).toBe(true);
   });
 
   it('PRI-1150 review fix 2: a row label contradicting the frozen dataset is rejected (A1 correction → none)', () => {
@@ -264,6 +309,84 @@ describe('dataset validation (P1-2)', () => {
     });
     expect(g.dataset_ok).toBe(false);
     expect(g.overall_ok).toBe(false);
+  });
+});
+
+describe('Stage-2 evidence extraction (P1-B)', () => {
+  it('reconciles D6-minimized terminal facts with the final measured classifier verdict', () => {
+    const facts = lib.readMarkerFacts({
+      decision: 'resolved_none',
+      reason: 'model returned none',
+      attempts: 2,
+      confidence: 0.82,
+      settledAt: '2026-11-08T00:00:00.000Z',
+    }, [
+      { status: 'ok', verdict: { type: 'correction', confidence: 0.4, reason: 'first low-confidence result' } },
+      { status: 'ok', verdict: { type: 'none', confidence: 0.82, reason: 'final model result' } },
+    ]);
+    expect(facts).toEqual({
+      attempts: 2,
+      confidence: 0.82,
+      verdict: 'none',
+      reason: 'model returned none',
+    });
+  });
+
+  it('recovers classifier facts when admitted settlement replaces the review payload with pain data', () => {
+    const facts = lib.readMarkerFacts({
+      painType: 'user_correction',
+      source: 'user_correction',
+      reason: 'User correction detected: 不是这个',
+      score: 70,
+    }, [
+      { status: 'no_verdict' },
+      { status: 'ok', verdict: { type: 'correction', confidence: 0.9, reason: 'model detected a correction' } },
+    ]);
+    expect(facts).toEqual({
+      attempts: 2,
+      confidence: 0.9,
+      verdict: 'correction',
+      reason: 'model detected a correction',
+    });
+  });
+
+  it('prefers durable pending review facts over the measured trace', () => {
+    const facts = lib.readMarkerFacts({
+      review: { attempts: 2, reviewResult: { verdict: 'none', confidence: 0.75, reason: 'durable review result' } },
+    }, [
+      { status: 'ok', verdict: { type: 'correction', confidence: 0.99, reason: 'later trace' } },
+    ]);
+    expect(facts).toEqual({
+      attempts: 2,
+      confidence: 0.75,
+      verdict: 'none',
+      reason: 'durable review result',
+    });
+  });
+
+  it('does not invent a verdict when the classifier returned no verdict', () => {
+    const facts = lib.readMarkerFacts(null, [{ status: 'no_verdict' }]);
+    expect(facts).toEqual({ attempts: 1, confidence: null, verdict: null, reason: null });
+  });
+
+  it('publishes the complete Stage-2 facts in the desensitized evidence shape', () => {
+    const evidence = buildEvidenceRows([row({
+      stage2_result: {
+        marker_decision_post: 'admitted',
+        attempts: 2,
+        verdict: 'correction',
+        confidence: 0.91,
+        verdict_reason: 'private classifier reason must not be exported',
+      },
+    })])[0];
+    expect(evidence.observed_stage2).toMatchObject({
+      marker_decision: 'admitted',
+      attempts: 2,
+      verdict: 'correction',
+      confidence: 0.91,
+    });
+    expect(evidence.attempts).toBe(2);
+    expect(JSON.stringify(evidence)).not.toContain('private classifier reason');
   });
 });
 

@@ -58,7 +58,7 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 | `.tmp/pri-1147/runs/<run_id>/d6-pending.summary.json` | run-d6-pending | S1–S7 检查记录 |
 | `.tmp/pri-1147/runs/<run_id>/summary` 文件 ×3 | 三阶段脚本 | 各自 ok/totals/run_id |
 | `.tmp/pri-1147/runs/<run_id>/metrics-summary.json` | compute-metrics | 五项门禁 + 混淆矩阵/精度/Stage-2 精度/LLM 统计 + OpenClaw dist SHA-256 指纹 |
-| `docs/reports/evidence/pri-1147-<run_id>/per-sample.json` | compute-metrics | **脱敏证据**（仅标识/期望/观测/结局/延迟/哈希；不含文本/日志/凭据） |
+| `docs/reports/evidence/pri-1147-<run_id>/per-sample.json` | compute-metrics | **脱敏证据**（含 Stage-2 attempts/verdict/confidence；仅标识/期望/观测/结局/延迟/哈希；不含样本原文/模型理由/日志/凭据） |
 
 样本环境（workspace + CODEX_HOME + trajectory.db）在 `os.tmpdir()` 的临时根下，保留作证据，报告评审后手动删除。
 

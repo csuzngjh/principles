@@ -117,6 +117,34 @@ export function validateDatasetRows(rows, dataset) {
   const executionFailures = rows
     .filter((r) => r.unparseable !== true && EXECUTION_FAILURE_OUTCOMES.includes(r.final_outcome))
     .map((r) => ({ sample_id: r.sample_id, outcome: r.final_outcome, reason: r.final_outcome_reason ?? null }));
+
+  // P1-B: a terminal Stage-2 outcome is not accepted as verified evidence
+  // unless its measured classifier facts are present and agree with the
+  // persisted terminal decision. This prevents summary-only PASS from hiding
+  // a missing verdict/attempt/confidence in the per-sample audit trail.
+  const stage2EvidenceProblems = [];
+  for (const r of rows) {
+    if (r.unparseable === true || r.pending_pre_stage2 !== true || !STAGE2_DECIDED_OUTCOMES.includes(r.final_outcome)) continue;
+    const facts = r.stage2_result ?? {};
+    const fields = [];
+    if (!Number.isInteger(facts.attempts) || facts.attempts < 1) fields.push({ field: 'attempts', problem: 'missing_or_invalid' });
+    if (typeof facts.confidence !== 'number' || !Number.isFinite(facts.confidence) || facts.confidence < 0 || facts.confidence > 1) {
+      fields.push({ field: 'confidence', problem: 'missing_or_invalid' });
+    }
+    if (!['correction', 'none'].includes(facts.verdict)) fields.push({ field: 'verdict', problem: 'missing_or_invalid' });
+    const expectedVerdict = r.final_outcome === 'admitted' ? 'correction' : 'none';
+    if (facts.verdict !== null && facts.verdict !== undefined && facts.verdict !== expectedVerdict) {
+      fields.push({ field: 'verdict', problem: 'contradicts_terminal_decision', expected: expectedVerdict, actual: facts.verdict });
+    }
+    if (facts.marker_decision_post !== r.final_outcome) {
+      fields.push({ field: 'marker_decision_post', problem: 'contradicts_final_outcome', expected: r.final_outcome, actual: facts.marker_decision_post ?? null });
+    }
+    if (fields.length > 0) stage2EvidenceProblems.push({ sample_id: r.sample_id, fields });
+  }
+  if (stage2EvidenceProblems.length > 0) {
+    problems.push({ kind: 'stage2_evidence_incomplete', samples: stage2EvidenceProblems });
+  }
+
   const missingOutcome = rows.filter((r) => r.unparseable !== true && !SAMPLE_OUTCOMES.includes(r.final_outcome));
   if (missingOutcome.length > 0) {
     problems.push({ kind: 'rows_without_valid_final_outcome', sample_ids: missingOutcome.map((r) => r.sample_id) });
@@ -299,6 +327,7 @@ export function buildEvidenceRows(rows) {
     },
     observed_stage2: {
       marker_decision: r.stage2_result?.marker_decision_post ?? null,
+      attempts: r.stage2_result?.attempts ?? null,
       verdict: r.stage2_result?.verdict ?? null,
       confidence: r.stage2_result?.confidence ?? null,
       cycles: Array.isArray(r.stage2?.cycles) ? r.stage2.cycles.length : null,

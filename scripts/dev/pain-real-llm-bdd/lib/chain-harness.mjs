@@ -188,10 +188,10 @@ export function readAdmissionState(workspaceDir, logicalKey) {
         // rc-8 bounded string preview (logs only — never machine-read).
         payloadPreview: safePreview(parseJsonSafe(marker.task_payload_json)),
         // PRI-1150 review P1-B: STRUCTURED parsed payload for evidence rows.
-        // Two shapes exist by design:
-        //   pending  → { review: { attempts, reviewResult: { verdict, confidence, reason } } }
-        //   terminal → { decision, reason, attempts, confidence, settledAt }  (D6-minimized)
-        // Evidence readers use readMarkerFacts (below) instead of the string.
+        // Pending and D6 terminal shapes retain review facts; admitted settlement
+        // replaces this JSON with the pain-event payload, so readers also reconcile
+        // the measured classifier-call trace captured before settlement.
+        // Evidence readers use readMarkerFacts (below), never the preview string.
         payloadParsed: parseJsonSafe(marker.task_payload_json),
       } : null,
       pain: pain ? { canonicalPainId: pain.canonical_pain_id, score: pain.score, source: pain.source, hostKind: pain.host_kind } : null,
@@ -204,30 +204,48 @@ export function readAdmissionState(workspaceDir, logicalKey) {
 }
 
 /**
- * PRI-1150 review P1-B: scalar-only marker facts for evidence rows, tolerant
- * of BOTH payload shapes (pending review shape and D6-minimized terminal
- * shape). Returns scalars only (numbers/strings) — never the payload text —
- * so evidence stays desensitized (§6/D6).
+ * PRI-1150 review P1-B: scalar-only Stage-2 facts for evidence rows.
+ *
+ * The persisted marker has three relevant post-cycle shapes:
+ *   - pending review: { review: { attempts, reviewResult: { verdict, confidence, reason } } }
+ *   - D6 terminal: { decision, reason, attempts, confidence, settledAt }
+ *   - admitted pain: the review payload has been replaced by the pain event
+ *     payload, which intentionally contains no classifier fields.
+ *
+ * For the admitted-pain shape, use the harness's measured classifier-call
+ * trace captured before the marker payload was replaced. This is still
+ * desensitized: only scalar outcomes are returned, never prompt/payload text.
  */
-export function readMarkerFacts(payloadParsed) {
-  if (!payloadParsed || typeof payloadParsed !== 'object') {
-    return { attempts: null, confidence: null, verdict: null, reason: null };
-  }
-  const pending = payloadParsed.review ?? null;
+export function readMarkerFacts(payloadParsed, classifierCalls = []) {
+  const payload = payloadParsed && typeof payloadParsed === 'object' ? payloadParsed : null;
+  const pending = payload?.review ?? null;
   const pendingResult = pending?.reviewResult ?? null;
+  const calls = Array.isArray(classifierCalls) ? classifierCalls : [];
+  const lastVerdictCall = [...calls].reverse().find((call) =>
+    call?.status === 'ok'
+    && call.verdict
+    && typeof call.verdict.type === 'string');
+  const isD6Terminal = typeof payload?.decision === 'string';
+
   return {
-    attempts: typeof payloadParsed.attempts === 'number'
-      ? payloadParsed.attempts
-      : (typeof pending?.attempts === 'number' ? pending.attempts : null),
-    confidence: typeof payloadParsed.confidence === 'number'
-      ? payloadParsed.confidence
-      : (typeof pendingResult?.confidence === 'number' ? pendingResult.confidence : null),
-    // Terminal payloads are D6-minimized and carry no verdict type; the
-    // decision lives on the marker row itself. Only the pending shape has it.
-    verdict: typeof pendingResult?.verdict === 'string' ? pendingResult.verdict : null,
-    reason: typeof payloadParsed.reason === 'string'
-      ? payloadParsed.reason
-      : (typeof pendingResult?.reason === 'string' ? pendingResult.reason : null),
+    attempts: typeof payload?.attempts === 'number'
+      ? payload.attempts
+      : (typeof pending?.attempts === 'number' ? pending.attempts : (calls.length > 0 ? calls.length : null)),
+    confidence: typeof payload?.confidence === 'number'
+      ? payload.confidence
+      : (typeof pendingResult?.confidence === 'number'
+        ? pendingResult.confidence
+        : (typeof lastVerdictCall?.verdict?.confidence === 'number' ? lastVerdictCall.verdict.confidence : null)),
+    verdict: typeof pendingResult?.verdict === 'string'
+      ? pendingResult.verdict
+      : (typeof lastVerdictCall?.verdict?.type === 'string' ? lastVerdictCall.verdict.type : null),
+    reason: typeof pendingResult?.reason === 'string'
+      ? pendingResult.reason
+      : (isD6Terminal && typeof payload?.reason === 'string'
+        ? payload.reason
+        : (typeof lastVerdictCall?.verdict?.reason === 'string'
+          ? lastVerdictCall.verdict.reason
+          : (typeof payload?.reason === 'string' ? payload.reason : null))),
   };
 }
 
