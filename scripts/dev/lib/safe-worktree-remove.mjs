@@ -274,11 +274,22 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
       throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
     }
     const adminGitDir = path.join(adminDir, 'gitdir');
-    const adminGitDirStat = fs.lstatSync(adminGitDir);
-    if (!adminGitDirStat.isFile() || adminGitDirStat.isSymbolicLink()) {
-      throw new Error('worktree admin reverse gitdir pointer is not a regular file');
+    // Open one stable file descriptor and compare its identity with the
+    // directory entry after reading. A path-based lstat-then-read can follow a
+    // symlink swapped into place in between those separate operations.
+    let reversePointer;
+    const pointerFd = fs.openSync(adminGitDir, 'r');
+    try {
+      const opened = fs.fstatSync(pointerFd);
+      reversePointer = fs.readFileSync(pointerFd, 'utf-8').trim();
+      const named = fs.lstatSync(adminGitDir);
+      if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
+        || opened.dev !== named.dev || opened.ino !== named.ino) {
+        throw new Error('worktree admin reverse gitdir pointer changed or is not a regular file');
+      }
+    } finally {
+      fs.closeSync(pointerFd);
     }
-    const reversePointer = fs.readFileSync(adminGitDir, 'utf-8').trim();
     if (normalizeGitPath(reversePointer) !== normalizeGitPath(markerPath)) {
       throw new Error('admin gitdir reverse pointer does not match the moved worktree marker');
     }
