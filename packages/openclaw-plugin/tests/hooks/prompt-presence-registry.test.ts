@@ -1,3 +1,5 @@
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PromptPresenceRegistry,
@@ -190,18 +192,23 @@ describe('prompt presence registry — review round (defects 1/2/4/5)', () => {
 
   it('D4: canonical workspace identity isolates same run/session across workspaces (existing path.resolve mechanism)', () => {
     const registry = new PromptPresenceRegistry();
+    // Platform-neutral identities (POSIX and win32 path.resolve agree here).
+    const wsA = path.resolve(path.join(os.tmpdir(), 'presence-ws-a'));
+    const wsB = path.resolve(path.join(os.tmpdir(), 'presence-ws-b'));
+    const wsAVariant = wsA + path.sep; // trailing-separator spelling normalizes to the same dir
+    const wsUnknown = path.resolve(path.join(os.tmpdir(), 'presence-ws-unknown'));
     registry.registerAssemblySnapshot({
-      runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\a',
+      runId: 'r-w', sessionId: 's-w', workspaceDir: wsA,
       expectations: [expectation('act_a', 'body from A')],
     });
     registry.registerAssemblySnapshot({
-      runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\b',
+      runId: 'r-w', sessionId: 's-w', workspaceDir: wsB,
       expectations: [expectation('act_b', 'body from B')],
     });
-    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\a' })).toMatchObject({ status: 'unique' });
-    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\b' })).toMatchObject({ status: 'unique' });
-    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\c' }).status).toBe('no_key');
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsA })).toMatchObject({ status: 'unique' });
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsB })).toMatchObject({ status: 'unique' });
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsUnknown }).status).toBe('no_key');
     // Same dir with a different path spelling normalizes to the same key.
-    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:/.openclaw/workspace/a/' })).toMatchObject({ status: 'unique' });
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsAVariant })).toMatchObject({ status: 'unique' });
   });
 });
