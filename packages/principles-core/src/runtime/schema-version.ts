@@ -5,12 +5,12 @@
  * is explicit and detectable at runtime.
  *
  * PRI-1139 (PR-6 write-side cutover): the versioned helpers that used to
- * live here — `schemaRef(kind, version)` and `RUNTIME_SCHEMA_VERSION =
- * '1.0.0'` (pre-rename `RUNTIME_V2_SCHEMA_VERSION`) plus their TypeBox
- * schemas — are retired. They had no production consumers at retirement.
- * The field NAME `schemaVersion` is unchanged; its written VALUE is the
- * version-neutral token below, and historical `'1'` payloads remain valid
- * reads for as long as backward read compatibility is required.
+ * live here — the `schemaRef(kind, version)` formatter, the '1.0.0' runtime
+ * schema-version constant (either spelling of its generational name), and
+ * their TypeBox schemas — are retired. They had no production consumers at
+ * retirement. The field NAME `schemaVersion` is unchanged; its written VALUE
+ * is the version-neutral token below, and historical `'1'` payloads remain
+ * valid reads for as long as backward read compatibility is required.
  */
 import { Type, type Static } from '@sinclair/typebox';
 

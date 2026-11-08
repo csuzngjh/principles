@@ -88,7 +88,7 @@
     }
   ],
   "namingPolicy": {
-    "description": "PRI-1104 naming policy consumed by scripts/check-naming-policy.mjs. PR-3 (PRI-1136) turned the runtime-v2 rule into a merge gate: the script runs --strict from verify:merge and fails on gated rules or scan I/O errors. Scan surface = packages/<pkg>/{src,scripts}/**, packages/<pkg>/tests/** (import rule only), root plugins/** (shipped payload), all package manifests beneath packages/ (including nested payload manifests), this registry, and .github/workflows/*.yml. Historical records (docs/, CHANGELOG, .gitleaksignore commit fingerprints) are out of scope on purpose. The identifier rule bans isRuntimeV2/RuntimeV2/runtimeV2/RUNTIME_V2 identifiers; only exact tokens listed in allowedIdentifiers are suppressed (the deprecated host-runtime export alias RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS and deprecated CLI JSON alias isRuntimeV2Exclusive). The two plugin payload files in exemptFiles are a temporary exception: they must keep @principles/core/runtime-v2 until runtime-version.json pins move from core 4.1.0 to the Core 5.x release that ships the ./runtime subpath; the Core 5.x runtime-pins PR MUST remove those two entries. The full cross-package consumer list and the Frozen Wire Literals with their read/write sites live in docs/audit/PRI-1104-single-version-convergence-plan.md (§4, §8).",
+    "description": "PRI-1104 naming policy consumed by scripts/check-naming-policy.mjs. PR-3 (PRI-1136) turned the runtime-v2 rule into a merge gate: the script runs --strict from verify:merge and fails on gated rules or scan I/O errors. Scan surface = packages/<pkg>/{src,scripts}/**, packages/<pkg>/tests/** (import rule only), root plugins/** (shipped payload), all package manifests beneath packages/ (including nested payload manifests), this registry, and .github/workflows/*.yml. Historical records (docs/, CHANGELOG, .gitleaksignore commit fingerprints) are out of scope on purpose. The identifier rule bans isRuntimeV2/RuntimeV2/runtimeV2/RUNTIME_V2 identifiers; only exact tokens listed in allowedIdentifiers are suppressed (the deprecated host-runtime export alias RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS and deprecated CLI JSON alias isRuntimeV2Exclusive). PRI-1139 (PR-6) turned versioned-output-ref into a merge gate: every production writer now uses the version-neutral canonical registry keys, so a versioned outputSchemaRef literal in source is a regression. The two plugin payload files in exemptFiles are a temporary exception: they must keep @principles/core/runtime-v2 until runtime-version.json pins move from core 4.1.0 to the Core 5.x release that ships the ./runtime subpath; the Core 5.x runtime-pins PR MUST remove those two entries. The full cross-package consumer list and the Frozen Wire Literals with their read/write sites live in docs/audit/PRI-1104-single-version-convergence-plan.md (§4, §8).",
     "frozenWireLiterals": [
       "runtime_v2_prompt_activations_injected",
       "pd-runtime-v2",
@@ -120,10 +120,9 @@
     "gatedRules": [
       "runtime-v2-import",
       "runtime-v2-identifier",
-      "runtime-v2-config"
-    ],
-    "pendingRules": [
+      "runtime-v2-config",
       "versioned-output-ref"
-    ]
+    ],
+    "pendingRules": []
   }
 }
