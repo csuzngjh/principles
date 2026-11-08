@@ -4158,6 +4158,13 @@ export interface InstallResult {
   consoleUrl?: string;
   /** ADR-0020 §2.3: Host-side install results (one per HostInstaller). */
   hostResults?: HostInstallResult[];
+  /**
+   * Marketplace contract (2026-11-07): host results that ended in a manual
+   * operator step (e.g. the Codex Marketplace install) — present ONLY when
+   * non-empty. The aggregate result is then NOT success (explicit partial
+   * completion, non-zero exit); the runtime itself stays installed and usable.
+   */
+  manualActions?: HostInstallResult[];
   /** ADR-0024 D-2 (PRI-664): transaction journal record for this install.
    * Undefined when the mutation never began (pre-mutation refusal/throw). */
   journal?: InstallJournalRecord;
@@ -4178,6 +4185,28 @@ export interface InstallJournalRecord {
    * later transitions were skipped — the backup/restore safety net remained
    * authoritative for this transaction. */
   readonly degraded: boolean;
+}
+
+/**
+ * Marketplace contract (2026-11-07): partition host installer results into
+ * REAL failures and pending MANUAL actions (e.g. the Codex Marketplace
+ * install). A real failure aborts the install transaction (atomic rollback);
+ * a manual action is an explicit partial completion — it must NOT trigger the
+ * other hosts' rollback (the OpenClaw `--host all` defect), but it does make
+ * the aggregate result non-successful with a non-zero exit code so automation
+ * cannot mistake partial for complete. Pure: unit-testable without I/O.
+ */
+export function partitionHostInstallResults(
+  results: readonly HostInstallResult[],
+): { failures: HostInstallResult[]; manualActions: HostInstallResult[] } {
+  const failures: HostInstallResult[] = [];
+  const manualActions: HostInstallResult[] = [];
+  for (const result of results) {
+    if (result.success) continue;
+    if (result.manualActionRequired === true) manualActions.push(result);
+    else failures.push(result);
+  }
+  return { failures, manualActions };
 }
 
 /**
@@ -5056,24 +5085,42 @@ export async function install(
     });
 
     // Report host install results (rc-9: surface failures, don't silently swallow).
-    // rc-9 propagation: if ANY host installer failed, the aggregate install
+    // rc-9 propagation: if ANY host installer FAILED, the aggregate install
     // result is NOT successful — callers (CLI, tests) must see the failure.
     // Previously failures were only logged, leaving `success: true` even when
     // a host adapter failed to install (silent failure).
-    const hostFailures: string[] = [];
+    //
+    // Marketplace contract (2026-11-07): a host result carrying
+    // manualActionRequired (Codex Marketplace install pending) is NOT a
+    // failure of the install transaction. It must not throw — throwing here
+    // used to roll back the SHARED runtime and left the already-successful
+    // OpenClaw install pointing at a restored-away runtime (the --host all
+    // defect). Manual actions are surfaced as an explicit partial completion:
+    // the runtime stays installed and usable, the manifest claims only hosts
+    // that actually installed, and the exit code is non-zero so automation
+    // cannot mistake partial for complete.
+    const { failures: hostFailures, manualActions: hostManualActions } = partitionHostInstallResults(hostResults);
+    const hostFailureMessages = hostFailures.map((hr) => `Host "${hr.hostId}": ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction}`);
+    for (const msg of hostFailureMessages) {
+      logger.warn(msg);
+    }
     for (const hr of hostResults) {
-      if (!hr.success) {
-        const msg = `Host "${hr.hostId}": ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction}`;
-        hostFailures.push(msg);
-        logger.warn(msg);
-      } else if (hr.configAction === 'skipped') {
+      if (hr.success && hr.configAction === 'skipped') {
         logger.info(`Host "${hr.hostId}" install: ${hr.reason ?? 'skipped'}. Next: ${hr.nextAction}`);
       }
     }
 
     if (hostFailures.length > 0) {
-      throw new Error(`Host installation failed: ${hostFailures.join(' | ')}`);
+      throw new Error(`Host installation failed: ${hostFailureMessages.join(' | ')}`);
     }
+    // Manual-action hosts (e.g. Codex awaiting the Marketplace step) STAY in
+    // the install manifest: the manifest records the hosts PD serves on this
+    // machine (uninstall reads it to decide shared-runtime removal), not a
+    // per-run success ledger. Dropping a pending host here could let a later
+    // sibling-host uninstall remove the shared runtime while the pending
+    // host's registration still points at it — the exact A3 hazard class
+    // this fix exists to close. Real install state remains file-based truth
+    // (checkInstallStatus / host detect()).
     writeInstallManifest(installManifestHosts, resolveInstallManifestWorkspaces(options.workspaceDir, options.host));
     // PRI-709 P0-1: persist the metadata source after the manifest write, so
     // the durable tier cannot be clobbered by the same install.
@@ -5170,7 +5217,15 @@ export async function install(
       }
     }
     if (spinner) {
-      spinner.succeed('Install complete!');
+      // rc-9: the runtime transaction IS committed here, but a pending host
+      // manual action (e.g. the Codex Marketplace install) makes the run a
+      // partial completion — "Install complete!" would be the exact
+      // misleading-success texture this contract exists to remove.
+      if (hostManualActions.length === 0) {
+        spinner.succeed('Install complete!');
+      } else {
+        spinner.warn(`Install partially complete — ${hostManualActions.length} manual step(s) pending (details below)`);
+      }
     }
 
     // P0-2: terminate + join the verified child before any later step that
@@ -5192,7 +5247,18 @@ export async function install(
     // requested config instead of the actual state).
     const actualEnabledChannels = readEnabledChannelsFromConfigYaml(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
-    const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
+    // Marketplace contract (2026-11-07): a pending manual action (e.g. the
+    // Codex Marketplace install) makes the run an explicit PARTIAL completion —
+    // never a full success (no fake "Install complete!"), never a runtime
+    // rollback either. The runtime component itself is verified; the pending
+    // step is host-side and must be surfaced with a non-zero exit code.
+    const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured' && hostManualActions.length === 0;
+    const manualActionReason = hostManualActions.length > 0
+      ? `Partial completion: ${hostManualActions.map((hr) => `host "${hr.hostId}" requires a manual step (${hr.reason ?? 'manual action required'})`).join('; ')}`
+      : undefined;
+    const manualActionNext = hostManualActions.length > 0
+      ? hostManualActions.map((hr) => `Host "${hr.hostId}": ${hr.nextAction}`).join(' | ')
+      : undefined;
     // A host installer failure means the install is not fully successful,
     // even if all component verifications passed. The operator should see
     // success=false and be guided to fix the failed host.
@@ -5214,6 +5280,9 @@ export async function install(
     if (launchResult.fallbackAction) {
       nextActions.push(launchResult.fallbackAction);
     }
+    if (manualActionNext !== undefined) {
+      nextActions.push(manualActionNext);
+    }
     pendingResult = {
       success: isComplete,
       workspaceDir: options.workspaceDir,
@@ -5225,6 +5294,7 @@ export async function install(
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,
+      ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),
       journal: installerJournalRecord(journal),
     };
     return pendingResult;
