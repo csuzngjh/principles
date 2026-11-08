@@ -11,7 +11,12 @@
  *
  * - Acquire = `open(path, 'wx')` with an owner body
  *   `<pid> <token> <createdAtISO>`; 'wx' creation is atomic, so exactly one
- *   of N simultaneous contenders wins.
+ *   of N simultaneous contenders wins. A create failure other than
+ *   EEXIST (e.g. EACCES on an unwritable directory) is reported immediately
+ *   as `unwritable` — never misreported as lock contention and never spun
+ *   against until the timeout. If the body write/close fails after creation,
+ *   the freshly created file (which no other process can have taken over —
+ *   it is younger than the stale threshold) is removed before failing.
  * - Stale takeover (crashed holder): only when the lock's mtime AND the
  *   renamed file's content match what we first observed as stale. The
  *   takeover itself is an atomic RENAME (claim), never a blind unlink — a
@@ -21,15 +26,22 @@
  *   it only if its body is still OURS; otherwise restore it. A late release
  *   by an already-taken-over (stale) holder therefore cannot delete the new
  *   holder's lock.
+ * - Ownership can be re-verified mid-transaction (ownsExclusiveLock): a
+ *   transaction whose body ran longer than the stale threshold may find its
+ *   lock taken over — its write must be refused (lock_lost) instead of
+ *   committing without the mutex.
  * - Acquisition waits asynchronously with a bounded deadline and returns a
- *   definitive not-acquired result; it never degrades into lock-free writing.
+ *   definitive failure result; it never degrades into lock-free writing.
+ * - Orphaned takeover/release sidecars (`.take-*` / `.rel-*`, left behind by
+ *   a crash mid-rename) are swept by the next successful acquirer once they
+ *   are older than the stale threshold — a sidecar that fresh may still be
+ *   part of a live protocol step and is never touched.
  *
  * Residual, documented: between a stale holder's crash and the STALE_MS
  * threshold the lock blocks (by design); the ultra-narrow window where a
  * third create lands while a wrongly-renamed fresh lock is being restored
- * parks the displaced body as an orphan sidecar (`.take-*`/`.rel-*`) that a
- * later stale takeover cleans up — mutual exclusion itself is preserved by
- * the 'wx' create point.
+ * parks the displaced body as an orphan sidecar that a later stale sweep
+ * cleans up — mutual exclusion itself is preserved by the 'wx' create point.
  */
 
 import fs from 'node:fs';
@@ -49,6 +61,12 @@ export interface ExclusiveLockHandle {
   /** The exact body we wrote (`<pid> <token> <createdAt>`); release checks it. */
   body: string;
 }
+
+/** Acquisition outcome: success, bounded-timeout contention, or a filesystem error. */
+export type AcquireExclusiveLockResult =
+  | { ok: true; handle: ExclusiveLockHandle }
+  | { ok: false; kind: 'timeout' }
+  | { ok: false; kind: 'unwritable'; detail: string };
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -72,18 +90,75 @@ function readLockBody(filePath: string): string | undefined {
   }
 }
 
-/** Atomic claim attempt: exactly one contender can create the file. */
-function tryCreateExclusiveLock(lockPath: string, body: string): boolean {
+/** Whether the lock file at `handle.lockPath` still carries OUR body. */
+export function ownsExclusiveLock(handle: ExclusiveLockHandle): boolean {
+  return readLockBody(handle.lockPath) === handle.body;
+}
+
+type CreateOutcome = 'created' | 'busy' | { error: string };
+
+/**
+ * Atomic claim attempt: exactly one contender can create the file. EEXIST is
+ * contention ('busy'); any other failure (EACCES, ENOSPC, …) is an error. A
+ * failure of the body write/close AFTER a successful create removes the
+ * freshly created file — safe because it is younger than the stale
+ * threshold, so no other process can have taken it over yet.
+ */
+function tryCreateExclusiveLock(lockPath: string, body: string): CreateOutcome {
+  let fd: number | undefined;
   try {
-    const fd = fs.openSync(lockPath, 'wx');
-    try {
-      fs.writeSync(fd, body);
-    } finally {
-      fs.closeSync(fd);
+    fd = fs.openSync(lockPath, 'wx');
+    fs.writeSync(fd, body);
+    fs.closeSync(fd);
+    fd = undefined;
+    return 'created';
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? (error as Record<string, unknown>).code
+        : undefined;
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // fd already closed or invalid
+      }
+      try {
+        fs.rmSync(lockPath, { force: true });
+      } catch {
+        // orphan with our token; stale takeover cleans it later
+      }
     }
-    return true;
+    if (code === 'EEXIST') return 'busy';
+    const message = error instanceof Error ? error.message : String(error);
+    return { error: `${typeof code === 'string' ? code : ''} ${message}`.trim() };
+  }
+}
+
+/**
+ * Best-effort sweep of orphaned takeover/release sidecars, run by the
+ * SUCCESSFUL acquirer (it owns the directory's lock protocol for this
+ * instant). Only sidecars older than the stale threshold are removed — one
+ * that fresh may still belong to a live protocol step in another process.
+ */
+function sweepOrphanSidecars(lockPath: string, staleMs: number): void {
+  const dir = path.dirname(lockPath);
+  const base = path.basename(lockPath);
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
   } catch {
-    return false;
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith(`${base}.take-`) && !entry.startsWith(`${base}.rel-`)) continue;
+    const sidecar = path.join(dir, entry);
+    try {
+      if (fs.statSync(sidecar).mtimeMs >= Date.now() - staleMs) continue;
+      fs.rmSync(sidecar, { force: true });
+    } catch {
+      // best effort; a failed sweep never blocks locking
+    }
   }
 }
 
@@ -119,7 +194,7 @@ function takeOverStaleExclusiveLock(args: {
     try {
       fs.rmSync(takePath, { force: true });
     } catch {
-      // orphan sidecar; harmless (a later stale takeover cleans it)
+      // orphan sidecar; harmless (a later stale sweep cleans it)
     }
     return true;
   }
@@ -166,15 +241,15 @@ export function releaseExclusiveLock(handle: ExclusiveLockHandle): void {
 
 /**
  * Acquire the cross-process exclusive lock, waiting asynchronously with a
- * bounded deadline. Returns undefined when the lock cannot be acquired in
- * time — callers must treat that as a loud failure (or a visible skip), never
- * degrade into lock-free writing.
+ * bounded deadline. The result distinguishes bounded-timeout CONTENTION from
+ * a FILESYSTEM failure (e.g. an unwritable directory) — both are loud, and
+ * neither ever degrades into lock-free writing.
  */
 export async function acquireExclusiveLock(stateFilePath: string, options?: {
   lockPath?: string;
   staleMs?: number;
   timeoutMs?: number;
-}): Promise<ExclusiveLockHandle | undefined> {
+}): Promise<AcquireExclusiveLockResult> {
   const lockPath = options?.lockPath ?? controlStateLockPath(stateFilePath);
   const staleMs = options?.staleMs ?? CONTROL_STATE_LOCK_STALE_MS;
   const deadline = Date.now() + (options?.timeoutMs ?? CONTROL_STATE_LOCK_TIMEOUT_MS);
@@ -182,14 +257,23 @@ export async function acquireExclusiveLock(stateFilePath: string, options?: {
   const body = lockBody(token);
   // A first-ever transaction on a fresh install has no ~/.pd directory yet —
   // create it (same recursive mkdir the state write itself uses) so lock
-  // creation cannot spin on ENOENT until the timeout.
+  // creation cannot fail on ENOENT. A real failure here surfaces as
+  // 'unwritable' below.
   try {
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-  } catch {
-    // a real failure surfaces through the create/stat loop below
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, kind: 'unwritable', detail: `mkdir failed: ${message}` };
   }
   for (;;) {
-    if (tryCreateExclusiveLock(lockPath, body)) return { lockPath, token, body };
+    const created = tryCreateExclusiveLock(lockPath, body);
+    if (created === 'created') {
+      sweepOrphanSidecars(lockPath, staleMs);
+      return { ok: true, handle: { lockPath, token, body } };
+    }
+    if (typeof created === 'object') {
+      return { ok: false, kind: 'unwritable', detail: created.error };
+    }
     let stale = false;
     let staleBody: string | undefined;
     try {
@@ -204,7 +288,7 @@ export async function acquireExclusiveLock(stateFilePath: string, options?: {
     if (stale && staleBody !== undefined) {
       if (takeOverStaleExclusiveLock({ lockPath, staleBody, sidecarToken: token, staleMs })) continue;
     }
-    if (Date.now() >= deadline) return undefined;
+    if (Date.now() >= deadline) return { ok: false, kind: 'timeout' };
     await sleep(CONTROL_STATE_LOCK_POLL_MS);
   }
 }
@@ -212,8 +296,9 @@ export async function acquireExclusiveLock(stateFilePath: string, options?: {
 /**
  * Synchronous one-shot variant for callers that must not await: tries to
  * create the lock once, and takes over a stale lock via the same
- * rename-claim protocol. Returns undefined when the lock is busy (the caller
- * skips loudly — it must never write without the lock).
+ * rename-claim protocol. Returns undefined when the lock is busy or cannot
+ * be created (the caller skips loudly — it must never write without the
+ * lock).
  */
 export function tryAcquireExclusiveLockSync(stateFilePath: string, options?: {
   lockPath?: string;
@@ -226,9 +311,14 @@ export function tryAcquireExclusiveLockSync(stateFilePath: string, options?: {
   try {
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   } catch {
-    // a real failure surfaces through the create/stat calls below
+    return undefined;
   }
-  if (tryCreateExclusiveLock(lockPath, body)) return { lockPath, token, body };
+  const created = tryCreateExclusiveLock(lockPath, body);
+  if (created === 'created') {
+    sweepOrphanSidecars(lockPath, staleMs);
+    return { lockPath, token, body };
+  }
+  if (typeof created === 'object') return undefined;
   let staleBody: string | undefined;
   try {
     const stat = fs.statSync(lockPath);
@@ -237,7 +327,11 @@ export function tryAcquireExclusiveLockSync(stateFilePath: string, options?: {
     return undefined;
   }
   if (staleBody !== undefined && takeOverStaleExclusiveLock({ lockPath, staleBody, sidecarToken: token, staleMs })) {
-    if (tryCreateExclusiveLock(lockPath, body)) return { lockPath, token, body };
+    const retried = tryCreateExclusiveLock(lockPath, body);
+    if (retried === 'created') {
+      sweepOrphanSidecars(lockPath, staleMs);
+      return { lockPath, token, body };
+    }
   }
   return undefined;
 }

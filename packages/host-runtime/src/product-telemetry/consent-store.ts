@@ -33,7 +33,8 @@
  *   (lastSucceededAt, retry state, attempt counters) is DISCARDED — it
  *   cannot be attributed to a workspace, and it is operational state, not a
  *   governance fact. Dropping it can cause at most one extra same-day
- *   snapshot per installation.
+ *   snapshot per eligible workspace on the machine (each workspace re-exports
+ *   once before its own fresh bookkeeping exists).
  */
 
 import fs from 'node:fs';
@@ -44,7 +45,7 @@ import {
   isValidTelemetrySecretHex,
   PRODUCT_TELEMETRY_CONSENT_VERSION,
 } from '@principles/core/runtime';
-import { acquireExclusiveLock, releaseExclusiveLock } from './control-state-lock.js';
+import { acquireExclusiveLock, ownsExclusiveLock, releaseExclusiveLock } from './control-state-lock.js';
 
 export const PRODUCT_TELEMETRY_STATE_FILENAME = 'product-telemetry.json';
 /** The ONE writable schema version (single-format contract, PRI-1138). */
@@ -458,7 +459,7 @@ export interface ControlStateLockTx {
    */
   readLatest(): LatestControlStateRead;
   /** Atomic single-format write inside the lock. */
-  write(state: ProductTelemetryControlState): ControlStateWrite;
+    write(state: ProductTelemetryControlState): ControlStateWrite;
 }
 
 /**
@@ -471,10 +472,13 @@ export interface ControlStateLockTx {
  * read can no longer overwrite a completed authorization change (e.g. a
  * concurrent disable).
  *
- * Failure semantics: lock acquisition is bounded; on timeout this returns
- * { ok: false } and NOTHING was written (no lock-free degradation). A
- * throwing body releases the lock and returns a structured failure — this
- * function never throws.
+ * Failure semantics: lock acquisition is bounded and CONTENTION (timeout) is
+ * distinguished from a FILESYSTEM failure (e.g. unwritable directory); on
+ * either failure nothing was written (no lock-free degradation). A body that
+ * runs longer than the lock's stale threshold may find its lock taken over
+ * by another process — tx.write then refuses (lock_lost) instead of
+ * committing without the mutex. A throwing body releases the lock and
+ * returns a structured failure — this function never throws.
  */
 export async function withControlStateLock<T>(
   homeDir: string,
@@ -482,18 +486,38 @@ export async function withControlStateLock<T>(
   options?: { timeoutMs?: number },
 ): Promise<{ ok: true; value: T } | { ok: false; reason: string; nextAction: string }> {
   const stateFilePath = getProductTelemetryStatePath(homeDir);
-  const lock = await acquireExclusiveLock(stateFilePath, options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined);
-  if (lock === undefined) {
+  const acquired = await acquireExclusiveLock(stateFilePath, options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined);
+  if (!acquired.ok) {
+    if (acquired.kind === 'timeout') {
+      return {
+        ok: false,
+        reason: 'product_telemetry_state_lock_timeout: another process holds the control-state lock',
+        nextAction: 'Retry the operation; if it keeps failing, check for a stuck PD process before touching ~/.pd/product-telemetry.json.state-lock',
+      };
+    }
     return {
       ok: false,
-      reason: 'product_telemetry_state_lock_timeout: another process holds the control-state lock',
-      nextAction: 'Retry the operation; if it keeps failing, check for a stuck PD process before touching ~/.pd/product-telemetry.json.state-lock',
+      reason: `product_telemetry_state_lock_unwritable: ${acquired.detail}`,
+      nextAction: `Check permissions on ${path.dirname(stateFilePath)}`,
     };
   }
+  const lock = acquired.handle;
   try {
     const tx: ControlStateLockTx = {
       readLatest: () => loadControlStateFromDisk(stateFilePath),
-      write: (state: ProductTelemetryControlState) => writeProductTelemetryControlState(homeDir, state),
+      write: (state: ProductTelemetryControlState) => {
+        // Ownership re-verify before committing: a body that outlived the
+        // stale threshold may have had its lock taken over — refuse instead
+        // of writing without the mutex (review round 2).
+        if (!ownsExclusiveLock(lock)) {
+          return {
+            ok: false,
+            reason: 'product_telemetry_state_lock_lost: another process took over the lock during this transaction; nothing was written',
+            nextAction: 'Retry the operation',
+          };
+        }
+        return writeProductTelemetryControlState(homeDir, state);
+      },
     };
     const value = await body(tx);
     return { ok: true, value };

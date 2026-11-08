@@ -404,14 +404,15 @@ describe('control-state store', () => {
         context.skip('environment (root/CAP_DAC_OVERRIDE) cannot produce a real write failure');
       }
       // The read itself still succeeds (read-only dir) and writes nothing;
-      // the locked migration fails loud on lock acquisition — never a
-      // lock-free write, never a fake success.
+      // the locked migration fails loud on lock acquisition — with the fs
+      // error distinguished from contention (never misreported as a busy
+      // lock, never a lock-free write, never a fake success).
       const read = readProductTelemetryControlState(homeDir);
       expect(read.ok).toBe(true);
       const migrated = await migrateLegacyControlState(homeDir);
       expect(migrated.ok).toBe(false);
       if (!migrated.ok) {
-        expect(migrated.reason).toContain('product_telemetry_state_lock_timeout');
+        expect(migrated.reason).toContain('product_telemetry_state_lock_unwritable');
         expect(migrated.nextAction.length).toBeGreaterThan(0);
       }
       // The original legacy file is byte-identical: the blocked transaction
@@ -512,6 +513,54 @@ describe('control-state store', () => {
     expect(blocked.ok).toBe(false);
     expect(fs.readFileSync(lockPath, 'utf8')).toBe(fresh);
     fs.rmSync(lockPath, { force: true });
+  });
+
+  it('a transaction that outlives its lock refuses to commit after a takeover (PRI-1151 review round 2)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({ consent: 'granted', consentVersion: '1', schemaVersion: '2' }));
+    let writeOutcome: { ok: boolean; reason?: string } | undefined;
+    let releaseTx1: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseTx1 = resolve;
+    });
+    const tx1 = withControlStateLock(homeDir, async (tx) => {
+      await gate; // park LONGER than the stale threshold
+      writeOutcome = tx.write({ consent: 'denied', consentVersion: '1', schemaVersion: '2' });
+      return 'tx1';
+    });
+    // Force tx1's lock stale and let a second transaction take it over and
+    // commit its own state change.
+    const lockPath = `${statePath}.state-lock`;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const stale = new Date(Date.now() - 60_000);
+    fs.utimesSync(lockPath, stale, stale);
+    const tx2 = await withControlStateLock(homeDir, (tx) => tx.write({ consent: 'granted', consentVersion: '2', schemaVersion: '2' }), { timeoutMs: 8000 });
+    expect(tx2.ok).toBe(true);
+    releaseTx1();
+    expect(await tx1).toEqual({ ok: true, value: 'tx1' });
+    // tx1's write was REFUSED — committing without the mutex is forbidden.
+    expect(writeOutcome?.ok).toBe(false);
+    expect(writeOutcome && !writeOutcome.ok && writeOutcome.reason).toContain('product_telemetry_state_lock_lost');
+    // The disk carries tx2's committed state, not tx1's parked one.
+    expect((JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>).consentVersion).toBe('2');
+  });
+
+  it('orphaned lock sidecars are swept once stale, never while fresh (PRI-1151 review round 2)', async () => {
+    const statePath = getProductTelemetryStatePath(homeDir);
+    const lockPath = `${statePath}.state-lock`;
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    const staleSidecar = `${lockPath}.take-deadbeefdeadbeef`;
+    const freshSidecar = `${lockPath}.rel-livebeeflivebeef`;
+    fs.writeFileSync(staleSidecar, 'old orphan\n');
+    fs.writeFileSync(freshSidecar, 'maybe still in a live protocol step\n');
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(staleSidecar, old, old);
+    const outcome = await withControlStateLock(homeDir, () => 'swept');
+    expect(outcome).toEqual({ ok: true, value: 'swept' });
+    expect(fs.existsSync(staleSidecar)).toBe(false);
+    expect(fs.existsSync(freshSidecar)).toBe(true);
+    fs.rmSync(freshSidecar, { force: true });
   });
 
   it('ownership-checked release: a superseded holder cannot delete the successor lock', async () => {

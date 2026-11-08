@@ -69,6 +69,14 @@ function assertChildBuilt(): void {
   if (!fs.statSync(EXPECTED_ENTRY).isFile()) {
     throw new Error(`telemetry child entry not found: ${EXPECTED_ENTRY}`);
   }
+  // The children run the BUILT production code; a stale/missing dist would
+  // silently test old bytes. Fail loud when dist is older than the source
+  // (CI always builds first; local runs get an actionable error).
+  const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'product-telemetry', 'consent-store.ts');
+  const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'product-telemetry', 'consent-store.js');
+  if (!fs.statSync(dist).isFile() || fs.statSync(dist).mtimeMs < fs.statSync(src).mtimeMs) {
+    throw new Error(`stale or missing built dist for the concurrency children (${dist}); run: npm run build --workspace @principles/host-runtime`);
+  }
 }
 
 function startChild(mode: string, arg1?: string, arg2?: string): ChildHandle {
