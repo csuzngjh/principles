@@ -88,21 +88,17 @@ describe('EventLog presence event durability (PRI-1152 B1)', () => {
     const stateDir = path.join(tempDir, 'state-failing');
     const error = vi.fn();
     const eventLog = new EventLog(stateDir, { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } as never);
-    try {
-      const blocker = path.join(stateDir, 'logs', `events_${new Date().toISOString().slice(0, 10)}.jsonl`);
-      // A directory at the events path makes the real append fail on every platform.
-      fs.mkdirSync(blocker);
-      expect(() => eventLog.recordPromptPresenceObserved(presenceData)).not.toThrow();
-      expect(error).toHaveBeenCalledTimes(1);
-      expect(String(error.mock.calls[0]?.[0])).toContain('Failed to flush events');
-      expect(eventLog.getBufferedEvents().map((entry) => entry.type)).toEqual([PRESENCE_EVENT_TYPE]);
+    const blocker = path.join(stateDir, 'logs', `events_${new Date().toISOString().slice(0, 10)}.jsonl`);
+    // A directory at the events path makes the real append fail on every platform.
+    fs.mkdirSync(blocker);
+    expect(() => eventLog.recordPromptPresenceObserved(presenceData)).not.toThrow();
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]?.[0])).toContain('Failed to flush events');
+    expect(eventLog.getBufferedEvents().map((entry) => entry.type)).toEqual([PRESENCE_EVENT_TYPE]);
 
-      fs.rmdirSync(blocker);
-      eventLog.recordPromptPresenceObserved({ ...presenceData, runId: 'run-2' });
-      expect(eventLog.getBufferedEvents()).toEqual([]);
-      expect(eventLines(stateDir).map((entry) => (entry['data'] as { runId: string }).runId)).toEqual(['run-1', 'run-2']);
-    } finally {
-      eventLog.dispose();
-    }
+    fs.rmdirSync(blocker);
+    eventLog.recordPromptPresenceObserved({ ...presenceData, runId: 'run-2' });
+    expect(eventLog.getBufferedEvents()).toEqual([]);
+    expect(eventLines(stateDir).map((entry) => (entry['data'] as { runId: string }).runId)).toEqual(['run-1', 'run-2']);
   });
 });
