@@ -28,7 +28,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { createGunzip } from 'node:zlib';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
-import { buildAllowlistedHostEnv, isInsideRoot } from './env-isolation.mjs';
+import { buildAllowlistedHostEnv, isInsideRoot, isSamePath } from './env-isolation.mjs';
 import { hostIdentity, resolveHostProfile } from './host-profile.mjs';
 import { PLUGIN_ID } from './host-config.mjs';
 import {
@@ -528,6 +528,69 @@ export function auditBundleExternals({ bundlePath, packRoot }) {
   };
 }
 
+/**
+ * The entry the host will import. OpenClaw resolves a config-path plugin's
+ * runtime entry from the package's `openclaw.extensions` relative to the
+ * candidate root, so the staged package.json must declare exactly the frozen
+ * entry and that entry must be the frozen bundle inside the candidate root.
+ */
+export function candidateEntryViolations({ candidateRoot, bundlePath, frozenExtensions }) {
+  let pkg;
+  try {
+    pkg = readJson(join(candidateRoot, 'package.json'));
+  } catch (error) {
+    return [`candidate package.json unreadable: ${String(error?.message ?? error)}`];
+  }
+  const extensions = pkg?.openclaw?.extensions;
+  if (!Array.isArray(extensions) || extensions.length !== 1 || typeof extensions[0] !== 'string') {
+    return ['candidate package.json openclaw.extensions must declare exactly one entry'];
+  }
+  const violations = [];
+  if (!isDeepStrictEqual(extensions, frozenExtensions)) violations.push('candidate entry differs from the frozen openclaw.extensions');
+  const entryPath = resolve(candidateRoot, extensions[0]);
+  if (!isInsideRoot(candidateRoot, entryPath)) violations.push(`candidate entry ${extensions[0]} resolves outside the candidate root`);
+  else if (!isSamePath(entryPath, bundlePath)) violations.push(`candidate entry ${extensions[0]} is not the frozen bundle`);
+  return violations;
+}
+
+const isCandidateCodeFile = (rel) => rel === 'package.json' || rel === 'openclaw.plugin.json' || /\.(?:c|m)?js$/.test(rel) || rel.endsWith('.node');
+
+/**
+ * After a round: are the candidate's code files (entry, bundle, manifests, the
+ * external dependency) still the frozen bytes? Data files the plugin may write
+ * into its own root at runtime (e.g. mcp-binding.json) are reported, not
+ * judged. The frozen per-file list is first proven against the manifest hash.
+ */
+export function candidateCodeDrift(manifest) {
+  let frozen;
+  try {
+    frozen = readJson(manifest.candidate.tree.filesManifest);
+  } catch (error) {
+    return { ok: false, reason: `frozen candidate file list unreadable: ${String(error?.message ?? error)}` };
+  }
+  const entries = Array.isArray(frozen?.entries) ? frozen.entries : [];
+  const aggregate = createHash('sha256');
+  for (const entry of entries) aggregate.update(`${entry.path}\t${entry.size}\t${entry.sha256}\n`);
+  if (entries.length === 0 || aggregate.digest('hex') !== manifest.candidate.tree.treeSha256) {
+    return { ok: false, reason: 'the frozen candidate file list does not reproduce the manifest tree hash' };
+  }
+  const live = hashTree(manifest.candidate.root, { include: isCandidateCodeFile });
+  const frozenCode = new Map(entries.filter((entry) => isCandidateCodeFile(entry.path)).map((entry) => [entry.path, entry.sha256]));
+  const liveCode = new Map(live.entries.map((entry) => [entry.path, entry.sha256]));
+  const changed = [...frozenCode].filter(([path, sha256]) => liveCode.has(path) && liveCode.get(path) !== sha256).map(([path]) => path);
+  const missing = [...frozenCode.keys()].filter((path) => !liveCode.has(path));
+  const added = [...liveCode.keys()].filter((path) => !frozenCode.has(path));
+  return {
+    ok: changed.length === 0 && missing.length === 0 && added.length === 0 && live.links.length === 0,
+    codeFiles: liveCode.size,
+    changed: changed.slice(0, 20),
+    missing: missing.slice(0, 20),
+    added: added.slice(0, 20),
+    links: live.links.slice(0, 20),
+    mcpBindingPresent: existsSync(join(manifest.candidate.root, 'mcp-binding.json')),
+  };
+}
+
 export function stageCandidate({ pluginSource, packRoot }) {
   const source = resolve(pluginSource);
   const dest = join(packRoot, 'candidate', 'principles-disciple');
@@ -814,6 +877,7 @@ export function packLayout(packRoot) {
     hostRoot: join(packRoot, 'host'),
     candidateRoot: join(packRoot, 'candidate', 'principles-disciple'),
     configPath: join(packRoot, 'config', 'openclaw.json'),
+    hostLogPath: join(packRoot, 'logs', 'openclaw-host.log'),
     workspaceDir: join(packRoot, 'workspace'),
     pdConfigPath: join(packRoot, 'workspace', '.pd', 'config.yaml'),
     settingsPath: join(packRoot, 'workspace', '.openclaw', 'settings.json'),
@@ -883,7 +947,7 @@ export async function preparePack({
   const candidate = stageCandidate({ pluginSource, packRoot });
 
   const fakeApiKey = generateFakeApiKey();
-  const hostConfig = buildPresenceHostConfig({ endpointPort, pluginRoot: layout.candidateRoot, fakeApiKey });
+  const hostConfig = buildPresenceHostConfig({ endpointPort, pluginRoot: layout.candidateRoot, fakeApiKey, hostLogPath: layout.hostLogPath });
   writeJson(layout.configPath, hostConfig);
 
   mkdirSync(join(layout.workspaceDir, '.pd'), { recursive: true });
@@ -895,7 +959,7 @@ export async function preparePack({
   if (!fixture.ok) throw new Error(`fixture inspection failed: ${fixture.violations.join('; ')}`);
 
   for (const dir of [layout.homeDir, join(layout.homeDir, 'AppData', 'Roaming'), join(layout.homeDir, 'AppData', 'Local'), layout.tempDir,
-    ...PRESENCE_ROUNDS.map((round) => layout.stateDir(round.id)), layout.preflightDir]) {
+    ...PRESENCE_ROUNDS.map((round) => layout.stateDir(round.id)), layout.preflightDir, dirname(layout.hostLogPath)]) {
     mkdirSync(dir, { recursive: true });
   }
 
@@ -938,6 +1002,7 @@ export async function preparePack({
     paths: {
       packRoot,
       configPath: layout.configPath,
+      hostLogPath: layout.hostLogPath,
       workspaceDir: layout.workspaceDir,
       pdConfigPath: layout.pdConfigPath,
       settingsPath: layout.settingsPath,
@@ -1045,8 +1110,9 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
   if (!externals.ok) candidateViolations.push(`external resolves outside the pack: ${externals.specifiers.filter((row) => row.status === 'outside-pack').map((row) => row.specifier).join(', ')}`);
   if (existsSync(join(manifest.candidate.root, 'mcp-binding.json'))) candidateViolations.push('candidate root carries an mcp-binding.json before any run');
   if (manifest.candidate.pluginId !== PLUGIN_ID) candidateViolations.push(`candidate plugin id is ${manifest.candidate.pluginId}`);
-  checks.push(check('candidate-payload', candidateViolations.length === 0 ? 'PASS' : 'FAIL', 'candidate payload frozen; externals resolve inside the pack', {
-    violations: candidateViolations, bundleSha256: manifest.candidate.bundleSha256, externals: externals.specifiers,
+  candidateViolations.push(...candidateEntryViolations({ candidateRoot: manifest.candidate.root, bundlePath: manifest.candidate.bundlePath, frozenExtensions: manifest.candidate.extensions }));
+  checks.push(check('candidate-payload', candidateViolations.length === 0 ? 'PASS' : 'FAIL', 'candidate payload frozen; its declared entry is the frozen bundle; externals resolve inside the pack', {
+    violations: candidateViolations, bundleSha256: manifest.candidate.bundleSha256, extensions: manifest.candidate.extensions ?? null, externals: externals.specifiers,
   }));
 
   checks.push(check('presence-durability', manifest.candidate.presenceDurability?.status === 'flushed_on_record' ? 'PASS' : 'FAIL',
@@ -1071,10 +1137,11 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
 
   const config = readJson(layout.configPath);
   const configViolations = validatePresenceHostConfig(config, {
-    pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port,
+    pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port, hostLogPath: manifest.paths.hostLogPath ?? layout.hostLogPath,
   });
+  if (manifest.paths.hostLogPath === undefined) configViolations.push('manifest records no in-pack host log path; this pack predates the registration-source check and must be prepared again');
   if (sha256FileSync(layout.configPath) !== manifest.hostConfig.sha256) configViolations.push('host config bytes changed');
-  checks.push(check('host-config', configViolations.length === 0 ? 'PASS' : 'FAIL', 'frozen host config: candidate-only load path, deny-all tools, MCP off, two loopback providers', { violations: configViolations }));
+  checks.push(check('host-config', configViolations.length === 0 ? 'PASS' : 'FAIL', 'frozen host config: candidate-only load path, deny-all tools, MCP off, two loopback providers, host log pinned inside the pack', { violations: configViolations }));
 
   const pdConfig = loadPdConfigForPlugin(layout.workspaceDir);
   const { flags } = computeFeatureFlagsFromConfig(pdConfig.effective);
@@ -1129,11 +1196,17 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
   }
   if (existsSync(layout.runDir)) layoutViolations.push('run/ exists: this pack was already executed or tampered with');
   if (manifest.host.bundledPluginIds?.includes(PLUGIN_ID)) layoutViolations.push('the official host bundles a plugin with the PD id');
-  if (manifest.productionPlugin?.presenceEventCapable) layoutViolations.push('the production plugin can emit the presence event; the candidate-only evidence argument does not hold');
   if (manifest.productionPlugin?.exists && isInsideRoot(packRoot, manifest.productionPlugin.root)) layoutViolations.push('production plugin is inside the pack');
+  // The production build's version and whether it can emit the presence event
+  // are recorded as environment facts only. Candidate identity is proven per
+  // round from the runtime registration source (round gate), not from what the
+  // production build happens to lack.
   checks.push(check('production-plugin-exclusion', layoutViolations.length === 0 ? 'PASS' : 'FAIL',
-    'no discovery root inside the pack carries a plugin, the host bundles no PD plugin, the production PD build cannot emit the presence event', {
+    'no discovery root inside the pack carries a plugin, the host bundles no PD plugin, the production plugin is outside the pack', {
       violations: layoutViolations, productionPlugin: manifest.productionPlugin, bundledPluginIdsCount: manifest.host.bundledPluginIds?.length ?? 0,
+      environmentFact: manifest.productionPlugin?.exists
+        ? `production PD ${manifest.productionPlugin.version ?? 'unknown version'} ${manifest.productionPlugin.presenceEventCapable ? 'contains' : 'does not contain'} the presence event code; not used as candidate evidence`
+        : 'no production PD plugin found',
     }));
 
   const pollutionBaseline = snapshotTargets(manifest.pollution.targets);

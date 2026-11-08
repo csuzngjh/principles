@@ -24,21 +24,22 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { BudgetExceededError, createExperimentLedger } from './lib/ledger.mjs';
+import { isInsideRoot, isSamePath } from './lib/env-isolation.mjs';
 import { selectLoopbackPort } from './lib/host-config.mjs';
 import { startPresenceEndpoint, PRESENCE_ANSWER } from './lib/presence-endpoint.mjs';
 import { PRESENCE_MODEL_ID } from './lib/presence-config.mjs';
 import { PRESENCE_FIXTURE } from './lib/presence-fixture.mjs';
 import { runProtocolSelftest } from './lib/protocol-selftest.mjs';
 import {
-  CARD_VERSION, PRESENCE_CODE_ROOT, PRESENCE_EVENT_TYPE, buildRoundEnv, classifyPollution, comparePollution, packLayout, pollutionSnapshotGaps,
-  preflightCheck, preparePack, roundArgv, sha256FileSync, snapshotTargets, summarizePreflight, verifyPack,
+  CARD_VERSION, PRESENCE_CODE_ROOT, PRESENCE_EVENT_TYPE, buildRoundEnv, candidateCodeDrift, classifyPollution, comparePollution, packLayout,
+  pollutionSnapshotGaps, preflightCheck, preparePack, roundArgv, sha256FileSync, snapshotTargets, summarizePreflight, verifyPack,
 } from './lib/presence-pack.mjs';
 import { escapeXml } from '@principles/core/prompt-builder';
 
@@ -159,14 +160,51 @@ export function sweepPackProcesses(packRoot) {
   };
 }
 
-function readPresenceEvents(workspaceDir) {
-  const logsDir = join(workspaceDir, '.state', 'logs');
+function eventsLogsDir(workspaceDir) {
+  return join(workspaceDir, '.state', 'logs');
+}
+
+/** Byte size of every event log before a round starts; only bytes appended after it count as that round's evidence. */
+export function eventLogSizes(workspaceDir) {
+  const logsDir = eventsLogsDir(workspaceDir);
+  const sizes = new Map();
+  if (!existsSync(logsDir)) return sizes;
+  for (const name of readdirSync(logsDir).filter((file) => file.startsWith('events_') && file.endsWith('.jsonl'))) {
+    sizes.set(name, statSync(join(logsDir, name)).size);
+  }
+  return sizes;
+}
+
+const MAX_ROUND_DELTA_BYTES = 32 * 1024 * 1024;
+
+/** The bytes appended to `path` after `fromByte` (bounded). A shrunken file is read whole and flagged. */
+export function readAppended(path, fromByte = 0, maxBytes = MAX_ROUND_DELTA_BYTES) {
+  if (!existsSync(path)) return { text: '', fromByte, bytes: 0, truncated: false, shrunk: false };
+  const size = statSync(path).size;
+  const shrunk = size < fromByte;
+  const start = shrunk ? 0 : fromByte;
+  const length = Math.min(size - start, maxBytes);
+  if (length <= 0) return { text: '', fromByte, bytes: 0, truncated: false, shrunk };
+  const buffer = Buffer.alloc(length);
+  const fd = openSync(path, 'r');
+  try {
+    readSync(fd, buffer, 0, length, start);
+  } finally {
+    closeSync(fd);
+  }
+  return { text: buffer.toString('utf8'), fromByte: start, bytes: length, truncated: size - start > maxBytes, shrunk };
+}
+
+/** Presence events appended to the isolated workspace's event logs since `baseline` was taken. */
+export function readPresenceEventsSince(workspaceDir, baseline = new Map()) {
+  const logsDir = eventsLogsDir(workspaceDir);
   const events = [];
   const files = [];
   if (!existsSync(logsDir)) return { logsDir, files, events };
   for (const name of readdirSync(logsDir).filter((file) => file.startsWith('events_') && file.endsWith('.jsonl')).sort()) {
-    files.push(name);
-    for (const line of readFileSync(join(logsDir, name), 'utf8').split('\n')) {
+    const delta = readAppended(join(logsDir, name), baseline.get(name) ?? 0);
+    files.push({ name, fromByte: delta.fromByte, bytes: delta.bytes, shrunk: delta.shrunk, truncated: delta.truncated });
+    for (const line of delta.text.split('\n')) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line);
@@ -177,15 +215,83 @@ function readPresenceEvents(workspaceDir) {
   return { logsDir, files, events };
 }
 
+const REGISTRATION_MARKER = 'Principles Disciple Plugin registered';
+// The path runs to the first ")" that ends the message, so a root such as
+// "C:\Program Files (x86)\..." keeps its inner parentheses.
+const REGISTRATION_MESSAGE = /Principles Disciple Plugin registered\. \(Path: ([^\r\n]*?)\)(?=\s*$|\s|["',}\]])/;
+const ANSI_SEQUENCE = /\u001b\[[0-9;]*[A-Za-z]/g;
+const MAX_REGISTRATION_LINES = 50_000;
+
+function collectStrings(value, out, depth = 0) {
+  if (depth > 6 || out.length > 200) return;
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) for (const item of value) collectStrings(item, out, depth + 1);
+  else if (value && typeof value === 'object') for (const item of Object.values(value)) collectStrings(item, out, depth + 1);
+}
+
+/** Registration lines in host output: plain console text, ANSI-coloured text or JSON log records. */
+export function extractRegistrationPaths(text, source) {
+  const found = [];
+  if (typeof text !== 'string' || !text.includes(REGISTRATION_MARKER)) return found;
+  for (const raw of text.split(/\r?\n/).slice(0, MAX_REGISTRATION_LINES)) {
+    if (!raw.includes(REGISTRATION_MARKER)) continue;
+    const line = raw.replace(ANSI_SEQUENCE, '');
+    let candidates = [line];
+    const trimmed = line.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const strings = [];
+        collectStrings(JSON.parse(trimmed), strings);
+        candidates = strings;
+      } catch { /* not a JSON record: scan the text itself */ }
+    }
+    for (const value of candidates) {
+      const match = value.match(REGISTRATION_MESSAGE);
+      if (match) found.push({ source, path: match[1].trim() });
+    }
+  }
+  return found;
+}
+
+/**
+ * Which plugin copy actually registered in this round. OpenClaw passes the
+ * discovered candidate's realpath'd root as `api.rootDir` (4ffdd2047d1
+ * registry-api.ts / discovery.ts), and the plugin logs it from register(). Only
+ * this round's process output and the bytes appended to the pinned host log
+ * during the round are read. Missing, unknown, outside or conflicting sources
+ * never confirm the candidate, and a presence event cannot stand in for them.
+ */
+export function candidateRegistrationVerdict({ sources, candidateRoot }) {
+  const found = sources.flatMap((row) => extractRegistrationPaths(row.text, row.source));
+  const base = {
+    candidateRoot,
+    lineCount: found.length,
+    lines: found.slice(0, 20),
+    sourcesWithLines: [...new Set(found.map((row) => row.source))],
+  };
+  if (found.length === 0) return { ...base, status: 'missing', reason: 'no registration line in this round\'s host output or host log delta' };
+  if (found.some((row) => row.path === '' || row.path === '(unknown)')) return { ...base, status: 'unknown', reason: 'the host passed no plugin rootDir' };
+  const distinct = [];
+  for (const row of found) {
+    if (!distinct.some((path) => isSamePath(path, row.path))) distinct.push(row.path);
+  }
+  if (distinct.length > 1) return { ...base, status: 'conflict', distinctPaths: distinct, reason: 'registration lines name different plugin roots' };
+  const [path] = distinct;
+  if (isSamePath(path, candidateRoot)) return { ...base, status: 'confirmed', relation: 'equal', path };
+  if (isInsideRoot(candidateRoot, path)) return { ...base, status: 'confirmed', relation: 'inside', path };
+  return { ...base, status: 'outside', path, reason: 'the registered plugin root is not the frozen candidate root' };
+}
+
 const FORBIDDEN_REASONS = new Set(['missing_expectations', 'expectations_expired', 'history_incomplete', 'ambiguous_binding', 'empty_snapshot',
   'snapshot_over_limit', 'observation_over_limit', 'unparseable_observation', 'check_failed', 'shared_field_absent', 'target_removed_by_fallback',
   'generation_failed', 'workspace_unresolved', 'missing_identity']);
 
 /**
  * Gate one round from evidence only. The presence event carries no API field,
- * so the API path is proven by the endpoint record, never by the event.
+ * so the API path is proven by the endpoint record, never by the event. The
+ * candidate is proven by its own registration source, never by the event.
  */
-export function evaluatePresenceRound({ round, hostResult, endpointRecords, presenceEvents }) {
+export function evaluatePresenceRound({ round, hostResult, endpointRecords, presenceEvents, registration, window, candidateCode }) {
   const checks = [];
   const add = (id, ok, detail, evidence = {}) => checks.push({ id, ok, detail, evidence });
 
@@ -193,8 +299,16 @@ export function evaluatePresenceRound({ round, hostResult, endpointRecords, pres
     'the host process exited 0 within the outer timeout', { exitCode: hostResult.exitCode, timedOut: hostResult.timedOut, spawnError: hostResult.spawnError });
   let envelope = null;
   try { envelope = JSON.parse(hostResult.stdout.trim()); } catch { envelope = null; }
+  const hostSessionId = typeof envelope?.sessionId === 'string' && envelope.sessionId.trim().length > 0 ? envelope.sessionId : null;
   add('host-envelope', envelope?.ok === true && envelope?.status === 'ok' && typeof envelope?.final === 'string' && envelope.final.includes(PRESENCE_ANSWER),
-    'agent exec --json reports ok with the endpoint answer (an empty [DONE]-only reply cannot pass)', { ok: envelope?.ok ?? null, status: envelope?.status ?? null, provider: envelope?.provider ?? null, model: envelope?.model ?? null });
+    'agent exec --json reports ok with the endpoint answer (an empty [DONE]-only reply cannot pass)', {
+      ok: envelope?.ok ?? null, status: envelope?.status ?? null, provider: envelope?.provider ?? null, model: envelope?.model ?? null, sessionId: hostSessionId,
+    });
+
+  add('candidate-registration-source', registration?.status === 'confirmed',
+    'this round\'s own plugin registration line names the frozen candidate root (missing, unknown, outside or conflicting sources fail)', registration ?? { status: 'not_collected' });
+  add('candidate-code-unchanged', candidateCode?.ok === true,
+    'the candidate\'s entry, bundle, manifests and external dependency are still the frozen bytes after the round', candidateCode ?? { ok: false, reason: 'not_checked' });
 
   const served = endpointRecords.filter((row) => row.decision === 'served');
   const refused = endpointRecords.filter((row) => row.decision === 'refused');
@@ -206,8 +320,23 @@ export function evaluatePresenceRound({ round, hostResult, endpointRecords, pres
   add('endpoint-fake-key', request?.authMatchesFakeKey === true, 'the request carried the frozen generated fake key, not an inherited credential');
   add('endpoint-model', request?.model === PRESENCE_MODEL_ID, `the request named ${PRESENCE_MODEL_ID}`, { model: request?.model ?? null });
 
-  const roundEvents = presenceEvents.filter((row) => row.entry?.data?.provider === round.provider && row.entry?.data?.model === PRESENCE_MODEL_ID);
-  add('presence-event', roundEvents.length === 1, 'exactly one presence event for this round reached the isolated workspace log (also the candidate-loaded proof)', { count: roundEvents.length });
+  // Only events appended during this round (the caller reads the log delta),
+  // for this round's provider/model, the host-reported session and the round window.
+  const startMs = Date.parse(window?.startedAt ?? '');
+  const endMs = Date.parse(window?.endedAt ?? '');
+  const excluded = { otherProviderOrModel: 0, otherSession: 0, outsideWindow: 0 };
+  const roundEvents = presenceEvents.filter((row) => {
+    const eventData = row.entry?.data;
+    if (eventData?.provider !== round.provider || eventData?.model !== PRESENCE_MODEL_ID) { excluded.otherProviderOrModel += 1; return false; }
+    if (hostSessionId === null || eventData?.sessionId !== hostSessionId) { excluded.otherSession += 1; return false; }
+    const ts = Date.parse(row.entry?.ts ?? '');
+    if (!Number.isFinite(ts) || !Number.isFinite(startMs) || !Number.isFinite(endMs) || ts < startMs || ts > endMs) { excluded.outsideWindow += 1; return false; }
+    return true;
+  });
+  add('presence-event', hostSessionId !== null && roundEvents.length === 1,
+    'exactly one presence event appended during this round, for this round\'s provider/model and the host-reported session', {
+      count: roundEvents.length, hostSessionId, excluded, appendedPresenceEvents: presenceEvents.length,
+    });
   const data = roundEvents[0]?.entry?.data ?? null;
   add('presence-boundary', data?.boundary === 'post_assembly_system_prompt_via_llm_input', 'boundary is post_assembly_system_prompt_via_llm_input', { boundary: data?.boundary ?? null });
   add('presence-binding', data?.binding === 'unique' && data?.checked === true && (data?.reason === undefined || !FORBIDDEN_REASONS.has(data.reason)),
@@ -436,16 +565,46 @@ export async function execute({
       }
       endpoint.openRound({ arm: round.id, api: round.api });
       roundRecord.started = true;
+      const eventLogsBefore = eventLogSizes(manifest.paths.workspaceDir);
+      const hostLogBefore = existsSync(manifest.paths.hostLogPath) ? statSync(manifest.paths.hostLogPath).size : 0;
+      const startedAt = new Date().toISOString();
       const hostResult = await runHostRound({ manifest, round, env: env.env });
+      const endedAt = new Date().toISOString();
       endpoint.closeRound();
       const sweep = sweepPackProcesses(packRoot);
       writeFileSync(join(layout.runDir, 'evidence', `${round.id}.host.stdout.txt`), hostResult.stdout, { encoding: 'utf8', flag: 'wx' });
       writeFileSync(join(layout.runDir, 'evidence', `${round.id}.host.stderr.txt`), hostResult.stderr, { encoding: 'utf8', flag: 'wx' });
       const endpointRecords = endpoint.roundObservations(round.id);
       writeJson(join(layout.runDir, 'evidence', `${round.id}.endpoint.json`), endpointRecords, 'wx');
-      const presence = readPresenceEvents(manifest.paths.workspaceDir);
-      writeJson(join(layout.runDir, 'evidence', `${round.id}.presence-events.json`), presence.events.map((row) => ({ file: row.file, entry: row.entry })), 'wx');
-      const gate = evaluatePresenceRound({ round, hostResult, endpointRecords, presenceEvents: presence.events });
+      // Candidate identity: this round's own registration lines from the host
+      // process output and the bytes the host appended to its pinned log.
+      const hostLogDelta = readAppended(manifest.paths.hostLogPath, hostLogBefore);
+      const registration = candidateRegistrationVerdict({
+        sources: [
+          { source: 'host-stdout', text: hostResult.stdout },
+          { source: 'host-stderr', text: hostResult.stderr },
+          { source: 'host-log', text: hostLogDelta.text },
+        ],
+        candidateRoot: manifest.candidate.root,
+      });
+      writeJson(join(layout.runDir, 'evidence', `${round.id}.registration-source.json`), {
+        ...registration,
+        hostLogBytesRead: hostLogDelta.bytes,
+        hostLogTruncated: hostLogDelta.truncated,
+        hostLogShrunk: hostLogDelta.shrunk,
+      }, 'wx');
+      const presence = readPresenceEventsSince(manifest.paths.workspaceDir, eventLogsBefore);
+      writeJson(join(layout.runDir, 'evidence', `${round.id}.presence-events.json`), {
+        window: { startedAt, endedAt },
+        appendedFiles: presence.files,
+        events: presence.events.map((row) => ({ file: row.file, entry: row.entry })),
+      }, 'wx');
+      const candidateCode = candidateCodeDrift(manifest);
+      writeJson(join(layout.runDir, 'evidence', `${round.id}.candidate-code.json`), candidateCode, 'wx');
+      const gate = evaluatePresenceRound({
+        round, hostResult, endpointRecords, presenceEvents: presence.events, registration, candidateCode,
+        window: { startedAt, endedAt },
+      });
       writeJson(join(layout.runDir, 'evidence', `${round.id}.gate.json`), gate, 'wx');
       const audit = auditProduction({ baseline: pollutionBefore, manifest });
       writeJson(join(layout.runDir, 'evidence', `${round.id}.pollution.json`), audit, 'wx');

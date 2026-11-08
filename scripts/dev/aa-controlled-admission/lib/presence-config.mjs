@@ -87,8 +87,15 @@ export function roundModelRef(round) {
   return `${round.provider}/${PRESENCE_MODEL_ID}`;
 }
 
-export function buildPresenceHostConfig({ endpointPort, pluginRoot, fakeApiKey }) {
+/**
+ * `hostLogPath` pins the host's own file log inside the pack: without it the
+ * host writes a rolling log under a temp root it chooses itself. Level `info`
+ * keeps the plugin's `Principles Disciple Plugin registered. (Path: ...)` line,
+ * which the round gate reads as the runtime registration source.
+ */
+export function buildPresenceHostConfig({ endpointPort, pluginRoot, fakeApiKey, hostLogPath }) {
   if (typeof fakeApiKey !== 'string' || fakeApiKey.length < 16) throw new Error('buildPresenceHostConfig: fakeApiKey is required');
+  if (typeof hostLogPath !== 'string' || !hostLogPath.trim()) throw new Error('buildPresenceHostConfig: hostLogPath is required');
   const baseUrl = endpointBaseUrl(endpointPort);
   const providers = Object.fromEntries(PRESENCE_ROUNDS.map((round) => [round.provider, {
     baseUrl,
@@ -115,6 +122,7 @@ export function buildPresenceHostConfig({ endpointPort, pluginRoot, fakeApiKey }
     mcp: { servers: { [MCP_SERVER_NAME]: { enabled: false } } },
     models: { mode: 'merge', providers },
     agents: { defaults: { model: { primary: roundModelRef(PRESENCE_ROUNDS[0]) } } },
+    logging: { level: 'info', file: hostLogPath },
   };
 }
 
@@ -165,6 +173,8 @@ export function validatePresenceHostConfig(config, expected) {
   const keys = new Set(PRESENCE_ROUNDS.map((round) => providers[round.provider]?.apiKey));
   if (keys.size !== 1) violations.push('providers must share the one generated placeholder key');
   if (config?.agents?.defaults?.model?.primary !== roundModelRef(PRESENCE_ROUNDS[0])) violations.push('agents.defaults.model.primary does not route to the loopback provider');
+  if (!samePath(config?.logging?.file, expected.hostLogPath)) violations.push('logging.file is not the frozen in-pack host log');
+  if (config?.logging?.level !== 'info') violations.push('logging.level is not info (the registration line would not be written)');
   return violations;
 }
 

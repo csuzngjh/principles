@@ -82,6 +82,11 @@ function comparable(path) {
   return process.platform === 'win32' ? value.toLowerCase() : value;
 }
 
+/** True when both paths name the same location after realpath (case-insensitive on Windows). */
+export function isSamePath(a, b) {
+  return comparable(a) === comparable(b);
+}
+
 /** True when `child` is strictly inside `root` (equal paths are not inside). */
 export function isInsideRoot(root, child) {
   const rootPath = comparable(root);

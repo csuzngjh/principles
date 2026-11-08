@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -25,11 +25,11 @@ import {
 import { PRESENCE_FIXTURE } from '../dev/aa-controlled-admission/lib/presence-fixture.mjs';
 import {
   CARD_VERSION, EXECUTION_CODE_TRUST_BOUNDARY, EXECUTION_SCRIPT_FILES, EXECUTION_WORKSPACE_BUILDS, PRESENCE_CODE_ROOT, PREFLIGHT_REQUIRED_CHECKS,
-  classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, presenceSurface, summarizePreflight, verifyPack,
+  candidateEntryViolations, classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, presenceSurface, summarizePreflight, verifyPack,
 } from '../dev/aa-controlled-admission/lib/presence-pack.mjs';
 import { runProtocolSelftest } from '../dev/aa-controlled-admission/lib/protocol-selftest.mjs';
 import {
-  APPROVAL_SCHEMA, evaluatePresenceRound, execute, main, preflightPack, validateApproval,
+  APPROVAL_SCHEMA, candidateRegistrationVerdict, evaluatePresenceRound, execute, extractRegistrationPaths, main, preflightPack, readAppended, validateApproval,
 } from '../dev/aa-controlled-admission/presence-run.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -683,16 +683,24 @@ describe('pollution gate — the audit decides stop and completion (temp product
 });
 
 describe('round gate — counterexamples', () => {
-  const event = (data) => ({ line: JSON.stringify({ type: 'runtime_v2_prompt_presence_observed', data }), entry: { type: 'runtime_v2_prompt_presence_observed', data } });
+  const window = { startedAt: '2026-11-09T01:00:00.000Z', endedAt: '2026-11-09T01:00:30.000Z' };
+  const event = (data, ts = '2026-11-09T01:00:10.000Z') => {
+    const entry = { ts, type: 'runtime_v2_prompt_presence_observed', data };
+    return { line: JSON.stringify(entry), entry };
+  };
   const good = {
     round: R1,
-    hostResult: { exitCode: 0, timedOut: false, spawnError: null, stdout: JSON.stringify({ ok: true, status: 'ok', final: PRESENCE_ANSWER }) },
+    window,
+    hostResult: { exitCode: 0, timedOut: false, spawnError: null, stdout: JSON.stringify({ ok: true, status: 'ok', final: PRESENCE_ANSWER, sessionId: 'host-session-r1' }) },
     endpointRecords: [{ decision: 'served', path: '/v1/responses', api: 'openai-responses', authMatchesFakeKey: true, model: PRESENCE_MODEL_ID }],
     presenceEvents: [event({
-      provider: R1.provider, model: PRESENCE_MODEL_ID, boundary: 'post_assembly_system_prompt_via_llm_input', binding: 'unique', checked: true,
+      runId: 'run-r1', sessionId: 'host-session-r1', provider: R1.provider, model: PRESENCE_MODEL_ID, boundary: 'post_assembly_system_prompt_via_llm_input', binding: 'unique', checked: true,
       results: [{ activationId: PRESENCE_FIXTURE.activationId, outcome: 'full_hit' }],
     })],
+    registration: { status: 'confirmed', relation: 'equal', path: 'X:\\pack\\candidate\\principles-disciple' },
+    candidateCode: { ok: true },
   };
+  const goodData = good.presenceEvents[0].entry.data;
 
   it('passes only the complete evidence set', () => {
     expect(evaluatePresenceRound(good).ok).toBe(true);
@@ -700,18 +708,82 @@ describe('round gate — counterexamples', () => {
 
   it.each([
     ['event missing (buffered and lost)', { presenceEvents: [] }, 'presence-event'],
-    ['ambiguous binding', { presenceEvents: [event({ ...good.presenceEvents[0].entry.data, binding: 'ambiguous', checked: false, reason: 'ambiguous_binding' })] }, 'presence-binding'],
-    ['checked_missing fixture', { presenceEvents: [event({ ...good.presenceEvents[0].entry.data, results: [{ activationId: PRESENCE_FIXTURE.activationId, outcome: 'checked_missing' }] })] }, 'presence-fixture-full-hit'],
-    ['body leaked into the event', { presenceEvents: [{ ...event(good.presenceEvents[0].entry.data), line: `x${PRESENCE_FIXTURE.text}` }] }, 'presence-no-body'],
+    ['ambiguous binding', { presenceEvents: [event({ ...goodData, binding: 'ambiguous', checked: false, reason: 'ambiguous_binding' })] }, 'presence-binding'],
+    ['checked_missing fixture', { presenceEvents: [event({ ...goodData, results: [{ activationId: PRESENCE_FIXTURE.activationId, outcome: 'checked_missing' }] })] }, 'presence-fixture-full-hit'],
+    ['body leaked into the event', { presenceEvents: [{ ...event(goodData), line: `x${PRESENCE_FIXTURE.text}` }] }, 'presence-no-body'],
     ['host retry reached the endpoint', { endpointRecords: [...good.endpointRecords, { decision: 'refused', refusal: { kind: 'over_budget' } }] }, 'endpoint-one-request'],
     ['wrong API path', { endpointRecords: [{ ...good.endpointRecords[0], path: '/v1/chat/completions', api: 'openai-completions' }] }, 'endpoint-api-path'],
     ['inherited credential instead of the fake key', { endpointRecords: [{ ...good.endpointRecords[0], authMatchesFakeKey: false }] }, 'endpoint-fake-key'],
-    ['empty [DONE]-only reply', { hostResult: { ...good.hostResult, stdout: JSON.stringify({ ok: true, status: 'ok', final: '' }) } }, 'host-envelope'],
+    ['empty [DONE]-only reply', { hostResult: { ...good.hostResult, stdout: JSON.stringify({ ok: true, status: 'ok', final: '', sessionId: 'host-session-r1' }) } }, 'host-envelope'],
     ['timeout', { hostResult: { ...good.hostResult, timedOut: true, exitCode: null } }, 'host-exit'],
+    // B3: the candidate is proven by its own registration source, never by the event.
+    ['registration line missing, presence event perfect', { registration: { status: 'missing' } }, 'candidate-registration-source'],
+    ['registration source is the production plugin', { registration: { status: 'outside', path: 'C:\\Users\\x\\.openclaw\\extensions\\principles-disciple' } }, 'candidate-registration-source'],
+    ['registration source is another candidate', { registration: { status: 'outside', path: 'X:\\pack\\other-candidate' } }, 'candidate-registration-source'],
+    ['registration source unknown', { registration: { status: 'unknown' } }, 'candidate-registration-source'],
+    ['registration sources conflict', { registration: { status: 'conflict' } }, 'candidate-registration-source'],
+    ['registration never collected', { registration: undefined }, 'candidate-registration-source'],
+    ['candidate code changed during the round', { candidateCode: { ok: false, changed: ['dist/bundle.js'] } }, 'candidate-code-unchanged'],
+    // B3: an event cannot come from another run/session or from before the round.
+    ['event from another session', { presenceEvents: [event({ ...goodData, sessionId: 'other-session' })] }, 'presence-event'],
+    ['event stamped before the round', { presenceEvents: [event(goodData, '2026-11-09T00:59:59.000Z')] }, 'presence-event'],
+    ['host reported no session identity', { hostResult: { ...good.hostResult, stdout: JSON.stringify({ ok: true, status: 'ok', final: PRESENCE_ANSWER }) } }, 'presence-event'],
   ])('fails on %s', (_label, override, failingCheck) => {
     const verdict = evaluatePresenceRound({ ...good, ...override });
     expect(verdict.ok).toBe(false);
     expect(verdict.checks.filter((row) => !row.ok).map((row) => row.id)).toContain(failingCheck);
+  });
+
+  it('a perfect presence event never substitutes for the registration source', () => {
+    for (const status of ['missing', 'unknown', 'outside', 'conflict']) {
+      const verdict = evaluatePresenceRound({ ...good, registration: { status } });
+      expect(verdict.checks.find((row) => row.id === 'presence-event').ok).toBe(true);
+      expect(verdict.checks.filter((row) => !row.ok).map((row) => row.id)).toEqual(['candidate-registration-source']);
+      expect(verdict.ok).toBe(false);
+    }
+  });
+});
+
+describe('candidate registration source — parsing and verdict', () => {
+  const root = mkdtempSync(join(tmpdir(), 'pp-reg-'));
+  const candidateRoot = join(root, 'candidate', 'principles-disciple');
+  const productionRoot = join(root, 'home', '.openclaw', 'extensions', 'principles-disciple');
+  mkdirSync(candidateRoot, { recursive: true });
+  mkdirSync(productionRoot, { recursive: true });
+  const line = (path) => `Principles Disciple Plugin registered. (Path: ${path})`;
+  const verdictOf = (...sources) => candidateRegistrationVerdict({ sources: sources.map(([source, text]) => ({ source, text })), candidateRoot });
+
+  it('confirms a plain console line, an ANSI-coloured line and a JSON log record naming the candidate root', () => {
+    expect(verdictOf(['host-stderr', `[plugins] ${line(candidateRoot)}`])).toMatchObject({ status: 'confirmed', relation: 'equal' });
+    expect(verdictOf(['host-stderr', `\u001b[36m[plugins]\u001b[39m ${line(candidateRoot)}`])).toMatchObject({ status: 'confirmed' });
+    const jsonRecord = JSON.stringify({ 0: line(candidateRoot), _meta: { logLevelName: 'INFO', name: 'plugins' } });
+    expect(verdictOf(['host-log', jsonRecord])).toMatchObject({ status: 'confirmed', sourcesWithLines: ['host-log'] });
+    expect(verdictOf(['host-stdout', `${line(join(candidateRoot, 'dist'))} trailing text`])).toMatchObject({ status: 'confirmed', relation: 'inside' });
+  });
+
+  it('keeps parentheses that belong to the path', () => {
+    const odd = join(root, 'Program Files (x86)', 'pd');
+    const found = extractRegistrationPaths(line(odd), 'host-stderr');
+    expect(found).toEqual([{ source: 'host-stderr', path: odd }]);
+  });
+
+  it('refuses missing, unknown, outside and conflicting sources', () => {
+    expect(verdictOf(['host-stderr', 'no registration here'], ['host-log', ''])).toMatchObject({ status: 'missing' });
+    expect(verdictOf(['host-stderr', line('(unknown)')])).toMatchObject({ status: 'unknown' });
+    expect(verdictOf(['host-stderr', line(productionRoot)])).toMatchObject({ status: 'outside', path: productionRoot });
+    expect(verdictOf(['host-stderr', line(join(root, 'candidate', 'other'))])).toMatchObject({ status: 'outside' });
+    expect(verdictOf(['host-stderr', line(candidateRoot)], ['host-log', line(productionRoot)])).toMatchObject({ status: 'conflict' });
+    // Several identical registrations (one per registration mode) are not a conflict.
+    expect(verdictOf(['host-stderr', `${line(candidateRoot)}\n${line(candidateRoot)}`])).toMatchObject({ status: 'confirmed', lineCount: 2 });
+  });
+
+  it('reads only bytes appended after the baseline', () => {
+    const file = join(root, 'host.log');
+    writeFileSync(file, `${line(candidateRoot)}\n`);
+    const baseline = statSync(file).size;
+    appendFileSync(file, 'other output\n');
+    expect(readAppended(file, baseline).text).toBe('other output\n');
+    expect(verdictOf(['host-log', readAppended(file, baseline).text])).toMatchObject({ status: 'missing' });
   });
 });
 
@@ -748,6 +820,13 @@ else {
   if (mode === 'touch-live-store') appendFileSync(prod.stateDb, 'another-session-write');
   if (mode === 'touch-log') appendFileSync(prod.log, JSON.stringify({ type: 'other-session' }) + '\n');
   const config = JSON.parse(readFileSync(arg('config'), 'utf8'));
+  // The plugin's own registration line, as OpenClaw would log it: api.rootDir
+  // is the discovered candidate root (or another copy in the failure modes).
+  const candidateRoot = config.plugins.load.paths[0];
+  const registered = (root) => 'Principles Disciple Plugin registered. (Path: ' + root + ')';
+  if (mode === 'reg-prod') process.stderr.write('[plugins] ' + registered(prod.pluginRoot) + '\n');
+  else if (mode === 'reg-log-only') appendFileSync(config.logging.file, JSON.stringify({ 0: registered(candidateRoot), _meta: { logLevelName: 'INFO', name: 'plugins' } }) + '\n');
+  else if (mode !== 'reg-missing' && mode !== 'stale-reg') process.stderr.write('[plugins] ' + registered(candidateRoot) + '\n');
   const [providerId, model] = arg('model').split('/');
   const provider = config.models.providers[providerId];
   const path = provider.api === 'openai-responses' ? '/responses' : '/chat/completions';
@@ -758,9 +837,12 @@ else {
   const logs = join(arg('cwd'), '.state', 'logs');
   mkdirSync(logs, { recursive: true });
   const date = new Date().toISOString().slice(0, 10);
-  appendFileSync(join(logs, 'events_' + date + '.jsonl'), JSON.stringify({ ts: new Date().toISOString(), date, type: 'runtime_v2_prompt_presence_observed', category: 'injected', sessionId: 's-' + round,
-    data: { runId: 'r-' + round, sessionId: 's-' + round, provider: providerId, model, boundary: 'post_assembly_system_prompt_via_llm_input', binding: 'unique', liveSnapshots: 1,
-      assemblySeqCandidates: [0], checked: true, results: [{ activationId: 'act_prompt_pri1152-presence-fixture', outcome: 'full_hit' }] } }) + '\n');
+  const eventSession = mode === 'other-session' ? 's-other' : 's-' + round;
+  if (mode !== 'no-event') {
+    appendFileSync(join(logs, 'events_' + date + '.jsonl'), JSON.stringify({ ts: new Date().toISOString(), date, type: 'runtime_v2_prompt_presence_observed', category: 'injected', sessionId: eventSession,
+      data: { runId: 'r-' + round, sessionId: eventSession, provider: providerId, model, boundary: 'post_assembly_system_prompt_via_llm_input', binding: 'unique', liveSnapshots: 1,
+        assemblySeqCandidates: [0], checked: true, results: [{ activationId: 'act_prompt_pri1152-presence-fixture', outcome: 'full_hit' }] } }) + '\n');
+  }
   process.stdout.write(JSON.stringify({ ok: true, status: 'ok', final: text.includes('PRESENCE-ACK') ? 'PRESENCE-ACK' : '', provider: providerId, model, sessionId: 's-' + round }));
 }
 `;
@@ -859,7 +941,10 @@ function makeCodeRoot() {
   return codeRoot;
 }
 
-async function makePack({ durable = true, surface = 'enabled', extraTarballFiles = [], acceptAll = false, codeRoot = undefined } = {}) {
+async function makePack({
+  durable = true, surface = 'enabled', extraTarballFiles = [], acceptAll = false, codeRoot = undefined,
+  productionBundle = '// production build without presence observation\n',
+} = {}) {
   const base = mkdtempSync(join(tmpdir(), 'pp-e2e-'));
   const hostPkg = join(base, 'global', 'node_modules', 'openclaw');
   const hostFiles = [
@@ -903,7 +988,7 @@ async function makePack({ durable = true, surface = 'enabled', extraTarballFiles
   const prodPlugin = join(realHome, '.openclaw', 'extensions', 'principles-disciple');
   mkdirSync(join(prodPlugin, 'dist'), { recursive: true });
   writeFileSync(join(prodPlugin, 'package.json'), JSON.stringify({ version: '2.6.4' }));
-  writeFileSync(join(prodPlugin, 'dist', 'bundle.js'), '// production build without presence observation\n');
+  writeFileSync(join(prodPlugin, 'dist', 'bundle.js'), productionBundle);
   const prodWorkspace = join(base, 'prod-workspace');
   mkdirSync(join(prodWorkspace, '.pd'), { recursive: true });
   mkdirSync(join(prodWorkspace, '.state', 'logs'), { recursive: true });
@@ -921,6 +1006,7 @@ async function makePack({ durable = true, surface = 'enabled', extraTarballFiles
   const prod = {
     log: join(prodWorkspace, '.state', 'logs', 'events_2026-11-08.jsonl'),
     pluginPkg: join(prodPlugin, 'package.json'),
+    pluginRoot: prodPlugin,
     stateDb: join(prodWorkspace, '.pd', 'state.db'),
   };
   writeFileSync(join(packRoot, 'home', 'fake-host-prod.json'), JSON.stringify(prod));
@@ -982,11 +1068,18 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
     expect(manifest.fixture.inspection.escaping.escapedExactlyOnce).toBe(true);
     expect(JSON.stringify(manifest)).not.toContain(PRESENCE_FIXTURE.text);
     const config = JSON.parse(readFileSync(manifest.paths.configPath, 'utf8'));
-    expect(validatePresenceHostConfig(config, { pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port })).toEqual([]);
+    const expected = { pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port, hostLogPath: manifest.paths.hostLogPath };
+    expect(validatePresenceHostConfig(config, expected)).toEqual([]);
+    expect(isInsideRoot(packRoot, manifest.paths.hostLogPath)).toBe(true);
+    expect(config.logging).toEqual({ level: 'info', file: manifest.paths.hostLogPath });
     const tampered = JSON.parse(JSON.stringify(config));
     tampered.models.providers['pdpresence-completions'].apiKey = 'not-a-generated-placeholder';
-    expect(validatePresenceHostConfig(tampered, { pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port }))
-      .toEqual(expect.arrayContaining(['pdpresence-completions.apiKey is not a generated loopback placeholder', 'providers must share the one generated placeholder key']));
+    tampered.logging = { level: 'warn', file: join(tmpdir(), 'openclaw.log') };
+    expect(validatePresenceHostConfig(tampered, expected))
+      .toEqual(expect.arrayContaining([
+        'pdpresence-completions.apiKey is not a generated loopback placeholder', 'providers must share the one generated placeholder key',
+        'logging.file is not the frozen in-pack host log', 'logging.level is not info (the registration line would not be written)',
+      ]));
     expect(JSON.stringify(manifest)).not.toContain(config.models.providers['pdpresence-responses'].apiKey);
     expect(config.plugins.load.paths).toEqual([manifest.candidate.root]);
     const report = await preflightPack({ packRoot, operatorEnv, realHome });
@@ -1114,12 +1207,104 @@ describe('approval binding', () => {
     expect(validateApproval({ approval: { ...valid, cardVersion: 'v2' }, manifestSha256: 'a'.repeat(64), manifest })).toContain('approval is not bound to this card version');
   });
 
-  it('builds a config whose only plugin path is the candidate and whose tools are denied', () => {
-    const config = buildPresenceHostConfig({ endpointPort: 4321, pluginRoot: 'X:\\pack\\candidate', fakeApiKey: 'pdpresence-local-0123456789abcdef' });
+  it('builds a config whose only plugin path is the candidate, whose tools are denied and whose host log is pinned', () => {
+    const config = buildPresenceHostConfig({ endpointPort: 4321, pluginRoot: 'X:\\pack\\candidate', fakeApiKey: 'pdpresence-local-0123456789abcdef', hostLogPath: 'X:\\pack\\logs\\openclaw-host.log' });
     expect(config.tools).toEqual({ deny: ['*'] });
     expect(config.plugins.load.paths).toEqual(['X:\\pack\\candidate']);
+    expect(config.logging).toEqual({ level: 'info', file: 'X:\\pack\\logs\\openclaw-host.log' });
     expect(Object.values(config.models.providers).map((row) => [row.api, row.baseUrl])).toEqual([
       ['openai-responses', 'http://127.0.0.1:4321/v1'], ['openai-completions', 'http://127.0.0.1:4321/v1'],
     ]);
+    expect(() => buildPresenceHostConfig({ endpointPort: 4321, pluginRoot: 'X:\\pack\\candidate', fakeApiKey: 'pdpresence-local-0123456789abcdef' })).toThrow(/hostLogPath/);
   });
+});
+
+describe('candidate identity — joint evidence (B3)', () => {
+  it('a production build that also contains the presence event code no longer blocks the preflight; its version stays an environment fact', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack({ productionBundle: '// production 3.0.2\nconst t = "runtime_v2_prompt_presence_observed";\n' });
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
+    const exclusion = report.checks.find((row) => row.id === 'production-plugin-exclusion');
+    expect(exclusion.status).toBe('PASS');
+    expect(exclusion.evidence.productionPlugin).toMatchObject({ exists: true, version: '2.6.4', presenceEventCapable: true });
+    expect(exclusion.evidence.environmentFact).toMatch(/contains the presence event code; not used as candidate evidence/);
+    expect(report.ready).toBe(true);
+  }, 120_000);
+
+  it('the declared candidate entry must be exactly the frozen bundle inside the candidate root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pp-entry-'));
+    const candidateRoot = join(root, 'candidate');
+    mkdirSync(join(candidateRoot, 'dist'), { recursive: true });
+    const bundlePath = join(candidateRoot, 'dist', 'bundle.js');
+    writeFileSync(bundlePath, '//');
+    const withExtensions = (extensions) => {
+      writeFileSync(join(candidateRoot, 'package.json'), JSON.stringify({ name: 'principles-disciple', openclaw: { extensions } }));
+      return candidateEntryViolations({ candidateRoot, bundlePath, frozenExtensions: ['./dist/bundle.js'] });
+    };
+    expect(withExtensions(['./dist/bundle.js'])).toEqual([]);
+    expect(withExtensions(['./dist/other.js'])).toEqual(expect.arrayContaining(['candidate entry differs from the frozen openclaw.extensions', 'candidate entry ./dist/other.js is not the frozen bundle']));
+    expect(withExtensions(['../outside.js'])).toEqual(expect.arrayContaining(['candidate entry ../outside.js resolves outside the candidate root']));
+    expect(withExtensions(['./dist/bundle.js', './dist/second.js'])).toEqual(['candidate package.json openclaw.extensions must declare exactly one entry']);
+  });
+
+  it('a registration line that only reaches the pinned host log still confirms the candidate', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'reg-log-only', R2: 'reg-log-only' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record.status).toBe('completed');
+    const evidence = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.registration-source.json'), 'utf8'));
+    expect(evidence).toMatchObject({ status: 'confirmed', relation: 'equal', sourcesWithLines: ['host-log'] });
+  }, 180_000);
+
+  it('a registration source pointing at the production plugin fails R1 and R2 never starts', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'reg-prod', R2: 'ok' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.rounds[0].failedChecks).toEqual(['candidate-registration-source']);
+    expect(hostStarts(packRoot)).toEqual(['R1']);
+    const evidence = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.registration-source.json'), 'utf8'));
+    expect(evidence.status).toBe('outside');
+  }, 180_000);
+
+  it('a missing registration source fails the round even though the presence event is perfect', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'reg-missing', R2: 'ok' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.rounds[0].failedChecks).toEqual(['candidate-registration-source']);
+    const gate = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.gate.json'), 'utf8'));
+    expect(gate.checks.find((row) => row.id === 'presence-event').ok).toBe(true);
+  }, 180_000);
+
+  it('a registration line already in the host log before the round does not count for it', async () => {
+    const { packRoot, operatorEnv, realHome, manifest } = await makePack();
+    setModes(packRoot, { R1: 'stale-reg', R2: 'ok' });
+    writeFileSync(manifest.paths.hostLogPath, `[plugins] Principles Disciple Plugin registered. (Path: ${manifest.candidate.root})\n`);
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.rounds[0].failedChecks).toEqual(['candidate-registration-source']);
+  }, 180_000);
+
+  it('an old presence event or one from another session cannot stand in for this round', async () => {
+    const stale = await makePack();
+    setModes(stale.packRoot, { R1: 'no-event', R2: 'ok' });
+    // A matching event written before the round (same provider/model/session) is not this round's evidence.
+    const logs = join(stale.manifest.paths.workspaceDir, '.state', 'logs');
+    mkdirSync(logs, { recursive: true });
+    writeFileSync(join(logs, `events_${new Date().toISOString().slice(0, 10)}.jsonl`), `${JSON.stringify({
+      ts: new Date().toISOString(), type: 'runtime_v2_prompt_presence_observed',
+      data: { runId: 'r-R1', sessionId: 's-R1', provider: 'pdpresence-responses', model: PRESENCE_MODEL_ID, boundary: 'post_assembly_system_prompt_via_llm_input', binding: 'unique', checked: true, results: [{ activationId: PRESENCE_FIXTURE.activationId, outcome: 'full_hit' }] },
+    })}\n`);
+    const staleRecord = await execute({ packRoot: stale.packRoot, approvalPath: approve(stale.packRoot), operatorEnv: stale.operatorEnv, realHome: stale.realHome });
+    expect(staleRecord).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(staleRecord.rounds[0].failedChecks).toContain('presence-event');
+
+    const other = await makePack();
+    setModes(other.packRoot, { R1: 'other-session', R2: 'ok' });
+    const otherRecord = await execute({ packRoot: other.packRoot, approvalPath: approve(other.packRoot), operatorEnv: other.operatorEnv, realHome: other.realHome });
+    expect(otherRecord).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(otherRecord.rounds[0].failedChecks).toContain('presence-event');
+    const gate = JSON.parse(readFileSync(join(other.packRoot, 'run', 'evidence', 'R1.gate.json'), 'utf8'));
+    expect(gate.checks.find((row) => row.id === 'presence-event').evidence.excluded.otherSession).toBe(1);
+  }, 240_000);
 });
