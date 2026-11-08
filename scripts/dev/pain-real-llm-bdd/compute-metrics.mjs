@@ -17,7 +17,7 @@ import process from 'node:process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows } from './lib/metrics-core.mjs';
+import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows, reconcileRowExpectedWithDataset } from './lib/metrics-core.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
@@ -31,8 +31,10 @@ function argValue(name, fallback) {
 }
 
 const runId = argValue('--run-id', null);
+const resultsRoot = argValue('--results-root', null) ?? path.join('.tmp', 'pri-1147');
+const evidenceRoot = argValue('--evidence-root', null) ?? path.join(repoRoot, 'docs', 'reports', 'evidence');
 if (!runId) {
-  const runsDir = path.join('.tmp', 'pri-1147', 'runs');
+  const runsDir = path.join(resultsRoot, 'runs');
   const available = fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : [];
   console.error(JSON.stringify({
     ok: false,
@@ -43,7 +45,7 @@ if (!runId) {
   process.exit(1);
 }
 
-const runDir = path.join('.tmp', 'pri-1147', 'runs', runId);
+const runDir = path.join(resultsRoot, 'runs', runId);
 if (!fs.existsSync(runDir)) {
   console.error(JSON.stringify({ ok: false, reason: 'run_dir_missing', details: runDir, nextAction: 'run the four phases with the same --run-id first' }));
   process.exit(1);
@@ -77,37 +79,60 @@ const openclawSummary = readJsonOptional(path.join(runDir, 'openclaw-host.summar
 
 const isPartial = chainSummary.partial_run === true;
 const validation = validateDatasetRows(chain, dataset);
-const datasetMetrics = computeDatasetMetrics(chain, dataset);
-const mode = isPartial || validation.problems.length > 0 ? 'partial' : 'full';
-const gates = computeGates({ datasetMetrics, validation, d6Summary, faultSummary, openclawSummary, runId, mode });
-gates.partial_run = isPartial;
 
 const runMeta = readJsonOptional(path.join(runDir, 'run-meta.json'));
-// PRI-1150 review P2-A/B: the committed dataset must be byte-identical to the
-// frozen dataset this run declared (sha256 in run-meta), and every evidence
-// row must carry THIS run's run_id — otherwise the metrics describe a foreign
-// run and ok must be false (recorded, not silently passed).
+// PRI-1150 review fix 3: ONE final verdict that spans every exit — dataset
+// SHA missing/invalid/mismatched, missing or foreign row run_ids, phase or
+// metadata identity contradictions, and frozen expectation contradictions all
+// produce a failed summary, a non-zero exit, and NO successful evidence export.
 const frozenDatasetSha = crypto.createHash('sha256').update(fs.readFileSync(datasetPath, 'utf8')).digest('hex');
 const declaredDatasetSha = runMeta?.dataset_sha256 ?? null;
 const datasetShaMatches = declaredDatasetSha !== null && declaredDatasetSha === frozenDatasetSha;
 const foreignRunIdRows = chain
   .filter((r) => typeof r.run_id === 'string' && r.run_id !== runId)
   .map((r) => r.sample_id);
-const integrityOk = datasetShaMatches && foreignRunIdRows.length === 0;
+const runIdMissingRows = chain
+  .filter((r) => r.unparseable !== true && typeof r.run_id !== 'string')
+  .map((r) => r.sample_id);
+const metaIdentityOk = runMeta === null || runMeta.run_id === undefined || runMeta.run_id === runId;
+const expectedContradictions = validation.problems.filter((p) =>
+  p.kind === 'expected_field_rejected'
+  || p.kind === 'expected_block_missing'
+  || p.kind === 'expected_mismatch_with_frozen_dataset');
+const integrityOk = datasetShaMatches
+  && foreignRunIdRows.length === 0
+  && runIdMissingRows.length === 0
+  && metaIdentityOk
+  && expectedContradictions.length === 0;
+
+// Metrics classification and evidence must NOT trust unverified inline labels:
+// reconcile every row's expected block to the authoritative frozen entry.
+// (Verified rows keep identical values — clean input is a no-op.)
+const reconciledRows = reconcileRowExpectedWithDataset(chain, dataset);
+const datasetMetrics = computeDatasetMetrics(reconciledRows, dataset);
+const mode = isPartial || validation.problems.length > 0 ? 'partial' : 'full';
+const gates = computeGates({ datasetMetrics, validation, d6Summary, faultSummary, openclawSummary, runId, mode });
+gates.partial_run = isPartial;
+
+const integrity = {
+  dataset_sha256_matches: datasetShaMatches,
+  declared_dataset_sha256: declaredDatasetSha,
+  frozen_dataset_sha256: frozenDatasetSha,
+  foreign_run_id_rows: foreignRunIdRows,
+  run_id_missing_rows: runIdMissingRows,
+  meta_identity_ok: metaIdentityOk,
+  expected_contradiction_count: expectedContradictions.length,
+};
+const finalOk = gates.overall_ok && integrityOk;
 const metricsSummary = {
-  ok: gates.overall_ok && integrityOk,
+  ok: finalOk,
   experiment: 'PRI-1147 real-LLM BDD metrics + acceptance gates',
   generated_at: new Date().toISOString(),
   run_id: runId,
   mode,
   partial_run: isPartial,
   gates,
-  integrity: {
-    dataset_sha256_matches: datasetShaMatches,
-    declared_dataset_sha256: declaredDatasetSha,
-    frozen_dataset_sha256: frozenDatasetSha,
-    foreign_run_id_rows,
-  },
+  integrity,
   run_meta: {
     git_commit_sha: runMeta?.git_commit_sha ?? null,
     dataset_sha256: declaredDatasetSha,
@@ -130,24 +155,52 @@ fs.writeFileSync(path.join(runDir, 'metrics-summary.json'), JSON.stringify(metri
 
 // §6 desensitized evidence (committed artifact): identity + outcome + provider
 // facts only — no sample text, no logs, no credentials.
-if (!isPartial && gates.dataset_ok) {
-  const evidenceDir = path.join(repoRoot, 'docs', 'reports', 'evidence', `pri-1147-${runId}`);
+// PRI-1150 review fix 3: evidence publishes ONLY when the unified final
+// verdict passes; failed runs keep their diagnostics in the run directory
+// (explicitly marked rejected) and never publish into the evidence root.
+const evidenceRows = buildEvidenceRows(reconciledRows);
+if (!isPartial && finalOk) {
+  const evidenceDir = path.join(evidenceRoot, `pri-1147-${runId}`);
   fs.mkdirSync(evidenceDir, { recursive: true });
-  fs.writeFileSync(path.join(evidenceDir, 'per-sample.json'), JSON.stringify({
+  const perSamplePath = path.join(evidenceDir, 'per-sample.json');
+  if (fs.existsSync(perSamplePath)) {
+    console.error(JSON.stringify({
+      ok: false,
+      reason: 'evidence_already_exists',
+      details: perSamplePath,
+      nextAction: 'use a new --run-id; existing committed evidence is never overwritten',
+    }));
+    process.exit(1);
+  }
+  fs.writeFileSync(perSamplePath, JSON.stringify({
     run_id: runId,
     git_commit_sha: runMeta?.git_commit_sha ?? null,
-    dataset_sha256: runMeta?.dataset_sha256 ?? null,
+    dataset_sha256: declaredDatasetSha,
+    frozen_dataset_sha256: frozenDatasetSha,
+    dataset_sha256_matches: datasetShaMatches,
     provider: runMeta?.provider ?? null,
     model: runMeta?.model ?? null,
     generated_at: new Date().toISOString(),
-    desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；不含样本完整原文、日志或凭据。final_outcome_reason 仅为 Stage-1 命中词（词表见冻结数据集）或模型一句话理由；样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json',
-    samples: buildEvidenceRows(chain),
+    desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；不含样本完整原文、日志或凭据。expected 字段以冻结数据集为权威源核对。样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json',
+    samples: evidenceRows,
   }, null, 2));
   fs.writeFileSync(path.join(evidenceDir, 'metrics-summary.json'), JSON.stringify(metricsSummary, null, 2));
+} else if (!finalOk) {
+  // Failed run: keep diagnostics inside the run directory, explicitly marked
+  // rejected — never mixed into the success evidence export.
+  fs.writeFileSync(path.join(runDir, 'rejected-evidence.json'), JSON.stringify({
+    rejected: true,
+    reason: 'final verdict failed — this file is a diagnostic, NOT acceptance evidence',
+    integrity,
+    gates,
+    dataset_problems: validation.problems,
+  }, null, 2));
 }
 
 console.log(JSON.stringify({
-  ok: gates.overall_ok,
+  ok: finalOk,
+  integrity_ok: integrityOk,
+  integrity,
   run_id: runId,
   mode,
   gates: {
@@ -165,4 +218,4 @@ console.log(JSON.stringify({
   stage2: datasetMetrics.stage2,
   output: path.join(runDir, 'metrics-summary.json'),
 }, null, 2));
-process.exitCode = gates.overall_ok ? 0 : 1;
+process.exitCode = finalOk ? 0 : 1;

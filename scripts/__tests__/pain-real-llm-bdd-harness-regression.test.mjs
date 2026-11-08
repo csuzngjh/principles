@@ -24,11 +24,17 @@ const datasetPath = path.join(here, '..', 'dev', 'pain-real-llm-bdd', 'golden-da
 const dataset = JSON.parse(fs.readFileSync(datasetPath, 'utf8'));
 
 function row(overrides = {}) {
+  // PRI-1150 review fix 2: the frozen dataset is authoritative — derive the
+  // expected block from the sample's own frozen entry (the real chain runner
+  // copies it per sample), so fixture rows always carry truthful expectations.
+  const sampleId = overrides.sample_id ?? 'A1';
+  const frozenSample = dataset.samples.find((s) => s.sample_id === sampleId)
+    ?? { expected_label: 'correction', expected_stage: 'stage2_via_pending', expected_final: 'admitted' };
   return {
     run_id: 'run-test',
-    sample_id: 'A1',
-    category: 'A',
-    expected: { label: 'correction', stage: 'stage2_via_pending', final: 'admitted' },
+    sample_id: sampleId,
+    category: frozenSample.category ?? 'A',
+    expected: { label: frozenSample.expected_label, stage: frozenSample.expected_stage, final: frozenSample.expected_final },
     pending_pre_stage2: true,
     pain_created: true,
     final_outcome: 'admitted',
@@ -142,6 +148,55 @@ describe('dataset validation (P1-2)', () => {
     expect(v.problems).toEqual([]);
     expect(v.executionFailures).toEqual([]);
     expect(v.missingIds).toEqual([]);
+  });
+
+  it('PRI-1150 review fix 2: a row label contradicting the frozen dataset is rejected (A1 correction → none)', () => {
+    const rows = allIds();
+    rows[0].expected.label = 'none';
+    const v = validateDatasetRows(rows, dataset);
+    expect(v.problems.some((p) => p.kind === 'expected_field_rejected'
+      && p.sample_id === 'A1'
+      && p.fields.some((f) => f.field === 'label' && f.problem === 'contradicts_frozen'))).toBe(true);
+  });
+
+  it('PRI-1150 review fix 2: stage and final contradictions are detected separately', () => {
+    const rows = allIds();
+    rows[0].expected.stage = 'stage1_strong_direct';
+    rows[1].expected.final = 'no_pain';
+    const v = validateDatasetRows(rows, dataset);
+    expect(v.problems.some((p) => p.kind === 'expected_field_rejected'
+      && p.sample_id === 'A1'
+      && p.fields.some((f) => f.field === 'stage' && f.problem === 'contradicts_frozen'))).toBe(true);
+    expect(v.problems.some((p) => p.kind === 'expected_field_rejected'
+      && p.sample_id === 'A2'
+      && p.fields.some((f) => f.field === 'final' && f.problem === 'contradicts_frozen'))).toBe(true);
+  });
+
+  it('PRI-1150 review fix 2: an entirely missing expected block is rejected (not defaulted to none)', () => {
+    const rows = allIds();
+    delete rows[0].expected;
+    const v = validateDatasetRows(rows, dataset);
+    expect(v.problems.some((p) => p.kind === 'expected_block_missing' && p.sample_id === 'A1')).toBe(true);
+    // And it must be a REJECTION, not a silent classification as no-hit.
+    expect(v.problems.some((p) => p.kind === 'expected_block_missing')).toBe(true);
+  });
+
+  it('PRI-1150 review fix 2: a single missing expected field is rejected per field', () => {
+    const rows = allIds();
+    delete rows[0].expected.stage;
+    const v = validateDatasetRows(rows, dataset);
+    expect(v.problems.some((p) => p.kind === 'expected_field_rejected'
+      && p.sample_id === 'A1'
+      && p.fields.some((f) => f.field === 'stage' && f.problem === 'missing'))).toBe(true);
+  });
+
+  it('PRI-1150 review fix 2: an invalid expected value is rejected', () => {
+    const rows = allIds();
+    rows[0].expected.label = 'bogus_label';
+    const v = validateDatasetRows(rows, dataset);
+    expect(v.problems.some((p) => p.kind === 'expected_field_rejected'
+      && p.sample_id === 'A1'
+      && p.fields.some((f) => f.field === 'label' && f.problem === 'invalid'))).toBe(true);
   });
 
   it('detects duplicate sample_ids', () => {

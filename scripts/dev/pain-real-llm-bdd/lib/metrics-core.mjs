@@ -17,7 +17,17 @@
  */
 import { SAMPLE_OUTCOMES, EXECUTION_FAILURE_OUTCOMES, STAGE2_DECIDED_OUTCOMES } from './outcomes.mjs';
 
-/** Validate the codex-chain rows against the frozen dataset (P1-2). */
+/** Validate the codex-chain rows against the frozen dataset (P1-2).
+ *  PRI-1150 review fix 2: the frozen dataset is the AUTHORITY and carries FLAT
+ *  fields (expected_label / expected_stage / expected_final) — the previous
+ *  cross-check read a nested `expectedSample.expected` object that never
+ *  exists on the frozen entries, so the check never executed. Now: a row
+ *  whose expected block is missing, has missing/invalid fields, or
+ *  contradicts the frozen entry is rejected — never defaulted to 'none'. */
+const EXPECTED_LABELS = Object.freeze(['correction', 'none']);
+const EXPECTED_STAGES = Object.freeze(['stage2_via_pending', 'stage1_no_hit_reject', 'stage1_strong_direct']);
+const EXPECTED_FINALS = Object.freeze(['admitted', 'no_pain']);
+
 export function validateDatasetRows(rows, dataset) {
   const problems = [];
   const expectedIds = dataset.samples.map((s) => s.sample_id);
@@ -43,6 +53,39 @@ export function validateDatasetRows(rows, dataset) {
   if (extra.length > 0) {
     problems.push({ kind: 'extra_samples', sample_ids: extra });
   }
+  // PRI-1150 review fix 2 (authoritative flat fields): per-row severity —
+  // block missing → field missing/invalid → contradiction with frozen.
+  const frozenById = new Map(dataset.samples.map((s) => [s.sample_id, s]));
+  for (const r of rows) {
+    if (r.unparseable === true || !expectedSet.has(r.sample_id)) continue;
+    const frozen = frozenById.get(r.sample_id);
+    if (!r.expected || typeof r.expected !== 'object') {
+      problems.push({
+        kind: 'expected_block_missing',
+        sample_id: r.sample_id,
+        frozen: { label: frozen.expected_label, stage: frozen.expected_stage, final: frozen.expected_final },
+      });
+      continue;
+    }
+    const fieldProblems = [];
+    for (const [field, allowed] of [
+      ['label', EXPECTED_LABELS],
+      ['stage', EXPECTED_STAGES],
+      ['final', EXPECTED_FINALS],
+    ]) {
+      const value = r.expected[field];
+      if (value === undefined || value === null || value === '') {
+        fieldProblems.push({ field, problem: 'missing' });
+      } else if (!allowed.includes(value)) {
+        fieldProblems.push({ field, problem: 'invalid', value });
+      } else if (frozen[`expected_${field}`] !== undefined && value !== frozen[`expected_${field}`]) {
+        fieldProblems.push({ field, problem: 'contradicts_frozen', frozen: frozen[`expected_${field}`], row: value });
+      }
+    }
+    if (fieldProblems.length > 0) {
+      problems.push({ kind: 'expected_field_rejected', sample_id: r.sample_id, fields: fieldProblems });
+    }
+  }
   // PRI-1150 review P2-B: a row's expected* facts must MATCH the frozen
   // dataset entry for its sample_id — a drifted row silently rewrites the
   // acceptance contract.
@@ -52,10 +95,11 @@ export function validateDatasetRows(rows, dataset) {
     if (r.unparseable === true || !byId.has(r.sample_id)) continue;
     const expectedSample = dataset.samples.find((s) => s.sample_id === r.sample_id);
     const rowExpected = r.expected ?? {};
+    if (!rowExpected || typeof rowExpected !== 'object') continue;
     for (const key of ['label', 'stage', 'final']) {
-      if (expectedSample.expected && expectedSample.expected[key] !== undefined
-        && rowExpected[key] !== undefined && rowExpected[key] !== expectedSample.expected[key]) {
-        expectedMismatches.push({ sample_id: r.sample_id, field: key, dataset: expectedSample.expected[key], row: rowExpected[key] });
+      const frozenValue = expectedSample?.[`expected_${key}`];
+      if (frozenValue !== undefined && rowExpected[key] !== undefined && rowExpected[key] !== frozenValue) {
+        expectedMismatches.push({ sample_id: r.sample_id, field: key, dataset: frozenValue, row: rowExpected[key] });
       }
     }
   }
@@ -78,6 +122,31 @@ export function validateDatasetRows(rows, dataset) {
     problems.push({ kind: 'rows_without_valid_final_outcome', sample_ids: missingOutcome.map((r) => r.sample_id) });
   }
   return { problems, executionFailures, duplicatedIds: [...duplicated], missingIds: missing, extraIds: extra };
+}
+
+/**
+ * PRI-1150 review fix 2: metrics classification and evidence output must NOT
+ * trust unverified inline labels. Returns rows whose expected block is
+ * replaced by the AUTHORITATIVE frozen entry (flat expected_label/stage/
+ * expected_final). Verified rows keep identical values, so a clean dataset is
+ * a no-op; rejected rows get the frozen truth so classification can never be
+ * steered by a drifted inline label.
+ */
+export function reconcileRowExpectedWithDataset(rows, dataset) {
+  const frozenById = new Map(dataset.samples.map((s) => [s.sample_id, s]));
+  return rows.map((r) => {
+    if (r.unparseable === true) return r;
+    const frozen = frozenById.get(r.sample_id);
+    if (!frozen) return r;
+    return {
+      ...r,
+      expected: {
+        label: frozen.expected_label,
+        stage: frozen.expected_stage,
+        final: frozen.expected_final,
+      },
+    };
+  });
 }
 
 /**
