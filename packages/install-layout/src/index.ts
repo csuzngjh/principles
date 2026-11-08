@@ -268,6 +268,90 @@ export function getWorkbuddyWorkspaceDir(homeDir: string): string {
   return path.join(path.resolve(homeDir), '.workbuddy', 'pd-workspace');
 }
 
+// ─── WorkBuddy host state (2026-11-07, read-only state contract) ────────────
+/**
+ * The ONE registration/enablement state definition shared by the installer
+ * (install summary + `status`) and pd-cli (`pd health --host workbuddy`).
+ * Pure: no fs, no env — callers read the host files and hand the parsed
+ * values in. Neither fact may be inferred from the other (SPEC §6.4
+ * install ≠ enable); an unreadable source must never collapse into a
+ * definite value.
+ */
+
+export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
+export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
+/** Registry/settings key: "principles-disciple@principles-disciple-market". */
+export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
+
+export interface WorkbuddyPluginStateView {
+  /** The host registry (installed_plugins.json) carries the PD plugin entry. */
+  readonly registered: boolean;
+  /** False when the registry file could not be read/parsed — installed must NOT be claimed. */
+  readonly registryReadable: boolean;
+  /** `enabledPlugins[key]`: true/false, or null when absent/unreadable/non-boolean (activation unknown). */
+  readonly enabled: boolean | null;
+}
+
+export interface WorkbuddyHostConfigPaths {
+  /** Host config root (the engine honors WORKBUDDY_CONFIG_DIR when set). */
+  readonly configDir: string;
+  readonly settingsPath: string;
+  readonly registryPath: string;
+}
+
+/**
+ * Resolve the WorkBuddy HOST config paths from one authority. The frozen
+ * governance dir (~/.workbuddy/pd-workspace) defines the config root;
+ * WORKBUDDY_CONFIG_DIR is the isolation override (Phase 0 lab discipline).
+ * The WorkBuddyHostInstaller resolves its full path set by delegating here,
+ * so installer / status / health can never disagree about where the host
+ * files live.
+ */
+export function getWorkbuddyHostConfigPaths(homeDir: string, configDirOverride?: string): WorkbuddyHostConfigPaths {
+  const configDir = configDirOverride !== undefined && configDirOverride.length > 0
+    ? path.resolve(configDirOverride)
+    : path.dirname(getWorkbuddyWorkspaceDir(homeDir));
+  return {
+    configDir,
+    settingsPath: path.join(configDir, 'settings.json'),
+    registryPath: path.join(configDir, 'plugins', 'installed_plugins.json'),
+  };
+}
+
+/** rc-1 minimal guard: a plain JSON object, not an array/null/primitive. */
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The shared plugin-state judgment (rc-2: no `as` bypass; rc-4/5). The exact
+ * semantics the installer has applied since PR #2355, extracted so pd-cli
+ * health reports the SAME three facts from the same rules:
+ *   - registered:  registry readable AND carried a plugins mapping with our key;
+ *   - registryReadable: false only when the registry could not be read/parsed;
+ *   - enabled: the boolean in settings.enabledPlugins[our key], or null when
+ *     settings are unreadable, the key is absent, or the value is not boolean.
+ */
+export function interpretWorkbuddyPluginState(input: {
+  registryParsed: unknown;
+  settingsParsed: unknown;
+  registryReadable: boolean;
+}): WorkbuddyPluginStateView {
+  const registry = isPlainJsonObject(input.registryParsed) ? input.registryParsed : undefined;
+  const plugins = registry !== undefined && isPlainJsonObject(registry.plugins) ? registry.plugins : undefined;
+  const registered = input.registryReadable && plugins !== undefined
+    ? Object.hasOwn(plugins, WORKBUDDY_PLUGIN_KEY)
+    : false;
+  const settings = isPlainJsonObject(input.settingsParsed) ? input.settingsParsed : undefined;
+  const enabledPlugins = settings !== undefined && isPlainJsonObject(settings.enabledPlugins) ? settings.enabledPlugins : undefined;
+  const raw = enabledPlugins === undefined ? undefined : enabledPlugins[WORKBUDDY_PLUGIN_KEY];
+  return {
+    registered,
+    registryReadable: input.registryReadable,
+    enabled: typeof raw === 'boolean' ? raw : null,
+  };
+}
+
 export function resolveInstallLayout(options: ResolveInstallLayoutOptions): LayoutResolution {
   const paths = getInstallLayoutPaths(options.homeDir);
   const parsed = parseInstallManifest(options.manifest);

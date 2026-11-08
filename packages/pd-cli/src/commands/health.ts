@@ -24,6 +24,8 @@ import {
 import { handleHealthCodex } from './health-codex.js';
 import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
 import type { McpHealthSection } from './health-mcp.js';
+import { assessWorkbuddyHostFacts, formatWorkbuddyHostFactLines } from './health-workbuddy.js';
+import type { WorkbuddyHostFacts } from './health-workbuddy.js';
 
 /**
  * MCP statuses that describe an absent host rather than a broken one. Every
@@ -122,6 +124,15 @@ interface WorkspaceHealth {
    */
   reuseEvaluation: ReuseEvaluationHealth;
   lastSuccessfulChain?: LastSuccessfulChain;
+  /**
+   * 2026-11-07 (WorkBuddy host-fact truthfulness): the FOUR independent host
+   * facts — plugin registration, plugin enablement, governance flag, runtime
+   * truthfulness — present ONLY for `pd health --host workbuddy`. Read-only;
+   * none of the facts is inferred from the MCP section, and the runtime
+   * boundary (probe never performed, model tool call not verified) is stated
+   * explicitly instead of implied.
+   */
+  workbuddyHostFacts?: WorkbuddyHostFacts;
 }
 
 interface ReuseEvaluationHealth {
@@ -218,6 +229,9 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
   const reliability = assessReliability(workspaceDir);
   const mcp = assessMcpHealth({ host: opts.host === 'workbuddy' ? 'workbuddy' : 'openclaw' });
+  // 2026-11-07: the four host facts ride along ONLY for the workbuddy host —
+  // they are WorkBuddy-specific truths, never an openclaw/codex section.
+  const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
@@ -248,6 +262,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       mcp,
       reuseEvaluation: assessReuseEvaluationTelemetry(workspaceDir),
       lastSuccessfulChain,
+      ...(workbuddyHostFacts !== undefined ? { workbuddyHostFacts } : {}),
     };
   }
 
@@ -286,6 +301,12 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       console.log(`reliability.nextAction: ${health.reliability.nextAction}`);
     }
     for (const line of formatMcpHealthLines(health.mcp)) console.log(line);
+    // 2026-11-07: the four independent WorkBuddy facts — printed AFTER the
+    // MCP block so a full MCP section visibly does NOT imply a registered or
+    // enabled plugin (install ≠ enable ≠ governance ≠ MCP ≠ runtime).
+    if (health.workbuddyHostFacts !== undefined) {
+      for (const line of formatWorkbuddyHostFactLines(health.workbuddyHostFacts)) console.log(line);
+    }
     console.log(`reuseEvaluation.criticalEventsFile: ${health.reuseEvaluation.criticalEventsFile}`);
     if (health.reuseEvaluation.lastUnavailable) {
       console.log('reuseEvaluation.lastUnavailable:');
