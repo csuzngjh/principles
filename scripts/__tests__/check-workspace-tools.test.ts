@@ -143,10 +143,10 @@ describe('workspace tools gate', () => {
   }, 60_000);
 
   it('fails when a MUTATION-GUARDED-HELPER is called outside a withMutationLock span', async () => {
-    const target = path.join(fixture, 'scripts', 'dev', 'workspace-cleanup.mjs');
+    const target = path.join(fixture, 'scripts', 'dev', 'lib', 'safe-worktree-remove.mjs');
     fs.writeFileSync(
       target,
-      fs.readFileSync(target, 'utf-8') + "\nawait removeWorktree('/somewhere', '/wt', []);\n",
+      fs.readFileSync(target, 'utf-8') + "\nawait removeWorktreeSafely({ cwd: '/somewhere', worktreePath: '/wt', primaryPath: '/somewhere' });\n",
       'utf-8',
     );
     const result = await runGate(fixture);

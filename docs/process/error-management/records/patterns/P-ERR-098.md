@@ -34,10 +34,12 @@ unresolvable target, a relative target containing `..`, a self/ancestor cycle,
 or a case-mismatched path on a case-sensitive Windows directory is UNKNOWN and
 refuses the deletion (`SCAN_INCOMPLETE` / `EXTERNAL_LINKS_PRESENT`). Direction is
 decided from `realpath` on BOTH sides and compared case-sensitively. The scan,
-the refusal decision and `git worktree remove` must share ONE mutation lock — a
-preflight outside the lock leaves a window for another process to add a link.
-Even a link proven INTERNAL must be detached before deletion: verified on this
-machine, `git worktree remove` returned exit 0 while leaving a junction directory
-(and its parent) behind. After deletion, compare a content-level fingerprint of
+the refusal decision, quarantine move, no-follow deletion and Git metadata
+unregistration must share ONE mutation lock. A mutex alone cannot stop a writer
+that does not use that mutex: never hand a live directory to recursive Git
+removal. Rename it to a private quarantine sibling and use the no-follow
+`removeResidueTree` walker; only unregister Git metadata after the tree is gone.
+Verified internal links and ancestor cycles are detached as links, not traversed.
+External and unresolvable targets still fail closed without explicit approval. After deletion, compare a content-level fingerprint of
 each external target (not `existsSync`: the incident deleted files INSIDE a target
 that was still present); targets already missing before the run are not "lost".

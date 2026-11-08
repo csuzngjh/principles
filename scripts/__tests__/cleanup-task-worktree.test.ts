@@ -15,7 +15,9 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { normalizeGitPath } from '../dev/lib/git.mjs';
+import { gitCommonDirAbsolute, normalizeGitPath } from '../dev/lib/git.mjs';
+import { withMutationLock } from '../dev/lib/git-mutation-lock.mjs';
+import { removeWorktreeSafely } from '../dev/lib/safe-worktree-remove.mjs';
 import {
   commitFile,
   git,
@@ -378,6 +380,26 @@ describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
     expect(fs.existsSync(wt)).toBe(false);
   }, 120_000);
 
+  it('detaches a verified ancestor-cycle junction without requiring external-link override', async () => {
+    const { wt, branch } = await makeTask('junction-cycle');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-junction-cycle');
+
+    fs.mkdirSync(path.join(wt, 'node_modules'), { recursive: true });
+    trackJunction(path.join(wt, 'node_modules', 'self'), wt);
+    const r = await runDevScript(
+      'cleanup-task-worktree.mjs',
+      [branch, '--delete-branch', '--skip-gh', '--json'],
+      { cwd: primary }
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout) as { ok: boolean; notes: string[] };
+    expect(out.ok).toBe(true);
+    expect(out.notes.join(' ')).toContain('reparse point');
+    expect(fs.existsSync(wt)).toBe(false);
+    await expect(git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
+  }, 120_000);
+
   it('does NOT report EXTERNAL_TARGET_LOST when the external target was already missing', async () => {
     const { wt, branch } = await makeTask('junction-dangling');
     await mergeIntoMain(branch);
@@ -399,5 +421,39 @@ describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
     expect(out.reason).toBeUndefined();
     expect(fs.existsSync(wt)).toBe(false);
     await expect(git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
+  }, 120_000);
+});
+
+
+describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
+  it('never follows a Junction created AFTER the caller preflight', async () => {
+    // The production helper performs its own final status/ownership check and
+    // moves the worktree before unlinking. This deterministic seam models a
+    // writer that does not participate in the Git metadata mutation lock and
+    // adds a new Junction after the earlier scan but before recursive deletion.
+    const { wt } = await makeTask('late-junction');
+    const outside = makeExternalInstall('late-junction');
+    const before = fingerprintTree(outside);
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let injected = false;
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: primary,
+        worktreePath: wt,
+        primaryPath: primary,
+        onQuarantined: (quarantined) => {
+          const lateLink = path.join(quarantined, 'node_modules');
+          trackJunction(lateLink, outside);
+          injected = true;
+        },
+      }),
+    );
+
+    expect(injected).toBe(true);
+    expect(result.ok, result.reason).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(fingerprintTree(outside)).toBe(before);
+    expect((await worktreeList(primary)).some((w) => normalizeGitPath(w.path) === normalizeGitPath(wt))).toBe(false);
   }, 120_000);
 });

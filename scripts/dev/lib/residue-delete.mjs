@@ -66,39 +66,85 @@ export function scanReparsePoints(root) {
   let files = 0;
   let dirs = 0;
   const stack = [root];
+
+  const recordLink = (linkPath) => {
+    let target = null;
+    try {
+      target = fs.readlinkSync(linkPath);
+    } catch {
+      target = null;
+    }
+    const resolvedTarget = resolveLinkTarget(linkPath, target);
+    links.push({ path: linkPath, target, targetExists: resolvedTarget !== null && fs.existsSync(resolvedTarget) });
+  };
+
   while (stack.length > 0) {
     const dir = stack.pop();
-    let entries;
+    let handle;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      handle = fs.opendirSync(dir);
     } catch (err) {
+      let stat = null;
+      try {
+        stat = fs.lstatSync(dir);
+      } catch {
+        unreadable.push({ path: dir, error: String((err && err.message) || err) });
+        continue;
+      }
+      if (stat.isSymbolicLink()) {
+        recordLink(dir);
+      } else {
+        unreadable.push({ path: dir, error: String((err && err.message) || err) });
+      }
+      continue;
+    }
+
+    let dirStat;
+    try {
+      // opendir may follow a junction if it is swapped in after the parent
+      // enumeration. lstat AFTER opening proves the handle still names a real
+      // directory before we read a single entry from it.
+      dirStat = fs.lstatSync(dir);
+    } catch (err) {
+      handle.closeSync();
       unreadable.push({ path: dir, error: String((err && err.message) || err) });
       continue;
     }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      // Dirent for a reparse point reports isSymbolicLink(); never call stat,
-      // which would traverse into the target.
-      if (entry.isSymbolicLink()) {
-      // PRI-796 review: readlink returns RELATIVE targets verbatim — resolving
-      // them against the process cwd reports existence wrongly. The shared
-      // resolveLinkTarget anchors them at the link's own directory.
-      let target = null;
-      try {
-        target = fs.readlinkSync(full);
-      } catch {
-        target = null;
-      }
-      const resolvedTarget = resolveLinkTarget(full, target);
-      links.push({ path: full, target, targetExists: resolvedTarget !== null && fs.existsSync(resolvedTarget) });
+    if (dirStat.isSymbolicLink()) {
+      handle.closeSync();
+      recordLink(dir);
       continue;
+    }
+    if (!dirStat.isDirectory()) {
+      handle.closeSync();
+      unreadable.push({ path: dir, error: 'path is no longer a directory' });
+      continue;
+    }
+
+    try {
+      let entry;
+      while ((entry = handle.readSync()) !== null) {
+        const full = path.join(dir, entry.name);
+        let childStat;
+        try {
+          childStat = fs.lstatSync(full);
+        } catch (err) {
+          unreadable.push({ path: full, error: String((err && err.message) || err) });
+          continue;
+        }
+        if (childStat.isSymbolicLink()) {
+          recordLink(full);
+        } else if (childStat.isDirectory()) {
+          dirs += 1;
+          stack.push(full);
+        } else {
+          files += 1;
+        }
       }
-      if (entry.isDirectory()) {
-        dirs += 1;
-        stack.push(full);
-      } else {
-        files += 1;
-      }
+    } catch (err) {
+      unreadable.push({ path: dir, error: String((err && err.message) || err) });
+    } finally {
+      handle.closeSync();
     }
   }
   return { links, files, dirs, unreadable };
@@ -160,18 +206,15 @@ export const REMOVAL_REASONS = Object.freeze({
  * Pre-flight for anything about to hand a tree to a recursive deleter —
  * including `git worktree remove`, which is NOT junction-safe on Windows.
  *
- * `external` = every link the deleter must NOT be allowed to traverse:
- *   * target outside `root` (the ERR-098 direction);
- *   * target unresolvable / unreadable — an unprovable direction is UNKNOWN,
- *     and git-14 forbids acting on unknowns;
- *   * target containing a `..` component: lexical normalisation is not what the
- *     OS does when a link precedes it (R/a -> R, R/a/../victim is R's sibling);
- *   * a link whose target contains the link itself (self/ancestor cycle) — git
- *     recurses through it until the removal fails and leaves a residue shell.
+ * `external` = every link not safe for recursive traversal: outside,
+ * unresolvable or non-lexical targets, plus self/ancestor cycles. Cycle links
+ * have `unsafeReason: 'cycle'` and a proven target inside this tree; callers
+ * can unlink those links safely without requiring an external-target override.
  * `internal` = targets proven inside `root` and non-cyclic.
  *
  * `complete` is false when any directory could not be enumerated or `root`
- * itself could not be resolved. `safe` is the ONLY flag a deleter may use.
+ * itself could not be resolved. `safe` is true only when the scan is complete
+ * and no unsafe link remains.
  *
  * @returns {{external: Array<object>, internal: Array<object>, links: number,
  *            files: number, dirs: number, unreadable: Array<object>,
@@ -223,6 +266,8 @@ export function classifyReparsePoints(root) {
       resolvedTarget: lexical,
       canonicalTarget,
       targetExists: link.targetExists,
+      // Cycles are unsafe for recursive traversal even when their targets
+      // are inside the tree; callers may detach verified cycles without recursing.
       inside: inside && !cycle,
       unsafeReason: inside && !cycle ? null : unsafeReason,
     };
@@ -287,7 +332,14 @@ export function detachExternalLinks(root) {
     }
   }
   const after = classifyReparsePoints(root);
-  const failed = detached.filter((d) => d.error !== null);
+  const remainingExternalPaths = new Set(after.external.map((link) => path.resolve(link.path)));
+  const failed = detached.flatMap((item) => {
+    if (item.error !== null) return [item];
+    if (remainingExternalPaths.has(path.resolve(item.path))) {
+      return [{ ...item, error: 'link remained after unlink' }];
+    }
+    return [];
+  });
   return {
     detached,
     brokenTargets,
@@ -326,12 +378,17 @@ export function detachInternalLinks(root) {
     }
   }
   const after = classifyReparsePoints(root);
+  const remainingPaths = new Set([...after.external, ...after.internal].map((link) => path.resolve(link.path)));
+  const stillPresent = detached
+    .filter((item) => remainingPaths.has(path.resolve(item.path)))
+    .map((item) => ({ ...item, error: 'link remained after unlink' }));
+  const failed = [...failedToDetach, ...stillPresent];
   return {
     detached,
-    failedToDetach,
+    failedToDetach: failed,
     remainingLinks: after.links,
     complete: after.complete,
-    ok: failedToDetach.length === 0 && after.complete && after.links === 0,
+    ok: failed.length === 0 && after.complete && after.links === 0,
   };
 }
 
@@ -419,54 +476,112 @@ export function removeResidueTree(root, opts = {}) {
     });
   };
 
-  const walk = (dir) => {
-    let entries;
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isSymbolicLink()) {
-        // Detach the link ITSELF. `unlink` on a Windows directory junction is
-        // verified to remove only the reparse point, leaving the target intact.
-        let target = null;
-        try {
-          target = fs.readlinkSync(full);
-        } catch {
-          target = null;
-        }
-        // Round-3 review: the existence probe must go through the SAME
-        // link-directory resolver as the pre-flight scan — a relative target
-        // checked against the process cwd wrongly reported "did not exist",
-        // silently downgrading the very anomaly detection this walk performs.
-        const resolvedTarget = resolveLinkTarget(full, target);
-        const existedBefore = resolvedTarget !== null ? fs.existsSync(resolvedTarget) : null;
-        fs.unlinkSync(full);
-        removedLinks += 1;
-        const stillThere = resolvedTarget !== null ? fs.existsSync(resolvedTarget) : null;
-        detachedLinks.push({ path: full, target, targetExistedBefore: existedBefore, targetStillExists: stillThere });
-        if (target && existedBefore === true && stillThere === false) {
-          // The link was followed, or the external target was destroyed
-          // concurrently. Either way this is a serious anomaly — surface it.
-          brokenTargets.push({ path: full, target });
-        }
-        report();
-        continue;
-      }
-      if (entry.isDirectory()) {
-        walk(full);
-        fs.rmdirSync(full);
-        removedDirs += 1;
-        report();
-      } else {
-        fs.unlinkSync(full);
-        removedFiles += 1;
-        if (removedFiles % progressEveryFiles === 0) report(true);
-        else report();
-      }
+  const detachLink = (linkPath) => {
+    let target = null;
+    try {
+      target = fs.readlinkSync(linkPath);
+    } catch {
+      target = null;
     }
+    const resolvedTarget = resolveLinkTarget(linkPath, target);
+    const existedBefore = resolvedTarget !== null ? fs.existsSync(resolvedTarget) : null;
+    fs.unlinkSync(linkPath);
+    removedLinks += 1;
+    const stillThere = resolvedTarget !== null ? fs.existsSync(resolvedTarget) : null;
+    detachedLinks.push({ path: linkPath, target, targetExistedBefore: existedBefore, targetStillExists: stillThere });
+    if (target && existedBefore === true && stillThere === false) {
+      brokenTargets.push({ path: linkPath, target });
+    }
+    report();
+  };
+
+  // Open the directory first, then lstat its path before reading the handle.
+  // If a directory is swapped for a junction between enumeration and descent,
+  // the handle may have opened the target, but the post-open lstat detects the
+  // reparse point and the handle is closed without reading a single entry.
+  const walk = (dir, isRoot = false) => {
+    let handle;
+    try {
+      handle = fs.opendirSync(dir);
+    } catch (openError) {
+      let stat;
+      try {
+        stat = fs.lstatSync(dir);
+      } catch {
+        if (openError && openError.code === 'ENOENT') return false;
+        throw openError;
+      }
+      if (stat.isSymbolicLink()) {
+        if (isRoot) throw new Error('refusing to traverse a root reparse point: ' + dir);
+        detachLink(dir);
+        return false;
+      }
+      if (!stat.isDirectory()) {
+        if (isRoot) throw new Error('root stopped being a directory: ' + dir);
+        fs.unlinkSync(dir);
+        removedFiles += 1;
+        report();
+        return false;
+      }
+      throw openError;
+    }
+
+    let stat;
+    try {
+      stat = fs.lstatSync(dir);
+    } catch (err) {
+      handle.closeSync();
+      throw err;
+    }
+    if (stat.isSymbolicLink()) {
+      handle.closeSync();
+      if (isRoot) throw new Error('refusing to traverse a root reparse point: ' + dir);
+      detachLink(dir);
+      return false;
+    }
+    if (!stat.isDirectory()) {
+      handle.closeSync();
+      if (isRoot) throw new Error('root stopped being a directory: ' + dir);
+      fs.unlinkSync(dir);
+      removedFiles += 1;
+      report();
+      return false;
+    }
+
+    try {
+      let entry;
+      while ((entry = handle.readSync()) !== null) {
+        const full = path.join(dir, entry.name);
+        let childStat;
+        try {
+          childStat = fs.lstatSync(full);
+        } catch (err) {
+          if (err && err.code === 'ENOENT') continue;
+          throw err;
+        }
+        if (childStat.isSymbolicLink()) {
+          detachLink(full);
+        } else if (childStat.isDirectory()) {
+          if (walk(full)) {
+            fs.rmdirSync(full);
+            removedDirs += 1;
+            report();
+          }
+        } else {
+          fs.unlinkSync(full);
+          removedFiles += 1;
+          if (removedFiles % progressEveryFiles === 0) report(true);
+          else report();
+        }
+      }
+    } finally {
+      handle.closeSync();
+    }
+    return true;
   };
 
   try {
-    walk(guard.resolved);
+    walk(guard.resolved, true);
     fs.rmdirSync(guard.resolved);
     removedDirs += 1;
     report(true);

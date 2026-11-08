@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PROGRESS_INTERVAL_MS,
   assertDeletableRoot,
@@ -320,6 +320,50 @@ describe('classifyReparsePoints / detachExternalLinks (ERR-098)', () => {
     expect(fs.readFileSync(path.join(outside, 'nested', 'SKILL.md'), 'utf-8')).toBe('# skill\n');
   });
 
+  it('records an unlink failure and refuses to claim successful external-link detachment', () => {
+    const { tree, outside } = buildTree('unlink-throws');
+    const link = path.join(tree, 'node_modules', 'openclaw');
+    makeJunction(link, outside);
+    const unlink = fs.unlinkSync;
+    const spy = vi.spyOn(fs, 'unlinkSync').mockImplementation((file, ...rest) => {
+      if (String(file) === link) throw new Error('simulated EPERM');
+      return unlink(file, ...rest);
+    });
+    let result;
+    try {
+      result = detachExternalLinks(tree);
+    } finally {
+      spy.mockRestore();
+      fs.unlinkSync(link);
+    }
+    expect(result.ok).toBe(false);
+    expect(result.failedToDetach).toHaveLength(1);
+    expect(result.failedToDetach[0].error).toContain('EPERM');
+    expect(result.remainingExternal).toHaveLength(1);
+  });
+
+  it('refuses when unlink returns without removing the external reparse point', () => {
+    const { tree, outside } = buildTree('unlink-noop');
+    const link = path.join(tree, 'node_modules', 'openclaw');
+    makeJunction(link, outside);
+    const unlink = fs.unlinkSync;
+    const spy = vi.spyOn(fs, 'unlinkSync').mockImplementation((file, ...rest) => {
+      if (String(file) === link) return;
+      return unlink(file, ...rest);
+    });
+    let result;
+    try {
+      result = detachExternalLinks(tree);
+    } finally {
+      spy.mockRestore();
+      fs.unlinkSync(link);
+    }
+    expect(result.ok).toBe(false);
+    expect(result.failedToDetach).toHaveLength(1);
+    expect(result.failedToDetach[0].error).toContain('remained');
+    expect(result.remainingExternal).toHaveLength(1);
+  });
+
   it('is a no-op on a tree with no links, and does not call it a failure', () => {
     const { tree } = buildTree('detach-none');
     const result = detachExternalLinks(tree);
@@ -362,7 +406,7 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     expect(verdict.safe).toBe(true);
   });
 
-  it('a link pointing at the tree root (self/ancestor cycle) is unsafe, not internal', () => {
+  it('a self/ancestor cycle is unsafe and refused before recursive deletion', () => {
     const { tree } = buildTree('cycle');
     makeJunction(path.join(tree, 'node_modules', 'self'), tree);
     const verdict = classifyReparsePoints(tree);

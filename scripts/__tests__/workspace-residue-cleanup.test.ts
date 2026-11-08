@@ -9,6 +9,8 @@ import { normalizeGitPath } from '../dev/lib/git.mjs';
 import { classifyResidue, scanResidue, toOwnerState } from '../dev/lib/workspace-lifecycle.mjs';
 import {
   git,
+  commitFile,
+  makeJunction,
   poolRootFor,
   removeFixture,
   runDevScript,
@@ -317,4 +319,45 @@ describe('residue is outside the automatic sweep', () => {
     // while the tool reports the expanded path — the ERR-090 class.)
     expect(normalizeGitPath(out.poolRoot)).toBe(normalizeGitPath(path.join(root, '_worktrees', path.basename(primary))));
   }, 60_000);
+});
+
+describe('batch cleanup preserves branches when a worktree removal is refused', () => {
+  it('keeps both the merged branch and external target when a junction blocks removal', async () => {
+    const created = await runDevScript(
+      'create-task-worktree.mjs', ['PRI-914', 'batch-link-refusal', '--skip-bootstrap', '--json'], { cwd: primary }
+    );
+    expect(created.code, created.stdout + created.stderr).toBe(0);
+    const { worktree, branch } = JSON.parse(created.stdout) as { worktree: string; branch: string };
+    await commitFile(worktree, 'batch-link-refusal.txt', 'x\n', 'batch link refusal');
+    await git(primary, 'switch', 'main');
+    await git(primary, 'merge', '--no-ff', '-m', 'merge batch-link-refusal', branch);
+    await git(primary, 'push', 'origin', 'main');
+
+    const external = path.join(root, 'batch-link-refusal-external');
+    fs.mkdirSync(external, { recursive: true });
+    fs.writeFileSync(path.join(external, 'keep.txt'), 'KEEP\n', 'utf-8');
+    fs.mkdirSync(path.join(worktree, 'node_modules'), { recursive: true });
+    const link = path.join(worktree, 'node_modules', 'outside-link');
+    makeJunction(link, external);
+
+    try {
+      const run = await runDevScript(
+        'workspace-cleanup.mjs', ['--apply', '--grace-days', '0', '--skip-gh', '--json'], { cwd: primary }
+      );
+      expect(run.code, run.stdout + run.stderr).toBe(0);
+      const out = JSON.parse(run.stdout) as {
+        refused: Array<{ action: { kind: string; branch?: string }; reason: string }>;
+        actions: Array<{ kind: string; branch?: string }>;
+      };
+      expect(out.refused.some((item) => item.action.kind === 'remove-worktree' && item.action.branch === branch)).toBe(true);
+      expect(out.refused.some((item) => item.action.kind === 'delete-branch' && item.action.branch === branch)).toBe(true);
+      expect(out.actions.some((item) => item.kind === 'delete-branch' && item.branch === branch)).toBe(false);
+      expect(fs.existsSync(worktree)).toBe(true);
+      expect(fs.readFileSync(path.join(external, 'keep.txt'), 'utf-8')).toBe('KEEP\n');
+      const branchTip = await git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch);
+      expect(branchTip.trim()).not.toBe('');
+    } finally {
+      try { fs.unlinkSync(link); } catch { /* link may have been detached */ }
+    }
+  }, 120_000);
 });

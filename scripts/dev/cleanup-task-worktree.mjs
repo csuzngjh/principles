@@ -26,20 +26,16 @@
 //   npm run dev:worktree:cleanup -- ai/PRI-123-some-task
 //
 // ERR-098 / PRI-1143 — `git worktree remove` is NOT junction-safe on Windows.
-// The recurrence OCC-20261106T025529Z-g9kvsgn43c proved it: two MERGED worktrees
-// held junctions (gitignored fixtures) pointing at the real global OpenClaw
-// install, git recursed through them on the FIRST non-forced removal, and deleted
-// files outside the worktree until MAX_PATH stopped it. So no removal runs without
-// a reparse-point preflight: any link whose target lies outside the worktree is a
-// REFUSAL, unless --detach-external-links explicitly detaches those links first
-// (detaching removes only the link, never the target). A single retry with one
-// --force is allowed ONLY after the porcelain-clean check passed and no external
-// link remains, so the only thing it can override is ignored build output
-// (node_modules). Double --force is never used. Scan, decision and removal share
-// one mutation-lock span; every external target is fingerprinted before and after
-// (not merely checked for existence — the incident deleted files INSIDE a target
-// that was still present), and internal links are detached too, because git can
-// report exit 0 while leaving a junction directory behind.
+// The recurrence OCC-20261106T025529Z-g9kvsgn43c proved that git worktree remove
+// can recurse through a junction and delete files outside the worktree. Every
+// removal therefore preflights reparse points: external/unresolvable links are a
+// REFUSAL unless --detach-external-links explicitly unlinks them (never targets);
+// proven-internal links, including ancestor cycles, are detached automatically.
+// The tree is then renamed into a unique quarantine sibling and deleted by the
+// no-follow filesystem walker. Git receives --force ONLY after that path is
+// verified absent, to clear its stale admin record; Git never recursively deletes
+// the user's worktree contents. Scan, detach, quarantine and unregister share one
+// mutation-lock span, and external targets are fingerprinted before and after.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,7 +48,8 @@ import {
 } from './lib/git.mjs';
 import { collectPrIndex, readLeaseState } from './lib/workspace-lifecycle.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
-import { classifyReparsePoints, detachExternalLinks, detachInternalLinks, REMOVAL_REASONS } from './lib/residue-delete.mjs';
+import { classifyReparsePoints, detachExternalLinks, detachInternalLinks, formatProgress, REMOVAL_REASONS } from './lib/residue-delete.mjs';
+import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';
 import { CODES } from './lib/preflight.mjs';
 
 function parseArgs(argv) {
@@ -95,6 +92,34 @@ class PreflightRefusal extends Error {
     this.name = 'PreflightRefusal';
     this.nextAction = nextAction;
     this.payload = payload || {};
+  }
+}
+
+/** Re-check both lease and Git lock state inside the mutation lock at each destructive boundary. */
+async function assertWorktreeRemovalOwnership(cwd, worktreePath, stage) {
+  const lease = readLeaseState(worktreePath);
+  if (lease.phase === 'active' || lease.phase === 'invalid') {
+    throw new PreflightRefusal(
+      'A write lease became ' + lease.phase + ' ' + stage + '; refusing to mutate the worktree.',
+      'Coordinate with the lease holder and retry once the lease is released.',
+      { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED, leasePhase: lease.phase }
+    );
+  }
+  const liveList = await listWorktrees(cwd);
+  const liveEntry = liveList.find((w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(worktreePath, cwd));
+  if (!liveEntry) {
+    throw new PreflightRefusal(
+      'The worktree is no longer registered ' + stage + '; refusing to mutate a path whose ownership changed.',
+      'Refresh the workspace snapshot and inspect the path before retrying.',
+      { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED }
+    );
+  }
+  if (liveEntry.locked) {
+    throw new PreflightRefusal(
+      'The worktree became Git-locked ' + stage + '; refusing to mutate it.',
+      'Release the claim deliberately, then retry.',
+      { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED }
+    );
   }
 }
 
@@ -337,24 +362,9 @@ async function main() {
     let targetSnapshots = [];
     try {
       await withMutationLock({ commonDir, operation: 'worktree-remove', target: target.path }, async () => {
-        // Re-check ownership INSIDE the lock, immediately before any mutation.
-        const liveLease = readLeaseState(target.path);
-        if (liveLease.phase === 'active' || liveLease.phase === 'invalid') {
-          throw new PreflightRefusal(
-            'A write lease became ' + liveLease.phase + ' after the pre-lock check; refusing to detach links or remove the worktree.',
-            'Coordinate with the lease holder and retry once it is released.',
-            { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED, leasePhase: liveLease.phase }
-          );
-        }
-        const liveList = await listWorktrees(cwd);
-        const liveEntry = liveList.find((w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(target.path, cwd));
-        if (liveEntry && liveEntry.locked) {
-          throw new PreflightRefusal(
-            'The worktree became Git-locked after the pre-lock check; refusing to detach links or remove it.',
-            'Release the claim deliberately, then retry.',
-            { reason: REMOVAL_REASONS.OWNERSHIP_CHANGED }
-          );
-        }
+        // The first ownership re-check is inside the lock. The same check is
+        // repeated after scanning and immediately before each unlink/move.
+        await assertWorktreeRemovalOwnership(cwd, target.path, 'before the reparse-point scan');
         const linkScan = classifyReparsePoints(target.path);
 
         if (!linkScan.complete) {
@@ -372,24 +382,26 @@ async function main() {
           );
         }
 
-        if (linkScan.external.length > 0 && !args.detachExternalLinks) {
+        const unapprovedExternal = linkScan.external.filter((link) => link.unsafeReason !== 'cycle');
+        if (unapprovedExternal.length > 0 && !args.detachExternalLinks) {
           throw new PreflightRefusal(
             'The worktree holds ' +
-              linkScan.external.length +
-              ' reparse point(s) the deleter must not traverse (target OUTSIDE the tree, unresolvable, non-lexical or cyclic). `git worktree remove` recurses through such links (ERR-098), which would delete files this worktree has no claim on. Nothing was removed:\n' +
-              describeLinks(linkScan.external),
+              unapprovedExternal.length +
+              ' reparse point(s) the deleter must not traverse (target OUTSIDE the tree, unresolvable or non-lexical). Self/ancestor cycles are proven internal and are detached by the internal-link path. `git worktree remove` recurses through unsafe links (ERR-098), which would delete files this worktree has no claim on. Nothing was removed:\n' +
+              describeLinks(unapprovedExternal),
             'Detach them yourself — removing a link never touches its target — then retry. On Windows a directory junction detaches with: cmd /c rmdir ' +
-              shellPath(linkScan.external[0].path) +
+              shellPath(unapprovedExternal[0].path) +
               '   (or pass --detach-external-links to let this tool detach exactly these links and re-verify each target). Every path is also listed in `externalLinks`.',
             {
               reason: REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT,
-              externalLinks: linkScan.external.slice(0, 20),
-              externalLinkCount: linkScan.external.length,
+              externalLinks: unapprovedExternal.slice(0, 20),
+              externalLinkCount: unapprovedExternal.length,
             }
           );
         }
 
         if (linkScan.external.length > 0) {
+          await assertWorktreeRemovalOwnership(cwd, target.path, 'before detaching external or cyclic reparse points');
           detached = detachExternalLinks(target.path);
           detachedLinks = detached.detached;
           if (detached.brokenTargets.length > 0) {
@@ -430,6 +442,7 @@ async function main() {
         // (and its parent) behind — a NO_GIT_MARKER residue shell. Detach
         // internal links unconditionally; their targets die with the tree anyway.
         if (linkScan.internal.length > 0) {
+          await assertWorktreeRemovalOwnership(cwd, target.path, 'before detaching internal reparse points');
           const internal = detachInternalLinks(target.path);
           if (!internal.ok) {
             throw new PreflightRefusal(
@@ -465,34 +478,25 @@ async function main() {
             };
           });
 
-        let removeError = '';
-        try {
-          await runGit(['worktree', 'remove', target.path], { cwd });
-        } catch (err) {
-          removeError = err && err.message ? err.message : String(err);
+        const safeRemoval = await removeWorktreeSafely({
+          cwd,
+          worktreePath: target.path,
+          primaryPath: primary.path,
+          onProgress: args.json ? null : (progress) => console.log(formatProgress(progress)),
+        });
+        notes.push(...safeRemoval.notes);
+        if (safeRemoval.removal && safeRemoval.removal.detachedLinks.length > 0) {
+          detachedLinks = [...(detachedLinks || []), ...safeRemoval.removal.detachedLinks];
         }
-        if (removeError) {
-          // Never force past a NEW untracked file created after our first
-          // porcelain check: re-prove cleanliness, or stop instead of retrying.
-          const freshStatus = await runGit(['status', '--porcelain'], { cwd: target.path, allowFailure: true });
-          if (freshStatus === null || freshStatus.trim().length > 0) {
-            const changed = new Error(
-              'git worktree remove refused and the worktree changed during the run (porcelain no longer clean); NOT retrying with --force'
-            );
-            changed.reason = REMOVAL_REASONS.REMOVAL_FAILED;
-            throw changed;
-          }
-          await runGit(['worktree', 'remove', '--force', target.path], { cwd });
-          notes.push('removal needed one --force pass for ignored build output (porcelain was clean)');
-        }
-
-        // git can report success while a junction-derived directory survives.
-        if (fs.existsSync(target.path)) {
-          const residueError = new Error(
-            'git worktree remove returned success but ' + target.path + ' is still on disk — this is a NO_GIT_MARKER residue shell'
+        if (safeRemoval.removedPath) removedWorktree = safeRemoval.removedPath;
+        if (!safeRemoval.ok) {
+          const removalError = new Error(
+            safeRemoval.reason + (safeRemoval.quarantinePath ? ' (quarantine: ' + safeRemoval.quarantinePath + ')' : '')
           );
-          residueError.reason = REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL;
-          throw residueError;
+          removalError.reason = safeRemoval.reasonCode || REMOVAL_REASONS.REMOVAL_FAILED;
+          removalError.quarantinePath = safeRemoval.quarantinePath;
+          removalError.restoredPath = safeRemoval.restoredPath;
+          throw removalError;
         }
         removedWorktree = target.path;
       });

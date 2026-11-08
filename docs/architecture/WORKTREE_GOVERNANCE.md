@@ -287,14 +287,23 @@ to a recursive remover:
 Acceptance criterion: a residue directory containing a junction to important data
 is removed, and the target is bit-for-bit intact. This is covered by a test.
 
-The same rule gates the **removal** path (PRI-1143). The scan, the refusal decision
-and `git worktree remove` all run inside ONE `withMutationLock` span: a preflight
-outside the lock leaves an ownership gap in which another process can create a
-junction that git then follows. `classifyReparsePoints` refuses with
-`EXTERNAL_LINKS_PRESENT` — listing each link, its target and why it is unsafe —
-when a target lies outside the tree, cannot be resolved by the filesystem, contains
-a `..` component (lexical normalisation is not what the OS does when a link
-precedes it), or forms a self/ancestor cycle. A scan that cannot enumerate every
+The same rule gates the **removal** path (PRI-1143). The scan, the refusal
+decision, quarantining, no-follow deletion and Git metadata unregistration all run
+inside ONE `withMutationLock` span. A Git mutex alone does not prevent an editor
+that ignores the mutex from creating a late junction, so Git NEVER recursively
+deletes the live worktree directory: the tool moves it into a unique quarantine
+sibling, uses the junction-safe `removeResidueTree` walk to remove its contents,
+then calls `git worktree remove --force` ONLY against the verified-absent
+quarantine path to unregister Git metadata. On partial failure, the helper
+attempts to restore the worktree path or preserves its quarantine path for
+manual inspection; no recursive-delete fallback is allowed.
+
+`classifyReparsePoints` refuses with `EXTERNAL_LINKS_PRESENT` — listing each
+link, its target and why it is unsafe — when a target lies outside the tree,
+cannot be resolved by the filesystem, or contains a `..` component (lexical
+normalisation is not what the OS does when a link precedes it). A verified
+self/ancestor cycle is also unsafe for recursive traversal but is detached
+as a link, without deleting its internal target. A scan that cannot enumerate every
 directory refuses with `SCAN_INCOMPLETE`: an unreadable directory may hide exactly
 such a link, and git-14 forbids acting on unknowns. Targets are compared
 case-sensitively after `realpath`, because Windows supports per-directory case
@@ -304,9 +313,9 @@ fingerprint (relative path + byte size) of every external target that existed
 before the delete, so partial deletion INSIDE a still-present directory is
 detected. Targets that were already missing are not reported as lost. A link
 proven to stay inside the tree, non-cyclically, never blocks a removal: it dies
-with the tree. The batch sweep (`dev:workspace:cleanup -- --apply`) refuses the
-same way, under the same lock, and never auto-detaches an UNSAFE link (it does
-detach links proven internal, which cannot carry the deletion elsewhere).
+with the tree. The batch sweep (`dev:workspace:cleanup -- --apply`) shares the same
+lock and no-follow removal. It refuses external or unresolvable links, but
+may safely unlink proven-internal links and same-tree ancestor cycles.
 
 ### 5.2 Observability of long deletions
 
