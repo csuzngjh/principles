@@ -21,9 +21,13 @@
  *   regenerate a legacy v1 file.
  * - Legacy v1 files remain readable through migrateLegacyConsentFile — a
  *   one-way, read-only migrator (legacy reader / one-way migrator, never a
- *   writer). The load that recognizes a v1 file persists the migrated
- *   state back through the normal atomic write, so the on-disk file
- *   converges to the current format on first load and never migrates twice.
+ *   writer). A read parses a v1 file in memory (identity preserved) but
+ *   NEVER writes; persistence of the migration happens exclusively inside
+ *   withControlStateLock transactions (PRI-1151): the legacy v1→v2
+ *   migration write-back, enable/disable/reset, and workspace export
+ *   bookkeeping merges all serialize on the same cross-process
+ *   `<state>.state-lock`, so no writer can build its write from a stale
+ *   read or overwrite a completed authorization change.
  * - Migration from schema v1: consent, consentVersion, and telemetrySecret
  *   are preserved verbatim; legacy machine-global export bookkeeping
  *   (lastSucceededAt, retry state, attempt counters) is DISCARDED — it
@@ -40,6 +44,7 @@ import {
   isValidTelemetrySecretHex,
   PRODUCT_TELEMETRY_CONSENT_VERSION,
 } from '@principles/core/runtime';
+import { acquireExclusiveLock, releaseExclusiveLock } from './control-state-lock.js';
 
 export const PRODUCT_TELEMETRY_STATE_FILENAME = 'product-telemetry.json';
 /** The ONE writable schema version (single-format contract, PRI-1138). */
@@ -326,6 +331,12 @@ function parseConsentState(parsed: unknown): ParsedControlState {
  * writable. This is the structural guarantee that no code path can persist
  * or regenerate a legacy v1 file — a state carrying any other schemaVersion
  * is refused loud and the file on disk is left untouched.
+ *
+ * Concurrency convention (PRI-1151): production read-modify-write callers
+ * must run inside withControlStateLock (tx.write) so their write is built
+ * from a read taken under the same cross-process mutex as every other
+ * writer; calling this function directly is for lock-held transaction
+ * internals and single-writer utilities.
  */
 export function writeProductTelemetryControlState(homeDir: string, state: ProductTelemetryControlState): ControlStateWrite {
   if (state.schemaVersion !== PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION) {
@@ -358,155 +369,165 @@ export function writeProductTelemetryControlState(homeDir: string, state: Produc
   }
 }
 
-/** Outcome of trying to persist a just-performed legacy migration. */
-type LegacyMigrationPersistOutcome =
-  /** Migration persisted through the normal atomic write. */
-  | { kind: 'persisted' }
-  /** Another process rewrote the file first; the caller must re-parse it. */
-  | { kind: 'superseded' }
-  /** Re-read failed mid-flight; the state already parsed from the bytes this
-   *  load actually read is the best available answer (same staleness as any
-   *  pre-PRI-1138 read). */
-  | { kind: 'serve-read' }
-  /** The write failed loud (details carried for the caller to return). */
-  | { kind: 'failed'; read: Extract<ControlStateRead, { ok: false }> };
+/**
+ * Lock-held read result: the parsed CURRENT disk state plus the schema
+ * version the bytes on disk actually carried (so a transaction can tell a
+ * migrated-in-memory v1 apart from a genuine v2 and persist the migration).
+ */
+export type LatestControlStateRead =
+  | { ok: true; state: ProductTelemetryControlState; existed: boolean; diskSchemaVersion: '1' | '2' }
+  | { ok: false; reason: string; nextAction: string };
 
 /**
- * Persist a just-performed legacy migration through the normal atomic write
- * (the migrator itself never writes, PRI-1138). The file is re-read first:
- * if another process already rewrote it (its own migration or a consent
- * transition), the migration is superseded — it must NOT overwrite that
- * newer result, and the caller re-parses the current bytes instead of
- * returning the superseded identity. A failed write is loud (returned by the
- * caller) and leaves the legacy file on disk so the next load retries
- * (idempotent).
- *
- * Residual window (documented, PRI-1138 review): between the byte-compare
- * and the rename another process's consent transition can still land and be
- * overwritten — the same last-writer-wins exposure the service's existing
- * read→write consent transitions (enable/disable/reset) already have. Closing
- * it fully means unifying ALL control-state writes under the service-layer
- * state-update lock; the reader is itself called inside that lock today, so
- * that redesign is deliberately out of scope here.
+ * Read the raw bytes from disk and parse them — pure, no write, no lock.
+ * A missing file is the normal never-configured case (defaults,
+ * existed=false, diskSchemaVersion '2'). A malformed file is a loud failure
+ * — silently treating it as "unset" could re-prompt or re-export against the
+ * user's recorded decision (rc-3/rc-9).
  */
-function persistLegacyMigration(args: {
-  homeDir: string;
-  filePath: string;
-  rawAtRead: string;
-  migrated: ProductTelemetryControlState;
-}): LegacyMigrationPersistOutcome {
-  let rawNow: string;
+function loadControlStateFromDisk(filePath: string): LatestControlStateRead {
+  let raw: string;
   try {
-    rawNow = fs.readFileSync(args.filePath, 'utf8');
-  } catch {
-    // Unreadable mid-flight (external tampering): skip the write-back; the
-    // state parsed from the bytes this load did read still serves the caller
-    // and the next load retries the migration.
-    return { kind: 'serve-read' };
-  }
-  if (rawNow !== args.rawAtRead) {
-    return { kind: 'superseded' };
-  }
-  const written = writeProductTelemetryControlState(args.homeDir, args.migrated);
-  if (!written.ok) {
+    raw = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    // Guarded code access (rc-1/rc-2: runtime check before use; rc-5:
+    // Object.hasOwn on untrusted objects; no NodeJS namespace in this config).
+    const codeValue =
+      typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
+        ? (error as Record<string, unknown>).code
+        : undefined;
+    const code = typeof codeValue === 'string' ? codeValue : undefined;
+    if (code === 'ENOENT') {
+      return { ok: true, state: defaultProductTelemetryControlState(), existed: false, diskSchemaVersion: PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION };
+    }
     return {
-      kind: 'failed',
-      read: {
-        ok: false,
-        reason: `product_telemetry_state_legacy_migration_write_failed: ${written.reason}`,
-        nextAction: written.nextAction,
-      },
+      ok: false,
+      reason: `product_telemetry_state_unreadable: ${code ?? String(error)}`,
+      nextAction: `Check permissions on ${filePath}`,
     };
   }
-  return { kind: 'persisted' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      ok: false,
+      reason: 'product_telemetry_state_malformed_json',
+      nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
+    };
+  }
+  const result = parseConsentState(parsed);
+  if (!result.ok) {
+    return {
+      ok: false,
+      reason: `product_telemetry_state_malformed: ${result.errors.join('; ')}`,
+      nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
+    };
+  }
+  return {
+    ok: true,
+    state: result.state,
+    existed: true,
+    diskSchemaVersion: result.migratedFromLegacy
+      ? PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION
+      : PRODUCT_TELEMETRY_CONTROL_SCHEMA_VERSION,
+  };
 }
 
 /**
- * Bound on the legacy-migration convergence loop: a file that keeps changing
- * under a migrating load (flapping concurrent writers) is reported loud
- * instead of looping forever.
- */
-const MAX_LEGACY_MIGRATION_ATTEMPTS = 3;
-
-/**
- * Read and validate the control state. A missing file is the normal
- * never-configured case (defaults, existed=false). A malformed file is a
- * loud failure — silently treating it as "unset" could re-prompt or re-export
- * against the user's recorded decision (rc-3/rc-9).
- *
- * Legacy v1 files (PRI-1138): parsed by the one-way legacy migrator
- * (identity preserved, export bookkeeping dropped) and immediately persisted
- * back as the current format through the normal atomic write, so the file on
- * disk converges on the very load that performed the migration. If another
- * process rewrites the file mid-migration, the load re-parses the CURRENT
- * bytes (never returning a superseded identity), bounded by
- * MAX_LEGACY_MIGRATION_ATTEMPTS. A failed migration write is a loud failure
- * — never a silent fallback to running on the old format — and leaves the
- * legacy file untouched (temp+rename write), so the next load retries the
- * idempotent migration.
+ * Read and validate the control state — PURE READ, never writes (PRI-1151).
+ * A legacy v1 file is parsed in memory (identity preserved, bookkeeping
+ * dropped) so callers observe the migrated semantics, but persisting the
+ * migration happens exclusively inside withControlStateLock transactions;
+ * a read-only caller (status/preview) can therefore never race a concurrent
+ * authorization change.
  */
 export function readProductTelemetryControlState(homeDir: string): ControlStateRead {
-  const filePath = getProductTelemetryStatePath(homeDir);
-  for (let attempt = 1; ; attempt += 1) {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(filePath, 'utf8');
-    } catch (error) {
-      // Guarded code access (rc-1/rc-2: runtime check before use; rc-5:
-      // Object.hasOwn on untrusted objects; no NodeJS namespace in this config).
-      const codeValue =
-        typeof error === 'object' && error !== null && Object.hasOwn(error, 'code')
-          ? (error as Record<string, unknown>).code
-          : undefined;
-      const code = typeof codeValue === 'string' ? codeValue : undefined;
-      if (code === 'ENOENT') {
-        return { ok: true, state: defaultProductTelemetryControlState(), existed: false };
-      }
-      return {
-        ok: false,
-        reason: `product_telemetry_state_unreadable: ${code ?? String(error)}`,
-        nextAction: `Check permissions on ${filePath}`,
-      };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return {
-        ok: false,
-        reason: 'product_telemetry_state_malformed_json',
-        nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
-      };
-    }
-    const result = parseConsentState(parsed);
-    if (!result.ok) {
-      return {
-        ok: false,
-        reason: `product_telemetry_state_malformed: ${result.errors.join('; ')}`,
-        nextAction: `Fix or delete ${filePath} (delete = consent returns to unset)`,
-      };
-    }
-    if (!result.migratedFromLegacy) {
-      return { ok: true, state: result.state, existed: true };
-    }
-    const persistOutcome = persistLegacyMigration({ homeDir, filePath, rawAtRead: raw, migrated: result.state });
-    if (persistOutcome.kind === 'persisted' || persistOutcome.kind === 'serve-read') {
-      return { ok: true, state: result.state, existed: true };
-    }
-    if (persistOutcome.kind === 'failed') {
-      return persistOutcome.read;
-    }
-    // superseded: another process rewrote the file before our write — do not
-    // return (or overwrite with) the superseded state; re-parse the current
-    // bytes, bounded so a flapping file cannot loop forever.
-    if (attempt >= MAX_LEGACY_MIGRATION_ATTEMPTS) {
-      return {
-        ok: false,
-        reason: `product_telemetry_state_legacy_migration_unstable: the file kept changing across ${MAX_LEGACY_MIGRATION_ATTEMPTS} attempts`,
-        nextAction: `Retry the operation; if it persists, inspect ${filePath}`,
-      };
-    }
+  const loaded = loadControlStateFromDisk(getProductTelemetryStatePath(homeDir));
+  if (!loaded.ok) return loaded;
+  return { ok: true, state: loaded.state, existed: loaded.existed };
+}
+
+/** Transactional read/write surface handed to withControlStateLock bodies. */
+export interface ControlStateLockTx {
+  /**
+   * Read the CURRENT disk state inside the lock. No re-acquisition — the
+   * caller already holds the lock; nesting withControlStateLock inside a
+   * body is a programming error and would deadlock against the bounded
+   * wait.
+   */
+  readLatest(): LatestControlStateRead;
+  /** Atomic single-format write inside the lock. */
+  write(state: ProductTelemetryControlState): ControlStateWrite;
+}
+
+/**
+ * withControlStateLock — the ONE cross-process transaction entry for the
+ * control state (PRI-1151): acquire `<state>.state-lock` → run the body with
+ * lock-held readLatest/write primitives → release. Every control-state
+ * writer (legacy migration write-back, enable/disable/reset, workspace
+ * bookkeeping merge) goes through here, so each write is built from a read
+ * taken under the same mutex that serializes every other writer — a stale
+ * read can no longer overwrite a completed authorization change (e.g. a
+ * concurrent disable).
+ *
+ * Failure semantics: lock acquisition is bounded; on timeout this returns
+ * { ok: false } and NOTHING was written (no lock-free degradation). A
+ * throwing body releases the lock and returns a structured failure — this
+ * function never throws.
+ */
+export async function withControlStateLock<T>(
+  homeDir: string,
+  body: (tx: ControlStateLockTx) => Promise<T> | T,
+  options?: { timeoutMs?: number },
+): Promise<{ ok: true; value: T } | { ok: false; reason: string; nextAction: string }> {
+  const stateFilePath = getProductTelemetryStatePath(homeDir);
+  const lock = await acquireExclusiveLock(stateFilePath, options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : undefined);
+  if (lock === undefined) {
+    return {
+      ok: false,
+      reason: 'product_telemetry_state_lock_timeout: another process holds the control-state lock',
+      nextAction: 'Retry the operation; if it keeps failing, check for a stuck PD process before touching ~/.pd/product-telemetry.json.state-lock',
+    };
   }
+  try {
+    const tx: ControlStateLockTx = {
+      readLatest: () => loadControlStateFromDisk(stateFilePath),
+      write: (state: ProductTelemetryControlState) => writeProductTelemetryControlState(homeDir, state),
+    };
+    const value = await body(tx);
+    return { ok: true, value };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `product_telemetry_state_transaction_error: ${message}`,
+      nextAction: 'Retry the operation; the control state on disk was not left half-written (atomic temp+rename)',
+    };
+  } finally {
+    releaseExclusiveLock(lock);
+  }
+}
+
+/**
+ * One-way legacy v1→v2 migration as a locked transaction (PRI-1151): read
+ * the CURRENT disk state under the lock; if it is still v1, persist the
+ * migrated state (identity preserved) through the normal atomic write; if it
+ * is already the current format, do nothing (idempotent — no rewrite). A
+ * concurrent disable/reset/enable serializes on the same lock, so this can
+ * never overwrite a completed authorization change.
+ */
+export async function migrateLegacyControlState(homeDir: string): Promise<ControlStateWrite> {
+  const outcome = await withControlStateLock(homeDir, (tx) => {
+    const latest = tx.readLatest();
+    if (!latest.ok) return latest;
+    if (latest.diskSchemaVersion !== PRODUCT_TELEMETRY_LEGACY_CONTROL_SCHEMA_VERSION) {
+      return { ok: true as const };
+    }
+    return tx.write(latest.state);
+  });
+  if (!outcome.ok) return outcome;
+  return outcome.value;
 }
 
 /**
