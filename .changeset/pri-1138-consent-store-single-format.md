@@ -1,5 +1,6 @@
 ---
 '@principles/host-runtime': patch
+'@principles/pd-cli': patch
 ---
 
 Consent-store single-format convergence + global control-state write mutex (PRI-1138, PRI-1104/5, PRI-1151).
