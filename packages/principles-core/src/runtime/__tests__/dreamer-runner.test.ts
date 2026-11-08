@@ -311,7 +311,7 @@ describe('DreamerRunner', () => {
     expect(callOrder).toEqual(['startRun', 'pollRun', 'fetchOutput']);
   });
 
-  it('sets agentSpec.agentId to dreamer and outputSchemaRef to dreamer-output-v1', async () => {
+  it('sets agentSpec.agentId to dreamer and outputSchemaRef to the canonical dreamer-output', async () => {
     const mocks = createMocks();
     const runner = createRunner(mocks);
 
@@ -319,7 +319,10 @@ describe('DreamerRunner', () => {
 
     const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
     expect(startInput.agentSpec.agentId).toBe('dreamer');
-    expect(startInput.outputSchemaRef).toBe('dreamer-output-v1');
+    // PRI-1139: canonical version-neutral ref; agentSpec carries the shared
+    // contract version token.
+    expect(startInput.outputSchemaRef).toBe('dreamer-output');
+    expect(startInput.agentSpec.schemaVersion).toBe('current');
     expect(startInput.taskRef?.taskId).toBe(TASK_ID);
   });
 

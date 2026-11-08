@@ -35,7 +35,7 @@ registry.given('workspace 中存在可查看的原则', async (ctx, page, api) =
 registry.given('该原则的治理投影需要 Owner 决策', async (ctx, page) => {
   await page.setViewportSize({ width: 375, height: 812 });
   const principleId = String(ctx.state.principleId);
-  await page.route(`**/api/v1/principles/${encodeURIComponent(principleId)}/governance`, async route => {
+  await page.route(`**/api/principles/${encodeURIComponent(principleId)}/governance`, async route => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       schemaVersion: '1', principleId, asOf: '2026-08-20T10:00:00.000Z',
       summary: { headlineCode: 'governance.headline.owner_decision', reasonCode: 'governance.reason.approval_pending', nextActionCode: 'governance.next.review', ownerActionRequired: true, sourceRefs: [{ type: 'approval', id: 'approval-bdd' }] },
@@ -53,14 +53,14 @@ registry.given('该原则的治理投影需要 Owner 决策', async (ctx, page) 
 
 registry.given('该原则的治理投影功能已关闭', async (ctx, page) => {
   const principleId = String(ctx.state.principleId);
-  await page.route(`**/api/v1/principles/${encodeURIComponent(principleId)}/governance`, async route => {
+  await page.route(`**/api/principles/${encodeURIComponent(principleId)}/governance`, async route => {
     await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'feature_disabled', message: 'disabled', reason: 'feature_disabled', nextAction: 'Enable the flag.' }) });
   });
 });
 
 registry.given('该原则正在自动修订且证据不完整', async (ctx, page) => {
   const principleId = String(ctx.state.principleId);
-  await page.route(`**/api/v1/principles/${encodeURIComponent(principleId)}/governance`, async route => {
+  await page.route(`**/api/principles/${encodeURIComponent(principleId)}/governance`, async route => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       schemaVersion: '1', principleId, asOf: '2026-08-20T10:00:00.000Z',
       summary: { headlineCode: 'governance.headline.revision', reasonCode: 'governance.reason.automatic_revision', nextActionCode: 'governance.next.wait', ownerActionRequired: false, sourceRefs: [{ type: 'task', id: 'task-bdd-degraded' }] },

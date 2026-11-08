@@ -66,7 +66,7 @@ export async function handleIntentRoute(
   const { workspaceDir, subPath } = ctx;
   const lang = parseLang(req);
   try {
-    // ── GET /api/v1/intent — read Intent summary ──────────────────────────
+    // ── GET /api/intent — read Intent summary ──────────────────────────
     if (req.method === 'GET' && subPath === '') {
       const flagEnabled = loadFlagEnabled(workspaceDir);
       const model = getModel(workspaceDir);
@@ -75,7 +75,7 @@ export async function handleIntentRoute(
       return;
     }
 
-    // ── GET /api/v1/intent/content — read raw INTENT.md for editing ─────────
+    // ── GET /api/intent/content — read raw INTENT.md for editing ─────────
     if (req.method === 'GET' && subPath === '/content') {
       const flagEnabled = loadFlagEnabled(workspaceDir);
       if (!flagEnabled) {
@@ -113,7 +113,7 @@ export async function handleIntentRoute(
       return;
     }
 
-    // ── GET /api/v1/intent/versions — list version history ────────────────
+    // ── GET /api/intent/versions — list version history ────────────────
     if (req.method === 'GET' && subPath === '/versions') {
       const model = getModel(workspaceDir);
       const result = await model.getVersions(lang);
@@ -125,7 +125,7 @@ export async function handleIntentRoute(
       return;
     }
 
-    // ── POST /api/v1/intent/init — create INTENT.md template ──────────────
+    // ── POST /api/intent/init — create INTENT.md template ──────────────
     if (req.method === 'POST' && subPath === '/init') {
       const flagEnabled = loadFlagEnabled(workspaceDir);
       if (!flagEnabled) {
@@ -184,7 +184,7 @@ export async function handleIntentRoute(
       return;
     }
 
-    // ── PUT /api/v1/intent/content — save INTENT.md content ───────────────
+    // ── PUT /api/intent/content — save INTENT.md content ───────────────
     if (req.method === 'PUT' && subPath === '/content') {
       const flagEnabled = loadFlagEnabled(workspaceDir);
       if (!flagEnabled) {
@@ -255,7 +255,7 @@ export async function handleIntentRoute(
     }
 
     // ── Unknown sub-path ──────────────────────────────────────────────────
-    sendError(res, 404, 'not_found', `Route /api/v1/intent${subPath} not found`);
+    sendError(res, 404, 'not_found', `Route /api/intent${subPath} not found`);
   } catch (err) {
     sendError(res, 500, 'intent_route_error', err instanceof Error ? err.message : 'Unknown error');
   }

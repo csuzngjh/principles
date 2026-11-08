@@ -14,7 +14,7 @@
   },
   "deliveryChannel": "research-same-channel-v1",
   "actorWiring": {
-    "transport": "createPiAdapterTransport({ adapter }) in lib/actor.mjs — wraps the PRODUCTION PiAiRuntimeAdapter (startRun/fetchOutput boundary, outputSchemaRef 'learning-lab-actor-action-v1' registered in OUTPUT_SCHEMA_REGISTRY)",
+    "transport": "createPiAdapterTransport({ adapter }) in lib/actor.mjs — wraps the PRODUCTION PiAiRuntimeAdapter (startRun/fetchOutput boundary, outputSchemaRef 'learning-lab-actor-action' registered in OUTPUT_SCHEMA_REGISTRY)",
     "interactiveLoop": "runRealActorOpportunity() — one model round per oracle action, observation-reactive, hard caps enforced",
     "capsTemplate": "DEFAULT_REAL_ACTOR_CAPS (lib/actor.mjs): maxStepsPerOpportunity=40, maxRequestsPerOpportunity=16, maxInvalidActions=2, maxTokensPerRequest=512, timeoutMsPerRequest=60s, totalBudgetMsPerOpportunity=300s — real-run values frozen at OD-2",
     "offlineRehearsal": "scripts/__tests__/principle-learning-lab-actor.test.ts (18 tests: reactivity, terminal stop, bounded invalid, caps, NT-01 channel guard, cross-arm isolation, freeze integrity, sidecar validity, study-stop-on-leak)"

@@ -23,17 +23,17 @@ beforeEach(async () => {
   }
   approvalId = (await new SqliteApprovalQueueStore(connection).enqueue({ artifactId: 'a', channel: 'defer_archive', riskLevel: 'low' }, 'now')).approvalId;
   model = new ApprovalsConsoleModel(directory);
-  server = createServer((req, res) => { void handleApprovalsRoute(req, res, directory, (req.url ?? '/').replace('/api/v1/approvals', '')).catch(() => { res.statusCode = 500; res.end(); }); });
+  server = createServer((req, res) => { void handleApprovalsRoute(req, res, directory, (req.url ?? '/').replace('/api/approvals', '')).catch(() => { res.statusCode = 500; res.end(); }); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing server port');
-  base = `http://127.0.0.1:${address.port}/api/v1/approvals/${approvalId}`;
+  base = `http://127.0.0.1:${address.port}/api/approvals/${approvalId}`;
 });
 afterEach(async () => { await new Promise<void>(resolve => server.close(() => resolve())); disposeApprovalsModels(); model.dispose(); connection.close(); rmSync(directory, { recursive: true, force: true }); });
 async function review() {
   const detail = await model.getApprovalDetail(approvalId);
   if (!detail) throw new Error('missing approval review');
-  expect(detail.writeGuardVersion).toBe('approval-review-v1');
+  expect(detail.writeGuardVersion).toBe('approval-review');
   expect(isApprovalReviewGuard(detail.review.expectedReview)).toBe(true);
   return detail;
 }
@@ -42,7 +42,7 @@ it('GET returns same-object exact material and guard without raw private metadat
   const response = await fetch(base);
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
-  expect(body).toMatchObject({ data: { writeGuardVersion: 'approval-review-v1', review: { expectedReview: { artifactState: 'present', artifactId: 'a' }, material: { exactBody: { kind: 'principle', text: 'Statement a' }, rationale: 'Reason', scope: ['local'], risks: ['Risk a'] } } } });
+  expect(body).toMatchObject({ data: { writeGuardVersion: 'approval-review', review: { expectedReview: { schemaVersion: 'approval-review', artifactState: 'present', artifactId: 'a' }, material: { exactBody: { kind: 'principle', text: 'Statement a' }, rationale: 'Reason', scope: ['local'], risks: ['Risk a'] } } } });
   expect(JSON.stringify(body)).not.toContain('not-for-ui');
 });
 it('route rejects stale approve, reject and edit without changing the winner', async () => {

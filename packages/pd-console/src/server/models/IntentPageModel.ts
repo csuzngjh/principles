@@ -250,7 +250,7 @@ export class IntentPageModel {
         return {
           ok: false,
           reason: 'not_found',
-          nextAction: `${getIntentFilename(lang)} does not exist. Create it first using POST /api/v1/intent/init.`,
+          nextAction: `${getIntentFilename(lang)} does not exist. Create it first using POST /api/intent/init.`,
         };
       }
       if ('oversized' in read) {

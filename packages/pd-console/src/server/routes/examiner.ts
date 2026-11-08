@@ -9,19 +9,19 @@
  *
  * Surface:
  *   v0.9 (offline-first, semantics unchanged):
- *     GET  /api/v1/examiner/overview
- *     GET  /api/v1/examiner/principles
- *     POST /api/v1/examiner/studies                   (v0.10.1: + suiteKey)
- *     GET  /api/v1/examiner/studies/:studyId
- *     POST /api/v1/examiner/studies/:studyId/preflight
- *     POST /api/v1/examiner/studies/:studyId/run      (offline-stub, synchronous)
- *     GET  /api/v1/examiner/studies/:studyId/report
- *     POST /api/v1/examiner/studies/:studyId/report
+ *     GET  /api/examiner/overview
+ *     GET  /api/examiner/principles
+ *     POST /api/examiner/studies                   (v0.10.1: + suiteKey)
+ *     GET  /api/examiner/studies/:studyId
+ *     POST /api/examiner/studies/:studyId/preflight
+ *     POST /api/examiner/studies/:studyId/run      (offline-stub, synchronous)
+ *     GET  /api/examiner/studies/:studyId/report
+ *     POST /api/examiner/studies/:studyId/report
  *   v0.10.1:
- *     GET  /api/v1/examiner/principles/:id/evidence   — production evidence aggregate
- *     GET  /api/v1/examiner/suites                    — challenge-suite catalog
- *     GET  /api/v1/examiner/hosts/openclaw/readiness  — host readiness projection
- *     POST /api/v1/examiner/studies/:studyId/run      — modes 'host-dry-run' /
+ *     GET  /api/examiner/principles/:id/evidence   — production evidence aggregate
+ *     GET  /api/examiner/suites                    — challenge-suite catalog
+ *     GET  /api/examiner/hosts/openclaw/readiness  — host readiness projection
+ *     POST /api/examiner/studies/:studyId/run      — modes 'host-dry-run' /
  *       'f2-real-host' follow the §12.3 async contract: 202 + runId, state
  *       derived from the study ledger, one live run per study, restart
  *       recovery, RESULT_UNKNOWN never auto-retried, f2 gated on an APPROVED
@@ -628,9 +628,9 @@ export async function handleExaminerRoute(
       return;
     }
 
-    sendNotFound(res, `Route /api/v1/examiner/studies/:studyId${rest} not found`);
+    sendNotFound(res, `Route /api/examiner/studies/:studyId${rest} not found`);
     return;
   }
 
-  sendNotFound(res, `Route /api/v1/examiner${subPath} not found`);
+  sendNotFound(res, `Route /api/examiner${subPath} not found`);
 }

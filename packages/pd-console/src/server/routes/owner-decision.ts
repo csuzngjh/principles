@@ -3,8 +3,8 @@
  * (SPEC §15). Read-only: the Owner decision projection never mutates; the
  * approval/activation mutation services remain the final write authority.
  *
- *   GET /api/v1/principles/owner-decision-inbox      (static; dispatch before /:id)
- *   GET /api/v1/principles/:id/owner-decision-view
+ *   GET /api/principles/owner-decision-inbox      (static; dispatch before /:id)
+ *   GET /api/principles/:id/owner-decision-view
  *
  * Both ride the existing `principle_governance_projection_v2` flag (no new
  * runtime flag, SPEC §16) and reuse the route family's auth/workspace
@@ -30,7 +30,7 @@ function featureDisabled(res: ServerResponse): void {
     { reason: 'feature_disabled', nextAction: 'Enable features.principle_governance_projection_v2 in .pd/config.yaml.' });
 }
 
-/** GET /api/v1/principles/owner-decision-inbox */
+/** GET /api/principles/owner-decision-inbox */
 export async function handleOwnerDecisionInboxRoute(params: OwnerDecisionRouteParams): Promise<void> {
   const { res, workspaceDir, featureFlags, now } = params;
   if (featureFlags?.principle_governance_projection_v2?.enabled !== true) {
@@ -45,7 +45,7 @@ export async function handleOwnerDecisionInboxRoute(params: OwnerDecisionRoutePa
   }
 }
 
-/** GET /api/v1/principles/owner-decision-library — compact titles/states for the Library list (§11.2). */
+/** GET /api/principles/owner-decision-library — compact titles/states for the Library list (§11.2). */
 export async function handleOwnerDecisionLibraryRoute(params: OwnerDecisionRouteParams): Promise<void> {
   const { res, workspaceDir, featureFlags, now } = params;
   if (featureFlags?.principle_governance_projection_v2?.enabled !== true) {
@@ -78,7 +78,7 @@ export function parseOwnerDecisionViewSubPath(subPath: string): string | null | 
 }
 
 /**
- * GET /api/v1/principles/:id/owner-decision-view.
+ * GET /api/principles/:id/owner-decision-view.
  * Returns false when the sub path does not match (caller continues routing).
  */
 export async function handleOwnerDecisionViewRoute(params: OwnerDecisionRouteParams & { subPath: string }): Promise<boolean> {

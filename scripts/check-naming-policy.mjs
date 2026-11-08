@@ -21,9 +21,9 @@
  * keep the paths they were written with.
  *
  * Rule gating is explicit config (`namingPolicy.gatedRules`), not "every rule
- * marked gated". `versioned-output-ref` belongs to PRI-1139 (PR-6) and stays
- * in `pendingRules` until that PR flips the write side; it is reported but
- * never fails the build here.
+ * marked gated". `versioned-output-ref` became a gate with PRI-1139 (PR-6):
+ * the write side now uses the version-neutral canonical registry keys, so a
+ * versioned `outputSchemaRef:` literal in production source is a regression.
  *
  * Exit contract:
  *   - `--strict` fails on gated violations OR scan I/O errors in EVERY output
@@ -315,8 +315,8 @@ const RULES = [
   },
   {
     id: 'versioned-output-ref',
-    why: '带 -vN 的 outputSchemaRef 写入（PRI-1139 / PR-6 去版本语义，尚未 gate）',
-    re: /outputSchemaRef:\s*['"`][^'"`]*-v[12]['"`]/g,
+    why: '带 -vN 的 outputSchemaRef 写入（PRI-1139 / PR-6 写入侧已切换，再出现即为回退）',
+    re: /outputSchemaRef:\s*['"`][^'"`]*-v\d+['"`]/g,
     gated: true,
     frozenExempt: false,
     // PR #2367 CodeRabbit #6: scan the whole file so the property name and

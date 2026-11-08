@@ -58,13 +58,13 @@ PD 严格遵循 Semantic Versioning：
 Schema 版本独立于 npm 版本，因为多个 npm minor 可能共享同一个 schema：
 
 ```typescript
-// @principles/core/runtime-v2/schema-version.ts
-export const RUNTIME_V2_SCHEMA_VERSION = 'v1' as const;
+// @principles/core/runtime/schema-version.ts（PRI-1139 收敛后）
+export const RUNTIME_CONTRACT_SCHEMA_VERSION = 'current' as const;
 
-// 子 schema 版本（独立演进）
-export const DIAGNOSTICIAN_OUTPUT_SCHEMA = 'diagnostician-output-v1';
-export const DREAMER_OUTPUT_SCHEMA = 'dreamer-output-v1';
-// ...
+// output contract ref 为版本中性的 canonical key（PRI-1104 / PRI-1139）；
+// 历史 -vN 拼写经 OUTPUT_SCHEMA_REF_ALIASES 兼容读取：
+// 'diagnostician-output'   ← canonical（唯一当前写入标准）
+// 'diagnostician-output-v1' ← 仅历史读取（alias）
 ```
 
 ---
@@ -93,15 +93,14 @@ export const DREAMER_OUTPUT_SCHEMA = 'dreamer-output-v1';
 ### 3.3 Schema 版本递增的命名
 
 ```
-v1 → v2
+契约演进（PRI-1139 之后的约定）：
+- registry key 本身版本中性（'diagnostician-output'），不再以 -vN 后缀表达版本；
+- 真正的破坏性契约演进（如 Diagnostician V2 Only，PRI-1146）走独立工单：
+  显式新增/退役 ref + alias 收敛 + 独立回滚，而不是静默改 key 的后缀。
 
-文件命名：
-diagnostician-output.ts                 ← 当前版本
-diagnostician-output-v2.ts              ← 新版本
-
-Schema constant：
-DIAGNOSTICIAN_OUTPUT_SCHEMA = 'diagnostician-output-v1'   ← 老版本保留
-DIAGNOSTICIAN_OUTPUT_SCHEMA_V2 = 'diagnostician-output-v2' ← 新版本
+兼容读取：
+'诊断 ref' 的历史 -vN 拼写登记在 CONTRACT_REF_PAIRS 双向表中，
+resolveOutputSchema 精确命中优先、未命中走 alias（PRI-1134 前置）。
 ```
 
 ### 3.4 多版本共存
@@ -109,20 +108,10 @@ DIAGNOSTICIAN_OUTPUT_SCHEMA_V2 = 'diagnostician-output-v2' ← 新版本
 新版本上线时，旧版本至少保留**一个 minor 版本**周期：
 
 ```typescript
-// runtime-v2/diagnostician-runner.ts
-const SUPPORTED_OUTPUT_SCHEMAS = [
-  'diagnostician-output-v1',
-  'diagnostician-output-v2',
-] as const;
-
-// 解析时容错读取
-function parseOutput(raw: unknown, schemaRef: string): DiagnosticianOutput {
-  if (schemaRef === 'diagnostician-output-v2') {
-    return parseV2(raw);
-  }
-  if (schemaRef === 'diagnostician-output-v1') {
-    return upgradeV1ToV2(parseV1(raw));
-  }
+// 多版本读取经 registry alias，而非调用点手写列表：
+// （真正的双版本期仅在有显式 Owner 批准的演进工单中出现）
+const schema = resolveOutputSchema(schemaRef); // 精确命中优先，alias 兼容历史拼写
+if (schemaRef && !schema) {
   throw new PDRuntimeError('output_invalid', `Unknown schema: ${schemaRef}`);
 }
 ```

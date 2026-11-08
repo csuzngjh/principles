@@ -10,9 +10,20 @@
  */
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
 
+/**
+ * PRI-1139 read-side whitelist for governance/owner-decision `schemaVersion`
+ * values. Servers mint 'current'; responses minted before the cutover carry
+ * the legacy '1' and stay valid reads. Kept local (not a core value import)
+ * because this module ships in the browser bundle.
+ */
+const RUNTIME_CONTRACT_SCHEMA_VERSIONS: ReadonlySet<string> = new Set(['current', '1']);
+function isRuntimeContractSchemaVersion(value: unknown): boolean {
+  return typeof value === 'string' && RUNTIME_CONTRACT_SCHEMA_VERSIONS.has(value);
+}
+
 /** Browser-local structural type for the compact inbox response (SPEC §11.1). */
 export interface OwnerDecisionInboxData {
-  schemaVersion: '1';
+  schemaVersion: 'current' | '1';
   generatedAt: string;
   totalPrinciples: number;
   groups: {
@@ -196,7 +207,7 @@ function isTimelineEvent(value: unknown): boolean {
 
 function isOwnerGovernanceView(value: unknown): value is OwnerGovernanceView {
   if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'principleId', 'asOf', 'summary', 'principleState', 'process', 'automation', 'attention', 'activationSummary', 'timeline', 'sourceRefs', 'dataQuality'])) return false;
-  if (value.schemaVersion !== '1' || typeof value.principleId !== 'string' || value.principleId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
+  if (!isRuntimeContractSchemaVersion(value.schemaVersion) || typeof value.principleId !== 'string' || value.principleId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
   const {
     summary, principleState: principle, process, automation, attention,
     activationSummary: activation, dataQuality: quality,
@@ -291,7 +302,7 @@ export function isOwnerDecisionViewCore(value: unknown): value is OwnerDecisionV
     'incidentSummary', 'learnedPrinciple', 'rationale', 'applicability', 'nonApplicabilityOrUnknown', 'expectedBehavior',
     'currentEnforcement', 'evidenceSummary', 'uncertainty', 'risk', 'rollback', 'decisionState', 'decisionSubjects',
     'availableActions', 'blockers', 'nextAction', 'inbox', 'technicalDetails'])) return false;
-  if (value.schemaVersion !== '1' || !isString(value.principleId) || !isString(value.asOf)) return false;
+  if (!isRuntimeContractSchemaVersion(value.schemaVersion) || !isString(value.principleId) || !isString(value.asOf)) return false;
   if (value.sourceReadStatus !== 'complete' && value.sourceReadStatus !== 'partial') return false;
   if (!isStringEnum(value.decisionState, ownerDecisionStates)) return false;
   if (!Array.isArray(value.availableActions) || !value.availableActions.every(isOwnerAction)) return false;
@@ -309,7 +320,7 @@ export function validateOwnerDecisionViewCore(value: unknown): OwnerDecisionView
 export function isOwnerDecisionInbox(value: unknown): value is OwnerDecisionInboxData {
   return isObject(value)
     && hasOwnFields(value, ['schemaVersion', 'generatedAt', 'totalPrinciples', 'groups', 'historicalUnknown'])
-    && value.schemaVersion === '1'
+    && isRuntimeContractSchemaVersion(value.schemaVersion)
     && isString(value.generatedAt)
     && typeof value.totalPrinciples === 'number'
     && isObject(value.groups) && hasOwnFields(value.groups, ['decision', 'blocked', 'recovery'])
@@ -326,7 +337,7 @@ export function validateOwnerDecisionInbox(value: unknown): OwnerDecisionInboxDa
 
 /** Browser-local structural type for the compact library projection (SPEC §11.2). */
 export interface OwnerDecisionLibraryData {
-  schemaVersion: '1';
+  schemaVersion: 'current' | '1';
   generatedAt: string;
   entries: Record<string, {
     decisionState: string;
@@ -347,7 +358,7 @@ function isOwnerDecisionLibraryEntry(value: unknown): boolean {
 export function isOwnerDecisionLibrary(value: unknown): value is OwnerDecisionLibraryData {
   return isObject(value)
     && hasOwnFields(value, ['schemaVersion', 'generatedAt', 'entries'])
-    && value.schemaVersion === '1'
+    && isRuntimeContractSchemaVersion(value.schemaVersion)
     && isString(value.generatedAt)
     && isObject(value.entries)
     && Object.values(value.entries).every(isOwnerDecisionLibraryEntry);
@@ -410,7 +421,7 @@ function isEnvironmentContext(value: unknown): boolean {
 
 function isGovernanceExperienceSnapshot(value: unknown): value is GovernanceExperienceSnapshot {
   if (!isObject(value) || !hasOwnFields(value, ['schemaVersion', 'snapshotId', 'asOf', 'summary', 'readiness', 'activity', 'trustContext', 'dataQuality'])) return false;
-  if (value.schemaVersion !== '1' || typeof value.snapshotId !== 'string' || value.snapshotId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
+  if (!isRuntimeContractSchemaVersion(value.schemaVersion) || typeof value.snapshotId !== 'string' || value.snapshotId.length === 0 || !isGovernanceTimestamp(value.asOf)) return false;
   const { summary, readiness, activity, trustContext, dataQuality } = value;
   if (!isObject(summary) || !hasOwnFields(summary, ['primaryAttention', 'headlineCode', 'reasonCode', 'nextActionCode'])
     || !isStringEnum(summary.primaryAttention, governancePrimaryAttentions)
@@ -951,7 +962,7 @@ export function validateDefaultRuntimeUpdate(v: unknown): DefaultRuntimeUpdateDa
   return { defaultRuntime: v.defaultRuntime };
 }
 
-// ── Runtime Profile mutation (POST/PATCH/DELETE /api/v1/config/profiles) ──────
+// ── Runtime Profile mutation (POST/PATCH/DELETE /api/config/profiles) ──────
 
 /**
  * Response shape for create/update/delete runtime profile endpoints.
@@ -1099,7 +1110,7 @@ export interface GovernanceQueueData {
   generatedAt?: string;
 }
 
-// ── Failed task detail (GET /api/v1/failed-tasks/:id) ───────────────────────
+// ── Failed task detail (GET /api/failed-tasks/:id) ───────────────────────
 // PRI-747 F22 / PRI-749: the server endpoint (task + run history) has existed
 // since the failed-task observability spec; this validator + the api.ts
 // wrapper connect the UI to it. Server contract: { task: TaskRecord, runs:
@@ -1119,7 +1130,7 @@ export interface FailedTaskDetailRun {
   errorCategory: string | null;
 }
 
-/** Validated shape of GET /api/v1/failed-tasks/:id. */
+/** Validated shape of GET /api/failed-tasks/:id. */
 export interface FailedTaskDetailData {
   taskId: string;
   taskKind: string;
@@ -2569,7 +2580,7 @@ export interface IntentDecisionResultData {
 }
 
 /**
- * Validate the POST /api/v1/intent-decisions response envelope.
+ * Validate the POST /api/intent-decisions response envelope.
  * Shape: { record: IntentDecisionRecord, created: boolean }
  */
 export function validateIntentDecisionResult(v: unknown): IntentDecisionResultData | null {
@@ -2594,7 +2605,7 @@ export interface IntentDecisionSummaryData {
 }
 
 /**
- * Validate the GET /api/v1/intent-decisions/summary response.
+ * Validate the GET /api/intent-decisions/summary response.
  * All 6 count keys must be present with non-negative finite numbers.
  * lastDecisionAt: null is valid, string is valid, anything else returns null.
  */
@@ -2684,7 +2695,7 @@ export type FollowUpResponseData =
   | GeneratePatchProposalFollowUpData;
 
 /**
- * Validate the POST /api/v1/intent-decisions/:id/follow-up response.
+ * Validate the POST /api/intent-decisions/:id/follow-up response.
  *
  * The response is a discriminated union on the `type` field. Each branch has
  * its own required fields (Rule 3: fail loud on missing required fields).

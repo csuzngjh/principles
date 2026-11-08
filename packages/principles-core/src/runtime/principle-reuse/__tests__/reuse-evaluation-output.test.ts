@@ -31,9 +31,11 @@ const VALID_REUSE = {
   confidence: 0.86,
 };
 
-describe('reuse-evaluation-output schema (reuse-evaluation-output-v1)', () => {
+describe('reuse-evaluation-output schema (reuse-evaluation-output)', () => {
   it('exposes the stable schema ref for OUTPUT_SCHEMA_REGISTRY', () => {
-    expect(REUSE_EVALUATION_OUTPUT_SCHEMA_REF).toBe('reuse-evaluation-output-v1');
+    // PRI-1139: canonical version-neutral ref; the pre-cutover '-v1' spelling
+    // still resolves through OUTPUT_SCHEMA_REF_ALIASES (see output-schema-ref-alias tests).
+    expect(REUSE_EVALUATION_OUTPUT_SCHEMA_REF).toBe('reuse-evaluation-output');
   });
 
   it('accepts a valid reuse output through the raw schema as well', () => {

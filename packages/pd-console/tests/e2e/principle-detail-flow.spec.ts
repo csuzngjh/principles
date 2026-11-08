@@ -43,8 +43,8 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
 
     // PrincipleDetailPage 的 4 源 Promise.all：
     // 1. /api/principles/:id
-    // 2. /api/v1/approvals/grouped
-    // 3. /api/v1/lifecycle/principles/:id
+    // 2. /api/approvals/grouped
+    // 3. /api/lifecycle/principles/:id
     // 4. /api/principles/:id/trajectory
     await page.goto(`/#/principles/${encodeURIComponent(principle.id)}`);
     await page.waitForLoadState('networkidle');
@@ -62,9 +62,9 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     const principleDetailCalled = apiCalls.some(c =>
       c.url.includes(`/api/principles/${encodeURIComponent(principle.id)}`) && !c.url.includes('trajectory'),
     );
-    const approvalsGroupedCalled = apiCalls.some(c => c.url.includes('/api/v1/approvals/grouped'));
+    const approvalsGroupedCalled = apiCalls.some(c => c.url.includes('/api/approvals/grouped'));
     const lifecycleCalled = apiCalls.some(c =>
-      c.url.includes(`/api/v1/lifecycle/principles/${encodeURIComponent(principle.id)}`),
+      c.url.includes(`/api/lifecycle/principles/${encodeURIComponent(principle.id)}`),
     );
     const trajectoryCalled = apiCalls.some(c =>
       c.url.includes(`/api/principles/${encodeURIComponent(principle.id)}/trajectory`),
@@ -107,7 +107,7 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     };
     const principleId = listBody.data.principles[0].id;
 
-    const lifecycleResp = await apiGet(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`);
+    const lifecycleResp = await apiGet(`/api/lifecycle/principles/${encodeURIComponent(principleId)}`);
     // lifecycle 端点可能返回 200 或 degraded（如果无数据），但不应 5xx
     expect(lifecycleResp.status).toBe(200);
     const lifecycleBody = lifecycleResp.body as {
@@ -139,14 +139,14 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
   // reader remains read-only; the final approval must never be clicked as a preview.
   test('打开准确对象的阅读与决定区：材料、后果、备注及最终按钮可达，展开和关闭均不写入', async ({ page }) => {
     const principleId = 'e2e00000-0000-4000-8000-000000000008';
-    const viewResp = await apiGet(`/api/v1/principles/${encodeURIComponent(principleId)}/owner-decision-view`);
+    const viewResp = await apiGet(`/api/principles/${encodeURIComponent(principleId)}/owner-decision-view`);
     expect(viewResp.status).toBe(200);
     const viewBody = viewResp.body as {
       data?: { availableActions?: Array<{ semantic?: string }> };
     };
     expect(viewBody.data?.availableActions?.some(action => action.semantic === 'approve'),
       `seed fixture ${principleId} 已不再提供 approve 动作`).toBe(true);
-    const grouped = await apiGet('/api/v1/approvals/grouped');
+    const grouped = await apiGet('/api/approvals/grouped');
     expect(grouped.status).toBe(200);
     const groups = grouped.body as { data: { groups: Array<{ principleId: string; records: Array<{ id: string; artifactId: string; status: string }> }> } };
     const group = groups.data.groups.find(item => item.principleId === principleId);
@@ -177,7 +177,7 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
 
     // The exact artifact's proposed behavior remains visible. The old view's
     // decorative prefix is now a separate label, not part of the stored text.
-    const review = await apiGet(`/api/v1/approvals/${encodeURIComponent(record.id)}`);
+    const review = await apiGet(`/api/approvals/${encodeURIComponent(record.id)}`);
     expect(review.status).toBe(200);
     const expectedBehavior = '提交确认面板前，Owner 能在决策区读到本条后果说明。';
     expect(review.body).toMatchObject({ data: { review: { material: { targetBehavior: expectedBehavior } } } });
@@ -203,7 +203,7 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     await opener.click();
     await expect(panel).not.toHaveAttribute('open');
     expect(writes, '关闭阅读区同样不得产生写入').toEqual([]);
-    const current = await apiGet(`/api/v1/approvals/${encodeURIComponent(record.id)}`);
+    const current = await apiGet(`/api/approvals/${encodeURIComponent(record.id)}`);
     expect(current.status).toBe(200);
     const currentBody = current.body as { data: { status: string; artifactId: string } };
     expect(currentBody.data.status).toBe('pending');

@@ -226,6 +226,25 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.observations[0].policyVersion).toBe(PROMPT_BUDGET_POLICY_VERSION);
   });
 
+  it('PRI-1139 cutover: historical model_aware_v2 events stay readable after the write side flipped', () => {
+    // Every event written before the PRI-1139 cutover carries the generational
+    // id. Dropping it from the whitelist would strand ALL pre-cutover history
+    // and the console would fall back to a stale budget on day one.
+    const dir = workspaceWith({
+      hostKind: 'openclaw',
+      budget: 8000,
+      budgetCapacitySource: 'host_effective_window',
+      budgetCapacityStatus: 'confirmed',
+      budgetContextWindowTokens: 256_000,
+      budgetPolicyVersion: 'model_aware_v2',
+    });
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
+    expect(report.foreignPolicyEventsSkipped).toBe(0);
+    expect(report.observations).toHaveLength(1);
+    expect(report.observations[0].budgetChars).toBe(8000);
+    expect(report.observations[0].policyVersion).toBe(PROMPT_BUDGET_POLICY_VERSION);
+  });
+
   it('provenance without a policy version is pre-policy, not "current by default"', () => {
     // A writer that emits source/status/window but no policy version cannot
     // prove the budget was computed under the CURRENT formula. Treating the
