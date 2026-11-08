@@ -1,0 +1,265 @@
+{
+  "ok": true,
+  "experiment": "PRI-1147 real-LLM BDD metrics + acceptance gates",
+  "generated_at": "2026-11-07T12:17:03.857Z",
+  "run_id": "run-20261107-full-remediation",
+  "mode": "full",
+  "partial_run": false,
+  "gates": {
+    "mode": "full",
+    "run_id": "run-20261107-full-remediation",
+    "dataset_ok": true,
+    "d6_ok": true,
+    "fault_injection_ok": true,
+    "openclaw_ok": true,
+    "overall_ok": true,
+    "missing_phases": [],
+    "run_id_mismatches": [],
+    "dataset_problems": [],
+    "execution_failures": [],
+    "partial_run": false
+  },
+  "run_meta": {
+    "git_commit_sha": "6bbfd8a497d2b6b947697f7aa4298657d1e7cb82",
+    "dataset_sha256": "2043116826d8e8f001afe6c3228d07b0cb0c8d0ff33ac5862869c775a9bb4a8e",
+    "provider": "zai",
+    "model": "glm-5.3-flash",
+    "api_key_env": "ZAI_API_KEY"
+  },
+  "dataset": {
+    "total_rows": 45,
+    "matrix_rows": 45,
+    "excluded_execution_failures": 0,
+    "confusion_matrix": {
+      "tp": 20,
+      "fp": 6,
+      "tn": 13,
+      "fn_detection": 0,
+      "fn_stage1_coverage": 6
+    },
+    "metrics": {
+      "precision": 0.7692,
+      "recall_incl_stage1_coverage": 0.7692,
+      "recall_detection_only": 1,
+      "specificity": 0.6842,
+      "accuracy": 0.7333
+    },
+    "stage2": {
+      "reached_stage2": 25,
+      "decided": 24,
+      "correct": 19,
+      "unresolved_excluded_from_accuracy": 1,
+      "accuracy": 0.7917,
+      "unresolved_samples": [
+        {
+          "sample_id": "D4",
+          "final_outcome": "abandoned_low_confidence"
+        }
+      ]
+    },
+    "outcome_counts": {
+      "admitted": 26,
+      "stage1_not_admitted": 15,
+      "resolved_none": 3,
+      "abandoned_low_confidence": 1
+    },
+    "llm_stats": {
+      "total_calls": 29,
+      "ok_calls": 29,
+      "no_verdict_calls": 0,
+      "threw_calls": 0,
+      "avg_latency_ms": 3657,
+      "p95_latency_ms": 6735
+    },
+    "fp_list": [
+      {
+        "sample_id": "B4",
+        "category": "B",
+        "final_outcome": "admitted",
+        "marker_decision": "admitted"
+      },
+      {
+        "sample_id": "C1",
+        "category": "C",
+        "final_outcome": "admitted",
+        "marker_decision": "admitted"
+      },
+      {
+        "sample_id": "C4",
+        "category": "C",
+        "final_outcome": "admitted",
+        "marker_decision": "admitted"
+      },
+      {
+        "sample_id": "D5",
+        "category": "D",
+        "final_outcome": "admitted",
+        "marker_decision": "admitted"
+      },
+      {
+        "sample_id": "G3",
+        "category": "G",
+        "final_outcome": "admitted",
+        "marker_decision": "admitted"
+      },
+      {
+        "sample_id": "G4",
+        "category": "G",
+        "final_outcome": "admitted",
+        "marker_decision": "admitted"
+      }
+    ],
+    "fn_list": [
+      {
+        "sample_id": "A3",
+        "category": "A",
+        "kind": "stage1_coverage",
+        "final_outcome": "stage1_not_admitted"
+      },
+      {
+        "sample_id": "E2",
+        "category": "E",
+        "kind": "stage1_coverage",
+        "final_outcome": "stage1_not_admitted"
+      },
+      {
+        "sample_id": "E3",
+        "category": "E",
+        "kind": "stage1_coverage",
+        "final_outcome": "stage1_not_admitted"
+      },
+      {
+        "sample_id": "F1",
+        "category": "F",
+        "kind": "stage1_coverage",
+        "final_outcome": "stage1_not_admitted"
+      },
+      {
+        "sample_id": "F2",
+        "category": "F",
+        "kind": "stage1_coverage",
+        "final_outcome": "stage1_not_admitted"
+      },
+      {
+        "sample_id": "F3",
+        "category": "F",
+        "kind": "stage1_coverage",
+        "final_outcome": "stage1_not_admitted"
+      }
+    ]
+  },
+  "phase_summaries": {
+    "d6_pending": {
+      "present": true,
+      "ok": true,
+      "totals": {
+        "checks": 17,
+        "passed": 17,
+        "failed": 0,
+        "blocked": 0
+      }
+    },
+    "fault_injection": {
+      "present": true,
+      "ok": true,
+      "totals": {
+        "checks": 27,
+        "passed": 27,
+        "failed": 0,
+        "blocked": 0
+      },
+      "honesty": {
+        "fault_mode": "simulated_fault",
+        "disclaimer": "全部故障为受控注入（simulated），不冒充真实 provider 行为；真实 provider 故障仅在自然发生时以 real_http_fault_observation 记录",
+        "separation": "本脚本与真实语义运行（run-codex-chain / run-d6-pending）严格分离"
+      }
+    },
+    "openclaw_host": {
+      "present": true,
+      "ok": true,
+      "totals": {
+        "samples": 10,
+        "seam_passed": 10,
+        "seam_mismatched": 0,
+        "errored": 0,
+        "semantic_pain_emitted": 6
+      }
+    }
+  },
+  "fp_list": [
+    {
+      "sample_id": "B4",
+      "category": "B",
+      "final_outcome": "admitted",
+      "marker_decision": "admitted"
+    },
+    {
+      "sample_id": "C1",
+      "category": "C",
+      "final_outcome": "admitted",
+      "marker_decision": "admitted"
+    },
+    {
+      "sample_id": "C4",
+      "category": "C",
+      "final_outcome": "admitted",
+      "marker_decision": "admitted"
+    },
+    {
+      "sample_id": "D5",
+      "category": "D",
+      "final_outcome": "admitted",
+      "marker_decision": "admitted"
+    },
+    {
+      "sample_id": "G3",
+      "category": "G",
+      "final_outcome": "admitted",
+      "marker_decision": "admitted"
+    },
+    {
+      "sample_id": "G4",
+      "category": "G",
+      "final_outcome": "admitted",
+      "marker_decision": "admitted"
+    }
+  ],
+  "fn_list": [
+    {
+      "sample_id": "A3",
+      "category": "A",
+      "kind": "stage1_coverage",
+      "final_outcome": "stage1_not_admitted"
+    },
+    {
+      "sample_id": "E2",
+      "category": "E",
+      "kind": "stage1_coverage",
+      "final_outcome": "stage1_not_admitted"
+    },
+    {
+      "sample_id": "E3",
+      "category": "E",
+      "kind": "stage1_coverage",
+      "final_outcome": "stage1_not_admitted"
+    },
+    {
+      "sample_id": "F1",
+      "category": "F",
+      "kind": "stage1_coverage",
+      "final_outcome": "stage1_not_admitted"
+    },
+    {
+      "sample_id": "F2",
+      "category": "F",
+      "kind": "stage1_coverage",
+      "final_outcome": "stage1_not_admitted"
+    },
+    {
+      "sample_id": "F3",
+      "category": "F",
+      "kind": "stage1_coverage",
+      "final_outcome": "stage1_not_admitted"
+    }
+  ]
+}

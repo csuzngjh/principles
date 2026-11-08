@@ -117,7 +117,7 @@ const workspace = ${JSON.stringify(workspace)};
 const out = [];
 const step = (label, pass, detail) => { out.push({ label, pass, detail }); };
 
-const enabled = service.enable();
+const enabled = await service.enable();
 step('enable grants consent', enabled.ok && enabled.consent === 'granted', JSON.stringify(enabled).slice(0, 120));
 
 const preview = service.preview(workspace);
@@ -133,7 +133,7 @@ const sameDay = await service.maybeExportDaily(workspace);
 step('same-day re-trigger skipped (bounded 1/day)', sameDay.attempted === false && sameDay.skipReason === 'already_succeeded_today', JSON.stringify(sameDay));
 step('no extra request after same-day skip', fetchCalls === 1, String(fetchCalls));
 
-const disabled = service.disable();
+const disabled = await service.disable();
 step('disable denies consent', disabled.ok && disabled.consent === 'denied');
 
 const afterDisable = await service.maybeExportDaily(workspace);
