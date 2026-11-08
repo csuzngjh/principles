@@ -775,4 +775,183 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
       await git(primary, 'branch', '-D', branch).catch(() => undefined);
     }
   }, 120_000);
+
+  /** Resolve a worktree's Git admin directory from its marker with an explicit containment check. */
+  async function adminDirOfWorktree(commonDir: string, worktreePath: string): Promise<string> {
+    const marker = fs.readFileSync(path.join(worktreePath, '.git'), 'utf-8');
+    const pointer = marker.split('gitdir: ')[1].trim();
+    const resolved = path.resolve(worktreePath, pointer);
+    const adminRoot = path.join(commonDir, 'worktrees');
+    if (!resolved.startsWith(adminRoot + path.sep)) throw new Error('admin dir escaped the repository admin root');
+    return resolved;
+  }
+
+  it('removes a worktree containing an initialized submodule via a verified manual rename', async () => {
+    // git refuses `git worktree move` for worktrees with initialized submodules
+    // ("working trees containing submodules cannot be moved or removed"), so
+    // the removal must quarantine via rename + verified admin retarget — and
+    // the shared submodule admin area (<commonDir>/modules) must survive.
+    const subSrc = path.join(root, 'submodule-src');
+    fs.mkdirSync(subSrc, { recursive: true });
+    fs.writeFileSync(path.join(subSrc, 'lib.txt'), 'submodule content\n', 'utf-8');
+    await git(subSrc, 'init');
+    await git(subSrc, 'add', '.');
+    await git(subSrc, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'sub init');
+
+    const superRepo = path.join(root, 'submodule-super');
+    fs.mkdirSync(superRepo, { recursive: true });
+    await git(superRepo, 'init', '-b', 'main');
+    await git(superRepo, 'config', 'protocol.file.allow', 'always');
+    fs.writeFileSync(path.join(superRepo, 'app.txt'), 'app\n', 'utf-8');
+    await git(superRepo, 'add', '.');
+    await git(superRepo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'super init');
+    await git(superRepo, '-c', 'protocol.file.allow=always', 'submodule', 'add', path.join('..', path.basename(subSrc)), 'sub');
+    await git(superRepo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'add submodule');
+
+    const wt = path.join(root, 'submodule-worktree');
+    await git(superRepo, 'worktree', 'add', wt, '-b', 'task-with-submodule');
+    await git(wt, '-c', 'protocol.file.allow=always', 'submodule', 'update', '--init');
+    expect(fs.existsSync(path.join(wt, 'sub', 'lib.txt'))).toBe(true);
+    // The submodule admin lives in the super-project's common modules dir.
+    const superCommonDir = await gitCommonDirAbsolute(superRepo);
+    const modulesAdmin = path.join(superCommonDir, 'modules', 'sub');
+    expect(fs.existsSync(modulesAdmin)).toBe(true);
+
+    try {
+      const commonDir = await gitCommonDirAbsolute(superRepo);
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({ cwd: superRepo, worktreePath: wt, primaryPath: superRepo }),
+      );
+      expect(result.ok, result.reason + ' ' + result.notes.join('; ')).toBe(true);
+      expect(result.notes.join(' ')).toContain('manual rename');
+      // The worktree tree and its exact admin dir are gone.
+      expect(fs.existsSync(wt)).toBe(false);
+      expect((await worktreeList(superRepo)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(false);
+      // git-4: the shared submodule admin area was never touched.
+      expect(fs.existsSync(modulesAdmin)).toBe(true);
+      // The super-project checkout and its own submodule are intact.
+      expect(fs.readFileSync(path.join(superRepo, 'sub', 'lib.txt'), 'utf-8').replace(/\r\n/g, '\n')).toBe('submodule content\n');
+      expect((await git(superRepo, 'status', '--porcelain')).trim()).toBe('');
+    } finally {
+      if (fs.existsSync(wt)) fs.rmSync(wt, { recursive: true, force: true });
+      await git(superRepo, 'worktree', 'prune').catch(() => undefined);
+      await git(superRepo, 'branch', '-D', 'task-with-submodule').catch(() => undefined);
+    }
+  }, 180_000);
+
+  it('reports a restore when the rollback move commits despite reporting failure', async () => {
+    const { wt } = await makeTask('rollback-also-fails');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let moves = 0;
+    const runGitCommand = async (args: string[], options: { cwd: string; allowFailure?: boolean }) => {
+      if (args[0] === 'worktree' && args[1] === 'move') {
+        // Both the forward quarantine move AND the rollback move commit on
+        // disk, then report failure. The state machine must trust the disk,
+        // not the error: the worktree IS back at its original path.
+        await runGit(args, options);
+        moves += 1;
+        throw new Error('simulated move failure after the rename committed');
+      }
+      return runGit(args, options);
+    };
+    try {
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({ cwd: wt, worktreePath: wt, primaryPath: primary, runGitCommand }),
+      );
+      expect(moves).toBe(2);
+      expect(result.ok).toBe(false);
+      // Disk truth: the rollback committed, so the result reports a restore —
+      // never a phantom quarantine.
+      expect(result.restoredPath).toBe(wt);
+      expect(result.quarantinePath).toBeUndefined();
+      expect(fs.existsSync(wt)).toBe(true);
+      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+      expect(result.notes.join(' ')).toContain('rollback move reported failure');
+    } finally {
+      await git(primary, 'worktree', 'prune').catch(() => undefined);
+    }
+  }, 120_000);
+
+  it('restores the worktree when the .git marker uses a relative gitdir pointer', async () => {
+    // Relative gitdir markers (worktree.useRelativePaths-style layouts) are
+    // only resolvable from the ORIGINAL worktree position. The quarantine move
+    // adds a path segment, so the pointer can no longer be proven: fail closed
+    // and put the worktree back, never delete against a guessed path.
+    const { wt, branch } = await makeTask('relative-gitdir');
+    await mergeIntoMain(branch);
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const markerFile = path.join(wt, '.git');
+    const absoluteMarker = fs.readFileSync(markerFile, 'utf-8');
+    const adminDir = await adminDirOfWorktree(commonDir, wt);
+    try {
+      // Rewrite the marker to a RELATIVE pointer, valid only at the original
+      // position: after quarantine the resolution cannot be proven. A freshly
+      // created worktree marker denies `w`-mode writes on Windows (open-file
+      // scan holds it), but `r+` works — write in place and truncate.
+      const relativeMarker = 'gitdir: ' + path.relative(wt, adminDir) + '\n';
+      const fd = fs.openSync(markerFile, 'r+');
+      try {
+        fs.writeFileSync(fd, relativeMarker, 'utf-8');
+        fs.ftruncateSync(fd, Buffer.byteLength(relativeMarker, 'utf-8'));
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({ cwd: primary, worktreePath: wt, primaryPath: primary }),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.restoredPath).toBe(wt);
+      expect(fs.existsSync(wt)).toBe(true);
+      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+      expect(fs.existsSync(path.join(wt, 'relative-gitdir.txt'))).toBe(true);
+    } finally {
+      // Restore the canonical marker so the fixture stays consistent, using
+      // the same r+ write that worked on the way in.
+      if (fs.existsSync(wt)) {
+        try {
+          const fd = fs.openSync(markerFile, 'r+');
+          try {
+            fs.writeFileSync(fd, absoluteMarker, 'utf-8');
+            fs.ftruncateSync(fd, Buffer.byteLength(absoluteMarker, 'utf-8'));
+          } finally {
+            fs.closeSync(fd);
+          }
+        } catch {
+          /* fixture consistency only; the suite does not depend on it */
+        }
+      }
+    }
+  }, 120_000);
+
+  it('refuses admin metadata whose reverse pointer names a different worktree', async () => {
+    const victim = await makeTask('reverse-pointer-victim');
+    const other = await makeTask('reverse-pointer-other');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const victimAdminDir = await adminDirOfWorktree(commonDir, victim.wt);
+    const pointerFile = path.join(victimAdminDir, 'gitdir');
+    const originalPointer = fs.readFileSync(pointerFile, 'utf-8');
+    try {
+      // Tamper: the admin record now claims the OTHER worktree's marker.
+      const tamperedPointer = path.join(other.wt, '.git');
+      fs.writeFileSync(pointerFile, tamperedPointer + '\n', 'utf-8');
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: victim.wt },
+        () => removeWorktreeSafely({ cwd: primary, worktreePath: victim.wt, primaryPath: primary }),
+      );
+      expect(result.ok).toBe(false);
+      // Zero mutation: ownership looks broken before anything is touched.
+      expect(fs.existsSync(victim.wt)).toBe(true);
+      expect(fs.readFileSync(path.join(victim.wt, 'reverse-pointer-victim.txt'), 'utf-8')).toBe('x\n');
+      expect(fs.existsSync(victimAdminDir)).toBe(true);
+      // The innocent other worktree is untouched and still registered.
+      expect(fs.existsSync(other.wt)).toBe(true);
+      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(other.wt))).toBe(true);
+    } finally {
+      fs.writeFileSync(pointerFile, originalPointer, 'utf-8');
+    }
+  }, 120_000);
 });
