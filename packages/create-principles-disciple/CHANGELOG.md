@@ -1,5 +1,14 @@
 # create-principles-disciple
 
+## 1.147.18
+
+### Patch Changes
+
+- 20719c6: Fix the `--host all` / Codex install contract: `CodexHostInstaller.install` now reports the Codex end state honestly (Marketplace already installed / manual Marketplace step required / state unverifiable) via the new optional `HostInstallResult.manualActionRequired` flag instead of returning a plain failure, so a pending Codex Marketplace install no longer aborts the whole install transaction — an already-successful OpenClaw install stays intact and the shared runtime is not rolled back. The aggregate result is an explicit partial completion (`success=false`, `manualActions[]` in the `--json` output, non-zero exit, per-host MANUAL ACTION REQUIRED text); a re-run after the manual `codex plugin add principles-disciple@principles` converges idempotently. `--host all` still never includes WorkBuddy.
+- bbdcb50: Separate the four independent WorkBuddy host facts in `pd health --host workbuddy` — plugin registration (registry), plugin enablement (settings enabledPlugins), governance flag state (ENABLED / EXPLICITLY_DISABLED / DEFAULT_OFF / UNKNOWN, an explicit Owner opt-out is never folded into a generic OFF), and an explicit runtime boundary (RUNTIME_PROBE_NOT_PERFORMED + MODEL_TOOL_CALL_NOT_VERIFIED; pd health stays read-only, never starts the host or the MCP server). The registration/enablement judgment and the host config paths move to @principles/install-layout as the single authority (getWorkbuddyHostConfigPaths / interpretWorkbuddyPluginState) — installer, `status` and `pd health` now resolve the same paths and apply the same rules; the installer delegates instead of owning a second judgment. A complete MCP payload implies nothing about registration or enablement. Verified: a WorkBuddy-only machine reports INSTALLED at the top level (negative control included).
+- Updated dependencies [bbdcb50]
+  - @principles/install-layout@0.5.0
+
 ## 1.147.17
 
 ### Patch Changes
