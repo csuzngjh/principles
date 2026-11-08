@@ -44,6 +44,7 @@ export const HOST_AGENT_TIMEOUT_SECONDS = 120;
 export const ROUND_OUTER_TIMEOUT_MS = 180_000;
 const A1_SAMPLE_ID = 'A1';
 const MAX_HASHED_TARGET_BYTES = 256 * 1024 * 1024;
+const CONSUMED_LIFECYCLE_MARKERS = new Set(['.openclaw-lifecycle-pending']);
 
 export function sha256Buffer(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -270,18 +271,27 @@ export async function verifyPackageAgainstTarball({ tarballPath, packageDir }) {
   }
 
   const extras = listTree(packageDir).files.filter((rel) => !rel.startsWith('node_modules/') && !tarFiles.has(rel));
+  // The published tarball ships `.openclaw-lifecycle-pending`; the official
+  // lifecycle completion removes it once postinstall has run. Its absence is
+  // the completed-install state (its presence would make the host run
+  // postinstall into its own package at the next start), so it is the only
+  // packaged file allowed to be missing.
+  const consumedLifecycleMarkers = missing.filter((rel) => CONSUMED_LIFECYCLE_MARKERS.has(rel));
+  const unexplainedMissing = missing.filter((rel) => !CONSUMED_LIFECYCLE_MARKERS.has(rel));
   return {
-    ok: checked > 0 && mismatched.length === 0 && missing.length === 0 && extras.length === 0,
+    ok: checked > 0 && mismatched.length === 0 && unexplainedMissing.length === 0 && extras.length === 0,
     tarballPath,
     checkedFiles: checked,
     mismatched: mismatched.slice(0, 50),
     mismatchedCount: mismatched.length,
-    missing: missing.slice(0, 50),
-    missingCount: missing.length,
+    missing: unexplainedMissing.slice(0, 50),
+    missingCount: unexplainedMissing.length,
+    consumedLifecycleMarkers,
     extraFilesOutsideNodeModules: extras.slice(0, 50),
     extraCount: extras.length,
   };
 }
+
 
 function bundledPluginIds(hostPackageDir) {
   const root = join(hostPackageDir, 'dist', 'extensions');

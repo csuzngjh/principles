@@ -404,7 +404,7 @@ function writeFakeNpmCache(cacheDir, files) {
   writeFileSync(bucket, `\n${sha256Text(entry)}\t${entry}`);
 }
 
-async function makePack({ durable = true } = {}) {
+async function makePack({ durable = true, extraTarballFiles = [] } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'pp-e2e-'));
   const hostPkg = join(base, 'global', 'node_modules', 'openclaw');
   const hostFiles = [
@@ -419,7 +419,9 @@ async function makePack({ durable = true } = {}) {
   mkdirSync(join(hostPkg, 'node_modules', '@openclaw', 'fs-safe'), { recursive: true });
   writeFileSync(join(hostPkg, 'node_modules', '@openclaw', 'fs-safe', 'package.json'), JSON.stringify({ name: '@openclaw/fs-safe', version: '0.0.0' }));
   const npmCache = join(base, 'npm-cache');
-  writeFakeNpmCache(npmCache, hostFiles);
+  // The published tarball ships the lifecycle marker that a completed install
+  // has already consumed; it must be the only tolerated difference.
+  writeFakeNpmCache(npmCache, [...hostFiles, ['.openclaw-lifecycle-pending', Buffer.from('pending\n')], ...extraTarballFiles]);
 
   const plugin = join(base, 'plugin');
   mkdirSync(join(plugin, 'dist'), { recursive: true });
@@ -490,7 +492,9 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
   it('freezes a verifiable pack: tarball-verified host copy, candidate-only load path, single-escaped fixture', async () => {
     const { packRoot, operatorEnv, realHome, prepared } = await makePack();
     const { manifest } = prepared;
-    expect(manifest.host.tarballVerification).toMatchObject({ ok: true, checkedFiles: 3, mismatchedCount: 0, extraCount: 0 });
+    expect(manifest.host.tarballVerification).toMatchObject({
+      ok: true, checkedFiles: 4, mismatchedCount: 0, missingCount: 0, extraCount: 0, consumedLifecycleMarkers: ['.openclaw-lifecycle-pending'],
+    });
     expect(manifest.productionPlugin).toMatchObject({ exists: true, version: '2.6.4', presenceEventCapable: false });
     expect(manifest.candidate.externals.ok).toBe(true);
     expect(manifest.fixture.inspection).toMatchObject({ ok: true, renderedAuthority: 'system_policy', approvalRows: 0 });
@@ -502,6 +506,14 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
     const report = await verifyPack({ packRoot, full: true, operatorEnv, realHome });
     expect(report.checks.filter((row) => row.status !== 'PASS')).toEqual([]);
     expect(report.ready).toBe(true);
+  }, 120_000);
+
+  it('a packaged file missing from the staged host (other than the consumed lifecycle marker) fails provenance', async () => {
+    const { packRoot, operatorEnv, realHome, prepared } = await makePack({ extraTarballFiles: [['dist/removed-after-install.js', Buffer.from('x')]] });
+    expect(prepared.manifest.host.tarballVerification).toMatchObject({ ok: false, missing: ['dist/removed-after-install.js'], missingCount: 1 });
+    const report = await verifyPack({ packRoot, full: false, operatorEnv, realHome });
+    expect(report.checks.find((row) => row.id === 'host-registry-tarball').status).toBe('FAIL');
+    expect(report.ready).toBe(false);
   }, 120_000);
 
   it('verify flags a candidate whose presence event is only buffered', async () => {
