@@ -39,11 +39,12 @@ import {
   pruneWorkspaceExports,
   readProductTelemetryControlState,
   resetControlState,
-  writeProductTelemetryControlState,
+  withControlStateLock,
   type ProductTelemetryConsent,
   type ProductTelemetryControlState,
   type WorkspaceExportState,
 } from './consent-store.js';
+import { releaseExclusiveLock, tryAcquireExclusiveLockSync, type ExclusiveLockHandle } from './control-state-lock.js';
 import { computeTelemetryEnvironment, type TelemetrySuppressionReason } from './eligibility.js';
 import { DEFAULT_PRODUCT_TELEMETRY_ENDPOINT, exportSnapshot, nextRetryDelayMs, type TelemetryFetchFn } from './exporter.js';
 import { readMilestoneFacts } from './milestone-readers.js';
@@ -60,109 +61,22 @@ export const MAX_DAILY_EXPORT_ATTEMPTS = 5;
 const EXPORT_LOCK_STALE_MS = 5 * 60 * 1000;
 
 /**
- * The state-update critical section (fresh read → prune → merge → atomic
- * write) holds for a few ms, so the poll budget and stale threshold are
- * tiny compared to the export lock's — a crashed holder blocks bookkeeping
- * for seconds, not minutes, and live holders can never be evicted (the
- * hold is far shorter than the stale threshold).
- */
-const STATE_UPDATE_LOCK_STALE_MS = 5 * 1000;
-const STATE_UPDATE_LOCK_TIMEOUT_MS = 3 * 1000;
-const STATE_UPDATE_LOCK_POLL_MS = 15;
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-interface ExportLock {
-  acquired: boolean;
-  lockPath?: string;
-}
-
-/**
  * Per-workspace cross-process export lock: exclusive create ('wx') is atomic,
  * so exactly one of N simultaneous holders wins — and the lock name embeds
  * only the opaque scope key, so workspace A's in-flight export never blocks
- * workspace B's (review remediation P1-1). Stale takeover uses mtime — a
- * crashed holder can block that workspace for at most EXPORT_LOCK_STALE_MS.
+ * workspace B's (review remediation P1-1). Stale takeover and release use the
+ * SAME ownership-checked rename-claim protocol as the control-state lock
+ * (control-state-lock.ts, PRI-1151): a crashed holder blocks that workspace
+ * for at most EXPORT_LOCK_STALE_MS, a live holder's lock is never deleted by
+ * another process, and a late release cannot delete a successor's lock.
  * Never throws: any filesystem failure degrades to "not acquired"
  * (telemetry skips, PD unaffected).
  */
-function tryAcquireExportLock(stateFilePath: string, workspaceScopeId: string): ExportLock {
-  const lockPath = workspaceExportLockPath(stateFilePath, workspaceScopeId);
-  const create = (): boolean => {
-    try {
-      const fd = fs.openSync(lockPath, 'wx');
-      try {
-        fs.writeSync(fd, `${process.pid} ${new Date().toISOString()}`);
-      } finally {
-        fs.closeSync(fd);
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (create()) return { acquired: true, lockPath };
-  try {
-    const stat = fs.statSync(lockPath);
-    if (Date.now() - stat.mtimeMs > EXPORT_LOCK_STALE_MS) {
-      fs.rmSync(lockPath, { force: true });
-      if (create()) return { acquired: true, lockPath };
-    }
-  } catch {
-    // stat/rm failure → treat as busy; never throw for telemetry
-  }
-  return { acquired: false };
-}
-
-function releaseExportLock(lockPath: string): void {
-  try {
-    fs.rmSync(lockPath, { force: true });
-  } catch {
-    // best effort; a leaked lock is reclaimed after EXPORT_LOCK_STALE_MS
-  }
-}
-
-/**
- * Machine-scope state-update lock: serializes ONLY the control-state file
- * read→merge→write across workspaces (a few ms each) — the network export
- * itself stays fully concurrent. Review round 4: without it, two
- * concurrently-completing exports built their writes from the same stale
- * base and the later write silently dropped the earlier workspace's entry
- * (lost update), defeating once/day dedup, backoff, and the attempt cap.
- *
- * Lock acquisition polls asynchronously (never blocks the event loop) and
- * takes over a stale (crashed-holder) lock after STATE_UPDATE_LOCK_STALE_MS.
- */
-async function acquireStateUpdateLock(stateFilePath: string): Promise<ExportLock> {
-  const lockPath = `${stateFilePath}.state-lock`;
-  const deadline = Date.now() + STATE_UPDATE_LOCK_TIMEOUT_MS;
-  const create = (): boolean => {
-    try {
-      const fd = fs.openSync(lockPath, 'wx');
-      try {
-        fs.writeSync(fd, `${process.pid} ${new Date().toISOString()}`);
-      } finally {
-        fs.closeSync(fd);
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  for (;;) {
-    if (create()) return { acquired: true, lockPath };
-    try {
-      const stat = fs.statSync(lockPath);
-      if (Date.now() - stat.mtimeMs > STATE_UPDATE_LOCK_STALE_MS) {
-        fs.rmSync(lockPath, { force: true });
-        if (create()) return { acquired: true, lockPath };
-      }
-    } catch {
-      // disappeared between poll attempts → next loop's create decides
-    }
-    if (Date.now() >= deadline) return { acquired: false };
-    await sleep(STATE_UPDATE_LOCK_POLL_MS);
-  }
+function tryAcquireExportLock(stateFilePath: string, workspaceScopeId: string): ExclusiveLockHandle | undefined {
+  return tryAcquireExclusiveLockSync(stateFilePath, {
+    lockPath: workspaceExportLockPath(stateFilePath, workspaceScopeId),
+    staleMs: EXPORT_LOCK_STALE_MS,
+  });
 }
 
 type StateMergeOutcome =
@@ -172,15 +86,19 @@ type StateMergeOutcome =
   | 'skipped_identity_changed';
 
 /**
- * Merge ONE workspace's export entry into the control state inside the
- * state-update critical section. The entry itself is built by the caller
- * (its inputs are stable for this workspace under the per-workspace export
- * lock); the OTHER workspaces' entries come from a FRESH read under the
- * lock, so concurrent completions compose instead of overwrite. Identity
- * transitions that raced the export (reset/disable/secret rotation mid-
- * flight) are detected and win — an in-flight result is never merged into
- * a rotated/denied identity. Best-effort by contract: every non-written
- * outcome is observable at the call site via structured logs (rc-9).
+ * Merge ONE workspace's export entry into the control state inside the ONE
+ * cross-process control-state transaction (withControlStateLock, PRI-1151)
+ * — the same lock that serializes enable/disable/reset and the legacy v1→v2
+ * migration write-back. The entry itself is built by the caller (its inputs
+ * are stable for this workspace under the per-workspace export lock); the
+ * OTHER workspaces' entries and the consent identity come from a FRESH read
+ * under the lock, so concurrent completions compose instead of overwrite,
+ * and identity transitions that raced the export (reset/disable/secret
+ * rotation mid-flight) are detected and win — an in-flight result is never
+ * merged into a rotated/denied identity. Best-effort by contract: every
+ * non-written outcome is observable at the call site via structured logs
+ * (rc-9). A legacy v1 file is migrated to the current format by this same
+ * transaction (migration + merge are one atomic write).
  */
 async function mergeWorkspaceExportEntry(args: {
   homeDir: string;
@@ -189,22 +107,19 @@ async function mergeWorkspaceExportEntry(args: {
   timestamp: number;
   nextEntry: WorkspaceExportState;
 }): Promise<StateMergeOutcome> {
-  const stateFilePath = getProductTelemetryStatePath(args.homeDir);
-  const lock = await acquireStateUpdateLock(stateFilePath);
-  if (!lock.acquired) return 'skipped_contention';
-  try {
-    const read = readProductTelemetryControlState(args.homeDir);
-    if (!read.ok) return 'skipped_unreadable';
-    if (read.state.consent !== 'granted' || read.state.telemetrySecret !== args.secret) return 'skipped_identity_changed';
+  const outcome = await withControlStateLock(args.homeDir, (tx) => {
+    const read = tx.readLatest();
+    if (!read.ok) return 'skipped_unreadable' as const;
+    if (read.state.consent !== 'granted' || read.state.telemetrySecret !== args.secret) return 'skipped_identity_changed' as const;
     const pruned = pruneWorkspaceExports(read.state, args.timestamp);
     const nextState: ProductTelemetryControlState = {
       ...pruned,
       workspaceExports: { ...(pruned.workspaceExports ?? {}), [args.scopeKey]: args.nextEntry },
     };
-    return writeProductTelemetryControlState(args.homeDir, nextState).ok ? 'written' : 'skipped_unreadable';
-  } finally {
-    releaseExportLock(lock.lockPath as string);
-  }
+    return tx.write(nextState).ok ? ('written' as const) : ('skipped_unreadable' as const);
+  });
+  if (!outcome.ok) return 'skipped_contention';
+  return outcome.value;
 }
 
 export interface ProductTelemetryServiceDeps {
@@ -421,36 +336,62 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
       return { banner: PREVIEW_BANNER, snapshot, gates, notes: previewNotes, secretEphemeral };
     },
 
-    /** `pd telemetry enable --confirm`: explicit granted consent (+ secret). */
-    enable(): { ok: true; consent: 'granted' } | { ok: false; reason: string; nextAction: string } {
-      const read = readProductTelemetryControlState(homeDir());
-      if (!read.ok) return read;
-      const next = grantedControlState(read.state);
-      const written = writeProductTelemetryControlState(homeDir(), next);
-      if (!written.ok) return written;
+    /**
+     * `pd telemetry enable --confirm`: explicit granted consent (+ secret).
+     * One locked transaction (PRI-1151): the latest disk state is read UNDER
+     * the same cross-process lock that serializes every other control-state
+     * writer, so the grant is computed from — and applied to — the current
+     * state; a concurrent disable/migration/reset cannot be overwritten by a
+     * stale one.
+     */
+    async enable(): Promise<{ ok: true; consent: 'granted' } | { ok: false; reason: string; nextAction: string }> {
+      const outcome = await withControlStateLock(homeDir(), (tx) => {
+        const read = tx.readLatest();
+        if (!read.ok) return read;
+        return tx.write(grantedControlState(read.state));
+      });
+      if (!outcome.ok) return outcome;
+      if (!outcome.value.ok) return outcome.value;
       logger.info?.(`[PD:Telemetry] Consent granted (control state: ${getProductTelemetryStatePath(homeDir())}).`);
       return { ok: true, consent: 'granted' };
     },
 
-    /** `pd telemetry disable --confirm`: deny consent and delete export identity. */
-    disable(): { ok: true; consent: 'denied' } | { ok: false; reason: string; nextAction: string } {
-      const read = readProductTelemetryControlState(homeDir());
-      if (!read.ok) return read;
-      const written = writeProductTelemetryControlState(homeDir(), deniedControlState());
-      if (!written.ok) return written;
+    /**
+     * `pd telemetry disable --confirm`: deny consent and delete export
+     * identity — one locked transaction (PRI-1151). Once this returns ok,
+     * no concurrent migration, enable, reset, or bookkeeping merge can
+     * restore the previous granted consent or secret: they serialize on the
+     * same lock and re-read the denied state.
+     */
+    async disable(): Promise<{ ok: true; consent: 'denied' } | { ok: false; reason: string; nextAction: string }> {
+      const outcome = await withControlStateLock(homeDir(), (tx) => {
+        const read = tx.readLatest();
+        if (!read.ok) return read;
+        return tx.write(deniedControlState());
+      });
+      if (!outcome.ok) return outcome;
+      if (!outcome.value.ok) return outcome.value;
       logger.info?.('[PD:Telemetry] Consent denied; local telemetry secret and export status deleted. Future export requests: 0.');
       return { ok: true, consent: 'denied' };
     },
 
-    /** `pd telemetry reset --confirm`: delete identity; fresh secret only if still enabled. */
-    reset(): { ok: true; consent: ProductTelemetryConsent } | { ok: false; reason: string; nextAction: string } {
-      const read = readProductTelemetryControlState(homeDir());
-      if (!read.ok) return read;
-      const next = resetControlState(read.state);
-      const written = writeProductTelemetryControlState(homeDir(), next);
-      if (!written.ok) return written;
+    /**
+     * `pd telemetry reset --confirm`: delete identity; fresh secret only if
+     * still enabled — one locked transaction (PRI-1151) over the LATEST disk
+     * state (never a stale cached identity).
+     */
+    async reset(): Promise<{ ok: true; consent: ProductTelemetryConsent } | { ok: false; reason: string; nextAction: string }> {
+      const outcome = await withControlStateLock(homeDir(), (tx) => {
+        const read = tx.readLatest();
+        if (!read.ok) return read;
+        const next = resetControlState(read.state);
+        const written = tx.write(next);
+        return written.ok ? { ok: true as const, consent: next.consent } : written;
+      });
+      if (!outcome.ok) return outcome;
+      if (!outcome.value.ok) return outcome.value;
       logger.info?.('[PD:Telemetry] Telemetry identity reset; previous daily IDs are unlinkable going forward.');
-      return { ok: true, consent: next.consent };
+      return { ok: true, consent: outcome.value.consent };
     },
 
     /**
@@ -502,7 +443,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
       }
 
       const lock = tryAcquireExportLock(getProductTelemetryStatePath(homeDir()), scopeKey);
-      if (!lock.acquired || lock.lockPath === undefined) {
+      if (lock === undefined) {
         // Another process is mid-export for THIS workspace; it will record
         // shared-day success and our next trigger will see
         // already_succeeded_today.
@@ -578,7 +519,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
           nextEntry,
         });
         if (merged === 'skipped_contention') {
-          logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state update was skipped after ${STATE_UPDATE_LOCK_TIMEOUT_MS / 1000}s of state-lock contention — this workspace may re-attempt today.`);
+          logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state update was skipped after 3s of state-lock contention — this workspace may re-attempt today.`);
         } else if (merged === 'skipped_unreadable') {
           logger.warn?.(`[PD:Telemetry] Export ${result.ok ? 'succeeded' : `failed (${result.code})`} but control state could not be read/updated — ${getProductTelemetryStatePath(homeDir())}`);
         } else if (merged === 'skipped_identity_changed') {
@@ -591,7 +532,7 @@ export function createProductTelemetryService(deps: ProductTelemetryServiceDeps 
         logger.warn?.(`[PD:Telemetry] Export failed (${result.code}); next retry after ${nextEntry.nextRetryAt}. PD behavior is unaffected.`);
         return { attempted: true, ok: false, failureCode: result.code };
       } finally {
-        releaseExportLock(lock.lockPath);
+        releaseExclusiveLock(lock);
       }
     },
   };
