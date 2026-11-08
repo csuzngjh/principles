@@ -88,10 +88,12 @@ export const EXECUTION_CODE_TRUST_BOUNDARY = 'Drift check, not tamper-proofing: 
  */
 export const PREFLIGHT_REQUIRED_CHECKS = Object.freeze([
   'manifest', 'node-identity', 'host-identity', 'host-tree', 'host-registry-tarball', 'candidate-payload', 'presence-durability',
-  'execution-code', 'budget-consistency', 'host-config', 'pd-config-and-retry', 'fixture-assembly', 'round-inputs',
+  'presence-surface', 'execution-code', 'budget-consistency', 'host-config', 'pd-config-and-retry', 'fixture-assembly', 'round-inputs',
   'environment-isolation', 'production-plugin-exclusion', 'pollution-baseline',
   'endpoint-port', 'termination-tool', 'process-sweep', 'protocol-selftest',
 ]);
+
+export const PRESENCE_SURFACE_ID = 'hook:llm_input_presence';
 
 export function sha256Buffer(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -566,6 +568,7 @@ export function stageCandidate({ pluginSource, packRoot }) {
     sqlite: { from: sqliteDir, version: readJson(join(sqliteDir, 'package.json'))?.version ?? null },
     presenceEventCapable: bundleText.includes(PRESENCE_EVENT_TYPE),
     presenceDurability: presenceDurability(bundleText),
+    presenceSurface: presenceSurface(bundleText),
     externals: auditBundleExternals({ bundlePath, packRoot }),
     tree: { fileCount: tree.fileCount, totalBytes: tree.totalBytes, treeSha256: tree.treeSha256, filesManifest: join(packRoot, 'candidate-files.json') },
   };
@@ -587,6 +590,29 @@ export function presenceDurability(bundleText) {
   return body.includes('flushEvents()')
     ? { status: 'flushed_on_record' }
     : { status: 'buffered_lost_on_one_shot_exit', reason: 'recordPromptPresenceObserved only buffers; no exit-time flush exists' };
+}
+
+/**
+ * Static fact for the presence hook surface in a built (unminified) bundle. The
+ * plugin registers the llm_input handler through guardHook, and guardHook
+ * installs a no-op for any surface the bundled PLUGIN_SURFACE_REGISTRY does not
+ * enable by default (PRI-289; it passes no overrides). Without an enabled entry
+ * the observation never runs, whatever the host dispatches.
+ */
+export function presenceSurface(bundleText) {
+  if (!bundleText.includes(`guardHook("${PRESENCE_SURFACE_ID}"`)) {
+    return { status: 'not_registered', reason: 'no guardHook registration for the presence surface in the bundle' };
+  }
+  const start = bundleText.indexOf('PLUGIN_SURFACE_REGISTRY = [');
+  const end = start === -1 ? -1 : bundleText.indexOf('\n];', start);
+  if (start === -1 || end === -1) return { status: 'unknown', reason: 'surface registry not found in the bundle (minified build?)' };
+  const entry = bundleText.slice(start, end).match(/(?<![\w$])id:\s*"hook:llm_input_presence"[^}]*\}/)?.[0];
+  if (!entry) {
+    return { status: 'unclassified', reason: 'the bundled surface registry has no hook:llm_input_presence entry, so guardHook installs a no-op' };
+  }
+  return /enabledByDefault:\s*true/.test(entry) && !/category:\s*"gone"/.test(entry)
+    ? { status: 'enabled_by_default' }
+    : { status: 'disabled_by_default', reason: 'the surface is classified but not enabled by default, and guardHook passes no overrides' };
 }
 
 export function inspectProductionPlugin(realHome) {
@@ -1025,6 +1051,11 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
 
   checks.push(check('presence-durability', manifest.candidate.presenceDurability?.status === 'flushed_on_record' ? 'PASS' : 'FAIL',
     'the presence event is written at record time (a one-shot host exits without flushing buffered events)', manifest.candidate.presenceDurability ?? {}));
+
+  // Read from the staged bundle itself (its bytes are pinned by candidate-payload), never from the manifest.
+  const surface = presenceSurface(readFileSync(manifest.candidate.bundlePath, 'utf8'));
+  checks.push(check('presence-surface', surface.status === 'enabled_by_default' ? 'PASS' : 'FAIL',
+    'the bundled surface registry enables hook:llm_input_presence (guardHook installs a no-op otherwise)', surface));
 
   const codeViolations = executionCodeViolations(manifest.executionCode, codeRoot);
   checks.push(check('execution-code', codeViolations.length === 0 ? 'PASS' : 'FAIL',

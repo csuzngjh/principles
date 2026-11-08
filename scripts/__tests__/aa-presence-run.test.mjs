@@ -25,7 +25,7 @@ import {
 import { PRESENCE_FIXTURE } from '../dev/aa-controlled-admission/lib/presence-fixture.mjs';
 import {
   CARD_VERSION, EXECUTION_CODE_TRUST_BOUNDARY, EXECUTION_SCRIPT_FILES, EXECUTION_WORKSPACE_BUILDS, PRESENCE_CODE_ROOT, PREFLIGHT_REQUIRED_CHECKS,
-  classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, summarizePreflight, verifyPack,
+  classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, presenceSurface, summarizePreflight, verifyPack,
 } from '../dev/aa-controlled-admission/lib/presence-pack.mjs';
 import { runProtocolSelftest } from '../dev/aa-controlled-admission/lib/protocol-selftest.mjs';
 import {
@@ -337,6 +337,28 @@ describe('pollution comparison — bounded verdicts', () => {
     expect(classifyPollution({ ...base, unattributed: ['d'] })).toMatchObject({ verdict: 'unattributed-changes-noted', stop: false });
     expect(classifyPollution(base)).toMatchObject({ verdict: 'clean', stop: false });
     expect(classifyPollution({ ...base, attributed: ['a'] }).meaning).toMatch(/the run reached production/);
+  });
+});
+
+describe('presence surface — guardHook no-ops an unclassified surface', () => {
+  const registration = 'guardHook("hook:llm_input_presence", api.logger, (event, ctx) => {});';
+  it.each([
+    ['enabled entry', [...fakeSurfaceRegistry('enabled'), registration], 'enabled_by_default'],
+    ['no entry (the merged #2412 state)', [...fakeSurfaceRegistry('unclassified'), registration], 'unclassified'],
+    ['disabled entry', [...fakeSurfaceRegistry('disabled'), registration], 'disabled_by_default'],
+    ['no registration at all', fakeSurfaceRegistry('enabled'), 'not_registered'],
+    ['registry not found (minified)', [registration, 'var a=[{id:"hook:llm_input_presence",enabledByDefault:!0}];'], 'unknown'],
+  ])('%s → %s', (_label, lines, status) => {
+    expect(presenceSurface(lines.join('\n')).status).toBe(status);
+  });
+
+  it('an entry elsewhere in the bundle (outside the registry) does not count', () => {
+    const text = [...fakeSurfaceRegistry('unclassified'), registration, 'const other = { id: "hook:llm_input_presence", enabledByDefault: true };'].join('\n');
+    expect(presenceSurface(text).status).toBe('unclassified');
+    // `surfaceId:` inside the registry span is not the registry `id:` field.
+    const registry = fakeSurfaceRegistry('unclassified');
+    const withSurfaceId = [...registry.slice(0, -1), '  { surfaceId: "hook:llm_input_presence", enabledByDefault: true },', ...registry.slice(-1), registration];
+    expect(presenceSurface(withSurfaceId.join('\n')).status).toBe('unclassified');
   });
 });
 
@@ -798,6 +820,33 @@ export const createOpenAIResponsesTransportStreamFn = () => (model, context, opt
 export const createOpenAICompletionsTransportStreamFn = () => (model, context, options) => call(model, options, '/chat/completions', { model: model.id, stream: true, messages: [{ role: 'user', content: 'x' }] }, (text) => text.includes('"finish_reason":"stop"'));
 `;
 
+/** The surface registry as esbuild emits it unminified; `surface` picks the presence entry. */
+function fakeSurfaceRegistry(surface) {
+  const entry = (enabled) => [
+    '  {',
+    '    id: "hook:llm_input_presence",',
+    '    kind: "hook",',
+    `    category: "${enabled ? 'core' : 'quiet'}",`,
+    `    enabledByDefault: ${enabled},`,
+    '    since: "2026-11-08",',
+    '    description: "Post-assembly presence observation"',
+    '  },',
+  ];
+  return [
+    'var PLUGIN_SURFACE_REGISTRY = [',
+    '  {',
+    '    id: "hook:llm_output",',
+    '    kind: "hook",',
+    '    category: "core",',
+    '    enabledByDefault: true,',
+    '    since: "2026-05-24",',
+    '    description: "LLM output analysis"',
+    '  },',
+    ...(surface === 'enabled' ? entry(true) : surface === 'disabled' ? entry(false) : []),
+    '];',
+  ];
+}
+
 /** A small repository-shaped copy of the execution code, safe to change in a test. */
 function makeCodeRoot() {
   const codeRoot = mkdtempSync(join(tmpdir(), 'pp-code-'));
@@ -810,7 +859,7 @@ function makeCodeRoot() {
   return codeRoot;
 }
 
-async function makePack({ durable = true, extraTarballFiles = [], acceptAll = false, codeRoot = undefined } = {}) {
+async function makePack({ durable = true, surface = 'enabled', extraTarballFiles = [], acceptAll = false, codeRoot = undefined } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'pp-e2e-'));
   const hostPkg = join(base, 'global', 'node_modules', 'openclaw');
   const hostFiles = [
@@ -837,12 +886,14 @@ async function makePack({ durable = true, extraTarballFiles = [], acceptAll = fa
   writeFileSync(join(plugin, 'openclaw.plugin.json'), JSON.stringify({ id: 'principles-disciple' }));
   writeFileSync(join(plugin, 'dist', 'bundle.js'), [
     'import Database from "better-sqlite3";',
+    ...fakeSurfaceRegistry(surface),
     'class EventLog {',
     '  recordPromptPresenceObserved(data) {',
     '    this.record("runtime_v2_prompt_presence_observed", "injected", data.sessionId, data);',
     durable ? '    this.flushEvents();' : '',
     '  }',
     '}',
+    'guardHook("hook:llm_input_presence", api.logger, (event, ctx) => {});',
     '',
   ].join('\n'));
   mkdirSync(join(plugin, 'node_modules', 'better-sqlite3'), { recursive: true });
@@ -957,6 +1008,21 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
     expect(report.checks.find((row) => row.id === 'presence-durability').status).toBe('FAIL');
     expect(report.ready).toBe(false);
     expect(report.failing.map((row) => row.id)).toEqual(['presence-durability']);
+  }, 120_000);
+
+  it.each([
+    ['not classified in the surface registry', 'unclassified', 'unclassified'],
+    ['classified but disabled by default', 'disabled', 'disabled_by_default'],
+  ])('a candidate whose presence surface is %s is blocked before any host start', async (_label, surface, status) => {
+    const { packRoot, operatorEnv, realHome } = await makePack({ surface });
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
+    expect(report.failing.map((row) => row.id)).toEqual(['presence-surface']);
+    expect(report.failing[0].evidence.status).toBe(status);
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'refused-before-any-start', reason: 'verification' });
+    expect(record.violations).toEqual(['presence-surface:FAIL']);
+    expect(hostStarts(packRoot)).toEqual([]);
   }, 120_000);
 
   it('refuses without a bound approval and leaves the budget untouched', async () => {
