@@ -23,6 +23,7 @@
  * runner's silent default (SPEC §9).
  */
 import type { PDRuntimeAdapter } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import {
   ReuseEvaluationOutputV1Schema,
   validateReuseEvaluationOutput,
@@ -237,7 +238,7 @@ export class ReuseEvaluationRunner {
       },
       {
         maxRepairAttempts: this.maxRepairAttempts,
-        schemaRef: 'reuse-evaluation-output-v1',
+        schemaRef: 'reuse-evaluation-output',
         schemaJson: JSON.stringify(ReuseEvaluationOutputV1Schema),
         requiredKeys: ['recommendation', 'rationale', 'confidence'],
       },
@@ -268,11 +269,11 @@ export class ReuseEvaluationRunner {
    */
   private async invoke(prompt: string, phase: 'evaluate' | 'repair'): Promise<unknown> {
     const runHandle = await this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId: `reuse_eval_${phase}_${Date.now()}` },
       inputPayload: prompt,
       contextItems: [],
-      outputSchemaRef: 'reuse-evaluation-output-v1',
+      outputSchemaRef: 'reuse-evaluation-output',
       timeoutMs: this.timeoutMs,
       systemPrompt: ReuseEvaluationRunner.SYSTEM_PROMPT,
     });
@@ -316,7 +317,7 @@ export class ReuseEvaluationRunner {
       throw new ReuseEvaluationError({
         reason: 'output_invalid',
         message: `Reuse evaluation ${phase} output could not be parsed or validated by the runtime`,
-        nextAction: 'Inspect the runtime output format; the adapter rejected it against reuse-evaluation-output-v1',
+        nextAction: 'Inspect the runtime output format; the adapter rejected it against reuse-evaluation-output',
         detail: err instanceof Error ? err.message : String(err),
       });
     }

@@ -141,7 +141,7 @@ export const DiagnosticianInvocationInputSchema = Type.Object({
   agentId: Type.String({ minLength: 1 }),
   taskId: Type.String({ minLength: 1 }),
   context: Type.Unknown(), // Validated separately — DiagnosticianContextPayload
-  outputSchemaRef: Type.Literal('diagnostician-output-v1'),
+  outputSchemaRef: Type.Literal('diagnostician-output'),
   timeoutMs: Type.Number({ minimum: 0 }),
 });
 
@@ -154,7 +154,7 @@ export interface DiagnosticianInvocationInput {
   /** Pre-assembled context for the diagnosis. */
   context: DiagnosticianContextPayload;
   /** Reference to the output schema version. */
-  outputSchemaRef: 'diagnostician-output-v1';
+  outputSchemaRef: 'diagnostician-output';
   /** Timeout in milliseconds for this invocation. */
   timeoutMs: number;
 }

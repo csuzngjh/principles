@@ -425,18 +425,18 @@ describe('DiagnosticianInvocationInputSchema', () => {
       agentId: 'diagnostician',
       taskId: 'task-0001',
       context: { /* opaque unknown — validated separately via DiagnosticianContextPayload */ },
-      outputSchemaRef: 'diagnostician-output-v1' as const,
+      outputSchemaRef: 'diagnostician-output' as const,
       timeoutMs: 60_000,
     };
     expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(true);
   });
 
-  it('PIN: outputSchemaRef is the literal "diagnostician-output-v1" (not any string)', () => {
+  it('PIN: outputSchemaRef is the literal "diagnostician-output" (not any string)', () => {
     // Pin that the schema only accepts the exact literal, not v2 or other refs.
     const outputRefProp = (DiagnosticianInvocationInputSchema as unknown as {
       properties: { outputSchemaRef: { const?: string } };
     }).properties.outputSchemaRef;
-    expect(outputRefProp?.const ?? (outputRefProp as unknown as { anyOf?: [{ const?: string }] })?.anyOf?.[0]?.const).toBe('diagnostician-output-v1');
+    expect(outputRefProp?.const ?? (outputRefProp as unknown as { anyOf?: [{ const?: string }] })?.anyOf?.[0]?.const).toBe('diagnostician-output');
   });
 
   it('rejects wrong outputSchemaRef (schema drift detection)', () => {
@@ -450,12 +450,27 @@ describe('DiagnosticianInvocationInputSchema', () => {
     expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(false);
   });
 
+  it('PRI-1139: rejects the pre-cutover "-v1" spelling on fresh invocation input', () => {
+    // The invocation input is constructed per call by in-repo production code;
+    // writer and validator deploy atomically, so a stale versioned spelling is
+    // a bug to surface (fail loud), not history to accommodate. Historical
+    // refs stay readable at the REGISTRY layer (output-schema-ref-alias tests).
+    const input = {
+      agentId: 'diagnostician',
+      taskId: 'task-0001',
+      context: {},
+      outputSchemaRef: 'diagnostician-output-v1',
+      timeoutMs: 60_000,
+    };
+    expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(false);
+  });
+
   it('rejects negative timeoutMs (minimum: 0)', () => {
     const input = {
       agentId: 'diagnostician',
       taskId: 'task-0001',
       context: {},
-      outputSchemaRef: 'diagnostician-output-v1' as const,
+      outputSchemaRef: 'diagnostician-output' as const,
       timeoutMs: -1,
     };
     expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(false);
@@ -466,7 +481,7 @@ describe('DiagnosticianInvocationInputSchema', () => {
       agentId: 'diagnostician',
       taskId: 'task-0001',
       context: {},
-      outputSchemaRef: 'diagnostician-output-v1' as const,
+      outputSchemaRef: 'diagnostician-output' as const,
       timeoutMs: 0,
     };
     expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(true);
@@ -475,7 +490,7 @@ describe('DiagnosticianInvocationInputSchema', () => {
   it('rejects empty agentId / taskId (minLength:1)', () => {
     const base = {
       context: {},
-      outputSchemaRef: 'diagnostician-output-v1' as const,
+      outputSchemaRef: 'diagnostician-output' as const,
       timeoutMs: 1000,
     };
     expect(Value.Check(DiagnosticianInvocationInputSchema, { ...base, agentId: '', taskId: 't' })).toBe(false);

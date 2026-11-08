@@ -26,7 +26,7 @@ import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
 /** Registry key for OUTPUT_SCHEMA_REGISTRY (adapter-side validation). */
-export const REUSE_EVALUATION_OUTPUT_SCHEMA_REF = 'reuse-evaluation-output-v1';
+export const REUSE_EVALUATION_OUTPUT_SCHEMA_REF = 'reuse-evaluation-output';
 
 export const ReuseEvaluationRecommendationSchema = Type.Union([
   Type.Literal('reuse'),

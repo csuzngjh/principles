@@ -10,6 +10,7 @@ import type { RolloutReviewerOutputV1, RolloutReviewerValidator, RolloutReviewMo
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata, type PITaskMetadata, type RolloutRevisionPayload, type RunnerDecision, type HumanReviewContext } from './pitask-metadata.js';
 import {
@@ -536,11 +537,11 @@ export class RolloutReviewerRunner {
     });
 
     const startInput: StartRunInput = {
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId: params.taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'rollout-reviewer-output-v1',
+      outputSchemaRef: 'rollout-reviewer-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     };

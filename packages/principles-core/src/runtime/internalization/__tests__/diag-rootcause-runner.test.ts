@@ -215,7 +215,8 @@ describe('DiagRootCauseRunner V-slice', () => {
     expect(startRunCalls.length).toBeGreaterThan(0);
     const startRunCall = startRunCalls[0]?.[0] as { agentSpec: { agentId: string }; outputSchemaRef: string };
     expect(startRunCall.agentSpec.agentId).toBe('main');
-    // outputSchemaRef still distinguishes the stage
-    expect(startRunCall.outputSchemaRef).toBe('diag-rootcause-output-v1');
+    // outputSchemaRef still distinguishes the stage (PRI-1139: canonical
+    // version-neutral spelling)
+    expect(startRunCall.outputSchemaRef).toBe('diag-rootcause-output');
   });
 });

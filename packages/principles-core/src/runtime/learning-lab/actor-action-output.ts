@@ -55,7 +55,7 @@ export const LearningLabActorActionV1Schema = Type.Object(
 export type LearningLabActorActionV1 = Static<typeof LearningLabActorActionV1Schema>;
 
 /** The outputSchemaRef string the lab passes on StartRunInput. */
-export const LEARNING_LAB_ACTOR_ACTION_REF = 'learning-lab-actor-action-v1';
+export const LEARNING_LAB_ACTOR_ACTION_REF = 'learning-lab-actor-action';
 
 /** Action-name list mirrored from the oracle registry (cross-checked by tests). */
 export const LEARNING_LAB_ACTOR_ACTION_NAMES: readonly string[] = [

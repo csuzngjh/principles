@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { PDRuntimeAdapter } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -152,11 +153,11 @@ export class CorrectionObserver {
 
     // One-shot start run
     const runHandle = await this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId: `corr_obs_${Date.now()}` },
       inputPayload: prompt,
       contextItems: [],
-      outputSchemaRef: 'correction-observer-output-v1',
+      outputSchemaRef: 'correction-observer-output',
       timeoutMs: this.timeoutMs,
       systemPrompt: CorrectionObserver.SYSTEM_PROMPT,
     });

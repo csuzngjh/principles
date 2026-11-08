@@ -220,8 +220,9 @@ describe('ReuseEvaluationRunner — happy path returns a validated recommendatio
       rationale: 'same experience, different wording',
       confidence: 0.82,
     });
-    // The run declared the Phase 3C-1 schema ref to the adapter.
-    expect(adapter.startedRuns[0]?.outputSchemaRef).toBe('reuse-evaluation-output-v1');
+    // The run declared the Phase 3C-1 schema ref to the adapter (PRI-1139:
+    // canonical version-neutral spelling).
+    expect(adapter.startedRuns[0]?.outputSchemaRef).toBe('reuse-evaluation-output');
     // T7: proposal-only — the ledger is byte-identical.
     expect(ledgerBytes()).toBe(before);
     expect(loadLedger(stateDir).tree.principles['p-uuid-1']?.reuseEvidence).toBeUndefined();
@@ -330,7 +331,7 @@ describe('T3 — failure semantics are observable, never a silent create', () =>
     expect(result.selectedPrincipleId).toBe('p-uuid-1');
     // Two runs: initial + exactly one repair round through the same adapter.
     expect(adapter.startedRuns).toHaveLength(2);
-    expect(adapter.startedRuns[0]?.outputSchemaRef).toBe('reuse-evaluation-output-v1');
+    expect(adapter.startedRuns[0]?.outputSchemaRef).toBe('reuse-evaluation-output');
     expect(ledgerBytes()).toBe(before);
   });
 

@@ -159,7 +159,7 @@ function wireRequestAt(index: number, because: string): { url: string; body: Rec
 
 describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2)', () => {
   it('actor action round: 512 lands on the tool-call path request (tool_choice required, registered tool declared)', async () => {
-    wire.handler = () => sseToolCallResponse('record_learning_lab_actor_action_v1', VALID_ACTION_JSON);
+    wire.handler = () => sseToolCallResponse('record_learning_lab_actor_action', VALID_ACTION_JSON);
     const { adapter } = makeAdapter({ outputPathStrategy: 'tool_call_first' });
     const handle = await adapter.startRun(makeInput({ outputSchemaRef: LEARNING_LAB_ACTOR_ACTION_REF, maxTokens: 512 }));
     const output = await adapter.fetchOutput(handle.runId);
@@ -171,7 +171,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     expect(body.max_tokens).toBe(512); // ← the wire value, not just the options bag
     expect(body.tool_choice).toBe('required'); // proof this is the tool-call path
     const tools = body.tools as { function?: { name?: string } }[];
-    expect(tools?.[0]?.function?.name).toBe('record_learning_lab_actor_action_v1');
+    expect(tools?.[0]?.function?.name).toBe('record_learning_lab_actor_action');
     expect(Value.Check(LearningLabActorActionV1Schema, output?.payload)).toBe(true);
   });
 
@@ -267,7 +267,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
   });
 
   it('priority: the model output ceiling wins over a huge per-request value (384000 over 900000, tool-call path)', async () => {
-    wire.handler = () => sseToolCallResponse('record_learning_lab_actor_action_v1', VALID_ACTION_JSON);
+    wire.handler = () => sseToolCallResponse('record_learning_lab_actor_action', VALID_ACTION_JSON);
     const { adapter } = makeAdapter({ outputPathStrategy: 'tool_call_first' });
     const handle = await adapter.startRun(makeInput({ outputSchemaRef: LEARNING_LAB_ACTOR_ACTION_REF, maxTokens: 900_000 }));
     await adapter.fetchOutput(handle.runId);
