@@ -49,7 +49,7 @@ describe("approval edit API client (PRI-447)", () => {
     expect(typeof api.editApproval).toBe("function");
   });
 
-  it("posts to /api/v1/approvals/:id/edit with newArtifactId and editReason", async () => {
+  it("posts to /api/approvals/:id/edit with newArtifactId and editReason", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -76,7 +76,7 @@ describe("approval edit API client (PRI-447)", () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [calledPath, calledInit] = mockFetch.mock.calls[0];
-    expect(calledPath).toBe("/api/v1/approvals/apr-1/edit");
+    expect(calledPath).toBe("/api/approvals/apr-1/edit");
     expect(calledInit?.method).toBe("POST");
     const body = JSON.parse(calledInit?.body as string);
     expect(body.newArtifactId).toBe("art-v2");

@@ -36,24 +36,29 @@ import { LearningLabActorActionV1Schema } from '../learning-lab/actor-action-out
  * `outputSchemaRef` values passed by each runner's `invokeRuntime()`.
  */
 export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<string, TSchema>([
-  ['diagnostician-output-v1', DiagnosticianOutputV1Schema],
-  ['diag-rootcause-output-v1', DiagRootCauseOutputV1Schema],
-  ['diag-distiller-output-v1', DiagDistillerOutputV1Schema],
-  ['dreamer-output-v1', DreamerOutputV1Schema],
-  ['philosopher-output-v1', PhilosopherOutputV1Schema],
-  ['scribe-output-v1', ScribeOutputV1Schema],
-  ['artificer-rule-output-v2', ArtificerRuleOutputSchema],
-  ['evaluator-output-v1', EvaluatorOutputV1Schema],
-  ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
-  ['correction-observer-output-v1', CorrectionObserverOutputV1Schema],
-  ['signal-classification-output-v2', SignalClassificationOutputV2Schema],
+  // PRI-1139 (PR-6 cutover): the registry keys are version-NEUTRAL and are the
+  // only current write standard. The versioned spelling each runner passed
+  // before the cutover still resolves through OUTPUT_SCHEMA_REF_ALIASES below,
+  // so historical refs stay readable while every production writer uses the
+  // canonical key.
+  ['diagnostician-output', DiagnosticianOutputV1Schema],
+  ['diag-rootcause-output', DiagRootCauseOutputV1Schema],
+  ['diag-distiller-output', DiagDistillerOutputV1Schema],
+  ['dreamer-output', DreamerOutputV1Schema],
+  ['philosopher-output', PhilosopherOutputV1Schema],
+  ['scribe-output', ScribeOutputV1Schema],
+  ['artificer-rule-output', ArtificerRuleOutputSchema],
+  ['evaluator-output', EvaluatorOutputV1Schema],
+  ['rollout-reviewer-output', RolloutReviewerOutputV1Schema],
+  ['correction-observer-output', CorrectionObserverOutputV1Schema],
+  ['signal-classification-output', SignalClassificationOutputV2Schema],
   // PRI-917 v0.3.2: the Semantic Reuse Evaluation Capability's proposal contract
   // (proposal-only — its outputs are never persisted; SPEC section 4.2/10).
-  ['reuse-evaluation-output-v1', ReuseEvaluationOutputV1Schema],
+  ['reuse-evaluation-output', ReuseEvaluationOutputV1Schema],
   // PRI-966 G2: the Learning Lab real-actor round contract — one environment
   // action per interactive round for the research actor. Production runners
   // never pass this ref; see learning-lab/actor-action-output.ts.
-  ['learning-lab-actor-action-v1', LearningLabActorActionV1Schema],
+  ['learning-lab-actor-action', LearningLabActorActionV1Schema],
 ]);
 
 /**
@@ -61,10 +66,10 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
  *
  * One declaration, no shadow list. Both directions are registered up front so
  * this table never needs to change during the single-version convergence:
- *   - now (PR-1..PR-5): the registry still owns versioned keys, so a
- *     version-neutral ref resolves FORWARD through this table;
- *   - PR-6: registry keys become version-neutral, so historical versioned
- *     refs resolve BACKWARD through the same table.
+ *   - PR-1..PR-5: the registry still owned versioned keys, so a
+ *     version-neutral ref resolved FORWARD through this table;
+ *   - PR-6 (PRI-1139, now): registry keys are version-neutral, so historical
+ *     versioned refs resolve BACKWARD through the same table.
  *
  * `resolveOutputSchema` always tries an exact registry hit first, so this
  * table is inert for every ref already registered. PR-6 can therefore be
@@ -100,7 +105,7 @@ export const OUTPUT_SCHEMA_REF_ALIASES: ReadonlyMap<string, string> = new Map(al
 /**
  * Resolve the TypeBox schema for a given `outputSchemaRef`.
  *
- * @param ref - the outputSchemaRef string passed by a runner (e.g. 'diag-rootcause-output-v1').
+ * @param ref - the outputSchemaRef string passed by a runner (e.g. 'diag-rootcause-output').
  * @returns the matching schema, or `undefined` when:
  *   - `ref` is undefined/null/empty (caller should apply its own default), OR
  *   - `ref` is a non-empty string not present in the registry or the PRI-1104

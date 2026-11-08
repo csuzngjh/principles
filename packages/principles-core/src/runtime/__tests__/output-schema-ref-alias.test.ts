@@ -31,11 +31,13 @@ const CONTRACTS: readonly (readonly [string, string])[] = [
 ];
 
 describe('PRI-1104 output schema ref aliases', () => {
-  it('the write side is unchanged: registry still owns exactly the 13 versioned keys', () => {
+  it('PRI-1139 cutover: registry owns exactly the 13 version-neutral canonical keys', () => {
     expect(OUTPUT_SCHEMA_REGISTRY.size).toBe(CONTRACTS.length);
     for (const [neutral, versioned] of CONTRACTS) {
-      expect(OUTPUT_SCHEMA_REGISTRY.has(versioned), versioned).toBe(true);
-      expect(OUTPUT_SCHEMA_REGISTRY.has(neutral), neutral).toBe(false);
+      expect(OUTPUT_SCHEMA_REGISTRY.has(neutral), neutral).toBe(true);
+      // The versioned spelling is compat-read-only: it resolves through the
+      // alias table, never through an exact registry hit.
+      expect(OUTPUT_SCHEMA_REGISTRY.has(versioned), versioned).toBe(false);
     }
   });
 

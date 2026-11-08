@@ -3,7 +3,7 @@
  *
  * Prevents future field-name divergence between:
  * - CLI `pd activation list --json` output (packages/pd-cli/src/commands/runtime-activation.ts)
- * - Console `/api/v1/activations` response (ActivationsConsoleModel.ts)
+ * - Console `/api/activations` response (ActivationsConsoleModel.ts)
  *
  * Before PRI-500, the two interfaces used different field names for the same
  * concept (CLI: `activationId`, Console: `id`; CLI: `{status, reason, nextAction}`,
@@ -190,7 +190,7 @@ describe('PRI-500: CLI ↔ Console activation field contract', () => {
 
   describe('Runtime JSON shape guard (rc-2: no `as`)', () => {
     it('a Console response JSON has activationId, not id', () => {
-      // Simulate a parsed JSON response from /api/v1/activations.
+      // Simulate a parsed JSON response from /api/activations.
       const json: unknown = JSON.stringify({
         activations: [
           {

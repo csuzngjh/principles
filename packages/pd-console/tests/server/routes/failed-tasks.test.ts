@@ -127,7 +127,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('handleFailedTasksRoute', () => {
-  describe('GET /api/v1/failed-tasks (collection)', () => {
+  describe('GET /api/failed-tasks (collection)', () => {
     it('returns failed task list with total', async () => {
       const mockTasks = [
         {
@@ -158,7 +158,7 @@ describe('handleFailedTasksRoute', () => {
         countFailedTasks: countFn,
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -185,7 +185,7 @@ describe('handleFailedTasksRoute', () => {
         countFailedTasks: countFn,
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks?kind=diag_router');
+      const req = createMockRequest('GET', '/api/failed-tasks?kind=diag_router');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -204,7 +204,7 @@ describe('handleFailedTasksRoute', () => {
         countFailedTasks: countFn,
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks?limit=10&offset=20');
+      const req = createMockRequest('GET', '/api/failed-tasks?limit=10&offset=20');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -220,7 +220,7 @@ describe('handleFailedTasksRoute', () => {
         countFailedTasks: vi.fn().mockResolvedValue(0),
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -261,7 +261,7 @@ describe('handleFailedTasksRoute', () => {
         countFailedTasks: vi.fn().mockResolvedValue(0),
         aggregatePipelineHealth: aggregateMock({ pendingCount: 1, oldestPendingCreatedAt: new Date(now - 10 * 60000).toISOString(), oldestPendingTaskKind: 'philosopher', lastSucceededAt: new Date(now - 2 * 60000).toISOString() }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
@@ -278,7 +278,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore({
         aggregatePipelineHealth: aggregateMock({ pendingCount: 233, oldestPendingCreatedAt: new Date(now - 5 * 60000).toISOString(), oldestPendingTaskKind: 'dreamer', lastSucceededAt: new Date(now - 60000).toISOString() }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
@@ -291,7 +291,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore({
         aggregatePipelineHealth: aggregateMock({ pendingCount: 1, oldestPendingCreatedAt: new Date(now - 3 * 3600000).toISOString(), oldestPendingTaskKind: 'philosopher', lastSucceededAt: new Date(now - 4 * 3600000).toISOString() }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
@@ -304,7 +304,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore({
         aggregatePipelineHealth: aggregateMock({ pendingCount: 0, lastSucceededAt: new Date(now - 60000).toISOString() }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
@@ -322,7 +322,7 @@ describe('handleFailedTasksRoute', () => {
           retryWaitCount: 1,
         }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
@@ -344,7 +344,7 @@ describe('handleFailedTasksRoute', () => {
           retryWaitCount: 4,
         }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock }>(res);
@@ -357,7 +357,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore({
         aggregatePipelineHealth: aggregateMock({ pendingCount: 0, lastSucceededAt: null }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
@@ -369,7 +369,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore({
         aggregatePipelineHealth: vi.fn().mockRejectedValue(new Error('db locked')),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
       const data = okEnvelope<{ pipeline: PipelineBlock; nextAction: string }>(res);
@@ -382,7 +382,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore({
         aggregatePipelineHealth: aggregateMock({ pendingCount: 2, oldestPendingCreatedAt: new Date(now - 60000).toISOString(), lastSucceededAt: null }),
       });
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir, subPath: '',
@@ -397,7 +397,7 @@ describe('handleFailedTasksRoute', () => {
     it('rejects limit > 200 with 400', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks?limit=500');
+      const req = createMockRequest('GET', '/api/failed-tasks?limit=500');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -410,7 +410,7 @@ describe('handleFailedTasksRoute', () => {
     it('rejects negative offset with 400', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks?offset=-5');
+      const req = createMockRequest('GET', '/api/failed-tasks?offset=-5');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -424,7 +424,7 @@ describe('handleFailedTasksRoute', () => {
       fs.unlinkSync(path.join(workspaceDir, '.pd', 'state.db'));
       const store = createMockStore();
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -440,7 +440,7 @@ describe('handleFailedTasksRoute', () => {
         listFailedTasks: vi.fn().mockRejectedValue(new Error('sqlite: disk I/O error')),
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -451,7 +451,7 @@ describe('handleFailedTasksRoute', () => {
     });
   });
 
-  describe('GET /api/v1/failed-tasks/:id (detail)', () => {
+  describe('GET /api/failed-tasks/:id (detail)', () => {
     it('returns task detail with runs and lastError', async () => {
       const mockDetail = {
         task: {
@@ -480,7 +480,7 @@ describe('handleFailedTasksRoute', () => {
         getFailedTaskDetail: vi.fn().mockResolvedValue(mockDetail),
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/task-001');
+      const req = createMockRequest('GET', '/api/failed-tasks/task-001');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-001', sqliteTaskStore: store });
 
@@ -497,7 +497,7 @@ describe('handleFailedTasksRoute', () => {
         getFailedTaskDetail: vi.fn().mockResolvedValue(null),
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/nonexistent');
+      const req = createMockRequest('GET', '/api/failed-tasks/nonexistent');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/nonexistent', sqliteTaskStore: store });
 
@@ -514,7 +514,7 @@ describe('handleFailedTasksRoute', () => {
       const getDetail = vi.fn().mockResolvedValue(null);
       const store = createMockStore({ getFailedTaskDetail: getDetail });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/task%2Fwith%20space');
+      const req = createMockRequest('GET', '/api/failed-tasks/task%2Fwith%20space');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task%2Fwith%20space', sqliteTaskStore: store });
 
@@ -528,7 +528,7 @@ describe('handleFailedTasksRoute', () => {
       const store = createMockStore();
       const getDetailSpy = vi.spyOn(store, 'getFailedTaskDetail');
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/%ZZ');
+      const req = createMockRequest('GET', '/api/failed-tasks/%ZZ');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/%ZZ', sqliteTaskStore: store });
 
@@ -543,7 +543,7 @@ describe('handleFailedTasksRoute', () => {
         getFailedTaskDetail: vi.fn().mockRejectedValue(new Error('connection lost')),
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/task-001');
+      const req = createMockRequest('GET', '/api/failed-tasks/task-001');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-001', sqliteTaskStore: store });
 
@@ -558,7 +558,7 @@ describe('handleFailedTasksRoute', () => {
     it('returns 403 when failed_tasks_observability flag is disabled', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks');
+      const req = createMockRequest('GET', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -588,7 +588,7 @@ describe('handleFailedTasksRoute', () => {
         getFailedTaskDetail: vi.fn().mockResolvedValue(mockDetail),
       });
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/task-001');
+      const req = createMockRequest('GET', '/api/failed-tasks/task-001');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -603,7 +603,7 @@ describe('handleFailedTasksRoute', () => {
     it('flag gate also blocks GET /:id when disabled', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/task-001');
+      const req = createMockRequest('GET', '/api/failed-tasks/task-001');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -621,7 +621,7 @@ describe('handleFailedTasksRoute', () => {
     it('POST / returns 405', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('POST', '/api/v1/failed-tasks');
+      const req = createMockRequest('POST', '/api/failed-tasks');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '', sqliteTaskStore: store });
 
@@ -633,7 +633,7 @@ describe('handleFailedTasksRoute', () => {
     it('PUT /:id returns 405', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('PUT', '/api/v1/failed-tasks/task-001');
+      const req = createMockRequest('PUT', '/api/failed-tasks/task-001');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-001', sqliteTaskStore: store });
 
@@ -643,7 +643,7 @@ describe('handleFailedTasksRoute', () => {
     it('DELETE /:id returns 405', async () => {
       const store = createMockStore();
 
-      const req = createMockRequest('DELETE', '/api/v1/failed-tasks/task-001');
+      const req = createMockRequest('DELETE', '/api/failed-tasks/task-001');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, { workspaceDir, subPath: '/task-001', sqliteTaskStore: store });
 
@@ -658,13 +658,13 @@ describe('handleFailedTasksRoute', () => {
     });
   });
 
-  // ── POST /api/v1/failed-tasks/:id/recover (Governance Recovery Actions v1) ──
+  // ── POST /api/failed-tasks/:id/recover (Governance Recovery Actions v1) ──
   //
   // These tests exercise the REAL recovery path: the route opens a writable
   // RecoverySweepService against the seeded temp workspace (EP-02/EP-09 — no
   // service mocks; assertions are on real DB rows and the real audit log).
 
-  describe('POST /api/v1/failed-tasks/:id/recover', () => {
+  describe('POST /api/failed-tasks/:id/recover', () => {
     let stateManager: RuntimeStateManager;
 
     const RECOVERY_FLAGS = {
@@ -727,7 +727,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('403 failed_task_recovery_console_disabled when the recovery flag is explicitly disabled', async () => {
-      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/some-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -742,7 +742,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('403 (fail-closed) when featureFlags context carries no recovery flag at all', async () => {
-      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/some-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -755,7 +755,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('404 task_not_found for an unknown task id', async () => {
-      const req = createMockPostRequest('/api/v1/failed-tasks/does-not-exist/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/does-not-exist/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -771,7 +771,7 @@ describe('handleFailedTasksRoute', () => {
     it('decodes percent-encoded task ids before recovery dispatch (same decode as the detail branch)', async () => {
       await seedTask({ taskId: 'task/with space', status: 'failed', attemptCount: 1, maxAttempts: 3 });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/task%2Fwith%20space/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/task%2Fwith%20space/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -788,7 +788,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('returns 400 invalid_encoding for a malformed percent-encoded recover id', async () => {
-      const req = createMockPostRequest('/api/v1/failed-tasks/%ZZ/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/%ZZ/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -803,7 +803,7 @@ describe('handleFailedTasksRoute', () => {
     it('409 task_not_recoverable for a leased (in-flight) task, row untouched', async () => {
       await seedTask({ taskId: 'leased-task', status: 'leased' });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/leased-task/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/leased-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -823,7 +823,7 @@ describe('handleFailedTasksRoute', () => {
       await seedTask({ taskId: 'failed-task-1', status: 'failed', attemptCount: 1, maxAttempts: 3 });
 
       const req = createMockPostRequest(
-        '/api/v1/failed-tasks/failed-task-1/recover',
+        '/api/failed-tasks/failed-task-1/recover',
         JSON.stringify({ reason: 'Owner approved retry after reviewing failure' }),
       );
       const res = createMockResponse();
@@ -857,7 +857,7 @@ describe('handleFailedTasksRoute', () => {
     it('409 task_attempts_exhausted without force leaves the row untouched', async () => {
       await seedTask({ taskId: 'exhausted-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/exhausted-task/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/exhausted-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -878,7 +878,7 @@ describe('handleFailedTasksRoute', () => {
       await seedTask({ taskId: 'exhausted-force-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
 
       const req = createMockPostRequest(
-        '/api/v1/failed-tasks/exhausted-force-task/recover',
+        '/api/failed-tasks/exhausted-force-task/recover',
         JSON.stringify({ force: true }),
       );
       const res = createMockResponse();
@@ -912,7 +912,7 @@ describe('handleFailedTasksRoute', () => {
       await seedTask({ taskId: 'exhausted-noforce-task', status: 'failed', attemptCount: 3, maxAttempts: 3 });
 
       const req = createMockPostRequest(
-        '/api/v1/failed-tasks/exhausted-noforce-task/recover',
+        '/api/failed-tasks/exhausted-noforce-task/recover',
         JSON.stringify({ force: false }),
       );
       const res = createMockResponse();
@@ -936,7 +936,7 @@ describe('handleFailedTasksRoute', () => {
 
       for (const badForce of ['"yes"', 'null', '1']) {
         const req = createMockPostRequest(
-          '/api/v1/failed-tasks/force-type-task/recover',
+          '/api/failed-tasks/force-type-task/recover',
           `{"force": ${badForce}}`,
         );
         const res = createMockResponse();
@@ -961,7 +961,7 @@ describe('handleFailedTasksRoute', () => {
       await seedTask({ taskId: 'review-force-task', status: 'needs_human_review', attemptCount: 2, maxAttempts: 3 });
 
       const req = createMockPostRequest(
-        '/api/v1/failed-tasks/review-force-task/recover',
+        '/api/failed-tasks/review-force-task/recover',
         JSON.stringify({ force: true }),
       );
       const res = createMockResponse();
@@ -1002,7 +1002,7 @@ describe('handleFailedTasksRoute', () => {
         },
       });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/review-task-1/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/review-task-1/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1066,7 +1066,7 @@ describe('handleFailedTasksRoute', () => {
         updatedAt: '2026-08-30T00:00:00.000Z',
       });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/decision-task-1/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/decision-task-1/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1092,7 +1092,7 @@ describe('handleFailedTasksRoute', () => {
         diagnosticJson: JSON.stringify({ note: 'not pi metadata' }),
       });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/corrupt-meta-task/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/corrupt-meta-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1111,7 +1111,7 @@ describe('handleFailedTasksRoute', () => {
 
     it('400 bad_request when reason is not a string', async () => {
       const req = createMockPostRequest(
-        '/api/v1/failed-tasks/some-task/recover',
+        '/api/failed-tasks/some-task/recover',
         JSON.stringify({ reason: 42 }),
       );
       const res = createMockResponse();
@@ -1126,7 +1126,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('400 bad_request for a non-JSON body', async () => {
-      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', 'not json');
+      const req = createMockPostRequest('/api/failed-tasks/some-task/recover', 'not json');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1140,7 +1140,7 @@ describe('handleFailedTasksRoute', () => {
     it('accepts an empty body (reason is optional)', async () => {
       await seedTask({ taskId: 'failed-empty-body', status: 'failed' });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/failed-empty-body/recover', '');
+      const req = createMockPostRequest('/api/failed-tasks/failed-empty-body/recover', '');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1155,7 +1155,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('405 for GET on the recover subpath', async () => {
-      const req = createMockRequest('GET', '/api/v1/failed-tasks/some-task/recover');
+      const req = createMockRequest('GET', '/api/failed-tasks/some-task/recover');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1167,7 +1167,7 @@ describe('handleFailedTasksRoute', () => {
     });
 
     it('400 bad_request when reason exceeds 2000 characters', async () => {
-      const req = createMockPostRequest('/api/v1/failed-tasks/x/recover', JSON.stringify({ reason: 'x'.repeat(2001) }));
+      const req = createMockPostRequest('/api/failed-tasks/x/recover', JSON.stringify({ reason: 'x'.repeat(2001) }));
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1182,7 +1182,7 @@ describe('handleFailedTasksRoute', () => {
     it('405 for a POST with no task id (recover regex requires an id segment)', async () => {
       // The recover matcher /^\/([^/]+)\/recover$/ requires a task id; an
       // empty-id request falls through to the detail route → 405.
-      const req = createMockPostRequest('/api/v1/failed-tasks//recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks//recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir,
@@ -1197,7 +1197,7 @@ describe('handleFailedTasksRoute', () => {
       const emptyWorkspace = path.join(tmpDir, 'empty-workspace');
       fs.mkdirSync(path.join(emptyWorkspace, '.pd'), { recursive: true });
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/some-task/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/some-task/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir: emptyWorkspace,
@@ -1212,7 +1212,7 @@ describe('handleFailedTasksRoute', () => {
     it('400 bad_request when the request body stream errors', async () => {
       const req = new EventEmitter() as unknown as IncomingMessage;
       req.method = 'POST';
-      req.url = '/api/v1/failed-tasks/x/recover';
+      req.url = '/api/failed-tasks/x/recover';
       setImmediate(() => req.emit('error', new Error('stream broke')));
 
       const res = createMockResponse();
@@ -1232,7 +1232,7 @@ describe('handleFailedTasksRoute', () => {
       // state.db exists but is not a valid SQLite database → open/query throws
       fs.writeFileSync(path.join(corruptWorkspace, '.pd', 'state.db'), 'this is not a sqlite database');
 
-      const req = createMockPostRequest('/api/v1/failed-tasks/x/recover', '{}');
+      const req = createMockPostRequest('/api/failed-tasks/x/recover', '{}');
       const res = createMockResponse();
       await handleFailedTasksRoute(req, res, {
         workspaceDir: corruptWorkspace,
@@ -1251,7 +1251,7 @@ describe('handleFailedTasksRoute', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const req = createMockPostRequest('/api/v1/failed-tasks/failed-audit-err/recover', '{}');
+        const req = createMockPostRequest('/api/failed-tasks/failed-audit-err/recover', '{}');
         const res = createMockResponse();
         await handleFailedTasksRoute(req, res, {
           workspaceDir,

@@ -42,7 +42,7 @@ function createMockRequest(
     : (options?.body !== undefined ? JSON.stringify(options.body) : '');
   const req = {
     method,
-    url: options?.url ?? '/api/v1/config/summary',
+    url: options?.url ?? '/api/config/summary',
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       if (event === 'data' && bodyStr.length > 0) {
         handler(Buffer.from(bodyStr));
@@ -166,12 +166,12 @@ const VALID_CONFIG = {
 };
 
 // ===========================================================================
-// GET /api/v1/config/summary
+// GET /api/config/summary
 // ===========================================================================
 
-describe('GET /api/v1/config/summary', () => {
+describe('GET /api/config/summary', () => {
   it('returns defaults when no config file exists', async () => {
-    const req = createMockRequest('GET', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('GET', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
 
@@ -193,7 +193,7 @@ describe('GET /api/v1/config/summary', () => {
 
   it('returns user config summary when config file exists', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('GET', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('GET', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
 
@@ -220,7 +220,7 @@ describe('GET /api/v1/config/summary', () => {
 
   it('never returns raw secret values in summary', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('GET', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('GET', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
 
@@ -234,7 +234,7 @@ describe('GET /api/v1/config/summary', () => {
 
   it('returns error summary for malformed config', async () => {
     writeMalformedConfig('version: 999\nfeatures: []\n');
-    const req = createMockRequest('GET', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('GET', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
 
@@ -261,7 +261,7 @@ describe('GET /api/v1/config/summary', () => {
         },
       },
     });
-    const req = createMockRequest('GET', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('GET', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
 
@@ -277,13 +277,13 @@ describe('GET /api/v1/config/summary', () => {
 });
 
 // ===========================================================================
-// GET /api/v1/config/catalog
+// GET /api/config/catalog
 // ===========================================================================
 
-describe('GET /api/v1/config/catalog', () => {
+describe('GET /api/config/catalog', () => {
   it('returns available runtime profiles with safe labels', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('GET', { url: '/api/v1/config/catalog' });
+    const req = createMockRequest('GET', { url: '/api/config/catalog' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/catalog' });
 
@@ -301,7 +301,7 @@ describe('GET /api/v1/config/catalog', () => {
   });
 
   it('returns defaults catalog when no config file exists', async () => {
-    const req = createMockRequest('GET', { url: '/api/v1/config/catalog' });
+    const req = createMockRequest('GET', { url: '/api/config/catalog' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/catalog' });
 
@@ -312,7 +312,7 @@ describe('GET /api/v1/config/catalog', () => {
 
   it('catalog never includes raw provider objects or tokens', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('GET', { url: '/api/v1/config/catalog' });
+    const req = createMockRequest('GET', { url: '/api/config/catalog' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/catalog' });
 
@@ -326,7 +326,7 @@ describe('GET /api/v1/config/catalog', () => {
 
   it('catalog returns empty profiles with errors when config is malformed', async () => {
     writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
-    const req = createMockRequest('GET', { url: '/api/v1/config/catalog' });
+    const req = createMockRequest('GET', { url: '/api/config/catalog' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/catalog' });
 
@@ -342,14 +342,14 @@ describe('GET /api/v1/config/catalog', () => {
 });
 
 // ===========================================================================
-// PATCH /api/v1/config/agents/:agentName/binding
+// PATCH /api/config/agents/:agentName/binding
 // ===========================================================================
 
-describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
+describe('PATCH /api/config/agents/:agentName/binding', () => {
   it('updates agent runtime binding', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'anthropic-cloud', enabled: true },
     });
     const res = createMockResponse();
@@ -376,7 +376,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('rejects unknown agent name', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/nonexistent-agent/binding',
+      url: '/api/config/agents/nonexistent-agent/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: true },
     });
     const res = createMockResponse();
@@ -393,7 +393,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('rejects unknown runtime profile reference', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'nonexistent-profile', enabled: true },
     });
     const res = createMockResponse();
@@ -410,7 +410,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('rejects malformed payload', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 123, enabled: 'not-a-boolean' },
     });
     const res = createMockResponse();
@@ -425,7 +425,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('rejects update when existing config is malformed', async () => {
     writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: true },
     });
     const res = createMockResponse();
@@ -443,7 +443,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('rejects payload with unknown fields (strict whitelist)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: true, apiKey: 'sk-ant-12345' },
     });
     const res = createMockResponse();
@@ -460,7 +460,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('rejects payload with unknown non-secret fields', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: true, extraField: 'value' },
     });
     const res = createMockResponse();
@@ -479,7 +479,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
     // Even though the nested key is secret-like, the whitelist check catches
     // the unknown top-level key 'provider' first. Both paths reject.
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: true, provider: { api_key: 'sk-ant-12345' } },
     });
     const res = createMockResponse();
@@ -494,7 +494,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('creates config file with defaults if missing, then applies update', async () => {
     // No config file exists
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'pd.default', enabled: true },
     });
     const res = createMockResponse();
@@ -512,7 +512,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
   it('preserves unrelated config sections when updating', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/dreamer/binding',
+      url: '/api/config/agents/dreamer/binding',
       body: { runtimeProfile: 'anthropic-cloud', enabled: true },
     });
     const res = createMockResponse();
@@ -540,7 +540,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
       customSection: { note: 'user-owned data', count: 42 },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/dreamer/binding',
+      url: '/api/config/agents/dreamer/binding',
       body: { runtimeProfile: 'anthropic-cloud', enabled: true },
     });
     const res = createMockResponse();
@@ -563,14 +563,14 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
 });
 
 // ===========================================================================
-// GET /api/v1/config/readiness/:agentName
+// GET /api/config/readiness/:agentName
 // ===========================================================================
 
-describe('GET /api/v1/config/readiness/:agentName', () => {
+describe('GET /api/config/readiness/:agentName', () => {
   it('returns needs_setup for an agent on a retired openclaw profile (ADR-0029)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/dreamer',
+      url: '/api/config/readiness/dreamer',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -600,7 +600,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
   it('returns needs_setup for a retired openclaw profile even with provider+model', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/diagnostician',
+      url: '/api/config/readiness/diagnostician',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -620,7 +620,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
   it('returns disabled for disabled agent', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/evaluator',
+      url: '/api/config/readiness/evaluator',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -645,7 +645,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
       },
     });
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/diagnostician',
+      url: '/api/config/readiness/diagnostician',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -668,7 +668,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     writeConfig(VALID_CONFIG);
     // Bind dreamer to anthropic-cloud (pi-ai profile)
     const updateReq = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/dreamer/binding',
+      url: '/api/config/agents/dreamer/binding',
       body: { runtimeProfile: 'anthropic-cloud', enabled: true },
     });
     const updateRes = createMockResponse();
@@ -679,7 +679,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     expect(updateRes.statusCode).toBe(200);
 
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/dreamer',
+      url: '/api/config/readiness/dreamer',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -700,7 +700,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
   it('returns 404 for unknown agent name', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/nonexistent',
+      url: '/api/config/readiness/nonexistent',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -713,7 +713,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
 
   it('readiness works with defaults when no config file exists', async () => {
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/diagnostician',
+      url: '/api/config/readiness/diagnostician',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -736,7 +736,7 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
   it('returns unknown readiness when config is malformed', async () => {
     writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/diagnostician',
+      url: '/api/config/readiness/diagnostician',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -753,14 +753,14 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
 });
 
 // ===========================================================================
-// PATCH /api/v1/config/default-runtime
+// PATCH /api/config/default-runtime
 // ===========================================================================
 
-describe('PATCH /api/v1/config/default-runtime', () => {
+describe('PATCH /api/config/default-runtime', () => {
   it('updates default runtime and persists to config.yaml', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'lmstudio-local' },
     });
     const res = createMockResponse();
@@ -785,7 +785,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
     writeConfig(VALID_CONFIG);
     // First set an explicit override for diagnostician
     const overrideReq = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'anthropic-cloud', enabled: true },
     });
     const overrideRes = createMockResponse();
@@ -797,7 +797,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
 
     // Now update default runtime
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'lmstudio-local' },
     });
     const res = createMockResponse();
@@ -845,7 +845,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
 
     // Update default runtime
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'lmstudio-local' },
     });
     const res = createMockResponse();
@@ -872,7 +872,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
   it('rejects missing defaultRuntime field', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { something: 'else' },
     });
     const res = createMockResponse();
@@ -889,7 +889,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
   it('rejects nonexistent runtime profile', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'nonexistent-profile' },
     });
     const res = createMockResponse();
@@ -906,7 +906,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
   it('rejects malformed config (refuses to write)', async () => {
     writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'lmstudio-local' },
     });
     const res = createMockResponse();
@@ -919,7 +919,7 @@ describe('PATCH /api/v1/config/default-runtime', () => {
   });
 
   it('returns 405 for GET on default-runtime', async () => {
-    const req = createMockRequest('GET', { url: '/api/v1/config/default-runtime' });
+    const req = createMockRequest('GET', { url: '/api/config/default-runtime' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/default-runtime' });
     expect(res.statusCode).toBe(405);
@@ -932,21 +932,21 @@ describe('PATCH /api/v1/config/default-runtime', () => {
 
 describe('Config API edge cases', () => {
   it('returns 405 for unsupported methods on /summary', async () => {
-    const req = createMockRequest('POST', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('POST', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
     expect(res.statusCode).toBe(405);
   });
 
   it('returns 405 for unsupported methods on /catalog', async () => {
-    const req = createMockRequest('DELETE', { url: '/api/v1/config/catalog' });
+    const req = createMockRequest('DELETE', { url: '/api/config/catalog' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/catalog' });
     expect(res.statusCode).toBe(405);
   });
 
   it('returns 404 for unknown sub-paths', async () => {
-    const req = createMockRequest('GET', { url: '/api/v1/config/unknown' });
+    const req = createMockRequest('GET', { url: '/api/config/unknown' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/unknown' });
     expect(res.statusCode).toBe(404);
@@ -956,7 +956,7 @@ describe('Config API edge cases', () => {
     writeConfig(VALID_CONFIG);
     const req = {
       method: 'PATCH',
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
         if (event === 'data') {
           handler(Buffer.from('{not valid json'));
@@ -976,7 +976,7 @@ describe('Config API edge cases', () => {
 
   it('summary response never includes raw YAML content', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('GET', { url: '/api/v1/config/summary' });
+    const req = createMockRequest('GET', { url: '/api/config/summary' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/summary' });
 
@@ -991,7 +991,7 @@ describe('Config API edge cases', () => {
     writeConfig(VALID_CONFIG);
     const largeBody = { runtimeProfile: 'openclaw.default', enabled: true, padding: 'x'.repeat(1024 * 100) };
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: largeBody,
     });
     const res = createMockResponse();
@@ -1005,7 +1005,7 @@ describe('Config API edge cases', () => {
   it('returns 400 for malformed URI encoding in agent name', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/%E0%A4%A/binding',
+      url: '/api/config/agents/%E0%A4%A/binding',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -1018,7 +1018,7 @@ describe('Config API edge cases', () => {
   it('returns 400 for malformed URI encoding in readiness agent name', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/readiness/%E0%A4%A',
+      url: '/api/config/readiness/%E0%A4%A',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -1076,7 +1076,7 @@ describe('validateBindingPayload — deep secret detection', () => {
 
 describe('PRI-332: GET/PATCH /principles/output-language', () => {
   it('GET returns default zh-CN when no config exists', async () => {
-    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const req = createMockRequest('GET', { url: '/api/config/principles/output-language' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
 
@@ -1088,7 +1088,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
   it('GET returns configured value', async () => {
     writeConfig({ principles: { outputLanguage: 'en' } });
-    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const req = createMockRequest('GET', { url: '/api/config/principles/output-language' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
 
@@ -1100,7 +1100,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
   it('GET returns 500 on malformed YAML (server-side config error)', async () => {
     writeMalformedConfig('version: [unclosed\n');
-    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const req = createMockRequest('GET', { url: '/api/config/principles/output-language' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
 
@@ -1111,7 +1111,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
   it('GET returns 500 on invalid outputLanguage in config', async () => {
     writeConfig({ principles: { outputLanguage: 'fr' } });
-    const req = createMockRequest('GET', { url: '/api/v1/config/principles/output-language' });
+    const req = createMockRequest('GET', { url: '/api/config/principles/output-language' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
 
@@ -1123,7 +1123,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
   it('PATCH updates language and confirms via re-read', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/principles/output-language',
+      url: '/api/config/principles/output-language',
       body: { outputLanguage: 'en' },
     });
     const res = createMockResponse();
@@ -1136,7 +1136,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
   it('PATCH returns 400 on invalid payload', async () => {
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/principles/output-language',
+      url: '/api/config/principles/output-language',
       body: { outputLanguage: 'fr' },
     });
     const res = createMockResponse();
@@ -1149,7 +1149,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
   it('PATCH returns 400 on missing outputLanguage field', async () => {
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/principles/output-language',
+      url: '/api/config/principles/output-language',
       body: {},
     });
     const res = createMockResponse();
@@ -1163,7 +1163,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
   it('PATCH returns 500 on malformed YAML during read-before-write', async () => {
     writeMalformedConfig('version: [unclosed\n');
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/principles/output-language',
+      url: '/api/config/principles/output-language',
       body: { outputLanguage: 'en' },
     });
     const res = createMockResponse();
@@ -1177,7 +1177,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
   it('PATCH preserves existing config sections when updating language', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/principles/output-language',
+      url: '/api/config/principles/output-language',
       body: { outputLanguage: 'en' },
     });
     const res = createMockResponse();
@@ -1208,7 +1208,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
     try {
       const req = createMockRequest('PATCH', {
-        url: '/api/v1/config/principles/output-language',
+        url: '/api/config/principles/output-language',
         body: { outputLanguage: 'en' },
       });
       const res = createMockResponse();
@@ -1224,7 +1224,7 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 
   it('returns 405 on non-GET/PATCH methods', async () => {
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/principles/output-language',
+      url: '/api/config/principles/output-language',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/principles/output-language' });
@@ -1234,10 +1234,10 @@ describe('PRI-332: GET/PATCH /principles/output-language', () => {
 });
 
 // ===========================================================================
-// PATCH /api/v1/config/features/:featureName — spec 2026-06-27 §13.4
+// PATCH /api/config/features/:featureName — spec 2026-06-27 §13.4
 // ===========================================================================
 
-describe('PATCH /api/v1/config/features/:featureName', () => {
+describe('PATCH /api/config/features/:featureName', () => {
   it('enables a registered feature flag and persists to config.yaml', async () => {
     // Config with a features section that includes intent_engineering (disabled)
     writeConfig({
@@ -1248,7 +1248,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1278,7 +1278,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
   it('rejects unknown feature name with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/nonexistent_flag',
+      url: '/api/config/features/nonexistent_flag',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1295,7 +1295,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
   it('rejects non-boolean enabled with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: 'true' },
     });
     const res = createMockResponse();
@@ -1318,7 +1318,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       ui: { diagnostics: { mode: 'simple' } },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1364,7 +1364,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       ].join('\n'),
     );
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1386,7 +1386,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
   it('rejects malformed existing config with 409', async () => {
     writeMalformedConfig('version: [unclosed\n');
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1408,7 +1408,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
       principles: { outputLanguage: 'en' },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1431,7 +1431,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
 
   it('returns 405 on non-PATCH methods for features', async () => {
     const req = createMockRequest('GET', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -1450,7 +1450,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
 
     try {
       const req = createMockRequest('PATCH', {
-        url: '/api/v1/config/features/intent_engineering',
+        url: '/api/config/features/intent_engineering',
         body: { enabled: true },
       });
       const res = createMockResponse();
@@ -1489,7 +1489,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
 
     try {
       const req = createMockRequest('PATCH', {
-        url: '/api/v1/config/features/intent_engineering',
+        url: '/api/config/features/intent_engineering',
         body: { enabled: true },
       });
       const res = createMockResponse();
@@ -1512,7 +1512,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
   it('rejects invalid JSON body with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       rawBody: '{invalid json',
     });
     const res = createMockResponse();
@@ -1529,7 +1529,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
   it('rejects array body (not object) with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       rawBody: '[1, 2, 3]',
     });
     const res = createMockResponse();
@@ -1546,7 +1546,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
   it('rejects body missing enabled field with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { foo: 'bar' },
     });
     const res = createMockResponse();
@@ -1564,7 +1564,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
     writeConfig(VALID_CONFIG);
     // %E0%A4%A is an incomplete UTF-8 sequence — decodeURIComponent throws
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/%E0%A4%A',
+      url: '/api/config/features/%E0%A4%A',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -1583,7 +1583,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
     // Construct a body > 64KB to trigger readBody rejection
     const hugePayload = { enabled: true, padding: 'x'.repeat(70 * 1024) };
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: hugePayload,
     });
     const res = createMockResponse();
@@ -1639,14 +1639,14 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
 });
 
 // ===========================================================================
-// POST /api/v1/config/profiles — create runtime profile
+// POST /api/config/profiles — create runtime profile
 // ===========================================================================
 
-describe('POST /api/v1/config/profiles', () => {
+describe('POST /api/config/profiles', () => {
   it('rejects creating a retired openclaw profile (ADR-0029: read-only legacy)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'new-openclaw',
         profile: { type: 'openclaw', provider: 'ollama', model: 'llama3' },
@@ -1673,7 +1673,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('creates a new pi-ai profile', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'openai-cloud',
         profile: {
@@ -1696,7 +1696,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('rejects duplicate profile ID with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'lmstudio-local',
         profile: {
@@ -1718,7 +1718,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('rejects profile with missing type field', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'no-type',
         profile: { provider: 'lmstudio' },
@@ -1735,7 +1735,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('rejects profile with invalid type value', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'bad-type',
         profile: { type: 'invalid-type' },
@@ -1750,7 +1750,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('rejects pi-ai profile missing required fields (provider/model/apiKeyEnv)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'incomplete-pi-ai',
         profile: { type: 'pi-ai' },
@@ -1767,7 +1767,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('rejects body missing id field', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: { profile: { type: 'openclaw' } },
     });
     const res = createMockResponse();
@@ -1781,7 +1781,7 @@ describe('POST /api/v1/config/profiles', () => {
   it('rejects body missing profile field', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: { id: 'new-profile' },
     });
     const res = createMockResponse();
@@ -1798,7 +1798,7 @@ describe('POST /api/v1/config/profiles', () => {
       customSection: { note: 'preserve-me' },
     });
     const req = createMockRequest('POST', {
-      url: '/api/v1/config/profiles',
+      url: '/api/config/profiles',
       body: {
         id: 'new-profile',
         profile: {
@@ -1820,7 +1820,7 @@ describe('POST /api/v1/config/profiles', () => {
   });
 
   it('returns 405 for non-POST methods on /profiles', async () => {
-    const req = createMockRequest('GET', { url: '/api/v1/config/profiles' });
+    const req = createMockRequest('GET', { url: '/api/config/profiles' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
     expect(res.statusCode).toBe(405);
@@ -1828,10 +1828,10 @@ describe('POST /api/v1/config/profiles', () => {
 });
 
 // ===========================================================================
-// PATCH /api/v1/config/profiles/:profileId — update runtime profile
+// PATCH /api/config/profiles/:profileId — update runtime profile
 // ===========================================================================
 
-describe('PATCH /api/v1/config/profiles/:profileId', () => {
+describe('PATCH /api/config/profiles/:profileId', () => {
   it('preserves maxTokens when updating other pi-ai profile fields', async () => {
     writeConfig({
       ...VALID_CONFIG,
@@ -1844,7 +1844,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
       },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { provider: 'zai', model: 'glm-5.3-flash' },
     });
     const res = createMockResponse();
@@ -1872,7 +1872,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
       },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { maxTokens: 24000 },
     });
     const res = createMockResponse();
@@ -1901,7 +1901,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
     const before = fs.readFileSync(configPath, 'utf8');
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { maxTokens: 0 },
     });
     const res = createMockResponse();
@@ -1918,7 +1918,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
     const before = fs.readFileSync(configPath, 'utf8');
 
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
+      url: '/api/config/profiles/lmstudio-local',
       body: { model: 'qwen3-new-model' },
     });
     const res = createMockResponse();
@@ -1939,7 +1939,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('updates a pi-ai profile adding optional fields', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { timeoutMs: 30000, maxRetries: 3 },
     });
     const res = createMockResponse();
@@ -1954,7 +1954,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('rejects update of non-existent profile with 404', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/nonexistent',
+      url: '/api/config/profiles/nonexistent',
       body: { model: 'newmodel' },
     });
     const res = createMockResponse();
@@ -1968,7 +1968,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('rejects type change with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { type: 'openclaw' },
     });
     const res = createMockResponse();
@@ -1982,7 +1982,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('allows patch with same type (no-op type field)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { type: 'pi-ai', model: 'updated-model' },
     });
     const res = createMockResponse();
@@ -1996,7 +1996,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('rejects invalid JSON body', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
+      url: '/api/config/profiles/lmstudio-local',
       rawBody: '{invalid json',
     });
     const res = createMockResponse();
@@ -2011,7 +2011,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
       customSection: { note: 'preserve-me' },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
       body: { model: 'newmodel' },
     });
     const res = createMockResponse();
@@ -2026,7 +2026,7 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
 
   it('returns 405 for non-PATCH methods on /profiles/:id', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('GET', { url: '/api/v1/config/profiles/lmstudio-local' });
+    const req = createMockRequest('GET', { url: '/api/config/profiles/lmstudio-local' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
     expect(res.statusCode).toBe(405);
@@ -2034,15 +2034,15 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
 });
 
 // ===========================================================================
-// DELETE /api/v1/config/profiles/:profileId — delete runtime profile
+// DELETE /api/config/profiles/:profileId — delete runtime profile
 // ===========================================================================
 
-describe('DELETE /api/v1/config/profiles/:profileId', () => {
+describe('DELETE /api/config/profiles/:profileId', () => {
   it('deletes an unreferenced profile and persists to config.yaml', async () => {
     writeConfig(VALID_CONFIG);
     // anthropic-cloud is not the default and not referenced by any agent
     const req = createMockRequest('DELETE', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
@@ -2065,7 +2065,7 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
   it('rejects deletion of non-existent profile with 404', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('DELETE', {
-      url: '/api/v1/config/profiles/nonexistent',
+      url: '/api/config/profiles/nonexistent',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/nonexistent' });
@@ -2079,7 +2079,7 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
     writeConfig(VALID_CONFIG);
     // openclaw.default is the defaultRuntime
     const req = createMockRequest('DELETE', {
-      url: '/api/v1/config/profiles/openclaw.default',
+      url: '/api/config/profiles/openclaw.default',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/openclaw.default' });
@@ -2093,7 +2093,7 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
     writeConfig(VALID_CONFIG);
     // lmstudio-local is referenced by diagnostician
     const req = createMockRequest('DELETE', {
-      url: '/api/v1/config/profiles/lmstudio-local',
+      url: '/api/config/profiles/lmstudio-local',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
@@ -2121,7 +2121,7 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
 
     // lmstudio-local is now unreferenced — delete should succeed
     const req = createMockRequest('DELETE', {
-      url: '/api/v1/config/profiles/lmstudio-local',
+      url: '/api/config/profiles/lmstudio-local',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
@@ -2135,7 +2135,7 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
       customSection: { note: 'preserve-me' },
     });
     const req = createMockRequest('DELETE', {
-      url: '/api/v1/config/profiles/anthropic-cloud',
+      url: '/api/config/profiles/anthropic-cloud',
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
@@ -2149,7 +2149,7 @@ describe('DELETE /api/v1/config/profiles/:profileId', () => {
 
   it('returns 405 for non-DELETE methods on /profiles/:id', async () => {
     writeConfig(VALID_CONFIG);
-    const req = createMockRequest('POST', { url: '/api/v1/config/profiles/anthropic-cloud' });
+    const req = createMockRequest('POST', { url: '/api/config/profiles/anthropic-cloud' });
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
     expect(res.statusCode).toBe(405);
@@ -2171,7 +2171,7 @@ describe('PRI-637: Console toggle records owner provenance', () => {
   it('writes source: owner for the toggled flag', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/feedback_channel',
+      url: '/api/config/features/feedback_channel',
       body: { enabled: false },
     });
     const res = createMockResponse();
@@ -2195,7 +2195,7 @@ describe('PRI-637: Console toggle records owner provenance', () => {
       ui: { diagnostics: { mode: 'simple' } },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -2222,7 +2222,7 @@ describe('PRI-637: Console toggle records owner provenance', () => {
       },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/feedback_channel',
+      url: '/api/config/features/feedback_channel',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -2255,7 +2255,7 @@ describe('PRI-637: config writers do not snapshot merged defaults (sparse overri
       features: { feedback_channel: { category: 'quiet', enabled: false } },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'lmstudio-local', enabled: true },
     });
     const res = createMockResponse();
@@ -2276,7 +2276,7 @@ describe('PRI-637: config writers do not snapshot merged defaults (sparse overri
       features: { feedback_channel: { category: 'quiet', enabled: false } },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'lmstudio-local' },
     });
     const res = createMockResponse();
@@ -2301,7 +2301,7 @@ describe('PRI-637: config writers do not snapshot merged defaults (sparse overri
       customSection: { note: 'preserve-me' },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/feedback_channel',
+      url: '/api/config/features/feedback_channel',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -2338,7 +2338,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
     // Fresh PRI-645 bootstrap shape: section present, map empty.
     writeConfig({ ...VALID_CONFIG, features: {} });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/features/intent_engineering',
+      url: '/api/config/features/intent_engineering',
       body: { enabled: true },
     });
     const res = createMockResponse();
@@ -2356,7 +2356,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
   it('updateAgentBinding keeps features: {} sparse (empty object is a valid feature map)', async () => {
     writeConfig({ ...VALID_CONFIG, features: {} });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'lmstudio-local', enabled: false },
     });
     const res = createMockResponse();
@@ -2371,7 +2371,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
   it('updateDefaultRuntime keeps features: {} sparse', async () => {
     writeConfig({ ...VALID_CONFIG, features: {} });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'lmstudio-local' },
     });
     const res = createMockResponse();
@@ -2387,7 +2387,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
     // No config.yaml at all — the writer must bootstrap `features: {}`
     // (registry defaults are resolved at read time, never written back).
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'pd.default', enabled: true },
     });
     const res = createMockResponse();
@@ -2402,7 +2402,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
 
   it('updateDefaultRuntime on a config-less workspace creates a sparse features section, not a registry snapshot', async () => {
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/default-runtime',
+      url: '/api/config/default-runtime',
       body: { defaultRuntime: 'pd.default' },
     });
     const res = createMockResponse();
@@ -2462,7 +2462,7 @@ describe('PRI-638: canonical Console writer vs legacy split=false', () => {
     expect(effectiveDiagnosticianEnabled()).toBe(false);
 
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/diagnostician/binding',
+      url: '/api/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'lmstudio-local', enabled: true },
     });
     const res = createMockResponse();
@@ -2504,7 +2504,7 @@ describe('PRI-638: canonical Console writer vs legacy split=false', () => {
     expect(effectiveDiagnosticianEnabled()).toBe(false);
 
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/agents/dreamer/binding',
+      url: '/api/config/agents/dreamer/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: false },
     });
     const res = createMockResponse();

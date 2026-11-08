@@ -333,8 +333,8 @@ type ApiResult<T> =
   | { success: true; data: T }
   | { success: false; error: string; reason?: string; nextAction?: string };
 
-const CONFIG_PATH = '/api/v1/config/summary';
-const LIFECYCLE_PATH = '/api/v1/lifecycle/state';
+const CONFIG_PATH = '/api/config/summary';
+const LIFECYCLE_PATH = '/api/lifecycle/state';
 const HEALTH_PATH = '/api/health';
 
 function describeFailure<T>(settled: SettledResult<ApiResult<T>>, path: string): string {
@@ -354,10 +354,10 @@ function pickString(value: unknown): string | undefined {
 }
 
 /**
- * Extract recentEvents from the /api/v1/lifecycle/state response body.
+ * Extract recentEvents from the /api/lifecycle/state response body.
  *
  * The endpoint is not yet implemented in the current server (only
- * /api/v1/lifecycle/principles/:id exists). When it returns a 404 or other
+ * /api/lifecycle/principles/:id exists). When it returns a 404 or other
  * error, the caller passes a failure ApiResult and we return an empty array;
  * the diagnostics `recentEvents` field is then populated with an
  * `unavailableReason` entry by the caller. When the endpoint exists and
@@ -384,7 +384,7 @@ function extractRecentEvents(data: unknown): { type: string; at: string; summary
 
 /**
  * P1-5: Extract recentEvents from /api/health's `checks` array as a fallback
- * when /api/v1/lifecycle/state is unavailable. Each health check becomes an
+ * when /api/lifecycle/state is unavailable. Each health check becomes an
  * event: type=check.id, at=check.lastCheck, summary=check.message, severity
  * mapped from check.status (error→'error', warning→'warn', healthy→none).
  *
@@ -425,13 +425,13 @@ function extractEventsFromHealthChecks(
  *                 version strings.
  * - platform:     P0-2: extracted from /api/health's `platform` field. Contains
  *                 os/arch/nodeVersion.
- * - featureFlags: built from /api/v1/config/summary's `features` array. The
+ * - featureFlags: built from /api/config/summary's `features` array. The
  *                 full ConfigSummaryData object is passed through (the server's
  *                 redactSensitiveFields scrubs it again as defense in depth).
  * - canary:       built from /api/health's `overall` field. 'healthy' and
  *                 'degraded' map to status='available'; 'error' maps to
  *                 status='unavailable'.
- * - recentEvents: P1-5: extracted from /api/v1/lifecycle/state's `recentEvents`
+ * - recentEvents: P1-5: extracted from /api/lifecycle/state's `recentEvents`
  *                 array (each entry validated; last 5 kept). When the endpoint
  *                 is absent (current state), falls back to /api/health's
  *                 `checks` array so the report is not permanently empty.
@@ -450,7 +450,7 @@ export function buildFeedbackDiagnostics(
 
   // ── versions / platform (from /api/health) ──────────────────────────────
   // P0-2: /api/health now returns versions and platform via HealthCheckModel.
-  // Previously these came from /api/v1/config/summary which never had them.
+  // Previously these came from /api/config/summary which never had them.
   let versions: Record<string, unknown>;
   let platform: Record<string, unknown>;
   if (healthFailure) {
@@ -466,7 +466,7 @@ export function buildFeedbackDiagnostics(
     platform = { unavailableReason: 'platform not in health response' };
   }
 
-  // ── featureFlags (from /api/v1/config/summary) ──────────────────────────
+  // ── featureFlags (from /api/config/summary) ──────────────────────────
   // Best-effort: pass the entire config summary data through as featureFlags.
   // The server's redactSensitiveFields will scrub sensitive values, and the
   // features array (id/category/enabled) is the closest available signal.
@@ -501,8 +501,8 @@ export function buildFeedbackDiagnostics(
     canary = { status: 'unavailable', unavailableReason: 'overall field not present in API response' };
   }
 
-  // ── recentEvents (from /api/v1/lifecycle/state, fallback to /api/health checks) ──
-  // P1-5: /api/v1/lifecycle/state is not yet implemented. When it fails, fall
+  // ── recentEvents (from /api/lifecycle/state, fallback to /api/health checks) ──
+  // P1-5: /api/lifecycle/state is not yet implemented. When it fails, fall
   // back to /api/health's checks array so the report's "Recent events" section
   // is not permanently empty. We still attempt the lifecycle fetch so that
   // when the endpoint exists in the future, real events flow through.

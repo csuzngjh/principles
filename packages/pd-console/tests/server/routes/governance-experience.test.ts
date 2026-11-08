@@ -67,7 +67,7 @@ afterEach(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe('PRI-585 GET /api/v1/governance/experience — flag contract (SPEC §14)', () => {
+describe('PRI-585 GET /api/governance/experience — flag contract (SPEC §14)', () => {
   it('flag OFF → 403 feature_disabled BEFORE any table read (no DB access)', async () => {
     const spy = vi.spyOn(GovernanceProjectionCollector, 'readTables');
     const res = createMockResponse();

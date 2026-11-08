@@ -24,6 +24,7 @@
 
 import { Value } from '@sinclair/typebox/value';
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { DiagDistillerOutputV1, DiagDistillerValidator } from '../diagnostician/diag-distiller-output.js';
 import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
 import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
@@ -186,11 +187,11 @@ export class DiagDistillerRunner extends BasePeerRunner<DiagDistillerContext, Di
     );
 
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'diag-distiller-output-v1',
+      outputSchemaRef: 'diag-distiller-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

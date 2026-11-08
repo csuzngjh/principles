@@ -1,11 +1,11 @@
 // failed-tasks.ts
-// Server route for /api/v1/failed-tasks/*
+// Server route for /api/failed-tasks/*
 //
 // Lists tasks in 'failed' or 'needs_human_review' status and fetches single-task
 // detail (task record + run history + last error category). Gated by the
 // failed_tasks_observability feature flag.
 //
-// Governance Recovery Actions v1: POST /api/v1/failed-tasks/:id/recover lets the
+// Governance Recovery Actions v1: POST /api/failed-tasks/:id/recover lets the
 // Owner recover a task from the Console. failed → pending reuses
 // RecoverySweepService.recoverFailedTask; needs_human_review → pending reuses
 // the extracted owner-retry sequence (ownerRetryNeedsHumanReviewTask — the same
@@ -434,12 +434,12 @@ export type FailedTasksContext = {
 };
 
 /**
- * Handle requests to `/api/v1/failed-tasks*`.
+ * Handle requests to `/api/failed-tasks*`.
  *
  * Routes:
- *   GET  /api/v1/failed-tasks              — list failed/needs_human_review tasks
- *   GET  /api/v1/failed-tasks/:id          — fetch single task detail (task + runs + lastError)
- *   POST /api/v1/failed-tasks/:id/recover  — Owner recovery (failed | needs_human_review → pending)
+ *   GET  /api/failed-tasks              — list failed/needs_human_review tasks
+ *   GET  /api/failed-tasks/:id          — fetch single task detail (task + runs + lastError)
+ *   POST /api/failed-tasks/:id/recover  — Owner recovery (failed | needs_human_review → pending)
  *   other methods                          — 405 Method Not Allowed
  *
  * Feature flag gates (checked before any DB access so a disabled flag
@@ -471,7 +471,7 @@ export async function handleFailedTasksRoute(
     }
   }
 
-  // Collection: GET /api/v1/failed-tasks
+  // Collection: GET /api/failed-tasks
   if (subPath === '' || subPath === '/') {
     if (method !== 'GET') {
       sendMethodNotAllowed(res);
@@ -576,7 +576,7 @@ export async function handleFailedTasksRoute(
     return;
   }
 
-  // Recovery: POST /api/v1/failed-tasks/:id/recover (Governance Recovery
+  // Recovery: POST /api/failed-tasks/:id/recover (Governance Recovery
   // Actions v1). Checked before the generic /:id detail branch.
   // eslint-disable-next-line @typescript-eslint/prefer-regexp-exec -- String#match is semantically identical for a non-global regex; the repo's security write-gate false-positives on `<expr>.exec(userInput)` as command injection, so RegExp#exec is not writable here.
   const recoverMatch = subPath.match(/^\/([^/]+)\/recover$/);
@@ -672,7 +672,7 @@ export async function handleFailedTasksRoute(
     return;
   }
 
-  // Detail: GET /api/v1/failed-tasks/:id
+  // Detail: GET /api/failed-tasks/:id
   const decodedId = decodeTaskIdSegment(subPath.replace(/^\//, ''));
   if (!decodedId.ok) {
     sendError(res, 400, 'invalid_encoding', 'task id path segment is not valid percent-encoding');
@@ -680,7 +680,7 @@ export async function handleFailedTasksRoute(
   }
   const id = decodedId.value;
   if (id.length === 0) {
-    sendNotFound(res, `Route /api/v1/failed-tasks${subPath} not found`);
+    sendNotFound(res, `Route /api/failed-tasks${subPath} not found`);
     return;
   }
 

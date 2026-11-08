@@ -21,7 +21,7 @@ test('authenticated Owner promotes and rejects exact shadow activations without 
   expect((await promoteResponse).status()).toBe(200);
 
   const authorization = { Authorization: 'Bearer owner-e2e-token' };
-  const promotedReviewResponse = await request.get('/api/v1/activations/act-rule-shadow-e2e/owner-review', {
+  const promotedReviewResponse = await request.get('/api/activations/act-rule-shadow-e2e/owner-review', {
     headers: authorization,
   });
   expect(promotedReviewResponse.status()).toBe(200);
@@ -42,7 +42,7 @@ test('authenticated Owner promotes and rejects exact shadow activations without 
   await rejectReview.getByRole('button', { name: /Reject and deactivate|拒绝并停用/ }).click();
   expect((await rejectResponse).status()).toBe(200);
 
-  const activationsResponse = await request.get('/api/v1/activations', { headers: authorization });
+  const activationsResponse = await request.get('/api/activations', { headers: authorization });
   const activations: unknown = await activationsResponse.json();
   if (!isRecord(activations) || !isRecord(activations.data) || !Array.isArray(activations.data.activations)) {
     throw new Error('Activation list response shape is invalid');

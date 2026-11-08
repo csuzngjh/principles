@@ -19,8 +19,8 @@ test('Principle detail rejects the exact reviewed approval through the guarded r
   await reading.getByRole('button', { name: '确认提交', exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(200);
-  expect(response.request().postDataJSON()).toMatchObject({ expectedReview: { schemaVersion: 'approval-review-v1', approvalId: 'apr-click-reject', artifactId: 'artifact-click-reject', artifactState: 'present' } });
-  const persisted = await request.get('/api/v1/approvals/apr-click-reject', { headers: authorization });
+  expect(response.request().postDataJSON()).toMatchObject({ expectedReview: { schemaVersion: 'approval-review', approvalId: 'apr-click-reject', artifactId: 'artifact-click-reject', artifactState: 'present' } });
+  const persisted = await request.get('/api/approvals/apr-click-reject', { headers: authorization });
   expect(await persisted.json()).toMatchObject({ data: { status: 'rejected' } });
   await expect(page.getByTestId('owner-decision-history')).toContainText('已拒绝');
 });
@@ -38,14 +38,14 @@ test('Principle detail replacement carries the reviewed old version and reads th
   const response = await responsePromise;
   expect(response.status()).toBe(200);
   expect(response.request().postDataJSON()).toMatchObject({ newArtifactId: 'artifact-click-edit-new', expectedReview: { approvalId: 'apr-click-edit', artifactId: 'artifact-click-edit', artifactState: 'present' } });
-  const persisted = await request.get('/api/v1/approvals/apr-click-edit', { headers: authorization });
+  const persisted = await request.get('/api/approvals/apr-click-edit', { headers: authorization });
   expect(await persisted.json()).toMatchObject({ data: { status: 'pending', artifactId: 'artifact-click-edit-new' } });
   await expect(reading).toContainText('已替换待审版本');
 });
 
 
 test('A grouped approval read failure keeps the pending decision visible with a retry', async ({ page }) => {
-  await page.route('**/api/v1/approvals/grouped*', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'grouped_unavailable' }) }));
+  await page.route('**/api/approvals/grouped*', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'grouped_unavailable' }) }));
   await login(page);
   await page.goto('/#/principles/e2e00000-0000-4000-8000-00000000000a');
   const alert = page.getByTestId('detail-approvals-unavailable');

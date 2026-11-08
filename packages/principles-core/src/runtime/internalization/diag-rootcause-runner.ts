@@ -21,6 +21,7 @@
  */
 
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { DiagRootCauseOutputV1, DiagRootCauseValidator } from '../diagnostician/diag-rootcause-output.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
 import type { ContextAssembler } from '../store/context/context-assembler.js';
@@ -225,11 +226,11 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     });
 
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'diag-rootcause-output-v1',
+      outputSchemaRef: 'diag-rootcause-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

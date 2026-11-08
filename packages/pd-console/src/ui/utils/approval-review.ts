@@ -1,10 +1,14 @@
 import { validateApprovalRecordDirect, type ApprovalRecordData } from './validators.js';
 
 // The server and client exchange this exact snapshot, never a newly fetched guard for old text.
+// PRI-1139: the server mints the version-neutral 'approval-review'; guards from
+// a pre-cutover server keep 'approval-review-v1' and stay valid reads.
+export type ApprovalReviewGuardSchemaVersion = 'approval-review' | 'approval-review-v1';
 export type ApprovalReviewGuard = {
-  schemaVersion: 'approval-review-v1'; approvalId: string; artifactId: string;
+  schemaVersion: ApprovalReviewGuardSchemaVersion; approvalId: string; artifactId: string;
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive';
 } & ({ artifactState: 'present'; artifactDigest: string } | { artifactState: 'missing' });
+const APPROVAL_REVIEW_GUARD_VERSIONS: ReadonlySet<string> = new Set(['approval-review', 'approval-review-v1']);
 export interface ApprovalReviewData {
   approval: ApprovalRecordData;
   expectedReview: ApprovalReviewGuard;
@@ -13,11 +17,11 @@ export interface ApprovalReviewData {
 }
 function record(v: unknown): v is Record<string, unknown> { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 export function validateApprovalReview(value: unknown): ApprovalReviewData | null {
-  if (!record(value) || value.writeGuardVersion !== 'approval-review-v1' || !record(value.review)) return null;
+  if (!record(value) || !APPROVAL_REVIEW_GUARD_VERSIONS.has(String(value.writeGuardVersion)) || !record(value.review)) return null;
   const approval = validateApprovalRecordDirect(value);
   const guard = value.review.expectedReview;
   const {material} = value.review;
-  if (!approval || !record(guard) || guard.schemaVersion !== 'approval-review-v1' || guard.approvalId !== approval.approvalId
+  if (!approval || !record(guard) || !APPROVAL_REVIEW_GUARD_VERSIONS.has(String(guard.schemaVersion)) || guard.approvalId !== approval.approvalId
     || guard.artifactId !== approval.artifactId || guard.channel !== approval.channel
     || !['prompt', 'code_tool_hook', 'defer_archive'].includes(String(guard.channel))
     || (guard.artifactState !== 'present' && guard.artifactState !== 'missing')
@@ -43,9 +47,13 @@ export function validateApprovalReview(value: unknown): ApprovalReviewData | nul
   // a payload that disagrees must fail loud rather than render the wrong preview.
   if ((material.availability === 'available') !== (exactBody !== null)) return null;
   if (exactBody !== null && (channel === 'code_tool_hook') !== (exactBody.kind === 'rule_code')) return null;
+  // Echo the guard's own schemaVersion verbatim (PRI-1139): whichever spelling
+  // the minting server used must round-trip byte-identically on submission.
+  // The value is already constrained to this union by the guards above.
+  const guardVersion = guard.schemaVersion as ApprovalReviewGuardSchemaVersion;
   const expectedReview: ApprovalReviewGuard = guard.artifactState === 'present' && typeof guard.artifactDigest === 'string'
-    ? { schemaVersion: 'approval-review-v1', approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'present', artifactDigest: guard.artifactDigest }
-    : { schemaVersion: 'approval-review-v1', approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'missing' };
+    ? { schemaVersion: guardVersion, approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'present', artifactDigest: guard.artifactDigest }
+    : { schemaVersion: guardVersion, approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'missing' };
   const {availability} = material;
   if (availability !== 'available' && availability !== 'missing' && availability !== 'unreadable') return null;
   return { approval, expectedReview, material: { availability, artifactId: approval.artifactId, statement: material.statement,

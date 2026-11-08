@@ -121,7 +121,7 @@ test.describe('PRI-1048 规则归属队列', () => {
     // stale 拒绝：旧 expectedRevision 的 bind 请求被权威拒绝。
     const replyCandidateId = await replyCard.getAttribute('data-testid');
     expect(replyCandidateId).toBeTruthy();
-    const stale = await page.request.post(`/api/v1/governance/rule-candidate-bindings/${replyCandidateId?.replace('rule-binding-card-', '')}`, {
+    const stale = await page.request.post(`/api/governance/rule-candidate-bindings/${replyCandidateId?.replace('rule-binding-card-', '')}`, {
       headers: OWNER_AUTH,
       data: {
         action: 'bind', principleId: RULE_BINDING_PRINCIPLE_ID, expectedRevision: 0,
@@ -148,7 +148,7 @@ test.describe('PRI-1048 规则归属队列', () => {
   });
 
   test('队列接口失败时显示可见错误，不渲染空待办', async ({ page }) => {
-    await page.route('**/api/v1/governance/rule-candidate-bindings', route => route.abort());
+    await page.route('**/api/governance/rule-candidate-bindings', route => route.abort());
     await page.goto('/#/focus');
     // 未登录先被导向登录；登录后队列请求被拦截 → 面板显示错误而非空白。
     await page.getByLabel('访问令牌').fill('owner-e2e-token');

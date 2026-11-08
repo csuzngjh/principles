@@ -235,7 +235,7 @@ export async function glmSelection({ PiAiRuntimeAdapter, fetch, payload, candida
     maxRetries: 0, maxRepairAttempts: 0, outputPathStrategy: 'free_form_only',
     timeoutMs: 30000, maxTokens: 512, reasoning: 'low', fetch,
     eventEmitter: { emitTelemetry() {} } });
-  const run = await adapter.startRun({ agentSpec: { agentId: 'aa-selector-diagnostic', schemaVersion: 'v1' },
+  const run = await adapter.startRun({ agentSpec: { agentId: 'aa-selector-diagnostic', schemaVersion: 'current' },
     inputPayload: payload, contextItems: [], timeoutMs: 30000, maxTokens: 512, systemPrompt: SYSTEM });
   const output = await adapter.fetchOutput(run.runId);
   return validateSelection(output?.payload, candidates);

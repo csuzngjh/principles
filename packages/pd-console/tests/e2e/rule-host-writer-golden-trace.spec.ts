@@ -36,7 +36,7 @@ async function apiPost(path: string, body?: unknown): Promise<{ status: number; 
 test.describe('RuleHostWriter goldenTrace schema 验证 (PR #1079 回归)', () => {
   test('非法 expectedDecision (requireApproval) 必须在 schema 层被拒绝，返回 golden_trace_schema_invalid', async () => {
     // ── 步骤 1：确认 seed 的 bad-trace approval 存在且为 pending ──────────
-    const approvalsResp = await apiGet('/api/v1/approvals?status=pending&channel=code_tool_hook');
+    const approvalsResp = await apiGet('/api/approvals?status=pending&channel=code_tool_hook');
     expect(approvalsResp.status).toBe(200);
     const approvalsBody = approvalsResp.body as {
       success: boolean;
@@ -52,7 +52,7 @@ test.describe('RuleHostWriter goldenTrace schema 验证 (PR #1079 回归)', () =
 
     // ── 步骤 2：尝试 approve 该 approval ───────────────────────────────────
     // 期望：500 + activation_failed，reason 含 'golden_trace_schema_invalid'
-    const approveResp = await apiPost(`/api/v1/approvals/${badTraceApproval!.approvalId}/approve`, {});
+    const approveResp = await apiPost(`/api/approvals/${badTraceApproval!.approvalId}/approve`, {});
     expect(approveResp.status).toBe(500);
 
     const approveBody = approveResp.body as {
@@ -81,7 +81,7 @@ test.describe('RuleHostWriter goldenTrace schema 验证 (PR #1079 回归)', () =
 
   test('approve 失败后 approval 必须回滚到 pending，允许 owner 修复后重试', async () => {
     // ── 步骤 1：获取当前 bad-trace approval 状态 ───────────────────────────
-    const beforeResp = await apiGet('/api/v1/approvals/apr-hook-bad-trace');
+    const beforeResp = await apiGet('/api/approvals/apr-hook-bad-trace');
     expect(beforeResp.status).toBe(200);
     const beforeBody = beforeResp.body as {
       success: boolean;
@@ -100,11 +100,11 @@ test.describe('RuleHostWriter goldenTrace schema 验证 (PR #1079 回归)', () =
     }
 
     // ── 步骤 2：再次 approve，验证回滚行为 ─────────────────────────────────
-    const approveResp = await apiPost('/api/v1/approvals/apr-hook-bad-trace/approve', {});
+    const approveResp = await apiPost('/api/approvals/apr-hook-bad-trace/approve', {});
     expect(approveResp.status).toBe(500);
 
     // ── 步骤 3：验证 approval 已回滚到 pending ─────────────────────────────
-    const afterResp = await apiGet('/api/v1/approvals/apr-hook-bad-trace');
+    const afterResp = await apiGet('/api/approvals/apr-hook-bad-trace');
     expect(afterResp.status).toBe(200);
     const afterBody = afterResp.body as {
       success: boolean;
@@ -144,7 +144,7 @@ test.describe('RuleHostWriter goldenTrace schema 验证 (PR #1079 回归)', () =
     // 注意：focus-approve-flow.spec.ts 按字母顺序先运行，已 approve
     // apr-prompt-1，所以 seed 的 3 个 pending 会减到 2（apr-hook-1 +
     // apr-hook-bad-trace）。本测试只验证 bad-trace approval 仍在队列中。
-    const queueResp = await apiGet('/api/v1/governance/queue');
+    const queueResp = await apiGet('/api/governance/queue');
     expect(queueResp.status).toBe(200);
     const queueBody = queueResp.body as {
       success: boolean;
@@ -156,7 +156,7 @@ test.describe('RuleHostWriter goldenTrace schema 验证 (PR #1079 回归)', () =
 
     // 关键：bad-trace approval 必须仍在 pending 列表（前两个测试的 approve
     // 都因 schema 校验失败而回滚到 pending）
-    const approvalsResp = await apiGet('/api/v1/approvals?status=pending');
+    const approvalsResp = await apiGet('/api/approvals?status=pending');
     expect(approvalsResp.status).toBe(200);
     const approvalsBody = approvalsResp.body as {
       success: boolean;
