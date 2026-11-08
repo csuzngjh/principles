@@ -45,7 +45,7 @@ import {
 } from './lib/workspace-lifecycle.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
 import { CODES } from './lib/preflight.mjs';
-import { formatProgress, removeResidueTree, scanReparsePoints, classifyReparsePoints } from './lib/residue-delete.mjs';
+import { formatProgress, removeResidueTree, scanReparsePoints, classifyReparsePoints, detachInternalLinks, REMOVAL_REASONS } from './lib/residue-delete.mjs';
 
 function parseArgs(argv) {
   const args = { apply: false, json: false, graceDays: GRACE_DAYS_DEFAULT, skipGh: false, residue: null, ackUnknown: false };
@@ -342,34 +342,61 @@ async function main() {
         refused.push({ action, reason: 'worktree is Git-locked at apply time — release the claim first (never auto-unlocked)' });
         continue;
       }
-      // ERR-098 / PRI-1143 — the same removal primitive the per-target tool uses,
-      // so the same preflight: `git worktree remove` recurses through junctions
-      // and would delete through them. A sweep never remediates destructively, so
-      // an external link is a per-target REFUSAL; detaching stays the explicit,
-      // per-target decision (`npm run dev:worktree:cleanup <path> --detach-external-links`).
-      const linkScan = classifyReparsePoints(worktreePath);
-      if (linkScan.external.length > 0) {
-        const first = linkScan.external[0];
-        refused.push({
-          action,
-          reason:
-            linkScan.external.length +
-            ' reparse point(s) point OUTSIDE the worktree (ERR-098: git worktree remove follows them) — first: ' +
-            first.path +
-            ' -> ' +
-            (first.target || '<unreadable target>') +
-            '; detach the links, then run: npm run dev:worktree:cleanup "' +
-            worktreePath +
-            '" --detach-external-links',
-        });
-        continue;
-      }
+      // ERR-098 / PRI-1143 — the SCAN, the DECISION and the REMOVAL must all
+      // happen under the SAME exclusive lock (CodeRabbit review). A preflight
+      // outside the lock leaves an ownership gap in which any other process can
+      // create a junction that git then follows. A sweep never remediates
+      // destructively: any unsafe link or unreadable directory is a REFUSAL;
+      // detaching stays the explicit, per-target decision.
       try {
-        const result = await withMutationLock({ commonDir, operation: 'worktree-remove', target: worktreePath }, () =>
-          removeWorktree(cwd, worktreePath, notes)
-        );
-        if (result === true) applied.push(action);
-        else refused.push({ action, reason: 'git worktree remove failed: ' + result });
+        const verdict = await withMutationLock({ commonDir, operation: 'worktree-remove', target: worktreePath }, async () => {
+          const linkScan = classifyReparsePoints(worktreePath);
+          if (!linkScan.complete) {
+            return {
+              ok: false,
+              reason:
+                'the reparse-point scan could NOT prove the whole worktree is readable (' +
+                linkScan.unreadable.length + ' unreadable directory/directories, first: ' +
+                (linkScan.unreadable[0] ? linkScan.unreadable[0].path : 'worktree root') +
+                ') — an unreadable directory may hide a junction pointing outside it (ERR-098); ' +
+                REMOVAL_REASONS.SCAN_INCOMPLETE,
+            };
+          }
+          if (linkScan.external.length > 0) {
+            const first = linkScan.external[0];
+            return {
+              ok: false,
+              reason:
+                linkScan.external.length +
+                ' reparse point(s) must not be traversed (outside / unresolvable / non-lexical / cyclic; ERR-098: git worktree remove follows them) — first: ' +
+                first.path +
+                ' -> ' +
+                (first.target || '<unreadable target>') +
+                ' [' + (first.unsafeReason || 'outside') + ']; ' +
+                REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT +
+                '; detach the links, then run: npm run dev:worktree:cleanup "' +
+                worktreePath +
+                '" --detach-external-links',
+            };
+          }
+          // Even an internal link must not be traversed by git: on Windows it
+          // can report success while leaving the junction directory behind.
+          if (linkScan.internal.length > 0) {
+            const internal = detachInternalLinks(worktreePath);
+            if (!internal.ok) {
+              return {
+                ok: false,
+                reason: 'could not detach ' + linkScan.internal.length + ' internal reparse point(s) before removal; ' +
+                  (internal.complete ? REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT : REMOVAL_REASONS.SCAN_INCOMPLETE),
+              };
+            }
+            notes.push('detached ' + internal.detached.length + ' internal reparse point(s) before removal');
+          }
+          const result = await removeWorktree(cwd, worktreePath, notes);
+          return result === true ? { ok: true } : { ok: false, reason: 'git worktree remove failed: ' + result };
+        });
+        if (verdict.ok) applied.push(action);
+        else refused.push({ action, reason: verdict.reason });
       } catch (err) {
         refused.push({ action, reason: 'mutation lock unavailable: ' + (err && err.message ? err.message : String(err)) });
       }
@@ -456,5 +483,22 @@ async function main() {
 
 const isMain = process.argv[1] && process.argv[1].endsWith('workspace-cleanup.mjs');
 if (isMain) {
-  await main();
+  const jsonMode = process.argv.includes('--json');
+  // cli-1: even an unexpected rejection must leave exactly one parseable JSON
+  // object on stdout, never a bare stack trace.
+  main().catch((err) => {
+    const message = String((err && err.message) || err);
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        ok: false,
+        code: CODES.CHECK_FAILED,
+        error: message,
+        reason: REMOVAL_REASONS.UNEXPECTED_ERROR,
+        nextAction: 'Inspect the error above; do not fall back to a recursive delete or a bare `git worktree remove`.',
+      }, null, 2));
+    } else {
+      console.error('[workspace-cleanup] UNEXPECTED FAILURE: ' + message);
+    }
+    process.exitCode = 1;
+  });
 }

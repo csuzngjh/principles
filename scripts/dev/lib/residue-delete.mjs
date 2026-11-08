@@ -51,14 +51,18 @@ export function resolveLinkTarget(linkPath, target) {
 
 /**
  * Pre-flight: enumerate the tree without following reparse points.
- * Returns the counts (for progress) and every link found (for the safety
- * report), so the operator sees what will be detached BEFORE anything is.
+ * Returns the counts (for progress), every link found (for the safety report),
+ * and EVERY directory that could not be read. An unreadable directory is an
+ * UNKNOWN, not an empty directory: hiding it would let a recursive deleter walk
+ * into a junction we never saw (ERR-098, git-14).
  *
  * @returns {{links: Array<{path: string, target: string, targetExists: boolean}>,
- *            files: number, dirs: number}}
+ *            files: number, dirs: number,
+ *            unreadable: Array<{path: string, error: string}>}}
  */
 export function scanReparsePoints(root) {
   const links = [];
+  const unreadable = [];
   let files = 0;
   let dirs = 0;
   const stack = [root];
@@ -67,8 +71,9 @@ export function scanReparsePoints(root) {
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue; // unreadable directory — the delete walk will surface it
+    } catch (err) {
+      unreadable.push({ path: dir, error: String((err && err.message) || err) });
+      continue;
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
@@ -96,19 +101,27 @@ export function scanReparsePoints(root) {
       }
     }
   }
-  return { links, files, dirs };
+  return { links, files, dirs, unreadable };
 }
 
 /**
- * Is `candidate` inside `root`? Case-insensitive on Windows (the platform where
- * reparse points exist), and tolerant of both separators, because a junction's
- * readlink target can be written either way.
+ * Is `candidate` inside `root`?
+ *
+ * `caseSensitive` defaults to the platform rule (Windows: case-insensitive).
+ * Callers that already canonicalised both paths through realpath MUST pass
+ * `caseSensitive: true`: Windows supports per-directory case sensitivity (WSL),
+ * where `Tree` and `tree` are two different directories, and folding the case
+ * would call an outside target "inside" (CodeRabbit review, PRI-1143).
+ *
+ * A trailing backslash is stripped ONLY on Windows. On POSIX a backslash is a
+ * legitimate filename character: `/tmp/tree\` is NOT `/tmp/tree`.
  */
-export function isPathInsideRoot(root, candidate) {
+export function isPathInsideRoot(root, candidate, { caseSensitive = process.platform !== 'win32' } = {}) {
   const normalize = (p) => {
     const resolved = path.resolve(p);
-    const withoutTrailing = resolved.length > 3 && /[\\/]$/.test(resolved) ? resolved.slice(0, -1) : resolved;
-    return process.platform === 'win32' ? withoutTrailing.toLowerCase() : withoutTrailing;
+    let out = resolved;
+    if (process.platform === 'win32' && out.length > 3 && /[\\/]$/.test(out)) out = out.slice(0, -1);
+    return caseSensitive ? out : out.toLowerCase();
   };
   const r = normalize(root);
   const c = normalize(candidate);
@@ -117,64 +130,129 @@ export function isPathInsideRoot(root, candidate) {
   return c.startsWith(prefix);
 }
 
+/** Resolve a path the filesystem's way. null = direction cannot be proven. */
+export function canonicalPath(p) {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return null;
+  }
+}
+
+/** Machine-readable refusal reasons shared by both cleanup entry points. */
+export const REMOVAL_REASONS = Object.freeze({
+  EXTERNAL_LINKS_PRESENT: 'EXTERNAL_LINKS_PRESENT',
+  EXTERNAL_TARGET_LOST: 'EXTERNAL_TARGET_LOST',
+  SCAN_INCOMPLETE: 'SCAN_INCOMPLETE',
+  MUTATION_LOCK_UNAVAILABLE: 'MUTATION_LOCK_UNAVAILABLE',
+  REMOVAL_FAILED: 'REMOVAL_FAILED',
+  REMOVAL_FAILED_RESIDUE_SHELL: 'REMOVAL_FAILED_RESIDUE_SHELL',
+  UNEXPECTED_ERROR: 'UNEXPECTED_ERROR',
+});
+
 /**
- * Pre-flight for anything that is about to hand a tree to a recursive deleter —
+ * Pre-flight for anything about to hand a tree to a recursive deleter —
  * including `git worktree remove`, which is NOT junction-safe on Windows.
  *
- * Splits every reparse point in the tree by the direction its target lies:
- *   * `internal` — target inside `root`: whatever it reaches is already doomed
- *     with the tree, so it cannot carry the deletion somewhere else;
- *   * `external` — target outside `root`: this is the ERR-098 direction, and
- *     following it destroys files the caller has no claim on.
- * A link whose target cannot be resolved is counted EXTERNAL on purpose: an
- * unprovable direction is an unknown, and git-14 forbids acting on unknowns.
+ * `external` = every link the deleter must NOT be allowed to traverse:
+ *   * target outside `root` (the ERR-098 direction);
+ *   * target unresolvable / unreadable — an unprovable direction is UNKNOWN,
+ *     and git-14 forbids acting on unknowns;
+ *   * target containing a `..` component: lexical normalisation is not what the
+ *     OS does when a link precedes it (R/a -> R, R/a/../victim is R's sibling);
+ *   * a link whose target contains the link itself (self/ancestor cycle) — git
+ *     recurses through it until the removal fails and leaves a residue shell.
+ * `internal` = targets proven inside `root` and non-cyclic.
+ *
+ * `complete` is false when any directory could not be enumerated or `root`
+ * itself could not be resolved. `safe` is the ONLY flag a deleter may use.
  *
  * @returns {{external: Array<object>, internal: Array<object>, links: number,
- *            files: number, dirs: number}}
+ *            files: number, dirs: number, unreadable: Array<object>,
+ *            complete: boolean, safe: boolean}}
  */
 export function classifyReparsePoints(root) {
   const scan = scanReparsePoints(root);
-  const resolvedRoot = path.resolve(root);
+  const canonicalRoot = canonicalPath(root);
   const external = [];
   const internal = [];
   for (const link of scan.links) {
-    const resolvedTarget = resolveLinkTarget(link.path, link.target);
-    const inside = resolvedTarget !== null && isPathInsideRoot(resolvedRoot, resolvedTarget);
+    const lexical = resolveLinkTarget(link.path, link.target);
+    const nonLexical = typeof link.target === 'string' && /(^|[\\/])\.\.([\\/]|$)/.test(link.target);
+    const canonicalTarget = lexical !== null && !nonLexical ? canonicalPath(lexical) : null;
+    // Both sides come from realpath, so compare case-SENSITIVELY.
+    const inside =
+      canonicalRoot !== null &&
+      canonicalTarget !== null &&
+      isPathInsideRoot(canonicalRoot, canonicalTarget, { caseSensitive: true });
+    const cycle = inside && isPathInsideRoot(canonicalTarget, link.path);
+    const unsafeReason = nonLexical
+      ? 'non-lexical'
+      : canonicalTarget === null
+        ? 'unresolved'
+        : cycle
+          ? 'cycle'
+          : inside
+            ? null
+            : 'outside';
     const row = {
       path: link.path,
       target: link.target,
-      resolvedTarget,
+      resolvedTarget: lexical,
+      canonicalTarget,
       targetExists: link.targetExists,
-      inside,
+      inside: inside && !cycle,
+      unsafeReason: inside && !cycle ? null : unsafeReason,
     };
-    (inside ? internal : external).push(row);
+    (inside && !cycle ? internal : external).push(row);
   }
-  return { external, internal, links: scan.links.length, files: scan.files, dirs: scan.dirs };
+  const complete = scan.unreadable.length === 0 && canonicalRoot !== null;
+  return {
+    external,
+    internal,
+    links: scan.links.length,
+    files: scan.files,
+    dirs: scan.dirs,
+    unreadable: scan.unreadable,
+    complete,
+    safe: complete && external.length === 0,
+  };
 }
 
 /**
- * Detach every reparse point in `root` that points outside it, and prove the
- * targets survived. Removing a link removes ONLY the link — that is the property
- * `removeResidueTree` relies on and the reason detaching is safe while recursing
- * is not. Each target is checked before and after its unlink; a target that
- * vanished means something traversed the link, and that fails loud.
+ * Detach every unsafe reparse point in `root` and prove the targets survived.
+ * Removing a link removes ONLY the link. A scan that could not be completed is
+ * never partially detached: an unknown tree is left completely untouched.
  *
  * @returns {{detached: Array<object>, brokenTargets: Array<object>,
- *            remainingExternal: Array<object>, ok: boolean}}
+ *            remainingExternal: Array<object>, failedToDetach: Array<object>,
+ *            unreadable: Array<object>, complete: boolean, ok: boolean}}
  */
 export function detachExternalLinks(root) {
   const before = classifyReparsePoints(root);
+  if (!before.complete) {
+    return {
+      detached: [],
+      brokenTargets: [],
+      failedToDetach: [],
+      remainingExternal: before.external,
+      unreadable: before.unreadable,
+      complete: false,
+      ok: false,
+    };
+  }
   const detached = [];
   const brokenTargets = [];
   for (const link of before.external) {
-    const existedBefore = link.resolvedTarget !== null ? fs.existsSync(link.resolvedTarget) : null;
+    const probe = link.canonicalTarget || link.resolvedTarget;
+    const existedBefore = probe !== null ? fs.existsSync(probe) : null;
     let error = null;
     try {
       fs.unlinkSync(link.path);
     } catch (err) {
       error = String((err && err.message) || err);
     }
-    const stillExists = link.resolvedTarget !== null ? fs.existsSync(link.resolvedTarget) : null;
+    const stillExists = probe !== null ? fs.existsSync(probe) : null;
     detached.push({
       path: link.path,
       target: link.target,
@@ -193,7 +271,45 @@ export function detachExternalLinks(root) {
     brokenTargets,
     failedToDetach: failed,
     remainingExternal: after.external,
-    ok: brokenTargets.length === 0 && failed.length === 0 && after.external.length === 0,
+    unreadable: after.unreadable,
+    complete: after.complete,
+    ok: brokenTargets.length === 0 && failed.length === 0 && after.complete && after.external.length === 0,
+  };
+}
+
+/**
+ * Detach reparse points PROVEN to stay inside the tree before handing it to a
+ * recursive deleter. git must not be allowed to traverse ANY link: verified on
+ * Windows, `git worktree remove` returns exit 0 while leaving a directory
+ * junction (and therefore its parent directory) behind — a NO_GIT_MARKER
+ * residue shell whose dirtiness is unprovable. Unlinking is safe here: the
+ * target is inside the tree and dies with it anyway.
+ *
+ * @returns {{detached: Array<object>, failedToDetach: Array<object>,
+ *            remainingLinks: number, complete: boolean, ok: boolean}}
+ */
+export function detachInternalLinks(root) {
+  const before = classifyReparsePoints(root);
+  if (!before.complete) {
+    return { detached: [], failedToDetach: [], remainingLinks: before.links, complete: false, ok: false };
+  }
+  const detached = [];
+  const failedToDetach = [];
+  for (const link of before.internal) {
+    try {
+      fs.unlinkSync(link.path);
+      detached.push({ path: link.path, target: link.target });
+    } catch (err) {
+      failedToDetach.push({ path: link.path, error: String((err && err.message) || err) });
+    }
+  }
+  const after = classifyReparsePoints(root);
+  return {
+    detached,
+    failedToDetach,
+    remainingLinks: after.links,
+    complete: after.complete,
+    ok: failedToDetach.length === 0 && after.complete && after.links === 0,
   };
 }
 

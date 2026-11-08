@@ -442,7 +442,7 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
   ],
   "requiredEvidence": [
     "Any 'pre-existing on main' CI-failure claim is reproduced on origin/main or proven unreachable from changed files.",
-    "Every deletion-capable cleanup command (including `git worktree remove`) was preceded by a reparse-point scan proving no link inside the target points OUTSIDE it; a link whose target cannot be resolved counts as outside.",
+    "Every deletion-capable cleanup command (including `git worktree remove`) was preceded, INSIDE one exclusive mutation-lock span, by a COMPLETE reparse-point scan proving no link inside the target points OUTSIDE it: unreadable directories, unresolvable/cyclic/non-lexical targets and case-mismatched paths all count as outside; internal links are detached too, external targets are re-checked by content fingerprint after the delete, and the scan-to-delete span stays under the lock.",
     "PR diff scope matches the stated task; commit list inspected before cherry-pick."
   ],
   "enforcement": "semantic"

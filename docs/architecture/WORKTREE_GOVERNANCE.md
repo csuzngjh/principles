@@ -205,11 +205,14 @@ npm run dev:workspace:cleanup -- --apply
 Removal requires PROVEN completion — GitHub `PR MERGED` first (the only evidence
 that covers a squash merge, where the branch tip can never be an ancestor), else
 ancestry to `origin/main` — plus: clean, not primary, no active lease, not
-Git-locked, status readable, and free of any reparse point whose target lies
-outside the worktree (ERR-098: `git worktree remove` follows links out of the
-tree, so porcelain-clean is not by itself evidence that deleting is safe). Every
-one of those is re-checked at apply time,
-because a snapshot from minutes ago is not evidence. An open PR is never swept.
+Git-locked, status readable, and a COMPLETE reparse-point scan proving no link
+can carry the deletion outside the worktree (ERR-098: `git worktree remove`
+follows those links; porcelain-clean is not by itself evidence that deleting is
+safe). An unreadable directory makes the scan incomplete and is a REFUSAL —
+`SCAN_INCOMPLETE` — never an empty result. Every one of those is re-checked at
+apply time, and the scan, the decision and the removal share one mutation-lock
+span, because a snapshot from minutes ago is not evidence. An open PR is never
+swept.
 
 ### 4.6 Migrate
 
@@ -284,14 +287,25 @@ to a recursive remover:
 Acceptance criterion: a residue directory containing a junction to important data
 is removed, and the target is bit-for-bit intact. This is covered by a test.
 
-The same rule gates the **removal** path (PRI-1143). Before `dev:worktree:cleanup`
-hands a worktree to `git worktree remove`, it classifies every reparse point in the
-tree (`classifyReparsePoints`) and refuses with `EXTERNAL_LINKS_PRESENT`, listing each
-link and its target, if any of them leaves the tree. `--detach-external-links` opts
-into detaching them first — one at a time, each target re-verified present, and every
-external target checked again after the delete. A link that stays inside the tree
-never blocks a removal: it dies with the tree. The batch sweep (`dev:workspace:cleanup
--- --apply`) refuses the same way and never detaches on its own.
+The same rule gates the **removal** path (PRI-1143). The scan, the refusal decision
+and `git worktree remove` all run inside ONE `withMutationLock` span: a preflight
+outside the lock leaves an ownership gap in which another process can create a
+junction that git then follows. `classifyReparsePoints` refuses with
+`EXTERNAL_LINKS_PRESENT` — listing each link, its target and why it is unsafe —
+when a target lies outside the tree, cannot be resolved by the filesystem, contains
+a `..` component (lexical normalisation is not what the OS does when a link
+precedes it), or forms a self/ancestor cycle. A scan that cannot enumerate every
+directory refuses with `SCAN_INCOMPLETE`: an unreadable directory may hide exactly
+such a link, and git-14 forbids acting on unknowns. Targets are compared
+case-sensitively after `realpath`, because Windows supports per-directory case
+sensitivity. `--detach-external-links` opts into detaching them first — one at a
+time, each target re-verified — and the tool then re-checks a content-level
+fingerprint (relative path + byte size) of every external target that existed
+before the delete, so partial deletion INSIDE a still-present directory is
+detected. Targets that were already missing are not reported as lost. A link
+proven to stay inside the tree, non-cyclically, never blocks a removal: it dies
+with the tree. The batch sweep (`dev:workspace:cleanup -- --apply`) refuses the
+same way, under the same lock, and never detaches on its own.
 
 ### 5.2 Observability of long deletions
 

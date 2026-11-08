@@ -13,6 +13,7 @@ import {
   assertDeletableRoot,
   classifyReparsePoints,
   detachExternalLinks,
+  detachInternalLinks,
   formatProgress,
   isPathInsideRoot,
   removeResidueTree,
@@ -326,6 +327,97 @@ describe('classifyReparsePoints / detachExternalLinks (ERR-098)', () => {
     expect(result.detached).toEqual([]);
     expect(result.remainingExternal).toEqual([]);
     expect(fs.existsSync(path.join(tree, 'a.txt'))).toBe(true);
+  });
+});
+
+// CodeRabbit / PRI-1143 follow-up review: the preflight must fail CLOSED, the
+// direction test must not be fooled by path spelling or link cycles, and no
+// deleter (git included) may be allowed to traverse a link at all.
+describe('fail-closed boundary cases (ERR-098 review)', () => {
+  const buildTree = (name: string) => {
+    const tree = path.join(root, name);
+    const outside = path.join(root, name + '-outside');
+    fs.mkdirSync(path.join(outside, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'keep.txt'), 'KEEP\n', 'utf-8');
+    fs.mkdirSync(path.join(tree, 'node_modules', 'real-pkg'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'node_modules', 'real-pkg', 'index.js'), 'real\n', 'utf-8');
+    fs.writeFileSync(path.join(tree, 'a.txt'), 'a\n', 'utf-8');
+    return { tree, outside };
+  };
+
+  it('an unreadable directory makes the scan INCOMPLETE, never "no links found"', () => {
+    const { tree } = buildTree('unreadable');
+    const fileAsRoot = path.join(tree, 'a.txt'); // readdirSync throws ENOTDIR
+    expect(scanReparsePoints(fileAsRoot).unreadable).toHaveLength(1);
+    const verdict = classifyReparsePoints(fileAsRoot);
+    expect(verdict.complete).toBe(false);
+    expect(verdict.safe).toBe(false);
+  });
+
+  it('a complete, link-free tree is the only thing declared safe', () => {
+    const { tree } = buildTree('safe');
+    const verdict = classifyReparsePoints(tree);
+    expect(verdict.complete).toBe(true);
+    expect(verdict.external).toEqual([]);
+    expect(verdict.safe).toBe(true);
+  });
+
+  it('a link pointing at the tree root (self/ancestor cycle) is unsafe, not internal', () => {
+    const { tree } = buildTree('cycle');
+    makeJunction(path.join(tree, 'node_modules', 'self'), tree);
+    const verdict = classifyReparsePoints(tree);
+    expect(verdict.internal).toEqual([]);
+    expect(verdict.external).toHaveLength(1);
+    expect(verdict.external[0].unsafeReason).toBe('cycle');
+    expect(verdict.safe).toBe(false);
+  });
+
+  it('a target containing .. is unprovable and refused (the OS follows the link first)', () => {
+    const { tree } = buildTree('nonlexical');
+    // tree/a -> tree, so "a/../victim" resolves OUTSIDE tree at runtime, while
+    // path.resolve() collapses it into tree/victim ("inside").
+    makeJunction(path.join(tree, 'a'), tree);
+    const link = path.join(tree, 'escape');
+    try {
+      fs.symlinkSync(path.join('a', '..', 'victim'), link, 'file');
+    } catch {
+      return; // Windows file symlinks need extra privilege; POSIX CI covers it
+    }
+    const verdict = classifyReparsePoints(tree);
+    const row = verdict.internal.find((l) => l.path === link);
+    expect(row, 'a non-lexical target must never be classified as internal').toBeUndefined();
+    expect(verdict.external.some((l) => l.path === link && l.unsafeReason === 'non-lexical')).toBe(true);
+  });
+
+  it('caseSensitive keeps Tree and tree distinct (Windows per-directory case sensitivity)', () => {
+    expect(isPathInsideRoot(path.join(root, 'Tree'), path.join(root, 'tree', 'x'), { caseSensitive: true })).toBe(false);
+    expect(isPathInsideRoot(path.join(root, 'Tree'), path.join(root, 'Tree', 'x'), { caseSensitive: true })).toBe(true);
+  });
+
+  it('a trailing backslash is a filename character on POSIX, not a separator', () => {
+    if (process.platform === 'win32') return; // win32 legitimately treats \ as a separator
+    expect(isPathInsideRoot('/tmp/tree\\', '/tmp/tree/file')).toBe(false);
+    expect(isPathInsideRoot('/tmp/tree\\', '/tmp/tree\\/file')).toBe(true);
+  });
+
+  it('an incomplete scan detaches NOTHING (fail-closed, git-14)', () => {
+    const { tree } = buildTree('incomplete');
+    const result = detachExternalLinks(path.join(tree, 'a.txt'));
+    expect(result.ok).toBe(false);
+    expect(result.complete).toBe(false);
+    expect(result.detached).toEqual([]);
+  });
+
+  it('detachInternalLinks removes the link git would otherwise leave behind', () => {
+    const { tree } = buildTree('internal-detach');
+    const target = path.join(tree, 'node_modules', 'real-pkg');
+    const link = path.join(tree, 'node_modules', 'linked-pkg');
+    makeJunction(link, target);
+    const result = detachInternalLinks(tree);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.detached).toHaveLength(1);
+    expect(fs.existsSync(link)).toBe(false);
+    expect(fs.readFileSync(path.join(target, 'index.js'), 'utf-8')).toBe('real\n');
   });
 });
 

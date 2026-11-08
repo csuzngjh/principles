@@ -377,4 +377,27 @@ describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
     expect(out.notes.join(' ')).toContain('internal reparse point');
     expect(fs.existsSync(wt)).toBe(false);
   }, 120_000);
+
+  it('does NOT report EXTERNAL_TARGET_LOST when the external target was already missing', async () => {
+    const { wt, branch } = await makeTask('junction-dangling');
+    await mergeIntoMain(branch);
+    await git(primary, 'switch', '-c', 'work/back-junction-dangling');
+
+    const gone = path.join(root, 'already-gone-install');
+    fs.mkdirSync(gone, { recursive: true });
+    trackJunction(path.join(wt, 'node_modules', 'openclaw'), gone);
+    fs.rmSync(gone, { recursive: true, force: true }); // target missing BEFORE cleanup
+
+    const r = await runDevScript(
+      'cleanup-task-worktree.mjs',
+      [branch, '--delete-branch', '--skip-gh', '--detach-external-links', '--json'],
+      { cwd: primary }
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout) as { ok: boolean; reason?: string };
+    expect(out.ok).toBe(true);
+    expect(out.reason).toBeUndefined();
+    expect(fs.existsSync(wt)).toBe(false);
+    await expect(git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
+  }, 120_000);
 });

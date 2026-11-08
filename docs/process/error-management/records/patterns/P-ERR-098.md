@@ -27,3 +27,17 @@ the external links are detached one at a time with their targets re-verified
 (`detachExternalLinks`, opt-in `--detach-external-links`), and the tool re-checks every external
 target after the delete. Recursive filesystem deletes (`Remove-Item -Recurse`, `rm -rf`) and
 `git clean -fdx` remain forbidden on such trees, and cleanup steps must still never silence errors.
+
+**Review hardening (PRI-1143, 2026-11-08)**: the preflight must FAIL CLOSED, not
+merely classify the links it happened to see. An unreadable directory, an
+unresolvable target, a relative target containing `..`, a self/ancestor cycle,
+or a case-mismatched path on a case-sensitive Windows directory is UNKNOWN and
+refuses the deletion (`SCAN_INCOMPLETE` / `EXTERNAL_LINKS_PRESENT`). Direction is
+decided from `realpath` on BOTH sides and compared case-sensitively. The scan,
+the refusal decision and `git worktree remove` must share ONE mutation lock — a
+preflight outside the lock leaves a window for another process to add a link.
+Even a link proven INTERNAL must be detached before deletion: verified on this
+machine, `git worktree remove` returned exit 0 while leaving a junction directory
+(and its parent) behind. After deletion, compare a content-level fingerprint of
+each external target (not `existsSync`: the incident deleted files INSIDE a target
+that was still present); targets already missing before the run are not "lost".

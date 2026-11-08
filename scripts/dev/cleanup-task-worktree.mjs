@@ -35,11 +35,14 @@
 // (detaching removes only the link, never the target). A single retry with one
 // --force is allowed ONLY after the porcelain-clean check passed and no external
 // link remains, so the only thing it can override is ignored build output
-// (node_modules). Double --force is never used. Every external target found by
-// the preflight is re-verified after the removal; if one vanished, this run failed
-// to contain the damage and exits non-zero.
+// (node_modules). Double --force is never used. Scan, decision and removal share
+// one mutation-lock span; every external target is fingerprinted before and after
+// (not merely checked for existence — the incident deleted files INSIDE a target
+// that was still present), and internal links are detached too, because git can
+// report exit 0 while leaving a junction directory behind.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import {
   assessWorktreePruneSafety,
   gitCommonDirAbsolute,
@@ -49,7 +52,7 @@ import {
 } from './lib/git.mjs';
 import { collectPrIndex, readLeaseState } from './lib/workspace-lifecycle.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
-import { classifyReparsePoints, detachExternalLinks } from './lib/residue-delete.mjs';
+import { classifyReparsePoints, detachExternalLinks, detachInternalLinks, REMOVAL_REASONS } from './lib/residue-delete.mjs';
 import { CODES } from './lib/preflight.mjs';
 
 function parseArgs(argv) {
@@ -82,6 +85,19 @@ function parseArgs(argv) {
   return args;
 }
 
+/** A failure already reported by fail(); the top-level handler must stay silent. */
+class ReportedFailure extends Error {}
+
+/** A refusal raised INSIDE the mutation lock, so the lock can unwind first. */
+class PreflightRefusal extends Error {
+  constructor(message, nextAction, payload) {
+    super(message);
+    this.name = 'PreflightRefusal';
+    this.nextAction = nextAction;
+    this.payload = payload || {};
+  }
+}
+
 function fail(args, code, message, nextAction, extra) {
   if (args.json) {
     console.log(JSON.stringify({ ok: false, code, error: message, nextAction, ...(extra || {}) }, null, 2));
@@ -90,14 +106,63 @@ function fail(args, code, message, nextAction, extra) {
     if (nextAction) console.error('  next: ' + nextAction);
   }
   process.exit(1);
+  // cli-2: never rely on process.exit() alone. If it is stubbed (tests) or this
+  // function is wrapped later, execution must NOT continue into the deletion.
+  throw new ReportedFailure('fail() reported: ' + code);
 }
 
-/** Format the first few external links so the operator sees the danger, not a count. */
+/** Paths containing shell metacharacters are never inlined into a paste-ready command. */
+const UNSAFE_SHELL_CHARS = /["&|%!^<>$`'\r\n]/;
+function shellPath(p) {
+  return UNSAFE_SHELL_CHARS.test(p) ? '"<copy path from JSON output; it contains shell metacharacters>"' : '"' + p + '"';
+}
+
+/** Format the first few unsafe links so the operator sees the danger, not a count. */
 function describeLinks(links, limit = 8) {
   return links
     .slice(0, limit)
-    .map((l) => '    ' + l.path + '  ->  ' + (l.target || '<unreadable target>') + (l.targetExists ? '' : '  [target missing]'))
+    .map(
+      (l) =>
+        '    ' + l.path + '  ->  ' + (l.target || '<unreadable target>') +
+        '  [' + (l.unsafeReason || 'outside') + ']' +
+        (l.targetExists ? '' : '  [target missing]')
+    )
     .join('\n') + (links.length > limit ? '\n    …and ' + (links.length - limit) + ' more' : '');
+}
+
+/**
+ * Content-level fingerprint of an external target. The 2026-11-06 incident
+ * deleted FILES INSIDE the target while leaving the directory itself in place,
+ * so `existsSync` alone would have reported success. Relative path + byte size
+ * detects that shape without hashing every byte of a large install.
+ */
+function fingerprintExternalTarget(dir) {
+  const rows = [];
+  const walk = (current) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      rows.push('UNREADABLE:' + path.relative(dir, current));
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      const rel = path.relative(dir, full);
+      if (entry.isDirectory()) {
+        rows.push('d:' + rel);
+        walk(full);
+      } else if (entry.isSymbolicLink()) {
+        rows.push('l:' + rel);
+      } else {
+        let size = -1;
+        try { size = fs.statSync(full).size; } catch { /* unreadable file */ }
+        rows.push('f:' + rel + ':' + size);
+      }
+    }
+  };
+  walk(dir);
+  return rows.sort().join('\n');
 }
 
 async function main() {
@@ -254,62 +319,128 @@ async function main() {
       );
     }
 
-    // ---- ERR-098 preflight: enumerate reparse points BEFORE git touches them ----
-    // Read-only, and deliberately OUTSIDE the mutation lock (git-12 says keep that
-    // lock short: never across an install/build/test run, and a 500k-file walk is
-    // in that cost class). An active lease (above) is what stops another writer
-    // changing this tree mid-run; the post-removal target check below is the
-    // tripwire if that assumption is ever wrong.
-    const linkScan = classifyReparsePoints(target.path);
-    const externalTargets = linkScan.external.map((l) => l.resolvedTarget).filter(Boolean);
-    if (linkScan.external.length > 0 && !args.detachExternalLinks) {
-      fail(
-        args,
-        CODES.CHECK_FAILED,
-        'The worktree holds ' +
-          linkScan.external.length +
-          ' reparse point(s) pointing OUTSIDE it. `git worktree remove` recurses through such links (ERR-098), which would delete files this worktree has no claim on. Nothing was removed:\n' +
-          describeLinks(linkScan.external),
-        'Detach them yourself — removing a link never touches its target — then retry. On Windows a directory junction detaches with: cmd /c rmdir "' +
-          linkScan.external[0].path +
-          '"   (or pass --detach-external-links to let this tool detach exactly the external links and re-verify each target).',
-        { reason: 'EXTERNAL_LINKS_PRESENT', externalLinks: linkScan.external.slice(0, 20), externalLinkCount: linkScan.external.length }
-      );
-    }
-    if (linkScan.external.length > 0) {
-      const detached = detachExternalLinks(target.path);
-      detachedLinks = detached.detached;
-      if (detached.brokenTargets.length > 0) {
-        fail(
-          args,
-          CODES.CHECK_FAILED,
-          'Detaching an external reparse point destroyed its target — the link WAS followed. Nothing more was removed:\n' +
-            detached.brokenTargets.map((b) => '    ' + b.path + '  ->  ' + b.target).join('\n'),
-          'Restore the target from a backup or its package tarball before continuing, then re-run: npm run check:error-handbook',
-          { reason: 'EXTERNAL_TARGET_LOST', detachedLinks: detached.detached, brokenTargets: detached.brokenTargets }
-        );
-      }
-      if (detached.failedToDetach.length > 0 || detached.remainingExternal.length > 0) {
-        fail(
-          args,
-          CODES.CHECK_FAILED,
-          'Could not detach every external reparse point; refusing to hand this tree to git:\n' +
-            detached.failedToDetach.map((f) => '    unlink failed: ' + f.path + ' — ' + f.error).join('\n') +
-            (detached.remainingExternal.length > 0 ? '\n' + describeLinks(detached.remainingExternal) : ''),
-          'Remove the leftovers manually (removing a link never touches its target), then retry.',
-          { reason: 'EXTERNAL_LINKS_PRESENT', detachedLinks: detached.detached, remainingExternal: detached.remainingExternal }
-        );
-      }
-      notes.push(
-        'detached ' + detached.detached.length + ' external reparse point(s) before removal; every target re-verified present (ERR-098)'
-      );
-    }
-    if (linkScan.internal.length > 0) {
-      notes.push(linkScan.internal.length + ' internal reparse point(s) left for git to traverse (targets inside this worktree only)');
-    }
-
+    // ---- ERR-098 preflight: SCAN, DECIDE and DELETE under ONE exclusive lock ----
+    // CodeRabbit / PRI-1143 review: a scan outside the lock leaves an ownership
+    // gap — an editor, installer or CI job can create a junction after the scan
+    // and before git recurses into the tree. The whole span now runs inside
+    // withMutationLock. The lock is held for a read-only directory walk plus one
+    // git command, never across an install/build/test run (git-12).
+    //
+    // Nothing inside the lock calls fail(): it calls process.exit, which would
+    // skip the lock's finally and leave a stale claim. Refusals are thrown out
+    // and reported only after the lock has been released.
+    let detached = null;
+    let targetSnapshots = [];
     try {
       await withMutationLock({ commonDir, operation: 'worktree-remove', target: target.path }, async () => {
+        const linkScan = classifyReparsePoints(target.path);
+
+        if (!linkScan.complete) {
+          throw new PreflightRefusal(
+            'The reparse-point scan could NOT prove the whole worktree is readable; ' +
+              linkScan.unreadable.length +
+              ' directory/directories could not be enumerated. An unreadable directory may hide a junction pointing outside the tree (ERR-098), so nothing was removed:\n' +
+              linkScan.unreadable.slice(0, 8).map((u) => '    ' + u.path + ' — ' + u.error).join('\n'),
+            'Fix the permission or long-path problem and retry. Never fall back to a recursive delete or a bare `git worktree remove`.',
+            {
+              reason: REMOVAL_REASONS.SCAN_INCOMPLETE,
+              unreadable: linkScan.unreadable.slice(0, 20),
+              externalLinks: linkScan.external.slice(0, 20),
+            }
+          );
+        }
+
+        if (linkScan.external.length > 0 && !args.detachExternalLinks) {
+          throw new PreflightRefusal(
+            'The worktree holds ' +
+              linkScan.external.length +
+              ' reparse point(s) the deleter must not traverse (target OUTSIDE the tree, unresolvable, non-lexical or cyclic). `git worktree remove` recurses through such links (ERR-098), which would delete files this worktree has no claim on. Nothing was removed:\n' +
+              describeLinks(linkScan.external),
+            'Detach them yourself — removing a link never touches its target — then retry. On Windows a directory junction detaches with: cmd /c rmdir ' +
+              shellPath(linkScan.external[0].path) +
+              '   (or pass --detach-external-links to let this tool detach exactly these links and re-verify each target). Every path is also listed in `externalLinks`.',
+            {
+              reason: REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT,
+              externalLinks: linkScan.external.slice(0, 20),
+              externalLinkCount: linkScan.external.length,
+            }
+          );
+        }
+
+        if (linkScan.external.length > 0) {
+          detached = detachExternalLinks(target.path);
+          detachedLinks = detached.detached;
+          if (detached.brokenTargets.length > 0) {
+            throw new PreflightRefusal(
+              'Detaching an unsafe reparse point destroyed its target — the link WAS followed. Nothing more was removed:\n' +
+                detached.brokenTargets.map((b) => '    ' + b.path + '  ->  ' + b.target).join('\n'),
+              'Restore the target from a backup or its package tarball before continuing, then re-run: npm run check:error-handbook',
+              {
+                reason: REMOVAL_REASONS.EXTERNAL_TARGET_LOST,
+                detachedLinks: detached.detached,
+                brokenTargets: detached.brokenTargets,
+              }
+            );
+          }
+          if (!detached.ok) {
+            throw new PreflightRefusal(
+              'Could not detach every unsafe reparse point; refusing to hand this tree to git:\n' +
+                detached.failedToDetach.map((f) => '    unlink failed: ' + f.path + ' — ' + f.error).join('\n') +
+                (detached.remainingExternal.length > 0 ? '\n' + describeLinks(detached.remainingExternal) : '') +
+                (detached.unreadable.length > 0
+                  ? '\n' + detached.unreadable.slice(0, 8).map((u) => '    unreadable: ' + u.path).join('\n')
+                  : ''),
+              'Remove the leftovers manually (removing a link never touches its target), then retry. Do NOT fall back to a recursive delete.',
+              {
+                reason: detached.complete ? REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT : REMOVAL_REASONS.SCAN_INCOMPLETE,
+                detachedLinks: detached.detached,
+                remainingExternal: detached.remainingExternal,
+                unreadable: detached.unreadable,
+              }
+            );
+          }
+          notes.push(
+            'detached ' + detached.detached.length + ' unsafe reparse point(s) before removal; every target re-verified present (ERR-098)'
+          );
+        }
+        // git must not traverse ANY reparse point, not even one proven internal:
+        // on Windows it can return exit 0 and still leave the junction directory
+        // (and its parent) behind — a NO_GIT_MARKER residue shell. Detach
+        // internal links unconditionally; their targets die with the tree anyway.
+        if (linkScan.internal.length > 0) {
+          const internal = detachInternalLinks(target.path);
+          if (!internal.ok) {
+            throw new PreflightRefusal(
+              'Could not detach every internal reparse point; refusing to let git traverse a link:\n' +
+                internal.failedToDetach.map((f) => '    unlink failed: ' + f.path + ' — ' + f.error).join('\n') +
+                '\n    remaining links: ' + internal.remainingLinks,
+              'Resolve the unreadable/undetachable link, then retry. Never fall back to a recursive delete.',
+              {
+                reason: internal.complete ? REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT : REMOVAL_REASONS.SCAN_INCOMPLETE,
+                internalLinks: linkScan.internal.slice(0, 20),
+              }
+            );
+          }
+          notes.push(
+            'detached ' + internal.detached.length + ' internal reparse point(s) before removal so git never traverses a link'
+          );
+        }
+
+        // Snapshot EVERY external target before deletion, remembering which ones
+        // existed. A dangling link must not be reported as "lost" afterwards
+        // (CodeRabbit), and existsSync alone cannot detect the 2026-11-06 shape
+        // where files INSIDE the target were deleted while the directory stayed.
+        targetSnapshots = linkScan.external
+          .filter((l) => l.canonicalTarget)
+          .map((l) => {
+            const existedBefore = fs.existsSync(l.canonicalTarget);
+            return {
+              path: l.canonicalTarget,
+              existedBefore,
+              fingerprint: existedBefore ? fingerprintExternalTarget(l.canonicalTarget) : null,
+            };
+          });
+
         let removeError = '';
         try {
           await runGit(['worktree', 'remove', target.path], { cwd });
@@ -317,59 +448,100 @@ async function main() {
           removeError = err && err.message ? err.message : String(err);
         }
         if (removeError) {
-          // Porcelain was clean AND no external reparse point remains, so only
-          // ignored build output (e.g. node_modules) can be blocking the removal.
-          // One --force retry is safe in exactly this situation; it cannot touch
-          // tracked/dirty content we did not already refuse above. Double --force
-          // is never used. (ERR-098 note: before the preflight above, this retry
-          // was NOT safe — the real incident traversed a junction on the FIRST,
-          // non-forced removal, so a clean porcelain was never evidence.)
+          // Porcelain was clean AND the just-completed, complete scan proved no
+          // unsafe link remains, so only ignored build output can be blocking
+          // the removal. Double --force is never used.
           await runGit(['worktree', 'remove', '--force', target.path], { cwd });
           notes.push('removal needed one --force pass for ignored build output (porcelain was clean)');
+        }
+
+        // git can report success while a junction-derived directory survives.
+        if (fs.existsSync(target.path)) {
+          const residueError = new Error(
+            'git worktree remove returned success but ' + target.path + ' is still on disk — this is a NO_GIT_MARKER residue shell'
+          );
+          residueError.reason = REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL;
+          throw residueError;
         }
         removedWorktree = target.path;
       });
     } catch (err) {
+      if (err instanceof PreflightRefusal) {
+        fail(args, CODES.CHECK_FAILED, err.message, err.nextAction, err.payload);
+        return;
+      }
+      if (err && err.reason === REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL) {
+        fail(
+          args,
+          CODES.CHECK_FAILED,
+          String(err.message),
+          'Do NOT delete it with a recursive delete. The junction-safe, explicitly acked residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
+            shellPath(target.path) +
+            ' --ack-unknown --apply . If it reports "not a discovered residue shell" (an out-of-pool worktree), do NOT bypass the gate: re-run npm run dev:workspace:snapshot so the tool can classify the directory, then retry --residue with --ack-unknown. Both gates must stay intact.',
+          { reason: REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL, removedWorktree: null }
+        );
+        return;
+      }
+      if (err && err.code === 'GIT_MUTATION_LOCKED') {
+        fail(
+          args,
+          CODES.CHECK_FAILED,
+          'The exclusive Git mutation lock could not be acquired; no scan or removal ran:\n' + (err.message || String(err)),
+          (err.nextAction || 'Retry once the other writer has released its claim.') +
+            ' Never remove the worktree by hand: a manual `git worktree remove` skips the ERR-098 preflight.',
+          { reason: REMOVAL_REASONS.MUTATION_LOCK_UNAVAILABLE, holder: err.holder || null }
+        );
+        return;
+      }
       // Did the failure leave a directory git no longer has admin metadata for?
       // That is a NO_GIT_MARKER residue shell (git-14): unprovable dirtiness, so
       // only the explicitly acked residue path may delete it.
-      const stillListed = await listWorktrees(cwd);
-      const stillRegistered = stillListed.some(
-        (w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(target.path, cwd)
-      );
+      let stillRegistered = false;
+      try {
+        const stillListed = await listWorktrees(cwd);
+        stillRegistered = stillListed.some(
+          (w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(target.path, cwd)
+        );
+      } catch {
+        /* the original failure is the useful signal */
+      }
       const shellRemains = fs.existsSync(target.path) && !stillRegistered;
       fail(
         args,
         CODES.CHECK_FAILED,
-        'git worktree remove failed (porcelain was clean' +
-          (linkScan.external.length === 0 ? ', no external reparse points' : '') +
-          '):\n' +
+        'git worktree remove failed (porcelain was clean, preflight proved no unsafe reparse point):\n' +
           (err && err.message ? err.message : String(err)) +
           (shellRemains
             ? '\n' + target.path + ' is still on disk but git has no admin metadata for it any more: it is now a NO_GIT_MARKER residue shell.'
             : ''),
         shellRemains
-          ? 'Do NOT delete it with a recursive delete. This tool\'s own junction-safe residue path is the only thing allowed to remove it: npm run dev:workspace:cleanup -- --residue "' +
-            target.path +
-            '" --ack-unknown --apply'
-          : 'Inspect manually: git worktree remove ' + target.path,
-        { reason: shellRemains ? 'REMOVAL_FAILED_RESIDUE_SHELL' : 'REMOVAL_FAILED' }
+          ? 'Do NOT delete it with a recursive delete. The junction-safe residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +
+            shellPath(target.path) +
+            ' --ack-unknown --apply . If it reports "not a discovered residue shell" (an out-of-pool worktree), do NOT bypass the gate: re-run npm run dev:workspace:snapshot so the tool can classify the directory, then take the --residue path with --ack-unknown. Both the discovery and the acknowledgement gates must stay intact.'
+          : 'Do NOT retry with a bare `git worktree remove` — it skips the ERR-098 preflight. Re-run npm run dev:worktree:cleanup -- ' +
+            shellPath(args.target) + ' after resolving the error above.',
+        {
+          reason: shellRemains ? REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL : REMOVAL_REASONS.REMOVAL_FAILED,
+          ...(detached ? { detachedLinks } : {}),
+        }
       );
     }
 
-    // Tripwire: git removed the tree — did every external target survive? (ERR-098)
-    if (removedWorktree && externalTargets.length > 0) {
-      const lost = externalTargets.filter((t) => !fs.existsSync(t));
+    // Tripwire: git removed the tree — did every external target survive WHOLE?
+    if (removedWorktree && targetSnapshots.length > 0) {
+      const lost = targetSnapshots
+        .filter((s) => s.existedBefore && (!fs.existsSync(s.path) || fingerprintExternalTarget(s.path) !== s.fingerprint))
+        .map((s) => s.path);
       if (lost.length > 0) {
         fail(
           args,
           CODES.CHECK_FAILED,
           'The worktree is gone, but ' +
             lost.length +
-            ' external target(s) of reparse points inside it disappeared with it — something traversed a link:\n' +
+            ' external target(s) of reparse points inside it disappeared or changed — something traversed a link:\n' +
             lost.map((t) => '    ' + t).join('\n'),
           'Restore them (npm pack <pkg> + sha512 check is how the 2026-11-06 incident was repaired) before running anything else.',
-          { reason: 'EXTERNAL_TARGET_LOST', removedWorktree, lostTargets: lost, detachedLinks }
+          { reason: REMOVAL_REASONS.EXTERNAL_TARGET_LOST, removedWorktree, lostTargets: lost, detachedLinks }
         );
       }
     }
@@ -437,5 +609,27 @@ async function main() {
 
 const isMain = process.argv[1] && process.argv[1].endsWith('cleanup-task-worktree.mjs');
 if (isMain) {
-  await main();
+  const jsonMode = process.argv.includes('--json');
+  // cli-1: even an unexpected rejection must leave exactly one parseable JSON
+  // object on stdout, never a bare stack trace.
+  main().catch((err) => {
+    // fail() already emitted the operator-facing payload; do not print twice.
+    if (err instanceof ReportedFailure) {
+      process.exitCode = 1;
+      return;
+    }
+    const message = String((err && err.message) || err);
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        ok: false,
+        code: CODES.CHECK_FAILED,
+        error: message,
+        reason: REMOVAL_REASONS.UNEXPECTED_ERROR,
+        nextAction: 'Inspect the error above; do not fall back to a recursive delete or a bare `git worktree remove`.',
+      }, null, 2));
+    } else {
+      console.error('[cleanup-task-worktree] UNEXPECTED FAILURE: ' + message);
+    }
+    process.exitCode = 1;
+  });
 }
