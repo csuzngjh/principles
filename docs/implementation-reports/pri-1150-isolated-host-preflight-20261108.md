@@ -30,7 +30,10 @@
 
 **可行，且不需要修改宿主**：观察链全部在 PD 候选构建内（llm_input 注册 + 冻结登记 + 有界检查器 + 事件发射）。OpenClaw 官方宿主只提供 llm_input 派发（2026.11.1 已核实具备）。隔离宿主验证 = 用候选构建 + 独立 workspace/config 启动官方宿主。
 
-**若运行卡需绕开已安装 2.6.4**：OpenClaw 支持从任意插件目录加载（`plugins.entries.<id>` 配置或 `--plugin-dir` 类启动参数——准确参数在运行卡执行前用 2026.11.1 官方文档二次核实，本预检只标记为执行时步骤）。
+**候选加载的具体官方机制（已核实，取代原占位）**：
+- `OPENCLAW_HOME` env → 隔离 home root（config/extensions/state 全部随根隔离；`src/plugins/discovery.ts` env.home 字段核实）。
+- 隔离配置内 `plugins.load.paths` 指向候选插件目录——官方文档明文支持本地覆盖加载（`docs/plugins/architecture.md:993`："For intentional local overrides, use `plugins.load.paths` to select the plugin path"）。
+- 重复 id 去重规则（`discovery.ts` dedupe）：bundled origin 优先保留——因此**必须**用独立 OPENCLAW_HOME 使已安装生产 PD 插件根本不被发现，而不是依赖 load.paths 胜出（执行时以已加载插件清单断言复核）。
 
 ## 4. 离线夹具验证已完成（§三：先离线，不启动宿主）
 

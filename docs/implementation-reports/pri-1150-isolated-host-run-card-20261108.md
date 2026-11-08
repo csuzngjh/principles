@@ -13,32 +13,64 @@
 | 项 | 值 | 来源 |
 |---|---|---|
 | 宿主 | OpenClaw **2026.11.1**（未修改，官方 npm 安装） | `openclaw --version` 前后对照 |
-| PD 候选 | 本仓构建 dist（`npm run build`，含 llm_input 注册） | 构建后 dist sha256 记录 |
-| 加载方式 | 独立 gateway 工作目录 + 显式插件路径（优先）；若 2026.11.1 要求插件必须安装，则以 `--plugin-dir`/等效机制加载候选目录（执行前用官方文档二次核实，不修补安装目录） | §3 预检 |
-| 隔离 workspace | 临时目录（`os.tmpdir()` 下新建），最小 config.yaml：`features.prompt.enabled=true` + `plugins.entries.principles-disciple.hooks.allowConversationAccess=true` | 隔离加载已预检可行 |
-| 环境隔离 | 进程 env 显式设置：`PD_WORKSPACE_DIR`/`OPENCLAW_WORKSPACE` 指向隔离目录（或 unset）；`ZAI_API_KEY` 等 provider key 从现有环境继承（模型密钥，非 PD 数据） | 防生产回落 |
+| PD 候选 | 本仓构建 dist（`npm run build`，含 llm_input 注册）；构建 sha256 记录入证据 | 构建后 dist 哈希清单 |
+| 插件加载（官方机制，已核实） | 独立 **`OPENCLAW_HOME`**（隔离 home root：config/extensions/state 全部随之隔离，`src/plugins/discovery.ts` env home 字段）+ 隔离配置内 **`plugins.load.paths`** 指向候选插件目录（官方文档：`docs/plugins/architecture.md:993` "For intentional local overrides, use `plugins.load.paths` to select the plugin path"） | release/2026.11.1 源码/文档 |
+| 排除生产 PD 插件 | 独立 OPENCLAW_HOME 下已安装 `extensions/principles-disciple` 不被发现；重复 id 仅在多源同现时去重（`discovery.ts` dedupe：bundled retained / config 传播），因此**必须**断言：启动后已加载插件清单含候选且**不含**生产安装路径 | 加载后断言（执行时步骤 E2） |
+| 隔离 workspace | `OPENCLAW_HOME` 下新建 workspace 目录；最小 config.yaml：`features.prompt.enabled=true` + `plugins.entries.principles-disciple.hooks.allowConversationAccess=true` + `plugins.load.paths=[候选目录]` | — |
+| 环境隔离（全量覆盖清单） | `OPENCLAW_HOME`、`PD_WORKSPACE_DIR`、`OPENCLAW_WORKSPACE`、`OPENCLAW_WORKSPACE_DIR`、`PD_STATE_DIR`、`OPENCLAW_STATE_DIR`、`OPENCLAW_CONFIG_PATH`、`OPENCLAW_PROFILE`、`OPENCLAW_DEV_SOURCE_ROOT`、`OPENCLAW_DISABLE_BUNDLED_SOURCE_OVERLAYS`：全部显式指向隔离路径或 unset（不许继承生产值） | resolver/config 源码核实 |
+| provider 密钥 | 假 provider 不需要密钥；**不继承**真实 provider 密钥（env 清单外显式 unset `ZAI_API_KEY` 等），防外发 | §4 |
 
-## 3. 两个回合（responses + completions 各一）
+## 3. 本地假 provider（固定，127.0.0.1）
 
-| 回合 | API/模型 | 输入（冻结样本 A1 原文） | 期望观察 | 不应出现 |
+| 项 | 值 |
+|---|---|
+| 端点 | `http://127.0.0.1:<固定端口>/v1`（隔离配置 `models.providers` 声明，host 本地回环） |
+| API/协议 | R1=`openai-responses`（`POST /v1/responses`，SSE 终止响应）；R2=`openai-completions`（`POST /v1/chat/completions`，SSE `[DONE]`） |
+| 模型标识 | `isolated-presence-model`（两协议同名固定 id） |
+| 凭证 | 假凭证 `isolated-test-key`（配置内显式写入，非环境继承；不继承真实 provider 密钥） |
+| 响应 | 固定终止 chunk：R1 responses SSE `response.completed`；R2 completions SSE `[DONE]`（复用 #2407 线已验证的 SSE 形状） |
+| 转发 | 无——假 provider 不向上游转发任何请求（离线已验证形状） |
+
+## 4. 两个回合（responses + completions 各一）
+
+| 回合 | API | 输入（冻结样本 A1 原文） | 期望观察 | 不应出现 |
 |---|---|---|---|---|
-| R1 | `openai-responses`（或宿主默认 responses 路径模型） | A1.text（correction 样本） | presence 事件：binding=unique、full_hit（A1 的 activationId）、reason 缺省 | binding=ambiguous/none；empty_snapshot |
-| R2 | `openai-completions`（宿主 completions 路径模型） | 同 A1.text | 同上（egress=completions） | 同上 |
+| R1 | `openai-responses` | A1.text（correction 样本） | presence 事件：binding=unique、full_hit（夹具 activationId）、reason 缺省 | binding=ambiguous/none；empty_snapshot |
+| R2 | `openai-completions` | 同 A1.text | 同上（egress=completions） | 同上 |
 
-（准确 provider/model id 在执行时从宿主可用模型清单中选定并记录；不修改生产配置。）
+（夹具 activationId/原则正文见 §2b 原则夹具；A1.text 为冻结样本原文，仅作为用户输入，与夹具原则正文不同。）
 
-## 4. 四个独立预算（任一触达即停，不自动重试）
+## 5. 四个独立预算（任一触达即停，不自动重试）
 
 | 预算 | 上限 |
 |---|---|
 | 宿主启动 | 2 次尝试（启动失败即记账失败、停止） |
-| HTTP（宿主自身对 provider 的请求） | 2（每回合 1 次；失败即记账停止） |
-| 工具调用 | 0（不调用任何工具） |
-| 付费调用 | 0（本地假 provider 时为 0；若用真实 provider 则 ≤2 且必须在卡内指定 provider——默认推荐本地假 provider，故真实付费=0） |
+| provider HTTP | 2（每回合 1 次；失败即记账停止） |
+| 工具调用 | 0 |
+| 付费调用 | 0（假 provider 本地回环，零外发零付费；不继承真实 provider 密钥） |
 
-**失败即停**：R1 失败不执行 R2。无自动重试（宿主内部对瞬时错误的单次重试属宿主行为，记账不掩蔽）。
+**失败即停**：R1 失败不执行 R2。无自动重试（宿主内部对瞬时错误的单次重试属宿主行为，记账不掩蔽）。宿主启动失败也计入启动预算（2 次含失败）。
 
-## 5. 超时与停止条件
+## 5a. 原则夹具（真实治理入口，非伪造授权）
+
+通过 PD 正式存储 API 在隔离 workspace 的 `.pd/state.db` 准备（与既有测试同一入口，`@principles/core/runtime`）：
+
+| 步骤 | API | 内容 |
+|---|---|---|
+| F1 | `SqlitePIArtifactStore`（insert pi_artifacts 行） | artifactId=`art-presence-fixture`，principleId=`presence-fixture`，text=固定夹具正文（含 XML 特殊字符，验证单次转义），validation_status=validated |
+| F2 | `SqliteActivationStateStore.recordActivation` | activationId=`act_prompt_presence-fixture`，channel=prompt，action=prompt_activate |
+| F3 | approvals 授权行 | 按 HostRuntime 授权联表要求写入（authority=owner 路径），或运行卡内明确该隔离 workspace 的授权来源 |
+
+冻结事实（写入运行卡，执行后核对）：
+- 原则正文：`PRI-1150 隔离验证夹具：交付前必须核对 <presence> 标记与 & 符号。`（含 `<` `>` `&` 验证单次转义）
+- 正文 sha256：执行时计算并记录
+- artifactId=`art-presence-fixture`；activationId=`act_prompt_presence-fixture`；revision：该层不可得 → unknown
+
+**离线已验证**：夹具 → shared 装配（host-runtime 冻结同源）→ 最终快照 → 正式 handler → presence 事件（`runtime-prompt-activation.test.ts` PRI-1150 端到端用例）；期望正文与实际渲染形式（转义后 directive 切片）一致由断言保证。
+
+**不复制生产数据库、不伪造生产授权**：夹具只存在于隔离 workspace 的自有 DB。
+
+## 5b. 超时与停止条件
 
 - 宿主启动超时 120s；每回合完成超时 180s。
 - 停止条件：预算触达 / 任一断言失败 / 超时。停止后收集证据并关闭进程。
