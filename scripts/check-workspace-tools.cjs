@@ -348,9 +348,16 @@ for (const file of devFiles) {
 // mutation mutex; check every imported removeWorktreeSafely() call independently.
 for (const file of devFiles) {
   const source = fs.readFileSync(file, 'utf8');
+  const masked = blankNonCode(source);
+  const inCodeContext = (matchIndex) =>
+    // blankNonCode preserves length: when the match region is blanked, it was
+    // inside a comment or string, not executable code.
+    masked.slice(matchIndex, matchIndex + 6).trim().length > 0;
   const namedImport = source.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su);
   const namespaceImport = source.match(/import\s*\*\s*as\s*(\w+)\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su);
-  if (namedImport && /\bremoveWorktreeSafely\s+as\s+\w+/.test(namedImport[1])) {
+  const realNamedImport = namedImport && inCodeContext(namedImport.index) ? namedImport : null;
+  const realNamespaceImport = namespaceImport && inCodeContext(namespaceImport.index) ? namespaceImport : null;
+  if (realNamedImport && /\bremoveWorktreeSafely\s+as\s+\w+/.test(realNamedImport[1])) {
     // An alias renames every call site out of the scan below — a blind spot,
     // so the import form is refused outright instead of being silently skipped.
     fail(
@@ -359,19 +366,18 @@ for (const file of devFiles) {
     );
     continue;
   }
-  if (namespaceImport) {
+  if (realNamespaceImport) {
     // swr.removeWorktreeSafely(...) escapes the identifier scan below.
     fail(
       'git-mutation-mutex',
-      path.relative(ROOT, file) + ' imports safe-worktree-remove.mjs as a namespace (' + namespaceImport[1] +
+      path.relative(ROOT, file) + ' imports safe-worktree-remove.mjs as a namespace (' + realNamespaceImport[1] +
         '); the call-site mutation-lock scan cannot verify member calls. Use a named import.',
     );
     continue;
   }
-  if (!namedImport) {
+  if (!realNamedImport) {
     continue;
   }
-  const masked = blankNonCode(source);
   const spans = mutationLockSpans(masked);
   const rel = path.relative(ROOT, file);
   const lineOf = (at) => source.slice(0, at).split('\n').length;

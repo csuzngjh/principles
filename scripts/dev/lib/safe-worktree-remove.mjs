@@ -80,6 +80,55 @@ async function findInitializedSubmodules(worktreePath, runGitCommand) {
 }
 
 /**
+ * Prove that the admin directory named by a worktree's .git marker bytes
+ * belongs to the worktree whose marker is at `expectedMarkerPath`: resolve the
+ * marker's gitdir pointer anchored at `anchorDir` (the ORIGINAL worktree
+ * position — the only base a relative pointer is defined against), confine the
+ * result to a direct child of the canonical `<commonDir>/worktrees` root, and
+ * require the admin's own reverse pointer to name `expectedMarkerPath`
+ * exactly. Every read goes through the one-fd no-follow snapshot primitive.
+ * Throws when any direction fails — callers preserve state and refuse.
+ */
+function resolveAdminDirFromMarkerBytes({ markerBytes, anchorDir, commonDir, expectedMarkerPath }) {
+  const markerLine = markerBytes.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
+  if (!markerLine) throw new Error('worktree .git marker has no gitdir pointer');
+  const rawAdminGitDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
+  // Absolute pointers resolve to themselves; relative pointers anchor at the
+  // ORIGINAL worktree position.
+  const candidate = path.resolve(anchorDir, rawAdminGitDir);
+  const commonStat = fs.lstatSync(commonDir);
+  if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
+    throw new Error('repository Git common directory is not a real directory');
+  }
+  const canonicalCommonDir = fs.realpathSync.native(commonDir);
+  const adminRoot = path.resolve(commonDir, 'worktrees');
+  const adminRootStat = fs.lstatSync(adminRoot);
+  if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()) {
+    throw new Error('repository worktrees admin root is not a real directory (refusing to follow a junction/symlink)');
+  }
+  const canonicalAdminRoot = fs.realpathSync.native(adminRoot);
+  if (normalizeGitPath(canonicalAdminRoot) !== normalizeGitPath(path.join(canonicalCommonDir, 'worktrees'))) {
+    throw new Error('repository worktrees admin root resolves outside the canonical Git common directory');
+  }
+  const candidateStat = fs.lstatSync(candidate);
+  if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
+    throw new Error('worktree admin directory is not a real directory');
+  }
+  const adminDir = fs.realpathSync.native(candidate);
+  const canonicalRelative = path.relative(canonicalAdminRoot, adminDir);
+  if (!canonicalRelative || canonicalRelative === '..' || canonicalRelative.startsWith('..' + path.sep)
+    || path.isAbsolute(canonicalRelative) || canonicalRelative.includes(path.sep)) {
+    throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
+  }
+  const pointerFile = path.join(adminDir, 'gitdir');
+  const reversePointer = readRegularFileNoFollow(pointerFile).trim();
+  if (normalizeGitPath(reversePointer) !== normalizeGitPath(expectedMarkerPath)) {
+    throw new Error('admin reverse pointer does not name the expected worktree marker');
+  }
+  return adminDir;
+}
+
+/**
  * The manual quarantine move for worktrees Git refuses to move: an atomic
  * rename of the directory entry, then an equally atomic rewrite of the exact
  * admin directory's reverse gitdir pointer. Both directions are identity-
@@ -100,35 +149,13 @@ async function moveWorktreeIntoQuarantineManually({ worktreePath, quarantinePath
   // (or another worktree's) registration (CodeRabbit round 4).
   let pointerRewritten = false;
   try {
-    const commonStat = fs.lstatSync(commonDir);
-    if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
-      throw new Error('repository Git common directory is not a real directory');
-    }
-    const canonicalCommonDir = fs.realpathSync.native(commonDir);
-    const adminRoot = path.resolve(commonDir, 'worktrees');
-    const adminRootStat = fs.lstatSync(adminRoot);
-    if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()) {
-      throw new Error('repository worktrees admin root is not a real directory (refusing to follow a junction/symlink)');
-    }
-    const canonicalAdminRoot = fs.realpathSync.native(adminRoot);
-    const expectedAdminRoot = path.join(canonicalCommonDir, 'worktrees');
-    if (normalizeGitPath(canonicalAdminRoot) !== normalizeGitPath(expectedAdminRoot)) {
-      throw new Error('repository worktrees admin root resolves outside the canonical Git common directory');
-    }
-    const markerLine = markerBefore.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
-    if (!markerLine) throw new Error('worktree .git marker has no gitdir pointer');
-    const rawAdminGitDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
-    const candidate = path.resolve(path.dirname(markerPath), rawAdminGitDir);
-    const candidateStat = fs.lstatSync(candidate);
-    if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
-      throw new Error('worktree admin directory is not a real directory');
-    }
-    adminDir = fs.realpathSync.native(candidate);
-    const canonicalRelative = path.relative(canonicalAdminRoot, adminDir);
-    if (!canonicalRelative || canonicalRelative === '..' || canonicalRelative.startsWith('..' + path.sep)
-      || path.isAbsolute(canonicalRelative) || canonicalRelative.includes(path.sep)) {
-      throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
-    }
+    // Prove the admin directory belongs to THIS worktree before touching it.
+    adminDir = resolveAdminDirFromMarkerBytes({
+      markerBytes: markerBefore,
+      anchorDir: worktreePath,
+      commonDir,
+      expectedMarkerPath: path.join(worktreePath, '.git'),
+    });
     const pointerFile = path.join(adminDir, 'gitdir');
     const current = readRegularFileNoFollow(pointerFile);
     // Git writes the pointer in slash form on Windows; compare separators the
@@ -232,11 +259,12 @@ function isWithinRoot(root, candidate) {
 /**
  * Render a value for a git-config `key = value` line. `$`-tokens in the
  * replacement string are neutralised by using a replace callback, and values
- * containing git-config comment starters (`#`, `;`) are double-quoted with
- * backslash escaping so the path parses as one value (CodeRabbit round 4).
+ * containing characters git config treats specially inside/outside quotes
+ * (`#`, `;` comment starters, `"` and `\` escapes) are double-quoted with
+ * backslash escaping so the path parses as one value (CodeRabbit round 5).
  */
 function gitConfigValue(value) {
-  if (!/[#;]/.test(value)) return value;
+  if (!/[#;"\\]/.test(value)) return value;
   return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
@@ -346,42 +374,15 @@ function retargetSubmodulesForQuarantine({ parentAdminDir, commonDir, worktreePa
  * must name the quarantined marker exactly.
  */
 async function manualMoveBack({ worktreePath, quarantinePath, markerPath, markerContents, gitCwd, submoduleRollbackEntries = [] }) {
-  const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
-  if (!markerLine) throw new Error('captured .git marker has no gitdir pointer');
-  const rawAdminGitDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
-  // Absolute pointers resolve to themselves; relative pointers anchor at the
-  // ORIGINAL worktree position, which is the only base that makes them valid.
-  const candidate = path.resolve(worktreePath, rawAdminGitDir);
-  const commonDir = await gitCommonDirAbsolute(gitCwd);
-  const commonStat = fs.lstatSync(commonDir);
-  if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
-    throw new Error('repository Git common directory is not a real directory');
-  }
-  const canonicalCommonDir = fs.realpathSync.native(commonDir);
-  const adminRoot = path.resolve(commonDir, 'worktrees');
-  const adminRootStat = fs.lstatSync(adminRoot);
-  if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()) {
-    throw new Error('repository worktrees admin root is not a real directory (refusing to follow a junction/symlink)');
-  }
-  const canonicalAdminRoot = fs.realpathSync.native(adminRoot);
-  if (normalizeGitPath(canonicalAdminRoot) !== normalizeGitPath(path.join(canonicalCommonDir, 'worktrees'))) {
-    throw new Error('repository worktrees admin root resolves outside the canonical Git common directory');
-  }
-  const candidateStat = fs.lstatSync(candidate);
-  if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
-    throw new Error('worktree admin directory is not a real directory');
-  }
-  const adminDir = fs.realpathSync.native(candidate);
-  const canonicalRelative = path.relative(canonicalAdminRoot, adminDir);
-  if (!canonicalRelative || canonicalRelative === '..' || canonicalRelative.startsWith('..' + path.sep)
-    || path.isAbsolute(canonicalRelative) || canonicalRelative.includes(path.sep)) {
-    throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
-  }
+  // The helper proves the admin directory belongs to THIS quarantined marker
+  // (reverse pointer names the quarantine exactly) before anything is renamed.
+  const adminDir = resolveAdminDirFromMarkerBytes({
+    markerBytes: markerContents,
+    anchorDir: worktreePath,
+    commonDir: await gitCommonDirAbsolute(gitCwd),
+    expectedMarkerPath: markerPath,
+  });
   const pointerFile = path.join(adminDir, 'gitdir');
-  const current = readRegularFileNoFollow(pointerFile);
-  if (normalizeGitPath(current.trim()) !== normalizeGitPath(markerPath)) {
-    throw new Error('admin reverse pointer does not name the quarantined marker; refusing to complete the rollback');
-  }
   fs.renameSync(quarantinePath, worktreePath);
   const temp = path.join(adminDir, 'gitdir.pd-restore-' + process.pid + '-' + Math.random().toString(36).slice(2));
   fs.writeFileSync(temp, path.join(worktreePath, '.git').split(path.sep).join('/') + '\n', 'utf-8');
@@ -528,19 +529,20 @@ export async function removeWorktreeSafely({
     if (quarantineStat && quarantineStat.isDirectory() && !quarantineStat.isSymbolicLink()
       && !fs.existsSync(worktreePath)) {
       // A quarantine whose .git entry cannot be proven to be the original
-      // regular marker is never handed back to Git: a symlink swapped in
-      // before the move-back could make Git truncate an external target.
-      let rollbackMarkerTrusted = movedManually;
-      if (!movedManually) {
-        try {
-          rollbackMarkerTrusted = originalMarkerBytes !== null
-            && readRegularFileNoFollow(markerPath) === originalMarkerBytes;
-        } catch {
-          rollbackMarkerTrusted = false;
-        }
-        if (!rollbackMarkerTrusted) {
-          notes.push('quarantine .git marker is not the original regular file; refusing to let Git move it back (quarantine preserved)');
-        }
+      // regular marker is never moved back at all: a symlink swapped in
+      // before the rollback could redirect Git at an external target. The
+      // verified manual move-back below never lets Git read the marker, so
+      // even a byte-identical substitute cannot be followed (CodeRabbit
+      // round 5: both rollback paths are unified here).
+      let rollbackMarkerTrusted = true;
+      try {
+        rollbackMarkerTrusted = originalMarkerBytes !== null
+          && readRegularFileNoFollow(markerPath) === originalMarkerBytes;
+      } catch {
+        rollbackMarkerTrusted = false;
+      }
+      if (!rollbackMarkerTrusted) {
+        notes.push('quarantine .git marker is not the original regular file; refusing to move the worktree back (quarantine preserved)');
       }
       // Git may have renamed the directory but failed while updating its
       // administrative pointers. Only attempt rollback when Git itself still
@@ -551,18 +553,14 @@ export async function removeWorktreeSafely({
           (entry) => normalizeGitPath(entry.path, gitCwd) === normalizeGitPath(quarantinePath, gitCwd)
         );
         if (quarantineEntry && !quarantineEntry.locked && rollbackMarkerTrusted) {
-          if (movedManually) {
-            fs.renameSync(quarantinePath, worktreePath);
-            if (fs.existsSync(worktreePath) && !fs.existsSync(quarantinePath)) {
-              restoredPath = worktreePath;
-              fs.rmdirSync(quarantineParent);
-            }
-          } else {
-            await runGitCommand(['worktree', 'move', quarantinePath, worktreePath], { cwd: gitCwd });
-            if (fs.existsSync(worktreePath) && !fs.existsSync(quarantinePath)) {
-              restoredPath = worktreePath;
-              fs.rmdirSync(quarantineParent);
-            }
+          const reverted = await manualMoveBack({
+            worktreePath, quarantinePath, markerPath,
+            markerContents: originalMarkerBytes, gitCwd,
+          });
+          notes.push(...reverted);
+          if (fs.existsSync(worktreePath) && !fs.existsSync(quarantinePath)) {
+            restoredPath = worktreePath;
+            fs.rmdirSync(quarantineParent);
           }
         }
       } catch (restoreError) {
@@ -700,15 +698,20 @@ export async function removeWorktreeSafely({
     if (!/^\s*gitdir:/m.test(markerContents)) {
       throw new Error('worktree .git marker does not contain a gitdir pointer');
     }
-    // A RELATIVE gitdir pointer is only resolvable from the ORIGINAL worktree
-    // position. The quarantine adds a path segment, so after the move the
-    // pointer can no longer prove which admin directory is ours — and git
-    // itself cannot resolve a status inside the quarantine. Refuse and
-    // restore BEFORE the tree is deleted, never resolve against a guess.
-    const earlyMarkerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
-    if (earlyMarkerLine && !path.isAbsolute(earlyMarkerLine.replace(/^\s*gitdir:\s*/i, '').trim())) {
-      throw new Error('worktree .git marker uses a relative gitdir pointer, which cannot be proven after the quarantine move');
-    }
+    // Prove the admin directory named by the marker belongs to THIS
+    // quarantined worktree BEFORE git (and this cleanup) reads anything else
+    // from it: the pointer is anchored at the ORIGINAL worktree position (the
+    // base a relative pointer is defined against), confined to the canonical
+    // admin root, and cross-checked against the admin's own reverse pointer.
+    // Failure preserves the quarantine via the catch below — a substituted
+    // marker can no longer redirect `git status` at another worktree
+    // (CodeRabbit round 5).
+    resolveAdminDirFromMarkerBytes({
+      markerBytes: markerContents,
+      anchorDir: worktreePath,
+      commonDir: await gitCommonDirAbsolute(gitCwd),
+      expectedMarkerPath: markerPath,
+    });
   } catch (err) {
     const restored = await restore();
     return {
@@ -736,47 +739,55 @@ export async function removeWorktreeSafely({
   );
   if (!statusContainsOnlyExpectedLinkDeletions(quarantineStatus, quarantinePath, expectedDeletedInQuarantine)) {
     const expectedInQuarantine = new Set(expectedDeletedInQuarantine.map((item) => normalizeGitPath(item)));
-    const unexpectedPaths = [];
-    if (quarantineStatus !== null) {
-      // Separate DATA from LINKS. A bare reparse point a writer dropped is not
-      // data: unlinking it removes only the link, and the no-follow walker never
-      // follows one — no deletion risk. Anything else (a real file, a directory
-      // with contents) is unknown work and refuses the deletion. A null status
-      // (git itself failed inside the quarantine, e.g. a swapped marker) has
-      // nothing to classify and refuses below.
+    let refusalReason = null;
+    let toleratedUntrackedLinks = 0;
+    if (quarantineStatus === null) {
+      // Git itself failed inside the quarantine (a swapped marker, a broken
+      // admin pointer): nothing can be classified, refuse outright.
+      refusalReason = 'git could not report the quarantine status after the move';
+    } else {
+      // Separate DATA from LINKS. Only an UNTRACKED reparse point dropped by a
+      // late writer may be tolerated: unlinking it removes only the link and
+      // the no-follow walk never follows one, so no data is at risk. A TRACKED
+      // path that changed after the move carries uncommitted target values
+      // (or content) and still refuses with a full restore (CodeRabbit round 5).
       for (const record of quarantineStatus.split('\0').filter(Boolean)) {
+        const statusCode = record.slice(0, 2);
         const resolved = path.resolve(quarantinePath, record.slice(3));
-        if (record.slice(0, 2) === ' D' && expectedInQuarantine.has(normalizeGitPath(resolved))) continue;
-        unexpectedPaths.push(resolved);
-      }
-    }
-    let everyUnexpectedPathIsALink = unexpectedPaths.length > 0;
-    for (const unexpectedPath of unexpectedPaths) {
-      try {
-        if (!fs.lstatSync(unexpectedPath).isSymbolicLink()) {
-          everyUnexpectedPathIsALink = false;
-          break;
+        if (statusCode === ' D' && expectedInQuarantine.has(normalizeGitPath(resolved))) continue;
+        if (statusCode === '??') {
+          let isLink = false;
+          try {
+            isLink = fs.lstatSync(resolved).isSymbolicLink();
+          } catch {
+            isLink = false;
+          }
+          if (isLink) {
+            toleratedUntrackedLinks += 1;
+            continue;
+          }
         }
-      } catch {
-        everyUnexpectedPathIsALink = false;
+        refusalReason = 'a non-cooperating writer modified the worktree after the quarantine move';
         break;
       }
     }
-    if (!everyUnexpectedPathIsALink) {
+    if (refusalReason !== null) {
       const restored = await restore();
       return {
         ok: false,
         reasonCode: REMOVAL_REASONS.OWNERSHIP_CHANGED,
-        reason: 'a non-cooperating writer modified the worktree after the quarantine move; ' +
+        reason: refusalReason + '; ' +
           (restored ? 'worktree restored intact at ' + worktreePath : 'quarantine preserved at ' + quarantinePath),
         ...(restored ? { restoredPath: worktreePath } : { quarantinePath }),
         notes,
       };
     }
-    notes.push(
-      'quarantine received only new reparse point(s) after the move (' +
-      unexpectedPaths.length + '): the no-follow walk detaches links without following them, so no data is at risk'
-    );
+    if (toleratedUntrackedLinks > 0) {
+      notes.push(
+        'quarantine received ' + toleratedUntrackedLinks + ' untracked reparse point(s) after the move: ' +
+        'the no-follow walk detaches links without following them, so no data is at risk'
+      );
+    }
   }
 
   try {
@@ -828,58 +839,19 @@ export async function removeWorktreeSafely({
     await onTreeRemoved(worktreePath);
   }
 
-  // Remove ONLY the admin directory named by the moved .git marker. A
-  // git worktree remove --force call, even against a path checked absent one
-  // line earlier, would reopen a late-Junction race between that check and Git's
-  // recursive delete. The reverse pointer proves this is the exact worktree
-  // admin directory for our quarantine path, not another worktree's metadata.
+  // Remove ONLY the admin directory named by the moved .git marker. The
+  // shared helper re-proves BOTH pointer directions at this exact moment (the
+  // marker's gitdir pointer anchored at the original worktree position, the
+  // admin's reverse pointer naming the quarantine marker back) before the
+  // no-follow removal — never Git's recursive deletion.
   let adminDir;
   try {
-    const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
-    if (!markerLine) throw new Error('moved .git marker has no gitdir pointer');
-    const rawAdminGitDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
-    const commonDir = await gitCommonDirAbsolute(gitCwd);
-    const commonStat = fs.lstatSync(commonDir);
-    if (!commonStat.isDirectory() || commonStat.isSymbolicLink()) {
-      throw new Error('repository Git common directory is not a real directory');
-    }
-    const canonicalCommonDir = fs.realpathSync.native(commonDir);
-    const adminRoot = path.resolve(commonDir, 'worktrees');
-    const adminRootStat = fs.lstatSync(adminRoot);
-    if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()) {
-      throw new Error('repository worktrees admin root is not a real directory (refusing to follow a junction/symlink)');
-    }
-    const canonicalAdminRoot = fs.realpathSync.native(adminRoot);
-    const expectedAdminRoot = path.join(canonicalCommonDir, 'worktrees');
-    if (normalizeGitPath(canonicalAdminRoot) !== normalizeGitPath(expectedAdminRoot)) {
-      throw new Error('repository worktrees admin root resolves outside the canonical Git common directory');
-    }
-    const candidateAdminDir = path.resolve(path.dirname(markerPath), rawAdminGitDir);
-    const relativeAdmin = path.relative(adminRoot, candidateAdminDir);
-    if (!relativeAdmin || relativeAdmin === '..' || relativeAdmin.startsWith('..' + path.sep) || path.isAbsolute(relativeAdmin)) {
-      throw new Error('gitdir pointer does not resolve to a child of the repository worktrees admin directory');
-    }
-    const candidateStat = fs.lstatSync(candidateAdminDir);
-    if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
-      throw new Error('worktree admin directory is not a real directory');
-    }
-    adminDir = fs.realpathSync.native(candidateAdminDir);
-    const canonicalRelativeAdmin = path.relative(canonicalAdminRoot, adminDir);
-    if (!canonicalRelativeAdmin || canonicalRelativeAdmin === '..' ||
-      canonicalRelativeAdmin.startsWith('..' + path.sep) || path.isAbsolute(canonicalRelativeAdmin) ||
-      canonicalRelativeAdmin.includes(path.sep)) {
-      throw new Error('resolved worktree admin directory is not a direct child of the canonical admin root');
-    }
-    const adminGitDir = path.join(adminDir, 'gitdir');
-    // The shared one-fd snapshot primitive: fstat the descriptor, read through
-    // it, compare against a fresh lstat. O_NOFOLLOW|O_NONBLOCK on POSIX also
-    // refuses FIFO/symlink substitutions instead of blocking on them (CodeRabbit
-    // round 4: a FIFO swap here would block while holding the mutation lock).
-    const reversePointer = readRegularFileNoFollow(adminGitDir).trim();
-    const resolvedReversePointer = resolveAdminReversePointer(adminDir, reversePointer);
-    if (normalizeGitPath(resolvedReversePointer) !== normalizeGitPath(markerPath)) {
-      throw new Error('admin gitdir reverse pointer does not match the moved worktree marker');
-    }
+    adminDir = resolveAdminDirFromMarkerBytes({
+      markerBytes: markerContents,
+      anchorDir: worktreePath,
+      commonDir: await gitCommonDirAbsolute(gitCwd),
+      expectedMarkerPath: markerPath,
+    });
     const adminScan = classifyReparsePoints(adminDir);
     if (!adminScan.complete || adminScan.links > 0) {
       throw new Error('worktree admin directory contains unreadable entries or reparse points; refusing metadata deletion');

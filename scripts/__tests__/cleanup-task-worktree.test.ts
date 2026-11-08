@@ -871,15 +871,16 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     }
   }, 180_000);
 
-  it('reports a restore when the rollback move commits despite reporting failure', async () => {
+  it('restores via the verified manual move-back when the forward move reports failure', async () => {
     const { wt } = await makeTask('rollback-also-fails');
     const commonDir = await gitCommonDirAbsolute(primary);
     let moves = 0;
     const runGitCommand = async (args: string[], options: { cwd: string; allowFailure?: boolean }) => {
       if (args[0] === 'worktree' && args[1] === 'move') {
-        // Both the forward quarantine move AND the rollback move commit on
-        // disk, then report failure. The state machine must trust the disk,
-        // not the error: the worktree IS back at its original path.
+        // The forward quarantine move commits on disk, then reports failure.
+        // The rollback no longer asks Git to move the tree back at all: it
+        // uses the identity-verified manual move-back, so a substituted
+        // marker can never be followed by Git during a rollback.
         await runGit(args, options);
         moves += 1;
         throw new Error('simulated move failure after the rename committed');
@@ -891,15 +892,14 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
         { commonDir, operation: 'worktree-remove', target: wt },
         () => removeWorktreeSafely({ cwd: wt, worktreePath: wt, primaryPath: primary, runGitCommand }),
       );
-      expect(moves).toBe(2);
+      expect(moves).toBe(1);
       expect(result.ok).toBe(false);
-      // Disk truth: the rollback committed, so the result reports a restore —
-      // never a phantom quarantine.
+      // Disk truth: the manual rollback completed, so the result reports a
+      // restore — never a phantom quarantine.
       expect(result.restoredPath).toBe(wt);
       expect(result.quarantinePath).toBeUndefined();
       expect(fs.existsSync(wt)).toBe(true);
       expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
-      expect(result.notes.join(' ')).toContain('rollback move reported failure');
     } finally {
       await git(primary, 'worktree', 'prune').catch(() => undefined);
     }

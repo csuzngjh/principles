@@ -349,6 +349,10 @@ export function classifyReparsePoints(root) {
     // raw concatenation is handed to realpath so the OS does the resolution.
     const probeTarget = (() => {
       if (lexical === null) return null;
+      if (typeof link.target === 'string' && path.isAbsolute(link.target)) {
+        // An absolute target never anchors at the link's directory.
+        return canonicalPath(link.target);
+      }
       if (!nonLexical) return canonicalPath(lexical);
       return canonicalPath(path.dirname(link.path) + path.sep + link.target);
     })();
@@ -667,6 +671,15 @@ export function removeResidueTree(root, opts = {}) {
         throw openError;
       }
       if (stat.isSymbolicLink()) {
+        // The caller's enumeration recorded this path as a real DIRECTORY. A
+        // directory that now lstats as a link was replaced mid-deletion —
+        // unlinking the link is harmless by itself, but it proves the walk's
+        // position is no longer the scanned tree, so refuse (fail-closed)
+        // instead of proceeding on an unverified identity (CodeRabbit round 5).
+        if (expectedIdentity && (stat.dev !== expectedIdentity.dev || stat.ino !== expectedIdentity.ino)) {
+          if (isRoot) throw new Error('refusing to traverse a root reparse point: ' + dir);
+          throw new Error('directory ' + dir + ' was replaced between the scan and this walk; refusing to adopt it (fail-closed)');
+        }
         if (isRoot) throw new Error('refusing to traverse a root reparse point: ' + dir);
         detachLink(dir);
         return false;
