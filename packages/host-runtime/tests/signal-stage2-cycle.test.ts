@@ -409,4 +409,29 @@ describe('runStage2CorrectionCycle (SPEC v0.3 §4.4.7 / v0.3.1 §2)', () => {
     expect(report.admitted).toBe(0);
     expect(decisionOf(1)).toBe('pending_llm_review');
   });
+
+  // PRI-1147 real-LLM BDD (ERR-PRI-1147-D1): the budget remainder is a
+  // performance.now() float, and the pi-ai adapter hands it straight to
+  // AbortSignal.timeout, which throws ERR_OUT_OF_RANGE for fractional delays.
+  // Under the production defaults (budget == classification timeout == 60s)
+  // the remainder is virtually always fractional, so every classification
+  // failed before any network I/O and consumed an attempt. The classifier
+  // must receive a whole-millisecond timeout.
+  it('the classifier receives a whole-millisecond classification timeout', async () => {
+    admit(1);
+    const receivedTimeouts: Array<number | undefined> = [];
+    const report = await runStage2CorrectionCycle({
+      workspaceDir,
+      classifier: async (_text: string, options?: { timeoutMs?: number }) => {
+        receivedTimeouts.push(options?.timeoutMs);
+        return classification();
+      },
+      now: NOW,
+    });
+    expect(receivedTimeouts).toHaveLength(1);
+    expect(receivedTimeouts[0]).toBeDefined();
+    expect(Number.isInteger(receivedTimeouts[0])).toBe(true);
+    expect(report.admitted).toBe(1);
+    expect(decisionOf(1)).toBe('admitted');
+  });
 });
