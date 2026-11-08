@@ -42,7 +42,8 @@
  *   result reason; every result carries reason + nextAction.
  */
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import semver from 'semver';
@@ -72,7 +73,7 @@ export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
 /** Registry/settings key: "principles-disciple@principles-disciple-market". */
 export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
 const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
-import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
+import { atomicReplaceTextFile, AtomicReplaceCleanupError, AtomicReplaceConflictError, errnoCode } from '../utils/config-file-io.js';
 import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
@@ -246,6 +247,25 @@ export interface WorkbuddyHostInstallerDeps {
   pdCliEntry?: () => string | undefined;
   /** Command runner (default: spawnSync). Tests inject a fake engine boundary. */
   runCommand?: (file: string, args: readonly string[], opts?: WorkbuddyCommandOptions) => WorkbuddyCommandResult;
+  /**
+   * Directory copier used ONLY for the install transaction's pre-upgrade cache
+   * backup (default: fs.cpSync). Same seam class as runCommand: tests inject a
+   * real copy-boundary failure; the safety proof is the real file state.
+   */
+  backupCopyDir?: typeof cpSync;
+  /** Atomic config writer seam for deterministic rollback fault injection. */
+  atomicReplaceConfig?: typeof atomicReplaceTextFile;
+  /** Synchronous non-cooperating host-write seam for concurrency regression tests. */
+  beforeCompensation?: () => void;
+  /**
+   * Rollback filesystem seams (production: node:fs). Same seam class as
+   * backupCopyDir/runCommand: tests replace the REAL copy/rename boundary to
+   * inject staging/swap failures; safety is proven by real file assertions.
+   */
+  cacheRollbackOps?: {
+    copyDir: typeof cpSync;
+    rename: typeof renameSync;
+  };
 }
 
 /** All WorkBuddy paths PD may touch, derived from install-layout (never hand-joined ad hoc). */
@@ -459,6 +479,678 @@ export function writeHostJsonFileProtected(filePath: string, content: string): {
   }
 }
 
+// ─── Install transaction compensation (2026-11-07) ──────────────────────────
+/**
+ * The registration transaction inside directWriteRegistration covers only the
+ * cache + settings + registry commit. Every LATER stage (governance workspace
+ * init, runtime profile, install manifest, governance flags) previously
+ * failed LOUD but left the just-completed registration in place — a plugin
+ * registered against a governance state that never materialized.
+ *
+ * The install transaction closes that gap: before the FIRST host-visible
+ * mutation (registration), openWorkbuddyInstallTxn snapshots every PD-owned
+ * mutation target (settings.json, installed_plugins.json, the incoming cache
+ * version dir, ~/.pd/install.json, the governance config) as raw BYTES.
+ * Each later stage records what it wrote; a post-registration failure restores
+ * those snapshots in REVERSE WRITE ORDER under byte guards. A file that no
+ * longer matches the exact bytes PD wrote is never restored; the original
+ * snapshot is persisted to a recovery directory and the rollback reports
+ * ROLLBACK_INCOMPLETE with those verifiable paths + SHA-256 values.
+ *
+ * CONCURRENCY LIMIT (explicit, not a CAS): read-then-rename is two syscalls.
+ * A non-cooperating process can write between the final byte check and the
+ * rename; portable filesystems expose no compare-and-swap rename, so that
+ * window cannot be eliminated. We narrow it (re-check on every retry, re-check
+ * moved cache payloads, quarantine-and-verify before deletion) and NEVER claim
+ * a concurrent edit survived. When a conflict is observed we refuse, preserve
+ * the original snapshot and tell the Owner to reconcile manually.
+ *
+ * The governance workspace DIRECTORY is never deleted: a fresh workspace
+ * created by a failed attempt is preserved and reported (it may hold
+ * runtime-init databases), matching the data-preservation guideline.
+ */
+
+interface WorkbuddyFileSnapshot {
+  existed: boolean;
+  /** Exact source bytes; text decoding would corrupt invalid UTF-8 host files. */
+  bytes: Buffer | undefined;
+}
+
+interface WorkbuddyFileEvidenceRecord {
+  originalPath: string;
+  existed: boolean;
+  snapshotFile?: string;
+  sha256?: string;
+}
+
+interface WorkbuddyInstallTxn {
+  /** Evidence dir for the pre-existing cache payload (kept on partial rollback). */
+  readonly evidenceDir: string;
+  /** Earliest observed bytes per path — the restore target. */
+  readonly fileSnapshots: Map<string, WorkbuddyFileSnapshot>;
+  /** Chronological list of paths PD wrote (deduped at restore time). */
+  readonly writtenPaths: string[];
+  /** The exact bytes PD last wrote on each path — the concurrency guard. */
+  readonly lastWrittenBytes: Map<string, Buffer>;
+  /** Lazily-created durable evidence for original file snapshots skipped by rollback. */
+  fileEvidenceDir: string | undefined;
+  readonly fileEvidenceRecords: WorkbuddyFileEvidenceRecord[];
+  /** Atomic writer used at the rollback commit boundary (production + test seam). */
+  readonly atomicReplace: typeof atomicReplaceTextFile;
+  /** Cache rollback copy/rename boundary (production: node:fs). */
+  readonly cacheOps: { copyDir: typeof cpSync; rename: typeof renameSync };
+  readonly governanceDir: string;
+  readonly governanceDirExistedBefore: boolean;
+  /** Host registration must not be left pointing at a deleted cache. */
+  readonly settingsPath: string;
+  readonly registryPath: string;
+  readonly cacheVersionDir: string | undefined;
+  readonly cacheExisted: boolean;
+  /** Copy of the pre-existing cache payload (undefined when absent or the snapshot copy failed). */
+  cacheBackupDir: string | undefined;
+  /** Digest of the pre-existing cache payload (verify the restore landed). */
+  readonly cacheDigestBefore: string | undefined;
+  /** Digest observed right after registration — the cache hash guard. */
+  cacheDigestAfterRegistration: string | undefined;
+}
+
+function workbuddyDigestTree(root: string): string {
+  const hash = createHash('sha256');
+  const walk = (dir: string, relative: string): void => {
+    // Hash directory structure too: a new empty dir is a concurrent write.
+    // An unreadable subtree is UNPROVABLE, not a stable equal digest.
+    hash.update('dir:' + relative + '\n');
+    const entries: Dirent[] = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = relative.length === 0 ? entry.name : relative + '/' + entry.name;
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        // A symlink/junction is not followed, but its target string is part
+        // of the identity of the cache, and must not be silently ignored.
+        hash.update('link:' + rel + ':' + readlinkSync(entryPath) + '\n');
+      } else if (entry.isDirectory()) {
+        walk(entryPath, rel);
+      } else if (entry.isFile()) {
+        hash.update('file:' + rel + ':' + createHash('sha256').update(readFileSync(entryPath)).digest('hex') + '\n');
+      } else {
+        throw new Error('unsupported cache filesystem entry: ' + entryPath);
+      }
+    }
+  };
+  walk(root, '');
+  return hash.digest('hex');
+}
+
+/** Byte snapshot of one file (undefined bytes when absent). */
+function snapshotWorkbuddyFile(filePath: string): WorkbuddyFileSnapshot {
+  try {
+    return { existed: true, bytes: readFileSync(filePath) };
+  } catch (error) {
+    // Only ENOENT proves absence. EACCES/EISDIR and other read failures cannot
+    // be converted to "new file": rollback would then delete Owner content.
+    if (errnoCode(error) === 'ENOENT') return { existed: false, bytes: undefined };
+    throw error;
+  }
+}
+
+function openWorkbuddyInstallTxn(
+  p: WorkbuddyPaths,
+  version: string,
+  deps: {
+    copyDir?: typeof cpSync;
+    atomicReplace?: typeof atomicReplaceTextFile;
+    cacheOps?: { copyDir: typeof cpSync; rename: typeof renameSync };
+  } = {},
+): { ok: true; txn: WorkbuddyInstallTxn } | { ok: false; reason: string; nextAction: string } {
+  const snapshots = new Map<string, WorkbuddyFileSnapshot>();
+  const governanceConfigPath = path.join(p.governanceDir, '.pd', 'config.yaml');
+  const governanceDirExistedBefore = existsSync(p.governanceDir);
+  try {
+    for (const filePath of [p.settingsPath, p.registryPath, p.installManifestPath, governanceConfigPath]) {
+      snapshots.set(filePath, snapshotWorkbuddyFile(filePath));
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'workbuddy_transaction_snapshot_failed: cannot prove the previous host configuration before registration (' +
+        (error instanceof Error ? error.message : String(error)) + '). No host registration or cache replacement was started; the PD marketplace staging files may already exist.',
+      nextAction: 'Repair the unreadable host file or its permissions and retry; do not delete it to make the install proceed.',
+    };
+  }
+
+  const versionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
+  let cacheExisted = false;
+  let cacheDigestBefore: string | undefined;
+  let cacheBackupDir: string | undefined;
+  if (versionDir !== undefined && existsSync(versionDir)) {
+    cacheExisted = true;
+    try {
+      cacheDigestBefore = workbuddyDigestTree(versionDir);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: 'workbuddy_cache_snapshot_failed: cache cannot be fully read before upgrade (' +
+          (error instanceof Error ? error.message : String(error)) + '); no cache replacement attempted.',
+        nextAction: 'Repair or remove the unreadable cache entry only after preserving Owner data, then retry.',
+      };
+    }
+    cacheBackupDir = path.join(path.dirname(path.resolve(p.cachePluginRoot)), `.pd-txn-backup-${process.pid}-${Date.now()}`);
+    // 2026-11-08 P1 fix: for an UPGRADE (a pre-existing cache payload), the
+    // backup is the rollback's only material. A backup that cannot be created
+    // — or one whose CONTENT cannot be proven identical to the payload it
+    // copied (content-level digest, not a mere existence/success check) —
+    // REFUSES the whole upgrade BEFORE any cache replacement is attempted.
+    // Returning without a usable backup used to let the install proceed and
+    // later delete the current cache against a rollback it could not serve.
+    // `deps.copyDir` is the same test seam class as deps.runCommand (real
+    // boundary substitution; safety is proven by real file assertions).
+    const copyDir = deps.copyDir ?? cpSync;
+    let backupError: string | undefined;
+    try {
+      rmSync(cacheBackupDir, { recursive: true, force: true });
+      copyDir(versionDir, cacheBackupDir, { recursive: true });
+      if (workbuddyDigestTree(cacheBackupDir) !== cacheDigestBefore) {
+        backupError = 'the copied backup does not match the current payload (digest mismatch)';
+      }
+    } catch (error) {
+      backupError = error instanceof Error ? error.message : String(error);
+    }
+    if (backupError !== undefined) {
+      try { rmSync(cacheBackupDir, { recursive: true, force: true }); } catch { /* reported below */ }
+      return {
+        ok: false,
+        reason: `workbuddy_cache_backup_failed: could not prove a restorable backup of the current cache payload ${versionDir} — ${backupError}. The upgrade was REFUSED before any replacement: the current payload and the host registration are untouched.`,
+        nextAction: 'Free the storage / close the tools holding the plugin cache files, then re-run the installer. The previous plugin version remains installed and usable.',
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    txn: {
+      evidenceDir: cacheExisted
+        ? (cacheBackupDir ?? '(pre-install backup unavailable)')
+        : '(no pre-existing cache payload — fresh install)',
+      fileSnapshots: snapshots,
+      writtenPaths: [],
+      lastWrittenBytes: new Map(),
+      fileEvidenceDir: undefined,
+      fileEvidenceRecords: [],
+      atomicReplace: deps.atomicReplace ?? atomicReplaceTextFile,
+      cacheOps: deps.cacheOps ?? { copyDir: cpSync, rename: renameSync },
+      governanceDir: p.governanceDir,
+      governanceDirExistedBefore,
+      settingsPath: p.settingsPath,
+      registryPath: p.registryPath,
+      cacheVersionDir: versionDir,
+      cacheExisted,
+      cacheBackupDir,
+      cacheDigestBefore,
+      cacheDigestAfterRegistration: undefined,
+    },
+  };
+}
+
+/** Record a successful PD write (rc-7: current state, not a prior iteration). */
+function recordWorkbuddyTxnWrite(
+  txn: WorkbuddyInstallTxn,
+  filePath: string,
+  bytesAfterWrite: string | Uint8Array,
+): void {
+  if (!txn.writtenPaths.includes(filePath)) txn.writtenPaths.push(filePath);
+  txn.lastWrittenBytes.set(filePath, Buffer.from(bytesAfterWrite));
+}
+
+/** After registration committed, pin the guard baselines PD must restore against.
+ *
+ * Known limit (documented, accepted): the baselines are pinned by reading the
+ * files right after registration. Within this process the read is synchronous
+ * with the write (no yield point), so only a CROSS-PROCESS host write landing
+ * inside that sub-millisecond window can be pinned as "what PD wrote" — the
+ * same unavoidable FS race class writeHostJsonFileProtected already accepts.
+ * Every modification AFTER the pin is correctly detected by the guard. */
+function captureWorkbuddyPostRegistration(
+  txn: WorkbuddyInstallTxn,
+  p: WorkbuddyPaths,
+  mode: 'engine' | 'direct-write' | 'already-registered',
+): void {
+  // A no-op registration did not write any host files/cache. In particular,
+  // never attribute a concurrent Owner edit to PD and roll it back.
+  if (mode === 'already-registered') {
+    txn.cacheDigestAfterRegistration = txn.cacheDigestBefore;
+    return;
+  }
+  for (const filePath of [p.settingsPath, p.registryPath]) {
+    const before = txn.fileSnapshots.get(filePath);
+    const after = snapshotWorkbuddyFile(filePath);
+    if (after.existed && after.bytes !== undefined &&
+      (!before?.existed || before.bytes === undefined || !after.bytes.equals(before.bytes))) {
+      recordWorkbuddyTxnWrite(txn, filePath, after.bytes);
+    }
+  }
+  if (txn.cacheVersionDir !== undefined && existsSync(txn.cacheVersionDir)) {
+    txn.cacheDigestAfterRegistration = workbuddyDigestTree(txn.cacheVersionDir);
+  }
+}
+
+function preserveWorkbuddyFileSnapshot(
+  txn: WorkbuddyInstallTxn,
+  filePath: string,
+): { ok: true; directory: string } | { ok: false; reason: string } {
+  const snapshot = txn.fileSnapshots.get(filePath);
+  if (snapshot === undefined) return { ok: false, reason: 'no original snapshot was recorded' };
+  try {
+    if (txn.fileEvidenceDir === undefined) {
+      mkdirSync(path.dirname(txn.settingsPath), { recursive: true });
+      txn.fileEvidenceDir = mkdtempSync(path.join(path.dirname(txn.settingsPath), '.pd-workbuddy-recovery-'));
+    }
+    let record = txn.fileEvidenceRecords.find((item) => item.originalPath === filePath);
+    if (record === undefined) {
+      record = { originalPath: filePath, existed: snapshot.existed };
+      if (snapshot.existed && snapshot.bytes !== undefined) {
+        const snapshotName = createHash('sha256').update(filePath).digest('hex') + '.bin';
+        const snapshotFile = path.join(txn.fileEvidenceDir, snapshotName);
+        writeFileSync(snapshotFile, snapshot.bytes, { flag: 'wx', mode: 0o600 });
+        record.snapshotFile = snapshotFile;
+        record.sha256 = createHash('sha256').update(snapshot.bytes).digest('hex');
+      }
+      txn.fileEvidenceRecords.push(record);
+    }
+    writeFileSync(
+      path.join(txn.fileEvidenceDir, 'manifest.json'),
+      JSON.stringify({ format: 'pd-workbuddy-file-recovery-v1', records: txn.fileEvidenceRecords }, null, 2) + '\n',
+      'utf-8',
+    );
+    return { ok: true, directory: txn.fileEvidenceDir };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'could not persist the original file snapshot (' + (error instanceof Error ? error.message : String(error)) + ')',
+    };
+  }
+}
+
+/** Restore one file snapshot under a byte guard. Returns an error detail or undefined. */
+function restoreWorkbuddyFileSnapshot(txn: WorkbuddyInstallTxn, filePath: string): string | undefined {
+  const snapshot = txn.fileSnapshots.get(filePath);
+  if (snapshot === undefined) return undefined; // never tracked — not ours to touch
+  const expected = txn.lastWrittenBytes.get(filePath);
+  if (expected === undefined) return undefined; // PD never wrote it in this txn — nothing to undo
+
+  const evidenceNote = (): string => {
+    const evidence = preserveWorkbuddyFileSnapshot(txn, filePath);
+    return evidence.ok
+      ? '; original snapshot preserved at ' + evidence.directory
+      : '; ' + evidence.reason;
+  };
+
+  let current: WorkbuddyFileSnapshot;
+  try {
+    current = snapshotWorkbuddyFile(filePath);
+  } catch (error) {
+    return filePath + ': unreadable during rollback (' +
+      (error instanceof Error ? error.message : String(error)) + ')' + evidenceNote();
+  }
+  if (current.existed !== true || current.bytes === undefined || !current.bytes.equals(expected)) {
+    return filePath + ': changed after PD wrote it (concurrent modification) — restore skipped to avoid clobbering' + evidenceNote();
+  }
+  if (snapshot.existed && snapshot.bytes !== undefined && current.bytes.equals(snapshot.bytes)) return undefined;
+  try {
+    if (!snapshot.existed || snapshot.bytes === undefined) {
+      // Only a file that did NOT exist before this transaction may be removed.
+      // Move the candidate out of the live path, RE-READ the moved bytes and
+      // compare them to what PD wrote before deleting anything. This narrows
+      // the check/delete race and keeps concurrent content instead of erasing
+      // it. (The residual read-then-rename window is documented above.)
+      const quarantine = filePath + '.pd-rollback-delete-' + process.pid + '-' + Date.now();
+      renameSync(filePath, quarantine);
+      const quarantinedBytes = readFileSync(quarantine);
+      if (!quarantinedBytes.equals(expected)) {
+        try {
+          if (!existsSync(filePath)) {
+            renameSync(quarantine, filePath);
+            return filePath + ': changed during rollback; deletion refused and the concurrent content was returned to its live path' + evidenceNote();
+          }
+          return filePath + ': changed during rollback; deletion refused, the moved content is preserved at ' +
+            quarantine + ' (a different file already occupies the live path)' + evidenceNote();
+        } catch (restoreError) {
+          return filePath + ': changed during rollback; deletion refused, the concurrent content is preserved at ' +
+            quarantine + ' and could NOT be returned to its live path (' +
+            (restoreError instanceof Error ? restoreError.message : String(restoreError)) + ')' + evidenceNote();
+        }
+      }
+      rmSync(quarantine, { force: true });
+    } else {
+      // Re-check the exact bytes at the atomic replacement boundary. A conflict
+      // is not repaired by copying the old backup over the concurrent edit.
+      // Routed through the txn seam so the read-then-rename boundary is
+      // testable with a real, non-cooperating concurrent write.
+      txn.atomicReplace(filePath, snapshot.bytes, undefined, {}, expected);
+    }
+    return undefined;
+  } catch (error) {
+    if (error instanceof AtomicReplaceConflictError) {
+      return filePath + ': changed at the rollback commit boundary; restore refused to preserve the concurrent edit (' +
+        error.message + ')' + evidenceNote();
+    }
+    return filePath + ': restore failed (' + (error instanceof Error ? error.message : String(error)) + ')' + evidenceNote();
+  }
+}
+
+/** Restore the cache payload snapshot. Returns an error detail or undefined.
+ *
+ * 2026-11-08 P1 ordering fix — the restore NEVER deletes the current payload
+ * before its replacement material is proven:
+ *   1. the pre-install backup must EXIST,
+ *   2. its content must digest-match the digest recorded at transaction open,
+ *   3. the restore is staged into an isolated temp dir and the STAGED copy is
+ *      digest-verified,
+ *   4. only then is the current payload swapped out via renames (no window
+ *      where the version dir is absent), and a failed second rename puts the
+ *      current payload back in place.
+ * A missing or corrupted backup REFUSES the destructive step: the current
+ * payload is preserved as-is and the caller reports ROLLBACK_INCOMPLETE —
+ * it never claims the previous version was restored. */
+function restoreWorkbuddyCacheSnapshot(txn: WorkbuddyInstallTxn): string | undefined {
+  if (txn.cacheVersionDir === undefined) return undefined;
+  if (txn.cacheDigestAfterRegistration === txn.cacheDigestBefore && txn.cacheExisted) {
+    // The registration left the cache byte-identical to its starting state:
+    // an unrelated later cache change is not PD's to roll back.
+    return undefined;
+  }
+  if (txn.cacheDigestAfterRegistration === undefined) {
+    return txn.cacheExisted ? 'cache: post-registration digest missing — restore skipped' : undefined;
+  }
+  let currentDigest: string;
+  try {
+    currentDigest = existsSync(txn.cacheVersionDir) ? workbuddyDigestTree(txn.cacheVersionDir) : 'absent';
+  } catch {
+    return 'cache: unreadable during rollback';
+  }
+  if (currentDigest !== txn.cacheDigestAfterRegistration) {
+    return 'cache: changed after PD wrote it (concurrent modification) — restore skipped to avoid clobbering';
+  }
+  // No-change short-circuit: an already-registered fast-path install (or any
+  // run whose registration left the payload identical) has nothing to undo —
+  // skip the destructive rm+cp cycle entirely instead of risking a healthy
+  // cache on a no-op restore.
+  if (currentDigest === txn.cacheDigestBefore) return undefined;
+  try {
+    if (txn.cacheExisted && txn.cacheDigestBefore !== undefined) {
+      // 1+2. Verify the backup BEFORE touching the current payload.
+      if (txn.cacheBackupDir === undefined) {
+        return 'cache: pre-install backup missing — the CURRENT payload is preserved untouched; restore refused';
+      }
+      let backupDigest: string;
+      try {
+        backupDigest = workbuddyDigestTree(txn.cacheBackupDir);
+      } catch {
+        return 'cache: pre-install backup unreadable — the CURRENT payload is preserved untouched; restore refused';
+      }
+      if (backupDigest !== txn.cacheDigestBefore) {
+        return 'cache: pre-install backup digest mismatch — the CURRENT payload is preserved untouched; restore refused';
+      }
+      // 3. Stage the replacement material in isolation and verify the staged copy.
+      const cacheParent = path.dirname(path.resolve(txn.cacheVersionDir));
+      const staging = path.join(cacheParent, `.pd-restore-${process.pid}-${Date.now()}`);
+      try {
+        rmSync(staging, { recursive: true, force: true });
+        txn.cacheOps.copyDir(txn.cacheBackupDir, staging, { recursive: true });
+        if (workbuddyDigestTree(staging) !== txn.cacheDigestBefore) {
+          try { rmSync(staging, { recursive: true, force: true }); } catch { /* reported below */ }
+          return 'cache: staged restore material failed verification — the CURRENT payload is preserved untouched; restore refused';
+        }
+      } catch (stagingError) {
+        try { rmSync(staging, { recursive: true, force: true }); } catch { /* reported below */ }
+        return 'cache: staging the restore material failed (' + (stagingError instanceof Error ? stagingError.message : String(stagingError)) + ') — the CURRENT payload is preserved untouched; restore refused';
+      }
+      // 4. Swap via renames — the version dir is never absent: current → discard, staged → live.
+      const discard = path.join(cacheParent, `.pd-discard-${process.pid}-${Date.now()}`);
+      try {
+        txn.cacheOps.rename(txn.cacheVersionDir, discard);
+      } catch (setAsideError) {
+        try { rmSync(staging, { recursive: true, force: true }); } catch { /* inert residue */ }
+        return 'cache: could not set the current payload aside (' + (setAsideError instanceof Error ? setAsideError.message : String(setAsideError)) + ') — the CURRENT payload is preserved untouched; restore refused';
+      }
+      // Re-hash the directory AFTER it has been moved out of the live path.
+      // This catches a writer that changed the payload between the initial
+      // digest and rename; do not discard or replace bytes that were not the
+      // exact tree PD observed after registration.
+      let movedDigest: string;
+      try {
+        movedDigest = workbuddyDigestTree(discard);
+      } catch (error) {
+        try {
+          if (!existsSync(txn.cacheVersionDir)) txn.cacheOps.rename(discard, txn.cacheVersionDir);
+        } catch (restoreError) {
+          return 'cache: moved payload became unreadable during rollback (' +
+            (error instanceof Error ? error.message : String(error)) +
+            ') and could not be returned to its live path (' +
+            (restoreError instanceof Error ? restoreError.message : String(restoreError)) +
+            '); preserved at ' + discard;
+        }
+        try { rmSync(staging, { recursive: true, force: true }); } catch { /* inert residue */ }
+        return 'cache: moved payload became unreadable during rollback; current payload restored to its live path and replacement refused';
+      }
+      if (movedDigest !== txn.cacheDigestAfterRegistration) {
+        try {
+          if (!existsSync(txn.cacheVersionDir)) txn.cacheOps.rename(discard, txn.cacheVersionDir);
+        } catch (restoreError) {
+          return 'cache: payload changed during rollback and could not be returned to its live path (' +
+            (restoreError instanceof Error ? restoreError.message : String(restoreError)) +
+            '); concurrent payload preserved at ' + discard;
+        }
+        try { rmSync(staging, { recursive: true, force: true }); } catch { /* inert residue */ }
+        return 'cache: payload changed during rollback after the initial digest check; current payload restored to its live path and replacement refused';
+      }
+      try {
+        txn.cacheOps.rename(staging, txn.cacheVersionDir);
+      } catch (swapError) {
+        // Best effort: put the current payload back in place, never leave the
+        // version dir absent.
+        try {
+          txn.cacheOps.rename(discard, txn.cacheVersionDir);
+          try { rmSync(staging, { recursive: true, force: true }); } catch { /* inert residue */ }
+          return 'cache: restore swap failed (' + (swapError instanceof Error ? swapError.message : String(swapError)) + ') — the CURRENT payload was recovered in place';
+        } catch (recoverError) {
+          return 'cache: restore swap failed (' + (swapError instanceof Error ? swapError.message : String(swapError)) + ') and the current payload could NOT be recovered in place (' + (recoverError instanceof Error ? recoverError.message : String(recoverError)) + '); the previous current payload is preserved at ' + discard;
+        }
+      }
+      try { rmSync(discard, { recursive: true, force: true }); } catch { /* inert residue, named below if it matters */ }
+      if (workbuddyDigestTree(txn.cacheVersionDir) !== txn.cacheDigestBefore) {
+        return 'cache: restored payload digest mismatch — previous version may be unusable';
+      }
+      return undefined;
+    } else {
+      // Fresh install: PD created this payload, so removal is eligible — but
+      // still never rmSync a LIVE tree blindly. Move it aside, re-hash the
+      // moved tree and only delete the exact payload PD left there. A host
+      // writer that added/changed files between the first digest and this step
+      // is preserved and reported instead of silently erased.
+      const cacheParent = path.dirname(path.resolve(txn.cacheVersionDir));
+      const discard = path.join(cacheParent, `.pd-discard-${process.pid}-${Date.now()}`);
+      renameSync(txn.cacheVersionDir, discard);
+      let movedDigest: string;
+      try {
+        movedDigest = workbuddyDigestTree(discard);
+      } catch (error) {
+        try {
+          if (!existsSync(txn.cacheVersionDir)) txn.cacheOps.rename(discard, txn.cacheVersionDir);
+          return 'cache: moved payload became unreadable during rollback; deletion refused';
+        } catch (restoreError) {
+          return 'cache: moved payload became unreadable during rollback (' +
+            (error instanceof Error ? error.message : String(error)) + ') and could not be returned to its live path (' +
+            (restoreError instanceof Error ? restoreError.message : String(restoreError)) + '); preserved at ' + discard;
+        }
+      }
+      if (movedDigest !== txn.cacheDigestAfterRegistration) {
+        try {
+          if (!existsSync(txn.cacheVersionDir)) txn.cacheOps.rename(discard, txn.cacheVersionDir);
+          return 'cache: payload changed during rollback; current payload restored to its live path and deletion refused';
+        } catch (restoreError) {
+          return 'cache: payload changed during rollback and could not be returned to its live path (' +
+            (restoreError instanceof Error ? restoreError.message : String(restoreError)) + '); concurrent payload preserved at ' + discard;
+        }
+      }
+      try {
+        rmSync(discard, { recursive: true, force: true });
+      } catch (deleteError) {
+        // No live path is missing data here — but never lose the bytes: put the
+        // verified PD payload back where it was and report the residue.
+        try { txn.cacheOps.rename(discard, txn.cacheVersionDir); } catch { /* preserved at discard, named below */ }
+        return 'cache: could not delete the PD-created payload (' +
+          (deleteError instanceof Error ? deleteError.message : String(deleteError)) +
+          '); it was preserved at ' + discard;
+      }
+    }
+    return undefined;
+  } catch (error) {
+    return 'cache: restore failed (' + (error instanceof Error ? error.message : String(error)) + ')';
+  }
+}
+
+type WorkbuddyCacheEvidenceState =
+  | { state: 'not-required' }
+  | { state: 'available'; path: string }
+  | { state: 'missing'; path?: string }
+  | { state: 'unreadable'; path: string; detail: string }
+  | { state: 'corrupt'; path: string };
+
+function inspectWorkbuddyCacheEvidence(txn: WorkbuddyInstallTxn): WorkbuddyCacheEvidenceState {
+  if (!txn.cacheExisted || txn.cacheDigestAfterRegistration === txn.cacheDigestBefore) {
+    return { state: 'not-required' };
+  }
+  if (txn.cacheBackupDir === undefined || !existsSync(txn.cacheBackupDir)) {
+    return { state: 'missing', ...(txn.cacheBackupDir !== undefined ? { path: txn.cacheBackupDir } : {}) };
+  }
+  try {
+    if (txn.cacheDigestBefore === undefined || workbuddyDigestTree(txn.cacheBackupDir) !== txn.cacheDigestBefore) {
+      return { state: 'corrupt', path: txn.cacheBackupDir };
+    }
+    return { state: 'available', path: txn.cacheBackupDir };
+  } catch (error) {
+    return {
+      state: 'unreadable',
+      path: txn.cacheBackupDir,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+interface WorkbuddyCompensation {
+  /** True ONLY when every tracked surface was verified restored. */
+  readonly complete: boolean;
+  /** Operator-facing rollback outcome for the failure reason (rc-9). */
+  readonly summary: string;
+  /** Next action for the operator (manual recovery on partial rollback). */
+  readonly nextAction: string;
+  /** Governance-workspace disposition note (preserved / restored). */
+  readonly governanceNote: string;
+}
+
+/** Reverse-order, byte-guarded restore of every surface this transaction touched.
+ *
+ * The write order is: registration (settings/registry + cache) → governance
+ * init config → runtime profile → install manifest → governance flags.
+ * `writtenPaths` is appended in that exact order, so the reverse loop below
+ * restores the LATEST stages first. The cache belongs to the EARLIEST
+ * (registration) stage and is therefore undone LAST — after the registration
+ * files that point at it have been proven restorable. That dependency order
+ * is deliberate: deleting/swapping a cache while a registration still points
+ * at it would leave a dangling plugin, which is a worse outcome than a
+ * strict timestamp reversal. */
+function compensateWorkbuddyInstall(txn: WorkbuddyInstallTxn, unprovenRegistration?: string): WorkbuddyCompensation {
+  const errors: string[] = [];
+  // When post-registration baselines could not be pinned, nothing may be
+  // claimed as restored. Force a partial-rollback verdict (which also keeps
+  // every evidence directory) instead of a false "fully restored".
+  if (unprovenRegistration !== undefined) errors.push('registration: ' + unprovenRegistration);
+
+  // 1. Later-stage file writes, reverse chronological (latest first), deduped.
+  const seen = new Set<string>();
+  for (let index = txn.writtenPaths.length - 1; index >= 0; index--) {
+    const rawPath = txn.writtenPaths[index];
+    if (rawPath === undefined) continue;
+    if (seen.has(rawPath)) continue;
+    seen.add(rawPath);
+    const filePath: string = rawPath;
+    // The governance config inside a workspace CREATED by this attempt is
+    // part of the preserved fresh workspace (never auto-deleted) — skip the
+    // byte restore, report the preserved dir instead.
+    if (filePath === path.join(txn.governanceDir, '.pd', 'config.yaml') && !txn.governanceDirExistedBefore) continue;
+    const error = restoreWorkbuddyFileSnapshot(txn, filePath);
+    if (error !== undefined) errors.push(error);
+  }
+
+  // 2. The registry is the pointer to the cache. If a concurrent host edit
+  // blocked registry/settings recovery, deleting the cache would produce a
+  // dangling registration. Preserve the cache and report partial rollback.
+  const registrationRestoreFailed = errors.some((error) =>
+    error.startsWith(txn.settingsPath + ':') || error.startsWith(txn.registryPath + ':'));
+  if (registrationRestoreFailed) {
+    errors.push('cache: preserved because host registration/settings could not be safely restored');
+  } else {
+    const cacheError = restoreWorkbuddyCacheSnapshot(txn);
+    if (cacheError !== undefined) errors.push(cacheError);
+  }
+
+  // 3. Evidence retention: discard cache evidence only after every tracked
+  //    surface is restored. A partial rollback keeps the backup and any
+  //    original file snapshots needed for manual recovery.
+  if (errors.length === 0 && txn.cacheBackupDir !== undefined) {
+    try { rmSync(txn.cacheBackupDir, { recursive: true, force: true }); } catch { /* inert recovery copy; success state remains restored */ }
+  }
+
+  const cacheEvidence = inspectWorkbuddyCacheEvidence(txn);
+  // Verifiable recovery evidence: every skipped original is listed with its
+  // exact snapshot file and SHA-256, so the Owner can prove the bytes instead
+  // of trusting a directory name. Records for files that did not exist before
+  // the transaction carry no snapshot bytes by construction.
+  const evidenceManifest = txn.fileEvidenceDir !== undefined
+    ? path.join(txn.fileEvidenceDir, 'manifest.json')
+    : undefined;
+  const fileRecords = txn.fileEvidenceRecords.map((record) =>
+    record.originalPath + (record.snapshotFile !== undefined && record.sha256 !== undefined
+      ? ' -> ' + record.snapshotFile + ' (sha256=' + record.sha256 + ', existed=' + record.existed + ')'
+      : ' (absent before install: PD-created file, no original bytes)'),
+  );
+  const fileEvidenceNote = txn.fileEvidenceDir !== undefined
+    ? 'Original host-file snapshots preserved at ' + txn.fileEvidenceDir +
+      ' (manifest ' + (evidenceManifest ?? 'unavailable') + '): ' +
+      (fileRecords.length > 0 ? fileRecords.join(' | ') : 'no records') + '.'
+    : '';
+  const cacheEvidenceNote = cacheEvidence.state === 'available'
+    ? 'Verified pre-install cache snapshot preserved at ' + cacheEvidence.path + '.'
+    : cacheEvidence.state === 'missing'
+      ? 'Pre-install cache snapshot is MISSING' + (cacheEvidence.path !== undefined ? ' at ' + cacheEvidence.path : '') + '; do not rely on a cache backup.'
+      : cacheEvidence.state === 'corrupt'
+        ? 'Pre-install cache snapshot is CORRUPT at ' + cacheEvidence.path + '; do not rely on it.'
+        : cacheEvidence.state === 'unreadable'
+          ? 'Pre-install cache snapshot is UNREADABLE at ' + cacheEvidence.path + ' (' + cacheEvidence.detail + '); do not rely on it.'
+          : '';
+  const evidenceNotes = [cacheEvidenceNote, fileEvidenceNote].filter((note) => note.length > 0).join(' ');
+
+  const governanceNote = txn.governanceDirExistedBefore
+    ? 'The pre-existing governance workspace was preserved (only PD flag/profile edits were eligible for rollback).'
+    : 'The governance workspace created by this attempt is PRESERVED at ' + txn.governanceDir + ' (never auto-deleted; it may hold runtime-init databases) — remove it manually only after review or re-run the installer to complete initialization.';
+
+  const complete = errors.length === 0;
+  return {
+    complete,
+    summary: complete
+      ? 'Previous cache and registration state restored.'
+      : 'ROLLBACK_INCOMPLETE: ' + errors.join('; ') + (evidenceNotes.length > 0 ? '. ' + evidenceNotes : '. No verified recovery evidence is currently available.'),
+    nextAction: complete
+      ? 'Fix the reported cause and re-run the installer (idempotent).'
+      : 'Do not treat the WorkBuddy plugin as installed or usable. ' +
+        (cacheEvidence.state === 'available' ? 'The verified previous cache is at ' + cacheEvidence.path + '. ' : '') +
+        (evidenceManifest !== undefined ? 'Original host-file snapshots with SHA-256 values and their manifest are at ' + evidenceManifest + ' (directory ' + txn.fileEvidenceDir + '). ' : '') +
+        'If a required evidence set is missing, unreadable, or corrupt, do not attempt an automatic restore from it; reconcile the listed surfaces manually before re-running the installer. ' +
+        'A concurrent write inside the final read-then-rename window cannot be ruled out on portable filesystems; verify each named file against its snapshot before treating the rollback as complete.',
+    governanceNote,
+  };
+}
+
 // ─── Plugin payload (adapter package contract) ──────────────────────────────
 
 /**
@@ -550,7 +1242,8 @@ function readInstallJsonRecord(manifestPath: string): Record<string, unknown> | 
 export function mergeWorkbuddyIntoInstallManifest(
   manifestPath: string,
   governanceDir: string,
-): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile,
+): { ok: true; writtenContent: string } | { ok: false; reason: string; nextAction: string; committed?: boolean; writtenContent?: string } {
   let current: unknown;
   let existed = false;
   try {
@@ -590,15 +1283,27 @@ export function mergeWorkbuddyIntoInstallManifest(
     hosts,
     workspaces,
   };
+  const writtenContent = JSON.stringify(payload, null, 2) + '\n';
   try {
     mkdirSync(path.dirname(manifestPath), { recursive: true });
-    writeFileSync(manifestPath, JSON.stringify(payload, null, 2) + '\n', 'utf-8');
-    return { ok: true };
+    // Atomic replace (temp + rename): a mid-write ENOSPC/EPERM must leave the
+    // previous manifest intact. A committed rename followed by temp cleanup
+    // failure is different: the new bytes are live and must enter compensation.
+    atomicReplace(manifestPath, writtenContent);
+    return { ok: true, writtenContent };
   } catch (error) {
+    const committed = error instanceof AtomicReplaceCleanupError && error.committed;
     return {
       ok: false,
-      reason: `install_manifest_write_failed: ${manifestPath} could not be written (${error instanceof Error ? error.message : String(error)}).`,
-      nextAction: `Check permissions on ~/.pd and re-run the installer.`,
+      reason: committed
+        ? `install_manifest_write_committed_but_cleanup_failed: ${manifestPath} was already replaced (${error instanceof Error ? error.message : String(error)}).`
+        : `install_manifest_write_failed: ${manifestPath} could not be written (${error instanceof Error ? error.message : String(error)}). The previous manifest was left unchanged.`,
+      nextAction: committed
+        ? `Check permissions on ~/.pd; the manifest was changed and must enter rollback before re-running the installer.`
+        : `Check permissions on ~/.pd and re-run the installer.`,
+      // The rename committed: these bytes ARE live. The caller MUST register
+      // the write or compensation will leave a changed manifest behind (P1).
+      ...(committed ? { committed: true, writtenContent } : {}),
     };
   }
 }
@@ -981,15 +1686,22 @@ export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolea
  */
 export function ensureWorkbuddyGovernanceEnabled(
   governanceDir: string,
-  options: { persist?: boolean } = {},
+  options: { persist?: boolean; atomicReplace?: typeof atomicReplaceTextFile } = {},
 ): FlagOverrideResult & {
   hostExplicitOff: boolean;
   keywordExplicitOff: boolean;
   /** The keyword gate as it actually reads back after the migration. */
   keywordPainEnabled: boolean;
   changed: boolean;
+  /** Exact content that became live (success OR committed-cleanup failure). */
+  writtenContent?: string;
+  /** True when the rename committed but temp-dir cleanup failed: this IS a write. */
+  committed?: boolean;
+  /** Present on a committed-cleanup failure so the caller can register the write. */
+  configPath?: string;
 } {
   const persist = options.persist !== false;
+  const atomicReplace = options.atomicReplace ?? atomicReplaceTextFile;
   const configPath = path.join(governanceDir, '.pd', 'config.yaml');
   let rawText: string;
   try { rawText = readFileSync(configPath, 'utf-8'); }
@@ -1071,11 +1783,23 @@ export function ensureWorkbuddyGovernanceEnabled(
   const keywordPainEnabled = isRecord(finalKeyword) && finalKeyword.enabled === true;
 
   try {
-    atomicReplaceTextFile(configPath, next);
-  } catch {
+    atomicReplace(configPath, next);
+  } catch (error) {
+    // COMMITTED-BUT-CLEANUP-FAILED is a real write: the new bytes are live.
+    // Reporting a plain "write failed" here would leave the changed config out
+    // of the transaction, so compensation would never restore it (P1).
+    if (error instanceof AtomicReplaceCleanupError && error.committed) {
+      return {
+        ok: false, configPath,
+        reason: `fresh_workbuddy_flag_write_committed_but_cleanup_failed: ${error.message}`,
+        nextAction: 'Repair config storage and retry; the governance config was already changed and must be rolled back.',
+        hostExplicitOff, keywordExplicitOff, keywordPainEnabled,
+        changed: true, committed: true, writtenContent: next,
+      };
+    }
     return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.', hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: false };
   }
-  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: true };
+  return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, keywordPainEnabled, changed: true, writtenContent: next };
 }
 
 /**
@@ -1254,6 +1978,7 @@ type GovernanceProfileApplyResult =
   | {
     ok: true;
     configPath: string;
+    writtenContent: string;
     profileId: string;
     /** The model actually written (explicit, preserved, or per-provider default). */
     model: string;
@@ -1262,7 +1987,15 @@ type GovernanceProfileApplyResult =
      *  silently overridden (round-4 S1). */
     pendingAgents: string[];
   }
-  | { ok: false; reason: string; nextAction: string };
+  | {
+    ok: false;
+    reason: string;
+    nextAction: string;
+    /** True when the rename committed but temp-dir cleanup failed: bytes ARE live. */
+    committed?: boolean;
+    writtenContent?: string;
+    configPath?: string;
+  };
 
 /**
  * Apply the install-collected LLM runtime profile (--provider/--api-key-env/
@@ -1309,6 +2042,7 @@ type GovernanceProfileApplyResult =
 function applyWorkbuddyGovernanceRuntimeProfile(
   governanceDir: string,
   profile: { readonly provider?: string; readonly model?: string; readonly apiKeyEnv?: string; readonly baseUrl?: string },
+  atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile,
 ): GovernanceProfileApplyResult {
   // rc-1/rc-3: validate here — upstream CLI validation is not trusted as a
   // substitute for a guard at the write boundary.
@@ -1501,15 +2235,26 @@ function applyWorkbuddyGovernanceRuntimeProfile(
 
   try {
     mkdirSync(path.dirname(configPath), { recursive: true });
-    atomicReplaceTextFile(configPath, next);
+    atomicReplace(configPath, next);
   } catch (error) {
+    // A committed rename with a failed temp cleanup is NOT "left unchanged".
+    // Surface the committed bytes so the install transaction registers the
+    // write and compensation can restore the previous config (P1).
+    if (error instanceof AtomicReplaceCleanupError && error.committed) {
+      return {
+        ok: false,
+        reason: `workbuddy_governance_profile_write_committed_but_cleanup_failed: ${configPath} was already replaced (${error.message}).`,
+        nextAction: `Check permissions under ${path.dirname(configPath)}; the governance config was changed and must enter rollback.`,
+        committed: true, writtenContent: next, configPath,
+      };
+    }
     return {
       ok: false,
       reason: `workbuddy_governance_profile_write_failed: could not write ${configPath} (${error instanceof Error ? error.message : String(error)}). The previous governance config was left unchanged.`,
       nextAction: `Check permissions under ${path.dirname(configPath)}, close tools holding the file, then re-run the installer.`,
     };
   }
-  return { ok: true, configPath, profileId: GOVERNANCE_PROFILE_ID, model, pendingAgents };
+  return { ok: true, configPath, writtenContent: next, profileId: GOVERNANCE_PROFILE_ID, model, pendingAgents };
 }
 
 // ─── Detect details ─────────────────────────────────────────────────────────
@@ -1711,6 +2456,10 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         const entry = path.join(getInstallLayoutPaths(homeDir()).pdCliDir, 'dist', 'index.js');
         return existsSync(entry) ? entry : undefined;
       }),
+      backupCopyDir: deps.backupCopyDir ?? cpSync,
+      atomicReplaceConfig: deps.atomicReplaceConfig ?? atomicReplaceTextFile,
+      beforeCompensation: deps.beforeCompensation ?? (() => undefined),
+      cacheRollbackOps: deps.cacheRollbackOps ?? { copyDir: cpSync, rename: renameSync },
       runCommand: deps.runCommand ?? ((file, args, opts) => {
         const result = spawnSync(file, [...args], {
           encoding: 'utf-8',
@@ -1869,8 +2618,75 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const mcpBinding = writeWorkbuddyMcpBinding(p.marketplaceRoot, this.deps.homeDir());
 
     // 5. Register: engine commands first; observable direct-write fallback.
+    //    2026-11-07: before this FIRST host-visible mutation the install
+    //    transaction snapshots every PD-owned mutation target; a failure in
+    //    any LATER stage compensates in reverse order (see
+    //    compensateWorkbuddyInstall). Registration-internal failures keep
+    //    their own established rollback (directWriteRegistration).
+    //    2026-11-08 P1: opening the transaction can itself refuse the
+    //    upgrade — a pre-existing cache whose backup cannot be proven
+    //    restorable aborts the install BEFORE any cache replacement.
+    const atomicReplaceConfig = this.deps.atomicReplaceConfig ?? atomicReplaceTextFile;
+    const opened = openWorkbuddyInstallTxn(p, payload.version, {
+      copyDir: this.deps.backupCopyDir,
+      atomicReplace: atomicReplaceConfig,
+      cacheOps: this.deps.cacheRollbackOps,
+    });
+    if (!opened.ok) {
+      // Zero mutations so far (snapshots are read-only; the unusable backup
+      // copy was already cleaned up inside the opener) — report and stop.
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: 'skipped',
+        reason: opened.reason,
+        nextAction: opened.nextAction,
+      };
+    }
+    const { txn } = opened;
+
+    // Compensated failure: roll this transaction back, then report the
+    // original cause TOGETHER WITH the verified rollback outcome (rc-9:
+    // "restored" is only claimed after real state verification).
+    // `unprovenRegistration` forces an honest partial-rollback verdict when
+    // the post-registration baselines could not be pinned.
+    const compensated = (
+      cause: { reason: string; nextAction: string },
+      settingsAction: 'created' | 'updated' | 'preserved',
+      unprovenRegistration?: string,
+    ): HostInstallResult => {
+      // Deterministic non-cooperating host/Owner write seam: lands AFTER the
+      // install stages and BEFORE the first rollback read (concurrency tests).
+      try { this.deps.beforeCompensation?.(); } catch { /* seam must not mask the real rollback */ }
+      const rollback = compensateWorkbuddyInstall(txn, unprovenRegistration);
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: settingsAction,
+        reason: cause.reason + ' ' + rollback.summary + ' ' + rollback.governanceNote,
+        nextAction: rollback.complete ? cause.nextAction : rollback.nextAction,
+      };
+    };
+
     const registration = this.registerPlugin(details, payload.version, payload.defaultEnabled);
     if (!registration.ok) {
+      if (registration.committed === true) {
+        // Engine registration already COMMITTED before a later engine-stage
+        // read/write failed (review #13). Pin what is on disk, then run the
+        // protected compensation instead of keeping a half-installed plugin.
+        let unproven: string | undefined;
+        try { captureWorkbuddyPostRegistration(txn, p, 'engine'); }
+        catch { unproven = 'engine registration committed but its post-registration state could not be pinned; manual reconciliation is required'; }
+        return compensated(registration, registration.settingsAction ?? 'updated', unproven);
+      }
+      // Registration-internal failures ran their own established rollback
+      // (directWriteRegistration). The transaction never started mutating —
+      // discard the evidence copy so this attempt leaves no residue.
+      if (txn.cacheBackupDir !== undefined) {
+        try { rmSync(txn.cacheBackupDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      }
       return {
         success: false,
         hostId: this.hostId,
@@ -1880,6 +2696,19 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         nextAction: registration.nextAction,
       };
     }
+    try {
+      captureWorkbuddyPostRegistration(txn, p, registration.mode);
+    } catch (error) {
+      // Missing/opaque post-registration evidence must not silently proceed:
+      // registration may have changed files but their new ownership is unproven.
+      // Force an incomplete verdict (which KEEPS all recovery evidence).
+      return compensated({
+        reason: 'workbuddy_registration_snapshot_failed: could not verify post-registration state (' +
+          (error instanceof Error ? error.message : String(error)) + ').',
+        nextAction: 'Inspect WorkBuddy settings, registry and plugin cache; do not assume registration was rolled back.',
+      }, registration.settingsAction,
+        'post-registration state could not be pinned; registration rollback is UNPROVEN');
+    }
 
     // 6. Initialize the governance workspace (OD-07 explicit creation) with
     //    the FULL loader-valid state the hook/console/worker chain reads:
@@ -1887,17 +2716,28 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     //    schema. Review 2026-10-13 R1: this step previously only mkdir'd the
     //    directory, so install reported success while the hook chain saw an
     //    uninitialized workspace.
-    const governance = this.initializeGovernanceWorkspace(p.governanceDir);
+    const governanceConfigPath = path.join(p.governanceDir, '.pd', 'config.yaml');
+    // A governance workspace that existed BEFORE this install but had no
+    // config.yaml gets one created here. That file is a real PD write and MUST
+    // enter the transaction: otherwise a later-stage failure leaves it behind
+    // while the report claims the workspace was untouched (review #14).
+    const recordGovernanceInitWrite = (): void => {
+      const before = txn.fileSnapshots.get(governanceConfigPath);
+      if (before === undefined || before.existed) return;
+      const after = snapshotWorkbuddyFile(governanceConfigPath);
+      if (after.existed && after.bytes !== undefined) {
+        recordWorkbuddyTxnWrite(txn, governanceConfigPath, after.bytes);
+      }
+    };
+    const governance = this.initializeGovernanceWorkspace(p.governanceDir, atomicReplaceConfig);
     if (!governance.ok) {
-      return {
-        success: false,
-        hostId: this.hostId,
-        configPath: p.settingsPath,
-        configAction: registration.settingsAction,
-        reason: governance.reason,
-        nextAction: governance.nextAction,
-      };
+      // B2 row 2: a governance-init failure must not strand the just-completed
+      // registration — restore the pre-registration host state. Even a failed
+      // initializer may have created the config before failing on the DB step.
+      recordGovernanceInitWrite();
+      return compensated(governance, registration.settingsAction);
     }
+    recordGovernanceInitWrite();
 
     // 6.5 Round-3 remediation P1: the install-collected LLM runtime profile
     //     (--provider/--api-key-env/--model) is GOVERNANCE state for this
@@ -1913,17 +2753,17 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     let profileNote = '';
     let profilePendingAgents: string[] = [];
     if (ctx.runtimeProfile) {
-      const applied = applyWorkbuddyGovernanceRuntimeProfile(p.governanceDir, ctx.runtimeProfile);
+      const applied = applyWorkbuddyGovernanceRuntimeProfile(p.governanceDir, ctx.runtimeProfile, atomicReplaceConfig);
       if (!applied.ok) {
-        return {
-          success: false,
-          hostId: this.hostId,
-          configPath: p.settingsPath,
-          configAction: registration.settingsAction,
-          reason: applied.reason,
-          nextAction: applied.nextAction,
-        };
+        // A committed rename + failed temp cleanup IS a write. Register the
+        // bytes that are already live BEFORE compensating (P1: never let a
+        // changed config be missing from the transaction record).
+        if (applied.committed === true && applied.configPath !== undefined && applied.writtenContent !== undefined) {
+          recordWorkbuddyTxnWrite(txn, applied.configPath, applied.writtenContent);
+        }
+        return compensated(applied, registration.settingsAction);
       }
+      recordWorkbuddyTxnWrite(txn, applied.configPath, snapshotWorkbuddyFile(applied.configPath).bytes ?? applied.writtenContent);
       profileNote = ` LLM runtime profile '${applied.profileId}' (provider ${ctx.runtimeProfile.provider}, model ${applied.model}) written to ${applied.configPath}.`;
       if (applied.pendingAgents.length > 0) {
         profilePendingAgents = applied.pendingAgents;
@@ -1932,17 +2772,17 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
 
     // 7. Record host + governance workspace in the install manifest (set union).
-    const manifest = mergeWorkbuddyIntoInstallManifest(p.installManifestPath, p.governanceDir);
+    const manifest = mergeWorkbuddyIntoInstallManifest(p.installManifestPath, p.governanceDir, atomicReplaceConfig);
     if (!manifest.ok) {
-      return {
-        success: false,
-        hostId: this.hostId,
-        configPath: p.settingsPath,
-        configAction: registration.settingsAction,
-        reason: manifest.reason,
-        nextAction: manifest.nextAction,
-      };
+      // The rename may have committed while temp-dir cleanup failed. Those
+      // bytes ARE live: register them so the reverse-order restore removes
+      // the new manifest instead of reporting a clean rollback (review #12).
+      if (manifest.committed === true && manifest.writtenContent !== undefined) {
+        recordWorkbuddyTxnWrite(txn, p.installManifestPath, manifest.writtenContent);
+      }
+      return compensated(manifest, registration.settingsAction);
     }
+    recordWorkbuddyTxnWrite(txn, p.installManifestPath, snapshotWorkbuddyFile(p.installManifestPath).bytes ?? manifest.writtenContent);
 
     // 8. Install ⇒ governance ON by default (PRI-1064, Owner directive
     //    2026-10-31): the ONLY preserved-off state is an explicit opt-out the
@@ -1950,11 +2790,29 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     //    failed install round are turned ON here — an install that ends with
     //    every hook skipping (host.workbuddy_disabled) is the P1 defect this
     //    replaces. The summary line below always states the effective state.
-    const governanceConfigExists = existsSync(path.join(p.governanceDir, '.pd', 'config.yaml'));
-    const governanceDefaults = governanceConfigExists ? ensureWorkbuddyGovernanceEnabled(p.governanceDir) : null;
+    const governanceConfigExists = existsSync(governanceConfigPath);
+    const governanceDefaults = governanceConfigExists
+      ? ensureWorkbuddyGovernanceEnabled(p.governanceDir, { atomicReplace: atomicReplaceConfig })
+      : null;
     if (governanceDefaults !== null && !governanceDefaults.ok) {
-      return { success: false, hostId: this.hostId, configPath: p.settingsPath,
-        configAction: registration.settingsAction, reason: governanceDefaults.reason, nextAction: governanceDefaults.nextAction };
+      // B2 row 5: a governance-flag failure compensates EVERYTHING this
+      // transaction changed, in reverse order. A committed-cleanup failure is
+      // a real write and must be registered first.
+      if (governanceDefaults.committed === true && governanceDefaults.configPath !== undefined && governanceDefaults.writtenContent !== undefined) {
+        recordWorkbuddyTxnWrite(txn, governanceDefaults.configPath, governanceDefaults.writtenContent);
+      }
+      return compensated(governanceDefaults, registration.settingsAction);
+    }
+    // Only an ACTUAL change enters the transaction. An already-correct config
+    // is byte-identical and must never be attributed to PD (an Owner edit in
+    // the meantime would otherwise be clobbered by the rollback).
+    if (governanceDefaults !== null && governanceDefaults.changed && governanceDefaults.configPath !== undefined) {
+      recordWorkbuddyTxnWrite(txn, governanceDefaults.configPath, snapshotWorkbuddyFile(governanceDefaults.configPath).bytes ?? governanceDefaults.writtenContent ?? '');
+    }
+    // The install has committed: the transaction evidence copy is stale —
+    // discard it so a successful install leaves no residue.
+    if (txn.cacheBackupDir !== undefined) {
+      try { rmSync(txn.cacheBackupDir, { recursive: true, force: true }); } catch { /* best effort; a locked copy is inert */ }
     }
     const governanceDefaultsNote = describeGovernanceDefaults(governanceDefaults, p.governanceDir);
     const effectiveNote = 'Registration takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).';
@@ -2008,7 +2866,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
    * database initialization as an observable skip with an explicit next
    * action — never a silent mkdir-only "success".
    */
-  private initializeGovernanceWorkspace(governanceDir: string): { ok: true; dbInit: 'initialized' | 'skipped'; note?: string } | { ok: false; reason: string; nextAction: string } {
+  private initializeGovernanceWorkspace(governanceDir: string, atomicReplace: typeof atomicReplaceTextFile = atomicReplaceTextFile): { ok: true; dbInit: 'initialized' | 'skipped'; note?: string } | { ok: false; reason: string; nextAction: string } {
     try {
       mkdirSync(governanceDir, { recursive: true });
     } catch (error) {
@@ -2048,7 +2906,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (!existsSync(configPath)) {
       try {
         mkdirSync(path.dirname(configPath), { recursive: true });
-        atomicReplaceTextFile(configPath, generateConfigYamlContent());
+        atomicReplace(configPath, generateConfigYamlContent());
       } catch (error) {
         return {
           ok: false,
@@ -2068,7 +2926,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     details: WorkbuddyDetectDetails,
     version: string,
     declaredDefaultEnabled: boolean,
-  ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string } | { ok: false; reason: string; nextAction: string } {
+  ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string }
+  | { ok: false; reason: string; nextAction: string; /** Engine registration already committed before a later stage failed. */ committed?: boolean; settingsAction?: 'created' | 'updated' | 'preserved' } {
     const p = this.paths();
 
     // A registered old plugin can still be hook-only, even at the same
@@ -2113,7 +2972,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
             // an Owner-chosen true/false from before the install.
             const applied = this.applyInstalledEnabledValue(installedEnabled.value);
             if (!applied.ok) {
-              return { ok: false, reason: applied.reason, nextAction: applied.nextAction };
+              // Engine registration (marketplace add + plugin install) already
+              // COMMITTED. A failure here must not leave it installed; flag it
+              // so install() runs protected compensation instead of just
+              // discarding the transaction evidence (review #13).
+              return { ok: false, reason: applied.reason, nextAction: applied.nextAction, committed: true, settingsAction: 'updated' };
             }
             return {
               ok: true,
