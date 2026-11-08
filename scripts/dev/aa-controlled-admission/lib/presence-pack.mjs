@@ -754,7 +754,8 @@ export async function preparePack({
       runDir: layout.runDir,
       budgetLedgerPath: layout.budgetLedgerPath,
     },
-    hostConfig: { path: layout.configPath, sha256: sha256FileSync(layout.configPath), fakeApiKeySha256: sha256Text(fakeApiKey) },
+    // The generated placeholder key is pinned by the config file hash; it is never fingerprinted on its own.
+    hostConfig: { path: layout.configPath, sha256: sha256FileSync(layout.configPath), fakeApiKeyFormat: 'pdpresence-local-<32 hex>, generated per pack' },
     pdConfig: { path: layout.pdConfigPath, sha256: sha256FileSync(layout.pdConfigPath), featureExpectations: PRESENCE_PD_FEATURE_EXPECTATIONS },
     agentSettings: { path: layout.settingsPath, sha256: sha256FileSync(layout.settingsPath), content: PRESENCE_AGENT_SETTINGS },
     endpoint: { host: '127.0.0.1', port: endpointPort, baseUrl: `http://127.0.0.1:${endpointPort}/v1`, answer: PRESENCE_ANSWER },
@@ -834,7 +835,7 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
 
   const config = readJson(layout.configPath);
   const configViolations = validatePresenceHostConfig(config, {
-    pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port, fakeApiKeySha256: manifest.hostConfig.fakeApiKeySha256,
+    pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port,
   });
   if (sha256FileSync(layout.configPath) !== manifest.hostConfig.sha256) configViolations.push('host config bytes changed');
   checks.push(check('host-config', configViolations.length === 0 ? 'PASS' : 'FAIL', 'frozen host config: candidate-only load path, deny-all tools, MCP off, two loopback providers', { violations: configViolations }));

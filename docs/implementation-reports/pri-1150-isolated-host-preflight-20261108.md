@@ -23,7 +23,7 @@
 | 6.5 | host-registry-tarball | 先按 npm 缓存 index-v5 定位 tarball，并验证其 SRI，再逐文件对照 15180 个文件 | — | 0 不一致、0 多余；仅缺消耗掉的 lifecycle 标记 | PASS |
 | 6.6 | candidate-payload | 候选树哈希、bundle 哈希、外部依赖解析 | — | better-sqlite3 解析在包内 | PASS |
 | 6.7 | presence-durability | 静态检查 bundle：`recordPromptPresenceObserved` 是否写盘 | — | `buffered_lost_on_one_shot_exit` | **FAIL（B1）** |
-| 6.8 | host-config | 结构化校验：只加载候选、tools deny-all、MCP 关闭、两个回环 provider、假 key 哈希 | — | sha256 `dc0fa286…0cb3` | PASS |
+| 6.8 | host-config | 结构化校验：只加载候选；tools deny-all；MCP 关闭；两个回环 provider 共用同一个生成的占位 key（只校验格式，不计算指纹） | — | sha256 `dc0fa286…0cb3` | PASS |
 | 6.9 | pd-config-and-retry | 经真实 `loadPdConfigForPlugin` 解析为 user_config，开关符合冻结值；`retry.provider.maxRetries=0` | — | — | PASS |
 | 6.10 | fixture-assembly | 经正式存储解析 + 真实 shared 路由冻结：bodyComplete、恰好转义一次、`authority=system_policy`、approvals 为 0 | — | directive sha256 `f69e1373…bb45` | PASS |
 | 6.11 | round-inputs | R1/R2 输入与金标数据集哈希 | — | — | PASS |

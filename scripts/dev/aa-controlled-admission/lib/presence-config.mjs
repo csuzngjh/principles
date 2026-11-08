@@ -71,6 +71,14 @@ export function generateFakeApiKey() {
   return `pdpresence-local-${randomBytes(16).toString('hex')}`;
 }
 
+/**
+ * Shape of the generated placeholder. The key itself is never fingerprinted:
+ * the frozen config file's sha256 already pins it, and validation only needs
+ * to know that every provider carries the SAME generated placeholder (not an
+ * inherited or hand-written credential).
+ */
+export const FAKE_API_KEY_PATTERN = /^pdpresence-local-[0-9a-f]{32}$/;
+
 export function sha256Text(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
@@ -151,9 +159,11 @@ export function validatePresenceHostConfig(config, expected) {
     const provider = providers[round.provider];
     if (provider?.baseUrl !== endpointBaseUrl(expected.endpointPort)) violations.push(`${round.provider}.baseUrl is not the frozen loopback endpoint`);
     if (provider?.api !== round.api) violations.push(`${round.provider}.api is not ${round.api}`);
-    if (typeof provider?.apiKey !== 'string' || sha256Text(provider.apiKey) !== expected.fakeApiKeySha256) violations.push(`${round.provider}.apiKey is not the frozen generated fake key`);
+    if (typeof provider?.apiKey !== 'string' || !FAKE_API_KEY_PATTERN.test(provider.apiKey)) violations.push(`${round.provider}.apiKey is not a generated loopback placeholder`);
     if (!Array.isArray(provider?.models) || provider.models.length !== 1 || provider.models[0]?.id !== PRESENCE_MODEL_ID) violations.push(`${round.provider}.models is not exactly [${PRESENCE_MODEL_ID}]`);
   }
+  const keys = new Set(PRESENCE_ROUNDS.map((round) => providers[round.provider]?.apiKey));
+  if (keys.size !== 1) violations.push('providers must share the one generated placeholder key');
   if (config?.agents?.defaults?.model?.primary !== roundModelRef(PRESENCE_ROUNDS[0])) violations.push('agents.defaults.model.primary does not route to the loopback provider');
   return violations;
 }

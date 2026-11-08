@@ -88,7 +88,7 @@ recordPromptPresenceObserved(data: PromptPresenceObservedEventData): void {
 | 模型 | `isolated-presence-model` | 同左 |
 | 终止响应 | SSE，以 `response.completed` 结束 | SSE 内容块 → `finish_reason:"stop"` → `data: [DONE]` |
 
-- **凭证**：每个执行包生成一个假 key（sha256 `40e13f55…e8d2`），写在冻结配置里，不来自环境变量。端点只记录请求是否携带该 key（`authMatchesFakeKey`）。
+- **凭证**：每个执行包生成一个假 key，格式为 `pdpresence-local-<32 hex>`，写在冻结配置里，由配置文件 sha256 `dc0fa286…0cb3` 锁定，不来自环境变量。两个 provider 必须使用同一个生成的占位 key。工具不再单独为 key 计算指纹（CodeQL js/insufficient-password-hash）。本包清单（由 `aabbd4550` 生成）中仍保留历史字段 `fakeApiKeySha256`，现行工具不再使用它。端点只记录请求是否携带该 key（`authMatchesFakeKey`）。
 - **端点规则**：不向任何地方转发，只服务两个固定路径。拒绝在读取请求体之前判定，拒绝原因包括 `no_active_round`、`api_mismatch`、`over_budget`、`tool_budget`、`off_protocol`。**从不返回 429**，因为宿主会把 429 当作可重试错误。端点只记录传输事实：方法、路径、API、模型、stream 标志、请求体大小与 sha256、工具定义名；不保存正文。
 - **协议自测**：这是记账的本地回环自测，**不是宿主启动，也不计入运行预算**（独立账本 `PACK\preflight\selftest-ledger-20261108T095711Z.json`，共 5 次请求）。用包内官方 `@openclaw/ai` 传输层实测：
   - responses 完整流：accepted（stop，`PRESENCE-ACK`）；

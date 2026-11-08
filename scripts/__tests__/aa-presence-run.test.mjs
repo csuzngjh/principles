@@ -501,7 +501,12 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
     expect(manifest.fixture.inspection.escaping.escapedExactlyOnce).toBe(true);
     expect(JSON.stringify(manifest)).not.toContain(PRESENCE_FIXTURE.text);
     const config = JSON.parse(readFileSync(manifest.paths.configPath, 'utf8'));
-    expect(validatePresenceHostConfig(config, { pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port, fakeApiKeySha256: manifest.hostConfig.fakeApiKeySha256 })).toEqual([]);
+    expect(validatePresenceHostConfig(config, { pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port })).toEqual([]);
+    const tampered = JSON.parse(JSON.stringify(config));
+    tampered.models.providers['pdpresence-completions'].apiKey = 'not-a-generated-placeholder';
+    expect(validatePresenceHostConfig(tampered, { pluginRoot: manifest.candidate.root, endpointPort: manifest.endpoint.port }))
+      .toEqual(expect.arrayContaining(['pdpresence-completions.apiKey is not a generated loopback placeholder', 'providers must share the one generated placeholder key']));
+    expect(JSON.stringify(manifest)).not.toContain(config.models.providers['pdpresence-responses'].apiKey);
     expect(config.plugins.load.paths).toEqual([manifest.candidate.root]);
     const report = await verifyPack({ packRoot, full: true, operatorEnv, realHome });
     expect(report.checks.filter((row) => row.status !== 'PASS')).toEqual([]);
