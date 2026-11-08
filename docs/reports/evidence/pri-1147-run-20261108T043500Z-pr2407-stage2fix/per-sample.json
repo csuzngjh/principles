@@ -1,0 +1,1234 @@
+{
+  "run_id": "run-20261108T043500Z-pr2407-stage2fix",
+  "git_commit_sha": "c01dde9c479d759fe2d09e17e55aaeb4d2a08f31",
+  "dataset_sha256": "2043116826d8e8f001afe6c3228d07b0cb0c8d0ff33ac5862869c775a9bb4a8e",
+  "frozen_dataset_sha256": "2043116826d8e8f001afe6c3228d07b0cb0c8d0ff33ac5862869c775a9bb4a8e",
+  "dataset_sha256_matches": true,
+  "openclaw_dist_fingerprint": {
+    "signal-collector-host.js": "sha256:e9949c69d72a22a3ab689a049984532a977fc0c44cfd22ef41ed5d1277eb5193",
+    "trajectory.js": "sha256:f602e949d95126cae877ea0953ec13824c4c2094e849b00f5965414c3ddba77e",
+    "evolution-reducer.js": "sha256:a057408a4a4e696170b7901d5387919f47bc58f14db1fa9f912b31966cc3b2b2",
+    "signal-keyword-store.js": "sha256:94f0ab0ada00da844b001802edee9cf1c8cb6b558cd4db6af4e0322ef75d40b0"
+  },
+  "provider": "zai",
+  "model": "glm-5.3-flash",
+  "generated_at": "2026-11-08T04:42:37.634Z",
+  "desensitization_note": "仅含样本标识/期望/观测/结局/延迟/哈希；final_outcome_reason 仅保留命中词片段或模型生成的一句话判定理由（非样本原文）；不含样本完整原文、日志或凭据。expected 字段以冻结数据集为权威源核对。样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json",
+  "samples": [
+    {
+      "sample_id": "A1",
+      "category": "A",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.9,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不是这个",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 1857,
+      "attempts": 1,
+      "input_hash": "d9bad08587ca68cdcf46657b6bbeb3287f38c9e50d219f6db78b8b76c70c8298",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "A2",
+      "category": "A",
+      "expected_label": "correction",
+      "expected_stage": "stage1_strong_direct",
+      "observed_stage1": {
+        "marker_decision": "admitted",
+        "marker_reason": "User correction detected: 你理解错了",
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 你理解错了",
+      "pain_created": true,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "a7aea9e19588bb5a389c15c51455b2adf96a5939123ab0b62906a694c7357f54",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "A3",
+      "category": "A",
+      "expected_label": "correction",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "0774a8099d9983dc0a698dc64527fc91ce939ba8cc6dda4c048299f0034eb7f0",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "A4",
+      "category": "A",
+      "expected_label": "correction",
+      "expected_stage": "stage1_strong_direct",
+      "observed_stage1": {
+        "marker_decision": "admitted",
+        "marker_reason": "User correction detected: 搞错了",
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 搞错了",
+      "pain_created": true,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "cf027644b43f3a84a3a2dca7076180ca0000b5dab1d51e8fd77e65f12243af96",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "A5",
+      "category": "A",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 1447,
+      "attempts": 1,
+      "input_hash": "56c6e1d200e82ae0d2ccd3bd59bf4336c1a9288e2ff95787dbddbdc6ad7711f8",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "A6",
+      "category": "A",
+      "expected_label": "correction",
+      "expected_stage": "stage1_strong_direct",
+      "observed_stage1": {
+        "marker_decision": "admitted",
+        "marker_reason": "User correction detected: 不要自作主张",
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不要自作主张",
+      "pain_created": true,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "58a3a044051edada5fba09fcf63e1723eed3104c9fffc3f7a500ec42502b11f0",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "B1",
+      "category": "B",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "0ec4d50d6ae79039bdb6d480a808ccba6c75010cb6d9dfc6cbbd436a935ba9eb",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "B2",
+      "category": "B",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "28db55b3bcce42ef31b8299be921df7c308423fea94dcd1ce4cb768a0f1a0782",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "B3",
+      "category": "B",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "afd2583facb2c4a37d7c9265ee7241c1063e9b749a0ef5fa9d4ad180da415a73",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "B4",
+      "category": "B",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.85,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 3056,
+      "attempts": 1,
+      "input_hash": "723788f30793869d19c96133f09bc3d7e30d4d5537fb6f9e6def24add0055426",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "B5",
+      "category": "B",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "resolved_none",
+        "attempts": 1,
+        "verdict": "none",
+        "confidence": 0.9,
+        "cycles": 1
+      },
+      "final_outcome": "resolved_none",
+      "final_outcome_reason": "这是一条咨询类问题，询问系统功能，并非对 AI 行为的不满或纠正。",
+      "pain_created": false,
+      "provider_status": "ok",
+      "latency_ms": 2935,
+      "attempts": 1,
+      "input_hash": "c4b1c6b8fb74ca3499ab53c87af8822166e32d963a67e0b1c2920d2de0224081",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "B6",
+      "category": "B",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "70128363b841f1619435e874b33508f3dc21d8d46de6b8dfc7d3b3090541324a",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "C1",
+      "category": "C",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.75,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不是这个",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2945,
+      "attempts": 1,
+      "input_hash": "102f02ece729b0bd92fdeda07da41c56988d77084893a24f84b5ad0691224d17",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "C2",
+      "category": "C",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "2034e3fdfbf519439cfb8d64947855ce9a6f4d070eaf7c96b3c557d8c03b72ab",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "C3",
+      "category": "C",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "1f3ad6582d13899b35f90d7d819e0e6fdbc2d6c449e90ddfe927b5b9b964eef0",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "C4",
+      "category": "C",
+      "expected_label": "none",
+      "expected_stage": "stage1_strong_direct",
+      "observed_stage1": {
+        "marker_decision": "admitted",
+        "marker_reason": "User correction detected: 搞错了",
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 搞错了",
+      "pain_created": true,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "af0ac64bd08629c41ab0115e3e3c43a5ee2f697e14ed527b9ae95020615db63b",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "C5",
+      "category": "C",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "8e23588d0b1b89c4baa42a11ebd5992f9e2b4b09321a36ffafa7520317920f1e",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "D1",
+      "category": "D",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "8ead3b7064d6abc8b959fbe506024d2124a0aadaab6a25130d45a626bc9ad5b4",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "D2",
+      "category": "D",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "resolved_none",
+        "attempts": 4,
+        "verdict": "none",
+        "confidence": 0.9,
+        "cycles": 4
+      },
+      "final_outcome": "resolved_none",
+      "final_outcome_reason": "用户明确否认AI做错，未指出任何需要纠正的行为。",
+      "pain_created": false,
+      "provider_status": "ok",
+      "latency_ms": 16200,
+      "attempts": 4,
+      "input_hash": "ddc91b97e8f3f3d7d56f428c32791680e7ee8ce80f1eb05d9609659e3a72474b",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "D3",
+      "category": "D",
+      "expected_label": "none",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "56f52bfae7a62dcdec20b9fc5e614ed28ae0aad58ca82170bcddab3a319ec8d4",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "D4",
+      "category": "D",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.75,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 5520,
+      "attempts": 1,
+      "input_hash": "4ebb8b96e32fcc96e10f5955a235f9e83e7ffd4e9dfd2ca907db2aeecc5b86fe",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "D5",
+      "category": "D",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不是让你",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 1962,
+      "attempts": 1,
+      "input_hash": "0a49db6926e98d303a831004ce0b5b4325415b17294ca4f766e464985e1d023f",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "E1",
+      "category": "E",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 4109,
+      "attempts": 1,
+      "input_hash": "85842e9a63c2c500600652ca2b0fe5ac66cea11fb99399cb081259926255dd3e",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "E2",
+      "category": "E",
+      "expected_label": "correction",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "bc2334b7c105eea2c772df9c1785694c7b00be8b700b24f860415444cbba28b5",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "E3",
+      "category": "E",
+      "expected_label": "correction",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "29baad280772722e356de7f4bf5c9640c619a5dc38628de5d7d1a1f38806def3",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "E4",
+      "category": "E",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 错了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2459,
+      "attempts": 1,
+      "input_hash": "9089315197fcac7b8699b3c07683bcd02900299ac287d10f52b5233f49c4ada5",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "E5",
+      "category": "E",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 错了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 5199,
+      "attempts": 1,
+      "input_hash": "3974c98cd59fc01f21878e4b5f9b064ee8f86f581c2263e61e323fe1cb6b1b56",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "F1",
+      "category": "F",
+      "expected_label": "correction",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "0e35123cce49f42074aa62eefa682e272cb173ad81f68dc8bfecc829673eeddb",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "F2",
+      "category": "F",
+      "expected_label": "correction",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "cf29a296bc0ad2984e6ee8a1f88f344aa33a00e30f2f9e7adb2a37d90995ab3a",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "F3",
+      "category": "F",
+      "expected_label": "correction",
+      "expected_stage": "stage1_no_hit_reject",
+      "observed_stage1": {
+        "marker_decision": null,
+        "marker_reason": null,
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": null,
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "stage1_not_admitted",
+      "final_outcome_reason": "no admission marker: not_a_signal (Stage-1 zero-hit)",
+      "pain_created": false,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "7e91a1fcaf7e1928b10ae07015340152cea812534b46a063ba681a3fc42680e0",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "F4",
+      "category": "F",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 7452,
+      "attempts": 1,
+      "input_hash": "5db3ba0ea0c86928a44bd8557e2e034ace3540c9689624842a85db7272be1124",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "F5",
+      "category": "F",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.9,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2791,
+      "attempts": 1,
+      "input_hash": "47b01c598fb7e28e8c1fa85fc1ad15de4fc36629be6ff7d5c8d5d10b2502e13f",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "F6",
+      "category": "F",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 都说了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 6427,
+      "attempts": 1,
+      "input_hash": "5d1f27d91b7bcfbf70e02841c366b4b3211b88c242fce2ae2672597fa9828859",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "G1",
+      "category": "G",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 跑偏了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2898,
+      "attempts": 1,
+      "input_hash": "431e51ff2b9bf6a526775179bbd06cecedb1f7d9df825178927444592c0a5a12",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "G2",
+      "category": "G",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "resolved_none",
+        "attempts": 1,
+        "verdict": "none",
+        "confidence": 0.9,
+        "cycles": 1
+      },
+      "final_outcome": "resolved_none",
+      "final_outcome_reason": "用户只是描述他人反馈并请求分析报告，未指出 AI 助手自身的行为错误。",
+      "pain_created": false,
+      "provider_status": "ok",
+      "latency_ms": 2882,
+      "attempts": 1,
+      "input_hash": "54a540c3913887ceb2556d9ccfc54897f206e042efd8a7bdfc22b5099ea371a0",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "G3",
+      "category": "G",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "resolved_none",
+        "attempts": 4,
+        "verdict": "none",
+        "confidence": 0.7,
+        "cycles": 4
+      },
+      "final_outcome": "resolved_none",
+      "final_outcome_reason": "只是提及上次复盘的背景信息，未明确指出 AI 本次的行为错误或要求改正。",
+      "pain_created": false,
+      "provider_status": "ok",
+      "latency_ms": 15650,
+      "attempts": 4,
+      "input_hash": "25f3b177ee1153e64c52e5b0e7a68600f5fcf50e92a7f050ba2917e4a6d6d94a",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "G4",
+      "category": "G",
+      "expected_label": "none",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.9,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 跑偏了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2908,
+      "attempts": 1,
+      "input_hash": "42a25709987a73a6a935fa638a3b3c725a085efb1e20c8c7fd3e5c2a644cb828",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "G5",
+      "category": "G",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 别瞎改",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 4685,
+      "attempts": 1,
+      "input_hash": "d907964d9748f7cefd3d68871f19567c7258604354cede31927825ce29006c25",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "G6",
+      "category": "G",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不是我要的",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 1849,
+      "attempts": 1,
+      "input_hash": "1396fcdd8e370a7d08c4c196e2b42a79d5851030958f1740e1f7b0125df6b2b0",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "H1",
+      "category": "H",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 错了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2831,
+      "attempts": 1,
+      "input_hash": "b73330be2bd9e706153e08b4b4429a56cb5ddf3c6169c53ec78b86621f1afd1d",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "H2",
+      "category": "H",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 错了",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2375,
+      "attempts": 1,
+      "input_hash": "ed9ad0c37ad942e7b1393c70359124bd73cdfe377665937113fdaf51cc09a8fd",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "H3",
+      "category": "H",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.9,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 2643,
+      "attempts": 1,
+      "input_hash": "1ddc4425a1d7813ed04762aa5f7b4b059f3c1ace496970914146c5bf59e260c8",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "H4",
+      "category": "H",
+      "expected_label": "correction",
+      "expected_stage": "stage1_strong_direct",
+      "observed_stage1": {
+        "marker_decision": "admitted",
+        "marker_reason": "User correction detected: 你理解错了",
+        "observation_persisted": true,
+        "pending_pre_stage2": false
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": null,
+        "verdict": null,
+        "confidence": null,
+        "cycles": null
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 你理解错了",
+      "pain_created": true,
+      "provider_status": "not_called",
+      "latency_ms": null,
+      "attempts": null,
+      "input_hash": "d2f2fdf1ace9813c7703e918e5f3539a2810065d714f7c28c6ca836531255072",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "H5",
+      "category": "H",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.98,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 3072,
+      "attempts": 1,
+      "input_hash": "b61724631cd7ddf48f0e2e80efb542554dd6ef87ab445f2b80a3946f475d680d",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    },
+    {
+      "sample_id": "H6",
+      "category": "H",
+      "expected_label": "correction",
+      "expected_stage": "stage2_via_pending",
+      "observed_stage1": {
+        "marker_decision": "pending_llm_review",
+        "marker_reason": "ambiguous correction candidate awaiting Stage 2 review",
+        "observation_persisted": true,
+        "pending_pre_stage2": true
+      },
+      "observed_stage2": {
+        "marker_decision": "admitted",
+        "attempts": 1,
+        "verdict": "correction",
+        "confidence": 0.95,
+        "cycles": 1
+      },
+      "final_outcome": "admitted",
+      "final_outcome_reason": "User correction detected: 不对",
+      "pain_created": true,
+      "provider_status": "ok",
+      "latency_ms": 4028,
+      "attempts": 1,
+      "input_hash": "e0c765f6ffd8681ef7535ae7b60ee4ea7a4ff2473b219ad5bea782a8d31755a7",
+      "run_id": "run-20261108T043500Z-pr2407-stage2fix"
+    }
+  ]
+}
