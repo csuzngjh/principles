@@ -14,8 +14,13 @@
  *   diagnostician-output → DiagnosticianOutputV1
  */
 
-// Schema versioning
-export { RUNTIME_SCHEMA_VERSION, schemaRef } from './schema-version.js';
+// Schema versioning (PRI-1139: schemaRef()/RUNTIME_SCHEMA_VERSION retired)
+export {
+  RUNTIME_CONTRACT_SCHEMA_VERSION,
+  LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION,
+  RuntimeContractSchemaVersionSchema,
+  isRuntimeContractSchemaVersion,
+} from './schema-version.js';
 
 // Schema exports (new — TypeBox schemas for runtime validation)
 export { PDErrorCategorySchema } from './error-categories.js';
@@ -113,7 +118,7 @@ export type {
   SnapshotValidationResult,
 } from './product-telemetry/snapshot-contract.js';
 export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
-export { SchemaVersionRefSchema, RuntimeSchemaVersionSchema } from './schema-version.js';
+export { type RuntimeContractSchemaVersion } from './schema-version.js';
 export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';
 export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
 // Context payload schemas (Phase 2)

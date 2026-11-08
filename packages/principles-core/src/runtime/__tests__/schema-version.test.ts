@@ -1,213 +1,129 @@
 /**
  * Schema Version Tests — Core Package
  *
- * Unit tests for schema-version.ts — centralized versioning for runtime contracts.
+ * Unit tests for schema-version.ts — the PRI-1139 version-neutral contract
+ * version token and its read-side union.
+ *
+ * The retired helpers (schemaRef()/RUNTIME_SCHEMA_VERSION='1.0.0' and their
+ * schemas) had no production consumers; their replacement is one write token
+ * ('current'), one named legacy token ('1') for dual-read acceptance, and one
+ * TypeBox union that read paths validate against.
  *
  * Tests verify:
- * - schemaRef() produces correct "kind-vN" format for valid inputs
- * - RUNTIME_SCHEMA_VERSION constant matches expected literal "1.0.0"
- * - RuntimeSchemaVersionSchema accepts only "1.0.0" (exact-match literal)
- * - SchemaVersionRefSchema accepts strings (open-ended contract — not a literal)
- * - Edge cases: zero version, large version, non-integer version numbers
+ * - RUNTIME_CONTRACT_SCHEMA_VERSION is exactly 'current' (write-side token)
+ * - LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION is exactly '1' (pre-cutover token)
+ * - RuntimeContractSchemaVersionSchema accepts exactly those two values
+ * - isRuntimeContractSchemaVersion matches the schema verdict on both paths
  *
  * ERR checklist:
- * - ERR-088: asserts exact value, not merely truthy — a drift from "1.0.0" to "1.0.1"
- *   must fail these tests rather than pass with a generic "is string" check.
+ * - ERR-088: asserts exact values, not merely truthy — drift from 'current'
+ *   to any generational suffix must fail these tests.
  * - ERR-089: branch coverage on both accept and reject paths for each check.
  */
 
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
-  RUNTIME_SCHEMA_VERSION,
-  schemaRef,
-  SchemaVersionRefSchema,
-  RuntimeSchemaVersionSchema,
+  RUNTIME_CONTRACT_SCHEMA_VERSION,
+  LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION,
+  RuntimeContractSchemaVersionSchema,
+  isRuntimeContractSchemaVersion,
 } from '../schema-version.js';
 
-// ── schemaRef() ───────────────────────────────────────────────────────────────
+// ── Write-side token ───────────────────────────────────────────────────────
 
-describe('schemaRef()', () => {
-  it('produces "kind-vN" format with version 1', () => {
-    expect(schemaRef('diagnostician-output', 1)).toBe('diagnostician-output-v1');
+describe('RUNTIME_CONTRACT_SCHEMA_VERSION (write token)', () => {
+  it('is exactly the string "current"', () => {
+    // ERR-088: exact literal check. A drift to 'current-v2' or '2' must fail.
+    expect(RUNTIME_CONTRACT_SCHEMA_VERSION).toBe('current');
   });
 
-  it('produces "kind-vN" format with version 2', () => {
-    expect(schemaRef('pain-signal', 2)).toBe('pain-signal-v2');
-  });
-
-  it('includes hyphen in kind names unchanged', () => {
-    expect(schemaRef('rule-host-input', 3)).toBe('rule-host-input-v3');
-  });
-
-  it('handles underscore in kind names', () => {
-    expect(schemaRef('intent_decision', 1)).toBe('intent_decision-v1');
-  });
-
-  it('handles kind names with mixed separators', () => {
-    expect(schemaRef('pi-artifact_v2', 5)).toBe('pi-artifact_v2-v5');
-  });
-
-  it('handles version 0 (edge — not normative but function should still format)', () => {
-    // The function is a pure string formatter; it does NOT gate on version >= 1.
-    // This test pins the current behavior so a change to validation would be deliberate.
-    expect(schemaRef('something', 0)).toBe('something-v0');
-  });
-
-  it('handles large version numbers (forward-compat format)', () => {
-    expect(schemaRef('contract', 999)).toBe('contract-v999');
-  });
-
-  it('does not insert extra separators before -vN', () => {
-    // The format is "${kind}-v${version}" — no trailing/leading spaces around "-v".
-    const ref = schemaRef('foo', 1);
-    expect(ref).not.toContain(' -v');
-    expect(ref).not.toContain('- v');
-    expect(ref).not.toContain('_v');
-    expect(ref).toMatch(/-v1$/);
-  });
-
-  it('kind is case-sensitive and preserved exactly', () => {
-    expect(schemaRef('DiagnosticianOutput', 1)).toBe('DiagnosticianOutput-v1');
-    expect(schemaRef('FOO', 1)).toBe('FOO-v1');
-    expect(schemaRef('fooBar', 1)).toBe('fooBar-v1');
-  });
-
-  it('version numbers are not zero-padded', () => {
-    // "v01" vs "v1" matters for equality comparison. Pin the correct format.
-    expect(schemaRef('x', 1)).toBe('x-v1');
-    expect(schemaRef('x', 10)).toBe('x-v10');
-    expect(schemaRef('x', 100)).toBe('x-v100');
+  it('carries no generational -vN suffix', () => {
+    expect(RUNTIME_CONTRACT_SCHEMA_VERSION).not.toMatch(/-v\d+$/);
+    expect(RUNTIME_CONTRACT_SCHEMA_VERSION).not.toMatch(/_v\d+$/);
   });
 });
 
-// ── RUNTIME_SCHEMA_VERSION constant ───────────────────────────────────────
+// ── Legacy read token ──────────────────────────────────────────────────────
 
-describe('RUNTIME_SCHEMA_VERSION constant', () => {
-  it('is exactly the string "1.0.0" — semantic-version format', () => {
-    // ERR-088: exact literal check. A drift to "1.0.1" or "1.1.0" must fail.
-    expect(RUNTIME_SCHEMA_VERSION).toBe('1.0.0');
+describe('LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION (pre-cutover token)', () => {
+  it('is exactly the string "1" — the value every pre-PRI-1139 writer stamped', () => {
+    expect(LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION).toBe('1');
   });
 
-  it('is a 3-segment semver string (X.Y.Z, numeric segments)', () => {
-    // Structural contract: consumers parse this with semver or prefix-match.
-    expect(RUNTIME_SCHEMA_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
-  });
-
-  it('is a string type, not a number', () => {
-    expect(typeof RUNTIME_SCHEMA_VERSION).toBe('string');
-  });
-
-  it('matches the RuntimeSchemaVersionSchema literal schema', () => {
-    // The schema MUST accept the constant. If they drift, validation will reject
-    // every versioned payload — catastrophic silent degradation downstream.
-    expect(Value.Check(RuntimeSchemaVersionSchema, RUNTIME_SCHEMA_VERSION)).toBe(true);
+  it('differs from the current token (dual-read needs two distinct values)', () => {
+    expect(LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION).not.toBe(RUNTIME_CONTRACT_SCHEMA_VERSION);
   });
 });
 
-// ── RuntimeSchemaVersionSchema TypeBox schema ──────────────────────────────
+// ── Read-side union schema ─────────────────────────────────────────────────
 
-describe('RuntimeSchemaVersionSchema TypeBox literal schema', () => {
-  it('accepts exactly "1.0.0"', () => {
-    expect(Value.Check(RuntimeSchemaVersionSchema, '1.0.0')).toBe(true);
+describe('RuntimeContractSchemaVersionSchema (dual-read union)', () => {
+  it('accepts the current write token', () => {
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, RUNTIME_CONTRACT_SCHEMA_VERSION)).toBe(true);
   });
 
-  it('rejects "1.0.1" (patch bump)', () => {
-    // Pin that a patch version bump without updating the schema literal will fail.
-    // This protects against the silent contract drift that would occur if someone
-    // updated RUNTIME_SCHEMA_VERSION without updating the schema too.
-    expect(Value.Check(RuntimeSchemaVersionSchema, '1.0.1')).toBe(false);
+  it('accepts the legacy pre-cutover token (backward read compatibility)', () => {
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION)).toBe(true);
   });
 
-  it('rejects "1.1.0" (minor bump)', () => {
-    expect(Value.Check(RuntimeSchemaVersionSchema, '1.1.0')).toBe(false);
+  it('rejects the retired semver token "1.0.0"', () => {
+    // The retired RUNTIME_SCHEMA_VERSION was never a schemaVersion field value;
+    // accepting it here would silently widen the read contract.
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, '1.0.0')).toBe(false);
   });
 
-  it('rejects "2.0.0" (major bump)', () => {
-    expect(Value.Check(RuntimeSchemaVersionSchema, '2.0.0')).toBe(false);
-  });
-
-  it('rejects "1.0" (missing patch segment)', () => {
-    expect(Value.Check(RuntimeSchemaVersionSchema, '1.0')).toBe(false);
-  });
-
-  it('rejects leading/trailing whitespace in version strings', () => {
-    expect(Value.Check(RuntimeSchemaVersionSchema, ' 1.0.0')).toBe(false);
-    expect(Value.Check(RuntimeSchemaVersionSchema, '1.0.0 ')).toBe(false);
-    expect(Value.Check(RuntimeSchemaVersionSchema, '\n1.0.0\t')).toBe(false);
-  });
-
-  it('rejects non-string inputs', () => {
-    expect(Value.Check(RuntimeSchemaVersionSchema, 1)).toBe(false);
-    expect(Value.Check(RuntimeSchemaVersionSchema, null)).toBe(false);
-    expect(Value.Check(RuntimeSchemaVersionSchema, undefined)).toBe(false);
-    expect(Value.Check(RuntimeSchemaVersionSchema, ['1.0.0'])).toBe(false);
-  });
-
-  it('rejects case variant "1.0.0" is all same case (no case to worry about, numbers)', () => {
-    // Sanity — numbers are not case sensitive; just ensure the value is exact.
-    expect(Value.Check(RuntimeSchemaVersionSchema, '1.0.0')).toBe(true);
-  });
-});
-
-// ── SchemaVersionRefSchema TypeBox string schema ─────────────────────────────
-
-describe('SchemaVersionRefSchema (open-ended string)', () => {
-  it('accepts standard refs produced by schemaRef()', () => {
-    expect(Value.Check(SchemaVersionRefSchema, schemaRef('diagnostician-output', 1))).toBe(true);
-    expect(Value.Check(SchemaVersionRefSchema, schemaRef('pain-signal', 2))).toBe(true);
-    expect(Value.Check(SchemaVersionRefSchema, 'rule-host-input-v3')).toBe(true);
-  });
-
-  it('accepts arbitrary strings (open-ended by design)', () => {
-    // SchemaVersionRefSchema is typed as Type.String() intentionally — it's a
-    // "loose" reference slot used in cross-file TypeBox schema refs where the
-    // exact literal list is not centralized. This test prevents accidental
-    // tightening to a union/literal that would break third-party schemas.
-    expect(Value.Check(SchemaVersionRefSchema, 'any-string-goes-here')).toBe(true);
-    expect(Value.Check(SchemaVersionRefSchema, '')).toBe(true); // empty string = valid String()
-    expect(Value.Check(SchemaVersionRefSchema, 'v1')).toBe(true);
-  });
-
-  it('rejects non-string inputs', () => {
-    expect(Value.Check(SchemaVersionRefSchema, 1)).toBe(false);
-    expect(Value.Check(SchemaVersionRefSchema, null)).toBe(false);
-    expect(Value.Check(SchemaVersionRefSchema, undefined)).toBe(false);
-    expect(Value.Check(SchemaVersionRefSchema, { ref: 'foo-v1' })).toBe(false);
-    expect(Value.Check(SchemaVersionRefSchema, ['foo-v1'])).toBe(false);
-  });
-});
-
-// ── Cross-contract invariants (version constant ↔ schema) ────────────────────
-
-describe('cross-contract invariants between constant and schema', () => {
-  it('schemaRef() output is compatible with SchemaVersionRefSchema', () => {
-    // Every schemaRef output must be a valid SchemaVersionRef, otherwise
-    // the two helpers are contradictory and consumers can't rely on either.
-    for (const [kind, version] of [
-      ['diagnostician-output', 1],
-      ['pain-signal', 2],
-      ['rule-host-input', 3],
-      ['x', 999],
-    ] as const) {
-      const ref = schemaRef(kind, version);
-      expect(Value.Check(SchemaVersionRefSchema, ref)).toBe(true);
+  it('rejects generational suffix variants', () => {
+    for (const v of ['current-v1', 'v1', 'v2', '2', 'v-current', 'CURRENT']) {
+      expect(Value.Check(RuntimeContractSchemaVersionSchema, v), v).toBe(false);
     }
   });
 
-  it('RUNTIME_SCHEMA_VERSION is the ONLY accepted value for RuntimeSchemaVersionSchema', () => {
-    // Enumerate some near-miss variants that developers commonly type.
-    const nearMisses = [
-      '1.0.1', '1.1.0', '2.0.0',       // semver bumps
-      '1.0', '1', '1.', '.0.0',         // incomplete
-      'v1.0.0', 'r1.0.0',              // prefixed
-      '1.0.0-beta', '1.0.0+build',     // semver pre-release/build
-      ' 1.0.0', '1.0.0 ',              // whitespace
-    ];
-    for (const v of nearMisses) {
-      expect(Value.Check(RuntimeSchemaVersionSchema, v)).toBe(false);
+  it('rejects whitespace and non-string inputs', () => {
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, ' current')).toBe(false);
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, 'current ')).toBe(false);
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, 1)).toBe(false);
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, null)).toBe(false);
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, undefined)).toBe(false);
+    expect(Value.Check(RuntimeContractSchemaVersionSchema, ['current'])).toBe(false);
+  });
+});
+
+// ── Runtime guard parity ───────────────────────────────────────────────────
+
+describe('isRuntimeContractSchemaVersion (guard parity with the schema)', () => {
+  it('accepts exactly what the schema accepts', () => {
+    const candidates = ['current', '1', '1.0.0', 'v1', '2', '', 1, null, undefined];
+    for (const v of candidates) {
+      expect(isRuntimeContractSchemaVersion(v), String(v))
+        .toBe(Value.Check(RuntimeContractSchemaVersionSchema, v));
     }
-    // And the exact match is accepted.
-    expect(Value.Check(RuntimeSchemaVersionSchema, RUNTIME_SCHEMA_VERSION)).toBe(true);
+  });
+});
+
+// ── Retirement contract ────────────────────────────────────────────────────
+
+describe('PRI-1139 retirement: versioned helpers are gone', () => {
+  it('schema-version.ts no longer declares schemaRef/RUNTIME_SCHEMA_VERSION family', () => {
+    // The module docstring intentionally NAMES the retired helpers (retirement
+    // is part of the contract), so these assertions target export declarations,
+    // not bare mentions.
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'schema-version.ts'), 'utf-8');
+    expect(src).not.toContain('export function schemaRef');
+    expect(src).not.toContain('export const RUNTIME_SCHEMA_VERSION');
+    expect(src).not.toContain('export const SchemaVersionRefSchema');
+    expect(src).not.toContain('export const RuntimeSchemaVersionSchema');
+  });
+
+  it('the runtime barrel no longer exports the retired names', async () => {
+    const barrel = await import('../index.js') as Record<string, unknown>;
+    expect(Object.hasOwn(barrel, 'schemaRef')).toBe(false);
+    expect(Object.hasOwn(barrel, 'RUNTIME_SCHEMA_VERSION')).toBe(false);
+    expect(Object.hasOwn(barrel, 'SchemaVersionRefSchema')).toBe(false);
+    expect(Object.hasOwn(barrel, 'RuntimeSchemaVersionSchema')).toBe(false);
+    expect(Object.hasOwn(barrel, 'RUNTIME_CONTRACT_SCHEMA_VERSION')).toBe(true);
+    expect(Object.hasOwn(barrel, 'LEGACY_RUNTIME_CONTRACT_SCHEMA_VERSION')).toBe(true);
   });
 });
