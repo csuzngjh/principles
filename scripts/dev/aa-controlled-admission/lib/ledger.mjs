@@ -81,6 +81,21 @@ function emptyCounters() {
   return Object.fromEntries(COUNTERS.map((key) => [key, 0]));
 }
 
+/**
+ * The arm names come from the budget allocation itself, so a run shape other
+ * than positive/control (PRI-1152 uses one arm per round) shares the same
+ * reserve/persist semantics instead of a second counter implementation.
+ */
+function armNames(armBudgets) {
+  const names = Object.keys(armBudgets ?? {});
+  if (names.length === 0) throw new Error('ledger: armBudgets must declare at least one arm');
+  return names;
+}
+
+function copyArmBudgets(armBudgets) {
+  return Object.fromEntries(armNames(armBudgets).map((arm) => [arm, { ...armBudgets[arm] }]));
+}
+
 function validateCounters(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`ledger: ${label} must be a counter object`);
@@ -94,11 +109,13 @@ function validateCounters(value, label) {
 }
 
 function sumArms(usedByArm) {
-  if (!usedByArm || typeof usedByArm !== 'object') return null;
+  if (!usedByArm || typeof usedByArm !== 'object' || Array.isArray(usedByArm)) return null;
+  const arms = Object.keys(usedByArm);
+  if (arms.length === 0) return null;
   const total = emptyCounters();
-  for (const arm of ['positive', 'control']) {
+  for (const arm of arms) {
     const row = usedByArm[arm];
-    if (!row) return null;
+    if (!row || typeof row !== 'object') return null;
     for (const key of COUNTERS) total[key] += Number.isInteger(row[key]) ? row[key] : 0;
   }
   return total;
@@ -165,13 +182,13 @@ export function reconcileLedgerBudget({
     approvedBy: approvedBy.trim(),
     reason: reason.trim(),
     from: { budget: { ...persisted.budget }, armBudgets: persisted.armBudgets ?? null },
-    to: { budget: { ...budget }, armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } } },
+    to: { budget: { ...budget }, armBudgets: copyArmBudgets(armBudgets) },
     used: { ...used },
   };
   const next = {
     ...persisted,
     budget: { ...budget },
-    armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } },
+    armBudgets: copyArmBudgets(armBudgets),
     budgetAudit: [...(Array.isArray(persisted.budgetAudit) ? persisted.budgetAudit : []), auditEntry],
     updatedAt: new Date().toISOString(),
   };
@@ -237,15 +254,17 @@ export function createExperimentLedger({
   for (const key of COUNTERS) {
     if (!Number.isInteger(budget[key]) || budget[key] < 0) throw new Error(`ledger: budget.${key} must be a non-negative integer`);
   }
-  for (const arm of ['positive', 'control']) {
-    if (!armBudgets[arm]) throw new Error(`ledger: missing arm budget for ${arm}`);
+  const arms = armNames(armBudgets);
+  for (const arm of arms) {
+    for (const key of COUNTERS) {
+      if (!Number.isInteger(armBudgets[arm]?.[key]) || armBudgets[arm][key] < 0) {
+        throw new Error(`ledger: armBudgets.${arm}.${key} must be a non-negative integer`);
+      }
+    }
   }
 
   const used = emptyCounters();
-  const usedByArm = {
-    positive: emptyCounters(),
-    control: emptyCounters(),
-  };
+  const usedByArm = Object.fromEntries(arms.map((arm) => [arm, emptyCounters()]));
   const records = Object.fromEntries(COUNTERS.map((key) => [key, []]));
   const violations = [];
   const budgetAudit = [];
@@ -289,7 +308,7 @@ export function createExperimentLedger({
     writeJsonAtomic(persistPath, {
       schemaVersion: CUMULATIVE_LEDGER_SCHEMA,
       budget: { ...budget },
-      armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } },
+      armBudgets: copyArmBudgets(armBudgets),
       used: { ...used },
       records: Object.fromEntries(COUNTERS.map((key) => [key, records[key].slice()])),
       violations: violations.slice(),
@@ -378,15 +397,16 @@ export function createExperimentLedger({
     },
     snapshot() {
       const attemptUsage = emptyCounters();
-      for (const key of COUNTERS) attemptUsage[key] = usedByArm.positive[key] + usedByArm.control[key];
+      for (const key of COUNTERS) attemptUsage[key] = arms.reduce((sum, arm) => sum + usedByArm[arm][key], 0);
+      const usedByArmCopy = () => Object.fromEntries(arms.map((arm) => [arm, { ...usedByArm[arm] }]));
       return {
         runId,
         fixtureId,
         budget: { ...budget },
-        armBudgets: { positive: { ...armBudgets.positive }, control: { ...armBudgets.control } },
+        armBudgets: copyArmBudgets(armBudgets),
         used: { ...used },
-        attempt: { used: attemptUsage, usedByArm: { positive: { ...usedByArm.positive }, control: { ...usedByArm.control } } },
-        usedByArm: { positive: { ...usedByArm.positive }, control: { ...usedByArm.control } },
+        attempt: { used: attemptUsage, usedByArm: usedByArmCopy() },
+        usedByArm: usedByArmCopy(),
         withinBudget: COUNTERS.every((key) => used[key] <= budget[key]),
         persistPath,
         violations: violations.slice(),

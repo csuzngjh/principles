@@ -248,7 +248,7 @@ async function prepare(options) {
   const principleId = options.principleId ?? `aa-principle-${identity.runId}`;
   const principleText = options.principleText
     ?? '读取夹具文件后才报告其内容编号；只调用一次只读工具，不重复读取。';
-  const workspaceTarget = seedControlledWorkspace({
+  const workspaceTarget = await seedControlledWorkspace({
     workspaceDir: safeRealpath(workspaceDir),
     artifactId: mappingIdentity.artifactId,
     activationId: mappingIdentity.activationId,
