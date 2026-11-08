@@ -239,6 +239,12 @@ export interface WorkbuddyHostInstallerDeps {
   pdCliEntry?: () => string | undefined;
   /** Command runner (default: spawnSync). Tests inject a fake engine boundary. */
   runCommand?: (file: string, args: readonly string[], opts?: WorkbuddyCommandOptions) => WorkbuddyCommandResult;
+  /**
+   * Directory copier used ONLY for the install transaction's pre-upgrade cache
+   * backup (default: fs.cpSync). Same seam class as runCommand: tests inject a
+   * real copy-boundary failure; the safety proof is the real file state.
+   */
+  backupCopyDir?: typeof cpSync;
 }
 
 /** All WorkBuddy paths PD may touch, derived from install-layout (never hand-joined ad hoc). */
@@ -535,7 +541,11 @@ function snapshotWorkbuddyFile(filePath: string): WorkbuddyFileSnapshot {
   }
 }
 
-function openWorkbuddyInstallTxn(p: WorkbuddyPaths, version: string): WorkbuddyInstallTxn {
+function openWorkbuddyInstallTxn(
+  p: WorkbuddyPaths,
+  version: string,
+  deps: { copyDir?: typeof cpSync } = {},
+): { ok: true; txn: WorkbuddyInstallTxn } | { ok: false; reason: string; nextAction: string } {
   const snapshots = new Map<string, WorkbuddyFileSnapshot>();
   for (const filePath of [p.settingsPath, p.registryPath, p.installManifestPath]) {
     snapshots.set(filePath, snapshotWorkbuddyFile(filePath));
@@ -552,28 +562,53 @@ function openWorkbuddyInstallTxn(p: WorkbuddyPaths, version: string): WorkbuddyI
     cacheExisted = true;
     cacheDigestBefore = workbuddyDigestTree(versionDir);
     cacheBackupDir = path.join(path.dirname(path.resolve(p.cachePluginRoot)), `.pd-txn-backup-${process.pid}-${Date.now()}`);
+    // 2026-11-08 P1 fix: for an UPGRADE (a pre-existing cache payload), the
+    // backup is the rollback's only material. A backup that cannot be created
+    // — or one whose CONTENT cannot be proven identical to the payload it
+    // copied (content-level digest, not a mere existence/success check) —
+    // REFUSES the whole upgrade BEFORE any cache replacement is attempted.
+    // Returning without a usable backup used to let the install proceed and
+    // later delete the current cache against a rollback it could not serve.
+    // `deps.copyDir` is the same test seam class as deps.runCommand (real
+    // boundary substitution; safety is proven by real file assertions).
+    const copyDir = deps.copyDir ?? cpSync;
+    let backupError: string | undefined;
     try {
       rmSync(cacheBackupDir, { recursive: true, force: true });
-      cpSync(versionDir, cacheBackupDir, { recursive: true });
-    } catch {
-      // A failed cache snapshot must not silently disable compensation: the
-      // transaction degrades to file-only restore and says so at rollback.
-      cacheBackupDir = undefined;
+      copyDir(versionDir, cacheBackupDir, { recursive: true });
+      if (workbuddyDigestTree(cacheBackupDir) !== cacheDigestBefore) {
+        backupError = 'the copied backup does not match the current payload (digest mismatch)';
+      }
+    } catch (error) {
+      backupError = error instanceof Error ? error.message : String(error);
+    }
+    if (backupError !== undefined) {
+      try { rmSync(cacheBackupDir, { recursive: true, force: true }); } catch { /* reported below */ }
+      return {
+        ok: false,
+        reason: `workbuddy_cache_backup_failed: could not prove a restorable backup of the current cache payload ${versionDir} — ${backupError}. The upgrade was REFUSED before any replacement: the current payload and the host registration are untouched.`,
+        nextAction: 'Free the storage / close the tools holding the plugin cache files, then re-run the installer. The previous plugin version remains installed and usable.',
+      };
     }
   }
 
   return {
-    evidenceDir: cacheBackupDir ?? '(no pre-existing cache payload — fresh install)',
-    fileSnapshots: snapshots,
-    writtenPaths: [],
-    lastWrittenBytes: new Map(),
-    governanceDir: p.governanceDir,
-    governanceDirExistedBefore,
-    cacheVersionDir: versionDir,
-    cacheExisted,
-    cacheBackupDir,
-    cacheDigestBefore,
-    cacheDigestAfterRegistration: undefined,
+    ok: true,
+    txn: {
+      evidenceDir: cacheExisted
+        ? (cacheBackupDir ?? '(pre-install backup unavailable)')
+        : '(no pre-existing cache payload — fresh install)',
+      fileSnapshots: snapshots,
+      writtenPaths: [],
+      lastWrittenBytes: new Map(),
+      governanceDir: p.governanceDir,
+      governanceDirExistedBefore,
+      cacheVersionDir: versionDir,
+      cacheExisted,
+      cacheBackupDir,
+      cacheDigestBefore,
+      cacheDigestAfterRegistration: undefined,
+    },
   };
 }
 
@@ -634,7 +669,20 @@ function restoreWorkbuddyFileSnapshot(txn: WorkbuddyInstallTxn, filePath: string
   }
 }
 
-/** Restore the cache payload snapshot. Returns an error detail or undefined. */
+/** Restore the cache payload snapshot. Returns an error detail or undefined.
+ *
+ * 2026-11-08 P1 ordering fix — the restore NEVER deletes the current payload
+ * before its replacement material is proven:
+ *   1. the pre-install backup must EXIST,
+ *   2. its content must digest-match the digest recorded at transaction open,
+ *   3. the restore is staged into an isolated temp dir and the STAGED copy is
+ *      digest-verified,
+ *   4. only then is the current payload swapped out via renames (no window
+ *      where the version dir is absent), and a failed second rename puts the
+ *      current payload back in place.
+ * A missing or corrupted backup REFUSES the destructive step: the current
+ * payload is preserved as-is and the caller reports ROLLBACK_INCOMPLETE —
+ * it never claims the previous version was restored. */
 function restoreWorkbuddyCacheSnapshot(txn: WorkbuddyInstallTxn): string | undefined {
   if (txn.cacheVersionDir === undefined) return undefined;
   if (txn.cacheDigestAfterRegistration === undefined) {
@@ -656,12 +704,59 @@ function restoreWorkbuddyCacheSnapshot(txn: WorkbuddyInstallTxn): string | undef
   if (currentDigest === txn.cacheDigestBefore) return undefined;
   try {
     if (txn.cacheExisted && txn.cacheDigestBefore !== undefined) {
-      rmSync(txn.cacheVersionDir, { recursive: true, force: true });
-      if (txn.cacheBackupDir === undefined) return 'cache: pre-install evidence copy missing — restore skipped';
-      cpSync(txn.cacheBackupDir, txn.cacheVersionDir, { recursive: true });
+      // 1+2. Verify the backup BEFORE touching the current payload.
+      if (txn.cacheBackupDir === undefined) {
+        return 'cache: pre-install backup missing — the CURRENT payload is preserved untouched; restore refused';
+      }
+      let backupDigest: string;
+      try {
+        backupDigest = workbuddyDigestTree(txn.cacheBackupDir);
+      } catch {
+        return 'cache: pre-install backup unreadable — the CURRENT payload is preserved untouched; restore refused';
+      }
+      if (backupDigest !== txn.cacheDigestBefore) {
+        return 'cache: pre-install backup digest mismatch — the CURRENT payload is preserved untouched; restore refused';
+      }
+      // 3. Stage the replacement material in isolation and verify the staged copy.
+      const cacheParent = path.dirname(path.resolve(txn.cacheVersionDir));
+      const staging = path.join(cacheParent, `.pd-restore-${process.pid}-${Date.now()}`);
+      try {
+        rmSync(staging, { recursive: true, force: true });
+        cpSync(txn.cacheBackupDir, staging, { recursive: true });
+        if (workbuddyDigestTree(staging) !== txn.cacheDigestBefore) {
+          try { rmSync(staging, { recursive: true, force: true }); } catch { /* reported below */ }
+          return 'cache: staged restore material failed verification — the CURRENT payload is preserved untouched; restore refused';
+        }
+      } catch (stagingError) {
+        try { rmSync(staging, { recursive: true, force: true }); } catch { /* reported below */ }
+        return 'cache: staging the restore material failed (' + (stagingError instanceof Error ? stagingError.message : String(stagingError)) + ') — the CURRENT payload is preserved untouched; restore refused';
+      }
+      // 4. Swap via renames — the version dir is never absent: current → discard, staged → live.
+      const discard = path.join(cacheParent, `.pd-discard-${process.pid}-${Date.now()}`);
+      try {
+        renameSync(txn.cacheVersionDir, discard);
+      } catch (setAsideError) {
+        try { rmSync(staging, { recursive: true, force: true }); } catch { /* inert residue */ }
+        return 'cache: could not set the current payload aside (' + (setAsideError instanceof Error ? setAsideError.message : String(setAsideError)) + ') — the CURRENT payload is preserved untouched; restore refused';
+      }
+      try {
+        renameSync(staging, txn.cacheVersionDir);
+      } catch (swapError) {
+        // Best effort: put the current payload back in place, never leave the
+        // version dir absent.
+        try {
+          renameSync(discard, txn.cacheVersionDir);
+          try { rmSync(staging, { recursive: true, force: true }); } catch { /* inert residue */ }
+          return 'cache: restore swap failed (' + (swapError instanceof Error ? swapError.message : String(swapError)) + ') — the CURRENT payload was recovered in place';
+        } catch (recoverError) {
+          return 'cache: restore swap failed (' + (swapError instanceof Error ? swapError.message : String(swapError)) + ') and the current payload could NOT be recovered in place (' + (recoverError instanceof Error ? recoverError.message : String(recoverError)) + '); the previous current payload is preserved at ' + discard;
+        }
+      }
+      try { rmSync(discard, { recursive: true, force: true }); } catch { /* inert residue, named below if it matters */ }
       if (workbuddyDigestTree(txn.cacheVersionDir) !== txn.cacheDigestBefore) {
         return 'cache: restored payload digest mismatch — previous version may be unusable';
       }
+      return undefined;
     } else {
       rmSync(txn.cacheVersionDir, { recursive: true, force: true });
     }
@@ -1977,6 +2072,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         const entry = path.join(getInstallLayoutPaths(homeDir()).pdCliDir, 'dist', 'index.js');
         return existsSync(entry) ? entry : undefined;
       }),
+      backupCopyDir: deps.backupCopyDir ?? cpSync,
       runCommand: deps.runCommand ?? ((file, args, opts) => {
         const result = spawnSync(file, [...args], {
           encoding: 'utf-8',
@@ -2140,7 +2236,23 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     //    any LATER stage compensates in reverse order (see
     //    compensateWorkbuddyInstall). Registration-internal failures keep
     //    their own established rollback (directWriteRegistration).
-    const txn = openWorkbuddyInstallTxn(p, payload.version);
+    //    2026-11-08 P1: opening the transaction can itself refuse the
+    //    upgrade — a pre-existing cache whose backup cannot be proven
+    //    restorable aborts the install BEFORE any cache replacement.
+    const opened = openWorkbuddyInstallTxn(p, payload.version, { copyDir: this.deps.backupCopyDir });
+    if (!opened.ok) {
+      // Zero mutations so far (snapshots are read-only; the unusable backup
+      // copy was already cleaned up inside the opener) — report and stop.
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: 'skipped',
+        reason: opened.reason,
+        nextAction: opened.nextAction,
+      };
+    }
+    const { txn } = opened;
     const registration = this.registerPlugin(details, payload.version, payload.defaultEnabled);
     if (!registration.ok) {
       // Registration-internal failures ran their own established rollback

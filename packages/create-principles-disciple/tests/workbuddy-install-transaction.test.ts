@@ -147,6 +147,7 @@ function seedForeignState(): void {
 interface ScenarioDeps {
   pdCliEntry?: () => string | undefined;
   runCommand?: (file: string, args: readonly string[], opts?: { timeoutMs?: number }) => { status: number | null; stdout: string; stderr: string; error?: string };
+  backupCopyDir?: typeof import('node:fs').cpSync;
 }
 
 function freshScenario(deps: ScenarioDeps = {}): WorkBuddyHostInstaller {
@@ -154,6 +155,7 @@ function freshScenario(deps: ScenarioDeps = {}): WorkBuddyHostInstaller {
     homeDir: () => home,
     enginePath: () => undefined,
     pdCliEntry: deps.pdCliEntry ?? (() => undefined),
+    ...(deps.backupCopyDir !== undefined ? { backupCopyDir: deps.backupCopyDir } : {}),
     runCommand: deps.runCommand,
   });
 }
@@ -189,7 +191,7 @@ function captureSeed(withCache: boolean, withGovernance: boolean): SeedState {
 
 function assertResidueFree(expectCacheRemoval: boolean): void {
   const parent = cacheParent();
-  const leftovers = fs.readdirSync(parent).filter((name) => name.startsWith('.pd-staging-') || name.startsWith('.pd-backup-') || name.startsWith('.pd-txn-backup-'));
+  const leftovers = fs.readdirSync(parent).filter((name) => name.startsWith('.pd-staging-') || name.startsWith('.pd-backup-') || name.startsWith('.pd-txn-backup-') || name.startsWith('.pd-restore-') || name.startsWith('.pd-discard-'));
   expect(leftovers).toEqual([]);
   if (expectCacheRemoval) {
     expect(fs.existsSync(cacheVersionDirPath())).toBe(false);
@@ -407,5 +409,108 @@ describe('WorkBuddy install-transaction compensation (real fault injection)', ()
     expect(settings.enabledPlugins[FOREIGN_PLUGIN]).toBe(true);
     expect(settings.enabledPlugins[WORKBUDDY_PLUGIN_KEY]).toBe(false);
     assertResidueFree(false);
+  });
+
+  it('P1-A backup failure REFUSES the upgrade before any cache replacement (real copy-boundary fault)', async () => {
+    seedForeignState();
+    // 0. Reset the shared payload fixture so this test does not depend on
+    //    earlier tests' wrapper mutations (full independence).
+    fs.writeFileSync(path.join(payloadRoot, 'workbuddy-adapter', 'plugin', 'scripts', 'wrapper.cjs'), '// wrapper v1-p1a\n');
+    // 1. Successful first install → a real OLD cache payload exists.
+    const seedInstaller = freshScenario();
+    const first = await seedInstaller.install(installCtx());
+    expect(first.success).toBe(true);
+
+    // 2. Record the OLD cache digest and the full pre-upgrade state.
+    const oldCacheDigest = digestTree(cacheVersionDirPath());
+    const oldSettingsSha = sha256File(settingsPath());
+    const oldRegistrySha = sha256File(registryPath());
+    const oldManifest = fs.readFileSync(manifestPath(), 'utf-8');
+    // A changed same-version payload = this next run is an UPGRADE refresh.
+    fs.writeFileSync(path.join(payloadRoot, 'workbuddy-adapter', 'plugin', 'scripts', 'wrapper.cjs'), '// wrapper p1a-changed\n');
+
+    // 3. Inject a REAL copy-boundary failure for the pre-upgrade backup only
+    //    (the documented seam class of deps.runCommand). Everything else —
+    //    digest computation, snapshot reads, every assertion below — runs
+    //    against the real filesystem.
+    const installer = freshScenario({
+      backupCopyDir: () => {
+        throw new Error('EIO: real copy-boundary failure injected at the backup step');
+      },
+    });
+
+    const result = await installer.install(installCtx());
+    // 4. The upgrade is REFUSED before any replacement — never a fake success.
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('workbuddy_cache_backup_failed');
+    expect(result.reason).toContain('REFUSED');
+    expect(result.nextAction).toContain('previous plugin version remains installed and usable');
+
+    // 5. Real file state: the OLD cache is intact byte-for-byte.
+    expect(digestTree(cacheVersionDirPath())).toEqual(oldCacheDigest);
+    expect(fs.readFileSync(path.join(cacheVersionDirPath(), 'scripts', 'wrapper.cjs'), 'utf8')).toBe('// wrapper v1-p1a\n');
+    // Registration/config state untouched, manifest carries other hosts.
+    expect(sha256File(settingsPath())).toBe(oldSettingsSha);
+    expect(sha256File(registryPath())).toBe(oldRegistrySha);
+    expect(JSON.parse(oldManifest).hosts).toContain('codex');
+    // No unusable-backup or staging residue from the refused attempt.
+    assertResidueFree(false);
+    expect(fs.existsSync(cacheVersionDirPath())).toBe(true);
+  });
+
+  it('P1-B rollback with a LOST backup preserves the current cache (never delete first)', async () => {
+    seedForeignState();
+    // 0. Reset the shared payload fixture (full independence from other tests).
+    fs.writeFileSync(path.join(payloadRoot, 'workbuddy-adapter', 'plugin', 'scripts', 'wrapper.cjs'), '// wrapper v1-p1b\n');
+    // 1. Successful OLD-version install.
+    const seedInstaller = freshScenario();
+    const seeded = await seedInstaller.install(installCtx());
+    expect(seeded.success).toBe(true);
+
+    // 2. Upgrade: the direct-write refresh swaps in a NEW payload; a later
+    //    stage (pd runtime init seam) then DESTROYS the transaction backup
+    //    and fails — the rollback must refuse the destructive step.
+    fs.writeFileSync(path.join(payloadRoot, 'workbuddy-adapter', 'plugin', 'scripts', 'wrapper.cjs'), '// wrapper v2-lost-backup\n');
+
+    const failInitAndLoseBackup = (file: string, args: readonly string[]): { status: number | null; stdout: string; stderr: string } => {
+      if (args.includes('runtime') && args.includes('init')) {
+        const parent = cacheParent();
+        for (const name of fs.readdirSync(parent)) {
+          if (name.startsWith('.pd-txn-backup-')) fs.rmSync(path.join(parent, name), { recursive: true, force: true });
+        }
+        return { status: 1, stdout: '', stderr: 'seam fault: init failed after backup loss' };
+      }
+      return { status: 0, stdout: 'v22', stderr: '' };
+    };
+    const pdCli = path.join(home, 'fake-pd-cli', 'index.js');
+    const installer = freshScenario({ pdCliEntry: () => pdCli, runCommand: failInitAndLoseBackup });
+
+    const result = await installer.install(installCtx());
+    expect(result.success).toBe(false);
+    // 3. Honest verdict: the old version is NOT claimed as restored. The lost
+    //    backup can surface as missing OR digest-mismatch (deleted dir reads
+    //    as an unverifiable digest) — both MUST refuse the destructive step.
+    expect(result.reason).toContain('ROLLBACK_INCOMPLETE');
+    expect(result.reason).toContain('pre-install backup');
+    expect(result.reason).toContain('the CURRENT payload is preserved untouched; restore refused');
+    expect(result.reason).not.toContain('Previous cache and registration state restored');
+
+    // 4. The CURRENT (new) payload was NEVER deleted: the rollback-start state
+    //    IS the completed upgrade, so the live cache must equal the staged
+    //    upgrade payload (minus the per-install mcp-binding timestamp).
+    expect(fs.existsSync(cacheVersionDirPath())).toBe(true);
+    const stripBinding = (tree: Record<string, string>): Record<string, string> => {
+      const copy = { ...tree };
+      delete copy['mcp-binding.json'];
+      return copy;
+    };
+    expect(stripBinding(digestTree(cacheVersionDirPath()))).toEqual(stripBinding(digestTree(path.join(payloadRoot, 'workbuddy-adapter', 'plugin'))));
+    expect(fs.readFileSync(path.join(cacheVersionDirPath(), 'scripts', 'wrapper.cjs'), 'utf8')).toBe('// wrapper v2-lost-backup\n');
+
+    // 5. Evidence + explicit manual-recovery next action (no fake success).
+    expect(result.nextAction).toContain('Do not treat the WorkBuddy plugin as installed');
+    // 6. No restore-staging or discard residue beyond the lost backup itself.
+    const leftovers = fs.readdirSync(cacheParent()).filter((name) => name.startsWith('.pd-restore-') || name.startsWith('.pd-discard-'));
+    expect(leftovers).toEqual([]);
   });
 });
