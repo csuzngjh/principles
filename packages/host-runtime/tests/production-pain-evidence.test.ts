@@ -419,6 +419,10 @@ describe('GFI-COMPLETE-REMOVAL-001 — legacy trajectory databases migrate on th
   it('drops gfi_before/gfi_after and terminalizes only the pending empathy confirmation', async () => {
     const workspaceDir = workspaceWithLegacyGfiTrajectory();
     expect(columnsOf(workspaceDir, 'tool_calls')).toEqual(expect.arrayContaining(['gfi_before', 'gfi_after']));
+    // PRI-1139 gate: the round-trip EXPLICITLY starts at the v1 epoch —
+    // capability detection must judge this database non-canonical, migrate
+    // it, and converge the version row to the current epoch (asserted below).
+    expect(schemaVersionOf(workspaceDir)).toBe(1);
 
     const result = await createProductionHostRuntime().dispatch(failedWrite(workspaceDir));
 
