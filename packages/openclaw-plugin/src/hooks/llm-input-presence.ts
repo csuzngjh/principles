@@ -59,7 +59,11 @@ export function handleLlmInputPresence(params: {
       return;
     }
 
-    const binding = registry.resolveBinding({ runId, sessionId });
+    // PRI-1150 review (D4): the binding query carries the canonical workspace
+    // identity — same runId+sessionId under a different workspace must never
+    // bind across workspaces (producer and consumer use the same registry
+    // normalization: path.resolve).
+    const binding = registry.resolveBinding({ runId, sessionId, workspaceDir: params.workspaceDir });
     const stats = registry.stats();
     const registryFacts = {
       liveSnapshots: binding.status === 'unique' ? 1 : binding.status === 'ambiguous' ? binding.liveSnapshots : 0,
@@ -127,17 +131,29 @@ export function handleLlmInputPresence(params: {
       assemblySeqCandidates: [snapshot.assemblySeq] as number[],
     };
     if (snapshot.expectations.length === 0) {
+      // PRI-1150 review (D3): empty snapshots carry WHY they are empty —
+      // confirmed zero-injection, an unavailable shared frozen field, a
+      // fallback that removed the target, a degraded over-limit registration,
+      // or generation failure. None of these may be read as a binding success
+      // or conflated with each other.
+      const kindReason = snapshot.emptyKind === 'shared_field_absent'
+        ? 'shared_field_absent'
+        : snapshot.emptyKind === 'target_removed_by_fallback'
+          ? 'target_removed_by_fallback'
+          : snapshot.emptyKind === 'generation_failed'
+            ? 'generation_failed'
+            : 'empty_snapshot';
       params.eventLog?.recordPromptPresenceObserved({
         ...base,
         binding: 'unique',
         ...registryFactsWithSeq,
         liveSnapshots: 1,
         checked: false,
-        reason: snapshot.overflowCount > 0 ? 'snapshot_over_limit' : 'empty_snapshot',
+        reason: snapshot.degradedReason ?? kindReason,
         ...(snapshot.overflowCount > 0 ? { expectationsOverflow: snapshot.overflowCount } : {}),
-        nextAction: snapshot.overflowCount > 0
+        nextAction: snapshot.degradedReason
           ? 'the frozen snapshot exceeded the registration body cap and was degraded'
-          : 'the frozen assembly carried no expectations (nothing injected by PD this build)',
+          : `frozen assembly carried no expectations (${snapshot.emptyKind ?? 'none_injected'})`,
       });
       return;
     }

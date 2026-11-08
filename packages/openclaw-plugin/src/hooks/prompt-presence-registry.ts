@@ -19,6 +19,8 @@
  * - Memory only. Nothing here is persisted, logged or emitted with body text.
  */
 
+import * as path from 'node:path';
+
 /** Central bound constants (single authority; all limits observable via verdicts). */
 export const PRESENCE_REGISTRY_LIMITS = {
   /** Distinct runId+sessionId keys kept at once. Chosen above any plausible concurrent-run count on one host. */
@@ -50,6 +52,17 @@ export interface PresenceSnapshot {
   /** Host-runtime-side overflow reported with this assembly (entries dropped at its own cap). */
   overflowCount: number;
   bodyBytes: number;
+  /**
+   * PRI-1150 review: present when this snapshot was registered DEGRADED —
+   * its expectation set exceeded the per-snapshot body cap, so the frozen
+   * set is empty and the observation can only be unknown:snapshot_over_limit.
+   * Distinguishes "over-limit" from "nothing injected" (empty_snapshot).
+   */
+  degradedReason?: 'snapshot_over_limit';
+  /** Why this snapshot's expectation set is empty/degraded (design revision: distinct sources). */
+  emptyKind?: 'none_injected' | 'shared_field_absent' | 'target_removed_by_fallback' | 'generation_failed';
+  /** Canonical workspace identity this snapshot belongs to (existing path.resolve mechanism). */
+  workspaceId: string;
 }
 
 export type BindingStatus =
@@ -83,6 +96,20 @@ function bodyBytesOf(expectations: readonly RegisteredExpectation[]): number {
   return total;
 }
 
+/**
+ * PRI-1150 review (D4): canonical workspace identity via the SAME existing
+ * normalization the workspace resolver uses for comparisons (path.resolve).
+ * Unknown/absent workspace dirs get a single shared unknown identity — the
+ * binding verdict stays honest (unknown) while the identity fact remains
+ * distinct from any real workspace.
+ */
+function resolveWorkspaceIdentity(workspaceDir: string | undefined): string {
+  if (!workspaceDir || typeof workspaceDir !== 'string') {
+    return '\u0001unknown-workspace';
+  }
+  return path.resolve(workspaceDir);
+}
+
 export class PromptPresenceRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
   /** Bounded marker: keys whose snapshot history was lost, surviving entry removal. */
@@ -91,6 +118,17 @@ export class PromptPresenceRegistry {
   private totalBodyBytes = 0;
   private evictedCount = 0;
   private expiredCount = 0;
+  /**
+   * PRI-1150 review (D2): count of lossy markers dropped by the marker table's
+   * own capacity. When > 0, a re-registered key with no surviving marker
+   * CANNOT prove complete candidate history — such registrations start
+   * history-incomplete (conservative). Documented scope/recovery: this only
+   * affects keys re-registered after >MAX_KEYS whole-key evictions (heavy
+   * churn); it never disables observations (events still emit with
+   * history_incomplete), and a process restart resets the in-memory registry
+   * entirely. No unbounded tombstone table is introduced.
+   */
+  private lossyMarkersDropped = 0;
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -106,8 +144,16 @@ export class PromptPresenceRegistry {
     };
   }
 
-  private keyOf(runId: string, sessionId: string): string {
-    return `${runId}\u0000${sessionId}`;
+  private keyOf(runId: string, sessionId: string, workspaceDir?: string): string {
+    // PRI-1150 review (D4): the registry is process-wide, so the key MUST
+    // carry the canonical workspace identity. Normalization uses the SAME
+    // existing mechanism as workspace-dir-validation / the resolver
+    // (path.resolve) — no custom lowercasing or concatenation.
+    return `${resolveWorkspaceIdentity(workspaceDir)}\u0000${runId}\u0000${sessionId}`;
+  }
+
+  private workspaceIdOf(workspaceDir?: string): string {
+    return resolveWorkspaceIdentity(workspaceDir);
   }
 
   /** Drops TTL-expired snapshots; returns true when any expired (history loss). */
@@ -137,13 +183,15 @@ export class PromptPresenceRegistry {
   private pushLossyKey(key: string): void {
     if (this.lossyKeys.has(key)) return;
     this.lossyKeys.set(key, true);
-    // Bounded marker table: drop the oldest marker when over capacity. A
-    // dropped marker can only make binding MORE conservative in the rare
-    // beyond-64-concurrent-runs case, never less.
+    // PRI-1150 review (D2): a DROPPED marker is itself a loss fact we can no
+    // longer attribute to a key. Any subsequent re-registration of an
+    // unmarked-and-absent key starts history-incomplete (see
+    // registerAssemblySnapshot) — conservative, bounded, and documented.
     while (this.lossyKeys.size > PRESENCE_REGISTRY_LIMITS.MAX_KEYS) {
       const oldest = this.lossyKeys.keys().next();
       if (oldest.done) break;
       this.lossyKeys.delete(oldest.value);
+      this.lossyMarkersDropped += 1;
     }
   }
 
@@ -197,26 +245,36 @@ export class PromptPresenceRegistry {
     sessionId: string;
     expectations: readonly RegisteredExpectation[];
     overflowCount?: number;
+    /** Canonical workspace identity (existing path.resolve mechanism); scopes the key. */
+    workspaceDir?: string;
+    /** Why this assembly's expectation set is empty/degraded (distinct sources, design revision). */
+    emptyKind?: PresenceSnapshot['emptyKind'];
   }): { registered: boolean; degradedReason?: 'snapshot_over_limit'; assemblySeq?: number } {
     const nowMs = this.now();
-    const key = this.keyOf(params.runId, params.sessionId);
+    const key = this.keyOf(params.runId, params.sessionId, params.workspaceDir);
     const bodyBytes = bodyBytesOf(params.expectations);
     const overLimit = bodyBytes > PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOT_BODY_BYTES;
 
     this.enforceGlobalCapsLocked();
-    const lossBefore = this.lossyKeys.get(key) === true;
     let entry = this.entries.get(key);
-    if (!entry) {
+    // PRI-1150 review (D1): sweep BEFORE reading the loss state — a TTL sweep
+    // triggered by THIS registration is itself a history-loss fact that must
+    // poison the rebuilt entry (the old code read lossBefore first and
+    // whitewashed the sweep).
+    let entrySweptLoss = false;
+    if (entry) {
+      entrySweptLoss = this.sweepExpiredLocked(key, entry, nowMs);
+    }
+    const lossBefore =
+      this.lossyKeys.get(key) === true ||
+      // A dropped lossy MARKER (D2) or a swept loss (D1) means candidate
+      // history cannot be proven complete for this key.
+      this.lossyMarkersDropped > 0 ||
+      entrySweptLoss;
+    if (!entry || !this.entries.has(key)) {
       entry = { snapshots: [], nextAssemblySeq: 0, historyComplete: !lossBefore };
       this.entries.set(key, entry);
       this.lossyKeys.delete(key);
-    } else {
-      this.sweepExpiredLocked(key, entry, nowMs);
-      if (!this.entries.has(key)) {
-        entry = { snapshots: [], nextAssemblySeq: 0, historyComplete: !lossBefore };
-        this.entries.set(key, entry);
-        this.lossyKeys.delete(key);
-      }
     }
     if (lossBefore) {
       // Re-registration never erases a past history loss for this key.
@@ -224,33 +282,26 @@ export class PromptPresenceRegistry {
     }
 
     const assemblySeq = ++entry.nextAssemblySeq;
-    if (overLimit) {
-      // Keep an observable degraded marker instead of vanishing: callbacks
-      // resolve it to unknown:snapshot_over_limit (bound uniquely — the fact
-      // is preserved and remains visible, nothing was dropped from history).
-      entry.snapshots.push({
-        assemblySeq,
-        frozenAtMs: nowMs,
-        expectations: [],
-        overflowCount: params.overflowCount ?? 0,
-        bodyBytes: 0,
-      });
-      this.totalSnapshots += 1;
-      this.enforceGlobalCapsLocked();
-      return { registered: true, degradedReason: 'snapshot_over_limit', assemblySeq };
-    }
-
+    // PRI-1150 review (D5): degraded and normal snapshots share ONE capacity
+    // path — per-key, global-snapshot, global-byte and key-count caps all
+    // apply to both, and the degraded fact is carried on the snapshot itself
+    // (never guessed from an empty array or an overflow count).
+    const degradedReason = overLimit ? ('snapshot_over_limit' as const) : undefined;
     const snapshot: PresenceSnapshot = {
       assemblySeq,
       frozenAtMs: nowMs,
-      expectations: params.expectations.map((expectation) => ({ ...expectation })),
+      expectations: overLimit ? [] : params.expectations.map((expectation) => ({ ...expectation })),
       overflowCount: params.overflowCount ?? 0,
-      bodyBytes,
+      bodyBytes: overLimit ? 0 : bodyBytes,
+      ...(degradedReason ? { degradedReason } : {}),
+      ...(params.emptyKind ? { emptyKind: params.emptyKind } : {}),
+      workspaceId: this.workspaceIdOf(params.workspaceDir),
     };
     entry.snapshots.push(snapshot);
     this.totalSnapshots += 1;
-    this.totalBodyBytes += bodyBytes;
-    // Per-key capacity: dropping older snapshots of this key is history loss.
+    if (!overLimit) this.totalBodyBytes += bodyBytes;
+    // Per-key capacity (unified): dropping older snapshots of this key —
+    // normal or degraded — is history loss.
     while (entry.snapshots.length > PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOTS_PER_KEY) {
       const dropped = entry.snapshots.shift();
       if (!dropped) break;
@@ -260,12 +311,12 @@ export class PromptPresenceRegistry {
       entry.historyComplete = false;
     }
     this.enforceGlobalCapsLocked();
-    return { registered: true, assemblySeq };
+    return { registered: true, degradedReason, assemblySeq };
   }
 
-  resolveBinding(params: { runId: string; sessionId: string }): BindingVerdict {
+  resolveBinding(params: { runId: string; sessionId: string; workspaceDir?: string }): BindingVerdict {
     const nowMs = this.now();
-    const key = this.keyOf(params.runId, params.sessionId);
+    const key = this.keyOf(params.runId, params.sessionId, params.workspaceDir);
     const entry = this.entries.get(key);
     if (!entry) {
       return this.lossyKeys.has(key) ? { status: 'history_incomplete' } : { status: 'no_key' };
@@ -293,6 +344,7 @@ export class PromptPresenceRegistry {
     this.totalBodyBytes = 0;
     this.evictedCount = 0;
     this.expiredCount = 0;
+    this.lossyMarkersDropped = 0;
   }
 }
 

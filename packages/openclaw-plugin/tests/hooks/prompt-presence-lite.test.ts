@@ -64,10 +64,23 @@ describe('prompt presence lite checker (Path A minimal, single-string observatio
     expect(check.limitsExceeded?.observationChars).toBeGreaterThan(32 * 1024 * 1024);
   });
 
-  it('unparseable observation (non-string) is reported, not treated as absence', () => {
-    const check = checkAssemblyPresence({ observedText: undefined, expectations: [expectation()] });
-    expect(check.checked).toBe(false);
+  it('unparseable observation (non-string) reports unparseable_observation, distinguishing shapes', () => {
+    // Defect 6: checked=false must carry a reason, and undefined/null/object
+    // must not be conflated with a valid empty string.
+    for (const shape of [undefined, null, { structured: true }, 42]) {
+      const check = checkAssemblyPresence({ observedText: shape as unknown, expectations: [expectation()] });
+      expect(check.checked).toBe(false);
+      expect(check.reason).toBe('unparseable_observation');
+      expect(check.results[0]).toMatchObject({ outcome: 'unknown', reason: 'unparseable_observation' });
+    }
+  });
+
+  it('valid empty string is a complete observation: full check → checked_missing (not unparseable)', () => {
+    const check = checkAssemblyPresence({ observedText: '', expectations: [expectation()] });
+    expect(check.checked).toBe(true);
     expect(check.observationChars).toBe(0);
+    expect(check.results[0]).toMatchObject({ outcome: 'checked_missing' });
+    expect(check.reason).toBeUndefined();
   });
 
   it('internal failure surfaces as check_failed without throwing', () => {

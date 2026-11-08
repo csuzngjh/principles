@@ -27,6 +27,7 @@ describe('PRI-1150 end-to-end: freeze → llm_input handler → event (productio
     registry.registerAssemblySnapshot({
       runId: 'run-e2e',
       sessionId: 'session-e2e',
+      workspaceDir: '/fake/workspace',
       expectations: [{ activationId: 'act_e2e', bodyText: BODY, bodyChars: BODY.length, bodyComplete: true }],
     });
     const { recorded, eventLog } = makeHarness();
@@ -65,11 +66,11 @@ describe('PRI-1150 end-to-end: freeze → llm_input handler → event (productio
     const registry = getPromptPresenceRegistry();
     registry.resetForTest();
     registry.registerAssemblySnapshot({
-      runId: 'run-amb', sessionId: 'session-amb',
+      runId: 'run-amb', sessionId: 'session-amb', workspaceDir: '/fake/workspace',
       expectations: [{ activationId: 'act_a', bodyText: 'body a', bodyChars: 7, bodyComplete: true }],
     });
     registry.registerAssemblySnapshot({
-      runId: 'run-amb', sessionId: 'session-amb',
+      runId: 'run-amb', sessionId: 'session-amb', workspaceDir: '/fake/workspace',
       expectations: [{ activationId: 'act_b', bodyText: 'body b', bodyChars: 7, bodyComplete: true }],
     });
     const { recorded, eventLog } = makeHarness();
@@ -94,7 +95,7 @@ describe('PRI-1150 end-to-end: freeze → llm_input handler → event (productio
     const registry = getPromptPresenceRegistry();
     registry.resetForTest();
     registry.registerAssemblySnapshot({
-      runId: 'run-late', sessionId: 'session-late',
+      runId: 'run-late', sessionId: 'session-late', workspaceDir: '/fake/workspace',
       expectations: [{ activationId: 'act_old', bodyText: 'old body', bodyChars: 8, bodyComplete: true }],
     });
     const { recorded, eventLog } = makeHarness();
@@ -102,7 +103,7 @@ describe('PRI-1150 end-to-end: freeze → llm_input handler → event (productio
     // registering with a TTL-elapsed timestamp is not exposed — instead verify
     // through the public behavior: re-registering after expiry keeps loss.
     registry.registerAssemblySnapshot({
-      runId: 'run-late', sessionId: 'session-late',
+      runId: 'run-late', sessionId: 'session-late', workspaceDir: '/fake/workspace',
       expectations: [{ activationId: 'act_new', bodyText: 'new body', bodyChars: 8, bodyComplete: true }],
     });
     handleLlmInputPresence({

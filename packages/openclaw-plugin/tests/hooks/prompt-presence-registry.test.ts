@@ -130,3 +130,78 @@ describe('prompt presence registry (PRI-1150, owner-amended rules)', () => {
     expect(registry.resolveBinding({ runId: 'same-run', sessionId: 'session-2' }).status).toBe('no_key');
   });
 });
+
+// ── Review-round defect tests (red-first) ──
+
+describe('prompt presence registry — review round (defects 1/2/4/5)', () => {
+  it('D1: TTL sweep during registration must NOT whiten history loss', () => {
+    let clock = 1_000_000;
+    const registry = new PromptPresenceRegistry(() => clock);
+    registry.registerAssemblySnapshot({ runId: 'r-d1', sessionId: 's1', expectations: [expectation('act_a')] });
+    clock += PRESENCE_REGISTRY_LIMITS.SNAPSHOT_TTL_MS + 1;
+    // No resolveBinding in between — the sweep happens INSIDE registration.
+    registry.registerAssemblySnapshot({ runId: 'r-d1', sessionId: 's1', expectations: [expectation('act_b')] });
+    const verdict = registry.resolveBinding({ runId: 'r-d1', sessionId: 's1' });
+    expect(verdict.status).toBe('history_incomplete');
+  });
+
+  it('D2: lossy-marker eviction then re-registration must not regain unique (conservative, bounded)', () => {
+    const registry = new PromptPresenceRegistry();
+    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old')] });
+    // Churn enough keys to evict old's ENTRY (key cap) AND its lossy MARKER
+    // (marker FIFO cap): entries churn MAX_KEYS keys, then markers churn
+    // MAX_KEYS more — only then is the marker itself evicted.
+    const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 2 + PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOTS_PER_KEY;
+    for (let i = 0; i < churn; i++) {
+      registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_c_${i}`)] });
+    }
+    // Old key re-registers — the registry cannot prove its candidate history
+    // is complete (its lossy marker was itself evicted by bounded churn).
+    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new')] });
+    expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('history_incomplete');
+    // Continued churn never produces a wrong unique for churned-and-returned keys.
+    for (let i = 0; i < churn; i++) {
+      registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_c2_${i}`)] });
+    }
+    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new2')] });
+    expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('history_incomplete');
+  });
+
+  it('D5: repeated over-limit registrations respect per-key capacity and keep the over-limit fact', () => {
+    const registry = new PromptPresenceRegistry();
+    const huge = 'h'.repeat(600 * 1024);
+    for (let i = 0; i < 10; i++) {
+      const result = registry.registerAssemblySnapshot({
+        runId: 'r-huge10',
+        sessionId: 's1',
+        expectations: [expectation(`act_huge_${i}`, huge)],
+        overflowCount: 0,
+      });
+      expect(result.degradedReason).toBe('snapshot_over_limit');
+    }
+    const stats = registry.stats();
+    expect(stats.snapshots).toBeLessThanOrEqual(PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOTS_PER_KEY);
+    const verdict = registry.resolveBinding({ runId: 'r-huge10', sessionId: 's1' });
+    if (verdict.status === 'unique') {
+      expect(verdict.snapshot.expectations.length).toBeLessThanOrEqual(PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOTS_PER_KEY);
+      expect(verdict.snapshot.degradedReason).toBe('snapshot_over_limit');
+    }
+  });
+
+  it('D4: canonical workspace identity isolates same run/session across workspaces (existing path.resolve mechanism)', () => {
+    const registry = new PromptPresenceRegistry();
+    registry.registerAssemblySnapshot({
+      runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\a',
+      expectations: [expectation('act_a', 'body from A')],
+    });
+    registry.registerAssemblySnapshot({
+      runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\b',
+      expectations: [expectation('act_b', 'body from B')],
+    });
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\a' })).toMatchObject({ status: 'unique' });
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\b' })).toMatchObject({ status: 'unique' });
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:\\.openclaw\\workspace\\c' }).status).toBe('no_key');
+    // Same dir with a different path spelling normalizes to the same key.
+    expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: 'D:/.openclaw/workspace/a/' })).toMatchObject({ status: 'unique' });
+  });
+});

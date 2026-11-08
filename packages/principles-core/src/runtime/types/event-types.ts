@@ -662,6 +662,11 @@ export interface PromptPresenceObservedEventData {
     | 'invalid_body'
     | 'assembly_truncated'
     | 'body_over_limit'
+    | 'check_failed'
+    | 'shared_field_absent'
+    | 'target_removed_by_fallback'
+    | 'generation_failed'
+    | 'workspace_unresolved'
     | 'check_failed';
   results?: {
     activationId: string;
@@ -703,6 +708,10 @@ export const PromptPresenceObservedEventDataSchema = Type.Object({
     Type.Literal('assembly_truncated'),
     Type.Literal('body_over_limit'),
     Type.Literal('check_failed'),
+    Type.Literal('shared_field_absent'),
+    Type.Literal('target_removed_by_fallback'),
+    Type.Literal('generation_failed'),
+    Type.Literal('workspace_unresolved'),
   ])),
   results: Type.Optional(Type.Array(Type.Object({
     activationId: Type.String(),

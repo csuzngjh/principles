@@ -33,7 +33,6 @@ export type PresenceLiteReason =
   | 'observation_over_limit'
   | 'unparseable_observation'
   | 'check_failed';
-
 export interface PresenceLiteResult {
   activationId: string;
   outcome: PresenceLiteOutcome;
@@ -68,7 +67,19 @@ export function checkAssemblyPresence(params: {
     observationChars: typeof params.observedText === 'string' ? params.observedText.length : 0,
   };
   if (typeof params.observedText !== 'string') {
-    return { ...base, results: [] };
+    // PRI-1150 review (D6): an unreadable observation must carry its reason —
+    // undefined/null/object/number are unparseable, never "checked, nothing
+    // found" and never conflated with a valid empty string.
+    return {
+      ...base,
+      reason: 'unparseable_observation',
+      results: (params.expectations ?? []).map((expectation) => ({
+        activationId: expectation.activationId,
+        outcome: 'unknown' as const,
+        reason: 'unparseable_observation' as const,
+        actualBodyChars: expectation.bodyChars,
+      })),
+    };
   }
   try {
     if (params.observedText.length > limits.MAX_OBSERVATION_CHARS) {

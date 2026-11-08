@@ -586,7 +586,7 @@ describe('Adaptive activation — actual local prompt entry', () => {
     // The freeze point registered the snapshot for this run (production side effect).
     const { getPromptPresenceRegistry } = await import('../../src/hooks/prompt-presence-registry.js');
     const registry = getPromptPresenceRegistry();
-    const binding = registry.resolveBinding({ runId, sessionId });
+    const binding = registry.resolveBinding({ runId, sessionId, workspaceDir: tempWorkspaceDir });
     expect(binding.status).toBe('unique');
 
     // The official llm_input callback (simulated event, real production handler
