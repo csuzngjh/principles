@@ -933,11 +933,22 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
         { commonDir, operation: 'worktree-remove', target: wt },
         () => removeWorktreeSafely({ cwd: primary, worktreePath: wt, primaryPath: primary }),
       );
-      expect(result.ok).toBe(false);
-      expect(result.restoredPath).toBe(wt);
-      expect(fs.existsSync(wt)).toBe(true);
-      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
-      expect(fs.existsSync(path.join(wt, 'relative-gitdir.txt'))).toBe(true);
+      if (result.ok) {
+        // Linux git repairs the relative marker to an absolute pointer during
+        // `worktree move`, which makes the pointer provable again — success is
+        // the safe outcome there. The tree and its admin dir are gone.
+        expect(fs.existsSync(wt)).toBe(false);
+        expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(false);
+      } else {
+        // Windows/macOS git keeps the marker relative: the pointer cannot be
+        // proven from the quarantine position, so the helper refuses BEFORE
+        // deleting the tree and restores the worktree intact.
+        expect(result.restoredPath).toBe(wt);
+        expect(fs.existsSync(wt)).toBe(true);
+        expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+        expect(fs.existsSync(path.join(wt, 'relative-gitdir.txt'))).toBe(true);
+        expect(fs.readFileSync(markerFile, 'utf-8')).toContain('gitdir: ' + path.relative(wt, adminDir));
+      }
     } finally {
       // Restore the canonical marker so the fixture stays consistent, using
       // the same r+ write that worked on the way in.

@@ -318,8 +318,14 @@ export function classifyReparsePoints(root) {
     // strict — for a non-lexical target the direction remains UNKNOWN — but
     // existence probes and caller fingerprints must name the real object, not
     // a lexically normalised path that can name a different one (CodeRabbit,
-    // PRI-1143 round 3).
-    const probeTarget = lexical !== null ? canonicalPath(lexical) : null;
+    // PRI-1143 round 3). For a target containing `..`, `path.resolve` would
+    // collapse the components lexically BEFORE the OS ever sees them; the
+    // raw concatenation is handed to realpath so the OS does the resolution.
+    const probeTarget = (() => {
+      if (lexical === null) return null;
+      if (!nonLexical) return canonicalPath(lexical);
+      return canonicalPath(path.dirname(link.path) + path.sep + link.target);
+    })();
     // Both sides come from realpath, so compare case-SENSITIVELY.
     const inside =
       canonicalRoot !== null &&

@@ -703,15 +703,48 @@ export async function removeWorktreeSafely({
     (item) => path.resolve(quarantinePath, path.relative(worktreePath, item))
   );
   if (!statusContainsOnlyExpectedLinkDeletions(quarantineStatus, quarantinePath, expectedDeletedInQuarantine)) {
-    const restored = await restore();
-    return {
-      ok: false,
-      reasonCode: REMOVAL_REASONS.OWNERSHIP_CHANGED,
-      reason: 'a non-cooperating writer modified the worktree after the quarantine move; ' +
-        (restored ? 'worktree restored intact at ' + worktreePath : 'quarantine preserved at ' + quarantinePath),
-      ...(restored ? { restoredPath: worktreePath } : { quarantinePath }),
-      notes,
-    };
+    const expectedInQuarantine = new Set(expectedDeletedInQuarantine.map((item) => normalizeGitPath(item)));
+    const unexpectedPaths = [];
+    if (quarantineStatus !== null) {
+      // Separate DATA from LINKS. A bare reparse point a writer dropped is not
+      // data: unlinking it removes only the link, and the no-follow walker never
+      // follows one — no deletion risk. Anything else (a real file, a directory
+      // with contents) is unknown work and refuses the deletion. A null status
+      // (git itself failed inside the quarantine, e.g. a swapped marker) has
+      // nothing to classify and refuses below.
+      for (const record of quarantineStatus.split('\0').filter(Boolean)) {
+        const resolved = path.resolve(quarantinePath, record.slice(3));
+        if (record.slice(0, 2) === ' D' && expectedInQuarantine.has(normalizeGitPath(resolved))) continue;
+        unexpectedPaths.push(resolved);
+      }
+    }
+    let everyUnexpectedPathIsALink = unexpectedPaths.length > 0;
+    for (const unexpectedPath of unexpectedPaths) {
+      try {
+        if (!fs.lstatSync(unexpectedPath).isSymbolicLink()) {
+          everyUnexpectedPathIsALink = false;
+          break;
+        }
+      } catch {
+        everyUnexpectedPathIsALink = false;
+        break;
+      }
+    }
+    if (!everyUnexpectedPathIsALink) {
+      const restored = await restore();
+      return {
+        ok: false,
+        reasonCode: REMOVAL_REASONS.OWNERSHIP_CHANGED,
+        reason: 'a non-cooperating writer modified the worktree after the quarantine move; ' +
+          (restored ? 'worktree restored intact at ' + worktreePath : 'quarantine preserved at ' + quarantinePath),
+        ...(restored ? { restoredPath: worktreePath } : { quarantinePath }),
+        notes,
+      };
+    }
+    notes.push(
+      'quarantine received only new reparse point(s) after the move (' +
+      unexpectedPaths.length + '): the no-follow walk detaches links without following them, so no data is at risk'
+    );
   }
 
   try {

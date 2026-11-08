@@ -653,7 +653,10 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
       const result = removeResidueTree(tree);
       expect(swapped).toBe(true);
       expect(result.ok).toBe(false);
-      expect(result.error).toContain('was replaced during deletion');
+      // The identity check that fires first differs per platform (Windows
+      // reports the parent replacement; Linux reports the child identity
+      // change through the swapped path) — both are the fail-closed refusal.
+      expect(result.error).toMatch(/(was replaced during deletion|changed identity during deletion)/);
       // The victim behind the swap was never touched.
       expect(fs.readFileSync(path.join(swapTarget, 'keep2.txt'), 'utf-8')).toBe('VICTIM — must survive\n');
     } finally {
