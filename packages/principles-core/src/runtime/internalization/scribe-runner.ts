@@ -16,7 +16,7 @@
  *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
  *   2. resolve Philosopher dependency from dependencyTaskIds
  *   3. fetch Philosopher artifact via PIArtifactStore
- *   4. startRun with outputSchemaRef: 'scribe-output-v1'
+ *   4. startRun with outputSchemaRef: 'scribe-output'
  *   5. pollUntilTerminal
  *   6. fetchOutput → validate as unknown → cast to ScribeOutputV1
  *   7. updateRunOutput → persist serialized output
@@ -28,6 +28,7 @@
 import type { CandidatePrincipleIdentityResolution } from '../adapter/principle-tree-ledger-adapter.js';
 import type { CandidateIdentityPort } from './candidate-identity.js';
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { ScribeOutputV1, ScribeValidator } from './scribe-output.js';
 import { normalizeStringEncodedIntentContract } from './scribe-output.js';
 import type { TaskRecord } from '../task-status.js';
@@ -473,11 +474,11 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       : `${message}${priorErrorsBlock}`;
 
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: finalMessage,
       contextItems: [],
-      outputSchemaRef: 'scribe-output-v1',
+      outputSchemaRef: 'scribe-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

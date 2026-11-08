@@ -255,11 +255,11 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
     server = http.createServer((req, res) => {
       const urlPath = req.url?.split('?')[0] ?? '/';
-      if (!urlPath.startsWith('/api/v1/approvals')) {
+      if (!urlPath.startsWith('/api/approvals')) {
         sendNotFound(res, 'Not found');
         return;
       }
-      const subPath = urlPath.slice('/api/v1/approvals'.length);
+      const subPath = urlPath.slice('/api/approvals'.length);
       asyncHandler(() => handleApprovalsRoute(req, res, tmpDir, subPath))(req, res);
     });
 
@@ -281,11 +281,11 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  // ── 1. GET /api/v1/approvals — default list ────────────────────────────────
+  // ── 1. GET /api/approvals — default list ────────────────────────────────
 
-  describe('GET /api/v1/approvals — default list', () => {
+  describe('GET /api/approvals — default list', () => {
     it('returns only proven channel records (no skill/legacy_channel)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals');
+      const { status, body } = await fetchJson('/api/approvals');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -300,14 +300,14 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('Channel filter — unsupported channels', () => {
     it('rejects ?channel=skill with bad request', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?channel=skill');
+      const { status, body } = await fetchJson('/api/approvals?channel=skill');
       expect(status).toBe(400);
       const rec = requireRecord(body, 'error response');
       expect(rec.success).toBe(false);
     });
 
     it('rejects ?channel=legacy_channel with bad request', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?channel=legacy_channel');
+      const { status, body } = await fetchJson('/api/approvals?channel=legacy_channel');
       expect(status).toBe(400);
       const rec = requireRecord(body, 'error response');
       expect(rec.success).toBe(false);
@@ -318,7 +318,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('Channel filter — proven channels', () => {
     it('filters by prompt', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?channel=prompt');
+      const { status, body } = await fetchJson('/api/approvals?channel=prompt');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -327,7 +327,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('filters by code_tool_hook', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?channel=code_tool_hook');
+      const { status, body } = await fetchJson('/api/approvals?channel=code_tool_hook');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -336,7 +336,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('filters by defer_archive', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?channel=defer_archive');
+      const { status, body } = await fetchJson('/api/approvals?channel=defer_archive');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -349,7 +349,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('POST approve — body validation', () => {
     it('rejects non-JSON body', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/approve', {
+      const { status } = await fetchJson('/api/approvals/test-id/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: 'not json',
@@ -358,7 +358,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('rejects non-object JSON body (string)', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/approve', {
+      const { status } = await fetchJson('/api/approvals/test-id/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify('just a string'),
@@ -367,7 +367,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('rejects non-object JSON body (array)', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/approve', {
+      const { status } = await fetchJson('/api/approvals/test-id/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify([1, 2, 3]),
@@ -376,7 +376,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('rejects non-string note', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/approve', {
+      const { status } = await fetchJson('/api/approvals/test-id/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 42 }),
@@ -389,7 +389,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('POST reject — body validation', () => {
     it('rejects non-JSON body', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/reject', {
+      const { status } = await fetchJson('/api/approvals/test-id/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: 'not json',
@@ -398,7 +398,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('rejects non-object JSON body', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/reject', {
+      const { status } = await fetchJson('/api/approvals/test-id/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(42),
@@ -407,7 +407,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('rejects missing reason', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/reject', {
+      const { status } = await fetchJson('/api/approvals/test-id/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -416,7 +416,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('rejects non-string reason', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/test-id/reject', {
+      const { status } = await fetchJson('/api/approvals/test-id/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 123 }),
@@ -438,7 +438,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('detail returns record with isMvpProven=false for legacy record', async () => {
-      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}`);
+      const { status, body } = await fetchJson(`/api/approvals/${legacyApprovalId}`);
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -449,7 +449,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('approve on unsupported channel returns 403 unsupported_channel', async () => {
-      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${legacyApprovalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'test' }),
@@ -460,7 +460,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('reject on unsupported channel returns 403 unsupported_channel', async () => {
-      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/reject`, {
+      const { status, body } = await fetchJson(`/api/approvals/${legacyApprovalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'test reason for legacy channel rejection' }),
@@ -479,7 +479,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Approvable prompt record (no artifact)',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test approval' }),
@@ -502,7 +502,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
 
       // First approve: refused by the capacity gate because artifact is missing
-      const { status: firstStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status: firstStatus } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'First attempt' }),
@@ -510,14 +510,14 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(firstStatus).toBe(422);
 
       // Verify approval is back to pending (not stuck in approved)
-      const { status: detailStatus, body: detailBody } = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      const { status: detailStatus, body: detailBody } = await fetchJson(`/api/approvals/${approvalId}`);
       expect(detailStatus).toBe(200);
       const detailData = getDataObject(detailBody);
       expect(detailData).toBeDefined();
       expect(getStringField(detailData, 'status')).toBe('pending');
 
       // Re-approve: should also fail for same reason but proves idempotent retry works
-      const { status: retryStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status: retryStatus } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Retry attempt' }),
@@ -531,7 +531,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Rejectable code_tool_hook record',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Test rejection reason for proven channel' }),
@@ -547,7 +547,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('Invalid channel filter', () => {
     it('rejects unknown channel name', async () => {
-      const { status } = await fetchJson('/api/v1/approvals?channel=nonexistent');
+      const { status } = await fetchJson('/api/approvals?channel=nonexistent');
       expect(status).toBe(400);
     });
   });
@@ -562,7 +562,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const tablesBefore = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>;
       const tableNamesBefore = new Set(tablesBefore.map((r) => r.name));
 
-      const { status } = await fetchJson('/api/v1/approvals');
+      const { status } = await fetchJson('/api/approvals');
       expect(status).toBe(200);
 
       const tablesAfter = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>;
@@ -590,11 +590,11 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
       freshServer = http.createServer((req, res) => {
         const urlPath = req.url?.split('?')[0] ?? '/';
-        if (!urlPath.startsWith('/api/v1/approvals')) {
+        if (!urlPath.startsWith('/api/approvals')) {
           sendNotFound(res, 'Not found');
           return;
         }
-        const subPath = urlPath.slice('/api/v1/approvals'.length);
+        const subPath = urlPath.slice('/api/approvals'.length);
         (async () => handleApprovalsRoute(req, res, freshTmp, subPath))().catch((err: unknown) => {
           if (!res.headersSent) {
             sendJson(res, 500, { success: false, error: err instanceof Error ? err.message : 'Internal error' });
@@ -619,7 +619,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('GET list returns 200 with empty items on fresh workspace', async () => {
-      const res = await fetch(`http://127.0.0.1:${freshPort}/api/v1/approvals`);
+      const res = await fetch(`http://127.0.0.1:${freshPort}/api/approvals`);
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = getDataObject(body);
@@ -630,7 +630,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('GET detail returns 404 on fresh workspace', async () => {
-      const res = await fetch(`http://127.0.0.1:${freshPort}/api/v1/approvals/nonexistent-id`);
+      const res = await fetch(`http://127.0.0.1:${freshPort}/api/approvals/nonexistent-id`);
       expect(res.status).toBe(404);
     });
 
@@ -665,11 +665,11 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
       preServer = http.createServer((req, res) => {
         const urlPath = req.url?.split('?')[0] ?? '/';
-        if (!urlPath.startsWith('/api/v1/approvals')) {
+        if (!urlPath.startsWith('/api/approvals')) {
           sendNotFound(res, 'Not found');
           return;
         }
-        const subPath = urlPath.slice('/api/v1/approvals'.length);
+        const subPath = urlPath.slice('/api/approvals'.length);
         (async () => handleApprovalsRoute(req, res, preTmp, subPath))().catch((err: unknown) => {
           if (!res.headersSent) {
             sendJson(res, 500, { success: false, error: err instanceof Error ? err.message : 'Internal error' });
@@ -694,7 +694,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('GET list returns 200 with empty items when approvals table missing', async () => {
-      const res = await fetch(`http://127.0.0.1:${prePort}/api/v1/approvals`);
+      const res = await fetch(`http://127.0.0.1:${prePort}/api/approvals`);
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = getDataObject(body);
@@ -705,13 +705,13 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('GET detail returns 404 when approvals table missing', async () => {
-      const res = await fetch(`http://127.0.0.1:${prePort}/api/v1/approvals/any-id`);
+      const res = await fetch(`http://127.0.0.1:${prePort}/api/approvals/any-id`);
       expect(res.status).toBe(404);
     });
 
     it('GET does not recreate the approvals table', async () => {
       // Hit the list endpoint first
-      const res = await fetch(`http://127.0.0.1:${prePort}/api/v1/approvals`);
+      const res = await fetch(`http://127.0.0.1:${prePort}/api/approvals`);
       expect(res.status).toBe(200);
 
       // Use a raw readonly connection to check — writable SqliteConnection
@@ -728,13 +728,13 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   // ── 12. Edit endpoint validation ────────────────────────────────────────
 
-  describe('POST /api/v1/approvals/:id/edit — validation', () => {
+  describe('POST /api/approvals/:id/edit — validation', () => {
     it('rejects non-JSON body', async () => {
       const approvalId = seedApproval('prompt', 'pending', {
         summary: 'Edit validation test',
       });
 
-      const { status } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: 'not json',
@@ -747,7 +747,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Edit validation test',
       });
 
-      const { status } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify([1, 2, 3]),
@@ -760,7 +760,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Edit validation test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ editReason: 'test reason' }),
@@ -775,7 +775,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Edit validation test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 123, editReason: 'test' }),
@@ -790,7 +790,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Edit validation test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'artifact-new' }),
@@ -805,7 +805,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Edit validation test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: '' }),
@@ -820,7 +820,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Edit validation test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: { text: 'nested' } }),
@@ -831,7 +831,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('returns 404 for nonexistent approval', async () => {
-      const { status } = await fetchJson('/api/v1/approvals/nonexistent-id/edit', {
+      const { status } = await fetchJson('/api/approvals/nonexistent-id/edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: 'test reason' }),
@@ -844,7 +844,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Already approved',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: 'test reason' }),
@@ -859,7 +859,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Legacy channel edit test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${legacyApprovalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'artifact-new', editReason: 'test reason' }),
@@ -877,7 +877,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('Pagination edge cases', () => {
     it('handles invalid page parameter (negative)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?page=-5');
+      const { status, body } = await fetchJson('/api/approvals?page=-5');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -885,7 +885,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('handles invalid page parameter (zero)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?page=0');
+      const { status, body } = await fetchJson('/api/approvals?page=0');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -893,7 +893,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('handles invalid page parameter (NaN)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?page=abc');
+      const { status, body } = await fetchJson('/api/approvals?page=abc');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -901,7 +901,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('handles large page parameter', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?page=999999');
+      const { status, body } = await fetchJson('/api/approvals?page=999999');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -913,7 +913,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('handles invalid pageSize parameter (negative)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?pageSize=-10');
+      const { status, body } = await fetchJson('/api/approvals?pageSize=-10');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -921,7 +921,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('handles pageSize exceeding maximum (100)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?pageSize=500');
+      const { status, body } = await fetchJson('/api/approvals?pageSize=500');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -931,7 +931,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('handles pageSize=0 (no pagination, return all)', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?pageSize=0');
+      const { status, body } = await fetchJson('/api/approvals?pageSize=0');
       expect(status).toBe(200);
       const data = getDataObject(body);
       expect(data).toBeDefined();
@@ -943,7 +943,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('Status filter edge cases', () => {
     it('rejects invalid status value', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?status=invalid_status');
+      const { status, body } = await fetchJson('/api/approvals?status=invalid_status');
       expect(status).toBe(400);
       const rec = requireRecord(body, 'error response');
       expect(rec.success).toBe(false);
@@ -951,7 +951,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('filters by pending status', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?status=pending');
+      const { status, body } = await fetchJson('/api/approvals?status=pending');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -960,7 +960,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     });
 
     it('filters by approved status', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals?status=approved');
+      const { status, body } = await fetchJson('/api/approvals?status=approved');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -974,7 +974,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Rejected approval',
       });
 
-      const { status, body } = await fetchJson('/api/v1/approvals?status=rejected');
+      const { status, body } = await fetchJson('/api/approvals?status=rejected');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -988,7 +988,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Cancelled approval',
       });
 
-      const { status, body } = await fetchJson('/api/v1/approvals?status=cancelled');
+      const { status, body } = await fetchJson('/api/approvals?status=cancelled');
       expect(status).toBe(200);
       const items = getItemsArray(body);
       for (const item of items) {
@@ -1013,13 +1013,13 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(approvalId, `artifact-${approvalId}`, 'prompt', 'low', 'pending', 0.8, new Date().toISOString(), 'Special chars', 'Test');
 
-      const { status } = await fetchJson(`/api/v1/approvals/${encodeURIComponent(approvalId)}`);
+      const { status } = await fetchJson(`/api/approvals/${encodeURIComponent(approvalId)}`);
       expect(status).toBe(200);
     });
 
     it('returns 400 for invalid URI encoding in approval ID', async () => {
       // Invalid URI encoding (%XX with invalid hex)
-      const { status, body } = await fetchJson('/api/v1/approvals/test%ZZ');
+      const { status, body } = await fetchJson('/api/approvals/test%ZZ');
       expect(status).toBe(400);
       const rec = requireRecord(body, 'error response');
       expect(getStringField(rec, 'error')).toBe('invalid_id');
@@ -1034,7 +1034,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(approvalId, `artifact-${approvalId}`, 'prompt', 'low', 'pending', 0.8, new Date().toISOString(), 'Spaces test', 'Test');
 
-      const { status } = await fetchJson(`/api/v1/approvals/${encodeURIComponent(approvalId)}`);
+      const { status } = await fetchJson(`/api/approvals/${encodeURIComponent(approvalId)}`);
       expect(status).toBe(200);
     });
   });
@@ -1047,7 +1047,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Reject empty reason test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: '' }),
@@ -1062,7 +1062,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Already rejected',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Second rejection' }),
@@ -1077,7 +1077,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         summary: 'Already cancelled',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Reject cancelled' }),
@@ -1090,7 +1090,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   // ── 17. Edit-then-approve production path (PRI-447) ───────────────────────
 
-  describe('POST /api/v1/approvals/:id/edit — edit-then-approve flow', () => {
+  describe('POST /api/approvals/:id/edit — edit-then-approve flow', () => {
     it('edits a pending approval to a validated revision and preserves previousArtifactId', async () => {
       const approvalId = `apr-edit-${Date.now()}`;
       const originalArtifactId = `art-original-${Date.now()}`;
@@ -1111,7 +1111,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Fix wording' }),
@@ -1154,7 +1154,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
       // Edit the approval to point at the revision.
-      const { status: editStatus, body: editBody } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status: editStatus, body: editBody } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Activate revised wording' }),
@@ -1165,7 +1165,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(getStringField(editData, 'artifactId')).toBe(revisedArtifactId);
 
       // Approve the edited approval.
-      const { status: approveStatus, body: approveBody } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status: approveStatus, body: approveBody } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Approved after edit' }),
@@ -1205,7 +1205,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: 'art-does-not-exist', editReason: 'Should fail' }),
@@ -1233,7 +1233,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Should fail' }),
@@ -1265,7 +1265,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: unrelatedArtifactId, editReason: 'Should fail' }),
@@ -1293,7 +1293,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
       // Approve first.
-      const { status: approveStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status: approveStatus } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Approve first' }),
@@ -1301,7 +1301,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(approveStatus).toBe(200);
 
       // Edit must fail because approval is no longer pending.
-      const { status: editStatus, body: editBody } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status: editStatus, body: editBody } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Too late' }),
@@ -1331,7 +1331,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedArtifactId, editReason: 'Audit trace' }),
@@ -1366,7 +1366,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
       const payload = { newArtifactId: revisedArtifactId, editReason: 'First edit' };
-      const first = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const first = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1376,7 +1376,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(getStringField(firstData, 'artifactId')).toBe(revisedArtifactId);
       expect(getStringField(firstData, 'previousArtifactId')).toBe(originalArtifactId);
 
-      const second = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const second = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1421,7 +1421,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       await seedPendingApprovalForArtifact(approvalId, originalArtifactId, 'prompt');
 
       // Edit 1: original → v2
-      await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedV2, editReason: 'v2' }),
@@ -1429,7 +1429,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
       // Edit 2: v2 → v3. previousArtifactId SHOULD still point at the ORIGINAL
       // (or at minimum chain v2→original), but the store overwrites it to v2.
-      const { body } = await fetchJson(`/api/v1/approvals/${approvalId}/edit`, {
+      const { body } = await fetchJson(`/api/approvals/${approvalId}/edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newArtifactId: revisedV3, editReason: 'v3' }),
@@ -1443,7 +1443,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
   });
 });
 
-// ── EP002-R4 follow-up #1: POST /api/v1/approvals/:id/reopen ────────────────
+// ── EP002-R4 follow-up #1: POST /api/approvals/:id/reopen ────────────────
 
 describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
   let server: http.Server;
@@ -1540,11 +1540,11 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
     }
     server = http.createServer((req, res) => {
       const urlPath = req.url?.split('?')[0] ?? '/';
-      if (!urlPath.startsWith('/api/v1/approvals')) {
+      if (!urlPath.startsWith('/api/approvals')) {
         sendNotFound(res, 'Not found');
         return;
       }
-      const subPath = urlPath.slice('/api/v1/approvals'.length);
+      const subPath = urlPath.slice('/api/approvals'.length);
       asyncHandler(() => handleApprovalsRoute(req, res, tmpDir, subPath))(req, res);
     });
     await new Promise<void>((resolve) => {
@@ -1564,7 +1564,7 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
   });
 
   it('approved → reopen → pending; a fresh Console approve then re-dispatches (full re-activation semantics)', async () => {
-    const first = await fetchJson('/api/v1/approvals/apr_reopen_approved/reopen', { method: 'POST' });
+    const first = await fetchJson('/api/approvals/apr_reopen_approved/reopen', { method: 'POST' });
     expect(first.status).toBe(200);
     if (!isRecord(first.body) || !isRecord(first.body.data)) throw new Error('bad body');
     expect(first.body.data.status).toBe('pending');
@@ -1572,7 +1572,7 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
 
     // The fresh decision must be a REAL dispatch path: approve with a body —
     // the artifact is validated + prompt channel, so approve → dispatch runs.
-    const second = await fetchJson('/api/v1/approvals/apr_reopen_approved/approve', {
+    const second = await fetchJson('/api/approvals/apr_reopen_approved/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'fresh decision after reopen' }),
@@ -1581,7 +1581,7 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
   });
 
   it('pending → reopen is a 200 no-op with alreadyPending=true (idempotent, not an error)', async () => {
-    const { status, body } = await fetchJson('/api/v1/approvals/apr_reopen_pending/reopen', { method: 'POST' });
+    const { status, body } = await fetchJson('/api/approvals/apr_reopen_pending/reopen', { method: 'POST' });
     expect(status).toBe(200);
     if (!isRecord(body) || !isRecord(body.data)) throw new Error('bad body');
     expect(body.data.alreadyPending).toBe(true);
@@ -1589,14 +1589,14 @@ describe('Approvals API — reopen a terminal approval (EP002-R4)', () => {
   });
 
   it('rejected → reopen → 409 not_reopenable (store only reopens approved rows)', async () => {
-    const { status, body } = await fetchJson('/api/v1/approvals/apr_reopen_rejected/reopen', { method: 'POST' });
+    const { status, body } = await fetchJson('/api/approvals/apr_reopen_rejected/reopen', { method: 'POST' });
     expect(status).toBe(409);
     if (!isRecord(body)) throw new Error('bad body');
     expect(body.error).toBe('not_reopenable');
   });
 
   it('unknown id → reopen → 404', async () => {
-    const { status } = await fetchJson('/api/v1/approvals/apr_reopen_missing/reopen', { method: 'POST' });
+    const { status } = await fetchJson('/api/approvals/apr_reopen_missing/reopen', { method: 'POST' });
     expect(status).toBe(404);
   });
 });

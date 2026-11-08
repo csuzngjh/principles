@@ -2,7 +2,7 @@
  * PRI-320 / CR6: Activation disable route tests
  *
  * Covers:
- * - POST /api/v1/activations/:id/disable validates request body
+ * - POST /api/activations/:id/disable validates request body
  * - Missing confirmed field → 400
  * - confirmed=false → 400
  * - Non-boolean confirmed → 400
@@ -36,7 +36,7 @@ function createMockRequest(
   const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';
   const req = {
     method,
-    url: `/api/v1/activations${options?.subPath ?? ''}`,
+    url: `/api/activations${options?.subPath ?? ''}`,
     [Symbol.asyncIterator]() {
       // Make the request body readable via for-await-of
       const chunks = options?.body !== undefined ? [Buffer.from(bodyStr)] : [];
@@ -111,11 +111,11 @@ describe('Activation disable route', () => {
 
   // ── Request body validation ──────────────────────────────────────────────
 
-  describe('POST /api/v1/activations/:id/disable — request validation', () => {
+  describe('POST /api/activations/:id/disable — request validation', () => {
     it('rejects non-JSON body with 400', async () => {
       const req = {
         method: 'POST',
-        url: '/api/v1/activations/act-001/disable',
+        url: '/api/activations/act-001/disable',
         [Symbol.asyncIterator]() {
           const chunks = [Buffer.from('not-json')];
           let i = 0;
@@ -187,7 +187,7 @@ describe('Activation disable route', () => {
 
   // ── Disable without state.db ─────────────────────────────────────────────
 
-  describe('POST /api/v1/activations/:id/disable — no state.db', () => {
+  describe('POST /api/activations/:id/disable — no state.db', () => {
     it('returns 409 with reason and nextAction when state.db does not exist', async () => {
       const req = createMockRequest('POST', { body: { confirmed: true }, subPath: '/act-001/disable' });
       const res = createMockResponse();
@@ -206,7 +206,7 @@ describe('Activation disable route', () => {
 
   // ── GET still works ──────────────────────────────────────────────────────
 
-  describe('GET /api/v1/activations', () => {
+  describe('GET /api/activations', () => {
     it('returns empty activations when state.db does not exist', async () => {
       const req = createMockRequest('GET', { subPath: '/' });
       const res = createMockResponse();
@@ -220,7 +220,7 @@ describe('Activation disable route', () => {
     });
   });
 
-  describe('GET /api/v1/activations/:id/owner-review', () => {
+  describe('GET /api/activations/:id/owner-review', () => {
     it('returns the production Owner review projection', async () => {
       const conn = new SqliteConnection({ workspaceDir: tempDir, readonly: false });
       const db = conn.getDb();

@@ -80,14 +80,17 @@ describe('check-naming-policy rule gating is explicit (PRI-1136 / PR-6 boundary)
     expect(parsed.gatedRules).toContain('runtime-v2-import');
     expect(parsed.gatedRules).toContain('runtime-v2-identifier');
     expect(parsed.gatedRules).toContain('runtime-v2-config');
-    // PRI-1139 (PR-6) flips the write side; until then this rule must not gate.
-    expect(parsed.gatedRules).not.toContain('versioned-output-ref');
+    // PRI-1139 (PR-6) flipped the write side: every production writer now
+    // uses the version-neutral canonical key, so a versioned literal regresses.
+    expect(parsed.gatedRules).toContain('versioned-output-ref');
   });
 
-  it('pending-rule findings are reported but never fail the build', () => {
+  it('PRI-1139: no pending rules remain — the PR-6 deliverable gated cleanly', () => {
     const parsed = JSON.parse(run('--strict', '--json').stdout);
-    expect(parsed.pendingFindings).toBeGreaterThan(0);
-    for (const finding of parsed.pending) expect(finding.rule).toBe('versioned-output-ref');
+    expect(parsed.pendingFindings).toBe(0);
+    expect(parsed.pending).toEqual([]);
+    // The whole tree, including every runner, writes the canonical keys.
+    expect(parsed.inventory['versioned-output-ref']).toBe(0);
     expect(run('--strict').status).toBe(0);
   });
 });
@@ -147,16 +150,24 @@ describe('check-naming-policy controlled scan roots (PR #2367 CodeRabbit #3/#4/#
     expect(parsed.findings.some((f) => f.rule === 'runtime-v2-import')).toBe(true);
   });
 
-  it('counts an outputSchemaRef whose value is on the next line (#6) without gating it yet', () => {
+  it('counts an outputSchemaRef whose value is on the next line (#6) and gates it (PRI-1139)', () => {
     const root = tempScanRoot();
     fs.writeFileSync(path.join(root, 'runner.ts'), "const input = {\n  outputSchemaRef:\n    'foo-output-v1',\n};\n");
     const result = runRoot(root, '--strict', '--json');
-    // PRI-1136: the rule stays in the inventory but is a PRI-1139 deliverable,
-    // so a hit here is pending — reported, not fatal.
-    expect(result.status).toBe(0);
+    // PRI-1139: the write-side cutover is complete, so a versioned literal
+    // ANYWHERE in production source is now a fatal regression.
+    expect(result.status).toBe(1);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.inventory['versioned-output-ref']).toBeGreaterThan(0);
-    expect(parsed.pending.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
+    expect(parsed.findings.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
+  });
+  it('gates a future -v3 spelling too — version digits are not capped at 1-2', () => {
+    const root = tempScanRoot();
+    fs.writeFileSync(path.join(root, 'runner.ts'), "const input = { outputSchemaRef: 'foo-output-v3' };\n");
+    const result = runRoot(root, '--strict', '--json');
+    expect(result.status).toBe(1);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.findings.some((f) => f.rule === 'versioned-output-ref')).toBe(true);
   });
 });
 
@@ -179,16 +190,21 @@ describe('check-naming-policy config surface (PRI-1136 scan redesign)', () => {
       'runtime-v2-import',
       'runtime-v2-identifier',
       'runtime-v2-config',
+      'versioned-output-ref',
     ]);
+    expect(registry.namingPolicy.pendingRules).toEqual([]);
   });
 });
 
 describe('check-naming-policy inventory vs exemptions (PR #2367 CodeRabbit #5)', () => {
   it('exempt server/UI files still contribute their /api/v1 route literals', () => {
     const parsed = JSON.parse(run('--json').stdout);
-    // server/index.ts and ui/api.ts hold the bulk of the '/api/v1/' literals;
-    // both files are gated-rule exemptions but MUST appear in the inventory.
-    expect(parsed.inventory['api-v1-route']).toBeGreaterThanOrEqual(130);
+    // PRI-1139: the client switched to canonical /api paths and the server
+    // implements the deprecated alias with a single strip, so the inventory
+    // collapsed from 130+ to the alias mechanism itself. The rule stays
+    // inventory-only: the alias is a frozen wire literal kept >=2 releases.
+    expect(parsed.inventory['api-v1-route']).toBeGreaterThanOrEqual(1);
+    expect(parsed.inventory['api-v1-route']).toBeLessThanOrEqual(10);
   });
 
   it('the default scan surface includes the root plugin payload', () => {

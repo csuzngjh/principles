@@ -81,7 +81,7 @@ describe('fetchPrincipleReceipts', () => {
     // Verify the real request shape (path encoding).
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
     const [url] = vi.mocked(fetch).mock.calls[0]!;
-    expect(url).toBe('/api/v1/receipts/principles/princ%2FA%201');
+    expect(url).toBe('/api/receipts/principles/princ%2FA%201');
   });
 
   it('filters malformed event elements instead of failing the whole payload (rc-4)', async () => {
@@ -162,7 +162,7 @@ describe('fetchReceiptCounts', () => {
     for (const k of Object.keys(sessionStore)) delete sessionStore[k];
   });
 
-  it('GETs /api/v1/receipts/counts and returns validated per-principle entries', async () => {
+  it('GETs /api/receipts/counts and returns validated per-principle entries', async () => {
     vi.mocked(fetch).mockResolvedValue(okEnvelope({
       status: 'ok',
       coverage: coverage(),
@@ -181,7 +181,7 @@ describe('fetchReceiptCounts', () => {
       expect(result.data.counts[1]?.presenceCount).toBe(3);
     }
     const [url] = vi.mocked(fetch).mock.calls[0]!;
-    expect(url).toBe('/api/v1/receipts/counts');
+    expect(url).toBe('/api/receipts/counts');
   });
 
   it('skips count entries missing principleId (rc-4 element-wise validation)', async () => {

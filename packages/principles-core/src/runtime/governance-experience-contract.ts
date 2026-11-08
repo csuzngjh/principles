@@ -5,6 +5,7 @@ import {
   SourceRefSchema,
 } from './governance-projection-contract.js';
 import { GovernanceTimestampSchema } from './governance-timestamp-schema.js';
+import { RuntimeContractSchemaVersionSchema } from './schema-version.js';
 
 // Governance Experience Snapshot v1.5.1 contract (PRI-584).
 //
@@ -106,7 +107,7 @@ export const FrontierEvidenceSchema = Type.Object({
   sampleRefs: Type.Array(SourceRefSchema, { maxItems: 10 }),
 }, { additionalProperties: false });
 export const GovernanceExperienceInputsSchema = Type.Object({
-  schemaVersion: Type.Literal('1'),
+  schemaVersion: RuntimeContractSchemaVersionSchema, // PRI-1139: 'current' writes, legacy '1' reads
   asOf: TimestampSchema,
   workspaceHash: NonEmptyStringSchema,
   governanceViews: Type.Array(GovernanceViewInputSchema),
@@ -219,7 +220,7 @@ export const GovernanceExperienceSummarySchema = Type.Object({
   nextActionCode: GovernanceExperienceNextActionCodeSchema,
 }, { additionalProperties: false });
 export const GovernanceExperienceSnapshotSchema = Type.Object({
-  schemaVersion: Type.Literal('1'),
+  schemaVersion: RuntimeContractSchemaVersionSchema, // PRI-1139: 'current' writes, legacy '1' reads
   snapshotId: NonEmptyStringSchema,
   asOf: TimestampSchema,
   summary: GovernanceExperienceSummarySchema,

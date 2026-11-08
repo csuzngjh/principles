@@ -33,6 +33,7 @@ import type {
   OwnerSourceRef, Reason, StringField,
 } from './owner-decision-view-contract.js';
 import { OwnerDecisionViewCoreSchema } from './owner-decision-view-contract.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION, RuntimeContractSchemaVersionSchema } from '../schema-version.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
 const Timestamp = GovernanceFactsSchema.properties.asOf;
@@ -89,7 +90,7 @@ export const OwnerDecisionApplicationsSchema = Type.Object({
   })),
 });
 export const OwnerDecisionInputsSchema = Type.Object({
-  schemaVersion: Type.Literal('1'),
+  schemaVersion: RuntimeContractSchemaVersionSchema, // PRI-1139: 'current' writes, legacy '1' reads
   principleId: NonEmptyString,
   asOf: Timestamp,
   ledger: Type.Object({
@@ -738,7 +739,7 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
         semantic: 'approve',
         label: '批准',
         targetRefs: subjectFull.targetRefs,
-        serviceOperation: 'POST /api/v1/approvals/:id/approve',
+        serviceOperation: 'POST /api/approvals/:id/approve',
         channel: subject.channel,
         assessedAt: capturedAt,
         requirements: [{ name: 'note', ownerText: '可以附加备注（可选）。', required: false }],
@@ -754,7 +755,7 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
       semantic: 'reject',
       label: '拒绝',
       targetRefs: subjectFull.targetRefs,
-      serviceOperation: 'POST /api/v1/approvals/:id/reject',
+      serviceOperation: 'POST /api/approvals/:id/reject',
       channel: subject.channel,
       assessedAt: capturedAt,
       requirements: [{ name: 'reason', ownerText: '需要填写拒绝原因。', required: true }],
@@ -770,7 +771,7 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
       semantic: 'edit_approval',
       label: '替换审批工件',
       targetRefs: subjectFull.targetRefs,
-      serviceOperation: 'POST /api/v1/approvals/:id/edit',
+      serviceOperation: 'POST /api/approvals/:id/edit',
       channel: subject.channel,
       assessedAt: capturedAt,
       requirements: [
@@ -793,7 +794,7 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
       semantic: 'disable',
       label: '停止此执行方式今后的影响',
       targetRefs: [activationRef],
-      serviceOperation: 'POST /api/v1/activations/:id/disable',
+      serviceOperation: 'POST /api/activations/:id/disable',
       channel: row.channel,
       assessedAt: capturedAt,
       requirements: [{ name: 'confirmed', ownerText: '需要明确确认（confirmed=true）。', required: true }],
@@ -933,7 +934,7 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
   })();
 
   const view: OwnerDecisionViewCore = {
-    schemaVersion: '1',
+    schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION,
     principleId,
     asOf,
     sourceReadStatus,
@@ -958,9 +959,9 @@ export function deriveOwnerDecisionView(rawInput: unknown): OwnerDecisionViewCor
     technicalDetails: {
       available: true,
       links: [
-        { kind: 'governance', target: `/api/v1/principles/${principleId}/governance`, reason: '完整治理投影（任务图、时间线、数据质量）。' },
-        { kind: 'trajectory', target: `/api/v1/principles/${principleId}/trajectory`, reason: '六阶段轨迹（证据→诊断→提案→评审→部署→行为）。' },
-        { kind: 'receipts', target: `/api/v1/principles/${principleId}/receipts`, reason: '行为回执与证据覆盖。' },
+        { kind: 'governance', target: `/api/principles/${principleId}/governance`, reason: '完整治理投影（任务图、时间线、数据质量）。' },
+        { kind: 'trajectory', target: `/api/principles/${principleId}/trajectory`, reason: '六阶段轨迹（证据→诊断→提案→评审→部署→行为）。' },
+        { kind: 'receipts', target: `/api/principles/${principleId}/receipts`, reason: '行为回执与证据覆盖。' },
       ],
       warnings: [],
     },

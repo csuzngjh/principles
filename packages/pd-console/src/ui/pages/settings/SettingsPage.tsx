@@ -220,7 +220,7 @@ export function SettingsPage() {
 
   // spec 2026-06-30 §12.5: load new_user_onboarding flag state from config summary.
   // Non-blocking — failures keep the toggle disabled (null) and surface a toast
-  // (rc-9: no silent fallback). The flag list comes from GET /api/v1/config/summary
+  // (rc-9: no silent fallback). The flag list comes from GET /api/config/summary
   // because there is no dedicated GET /features list endpoint.
   const loadOnboardingFlag = useCallback(async () => {
     setOnboardingFlagEnabled(null);
@@ -454,7 +454,7 @@ export function SettingsPage() {
   );
 
   // ── Onboarding flag toggle handler (spec 2026-06-30 §12.5) ────────────
-  // Calls the validated PATCH /api/v1/config/features/new_user_onboarding
+  // Calls the validated PATCH /api/config/features/new_user_onboarding
   // wrapper (patchFeatureFlag). Response is runtime-validated by validateFeatureFlagUpdate
   // (rc-1/rc-3) before state is updated.
   const handleToggleOnboardingFlag = useCallback(async () => {
@@ -477,7 +477,7 @@ export function SettingsPage() {
   }, [onboardingFlagEnabled, t]);
 
   // ── PRI-720 full-pipeline flag toggle handler ───────────────────────────
-  // Calls the validated PATCH /api/v1/config/features/prompt_full_pipeline
+  // Calls the validated PATCH /api/config/features/prompt_full_pipeline
   // wrapper (patchFeatureFlag). Response is runtime-validated by
   // validateFeatureFlagUpdate (rc-1/rc-3) before state is updated.
   const handleToggleFullPipelineFlag = useCallback(async () => {

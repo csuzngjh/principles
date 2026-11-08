@@ -217,10 +217,10 @@ describe('RuleCode binding UI decoders', () => {
     expect(mutation).toMatchObject({ success: true, data: { status: 'bound', revisionStatus: 'refused' } });
     expect(revision).toMatchObject({ success: true, data: { status: 'revision_started' } });
     expect(fetchStub.mock.calls.map(([url]) => url)).toEqual([
-      '/api/v1/governance/rule-candidate-bindings',
-      '/api/v1/governance/rule-candidate-bindings/candidate%2Fwith%20%3F%20and%20%23/review?search=target%20%2F%20%231',
-      '/api/v1/governance/rule-candidate-bindings/candidate%2Fwith%20%3F%20and%20%23',
-      '/api/v1/governance/rule-candidate-bindings/candidate%2Fwith%20%3F%20and%20%23/revise-once',
+      '/api/governance/rule-candidate-bindings',
+      '/api/governance/rule-candidate-bindings/candidate%2Fwith%20%3F%20and%20%23/review?search=target%20%2F%20%231',
+      '/api/governance/rule-candidate-bindings/candidate%2Fwith%20%3F%20and%20%23',
+      '/api/governance/rule-candidate-bindings/candidate%2Fwith%20%3F%20and%20%23/revise-once',
     ]);
     expect(fetchStub.mock.calls[2]?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify(bindingRequest) });
     expect(fetchStub.mock.calls[3]?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify(reviseRequest) });

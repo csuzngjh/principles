@@ -64,7 +64,7 @@ test('Owner chooses one exact item, reads it, returns and keeps runtime records 
 });
 
 test('A failed governance summary preserves readable items and does not unlock unknown permissions', async ({ page }) => {
-  await page.route('**/api/v1/governance/experience', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'snapshot_unavailable' }) }));
+  await page.route('**/api/governance/experience', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'snapshot_unavailable' }) }));
   await login(page);
   await expect(page.getByTestId('owner-work-item').first()).toBeVisible();
   await expect(page.getByText('部分资料暂未读取，当前列表可能不完整。').first()).toBeVisible();
@@ -126,8 +126,8 @@ test('The task scrollbar follows both themes and daily thoughts remain visible o
 test('A hanging runtime source does not hide known approvals or claim all clear', async ({ page }) => {
   let release: (() => void) | undefined;
   const held = new Promise<void>(resolveHeld => { release = resolveHeld; });
-  await page.route('**/api/v1/activations?*', async route => { await held; await route.abort(); });
-  await page.route('**/api/v1/activations', async route => { await held; await route.abort(); });
+  await page.route('**/api/activations?*', async route => { await held; await route.abort(); });
+  await page.route('**/api/activations', async route => { await held; await route.abort(); });
   try {
     await login(page);
     await expect(page.getByTestId('owner-work-item').first()).toBeVisible();
@@ -155,7 +155,7 @@ test('Narrow layout opens the final item at its reading start and returns to its
 
 test('A comparison for older bytes cannot confirm a same-ID changed revision', async ({ page }) => {
   function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-  await page.route('**/api/v1/approvals/grouped*', async route => {
+  await page.route('**/api/approvals/grouped*', async route => {
     const response = await route.fetch();
     const body: unknown = await response.json();
     if (!record(body) || !record(body.data) || !Array.isArray(body.data.groups)) throw new Error('Invalid grouped fixture');

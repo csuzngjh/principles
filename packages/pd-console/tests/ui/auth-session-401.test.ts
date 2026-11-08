@@ -113,7 +113,7 @@ describe('FailedTasksPage shared-request contract', () => {
   });
 
   it('routes through the shared request() with the page validator', () => {
-    expect(failedTasksSource).toContain('request("/api/v1/failed-tasks", undefined, validateFailedTasksData)');
+    expect(failedTasksSource).toContain('request("/api/failed-tasks", undefined, validateFailedTasksData)');
   });
 
   it('keeps the 403 flag-disabled state via the failure envelope status', () => {

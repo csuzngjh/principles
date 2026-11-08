@@ -930,7 +930,7 @@ describe('runRuleHostPipeline — outputLanguage reaches adapter.startRun messag
     expect(philosopher?.systemPrompt).toContain('English');
     expect(philosopher?.systemPrompt).toContain('(thesis, principleCandidate.title, principleCandidate.rationale, principleCandidate.scope, risks[])');
     // Evaluator: review-subject explicit nested paths + PRI-630 ledger echo rule.
-    const evaluator = inputs.find((i) => i.outputSchemaRef === 'evaluator-output-v1');
+    const evaluator = inputs.find((i) => i.outputSchemaRef === 'evaluator-output');
     expect(evaluator).toBeDefined();
     expect(evaluator?.systemPrompt).toContain('LANGUAGE DIRECTIVE');
     expect(evaluator?.systemPrompt).toContain('English');

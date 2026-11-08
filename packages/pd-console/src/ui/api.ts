@@ -293,18 +293,18 @@ async function checkAuth(): Promise<boolean> {
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
 export function fetchRuleBindingQueue(): Promise<ApiResponse<RuleBindingQueueView>> {
-  return request('/api/v1/governance/rule-candidate-bindings', undefined, validateBindingQueue);
+  return request('/api/governance/rule-candidate-bindings', undefined, validateBindingQueue);
 }
 export function fetchRuleBindingReview(candidateId: string, search = ''): Promise<ApiResponse<RuleBindingReviewView>> {
-  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/review?search=${encodeURIComponent(search)}`, undefined, validateBindingReview);
+  return request(`/api/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/review?search=${encodeURIComponent(search)}`, undefined, validateBindingReview);
 }
 export function mutateRuleBinding(candidateId: string, body: RuleCandidateBindingRequest) {
-  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}`, { method: 'POST', body: JSON.stringify(body) }, validateBindingMutation);
+  return request(`/api/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}`, { method: 'POST', body: JSON.stringify(body) }, validateBindingMutation);
 }
 /** PRI-1048: consume the REAL backend revision capability (revise-once route);
  * eligibility was resolved server-side from the production resolver. */
 export function reviseRuleBindingOnce(candidateId: string, body: { expectedBindingRevision: number; expectedScribeTaskId: string; expectedTaskRevisionEpoch: number; requestId: string }) {
-  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/revise-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
+  return request(`/api/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/revise-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
 }
 
 /** PRI-1048 R6 #4: the bounded one-shot SOURCE correction (PRI-1047) — the
@@ -315,7 +315,7 @@ export function correctRuleSource(candidateId: string, body: {
   expectedBindingRevision: number; expectedScribeTaskId: string; expectedArtificerTaskId: string;
   expectedScribeArtifactDigest: string; reason: string; requestId: string;
 }) {
-  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/source-correct-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
+  return request(`/api/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/source-correct-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
 }
 
 async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
@@ -358,21 +358,21 @@ async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<un
 }
 
 async function fetchPrincipleGovernance(principleId: string): Promise<ApiResponse<OwnerGovernanceView>> {
-  return request<OwnerGovernanceView>(`/api/v1/principles/${encodeURIComponent(principleId)}/governance`, undefined, validateOwnerGovernanceView);
+  return request<OwnerGovernanceView>(`/api/principles/${encodeURIComponent(principleId)}/governance`, undefined, validateOwnerGovernanceView);
 }
 
 // Owner Decision Experience v1 (SPEC §15): canonical Owner-facing decision
 // projection for the Detail first layer + compact Inbox. Read-only.
 async function fetchOwnerDecisionView(principleId: string): Promise<ApiResponse<OwnerDecisionViewCore>> {
-  return request<OwnerDecisionViewCore>(`/api/v1/principles/${encodeURIComponent(principleId)}/owner-decision-view`, undefined, validateOwnerDecisionViewCore);
+  return request<OwnerDecisionViewCore>(`/api/principles/${encodeURIComponent(principleId)}/owner-decision-view`, undefined, validateOwnerDecisionViewCore);
 }
 
 async function fetchOwnerDecisionInbox(): Promise<ApiResponse<OwnerDecisionInboxData>> {
-  return request<OwnerDecisionInboxData>('/api/v1/principles/owner-decision-inbox', undefined, validateOwnerDecisionInbox);
+  return request<OwnerDecisionInboxData>('/api/principles/owner-decision-inbox', undefined, validateOwnerDecisionInbox);
 }
 
 async function fetchOwnerDecisionLibrary(): Promise<ApiResponse<OwnerDecisionLibraryData>> {
-  return request<OwnerDecisionLibraryData>('/api/v1/principles/owner-decision-library', undefined, validateOwnerDecisionLibrary);
+  return request<OwnerDecisionLibraryData>('/api/principles/owner-decision-library', undefined, validateOwnerDecisionLibrary);
 }
 
 async function archivePrinciple(principleId: string): Promise<ApiResponse<unknown>> {
@@ -546,11 +546,11 @@ function validateReceiptCounts(data: unknown): ReceiptCountsData | null {
 }
 
 async function fetchPrincipleReceipts(principleId: string): Promise<ApiResponse<PrincipleReceiptsData>> {
-  return request<PrincipleReceiptsData>(`/api/v1/receipts/principles/${encodeURIComponent(principleId)}`, undefined, validatePrincipleReceipts);
+  return request<PrincipleReceiptsData>(`/api/receipts/principles/${encodeURIComponent(principleId)}`, undefined, validatePrincipleReceipts);
 }
 
 async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
-  return request<ReceiptCountsData>("/api/v1/receipts/counts", undefined, validateReceiptCounts);
+  return request<ReceiptCountsData>("/api/receipts/counts", undefined, validateReceiptCounts);
 }
 
 // ── Intervention Evidence Audit (PD v2 Phase 1, ADR-0027) ────────────────────
@@ -813,27 +813,27 @@ async function fetchEvidenceAudit(
     query.set("afterEvidenceId", cursor.after.evidenceId);
   }
   return request<EvidenceAuditData>(
-    `/api/v1/receipts/evidence-audit?${query.toString()}`,
+    `/api/receipts/evidence-audit?${query.toString()}`,
     undefined,
     validateEvidenceAudit,
   );
 }
 
 export function fetchApprovalReview(approvalId: string): Promise<ApiResponse<ApprovalReviewData>> {
-  return request('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalReview);
+  return request('/api/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalReview);
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
 async function approveApproval(approvalId: string, note?: string, options?: { expectedReview?: ApprovalReviewGuard; targetHost?: 'openclaw' | 'codex' | 'workbuddy'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
-  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
+  return request<ApprovalRecordData>('/api/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
     body: JSON.stringify({ note, ...(options?.expectedReview === undefined ? {} : { expectedReview: options.expectedReview }), ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
   }, validateApprovalRecordDirect);
 }
 
 async function rejectApproval(approvalId: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ApiResponse<ApprovalRecordData>> {
-  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/reject', {
+  return request<ApprovalRecordData>('/api/approvals/' + encodeURIComponent(approvalId) + '/reject', {
     method: 'POST',
     body: JSON.stringify({ reason, ...(expectedReview === undefined ? {} : { expectedReview }) }),
   }, validateApprovalRecordDirect);
@@ -844,7 +844,7 @@ async function editApproval(
   newArtifactId: string,
   editReason: string | { reason: string; expectedReview: ApprovalReviewGuard },
 ): Promise<ApiResponse<ApprovalRecordData>> {
-  return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/edit', {
+  return request<ApprovalRecordData>('/api/approvals/' + encodeURIComponent(approvalId) + '/edit', {
     method: 'POST',
     body: JSON.stringify({ newArtifactId, editReason: typeof editReason === 'string' ? editReason : editReason.reason, ...(typeof editReason === 'string' ? {} : { expectedReview: editReason.expectedReview }) }),
   }, validateApprovalRecordDirect);
@@ -921,11 +921,11 @@ async function markFeedbackReportSent(
 // ── Config / Control Center API (PRI-303, PRI-309) ───────────────────────────
 
 async function fetchConfigSummary(): Promise<ApiResponse<ConfigSummaryData>> {
-  return request<ConfigSummaryData>('/api/v1/config/summary', undefined, validateConfigSummary);
+  return request<ConfigSummaryData>('/api/config/summary', undefined, validateConfigSummary);
 }
 
 async function fetchConfigCatalog(): Promise<ApiResponse<ConfigCatalogData>> {
-  return request<ConfigCatalogData>('/api/v1/config/catalog', undefined, validateConfigCatalog);
+  return request<ConfigCatalogData>('/api/config/catalog', undefined, validateConfigCatalog);
 }
 
 async function updateAgentBinding(
@@ -934,7 +934,7 @@ async function updateAgentBinding(
   enabled: boolean,
 ): Promise<ApiResponse<AgentBindingUpdateData>> {
   return request<AgentBindingUpdateData>(
-    `/api/v1/config/agents/${encodeURIComponent(agentName)}/binding`,
+    `/api/config/agents/${encodeURIComponent(agentName)}/binding`,
     {
       method: 'PATCH',
       body: JSON.stringify({ runtimeProfile, enabled }),
@@ -945,7 +945,7 @@ async function updateAgentBinding(
 
 async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse<DefaultRuntimeUpdateData>> {
   return request<DefaultRuntimeUpdateData>(
-    '/api/v1/config/default-runtime',
+    '/api/config/default-runtime',
     {
       method: 'PATCH',
       body: JSON.stringify({ defaultRuntime }),
@@ -957,7 +957,7 @@ async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse
 // ── Owner identity (ADR-0022 / PRI-578) ──────────────────────────────────────
 
 export async function fetchOwnerIdentity(): Promise<ApiResponse<OwnerIdentityViewData>> {
-  return request<OwnerIdentityViewData>('/api/v1/owner-identity', undefined, validateOwnerIdentityView);
+  return request<OwnerIdentityViewData>('/api/owner-identity', undefined, validateOwnerIdentityView);
 }
 
 export async function registerOwnerIdentity(
@@ -965,7 +965,7 @@ export async function registerOwnerIdentity(
   credentialId: string,
 ): Promise<ApiResponse<OwnerIdentityRegisterData>> {
   return request<OwnerIdentityRegisterData>(
-    '/api/v1/owner-identity',
+    '/api/owner-identity',
     {
       method: 'POST',
       body: JSON.stringify({ ownerId, credentialId }),
@@ -976,13 +976,13 @@ export async function registerOwnerIdentity(
 
 export async function unregisterOwnerIdentity(): Promise<ApiResponse<OwnerIdentityUnregisterData>> {
   return request<OwnerIdentityUnregisterData>(
-    '/api/v1/owner-identity',
+    '/api/owner-identity',
     { method: 'DELETE' },
     validateOwnerIdentityUnregister,
   );
 }
 
-// ── Runtime Profile CRUD (POST/PATCH/DELETE /api/v1/config/profiles) ──────────
+// ── Runtime Profile CRUD (POST/PATCH/DELETE /api/config/profiles) ──────────
 
 /**
  * Create a new runtime profile.
@@ -1001,7 +1001,7 @@ async function createRuntimeProfile(
   profile: Record<string, unknown>,
 ): Promise<ApiResponse<RuntimeProfileMutationData>> {
   return request<RuntimeProfileMutationData>(
-    '/api/v1/config/profiles',
+    '/api/config/profiles',
     {
       method: 'POST',
       body: JSON.stringify({ id, profile }),
@@ -1021,7 +1021,7 @@ async function updateRuntimeProfile(
   patch: Record<string, unknown>,
 ): Promise<ApiResponse<RuntimeProfileMutationData>> {
   return request<RuntimeProfileMutationData>(
-    `/api/v1/config/profiles/${encodeURIComponent(profileId)}`,
+    `/api/config/profiles/${encodeURIComponent(profileId)}`,
     {
       method: 'PATCH',
       body: JSON.stringify(patch),
@@ -1041,14 +1041,14 @@ async function deleteRuntimeProfile(
   profileId: string,
 ): Promise<ApiResponse<RuntimeProfileMutationData>> {
   return request<RuntimeProfileMutationData>(
-    `/api/v1/config/profiles/${encodeURIComponent(profileId)}`,
+    `/api/config/profiles/${encodeURIComponent(profileId)}`,
     { method: 'DELETE' },
     validateRuntimeProfileMutation,
   );
 }
 
 /**
- * Fetch dynamic readiness for a single agent (GET /api/v1/config/readiness/:name).
+ * Fetch dynamic readiness for a single agent (GET /api/config/readiness/:name).
  *
  * The summary/catalog endpoints return a static, pessimistic readiness that
  * doesn't probe the actual provider. This endpoint performs a live check
@@ -1063,7 +1063,7 @@ async function fetchAgentReadiness(
   agentName: string,
 ): Promise<ApiResponse<ReadinessCheckData>> {
   return request<ReadinessCheckData>(
-    `/api/v1/config/readiness/${encodeURIComponent(agentName)}`,
+    `/api/config/readiness/${encodeURIComponent(agentName)}`,
     undefined,
     validateReadinessCheck,
   );
@@ -1076,7 +1076,7 @@ async function patchFeatureFlag(
   enabled: boolean,
 ): Promise<ApiResponse<FeatureFlagUpdateData>> {
   return request<FeatureFlagUpdateData>(
-    `/api/v1/config/features/${encodeURIComponent(featureName)}`,
+    `/api/config/features/${encodeURIComponent(featureName)}`,
     {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
@@ -1088,12 +1088,12 @@ async function patchFeatureFlag(
 // ── Principles Output Language (PRI-332 P1-1) ────────────────────────────────
 
 async function fetchOutputLanguage(): Promise<ApiResponse<OutputLanguageData>> {
-  return request<OutputLanguageData>('/api/v1/config/principles/output-language', undefined, validateOutputLanguage);
+  return request<OutputLanguageData>('/api/config/principles/output-language', undefined, validateOutputLanguage);
 }
 
 async function updateOutputLanguage(outputLanguage: string): Promise<ApiResponse<OutputLanguageData>> {
   return request<OutputLanguageData>(
-    '/api/v1/config/principles/output-language',
+    '/api/config/principles/output-language',
     {
       method: 'PATCH',
       body: JSON.stringify({ outputLanguage }),
@@ -1105,14 +1105,14 @@ async function updateOutputLanguage(outputLanguage: string): Promise<ApiResponse
 // ── CR8: Backend Data Contract (G.1) ─────────────────────────────────────────
 
 async function fetchGovernanceQueue(): Promise<ApiResponse<GovernanceQueueData>> {
-  return request<GovernanceQueueData>('/api/v1/governance/queue', undefined, validateGovernanceQueue);
+  return request<GovernanceQueueData>('/api/governance/queue', undefined, validateGovernanceQueue);
 }
 
 // PRI-586: read-only governance experience snapshot. Only called when the
 // governance_experience_v1 flag is enabled — flag-off the endpoint 403s and
 // the Console keeps the legacy Focus experience (ERR-102: disabled ≠ unavailable).
 async function fetchGovernanceExperience(): Promise<ApiResponse<GovernanceExperienceSnapshot>> {
-  return request<GovernanceExperienceSnapshot>('/api/v1/governance/experience', undefined, validateGovernanceExperienceSnapshot);
+  return request<GovernanceExperienceSnapshot>('/api/governance/experience', undefined, validateGovernanceExperienceSnapshot);
 }
 
 // Governance Recovery Actions v1: Owner-triggered recovery of a failed /
@@ -1127,7 +1127,7 @@ async function recoverFailedTask(taskId: string, reason?: string, force?: boolea
   if (force === true) {
     body.force = true;
   }
-  return request<RecoveryResultData>('/api/v1/failed-tasks/' + encodeURIComponent(taskId) + '/recover', {
+  return request<RecoveryResultData>('/api/failed-tasks/' + encodeURIComponent(taskId) + '/recover', {
     method: 'POST',
     body: JSON.stringify(body),
   }, validateRecoveryResult);
@@ -1138,12 +1138,12 @@ async function recoverFailedTask(taskId: string, reason?: string, force?: boolea
 // SqliteTaskStore.getFailedTaskDetail already existed; this wrapper is the
 // missing UI-side consumer the Failed Tasks page expands into.
 async function fetchFailedTaskDetail(taskId: string): Promise<ApiResponse<FailedTaskDetailData>> {
-  return request<FailedTaskDetailData>('/api/v1/failed-tasks/' + encodeURIComponent(taskId), undefined, validateFailedTaskDetail);
+  return request<FailedTaskDetailData>('/api/failed-tasks/' + encodeURIComponent(taskId), undefined, validateFailedTaskDetail);
 }
 
 // PRI-629: unified Owner Decision inbox — read projection + resolution.
 async function fetchOwnerDecisions(): Promise<ApiResponse<OwnerDecisionsData>> {
-  return request<OwnerDecisionsData>('/api/v1/governance/owner-decisions', undefined, validateOwnerDecisionsData);
+  return request<OwnerDecisionsData>('/api/governance/owner-decisions', undefined, validateOwnerDecisionsData);
 }
 
 async function resolveOwnerDecision(taskId: string, body: {
@@ -1158,7 +1158,7 @@ async function resolveOwnerDecision(taskId: string, body: {
   ownerInstruction?: string | null;
 }): Promise<ApiResponse<OwnerResolutionResultData>> {
   return request<OwnerResolutionResultData>(
-    '/api/v1/governance/owner-decisions/' + encodeURIComponent(taskId) + '/resolve',
+    '/api/governance/owner-decisions/' + encodeURIComponent(taskId) + '/resolve',
     { method: 'POST', body: JSON.stringify(body) },
     validateOwnerResolutionResult,
   );
@@ -1166,17 +1166,17 @@ async function resolveOwnerDecision(taskId: string, body: {
 
 async function fetchApprovalsGrouped(targetHost?: 'openclaw' | 'codex' | 'workbuddy'): Promise<ApiResponse<ApprovalsGroupedData>> {
   const query = targetHost !== undefined ? `?host=${targetHost}` : '';
-  return request<ApprovalsGroupedData>(`/api/v1/approvals/grouped${query}`, undefined, validateApprovalsGrouped);
+  return request<ApprovalsGroupedData>(`/api/approvals/grouped${query}`, undefined, validateApprovalsGrouped);
 }
 
 async function fetchAllActivations(targetHost?: 'openclaw' | 'codex' | 'workbuddy'): Promise<ApiResponse<ActivationsData>> {
   const query = targetHost !== undefined ? `?host=${targetHost}` : '';
-  return request<ActivationsData>(`/api/v1/activations${query}`, undefined, validateActivations);
+  return request<ActivationsData>(`/api/activations${query}`, undefined, validateActivations);
 }
 
 async function disableActivation(activationId: string): Promise<ApiResponse<DisableActivationData>> {
   return request<DisableActivationData>(
-    `/api/v1/activations/${encodeURIComponent(activationId)}/disable`,
+    `/api/activations/${encodeURIComponent(activationId)}/disable`,
     {
       method: 'POST',
       body: JSON.stringify({ confirmed: true }),
@@ -1186,15 +1186,15 @@ async function disableActivation(activationId: string): Promise<ApiResponse<Disa
 }
 
 async function fetchRuleCodeOwnerReview(activationId: string): Promise<ApiResponse<RuleCodeOwnerReviewData>> {
-  return request(`/api/v1/activations/${encodeURIComponent(activationId)}/owner-review`, undefined, validateRuleCodeOwnerReview);
+  return request(`/api/activations/${encodeURIComponent(activationId)}/owner-review`, undefined, validateRuleCodeOwnerReview);
 }
 
 export async function fetchApprovedRuleRevisionPreview(activationId: string): Promise<ApiResponse<ApprovedRuleRevisionPreview>> {
-  return request(`/api/v1/activations/${encodeURIComponent(activationId)}/rule-revision-preview`, undefined, validateApprovedRuleRevisionPreview);
+  return request(`/api/activations/${encodeURIComponent(activationId)}/rule-revision-preview`, undefined, validateApprovedRuleRevisionPreview);
 }
 
 export async function reviseApprovedRuleOnce(activationId: string, input: ApprovedRuleRevisionRequest): Promise<ApiResponse<ApprovedRuleRevisionResult>> {
-  return request(`/api/v1/activations/${encodeURIComponent(activationId)}/revise-rule-once`, {
+  return request(`/api/activations/${encodeURIComponent(activationId)}/revise-rule-once`, {
     method: 'POST', body: JSON.stringify(input),
   }, validateApprovedRuleRevisionResult);
 }
@@ -1221,7 +1221,7 @@ async function proposePromptRevision(
   targetHost?: 'openclaw' | 'codex' | 'workbuddy',
 ): Promise<ApiResponse<ProposeRevisionData>> {
   return request<ProposeRevisionData>(
-    `/api/v1/activations/${encodeURIComponent(activationId)}/propose-revision`,
+    `/api/activations/${encodeURIComponent(activationId)}/propose-revision`,
     {
       method: 'POST',
       body: JSON.stringify({ statement, ...(targetHost !== undefined ? { host: targetHost } : {}) }),
@@ -1251,14 +1251,14 @@ async function mutateRuleCode(path: string, body: Record<string, unknown>): Prom
 }
 
 function ruleCodeDecision(activationId: string, action: 'continue-observing' | 'reject-after-shadow' | 'emergency-deactivate' | 'promote' | 'recover-to-shadow', body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> {
-  return mutateRuleCode(`/api/v1/activations/${encodeURIComponent(activationId)}/${action}`, body);
+  return mutateRuleCode(`/api/activations/${encodeURIComponent(activationId)}/${action}`, body);
 }
 
-function pauseAllRuleCode(body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> { return mutateRuleCode('/api/v1/activations/emergency-pause', body); }
-function releaseRuleCodePause(pauseId: string, body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> { return mutateRuleCode(`/api/v1/activations/emergency-pause/${encodeURIComponent(pauseId)}/release`, body); }
+function pauseAllRuleCode(body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> { return mutateRuleCode('/api/activations/emergency-pause', body); }
+function releaseRuleCodePause(pauseId: string, body: Record<string, unknown>): Promise<ApiResponse<RuleCodeMutationData>> { return mutateRuleCode(`/api/activations/emergency-pause/${encodeURIComponent(pauseId)}/release`, body); }
 
 async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<LifecycleMetricsData>> {
-  return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`, undefined, validateLifecycleMetrics);
+  return request<LifecycleMetricsData>(`/api/lifecycle/principles/${encodeURIComponent(principleId)}`, undefined, validateLifecycleMetrics);
 }
 
 // ── Updates (CR9) ─────────────────────────────────────────────────────────────
@@ -1291,36 +1291,36 @@ async function fetchUpdateTransaction(transactionId: string): Promise<ApiRespons
 // ── Evidence Chain (PRI-331) ──────────────────────────────────────────────────
 
 async function fetchEvidenceChain(): Promise<ApiResponse<EvidenceChainData>> {
-  return request<EvidenceChainData>('/api/v1/evidence-chain', undefined, validateEvidenceChain);
+  return request<EvidenceChainData>('/api/evidence-chain', undefined, validateEvidenceChain);
 }
 
 
 // ── Intent Summary (PRI-466) ─────────────────────────────────────────────────
 
 async function fetchIntentSummary(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentSummaryData>> {
-  return request<IntentSummaryData>(`/api/v1/intent?lang=${lang}`, undefined, validateIntentSummary);
+  return request<IntentSummaryData>(`/api/intent?lang=${lang}`, undefined, validateIntentSummary);
 }
 
 // ── Intent Init / Edit (PRI-477 onboarding) ──────────────────────────────────
 
 /**
- * Fetch raw INTENT.md content for editing via GET /api/v1/intent/content.
+ * Fetch raw INTENT.md content for editing via GET /api/intent/content.
  */
 async function fetchIntentContent(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentRawContentData>> {
   return request<IntentRawContentData>(
-    `/api/v1/intent/content?lang=${lang}`,
+    `/api/intent/content?lang=${lang}`,
     undefined,
     validateIntentRawContent,
   );
 }
 
 /**
- * Create INTENT.md from the SPEC §7 template via POST /api/v1/intent/init.
+ * Create INTENT.md from the SPEC §7 template via POST /api/intent/init.
  * Does NOT overwrite an existing file unless force=true.
  */
 async function createIntentTemplate(force = false, lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentInitResultData>> {
   return request<IntentInitResultData>(
-    `/api/v1/intent/init?lang=${lang}`,
+    `/api/intent/init?lang=${lang}`,
     {
       method: 'POST',
       body: JSON.stringify({ force }),
@@ -1330,11 +1330,11 @@ async function createIntentTemplate(force = false, lang: 'zh-CN' | 'en' = 'zh-CN
 }
 
 /**
- * Save user-edited INTENT.md content via PUT /api/v1/intent/content.
+ * Save user-edited INTENT.md content via PUT /api/intent/content.
  */
 async function saveIntentContent(content: string, lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentSaveResultData>> {
   return request<IntentSaveResultData>(
-    `/api/v1/intent/content?lang=${lang}`,
+    `/api/intent/content?lang=${lang}`,
     {
       method: 'PUT',
       body: JSON.stringify({ content }),
@@ -1345,7 +1345,7 @@ async function saveIntentContent(content: string, lang: 'zh-CN' | 'en' = 'zh-CN'
 
 async function fetchIntentVersions(lang: 'zh-CN' | 'en' = 'zh-CN'): Promise<ApiResponse<IntentVersionData>> {
   return request<IntentVersionData>(
-    `/api/v1/intent/versions?lang=${lang}`,
+    `/api/intent/versions?lang=${lang}`,
     undefined,
     validateIntentVersions,
   );
@@ -1374,7 +1374,7 @@ async function recordIntentDecision(
   payload: IntentDecisionInputPayload,
 ): Promise<ApiResponse<IntentDecisionResultData>> {
   return request<IntentDecisionResultData>(
-    '/api/v1/intent-decisions',
+    '/api/intent-decisions',
     {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -1387,7 +1387,7 @@ async function listIntentDecisionsByPainId(
   painId: string,
 ): Promise<ApiResponse<IntentDecisionRecordData[]>> {
   return request<IntentDecisionRecordData[]>(
-    `/api/v1/intent-decisions?painId=${encodeURIComponent(painId)}`,
+    `/api/intent-decisions?painId=${encodeURIComponent(painId)}`,
     undefined,
     validateIntentDecisionList,
   );
@@ -1397,7 +1397,7 @@ async function listIntentDecisionsByTaskId(
   taskId: string,
 ): Promise<ApiResponse<IntentDecisionRecordData[]>> {
   return request<IntentDecisionRecordData[]>(
-    `/api/v1/intent-decisions?taskId=${encodeURIComponent(taskId)}`,
+    `/api/intent-decisions?taskId=${encodeURIComponent(taskId)}`,
     undefined,
     validateIntentDecisionList,
   );
@@ -1405,7 +1405,7 @@ async function listIntentDecisionsByTaskId(
 
 async function fetchIntentDecisionSummary(): Promise<ApiResponse<IntentDecisionSummaryData>> {
   return request<IntentDecisionSummaryData>(
-    '/api/v1/intent-decisions/summary',
+    '/api/intent-decisions/summary',
     undefined,
     validateIntentDecisionSummary,
   );
@@ -1435,7 +1435,7 @@ async function dispatchFollowUp(
   payload: FollowUpPayload,
 ): Promise<ApiResponse<FollowUpResponseData>> {
   return request<FollowUpResponseData>(
-    `/api/v1/intent-decisions/${encodeURIComponent(decisionId)}/follow-up`,
+    `/api/intent-decisions/${encodeURIComponent(decisionId)}/follow-up`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -1531,7 +1531,7 @@ function validateDesignGateDeclarationEnvelope(value: unknown): { declaration: D
   return isDesignGateDeclarationValue(value.declaration) ? { declaration: value.declaration } : null;
 }
 
-const designGateBasePath = "/api/v1/governance/design-gate";
+const designGateBasePath = "/api/governance/design-gate";
 
 async function fetchDesignGateSessions(): Promise<ApiResponse<{ sessions: DesignGateObservedSession[] }>> {
   return request(`${designGateBasePath}/sessions`, undefined, validateDesignGateSessions);
@@ -1887,14 +1887,14 @@ export interface ExaminerReportData {
 }
 
 export async function fetchExaminerOverview(): Promise<ApiResponse<ExaminerOverviewData>> {
-  return request<ExaminerOverviewData>('/api/v1/examiner/overview', undefined, (v) => {
+  return request<ExaminerOverviewData>('/api/examiner/overview', undefined, (v) => {
     if (v !== null && typeof v === 'object' && Object.hasOwn(v, 'studies')) return v as ExaminerOverviewData;
     return null;
   });
 }
 
 export async function fetchExaminerPrinciples(): Promise<ApiResponse<{ principles: ExaminerPrincipleItem[] }>> {
-  return request<{ principles: ExaminerPrincipleItem[] }>('/api/v1/examiner/principles', undefined, (v) => {
+  return request<{ principles: ExaminerPrincipleItem[] }>('/api/examiner/principles', undefined, (v) => {
     if (v && typeof v === 'object' && Array.isArray((v as { principles?: unknown }).principles)) return v as { principles: ExaminerPrincipleItem[] };
     return null;
   });
@@ -1902,7 +1902,7 @@ export async function fetchExaminerPrinciples(): Promise<ApiResponse<{ principle
 
 export async function createExaminerStudy(input: { targetPrincipleId: string; experimentMode: string; repetitionsPerCase: number; suiteKey?: string }): Promise<ApiResponse<{ studyId: string; experimentMode: string; plannedPairs: number | null; suiteKey?: string; productionSnapshotMarkers?: string[]; note: string }>> {
   return request<{ studyId: string; experimentMode: string; plannedPairs: number | null; suiteKey?: string; productionSnapshotMarkers?: string[]; note: string }>(
-    '/api/v1/examiner/studies',
+    '/api/examiner/studies',
     { method: 'POST', body: JSON.stringify(input) },
     (v) => {
       if (v && typeof (v as { studyId?: unknown }).studyId === 'string') return v as { studyId: string; experimentMode: string; plannedPairs: number | null; suiteKey?: string; productionSnapshotMarkers?: string[]; note: string };
@@ -1912,35 +1912,35 @@ export async function createExaminerStudy(input: { targetPrincipleId: string; ex
 }
 
 export async function fetchExaminerStudyStatus(studyId: string): Promise<ApiResponse<ExaminerStudyStatusData>> {
-  return request<ExaminerStudyStatusData>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}`, undefined, (v) => {
+  return request<ExaminerStudyStatusData>(`/api/examiner/studies/${encodeURIComponent(studyId)}`, undefined, (v) => {
     if (v && typeof (v as { studyId?: unknown }).studyId === 'string') return v as ExaminerStudyStatusData;
     return null;
   });
 }
 
 export async function runExaminerPreflight(studyId: string): Promise<ApiResponse<ExaminerPreflightData>> {
-  return request<ExaminerPreflightData>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/preflight`, { method: 'POST' }, (v) => {
+  return request<ExaminerPreflightData>(`/api/examiner/studies/${encodeURIComponent(studyId)}/preflight`, { method: 'POST' }, (v) => {
     if (v && typeof (v as { ok?: unknown }).ok === 'boolean') return v as ExaminerPreflightData;
     return null;
   });
 }
 
 export async function runExaminerStudy(studyId: string): Promise<ApiResponse<{ units: { unit: unknown; state: string }[] }>> {
-  return request<{ units: { unit: unknown; state: string }[] }>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/run`, { method: 'POST', body: JSON.stringify({ mode: 'offline-stub' }) }, (v) => {
+  return request<{ units: { unit: unknown; state: string }[] }>(`/api/examiner/studies/${encodeURIComponent(studyId)}/run`, { method: 'POST', body: JSON.stringify({ mode: 'offline-stub' }) }, (v) => {
     if (v && Array.isArray((v as { units?: unknown }).units)) return v as { units: { unit: unknown; state: string }[] };
     return null;
   });
 }
 
 export async function generateExaminerReport(studyId: string): Promise<ApiResponse<{ status: string; written: boolean }>> {
-  return request<{ status: string; written: boolean }>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/report`, { method: 'POST' }, (v) => {
+  return request<{ status: string; written: boolean }>(`/api/examiner/studies/${encodeURIComponent(studyId)}/report`, { method: 'POST' }, (v) => {
     if (v && typeof (v as { status?: unknown }).status === 'string') return v as { status: string; written: boolean };
     return null;
   });
 }
 
 export async function fetchExaminerReport(studyId: string): Promise<ApiResponse<ExaminerReportData>> {
-  return request<ExaminerReportData>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/report`, undefined, (v) => {
+  return request<ExaminerReportData>(`/api/examiner/studies/${encodeURIComponent(studyId)}/report`, undefined, (v) => {
     if (v && (v as { report?: unknown }).report) return v as ExaminerReportData;
     return null;
   });
@@ -2011,7 +2011,7 @@ export interface ExaminerEvidenceData {
 }
 
 export async function fetchExaminerPrincipleEvidence(principleId: string): Promise<ApiResponse<ExaminerEvidenceData>> {
-  return request<ExaminerEvidenceData>(`/api/v1/examiner/principles/${encodeURIComponent(principleId)}/evidence`, undefined, (v) => {
+  return request<ExaminerEvidenceData>(`/api/examiner/principles/${encodeURIComponent(principleId)}/evidence`, undefined, (v) => {
     if (v && typeof (v as { principleId?: unknown }).principleId === 'string' && (v as { principle?: unknown }).principle) return v as ExaminerEvidenceData;
     return null;
   });
@@ -2029,7 +2029,7 @@ export interface ExaminerSuiteItem {
 }
 
 export async function fetchExaminerSuites(): Promise<ApiResponse<{ suites: ExaminerSuiteItem[]; note: string }>> {
-  return request<{ suites: ExaminerSuiteItem[]; note: string }>('/api/v1/examiner/suites', undefined, (v) => {
+  return request<{ suites: ExaminerSuiteItem[]; note: string }>('/api/examiner/suites', undefined, (v) => {
     if (v && Array.isArray((v as { suites?: unknown }).suites)) return v as { suites: ExaminerSuiteItem[]; note: string };
     return null;
   });
@@ -2044,7 +2044,7 @@ export interface ExaminerHostReadiness {
 }
 
 export async function fetchExaminerHostReadiness(): Promise<ApiResponse<ExaminerHostReadiness>> {
-  return request<ExaminerHostReadiness>('/api/v1/examiner/hosts/openclaw/readiness', undefined, (v) => {
+  return request<ExaminerHostReadiness>('/api/examiner/hosts/openclaw/readiness', undefined, (v) => {
     if (v && typeof (v as { host?: unknown }).host === 'string' && Array.isArray((v as { requirements?: unknown }).requirements)) return v as ExaminerHostReadiness;
     return null;
   });
@@ -2102,7 +2102,7 @@ export interface ExaminerAsyncRunAccepted {
 
 export async function startExaminerAsyncRun(studyId: string, mode: 'host-dry-run' | 'f2-real-host'): Promise<ApiResponse<ExaminerAsyncRunAccepted>> {
   return request<ExaminerAsyncRunAccepted>(
-    `/api/v1/examiner/studies/${encodeURIComponent(studyId)}/run`,
+    `/api/examiner/studies/${encodeURIComponent(studyId)}/run`,
     { method: 'POST', body: JSON.stringify({ mode }) },
     (v) => {
       if (v && typeof (v as { runId?: unknown }).runId === 'string') return v as ExaminerAsyncRunAccepted;

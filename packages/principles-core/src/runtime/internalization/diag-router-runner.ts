@@ -28,6 +28,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import { Value } from '@sinclair/typebox/value';
 import { verifyRouterContextReceipt } from './router-context-evidence.js';
 import type { RunHandle } from '../runtime-protocol.js';
@@ -257,11 +258,11 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       ],
     };
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'diagnostician-output-v1',
+      outputSchemaRef: 'diagnostician-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });
@@ -320,7 +321,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         schemaVersion: 'router-context-v1',
         taskId,
         runId,
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         contextHash,
         messageDigest: evidence.messageDigest,
         systemPromptDigest: evidence.systemPromptDigest,

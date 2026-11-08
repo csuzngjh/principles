@@ -4,7 +4,12 @@ import type { ApprovalRecord, PIArtifactSnapshot } from './activation-types.js';
 import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
 
 const Common = {
-  schemaVersion: Type.Literal('approval-review-v1'),
+  // PRI-1139: new review guards carry the version-neutral
+  // 'approval-review' spelling; guards minted before the cutover keep
+  // 'approval-review-v1'. The guard is a freshness check against CURRENT
+  // artifact state at decision time, so both spellings are equally valid
+  // submissions — anything else fails loud.
+  schemaVersion: Type.Union([Type.Literal('approval-review'), Type.Literal('approval-review-v1')]),
   approvalId: Type.String({ minLength: 1 }), artifactId: Type.String({ minLength: 1 }),
   channel: Type.Union([Type.Literal('prompt'), Type.Literal('skill'), Type.Literal('code_tool_hook'), Type.Literal('defer_archive')]),
 };
