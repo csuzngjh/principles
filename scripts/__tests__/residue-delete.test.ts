@@ -708,7 +708,7 @@ describe('deletion guarantees under unreadable directories (spy-injected EACCES,
     const realClose = fs.Dir.prototype.closeSync;
     const openedHandles: fs.Dir[] = [];
     const closedHandles: fs.Dir[] = [];
-    const spy = vi.spyOn(fs, 'opendirSync').mockImplementation(((dir: fs.PathLike, ...args: unknown[]) => {
+    vi.spyOn(fs, 'opendirSync').mockImplementation(((dir: fs.PathLike, ...args: unknown[]) => {
       if (path.resolve(String(dir)) === path.resolve(blockedDirectory)) {
         throw Object.assign(new Error('simulated directory read denial'), { code: 'EACCES' });
       }
