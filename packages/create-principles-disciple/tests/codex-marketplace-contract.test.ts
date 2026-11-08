@@ -29,10 +29,6 @@ function underHome(...segments: string[]): string {
   return target;
 }
 
-function cacheRoot(): string {
-  return underHome('.codex', 'plugins', 'cache', 'principles', 'principles-disciple');
-}
-
 function writeMarketVersion(version: string): void {
   const dir = underHome('.codex', 'plugins', 'cache', 'principles', 'principles-disciple', version);
   fs.mkdirSync(dir, { recursive: true });
