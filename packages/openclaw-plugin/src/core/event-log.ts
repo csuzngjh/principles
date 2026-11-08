@@ -229,9 +229,15 @@ export class EventLog {
    * Boundary is fixed at post_assembly_system_prompt_via_llm_input; this event
    * never asserts the actual request, delivery, adherence or D/confirmed.
    * Data carries no body text — containment facts only.
+   *
+   * PRI-1152: written at record time, like recordAdaptiveDelivery. A one-shot
+   * host exits on its own before the unref'd flush timer fires and nothing
+   * flushes the buffer at exit, so a buffered observation would be lost. A
+   * failed write keeps the usual flushEvents semantics (logged, stays buffered).
    */
   recordPromptPresenceObserved(data: PromptPresenceObservedEventData): void {
     this.record('runtime_v2_prompt_presence_observed', 'injected', data.sessionId, data);
+    this.flushEvents();
   }
 
   /**
