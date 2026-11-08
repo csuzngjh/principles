@@ -379,7 +379,10 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     makeJunction(path.join(tree, 'a'), tree);
     const link = path.join(tree, 'escape');
     try {
-      fs.symlinkSync(path.join('a', '..', 'victim'), link, 'file');
+      // NB: path.join() would normalise ".." away — the raw readlink string must
+      // keep it, because that is exactly the component the OS resolves first.
+      const rawTarget = process.platform === 'win32' ? 'a\\..\\victim' : 'a/../victim';
+      fs.symlinkSync(rawTarget, link, 'file');
     } catch {
       return; // Windows file symlinks need extra privilege; POSIX CI covers it
     }
