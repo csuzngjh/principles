@@ -20,7 +20,7 @@ import type { HostLivenessContract } from './openclaw-promotion-checks.js';
  * - `pd activation deactivate --activation-id <id>` — registered
  *   (pd-cli runtime-activation.ts, idempotent rollback);
  * - global emergency pause — NO pd CLI command exists; the real surface is
- *   the authenticated Owner Console route POST /api/v1/activations/
+ *   the authenticated Owner Console route POST /api/activations/
  *   emergency-pause (server/routes/activations.ts → pauseAllRuleCode →
  *   SqliteActivationSafetyStore.pauseAllLive, honored by the shared gate's
  *   global_rulecode_pauses read);
@@ -57,12 +57,12 @@ export const RECOVERY_CONTROL_SURFACES: readonly RecoveryControlSurface[] = Obje
   Object.freeze({
     capabilityId: 'rulecode_global_pause',
     channel: 'console',
-    consoleRoute: '/api/v1/activations/emergency-pause',
+    consoleRoute: '/api/activations/emergency-pause',
   } satisfies RecoveryControlSurface),
   Object.freeze({
     capabilityId: 'owner_review_access',
     channel: 'console',
-    consoleRoute: '/api/v1/activations/{activationId}/owner-review',
+    consoleRoute: '/api/activations/{activationId}/owner-review',
   } satisfies RecoveryControlSurface),
 ]);
 

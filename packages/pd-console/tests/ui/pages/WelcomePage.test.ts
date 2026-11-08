@@ -9,7 +9,7 @@
  * This guards against accidental regressions in:
  *  - 4-step wizard state (1 | 2 | 3 | 4)
  *  - integration of CircuitDiagram + DemoResultView + SlashCommandsCard + onboarding-state
- *  - API call wiring (POST /api/v1/onboarding/run-demo)
+ *  - API call wiring (POST /api/onboarding/run-demo)
  *  - i18n key routing (EP-11: every user-facing string via t())
  *  - accessibility roles (role=main, progressbar, aria-labelledby)
  *  - completion status values ('demo' / 'skipped')
@@ -60,9 +60,9 @@ describe('WelcomePage component contract', () => {
     expect(componentSource).toContain('setOnboardingState');
   });
 
-  it('Given WelcomePage, When parsed, Then calls POST /api/v1/onboarding/run-demo', () => {
+  it('Given WelcomePage, When parsed, Then calls POST /api/onboarding/run-demo', () => {
     expect(componentSource).toContain('POST');
-    expect(componentSource).toContain('/api/v1/onboarding/run-demo');
+    expect(componentSource).toContain('/api/onboarding/run-demo');
   });
 
   it('Given WelcomePage, When parsed, Then completeOnboarding sets state and navigates to /focus', () => {
@@ -139,7 +139,7 @@ describe('WelcomePage step 4 polling (spec 6.5.2)', () => {
     expect(componentSource).toContain("'evidence-found'");
   });
 
-  it('Given WelcomePage, When parsed, Then calls /api/v1/evidence-chain for polling', () => {
-    expect(componentSource).toContain('/api/v1/evidence-chain');
+  it('Given WelcomePage, When parsed, Then calls /api/evidence-chain for polling', () => {
+    expect(componentSource).toContain('/api/evidence-chain');
   });
 });

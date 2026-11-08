@@ -716,7 +716,7 @@ export function ReportProblemPage() {
     try {
       const [configSettled, lifecycleSettled, healthSettled] = await Promise.allSettled([
         fetchConfigSummary(),
-        request('/api/v1/lifecycle/state'),
+        request('/api/lifecycle/state'),
         request('/api/health'),
       ]);
       const diagnostics = buildFeedbackDiagnostics(

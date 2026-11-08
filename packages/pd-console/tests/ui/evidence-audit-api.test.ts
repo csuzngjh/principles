@@ -88,7 +88,7 @@ describe('fetchEvidenceAudit', () => {
     expect(result.data.pages.delivery.nextCursor?.evidenceId).toBe('sha256:cursor');
     expect(result.data.capabilityDeclarations[0]!.status).toBe('supported');
     const url = vi.mocked(fetch).mock.calls[0]?.[0];
-    expect(String(url)).toContain('/api/v1/receipts/evidence-audit?type=principle&id=princ-A');
+    expect(String(url)).toContain('/api/receipts/evidence-audit?type=principle&id=princ-A');
     expect(String(url)).toContain('afterKind=delivery');
   });
 

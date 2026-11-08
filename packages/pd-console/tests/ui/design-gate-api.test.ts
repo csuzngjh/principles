@@ -47,7 +47,7 @@ describe("local Codex design-gate API", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond({ declaration: null })));
     const result = await fetchDesignGateDeclaration("D:/project with spaces", "session/?#1");
     expect(result).toEqual({ success: true, data: { declaration: null } });
-    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/api/v1/governance/design-gate/declaration?projectWorkspacePath=D%3A%2Fproject+with+spaces&hostSessionId=session%2F%3F%231");
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/api/governance/design-gate/declaration?projectWorkspacePath=D%3A%2Fproject+with+spaces&hostSessionId=session%2F%3F%231");
   });
 
   it("validates the declaration contract field-by-field and refuses malformed returned declarations", async () => {
@@ -71,19 +71,19 @@ describe("local Codex design-gate API", () => {
     };
     await createDesignGateDeclaration(createInput);
     const createCall = vi.mocked(fetch).mock.calls[0];
-    expect(createCall?.[0]).toBe("/api/v1/governance/design-gate/declarations");
+    expect(createCall?.[0]).toBe("/api/governance/design-gate/declarations");
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual(createInput);
     expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty("ownerId");
     expect(JSON.parse(String(createCall?.[1]?.body))).not.toHaveProperty("sourceRef");
 
     await updateDesignGateDecision("decl/1", 3, "approved");
     const decisionCall = vi.mocked(fetch).mock.calls[1];
-    expect(decisionCall?.[0]).toBe("/api/v1/governance/design-gate/declarations/decl%2F1/decision");
+    expect(decisionCall?.[0]).toBe("/api/governance/design-gate/declarations/decl%2F1/decision");
     expect(JSON.parse(String(decisionCall?.[1]?.body))).toEqual({ expectedRevision: 3, decision: "approved" });
 
     await revokeDesignGateDeclaration("decl-1", 4);
     const revokeCall = vi.mocked(fetch).mock.calls[2];
-    expect(revokeCall?.[0]).toBe("/api/v1/governance/design-gate/declarations/decl-1/revoke");
+    expect(revokeCall?.[0]).toBe("/api/governance/design-gate/declarations/decl-1/revoke");
     expect(JSON.parse(String(revokeCall?.[1]?.body))).toEqual({ expectedRevision: 4 });
   });
 });

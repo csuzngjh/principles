@@ -1,7 +1,7 @@
 /**
  * Evidence Chain API — exposes behavior evidence chain records for the Pain page.
  *
- * GET /api/v1/evidence-chain
+ * GET /api/evidence-chain
  *   Returns evidence chain records from pain_events, tasks, candidates, and ledger.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';

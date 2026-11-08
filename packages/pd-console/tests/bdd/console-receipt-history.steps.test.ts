@@ -1,6 +1,6 @@
 /**
  * PRI-533 BDD: console receipt history — binds to the REAL ReceiptsConsoleModel
- * (the model the /api/v1/receipts route serves) against a real temp workspace.
+ * (the model the /api/receipts route serves) against a real temp workspace.
  * UI rendering is covered by the detail-page section; this contract pins the
  * data semantics (two-level counts, ordering, degraded vs empty).
  */

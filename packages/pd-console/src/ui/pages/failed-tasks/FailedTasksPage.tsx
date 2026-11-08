@@ -14,12 +14,12 @@
  * feature flag is enabled, each row also exposes a "Resume Evolution" button.
  * Recovery is an Owner governance action (never auto-triggered on load): it
  * always goes through an explicit confirmation dialog before POSTing
- * /api/v1/failed-tasks/:id/recover. The success state means "Recovery
+ * /api/failed-tasks/:id/recover. The success state means "Recovery
  * Accepted" — the task is pending again; execution is asynchronous.
  *
  * PRI-747 F22 / PRI-749: each row can be expanded into its detail — the full
  * task record plus run history — fetched lazily from the pre-existing
- * GET /api/v1/failed-tasks/:id endpoint (server route +
+ * GET /api/failed-tasks/:id endpoint (server route +
  * SqliteTaskStore.getFailedTaskDetail already existed; the UI simply never
  * consumed them).
  *
@@ -298,7 +298,7 @@ export function FailedTasksPage() {
     // Shared request(): same auth header and global 401 session-expiry
     // handling as every other page (PRI-643 — a manual fetch here bypassed
     // session-expiry routing entirely).
-    const result = await request("/api/v1/failed-tasks", undefined, validateFailedTasksData);
+    const result = await request("/api/failed-tasks", undefined, validateFailedTasksData);
     if (result.success) {
       setState({ status: "loaded", data: result.data });
       return;

@@ -26,7 +26,7 @@ function createMockRequest(method: string, options?: { body?: unknown; subPath?:
   const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';
   return {
     method,
-    url: `/api/v1/activations${options?.subPath ?? ''}`,
+    url: `/api/activations${options?.subPath ?? ''}`,
     [Symbol.asyncIterator]() {
       const chunks = options?.body !== undefined ? [Buffer.from(bodyStr)] : [];
       let i = 0;

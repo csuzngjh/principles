@@ -1,8 +1,8 @@
 /**
- * PRI-629 — /api/v1/governance/owner-decisions 路由。
+ * PRI-629 — /api/governance/owner-decisions 路由。
  *
- *   GET  /api/v1/governance/owner-decisions            — 统一 Owner Inbox 投影
- *   POST /api/v1/governance/owner-decisions/:taskId/resolve — Owner 裁决
+ *   GET  /api/governance/owner-decisions            — 统一 Owner Inbox 投影
+ *   POST /api/governance/owner-decisions/:taskId/resolve — Owner 裁决
  *
  * 安全模型（SPEC §28/§29）:
  *   - 全局 console token 认证由 server/index.ts 统一强制;
@@ -208,7 +208,7 @@ export async function handleOwnerDecisionsRoute(
   const { workspaceDir, subPath, ownerIdentity } = ctx;
   const method = req.method ?? 'GET';
 
-  // GET /api/v1/governance/owner-decisions — list
+  // GET /api/governance/owner-decisions — list
   if (subPath === '' || subPath === '/') {
     if (method !== 'GET') {
       sendMethodNotAllowed(res);
@@ -226,7 +226,7 @@ export async function handleOwnerDecisionsRoute(
     return;
   }
 
-  // POST /api/v1/governance/owner-decisions/:taskId/resolve
+  // POST /api/governance/owner-decisions/:taskId/resolve
   const resolveMatch = /^\/([^/]+)\/resolve$/.exec(subPath);
   if (resolveMatch) {
     if (method !== 'POST') {
@@ -274,5 +274,5 @@ export async function handleOwnerDecisionsRoute(
     return;
   }
 
-  sendError(res, 404, 'not_found', `Route /api/v1/governance/owner-decisions${subPath} not found`);
+  sendError(res, 404, 'not_found', `Route /api/governance/owner-decisions${subPath} not found`);
 }

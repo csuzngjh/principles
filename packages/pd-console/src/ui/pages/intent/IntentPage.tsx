@@ -80,7 +80,7 @@ function EditEntry({ filePath }: { filePath: string }) {
  *
  * Replaces the static FlagDisabledBanner. Instead of telling the Owner to
  * hand-edit yaml + restart, this card offers a one-click toggle that calls
- * PATCH /api/v1/config/features/intent_engineering { enabled: true }.
+ * PATCH /api/config/features/intent_engineering { enabled: true }.
  *
  * Only renders when flagEnabled === false (disabled state). After a successful
  * enable, calls onAfterEnable so the parent re-fetches IntentSummary and the

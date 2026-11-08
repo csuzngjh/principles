@@ -23,11 +23,11 @@ beforeEach(async () => {
   }
   approvalId = (await new SqliteApprovalQueueStore(connection).enqueue({ artifactId: 'a', channel: 'defer_archive', riskLevel: 'low' }, 'now')).approvalId;
   model = new ApprovalsConsoleModel(directory);
-  server = createServer((req, res) => { void handleApprovalsRoute(req, res, directory, (req.url ?? '/').replace('/api/v1/approvals', '')).catch(() => { res.statusCode = 500; res.end(); }); });
+  server = createServer((req, res) => { void handleApprovalsRoute(req, res, directory, (req.url ?? '/').replace('/api/approvals', '')).catch(() => { res.statusCode = 500; res.end(); }); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('missing server port');
-  base = `http://127.0.0.1:${address.port}/api/v1/approvals/${approvalId}`;
+  base = `http://127.0.0.1:${address.port}/api/approvals/${approvalId}`;
 });
 afterEach(async () => { await new Promise<void>(resolve => server.close(() => resolve())); disposeApprovalsModels(); model.dispose(); connection.close(); rmSync(directory, { recursive: true, force: true }); });
 async function review() {

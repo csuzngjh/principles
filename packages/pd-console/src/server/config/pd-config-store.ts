@@ -1438,7 +1438,7 @@ export function createRuntimeProfile(
       statusCode: 400,
       error: 'bad_request',
       message: `Runtime profile '${profileId}' already exists. Use PATCH to update it.`,
-      nextAction: `Use PATCH /api/v1/config/profiles/${encodeURIComponent(profileId)} to update the existing profile`,
+      nextAction: `Use PATCH /api/config/profiles/${encodeURIComponent(profileId)} to update the existing profile`,
     };
   }
 
@@ -1541,7 +1541,7 @@ export function updateRuntimeProfile(
       statusCode: 404,
       error: 'not_found',
       message: `Runtime profile '${profileId}' does not exist. Available profiles: ${Object.keys(effective.config.runtimeProfiles).join(', ')}`,
-      nextAction: 'Use POST /api/v1/config/profiles to create a new profile',
+      nextAction: 'Use POST /api/config/profiles to create a new profile',
     };
   }
 
@@ -1560,7 +1560,7 @@ export function updateRuntimeProfile(
       statusCode: 400,
       error: 'retired_profile_type',
       message: `Runtime profile type 'openclaw' is retired (ADR-0029) and cannot be updated. The profile stays readable for legacy compatibility only.`,
-      nextAction: `DELETE /api/v1/config/profiles/${encodeURIComponent(profileId)} and create a pi-ai profile instead (provider + model + apiKeyEnv)`,
+      nextAction: `DELETE /api/config/profiles/${encodeURIComponent(profileId)} and create a pi-ai profile instead (provider + model + apiKeyEnv)`,
     };
   }
 
@@ -1573,7 +1573,7 @@ export function updateRuntimeProfile(
         statusCode: 400,
         error: 'bad_request',
         message: `Cannot change profile type (existing: '${existingProfile.type}', requested: '${String(patchType)}'). Type change equals delete + create. Delete this profile and create a new one instead.`,
-        nextAction: `DELETE /api/v1/config/profiles/${encodeURIComponent(profileId)} then POST /api/v1/config/profiles with the new type`,
+        nextAction: `DELETE /api/config/profiles/${encodeURIComponent(profileId)} then POST /api/config/profiles with the new type`,
       };
     }
   }
@@ -1684,7 +1684,7 @@ export function deleteRuntimeProfile(
       statusCode: 400,
       error: 'bad_request',
       message: `Cannot delete runtime profile '${profileId}' because it is the default runtime. Change the default runtime first.`,
-      nextAction: 'Use PATCH /api/v1/config/default-runtime to change the default to another profile before deleting',
+      nextAction: 'Use PATCH /api/config/default-runtime to change the default to another profile before deleting',
     };
   }
 
@@ -1702,7 +1702,7 @@ export function deleteRuntimeProfile(
       statusCode: 400,
       error: 'bad_request',
       message: `Cannot delete runtime profile '${profileId}' because it is referenced by agents: ${referencingAgents.join(', ')}. Update their bindings first.`,
-      nextAction: `Use PATCH /api/v1/config/agents/:agentName/binding to reassign: ${referencingAgents.join(', ')}`,
+      nextAction: `Use PATCH /api/config/agents/:agentName/binding to reassign: ${referencingAgents.join(', ')}`,
     };
   }
 

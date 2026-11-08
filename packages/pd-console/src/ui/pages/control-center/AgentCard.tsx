@@ -139,7 +139,7 @@ export function AgentCard({
   const [confirming, setConfirming] = useState(false);
 
   // 动态 readiness：L2 展开时，若静态 readiness 为 'unknown'（悲观值），
-  // 调用 /api/v1/config/readiness/:agentName 获取实时探测结果替换静态值。
+  // 调用 /api/config/readiness/:agentName 获取实时探测结果替换静态值。
   // 仅在 agent.enabled && agent.readiness === 'unknown' 时发起请求。
   const [dynamicReadiness, setDynamicReadiness] = useState<ReadinessStatus | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);

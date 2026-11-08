@@ -124,12 +124,12 @@ afterEach(() => {
   try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-// ── GET /api/v1/intent (existing, smoke test) ───────────────────────────────
+// ── GET /api/intent (existing, smoke test) ───────────────────────────────
 
-describe('Intent route — GET /api/v1/intent', () => {
+describe('Intent route — GET /api/intent', () => {
   it('returns summary with flag_enabled=true', async () => {
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent'), res, { workspaceDir, subPath: '' });
+    await handleIntentRoute(makeGetReq('/api/intent'), res, { workspaceDir, subPath: '' });
     expect(getStatus(res)).toBe(200);
     const body = parseBody(res);
     expect(body.success).toBe(true);
@@ -140,7 +140,7 @@ describe('Intent route — GET /api/v1/intent', () => {
   it('returns 403 when flag is disabled', async () => {
     writeConfig(false);
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent'), res, { workspaceDir, subPath: '' });
+    await handleIntentRoute(makeGetReq('/api/intent'), res, { workspaceDir, subPath: '' });
     expect(getStatus(res)).toBe(200); // GET returns summary with flagEnabled=false
     const body = parseBody(res);
     expect(body.data.flagEnabled).toBe(false);
@@ -148,12 +148,12 @@ describe('Intent route — GET /api/v1/intent', () => {
   });
 });
 
-// ── POST /api/v1/intent/init ────────────────────────────────────────────────
+// ── POST /api/intent/init ────────────────────────────────────────────────
 
-describe('Intent route — POST /api/v1/intent/init', () => {
+describe('Intent route — POST /api/intent/init', () => {
   it('creates INTENT.md template (201)', async () => {
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', {}), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(201);
     const body = parseBody(res);
     expect(body.success).toBe(true);
@@ -173,7 +173,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
     fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'existing content', 'utf8');
 
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', {}), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(200);
     const body = parseBody(res);
     expect(body.success).toBe(true);
@@ -189,7 +189,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
     fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), 'old content', 'utf8');
 
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', { force: true }), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', { force: true }), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(201);
     const body = parseBody(res);
     expect(body.data.created).toBe(true);
@@ -206,7 +206,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
     expect(fs.existsSync(principlesDir)).toBe(false);
 
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', {}), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(201);
 
     // Directory and file should now exist
@@ -217,7 +217,7 @@ describe('Intent route — POST /api/v1/intent/init', () => {
   it('returns 403 when flag is disabled', async () => {
     writeConfig(false);
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', {}), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', {}), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(403);
     const body = parseError(res);
     expect(body.reason).toBe('flag_disabled');
@@ -225,27 +225,27 @@ describe('Intent route — POST /api/v1/intent/init', () => {
 
   it('handles empty body gracefully', async () => {
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', ''), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', ''), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(201);
   });
 
   it('returns 400 on invalid JSON body', async () => {
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/init', '{not valid'), res, { workspaceDir, subPath: '/init' });
+    await handleIntentRoute(makePostReq('/api/intent/init', '{not valid'), res, { workspaceDir, subPath: '/init' });
     expect(getStatus(res)).toBe(400);
     const body = parseError(res);
     expect(body.reason).toBe('invalid_json');
   });
 });
 
-// ── GET /api/v1/intent/content ──────────────────────────────────────────────
+// ── GET /api/intent/content ──────────────────────────────────────────────
 
-describe('Intent route — GET /api/v1/intent/content', () => {
+describe('Intent route — GET /api/intent/content', () => {
   it('returns raw content when file exists', async () => {
     fs.writeFileSync(path.join(principlesDir, 'INTENT.zh-CN.md'), '# My Intent\n\ntest content', 'utf8');
 
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    await handleIntentRoute(makeGetReq('/api/intent/content'), res, { workspaceDir, subPath: '/content' });
     expect(getStatus(res)).toBe(200);
     const body = parseBody(res);
     expect(body.data.content).toContain('# My Intent');
@@ -255,7 +255,7 @@ describe('Intent route — GET /api/v1/intent/content', () => {
 
   it('returns 404 when file does not exist', async () => {
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    await handleIntentRoute(makeGetReq('/api/intent/content'), res, { workspaceDir, subPath: '/content' });
     expect(getStatus(res)).toBe(404);
     const body = parseError(res);
     expect(body.reason).toBe('not_found');
@@ -264,7 +264,7 @@ describe('Intent route — GET /api/v1/intent/content', () => {
   it('returns 403 when flag is disabled', async () => {
     writeConfig(false);
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    await handleIntentRoute(makeGetReq('/api/intent/content'), res, { workspaceDir, subPath: '/content' });
     expect(getStatus(res)).toBe(403);
     expect(parseError(res).reason).toBe('flag_disabled');
   });
@@ -284,20 +284,20 @@ describe('Intent route — GET /api/v1/intent/content', () => {
     );
 
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent/content'), res, { workspaceDir, subPath: '/content' });
+    await handleIntentRoute(makeGetReq('/api/intent/content'), res, { workspaceDir, subPath: '/content' });
     expect(getStatus(res)).toBe(413);
     const body = parseError(res);
     expect(body.reason).toBe('oversized');
   });
 });
 
-// ── PUT /api/v1/intent/content ──────────────────────────────────────────────
+// ── PUT /api/intent/content ──────────────────────────────────────────────
 
-describe('Intent route — PUT /api/v1/intent/content', () => {
+describe('Intent route — PUT /api/intent/content', () => {
   it('saves content and returns updated metadata', async () => {
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { content: '# My Intent\n\nnew content' }),
+      makePutReq('/api/intent/content', { content: '# My Intent\n\nnew content' }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -317,7 +317,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
 
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { content: 'new content' }),
+      makePutReq('/api/intent/content', { content: 'new content' }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -330,7 +330,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
   it('returns 400 when content is missing', async () => {
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { other: 'field' }),
+      makePutReq('/api/intent/content', { other: 'field' }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -341,7 +341,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
   it('returns 400 when content is empty string', async () => {
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { content: '' }),
+      makePutReq('/api/intent/content', { content: '' }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -352,7 +352,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
   it('returns 400 when content is not a string', async () => {
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { content: 123 }),
+      makePutReq('/api/intent/content', { content: 123 }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -364,7 +364,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
     const hugeContent = 'x'.repeat(33 * 1024);
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { content: hugeContent }),
+      makePutReq('/api/intent/content', { content: hugeContent }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -376,7 +376,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
     writeConfig(false);
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', { content: 'test' }),
+      makePutReq('/api/intent/content', { content: 'test' }),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -387,7 +387,7 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
   it('returns 400 on invalid JSON body', async () => {
     const res = makeRes();
     await handleIntentRoute(
-      makePutReq('/api/v1/intent/content', '{not valid'),
+      makePutReq('/api/intent/content', '{not valid'),
       res,
       { workspaceDir, subPath: '/content' },
     );
@@ -401,13 +401,13 @@ describe('Intent route — PUT /api/v1/intent/content', () => {
 describe('Intent route — unknown sub-paths', () => {
   it('returns 404 for unknown GET sub-path', async () => {
     const res = makeRes();
-    await handleIntentRoute(makeGetReq('/api/v1/intent/unknown'), res, { workspaceDir, subPath: '/unknown' });
+    await handleIntentRoute(makeGetReq('/api/intent/unknown'), res, { workspaceDir, subPath: '/unknown' });
     expect(getStatus(res)).toBe(404);
   });
 
   it('returns 404 for unknown POST sub-path', async () => {
     const res = makeRes();
-    await handleIntentRoute(makePostReq('/api/v1/intent/unknown', {}), res, { workspaceDir, subPath: '/unknown' });
+    await handleIntentRoute(makePostReq('/api/intent/unknown', {}), res, { workspaceDir, subPath: '/unknown' });
     expect(getStatus(res)).toBe(404);
   });
 });

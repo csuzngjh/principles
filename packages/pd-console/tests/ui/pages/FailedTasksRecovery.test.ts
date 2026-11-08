@@ -14,7 +14,7 @@
  * Pattern: source-code contract test (string matching on source files).
  * Mirrors SettingsOnboardingFlag.test.ts.
  *
- * EP-02 (Production Path Wiring): POST /api/v1/failed-tasks/:id/recover
+ * EP-02 (Production Path Wiring): POST /api/failed-tasks/:id/recover
  * EP-09 (Test Reality): contract assertions reflect the real implementation.
  */
 
@@ -47,7 +47,7 @@ const zhJson = parseJsonRecord(
 describe('FailedTasksPage recovery (Governance Recovery Actions v1)', () => {
   it('Given api.ts, When parsed, Then recoverFailedTask POSTs to /recover with a validator (EP-02)', () => {
     expect(apiSource).toContain('recoverFailedTask');
-    expect(apiSource).toContain('/api/v1/failed-tasks/');
+    expect(apiSource).toContain('/api/failed-tasks/');
     expect(apiSource).toContain('/recover');
     expect(apiSource).toContain('validateRecoveryResult');
     expect(apiSource).toContain("'POST'");

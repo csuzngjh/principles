@@ -1,8 +1,8 @@
 /**
  * PD v2 Phase 1 BDD: intervention evidence chain — binds to the REAL
  * ReceiptsConsoleModel.getEvidenceAudit (the model the
- * /api/v1/receipts/evidence-audit route serves) and the REAL
- * handleEvidenceOutcomesRoute (the POST /api/v1/evidence/outcomes route)
+ * /api/receipts/evidence-audit route serves) and the REAL
+ * handleEvidenceOutcomesRoute (the POST /api/evidence/outcomes route)
  * against a real temp workspace. Fixtures enter through the REAL ingress +
  * normalizer, never hand-inserted rows.
  *
@@ -120,7 +120,7 @@ function makeOutcomeReq(method: string, body?: unknown): IncomingMessage {
   const listeners: Record<string, (chunk?: Buffer) => void> = {};
   const req = {
     method,
-    url: '/api/v1/evidence/outcomes',
+    url: '/api/evidence/outcomes',
     on(event: string, cb: (chunk?: Buffer) => void) {
       listeners[event] = cb;
       if (event === 'end') {

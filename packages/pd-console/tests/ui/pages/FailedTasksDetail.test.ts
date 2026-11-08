@@ -1,7 +1,7 @@
 /**
  * Tests for the Failed Tasks detail connection — PRI-747 F22 / PRI-749.
  *
- * The server endpoint GET /api/v1/failed-tasks/:id (task record + run
+ * The server endpoint GET /api/failed-tasks/:id (task record + run
  * history via SqliteTaskStore.getFailedTaskDetail) has existed since the
  * failed-task observability spec; the UI never consumed it. These tests pin
  * the restored connection:
@@ -14,7 +14,7 @@
  *   responses (rc-7), surfaces error reason + next action (rc-9)
  * - i18n keys exist with en/zh parity (EP-11)
  *
- * EP-02 (Production Path Wiring): GET /api/v1/failed-tasks/:id
+ * EP-02 (Production Path Wiring): GET /api/failed-tasks/:id
  * EP-09 (Test Reality): assertions reflect the real implementation.
  */
 
@@ -42,7 +42,7 @@ const zhJson = parseJsonRecord(
   readFileSync(join(SRC_ROOT, 'ui', 'i18n', 'zh-CN.json'), 'utf8'),
 );
 
-/** Realistic server payload for GET /api/v1/failed-tasks/:id (route sends
+/** Realistic server payload for GET /api/failed-tasks/:id (route sends
  *  { task: TaskRecord, runs: RunRecord[], lastError, pendingAgentDraft }). */
 function serverDetailPayload(): Record<string, unknown> {
   return {
@@ -127,7 +127,7 @@ describe('fetchFailedTaskDetail (PRI-747 F22)', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [calledPath, calledInit] = mockFetch.mock.calls[0];
-    expect(calledPath).toBe('/api/v1/failed-tasks/task-detail-1');
+    expect(calledPath).toBe('/api/failed-tasks/task-detail-1');
     expect(calledInit?.method).toBeUndefined(); // GET — no method override
   });
 
@@ -143,7 +143,7 @@ describe('fetchFailedTaskDetail (PRI-747 F22)', () => {
     await fetchFailedTaskDetail('task/with spaces');
 
     const [calledPath] = mockFetch.mock.calls[0];
-    expect(calledPath).toBe('/api/v1/failed-tasks/task%2Fwith%20spaces');
+    expect(calledPath).toBe('/api/failed-tasks/task%2Fwith%20spaces');
     // Round trip: the server route decodes the segment before the store
     // lookup (failed-tasks.test.ts pins the server half of this contract).
   });

@@ -250,7 +250,7 @@ export interface IntentDecisionChoice {
 
 /**
  * Build an IntentDecisionInputPayload from an IntentTension and the Owner's
- * chosen action. The payload is sent to POST /api/v1/intent-decisions.
+ * chosen action. The payload is sent to POST /api/intent-decisions.
  *
  * - `id` is the caller-supplied decision UUID (P0 fix: server requires this).
  * - `taskId` falls back to `recordId` when not provided.

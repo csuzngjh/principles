@@ -6,7 +6,7 @@
  * verifies the page renders REGISTRATION (where the identity comes from) and
  * GOVERNANCE READINESS (whether Owner actions can execute) as two separate,
  * independently-colored states, and that readiness is derived ONLY from the
- * canonical governance snapshot delivered by /api/v1/owner-identity — never
+ * canonical governance snapshot delivered by /api/owner-identity — never
  * re-derived from the registration source in the UI.
  *
  * EP-09 (Test Reality): contract assertions reflect the real implementation.

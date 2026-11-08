@@ -101,7 +101,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
     setDemoError(null);
     try {
       const response = await request(
-        '/api/v1/onboarding/run-demo',
+        '/api/onboarding/run-demo',
         { method: 'POST' },
         parseDemoResponse,
       );
@@ -151,7 +151,7 @@ export function WelcomePage({ workspaceId }: WelcomePageProps) {
 
     const checkForEvidence = async () => {
       try {
-        const response = await request('/api/v1/evidence-chain');
+        const response = await request('/api/evidence-chain');
         // P2-A: request() returns { success: false, error } on HTTP/network
         // errors instead of throwing. Convert non-success into a thrown error
         // so the catch block (error counter + retry UI) actually fires.

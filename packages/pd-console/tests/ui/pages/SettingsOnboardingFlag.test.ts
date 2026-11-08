@@ -11,7 +11,7 @@
  * Pattern: source-code contract test (string matching on source files).
  * Mirrors Approuting.test.ts and WelcomePage.test.ts.
  *
- * EP-02 (Production Path Wiring): PATCH /api/v1/config/features/new_user_onboarding
+ * EP-02 (Production Path Wiring): PATCH /api/config/features/new_user_onboarding
  * EP-09 (Test Reality): contract assertions reflect the real implementation.
  * EP-11 (i18n): all user-visible strings come from i18n keys.
  */
@@ -74,7 +74,7 @@ describe('SettingsPage onboarding flag toggle', () => {
 
   it('Given api.ts, When parsed, Then patchFeatureFlag wires PATCH /features/:name (EP-02)', () => {
     expect(apiSource).toContain('PATCH');
-    expect(apiSource).toContain('/api/v1/config/features/');
+    expect(apiSource).toContain('/api/config/features/');
     expect(apiSource).toContain('validateFeatureFlagUpdate');
   });
 

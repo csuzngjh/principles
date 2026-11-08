@@ -1,7 +1,7 @@
 /**
  * PRI-515: Lifecycle API Route Tests (DEFECT-006)
  *
- * Verifies the route contract for `GET /api/v1/lifecycle/principles/:principleId`.
+ * Verifies the route contract for `GET /api/lifecycle/principles/:principleId`.
  * The key fix (DEFECT-006): when a principle exists in the system but is not yet
  * in the lifecycle read model (e.g., recently created, no rules/implementations),
  * the API MUST return 200 with `{ insufficientData: true }` — NOT 404.
@@ -37,7 +37,7 @@ import { handleLifecycleRoute, disposeLifecycleModels } from '../../../src/serve
 function createMockRequest(method: string, url?: string): IncomingMessage {
   const req = {
     method,
-    url: url ?? '/api/v1/lifecycle/principles/principle-001',
+    url: url ?? '/api/lifecycle/principles/principle-001',
     on: vi.fn(),
   } as unknown as IncomingMessage;
   return req;
@@ -130,7 +130,7 @@ describe('DEFECT-006 (PRI-515): lifecycle API must NOT return 404 for missing pr
       },
     });
 
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/principle-missing');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/principle-missing');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/principle-missing');
@@ -155,7 +155,7 @@ describe('DEFECT-006 (PRI-515): lifecycle API must NOT return 404 for missing pr
 
   it('returns 200 + insufficientData when ledger does not exist at all', async () => {
     // No ledger file created — fresh workspace
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/any-principle');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/any-principle');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/any-principle');
@@ -191,7 +191,7 @@ describe('DEFECT-006 (PRI-515): lifecycle API must NOT return 404 for missing pr
       },
     });
 
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/principle-empty');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/principle-empty');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/principle-empty');
@@ -251,7 +251,7 @@ describe('lifecycle route — happy path with rules', () => {
     );
     fs.mkdirSync(replayDir, { recursive: true });
 
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/principle-001');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/principle-001');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/principle-001');
@@ -275,7 +275,7 @@ describe('lifecycle route — happy path with rules', () => {
 
 describe('lifecycle route — error paths', () => {
   it('returns 400 when principle ID is missing (empty segment)', async () => {
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/');
     const res = createMockResponse();
 
     // Note: subPath here would be '/principles/' — regex `/^[/]principles[/]([^/]+)$/`
@@ -290,7 +290,7 @@ describe('lifecycle route — error paths', () => {
   });
 
   it('returns 400 when principle ID contains invalid percent encoding', async () => {
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/%E0%A4');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/%E0%A4');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/%E0%A4');
@@ -304,7 +304,7 @@ describe('lifecycle route — error paths', () => {
   });
 
   it('returns 404 for non-GET methods (route not found)', async () => {
-    const req = createMockRequest('POST', '/api/v1/lifecycle/principles/principle-001');
+    const req = createMockRequest('POST', '/api/lifecycle/principles/principle-001');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/principle-001');
@@ -315,7 +315,7 @@ describe('lifecycle route — error paths', () => {
   });
 
   it('returns 404 for unknown sub-path', async () => {
-    const req = createMockRequest('GET', '/api/v1/lifecycle/unknown/path');
+    const req = createMockRequest('GET', '/api/lifecycle/unknown/path');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/unknown/path');
@@ -333,7 +333,7 @@ describe('lifecycle route — error paths', () => {
     fs.rmSync(stateDir, { recursive: true, force: true });
     fs.writeFileSync(stateDir, 'not a directory');
 
-    const req = createMockRequest('GET', '/api/v1/lifecycle/principles/principle-001');
+    const req = createMockRequest('GET', '/api/lifecycle/principles/principle-001');
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, '/principles/principle-001');
@@ -374,7 +374,7 @@ describe('lifecycle route — URL decoding', () => {
     });
 
     const encoded = encodeURIComponent('principle with spaces');
-    const req = createMockRequest('GET', `/api/v1/lifecycle/principles/${encoded}`);
+    const req = createMockRequest('GET', `/api/lifecycle/principles/${encoded}`);
     const res = createMockResponse();
 
     await handleLifecycleRoute(req, res, workspaceDir, `/principles/${encoded}`);

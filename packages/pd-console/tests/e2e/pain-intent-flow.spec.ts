@@ -25,7 +25,7 @@ async function apiPost(path: string, body?: unknown): Promise<{ status: number; 
 test.describe('PainPage evidence-chain + intent 流程', () => {
   test('evidence-chain 加载 → 验证 pain_event 出现 → intent 端点可用', async ({ page }) => {
     // ── 步骤 1：验证 evidence-chain API 返回 seed 的 pain_event ──────────────
-    const evidenceResp = await apiGet('/api/v1/evidence-chain');
+    const evidenceResp = await apiGet('/api/evidence-chain');
     expect(evidenceResp.status).toBe(200);
     // 注意：evidence-chain 端点返回 data.records（不是 data.items）
     // 每条 record 用 id（格式 pain_<rowid>）和 canonicalPainId（如 pain-e2e-1）
@@ -70,7 +70,7 @@ test.describe('PainPage evidence-chain + intent 流程', () => {
   });
 
   test('intent summary 端点：返回 intent 概览', async () => {
-    const resp = await apiGet('/api/v1/intent');
+    const resp = await apiGet('/api/intent');
     // intent 端点受 feature flag 控制，可能返回 200 或 404（flag 关闭）
     if (resp.status === 200) {
       const body = resp.body as { success: boolean; data: unknown };
@@ -88,7 +88,7 @@ test.describe('PainPage evidence-chain + intent 流程', () => {
     // intent-decisions 受 intent_engineering feature flag 控制：
     // - flag 开启：返回 200 + 决策汇总
     // - flag 关闭：返回 403 + reason/nextAction（ERR-002：不静默）
-    const resp = await apiGet('/api/v1/intent-decisions/summary');
+    const resp = await apiGet('/api/intent-decisions/summary');
     if (resp.status === 200) {
       const body = resp.body as {
         success: boolean;
@@ -112,7 +112,7 @@ test.describe('PainPage evidence-chain + intent 流程', () => {
 
   test('intent-decisions 按 painId 查询：空结果或 flag-disabled 不报错', async () => {
     // 用 seed 的 pain-e2e-1 查询
-    const resp = await apiGet('/api/v1/intent-decisions?painId=pain-e2e-1');
+    const resp = await apiGet('/api/intent-decisions?painId=pain-e2e-1');
     if (resp.status === 200) {
       const body = resp.body as {
         success: boolean;
@@ -133,7 +133,7 @@ test.describe('PainPage evidence-chain + intent 流程', () => {
 
   test('intent-decisions 创建：验证 201/200（flag 开启）或 403 降级（flag 关闭）', async () => {
     // 创建一个 intent decision
-    const createResp = await apiPost('/api/v1/intent-decisions', {
+    const createResp = await apiPost('/api/intent-decisions', {
       painId: 'pain-e2e-1',
       taskId: 'task-diag-1',
       source: 'owner',
@@ -152,7 +152,7 @@ test.describe('PainPage evidence-chain + intent 流程', () => {
 
       // 验证创建后能查询到
       if (createBody.data.id) {
-        const queryResp = await apiGet('/api/v1/intent-decisions?painId=pain-e2e-1');
+        const queryResp = await apiGet('/api/intent-decisions?painId=pain-e2e-1');
         const queryBody = queryResp.body as {
           success: boolean;
           data: { decisions?: Array<{ id: string; painId: string }> };

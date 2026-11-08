@@ -28,7 +28,7 @@ async function apiPost(path: string, body?: unknown): Promise<{ status: number; 
 test.describe('FocusPage 审批闭环流程', () => {
   test('governance queue 加载 → approve → pending 减少 + activation 出现', async ({ page }) => {
     // ── 步骤 1：验证初始状态（seed 数据应有 2 个 pending approvals）──────────
-    const queueResp = await apiGet('/api/v1/governance/queue');
+    const queueResp = await apiGet('/api/governance/queue');
     expect(queueResp.status).toBe(200);
     const queueBody = queueResp.body as { success: boolean; data: { pendingReviewCount?: number } };
     expect(queueBody.success).toBe(true);
@@ -54,7 +54,7 @@ test.describe('FocusPage 审批闭环流程', () => {
     expect(bodyText.length).toBeGreaterThan(100);
 
     // ── 步骤 3：获取 pending approvals 列表 ──────────────────────────────────
-    const approvalsResp = await apiGet('/api/v1/approvals?status=pending');
+    const approvalsResp = await apiGet('/api/approvals?status=pending');
     expect(approvalsResp.status).toBe(200);
     // 注意：approvals 列表端点返回 data.items（不是 data.approvals）
     const approvalsBody = approvalsResp.body as {
@@ -77,7 +77,7 @@ test.describe('FocusPage 审批闭环流程', () => {
 
     // ── 步骤 4：通过 API approve 第一个 approval ─────────────────────────────
     // approve 端点要求 JSON body（空对象即可），否则返回 400 bad_request
-    const approveResp = await apiPost(`/api/v1/approvals/${firstApproval.approvalId}/approve`, {});
+    const approveResp = await apiPost(`/api/approvals/${firstApproval.approvalId}/approve`, {});
     expect(approveResp.status).toBe(200);
     const approveBody = approveResp.body as {
       success: boolean;
@@ -100,7 +100,7 @@ test.describe('FocusPage 审批闭环流程', () => {
     }
 
     // ── 步骤 5：验证 pending count 减少 ──────────────────────────────────────
-    const queueAfterResp = await apiGet('/api/v1/governance/queue');
+    const queueAfterResp = await apiGet('/api/governance/queue');
     const queueAfterBody = queueAfterResp.body as { success: boolean; data: { pendingReviewCount?: number } };
     expect(queueAfterBody.data.pendingReviewCount).toBeLessThan(queueBody.data.pendingReviewCount!);
 
@@ -114,7 +114,7 @@ test.describe('FocusPage 审批闭环流程', () => {
     // actual signal that approve produced an activation (prompt/defer_archive
     // channels do; code_tool_hook may not).
     if (approveBody.data.activation) {
-      const activationsResp = await apiGet('/api/v1/activations');
+      const activationsResp = await apiGet('/api/activations');
       expect(activationsResp.status).toBe(200);
       const activationsBody = activationsResp.body as {
         success: boolean;
@@ -133,7 +133,7 @@ test.describe('FocusPage 审批闭环流程', () => {
   });
 
   test('approvals grouped 端点：按 principle 分组返回 pending records', async () => {
-    const resp = await apiGet('/api/v1/approvals/grouped');
+    const resp = await apiGet('/api/approvals/grouped');
     expect(resp.status).toBe(200);
     const body = resp.body as {
       success: boolean;

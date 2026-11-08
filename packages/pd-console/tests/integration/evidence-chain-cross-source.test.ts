@@ -69,7 +69,7 @@ let baseUrl: string;
 function startServer(workspaceDir: string): void {
   server = http.createServer((req, res) => {
     const urlPath = req.url?.split('?')[0] ?? '/';
-    if (urlPath.startsWith('/api/v1/evidence-chain')) {
+    if (urlPath.startsWith('/api/evidence-chain')) {
       handleEvidenceChainRoute(req, res, workspaceDir).catch((err: unknown) => {
         if (!res.headersSent) {
           sendJson(res, 500, { success: false, error: err instanceof Error ? err.message : 'Internal error' });
@@ -324,7 +324,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     }]);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const records = getRecordsArray(body);
@@ -369,7 +369,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     writeLedger(workspaceDir, []);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const records = getRecordsArray(body);
@@ -400,7 +400,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     writeLedger(workspaceDir, []);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const data = getDataObject(body);
@@ -425,7 +425,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     writeLedger(workspaceDir, []);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const data = getDataObject(body);
@@ -496,7 +496,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     writeLedger(workspaceDir, []);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const records = getRecordsArray(body);
@@ -555,7 +555,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     }]);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const records = getRecordsArray(body);
@@ -577,7 +577,7 @@ describe('Evidence-Chain Cross-Source Integration', () => {
     writeLedger(workspaceDir, [{ id: 'p-orphan', derivedFromPainIds: [] }]);
 
     startServer(workspaceDir);
-    const { status, body } = await fetchJson('/api/v1/evidence-chain');
+    const { status, body } = await fetchJson('/api/evidence-chain');
     expect(status).toBe(200);
 
     const data = getDataObject(body);

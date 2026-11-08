@@ -6,7 +6,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 test.describe('RuleCode Owner live-decision safety journey', () => {
   test('shows bounded evidence and performs break-glass containment without CLI or host restart', async ({ page, request }) => {
-    const decisionsResponse = await request.get('/api/v1/governance/owner-decisions');
+    const decisionsResponse = await request.get('/api/governance/owner-decisions');
     expect(decisionsResponse.status()).toBe(200);
     const decisionsBody: unknown = await decisionsResponse.json();
     if (!isRecord(decisionsBody) || !isRecord(decisionsBody.data) || !Array.isArray(decisionsBody.data.items)) {
@@ -47,11 +47,11 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
     await expect(shadowReview).toContainText(/Failed|未通过/);
     await expect(shadowReview).toContainText(/Promotion controls are disabled|拥有者决策功能尚未开放/);
 
-    const pauseResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/activations/emergency-pause'));
+    const pauseResponse = page.waitForResponse(response => response.url().endsWith('/api/activations/emergency-pause'));
     await page.getByRole('button', { name: /Pause all Live RuleCode|暂停全部 Live RuleCode/ }).click();
     expect((await pauseResponse).status()).toBe(200);
 
-    const pausedReview = await request.get('/api/v1/activations/act-rule-shadow-e2e/owner-review');
+    const pausedReview = await request.get('/api/activations/act-rule-shadow-e2e/owner-review');
     expect(pausedReview.status()).toBe(200);
     const pausedBody: unknown = await pausedReview.json();
     expect(pausedBody).toMatchObject({
@@ -63,7 +63,7 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
     await liveCard.getByRole('button', { name: /Emergency deactivate|紧急停用/ }).click();
     expect((await emergencyResponse).status()).toBe(200);
 
-    const activationResponse = await request.get('/api/v1/activations');
+    const activationResponse = await request.get('/api/activations');
     const activationBody: unknown = await activationResponse.json();
     expect(activationResponse.status(), JSON.stringify(activationBody)).toBe(200);
     if (!isRecord(activationBody) || activationBody.success !== true || !isRecord(activationBody.data)

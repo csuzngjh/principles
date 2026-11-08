@@ -258,7 +258,7 @@ test.describe('R2 conclusion strip stays honest with on-screen cards', () => {
 
 test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', () => {
   test('degraded inbox payload surfaces the server reason and keeps the count honest (S1)', async ({ page }) => {
-    await page.route('**/api/v1/principles/owner-decision-inbox', (route) =>
+    await page.route('**/api/principles/owner-decision-inbox', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -290,7 +290,7 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
   });
 
   test('feature-disabled inbox keeps cards and locks actions with a visible reason (S3)', async ({ page }) => {
-    await page.route('**/api/v1/principles/owner-decision-inbox', (route) =>
+    await page.route('**/api/principles/owner-decision-inbox', (route) =>
       route.fulfill({
         status: 403,
         contentType: 'application/json',

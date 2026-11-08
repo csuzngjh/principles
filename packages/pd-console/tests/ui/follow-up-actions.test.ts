@@ -297,8 +297,8 @@ describe('dispatchFollowUp API client', () => {
     expect(apiSrc).toMatch(/^\s*dispatchFollowUp,\s*$/m);
   });
 
-  it('dispatchFollowUp calls POST /api/v1/intent-decisions/:id/follow-up', () => {
-    expect(apiSrc).toMatch(/\/api\/v1\/intent-decisions\/\$\{encodeURIComponent\(decisionId\)\}\/follow-up/);
+  it('dispatchFollowUp calls POST /api/intent-decisions/:id/follow-up', () => {
+    expect(apiSrc).toMatch(/\/api\/intent-decisions\/\$\{encodeURIComponent\(decisionId\)\}\/follow-up/);
     expect(apiSrc).toMatch(/method:\s*['"]POST['"]/);
   });
 

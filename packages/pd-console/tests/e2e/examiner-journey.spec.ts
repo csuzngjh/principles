@@ -91,7 +91,7 @@ test.describe('Examiner v0.10.1 — four-page Owner journey (real browser, real 
     // activations — creation must REFUSE with INTERVENTION_NOT_IDENTIFIABLE
     // (runtime-sourced evidence, never an assumed-independent study).
     await page.getByTestId('examiner-target-select').selectOption(COUPLED_PRINCIPLE);
-    const refusedPromise = page.waitForResponse((r) => r.url().includes('/api/v1/examiner/studies') && r.request().method() === 'POST', { timeout: 25_000 });
+    const refusedPromise = page.waitForResponse((r) => r.url().includes('/api/examiner/studies') && r.request().method() === 'POST', { timeout: 25_000 });
     await page.getByTestId('examiner-create-button').click();
     const refused = await refusedPromise;
     expect(refused.status()).toBe(422);
@@ -101,7 +101,7 @@ test.describe('Examiner v0.10.1 — four-page Owner journey (real browser, real 
     await page.getByTestId('examiner-target-select').selectOption(TARGET_PRINCIPLE);
     await page.getByTestId('examiner-repetitions-select').selectOption('1');
     await page.getByTestId('examiner-suite-calibration-core').click();
-    const createResponsePromise = page.waitForResponse((r) => r.url().includes('/api/v1/examiner/studies') && r.request().method() === 'POST', { timeout: 60_000 });
+    const createResponsePromise = page.waitForResponse((r) => r.url().includes('/api/examiner/studies') && r.request().method() === 'POST', { timeout: 60_000 });
     await page.getByTestId('examiner-create-button').click();
     const createResponse = await createResponsePromise;
     expect(createResponse.status()).toBe(200);

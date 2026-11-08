@@ -43,7 +43,7 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
   await page.getByLabel('批准备注（可选）').fill('  看过这份确切草案后批准。  ');
   // 观察真实提交请求（UI 点击产生，而非测试直接 POST）
   const approveResponse = page.waitForResponse(
-    (response) => response.url().endsWith('/api/v1/approvals/apr-click-approve/approve') && response.request().method() === 'POST',
+    (response) => response.url().endsWith('/api/approvals/apr-click-approve/approve') && response.request().method() === 'POST',
   );
   await approveBtn.click();
   const response = await approveResponse;
@@ -61,7 +61,7 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
   await expect(page.getByTestId('owner-work-reading')).toContainText('已批准');
 
   // 服务端最终权威状态：审批列表含 approved 记录；激活列表含该激活且 active
-  const approvalsResponse = await request.get('/api/v1/approvals?status=approved', { headers: AUTHORIZATION });
+  const approvalsResponse = await request.get('/api/approvals?status=approved', { headers: AUTHORIZATION });
   expect(approvalsResponse.status()).toBe(200);
   const approvals: unknown = await approvalsResponse.json();
   const items = isRecord(approvals) && isRecord(approvals.data) && Array.isArray(approvals.data.items)
@@ -74,7 +74,7 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
     ? data.activation.activationId
     : undefined;
   expect(activationId).toBeTruthy();
-  const activationsResponse = await request.get('/api/v1/activations', { headers: AUTHORIZATION });
+  const activationsResponse = await request.get('/api/activations', { headers: AUTHORIZATION });
   expect(activationsResponse.status()).toBe(200);
   const activations: unknown = await activationsResponse.json();
   const activation = isRecord(activations) && isRecord(activations.data) && Array.isArray(activations.data.activations)

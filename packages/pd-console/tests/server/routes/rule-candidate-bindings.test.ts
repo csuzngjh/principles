@@ -40,14 +40,14 @@ describe('authenticated binding route, real Ledger + real SQLite revision', () =
     }
     authorized = true;
     server = createServer((req, res) => {
-      const prefix = '/api/v1/governance/rule-candidate-bindings';
+      const prefix = '/api/governance/rule-candidate-bindings';
       const subPath = new URL(req.url ?? '/', 'http://localhost').pathname.slice(prefix.length);
       void handleRuleCandidateBindingsRoute(req, res, { workspaceDir, subPath, ownerIdentity: authorized ? { ownerId: 'server-owner', credentialId: 'credential' } : null });
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('No test listener.');
-    base = `http://127.0.0.1:${address.port}/api/v1/governance/rule-candidate-bindings/${candidateId}`;
+    base = `http://127.0.0.1:${address.port}/api/governance/rule-candidate-bindings/${candidateId}`;
   });
   afterEach(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); await handle.close(); rmSync(workspaceDir, { recursive: true, force: true }); });
   async function bindBody() {

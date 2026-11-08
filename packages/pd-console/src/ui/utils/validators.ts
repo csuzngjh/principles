@@ -962,7 +962,7 @@ export function validateDefaultRuntimeUpdate(v: unknown): DefaultRuntimeUpdateDa
   return { defaultRuntime: v.defaultRuntime };
 }
 
-// ── Runtime Profile mutation (POST/PATCH/DELETE /api/v1/config/profiles) ──────
+// ── Runtime Profile mutation (POST/PATCH/DELETE /api/config/profiles) ──────
 
 /**
  * Response shape for create/update/delete runtime profile endpoints.
@@ -1110,7 +1110,7 @@ export interface GovernanceQueueData {
   generatedAt?: string;
 }
 
-// ── Failed task detail (GET /api/v1/failed-tasks/:id) ───────────────────────
+// ── Failed task detail (GET /api/failed-tasks/:id) ───────────────────────
 // PRI-747 F22 / PRI-749: the server endpoint (task + run history) has existed
 // since the failed-task observability spec; this validator + the api.ts
 // wrapper connect the UI to it. Server contract: { task: TaskRecord, runs:
@@ -1130,7 +1130,7 @@ export interface FailedTaskDetailRun {
   errorCategory: string | null;
 }
 
-/** Validated shape of GET /api/v1/failed-tasks/:id. */
+/** Validated shape of GET /api/failed-tasks/:id. */
 export interface FailedTaskDetailData {
   taskId: string;
   taskKind: string;
@@ -2580,7 +2580,7 @@ export interface IntentDecisionResultData {
 }
 
 /**
- * Validate the POST /api/v1/intent-decisions response envelope.
+ * Validate the POST /api/intent-decisions response envelope.
  * Shape: { record: IntentDecisionRecord, created: boolean }
  */
 export function validateIntentDecisionResult(v: unknown): IntentDecisionResultData | null {
@@ -2605,7 +2605,7 @@ export interface IntentDecisionSummaryData {
 }
 
 /**
- * Validate the GET /api/v1/intent-decisions/summary response.
+ * Validate the GET /api/intent-decisions/summary response.
  * All 6 count keys must be present with non-negative finite numbers.
  * lastDecisionAt: null is valid, string is valid, anything else returns null.
  */
@@ -2695,7 +2695,7 @@ export type FollowUpResponseData =
   | GeneratePatchProposalFollowUpData;
 
 /**
- * Validate the POST /api/v1/intent-decisions/:id/follow-up response.
+ * Validate the POST /api/intent-decisions/:id/follow-up response.
  *
  * The response is a discriminated union on the `type` field. Each branch has
  * its own required fields (Rule 3: fail loud on missing required fields).

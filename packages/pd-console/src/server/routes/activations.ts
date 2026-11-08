@@ -87,11 +87,11 @@ export async function handleActivationsRoute(
   subPath: string,
   authority?: ActivationsRouteAuthority,
 ): Promise<void> {
-  // GET /api/v1/activations
+  // GET /api/activations
   if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
     // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host for the
     // per-activation injection statuses (route-unconfirmed rows otherwise).
-    const url = new URL(req.url ?? '/api/v1/activations', 'http://localhost');
+    const url = new URL(req.url ?? '/api/activations', 'http://localhost');
     let targetHost: 'openclaw' | 'codex' | 'workbuddy' | undefined;
     const rawHost = url.searchParams.get('host');
     if (rawHost !== null) {
@@ -191,7 +191,7 @@ export async function handleActivationsRoute(
     return;
   }
 
-  // POST /api/v1/activations/:id/propose-revision
+  // POST /api/activations/:id/propose-revision
   // PD_PROMPT_CAPACITY_V1 R-B3: Owner-initiated "modify to injectable version"
   // on a live prompt activation — new validated artifact version + a NORMAL
   // pending approval (the atomic replacement happens on approve).
@@ -246,7 +246,7 @@ export async function handleActivationsRoute(
     return;
   }
 
-  // POST /api/v1/activations/:id/disable
+  // POST /api/activations/:id/disable
   const disableExec = /^\/([^/]+)\/disable$/.exec(subPath);
   if (req.method === 'POST' && disableExec) {
     const [, rawId] = disableExec;
@@ -305,7 +305,7 @@ export async function handleActivationsRoute(
     return;
   }
 
-  sendNotFound(res, `Route /api/v1/activations${subPath} not found`);
+  sendNotFound(res, `Route /api/activations${subPath} not found`);
 }
 
 export function disposeActivationsModels(): void {

@@ -43,7 +43,7 @@ test('Principle library scans compactly, expands context in place, and returns w
 test('Long learned text stays searchable while library titles remain short', async ({ page }) => {
   function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
   const longText = '先核对影响范围，再处理共享状态。' + '保留触发条件与必要例外。'.repeat(100) + '独特检索尾句';
-  await page.route('**/api/v1/principles/owner-decision-library', async route => {
+  await page.route('**/api/principles/owner-decision-library', async route => {
     const response = await route.fetch();
     const body: unknown = await response.json();
     if (!record(body) || !record(body.data) || !record(body.data.entries)) throw new Error('Invalid library fixture');

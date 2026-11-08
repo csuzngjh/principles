@@ -1,7 +1,7 @@
 /**
  * Receipts API routes — PRI-533.
- *   GET /api/v1/receipts/counts                    → per-principle receipt counts
- *   GET /api/v1/receipts/principles/:principleId   → per-principle receipt history
+ *   GET /api/receipts/counts                    → per-principle receipt counts
+ *   GET /api/receipts/principles/:principleId   → per-principle receipt history
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ReceiptsConsoleModel } from '../models/ReceiptsConsoleModel.js';
@@ -27,7 +27,7 @@ export async function handleReceiptsRoute(
   subPath: string,
 ): Promise<void> {
   if (req.method !== 'GET') {
-    sendError(res, 405, 'method_not_allowed', 'Only GET is supported on /api/v1/receipts');
+    sendError(res, 405, 'method_not_allowed', 'Only GET is supported on /api/receipts');
     return;
   }
 
@@ -48,7 +48,7 @@ export async function handleReceiptsRoute(
   if (subPath.startsWith('/principles/')) {
     const rawId = subPath.slice('/principles/'.length);
     if (rawId.length === 0 || rawId.includes('/')) {
-      sendNotFound(res, `Route /api/v1/receipts${subPath} not found`);
+      sendNotFound(res, `Route /api/receipts${subPath} not found`);
       return;
     }
     let principleId: string;
@@ -70,7 +70,7 @@ export async function handleReceiptsRoute(
   }
 
   // PD v2 Phase 1 (SPEC §13.8): the four audit queries.
-  //   GET /api/v1/receipts/evidence-audit?type=principle|activation|episode|effect&id=<selector>
+  //   GET /api/receipts/evidence-audit?type=principle|activation|episode|effect&id=<selector>
   if (subPath === '/evidence-audit' || subPath === '/evidence-audit/') {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const type = url.searchParams.get('type');
@@ -121,7 +121,7 @@ export async function handleReceiptsRoute(
     return;
   }
 
-  sendNotFound(res, `Route /api/v1/receipts${subPath} not found`);
+  sendNotFound(res, `Route /api/receipts${subPath} not found`);
 }
 
 export function disposeReceiptsModels(): void {

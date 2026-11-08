@@ -19,7 +19,7 @@ const AS_OF = '2026-09-18T10:00:00.000Z';
 let workspaceDir: string;
 
 function request(): IncomingMessage {
-  return { method: 'GET', url: '/api/v1/principles/x/owner-decision-view' } as IncomingMessage;
+  return { method: 'GET', url: '/api/principles/x/owner-decision-view' } as IncomingMessage;
 }
 
 function response(): ServerResponse & { body: string; statusCode: number } {
@@ -164,7 +164,7 @@ afterEach(() => {
   }
 });
 
-describe('GET /api/v1/principles/:id/owner-decision-view', () => {
+describe('GET /api/principles/:id/owner-decision-view', () => {
   it('flag-off is a true no-read path (403, no workspace files created)', async () => {
     const res = response();
     await handleOwnerDecisionViewRoute({ req: request(), res, workspaceDir, featureFlags: { principle_governance_projection_v2: { enabled: false } }, now: () => AS_OF, subPath: '/prin-a/owner-decision-view' });
@@ -197,12 +197,12 @@ describe('GET /api/v1/principles/:id/owner-decision-view', () => {
     expect(semantics).toContain('approve');
     expect(semantics).toContain('reject');
     // Fix 3 (review P2): edit_approval is a REAL capability (POST
-    // /api/v1/approvals/:id/edit + ApprovalsConsoleModel.editApproval with
+    // /api/approvals/:id/edit + ApprovalsConsoleModel.editApproval with
     // pending-only/validated-artifact/lineage checks, exercised by
     // approvals-api.test.ts) — the advertised operation must match it exactly.
     expect(semantics).toContain('edit_approval');
     const editAction = data.availableActions.find((action: { semantic: string }) => action.semantic === 'edit_approval');
-    expect(editAction.serviceOperation).toBe('POST /api/v1/approvals/:id/edit');
+    expect(editAction.serviceOperation).toBe('POST /api/approvals/:id/edit');
     // Per-subject material is present on every pending subject (Fix 1).
     for (const subject of data.decisionSubjects) {
       expect(Object.hasOwn(subject, 'decisionMaterial')).toBe(true);
@@ -276,7 +276,7 @@ describe('GET /api/v1/principles/:id/owner-decision-view', () => {
   });
 });
 
-describe('GET /api/v1/principles/owner-decision-inbox', () => {  it('T16 — real current subjects listed; unbound history is one aggregate notice, not cards', async () => {
+describe('GET /api/principles/owner-decision-inbox', () => {  it('T16 — real current subjects listed; unbound history is one aggregate notice, not cards', async () => {
     seedWorkspace();
     const res = response();
     await handleOwnerDecisionInboxRoute({ req: request(), res, workspaceDir, featureFlags: enableFlag(true), now: () => AS_OF });

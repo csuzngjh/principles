@@ -78,7 +78,7 @@ interface RouteData {
   ok?: boolean;
 }
 
-describe('ADR-0022 /api/v1/owner-identity route (PRI-578 PR-3-A)', () => {
+describe('ADR-0022 /api/owner-identity route (PRI-578 PR-3-A)', () => {
   const originalOwnerId = process.env.PD_OWNER_ID;
   const originalCredentialId = process.env.PD_OWNER_CREDENTIAL_ID;
   beforeEach(() => {

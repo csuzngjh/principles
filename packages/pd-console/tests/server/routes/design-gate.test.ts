@@ -51,7 +51,7 @@ function parse(res: { _body: string }): { success: boolean; data?: Record<string
 
 async function call(method: string, subPath: string, body?: unknown, ownerIdentity: typeof OWNER | null = OWNER) {
   const res = makeRes();
-  await handleDesignGateRoute(makeReq(method, `/api/v1/governance/design-gate${subPath}`, body), res, {
+  await handleDesignGateRoute(makeReq(method, `/api/governance/design-gate${subPath}`, body), res, {
     workspaceDir,
     subPath: subPath.split('?', 1)[0] ?? subPath,
     ownerIdentity,

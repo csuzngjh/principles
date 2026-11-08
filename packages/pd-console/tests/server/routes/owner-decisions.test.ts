@@ -1,5 +1,5 @@
 /**
- * PRI-629 — /api/v1/governance/owner-decisions 集成测试（真实 state.db）。
+ * PRI-629 — /api/governance/owner-decisions 集成测试（真实 state.db）。
  *
  * 覆盖验收矩阵:
  *   - GET list: decision-capable NHR 出现为决策项 (含 legacy 推断 W);
@@ -140,7 +140,7 @@ function makeReq(method: string, body?: unknown): IncomingMessage {
   const listeners: Record<string, (chunk?: Buffer) => void> = {};
   const req = {
     method,
-    url: '/api/v1/governance/owner-decisions',
+    url: '/api/governance/owner-decisions',
     on(event: string, cb: (chunk?: Buffer) => void) {
       listeners[event] = cb;
       if (event === 'end') {
@@ -195,7 +195,7 @@ const ctxBase = (subPath: string): OwnerDecisionRouteContext & { subPath: string
   ownerIdentity: { ownerId: 'owner-test', credentialId: 'cred-test' },
 });
 
-describe('GET /api/v1/governance/owner-decisions', () => {
+describe('GET /api/governance/owner-decisions', () => {
   it('lists decision-capable items only (legacy inference, matrix W); recovery NHR excluded; badge = total', async () => {
     setupDb().close();
     const res = makeRes();
@@ -360,7 +360,7 @@ describe('GET /api/v1/governance/owner-decisions', () => {
   });
 });
 
-describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
+describe('POST /api/governance/owner-decisions/:taskId/resolve', () => {
   async function listItem() {
     const res = makeRes();
     await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));

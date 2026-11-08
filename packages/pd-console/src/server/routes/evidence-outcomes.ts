@@ -1,7 +1,7 @@
 /**
- * PD v2 Phase 1 — /api/v1/evidence/outcomes 路由（ADR-0027 §2.3, SPEC §13.4）。
+ * PD v2 Phase 1 — /api/evidence/outcomes 路由（ADR-0027 §2.3, SPEC §13.4）。
  *
- *   POST /api/v1/evidence/outcomes — Owner 结果反馈入账
+ *   POST /api/evidence/outcomes — Owner 结果反馈入账
  *
  * 最小获授权事实入口：Owner 可以对一个已存在的 Behavior Episode 提交
  * 明确的结果观察/反馈。安全模型（复用 owner-decisions 的模式）：

@@ -40,7 +40,7 @@ describe('recoverFailedTask (Governance Recovery Actions v1)', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [calledPath, calledInit] = mockFetch.mock.calls[0];
-    expect(calledPath).toBe('/api/v1/failed-tasks/t1/recover');
+    expect(calledPath).toBe('/api/failed-tasks/t1/recover');
     expect(calledInit?.method).toBe('POST');
     const body = JSON.parse(calledInit?.body as string);
     expect(body.reason).toBe('owner reviewed');

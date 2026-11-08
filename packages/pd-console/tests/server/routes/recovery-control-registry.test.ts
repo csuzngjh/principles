@@ -19,7 +19,7 @@ function createMockRequest(method: string, options?: { body?: unknown; subPath?:
   const bodyStr = options?.body !== undefined ? JSON.stringify(options.body) : '';
   const req = {
     method,
-    url: `/api/v1/activations${options?.subPath ?? ''}`,
+    url: `/api/activations${options?.subPath ?? ''}`,
     [Symbol.asyncIterator]() {
       const chunks = options?.body !== undefined ? [Buffer.from(bodyStr)] : [];
       let i = 0;
@@ -60,7 +60,7 @@ describe('recovery-control registry ↔ real console route dispatch (SPEC R1)', 
   it('the registry declares the emergency-pause console surface for rulecode_global_pause', () => {
     const pause = RECOVERY_CONTROL_SURFACES.find(surface => surface.capabilityId === 'rulecode_global_pause');
     expect(pause?.channel).toBe('console');
-    expect(pause?.consoleRoute).toBe('/api/v1/activations/emergency-pause');
+    expect(pause?.consoleRoute).toBe('/api/activations/emergency-pause');
   });
 
   it('POST /emergency-pause dispatches through the real handler and writes the durable pause row', async () => {
@@ -94,7 +94,7 @@ describe('recovery-control registry ↔ real console route dispatch (SPEC R1)', 
 
   it('GET /{id}/owner-review is a registered route, matching the registry owner-review surface', async () => {
     const review = RECOVERY_CONTROL_SURFACES.find(surface => surface.capabilityId === 'owner_review_access');
-    expect(review?.consoleRoute).toBe('/api/v1/activations/{activationId}/owner-review');
+    expect(review?.consoleRoute).toBe('/api/activations/{activationId}/owner-review');
     // Seed one code_tool_hook activation so the route dispatches to data
     // (a missing activation legitimately 404s — not a registration signal).
     const conn = new SqliteConnection({ workspaceDir: tempDir, readonly: false });

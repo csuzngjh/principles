@@ -30,7 +30,7 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
  *
  * Served directly from the canonical `CORE_PRINCIPLES` registry (no ledger /
  * DB read). Dispatched in server/index.ts BEFORE the `/api/principles`
- * catch-all so `core` is never parsed as `/:id`; the `/api/v1/principles`
+ * catch-all so `core` is never parsed as `/:id`; the `/api/principles`
  * mount intentionally does NOT expose this endpoint.
  *
  * Owner Decision Experience v1: the canonical Owner decision read endpoints
@@ -204,7 +204,7 @@ export async function handlePrinciplesRoute({
   featureFlags,
   now = () => new Date().toISOString(),
 }: PrinciplesRouteParams): Promise<void> {
-  // GET /api/v1/principles/:id/governance. Gate before constructing any
+  // GET /api/principles/:id/governance. Gate before constructing any
   // Console model or projection reader so flag-off is a true no-read path.
   const governanceMatch = /^\/([^/]+)\/governance$/.exec(subPath);
   if (req.method === 'GET' && governanceMatch) {

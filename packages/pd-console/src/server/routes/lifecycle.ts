@@ -21,11 +21,11 @@ export async function handleLifecycleRoute(
   subPath: string,
 ): Promise<void> {
   if (req.method !== 'GET') {
-    sendNotFound(res, `Route /api/v1/lifecycle${subPath} not found`);
+    sendNotFound(res, `Route /api/lifecycle${subPath} not found`);
     return;
   }
 
-  // GET /api/v1/lifecycle/principles/:principleId
+  // GET /api/lifecycle/principles/:principleId
   const principleMatch = /^[/]principles[/]([^/]+)$/.exec(subPath);
   if (principleMatch) {
     const [, rawId] = principleMatch;
@@ -73,7 +73,7 @@ export async function handleLifecycleRoute(
     return;
   }
 
-  sendNotFound(res, `Route /api/v1/lifecycle${subPath} not found`);
+  sendNotFound(res, `Route /api/lifecycle${subPath} not found`);
 }
 
 export function disposeLifecycleModels(): void {

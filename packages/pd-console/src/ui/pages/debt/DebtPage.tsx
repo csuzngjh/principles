@@ -368,7 +368,7 @@ export function DebtPage() {
     setIsProcessing(false);
   };
 
-  // Deactivate Action: calls POST /api/v1/activations/:id/disable
+  // Deactivate Action: calls POST /api/activations/:id/disable
   const handleDeactivate = async (activationId: string, principleId: string) => {
     setIsProcessing(true);
     const result = await disableActivation(activationId);

@@ -1,6 +1,6 @@
 /**
  * Shared wire-shape contract for the prompt-injection budget forecast on
- * `/api/v1/approvals/grouped` (PRI-908).
+ * `/api/approvals/grouped` (PRI-908).
  *
  * Single source of truth for the field shape within pd-console: the server
  * model (server/models/ApprovalsGroupedConsoleModel.ts) emits it and the UI

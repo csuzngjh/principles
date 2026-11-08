@@ -8,9 +8,9 @@
  * This file verifies the full approve → activation → list cycle through real
  * HTTP routes with real SQLite, locking the cross-table contract:
  *   1. POST /approve → activation written to activations table
- *   2. GET /api/v1/activations returns the new activation
- *   3. GET /api/v1/approvals shows status='approved'
- *   4. GET /api/v1/approvals/grouped shows group status='approved'
+ *   2. GET /api/activations returns the new activation
+ *   3. GET /api/approvals shows status='approved'
+ *   4. GET /api/approvals/grouped shows group status='approved'
  *   5. Idempotent re-approve → already_activated
  *   6. Approve then disable → GET activations shows 'deactivated'
  *
@@ -263,7 +263,7 @@ async function approveFreshPromptPrinciple(label: string, text: string): Promise
     contentJson: { principleId, text },
   });
   await seedPendingApproval(approvalId, artifactId, 'prompt');
-  const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+  const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ note: `PRI-1017 warning basis: ${label}` }),
@@ -310,17 +310,17 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     server = http.createServer((req, res) => {
       const urlPath = req.url?.split('?')[0] ?? '/';
-      if (urlPath === '/api/v1/approvals/grouped') {
+      if (urlPath === '/api/approvals/grouped') {
         asyncHandler((rq, rs) => handleApprovalsGroupedRoute(rq, rs, tmpDir))(req, res);
         return;
       }
-      if (urlPath.startsWith('/api/v1/approvals')) {
-        const subPath = urlPath.slice('/api/v1/approvals'.length);
+      if (urlPath.startsWith('/api/approvals')) {
+        const subPath = urlPath.slice('/api/approvals'.length);
         asyncHandler((rq, rs) => handleApprovalsRoute(rq, rs, tmpDir, subPath))(req, res);
         return;
       }
-      if (urlPath.startsWith('/api/v1/activations')) {
-        const subPath = urlPath.slice('/api/v1/activations'.length);
+      if (urlPath.startsWith('/api/activations')) {
+        const subPath = urlPath.slice('/api/activations'.length);
         asyncHandler((rq, rs) => handleActivationsRoute(rq, rs, tmpDir, subPath))(req, res);
         return;
       }
@@ -349,7 +349,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
   // ── 1. Approve prompt channel → activation appears in GET /activations ───
 
-  it('approve prompt channel writes activation, visible in GET /api/v1/activations', async () => {
+  it('approve prompt channel writes activation, visible in GET /api/activations', async () => {
     const artifactId = `art-prompt-approve-${Date.now()}`;
     const approvalId = `apr-prompt-approve-${Date.now()}`;
     const principleId = newPrincipleId();
@@ -361,7 +361,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Approve
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Cross-table consistency test' }),
@@ -378,8 +378,8 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       expect(getStringField(activation, 'decision')).toBe('activated');
     }
 
-    // GET /api/v1/activations — cross-table verification
-    const activationsRes = await fetchJson('/api/v1/activations');
+    // GET /api/activations — cross-table verification
+    const activationsRes = await fetchJson('/api/activations');
     expect(activationsRes.status).toBe(200);
     const activationsData = getDataObject(activationsRes.body);
     expect(activationsData).toBeDefined();
@@ -399,9 +399,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     }
   });
 
-  // ── 2. Approve → GET /api/v1/approvals shows status='approved' ───────────
+  // ── 2. Approve → GET /api/approvals shows status='approved' ───────────
 
-  it('approve updates approval status, visible in GET /api/v1/approvals?status=approved', async () => {
+  it('approve updates approval status, visible in GET /api/approvals?status=approved', async () => {
     const artifactId = `art-status-check-${Date.now()}`;
     const approvalId = `apr-status-check-${Date.now()}`;
     const principleId = newPrincipleId();
@@ -410,15 +410,15 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Approve
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Status check test' }),
     });
     expect(approveRes.status).toBe(200);
 
-    // GET /api/v1/approvals?status=approved
-    const listRes = await fetchJson('/api/v1/approvals?status=approved');
+    // GET /api/approvals?status=approved
+    const listRes = await fetchJson('/api/approvals?status=approved');
     expect(listRes.status).toBe(200);
     const listData = getDataObject(listRes.body);
     expect(listData).toBeDefined();
@@ -435,7 +435,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     }
   });
 
-  // ── 3. Approve → GET /api/v1/approvals/grouped shows group status='approved'
+  // ── 3. Approve → GET /api/approvals/grouped shows group status='approved'
 
   it('approve updates grouped endpoint, group status becomes approved', async () => {
     const principleId = newPrincipleId();
@@ -453,7 +453,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Before approve: group should be 'pending'
-    const beforeRes = await fetchJson('/api/v1/approvals/grouped');
+    const beforeRes = await fetchJson('/api/approvals/grouped');
     expect(beforeRes.status).toBe(200);
     const beforeData = getDataObject(beforeRes.body);
     expect(beforeData).toBeDefined();
@@ -461,7 +461,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(Array.isArray(beforeGroups)).toBe(true);
 
     // Approve
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Grouped test' }),
@@ -469,7 +469,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(approveRes.status).toBe(200);
 
     // After approve: group should be 'approved'
-    const afterRes = await fetchJson('/api/v1/approvals/grouped');
+    const afterRes = await fetchJson('/api/approvals/grouped');
     expect(afterRes.status).toBe(200);
     const afterData = getDataObject(afterRes.body);
     expect(afterData).toBeDefined();
@@ -497,7 +497,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // First approve succeeds
-    const firstRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const firstRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'First approve' }),
@@ -505,7 +505,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(firstRes.status).toBe(200);
 
     // Second approve → 409 conflict (already_decided)
-    const secondRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const secondRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Second approve' }),
@@ -524,7 +524,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Approve
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Disable test' }),
@@ -532,7 +532,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(approveRes.status).toBe(200);
 
     // Find the activation ID from GET /activations
-    const listRes = await fetchJson('/api/v1/activations');
+    const listRes = await fetchJson('/api/activations');
     expect(listRes.status).toBe(200);
     const listData = getDataObject(listRes.body);
     const activations = listData?.activations;
@@ -549,7 +549,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(activationId).withContext('Must find activation ID to disable').toBeDefined();
 
     // Disable the activation
-    const disableRes = await fetchJson(`/api/v1/activations/${activationId}/disable`, {
+    const disableRes = await fetchJson(`/api/activations/${activationId}/disable`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirmed: true }),
@@ -557,7 +557,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(disableRes.status).toBe(200);
 
     // Verify status is now 'deactivated'
-    const afterRes = await fetchJson('/api/v1/activations');
+    const afterRes = await fetchJson('/api/activations');
     expect(afterRes.status).toBe(200);
     const afterData = getDataObject(afterRes.body);
     const afterActivations = afterData?.activations;
@@ -587,7 +587,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
     // Approve
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Consistency test' }),
@@ -596,9 +596,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     // Verify across all 3 endpoints
     const [approvalsRes, activationsRes, groupedRes] = await Promise.all([
-      fetchJson(`/api/v1/approvals?status=approved`),
-      fetchJson('/api/v1/activations'),
-      fetchJson('/api/v1/approvals/grouped'),
+      fetchJson(`/api/approvals?status=approved`),
+      fetchJson('/api/activations'),
+      fetchJson('/api/approvals/grouped'),
     ]);
 
     // Approvals: artifactId + channel
@@ -686,7 +686,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     // Approve — this must trigger the ledger upgrade via
     // ApprovalsConsoleModel.upgradeLedgerPrinciple (Bug-O L3b).
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Ledger upgrade test' }),
@@ -735,7 +735,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'Missing ledger test' }),
@@ -747,7 +747,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(JSON.stringify(approveRes.body)).toContain('principle_not_in_ledger');
 
     // Cross-table verification: no activation row exists for this artifact.
-    const listRes = await fetchJson('/api/v1/activations');
+    const listRes = await fetchJson('/api/activations');
     expect(listRes.status).toBe(200);
     const listData = getDataObject(listRes.body);
     const activations = listData?.activations;
@@ -806,7 +806,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(newApprovalId, newArtifactId, 'prompt');
 
-    const approveRes = await fetchJson(`/api/v1/approvals/${newApprovalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${newApprovalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'PRI-890 budget saturation test' }),
@@ -988,7 +988,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         budgetContextWindowTokens: 256_000,
       });
 
-      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      const { status, body } = await fetchJson('/api/approvals/grouped');
       expect(status).toBe(200);
       const promptInjection = getDataObject(body)?.['promptInjection'];
       expect(isRecord(promptInjection)).toBe(true);
@@ -1067,7 +1067,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         budgetFallbackReason: 'host_capacity_absent',
       });
 
-      const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'PRI-1017 P2-3 mixed observations' }),
@@ -1085,14 +1085,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       // The single shared route is confirmed without borrowing the 256K
       // observation for codex/openclaw: a fresh observation is budget
       // evidence, never route evidence.
-      const grouped = await fetchJson('/api/v1/approvals/grouped');
+      const grouped = await fetchJson('/api/approvals/grouped');
       const promptInjection = getDataObject(grouped.body)?.['promptInjection'];
       expect(isRecord(promptInjection)).toBe(true);
       expect(promptInjection!['capacityStatus']).toBe('confirmed');
 
       // The governance write happened — the retired route refusal must not
       // linger on a workspace whose hosts now share one route.
-      const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      const detail = await fetchJson(`/api/approvals/${approvalId}`);
       expect(getStringField(getDataObject(detail.body), 'status')).toBe('approved');
     } finally {
       fs.rmSync(declarationPath, { force: true });
@@ -1140,7 +1140,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       });
       await seedPendingApproval(starveApproval, starveArtifact, 'prompt');
 
-      const res = await fetchJson(`/api/v1/approvals/${starveApproval}/approve`, {
+      const res = await fetchJson(`/api/approvals/${starveApproval}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'PR-1894 non-rotating route starvation' }),
@@ -1213,7 +1213,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(newApproval, newArtifact, 'prompt');
 
-    const res = await fetchJson(`/api/v1/approvals/${newApproval}/approve`, {
+    const res = await fetchJson(`/api/approvals/${newApproval}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'oversized on rotating route is refused pre-write' }),
@@ -1250,7 +1250,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'PRI-890 headroom positive path' }),
@@ -1285,7 +1285,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(approvalId, artifactId, 'defer_archive');
 
-    const approveRes = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const approveRes = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'PRI-890 defer control' }),
@@ -1317,7 +1317,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
-    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'undeliverable single item' }),
@@ -1328,7 +1328,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(typeof body.message === 'string' && body.message.includes('single_item_exceeds_budget')).toBe(true);
 
     // 无非法写入：审批仍 pending、无激活行、账本仍是 candidate。
-    const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
+    const detail = await fetchJson(`/api/approvals/${approvalId}`);
     const detailStatus = getStringField(getDataObject(detail.body), 'status');
     expect(detailStatus).toBe('pending');
     const activationRow = sqliteConn.getDb()
@@ -1354,7 +1354,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     // 预览：分组接口此时判定可装入（fitsPromptBudget=true，随后的断言只在
     // 预检行为上，不依赖该字段的展示）。
-    const groupedPreview = await fetchJson('/api/v1/approvals/grouped');
+    const groupedPreview = await fetchJson('/api/approvals/grouped');
     expect(groupedPreview.status).toBe(200);
 
     // 提交前工件被改长（模拟 Owner 在别处编辑/新版本就位）。
@@ -1372,7 +1372,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       updatedAt: new Date().toISOString(),
     });
 
-    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'stale preview' }),
@@ -1400,7 +1400,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     try { declarationBackup = fs.readFileSync(declarationPath, 'utf8'); } catch { /* absent */ }
     fs.rmSync(declarationPath, { force: true });
     try {
-      const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'no host facts' }),
@@ -1414,14 +1414,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         expect(getStringField(activation, 'decision')).toBe('activated');
       }
       // 审批已写。
-      const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      const detail = await fetchJson(`/api/approvals/${approvalId}`);
       expect(getStringField(getDataObject(detail.body), 'status')).toBe('approved');
 
       // PRI-1137: with ONE shared route, unknown host attribution is a fact
       // gap — not a route ambiguity. The route stays confirmed without
       // fabricating a host, so this approval is no longer refused on that
       // basis (per-host budget attribution remains explicitly unknown).
-      const grouped = await fetchJson('/api/v1/approvals/grouped');
+      const grouped = await fetchJson('/api/approvals/grouped');
       const promptInjection = getDataObject(grouped.body)?.['promptInjection'];
       expect(isRecord(promptInjection)).toBe(true);
       expect(promptInjection!['capacityStatus']).toBe('confirmed');
@@ -1455,7 +1455,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     try { declarationBackup = fs.readFileSync(declarationPath, 'utf8'); } catch { /* absent */ }
     fs.rmSync(declarationPath, { force: true });
     try {
-      const grouped = await fetchJson('/api/v1/approvals/grouped');
+      const grouped = await fetchJson('/api/approvals/grouped');
       expect(grouped.status).toBe(200);
       const data = getDataObject(grouped.body);
       expect(isRecord(data)).toBe(true);
@@ -1501,7 +1501,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
-    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'window full, single deliverable' }),

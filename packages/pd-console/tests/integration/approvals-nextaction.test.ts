@@ -108,11 +108,11 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
 
     server = http.createServer((req, res) => {
       const urlPath = req.url?.split('?')[0] ?? '/';
-      if (!urlPath.startsWith('/api/v1/approvals')) {
+      if (!urlPath.startsWith('/api/approvals')) {
         sendNotFound(res, 'Not found');
         return;
       }
-      const subPath = urlPath.slice('/api/v1/approvals'.length);
+      const subPath = urlPath.slice('/api/approvals'.length);
       asyncHandler(() => handleApprovalsRoute(req, res, tmpDir, subPath))(req, res);
     });
 
@@ -142,7 +142,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Approvable prompt record (no artifact)',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test approval' }),
@@ -171,7 +171,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         riskLevel: 'high',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test approval' }),
@@ -199,7 +199,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Approval rollback test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test approval' }),
@@ -224,7 +224,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       });
 
       // First approve: refused by the capacity gate because artifact is missing
-      const { status: firstStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status: firstStatus } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'First attempt' }),
@@ -232,7 +232,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       expect(firstStatus).toBe(422);
 
       // Verify approval is back to pending (not stuck in approved)
-      const { status: detailStatus, body: detailBody } = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      const { status: detailStatus, body: detailBody } = await fetchJson(`/api/approvals/${approvalId}`);
       expect(detailStatus).toBe(200);
       const data = requireRecord(detailBody, 'detailBody');
       const dataInner = data.data;
@@ -240,7 +240,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       expect(getStringField(dataInner, 'status')).toBe('pending');
 
       // Re-approve: should also fail for same reason but proves idempotent retry works
-      const { status: retryStatus } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status: retryStatus } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Retry attempt' }),
@@ -254,14 +254,14 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       });
 
       // First approve fails
-      await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'First' }),
       });
 
       // Second approve should NOT be 409 conflict
-      const { status } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Second' }),
@@ -279,7 +279,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Error reason preservation test',
       });
 
-      const { body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test' }),
@@ -297,7 +297,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Actionable guidance test',
       });
 
-      const { body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test' }),
@@ -320,7 +320,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Legacy channel test',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${legacyApprovalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test' }),
@@ -334,7 +334,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
     });
 
     it('not_found error does not include nextAction', async () => {
-      const { status, body } = await fetchJson('/api/v1/approvals/nonexistent-id/approve', {
+      const { status, body } = await fetchJson('/api/approvals/nonexistent-id/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test' }),
@@ -351,7 +351,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
         summary: 'Already approved',
       });
 
-      const { status, body } = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+      const { status, body } = await fetchJson(`/api/approvals/${approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'Test' }),
@@ -372,12 +372,12 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       const approvalId2 = seedApproval('prompt', 'pending', { summary: 'Second failure' });
 
       const [result1, result2] = await Promise.all([
-        fetchJson(`/api/v1/approvals/${approvalId1}/approve`, {
+        fetchJson(`/api/approvals/${approvalId1}/approve`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ note: 'Test 1' }),
         }),
-        fetchJson(`/api/v1/approvals/${approvalId2}/approve`, {
+        fetchJson(`/api/approvals/${approvalId2}/approve`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ note: 'Test 2' }),

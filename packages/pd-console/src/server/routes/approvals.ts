@@ -54,7 +54,7 @@ export async function handleApprovalsRoute(
 ): Promise<void> {
   const model = getModel(workspaceDir);
 
-  // GET /api/v1/approvals - list all approvals (MVP proven channels only)
+  // GET /api/approvals - list all approvals (MVP proven channels only)
   if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
     try {
       const query = parseQuery(req.url ?? '');
@@ -86,7 +86,7 @@ export async function handleApprovalsRoute(
     return;
   }
 
-  // GET /api/v1/approvals/:id - detail
+  // GET /api/approvals/:id - detail
   const detailMatch = /^[/]([^/]+)$/.exec(subPath);
   if (req.method === 'GET' && detailMatch) {
     const [, rawId] = detailMatch;
@@ -114,7 +114,7 @@ export async function handleApprovalsRoute(
     return;
   }
 
-  // POST /api/v1/approvals/:id/approve
+  // POST /api/approvals/:id/approve
   const approveMatch = /^[/]([^/]+)[/]approve$/.exec(subPath);
   if (req.method === 'POST' && approveMatch) {
     const [, rawId] = approveMatch;
@@ -232,7 +232,7 @@ export async function handleApprovalsRoute(
     return;
   }
 
-  // POST /api/v1/approvals/:id/reject
+  // POST /api/approvals/:id/reject
   const rejectMatch = /^[/]([^/]+)[/]reject$/.exec(subPath);
   if (req.method === 'POST' && rejectMatch) {
     const [, rawId] = rejectMatch;
@@ -290,7 +290,7 @@ export async function handleApprovalsRoute(
     return;
   }
 
-  // POST /api/v1/approvals/:id/reopen — reset a terminal approval back to
+  // POST /api/approvals/:id/reopen — reset a terminal approval back to
   // pending so the Owner can decide again (EP002-R4 follow-up: the clean
   // re-activation path for a deliberately deactivated intervention — reopen,
   // then a fresh Console approve re-dispatches through the verified chain).
@@ -327,7 +327,7 @@ export async function handleApprovalsRoute(
     return;
   }
 
-  // POST /api/v1/approvals/:id/edit — edit a pending approval's artifact (P1 #2 fix)
+  // POST /api/approvals/:id/edit — edit a pending approval's artifact (P1 #2 fix)
   const editMatch = /^[/]([^/]+)[/]edit$/.exec(subPath);
   if (req.method === 'POST' && editMatch) {
     const [, rawId] = editMatch;
@@ -395,7 +395,7 @@ export async function handleApprovalsRoute(
     return;
   }
 
-  sendNotFound(res, 'Route /api/v1/approvals' + subPath + ' not found');
+  sendNotFound(res, 'Route /api/approvals' + subPath + ' not found');
 }
 
 export function disposeApprovalsModels(): void {

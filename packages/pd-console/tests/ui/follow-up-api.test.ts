@@ -69,7 +69,7 @@ describe('dispatchFollowUp', () => {
     // Verify the actual request shape (path, method, body, JSON content-type).
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(fetch).mock.calls[0]!;
-    expect(url).toBe('/api/v1/intent-decisions/idr-001/follow-up');
+    expect(url).toBe('/api/intent-decisions/idr-001/follow-up');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(JSON.stringify({ type: 'link_candidate', candidateId: 'cand-1' }));
   });
@@ -92,7 +92,7 @@ describe('dispatchFollowUp', () => {
     const result = await dispatchFollowUp('a/b c', { type: 'guide_rulehost' });
     expect(result.success).toBe(true);
     const [url] = vi.mocked(fetch).mock.calls[0]!;
-    expect(url).toBe('/api/v1/intent-decisions/a%2Fb%20c/follow-up');
+    expect(url).toBe('/api/intent-decisions/a%2Fb%20c/follow-up');
   });
 
   it('returns validation failure for malformed response data', async () => {

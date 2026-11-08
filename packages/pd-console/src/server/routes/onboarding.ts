@@ -1,5 +1,5 @@
 /**
- * Onboarding route - POST /api/v1/onboarding/run-demo
+ * Onboarding route - POST /api/onboarding/run-demo
  *
  * Spec: docs/superpowers/specs/2026-06-30-new-user-onboarding-design.md 6.3 change 5
  *
@@ -151,7 +151,7 @@ function parseDemoStdout(stdout: string): Record<string, unknown> | null {
  * The demo typically completes in < 30s. We block on the subprocess so the
  * response carries the validated demo result in a single round-trip - the
  * frontend does not need to poll for the demo itself (it still polls
- * /api/v1/evidence-chain in step 3 for live evidence detection).
+ * /api/evidence-chain in step 3 for live evidence detection).
  *
  * Failure modes (rc-9-no-silent-fallback - every path returns a structured
  * error with reason + nextAction):
@@ -333,7 +333,7 @@ export async function handleOnboardingRoute(
     return;
   }
 
-  // -- POST /api/v1/onboarding/run-demo --
+  // -- POST /api/onboarding/run-demo --
   if (subPath === '/run-demo') {
     if (req.method !== 'POST') {
       sendStructuredError(res, {
@@ -353,7 +353,7 @@ export async function handleOnboardingRoute(
     statusCode: 404,
     error: 'not_found',
     reason: 'not_found',
-    nextAction: `Route /api/v1/onboarding${subPath} not found. Use POST /api/v1/onboarding/run-demo.`,
+    nextAction: `Route /api/onboarding${subPath} not found. Use POST /api/onboarding/run-demo.`,
   });
 }
 

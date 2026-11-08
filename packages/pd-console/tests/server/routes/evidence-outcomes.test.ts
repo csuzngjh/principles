@@ -1,5 +1,5 @@
 /**
- * PD v2 Phase 1 — /api/v1/evidence/outcomes + /api/v1/receipts/evidence-audit
+ * PD v2 Phase 1 — /api/evidence/outcomes + /api/receipts/evidence-audit
  * 路由集成测试（真实 state.db，mock req/res — owner-decisions 同款 harness）。
  *
  * 覆盖:
@@ -62,7 +62,7 @@ const OWNER = { ownerId: 'owner-console-1', credentialId: 'cred-1' };
 
 async function callOutcome(method: string, body: unknown, ownerIdentity: { ownerId: string; credentialId: string } | null) {
   const res = makeRes();
-  await handleEvidenceOutcomesRoute(makeReq(method, '/api/v1/evidence/outcomes', body), res, {
+  await handleEvidenceOutcomesRoute(makeReq(method, '/api/evidence/outcomes', body), res, {
     workspaceDir,
     ownerIdentity,
   });
@@ -71,7 +71,7 @@ async function callOutcome(method: string, body: unknown, ownerIdentity: { owner
 
 async function callAudit(query: string) {
   const res = makeRes();
-  await handleReceiptsRoute(makeReq('GET', `/api/v1/receipts/evidence-audit${query}`), res, workspaceDir, '/evidence-audit');
+  await handleReceiptsRoute(makeReq('GET', `/api/receipts/evidence-audit${query}`), res, workspaceDir, '/evidence-audit');
   return res;
 }
 
@@ -111,7 +111,7 @@ afterEach(() => {
   fs.rmSync(workspaceDir, { recursive: true, force: true });
 });
 
-describe('POST /api/v1/evidence/outcomes', () => {
+describe('POST /api/evidence/outcomes', () => {
   it('rejects without a verified Owner identity (server-side actor only)', async () => {
     const res = await callOutcome('POST', { episodeKey: 'k', observationSummary: 's' }, null);
     expect(res.statusCode).toBe(403);
@@ -209,7 +209,7 @@ describe('POST /api/v1/evidence/outcomes', () => {
   });
 });
 
-describe('GET /api/v1/receipts/evidence-audit', () => {
+describe('GET /api/receipts/evidence-audit', () => {
   it('rejects invalid selector parameters', async () => {
     const badType = await callAudit('?type=unknown&id=x');
     expect(badType.statusCode).toBe(400);

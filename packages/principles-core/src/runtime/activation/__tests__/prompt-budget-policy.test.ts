@@ -100,7 +100,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.3)', () => {
       capacitySource: 'legacy_fallback',
       capacityStatus: 'unknown',
       contextWindowTokens: null,
-      policyVersion: 'model_aware_v2',
+      policyVersion: 'model_aware',
     });
     expect(result.fallbackReason).toBe('host_capacity_absent');
   });
@@ -368,7 +368,7 @@ describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
       capacitySource: 'operator_declared',
       capacityStatus: 'confirmed',
       contextWindowTokens: 262_144,
-      policyVersion: 'model_aware_v2',
+      policyVersion: 'model_aware',
     });
     expect(result.fallbackReason).toBeUndefined();
   });

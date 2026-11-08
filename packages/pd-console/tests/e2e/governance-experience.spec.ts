@@ -12,7 +12,7 @@ import { test, expect } from '@playwright/test';
 
 test('governance experience snapshot serves Focus and routes its recovery action', async ({ page }) => {
   // ── 1. Understand current state: the API serves one schema-valid snapshot ──
-  const resp = await page.request.get('/api/v1/governance/experience');
+  const resp = await page.request.get('/api/governance/experience');
   expect(resp.status()).toBe(200);
   const body = (await resp.json()) as {
     success: boolean;
@@ -52,13 +52,13 @@ test('governance experience snapshot serves Focus and routes its recovery action
   // 004 keeps runtime status available on demand, outside the primary task flow.
   await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
   await expect(page.getByTestId('experience-summary')).toBeVisible();
-  expect(apiRequests).toContain('/api/v1/governance/experience');
+  expect(apiRequests).toContain('/api/governance/experience');
   // Exactly ONE /governance/queue request is permitted: the NotificationProvider's
   // mount-time badge poll (global notification subsystem — migration deferred to
   // PRI-589 because badge semantics need a product decision). FocusPage itself
   // must add none: a regression that re-introduces the legacy status fetch in the
   // Focus data load pushes this count above 1 and fails here.
-  const queueRequests = apiRequests.filter(pathname => pathname.startsWith('/api/v1/governance/queue'));
+  const queueRequests = apiRequests.filter(pathname => pathname.startsWith('/api/governance/queue'));
   expect(queueRequests.length).toBeLessThanOrEqual(1);
   await expect(page.getByTestId('experience-reason')).toContainText('waiting for your decision');
   await expect(page.getByTestId('experience-trust')).toContainText('Environment: test');

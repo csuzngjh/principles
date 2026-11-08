@@ -11,7 +11,7 @@ const AS_OF = '2026-08-20T10:00:00.000Z';
 let workspaceDir: string;
 
 function request(): IncomingMessage {
-  return { method: 'GET', url: '/api/v1/principles/principle-1/governance' } as IncomingMessage;
+  return { method: 'GET', url: '/api/principles/principle-1/governance' } as IncomingMessage;
 }
 
 function response(): ServerResponse & { body: string; statusCode: number } {
@@ -56,7 +56,7 @@ function seedProjection(): void {
 beforeEach(() => { workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-governance-route-')); });
 afterEach(() => { disposePrinciplesModels(); fs.rmSync(workspaceDir, { recursive: true, force: true }); });
 
-describe('PRI-552 GET /api/v1/principles/:id/governance', () => {
+describe('PRI-552 GET /api/principles/:id/governance', () => {
   it('short-circuits before projection reads when the production-loaded flag is off', async () => {
     const res = response();
     await handlePrinciplesRoute({ req: request(), res, workspaceDir, subPath: '/principle-1/governance', featureFlags: enableFlag(false), now: () => AS_OF });

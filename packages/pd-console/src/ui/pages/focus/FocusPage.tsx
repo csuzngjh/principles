@@ -642,7 +642,7 @@ function approvalWorkKind(channel: string): OwnerWorkItemKind {
 const FOCUS_SOURCES: FocusSource[] = ['summary', 'approvals', 'activations', 'bindings', 'decisions', 'inbox'];
 
 export interface FocusPageProps {
-  /** Feature flags from /api/v1/config/summary — gates the experience snapshot path. */
+  /** Feature flags from /api/config/summary — gates the experience snapshot path. */
   featureFlags?: Record<string, { enabled: boolean } | undefined>;
 }
 

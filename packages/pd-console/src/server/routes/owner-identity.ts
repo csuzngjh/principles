@@ -1,5 +1,5 @@
 /**
- * GET/POST/DELETE /api/v1/owner-identity — install-level Owner identity
+ * GET/POST/DELETE /api/owner-identity — install-level Owner identity
  * registration (ADR-0022, PRI-578).
  *
  * - GET    resolved identity (env > ~/.pd/owner.json > none) + file record
@@ -61,7 +61,7 @@ export async function handleOwnerIdentityRoute(
   authConfig: { isEnabled(): boolean },
 ): Promise<void> {
   if (subPath !== '' && subPath !== '/') {
-    sendError(res, 404, 'not_found', 'Unknown owner identity endpoint.', { nextAction: 'Use GET / POST / DELETE /api/v1/owner-identity.' });
+    sendError(res, 404, 'not_found', 'Unknown owner identity endpoint.', { nextAction: 'Use GET / POST / DELETE /api/owner-identity.' });
     return;
   }
 
