@@ -292,11 +292,28 @@ decision, quarantining, no-follow deletion and Git metadata unregistration all r
 inside ONE `withMutationLock` span. A Git mutex alone does not prevent an editor
 that ignores the mutex from creating a late junction, so Git NEVER recursively
 deletes the live worktree directory: the tool moves it into a unique quarantine
-sibling, uses the junction-safe `removeResidueTree` walk to remove its contents,
-then calls `git worktree remove --force` ONLY against the verified-absent
-quarantine path to unregister Git metadata. On partial failure, the helper
-attempts to restore the worktree path or preserves its quarantine path for
-manual inspection; no recursive-delete fallback is allowed.
+sibling — via `git worktree move` for submodule-free worktrees, or via a verified
+manual rename plus admin-pointer re-anchoring for worktrees Git refuses to move
+(initialized submodules) — then uses the junction-safe `removeResidueTree` walk to
+remove its contents, and finally removes ONLY the exact admin directory named by
+the moved `.git` marker after its reverse pointer names the quarantine back. No
+recursive Git deletion is ever invoked, not even against a verified-absent path.
+
+Before the tree is deleted, the quarantine is re-checked with a SECOND
+`git status`: a writer that ignores the mutation lock can commit bytes between
+the pre-move check and the rename (the rename does not stop an open handle), so a
+single pre-move check is never proof that the tree is quiet. Any change appearing
+after the move restores the worktree intact and refuses the deletion. On partial
+failure, the helper attempts to restore the worktree path (trusting verified disk
+state over the error text, completing rollbacks git refuses to perform) or
+preserves its quarantine path for manual inspection; no recursive-delete fallback
+is allowed. Every path-based unlink in the detach passes and in the no-follow
+walk re-verifies the recorded `dev`/`ino` identity of the ancestor directory
+chain first: a parent swapped for a junction mid-deletion fails closed instead
+of redirecting the unlink outside the tree (Node has no unlink-at-fd primitive;
+identity verification plus fail-closed is the strongest available guarantee).
+A scanned directory that becomes an ordinary file mid-removal is never unlinked:
+it may be someone's data written through a non-cooperating handle (git-4).
 
 `classifyReparsePoints` refuses with `EXTERNAL_LINKS_PRESENT` — listing each
 link, its target and why it is unsafe — when a target lies outside the tree,

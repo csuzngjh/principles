@@ -46,3 +46,21 @@ Verified internal links and ancestor cycles are detached as links, not traversed
 External and unresolvable targets still fail closed without explicit approval. After deletion, compare a content-level fingerprint of
 each external target (not `existsSync`: the incident deleted files INSIDE a target
 that was still present); targets already missing before the run are not "lost".
+
+**Concurrency hardening (PRI-1143 review round 3, 2026-11-08)**: a cooperative
+mutex is not an OS-level exclusive lock. The quarantine move does not stop a
+process that already holds an open handle from committing bytes, so a single
+pre-move `git status` is never proof the tree is quiet: the quarantine is
+re-checked with a SECOND status after the move, and any change appearing there
+(restore-able) restores the worktree intact and refuses the deletion. Every
+path-based unlink re-verifies the recorded dev/ino identity of its ancestor
+chain first — a parent swapped for a junction mid-deletion fails closed instead
+of redirecting the unlink outside the tree. Worktrees containing initialized
+submodules are quarantined via a verified manual rename with re-anchored
+submodule admin pointers (git refuses `git worktree move` for them outright);
+the shared `<commonDir>/modules` area is never deleted. Rollbacks trust
+verified disk state over the error text and complete moves git itself refuses
+(relative gitdir markers fail git's move-time validation). Undetectable
+residual risk, recorded honestly: a writer holding an unlinked file descriptor
+can keep writing into a deleted inode on POSIX — Node has no handle-enumeration
+primitive, so that class is documented here instead of being silently ignored.

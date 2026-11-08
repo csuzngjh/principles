@@ -32,10 +32,13 @@
 // REFUSAL unless --detach-external-links explicitly unlinks them (never targets);
 // proven-internal links, including ancestor cycles, are detached automatically.
 // The tree is then renamed into a unique quarantine sibling and deleted by the
-// no-follow filesystem walker. Git receives --force ONLY after that path is
-// verified absent, to clear its stale admin record; Git never recursively deletes
-// the user's worktree contents. Scan, detach, quarantine and unregister share one
-// mutation-lock span, and external targets are fingerprinted before and after.
+// no-follow filesystem walker; the exact Git admin directory is verified via
+// the moved marker and its reverse pointer, then removed with the same
+// no-follow walker. Git never recursively deletes the user's worktree
+// contents. Scan, detach, quarantine and unregister share one
+// mutation-lock span, external targets are fingerprinted before and after,
+// and a second git status inside the quarantine refuses late non-cooperating
+// writers by restoring the worktree intact.
 
 import fs from 'node:fs';
 import path from 'node:path';
