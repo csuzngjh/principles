@@ -82,3 +82,29 @@
 | 静态安装文件变化 | `reviewRequired` 非空，R2 仍启动，`completed` |
 | 污染目标读取失败 | `finally` 抛 EISDIR，`run-record.json` 未写出 |
 | 标记扫描失败 | 判为 `changed-attributed`（错误归因） |
+
+工具版本 `d916daad8`。方法：复制工具到临时目录，用假宿主和临时模拟生产目录驱动；CLI 场景经子进程运行并读取真实退出码。
+
+## 7. 修复后实测（同一批场景，工具 `8860abcea`）
+
+| 反例 | 结果 |
+|---|---|
+| 端口被占 | `ready=false`，exit 1，失败项 `endpoint-port` |
+| 自测失败 | `ready=false`，exit 1，失败项 `protocol-selftest` |
+| `where.exe` 不可用 | `ready=false`，exit 1，失败项 `termination-tool` |
+| PowerShell 不可用 | `ready=false`，exit 1，失败项 `process-sweep` |
+| 自测失败时 `--execute` | `refused-before-any-start`，宿主启动 0，无 `run/` |
+| 端口被占时 `--execute` | `refused-before-any-start`，宿主启动 0，无 `run/` |
+| 命令行含包路径的父进程 | 启动器存活，R1、R2 正常完成，写出 `run-record.json` |
+| 批准后改启动器 | `refused-before-any-start`，失败项 `execution-code`，宿主启动 0 |
+| 批准后改预算常量 | `refused-before-any-start`，失败项 `execution-code`，宿主启动 0 |
+| 污染已归因 | `stopped`，`stoppedAt=R1`，`pollution_attributed`，R2 未启动 |
+| 静态安装文件变化 | `stopped`，`pollution_review_required`，待人工复核，R2 未启动 |
+| 污染目标读取失败 | `stopped`，`pollution_audit_incomplete`，写出 `run-record.json` |
+| 标记扫描失败 | `audit-incomplete`，`attributed` 为空 |
+
+这些场景都已固化为 `scripts/__tests__/aa-presence-run.test.mjs` 中的测试（61 条，连续 3 轮全绿）。
+
+## 8. 证据保存说明
+
+§6、§7 的结果由会话临时脚本 `.tmp/pri1152-red/red.mjs` 产生。该脚本、旧工具副本和结果 JSON 都在 worktree 的 `.tmp/` 下，21:03 被外部进程连同整个 worktree 一起删除（运行卡 §15）。上表是删除前的原始输出抄录。如需复核，可将 `d916daad8` 的 `scripts/dev/aa-controlled-admission` 导出到临时目录，用同一假宿主重跑。

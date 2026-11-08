@@ -3,8 +3,8 @@
 - 文档 ID：`pri-1150-isolated-host-run-card-20261108`（文件名沿用，保护既有指针；v3 取代 v1/v2 全部内容）
 - 状态：**🔴 当前不可执行，真实运行未批准、未执行，真实宿主/模型零启动**。本卡正文记录的是冻结执行包 v3 的事实。v3 包已无法通过现行工具的预检（3 项 FAIL，见 §0.1），工具已按复核意见加固，下一步是按 §12 生成 v3.1。
 - 批准对象（两项必须同时绑定）：卡版本 + 执行清单 sha256。v3 包的取值是 `pri1152-run-card-v3` + `b16e81284bd1975036c3560f022d28610f1c43550d245e0e4610f926e383b895`，**这组取值已作废，不得用于批准**。v3.1 尚未生成，届时产生新的清单 sha256，须对新值重新批准；不沿用旧批准。
-- 执行包（PACK）：`D:\Code\_worktrees\principles\PRI-1152-isolated-host-exec-pack\artifacts\pri-1152-isolated-host\pp-20261108T095217Z`
-- 机器可读清单：`PACK\manifest.json`；本卡全部数值抄自该清单与离线复核报告 `PACK\preflight\verify-20261108T095712Z.json`。
+- 执行包（PACK）：`D:\Code\_worktrees\principles\PRI-1152-isolated-host-exec-pack\artifacts\pri-1152-isolated-host\pp-20261108T095217Z`。**该目录已不存在**：2026-11-08 21:03（+08:00）一个外部进程对整个 worktree 执行了 `robocopy <空目录> <worktree> /MIR`，把它连同 gitignored 的 `artifacts\` 一起删除（§15）。该包从未获批、从未执行。下文 v3 数值抄自删除前的清单和报告，只作历史记录。
+- 机器可读清单：`PACK\manifest.json`；本卡 v3 数值抄自该清单与离线复核报告 `PACK\preflight\verify-20261108T095712Z.json`（两者均已随包删除）。
 
 ## 0. 阻断项 B1：presence 事件在一次性宿主退出时丢失（已离线复现）
 
@@ -37,7 +37,18 @@ v3 包不覆盖、不重新批准，只读复核：17 项 PASS，3 项 FAIL。
 | `presence-durability` | 候选 bundle 仍是 B1 修复前的构建，事件只缓冲 |
 | `execution-code` | 清单没有执行代码绑定，属于旧包，必须重新 prepare |
 
-报告：`PACK\preflight\verify-20261108T124850Z-5a8054fd.json`。本次核对了 manifest、host-files、candidate-files、approval.template、config、state.db 六个冻结文件的 sha256，复核前后一致；没有产生 `run\`。预检只新增了报告和自测账本两个带时间戳的文件。
+报告：`PACK\preflight\verify-20261108T124850Z-5a8054fd.json`（已随包删除，结论抄录如上）。本次核对了 manifest、host-files、candidate-files、approval.template、config、state.db 六个冻结文件的 sha256，复核前后一致；没有产生 `run\`。预检只新增了报告和自测账本两个带时间戳的文件。
+
+### 0.2 v3 包删除后的替代证据（预演包，不可批准）
+
+两个预演包都用现行工具 `641b2c5cb` 生成，位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`。它们**不是 v3.1**：候选取自未合并分支或旧构建，只用于证明工具对两种候选的判定正确，**不得批准、不得执行**。
+
+| 预演包 | 候选来源 | `--verify --full --selftest` |
+|---|---|---|
+| `rehearsal-not-approvable`（清单 `463d694f…d310`） | B1 分支 `ai/PRI-1152-presence-event-flush` 的 `build:bundle` 产物（含 `this.flushEvents()`） | **exit 0，20/20 PASS，READY** |
+| `rehearsal-pre-b1-main-candidate`（清单 `40dfc6d8…8d8c`） | 本 worktree（main 源码，不含 B1）的 `build:bundle` 产物 | **exit 1，19 PASS / 1 FAIL**，唯一失败项 `presence-durability` |
+
+这说明：B1 合并前的真实候选仍被 `presence-durability` 阻断；含 B1 的构建可以达到 READY。
 
 ## 1. 目标与结论上限
 
@@ -243,7 +254,7 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
    - `tools.deny` 下实际暴露的工具面；
    - 污染前后对照。
 3. **端口**：prepare 时分配并冻结。执行时若被占用，预检或真实绑定失败关闭，需要重新 prepare。
-4. **worktree**：v3 包位于本任务 worktree 的 `artifacts\` 下，保留作为历史判定，**不得清理**。
+4. **worktree 与证据保存**：v3 包原先位于本任务 worktree 的 `artifacts\` 下，已被外部清理删除（§15）。worktree 锁和写入租约都没能阻止这次删除。v3.1 包生成后，应在 worktree 池之外另存清单、批准模板和预检报告的副本，并记录其 sha256。
 5. **安全审计**：Mimosa 完整审计未得出结论（scanner_enobufs），本卡不作安全性声明。
 
 ## 14. 变更记录
@@ -263,3 +274,18 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
   - 批准绑定实际执行代码和冻结预算；
   - 污染审计决定是否继续以及能否 `completed`；
   - 清扫不再误杀启动器祖先进程；读取失败的污染目标不再被判为已归因。
+
+## 15. 事件：v3 执行包被外部清理删除（2026-11-08 21:03，+08:00）
+
+| 项 | 事实 |
+|---|---|
+| 删除动作 | 进程 `C:\Windows\System32\robocopy.exe D:/pd-empty D:/Code/_worktrees/principles/PRI-1152-isolated-host-exec-pack /MIR /R:0 /W:0 /NFL /NDL /NJH /NJS`（pid 39692，父 pid 64420，21:03:29 启动）。以空目录为源的 `/MIR` 会删除目标中的全部内容 |
+| 发起方 | 未查明。查询时父进程已退出；在可读的会话记录中，限时检索没有找到该命令。不是本任务发起：本任务没有运行 robocopy，也不删除临时目录之外的内容 |
+| 当时的保护 | 该 worktree 由本任务持有 `git worktree lock`，写入租约有效至 15:32Z，PR #2424 未合并。两者都没能阻止删除 |
+| 同期范围 | worktree 池中另有多个 worktree 在 18:02–21:15 间被移除（从目录列表观察到，具体操作者不明）。本任务没有触碰它们，也没有动 `D:\pd-empty` |
+| 损失 | `artifacts\pri-1152-isolated-host\pp-20261108T095217Z`（v3 包、清单 `b16e8128…`、宿主副本、候选、配置、夹具库、预检报告与自测账本）；`.tmp\` 中的旧实现反例脚本及其结果文件。结果已在删除前输出，抄录于复核修复卡 §6/§7 |
+| 未受影响 | 所有提交都在删除前推送到 origin（`641b2c5cb`），代码零丢失。全局宿主安装、npm 缓存、主检出未受影响：21:25 生成的预演包对 npm 缓存 tarball 的逐文件对照通过 |
+| 恢复动作 | 在原路径对本任务分支执行 `git worktree add -f -f`（未经 PD 的 `dev:worktree` 互斥流程；当时互斥 arena 为空，无持有者），随后 `dev:worktree:claim`、`bootstrap`，`dev:worktree:ready` 判定 READY |
+| 无法恢复 | v3 包不能逐字节重建：占位 key 和时间戳是随机或当时生成的。卷影副本需要管理员权限，本任务未使用 |
+
+替代证据见 §0.2。v3.1 包生成后，在池外另存副本（§13 第 4 项）。

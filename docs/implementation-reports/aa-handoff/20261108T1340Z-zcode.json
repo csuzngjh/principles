@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261108T1340Z-zcode",
+  "previousCheckpoint": "20261108T1010Z-zcode",
+  "generatedAt": "2026-11-08T13:40:00Z",
+  "agent": "zcode",
+  "overallStatus": "PRI1152_REVIEW_FIXES_PUSHED_V31_NOT_GENERATED_REAL_RUN_NOT_APPROVED",
+  "summary": "复核四项修复已推送：B1 独立 PR #2427（recordPromptPresenceObserved 记录后 flushEvents，真实子进程自然退出回归：修复前 0 条、修复后 1 条，对照组普通缓冲事件仍不落盘）；#2424 加入统一 READY（20 项必需检查，端口/终止工具/清扫/自测/污染基线纳入，execute 前重跑，绑定失败安全停止）、执行代码绑定（11 个脚本 + 3 个工作区 dist 的相对路径与 sha256，冻结预算进入账本和批准）、污染审计决定停止与 completed（attributed/review-required/incomplete 停止，不能归因的变化只记录）。旧实现 13 个反例实测为错，修复后全部按预期。v3 包在 12:48Z 用现行工具复核为 17 PASS / 3 FAIL，随后于 21:03（+08:00）被外部 robocopy /MIR 连同整个 worktree 删除（已记录，发起方未查明，代码已推送无丢失）。替代证据：含 B1 的预演包 20/20 READY，main 候选预演包仅 presence-durability FAIL。v3.1 未生成；真实宿主/模型零启动；不签收 D/G1/C04/G2。",
+  "git": {
+    "execPack": {
+      "worktree": "D:\\Code\\_worktrees\\principles\\PRI-1152-isolated-host-exec-pack (recreated 2026-11-08 21:16 +08:00 after external wipe)",
+      "branch": "ai/PRI-1152-isolated-host-exec-pack",
+      "prUrl": "https://github.com/csuzngjh/principles/pull/2424",
+      "reviewedHead": "d916daad8",
+      "commits": [
+        "8860abcea fix(aa): PRI-1152 unify READY, bind approval to the running code, let the pollution audit stop a run",
+        "641b2c5cb Merge origin/main (a49e4fc4e)"
+      ]
+    },
+    "b1": {
+      "worktree": "D:\\Code\\_worktrees\\principles\\PRI-1152-presence-event-flush",
+      "branch": "ai/PRI-1152-presence-event-flush",
+      "prUrl": "https://github.com/csuzngjh/principles/pull/2427",
+      "base": "main",
+      "commits": [
+        "d1cd06eda fix(openclaw-plugin): write the presence observation at record time (PRI-1152)",
+        "d858e4aef Merge origin/main (a49e4fc4e)",
+        "8dec1a833 test(openclaw-plugin): keep the durability test free of any explicit flush or dispose (PRI-1152)"
+      ]
+    }
+  },
+  "fixes": [
+    {
+      "id": "B1",
+      "pr": 2427,
+      "oldCounterexample": "real EventLog in a child process exits naturally: 0 presence events on disk",
+      "after": "exactly 1 presence event; control (recordToolCall) still 0; write failure keeps old semantics (no throw, logger.error, stays buffered)"
+    },
+    {
+      "id": "unified-ready",
+      "pr": 2424,
+      "oldCounterexample": "port taken / selftest failing / taskkill missing / PowerShell missing all gave ready=true exit 0; execute ran both rounds with a failing selftest; port taken at execute created run/; sweep killed the launcher when started from a shell carrying the pack path",
+      "after": "each gives ready=false exit 1 with the named failing check; execute refuses before any host start; bind failure stops at endpoint-bind with 0 starts; launcher ancestry excluded from the sweep"
+    },
+    {
+      "id": "execution-code-binding",
+      "pr": 2424,
+      "oldCounterexample": "launcher edited after approval ran and completed with an unchanged manifest hash; budget constant changed to 9 was used by the ledger",
+      "after": "execution-code FAIL before any host start; ledger uses manifest.budget; approval must name the frozen budgets; unrelated docs/.d.ts/.map do not invalidate",
+      "trustBoundary": "drift check run by the checked code itself; does not defend against a replaced verifier or node binary; third-party node_modules not listed"
+    },
+    {
+      "id": "pollution-gate",
+      "pr": 2424,
+      "oldCounterexample": "attributed and static-install-review still completed with R2 started; unreadable target threw in finally and lost run-record.json; marker scan failure read as attributed",
+      "after": "attributed/review-required/incomplete stop before the next round and block completed; unattributed changes recorded, run continues; unreadable = audit-incomplete; run-record.json always written; audit read-only"
+    }
+  ],
+  "packs": {
+    "v3": {
+      "path": "D:\\Code\\_worktrees\\principles\\PRI-1152-isolated-host-exec-pack\\artifacts\\pri-1152-isolated-host\\pp-20261108T095217Z",
+      "manifestSha256": "b16e81284bd1975036c3560f022d28610f1c43550d245e0e4610f926e383b895",
+      "status": "DELETED by external robocopy /MIR at 2026-11-08 21:03:29 +08:00; never approved, never executed; approval values void",
+      "lastVerdict": "current tool 12:48Z: 17 PASS / 3 FAIL (manifest, presence-durability, execution-code), exit 1"
+    },
+    "v31": "NOT GENERATED (requires B1 merged into main; sequence in run card §12)",
+    "rehearsals": {
+      "root": "D:\\Code\\.pd-tmp\\principles\\20261108\\task-pri1152-rehearsal-211918-7ffe9a",
+      "notApprovable": true,
+      "withB1Candidate": { "manifestSha256": "463d694fe084e8feaff10ce576e0d8adef3a89b8a749f4c4b388c52113a7d310", "verify": "exit 0, 20/20 PASS READY" },
+      "mainCandidatePreB1": { "manifestSha256": "40dfc6d8e0bd874b7faa07c4f2d6b140580a37548c124e1ad0a275d3c5378d8c", "verify": "exit 1, 19 PASS / 1 FAIL presence-durability" }
+    }
+  },
+  "verification": {
+    "scripts": "aa-presence-run 61/61 (3 consecutive runs); with aa-controlled-admission 95/95",
+    "plugin": "B1 durability 3/3 (red before fix: 2 failed); event-log + durability 30/30; core+hooks 1619 passed / 3 skipped (llama.cpp e2e, not counted as pass); presence chain 100/100",
+    "guards": "check:runtime-contract/repo-hygiene/security-baseline/workspace-tools/runtime-writers/naming-policy/docs-structure exit 0; plugin tsc + eslint exit 0; release-intent PASS on B1",
+    "ci": "#2424 head 641b2c5cb: 28 pass / 1 skipping / 0 fail; #2427 head 8dec1a833: 24 pass / 5 skipping / 0 fail",
+    "notRun": "verify:merge locally (CI gate is authoritative); Mimosa full audit (scanner_enobufs); any real host or model start"
+  },
+  "incident": {
+    "what": "robocopy.exe D:/pd-empty -> the exec-pack worktree /MIR (pid 39692, parent 64420 gone) deleted the whole locked, leased worktree incl. artifacts/ and .tmp/",
+    "initiator": "unknown; not this task",
+    "recovery": "git worktree add -f -f at the same path (bypassed dev:worktree mutex; arena empty at the time), claim, bootstrap -> READY",
+    "notTouched": "other worktrees, D:/pd-empty, the mutation arena"
+  },
+  "conclusionBound": "只验证宿主装配观察连通的准备；D=unknown；不签收 G1/C04/G2；真实宿主/模型未启动；不宣称行为改善",
+  "linear": {
+    "PRI-1152": "stays In Review; fact comment (real run not approved, not executed)",
+    "PRI-1119": "progress comment",
+    "PRI-1105": "progress comment",
+    "PRI-1150": "kept Done"
+  },
+  "latestPointer": "LATEST.json not modified (belongs to another session)"
+}
