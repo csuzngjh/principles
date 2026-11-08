@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows } from './lib/metrics-core.mjs';
@@ -82,17 +83,35 @@ const gates = computeGates({ datasetMetrics, validation, d6Summary, faultSummary
 gates.partial_run = isPartial;
 
 const runMeta = readJsonOptional(path.join(runDir, 'run-meta.json'));
+// PRI-1150 review P2-A/B: the committed dataset must be byte-identical to the
+// frozen dataset this run declared (sha256 in run-meta), and every evidence
+// row must carry THIS run's run_id — otherwise the metrics describe a foreign
+// run and ok must be false (recorded, not silently passed).
+const frozenDatasetSha = crypto.createHash('sha256').update(fs.readFileSync(datasetPath, 'utf8')).digest('hex');
+const declaredDatasetSha = runMeta?.dataset_sha256 ?? null;
+const datasetShaMatches = declaredDatasetSha !== null && declaredDatasetSha === frozenDatasetSha;
+const foreignRunIdRows = chain
+  .filter((r) => typeof r.run_id === 'string' && r.run_id !== runId)
+  .map((r) => r.sample_id);
+const integrityOk = datasetShaMatches && foreignRunIdRows.length === 0;
 const metricsSummary = {
-  ok: gates.overall_ok,
+  ok: gates.overall_ok && integrityOk,
   experiment: 'PRI-1147 real-LLM BDD metrics + acceptance gates',
   generated_at: new Date().toISOString(),
   run_id: runId,
   mode,
   partial_run: isPartial,
   gates,
+  integrity: {
+    dataset_sha256_matches: datasetShaMatches,
+    declared_dataset_sha256: declaredDatasetSha,
+    frozen_dataset_sha256: frozenDatasetSha,
+    foreign_run_id_rows,
+  },
   run_meta: {
     git_commit_sha: runMeta?.git_commit_sha ?? null,
-    dataset_sha256: runMeta?.dataset_sha256 ?? null,
+    dataset_sha256: declaredDatasetSha,
+    frozen_dataset_sha256: frozenDatasetSha,
     provider: runMeta?.provider ?? chainSummary.provider ?? null,
     model: runMeta?.model ?? chainSummary.model ?? null,
     api_key_env: runMeta?.api_key_env ?? null,

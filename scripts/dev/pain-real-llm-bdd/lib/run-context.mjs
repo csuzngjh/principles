@@ -51,8 +51,13 @@ export function gitCommitSha(repoRoot) {
  * @returns {{runId, runDir, meta: object, createdNew: boolean}}
  */
 export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, phaseInfo }) {
-  if (!/^[A-Za-z0-9._-]+$/.test(String(runIdArg ?? '')) && runIdArg !== null && runIdArg !== undefined) {
-    throw new Error(`invalid run_id '${runIdArg}': only [A-Za-z0-9._-] are allowed`);
+  // PRI-1150 review P2-C: `.` and `..` pass the charset regex but are path
+  // segments that escape `runs/` — reject them (and leading dots) explicitly.
+  if (
+    runIdArg !== null && runIdArg !== undefined
+    && (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(String(runIdArg)))
+  ) {
+    throw new Error(`invalid run_id '${runIdArg}': must match [A-Za-z0-9][A-Za-z0-9._-]* and must not start with a dot (no path escape)`);
   }
   const runId = runIdArg ?? generateRunId();
   const runDir = path.join(resultsRoot, 'runs', runId);
@@ -61,7 +66,7 @@ export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, p
   let meta;
   let createdNew;
   // Read-first (ENOENT = absent): avoids the existsSync→write check-then-act
-  // race shape entirely — the only writer gate is the run_id match below.
+  // race shape for the MATCH decision — the writer itself is exclusive below.
   let existingText = null;
   try {
     existingText = fs.readFileSync(metaPath, 'utf8');
@@ -85,7 +90,11 @@ export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, p
       api_key_env: phaseInfo.apiKeyEnv,
       phases: {},
     };
-    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+    // PRI-1150 review P2-F (CodeQL js/file-system-race high; PRI-913
+    // precedent): the CREATE write is exclusive ('wx') — two concurrent
+    // processes racing to open the same NEW run cannot both succeed; the
+    // loser fails loud instead of silently overwriting.
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), { flag: 'wx' });
     createdNew = true;
   }
   return { runId, runDir, meta, metaPath, createdNew };

@@ -93,6 +93,18 @@ const { SignalCollectorHost, DEFAULT_SIGNAL_CONFIG, createSignalLlmClassifierFro
 const { createLiveSignalKeywordStore } = await importDist('signal-keyword-store.js');
 
 const dataset = JSON.parse(fs.readFileSync(path.join(here, 'golden-dataset.json'), 'utf8'));
+
+// PRI-1150 review P2-G: fingerprint the ACTUALLY EXECUTED dist artifacts —
+// the git commit SHA alone cannot prove a fix is in the running code.
+const crypto = await import('node:crypto');
+const distFingerprint = Object.fromEntries(
+  ['signal-collector-host.js', 'trajectory.js', 'evolution-reducer.js', 'signal-keyword-store.js'].map((fileName) => {
+    const file = path.join(distDir, fileName);
+    return [fileName, fs.existsSync(file)
+      ? 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16)
+      : 'missing'];
+  }),
+);
 const sampleById = new Map(dataset.samples.map((s) => [s.sample_id, s]));
 
 const SUBSET = ['A1', 'A2', 'A6', 'B1', 'B4', 'C1', 'C4', 'D2', 'G1', 'H4'];
@@ -154,24 +166,34 @@ function readSignalConfirmations(workspaceDir, sessionId) {
 function readDiagnosticianTaskCount(workspaceDir) {
   const dbPath = path.join(workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(dbPath)) return 0;
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  let db;
   try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
     return db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()?.n ?? 0;
-  } catch {
-    return 0;
+  } catch (error) {
+    // PRI-1150 review P1-D: a READ FAILURE is "unknown" (null) — never a
+    // silent 0 that reads a failed write as "no pain emitted". (A missing db
+    // file above stays a legitimate 0 for a fresh workspace.)
+    console.error(`[openclaw-host] diagnostician task count read failed: ${lib.redactSecrets(String(error).slice(0, 200))}`);
+    return null;
   } finally {
-    db.close();
+    try { db?.close(); } catch { /* best effort */ }
   }
 }
 
 function readEvolutionPainEventCount(workspaceDir) {
   const file = path.join(workspaceDir, 'memory', 'evolution.jsonl');
   if (!fs.existsSync(file)) return 0;
-  let count = 0;
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (line.includes('"pain_detected"')) count += 1;
+  try {
+    let count = 0;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (line.includes('"pain_detected"')) count += 1;
+    }
+    return count;
+  } catch (error) {
+    console.error(`[openclaw-host] evolution pain event count read failed: ${lib.redactSecrets(String(error).slice(0, 200))}`);
+    return null;
   }
-  return count;
 }
 
 /** SYSTEM 日志（memory/logs/SYSTEM_YYYY-MM-DD.log）中与本实验相关的事件行。 */
@@ -297,10 +319,13 @@ for (const sampleId of SUBSET) {
 
     const llmCalls = calls.length;
     const verdicts = calls.filter((c) => c.verdict).map((c) => c.verdict);
+    // PRI-1150 review P1-D: "reached Stage 2" requires a REAL dispatched call —
+    // thrown calls are transport failures, not Stage-2 evidence.
+    const realDispatch = calls.some((c) => c.status === 'ok' || c.status === 'no_verdict');
     const strongDirect = turn?.correction_detected === 1 && llmCalls === 0;
-    const reachedStage2 = llmCalls > 0;
+    const reachedStage2 = realDispatch;
     // 漏斗完成的真实证据 = state.db 的 diagnostician 任务（成功路径静默，见上）。
-    const emitted = diagnosticianTasks >= 1;
+    let emitted = diagnosticianTasks !== null && diagnosticianTasks >= 1;
     const queuedForBatch = confirmations.length > 0;
 
     let observedRouting;
@@ -319,6 +344,20 @@ for (const sampleId of SUBSET) {
     if (sample.expected_stage === 'stage1_strong_direct') seamPass = strongDirect;
     else if (sample.expected_stage === 'stage2_via_pending') seamPass = reachedStage2 && !strongDirect;
     else seamPass = (turn?.correction_cue ?? null) === null;
+    // PRI-1150 review P1-D: a MISSING trajectory turn row is an ingestion/read
+    // anomaly — it must fail the sample (record.error → summary ok=false)
+    // instead of silently satisfying the no-hit branch (null === null).
+    if (turn === null) {
+      record.error = 'trajectory turn row missing for this sample — ingestion or read anomaly; no-hit/pass conclusions are unavailable';
+      seamPass = false;
+    }
+    // Count-read failures (null) are unknown facts: they must fail the sample
+    // rather than read a failed write as "no pain emitted".
+    if (diagnosticianTasks === null || evolutionPainEvents === null) {
+      record.error = record.error
+        ?? 'diagnostician/evolution funnel counts unreadable (state.db read failure) — pain-emission conclusions are unavailable';
+      emitted = false;
+    }
 
     record.observed = {
       routing: observedRouting,
@@ -438,6 +477,7 @@ const summary = {
     .map((r) => ({ sample_id: r.sample_id, expected_label: r.expected.label, pain_emitted: r.semantic_observation.pain_emitted, llm_verdicts: r.semantic_observation.llm_verdicts })),
   results_file: resultsFile,
   run_root: runRoot,
+  dist_fingerprint: distFingerprint,
   records,
 };
 fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));

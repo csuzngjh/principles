@@ -38,11 +38,16 @@ export const SAMPLE_OUTCOMES = Object.freeze([
 /** Outcomes that represent a completed, model-verified Stage-2 adjudication. */
 export const STAGE2_DECIDED_OUTCOMES = Object.freeze(['admitted', 'resolved_none']);
 
-/** Outcomes that mean the run infrastructure itself failed (exit-code relevant). */
+/** Outcomes that mean the run infrastructure itself failed (exit-code relevant).
+ *  PRI-1150 review P1-A: `abandoned_llm_error` belongs here — the bounded-retry
+ *  budget was exhausted on LLM ERRORS (never a real verdict), so an all-error
+ *  run is an infrastructure failure and must fail dataset_ok / overall_ok
+ *  instead of silently computing a confusion matrix. */
 export const EXECUTION_FAILURE_OUTCOMES = Object.freeze([
   'pending_unresolved',
   'classifier_unavailable',
   'execution_error',
+  'abandoned_llm_error',
 ]);
 
 /**

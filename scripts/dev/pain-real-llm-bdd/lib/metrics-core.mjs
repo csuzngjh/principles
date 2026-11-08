@@ -43,6 +43,25 @@ export function validateDatasetRows(rows, dataset) {
   if (extra.length > 0) {
     problems.push({ kind: 'extra_samples', sample_ids: extra });
   }
+  // PRI-1150 review P2-B: a row's expected* facts must MATCH the frozen
+  // dataset entry for its sample_id — a drifted row silently rewrites the
+  // acceptance contract.
+  const expectedMismatches = [];
+  const byId = new Set(dataset.samples.map((s) => s.sample_id));
+  for (const r of rows) {
+    if (r.unparseable === true || !byId.has(r.sample_id)) continue;
+    const expectedSample = dataset.samples.find((s) => s.sample_id === r.sample_id);
+    const rowExpected = r.expected ?? {};
+    for (const key of ['label', 'stage', 'final']) {
+      if (expectedSample.expected && expectedSample.expected[key] !== undefined
+        && rowExpected[key] !== undefined && rowExpected[key] !== expectedSample.expected[key]) {
+        expectedMismatches.push({ sample_id: r.sample_id, field: key, dataset: expectedSample.expected[key], row: rowExpected[key] });
+      }
+    }
+  }
+  if (expectedMismatches.length > 0) {
+    problems.push({ kind: 'expected_mismatch_with_frozen_dataset', mismatches: expectedMismatches });
+  }
   const unparseable = rows.filter((r) => r.unparseable === true);
   if (unparseable.length > 0) {
     problems.push({ kind: 'unparseable_rows', count: unparseable.length });

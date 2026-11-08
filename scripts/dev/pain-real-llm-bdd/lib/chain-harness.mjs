@@ -67,7 +67,11 @@ export function writeLearnedKeywordStore(workspaceDir, keywords) {
  * profile. Provider/model come from env so the dataset stays provider-neutral.
  */
 export function buildWorkspaceConfig({ provider, model, apiKeyEnv, timeoutMs, maxTokens, reasoning, baseUrl }) {
-  const config = getDefaultPdConfig();
+  // PRI-1150 review P2-E: getDefaultPdConfig shallow-spreads DEFAULT_FEATURE_FLAGS,
+  // so mutating `config.features['host.codex']` in place polluted the SHARED
+  // default object for every later caller in this process (including the 45
+  // production-chain samples). Deep-clone before mutating.
+  const config = structuredClone(getDefaultPdConfig());
   if (config.features['host.codex']) config.features['host.codex'].enabled = true;
   config.features['codex_conversation_ingestion'] = { enabled: true, category: 'quiet' };
   config.features['signal_collector'] = { enabled: true, category: 'quiet' };
@@ -181,7 +185,14 @@ export function readAdmissionState(workspaceDir, logicalKey) {
         ruleVersion: marker.rule_version,
         canonicalPainId: marker.canonical_pain_id,
         updatedAt: marker.updated_at,
+        // rc-8 bounded string preview (logs only — never machine-read).
         payloadPreview: safePreview(parseJsonSafe(marker.task_payload_json)),
+        // PRI-1150 review P1-B: STRUCTURED parsed payload for evidence rows.
+        // Two shapes exist by design:
+        //   pending  → { review: { attempts, reviewResult: { verdict, confidence, reason } } }
+        //   terminal → { decision, reason, attempts, confidence, settledAt }  (D6-minimized)
+        // Evidence readers use readMarkerFacts (below) instead of the string.
+        payloadParsed: parseJsonSafe(marker.task_payload_json),
       } : null,
       pain: pain ? { canonicalPainId: pain.canonical_pain_id, score: pain.score, source: pain.source, hostKind: pain.host_kind } : null,
       observation: observation ? { kind: observation.kind, completeness: observation.completeness } : null,
@@ -190,6 +201,34 @@ export function readAdmissionState(workspaceDir, logicalKey) {
   } finally {
     db.close();
   }
+}
+
+/**
+ * PRI-1150 review P1-B: scalar-only marker facts for evidence rows, tolerant
+ * of BOTH payload shapes (pending review shape and D6-minimized terminal
+ * shape). Returns scalars only (numbers/strings) — never the payload text —
+ * so evidence stays desensitized (§6/D6).
+ */
+export function readMarkerFacts(payloadParsed) {
+  if (!payloadParsed || typeof payloadParsed !== 'object') {
+    return { attempts: null, confidence: null, verdict: null, reason: null };
+  }
+  const pending = payloadParsed.review ?? null;
+  const pendingResult = pending?.reviewResult ?? null;
+  return {
+    attempts: typeof payloadParsed.attempts === 'number'
+      ? payloadParsed.attempts
+      : (typeof pending?.attempts === 'number' ? pending.attempts : null),
+    confidence: typeof payloadParsed.confidence === 'number'
+      ? payloadParsed.confidence
+      : (typeof pendingResult?.confidence === 'number' ? pendingResult.confidence : null),
+    // Terminal payloads are D6-minimized and carry no verdict type; the
+    // decision lives on the marker row itself. Only the pending shape has it.
+    verdict: typeof pendingResult?.verdict === 'string' ? pendingResult.verdict : null,
+    reason: typeof payloadParsed.reason === 'string'
+      ? payloadParsed.reason
+      : (typeof pendingResult?.reason === 'string' ? pendingResult.reason : null),
+  };
 }
 
 /** All admission markers (used by D6 idempotency/TTL checks). */

@@ -14,13 +14,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { classifySampleOutcome, SAMPLE_OUTCOMES, EXECUTION_FAILURE_OUTCOMES, STAGE2_DECIDED_OUTCOMES } from './lib/outcomes.mjs';
-import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows } from './lib/metrics-core.mjs';
-import { assertFreshOutputs, generateRunId, openRunContext, recordPhase, PHASES } from './lib/run-context.mjs';
-import * as lib from './lib/chain-harness.mjs';
+import { classifySampleOutcome, SAMPLE_OUTCOMES, EXECUTION_FAILURE_OUTCOMES, STAGE2_DECIDED_OUTCOMES } from '../dev/pain-real-llm-bdd/lib/outcomes.mjs';
+import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows } from '../dev/pain-real-llm-bdd/lib/metrics-core.mjs';
+import { assertFreshOutputs, generateRunId, openRunContext, recordPhase, PHASES } from '../dev/pain-real-llm-bdd/lib/run-context.mjs';
+import * as lib from '../dev/pain-real-llm-bdd/lib/chain-harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const datasetPath = path.join(here, 'golden-dataset.json');
+const datasetPath = path.join(here, '..', 'dev', 'pain-real-llm-bdd', 'golden-dataset.json');
 const dataset = JSON.parse(fs.readFileSync(datasetPath, 'utf8'));
 
 function row(overrides = {}) {
@@ -91,12 +91,13 @@ describe('dataset metrics adjudication (P1-1/P2)', () => {
   it('excludes execution failures from the matrix and reports them', () => {
     const m = computeDatasetMetrics(rows, dataset);
     expect(m.total_rows).toBe(7);
-    expect(m.matrix_rows).toBe(6);
-    expect(m.excluded_execution_failures).toBe(1);
-    // A5 (abandoned_llm_error) is a semantic-unresolved correction: honestly a
-    // pipeline FN in the matrix (never a NONE), while E1 (execution_error) is
-    // excluded as infrastructure noise.
-    expect(m.confusion_matrix).toEqual({ tp: 1, fp: 1, tn: 1, fn_detection: 1, fn_stage1_coverage: 2 });
+    // PRI-1150 review P1-A: abandoned_llm_error is an infrastructure failure
+    // (bounded retries exhausted on LLM ERRORS) — excluded from the matrix
+    // exactly like execution_error. The 45-sample real run had zero such rows,
+    // so reported acceptance numbers are unaffected by this correction.
+    expect(m.matrix_rows).toBe(5);
+    expect(m.excluded_execution_failures).toBe(2);
+    expect(m.confusion_matrix).toEqual({ tp: 1, fp: 1, tn: 1, fn_detection: 0, fn_stage1_coverage: 2 });
   });
 
   it('never counts llm_error as a Stage-2 NONE; accuracy uses decided rows only', () => {
@@ -105,19 +106,21 @@ describe('dataset metrics adjudication (P1-1/P2)', () => {
     expect(m.stage2.decided).toBe(3);
     expect(m.stage2.correct).toBe(2);
     expect(m.stage2.accuracy).toBeCloseTo(2 / 3, 4);
-    // unresolved = A5 (abandoned_llm_error, semantic-unresolved) + E1
-    // (execution_error after pending: infra noise never becomes a verdict)
+    // unresolved = A5 (abandoned_llm_error, infra) + E1 (execution_error)
     expect(m.stage2.unresolved_excluded_from_accuracy).toBe(2);
     const unresolvedIds = m.stage2.unresolved_samples.map((s) => s.sample_id);
     expect(unresolvedIds).toContain('A5');
     expect(unresolvedIds).toContain('E1');
     expect(STAGE2_DECIDED_OUTCOMES).not.toContain('abandoned_llm_error');
+    expect(EXECUTION_FAILURE_OUTCOMES).toContain('abandoned_llm_error');
   });
 
   it('attributes Stage-1 coverage FN separately from detection FN', () => {
     const m = computeDatasetMetrics(rows, dataset);
     expect(m.confusion_matrix.fn_stage1_coverage).toBe(2);
-    expect(m.confusion_matrix.fn_detection).toBe(1); // A5 abandoned_llm_error: semantic-unresolved correction
+    // A5 abandoned_llm_error is now excluded as infrastructure — detection FN
+    // counts only genuine in-matrix misses.
+    expect(m.confusion_matrix.fn_detection).toBe(0);
   });
 
   it('evidence rows are desensitized (no text/logs/credentials)', () => {
@@ -171,6 +174,41 @@ describe('dataset validation (P1-2)', () => {
     rows[0].final_outcome = 'classifier_unavailable';
     const v = validateDatasetRows(rows, dataset);
     expect(v.executionFailures).toEqual([{ sample_id: 'A1', outcome: 'classifier_unavailable', reason: null }]);
+  });
+
+  it('PRI-1150 review P1-A negative control: an ALL-abandoned_llm_error run fails dataset_ok and overall_ok (never PASS)', () => {
+    // Owner-verified defect: 45 rows whose every LLM call threw in 1ms → every
+    // row abandoned_llm_error. Before the fix, EXECUTION_FAILURE_OUTCOMES did
+    // not include it → dataset_ok=true, overall_ok=true, specificity=1.0 —
+    // the gate passed on a total infrastructure failure.
+    const rows = allIds().map((r) => ({
+      ...r,
+      pain_created: false,
+      pending_pre_stage2: true,
+      final_outcome: 'abandoned_llm_error',
+      final_outcome_reason: 'llm_error',
+      stage1: { marker_decision_pre: 'pending_llm_review', marker_reason_pre: null, observation_persisted: true },
+      stage2_result: { marker_decision_post: 'abandoned' },
+      llm_calls: [{ latency_ms: 1, status: 'threw' }],
+    }));
+    const v = validateDatasetRows(rows, dataset);
+    expect(v.executionFailures).toHaveLength(45);
+    expect(v.executionFailures.every((f) => f.outcome === 'abandoned_llm_error')).toBe(true);
+    const metrics = computeDatasetMetrics(rows, dataset);
+    // No confusion matrix from pure infrastructure failure.
+    expect(metrics.matrix_rows).toBe(0);
+    expect(metrics.metrics.specificity).toBeNull();
+    const g = computeGates({
+      datasetMetrics: metrics,
+      validation: v,
+      d6Summary: { ok: true, run_id: 'run-test' },
+      faultSummary: { ok: true, run_id: 'run-test' },
+      openclawSummary: { ok: true, run_id: 'run-test' },
+      runId: 'run-test',
+      mode: 'full',
+    });
+    expect(g.dataset_ok).toBe(false);
+    expect(g.overall_ok).toBe(false);
   });
 });
 
@@ -232,7 +270,7 @@ describe('run isolation (P1-2)', () => {
   it('run_id format is filesystem-safe and invalid ids are rejected', () => {
     expect(generateRunId()).toMatch(/^run-\d{8}T\d{6}Z-[0-9a-f]{4}$/);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pri1147-ctx-test-'));
-    const repoRoot = path.resolve(here, '..', '..', '..');
+    const repoRoot = path.resolve(here, '..', '..');
     try {
       expect(() => openRunContext({ runIdArg: '../escape', resultsRoot: tmp, repoRoot, datasetPath, phaseInfo: { provider: 'x', model: 'x', apiKeyEnv: 'X' } })).toThrow(/invalid run_id/);
       const ctx = openRunContext({ runIdArg: 'run-fixed', resultsRoot: tmp, repoRoot, datasetPath, phaseInfo: { provider: 'zai', model: 'glm-5.3-flash', apiKeyEnv: 'ZAI_API_KEY' } });

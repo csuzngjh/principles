@@ -363,7 +363,7 @@ try {
     let finalDecision = null;
     const recoveryCycles = [];
     for (let round = 0; round < STAGE2_MAX_ATTEMPTS + 2; round += 1) {
-      const report = await runStage2CorrectionCycle({ workspaceDir: env.workspaceDir, classifier: c1.fn, classifierState: 'used', classificationTimeoutMs: 60_000, aggregateBudgetMs: 120_000 });
+      const report = await runStage2CorrectionCycle({ workspaceDir: env.workspaceDir, classifier: c1.fn, classifierState: 'used', classificationTimeoutMs: 60_000 });
       recoveryCycles.push({ round: round + 1, claimed: report.claimed, admitted: report.admitted, resolvedNone: report.resolvedNone, abandoned: report.abandoned, stillPending: report.stillPending });
       finalDecision = readRawMarker(env.workspaceDir, key)?.decision ?? null;
       if (finalDecision === 'admitted' || finalDecision === 'resolved_none' || finalDecision === 'abandoned') break;
@@ -430,7 +430,6 @@ try {
         classifier: freshCycle.fn,
         classifierState: 'used',
         classificationTimeoutMs: 60_000,
-        aggregateBudgetMs: 120_000,
       });
       const freshSkipped = freshReport.claimed === 0
         && freshCycle.calls.length === 0

@@ -178,15 +178,20 @@ for (const sample of samples) {
       }
     }
 
+    // PRI-1150 review P1-B: read marker facts through the STRUCTURED payload
+    // (both pending and D6-minimized terminal shapes), not the preview string
+    // whose property reads always produced undefined → null.
+    const markerFacts = lib.readMarkerFacts(postStage2.marker?.payloadParsed);
     record.stage2_result = {
       marker_decision_post: postStage2.marker?.decision ?? null,
       marker_reason_post: postStage2.marker?.reason ?? null,
-      attempts: postStage2.marker?.payloadPreview?.review?.attempts
-        ?? postStage2.marker?.payloadPreview?.attempts
-        ?? null,
-      verdict: postStage2.marker?.payloadPreview?.review?.reviewResult?.verdict ?? null,
-      confidence: postStage2.marker?.payloadPreview?.review?.reviewResult?.confidence ?? null,
-      verdict_reason: postStage2.marker?.payloadPreview?.review?.reviewResult?.reason ?? null,
+      attempts: markerFacts.attempts,
+      confidence: markerFacts.confidence,
+      // Verdict TYPE only exists on the pending payload shape; terminal
+      // payloads are D6-minimized — the decision on the marker row carries
+      // the semantic, so this stays null (honest) for terminal markers.
+      verdict: markerFacts.verdict,
+      verdict_reason: markerFacts.reason,
     };
     record.pain_created = postStage2.pain !== null;
     record.pain = postStage2.pain;
