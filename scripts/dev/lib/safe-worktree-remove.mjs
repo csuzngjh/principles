@@ -534,13 +534,14 @@ export async function removeWorktreeSafely({
       // verified manual move-back below never lets Git read the marker, so
       // even a byte-identical substitute cannot be followed (CodeRabbit
       // round 5: both rollback paths are unified here).
-      let rollbackMarkerTrusted = true;
-      try {
-        rollbackMarkerTrusted = originalMarkerBytes !== null
-          && readRegularFileNoFollow(markerPath) === originalMarkerBytes;
-      } catch {
-        rollbackMarkerTrusted = false;
-      }
+      const rollbackMarkerTrusted = (() => {
+        try {
+          return originalMarkerBytes !== null
+            && readRegularFileNoFollow(markerPath) === originalMarkerBytes;
+        } catch {
+          return false;
+        }
+      })();
       if (!rollbackMarkerTrusted) {
         notes.push('quarantine .git marker is not the original regular file; refusing to move the worktree back (quarantine preserved)');
       }
