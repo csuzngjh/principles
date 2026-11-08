@@ -208,7 +208,7 @@ if (!isPartial && finalOk) {
     provider: runMeta?.provider ?? null,
     model: runMeta?.model ?? null,
     generated_at: new Date().toISOString(),
-    desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；不含样本完整原文、日志或凭据。expected 字段以冻结数据集为权威源核对。样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json',
+    desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；final_outcome_reason 仅保留命中词片段或模型生成的一句话判定理由（非样本原文）；不含样本完整原文、日志或凭据。expected 字段以冻结数据集为权威源核对。样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json',
     samples: evidenceRows,
   }, null, 2);
   // Exclusive create ('wx', PRI-913 precedent): committing evidence is

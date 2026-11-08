@@ -58,7 +58,7 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 | `.tmp/pri-1147/runs/<run_id>/d6-pending.summary.json` | run-d6-pending | S1–S7 检查记录 |
 | `.tmp/pri-1147/runs/<run_id>/summary` 文件 ×3 | 三阶段脚本 | 各自 ok/totals/run_id |
 | `.tmp/pri-1147/runs/<run_id>/metrics-summary.json` | compute-metrics | 五项门禁 + 混淆矩阵/精度/Stage-2 精度/LLM 统计 + OpenClaw dist SHA-256 指纹 |
-| `docs/reports/evidence/pri-1147-<run_id>/per-sample.json` | compute-metrics | **脱敏证据**（含 Stage-2 attempts/verdict/confidence；仅标识/期望/观测/结局/延迟/哈希；不含样本原文/模型理由/日志/凭据） |
+| `docs/reports/evidence/pri-1147-<run_id>/per-sample.json` | compute-metrics | **脱敏证据**（含 Stage-2 attempts/verdict/confidence；`final_outcome_reason` 仅保留命中词片段或模型一句话判定理由；不含样本完整原文/日志/凭据） |
 
 样本环境（workspace + CODEX_HOME + trajectory.db）在 `os.tmpdir()` 的临时根下，保留作证据，报告评审后手动删除。
 
@@ -103,6 +103,6 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 
 真实 `SignalCollectorHost` + 真实 `TrajectoryDatabase` + 真实 `EvolutionReducerImpl` + 生产配置解析的共享分类器；10 样本路由观测 + 单 session 6×STRONG rate-limit 抑制检查（第 6 次必须 `SIGNAL_STRONG_RATE_LIMITED`）。
 
-### harness-regression.test.mjs（离线回归，`npx vitest run scripts/dev/pain-real-llm-bdd/harness-regression.test.mjs`）
+### Harness 回归（离线，`npx vitest run scripts/__tests__/pain-real-llm-bdd-harness-regression.test.mjs scripts/__tests__/compute-metrics-cli.test.mjs`）
 
 结局分类学全映射 / llm_error 永不充当 NONE / 低置信与错误耗尽不计入 Stage-2 准确率分母 / Stage-1 覆盖 FN 单列 / 数据集校验（45/唯一/缺失/多余/无 run_id/无效结局） / 五项门禁（缺 phase、run_id 错配、partial 永不 PASS） / 运行隔离（拒绝覆盖 / run_id 格式 / meta 往返） / 真实 cycle 离线驱动（5 次 null → abandoned(llm_error)、8 轮 budget-release → pending_unresolved、5 次低置信 → abandoned(low_confidence)）。

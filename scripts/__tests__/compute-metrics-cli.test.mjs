@@ -156,6 +156,14 @@ describe('compute-metrics REAL CLI (spawns node, temp results roots)', () => {
     expect(summary.integrity.openclaw_dist_fingerprint_ok).toBe(true);
     expect(summary.phase_summaries.openclaw_host.dist_fingerprint).toEqual(validDistFingerprint());
     expect(perSample.openclaw_dist_fingerprint).toEqual(validDistFingerprint());
+    const stage2 = perSample.samples.filter((sample) => sample.expected_stage === 'stage2_via_pending');
+    expect(stage2).toHaveLength(25);
+    expect(stage2.every((sample) => Number.isInteger(sample.observed_stage2?.attempts)
+      && sample.observed_stage2.attempts > 0
+      && ['correction', 'none'].includes(sample.observed_stage2.verdict)
+      && typeof sample.observed_stage2.confidence === 'number')).toBe(true);
+    expect(perSample.desensitization_note).toContain('final_outcome_reason');
+    expect(perSample.desensitization_note).toContain('一句话判定理由');
   });
 
   it('missing OpenClaw dist fingerprint → exit 1, ok=false, NO evidence published', () => {

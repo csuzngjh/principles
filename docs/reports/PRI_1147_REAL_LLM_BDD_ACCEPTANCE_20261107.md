@@ -1,19 +1,19 @@
 # PRI-1147 — Pain 真实 LLM BDD 与检测可靠性验收报告
 
-**状态：** READY_FOR_OWNER_REVIEW（整改轮已完成）
-**日期：** 2026-11-07
-**执行分支：** `test/pain-real-llm-bdd-pri-1147-20261107`（基于 `origin/main@e02fe63b3`）
+**状态：** READY_FOR_OWNER_REVIEW（整改与真实验收已完成，等待最新 PR CI 全绿）
+**日期：** 2026-11-08
+**执行分支：** `test/pain-real-llm-bdd-pri-1147-20261107`（已同步最新 main；最终验收代码 commit `c01dde9c4`）
 **关联：** SPEC `docs/specs/SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001-v0.3.1.md` §7.1–§7.3、§8；SPEC `docs/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.2.md`
 **冻结证据：** Golden Dataset 于任何模型调用前冻结并提交（`4801fd8b0`，早于首个 API 调用 2026-11-07T09:41:51Z）
-**验收运行：** `run-20261107-full-remediation`（整改后单一 run_id 贯穿四阶段，生产默认预算，五项门禁全过）
+**最终验收运行：** `run-20261108T043500Z-pr2407-stage2fix`（最新代码下单一 run_id 贯穿四阶段，生产默认预算，五项门禁全过，Stage-2 证据 25/25 完整）
 
 ---
 
 ## 〇、最终裁定：**READY_FOR_OWNER_REVIEW**
 
-真实 LLM BDD 在生产默认预算下重新执行并全量完成；三个 P1 整改项全部关闭（判定分类学+退出码、run_id 隔离+完整性校验、D-DEF1 修复后验收语义）；五项验收门禁（dataset/d6/fault_injection/openclaw/overall）全部通过；发现并修复一个预先存在的 P1 生产缺陷（D-DEF1，修复+回归+ERR-191）。FP 与覆盖边界 FN 为诚实实测边界，需 Owner 决策（不构成本轮修复范围）。
+真实 LLM BDD 已在最新代码 `c01dde9c4`、生产默认预算下重新全量执行；原始三项 P1 与最终复核 P1-B 全部关闭（失败分类学/退出码、run_id 隔离/并发锁、D-DEF1 默认预算、Stage-2 证据回填与 fail-closed 完整性门禁）；五项验收门禁全部通过；25/25 Stage-2 样本的 attempts/verdict/confidence 均完整且与终态一致。另保留已修复的生产缺陷 D-DEF1（整数 timeout 钳制 + ERR-191）。6 个 FP 与 6 个 Stage-1 覆盖边界 FN 是真实语义/覆盖边界，需 Owner 决策，不构成本轮 P1。
 
-**Owner 五问对照（验收运行 run-20261107-full-remediation）：**
+**Owner 五问对照（最终验收运行 run-20261108T043500Z-pr2407-stage2fix）：**
 
 | # | Owner 关注点 | 结论 | 证据 |
 |---|---|---|---|
@@ -85,7 +85,7 @@ Pain Admission 单事务 :1279 (pain_events + marker admitted + 限流)
 复现命令（worktree 根，完整说明见 `scripts/dev/pain-real-llm-bdd/README.md`；验收运行共用同一 run_id）：
 
 ```bash
-RUN_ID=run-20261107-full-remediation
+RUN_ID=run-20261108T043500Z-pr2407-stage2fix
 node scripts/dev/pain-real-llm-bdd/run-codex-chain.mjs --run-id $RUN_ID --provider zai --model glm-5.3-flash --apiKeyEnv ZAI_API_KEY --reasoning low
 node scripts/dev/pain-real-llm-bdd/run-d6-pending.mjs --run-id $RUN_ID --provider zai --model glm-5.3-flash --apiKeyEnv ZAI_API_KEY --reasoning low
 node scripts/dev/pain-real-llm-bdd/run-fault-injection.mjs --run-id $RUN_ID --provider zai --model glm-5.3-flash --apiKeyEnv ZAI_API_KEY --reasoning low
@@ -93,7 +93,7 @@ node scripts/dev/pain-real-llm-bdd/run-openclaw-host.mjs --run-id $RUN_ID --prov
 node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 ```
 
-验收运行元数据（`run-meta.json`）：git commit `6bbfd8a4`、dataset SHA-256 `20431168…`、provider/model 仅记录凭据环境变量名（`ZAI_API_KEY`），开始/结束时间与各阶段样本数齐备；所有结果写入 `.tmp/pri-1147/runs/<run_id>/`，重跑同 run_id 无 `--append` 会被拒绝。
+最终验收运行元数据（`run-meta.json`）：run_id `run-20261108T043500Z-pr2407-stage2fix`；实验代码 commit `c01dde9c479d759fe2d09e17e55aaeb4d2a08f31`；dataset SHA-256 `2043116826d8e8f001afe6c3228d07b0cb0c8d0ff33ac5862869c775a9bb4a8e`；provider/model 仅记录凭据环境变量名（`ZAI_API_KEY`）。真实 Codex 主链运行 04:34:25–04:36:26 UTC，metrics 与证据归档于 04:38:25 UTC 完成；所有结果写入 `.tmp/pri-1147/runs/<run_id>/`，重跑同 run_id 无 `--append` 会被拒绝。
 
 时间线（全部真实 HTTP 命中 ZAI，无缓存、无 mock、无预制结果；首轮 = 整改前基线运行，验收运行 = 整改后单一 run_id 贯穿四阶段）：
 
@@ -101,14 +101,14 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 |---|---|---|
 | 首轮冒烟 A1/A2（09:41:51Z） | 2 样本 | A1 经真实 Stage 2 correction@0.9；A2 STRONG 直达 |
 | 首轮全量（09:42:51–09:44:59Z） | 45 样本 / 29 次真实调用 | 全 ok（旧判定口径，作历史对照保留） |
-| **验收运行：Codex 主数据集** | 45 样本 / 29 次真实调用，生产默认预算 | 全 ok，outcome_counts {admitted 26, stage1_not_admitted 15, resolved_none 3, abandoned_low_confidence 1}，零执行失败 |
+| **最终验收运行：Codex 主数据集** | 45 样本 / 31 次真实调用，生产默认预算 | 全 ok，outcome_counts {admitted 26, stage1_not_admitted 15, resolved_none 4}，零执行失败 |
 | **验收运行：D6 专项** | 17 检查项 | 17/17 PASS |
 | **验收运行：故障注入** | 27 检查项（含 D-DEF1-postfix 回归 3 项） | 27/27 PASS（全部 simulated_fault 明示标注） |
-| **验收运行：OpenClaw 子集** | 10 样本 / 真实漏斗 | 10/10 接缝通过 |
-| **验收运行：metrics 门禁** | dataset/d6/fault/openclaw/overall | 五项全 TRUE，mode=full |
+| **最终验收运行：OpenClaw 子集** | 10 样本 / 真实漏斗 + 6 次真实 LLM 调用 | 10/10 接缝通过；6/6 LLM 调用成功；STRONG 限流抑制 1 次并生成 5 个 diagnostician 任务 |
+| **最终验收运行：metrics 门禁** | dataset/d6/fault/openclaw/overall + Stage-2 证据完整性 | 五项全 TRUE，mode=full；25/25 Stage-2 行的 attempts/verdict/confidence 全部完整且与终态一致 |
 | host-runtime 全套件 | 66 文件 | 全绿（exit 0） |
 | stage2-cycle 回归 | 16/16（含整数超时回归） | 绿 |
-| harness 回归（新增） | 24/24 | 绿 |
+| harness + metrics CLI 回归 | 47/47（38 + 9） | 绿；ESLint 通过 |
 
 ## 五、混淆矩阵与 Precision / Recall（验收运行 45 样本全量）
 
@@ -123,13 +123,12 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 - Specificity = 13/19 = 0.684；Accuracy = 33/45 = 0.733。
 - **重点关注 FP（6 个）：**
   - **C4**（冻结对抗样本，按冻结预判实现）：高精度词「搞错了」处于第三人称转述「复盘写着…」中，P-1 第三人称守卫前缀列表（文档/注释/日志/报错/README）不含「复盘」→ STRONG 直达准入。守卫列表扩展属 Owner 决策，本轮未扩表。
-  - **B4/D5/G4**（两轮一致的模型语义误判）：全部含显式否定/假设语境（「如果用户觉得…不对」「我不是让你现在就改」「我并没有说跑偏了」），Stage-2 模型以 0.8/0.9/0.9 置信度误判为 correction。Stage 1 行为全部正确（正确降级/正确送 Stage 2）；误判发生在语义层。
-  - **C1/G3**（阈值边界翻转，两轮间不一致）：首轮 C1 以 none@0.7 收敛 resolved_none、G3 以 none@0.75 收敛；验收运行中两者分别以 correction@0.7 / correction@0.75 一步翻越阈值 → admitted。两轮置信度均在 0.7 阈值边缘——这是模型对历史引用/否定语境样本的**非确定性**，归入 OC-2 语义可靠性证据。
-- **Stage 2 判定准确率：** 到达 Stage 2 的 25 样本中 24 个获得模型裁决（admitted/resolved_none），其中 19 个符合语义真值 = **0.792**；1 个未决（D4：五次调用置信度持续 0.6 < 0.7，诚实 `abandoned_low_confidence`，不计入准确率分母——不伪装成 NONE）。
+  - **B4/C1/D4/D5/G4**（Stage-2 语义误判）：均正确进入 pending，但模型把条件句/历史引用/显式否定误判为 correction：B4（假设句）0.85、C1（转述历史发言）0.75、D4（「我没有说…不对」）0.75、D5（「我不是让你现在就改」）0.95、G4（「我并没有说跑偏了」）0.90。Stage-1 路由正确，误判发生在 Stage-2 语义层，归入 OC-2。
+- **Stage-2 判定准确率：** 25/25 全部得到终态裁决，20 个符合冻结语义真值，准确率 **0.800**；未决 0。上一轮 D4 为持续低置信未决，本轮变为 correction@0.75（FP）；G3 则经 4 次调用最终 none@0.70 收敛为 resolved_none，体现模型对否定/历史语境的非确定性。
 - **Pending 进入率 100%（25/25）**——所有歧义候选都按 D6 进入持久 pending 而非静默丢弃。
-- **LLM 调用失败率 0%**（29/29 ok；无 no_verdict、无 threw）。平均延迟 3657ms，P95 6735ms。
-- **两轮对比（模型非确定性诚实记录）**：判定机制零漂移（直达 STRONG 5 样本、pending 进入 25 样本、零命中拒绝 15 样本两轮完全一致）；漂移只发生在置信度 0.7 边缘的语义判定（FP 4→6，C1/G3 翻转；D4 从两轮 retry 后收敛变为持续低置信 abandoned）。这支持 OC-2 的方向：阈值边界样本需要确定性处置策略（Owner 决策），不是管线机制问题。
-- 置信度门与重试预算的真实行为证据（验收运行）：D4 五次调用全部 correction@0.6（<0.7 → 每次消耗 attempt 回 pending，绝不伪装终态）→ 第 5 次 attempts 耗尽 → `abandoned_low_confidence` 单列未决；B5 首判 none@0.9 → resolved_none。
+- **LLM 调用失败率 0%**（31/31 真实 ZAI 调用成功；无 no_verdict、无 threw）。平均延迟 3554ms，P95 6961ms。D2 与 G3 各经 4 次尝试后收敛为 resolved_none。
+- **两轮对比（模型非确定性诚实记录）**：Stage-1 路由结构保持一致（STRONG 直达 5、pending 25、零命中拒绝 15）；模型语义裁决有漂移：本轮 D4 从上一轮低置信未决翻为 correction@0.75，G3 从上一轮误判 correction 翻为 none@0.70（4 次调用后收敛）。阈值附近与否定/历史语境仍需确定性处置策略，归入 OC-2。
+- 置信度门与重试预算的真实行为证据（最终验收运行）：D2 与 G3 均经历 4 次真实调用，最终分别以 none@0.90 / none@0.70 收敛为 resolved_none；其间低置信和相反方向 verdict 均未被提前当作终态。
 
 ## 六、D5 专项验收（经真实调用链，非孤立函数测试）
 
@@ -138,7 +137,7 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 | 验收项 | 结论 | 证据 |
 |---|---|---|
 | 学习词只提高 Stage 2 候选优先级，永不直接 STRONG | **是** | G1/G5/G6 真实纠正样本全部先落 pending_llm_review、经真实 Stage 2 判定后才 admitted（marker 前态/后态均已记录）；G2/G3/G4 非纠正样本同样全部先经 pending——无一绕过 Stage 2 |
-| 历史引用不直接创建 Pain | **是（机制层）** | G3 的 Stage-1 行为正确（学习词为歧义精度，仅作 Stage 2 候选）；终态由模型语义判定决定——验收运行中模型以 correction@0.75 误判 → FP，属 OC-2 语义层，D5 机制未被绕过 |
+| 历史引用不直接创建 Pain | **是（机制层）** | G3 的 Stage-1 行为正确（学习词仅作 Stage-2 候选）；最终经 4 次真实调用以 none@0.70 收敛为 resolved_none，未创建 Pain；D5 机制未被绕过 |
 | 否定语境不直接创建 Pain | **是（机制层）** | G4 的 Stage-1 行为正确（送 Stage 2）；模型以 0.9 误判 → FP，语义层归 OC-2 |
 | 真正纠正经 Stage 2 正常准入 | 是 | G1/G5/G6 经真实 Stage 2 → admitted（同 §五） |
 | 普通文本不因学习词命中污染 | 是 | G2（讨论）resolved_none，零 Pain |
@@ -194,9 +193,10 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 
 1. **P1-1 判定与退出码**：8 态结局分类学（`lib/outcomes.mjs`）；hook 失败/缺 observation/classifier 不可用 → `execution_error`/`classifier_unavailable`，永不充当语义 NONE；`runStage2UntilTerminal` 耗尽循环数 → `pending_unresolved`（读真实持久化状态，不是 NONE）；低置信/错误耗尽 5 次 → `abandoned_*` 单列（不计入 Stage-2 准确率分母）；summary `ok=false` 时进程退出码 1（冒烟实测：拒绝覆盖 exit 1、partial metrics exit 1、缺失 run exit 1）。
 2. **P1-2 运行隔离**：单一 run_id 贯穿四阶段；结果仅写 `.tmp/pri-1147/runs/<run_id>/`；已存在结果默认拒绝运行（`--append` 显式授权）；完整性校验 45/唯一/无缺/无重/无执行失败；`run-meta.json` 记录 git SHA + dataset SHA-256 + provider/model（仅凭据名）+ 各阶段时间。
-3. **P1-3 默认预算**：主 BDD `runStage2UntilTerminal` 不再人为传 120s 预算——与生产 worker 相同的默认预算（60s==60s）跑完全部 45 样本；D6 与故障注入的全部直接 cycle 调用同步去掩码（仅 F-TIMEOUT 保留 2s 分类超时，其测试目的即超时形状本身）。**验收运行证明：生产默认预算下 29/29 真实调用成功**——这是 D-DEF1 修复后的真实全量证据。
+3. **P1-3 默认预算**：主 BDD `runStage2UntilTerminal` 不再人为传 120s 预算——与生产 worker 相同的默认预算（60s==60s）跑完全部 45 样本；D6 与故障注入的全部直接 cycle 调用同步去掩码（仅 F-TIMEOUT 保留 2s 分类超时，其测试目的即超时形状本身）。**最终验收运行证明：生产默认预算下 31/31 真实调用成功**——这是 D-DEF1 修复后的真实全量证据。
 4. **P2 门禁**：`compute-metrics` 五状态（dataset_ok/d6_ok/fault_injection_ok/openclaw_ok/overall_ok）+ 跨阶段 run_id 一致性 + 缺失专项即 fail + partial 模式永不 PASS。
-5. **回归测试**：新增 `harness-regression.test.mjs` 24 项（分类学映射 / llm_error 永不充当 NONE / 低置信与错误耗尽不计入准确率分母 / Stage-1 覆盖漏报单列 / 数据集校验（重复/缺失/多余/无 run_id） / 门禁（缺 phase、run_id 错配、partial 永不 PASS） / 拒绝覆盖 / 真实 cycle 离线驱动：5 次 null → abandoned(llm_error)、8 轮 budget-release → pending_unresolved、5 次低置信 → abandoned(low_confidence)；"默认预算整数 timeout"由 host-runtime 回归 + D-DEF1-postfix 实测覆盖）。
+5. **Stage-2 证据闭环（最终复核 P1-B）**：admitted settlement 会用 pain-event payload 替换 review payload；验收器现从真实测量的 classifier-call trace 补齐 scalar attempts/verdict/confidence，并以持久化 marker terminal decision 为最终裁决依据。`validateDatasetRows` 对所有已裁决 Stage-2 样本强制校验 attempts、confidence、verdict 与终态一致，缺失/矛盾即 dataset gate fail，不允许 summary-only PASS。最终真实运行 25/25 完整。
+6. **回归测试**：harness 38 项 + metrics CLI 9 项，共 47/47；覆盖 Stage-2 admitted/D6-terminal/pending/no-verdict 证据形状、缺失字段负控、终态矛盾负控、脱敏输出、实验锁、dist fingerprint 和 CLI fail-closed。默认预算整数 timeout 由 host-runtime 回归 + D-DEF1-postfix 实测覆盖。
 
 ## 十一、未完成事项与限制
 
@@ -204,8 +204,8 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 2. **OpenClaw 子集规模**：10 样本（覆盖 STRONG 直达/歧义确认/零命中 discovery/学习词/历史引用），非全 45 样本；漏斗证据以真实 diagnostician 任务 + evolution.jsonl 为主，成功路径在 PAIN_* 日志层静默（已在输出中诚实标注）。
 3. **`pd codex worker --once` CLI 入口未单独驱动**：Stage 2 经生产函数 `runStage2CorrectionCycle`（worker cycle 的最后一步，同一函数、同一真实分类器解析路径）验证；worker CLI 的 catch-up/reconcile/downstream 前置步骤不在本轮范围。
 4. **6 个 FP 与 6 个覆盖边界 FN 未修复**——属检测语义/词表设计决策，见 §十二 Owner 决策卡；按指令"不得改变已批准的 D5/D6 行为、不处理 OC-1～OC-4"执行。
-5. **模型语义非确定性**：两轮全量运行间，判定机制零漂移，但置信度 0.7 边缘的语义判定存在漂移（C1/G3 翻转为 FP，D4 从收敛变为持续低置信 abandoned）。任何单轮 Precision/Stage-2 准确率都是该模型在该时点的采样值，不代表确定性的上限——见 OC-2。
-6. 证据产物：原始运行记录在 `.tmp/pri-1147/runs/<run_id>/`（gitignored，含逐样本判定/延迟，可按 §四命令复现）；**脱敏逐样本证据已入库** `docs/reports/evidence/pri-1147-run-20261107-full-remediation/`（仅标识/期望/观测/结局/延迟/哈希，无原文/凭据）。
+5. **模型语义非确定性**：两轮全量运行间，Stage-1 路由结构稳定，但 Stage-2 语义判定有漂移：本轮 D4 从上一轮低置信未决翻为 correction@0.75（FP），G3 从上一轮 correction 翻为 none@0.70（4 次调用后收敛）。任何单轮 Precision/Stage-2 准确率都是该模型在该时点的采样值，不代表确定性的上限——见 OC-2。
+6. 证据产物：原始运行记录在 `.tmp/pri-1147/runs/run-20261108T043500Z-pr2407-stage2fix/`（gitignored，含逐样本判定/延迟）；**最终脱敏证据已入库** `docs/reports/evidence/pri-1147-run-20261108T043500Z-pr2407-stage2fix/`。证据含 25/25 Stage-2 attempts/verdict/confidence 与四个 OpenClaw dist 完整 SHA-256；`final_outcome_reason` 仅含命中词片段或模型一句话判定理由，不含样本完整原文、日志或凭据。
 
 ## 十二、最终裁定与 Owner 决策卡
 
@@ -213,26 +213,27 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 
 整改指令 §九 的十二问逐项回答：
 
-1. **本轮修复了哪些真实缺陷？** 三个 P1：①BDD 失败判定（hook 失败/classifier 不可用/循环耗尽曾被静默当作正常语义结果或 false；现按 8 态分类学判定，退出码如实反映失败）；②重复运行数据污染（固定结果路径可被覆盖/追加、无 run_id；现 run_id 隔离 + 拒绝覆盖 + 完整性校验）；③D-DEF1 验收语义不一致（fault 脚本期待旧 Bug 复现、harness 用 120s 预算掩码；现默认预算全量 + D-DEF1-postfix 修复后回归）。另加 P2 验收门禁（combined.ok 只看主数据集 → 五状态门禁 + run_id 一致性）。
+1. **本轮修复了哪些真实缺陷？** 原始三项 P1：①BDD 失败判定（hook 失败/classifier 不可用/循环耗尽曾被静默当作正常语义结果；现按 8 态分类学判定，退出码如实反映失败）；②重复运行数据污染（现 run_id 隔离、拒绝覆盖并校验完整性）；③D-DEF1 验收语义不一致（移除旧 Bug 复现场景与 120s 掩码，使用生产默认预算 + 修复后回归）。另关闭最终复核 P1-B：Stage-2 admitted payload 替换导致证据字段缺失，改为真实 classifier trace 回填并在 metrics 层 fail closed。P2 门禁亦已补齐（五状态门禁 + run_id 一致性 + OpenClaw dist fingerprint）。
 2. **哪些生产代码保持不变？** 除 D-DEF1 整数钳制（历史轮，保留未回退）外，本轮零生产代码改动——检测语义、D5/D6 行为、词表、prompt、阈值全部未动。
 3. **三个 P1 是否全部关闭？** 是（P1-1/P1-2/P1-3 全部实现 + 冒烟/回归验证，见 §十）。
 4. **是否解决重复实验污染？** 是——同 run_id 重跑被拒绝（exit 1 实测），metrics 只读指定 run_id，跨阶段 run_id 错配即 fail。
-5. **是否真正使用生产默认预算完成真实 Provider 调用？** 是——验收运行全部 45 样本经默认预算（无 aggregateBudgetMs 覆盖），29/29 真实 ZAI 调用成功（D-DEF1-postfix 另有专项检查：整数 timeout + 真实网络延迟 + 判定）。
+5. **是否真正使用生产默认预算完成真实 Provider 调用？** 是——最终运行全部 45 样本经默认预算（无 aggregateBudgetMs 覆盖），31/31 真实 ZAI 调用成功（D-DEF1-postfix 另有专项检查：整数 timeout + 真实网络延迟 + 判定）。
 6. **45 个样本是否完整且唯一？** 是——45/45，唯一，无缺失/多余/重复，零执行失败（compute-metrics dataset_ok=TRUE）。
-7. **Precision / Recall / Stage-2 Accuracy 是否重新计算？** 是——Precision 0.769；Recall（检测错误口径）1.000；Recall（含覆盖边界）0.769；Stage-2 Accuracy 0.792（仅模型裁决样本，未决/失败单列）。
+7. **Precision / Recall / Stage-2 Accuracy 是否重新计算？** 是——Precision 0.769；Recall（检测错误口径）1.000；Recall（含覆盖边界）0.769；Specificity 0.684；Accuracy 0.733；Stage-2 Accuracy 0.800（25/25 决定，未决 0）。
 8. **D6 是否 7/7 通过？** 是——S1–S7 七组 17/17 检查全 PASS。
 9. **故障注入是否全部通过？** 是——27/27（含 D-DEF1-postfix 3 项），全部 simulated_fault 明示标注，与真实语义运行分脚本。
 10. **OpenClaw 是否 10/10 通过？** 是——真实 SignalCollectorHost seam 10/10，另含 STRONG 限流实测。
-11. **CI 是否全部通过？** 推送后以 PR checks 为准（本节提交时的承诺：不标绿未完成的 CI；最终状态见 PR #2407）。此前一轮 29 项检查全部 pass。
+11. **CI 是否全部通过？** 以最新 PR #2407 checks 为准；本报告更新时 CodeQL / CI / pd-console E2E 仍在运行，其余已完成检查通过，不提前宣称全绿。
+12. **是否还有影响合并的 P0/P1？** 目前未发现；最终复核 P1-B 已通过 25/25 真实 Stage-2 证据闭环与 fail-closed 负控。CI 全绿后即可合并。
 
-**遗留 P0/P1：无。** 不以总体测试通过掩盖任何未执行项；上述限制均为诚实实测边界。
+**遗留 P0/P1：无已知未关闭项；CI 尚待最终完成。** 不以总体测试通过掩盖任何未执行项；上述限制均为诚实实测边界。
 
 ### 需 Owner 决策的发现（本轮均未擅自修改，仅记录）
 
 | # | 发现 | 性质 | 建议方向 |
 |---|---|---|---|
 | OC-1 | P-1 第三人称守卫前缀列表不含「复盘写着/报告写着/会议纪要」类转述 | 词表覆盖边界（C4 冻结对抗样本两轮均实现为 FP） | 扩守卫前缀列表，或接受 STRONG 直达 + 事后降噪 |
-| OC-2 | Stage 2 模型在显式否定/假设语境的误判（B4/D5/G4 两轮一致）+ 阈值边缘非确定性（C1/G3 两轮翻转，0.7 边界） | 模型语义可靠性 | prompt 增补否定/历史语境定义，或提高 confirm 阈值，或对含显式否定标记/阈值边缘的 correction 判定强制二次确认 |
+| OC-2 | Stage 2 模型在显式否定/假设/历史语境的误判（本轮 B4/C1/D4/D5/G4 为 FP；D4 与 G3 两轮间翻转，0.7–0.75 边界） | 模型语义可靠性 | prompt 增补否定/历史语境定义，或提高 confirm 阈值，或对含显式否定标记/阈值边缘的 correction 判定强制二次确认 |
 | OC-3 | Stage-1 关键词零命中的真实纠正（6 例）在 Codex 治理路径不可见 | 设计覆盖边界（SPEC 既定，非缺陷） | 依赖 OpenClaw discovery 恢复通道；或 Owner 批准扩大 Stage-1 词表 |
 | OC-4 | D-DEF1 修复仅覆盖 cycle 生产者；`pi-ai-runtime-adapter.ts:571` 健康探针路径的 config timeout 理论上也可为分数 | 纵深防御候选 | 可选：adapter 侧统一钳制（独立小 PR） |
 
@@ -242,5 +243,5 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 - 整改轮提交：harness 判定/隔离/门禁 + README + 本报告（本分支）
 - 冻结数据集提交：`4801fd8b0`（早于全部模型调用；dataset SHA-256 `20431168…` 记录于 run-meta.json）
 - ERR-191：`docs/process/error-management/records/patterns/P-20261107T103850Z-3ghz2gqkg6.md`（check:error-handbook OK）
-- 脱敏证据：`docs/reports/evidence/pri-1147-run-20261107-full-remediation/`
+- 最终脱敏证据：`docs/reports/evidence/pri-1147-run-20261108T043500Z-pr2407-stage2fix/`
 - Linear：PRI-1147 状态未在本轮修改（按指令）；PRI-1085 已有真实 BDD 证据评论。
