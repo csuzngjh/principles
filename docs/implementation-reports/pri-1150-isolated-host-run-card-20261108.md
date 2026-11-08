@@ -1,8 +1,8 @@
 # PRI-1152 Path A 隔离宿主验证运行卡 v3（`pri1152-run-card-v3`）
 
 - 文档 ID：`pri-1150-isolated-host-run-card-20261108`（文件名沿用，保护既有指针；v3 取代 v1/v2 全部内容）
-- 状态：**🔴 当前不可执行、待 Owner 决定**。阻断项 B1（§0）未解决前，启动器 `--execute` 的离线复核会因 `presence-durability FAIL` 自动拒绝。本卡**未获批准、真实宿主/模型零启动**。
-- 批准对象（两项必须同时绑定）：卡版本 `pri1152-run-card-v3` + 执行清单 sha256 `b16e81284bd1975036c3560f022d28610f1c43550d245e0e4610f926e383b895`。B1 修复后重新 prepare 会产生新的清单 sha256（卡升 v3.1），**须对新值重新批准**。
+- 状态：**🔴 当前不可执行，真实运行未批准、未执行，真实宿主/模型零启动**。本卡正文记录的是冻结执行包 v3 的事实。v3 包已无法通过现行工具的预检（3 项 FAIL，见 §0.1），工具已按复核意见加固，下一步是按 §12 生成 v3.1。
+- 批准对象（两项必须同时绑定）：卡版本 + 执行清单 sha256。v3 包的取值是 `pri1152-run-card-v3` + `b16e81284bd1975036c3560f022d28610f1c43550d245e0e4610f926e383b895`，**这组取值已作废，不得用于批准**。v3.1 尚未生成，届时产生新的清单 sha256，须对新值重新批准；不沿用旧批准。
 - 执行包（PACK）：`D:\Code\_worktrees\principles\PRI-1152-isolated-host-exec-pack\artifacts\pri-1152-isolated-host\pp-20261108T095217Z`
 - 机器可读清单：`PACK\manifest.json`；本卡全部数值抄自该清单与离线复核报告 `PACK\preflight\verify-20261108T095712Z.json`。
 
@@ -16,7 +16,7 @@
 | 后果 | 即使 R1 中观察真实发生，E1 证据也不会落盘，R1 会因"事件缺失"失败，白白消耗已批预算 |
 | 构建产物检查 | `presence-pack.presenceDurability()` 对候选 bundle 的判定为 `buffered_lost_on_one_shot_exit`，复核项 `presence-durability FAIL` |
 
-**最小修复（需 Owner 批准；本任务未实施，因为指令要求不修改已收口的观察功能）**：
+**修复（PR #2427，独立于执行包工具 PR #2424，待 Owner 合并）**：按上述机制实施，只增加一行调用，并有真实子进程自然退出回归。
 
 ```ts
 recordPromptPresenceObserved(data: PromptPresenceObservedEventData): void {
@@ -25,7 +25,19 @@ recordPromptPresenceObserved(data: PromptPresenceObservedEventData): void {
 }
 ```
 
-配套回归测试：子进程记录一条事件后自然退出，断言事件行已落盘。修复以独立小 PR 合入后，按 §12 重新 prepare（候选 bundle 哈希会变）并 verify；`presence-durability` 应为 PASS，再以 v3.1 清单 sha256 提交批准。备选方案是在 `EventLogService` 注册 `process.on('exit')` 统一写盘，但它影响所有事件和所有宿主，范围大，**不推荐**。
+回归测试让真实 `EventLog`（esbuild 打包源码）在子进程中记录一条事件后自然退出，不调用 flush、dispose、`process.exit`，也不等待 30 秒：修复前磁盘 0 条，修复后恰好 1 条。对照组中普通缓冲事件仍不落盘，证明写盘策略没有被全局改变。写盘失败语义不变（不抛异常、记错误、事件留在缓冲区），调用 flush 不等于绝对持久化。没有采用在 `EventLogService` 注册 `process.on('exit')` 的方案，因为它影响所有事件和所有宿主。
+
+### 0.1 现行工具对 v3 包的判定（`--verify --full --selftest`，exit 1）
+
+v3 包不覆盖、不重新批准，只读复核：17 项 PASS，3 项 FAIL。
+
+| FAIL | 原因 |
+|---|---|
+| `manifest` | 清单是旧 schema（v1）和旧卡版本（v3），现行工具要求 v2 和 `pri1152-run-card-v3.1` |
+| `presence-durability` | 候选 bundle 仍是 B1 修复前的构建，事件只缓冲 |
+| `execution-code` | 清单没有执行代码绑定，属于旧包，必须重新 prepare |
+
+报告：`PACK\preflight\verify-20261108T124850Z-5a8054fd.json`。本次核对了 manifest、host-files、candidate-files、approval.template、config、state.db 六个冻结文件的 sha256，复核前后一致；没有产生 `run\`。预检只新增了报告和自测账本两个带时间戳的文件。
 
 ## 1. 目标与结论上限
 
@@ -155,11 +167,13 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
 | 工具 | 0 | 宿主配置 deny-all；端点一旦看到工具活动，返回 403 `tool_budget` 并记账 |
 | 付费 | 0 | 只用回环 provider，没有可用的真实凭证 |
 
-- **预算语义**：额度用满不算超预算；**下一次**尝试在发出前被拒绝。账本 `PACK\run\budget-ledger.json` 永不重置。同一执行包只执行一次：`run\` 目录已存在就拒绝。
+- **预算语义**：额度用满不算超预算；**下一次**尝试在发出前被拒绝。账本 `PACK\run\budget-ledger.json` 永不重置。同一执行包只执行一次：`run\` 目录已存在就拒绝。账本取自冻结清单的 `budget`，不取当前代码常量；`budget-consistency` 校验冻结值、代码常量和每回合预算三者一致，批准文件的 `budgets` 也必须等于冻结值。
 - **超时**：宿主 `--timeout 120`（秒）；外层 180000 ms 后执行 `taskkill /PID <pid> /T /F`，结束整个进程树。
-- **停止**：R1 任何一项判定失败，**不启动 R2**。不自动重试，不切换 provider，不用 fallback。
+- **执行前复核**：`--execute` 在建 `run\`、建账本之前重新跑全部 20 项必需检查，不读历史预检文件。端口检查只说明当时空闲，不是预留；真实绑定失败时 `stoppedAt=endpoint-bind`，不启动宿主，不计预算，保留证据。
+- **执行代码绑定**：清单 `executionCode` 记录启动器及其相对导入闭包（11 个脚本，相对路径 + SHA-256）和启动器加载的 3 个工作区包 `dist`（只算 `.js`，相对路径 + 文件数 + 聚合 SHA-256）。`execution-code` 按运行中模块的位置重算，不符即在启动宿主前拒绝。信任边界：这是防漂移校验，由被校验的代码自己执行，不能抵御校验器或 Node 被恶意替换，第三方 `node_modules` 不在列表内。
+- **停止**：R1 任何一项判定失败，**不启动 R2**。污染审计结果也决定是否继续（§11）。不自动重试，不切换 provider，不用 fallback。
 - **清理**：
-  - 每回合结束后，用 PowerShell CIM 查找命令行中引用 PACK 的残留进程，全部结束；发现任何残留即判该回合失败；
+  - 每回合结束后，用 PowerShell CIM 查找命令行中引用 PACK 的残留进程，全部结束；发现任何残留即判该回合失败。启动器自身及其祖先进程不在清扫范围内，否则从 shell 启动时会杀掉启动器；
   - 最后关闭端点，并确认端口拒绝连接；
   - **保留全部证据，不删除执行包**。
 - **离线反例**（假宿主）：
@@ -173,9 +187,9 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
 ## 10. 证据（`PACK\run\`，只有获批执行才会生成）
 
 - `verification-before-run.json`、`approval-used.json`、`pollution-before.json`
-- `evidence\Rn.environment.json`、`Rn.host.stdout.txt`、`Rn.host.stderr.txt`、`Rn.endpoint.json`、`Rn.presence-events.json`、`Rn.gate.json`
+- `evidence\Rn.environment.json`、`Rn.host.stdout.txt`、`Rn.host.stderr.txt`、`Rn.endpoint.json`、`Rn.presence-events.json`、`Rn.gate.json`、`Rn.pollution.json`
 - `budget-ledger.json`
-- `run-record.json`：含账本快照、端点关闭结果、最终清扫结果、污染对照
+- `run-record.json`：含账本快照、端点关闭结果、最终清扫结果、污染对照和 `pollutionAudit` 结论，以及 `stopReasons`
 
 ## 11. 生产污染审计（范围与限制）
 
@@ -189,19 +203,38 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
   - 静态安装文件变化：`changed-static-install-review`，需人工复核；
   - 活动库变化：`changed-independent-writer-possible`。**不按哈希归因**，因为可能有其他合法写入方；
   - 配置或日志出现本次运行的唯一标记（packId、夹具 id、provider/model id、`127.0.0.1:8652`、PACK 路径）：`changed-attributed`；
-  - 有变化但未命中标记：`changed-no-run-marker-found`。
+  - 有变化但未命中标记：`changed-no-run-marker-found`；
+  - 目标无法读取、无法哈希或无法扫描标记：`audit-incomplete`，不算未变化，也不算已归因。
+- **对运行的影响**：每回合结束、下一回合启动前，按上述目标对比启动前基线，并在最终审计再做一次：
+
+  | 汇总结论 | 动作 |
+  |---|---|
+  | `attributed`（找到运行标记） | 停止，不启动下一回合，最终不得 `completed` |
+  | `review-required`（静态安装文件变化） | 停止，标明待人工复核，不断言由实验造成 |
+  | `incomplete`（审计无法完成） | 停止，写明原因，不声称审计通过 |
+  | `unattributed-changes-noted`（活动库或日志变化且无标记） | 继续，记录"不能归因"的事实，不判污染 |
+  | `clean` | 继续，不等于证明零写入 |
+
+  基线本身取不到时（`pollution-baseline` FAIL）在任何写入和计账之前拒绝。审计只读，不删除、不回写、不回滚生产数据。
 - **限制**：哈希不变或未检索到标记，**都不能证明零写入**；mtime 变化也不直接归因。
 
-## 12. 执行步骤（只有 v3.1 获批后才执行）
+## 12. 生成 v3.1 的准确顺序（只有 Owner 批准新卡版本和新清单 sha256 后才能执行真实回合）
 
-1. 合入 B1 修复并重建候选，然后运行 `node scripts/dev/aa-controlled-admission/presence-run.mjs --prepare --repo D:\Code\_worktrees\principles\PRI-1152-isolated-host-exec-pack`，得到新的 PACK 和清单 sha256。
-2. 运行 `node scripts/dev/aa-controlled-admission/presence-run.mjs --verify --pack <新 PACK> --full --selftest`，要求退出码为 0，13 项全部 PASS。
-3. Owner 批准该卡版本和清单 sha256 后，按 `approval.template.json` 填写 `approvedBy`、`approvedAt`、`approvalEvidence`（批准记录所在位置），另存为 `approval.json`。
-4. 运行 `node scripts/dev/aa-controlled-admission/presence-run.mjs --execute --pack <新 PACK> --approval <新 PACK>\approval.json`。
+本轮**未生成 v3.1**：只有实际包含 B1 修复的构建才能生成新候选，而 B1 PR 尚未合并。
+
+1. Owner 合并 #2427（B1）和 #2424（执行包工具），两者先后顺序不影响结果，但必须都进入 main。
+2. 从最新 origin/main 新建独立 worktree（`npm run dev:worktree -- PRI-1152 v31-pack`），确认 `npm run dev:worktree:ready` 为 READY。不要复用保存 v3 包的旧 worktree。
+3. 在新 worktree 的 `packages/openclaw-plugin` 运行 `npm run build:bundle`。必须用非压缩构建：`presence-durability` 读取产物文本，`build:production` 的压缩产物无法判定。
+4. 运行 `node scripts/dev/aa-controlled-admission/presence-run.mjs --prepare --repo <新 worktree>`，得到新 PACK 和新清单 sha256。此后不要重新构建、切换分支或改动被绑定的脚本，否则 `execution-code` 会拒绝。
+5. 运行 `--verify --pack <新 PACK> --full --selftest`，要求退出码 0、20 项全部 PASS（READY）。任何一项失败都不进入下一步。
+6. 用新清单的实际取值更新本卡为 `pri1152-run-card-v3.1`（SHA、哈希、端口、路径）。
+7. Owner 明确批准该卡版本和新清单 sha256。Agent 不得自行填写批准。
+8. 按 `approval.template.json` 填写 `approvedBy`、`approvedAt`、`approvalEvidence`（批准记录所在位置），另存为 `approval.json`。
+9. 运行 `--execute --pack <新 PACK> --approval <新 PACK>\approval.json`。启动器会再次跑完全部必需检查。
 
 ## 13. 尚缺事项
 
-1. **B1（阻断）**：需要 Owner 决定 §0 的最小修复，或给出其他方案。
+1. **B1 修复合并**：#2427 待 Owner 合并；此前现有候选一直被 `presence-durability` 阻断。
 2. **只能由获批真实运行给出的事实（NOT RUN）**：
    - 官方宿主是否确实加载了候选；
    - 真实的 `llm_input` 派发；
@@ -209,14 +242,14 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
    - 宿主退出时序；
    - `tools.deny` 下实际暴露的工具面；
    - 污染前后对照。
-3. **端口**：8652 在 prepare 时分配并冻结。执行时若被占用会失败关闭，需要重新 prepare。
-4. **worktree**：执行包位于本任务 worktree 的 `artifacts\` 下，**真实运行完成之前不得清理该 worktree**。
+3. **端口**：prepare 时分配并冻结。执行时若被占用，预检或真实绑定失败关闭，需要重新 prepare。
+4. **worktree**：v3 包位于本任务 worktree 的 `artifacts\` 下，保留作为历史判定，**不得清理**。
 5. **安全审计**：Mimosa 完整审计未得出结论（scanner_enobufs），本卡不作安全性声明。
 
 ## 14. 变更记录
 
 - **v1/v2**（PRI-1150 期间）：只有说明性运行卡，端口、key、路径留了占位；v2 中的 "egress=completions" 是不存在的事件字段；没有覆盖 HOME/USERPROFILE/APPDATA 等回落来源。
-- **v3**（本卡）：
+- **v3**：
   - 所有数值来自生成的执行清单；
   - 加载机制和产物来源均可核验；
   - 夹具经正式存储入口写入；
@@ -224,3 +257,9 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
   - 环境改为允许列表；
   - 预算、停止、清理都有离线反例；
   - 新增阻断项 B1。
+- **v3 复核修复（本次，工具卡版本升为 `pri1152-run-card-v3.1`，v3.1 包尚未生成）**：
+  - B1 独立修复（#2427）；
+  - 端口、终止工具、进程清扫、协议自测、污染基线进入统一 READY；
+  - 批准绑定实际执行代码和冻结预算；
+  - 污染审计决定是否继续以及能否 `completed`；
+  - 清扫不再误杀启动器祖先进程；读取失败的污染目标不再被判为已归因。

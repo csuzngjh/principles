@@ -23,6 +23,8 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { createGunzip } from 'node:zlib';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
@@ -37,14 +39,59 @@ import {
 import { PRESENCE_FIXTURE, inspectPresenceFixture, seedPresenceFixture, sha256Utf8 } from './presence-fixture.mjs';
 import { PRESENCE_ANSWER } from './presence-endpoint.mjs';
 
-export const PACK_SCHEMA = 'pd-presence-exec-pack/v1';
-export const CARD_VERSION = 'pri1152-run-card-v3';
+export const PACK_SCHEMA = 'pd-presence-exec-pack/v2';
+export const CARD_VERSION = 'pri1152-run-card-v3.1';
 export const PRESENCE_EVENT_TYPE = 'runtime_v2_prompt_presence_observed';
 export const HOST_AGENT_TIMEOUT_SECONDS = 120;
 export const ROUND_OUTER_TIMEOUT_MS = 180_000;
 const A1_SAMPLE_ID = 'A1';
 const MAX_HASHED_TARGET_BYTES = 256 * 1024 * 1024;
+const MAX_MARKER_SCAN_BYTES = 16 * 1024 * 1024;
 const CONSUMED_LIFECYCLE_MARKERS = new Set(['.openclaw-lifecycle-pending']);
+
+const TOOL_DIR = 'scripts/dev/aa-controlled-admission';
+
+/**
+ * The local scripts that take part in a presence run: the launcher and its
+ * relative-import closure, as paths from the repository root. A fixed list, not
+ * a dependency scanner; a test walks the real import graph so it cannot drift.
+ */
+export const EXECUTION_SCRIPT_FILES = Object.freeze([
+  'presence-run.mjs',
+  'lib/env-isolation.mjs',
+  'lib/host-config.mjs',
+  'lib/host-profile.mjs',
+  'lib/ledger.mjs',
+  'lib/presence-config.mjs',
+  'lib/presence-endpoint.mjs',
+  'lib/presence-fixture.mjs',
+  'lib/presence-pack.mjs',
+  'lib/protocol-selftest.mjs',
+  'lib/workspace-seed.mjs',
+].map((rel) => `${TOOL_DIR}/${rel}`));
+
+/** Built workspace packages the launcher loads, each frozen as one dist tree (executable .js only). */
+export const EXECUTION_WORKSPACE_BUILDS = Object.freeze([
+  Object.freeze({ specifier: '@principles/core/runtime', dist: 'packages/principles-core/dist' }),
+  Object.freeze({ specifier: '@principles/host-runtime', dist: 'packages/host-runtime/dist' }),
+  Object.freeze({ specifier: '@principles/install-layout', dist: 'packages/install-layout/dist' }),
+]);
+
+/** The checkout this module runs from: the code that is actually loaded, whatever --repo says. */
+export const PRESENCE_CODE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+
+export const EXECUTION_CODE_TRUST_BOUNDARY = 'Drift check, not tamper-proofing: the launcher verifies itself, so this detects edits, rebuilds and branch switches made after prepare. It does not defend against a maliciously replaced verifier or node binary, or against changes made after the check. Third-party node_modules are outside the list.';
+
+/**
+ * Every check a pack needs before it may be called READY. A check that was not
+ * produced counts as NOT_RUN, so omitting one can never make a pack READY.
+ */
+export const PREFLIGHT_REQUIRED_CHECKS = Object.freeze([
+  'manifest', 'node-identity', 'host-identity', 'host-tree', 'host-registry-tarball', 'candidate-payload', 'presence-durability',
+  'execution-code', 'budget-consistency', 'host-config', 'pd-config-and-retry', 'fixture-assembly', 'round-inputs',
+  'environment-isolation', 'production-plugin-exclusion', 'pollution-baseline',
+  'endpoint-port', 'termination-tool', 'process-sweep', 'protocol-selftest',
+]);
 
 export function sha256Buffer(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -89,12 +136,12 @@ export function listTree(root) {
 }
 
 /** Per-file sha256 plus one aggregate over the sorted `path\tsize\tsha256` lines. */
-export function hashTree(root) {
+export function hashTree(root, { include = () => true } = {}) {
   const { files, links } = listTree(root);
   const entries = [];
   let totalBytes = 0;
   const aggregate = createHash('sha256');
-  for (const rel of files) {
+  for (const rel of files.filter(include)) {
     const bytes = readFileSync(join(root, rel));
     const sha256 = sha256Buffer(bytes);
     entries.push({ path: rel, size: bytes.length, sha256 });
@@ -292,6 +339,71 @@ export async function verifyPackageAgainstTarball({ tarballPath, packageDir }) {
   };
 }
 
+
+function repoFile(codeRoot, rel) {
+  return join(codeRoot, ...rel.split('/'));
+}
+
+/**
+ * The code a run would execute, as recorded in the manifest: repository-relative
+ * paths with sha256 values. Pack files and the manifest are not part of it, so
+ * the manifest hash has no dependency on itself.
+ */
+export function collectExecutionCode(codeRoot = PRESENCE_CODE_ROOT) {
+  return {
+    scripts: EXECUTION_SCRIPT_FILES.map((path) => ({ path, sha256: sha256FileSync(repoFile(codeRoot, path)) })),
+    workspaceBuilds: EXECUTION_WORKSPACE_BUILDS.map(({ specifier, dist }) => {
+      const tree = hashTree(repoFile(codeRoot, dist), { include: (rel) => rel.endsWith('.js') });
+      return { specifier, path: dist, fileCount: tree.fileCount, treeSha256: tree.treeSha256 };
+    }),
+  };
+}
+
+/** Compare the frozen list with the code on disk now; an empty result means no drift was found. */
+export function executionCodeViolations(frozen, codeRoot = PRESENCE_CODE_ROOT) {
+  if (!Array.isArray(frozen?.scripts) || !Array.isArray(frozen?.workspaceBuilds)) {
+    return ['manifest carries no execution-code binding; this pack predates the check and must be prepared again'];
+  }
+  let live;
+  try {
+    live = collectExecutionCode(codeRoot);
+  } catch (error) {
+    return [`the code that would run cannot be hashed: ${String(error?.message ?? error)}`];
+  }
+  const violations = [];
+  const compare = (kind, frozenRows, liveRows, field) => {
+    const frozenByPath = new Map(frozenRows.map((row) => [row.path, row[field]]));
+    const liveByPath = new Map(liveRows.map((row) => [row.path, row[field]]));
+    for (const [path, value] of liveByPath) {
+      if (frozenByPath.get(path) !== value) violations.push(`${kind} ${path} differs from the frozen hash`);
+    }
+    for (const path of frozenByPath.keys()) {
+      if (!liveByPath.has(path)) violations.push(`${kind} ${path} is frozen but no longer in the execution list`);
+    }
+  };
+  compare('script', frozen.scripts, live.scripts, 'sha256');
+  compare('workspace build', frozen.workspaceBuilds, live.workspaceBuilds, 'treeSha256');
+  // What this process really imports must be the checkout that was just hashed.
+  const resolveFromLauncher = createRequire(repoFile(PRESENCE_CODE_ROOT, `${TOOL_DIR}/lib/presence-pack.mjs`)).resolve;
+  for (const { specifier, dist } of EXECUTION_WORKSPACE_BUILDS) {
+    let resolved = null;
+    try { resolved = resolveFromLauncher(specifier); } catch { /* reported below */ }
+    if (resolved === null || !isInsideRoot(repoFile(PRESENCE_CODE_ROOT, dist), resolved)) {
+      violations.push(`${specifier} resolves to ${resolved ?? 'nothing'}, outside the hashed build ${dist}`);
+    }
+  }
+  return violations;
+}
+
+function budgetConsistencyViolations(manifest) {
+  const violations = [];
+  if (!isDeepStrictEqual(manifest.budget?.run, PRESENCE_RUN_BUDGET)) violations.push('the frozen run budget differs from the launcher run budget');
+  if (!isDeepStrictEqual(manifest.budget?.rounds, PRESENCE_ROUND_BUDGETS)) violations.push('the frozen per-round budgets differ from the launcher per-round budgets');
+  for (const round of manifest.rounds) {
+    if (!isDeepStrictEqual(round.budget, manifest.budget?.rounds?.[round.id])) violations.push(`${round.id}: the round budget differs from budget.rounds inside the manifest`);
+  }
+  return violations;
+}
 
 function bundledPluginIds(hostPackageDir) {
   const root = join(hostPackageDir, 'dist', 'extensions');
@@ -528,33 +640,46 @@ export function pollutionTargets({ realHome, operatorEnv, globalHostDir }) {
 
 export function snapshotTargets(targets) {
   return targets.map((target) => {
-    if (!existsSync(target.path)) return { ...target, exists: false };
-    const stat = statSync(target.path);
-    if (target.class === 'log-dir') {
-      const files = readdirSync(target.path).filter((name) => name.startsWith('events_') && name.endsWith('.jsonl')).sort()
-        .map((name) => {
-          const fileStat = statSync(join(target.path, name));
-          return { name, size: fileStat.size, mtimeMs: fileStat.mtimeMs };
-        });
-      return { ...target, exists: true, files };
+    try {
+      if (!existsSync(target.path)) return { ...target, exists: false };
+      const stat = statSync(target.path);
+      if (target.class === 'log-dir') {
+        const files = readdirSync(target.path).filter((name) => name.startsWith('events_') && name.endsWith('.jsonl')).sort()
+          .map((name) => {
+            const fileStat = statSync(join(target.path, name));
+            return { name, size: fileStat.size, mtimeMs: fileStat.mtimeMs };
+          });
+        return { ...target, exists: true, files };
+      }
+      return {
+        ...target,
+        exists: true,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        sha256: stat.size <= MAX_HASHED_TARGET_BYTES ? sha256FileSync(target.path) : null,
+      };
+    } catch (error) {
+      // One unreadable target must not abort the audit, and must not read as clean.
+      return { ...target, exists: null, unreadable: String(error?.code ?? error?.message ?? error) };
     }
-    return {
-      ...target,
-      exists: true,
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-      sha256: stat.size <= MAX_HASHED_TARGET_BYTES ? sha256FileSync(target.path) : null,
-    };
   });
 }
 
-function markerHits(path, markers, fromByte = 0) {
+/** Targets a snapshot could not establish a comparable baseline for. */
+export function pollutionSnapshotGaps(snapshot) {
+  return snapshot.flatMap((row) => {
+    if (row.unreadable) return [{ id: row.id, reason: `snapshot failed: ${row.unreadable}` }];
+    if (row.class !== 'log-dir' && row.exists === true && row.sha256 === null) return [{ id: row.id, reason: 'target exceeds the hash limit' }];
+    return [];
+  });
+}
+
+function markerScan(path, markers, fromByte = 0) {
   try {
-    const bytes = readFileSync(path);
-    const text = bytes.subarray(fromByte).toString('utf8');
-    return markers.filter((marker) => text.includes(marker));
-  } catch {
-    return ['(unreadable)'];
+    const text = readFileSync(path).subarray(fromByte).toString('utf8');
+    return { hits: markers.filter((marker) => text.includes(marker)) };
+  } catch (error) {
+    return { hits: [], unreadable: String(error?.code ?? error?.message ?? error) };
   }
 }
 
@@ -563,45 +688,84 @@ function markerHits(path, markers, fromByte = 0) {
  * "unchanged"; a changed static install is flagged for review; a live store is
  * never attributed by hash (independent legitimate writers exist); log and
  * config files are attributed only by a run-unique marker. "No marker found"
- * is not proof of zero writes.
+ * is not proof of zero writes, and a target that could not be read or hashed
+ * is `audit-incomplete`, never unchanged and never attributed.
  */
 export function comparePollution(before, after, markers) {
   const byId = new Map(before.map((row) => [row.id, row]));
   const rows = after.map((now) => {
     const was = byId.get(now.id) ?? { exists: false };
+    const row = { id: now.id, path: now.path, class: now.class };
+    if (was.unreadable || now.unreadable) {
+      return { ...row, verdict: 'audit-incomplete', reason: was.unreadable ? `baseline snapshot failed: ${was.unreadable}` : `current snapshot failed: ${now.unreadable}` };
+    }
     if (now.class === 'log-dir') {
       const previous = new Map((was.files ?? []).map((file) => [file.name, file]));
+      const currentNames = new Set((now.files ?? []).map((file) => file.name));
+      const removed = [...previous.keys()].filter((name) => !currentNames.has(name));
       const touched = (now.files ?? []).filter((file) => {
         const old = previous.get(file.name);
         return !old || old.size !== file.size || old.mtimeMs !== file.mtimeMs;
-      }).map((file) => ({
-        name: file.name,
-        hits: markerHits(join(now.path, file.name), markers, previous.get(file.name)?.size ?? 0),
-      }));
-      const attributed = touched.filter((file) => file.hits.length > 0);
-      return {
-        id: now.id, path: now.path, class: now.class,
-        verdict: attributed.length > 0 ? 'changed-attributed' : touched.length > 0 ? 'changed-no-run-marker-found' : 'unchanged',
-        touched,
-      };
+      }).map((file) => ({ name: file.name, ...markerScan(join(now.path, file.name), markers, previous.get(file.name)?.size ?? 0) }));
+      const unreadable = touched.filter((file) => file.unreadable);
+      if (touched.some((file) => file.hits.length > 0)) return { ...row, verdict: 'changed-attributed', touched, removed };
+      if (unreadable.length > 0) return { ...row, verdict: 'audit-incomplete', reason: `marker scan failed: ${unreadable.map((file) => `${file.name} ${file.unreadable}`).join(', ')}`, touched, removed };
+      const changed = touched.length > 0 || removed.length > 0 || was.exists !== now.exists;
+      return { ...row, verdict: changed ? 'changed-no-run-marker-found' : 'unchanged', touched, removed };
     }
     const changed = was.exists !== now.exists || was.sha256 !== now.sha256 || was.size !== now.size;
-    if (!changed) return { id: now.id, path: now.path, class: now.class, verdict: 'unchanged' };
-    if (now.class === 'live-store') {
-      return { id: now.id, path: now.path, class: now.class, verdict: 'changed-independent-writer-possible', note: 'live store hash is not attributable' };
+    if (!changed && now.exists && now.sha256 === null) {
+      return { ...row, verdict: 'audit-incomplete', reason: 'target exceeds the hash limit; an equal size is not proof of no change' };
     }
-    const hits = now.exists && now.size <= 16 * 1024 * 1024 ? markerHits(now.path, markers) : [];
+    if (!changed) return { ...row, verdict: 'unchanged' };
+    if (now.class === 'live-store') {
+      return { ...row, verdict: 'changed-independent-writer-possible', note: 'live store hash is not attributable' };
+    }
+    if (now.exists && now.size > MAX_MARKER_SCAN_BYTES) {
+      return { ...row, verdict: 'audit-incomplete', reason: 'changed target exceeds the marker scan limit' };
+    }
+    const scan = now.exists ? markerScan(now.path, markers) : { hits: [] };
+    if (scan.unreadable) return { ...row, verdict: 'audit-incomplete', reason: `marker scan failed: ${scan.unreadable}` };
     return {
-      id: now.id, path: now.path, class: now.class,
-      verdict: hits.length > 0 ? 'changed-attributed' : now.class === 'static-install' ? 'changed-static-install-review' : 'changed-no-run-marker-found',
-      hits,
+      ...row,
+      verdict: scan.hits.length > 0 ? 'changed-attributed' : now.class === 'static-install' ? 'changed-static-install-review' : 'changed-no-run-marker-found',
+      hits: scan.hits,
     };
   });
+  const idsOf = (...verdicts) => rows.filter((row) => verdicts.includes(row.verdict)).map((row) => row.id);
   return {
     rows,
-    attributed: rows.filter((row) => row.verdict === 'changed-attributed').map((row) => row.id),
-    reviewRequired: rows.filter((row) => row.verdict === 'changed-static-install-review').map((row) => row.id),
+    attributed: idsOf('changed-attributed'),
+    reviewRequired: idsOf('changed-static-install-review'),
+    unattributed: idsOf('changed-independent-writer-possible', 'changed-no-run-marker-found'),
+    incomplete: rows.filter((row) => row.verdict === 'audit-incomplete').map((row) => ({ id: row.id, reason: row.reason })),
     statement: 'Verdicts are bounded: unchanged hashes and missing markers are reported as such; neither proves the absence of every write.',
+  };
+}
+
+const POLLUTION_VERDICT_MEANING = Object.freeze({
+  attributed: 'A production target carries a run-unique marker: the run reached production. Stop; the run cannot be completed.',
+  'review-required': 'A static install file changed during the run window. The cause is not established; stop and hand to human review.',
+  incomplete: 'The audit could not be completed for at least one target. No audit pass is claimed; stop.',
+  'unattributed-changes-noted': 'Live stores or logs changed with no run marker. Other sessions write them legitimately, so this is recorded as unattributable, not as pollution.',
+  clean: 'No change was seen on the audited targets. This does not prove zero writes anywhere else.',
+});
+
+/** Turn one comparison into the single stop/continue decision a run acts on. */
+export function classifyPollution({ attributed, reviewRequired, unattributed, incomplete }) {
+  const verdict = attributed.length > 0 ? 'attributed'
+    : reviewRequired.length > 0 ? 'review-required'
+      : incomplete.length > 0 ? 'incomplete'
+        : unattributed.length > 0 ? 'unattributed-changes-noted' : 'clean';
+  return {
+    verdict,
+    stop: verdict === 'attributed' || verdict === 'review-required' || verdict === 'incomplete',
+    pendingHumanReview: reviewRequired.length > 0,
+    attributed,
+    reviewRequired,
+    unattributed,
+    incomplete,
+    meaning: POLLUTION_VERDICT_MEANING[verdict],
   };
 }
 
@@ -681,6 +845,7 @@ export async function preparePack({
   source,
   operatorEnv = process.env,
   realHome = homedir(),
+  codeRoot = PRESENCE_CODE_ROOT,
 }) {
   if (!isAbsolute(packRoot)) throw new Error('packRoot must be absolute');
   if (existsSync(packRoot)) throw new Error(`pack already exists: ${packRoot}`);
@@ -739,6 +904,7 @@ export async function preparePack({
     createdAt: new Date().toISOString(),
     scope: 'Path A post-assembly presence observation connectivity on the unmodified official host; D=unknown; no G1/C04/G2 sign-off; no delivery/adherence/behaviour claim',
     source,
+    executionCode: { ...collectExecutionCode(codeRoot), trustBoundary: EXECUTION_CODE_TRUST_BOUNDARY },
     node: { path: process.execPath, version: process.version, sha256: sha256FileSync(process.execPath) },
     host,
     candidate,
@@ -774,18 +940,45 @@ export function runMarkers({ packId, packRoot, endpointPort }) {
     ...PRESENCE_ROUNDS.map((round) => round.provider), `127.0.0.1:${endpointPort}`, packRoot];
 }
 
-function check(id, status, detail, evidence = {}) {
+export function preflightCheck(id, status, detail, evidence = {}) {
   return { id, status, detail, evidence };
 }
 
 /**
- * Offline re-verification of a frozen pack. `full` re-hashes the staged host
- * tree (the execute path always does). Never starts a host.
+ * The one place READY is decided. A pack is READY only when every required
+ * check ran and passed; NOT_RUN is never a pass. Callers derive their exit code
+ * and refusal reasons from this result and nothing else.
  */
-export async function verifyPack({ packRoot, full = false, operatorEnv = process.env, realHome = homedir() }) {
+export function summarizePreflight(checks) {
+  const produced = new Set(checks.map((row) => row.id));
+  const all = [
+    ...checks,
+    ...PREFLIGHT_REQUIRED_CHECKS.filter((id) => !produced.has(id)).map((id) => preflightCheck(id, 'NOT_RUN', 'this required check was not produced')),
+  ];
+  const failing = all.filter((row) => row.status !== 'PASS').map((row) => ({ id: row.id, status: row.status, detail: row.detail, evidence: row.evidence }));
+  return {
+    checks: all,
+    summary: {
+      pass: all.filter((row) => row.status === 'PASS').length,
+      fail: all.filter((row) => row.status === 'FAIL').length,
+      notRun: all.filter((row) => row.status === 'NOT_RUN').length,
+      total: all.length,
+    },
+    failing,
+    ready: failing.length === 0,
+  };
+}
+
+/**
+ * Offline re-verification of a frozen pack. `full` re-hashes the staged host
+ * tree. Never starts a host. Returns checks only: `summarizePreflight` decides
+ * READY once the launcher has added its runtime capability checks.
+ */
+export async function verifyPack({ packRoot, full = false, operatorEnv = process.env, realHome = homedir(), codeRoot = PRESENCE_CODE_ROOT }) {
   const layout = packLayout(packRoot);
+  const check = preflightCheck;
   const checks = [];
-  if (!existsSync(layout.manifestPath)) return { ready: false, checks: [check('manifest', 'FAIL', 'manifest.json missing')] };
+  if (!existsSync(layout.manifestPath)) return { schemaVersion: 'pd-presence-verify/v2', packRoot, manifestSha256: null, full, checks: [check('manifest', 'FAIL', 'manifest.json missing')] };
   const manifestSha256 = sha256FileSync(layout.manifestPath);
   const manifest = readJson(layout.manifestPath);
   checks.push(check('manifest', manifest.schemaVersion === PACK_SCHEMA && manifest.cardVersion === CARD_VERSION ? 'PASS' : 'FAIL',
@@ -832,6 +1025,18 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
 
   checks.push(check('presence-durability', manifest.candidate.presenceDurability?.status === 'flushed_on_record' ? 'PASS' : 'FAIL',
     'the presence event is written at record time (a one-shot host exits without flushing buffered events)', manifest.candidate.presenceDurability ?? {}));
+
+  const codeViolations = executionCodeViolations(manifest.executionCode, codeRoot);
+  checks.push(check('execution-code', codeViolations.length === 0 ? 'PASS' : 'FAIL',
+    'the launcher, its local scripts and the workspace builds it loads are byte-identical to the frozen list', {
+      violations: codeViolations, trustBoundary: EXECUTION_CODE_TRUST_BOUNDARY,
+    }));
+
+  const budgetViolations = budgetConsistencyViolations(manifest);
+  checks.push(check('budget-consistency', budgetViolations.length === 0 ? 'PASS' : 'FAIL',
+    'the frozen run and per-round budgets match the launcher and each other (the ledger is built from the frozen values)', {
+      violations: budgetViolations, frozen: manifest.budget ?? null,
+    }));
 
   const config = readJson(layout.configPath);
   const configViolations = validatePresenceHostConfig(config, {
@@ -900,21 +1105,21 @@ export async function verifyPack({ packRoot, full = false, operatorEnv = process
       violations: layoutViolations, productionPlugin: manifest.productionPlugin, bundledPluginIdsCount: manifest.host.bundledPluginIds?.length ?? 0,
     }));
 
-  const ready = checks.every((row) => row.status === 'PASS' || (row.status === 'NOT_RUN' && !full));
+  const pollutionBaseline = snapshotTargets(manifest.pollution.targets);
+  const pollutionGaps = pollutionSnapshotGaps(pollutionBaseline);
+  checks.push(check('pollution-baseline', pollutionGaps.length === 0 ? 'PASS' : 'FAIL',
+    'every frozen production target can be read and hashed for the before/after audit (read-only)', {
+      gaps: pollutionGaps,
+      targets: pollutionBaseline.map((row) => ({ id: row.id, class: row.class, exists: row.exists, sha256: row.sha256 ?? null, files: row.files?.length ?? undefined })),
+    }));
+
   return {
-    schemaVersion: 'pd-presence-verify/v1',
+    schemaVersion: 'pd-presence-verify/v2',
     generatedAt: new Date().toISOString(),
     packRoot,
     manifestSha256,
     full,
     checks,
-    summary: {
-      pass: checks.filter((row) => row.status === 'PASS').length,
-      fail: checks.filter((row) => row.status === 'FAIL').length,
-      notRun: checks.filter((row) => row.status === 'NOT_RUN').length,
-      total: checks.length,
-    },
-    ready,
   };
 }
 

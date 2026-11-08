@@ -6,11 +6,16 @@
 //               no host and sends no request.
 //   --verify    offline re-verification of a frozen pack; `--full` re-hashes the
 //               staged host tree; `--selftest` runs the accounted loopback
-//               protocol self-test against the staged official transports.
+//               protocol self-test against the staged official transports. Exit 0
+//               only when every required check passed (READY): both flags are
+//               needed for that.
 //   --execute   the approved run ONLY: requires an approval file bound to the
-//               manifest sha256 and card version. Re-verifies everything, then
-//               runs R1 and — only if R1 passed — R2, each as ONE host start with
-//               ONE provider request, under the shared fail-closed ledger.
+//               manifest sha256 and card version. Re-runs every required check
+//               (stored preflight reports are never trusted), then runs R1 and —
+//               only if R1 passed — R2, each as ONE host start with ONE provider
+//               request, under the shared fail-closed ledger. The production
+//               pollution audit runs after each round and decides whether the
+//               next round starts and whether the run can be `completed`.
 //
 // Budget semantics: reaching a cap is not over budget; the NEXT attempt is
 // refused before it is issued (host start: before spawn; provider HTTP: before
@@ -18,20 +23,22 @@
 // fallback, no second execute of the same pack (the ledger file is never reset).
 
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { BudgetExceededError, createExperimentLedger } from './lib/ledger.mjs';
 import { selectLoopbackPort } from './lib/host-config.mjs';
 import { startPresenceEndpoint, PRESENCE_ANSWER } from './lib/presence-endpoint.mjs';
-import { PRESENCE_MODEL_ID, PRESENCE_ROUND_BUDGETS, PRESENCE_RUN_BUDGET } from './lib/presence-config.mjs';
+import { PRESENCE_MODEL_ID } from './lib/presence-config.mjs';
 import { PRESENCE_FIXTURE } from './lib/presence-fixture.mjs';
 import { runProtocolSelftest } from './lib/protocol-selftest.mjs';
 import {
-  CARD_VERSION, PRESENCE_EVENT_TYPE, buildRoundEnv, comparePollution, packLayout, preparePack, roundArgv,
-  sha256FileSync, snapshotTargets, verifyPack,
+  CARD_VERSION, PRESENCE_CODE_ROOT, PRESENCE_EVENT_TYPE, buildRoundEnv, classifyPollution, comparePollution, packLayout, pollutionSnapshotGaps,
+  preflightCheck, preparePack, roundArgv, sha256FileSync, snapshotTargets, summarizePreflight, verifyPack,
 } from './lib/presence-pack.mjs';
 import { escapeXml } from '@principles/core/prompt-builder';
 
@@ -59,7 +66,7 @@ function sourceFacts(repoRoot) {
   };
 }
 
-/** Bind the frozen port briefly and connect over raw TCP (no HTTP request). */
+/** Bind the frozen port briefly and connect over raw TCP (no HTTP request). A free port now is not a reservation. */
 async function probePort(port) {
   const { createServer } = await import('node:net');
   const server = createServer((socket) => socket.destroy());
@@ -89,28 +96,41 @@ async function portRefusesConnections(port) {
   });
 }
 
-/** Processes whose command line references `fragment` (the pack root). */
+/**
+ * The launcher and the shells that started it can carry the pack path on their
+ * own command lines. They are never sweep targets: killing one would take the
+ * launcher down mid-run and lose its cleanup and evidence.
+ */
+function withoutLauncherAncestry(rows) {
+  const byPid = new Map(rows.map((row) => [row.pid, row]));
+  const ancestry = new Set([process.pid]);
+  for (let pid = process.ppid; byPid.has(pid) && !ancestry.has(pid); pid = byPid.get(pid).ppid) ancestry.add(pid);
+  return rows.filter((row) => !ancestry.has(row.pid));
+}
+
+/** Processes whose command line references `fragment` (the pack root), excluding the launcher's own ancestry. */
 export function findProcessesReferencing(fragment) {
   if (process.platform === 'win32') {
     const escaped = fragment.replaceAll("'", "''");
     // $PID excludes this PowerShell query itself (its own command line contains the fragment).
     const script = `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('${escaped}') } | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress`;
     const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
-    if (result.status !== 0) return { ok: false, reason: (result.stderr || '').slice(0, 300), processes: [] };
+    if (result.status !== 0) return { ok: false, reason: (result.stderr || String(result.error ?? 'process query failed')).slice(0, 300), processes: [] };
     const text = (result.stdout || '').trim();
     if (!text) return { ok: true, processes: [] };
-    const parsed = JSON.parse(text);
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { return { ok: false, reason: 'process query returned unparseable output', processes: [] }; }
     const rows = Array.isArray(parsed) ? parsed : [parsed];
-    return { ok: true, processes: rows.map((row) => ({ pid: row.ProcessId, ppid: row.ParentProcessId, name: row.Name })).filter((row) => row.pid !== process.pid) };
+    return { ok: true, processes: withoutLauncherAncestry(rows.map((row) => ({ pid: row.ProcessId, ppid: row.ParentProcessId, name: row.Name }))) };
   }
   const result = spawnSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8', timeout: 30_000 });
   if (result.status !== 0) return { ok: false, reason: 'ps failed', processes: [] };
   const processes = [];
   for (const line of result.stdout.split('\n')) {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
-    if (match && match[3].includes(fragment) && Number(match[1]) !== process.pid) processes.push({ pid: Number(match[1]), ppid: Number(match[2]), name: match[3].slice(0, 80) });
+    if (match && match[3].includes(fragment)) processes.push({ pid: Number(match[1]), ppid: Number(match[2]), name: match[3].slice(0, 80) });
   }
-  return { ok: true, processes };
+  return { ok: true, processes: withoutLauncherAncestry(processes) };
 }
 
 function killTree(pid) {
@@ -253,6 +273,65 @@ async function runHostRound({ manifest, round, env }) {
   };
 }
 
+function terminationCapability() {
+  if (process.platform !== 'win32') return { tool: 'process.kill', available: true };
+  return { tool: 'taskkill', available: spawnSync('where.exe', ['taskkill'], { windowsHide: true }).status === 0 };
+}
+
+const DEFAULT_PROBES = Object.freeze({ port: probePort, termination: terminationCapability, processSweep: findProcessesReferencing });
+
+/** A fresh evidence file name: two runs in the same second must not collide. */
+function preflightFileName(prefix) {
+  return `${prefix}-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}-${randomBytes(4).toString('hex')}.json`;
+}
+
+async function protocolSelftestCheck({ packRoot, manifest, requested, hostTreeVerified }) {
+  if (!requested) return preflightCheck('protocol-selftest', 'NOT_RUN', 'run --verify --selftest (--execute always runs it)');
+  if (!hostTreeVerified) return preflightCheck('protocol-selftest', 'NOT_RUN', 'the staged host tree is not verified, so its transports are not imported (add --full)');
+  try {
+    const fakeApiKey = JSON.parse(readFileSync(manifest.paths.configPath, 'utf8')).models.providers[manifest.rounds[0].provider].apiKey;
+    const report = await runProtocolSelftest({
+      aiPackageDir: join(manifest.host.packageDir, 'node_modules', '@openclaw', 'ai'),
+      ledgerPersistPath: join(packRoot, 'preflight', preflightFileName('selftest-ledger')),
+      fakeApiKey,
+    });
+    return preflightCheck('protocol-selftest', report.pass ? 'PASS' : 'FAIL',
+      'the official transports accept both terminal responses and reject the negative controls (loopback, own ledger, not run budget)', {
+        pass: report.pass,
+        cases: report.cases.map(({ arm, expected, outcome, pass, errorMessage }) => ({ arm, expected, outcome, pass, errorMessage })),
+        ledger: report.ledger,
+      });
+  } catch (error) {
+    return preflightCheck('protocol-selftest', 'FAIL', 'the protocol self-test could not complete', { reason: String(error?.message ?? error) });
+  }
+}
+
+/**
+ * The single preflight: every check `--verify` reports and `--execute` requires.
+ * Nothing here starts a host or charges the run budget.
+ */
+export async function preflightPack({
+  packRoot, full = true, selftest = true, operatorEnv = process.env, realHome = homedir(), codeRoot = PRESENCE_CODE_ROOT, probes = {},
+}) {
+  const verification = await verifyPack({ packRoot, full, operatorEnv, realHome, codeRoot });
+  const checks = [...verification.checks];
+  if (verification.manifestSha256 !== null) {
+    const probe = { ...DEFAULT_PROBES, ...probes };
+    const manifest = JSON.parse(readFileSync(packLayout(packRoot).manifestPath, 'utf8'));
+    const port = await probe.port(manifest.endpoint.port);
+    checks.push(preflightCheck('endpoint-port', port.ok ? 'PASS' : 'FAIL',
+      'the frozen loopback port could be bound and reached just now; this is not a reservation and the bind at --execute stays authoritative', port));
+    const termination = probe.termination();
+    checks.push(preflightCheck('termination-tool', termination.available ? 'PASS' : 'FAIL', 'the process-tree termination tool used on timeout is available', termination));
+    const sweep = probe.processSweep(packRoot);
+    checks.push(preflightCheck('process-sweep', sweep.ok && sweep.processes.length === 0 ? 'PASS' : 'FAIL',
+      'the process query works and nothing other than the launcher and its ancestors references the pack', { queryOk: sweep.ok, reason: sweep.reason ?? null, processes: sweep.processes }));
+    const hostTreeVerified = checks.some((row) => row.id === 'host-tree' && row.status === 'PASS');
+    checks.push(await protocolSelftestCheck({ packRoot, manifest, requested: selftest, hostTreeVerified }));
+  }
+  return { ...verification, selftest, ...summarizePreflight(checks) };
+}
+
 export function validateApproval({ approval, manifestSha256, manifest }) {
   const violations = [];
   if (approval?.schemaVersion !== APPROVAL_SCHEMA) violations.push('approval schemaVersion mismatch');
@@ -262,14 +341,35 @@ export function validateApproval({ approval, manifestSha256, manifest }) {
   if (approval?.manifestSha256 !== manifestSha256) violations.push('approval is not bound to this manifest sha256');
   if (approval?.cardVersion !== manifest.cardVersion) violations.push('approval is not bound to this card version');
   if (!Array.isArray(approval?.rounds) || approval.rounds.join(',') !== manifest.rounds.map((round) => round.id).join(',')) violations.push('approval must name exactly the frozen rounds');
+  if (!isDeepStrictEqual(approval?.budgets, manifest.budget)) violations.push('approval budgets differ from the frozen manifest budgets');
   return violations;
+}
+
+const POLLUTION_STOP_REASON = Object.freeze({
+  attributed: 'pollution_attributed',
+  'review-required': 'pollution_review_required',
+  incomplete: 'pollution_audit_incomplete',
+});
+
+/** Read-only comparison against the pre-run baseline. Never throws; an unfinished audit reports itself as incomplete. */
+function auditProduction({ baseline, manifest }) {
+  try {
+    const comparison = comparePollution(baseline, snapshotTargets(manifest.pollution.targets), manifest.pollution.markers);
+    return { comparison, summary: classifyPollution(comparison) };
+  } catch (error) {
+    const incomplete = [{ id: 'pollution-audit', reason: String(error?.message ?? error) }];
+    return { comparison: null, summary: classifyPollution({ attributed: [], reviewRequired: [], unattributed: [], incomplete }) };
+  }
 }
 
 /**
  * The approved run. Every refusal before the first host start leaves the
- * budget untouched (no ledger file is created). Evidence is never deleted.
+ * budget untouched (no ledger file is created). Evidence is never deleted, and
+ * production data is only ever read: it is never removed, rewritten or rolled back.
  */
-export async function execute({ packRoot, approvalPath, operatorEnv = process.env, realHome = homedir() }) {
+export async function execute({
+  packRoot, approvalPath, operatorEnv = process.env, realHome = homedir(), codeRoot = PRESENCE_CODE_ROOT, probes = {},
+}) {
   const layout = packLayout(packRoot);
   const manifestSha256 = sha256FileSync(layout.manifestPath);
   const manifest = JSON.parse(readFileSync(layout.manifestPath, 'utf8'));
@@ -281,30 +381,42 @@ export async function execute({ packRoot, approvalPath, operatorEnv = process.en
   if (existsSync(layout.budgetLedgerPath) || existsSync(layout.runDir)) {
     return { status: 'refused-before-any-start', reason: 'pack_already_executed', violations: ['run/ exists; budgets never reset and a pack executes once'] };
   }
-  const verification = await verifyPack({ packRoot, full: true, operatorEnv, realHome });
+  const verification = await preflightPack({ packRoot, full: true, selftest: true, operatorEnv, realHome, codeRoot, probes });
   if (!verification.ready) {
-    return { status: 'refused-before-any-start', reason: 'verification', violations: verification.checks.filter((row) => row.status !== 'PASS').map((row) => `${row.id}:${row.status}`), verification };
+    return { status: 'refused-before-any-start', reason: 'verification', violations: verification.failing.map((row) => `${row.id}:${row.status}`), verification };
+  }
+  const pollutionBefore = snapshotTargets(manifest.pollution.targets);
+  const baselineGaps = pollutionSnapshotGaps(pollutionBefore);
+  if (baselineGaps.length > 0) {
+    return { status: 'refused-before-any-start', reason: 'pollution_baseline_incomplete', violations: baselineGaps.map((row) => `${row.id}: ${row.reason}`) };
   }
 
   mkdirSync(join(layout.runDir, 'evidence'), { recursive: true });
   writeJson(join(layout.runDir, 'verification-before-run.json'), verification, 'wx');
   writeJson(join(layout.runDir, 'approval-used.json'), { ...approval, approvalFileSha256: sha256FileSync(approvalPath) }, 'wx');
-  const pollutionBefore = snapshotTargets(manifest.pollution.targets);
   writeJson(join(layout.runDir, 'pollution-before.json'), pollutionBefore, 'wx');
 
+  // The frozen budgets, not the current code constants: the approval names these.
   const ledger = createExperimentLedger({
     runId: manifest.packId,
     fixtureId: PRESENCE_FIXTURE.activationId,
-    budget: PRESENCE_RUN_BUDGET,
-    armBudgets: PRESENCE_ROUND_BUDGETS,
+    budget: manifest.budget.run,
+    armBudgets: manifest.budget.rounds,
     persistPath: layout.budgetLedgerPath,
   });
   const fakeApiKey = JSON.parse(readFileSync(manifest.paths.configPath, 'utf8')).models.providers[manifest.rounds[0].provider].apiKey;
-  const record = { schemaVersion: 'pd-presence-run-record/v1', packId: manifest.packId, manifestSha256, cardVersion: manifest.cardVersion, rounds: [], stoppedAt: null };
+  const record = { schemaVersion: 'pd-presence-run-record/v2', packId: manifest.packId, manifestSha256, cardVersion: manifest.cardVersion, rounds: [], stoppedAt: null, stopReasons: [] };
   let endpoint = null;
   try {
-    endpoint = await startPresenceEndpoint({ ledger, port: manifest.endpoint.port, fakeApiKey });
-    for (const round of manifest.rounds) {
+    try {
+      endpoint = await startPresenceEndpoint({ ledger, port: manifest.endpoint.port, fakeApiKey });
+    } catch (error) {
+      // The port check was not a reservation. Nothing has been started or charged.
+      record.stoppedAt = 'endpoint-bind';
+      record.stopReasons.push('endpoint_bind_failed');
+      record.endpointBindError = String(error?.message ?? error);
+    }
+    for (const round of endpoint ? manifest.rounds : []) {
       const roundRecord = { id: round.id, started: false };
       record.rounds.push(roundRecord);
       // The environment is rebuilt and proven inside the pack BEFORE the host
@@ -319,6 +431,7 @@ export async function execute({ packRoot, approvalPath, operatorEnv = process.en
         if (!(error instanceof BudgetExceededError)) throw error;
         roundRecord.refused = { counter: error.counter, scope: error.scope, cap: error.cap };
         record.stoppedAt = round.id;
+        record.stopReasons.push('budget_refused');
         break;
       }
       endpoint.openRound({ arm: round.id, api: round.api });
@@ -334,28 +447,45 @@ export async function execute({ packRoot, approvalPath, operatorEnv = process.en
       writeJson(join(layout.runDir, 'evidence', `${round.id}.presence-events.json`), presence.events.map((row) => ({ file: row.file, entry: row.entry })), 'wx');
       const gate = evaluatePresenceRound({ round, hostResult, endpointRecords, presenceEvents: presence.events });
       writeJson(join(layout.runDir, 'evidence', `${round.id}.gate.json`), gate, 'wx');
+      const audit = auditProduction({ baseline: pollutionBefore, manifest });
+      writeJson(join(layout.runDir, 'evidence', `${round.id}.pollution.json`), audit, 'wx');
       Object.assign(roundRecord, {
         argv: hostResult.argv, pid: hostResult.pid, exitCode: hostResult.exitCode, timedOut: hostResult.timedOut, killed: hostResult.killed,
-        sweep, gateOk: gate.ok, failedChecks: gate.checks.filter((row) => !row.ok).map((row) => row.id),
+        sweep, gateOk: gate.ok, failedChecks: gate.checks.filter((row) => !row.ok).map((row) => row.id), pollution: audit.summary,
       });
-      if (!gate.ok || !sweep.ok) {
+      const stopReasons = [!gate.ok && 'round_gate_failed', !sweep.ok && 'residual_process', audit.summary.stop && POLLUTION_STOP_REASON[audit.summary.verdict]].filter(Boolean);
+      if (stopReasons.length > 0) {
         record.stoppedAt = round.id;
+        record.stopReasons.push(...stopReasons);
         break;
       }
     }
   } catch (error) {
     record.error = String(error?.stack ?? error);
     record.stoppedAt ??= 'error';
+    record.stopReasons.push('error');
   } finally {
-    if (endpoint) await endpoint.close();
+    try {
+      if (endpoint) await endpoint.close();
+    } catch (error) {
+      record.endpointCloseError = String(error?.message ?? error);
+    }
     record.unexpectedOutsideRounds = endpoint ? endpoint.observations().filter((row) => row.arm === null) : [];
-    record.endpointClosed = await portRefusesConnections(manifest.endpoint.port);
+    record.endpointBound = endpoint !== null;
+    record.endpointClosed = endpoint ? await portRefusesConnections(manifest.endpoint.port) : null;
     record.finalSweep = sweepPackProcesses(packRoot);
     record.ledger = ledger.snapshot();
-    record.pollution = comparePollution(pollutionBefore, snapshotTargets(manifest.pollution.targets), manifest.pollution.markers);
+    const finalAudit = auditProduction({ baseline: pollutionBefore, manifest });
+    record.pollution = finalAudit.comparison;
+    record.pollutionAudit = finalAudit.summary;
+    if (finalAudit.summary.stop) {
+      const reason = POLLUTION_STOP_REASON[finalAudit.summary.verdict];
+      if (!record.stopReasons.includes(reason)) record.stopReasons.push(reason);
+      record.stoppedAt ??= 'final-pollution-audit';
+    }
     const allRoundsPassed = record.rounds.length === manifest.rounds.length && record.rounds.every((row) => row.gateOk === true && row.sweep?.ok === true);
     record.status = record.stoppedAt === null && allRoundsPassed && record.unexpectedOutsideRounds.length === 0
-      && record.endpointClosed && record.finalSweep.ok && record.ledger.withinBudget ? 'completed' : 'stopped';
+      && record.endpointClosed === true && record.finalSweep.ok && record.ledger.withinBudget && !finalAudit.summary.stop ? 'completed' : 'stopped';
     record.conclusionBound = manifest.scope;
     writeJson(join(layout.runDir, 'run-record.json'), record, 'wx');
   }
@@ -381,8 +511,8 @@ function argValue(argv, name) {
   return index >= 0 && index + 1 < argv.length ? argv[index + 1] : null;
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
+/** CLI entry. Returns the process exit code: 0 only for a READY verify or a completed execute. */
+export async function main(argv = process.argv.slice(2)) {
   const repoRoot = resolve(argValue(argv, 'repo') ?? process.cwd());
   const packsRoot = resolve(argValue(argv, 'packs-root') ?? join(repoRoot, 'artifacts', 'pri-1152-isolated-host'));
   if (argv.includes('--prepare')) {
@@ -408,33 +538,16 @@ async function main() {
     });
     writeJson(join(packRoot, 'approval.template.json'), approvalTemplate({ manifest, manifestSha256 }), 'wx');
     process.stdout.write(`${JSON.stringify({ packRoot, manifestSha256, cardVersion: CARD_VERSION, endpointPort, source }, null, 2)}\n`);
-    return;
+    return 0;
   }
   if (argv.includes('--verify')) {
     const packRoot = resolve(argValue(argv, 'pack') ?? '');
-    const report = await verifyPack({ packRoot, full: argv.includes('--full') });
-    report.portProbe = await probePort(JSON.parse(readFileSync(join(packRoot, 'manifest.json'), 'utf8')).endpoint.port);
-    report.termination = process.platform === 'win32'
-      ? { tool: 'taskkill', available: spawnSync('where.exe', ['taskkill'], { windowsHide: true }).status === 0 }
-      : { tool: 'kill', available: true };
-    report.processSweepAvailable = findProcessesReferencing(packRoot).ok;
-    if (argv.includes('--selftest')) {
-      const manifest = JSON.parse(readFileSync(join(packRoot, 'manifest.json'), 'utf8'));
-      const fakeApiKey = JSON.parse(readFileSync(manifest.paths.configPath, 'utf8')).models.providers[manifest.rounds[0].provider].apiKey;
-      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-      report.protocolSelftest = await runProtocolSelftest({
-        aiPackageDir: join(manifest.host.packageDir, 'node_modules', '@openclaw', 'ai'),
-        ledgerPersistPath: join(packRoot, 'preflight', `selftest-ledger-${stamp}.json`),
-        fakeApiKey,
-      });
-    }
-    report.pollutionBaseline = snapshotTargets(JSON.parse(readFileSync(join(packRoot, 'manifest.json'), 'utf8')).pollution.targets)
-      .map((row) => ({ id: row.id, class: row.class, exists: row.exists, sha256: row.sha256 ?? null, files: row.files?.length ?? undefined }));
-    const out = join(packRoot, 'preflight', `verify-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}.json`);
-    writeJson(out, report, 'wx');
-    process.stdout.write(`${JSON.stringify({ out, ready: report.ready, summary: report.summary, failing: report.checks.filter((row) => row.status !== 'PASS').map((row) => `${row.id}:${row.status}`), selftestPass: report.protocolSelftest?.pass ?? null, portProbe: report.portProbe }, null, 2)}\n`);
-    process.exitCode = report.ready ? 0 : 1;
-    return;
+    const report = await preflightPack({ packRoot, full: argv.includes('--full'), selftest: argv.includes('--selftest') });
+    const preflightDir = join(packRoot, 'preflight');
+    const out = existsSync(preflightDir) ? join(preflightDir, preflightFileName('verify')) : null;
+    if (out) writeJson(out, report, 'wx');
+    process.stdout.write(`${JSON.stringify({ out, ready: report.ready, summary: report.summary, failing: report.failing.map((row) => `${row.id}:${row.status}`), failingDetails: report.failing.map(({ id, detail }) => ({ id, detail })) }, null, 2)}\n`);
+    return report.ready ? 0 : 1;
   }
   if (argv.includes('--execute')) {
     const packRoot = resolve(argValue(argv, 'pack') ?? '');
@@ -442,14 +555,13 @@ async function main() {
     if (!approvalPath) throw new Error('--approval <approval.json> is required');
     const record = await execute({ packRoot, approvalPath: resolve(approvalPath) });
     process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
-    process.exitCode = record.status === 'completed' ? 0 : 1;
-    return;
+    return record.status === 'completed' ? 0 : 1;
   }
   throw new Error('use --prepare, --verify or --execute');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  main().then((code) => { process.exitCode = code; }, (error) => {
     process.stderr.write(`${String(error?.stack ?? error)}\n`);
     process.exitCode = 2;
   });

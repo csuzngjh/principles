@@ -4,12 +4,14 @@
 // endpoint, so budgets, refusals, stop rules, timeouts, process-tree cleanup
 // and endpoint shutdown are exercised through the real launcher code.
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { BudgetExceededError, createExperimentLedger } from '../dev/aa-controlled-admission/lib/ledger.mjs';
 import {
@@ -21,10 +23,13 @@ import {
   PRESENCE_MODEL_ID, PRESENCE_ROUND_BUDGETS, PRESENCE_RUN_BUDGET, buildPresenceHostConfig, sha256Text, validatePresenceHostConfig,
 } from '../dev/aa-controlled-admission/lib/presence-config.mjs';
 import { PRESENCE_FIXTURE } from '../dev/aa-controlled-admission/lib/presence-fixture.mjs';
-import { comparePollution, preparePack, verifyPack } from '../dev/aa-controlled-admission/lib/presence-pack.mjs';
+import {
+  CARD_VERSION, EXECUTION_CODE_TRUST_BOUNDARY, EXECUTION_SCRIPT_FILES, EXECUTION_WORKSPACE_BUILDS, PRESENCE_CODE_ROOT, PREFLIGHT_REQUIRED_CHECKS,
+  classifyPollution, collectExecutionCode, comparePollution, executionCodeViolations, preparePack, preflightCheck, summarizePreflight, verifyPack,
+} from '../dev/aa-controlled-admission/lib/presence-pack.mjs';
 import { runProtocolSelftest } from '../dev/aa-controlled-admission/lib/protocol-selftest.mjs';
 import {
-  APPROVAL_SCHEMA, evaluatePresenceRound, execute, validateApproval,
+  APPROVAL_SCHEMA, evaluatePresenceRound, execute, main, preflightPack, validateApproval,
 } from '../dev/aa-controlled-admission/presence-run.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -292,6 +297,367 @@ describe('pollution comparison — bounded verdicts', () => {
     expect(result.attributed).toEqual(['cfg']);
     expect(result.statement).toMatch(/neither proves the absence/);
   });
+
+  it('an unreadable or unhashable target is audit-incomplete, never unchanged and never attributed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pp-pollution-unreadable-'));
+    const dirTarget = join(dir, 'not-a-file');
+    mkdirSync(dirTarget);
+    const logs = join(dir, 'logs');
+    mkdirSync(logs);
+    const before = [
+      { id: 'cfg', path: dirTarget, class: 'config', exists: true, size: 1, sha256: 'old' },
+      { id: 'log', path: logs, class: 'log-dir', exists: true, files: [{ name: 'events_2026-11-08.jsonl', size: 5, mtimeMs: 1 }] },
+    ];
+    writeFileSync(join(logs, 'events_2026-11-08.jsonl'), '{"x":1}\n');
+    const after = [
+      { id: 'cfg', path: dirTarget, class: 'config', unreadable: 'EISDIR' },
+      { id: 'log', path: join(dir, 'logs'), class: 'log-dir', exists: true, files: [{ name: 'events_2026-11-08.jsonl', size: 8, mtimeMs: 2 }] },
+    ];
+    const result = comparePollution(before, after, ['pp-test-marker']);
+    expect(result.rows.find((row) => row.id === 'cfg').verdict).toBe('audit-incomplete');
+    expect(result.rows.find((row) => row.id === 'log').verdict).toBe('changed-no-run-marker-found');
+    expect(result.incomplete.map((row) => row.id)).toEqual(['cfg']);
+    // The unreadable row must not be misread as attributed.
+    expect(result.attributed).toEqual([]);
+    // A live store whose hash was skipped (over the limit) cannot be equal by size alone.
+    const oversized = comparePollution(
+      [{ id: 'db', path: 'x', class: 'live-store', exists: true, size: 9_999_999, sha256: null }],
+      [{ id: 'db', path: 'x', class: 'live-store', exists: true, size: 9_999_999, sha256: null }],
+      ['m'],
+    );
+    expect(oversized.rows[0].verdict).toBe('audit-incomplete');
+    expect(oversized.incomplete[0].reason).toMatch(/hash limit/);
+  });
+
+  it('classifyPollution stops on attributed, review-required or incomplete, notes the rest', () => {
+    const base = { attributed: [], reviewRequired: [], unattributed: [], incomplete: [] };
+    expect(classifyPollution({ ...base, attributed: ['a'] })).toMatchObject({ verdict: 'attributed', stop: true, pendingHumanReview: false });
+    expect(classifyPollution({ ...base, reviewRequired: ['b'] })).toMatchObject({ verdict: 'review-required', stop: true, pendingHumanReview: true });
+    expect(classifyPollution({ ...base, incomplete: [{ id: 'c', reason: 'r' }] })).toMatchObject({ verdict: 'incomplete', stop: true });
+    expect(classifyPollution({ ...base, unattributed: ['d'] })).toMatchObject({ verdict: 'unattributed-changes-noted', stop: false });
+    expect(classifyPollution(base)).toMatchObject({ verdict: 'clean', stop: false });
+    expect(classifyPollution({ ...base, attributed: ['a'] }).meaning).toMatch(/the run reached production/);
+  });
+});
+
+describe('preflight — one READY decision, one failing set', () => {
+  it('a check that was never produced counts as NOT_RUN and blocks READY', () => {
+    const partial = summarizePreflight([preflightCheck('manifest', 'PASS', 'ok'), preflightCheck('endpoint-port', 'PASS', 'ok')]);
+    expect(partial.ready).toBe(false);
+    expect(partial.summary.pass).toBe(2);
+    expect(partial.summary.notRun).toBe(PREFLIGHT_REQUIRED_CHECKS.length - 2);
+    expect(partial.failing.map((row) => row.id)).toEqual(expect.arrayContaining(['host-tree', 'protocol-selftest']));
+    const none = summarizePreflight([]);
+    expect(none.ready).toBe(false);
+    expect(none.summary.notRun).toBe(PREFLIGHT_REQUIRED_CHECKS.length);
+    const good = summarizePreflight(PREFLIGHT_REQUIRED_CHECKS.map((id) => preflightCheck(id, 'PASS', 'ok')));
+    expect(good).toMatchObject({ ready: true, failing: [], summary: { pass: PREFLIGHT_REQUIRED_CHECKS.length, fail: 0, notRun: 0 } });
+    const notRun = summarizePreflight(PREFLIGHT_REQUIRED_CHECKS.map((id) => preflightCheck(id, id === 'host-tree' ? 'NOT_RUN' : 'PASS', 'x')));
+    expect(notRun.ready).toBe(false);
+    expect(notRun.failing.map((row) => `${row.id}:${row.status}`)).toEqual(['host-tree:NOT_RUN']);
+  });
+
+  it('the required list has no duplicates and names every check the pack and launcher produce', async () => {
+    expect(new Set(PREFLIGHT_REQUIRED_CHECKS).size).toBe(PREFLIGHT_REQUIRED_CHECKS.length);
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
+    expect(report.checks.map((row) => row.id).sort()).toEqual([...PREFLIGHT_REQUIRED_CHECKS].sort());
+    expect(report.failing).toEqual([]);
+    expect(report.ready).toBe(true);
+  }, 120_000);
+
+  const FAILURES = [
+    ['the frozen port is taken', { occupyPort: true }, 'endpoint-port'],
+    ['the termination tool is unavailable', { probes: { termination: () => ({ tool: 'taskkill', available: false }) } }, 'termination-tool'],
+    ['the process query cannot run', { probes: { processSweep: () => ({ ok: false, reason: 'query failed', processes: [] }) } }, 'process-sweep'],
+    ['another process references the pack', { probes: { processSweep: () => ({ ok: true, processes: [{ pid: 4242, ppid: 1, name: 'node' }] }) } }, 'process-sweep'],
+    ['the protocol self-test fails', { pack: { acceptAll: true } }, 'protocol-selftest'],
+  ];
+
+  it.each(FAILURES)('when %s the pack is not READY and execute refuses with zero host starts', async (_label, scenario, failingCheck) => {
+    const { packRoot, operatorEnv, realHome, endpointPort } = await makePack(scenario.pack);
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    const holder = scenario.occupyPort ? await occupy(endpointPort) : null;
+    try {
+      const report = await preflightPack({ packRoot, operatorEnv, realHome, probes: scenario.probes });
+      expect(report.ready).toBe(false);
+      expect(report.failing.map((row) => `${row.id}:${row.status}`)).toContain(`${failingCheck}:FAIL`);
+      const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome, probes: scenario.probes });
+      expect(record).toMatchObject({ status: 'refused-before-any-start', reason: 'verification' });
+      expect(record.violations).toContain(`${failingCheck}:FAIL`);
+      expect(hostStarts(packRoot)).toEqual([]);
+      expect(existsSync(join(packRoot, 'run'))).toBe(false);
+    } finally {
+      if (holder) await release(holder);
+    }
+  }, 180_000);
+
+  it('execute does not trust a stored passing report', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack({ acceptAll: true });
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    writeFileSync(join(packRoot, 'preflight', 'verify-20261108T000000Z.json'), JSON.stringify({ ready: true, failing: [], summary: { fail: 0 } }));
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'refused-before-any-start', reason: 'verification' });
+    expect(record.violations).toContain('protocol-selftest:FAIL');
+    expect(hostStarts(packRoot)).toEqual([]);
+  }, 120_000);
+
+  it('--verify exits 0 only for a READY --full --selftest run; anything less exits 1', async () => {
+    const { packRoot, endpointPort } = await makePack();
+    const silenced = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(await main(['--verify', '--pack', packRoot, '--full', '--selftest'])).toBe(0);
+      expect(await main(['--verify', '--pack', packRoot])).toBe(1);
+      expect(await main(['--verify', '--pack', packRoot, '--full'])).toBe(1);
+      expect(await main(['--verify', '--pack', packRoot, '--selftest'])).toBe(1);
+      const holder = await occupy(endpointPort);
+      try {
+        expect(await main(['--verify', '--pack', packRoot, '--full', '--selftest'])).toBe(1);
+      } finally {
+        await release(holder);
+      }
+      // Concurrent reports never collide on one file name.
+      expect(await Promise.all([main(['--verify', '--pack', packRoot]), main(['--verify', '--pack', packRoot])])).toEqual([1, 1]);
+    } finally {
+      silenced.mockRestore();
+    }
+    expect(readdirSync(join(packRoot, 'preflight')).filter((name) => name.startsWith('verify-'))).toHaveLength(7);
+    const partial = await preflightPack({ packRoot, full: false, selftest: false });
+    expect(partial.failing.map((row) => `${row.id}:${row.status}`)).toEqual(['host-tree:NOT_RUN', 'protocol-selftest:NOT_RUN']);
+  }, 180_000);
+
+  it('the port check is not a reservation: a bind that fails at execute stops safely with zero host starts', async () => {
+    const { packRoot, operatorEnv, realHome, endpointPort } = await makePack();
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    const holder = await occupy(endpointPort);
+    let record;
+    try {
+      // The port looked free when checked; something took it before the real bind.
+      record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome, probes: { port: async (port) => ({ ok: true, port }) } });
+    } finally {
+      await release(holder);
+    }
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'endpoint-bind', endpointBound: false, endpointClosed: null, rounds: [] });
+    expect(record.stopReasons).toEqual(['endpoint_bind_failed']);
+    expect(record.endpointBindError).toMatch(/EADDRINUSE/);
+    expect(record.ledger.used).toEqual({ hostTurns: 0, httpRequests: 0, toolCalls: 0, paidCalls: 0 });
+    expect(hostStarts(packRoot)).toEqual([]);
+    expect(existsSync(join(packRoot, 'run', 'run-record.json'))).toBe(true);
+  }, 120_000);
+
+  it('the process query never returns the launcher or its ancestors, but does find other processes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pp-ancestry-'));
+    const fragment = `pp-ancestry-${process.pid}-${Date.now()}`;
+    const launcherUrl = pathToFileURL(join(REPO_ROOT, 'scripts', 'dev', 'aa-controlled-admission', 'presence-run.mjs')).href;
+    const query = join(dir, 'query.mjs');
+    writeFileSync(query, `import { findProcessesReferencing } from ${JSON.stringify(launcherUrl)};\nprocess.stdout.write(JSON.stringify(findProcessesReferencing(process.argv[2])));\n`);
+    const parent = join(dir, 'parent.mjs');
+    writeFileSync(parent, [
+      "import { spawn, spawnSync } from 'node:child_process';",
+      'const fragment = process.argv[2];',
+      "const sibling = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', fragment], { stdio: 'ignore', windowsHide: true });",
+      'await new Promise((done) => setTimeout(done, 500));',
+      `const result = spawnSync(process.execPath, [${JSON.stringify(query)}, fragment], { encoding: 'utf8', windowsHide: true });`,
+      'sibling.kill();',
+      'process.stdout.write(JSON.stringify({ sibling: sibling.pid, out: result.stdout, err: result.stderr }));',
+    ].join('\n'));
+    const run = spawnSync(process.execPath, [parent, fragment], { encoding: 'utf8', windowsHide: true, timeout: 60_000 });
+    const report = JSON.parse(run.stdout);
+    const found = JSON.parse(report.out);
+    expect(found.ok).toBe(true);
+    expect(found.processes.map((row) => row.pid)).toEqual([report.sibling]);
+  }, 90_000);
+});
+
+function localImportClosure(entry) {
+  const seen = new Set();
+  const stack = [entry];
+  while (stack.length > 0) {
+    const file = stack.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const match of readFileSync(file, 'utf8').matchAll(/(?:^|\n)\s*(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"](\.[^'"]+)['"]/g)) {
+      stack.push(resolve(dirname(file), match[1]));
+    }
+  }
+  return [...seen];
+}
+
+describe('execution-code binding — the approval covers the code that runs', () => {
+  it('the bounded script list is exactly the launcher import closure, by repository-relative path', () => {
+    const entry = join(REPO_ROOT, 'scripts', 'dev', 'aa-controlled-admission', 'presence-run.mjs');
+    const closure = localImportClosure(entry).map((file) => relative(REPO_ROOT, file).replaceAll('\\', '/')).sort();
+    expect(closure).toEqual([...EXECUTION_SCRIPT_FILES].sort());
+    expect(EXECUTION_WORKSPACE_BUILDS.map((row) => row.specifier).sort()).toEqual(['@principles/core/runtime', '@principles/host-runtime', '@principles/install-layout']);
+    expect(EXECUTION_CODE_TRUST_BOUNDARY).toMatch(/not tamper-proofing/);
+    expect(resolve(PRESENCE_CODE_ROOT)).toBe(resolve(REPO_ROOT));
+  });
+
+  it('records hashes and a trust boundary; nothing in the list can depend on the manifest hash', async () => {
+    const { manifest } = await makePack();
+    expect(manifest.schemaVersion).toBe('pd-presence-exec-pack/v2');
+    expect(manifest.cardVersion).toBe(CARD_VERSION);
+    expect(manifest.executionCode.scripts).toHaveLength(EXECUTION_SCRIPT_FILES.length);
+    expect(manifest.executionCode.workspaceBuilds).toHaveLength(EXECUTION_WORKSPACE_BUILDS.length);
+    expect(manifest.executionCode.trustBoundary).toBe(EXECUTION_CODE_TRUST_BOUNDARY);
+    for (const row of manifest.executionCode.scripts) {
+      expect(row.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(row.path).toMatch(/^scripts\/dev\/aa-controlled-admission\//);
+      expect(row.path).not.toMatch(/manifest\.json|approval/);
+    }
+    for (const row of manifest.executionCode.workspaceBuilds) {
+      expect(row.treeSha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(row.fileCount).toBeGreaterThan(0);
+    }
+    expect(collectExecutionCode()).toEqual({ scripts: manifest.executionCode.scripts, workspaceBuilds: manifest.executionCode.workspaceBuilds });
+  }, 120_000);
+
+  it('a manifest prepared before the binding existed is refused, never treated as covered', () => {
+    expect(executionCodeViolations(undefined)).toEqual(['manifest carries no execution-code binding; this pack predates the check and must be prepared again']);
+  });
+
+  const TOOL_FILE = (rel) => `scripts/dev/aa-controlled-admission/${rel}`;
+  it.each([
+    ['the launcher', TOOL_FILE('presence-run.mjs'), 'script'],
+    ['a helper module', TOOL_FILE('lib/presence-endpoint.mjs'), 'script'],
+    ['the budget constants', TOOL_FILE('lib/presence-config.mjs'), 'script'],
+    ['a workspace build', 'packages/host-runtime/dist/index.js', 'workspace build'],
+  ])('changing %s after prepare keeps the manifest hash but the old approval no longer runs', async (_label, changedFile, kind) => {
+    const codeRoot = makeCodeRoot();
+    const { packRoot, operatorEnv, realHome } = await makePack({ codeRoot });
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    const approvalPath = approve(packRoot);
+    const manifestShaBefore = sha256(readFileSync(join(packRoot, 'manifest.json')));
+    appendFileSync(join(codeRoot, ...changedFile.split('/')), '\n// changed after prepare\n');
+    expect(sha256(readFileSync(join(packRoot, 'manifest.json')))).toBe(manifestShaBefore);
+    const record = await execute({ packRoot, approvalPath, operatorEnv, realHome, codeRoot });
+    expect(record).toMatchObject({ status: 'refused-before-any-start', reason: 'verification' });
+    expect(record.violations).toContain('execution-code:FAIL');
+    const evidence = record.verification.failing.find((row) => row.id === 'execution-code').evidence;
+    expect(evidence.violations.some((line) => line.startsWith(kind) && line.includes(changedFile.startsWith('packages') ? 'packages/host-runtime/dist' : changedFile))).toBe(true);
+    expect(hostStarts(packRoot)).toEqual([]);
+    expect(existsSync(join(packRoot, 'run'))).toBe(false);
+  }, 180_000);
+
+  it('unrelated documentation and non-executable build output do not invalidate the pack', async () => {
+    const codeRoot = makeCodeRoot();
+    const { packRoot, operatorEnv, realHome } = await makePack({ codeRoot });
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    const approvalPath = approve(packRoot);
+    writeFileSync(join(codeRoot, 'scripts', 'dev', 'aa-controlled-admission', 'README.md'), 'notes\n');
+    mkdirSync(join(codeRoot, 'docs'), { recursive: true });
+    writeFileSync(join(codeRoot, 'docs', 'run-card.md'), 'manifest sha256 goes here\n');
+    writeFileSync(join(codeRoot, 'packages', 'host-runtime', 'dist', 'index.d.ts'), 'export {};\n');
+    writeFileSync(join(codeRoot, 'packages', 'host-runtime', 'dist', 'index.js.map'), '{}\n');
+    const record = await execute({ packRoot, approvalPath, operatorEnv, realHome, codeRoot });
+    expect(record.status).toBe('completed');
+    expect(hostStarts(packRoot)).toEqual(['R1', 'R2']);
+  }, 180_000);
+});
+
+describe('budget binding — the run uses the frozen budgets', () => {
+  it('an approval naming different budgets is refused', () => {
+    const budget = { run: { hostTurns: 2, httpRequests: 2, toolCalls: 0, paidCalls: 0 }, rounds: { R1: { hostTurns: 1, httpRequests: 1, toolCalls: 0, paidCalls: 0 }, R2: { hostTurns: 1, httpRequests: 1, toolCalls: 0, paidCalls: 0 } } };
+    const manifest = { cardVersion: CARD_VERSION, rounds: [{ id: 'R1' }, { id: 'R2' }], budget };
+    const valid = { schemaVersion: APPROVAL_SCHEMA, approvedBy: 'Owner', approvedAt: '2026-11-08T00:00:00Z', approvalEvidence: 'linear comment', cardVersion: CARD_VERSION, manifestSha256: 'a'.repeat(64), rounds: ['R1', 'R2'], budgets: budget };
+    expect(validateApproval({ approval: valid, manifestSha256: 'a'.repeat(64), manifest })).toEqual([]);
+    expect(validateApproval({ approval: { ...valid, budgets: { ...budget, run: { ...budget.run, httpRequests: 9 } } }, manifestSha256: 'a'.repeat(64), manifest }))
+      .toContain('approval budgets differ from the frozen manifest budgets');
+  });
+
+  it('editing the frozen budget breaks the old approval, and re-approving it still cannot run', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    const oldApproval = approve(packRoot);
+    const manifestPath = join(packRoot, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.budget.run.httpRequests = 9;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const stale = await execute({ packRoot, approvalPath: oldApproval, operatorEnv, realHome });
+    expect(stale).toMatchObject({ status: 'refused-before-any-start', reason: 'approval' });
+    expect(stale.violations).toContain('approval is not bound to this manifest sha256');
+    const reapproved = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(reapproved).toMatchObject({ status: 'refused-before-any-start', reason: 'verification' });
+    expect(reapproved.violations).toContain('budget-consistency:FAIL');
+    expect(hostStarts(packRoot)).toEqual([]);
+    expect(existsSync(join(packRoot, 'run'))).toBe(false);
+  }, 180_000);
+
+  it('a round budget edited apart from budget.rounds is caught inside the manifest', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    const manifestPath = join(packRoot, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.rounds[1].budget.httpRequests = 7;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
+    expect(report.failing.find((row) => row.id === 'budget-consistency').evidence.violations)
+      .toEqual(['R2: the round budget differs from budget.rounds inside the manifest']);
+  }, 120_000);
+});
+
+describe('pollution gate — the audit decides stop and completion (temp production dirs only)', () => {
+  it('an attributed change stops the run before R2 and the run is not completed', async () => {
+    const { packRoot, operatorEnv, realHome, prod } = await makePack();
+    setModes(packRoot, { R1: 'pollute-log', R2: 'ok' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.stopReasons).toEqual(['pollution_attributed']);
+    expect(record.pollutionAudit).toMatchObject({ verdict: 'attributed', stop: true, attributed: ['prod-workspace-0-event-logs'] });
+    expect(record.rounds[0]).toMatchObject({ gateOk: true, pollution: { verdict: 'attributed' } });
+    expect(hostStarts(packRoot)).toEqual(['R1']);
+    expect(existsSync(join(packRoot, 'run', 'evidence', 'R1.pollution.json'))).toBe(true);
+    // The audit only reads: the line stays exactly as the host wrote it.
+    expect(readFileSync(prod.log, 'utf8')).toContain('pp-test');
+  }, 180_000);
+
+  it('a changed static install stops for human review without blaming the run', async () => {
+    const { packRoot, operatorEnv, realHome, prod } = await makePack();
+    setModes(packRoot, { R1: 'pollute-static', R2: 'ok' });
+    const changedBefore = readFileSync(prod.pluginPkg, 'utf8');
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.stopReasons).toEqual(['pollution_review_required']);
+    expect(record.pollutionAudit).toMatchObject({ verdict: 'review-required', pendingHumanReview: true, reviewRequired: ['prod-plugin-package-json'], attributed: [] });
+    expect(record.pollutionAudit.meaning).toMatch(/cause is not established/);
+    expect(hostStarts(packRoot)).toEqual(['R1']);
+    expect(readFileSync(prod.pluginPkg, 'utf8')).toBe(`${changedBefore} `);
+  }, 180_000);
+
+  it('live-store and log changes without a run marker are recorded as unattributable and do not stop the run', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'touch-live-store', R2: 'touch-log' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record.status).toBe('completed');
+    expect(record.stopReasons).toEqual([]);
+    expect(record.pollutionAudit).toMatchObject({ verdict: 'unattributed-changes-noted', stop: false, attributed: [], reviewRequired: [], incomplete: [] });
+    expect(record.pollutionAudit.unattributed).toEqual(expect.arrayContaining(['prod-workspace-0-state-db', 'prod-workspace-0-event-logs']));
+    expect(record.pollutionAudit.meaning).toMatch(/not as pollution/);
+  }, 180_000);
+
+  it('an audit that cannot complete stops with its reason and writes the run record', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'pollute-unreadable', R2: 'ok' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.stopReasons).toEqual(['pollution_audit_incomplete']);
+    expect(record.pollutionAudit.verdict).toBe('incomplete');
+    expect(record.pollutionAudit.incomplete).toEqual([expect.objectContaining({ id: 'prod-workspace-0-state-db', reason: expect.stringContaining('EISDIR') })]);
+    expect(record.pollutionAudit.attributed).toEqual([]);
+    expect(hostStarts(packRoot)).toEqual(['R1']);
+    expect(JSON.parse(readFileSync(join(packRoot, 'run', 'run-record.json'), 'utf8')).status).toBe('stopped');
+  }, 180_000);
+
+  it('a baseline that cannot be taken refuses before anything is written or charged', async () => {
+    const { packRoot, operatorEnv, realHome, prod } = await makePack();
+    setModes(packRoot, { R1: 'ok', R2: 'ok' });
+    rmSync(prod.stateDb);
+    mkdirSync(prod.stateDb);
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'refused-before-any-start', reason: 'verification' });
+    expect(record.violations).toContain('pollution-baseline:FAIL');
+    expect(hostStarts(packRoot)).toEqual([]);
+    expect(existsSync(join(packRoot, 'run'))).toBe(false);
+  }, 120_000);
 });
 
 describe('round gate — counterexamples', () => {
@@ -333,13 +699,14 @@ describe('round gate — counterexamples', () => {
 
 const FAKE_HOST = String.raw`
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 const argv = process.argv.slice(2);
 const arg = (name) => argv[argv.indexOf('--' + name) + 1];
 const round = basename(arg('state-dir'));
 const modes = JSON.parse(readFileSync(join(process.env.HOME, 'fake-host-mode.json'), 'utf8'));
+const prod = JSON.parse(readFileSync(join(process.env.HOME, 'fake-host-prod.json'), 'utf8'));
 const mode = modes[round] ?? 'ok';
 writeFileSync(join(process.env.HOME, 'fake-host-env-' + round + '.json'), JSON.stringify({
   homedir: homedir(), PD_WORKSPACE_DIR: process.env.PD_WORKSPACE_DIR, OPENCLAW_HOME: process.env.OPENCLAW_HOME,
@@ -352,6 +719,12 @@ if (mode === 'crash') process.exit(1);
 if (mode === 'hang') { writeFileSync(join(process.env.HOME, 'grandchild-' + round + '.pid'), String(child(false).pid)); setInterval(() => {}, 1000); }
 else {
   if (mode === 'orphan') { const c = child(true); c.unref(); writeFileSync(join(process.env.HOME, 'grandchild-' + round + '.pid'), String(c.pid)); }
+  // Writes into the temp "production" directories the pollution audit watches.
+  if (mode === 'pollute-log') appendFileSync(prod.log, JSON.stringify({ note: 'pp-test' }) + '\n');
+  if (mode === 'pollute-static') appendFileSync(prod.pluginPkg, ' ');
+  if (mode === 'pollute-unreadable') { rmSync(prod.stateDb); mkdirSync(prod.stateDb); }
+  if (mode === 'touch-live-store') appendFileSync(prod.stateDb, 'another-session-write');
+  if (mode === 'touch-log') appendFileSync(prod.log, JSON.stringify({ type: 'other-session' }) + '\n');
   const config = JSON.parse(readFileSync(arg('config'), 'utf8'));
   const [providerId, model] = arg('model').split('/');
   const provider = config.models.providers[providerId];
@@ -404,7 +777,40 @@ function writeFakeNpmCache(cacheDir, files) {
   writeFileSync(bucket, `\n${sha256Text(entry)}\t${entry}`);
 }
 
-async function makePack({ durable = true, extraTarballFiles = [] } = {}) {
+/**
+ * Stands in for the staged official transports so the real self-test code path
+ * runs offline. `acceptAll` makes the negative controls pass, which must fail the self-test.
+ */
+const fakeTransports = (acceptAll) => String.raw`
+const acceptAll = ${acceptAll ? 'true' : 'false'};
+async function call(model, options, path, body, complete) {
+  const response = await fetch(model.baseUrl + path, { method: 'POST', headers: { authorization: 'Bearer ' + options.apiKey, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: options.signal });
+  const text = await response.text();
+  return {
+    async *[Symbol.asyncIterator]() { yield { type: 'done' }; },
+    result: async () => {
+      if (!acceptAll && !complete(text)) throw new Error('stream ended before a terminal event');
+      return { stopReason: 'stop', content: [{ type: 'text', text: 'PRESENCE-ACK' }] };
+    },
+  };
+}
+export const createOpenAIResponsesTransportStreamFn = () => (model, context, options) => call(model, options, '/responses', { model: model.id, stream: true, input: [] }, (text) => text.includes('response.completed'));
+export const createOpenAICompletionsTransportStreamFn = () => (model, context, options) => call(model, options, '/chat/completions', { model: model.id, stream: true, messages: [{ role: 'user', content: 'x' }] }, (text) => text.includes('"finish_reason":"stop"'));
+`;
+
+/** A small repository-shaped copy of the execution code, safe to change in a test. */
+function makeCodeRoot() {
+  const codeRoot = mkdtempSync(join(tmpdir(), 'pp-code-'));
+  const toolDir = join('scripts', 'dev', 'aa-controlled-admission');
+  cpSync(join(REPO_ROOT, toolDir), join(codeRoot, toolDir), { recursive: true });
+  for (const { dist } of EXECUTION_WORKSPACE_BUILDS) {
+    mkdirSync(join(codeRoot, ...dist.split('/')), { recursive: true });
+    writeFileSync(join(codeRoot, ...dist.split('/'), 'index.js'), `// ${dist}\n`);
+  }
+  return codeRoot;
+}
+
+async function makePack({ durable = true, extraTarballFiles = [], acceptAll = false, codeRoot = undefined } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'pp-e2e-'));
   const hostPkg = join(base, 'global', 'node_modules', 'openclaw');
   const hostFiles = [
@@ -418,6 +824,8 @@ async function makePack({ durable = true, extraTarballFiles = [] } = {}) {
   }
   mkdirSync(join(hostPkg, 'node_modules', '@openclaw', 'fs-safe'), { recursive: true });
   writeFileSync(join(hostPkg, 'node_modules', '@openclaw', 'fs-safe', 'package.json'), JSON.stringify({ name: '@openclaw/fs-safe', version: '0.0.0' }));
+  mkdirSync(join(hostPkg, 'node_modules', '@openclaw', 'ai', 'dist'), { recursive: true });
+  writeFileSync(join(hostPkg, 'node_modules', '@openclaw', 'ai', 'dist', 'transports.mjs'), fakeTransports(acceptAll));
   const npmCache = join(base, 'npm-cache');
   // The published tarball ships the lifecycle marker that a completed install
   // has already consumed; it must be the only tolerated difference.
@@ -457,9 +865,31 @@ async function makePack({ durable = true, extraTarballFiles = [] } = {}) {
   const prepared = await preparePack({
     repoRoot: REPO_ROOT, packRoot, packId: 'pp-test', hostSource: hostPkg, pluginSource: plugin,
     expectedHostVersion: '2026.11.1', expectedHostCommit: HOST_COMMIT, npmCacheDir: npmCache, endpointPort,
-    source: { headSha: 'test', trackedTreeClean: true }, operatorEnv, realHome,
+    source: { headSha: 'test', trackedTreeClean: true }, operatorEnv, realHome, codeRoot,
   });
-  return { base, packRoot, operatorEnv, realHome, prepared, prodWorkspace };
+  const prod = {
+    log: join(prodWorkspace, '.state', 'logs', 'events_2026-11-08.jsonl'),
+    pluginPkg: join(prodPlugin, 'package.json'),
+    stateDb: join(prodWorkspace, '.pd', 'state.db'),
+  };
+  writeFileSync(join(packRoot, 'home', 'fake-host-prod.json'), JSON.stringify(prod));
+  return { base, packRoot, operatorEnv, realHome, prepared, manifest: prepared.manifest, prodWorkspace, prod, endpointPort };
+}
+
+function hostStarts(packRoot) {
+  return ['R1', 'R2'].filter((round) => existsSync(join(packRoot, 'home', `fake-host-env-${round}.json`)));
+}
+
+function occupy(port) {
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolvePromise(server));
+  });
+}
+
+function release(server) {
+  return new Promise((resolvePromise) => server.close(() => resolvePromise()));
 }
 
 function shortenTimeouts(packRoot, ms) {
@@ -475,7 +905,7 @@ function approve(packRoot, overrides = {}) {
   const approvalPath = join(packRoot, 'approval.json');
   writeFileSync(approvalPath, JSON.stringify({
     schemaVersion: APPROVAL_SCHEMA, approvedBy: 'test-owner', approvedAt: new Date().toISOString(), approvalEvidence: 'offline test',
-    cardVersion: manifest.cardVersion, manifestSha256: sha256(readFileSync(manifestPath)), rounds: ['R1', 'R2'], ...overrides,
+    cardVersion: manifest.cardVersion, manifestSha256: sha256(readFileSync(manifestPath)), rounds: ['R1', 'R2'], budgets: manifest.budget, ...overrides,
   }));
   return approvalPath;
 }
@@ -508,7 +938,7 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
       .toEqual(expect.arrayContaining(['pdpresence-completions.apiKey is not a generated loopback placeholder', 'providers must share the one generated placeholder key']));
     expect(JSON.stringify(manifest)).not.toContain(config.models.providers['pdpresence-responses'].apiKey);
     expect(config.plugins.load.paths).toEqual([manifest.candidate.root]);
-    const report = await verifyPack({ packRoot, full: true, operatorEnv, realHome });
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
     expect(report.checks.filter((row) => row.status !== 'PASS')).toEqual([]);
     expect(report.ready).toBe(true);
   }, 120_000);
@@ -516,16 +946,17 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
   it('a packaged file missing from the staged host (other than the consumed lifecycle marker) fails provenance', async () => {
     const { packRoot, operatorEnv, realHome, prepared } = await makePack({ extraTarballFiles: [['dist/removed-after-install.js', Buffer.from('x')]] });
     expect(prepared.manifest.host.tarballVerification).toMatchObject({ ok: false, missing: ['dist/removed-after-install.js'], missingCount: 1 });
-    const report = await verifyPack({ packRoot, full: false, operatorEnv, realHome });
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
     expect(report.checks.find((row) => row.id === 'host-registry-tarball').status).toBe('FAIL');
     expect(report.ready).toBe(false);
   }, 120_000);
 
   it('verify flags a candidate whose presence event is only buffered', async () => {
     const { packRoot, operatorEnv, realHome } = await makePack({ durable: false });
-    const report = await verifyPack({ packRoot, full: false, operatorEnv, realHome });
+    const report = await preflightPack({ packRoot, operatorEnv, realHome });
     expect(report.checks.find((row) => row.id === 'presence-durability').status).toBe('FAIL');
     expect(report.ready).toBe(false);
+    expect(report.failing.map((row) => row.id)).toEqual(['presence-durability']);
   }, 120_000);
 
   it('refuses without a bound approval and leaves the budget untouched', async () => {
@@ -536,14 +967,20 @@ describe('execution pack — prepare, verify and approved execute (fake host)', 
   }, 120_000);
 
   it('runs R1 then R2 within 2/2/0/0, closes the endpoint, keeps evidence and refuses a second execute', async () => {
-    const { packRoot, operatorEnv, realHome } = await makePack();
+    const { packRoot, operatorEnv, realHome, manifest } = await makePack();
     setModes(packRoot, { R1: 'ok', R2: 'ok' });
     const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
     expect(record.status).toBe('completed');
+    expect(record.stopReasons).toEqual([]);
     expect(record.rounds.map((row) => [row.id, row.gateOk])).toEqual([['R1', true], ['R2', true]]);
     expect(record.ledger.used).toEqual({ hostTurns: 2, httpRequests: 2, toolCalls: 0, paidCalls: 0 });
+    // The ledger ran on the frozen budgets.
+    expect(record.ledger.budget).toEqual(manifest.budget.run);
+    expect(record.ledger.armBudgets).toEqual(manifest.budget.rounds);
     expect(record.endpointClosed).toBe(true);
     expect(record.pollution.attributed).toEqual([]);
+    expect(record.pollutionAudit).toMatchObject({ verdict: 'clean', stop: false });
+    expect(record.rounds.map((row) => row.pollution.verdict)).toEqual(['clean', 'clean']);
     const childEnv = JSON.parse(readFileSync(join(packRoot, 'home', 'fake-host-env-R1.json'), 'utf8'));
     expect(isInsideRoot(packRoot, childEnv.homedir)).toBe(true);
     expect(isInsideRoot(packRoot, childEnv.PD_WORKSPACE_DIR)).toBe(true);
