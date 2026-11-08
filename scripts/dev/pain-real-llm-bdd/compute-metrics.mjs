@@ -163,16 +163,7 @@ if (!isPartial && finalOk) {
   const evidenceDir = path.join(evidenceRoot, `pri-1147-${runId}`);
   fs.mkdirSync(evidenceDir, { recursive: true });
   const perSamplePath = path.join(evidenceDir, 'per-sample.json');
-  if (fs.existsSync(perSamplePath)) {
-    console.error(JSON.stringify({
-      ok: false,
-      reason: 'evidence_already_exists',
-      details: perSamplePath,
-      nextAction: 'use a new --run-id; existing committed evidence is never overwritten',
-    }));
-    process.exit(1);
-  }
-  fs.writeFileSync(perSamplePath, JSON.stringify({
+  const perSamplePayload = JSON.stringify({
     run_id: runId,
     git_commit_sha: runMeta?.git_commit_sha ?? null,
     dataset_sha256: declaredDatasetSha,
@@ -183,7 +174,25 @@ if (!isPartial && finalOk) {
     generated_at: new Date().toISOString(),
     desensitization_note: '仅含样本标识/期望/观测/结局/延迟/哈希；不含样本完整原文、日志或凭据。expected 字段以冻结数据集为权威源核对。样本文本以 input_hash 指纹引用，原文见冻结数据集 golden-dataset.json',
     samples: evidenceRows,
-  }, null, 2));
+  }, null, 2);
+  // Exclusive create ('wx', PRI-913 precedent): committing evidence is
+  // create-once — an existing file rejects the run. This replaces the
+  // existsSync→write check-then-act shape (CodeQL js/file-system-race)
+  // with a single atomic gate.
+  try {
+    fs.writeFileSync(perSamplePath, perSamplePayload, { flag: 'wx' });
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      console.error(JSON.stringify({
+        ok: false,
+        reason: 'evidence_already_exists',
+        details: perSamplePath,
+        nextAction: 'use a new --run-id; existing committed evidence is never overwritten',
+      }));
+      process.exit(1);
+    }
+    throw error;
+  }
   fs.writeFileSync(path.join(evidenceDir, 'metrics-summary.json'), JSON.stringify(metricsSummary, null, 2));
 } else if (!finalOk) {
   // Failed run: keep diagnostics inside the run directory, explicitly marked
