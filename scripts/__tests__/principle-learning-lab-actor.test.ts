@@ -124,15 +124,15 @@ describe('production transport wiring (offline — fake adapter, no socket)', ()
     const out = await transport.complete({
       systemPrompt: 'SYS',
       userPrompt: 'USER',
-      outputSchemaRef: 'learning-lab-actor-action-v1',
+      outputSchemaRef: 'learning-lab-actor-action',
       maxTokens: 512,
       timeoutMs: 1000,
       taskId: 'EA#P1#turn1',
     });
     expect(out.payload).toEqual({ type: 'proceed' });
     expect(started).toHaveLength(1);
-    expect(started[0].agentSpec).toEqual({ agentId: 'learning-lab-actor', schemaVersion: 'v1' });
-    expect(started[0].outputSchemaRef).toBe('learning-lab-actor-action-v1');
+    expect(started[0].agentSpec).toEqual({ agentId: 'learning-lab-actor', schemaVersion: 'current' });
+    expect(started[0].outputSchemaRef).toBe('learning-lab-actor-action');
     expect(started[0].inputPayload).toBe('USER');
     expect(started[0].systemPrompt).toBe('SYS');
     expect(started[0].contextItems).toEqual([]);
@@ -150,7 +150,7 @@ describe('production transport wiring (offline — fake adapter, no socket)', ()
     };
     const transport = createPiAdapterTransport({ adapter: fakeAdapter });
     await expect(
-      transport.complete({ systemPrompt: 's', userPrompt: 'u', outputSchemaRef: 'learning-lab-actor-action-v1', maxTokens: 64, timeoutMs: 1000 }),
+      transport.complete({ systemPrompt: 's', userPrompt: 'u', outputSchemaRef: 'learning-lab-actor-action', maxTokens: 64, timeoutMs: 1000 }),
     ).rejects.toMatchObject({ code: 'no_response' });
   });
 
@@ -185,7 +185,7 @@ describe('production transport wiring (offline — fake adapter, no socket)', ()
     expect(roundCalls.length).toBeGreaterThan(0);
     for (const call of roundCalls) {
       expect(call.maxTokens).toBe(512); // actor round budget (DEFAULT_REAL_ACTOR_CAPS.maxTokensPerRequest)
-      expect(call.outputSchemaRef).toBe('learning-lab-actor-action-v1');
+      expect(call.outputSchemaRef).toBe('learning-lab-actor-action');
     }
   });
 });

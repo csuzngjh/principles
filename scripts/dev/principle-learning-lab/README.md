@@ -110,7 +110,7 @@ scripts/__tests__/principle-learning-lab-actor.test.ts # 18 项真实 Actor 离�
 
 - **`lib/actor.mjs`**：G2 stub 抽象扩展为可交互真实 Actor。模型调用走单一 transport seam：
   `createPiAdapterTransport` 包裹**生产 `PiAiRuntimeAdapter`**（startRun/fetchOutput 边界 +
-  注册表 schema ref `learning-lab-actor-action-v1`，复用生产 tool-call/json_schema/有界修复机制，
+  注册表 schema ref `learning-lab-actor-action`（PRI-1139 起 canonical；历史 -v1 拼写照常经 alias 解析），复用生产 tool-call/json_schema/有界修复机制，
   不另造模型调用框架）；`createFakeActorTransport` 是确定性离线演练 provider（零网络）。
   逐轮循环内置硬上限（请求 16/机会、步数 40=Oracle STEP_CAP、单请求 token 512、超时 60s、
   总预算 300s、无效输出最多 2 次有界重提），无效动作永不进 Oracle；NT-01 守卫扫**通道文本**

@@ -529,7 +529,7 @@ describe('stdout official event format (root cause of the 2026-10-23 zero-event 
 });
 
 describe('OpenAI strict schema normalization (official rules, live 400 root-caused)', () => {
-  // shape mirrors learning-lab-actor-action-v1: root object with a required
+  // shape mirrors learning-lab-actor-action: root object with a required
   // anyOf-const action union, an OPTIONAL args object node, and an OPTIONAL
   // narrative string — exactly the tree OpenAI rejected live.
   const labSchema = () => JSON.parse(JSON.stringify({

@@ -25,7 +25,9 @@ test('governance experience snapshot serves Focus and routes its recovery action
     };
   };
   expect(body.success).toBe(true);
-  expect(body.data.schemaVersion).toBe('1');
+  // PRI-1139: the live server stamps the version-neutral 'current' (legacy
+  // '1' remains a valid read for pre-cutover payloads).
+  expect(body.data.schemaVersion).toBe('current');
   expect(body.data.snapshotId).toMatch(/^gov-exp:[0-9a-f]+:\d{4}-\d{2}-\d{2}T/);
   // Seeded workspace has pending approvals → the owner must decide.
   expect(body.data.summary.primaryAttention).toBe('owner_decision_required');
