@@ -1,14 +1,14 @@
 # PRI-1152 Path A 隔离宿主验证：离线预检报告（随运行卡，工具 v3.1）
 
 - 文档 ID：`pri-1150-isolated-host-preflight-20261108`。文件名沿用旧名以保护既有指针；本文按复核修复后的工具全文改写。
-- 结论：**目前没有可申请真实运行的执行包。** v3 包已作废，并已被外部清理删除（运行卡 §15）；v3.1 包尚未生成，因为 B1 修复（#2427）还没有合并。真实宿主和模型**均未启动**，运行预算零消耗。
+- 结论：**目前没有任何候选能达到 READY，也就没有可申请真实运行的执行包。** v3 包已作废，并已被外部清理删除（运行卡 §15）。尚未合并的 B1 修复（#2427）之外，还有两项新阻断需要 Owner 决定：B2，presence hook surface 未分类（运行卡 §0.3）；B3，生产 PD 已升级为同样含 presence 代码的 3.0.2（运行卡 §0.4）。真实宿主和模型**均未启动**，运行预算零消耗。
 - 说明：本文不声称「全部预检通过」。下面每一项都写明对象、命令、退出码和结果。
 
 ## 1. 预检口径（现行工具）
 
-`--verify` 与 `--execute` 共用 `preflightPack`，必需检查共 20 项。`summarizePreflight` 是唯一的 READY 判定点：
+`--verify` 与 `--execute` 共用 `preflightPack`，必需检查共 21 项。`summarizePreflight` 是唯一的 READY 判定点：
 
-- 20 项全部为 PASS 才 READY；
+- 21 项全部为 PASS 才 READY；
 - 缺少的项按 NOT_RUN 计，NOT_RUN 不算通过；
 - 退出码只取决于 READY；
 - 只有同时带 `--full --selftest` 才可能 READY。
@@ -22,6 +22,7 @@
 | 5 | host-registry-tarball | prepare 时与 npm 缓存 tarball 的逐文件对照结果 |
 | 6 | candidate-payload | 候选树、bundle 和外部依赖都在包内 |
 | 7 | presence-durability | bundle 中 `recordPromptPresenceObserved` 记录后立即写盘（B1） |
+| 7a | presence-surface | 包内 bundle 的 `PLUGIN_SURFACE_REGISTRY` 默认启用 `hook:llm_input_presence`，否则 `guardHook` 注册空操作（B2） |
 | 8 | execution-code | 启动器闭包 11 个脚本和 3 个工作区 dist 与冻结哈希一致 |
 | 9 | budget-consistency | 冻结预算、代码常量、每回合预算三者一致 |
 | 10 | host-config | 只加载候选、工具全拒、MCP 关闭、两个回环 provider |
@@ -42,16 +43,18 @@
 |---|---|---|---|---|
 | v3 包 `pp-20261108T095217Z`（清单 `b16e8128…b895`） | 旧工具 `aabbd4550` | `--verify --full --selftest`（09:57Z） | 1 | 12 PASS / 1 FAIL（`presence-durability`）。旧工具不计端口、终止工具、清扫和自测，这正是本次复核修复的问题之一 |
 | 同一 v3 包 | 现行工具 `8860abcea` | `--verify --full --selftest`（12:48Z） | 1 | 17 PASS / 3 FAIL：`manifest`（旧 schema 和卡版本）、`presence-durability`（B1）、`execution-code`（无执行代码绑定）。复核前后六个冻结文件 sha256 一致 |
-| 预演包 `rehearsal-not-approvable`（清单 `463d694f…d310`），候选为 B1 分支构建 | 现行工具 `641b2c5cb` | `--prepare` 后 `--verify --full --selftest`（13:28Z） | 0 / 0 | **20/20 PASS，READY**。只证明含 B1 的构建能达到 READY，不可批准 |
-| 预演包 `rehearsal-pre-b1-main-candidate`（清单 `40dfc6d8…8d8c`），候选为 main 源码构建 | 现行工具 `641b2c5cb` | 同上（13:35Z） | 0 / 1 | **19 PASS / 1 FAIL**，唯一失败项 `presence-durability`：B1 合并前的真实候选仍被阻断 |
+| 预演包 `rehearsal-not-approvable`（清单 `463d694f…d310`），候选为 B1 分支构建 | 工具 `641b2c5cb`（20 项，没有 `presence-surface`） | `--prepare` 后 `--verify --full --selftest`（13:28Z） | 0 / 0 | 20/20。**这是假通过**：当时的工具漏检了 B2，已被下面 `rehearsal2` 的结果取代 |
+| 预演包 `rehearsal-pre-b1-main-candidate`（清单 `40dfc6d8…8d8c`），候选为 main 源码构建 | 工具 `641b2c5cb` | 同上（13:35Z） | 0 / 1 | 19 PASS / 1 FAIL：`presence-durability` |
+| 预演包 `rehearsal2-b1-candidate`（清单 `6ed87629…abf4`），候选为 B1 分支构建 | 工具 `dfe661a11`（21 项） | 同上（14:0xZ） | 0 / 1 | **19 PASS / 2 FAIL**：`presence-surface`（B2）、`production-plugin-exclusion`（B3） |
+| 预演包 `rehearsal2-main-candidate`（清单 `b4b1c1cb…e191`），候选为 main 源码构建 | 工具 `dfe661a11` | 同上 | 0 / 1 | **18 PASS / 3 FAIL**：`presence-durability`（B1）、`presence-surface`（B2）、`production-plugin-exclusion`（B3） |
 
-两个预演包位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`，**不是 v3.1，不得批准或执行**。v3 包及其两份报告已在 21:03 被外部进程删除，结论按删除前的输出抄录。
+预演包位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`，**不是 v3.1，不得批准或执行**。v3 包及其两份报告已在 21:03 被外部进程删除，结论按删除前的输出抄录。`production-plugin-exclusion` 在 13:35Z 还是 PASS，到 rehearsal2 时变为 FAIL，原因是生产 PD 在 21:58（+08:00）升级到了 3.0.2（运行卡 §0.4）。
 
 ## 3. 测试与守卫
 
 | 命令 | 退出码 | 结果 |
 |---|---|---|
-| `npx vitest run __tests__/aa-presence-run.test.mjs`（scripts） | 0 | 61/61，连续 3 轮 |
+| `npx vitest run __tests__/aa-presence-run.test.mjs`（scripts） | 0 | 69/69（含 B2 检查后；加入 B2 检查前 61/61 连续 3 轮） |
 | `npx vitest run __tests__/aa-presence-run.test.mjs __tests__/aa-controlled-admission.test.mjs` | 0 | 95/95 |
 | `npx vitest run tests/hooks/{isolated-host-presence-fixture,llm-input-presence,prompt-presence-registry,runtime-prompt-activation}.test.ts`（插件） | 0 | 100/100 |
 | `npm run check:runtime-contract / repo-hygiene / security-baseline / workspace-tools / runtime-writers / naming-policy / docs-structure` | 均为 0 | PASS |

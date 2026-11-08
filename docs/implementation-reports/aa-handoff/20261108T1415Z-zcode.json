@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261108T1415Z-zcode",
+  "previousCheckpoint": "20261108T1340Z-zcode",
+  "generatedAt": "2026-11-08T14:15:00Z",
+  "agent": "zcode",
+  "overallStatus": "PRI1152_FIXES_PUSHED_NO_CANDIDATE_READY_B2_B3_NEED_OWNER_REAL_RUN_NOT_APPROVED",
+  "supersedes": "20261108T1340Z-zcode claimed the B1 candidate reaches READY 20/20; that READY was a false pass (the tool then had no presence-surface check). Corrected here.",
+  "summary": "复核四项修复均已推送并通过 CI：B1 (#2427)，以及 #2424 的统一 READY、执行代码绑定、污染停止。CodeRabbit 在 #2427 指出、并经实测确认的新阻断项 B2：hook:llm_input_presence 不在 PLUGIN_SURFACE_REGISTRY 中，guardHook 因此注册空操作，presence 观察在生产和隔离宿主中都从未运行。#2424 已新增第 21 项必需检查 presence-surface，在 fail-closed 前拦截；registry 分类属于 Owner 的 MVP 决定，本轮未修改。新环境变化 B3：生产 PD 于 21:58（+08:00）升级到 3.0.2，该版本也含 presence 代码，『候选专属事件』判据失效，production-plugin-exclusion 正确地判为 FAIL。用现行工具做预演：B1 候选 19 PASS / 2 FAIL（B2、B3），main 候选 18 PASS / 3 FAIL（B1、B2、B3）。目前没有任何候选能达到 READY；v3.1 未生成；真实宿主与模型零启动；不签收 D/G1/C04/G2。",
+  "git": {
+    "execPack": {
+      "branch": "ai/PRI-1152-isolated-host-exec-pack",
+      "prUrl": "https://github.com/csuzngjh/principles/pull/2424",
+      "reviewedHead": "d916daad8",
+      "commits": ["8860abcea review fixes", "641b2c5cb merge main", "91d1112b6 docs + checkpoint 1340Z", "3b6fd08db merge main (e501b9654)", "dfe661a11 presence-surface check (B2)", "this checkpoint commit"]
+    },
+    "b1": {
+      "branch": "ai/PRI-1152-presence-event-flush",
+      "prUrl": "https://github.com/csuzngjh/principles/pull/2427",
+      "commits": ["d1cd06eda flush fix + regression", "8dec1a833 no dispose in tests", "363d9b5d0 merge main (e501b9654)", "e2105ff49 CodeRabbit review: cwd-independent paths, child deadline, mixed-order case, pinned Date"]
+    }
+  },
+  "blockers": {
+    "B1": { "state": "fixed in #2427, not merged", "check": "presence-durability" },
+    "B2": {
+      "state": "OWNER DECISION",
+      "check": "presence-surface",
+      "evidence": "isSurfaceEnabled('hook:llm_input_presence') -> {enabled:false, reason:'not found in registry — classify before enabling (PRI-289)'}; llm_output/before_prompt_build enabled:true",
+      "escape": "mvp-surface-registry-guard.test.ts regex only matches hookRegistrations.register('<literal>', ...); the presence registration passes variables",
+      "options": ["A: core + enabledByDefault true in plugin-surface-registry.ts (production starts fact-only presence events, PRI-1150 intent)", "B: quiet/off (guardHook reads no override; Path A unverifiable without a new switch)"],
+      "followUps": ["fix the registry guard to see variable registrations", "record an ERR for the escaped defect"]
+    },
+    "B3": {
+      "state": "OWNER DECISION",
+      "check": "production-plugin-exclusion",
+      "evidence": "production PD upgraded 2.6.4 -> 3.0.2 at 2026-11-08 21:58:56 +08:00 (not by this task); bundle dc1ceb1f…f247 contains the presence event type",
+      "options": ["choose another candidate-loaded discriminator for v3.1 (e.g. host-side plugin source record as R1 first check)", "rely on structural exclusion only"]
+    }
+  },
+  "codeRabbitOn2427": {
+    "surfaceUnclassified": "valid -> B2 (Owner decision; #2424 fails closed)",
+    "dailyStatsConsistency": "not changed: Owner-specified flushEvents; daily-stats is a 30 s derived cache that already diverges on the 20-event, adaptive-delivery and flushImmediately paths; follow-up candidate",
+    "cwdRelativePaths": "fixed e2105ff49 (verified from repo root 4/4)",
+    "utcMidnight": "fixed e2105ff49 (Date-only fake timers, restored in afterEach)",
+    "childDeadline": "fixed e2105ff49",
+    "mixedEvents": "fixed e2105ff49",
+    "docstringCoverage": "CodeRabbit-only check, not a repo merge gate"
+  },
+  "packs": {
+    "v3": "DELETED by external robocopy /MIR 2026-11-08 21:03:29 +08:00 (manifest b16e8128…; never approved or executed)",
+    "v31": "NOT GENERATED",
+    "rehearsals": {
+      "root": "D:\\Code\\.pd-tmp\\principles\\20261108\\task-pri1152-rehearsal-211918-7ffe9a",
+      "notApprovable": true,
+      "rehearsal2-b1-candidate": { "manifestSha256": "6ed87629d0ebfbb10bebf37f81c5fd30263d271aa7132cda5799d91beef5abf4", "verify": "exit 1, 19 PASS / 2 FAIL (presence-surface, production-plugin-exclusion)" },
+      "rehearsal2-main-candidate": { "manifestSha256": "b4b1c1cbbb6286f7f01f4ef8da625880e784810c52bb778005f2d35927e2e191", "verify": "exit 1, 18 PASS / 3 FAIL (presence-durability, presence-surface, production-plugin-exclusion)" }
+    }
+  },
+  "verification": {
+    "scripts": "aa-presence-run 69/69 (61/61 x3 before the B2 check)",
+    "plugin": "durability 4/4 from the package and from the repo root; event-log + durability + presence 35/35; tsc/eslint exit 0",
+    "notRun": "verify:merge locally; Mimosa full audit (scanner_enobufs); any real host or model start"
+  },
+  "conclusionBound": "D=unknown；不签收 G1/C04/G2；不宣称送达、遵循或行为改善；真实运行未批准未执行",
+  "latestPointer": "LATEST.json not modified"
+}

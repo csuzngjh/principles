@@ -1,7 +1,7 @@
 # PRI-1152 Path A 隔离宿主验证运行卡 v3（`pri1152-run-card-v3`）
 
 - 文档 ID：`pri-1150-isolated-host-run-card-20261108`（文件名沿用，保护既有指针；v3 取代 v1/v2 全部内容）
-- 状态：**🔴 当前不可执行，真实运行未批准、未执行，真实宿主/模型零启动**。本卡正文记录的是冻结执行包 v3 的事实。v3 包已无法通过现行工具的预检（3 项 FAIL，见 §0.1），工具已按复核意见加固，下一步是按 §12 生成 v3.1。
+- 状态：**🔴 当前不可执行，真实运行未批准、未执行，真实宿主/模型零启动**。本卡正文记录的是冻结执行包 v3 的事实。v3 包已无法通过现行工具的预检（3 项 FAIL，见 §0.1），工具已按复核意见加固。另有两项新发现的阻断需要 Owner 决定：B2（§0.3）和 B3（§0.4）。目前没有任何候选能达到 READY，v3.1 只能在这些事项解决后按 §12 生成。
 - 批准对象（两项必须同时绑定）：卡版本 + 执行清单 sha256。v3 包的取值是 `pri1152-run-card-v3` + `b16e81284bd1975036c3560f022d28610f1c43550d245e0e4610f926e383b895`，**这组取值已作废，不得用于批准**。v3.1 尚未生成，届时产生新的清单 sha256，须对新值重新批准；不沿用旧批准。
 - 执行包（PACK）：`D:\Code\_worktrees\principles\PRI-1152-isolated-host-exec-pack\artifacts\pri-1152-isolated-host\pp-20261108T095217Z`。**该目录已不存在**：2026-11-08 21:03（+08:00）一个外部进程对整个 worktree 执行了 `robocopy <空目录> <worktree> /MIR`，把它连同 gitignored 的 `artifacts\` 一起删除（§15）。该包从未获批、从未执行。下文 v3 数值抄自删除前的清单和报告，只作历史记录。
 - 机器可读清单：`PACK\manifest.json`；本卡 v3 数值抄自该清单与离线复核报告 `PACK\preflight\verify-20261108T095712Z.json`（两者均已随包删除）。
@@ -41,14 +41,36 @@ v3 包不覆盖、不重新批准，只读复核：17 项 PASS，3 项 FAIL。
 
 ### 0.2 v3 包删除后的替代证据（预演包，不可批准）
 
-两个预演包都用现行工具 `641b2c5cb` 生成，位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`。它们**不是 v3.1**：候选取自未合并分支或旧构建，只用于证明工具对两种候选的判定正确，**不得批准、不得执行**。
+预演包都位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`。它们**不是 v3.1**：候选取自未合并分支或旧构建，只用于检验工具对不同候选的判定，**不得批准、不得执行**。
 
-| 预演包 | 候选来源 | `--verify --full --selftest` |
-|---|---|---|
-| `rehearsal-not-approvable`（清单 `463d694f…d310`） | B1 分支 `ai/PRI-1152-presence-event-flush` 的 `build:bundle` 产物（含 `this.flushEvents()`） | **exit 0，20/20 PASS，READY** |
-| `rehearsal-pre-b1-main-candidate`（清单 `40dfc6d8…8d8c`） | 本 worktree（main 源码，不含 B1）的 `build:bundle` 产物 | **exit 1，19 PASS / 1 FAIL**，唯一失败项 `presence-durability` |
+| 预演包 | 工具 | 候选来源 | `--verify --full --selftest` |
+|---|---|---|---|
+| `rehearsal-not-approvable`（清单 `463d694f…d310`） | `641b2c5cb`（尚无 `presence-surface` 检查） | B1 分支的 `build:bundle` 产物 | exit 0，20/20。**这个 READY 是假通过**：当时的工具漏检了 B2（§0.3），已被下一行取代 |
+| `rehearsal-pre-b1-main-candidate`（清单 `40dfc6d8…8d8c`） | `641b2c5cb` | main 源码（不含 B1）的 `build:bundle` 产物 | exit 1，19 PASS / 1 FAIL：`presence-durability` |
+| `rehearsal2-b1-candidate`（清单 `6ed87629…abf4`） | `dfe661a11`（21 项） | B1 分支的 `build:bundle` 产物 | **exit 1，19 PASS / 2 FAIL：`presence-surface`（B2）、`production-plugin-exclusion`（B3）** |
+| `rehearsal2-main-candidate`（清单 `b4b1c1cb…e191`） | `dfe661a11` | main 源码的 `build:bundle` 产物 | **exit 1，18 PASS / 3 FAIL：`presence-durability`（B1）、`presence-surface`（B2）、`production-plugin-exclusion`（B3）** |
 
-这说明：B1 合并前的真实候选仍被 `presence-durability` 阻断；含 B1 的构建可以达到 READY。
+结论：**目前没有任何候选能达到 READY。** B1 由 #2427 修复，B2 和 B3 需要 Owner 决定。
+
+### 0.3 阻断项 B2：presence hook surface 未分类，guardHook 注册空操作（CodeRabbit 在 #2427 指出，已核实）
+
+| 项 | 事实 |
+|---|---|
+| 机制 | 插件经 `guardHook('hook:llm_input_presence', …)` 注册 `llm_input` 处理器。`guardHook` 对 `PLUGIN_SURFACE_REGISTRY` 中没有、或未默认开启的 surface 注册空操作（PRI-289），且不传 overrides |
+| 实测 | 用真实 `@principles/core/runtime` 运行 `isSurfaceEnabled('hook:llm_input_presence')`，结果为 `{enabled:false, reason:"surface 'hook:llm_input_presence' not found in registry — classify before enabling (PRI-289)"}`。`hook:llm_output`、`hook:before_prompt_build` 为 `enabled:true`。B1 分支 bundle 的 registry 中同样没有该条目 |
+| 后果 | 生产环境和隔离宿主中的 presence 观察**从未运行**。即使 B1 合并，R1 也会因事件数为 0 而失败 |
+| 漏检原因 | `mvp-surface-registry-guard.test.ts` 的正则只识别 `hookRegistrations.register('<字面量>', …)`，这一处注册传的是变量 `llmInputPresence.surfaceId`；`isolated-host-presence-fixture.test.ts` 直接调用处理器，没有经过注册 |
+| 本轮动作 | #2424 新增第 21 项必需检查 `presence-surface`：读取包内 bundle 的 registry，未启用即在启动宿主前拒绝。**没有修改 registry**：分类决定生产是否开始记录 presence 事件，属于 Owner 的 MVP 范围决定（AGENTS.md §5、PRI-289） |
+| 待 Owner 选择 | 方案 A：在 `packages/principles-core/src/runtime/feature-flags/plugin-surface-registry.ts` 新增 `{ id: 'hook:llm_input_presence', kind: 'hook', category: 'core', enabledByDefault: true, … }`，生产随之开始记录只含事实、不含正文的 presence 事件，这与 PRI-1150「生产零配置变更」的原意一致。方案 B：`quiet` 默认关闭；但 `guardHook` 不读取任何开关，隔离宿主也无法开启，Path A 将无法验证，除非再新增开关通道（范围更大）。另外应修正 registry 守卫测试，让它识别变量形式的注册，并记一条 ERR 记录 |
+
+### 0.4 阻断项 B3：生产 PD 已升级到 3.0.2，「候选专属事件」论据不再成立（环境变化）
+
+| 项 | 事实 |
+|---|---|
+| 变化 | `C:\Users\Administrator\.openclaw\extensions\principles-disciple` 于 2026-11-08 21:58:56（+08:00）从 2.6.4 升级到 3.0.2（bundle sha256 `dc1ceb1f…f247`）。升级不是本任务所为 |
+| 影响 | §3 的判据是「生产 bundle 不含 `runtime_v2_prompt_presence_observed`，所以隔离日志中出现该事件即证明候选执行了」。3.0.2 含有该事件代码，判据失效，`production-plugin-exclusion` 现为 FAIL（fail-closed，属于正确行为） |
+| 仍然成立的隔离 | 所有发现根都在包内，`plugins.load.paths` 只指向候选，`plugins.allow` 只含 PD，HOME/USERPROFILE/APPDATA 都已重定向。这些结构性排除不依赖生产版本 |
+| 待 Owner 选择 | 为 v3.1 另定「候选确实被加载」的判据，例如以宿主对插件来源的记录作为 R1 首项判定，或只依赖结构性排除。在此之前不放宽该检查 |
 
 ## 1. 目标与结论上限
 
@@ -180,7 +202,7 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
 
 - **预算语义**：额度用满不算超预算；**下一次**尝试在发出前被拒绝。账本 `PACK\run\budget-ledger.json` 永不重置。同一执行包只执行一次：`run\` 目录已存在就拒绝。账本取自冻结清单的 `budget`，不取当前代码常量；`budget-consistency` 校验冻结值、代码常量和每回合预算三者一致，批准文件的 `budgets` 也必须等于冻结值。
 - **超时**：宿主 `--timeout 120`（秒）；外层 180000 ms 后执行 `taskkill /PID <pid> /T /F`，结束整个进程树。
-- **执行前复核**：`--execute` 在建 `run\`、建账本之前重新跑全部 20 项必需检查，不读历史预检文件。端口检查只说明当时空闲，不是预留；真实绑定失败时 `stoppedAt=endpoint-bind`，不启动宿主，不计预算，保留证据。
+- **执行前复核**：`--execute` 在建 `run\`、建账本之前重新跑全部 21 项必需检查，不读历史预检文件。端口检查只说明当时空闲，不是预留；真实绑定失败时 `stoppedAt=endpoint-bind`，不启动宿主，不计预算，保留证据。
 - **执行代码绑定**：清单 `executionCode` 记录启动器及其相对导入闭包（11 个脚本，相对路径 + SHA-256）和启动器加载的 3 个工作区包 `dist`（只算 `.js`，相对路径 + 文件数 + 聚合 SHA-256）。`execution-code` 按运行中模块的位置重算，不符即在启动宿主前拒绝。信任边界：这是防漂移校验，由被校验的代码自己执行，不能抵御校验器或 Node 被恶意替换，第三方 `node_modules` 不在列表内。
 - **停止**：R1 任何一项判定失败，**不启动 R2**。污染审计结果也决定是否继续（§11）。不自动重试，不切换 provider，不用 fallback。
 - **清理**：
@@ -233,11 +255,11 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
 
 本轮**未生成 v3.1**：只有实际包含 B1 修复的构建才能生成新候选，而 B1 PR 尚未合并。
 
-1. Owner 合并 #2427（B1）和 #2424（执行包工具），两者先后顺序不影响结果，但必须都进入 main。
+1. Owner 合并 #2427（B1）和 #2424（执行包工具），并就 B2（§0.3，surface 分类）和 B3（§0.4，候选加载判据）作出决定，按决定合入对应修复。这些都必须进入 main，先后顺序不影响结果。
 2. 从最新 origin/main 新建独立 worktree（`npm run dev:worktree -- PRI-1152 v31-pack`），确认 `npm run dev:worktree:ready` 为 READY。不要复用保存 v3 包的旧 worktree。
 3. 在新 worktree 的 `packages/openclaw-plugin` 运行 `npm run build:bundle`。必须用非压缩构建：`presence-durability` 读取产物文本，`build:production` 的压缩产物无法判定。
 4. 运行 `node scripts/dev/aa-controlled-admission/presence-run.mjs --prepare --repo <新 worktree>`，得到新 PACK 和新清单 sha256。此后不要重新构建、切换分支或改动被绑定的脚本，否则 `execution-code` 会拒绝。
-5. 运行 `--verify --pack <新 PACK> --full --selftest`，要求退出码 0、20 项全部 PASS（READY）。任何一项失败都不进入下一步。
+5. 运行 `--verify --pack <新 PACK> --full --selftest`，要求退出码 0、21 项全部 PASS（READY）。任何一项失败都不进入下一步。
 6. 用新清单的实际取值更新本卡为 `pri1152-run-card-v3.1`（SHA、哈希、端口、路径）。
 7. Owner 明确批准该卡版本和新清单 sha256。Agent 不得自行填写批准。
 8. 按 `approval.template.json` 填写 `approvedBy`、`approvedAt`、`approvalEvidence`（批准记录所在位置），另存为 `approval.json`。
@@ -246,6 +268,8 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
 ## 13. 尚缺事项
 
 1. **B1 修复合并**：#2427 待 Owner 合并；此前现有候选一直被 `presence-durability` 阻断。
+1a. **B2（Owner 决定）**：presence surface 的分类方案，见 §0.3。在此之前所有候选被 `presence-surface` 阻断。
+1b. **B3（Owner 决定）**：生产 PD 3.0.2 也含 presence 代码，需要另定「候选确实被加载」的判据，见 §0.4。在此之前 `production-plugin-exclusion` 为 FAIL。
 2. **只能由获批真实运行给出的事实（NOT RUN）**：
    - 官方宿主是否确实加载了候选；
    - 真实的 `llm_input` 派发；
