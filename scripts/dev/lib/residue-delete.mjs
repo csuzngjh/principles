@@ -190,6 +190,78 @@ export function canonicalPath(p) {
 // components there; on Windows both separators count.
 const NON_LEXICAL_TARGET = process.platform === 'win32' ? /(^|[\\/])\.\.([\\/]|$)/ : /(^|\/)\.\.(\/|$)/;
 
+/**
+ * One recorded filesystem identity: what `lstat` said about a path at scan
+ * time. `dev`/`ino` are the OS-level identity of the EXACT object named by the
+ * path (a directory entry or a link itself — never its target, because lstat
+ * does not follow reparse points).
+ * @typedef {{path: string, dev: number, ino: number, kind: 'directory'|'link'}} IdentityEntry
+ */
+
+/**
+ * Record the identity of every directory from `root` (inclusive) down to the
+ * parent of `linkPath`, plus the link entry itself. The chain is what a path
+ * resolution of `linkPath` walks, so re-verifying it immediately before an
+ * unlink proves no ancestor directory was replaced by a junction/symlink (or
+ * another directory) since the scan — without such a check, a swapped parent
+ * would redirect `fs.unlinkSync(link.path)` at an object OUTSIDE the tree.
+ *
+ * @param {string} root absolute scan root (a real directory, already verified)
+ * @param {string} linkPath absolute path of the link inside root
+ * @returns {IdentityEntry[]} root→parent directories, then the link itself
+ */
+function captureIdentityChain(root, linkPath) {
+  const chain = [];
+  const rootResolved = path.resolve(root);
+  const linkResolved = path.resolve(linkPath);
+  const relative = path.relative(rootResolved, linkResolved);
+  const segments = relative.split(path.sep).filter(Boolean);
+  // Every directory on the way: root, root/a, root/a/b, ... parent(link).
+  let current = rootResolved;
+  const dirSegments = segments.slice(0, -1);
+  for (let i = 0; i <= dirSegments.length; i += 1) {
+    if (i > 0) current = path.join(current, dirSegments[i - 1]);
+    const stat = fs.lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error('ancestor ' + current + ' is not a real directory');
+    }
+    chain.push({ path: current, dev: stat.dev, ino: stat.ino, kind: 'directory' });
+  }
+  const linkStat = fs.lstatSync(linkResolved);
+  chain.push({ path: linkResolved, dev: linkStat.dev, ino: linkStat.ino, kind: 'link' });
+  return chain;
+}
+
+/**
+ * Prove the recorded chain still names the same objects right before a
+ * path-based unlink. Any disappearance, identity change or type change (a
+ * directory swapped for a link, a link replaced by a real file) fails closed:
+ * the caller refuses that link instead of unlinking through a redirected path.
+ *
+ * @param {IdentityEntry[]} chain value returned by captureIdentityChain()
+ * @returns {string|null} null when the chain is intact, else the failure reason
+ */
+function verifyIdentityChain(chain) {
+  for (const entry of chain) {
+    let stat;
+    try {
+      stat = fs.lstatSync(entry.path);
+    } catch (err) {
+      return entry.path + ' disappeared since the scan: ' + String((err && err.code) || err);
+    }
+    if (entry.kind === 'directory' && (stat.isSymbolicLink() || !stat.isDirectory())) {
+      return entry.path + ' is no longer a real directory (replaced since the scan)';
+    }
+    if (entry.kind === 'link' && !stat.isSymbolicLink()) {
+      return entry.path + ' is no longer a reparse point (replaced since the scan)';
+    }
+    if (stat.dev !== entry.dev || stat.ino !== entry.ino) {
+      return entry.path + ' changed identity since the scan (dev/ino mismatch)';
+    }
+  }
+  return null;
+}
+
 /** Machine-readable refusal reasons shared by both cleanup entry points. */
 export const REMOVAL_REASONS = Object.freeze({
   EXTERNAL_LINKS_PRESENT: 'EXTERNAL_LINKS_PRESENT',
@@ -241,6 +313,13 @@ export function classifyReparsePoints(root) {
     const lexical = resolveLinkTarget(link.path, link.target);
     const nonLexical = typeof link.target === 'string' && NON_LEXICAL_TARGET.test(link.target);
     const canonicalTarget = lexical !== null && !nonLexical ? canonicalPath(lexical) : null;
+    // The probe target is what the OS ACTUALLY reaches when it resolves the
+    // link (realpath resolves every intermediate link). Classification stays
+    // strict — for a non-lexical target the direction remains UNKNOWN — but
+    // existence probes and caller fingerprints must name the real object, not
+    // a lexically normalised path that can name a different one (CodeRabbit,
+    // PRI-1143 round 3).
+    const probeTarget = lexical !== null ? canonicalPath(lexical) : null;
     // Both sides come from realpath, so compare case-SENSITIVELY.
     const inside =
       canonicalRoot !== null &&
@@ -260,11 +339,22 @@ export function classifyReparsePoints(root) {
           : inside
             ? null
             : 'outside';
+    let ancestorIdentity = null;
+    try {
+      ancestorIdentity = captureIdentityChain(root, link.path);
+    } catch (err) {
+      // The chain broke between the walk and this recording pass; the next
+      // verify would refuse anyway — record the failure so the scan is
+      // incomplete and the caller fails closed.
+      scan.unreadable.push({ path: link.path, error: 'could not record ancestor identity: ' + String((err && err.message) || err) });
+    }
     const row = {
       path: link.path,
       target: link.target,
       resolvedTarget: lexical,
       canonicalTarget,
+      probeTarget,
+      ancestorIdentity,
       targetExists: link.targetExists,
       // Cycles are unsafe for recursive traversal even when their targets
       // are inside the tree; callers may detach verified cycles without recursing.
@@ -311,7 +401,24 @@ export function detachExternalLinks(root) {
   const detached = [];
   const brokenTargets = [];
   for (const link of before.external) {
-    const probe = link.canonicalTarget || link.resolvedTarget;
+    // A path-based unlink follows the WHOLE ancestor chain. If any directory
+    // on that chain was replaced by a junction since the scan, unlinking would
+    // reach an object OUTSIDE this tree. Verify every recorded identity first
+    // and refuse the link when anything changed (fail-closed, git-14).
+    const identityFailure = link.ancestorIdentity ? verifyIdentityChain(link.ancestorIdentity) : 'ancestor identity was not recorded for this link';
+    if (identityFailure) {
+      detached.push({
+        path: link.path,
+        target: link.target,
+        targetExistedBefore: null,
+        targetStillExists: null,
+        error: 'refused to unlink: ' + identityFailure,
+      });
+      continue;
+    }
+    // Existence is probed against the object the OS actually reaches, not the
+    // lexical fallback a non-lexical target would produce.
+    const probe = link.canonicalTarget || link.probeTarget;
     const existedBefore = probe !== null ? fs.existsSync(probe) : null;
     let error = null;
     try {
@@ -377,6 +484,13 @@ export function detachInternalLinks(root) {
     ...before.external.filter((link) => link.unsafeReason === 'cycle'),
   ];
   for (const link of safeToDetach) {
+    // Same fail-closed rule as the external pass: never unlink through an
+    // ancestor chain that changed since the scan.
+    const identityFailure = link.ancestorIdentity ? verifyIdentityChain(link.ancestorIdentity) : 'ancestor identity was not recorded for this link';
+    if (identityFailure) {
+      failedToDetach.push({ path: link.path, error: 'refused to unlink: ' + identityFailure });
+      continue;
+    }
     try {
       fs.unlinkSync(link.path);
       detached.push({ path: link.path, target: link.target, unsafeReason: link.unsafeReason || null });
@@ -451,6 +565,8 @@ export function removeResidueTree(root, opts = {}) {
   }
 
   const started = now();
+  const rootIdentityStat = fs.lstatSync(guard.resolved);
+  const rootIdentity = { dev: rootIdentityStat.dev, ino: rootIdentityStat.ino };
   const preflight = scanReparsePoints(guard.resolved);
   if (preflight.unreadable.length > 0) {
     return {
@@ -524,11 +640,11 @@ export function removeResidueTree(root, opts = {}) {
         return false;
       }
       if (!stat.isDirectory()) {
+        // A directory recorded by the scan became an ordinary file mid-walk.
+        // That file may be someone's data written through a non-cooperating
+        // handle; deleting it would destroy unknown work (git-4). Fail closed.
         if (isRoot) throw new Error('root stopped being a directory: ' + dir);
-        fs.unlinkSync(dir);
-        removedFiles += 1;
-        report();
-        return false;
+        throw new Error('directory ' + dir + ' was replaced by a non-link object during deletion; refusing to unlink it (fail-closed)');
       }
       throw openError;
     }
@@ -549,11 +665,29 @@ export function removeResidueTree(root, opts = {}) {
     if (!stat.isDirectory()) {
       handle.closeSync();
       if (isRoot) throw new Error('root stopped being a directory: ' + dir);
-      fs.unlinkSync(dir);
-      removedFiles += 1;
-      report();
-      return false;
+      // Same rule as the open-failure path: a scanned directory that became an
+      // ordinary file mid-walk is unknown work — never unlink it silently.
+      throw new Error('directory ' + dir + ' was replaced by a non-link object during deletion; refusing to unlink it (fail-closed)');
     }
+
+    // Identity of the exact directory this handle enumerates. Every path-based
+    // child mutation below is preceded by a re-check against this identity: if
+    // an ancestor swapped this path for a junction, lstat now names a different
+    // object and the deletion fails closed instead of unlinking outside the
+    // tree (Node has no unlink-at-fd primitive to do better).
+    const dirIdentity = { dev: stat.dev, ino: stat.ino };
+    const assertParentStable = () => {
+      const now = fs.lstatSync(dir);
+      if (now.isSymbolicLink() || !now.isDirectory() || now.dev !== dirIdentity.dev || now.ino !== dirIdentity.ino) {
+        throw new Error('directory ' + dir + ' was replaced during deletion; refusing path-based unlink (fail-closed)');
+      }
+    };
+    const assertChildUnchanged = (full, childStat) => {
+      const now = fs.lstatSync(full);
+      if (now.dev !== childStat.dev || now.ino !== childStat.ino) {
+        throw new Error('entry ' + full + ' changed identity during deletion; refusing to unlink it (fail-closed)');
+      }
+    };
 
     try {
       let entry;
@@ -567,14 +701,22 @@ export function removeResidueTree(root, opts = {}) {
           throw err;
         }
         if (childStat.isSymbolicLink()) {
+          assertParentStable();
+          assertChildUnchanged(full, childStat);
           detachLink(full);
         } else if (childStat.isDirectory()) {
+          assertParentStable();
+          assertChildUnchanged(full, childStat);
           if (walk(full)) {
+            assertParentStable();
+            assertChildUnchanged(full, childStat);
             fs.rmdirSync(full);
             removedDirs += 1;
             report();
           }
         } else {
+          assertParentStable();
+          assertChildUnchanged(full, childStat);
           fs.unlinkSync(full);
           removedFiles += 1;
           if (removedFiles % progressEveryFiles === 0) report(true);
@@ -589,6 +731,13 @@ export function removeResidueTree(root, opts = {}) {
 
   try {
     walk(guard.resolved, true);
+    // The final rmdir resolves the root path through its ancestors too. Verify
+    // the root still names the directory this walk emptied before removing it.
+    const rootNow = fs.lstatSync(guard.resolved);
+    if (rootNow.isSymbolicLink() || !rootNow.isDirectory()
+      || rootNow.dev !== rootIdentity.dev || rootNow.ino !== rootIdentity.ino) {
+      throw new Error('tree root ' + guard.resolved + ' was replaced during deletion; refusing the final rmdir (fail-closed)');
+    }
     fs.rmdirSync(guard.resolved);
     removedDirs += 1;
     report(true);

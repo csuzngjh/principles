@@ -48,7 +48,14 @@ import {
 } from './lib/git.mjs';
 import { collectPrIndex, readLeaseState } from './lib/workspace-lifecycle.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
-import { classifyReparsePoints, detachExternalLinks, detachInternalLinks, formatProgress, REMOVAL_REASONS } from './lib/residue-delete.mjs';
+import {
+  classifyReparsePoints,
+  detachExternalLinks,
+  detachInternalLinks,
+  formatProgress,
+  isPathInsideRoot,
+  REMOVAL_REASONS,
+} from './lib/residue-delete.mjs';
 import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';
 import { CODES } from './lib/preflight.mjs';
 
@@ -257,11 +264,22 @@ export function fingerprintExternalTarget(dir, { excludePaths = [] } = {}) {
   return rows.sort().join('\n');
 }
 
-export function snapshotExternalTargets(links, { excludePaths = [] } = {}) {
+/**
+ * Snapshot every external reparse-point target that a detach pass may affect.
+ * The fingerprint target is the object the OS actually reaches: the canonical
+ * target when the direction is proven, else the link's probe target (a
+ * non-lexical target's realpath — classification stays UNKNOWN, but existence
+ * and content checks must still name the real object, CodeRabbit round 3).
+ * Anything proven inside `root` (self/ancestor cycles) is skipped: it dies with
+ * the tree and cannot be damaged by detaching the link.
+ */
+export function snapshotExternalTargets(links, { excludePaths = [], root = null } = {}) {
   const snapshots = new Map();
   for (const link of links) {
-    if (!link.canonicalTarget || link.unsafeReason !== 'outside') continue;
-    const target = path.resolve(link.canonicalTarget);
+    const candidate = link.canonicalTarget || link.probeTarget;
+    if (!candidate) continue;
+    if (root && isPathInsideRoot(root, candidate)) continue;
+    const target = path.resolve(candidate);
     const key = process.platform === 'win32' ? target.toLowerCase() : target;
     if (snapshots.has(key)) continue;
     const existedBefore = fs.existsSync(target);
@@ -517,7 +535,22 @@ async function main() {
             );
           }
         }
-        targetSnapshots = snapshotExternalTargets(linkScan.external, { excludePaths: expectedRemovalPaths });
+        // A non-lexical target's probe target cannot be proven to contain (or
+        // not contain) the worktree or the Git admin area, so the expected
+        // exclusion list cannot be proven complete for it. Fail closed instead
+        // of reporting an expected change as external-target damage.
+        for (const link of linkScan.external) {
+          if (link.canonicalTarget || !link.probeTarget) continue;
+          if (isWithinPath(link.probeTarget, target.path) || isWithinPath(link.probeTarget, commonDir)) {
+            throw new PreflightRefusal(
+              'A non-lexical reparse-point target resolves to ' + link.probeTarget +
+                ', which contains this worktree or the repository Git area; the expected-change exclusion cannot be proven for it.',
+              'Replace the link with a direct target, or remove it manually, before cleaning this worktree.',
+              { reason: REMOVAL_REASONS.SCAN_INCOMPLETE }
+            );
+          }
+        }
+        targetSnapshots = snapshotExternalTargets(linkScan.external, { excludePaths: expectedRemovalPaths, root: target.path });
 
         if (linkScan.external.length > 0) {
           await assertWorktreeRemovalOwnership(cwd, target.path, 'before detaching external or cyclic reparse points');

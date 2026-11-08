@@ -6,6 +6,7 @@
 // shared `node_modules` appears, so this is not hypothetical.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -526,6 +527,203 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     expect(row, 'the link must still be reported as unsafe').toBeDefined();
     expect(row?.unsafeReason).not.toBe('non-lexical');
   });
+
+  it('records the ancestor identity chain for every link it classifies', () => {
+    const { tree, outside } = buildTree('identity-chain');
+    const link = path.join(tree, 'node_modules', 'external-pkg');
+    makeJunction(link, outside);
+    const verdict = classifyReparsePoints(tree);
+    const row = verdict.external.find((l) => l.path === link);
+    expect(row?.ancestorIdentity).toBeTruthy();
+    const chain = row?.ancestorIdentity as Array<{ path: string; kind: string }>;
+    // Root → parent directories → the link itself.
+    expect(chain.map((entry) => entry.kind)).toEqual(['directory', 'directory', 'link']);
+    expect(path.resolve(chain[0].path)).toBe(path.resolve(tree));
+    expect(path.resolve(chain[2].path)).toBe(path.resolve(link));
+  });
+
+  it('a parent swapped for a junction BEFORE the detach pass never causes deletion through the swap (external)', () => {
+    const { tree, outside } = buildTree('parent-swap-external');
+    const parent = path.join(tree, 'node_modules');
+    const link = path.join(parent, 'external-pkg');
+    makeJunction(link, outside);
+
+    // Race injection: between an earlier scan and the detach pass, a
+    // non-cooperating process replaced the link's parent directory with a
+    // junction. The detach pass re-scans and must treat the situation as the
+    // NEW reality without deleting anything through the swapped path.
+    const swapTarget = path.join(root, 'parent-swap-external-swapdir');
+    fs.mkdirSync(swapTarget, { recursive: true });
+    fs.writeFileSync(path.join(swapTarget, 'external-pkg'), 'VICTIM — must survive\n', 'utf-8');
+    fs.renameSync(parent, parent + '.original');
+    makeJunction(parent, swapTarget);
+
+    try {
+      const result = detachExternalLinks(tree);
+      // The swapped parent is itself an external junction now: with no explicit
+      // approval semantics at this layer it is DETACHED AS A LINK (unlink
+      // removes only the link), never traversed.
+      expect(result.detached.every((item) => item.error === null)).toBe(true);
+      // Fail-safe: the victim file behind the swap survives, and the original
+      // tree content parked beside the swap was handled without traversal.
+      expect(fs.readFileSync(path.join(swapTarget, 'external-pkg'), 'utf-8')).toBe('VICTIM — must survive\n');
+      expect(fs.existsSync(path.join(parent + '.original'))).toBe(true);
+      expect(fs.existsSync(path.join(outside, 'keep.txt'))).toBe(true);
+    } finally {
+      try { fs.unlinkSync(parent); } catch { /* already detached */ }
+      fs.renameSync(parent + '.original', parent);
+    }
+  });
+
+  it('a parent swapped for a junction BEFORE the internal pass never deletes through the swap (internal)', () => {
+    const { tree } = buildTree('parent-swap-internal');
+    const parent = path.join(tree, 'node_modules');
+    const target = path.join(parent, 'real-pkg');
+    const link = path.join(parent, 'linked-pkg');
+    makeJunction(link, target);
+
+    const swapTarget = path.join(root, 'parent-swap-internal-swapdir');
+    fs.mkdirSync(swapTarget, { recursive: true });
+    fs.writeFileSync(path.join(swapTarget, 'linked-pkg'), 'VICTIM — must survive\n', 'utf-8');
+    fs.renameSync(parent, parent + '.original');
+    makeJunction(parent, swapTarget);
+
+    try {
+      const result = detachInternalLinks(tree);
+      // The internal pass detaches only links PROVEN inside the tree; the
+      // swapped parent is an external junction it must NOT unlink, so links
+      // remain and the pass refuses to claim success.
+      expect(result.ok).toBe(false);
+      expect(result.remainingLinks).toBeGreaterThan(0);
+      // Nothing was destroyed through the swapped path: the victim survives and
+      // the original tree content (parked beside the swap) is intact.
+      expect(fs.readFileSync(path.join(swapTarget, 'linked-pkg'), 'utf-8')).toBe('VICTIM — must survive\n');
+      expect(fs.existsSync(path.join(parent + '.original', 'real-pkg'))).toBe(true);
+    } finally {
+      try { fs.unlinkSync(parent); } catch { /* already detached */ }
+      fs.renameSync(parent + '.original', parent);
+    }
+  });
+
+  it('never unlinks a scanned link that was replaced by a real file BEFORE the detach pass', () => {
+    const { tree, outside } = buildTree('link-replaced-by-file');
+    const link = path.join(tree, 'node_modules', 'external-pkg');
+    makeJunction(link, outside);
+
+    // A non-cooperating writer replaced the reparse point with a real file:
+    // unlinking it now would destroy THEIR data, not the link we scanned.
+    fs.unlinkSync(link);
+    fs.writeFileSync(link, 'someone\'s real data\n', 'utf-8');
+
+    const result = detachExternalLinks(tree);
+    // The replacement is an ordinary file, not a reparse point: it is out of
+    // scope for the detach pass and must survive untouched.
+    expect(fs.readFileSync(link, 'utf-8')).toBe('someone\'s real data\n');
+    expect(fs.existsSync(path.join(outside, 'keep.txt'))).toBe(true);
+    expect(result.detached.some((item) => path.resolve(item.path) === path.resolve(link))).toBe(false);
+  });
+
+  it('fails closed when a parent directory is swapped for a junction DURING the no-follow walk', () => {
+    const { tree } = buildTree('walk-parent-swap');
+    const sub = path.join(tree, 'sub');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, 'b.txt'), 'B\n', 'utf-8');
+    fs.writeFileSync(path.join(sub, 'keep2.txt'), 'KEEP2\n', 'utf-8');
+    const swapTarget = path.join(root, 'walk-parent-swap-swapdir');
+    fs.mkdirSync(swapTarget, { recursive: true });
+    fs.writeFileSync(path.join(swapTarget, 'keep2.txt'), 'VICTIM — must survive\n', 'utf-8');
+
+    // Injection point: after the FIRST unlink inside `sub` commits, a
+    // non-cooperating process swaps `sub` itself for a junction whose target
+    // holds a same-named file. The walk is already enumerating `sub` through a
+    // handle, so the next child lstat resolves through the swap and the identity
+    // check must refuse instead of unlinking through it.
+    const realUnlink = fs.unlinkSync.bind(fs);
+    let swapped = false;
+    const spy = vi.spyOn(fs, 'unlinkSync').mockImplementation((p, ...args) => {
+      const result = realUnlink(p, ...args);
+      if (!swapped && path.resolve(String(p)) === path.resolve(sub, 'b.txt')) {
+        swapped = true;
+        fs.renameSync(sub, sub + '.original');
+        makeJunction(sub, swapTarget);
+      }
+      return result;
+    });
+    try {
+      const result = removeResidueTree(tree);
+      expect(swapped).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('was replaced during deletion');
+      // The victim behind the swap was never touched.
+      expect(fs.readFileSync(path.join(swapTarget, 'keep2.txt'), 'utf-8')).toBe('VICTIM — must survive\n');
+    } finally {
+      spy.mockRestore();
+      try { fs.unlinkSync(sub); } catch { /* not swapped on earlier failure */ }
+      if (fs.existsSync(sub + '.original')) fs.renameSync(sub + '.original', sub);
+    }
+  });
+
+  it('probes a non-lexical target at its REAL filesystem object, not the lexical fallback', () => {
+    if (process.platform === 'win32') return; // file symlinks need privilege on Windows; POSIX CI covers it
+    const { tree } = buildTree('nonlexical-probe');
+    const victim = path.join(root, 'nonlexical-probe-victim');
+    fs.mkdirSync(victim, { recursive: true });
+    fs.writeFileSync(path.join(victim, 'data.txt'), 'real target\n', 'utf-8');
+    // tree/a -> tree, so the OS resolves a/../victim to the OUTSIDE victim dir,
+    // while lexical normalisation would name tree/victim (which does not exist).
+    makeJunction(path.join(tree, 'a'), tree);
+    const link = path.join(tree, 'escape');
+    fs.symlinkSync('a/../victim', link, 'dir');
+
+    const verdict = classifyReparsePoints(tree);
+    const row = verdict.external.find((l) => l.path === link);
+    expect(row?.unsafeReason).toBe('non-lexical');
+    expect(row?.canonicalTarget, 'classification stays UNKNOWN for non-lexical targets').toBeNull();
+    expect(fs.realpathSync.native(String(row?.probeTarget))).toBe(fs.realpathSync.native(victim));
+
+    const result = detachExternalLinks(tree);
+    const record = result.detached.find((item) => item.path === link);
+    expect(record?.targetExistedBefore, 'the REAL target existed before').toBe(true);
+    expect(record?.targetStillExists).toBe(true);
+    expect(result.brokenTargets).toEqual([]);
+    expect(fs.existsSync(path.join(victim, 'data.txt'))).toBe(true);
+  });
+});
+
+describe('POSIX-only deletion guarantees (CI ubuntu; skipped on Windows)', () => {
+  it.skipIf(process.platform === 'win32')(
+    'removeResidueTree refuses an unreadable directory, deletes NOTHING, and leaves no handle behind',
+    () => {
+      const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-residue-unreadable-'));
+      try {
+        fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
+        fs.writeFileSync(path.join(tree, 'sub', 'keep.txt'), 'KEEP\n', 'utf-8');
+        fs.writeFileSync(path.join(tree, 'keep.txt'), 'KEEP\n', 'utf-8');
+        fs.mkdirSync(path.join(tree, 'blocked'));
+        fs.writeFileSync(path.join(tree, 'blocked', 'data.txt'), 'data\n', 'utf-8');
+        fs.chmodSync(path.join(tree, 'blocked'), 0o000);
+
+        const result = removeResidueTree(tree);
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('preflight incomplete');
+        // Zero mutations: the readable files all survive.
+        expect(result.removedFiles).toBe(0);
+        expect(result.removedLinks).toBe(0);
+        expect(fs.readFileSync(path.join(tree, 'keep.txt'), 'utf-8')).toBe('KEEP\n');
+        expect(fs.readFileSync(path.join(tree, 'sub', 'keep.txt'), 'utf-8')).toBe('KEEP\n');
+
+        // No leaked directory handle: the tree can still be renamed (on Linux a
+        // leaked opendir handle does not block rename, but a leaked handle on
+        // the SAME file would; this doubles as a smoke check that every open
+        // failed-path closed its handle).
+        fs.chmodSync(path.join(tree, 'blocked'), 0o755);
+        expect(() => fs.renameSync(tree, tree + '-renamed')).not.toThrow();
+        fs.renameSync(tree + '-renamed', tree);
+      } finally {
+        fs.rmSync(tree, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('formatProgress', () => {

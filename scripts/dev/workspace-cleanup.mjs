@@ -325,7 +325,7 @@ async function main() {
         lines.push('  ' + r.path + '  [' + r.residueClass + ' / ' + r.residueShape + ']');
         if (r.recoveredBranch) lines.push('    task branch (recovered from lease): ' + r.recoveredBranch);
         for (const reason of r.reasons) lines.push('    note: ' + reason);
-        lines.push('    to remove explicitly: npm run dev:workspace:cleanup -- --residue "' + r.path + '" --ack-unknown --apply');
+        lines.push('    to remove explicitly: npm run dev:workspace:cleanup -- --residue ' + shellPath(r.path) + ' --ack-unknown --apply');
       }
     }
     for (const note of state.notes) lines.push('Note: ' + note);
