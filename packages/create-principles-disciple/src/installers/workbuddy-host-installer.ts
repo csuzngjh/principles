@@ -56,6 +56,23 @@ import {
   INSTALL_LAYOUT_VERSION,
   type InstallHost,
 } from '@principles/install-layout';
+// 2026-11-08: the shared state DEFINITIONS for pd-cli health live in
+// @principles/install-layout (interpretWorkbuddyPluginState /
+// getWorkbuddyHostConfigPaths). The installer does NOT import them at
+// runtime: its packaged dist must keep loading against the PUBLISHED
+// install-layout (registry-parity smoke, PRI-669/RF-02), and a normal PR
+// cannot raise the version floor (release-intent guard N-version). The
+// local constants/judgment below are the pinned mirror — a CI parity test
+// pins installer state == install-layout state on a fixture matrix (the
+// same discipline as the Codex legacy-registration parser mirror).
+
+/** Plugin name inside the PD-owned marketplace (kebab-case per plugin.json contract). */
+export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
+/** PD-owned local marketplace name. enabledPlugins keys use "plugin@marketplace". */
+export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
+/** Registry/settings key: "principles-disciple@principles-disciple-market". */
+export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
+const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 import { atomicReplaceTextFile, AtomicReplaceCleanupError, AtomicReplaceConflictError, errnoCode } from '../utils/config-file-io.js';
 import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
@@ -72,15 +89,6 @@ import type {
 
 // Type-only import from @principles/core — erased at compile time; this
 // package ships self-contained without @principles/core (PRI-625/PRI-669).
-
-// ─── Frozen host contract constants ─────────────────────────────────────────
-/** Plugin name inside the PD-owned marketplace (kebab-case per plugin.json contract). */
-export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
-/** PD-owned local marketplace name. enabledPlugins keys use "plugin@marketplace". */
-export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
-/** Registry/settings key: "principles-disciple@principles-disciple-market". */
-export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
-const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 
 /**
  * Files the host needs to load this plugin. One list serves both the
@@ -1801,6 +1809,14 @@ export function ensureWorkbuddyGovernanceEnabled(
  * exactly one implementation.
  */
 export function readWorkbuddyPluginState(p: WorkbuddyPaths): HostPluginStateSummary {
+  // Pinned mirror of install-layout's interpretWorkbuddyPluginState — the
+  // shared judgment pd-cli health applies. A CI parity test
+  // (workbuddy-plugin-state-parity.test.ts) pins the two implementations to
+  // identical outputs on a fixture matrix; a runtime import cannot exist
+  // here because the packaged installer must keep loading against the
+  // PUBLISHED install-layout (registry-parity smoke, PRI-669/RF-02; the
+  // release-intent guard N-version forbids raising the version floor in a
+  // normal PR).
   const registry = readHostJsonFile(p.registryPath);
   const registered = registry.ok && registry.existed && isRecord(registry.value.plugins)
     ? Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)

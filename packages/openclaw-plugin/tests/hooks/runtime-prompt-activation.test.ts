@@ -569,6 +569,80 @@ describe('Adaptive activation — actual local prompt entry', () => {
     }
   });
 
+  it('PRI-1150 end-to-end: real shared freeze → registry → unique llm_input handler → containment event', async () => {
+    const { target, packed } = await sharedPrepared();
+    const configuredCtx = configured(target);
+    const runId = 'e2e-run-1150';
+    const sessionId = 'e2e-session-1150';
+    const ctx = {
+      ...configuredCtx,
+      runId,
+      sessionId,
+    } as typeof configuredCtx;
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(admitted(), ctx, packed);
+    const assembled = result?.prependSystemContext ?? '';
+
+    // The freeze point registered the snapshot for this run (production side effect).
+    const { getPromptPresenceRegistry } = await import('../../src/hooks/prompt-presence-registry.js');
+    const registry = getPromptPresenceRegistry();
+    const binding = registry.resolveBinding({ runId, sessionId, workspaceDir: tempWorkspaceDir });
+    expect(binding.status).toBe('unique');
+
+    // The official llm_input callback (simulated event, real production handler
+    // and emission path — no hand-picked snapshot, no fabricated binding).
+    const { handleLlmInputPresence } = await import('../../src/hooks/llm-input-presence.js');
+    const recorded: Record<string, unknown>[] = [];
+    handleLlmInputPresence({
+      event: {
+        runId,
+        sessionId,
+        provider: 'test-provider',
+        model: 'test-model',
+        systemPrompt: assembled,
+        prompt: 'user prompt text',
+        historyMessages: [],
+        imagesCount: 0,
+      },
+      ctx: { runId, sessionId } as Parameters<typeof handleLlmInputPresence>[0]['ctx'],
+      workspaceDir: tempWorkspaceDir,
+      eventLog: { recordPromptPresenceObserved: (data: Record<string, unknown>) => recorded.push(data) } as unknown as EventLog,
+    });
+    expect(recorded).toHaveLength(1);
+    const event = recorded[0] as Record<string, unknown>;
+    expect(event).toMatchObject({
+      runId,
+      sessionId,
+      boundary: 'post_assembly_system_prompt_via_llm_input',
+      binding: 'unique',
+      checked: true,
+    });
+    const results = event.results as Array<Record<string, unknown>>;
+    expect(results.length).toBeGreaterThan(0);
+    const targetResult = results.find((r) => r.activationId === `act_prompt_${target}`);
+    expect(targetResult).toMatchObject({ outcome: 'full_hit' });
+    for (const entry of results) expect(entry.outcome).toBe('full_hit');
+    // Privacy: no body text in the emitted event.
+    expect(JSON.stringify(event)).not.toContain(`${target}-body-`);
+
+    // A second assembly in the SAME run makes the next callback ambiguous
+    // (owner constraint: no silent latest-snapshot binding).
+    const result2 = await handleBeforePromptBuild(admitted(), ctx, packed);
+    expect(result2?.prependSystemContext).toBe(assembled);
+    const recorded2: Record<string, unknown>[] = [];
+    handleLlmInputPresence({
+      event: {
+        runId, sessionId, provider: 'test-provider', model: 'test-model',
+        systemPrompt: assembled, prompt: '', historyMessages: [], imagesCount: 0,
+      },
+      ctx: { runId, sessionId } as Parameters<typeof handleLlmInputPresence>[0]['ctx'],
+      workspaceDir: tempWorkspaceDir,
+      eventLog: { recordPromptPresenceObserved: (data: Record<string, unknown>) => recorded2.push(data) } as unknown as EventLog,
+    });
+    // Two live snapshots (first + second assembly) → ambiguous_binding.
+    expect(recorded2[0]).toMatchObject({ binding: 'ambiguous', checked: false, reason: 'ambiguous_binding' });
+  });
+
   it('presence expectations: a target failing final revalidation is excluded, not misreported', async () => {
     const { target, packed } = await sharedPrepared();
     // Mutate after packing, before the hook: the hook's own final revalidation

@@ -1,5 +1,33 @@
 # Changelog
 
+## 5.2.0
+
+### Minor Changes
+
+- 20719c6: Fix the `--host all` / Codex install contract: `CodexHostInstaller.install` now reports the Codex end state honestly (Marketplace already installed / manual Marketplace step required / state unverifiable) via the new optional `HostInstallResult.manualActionRequired` flag instead of returning a plain failure, so a pending Codex Marketplace install no longer aborts the whole install transaction — an already-successful OpenClaw install stays intact and the shared runtime is not rolled back. The aggregate result is an explicit partial completion (`success=false`, `manualActions[]` in the `--json` output, non-zero exit, per-host MANUAL ACTION REQUIRED text); a re-run after the manual `codex plugin add principles-disciple@principles` converges idempotently. `--host all` still never includes WorkBuddy.
+
+## 5.1.1
+
+### Patch Changes
+
+- f7cdc5a: feat(openclaw-plugin,host-runtime): PD-self assembly presence observation via official llm_input (PRI-1150, Path A)
+  
+  - host-runtime: `buildActivePrinciplePromptContext` freezes per-principle
+    presence expectations same-source with `additionalContext` (bounded at 64,
+    overflow fact, bodyComplete containment); PD-internal contract. Core gains
+    the `PromptPresenceObservedEventData` event contract (union + schema).
+  - openclaw-plugin: bounded in-memory assembly snapshot registry keyed by
+    runId+sessionId (global key/snapshot/body-byte caps + TTL, sticky history
+    loss), minimal single-string containment checker (three-value outcomes),
+    official llm_input registration, and a PD-owned forensic event
+    `runtime_v2_prompt_presence_observed` (boundary
+    post_assembly_system_prompt_via_llm_input; containment facts only, no body
+    text; unique binding requires complete candidate history, everything else
+    degrades to unknown:ambiguous_binding / history_incomplete / expired).
+  - Not dependent on hook-result fields the official host drops. Fact-only: no
+    D/confirmed/timely, no delivery/adherence claims. Existing llm_output
+    behavior unchanged.
+
 ## 5.1.0
 
 ### Minor Changes

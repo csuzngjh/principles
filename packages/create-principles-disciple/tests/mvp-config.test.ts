@@ -1224,10 +1224,13 @@ describe('Atomic install: console/story-a fail triggers rollback', () => {
 
   // Regression (CodeRabbit #3758794660 + PRI-583 review, rc-9): a host
   // failure must enter the atomic rollback catch before backups are deleted.
+  // 2026-11-07 Marketplace contract: failure DETECTION moved into the pure
+  // partitionHostInstallResults helper (manual actions are NOT failures and
+  // must not roll back); real failures still throw before retention/pruning.
   it('rolls back before retention/pruning when a host installer fails (rc-9)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    expect(content).toContain('hostFailures.push');
+    expect(content).toContain('partitionHostInstallResults');
     const failureThrow = content.indexOf('throw new Error(`Host installation failed:');
     const retain = content.indexOf('retainSupersededBackup(backupDir, runtimeBackupDir)', failureThrow);
     expect(failureThrow).toBeGreaterThan(0);

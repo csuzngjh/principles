@@ -132,6 +132,17 @@ export interface HostInstallResult {
     /** `enabledPlugins[key]`; null when absent or unreadable (activation unknown). */
     readonly enabled: boolean | null;
   };
+  /**
+   * Manual action required (Marketplace contract, 2026-11-07): this host's
+   * desired end state requires an operator/Owner step PD must not perform
+   * itself (rc-9 / no fake success). Present only on results where the host
+   * installer wrote NOTHING and success=false — it is NOT a compensation
+   * signal: other hosts' successful installs stay intact (no rollback), and
+   * the aggregate install result reports partial completion (non-zero exit).
+   * When the manual step is completed, a re-run converges idempotently.
+   * Optional: hosts that either installed or genuinely failed omit it.
+   */
+  readonly manualActionRequired?: boolean;
 }
 
 export interface HostUninstallResult {

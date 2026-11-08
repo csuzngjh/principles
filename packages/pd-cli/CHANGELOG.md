@@ -1,5 +1,33 @@
 # @principles/pd-cli
 
+## 1.168.0
+
+### Minor Changes
+
+- bbdcb50: Separate the four independent WorkBuddy host facts in `pd health --host workbuddy` — plugin registration (registry), plugin enablement (settings enabledPlugins), governance flag state (ENABLED / EXPLICITLY_DISABLED / DEFAULT_OFF / UNKNOWN, an explicit Owner opt-out is never folded into a generic OFF), and an explicit runtime boundary (RUNTIME_PROBE_NOT_PERFORMED + MODEL_TOOL_CALL_NOT_VERIFIED; pd health stays read-only, never starts the host or the MCP server). The registration/enablement judgment and the host config paths move to @principles/install-layout as the single authority (getWorkbuddyHostConfigPaths / interpretWorkbuddyPluginState) — installer, `status` and `pd health` now resolve the same paths and apply the same rules; the installer delegates instead of owning a second judgment. A complete MCP payload implies nothing about registration or enablement. Verified: a WorkBuddy-only machine reports INSTALLED at the top level (negative control included).
+
+### Patch Changes
+
+- Updated dependencies [20719c6]
+- Updated dependencies [bbdcb50]
+  - @principles/core@5.2.0
+  - @principles/install-layout@0.5.0
+  - @principles/codex-adapter@0.8.4
+  - @principles/host-runtime@3.0.4
+  - @principles/workbuddy-adapter@0.5.6
+
+## 1.167.3
+
+### Patch Changes
+
+- ee9e62b: Consent-store single-format convergence + global control-state write mutex (PRI-1138, PRI-1104/5, PRI-1151).
+  
+  Single writable format (PRI-1138): `writeProductTelemetryControlState` refuses any non-current schemaVersion, so no code path can persist or regenerate a legacy v1 file; parsing converges into one `parseConsentState` entry with a single current-format whitelist; legacy v1 files remain readable through the strictly one-way, read-only migrator (`migrateLegacyConsentFile`), preserving consent/consentVersion/telemetrySecret verbatim.
+  
+  Global write mutex (PRI-1151): every control-state writer now serializes on ONE cross-process lock (`product-telemetry.json.state-lock`) via the new `withControlStateLock` transaction entry — the legacy v1→v2 migration write-back, `pd telemetry enable/disable/reset` (now async locked transactions awaited through the CLI), and workspace export bookkeeping merges. `readProductTelemetryControlState` is now a pure read (v1 parsed in memory, never written); persistence happens exclusively inside locked transactions, so no writer can build its write from a stale read — once disable succeeds, no concurrent migration/enable/reset/merge can restore the previous granted consent or secret. The lock uses an ownership-checked protocol (owner token in the lock body, atomic rename-claim for stale takeover and for release): a crashed holder is recovered after the stale threshold, a live holder's lock is never deleted by another process, a late release cannot delete a successor's lock, acquisition waits are bounded and fail loud (never degrading into lock-free writes). The per-workspace export lock adopts the same takeover/release protocol. Verified by real multi-process tests (deterministic stdio barriers): migration vs disable/reset/enable/workspace-merge races, 6-way cross-process mutual exclusion with zero lost updates, bounded-timeout loud failure, and stale-lock recovery. No wire values, snapshot payloads, or export behavior changed.
+- Updated dependencies [ee9e62b]
+  - @principles/host-runtime@3.0.2
+
 ## 1.167.2
 
 ### Patch Changes
