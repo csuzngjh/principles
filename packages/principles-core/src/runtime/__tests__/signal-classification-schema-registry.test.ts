@@ -29,13 +29,20 @@ function productionTsFiles(dir: string): string[] {
  * Stage-2 structured-output registry contract.
  *
  * Why this exists: the production classifier (host-runtime/signal-classifier.ts)
- * requests an `outputSchemaRef` by string. v1 was retired and the registry now
- * only owns v2; a stale v1 request would make PiAiRuntimeAdapter fail loud
- * (`output_invalid`) and be swallowed into a `null` classification. These assertions
- * pin the registry side of that contract with the REAL registry map (no mock).
+ * requests an `outputSchemaRef` by string. v1 was retired and PRI-1139 made the
+ * version-neutral `signal-classification-output` the canonical key (the pre-v2
+ * spelling still resolves through the PRI-1104 alias table); a stale v1 request
+ * would make PiAiRuntimeAdapter fail loud (`output_invalid`) and be swallowed
+ * into a `null` classification. These assertions pin the registry side of that
+ * contract with the REAL registry map (no mock).
  */
 describe('signal-classification output schema registry', () => {
-  it('resolves the v2 ref the Stage-2 classifier requests', () => {
+  it('resolves the canonical ref the Stage-2 classifier requests (PRI-1139)', () => {
+    expect(OUTPUT_SCHEMA_REGISTRY.get('signal-classification-output'))
+      .toBe(SignalClassificationOutputV2Schema);
+  });
+
+  it('keeps the pre-cutover v2 spelling readable through the alias table', () => {
     expect(resolveOutputSchema('signal-classification-output-v2'))
       .toBe(SignalClassificationOutputV2Schema);
   });
