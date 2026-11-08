@@ -126,10 +126,36 @@ describe('prompt presence registry (PRI-1150, owner-amended rules)', () => {
     }
   });
 
-  it('workspace/run isolation: identity binding uses both runId and sessionId', () => {
+  it('D2b (owner): a NEVER-SEEN new run regains unique eligibility — global churn alone must not disable it', () => {
     const registry = new PromptPresenceRegistry();
-    registry.registerAssemblySnapshot({ runId: 'same-run', sessionId: 'session-1', expectations: [expectation('act_1')] });
-    expect(registry.resolveBinding({ runId: 'same-run', sessionId: 'session-2' }).status).toBe('no_key');
+    registry.registerAssemblySnapshot({ runId: 'first', sessionId: 's1', expectations: [expectation('act_first')] });
+    const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 3;
+    for (let i = 0; i < churn; i++) {
+      registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_ch_${i}`)] });
+    }
+    // A BRAND-NEW run never evicted before: its history is provably complete
+    // (registered now, nothing dropped since). Global marker churn must not
+    // disable it — its verdict is unique.
+    registry.registerAssemblySnapshot({ runId: 'fresh-after-churn', sessionId: 's1', expectations: [expectation('act_fresh')] });
+    expect(registry.resolveBinding({ runId: 'fresh-after-churn', sessionId: 's1' })).toMatchObject({ status: 'unique' });
+  });
+
+  it('D2c (owner): TTL + snapshot eviction + marker eviction combined — old late callback never binds to a new snapshot', () => {
+    let clock = 5_000_000;
+    const registry = new PromptPresenceRegistry(() => clock);
+    registry.registerAssemblySnapshot({ runId: 'r-combo', sessionId: 's1', expectations: [expectation('act_original')] });
+    // Advance past TTL AND churn beyond key+marker capacity in one sequence.
+    clock += PRESENCE_REGISTRY_LIMITS.SNAPSHOT_TTL_MS + 1;
+    for (let i = 0; i < PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 3; i++) {
+      registry.registerAssemblySnapshot({ runId: `combo-${i}`, sessionId: 's1', expectations: [expectation(`act_c_${i}`)] });
+    }
+    // The original late callback: whatever remains, it must not bind to a
+    // snapshot assembled AFTER it (no silent latest-snapshot binding).
+    const verdict = registry.resolveBinding({ runId: 'r-combo', sessionId: 's1' });
+    expect(['expired', 'history_incomplete', 'no_key']).toContain(verdict.status);
+    // And the churned keys' own late callbacks are equally conservative.
+    const lateChurn = registry.resolveBinding({ runId: 'combo-0', sessionId: 's1' });
+    expect(['history_incomplete', 'no_key', 'expired']).toContain(lateChurn.status);
   });
 });
 
@@ -147,26 +173,46 @@ describe('prompt presence registry — review round (defects 1/2/4/5)', () => {
     expect(verdict.status).toBe('history_incomplete');
   });
 
-  it('D2: lossy-marker eviction then re-registration must not regain unique (conservative, bounded)', () => {
+  it('D2 (within memory): re-registration of a live key yields two snapshots → ambiguous (never unique)', () => {
     const registry = new PromptPresenceRegistry();
     registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old')] });
-    // Churn enough keys to evict old's ENTRY (key cap) AND its lossy MARKER
-    // (marker FIFO cap): entries churn MAX_KEYS keys, then markers churn
-    // MAX_KEYS more — only then is the marker itself evicted.
+    // Churn within the key ceiling: old is never evicted (all 63 keys fit),
+    // so its own history is complete — re-registration just adds a second
+    // live snapshot under the same run, which resolves conservative-ambiguous
+    // (never a silent unique against an unverifiable assembly).
+    for (let i = 0; i < 20; i++) {
+      registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_c_${i}`)] });
+    }
+    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new')] });
+    const verdict = registry.resolveBinding({ runId: 'old', sessionId: 's1' });
+    expect(verdict.status).toBe('ambiguous');
+    if (verdict.status === 'ambiguous') expect(verdict.liveSnapshots).toBe(2);
+    // Continued churn keeps it conservative (never unique).
+    for (let i = 0; i < 4; i++) {
+      registry.registerAssemblySnapshot({ runId: `churn-more-${i}`, sessionId: 's1', expectations: [expectation(`act_cm_${i}`)] });
+    }
+    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new2')] });
+    expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('ambiguous');
+  });
+
+  it('D2-extreme (TRADE-OFF CARD scope): beyond scar retention a re-registered key starts clean — documented, bounded loss', () => {
+    const registry = new PromptPresenceRegistry();
+    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old')] });
+    // Churn far beyond scar retention (MAX_KEYS scars + margin): old's scar
+    // itself is evicted (scarEvictions increments). Its late callbacks already
+    // resolved to missing_expectations (safe — they bind nothing). A
+    // re-registration now starts clean; this is the DOCUMENTED trade-off
+    // (bounded memory vs permanent disablement), not a silent whitewash.
     const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 2 + PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOTS_PER_KEY;
     for (let i = 0; i < churn; i++) {
       registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_c_${i}`)] });
     }
-    // Old key re-registers — the registry cannot prove its candidate history
-    // is complete (its lossy marker was itself evicted by bounded churn).
+    expect(registry.stats().scarEvictions).toBeGreaterThanOrEqual(1);
     registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new')] });
-    expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('history_incomplete');
-    // Continued churn never produces a wrong unique for churned-and-returned keys.
-    for (let i = 0; i < churn; i++) {
-      registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_c2_${i}`)] });
-    }
-    registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new2')] });
-    expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('history_incomplete');
+    const verdict = registry.resolveBinding({ runId: 'old', sessionId: 's1' });
+    expect(verdict).toMatchObject({ status: 'unique' });
+    // The new snapshot's own history is truthful: it was never dropped.
+    if (verdict.status === 'unique') expect(verdict.snapshot.expectations.length).toBeGreaterThan(0);
   });
 
   it('D5: repeated over-limit registrations respect per-key capacity and keep the over-limit fact', () => {
@@ -210,5 +256,43 @@ describe('prompt presence registry — review round (defects 1/2/4/5)', () => {
     expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsUnknown }).status).toBe('no_key');
     // Same dir with a different path spelling normalizes to the same key.
     expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsAVariant })).toMatchObject({ status: 'unique' });
+  });
+
+  it('D2b (owner): a NEVER-SEEN new run regains unique eligibility — global churn alone must not disable it', () => {
+    const registry = new PromptPresenceRegistry();
+    registry.registerAssemblySnapshot({ runId: 'first', sessionId: 's1', expectations: [expectation('act_first')] });
+    const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 3;
+    for (let i = 0; i < churn; i++) {
+      registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_ch_${i}`)] });
+    }
+    // A BRAND-NEW run never evicted before: its history is provably complete
+    // (registered now, nothing dropped since). Global marker churn must not
+    // disable it — its verdict is unique.
+    registry.registerAssemblySnapshot({ runId: 'fresh-after-churn', sessionId: 's1', expectations: [expectation('act_fresh')] });
+    expect(registry.resolveBinding({ runId: 'fresh-after-churn', sessionId: 's1' })).toMatchObject({ status: 'unique' });
+  });
+
+  it('D2c (owner): TTL + snapshot eviction + marker eviction combined — old late callback never binds to a new snapshot', () => {
+    let clock = 5_000_000;
+    const registry = new PromptPresenceRegistry(() => clock);
+    registry.registerAssemblySnapshot({ runId: 'r-combo', sessionId: 's1', expectations: [expectation('act_original')] });
+    // Advance past TTL AND churn beyond key+marker capacity in one sequence.
+    clock += PRESENCE_REGISTRY_LIMITS.SNAPSHOT_TTL_MS + 1;
+    for (let i = 0; i < PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 3; i++) {
+      registry.registerAssemblySnapshot({ runId: `combo-${i}`, sessionId: 's1', expectations: [expectation(`act_c_${i}`)] });
+    }
+    // The original late callback: whatever remains, it must not bind to a
+    // snapshot assembled AFTER it (no silent latest-snapshot binding).
+    const verdict = registry.resolveBinding({ runId: 'r-combo', sessionId: 's1' });
+    expect(['expired', 'history_incomplete', 'no_key']).toContain(verdict.status);
+    // And the churned keys' own late callbacks are equally conservative.
+    const lateChurn = registry.resolveBinding({ runId: 'combo-0', sessionId: 's1' });
+    expect(['history_incomplete', 'no_key', 'expired']).toContain(lateChurn.status);
+  });
+
+  it('workspace/run isolation: identity binding uses both runId and sessionId', () => {
+    const registry = new PromptPresenceRegistry();
+    registry.registerAssemblySnapshot({ runId: 'same-run', sessionId: 'session-1', expectations: [expectation('act_1')] });
+    expect(registry.resolveBinding({ runId: 'same-run', sessionId: 'session-2' }).status).toBe('no_key');
   });
 });

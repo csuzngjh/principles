@@ -112,35 +112,36 @@ function resolveWorkspaceIdentity(workspaceDir: string | undefined): string {
 
 export class PromptPresenceRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
-  /** Bounded marker: keys whose snapshot history was lost, surviving entry removal. */
-  private readonly lossyKeys = new Map<string, true>();
   private totalSnapshots = 0;
   private totalBodyBytes = 0;
   private evictedCount = 0;
   private expiredCount = 0;
   /**
-   * PRI-1150 review (D2): count of lossy markers dropped by the marker table's
-   * own capacity. When > 0, a re-registered key with no surviving marker
-   * CANNOT prove complete candidate history — such registrations start
-   * history-incomplete (conservative). Documented scope/recovery: this only
-   * affects keys re-registered after >MAX_KEYS whole-key evictions (heavy
-   * churn); it never disables observations (events still emit with
-   * history_incomplete), and a process restart resets the in-memory registry
-   * entirely. No unbounded tombstone table is introduced.
+   * PRI-1150 review (D2/D2b resolution): whole-key evictions keep a SCAR entry
+   * (snapshots=[], historyComplete=false) bounded by MAX_KEYS — the entry
+   * itself IS the loss marker, so no separate tombstone table exists. When
+   * scars overflow (heavy churn beyond MAX_KEYS keys), the OLDEST scar is
+   * evicted and its fact is unrecoverable: that key's late callbacks degrade
+   * to missing_expectations (SAFE — they bind nothing), and a re-registration
+   * of such a key starts CLEAN (documented trade-off). Host runIds are unique
+   * per turn, so an evicted key can never collide with a genuinely new run's
+   * key — new runs stay uniquely bindable.
    */
-  private lossyMarkersDropped = 0;
+  private scarEvictions = 0;
 
   constructor(private readonly now: () => number = Date.now) {}
 
   /** Observable counters (for events/diagnostics; no body content). */
-  stats(): { keys: number; snapshots: number; totalBodyBytes: number; evictedCount: number; expiredCount: number; lossyKeys: number } {
+  stats(): { keys: number; snapshots: number; totalBodyBytes: number; evictedCount: number; expiredCount: number; scars: number; scarEvictions: number } {
+    const scars = [...this.entries.values()].filter((e) => e.historyComplete === false && e.snapshots.length === 0).length;
     return {
       keys: this.entries.size,
       snapshots: this.totalSnapshots,
       totalBodyBytes: this.totalBodyBytes,
       evictedCount: this.evictedCount,
       expiredCount: this.expiredCount,
-      lossyKeys: this.lossyKeys.size,
+      scars,
+      scarEvictions: this.scarEvictions,
     };
   }
 
@@ -175,23 +176,33 @@ export class PromptPresenceRegistry {
     entry.historyComplete = false;
     if (entry.snapshots.length === 0) {
       this.entries.delete(key);
-      this.pushLossyKey(key);
+      this.pushScar(key);
     }
     return true;
   }
 
-  private pushLossyKey(key: string): void {
-    if (this.lossyKeys.has(key)) return;
-    this.lossyKeys.set(key, true);
-    // PRI-1150 review (D2): a DROPPED marker is itself a loss fact we can no
-    // longer attribute to a key. Any subsequent re-registration of an
-    // unmarked-and-absent key starts history-incomplete (see
-    // registerAssemblySnapshot) — conservative, bounded, and documented.
-    while (this.lossyKeys.size > PRESENCE_REGISTRY_LIMITS.MAX_KEYS) {
-      const oldest = this.lossyKeys.keys().next();
-      if (oldest.done) break;
-      this.lossyKeys.delete(oldest.value);
-      this.lossyMarkersDropped += 1;
+  /**
+   * PRI-1150 review (D2/D2b): instead of a separate lossy-marker set (whose
+   * FIFO eviction silently whitewashed history and poisoned unrelated new
+   * keys), whole-key evictions leave a bounded SCAR ENTRY in place — the
+   * entry itself carries the loss fact. Scar entries are bounded by the same
+   * MAX_KEYS ceiling; overflowing scars increment scarEvictions and the
+   * corresponding keys become indistinguishable from brand-new keys
+   * (documented trade-off — see the checkpoint card).
+   */
+  private pushScar(key: string): void {
+    const existing = this.entries.get(key);
+    if (existing && existing.snapshots.length === 0 && existing.historyComplete === false) {
+      return; // Scar already in place.
+    }
+    this.entries.set(key, { snapshots: [], nextAssemblySeq: 0, historyComplete: false });
+    // Bounded: drop the oldest EMPTY entry (scar) when over capacity.
+    while (this.entries.size > PRESENCE_REGISTRY_LIMITS.MAX_KEYS) {
+      const oldest = [...this.entries.keys()].find((k) => this.entries.get(k)!.snapshots.length === 0)
+        ?? this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.entries.delete(oldest);
+      this.scarEvictions += 1;
     }
   }
 
@@ -217,7 +228,7 @@ export class PromptPresenceRegistry {
       entry.historyComplete = false;
       if (entry.snapshots.length === 0) {
         this.entries.delete(oldestKey);
-        this.pushLossyKey(oldestKey);
+        this.pushScar(oldestKey);
       }
       return true;
     };
@@ -236,7 +247,7 @@ export class PromptPresenceRegistry {
       this.totalBodyBytes -= entry.snapshots.reduce((sum, snapshot) => sum + snapshot.bodyBytes, 0);
       this.evictedCount += entry.snapshots.length;
       this.entries.delete(oldestKey.value);
-      this.pushLossyKey(oldestKey.value);
+      this.pushScar(oldestKey.value);
     }
   }
 
@@ -259,27 +270,22 @@ export class PromptPresenceRegistry {
     let entry = this.entries.get(key);
     // PRI-1150 review (D1): sweep BEFORE reading the loss state — a TTL sweep
     // triggered by THIS registration is itself a history-loss fact that must
-    // poison the rebuilt entry (the old code read lossBefore first and
-    // whitewashed the sweep).
+    // poison the rebuilt entry. A pre-existing SCAR (empty, historyComplete=
+    // false) also poisons: the key's earlier history was already lost.
     let entrySweptLoss = false;
     if (entry) {
       entrySweptLoss = this.sweepExpiredLocked(key, entry, nowMs);
     }
-    const lossBefore =
-      this.lossyKeys.get(key) === true ||
-      // A dropped lossy MARKER (D2) or a swept loss (D1) means candidate
-      // history cannot be proven complete for this key.
-      this.lossyMarkersDropped > 0 ||
-      entrySweptLoss;
+    const lossBefore = entrySweptLoss
+      || (entry !== undefined && entry.snapshots.length === 0 && entry.historyComplete === false);
     if (!entry || !this.entries.has(key)) {
-      entry = { snapshots: [], nextAssemblySeq: 0, historyComplete: !lossBefore };
+      // Brand-new key: no in-process record exists, and host runIds are unique
+      // per turn, so this run's callbacks can never collide with an evicted
+      // run's key — its history is provably complete (trade-off card).
+      entry = { snapshots: [], nextAssemblySeq: 0, historyComplete: true };
       this.entries.set(key, entry);
-      this.lossyKeys.delete(key);
     }
-    if (lossBefore) {
-      // Re-registration never erases a past history loss for this key.
-      entry.historyComplete = false;
-    }
+
 
     const assemblySeq = ++entry.nextAssemblySeq;
     // PRI-1150 review (D5): degraded and normal snapshots share ONE capacity
@@ -319,7 +325,7 @@ export class PromptPresenceRegistry {
     const key = this.keyOf(params.runId, params.sessionId, params.workspaceDir);
     const entry = this.entries.get(key);
     if (!entry) {
-      return this.lossyKeys.has(key) ? { status: 'history_incomplete' } : { status: 'no_key' };
+      return this.entries.has(key) ? { status: 'history_incomplete' } : { status: 'no_key' };
     }
     const sweptAny = this.sweepExpiredLocked(key, entry, nowMs);
     if (entry.snapshots.length === 0) {
@@ -339,12 +345,10 @@ export class PromptPresenceRegistry {
   /** Test/diagnostic reset (per-workspace isolation); never called in production paths. */
   resetForTest(): void {
     this.entries.clear();
-    this.lossyKeys.clear();
     this.totalSnapshots = 0;
     this.totalBodyBytes = 0;
     this.evictedCount = 0;
     this.expiredCount = 0;
-    this.lossyMarkersDropped = 0;
   }
 }
 
