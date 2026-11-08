@@ -669,11 +669,14 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
   it('probes a non-lexical target at its REAL filesystem object, not the lexical fallback', () => {
     if (process.platform === 'win32') return; // file symlinks need privilege on Windows; POSIX CI covers it
     const { tree } = buildTree('nonlexical-probe');
-    const victim = path.join(root, 'nonlexical-probe-victim');
+    // `tree/a -> tree`, so the OS resolves `a/../victim` to <root>/victim — a
+    // SIBLING of tree (the `..` escapes tree through the link). The lexical
+    // fallback path.resolve(tree, 'a/../victim') would name tree/victim, which
+    // does not exist. The victim must sit exactly where the OS resolution
+    // lands, or the probe cannot prove anything.
+    const victim = path.join(root, 'victim');
     fs.mkdirSync(victim, { recursive: true });
     fs.writeFileSync(path.join(victim, 'data.txt'), 'real target\n', 'utf-8');
-    // tree/a -> tree, so the OS resolves a/../victim to the OUTSIDE victim dir,
-    // while lexical normalisation would name tree/victim (which does not exist).
     makeJunction(path.join(tree, 'a'), tree);
     const link = path.join(tree, 'escape');
     fs.symlinkSync('a/../victim', link, 'dir');
