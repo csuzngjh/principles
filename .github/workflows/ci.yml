@@ -600,6 +600,10 @@ jobs:
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=principles-disciple
+          # PRI-1150 review P2-D: the PRI-1147 harness regression tests moved
+          # into scripts/__tests__ import @principles/codex-adapter (via
+          # chain-harness) — its dist must be built for the scripts job.
+          npm run build --workspace=@principles/codex-adapter
 
       # PRI-819: the telemetry smoke config regression test validates the
       # generated YAML through the real @principles/core/runtime
