@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T1230Z-zcode",
+  "previousCheckpoint": "20261107T1130Z-zcode",
+  "generatedAt": "2026-11-07T12:30:00Z",
+  "agent": "zcode",
+  "overallStatus": "IMPLEMENTATION_COMPLETE_OFFLINE_ACCEPTED_AWAITING_REVIEW",
+  "summary": "PRI-1150 Path A 实施（Owner 书面批准设计 v2 + 三项修订约束）：host-runtime ActivePrinciplePromptResult 增加 injectedExpectations（makeResult 唯一出口同源冻结——单原则渲染取已转义 directive 切片、bodyComplete 包含判定、64 上限+溢出、revision 不在此层不带）；插件有界内存登记表（runId+sessionId 键、全局键64/快照128/字节1MiB/TTL30min 集中常量、粘性历史缺失=有界 lossyKeys 标记集非 tombstone、裁决三态去 all_candidates_agree：unique 须恰一活快照+完整历史，多候选 ambiguous_binding、过期 expired、历史缺失 history_incomplete 分列）；最小单字符串检查器（三值+closed reasons+全有界）；core event-types 增 runtime_v2_prompt_presence_observed union+schema+PromptPresenceObservedEventData（无正文字段，results≤64、candidates≤8），PRI-775 barrel 快照刷新（1980→1982）；插件 llm_input 正式注册（SDK 镜像+guardHook+workspace 解析仿 llm_output 模式）、handler 裁决→检查→recordPromptPresenceObserved（fail-open 双层兜底）；prompt.ts 冻结点以 host-runtime 冻集为 preEscaped rendered 候选、最终 guard/重验/回退后注册快照；不依赖官方丢弃的 hook-result 字段。离线验收经生产链（真实 sharedPrepared 装配→冻结注册→正式 handler→事件捕获）：唯一绑定逐期望 full_hit、第二装配降级 ambiguous_binding、sticky 历史缺失、TTL/淘汰/字节上限、隔离、privacy（事件 JSON 无正文）。实测：18×2.2KiB containment 0.166ms/事件1429B；64×64KiB 边界 120ms/4717B；register 0.005ms、binding 0.000ms。hooks 640/640、tsc 0、eslint 0、build 0、发布意图 PASS（四包 changeset）、CI 0737a4c86 27/27。真实宿主/模型 0；D/G1/C04/G2 NOT CLAIMED。文档更正 llm_output 错误（PD 已注册并运行 llm_output，Path A 不改其行为）。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1150-path-a-presence-observe",
+    "branch": "ai/PRI-1150-path-a-presence-observe",
+    "baseCommit": "main 97a50b906（#2406 merge commit，Owner 指定基线）",
+    "headCommit": "0737a4c860e25cda5678e0129164d980d24cf5b5",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2412",
+    "prState": "OPEN",
+    "remoteChecks": "27/27 全绿（Verify Merge Gate PASS 2m44s）；Test principles-core 含 PRI-775 快照刷新后通过。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1150",
+      "scope": "PD 自有装配正文观察（Path A）：host-runtime 冻结 + 插件登记/检查/llm_input 接线 + 离线验收（三项修订约束全部落地）",
+      "status": "IMPLEMENTATION_COMPLETE_OFFLINE_ACCEPTED_AWAITING_REVIEW",
+      "owner": "zcode",
+      "writePaths": [
+        "packages/host-runtime/src/active-principle-prompt.ts",
+        "packages/principles-core/src/runtime/types/event-types.ts",
+        "packages/principles-core/src/runtime/index.ts",
+        "packages/principles-core/src/runtime/__tests__/fixtures/runtime-barrel-surface.json",
+        "packages/openclaw-plugin/src/core/event-log.ts",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-registry.ts",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-lite.ts",
+        "packages/openclaw-plugin/src/hooks/llm-input-presence.ts",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-expectations.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-measure.mts",
+        "packages/openclaw-plugin/src/index.ts",
+        "packages/openclaw-plugin/src/openclaw-sdk.ts",
+        "packages/openclaw-plugin/src/types/event-types.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-registry.test.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-lite.test.ts",
+        "packages/openclaw-plugin/tests/hooks/llm-input-presence.test.ts",
+        "packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts",
+        ".changeset/presence-observe.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T1230Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T1230Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "修订1 候选历史不完整不得唯一关联（sticky 历史缺失+有界 lossyKeys）", "result": "PASS", "evidenceRefs": ["evidence-registry"]},
+        {"criterion": "修订2 无 all_candidates_agree；多候选/历史不完整→unknown", "result": "PASS", "evidenceRefs": ["evidence-registry"]},
+        {"criterion": "修订3 登记表全局有界（键/快照/字节/TTL/输出集中常量+可观察）", "result": "PASS", "evidenceRefs": ["evidence-registry"]},
+        {"criterion": "shared 入口冻结（host-runtime 同源+最终校准）", "result": "PASS", "evidenceRefs": ["evidence-e2e"]},
+        {"criterion": "llm_input 正式注册→handler→事件写入生产链", "result": "PASS", "evidenceRefs": ["evidence-e2e"]},
+        {"criterion": "乱序/重复/多装配/相同正文/隔离/TTL/淘汰/缺失区分", "result": "PASS", "evidenceRefs": ["evidence-registry", "evidence-e2e"]},
+        {"criterion": "隐私（正文不落盘/不进事件日志）", "result": "PASS", "evidenceRefs": ["evidence-e2e"]},
+        {"criterion": "性能与 UTF-8 事件字节实测", "result": "PASS", "evidenceRefs": ["evidence-measure"]},
+        {"criterion": "真实宿主/模型调用", "result": "0", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "D/G1/C04/G2 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "隔离宿主运行卡", "result": "NOT_RUN（离线验收后另行提出）", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": [
+        "Owner 评审 PR #2412。",
+        "离线验收完成后由 Owner 授权再提出隔离宿主运行卡。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-registry", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1150-path-a-presence-observe\\packages\\openclaw-plugin", "command": "npx vitest run tests/hooks/prompt-presence-registry.test.ts tests/hooks/prompt-presence-lite.test.ts", "result": "PASS", "category": "登记/检查器", "freshThisRound": true, "passed": 21, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-registry"]},
+    {"id": "check-e2e", "cwd": "同上", "command": "npx vitest run tests/hooks/runtime-prompt-activation.test.ts（含 PRI-1150 端到端）", "result": "PASS", "category": "真实链端到端", "freshThisRound": true, "passed": 73, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-e2e"]},
+    {"id": "check-hooks-all", "cwd": "同上", "command": "npx vitest run tests/hooks/ + tsc --noEmit + eslint(11 文件) + npm run build ×3 + check-pr-release-intent", "result": "PASS", "category": "全量回归与门禁", "freshThisRound": true, "passed": 640, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-regressions"]},
+    {"id": "check-measure", "cwd": "同上", "command": "npx tsx src/hooks/prompt-presence-measure.mts", "result": "PASS", "category": "性能/字节实测", "freshThisRound": true, "evidenceRefs": ["evidence-measure"]},
+    {"id": "check-ci", "cwd": "N/A", "command": "gh pr checks 2412（head 0737a4c86）", "result": "PASS", "category": "远端 CI", "freshThisRound": true, "evidenceRefs": ["evidence-ci"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-registry", "kind": "LOCAL_TEST", "locator": "tests/hooks/prompt-presence-registry.test.ts（11）+ prompt-presence-lite.test.ts（10）", "observedAt": "2026-11-07T23:45:00+08:00", "supports": "三项修订约束+边界+degraded 可观察。", "limitations": null},
+    {"id": "evidence-e2e", "kind": "LOCAL_TEST", "locator": "runtime-prompt-activation.test.ts 'PRI-1150 end-to-end'（真实 sharedPrepared→注册→handler→事件捕获；73/73）", "observedAt": "2026-11-07T23:50:00+08:00", "supports": "生产链端到端+第二次装配 ambiguous+隐私。", "limitations": "宿主 llm_input 事件为模拟（允许），绑定/检查/发射走生产代码。"},
+    {"id": "evidence-measure", "kind": "LOCAL_TEST", "locator": "src/hooks/prompt-presence-measure.mts 输出（本机）", "observedAt": "2026-11-07T23:30:00+08:00", "supports": "0.166ms/1429B（18 条）；120ms/4717B（64×64KiB 边界）；register 0.005ms、binding 0.000ms、ambiguous 事件 200B。", "limitations": "机器相关；脚本入库可复跑。"},
+    {"id": "evidence-regressions", "kind": "LOCAL_TEST", "locator": "hooks 全量 640/640；tsc exit 0；eslint 0；build core/host-runtime/plugin exit 0；release-intent PASS", "observedAt": "2026-11-07T23:55:00+08:00", "supports": "门禁全绿。", "limitations": null},
+    {"id": "evidence-ci", "kind": "REMOTE_CI", "locator": "PR #2412 checks head 0737a4c86：27 pass / 0 fail（VMG PASS 2m44s；Test principles-core 含刷新后快照通过）", "observedAt": "2026-11-08T00:05:00+08:00", "supports": "最终 head CI。", "limitations": null},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮真实宿主/模型 0；未安装/发版/改生产配置/库/安装目录；OpenClaw 仓未改；未自动合并", "observedAt": "2026-11-07T12:30:00Z", "supports": "边界遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-pr", "kind": "CHECKPOINT", "locator": "https://github.com/csuzngjh/principles/pull/2412", "persistence": "remote", "notes": "独立实施 PR（不合并）。"},
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T1230Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "PR #2412 待 Owner 评审合并。",
+    "隔离宿主运行卡待 Owner 授权后另行提出。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1150", "action": "Owner 评审 #2412 并合并（合并后仅更新 PD 即生效，零配置变更）。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "合并决定。"},
+    {"order": 2, "issue": "PRI-1150", "action": "Owner 授权后提出隔离宿主运行卡并执行。", "dependsOn": [1], "authorization": "NEEDS_OWNER", "doneWhen": "运行卡书面批准并执行。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "openclawWorktreeModified": false,
+    "sharedBranchForcePushed": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-07 批准 Path A 设计 v2 + 三项修订约束，进入 PD 仓内实现与离线验收；不含真实宿主/模型调用、安装、发布、生产变更；不修改 OpenClaw/上游 PR；不自动合并；不宣称 D/G1/C04/G2。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T1230Z-zcode\",\"kind\":\"pri-1150-path-a-implementation-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（zcode:PRI-1150-path-a-presence-observe）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

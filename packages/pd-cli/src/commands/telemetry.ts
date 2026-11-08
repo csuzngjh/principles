@@ -232,8 +232,10 @@ export async function handleTelemetryMutation(kind: MutationKind, opts: Telemetr
     return;
   }
 
+  // PRI-1151: consent mutations are locked cross-process transactions —
+  // the CLI awaits them so the exit reflects the persisted outcome.
   const result =
-    kind === 'enable' ? service.enable() : kind === 'disable' ? service.disable() : service.reset();
+    kind === 'enable' ? await service.enable() : kind === 'disable' ? await service.disable() : await service.reset();
   if (!result.ok) {
     process.exitCode = emitError(new Error(result.reason), { json, nextAction: result.nextAction });
     return;

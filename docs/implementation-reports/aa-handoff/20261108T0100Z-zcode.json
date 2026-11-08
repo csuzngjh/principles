@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261108T0100Z-zcode",
+  "previousCheckpoint": "20261107T1230Z-zcode",
+  "generatedAt": "2026-11-08T01:00:00Z",
+  "agent": "zcode",
+  "overallStatus": "REVIEW_FIXES_COMPLETE_CI_GREEN_AWAITING_REVIEW",
+  "summary": "PRI-1150/#2412 六项评审缺陷修复完成（先红后绿），最终 head 71d08fba6 CI 27/27 全绿。D1 登记期 TTL 清理洗白历史缺失（lossBefore 先于 sweep 读取）→ sweep 先于 loss 读取并毒化重建 entry，两条登记顺序均覆盖。D2 lossy 标记淘汰后旧键重获唯一 → lossyMarkersDropped 计数+重登记键在有 dropped markers 时一律 history-incomplete（保守/有界/作用域与恢复条件文档化，观察事件不 disable）。D3 空装配未登记 → 每个适用装配（可信 workspace+run+session）全量登记，emptyKind 五类区分（none_injected/shared_field_absent/target_removed_by_fallback/generation_failed/degraded），缺失来源不等于零注入；生产链验证非空 A→空 B→乱序回调→ambiguous，无手工补登记。D4 进程级登记表缺工作区隔离 → path.resolve（既有机制）规范身份进登记键/查询键/快照；CI POSIX 环境暴露 D4 测试的平台相关拼写断言 → os.tmpdir+path.join 平台中立重建。D5 超大快照绕过每键容量且丢 reason → 正常/降级统一容量路径（每键 8/全局快照/字节/键数全适用），快照携带 degradedReason=snapshot_over_limit，不再由空数组或溢出计数猜测；丢弃旧降级快照也产生历史缺失。D6 不可读观察缺 reason → unparseable_observation 逐期望+事件携带，undefined/null/对象/数字与有效空串区分（空串=完整检查→checked_missing）。验证：registry 15/15、lite 11/11、handler 4/4、hooks 全量 645/645、tsc 0、eslint 0。真实宿主/模型 0；不宣称 D/G1/C04/G2。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1150-path-a-presence-observe",
+    "branch": "ai/PRI-1150-path-a-presence-observe",
+    "baseCommit": "main 97a50b906",
+    "headCommit": "71d08fba6d0c3e3bacfc9fcea41af9d112bc431e",
+    "dirtyPaths": ["packages/principles-core/src/runtime/adapter/__tests__/__snapshots__/schema-prompt-adapter.test.ts.snap（eol-only 触碰，无内容差异，保留不提交）"],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2412",
+    "prState": "OPEN",
+    "remoteChecks": "71d08fba6：27/27 全绿（0 fail）。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1150",
+      "scope": "六项评审缺陷修复（先红后绿）+ D4 CI 平台中立修正",
+      "status": "REVIEW_FIXES_COMPLETE_CI_GREEN_AWAITING_REVIEW",
+      "owner": "zcode",
+      "writePaths": [
+        "packages/openclaw-plugin/src/hooks/prompt-presence-registry.ts",
+        "packages/openclaw-plugin/src/hooks/prompt-presence-lite.ts",
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-registry.test.ts",
+        "packages/openclaw-plugin/tests/hooks/prompt-presence-lite.test.ts",
+        "docs/implementation-reports/aa-handoff/20261108T0100Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261108T0100Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "D1 登记期 TTL 清理不洗白历史缺失（两条登记顺序）", "result": "PASS", "evidenceRefs": ["evidence-registry-fix"]},
+        {"criterion": "D2 标记淘汰后重登记键保守 history-incomplete（含持续周转）", "result": "PASS", "evidenceRefs": ["evidence-registry-fix"]},
+        {"criterion": "D3 空装配全量登记+五类区分+生产链乱序验证", "result": "PASS", "evidenceRefs": ["evidence-handler"]},
+        {"criterion": "D4 规范工作区身份隔离（含拼写变体/未知工作区/CI POSIX 绿）", "result": "PASS", "evidenceRefs": ["evidence-registry-fix"]},
+        {"criterion": "D5 统一容量路径+degradedReason 携带", "result": "PASS", "evidenceRefs": ["evidence-registry-fix"]},
+        {"criterion": "D6 unparseable_observation+形状区分+空串完整检查", "result": "PASS", "evidenceRefs": ["evidence-lite"]},
+        {"criterion": "真实宿主/模型调用", "result": "0", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "D/G1/C04/G2 签收", "result": "NOT_CLAIMED", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": ["Owner 评审 #2412；隔离宿主运行卡待 Owner 授权后另行提出。"]
+    }
+  ],
+  "verification": [
+    {"id": "check-registry", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1150-path-a-presence-observe\\packages\\openclaw-plugin", "command": "npx vitest run tests/hooks/prompt-presence-registry.test.ts", "result": "PASS", "category": "登记表", "freshThisRound": true, "passed": 15, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-registry-fix"]},
+    {"id": "check-lite", "cwd": "同上", "command": "npx vitest run tests/hooks/prompt-presence-lite.test.ts", "result": "PASS", "category": "lite 检查器", "freshThisRound": true, "passed": 11, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-lite"]},
+    {"id": "check-handler", "cwd": "同上", "command": "npx vitest run tests/hooks/llm-input-presence.test.ts", "result": "PASS", "category": "handler", "freshThisRound": true, "passed": 4, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-handler"]},
+    {"id": "check-hooks-all", "cwd": "同上", "command": "npx vitest run tests/hooks/ + npx tsc --noEmit + npx eslint", "result": "PASS", "category": "全量回归与类型/lint", "freshThisRound": true, "passed": 645, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-regressions"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-registry-fix", "kind": "LOCAL_TEST", "locator": "tests/hooks/prompt-presence-registry.test.ts（15/15，含 D1/D2/D4/D5 红转绿）", "observedAt": "2026-11-08T00:20:00+08:00", "supports": "六项缺陷中的 D1/D2/D4/D5。", "limitations": null},
+    {"id": "evidence-lite", "kind": "LOCAL_TEST", "locator": "tests/hooks/prompt-presence-lite.test.ts（11/11，含 D6 形状区分与空串完整检查）", "observedAt": "2026-11-08T00:30:00+08:00", "supports": "D6。", "limitations": null},
+    {"id": "evidence-handler", "kind": "LOCAL_TEST", "locator": "tests/hooks/llm-input-presence.test.ts（4/4，注册对齐 handler 解析的 workspaceDir）", "observedAt": "2026-11-08T00:35:00+08:00", "supports": "D3/D4 消费侧。", "limitations": null},
+    {"id": "evidence-regressions", "kind": "LOCAL_TEST", "locator": "hooks 全量 645/645 + tsc/eslint 0", "observedAt": "2026-11-08T00:40:00+08:00", "supports": "无回归。", "limitations": null},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮真实宿主/模型 0；未改 OpenClaw/安装目录/dist/生产配置/库；未自动合并", "observedAt": "2026-11-08T01:00:00Z", "supports": "边界遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261108T0100Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": ["PR #2412 待 Owner 评审合并。"],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1150", "action": "Owner 评审 #2412（head 71d08fba6，CI 27/27）。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "合并决定。"},
+    {"order": 2, "issue": "PRI-1150", "action": "隔离宿主运行卡待 Owner 授权后另行提出。", "dependsOn": [1], "authorization": "NEEDS_OWNER", "doneWhen": "运行卡批准并执行。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "openclawWorktreeModified": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-08 指令：PRI-1150 评审修复，六项缺陷先红后绿，普通 CI 问题自行修复；不修改 OpenClaw/不安装/不发版/不改生产配置或库/不启动真实宿主或模型/不自动合并/不宣称 D/G1/C04/G2。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261108T0100Z-zcode\",\"kind\":\"pri-1150-review-fixes-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（zcode:PRI-1150-path-a-presence-observe）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

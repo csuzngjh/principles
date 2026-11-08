@@ -117,7 +117,7 @@ PD llm_input handler（runId+sessionId 查登记表 → §4 关联裁决 → 有
 - **已授权时**：无重复配置。
 - **未授权环境**：宿主不派发 llm_input → handler 不执行 → PD 报告方式=注册时（`api.on` 不可用时）或首次装配时写一条诊断事件 `presence_source_unavailable(reason=conversation_access_not_granted)`——不静默、不把缺失解释为"未注入"。
 - **回滚**：revert PD 即移除 handler 与登记表（内存态）；`allowConversationAccess` **恢复运行前值**（若本轮未曾改动则保持现状）——不作为清理动作一律删除；该授权扩大的是**本插件条目**的会话内容读取面（宿主文档明示这是信任授予而非沙箱），不得描述为"无副作用"。
-- 授权对既有功能的影响：`llm_output` 等同清单钩子本就在该授权覆盖下；PD 不注册 `llm_output`，其他插件的授权是各自条目互不影响。
+- 授权对既有功能的影响：`llm_output` 与 `llm_input` 同在该授权清单下。**更正（Owner 第八轮指令 §四）**：PD 插件**已经注册并运行 `llm_output`**（`src/index.ts` hook:llm_output，PRI-755 接收链）——v2 §7 此前"PD 不注册 llm_output"为错误陈述。Path A 在其旁新增 `llm_input` 注册，不改动 `llm_output` 的任何行为；授权是插件条目级的，其他插件的授权互不影响。回滚=恢复运行前配置值，不一律删除；该授权不描述为"无副作用"。
 
 ## 8. 测试矩阵（批准后实施验收）
 
