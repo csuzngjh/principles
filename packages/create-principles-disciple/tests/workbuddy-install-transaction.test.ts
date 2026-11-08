@@ -515,7 +515,10 @@ describe('WorkBuddy install-transaction compensation (real fault injection)', ()
         () => {
           for (const dir of backupDirs()) {
             const marker = path.join(dir, 'scripts', 'wrapper.cjs');
-            if (fs.existsSync(marker)) fs.appendFileSync(marker, '\n// injected backup corruption\n');
+            // No existence-check-then-act race: attempt the append directly.
+            // A backup without this payload file simply stays unchanged.
+            try { fs.appendFileSync(marker, '\n// injected backup corruption\n'); }
+            catch { /* backup payload has no wrapper.cjs — nothing to corrupt */ }
           }
         },
       ),
