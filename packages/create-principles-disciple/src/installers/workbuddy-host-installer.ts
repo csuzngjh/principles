@@ -43,7 +43,7 @@
  */
 import { spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync, type Dirent } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import semver from 'semver';
@@ -496,6 +496,9 @@ interface WorkbuddyInstallTxn {
   readonly lastWrittenBytes: Map<string, string>;
   readonly governanceDir: string;
   readonly governanceDirExistedBefore: boolean;
+  /** Host registration must not be left pointing at a deleted cache. */
+  readonly settingsPath: string;
+  readonly registryPath: string;
   readonly cacheVersionDir: string | undefined;
   readonly cacheExisted: boolean;
   /** Copy of the pre-existing cache payload (undefined when absent or the snapshot copy failed). */
@@ -509,22 +512,23 @@ interface WorkbuddyInstallTxn {
 function workbuddyDigestTree(root: string): string {
   const hash = createHash('sha256');
   const walk = (dir: string, relative: string): void => {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      hash.update('unreadable:' + relative + '\n');
-      return;
-    }
+    // Hash directory structure too: a new empty dir is a concurrent write.
+    // An unreadable subtree is UNPROVABLE, not a stable equal digest.
+    hash.update('dir:' + relative + '\n');
+    const entries: Dirent[] = readdirSync(dir, { withFileTypes: true });
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const rel = relative.length === 0 ? entry.name : relative + '/' + entry.name;
-      if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
-      else if (entry.isFile()) {
-        try {
-          hash.update(rel + ':' + createHash('sha256').update(readFileSync(path.join(dir, entry.name))).digest('hex') + '\n');
-        } catch {
-          hash.update(rel + ':unreadable\n');
-        }
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        // A symlink/junction is not followed, but its target string is part
+        // of the identity of the cache, and must not be silently ignored.
+        hash.update('link:' + rel + ':' + readlinkSync(entryPath) + '\n');
+      } else if (entry.isDirectory()) {
+        walk(entryPath, rel);
+      } else if (entry.isFile()) {
+        hash.update('file:' + rel + ':' + createHash('sha256').update(readFileSync(entryPath)).digest('hex') + '\n');
+      } else {
+        throw new Error('unsupported cache filesystem entry: ' + entryPath);
       }
     }
   };
@@ -536,8 +540,11 @@ function workbuddyDigestTree(root: string): string {
 function snapshotWorkbuddyFile(filePath: string): WorkbuddyFileSnapshot {
   try {
     return { existed: true, bytes: readFileSync(filePath, 'utf-8') };
-  } catch {
-    return { existed: false, bytes: undefined };
+  } catch (error) {
+    // Only ENOENT proves absence. EACCES/EISDIR and other read failures cannot
+    // be converted to "new file": rollback would then delete Owner content.
+    if (errnoCode(error) === 'ENOENT') return { existed: false, bytes: undefined };
+    throw error;
   }
 }
 
@@ -547,12 +554,20 @@ function openWorkbuddyInstallTxn(
   deps: { copyDir?: typeof cpSync } = {},
 ): { ok: true; txn: WorkbuddyInstallTxn } | { ok: false; reason: string; nextAction: string } {
   const snapshots = new Map<string, WorkbuddyFileSnapshot>();
-  for (const filePath of [p.settingsPath, p.registryPath, p.installManifestPath]) {
-    snapshots.set(filePath, snapshotWorkbuddyFile(filePath));
-  }
   const governanceConfigPath = path.join(p.governanceDir, '.pd', 'config.yaml');
   const governanceDirExistedBefore = existsSync(p.governanceDir);
-  snapshots.set(governanceConfigPath, snapshotWorkbuddyFile(governanceConfigPath));
+  try {
+    for (const filePath of [p.settingsPath, p.registryPath, p.installManifestPath, governanceConfigPath]) {
+      snapshots.set(filePath, snapshotWorkbuddyFile(filePath));
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'workbuddy_transaction_snapshot_failed: cannot prove the previous host configuration before registration (' +
+        (error instanceof Error ? error.message : String(error)) + '). No host registration or cache replacement was started; the PD marketplace staging files may already exist.',
+      nextAction: 'Repair the unreadable host file or its permissions and retry; do not delete it to make the install proceed.',
+    };
+  }
 
   const versionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
   let cacheExisted = false;
@@ -560,7 +575,16 @@ function openWorkbuddyInstallTxn(
   let cacheBackupDir: string | undefined;
   if (versionDir !== undefined && existsSync(versionDir)) {
     cacheExisted = true;
-    cacheDigestBefore = workbuddyDigestTree(versionDir);
+    try {
+      cacheDigestBefore = workbuddyDigestTree(versionDir);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: 'workbuddy_cache_snapshot_failed: cache cannot be fully read before upgrade (' +
+          (error instanceof Error ? error.message : String(error)) + '); no cache replacement attempted.',
+        nextAction: 'Repair or remove the unreadable cache entry only after preserving Owner data, then retry.',
+      };
+    }
     cacheBackupDir = path.join(path.dirname(path.resolve(p.cachePluginRoot)), `.pd-txn-backup-${process.pid}-${Date.now()}`);
     // 2026-11-08 P1 fix: for an UPGRADE (a pre-existing cache payload), the
     // backup is the rollback's only material. A backup that cannot be created
@@ -603,6 +627,8 @@ function openWorkbuddyInstallTxn(
       lastWrittenBytes: new Map(),
       governanceDir: p.governanceDir,
       governanceDirExistedBefore,
+      settingsPath: p.settingsPath,
+      registryPath: p.registryPath,
       cacheVersionDir: versionDir,
       cacheExisted,
       cacheBackupDir,
@@ -626,12 +652,22 @@ function recordWorkbuddyTxnWrite(txn: WorkbuddyInstallTxn, filePath: string, byt
  * inside that sub-millisecond window can be pinned as "what PD wrote" — the
  * same unavoidable FS race class writeHostJsonFileProtected already accepts.
  * Every modification AFTER the pin is correctly detected by the guard. */
-function captureWorkbuddyPostRegistration(txn: WorkbuddyInstallTxn, p: WorkbuddyPaths): void {
+function captureWorkbuddyPostRegistration(
+  txn: WorkbuddyInstallTxn,
+  p: WorkbuddyPaths,
+  mode: 'engine' | 'direct-write' | 'already-registered',
+): void {
+  // A no-op registration did not write any host files/cache. In particular,
+  // never attribute a concurrent Owner edit to PD and roll it back.
+  if (mode === 'already-registered') {
+    txn.cacheDigestAfterRegistration = txn.cacheDigestBefore;
+    return;
+  }
   for (const filePath of [p.settingsPath, p.registryPath]) {
+    const before = txn.fileSnapshots.get(filePath);
     const after = snapshotWorkbuddyFile(filePath);
-    if (after.existed && after.bytes !== undefined) {
-      txn.lastWrittenBytes.set(filePath, after.bytes);
-      if (!txn.writtenPaths.includes(filePath)) txn.writtenPaths.push(filePath);
+    if (after.existed && after.bytes !== undefined && (!before?.existed || after.bytes !== before.bytes)) {
+      recordWorkbuddyTxnWrite(txn, filePath, after.bytes);
     }
   }
   if (txn.cacheVersionDir !== undefined && existsSync(txn.cacheVersionDir)) {
@@ -685,6 +721,11 @@ function restoreWorkbuddyFileSnapshot(txn: WorkbuddyInstallTxn, filePath: string
  * it never claims the previous version was restored. */
 function restoreWorkbuddyCacheSnapshot(txn: WorkbuddyInstallTxn): string | undefined {
   if (txn.cacheVersionDir === undefined) return undefined;
+  if (txn.cacheDigestAfterRegistration === txn.cacheDigestBefore && txn.cacheExisted) {
+    // The registration left the cache byte-identical to its starting state:
+    // an unrelated later cache change is not PD's to roll back.
+    return undefined;
+  }
   if (txn.cacheDigestAfterRegistration === undefined) {
     return txn.cacheExisted ? 'cache: post-registration digest missing — restore skipped' : undefined;
   }
@@ -797,9 +838,17 @@ function compensateWorkbuddyInstall(txn: WorkbuddyInstallTxn): WorkbuddyCompensa
     if (error !== undefined) errors.push(error);
   }
 
-  // 2. Registration surfaces: settings + registry + cache payload.
-  const cacheError = restoreWorkbuddyCacheSnapshot(txn);
-  if (cacheError !== undefined) errors.push(cacheError);
+  // 2. The registry is the pointer to the cache. If a concurrent host edit
+  // blocked registry/settings recovery, deleting the cache would produce a
+  // dangling registration. Preserve the cache and report partial rollback.
+  const registrationRestoreFailed = errors.some((error) =>
+    error.startsWith(txn.settingsPath + ':') || error.startsWith(txn.registryPath + ':'));
+  if (registrationRestoreFailed) {
+    errors.push('cache: preserved because host registration/settings could not be safely restored');
+  } else {
+    const cacheError = restoreWorkbuddyCacheSnapshot(txn);
+    if (cacheError !== undefined) errors.push(cacheError);
+  }
 
   // 3. Evidence retention: a complete rollback discards the cache evidence
   //    copy; an incomplete one keeps it as the manual-recovery source.
@@ -2270,7 +2319,21 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         nextAction: registration.nextAction,
       };
     }
-    captureWorkbuddyPostRegistration(txn, p);
+    try {
+      captureWorkbuddyPostRegistration(txn, p, registration.mode);
+    } catch (error) {
+      // Missing/opaque post-registration evidence must not silently proceed:
+      // registration may have changed files but their new ownership is unproven.
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: registration.settingsAction,
+        reason: 'workbuddy_registration_snapshot_failed: could not verify post-registration state (' +
+          (error instanceof Error ? error.message : String(error)) + '); ROLLBACK_INCOMPLETE: manual reconciliation required.',
+        nextAction: 'Inspect WorkBuddy settings, registry and plugin cache; do not assume registration was rolled back.',
+      };
+    }
 
     // Compensated failure: roll this transaction back, then report the
     // original cause TOGETHER WITH the verified rollback outcome (rc-9:

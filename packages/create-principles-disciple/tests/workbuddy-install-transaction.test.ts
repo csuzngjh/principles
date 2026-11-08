@@ -513,4 +513,75 @@ describe('WorkBuddy install-transaction compensation (real fault injection)', ()
     const leftovers = fs.readdirSync(cacheParent()).filter((name) => name.startsWith('.pd-restore-') || name.startsWith('.pd-discard-'));
     expect(leftovers).toEqual([]);
   });
+
+  it('P1-C unreadable manifest snapshot refuses registration without deleting Owner data', async () => {
+    seedForeignState();
+    fs.rmSync(cacheVersionDirPath(), { recursive: true, force: true });
+    fs.rmSync(manifestPath(), { force: true });
+    fs.mkdirSync(manifestPath());
+    const oldSettings = sha256File(settingsPath());
+    const oldRegistry = sha256File(registryPath());
+    try {
+      const result = await freshScenario().install(installCtx());
+      expect(result.success).toBe(false);
+      expect(result.reason).toContain('workbuddy_transaction_snapshot_failed');
+      expect(result.reason).toContain('No host registration or cache replacement was started');
+      expect(sha256File(settingsPath())).toBe(oldSettings);
+      expect(sha256File(registryPath())).toBe(oldRegistry);
+      expect(fs.statSync(manifestPath()).isDirectory()).toBe(true);
+      expect(fs.existsSync(cacheVersionDirPath())).toBe(false);
+    } finally {
+      fs.rmSync(manifestPath(), { recursive: true, force: true });
+    }
+  });
+
+  it('P1-D concurrent registry edit preserves the live cache and reports incomplete rollback', async () => {
+    seedForeignState();
+    fs.rmSync(cacheVersionDirPath(), { recursive: true, force: true });
+    fs.rmSync(governanceDir(), { recursive: true, force: true });
+    const failInitAfterHostEdit = (file: string, args: readonly string[]): { status: number | null; stdout: string; stderr: string } => {
+      if (args.includes('runtime') && args.includes('init')) {
+        const current = JSON.parse(fs.readFileSync(registryPath(), 'utf8')) as Record<string, unknown>;
+        fs.writeFileSync(registryPath(), JSON.stringify({ ...current, ownerConcurrentEdit: true }, null, 2));
+        return { status: 1, stdout: '', stderr: 'simulated runtime initialization error after Owner registry edit' };
+      }
+      return { status: 0, stdout: 'v22', stderr: '' };
+    };
+    const result = await freshScenario({
+      pdCliEntry: () => path.join(home, 'fake-pd-cli', 'index.js'),
+      runCommand: failInitAfterHostEdit,
+    }).install(installCtx());
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('ROLLBACK_INCOMPLETE');
+    expect(result.reason).toContain('cache: preserved because host registration/settings could not be safely restored');
+    expect(JSON.parse(fs.readFileSync(registryPath(), 'utf8')).ownerConcurrentEdit).toBe(true);
+    expect(fs.existsSync(path.join(cacheVersionDirPath(), '.codebuddy-plugin', 'plugin.json'))).toBe(true);
+  });
+
+  it('P1-E already-registered no-op does not roll back an Owner settings edit', async () => {
+    seedForeignState();
+    fs.rmSync(cacheVersionDirPath(), { recursive: true, force: true });
+    fs.rmSync(governanceDir(), { recursive: true, force: true });
+    const seeded = await freshScenario().install(installCtx());
+    expect(seeded.success, seeded.reason).toBe(true);
+    let ownerChanged = false;
+    const failInitAfterOwnerEdit = (file: string, args: readonly string[]): { status: number | null; stdout: string; stderr: string } => {
+      if (args.includes('runtime') && args.includes('init')) {
+        const current = JSON.parse(fs.readFileSync(settingsPath(), 'utf8')) as Record<string, unknown>;
+        fs.writeFileSync(settingsPath(), JSON.stringify({ ...current, ownerConcurrentEdit: 'keep' }, null, 2));
+        ownerChanged = true;
+        return { status: 1, stdout: '', stderr: 'simulated runtime initialization failure' };
+      }
+      return { status: 0, stdout: 'v22', stderr: '' };
+    };
+    const result = await freshScenario({
+      pdCliEntry: () => path.join(home, 'fake-pd-cli', 'index.js'),
+      runCommand: failInitAfterOwnerEdit,
+    }).install(installCtx());
+    expect(ownerChanged).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.reason).not.toContain('changed after PD wrote it (concurrent modification)');
+    expect(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')).ownerConcurrentEdit).toBe('keep');
+    expect(fs.existsSync(cacheVersionDirPath())).toBe(true);
+  });
 });
