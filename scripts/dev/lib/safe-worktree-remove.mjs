@@ -111,8 +111,23 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
   const restore = async () => {
     if (!fs.existsSync(quarantinePath) || fs.existsSync(worktreePath)) return false;
     try {
-      if (markerContents !== null && !fs.existsSync(markerPath)) {
-        fs.writeFileSync(markerPath, markerContents, 'utf-8');
+      if (markerContents !== null) {
+        // Exclusive creation is atomic: checking existsSync and then writing
+        // would follow a Junction/symlink introduced in between and overwrite
+        // a file outside this quarantine directory.
+        let markerFd;
+        try {
+          markerFd = fs.openSync(markerPath, 'wx', 0o600);
+        } catch (error) {
+          if (error && error.code !== 'EEXIST') throw error;
+        }
+        if (markerFd !== undefined) {
+          try {
+            fs.writeFileSync(markerFd, markerContents, 'utf-8');
+          } finally {
+            fs.closeSync(markerFd);
+          }
+        }
       }
       await runGit(['worktree', 'move', quarantinePath, worktreePath], { cwd });
       fs.rmdirSync(quarantineParent);
@@ -147,11 +162,21 @@ export async function removeWorktreeSafely({ cwd, worktreePath, primaryPath, onP
   }
 
   try {
-    const markerStat = fs.lstatSync(markerPath);
-    if (markerStat.isSymbolicLink() || !markerStat.isFile()) {
-      throw new Error('worktree .git marker is not a regular file');
+    // Open one stable file descriptor and compare its identity with the
+    // directory entry after reading. A path-based lstat-then-read can follow
+    // a symlink swapped into place in between those separate operations.
+    const markerFd = fs.openSync(markerPath, 'r');
+    try {
+      const opened = fs.fstatSync(markerFd);
+      markerContents = fs.readFileSync(markerFd, 'utf-8');
+      const named = fs.lstatSync(markerPath);
+      if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
+        || opened.dev !== named.dev || opened.ino !== named.ino) {
+        throw new Error('worktree .git marker changed or is not a regular file');
+      }
+    } finally {
+      fs.closeSync(markerFd);
     }
-    markerContents = fs.readFileSync(markerPath, 'utf-8');
     if (!/^\s*gitdir:/m.test(markerContents)) {
       throw new Error('worktree .git marker does not contain a gitdir pointer');
     }

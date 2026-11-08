@@ -456,4 +456,48 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     expect(fingerprintTree(outside)).toBe(before);
     expect((await worktreeList(primary)).some((w) => normalizeGitPath(w.path) === normalizeGitPath(wt))).toBe(false);
   }, 120_000);
+
+  it('refuses a swapped .git marker and never overwrites the external target', async () => {
+    const { wt } = await makeTask('marker-swap');
+    const outside = makeExternalInstall('marker-swap');
+    const before = fingerprintTree(outside);
+    const commonDir = await gitCommonDirAbsolute(primary);
+    let quarantine = '';
+    let originalMarker = '';
+    try {
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({
+          cwd: primary,
+          worktreePath: wt,
+          primaryPath: primary,
+          onQuarantined: (moved) => {
+            quarantine = moved;
+            const marker = path.join(moved, '.git');
+            originalMarker = fs.readFileSync(marker, 'utf-8');
+            fs.unlinkSync(marker);
+            // A non-cooperating process swaps a directory Junction in place
+            // between the Git move and filesystem verification.
+            trackJunction(marker, outside);
+          },
+        }),
+      );
+      expect(result.ok).toBe(false);
+      expect(fingerprintTree(outside)).toBe(before);
+    } finally {
+      if (quarantine && fs.existsSync(quarantine)) {
+        const marker = path.join(quarantine, '.git');
+        try {
+          fs.unlinkSync(marker);
+        } catch {
+          /* already detached */
+        }
+        fs.writeFileSync(marker, originalMarker, 'utf-8');
+        await git(primary, 'worktree', 'move', quarantine, wt);
+        fs.rmdirSync(path.dirname(quarantine));
+      }
+    }
+    expect(fingerprintTree(outside)).toBe(before);
+    expect(fs.existsSync(wt)).toBe(true);
+  }, 120_000);
 });
