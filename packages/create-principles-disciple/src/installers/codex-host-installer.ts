@@ -23,7 +23,7 @@
  * merge into it, never overwrite. The marker file is our own bookkeeping
  * for precise uninstall.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
@@ -78,7 +78,12 @@ function getErrorCode(err: unknown): string | undefined {
 
 // ─── Path helpers ───────────────────────────────────────────────────────────
 function getCodexDir(): string {
-  return path.join(os.homedir(), '.codex');
+  // Shared authority for Marketplace observation and the legacy hook detector.
+  // Codex accepts relative CODEX_HOME; path.resolve matches pd-cli's reader.
+  const override = process.env.CODEX_HOME;
+  return typeof override === 'string' && override.length > 0
+    ? path.resolve(override)
+    : path.join(os.homedir(), '.codex');
 }
 
 function getCodexHooksJsonPath(): string {
@@ -230,6 +235,94 @@ export function detectLegacyCodexHookRegistration(hooksJsonPathOverride?: string
   return { detected, legacyAsyncPostToolUse };
 }
 
+// ─── Codex Marketplace state (three-state detection, read-only) ─────────────
+/**
+ * Read-only three-state detection of the Codex Marketplace plugin install.
+ * Layout Codex writes for the supported path (plugin add principles-disciple):
+ *   plugins/cache/principles/principles-disciple/SEMVER/runtime-version.json
+ * under the Codex home. Same read-only evidence pd-cli health consumes
+ * (selectMarketplaceCacheVersionDir); mirrored read-only here because the
+ * self-contained npx package must not depend on pd-cli. A CI parity test pins
+ * the two shapes together. rc-9: an unreadable cache root is unknown, never
+ * installed state.
+ */
+export type CodexMarketplaceState =
+  | { state: 'installed'; version: string; versionDir: string }
+  | { state: 'not_installed' }
+  | { state: 'unknown'; reason: string };
+
+/**
+ * Same resolution the pd-cli authority uses (resolveCodexHome): the Codex
+ * home may be redirected via CODEX_HOME and the Marketplace cache follows
+ * that redirect. Like the pd-cli authority, relative paths and parent
+ * components are resolved against the current working directory. This is
+ * read-only observation of a user-selected Codex home, not a filesystem write.
+ */
+function resolveCodexHomeForMarketplace(): string {
+  return getCodexDir();
+}
+
+export function detectCodexMarketplaceState(codexHome?: string): CodexMarketplaceState {
+  const home = codexHome ?? resolveCodexHomeForMarketplace();
+  const cachePluginRoot = path.join(home, 'plugins', 'cache', 'principles', 'principles-disciple');
+  let entries: string[] | undefined;
+  try {
+    const read = readdirSync(cachePluginRoot);
+    // rc-4: validating "is array" before iteration — a non-array listing is
+    // unverifiable state, never an empty guess.
+    if (!Array.isArray(read)) {
+      return { state: 'unknown', reason: 'the Codex Marketplace cache listing is not a directory array: ' + cachePluginRoot };
+    }
+    entries = read;
+  } catch (err) {
+    if (getErrorCode(err) === 'ENOENT') return { state: 'not_installed' };
+    return {
+      state: 'unknown',
+      reason: 'cache root unreadable: ' + cachePluginRoot + ' (' + String(err) + ')',
+    };
+  }
+  const semverPattern = /^(\d+)\.(\d+)\.(\d+)$/;
+  let best: { dirName: string; parts: [number, number, number] } | undefined;
+  let unverifiableCandidate: string | undefined;
+  for (const versionDir of entries) {
+    const match = semverPattern.exec(versionDir);
+    if (match === null) continue;
+    // Parity with the authority (selectMarketplaceCacheVersionDir): the pin
+    // must PARSE as a JSON object, not merely exist — a corrupt pin means the
+    // candidate is unusable, not installed (a bare existsSync here would
+    // claim installed state that pd-cli health refuses).
+    const pinFile = path.join(cachePluginRoot, versionDir, 'runtime-version.json');
+    let pinValid: boolean;
+    try {
+      const pin: unknown = JSON.parse(readFileSync(pinFile, 'utf-8'));
+      pinValid = isRecord(pin);
+    } catch {
+      pinValid = false;
+    }
+    if (!pinValid) {
+      // Presence of an apparently installed version with an unreadable or
+      // malformed pin is UNKNOWN, not proof that no plugin was installed.
+      unverifiableCandidate ??= pinFile;
+      continue;
+    }
+    const major = Number.parseInt(match[1] ?? '', 10);
+    const minor = Number.parseInt(match[2] ?? '', 10);
+    const patch = Number.parseInt(match[3] ?? '', 10);
+    if (![major, minor, patch].every((n) => Number.isFinite(n))) continue;
+    if (best === undefined
+      || major > best.parts[0]
+      || (major === best.parts[0] && (minor > best.parts[1] || (minor === best.parts[1] && patch > best.parts[2])))) {
+      best = { dirName: versionDir, parts: [major, minor, patch] };
+    }
+  }
+  if (best === undefined) {
+    return unverifiableCandidate === undefined
+      ? { state: 'not_installed' }
+      : { state: 'unknown', reason: 'Codex Marketplace version exists but runtime pin cannot be verified: ' + unverifiableCandidate };
+  }
+  return { state: 'installed', version: best.dirName, versionDir: path.join(cachePluginRoot, best.dirName) };
+}
+
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────
 export class CodexHostInstaller implements HostInstaller {
   readonly hostId = 'codex';
@@ -253,17 +346,38 @@ export class CodexHostInstaller implements HostInstaller {
         hostId: this.hostId,
         configPath: hooksJsonPath,
         configAction: 'skipped',
+        manualActionRequired: true,
         reason: 'A legacy PD global Codex hook registration was detected (async PostToolUse in ~/.codex/hooks.json). The legacy global installer is retired (SPEC rev 2 §17) and cannot update it.',
         nextAction: 'Migrate to the Marketplace plugin: 1) npx create-principles-disciple uninstall --host codex  (removes ONLY PD-owned entries; evidence is preserved); 2) codex plugin add principles-disciple@principles; 3) run the plugin setup ($pd-control setup) — it presents the ingestion disclosure and records consent.',
       };
     }
+    // Marketplace contract (2026-11-07): the retired global-hook installer
+    // never writes anything; the Codex end state is reported honestly in
+    // three states and never executes the retired registration logic.
+    const marketplace = detectCodexMarketplaceState();
+    if (marketplace.state === 'installed') {
+      return {
+        success: true,
+        hostId: this.hostId,
+        configAction: 'preserved',
+        reason: `Codex Marketplace plugin already installed and confirmable (cache version ${marketplace.version}).`,
+        nextAction: 'If not done yet, start a Codex session and run the plugin setup ($pd-control setup) — it verifies Node/runtime/workspace/trust and records the conversation-ingestion consent.',
+      };
+    }
+    // 'not_installed' and 'unknown' both leave a manual step pending. They are
+    // NOT failures of anything this installer attempted (it never writes), so
+    // they must not trigger other hosts' rollback — the manualActionRequired
+    // flag separates them from real failures (installer.ts aggregation).
     return {
       success: false,
       hostId: this.hostId,
       configPath: hooksJsonPath,
       configAction: 'skipped',
-      reason: 'New Codex global hook registrations are retired (SPEC rev 2 §17). The Marketplace plugin is the only supported new install path for Codex.',
-      nextAction: 'Install the plugin: codex plugin add principles-disciple@principles — then run its setup ($pd-control setup), which verifies Node/runtime/workspace/trust and records the conversation-ingestion consent.',
+      manualActionRequired: true,
+      reason: marketplace.state === 'not_installed'
+        ? 'New Codex global hook registrations are retired (SPEC rev 2 §17) and the Marketplace plugin is not installed on this machine. PD will not auto-execute the Marketplace install or edit the Codex plugin config without authorization.'
+        : 'New Codex global hook registrations are retired (SPEC rev 2 §17). The Codex Marketplace install state could not be verified: ' + marketplace.reason + '. PD will not guess the state or auto-execute the Marketplace install.',
+      nextAction: 'Install the plugin: codex plugin add principles-disciple@principles — then run its setup ($pd-control setup), which verifies Node/runtime/workspace/trust and records the conversation-ingestion consent. Re-run npx create-principles-disciple afterwards; the install is idempotent.',
     };
   }
 

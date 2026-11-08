@@ -48,6 +48,15 @@ export function toInstallJsonOutput(result: Awaited<ReturnType<typeof install>>)
     enabledChannels: result.enabledChannels,
     verification: result.verification,
     nextAction: result.nextAction,
+    ...(result.manualActions !== undefined && result.manualActions.length > 0
+      ? {
+          manualActions: result.manualActions.map((hr) => ({
+            hostId: hr.hostId,
+            reason: hr.reason,
+            nextAction: hr.nextAction,
+          })),
+        }
+      : {}),
     ...(result.success ? {} : {
       reason: result.reason,
       component: result.component,
@@ -437,6 +446,20 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log();
       console.log(t('not_ready_for_release'));
       console.log(`${t('diagnostics')}: ${diagCmd}`);
+      // Marketplace contract (2026-11-07): a pending manual step (e.g. the
+      // Codex Marketplace install) is the reason this run is a partial
+      // completion. Surface it explicitly — already-succeeded hosts stay
+      // installed and usable; completing the step and re-running converges.
+      if (result.manualActions !== undefined && result.manualActions.length > 0) {
+        console.log();
+        for (const action of result.manualActions) {
+          console.log(`  ${action.hostId} — MANUAL ACTION REQUIRED`);
+          console.log(`    ${action.reason ?? 'a manual step is pending for this host'}`);
+          console.log(`    next: ${action.nextAction}`);
+        }
+        console.log();
+        console.log('  Already-installed hosts remain installed and usable. Complete the manual step, then re-run: npx create-principles-disciple install --host <target>');
+      }
       process.exit(1);
       return;
     } else {
