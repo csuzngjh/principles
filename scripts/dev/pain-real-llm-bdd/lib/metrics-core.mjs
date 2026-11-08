@@ -124,9 +124,10 @@ export function validateDatasetRows(rows, dataset) {
   // a missing verdict/attempt/confidence in the per-sample audit trail.
   const stage2EvidenceProblems = [];
   for (const r of rows) {
-    if (r.unparseable === true || r.pending_pre_stage2 !== true || !STAGE2_DECIDED_OUTCOMES.includes(r.final_outcome)) continue;
+    if (r.unparseable === true || r.expected?.stage !== 'stage2_via_pending' || !STAGE2_DECIDED_OUTCOMES.includes(r.final_outcome)) continue;
     const facts = r.stage2_result ?? {};
     const fields = [];
+    if (r.pending_pre_stage2 !== true) fields.push({ field: 'pending_pre_stage2', problem: 'missing_or_false' });
     if (!Number.isInteger(facts.attempts) || facts.attempts < 1) fields.push({ field: 'attempts', problem: 'missing_or_invalid' });
     if (typeof facts.confidence !== 'number' || !Number.isFinite(facts.confidence) || facts.confidence < 0 || facts.confidence > 1) {
       fields.push({ field: 'confidence', problem: 'missing_or_invalid' });

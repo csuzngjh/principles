@@ -196,7 +196,7 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 3. **P1-3 默认预算**：主 BDD `runStage2UntilTerminal` 不再人为传 120s 预算——与生产 worker 相同的默认预算（60s==60s）跑完全部 45 样本；D6 与故障注入的全部直接 cycle 调用同步去掩码（仅 F-TIMEOUT 保留 2s 分类超时，其测试目的即超时形状本身）。**最终验收运行证明：生产默认预算下 31/31 真实调用成功**——这是 D-DEF1 修复后的真实全量证据。
 4. **P2 门禁**：`compute-metrics` 五状态（dataset_ok/d6_ok/fault_injection_ok/openclaw_ok/overall_ok）+ 跨阶段 run_id 一致性 + 缺失专项即 fail + partial 模式永不 PASS。
 5. **Stage-2 证据闭环（最终复核 P1-B）**：admitted settlement 会用 pain-event payload 替换 review payload；验收器现从真实测量的 classifier-call trace 补齐 scalar attempts/verdict/confidence，并以持久化 marker terminal decision 为最终裁决依据。`validateDatasetRows` 对所有已裁决 Stage-2 样本强制校验 attempts、confidence、verdict 与终态一致，缺失/矛盾即 dataset gate fail，不允许 summary-only PASS。最终真实运行 25/25 完整。
-6. **回归测试**：harness 38 项 + metrics CLI 9 项，共 47/47；覆盖 Stage-2 admitted/D6-terminal/pending/no-verdict 证据形状、缺失字段负控、终态矛盾负控、脱敏输出、实验锁、dist fingerprint 和 CLI fail-closed。默认预算整数 timeout 由 host-runtime 回归 + D-DEF1-postfix 实测覆盖。
+6. **回归测试**：harness 39 项 + metrics CLI 9 项，共 48/48；覆盖 Stage-2 admitted/D6-terminal/pending/no-verdict 证据形状、缺失字段负控、pending 路由缺失负控、终态矛盾负控、脱敏输出、实验锁、dist fingerprint 和 CLI fail-closed。默认预算整数 timeout 由 host-runtime 回归 + D-DEF1-postfix 实测覆盖。
 
 ## 十一、未完成事项与限制
 

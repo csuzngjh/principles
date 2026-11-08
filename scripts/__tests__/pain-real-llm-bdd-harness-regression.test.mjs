@@ -186,6 +186,15 @@ describe('dataset validation (P1-2)', () => {
     expect(gates.overall_ok).toBe(false);
   });
 
+  it('fails closed if a frozen Stage-2 sample bypasses pending admission', () => {
+    const rows = allIds();
+    rows.find((r) => r.sample_id === 'A1').pending_pre_stage2 = false;
+    const validation = validateDatasetRows(rows, dataset);
+    expect(validation.problems.some((p) => p.kind === 'stage2_evidence_incomplete'
+      && p.samples.some((s) => s.sample_id === 'A1'
+        && s.fields.some((f) => f.field === 'pending_pre_stage2' && f.problem === 'missing_or_false')))).toBe(true);
+  });
+
   it('rejects a Stage-2 verdict that contradicts the persisted terminal decision', () => {
     const rows = allIds();
     rows.find((r) => r.sample_id === 'A1').stage2_result.verdict = 'none';
