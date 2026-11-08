@@ -78,7 +78,12 @@ function getErrorCode(err: unknown): string | undefined {
 
 // ─── Path helpers ───────────────────────────────────────────────────────────
 function getCodexDir(): string {
-  return path.join(os.homedir(), '.codex');
+  // Shared authority for Marketplace observation and the legacy hook detector.
+  // Codex accepts relative CODEX_HOME; path.resolve matches pd-cli's reader.
+  const override = process.env.CODEX_HOME;
+  return typeof override === 'string' && override.length > 0
+    ? path.resolve(override)
+    : path.join(os.homedir(), '.codex');
 }
 
 function getCodexHooksJsonPath(): string {
@@ -249,15 +254,12 @@ export type CodexMarketplaceState =
 /**
  * Same resolution the pd-cli authority uses (resolveCodexHome): the Codex
  * home may be redirected via CODEX_HOME and the Marketplace cache follows
- * that redirect. The override is validated (absolute, no parent traversal)
- * before use — an unvalidated env path here would be a path-trust hole.
+ * that redirect. Like the pd-cli authority, relative paths and parent
+ * components are resolved against the current working directory. This is
+ * read-only observation of a user-selected Codex home, not a filesystem write.
  */
 function resolveCodexHomeForMarketplace(): string {
-  const override = process.env.CODEX_HOME;
-  if (typeof override === 'string' && override.length > 0 && path.isAbsolute(override) && !override.includes('..')) {
-    return path.resolve(override);
-  }
-  return path.join(os.homedir(), '.codex');
+  return getCodexDir();
 }
 
 export function detectCodexMarketplaceState(codexHome?: string): CodexMarketplaceState {
@@ -281,6 +283,7 @@ export function detectCodexMarketplaceState(codexHome?: string): CodexMarketplac
   }
   const semverPattern = /^(\d+)\.(\d+)\.(\d+)$/;
   let best: { dirName: string; parts: [number, number, number] } | undefined;
+  let unverifiableCandidate: string | undefined;
   for (const versionDir of entries) {
     const match = semverPattern.exec(versionDir);
     if (match === null) continue;
@@ -296,7 +299,12 @@ export function detectCodexMarketplaceState(codexHome?: string): CodexMarketplac
     } catch {
       pinValid = false;
     }
-    if (!pinValid) continue;
+    if (!pinValid) {
+      // Presence of an apparently installed version with an unreadable or
+      // malformed pin is UNKNOWN, not proof that no plugin was installed.
+      unverifiableCandidate ??= pinFile;
+      continue;
+    }
     const major = Number.parseInt(match[1] ?? '', 10);
     const minor = Number.parseInt(match[2] ?? '', 10);
     const patch = Number.parseInt(match[3] ?? '', 10);
@@ -307,7 +315,11 @@ export function detectCodexMarketplaceState(codexHome?: string): CodexMarketplac
       best = { dirName: versionDir, parts: [major, minor, patch] };
     }
   }
-  if (best === undefined) return { state: 'not_installed' };
+  if (best === undefined) {
+    return unverifiableCandidate === undefined
+      ? { state: 'not_installed' }
+      : { state: 'unknown', reason: 'Codex Marketplace version exists but runtime pin cannot be verified: ' + unverifiableCandidate };
+  }
   return { state: 'installed', version: best.dirName, versionDir: path.join(cachePluginRoot, best.dirName) };
 }
 

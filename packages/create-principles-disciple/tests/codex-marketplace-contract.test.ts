@@ -100,6 +100,32 @@ describe('detectCodexMarketplaceState — three states (read-only)', () => {
     expect(state.state).toBe('unknown');
   });
 
+  it('does not mistake a default-home plugin for the active relative CODEX_HOME', () => {
+    // The old mirror rejected a relative override and silently fell back to
+    // ~/.codex, returning false installed-success for the wrong instance.
+    writeMarketVersion('9.9.9');
+    const previous = process.env.CODEX_HOME;
+    try {
+      process.env.CODEX_HOME = 'relative-codex-home-not-installed';
+      expect(detectCodexMarketplaceState().state).toBe('not_installed');
+      process.env.CODEX_HOME = home + path.sep + 'nested' + path.sep + '..' + path.sep + 'custom-codex';
+      expect(detectCodexMarketplaceState().state).toBe('not_installed');
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previous;
+    }
+  });
+
+  it('returns UNKNOWN rather than NOT_INSTALLED when a semver version has an unreadable pin', () => {
+    const codexHome = underHome('.codex-corrupt');
+    const versionDir = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', '1.2.3');
+    fs.mkdirSync(versionDir, { recursive: true });
+    fs.writeFileSync(path.join(versionDir, 'runtime-version.json'), '{invalid-json');
+    const state = detectCodexMarketplaceState(codexHome);
+    expect(state.state).toBe('unknown');
+    if (state.state === 'unknown') expect(state.reason).toContain('runtime pin cannot be verified');
+  });
+
   it('parity: agrees with pd-cli selectMarketplaceCacheVersionDir on a fixture matrix (ERR-126)', async () => {
     // The installer's read-only classifier mirrors pd-cli's health authority
     // because the npx package must not depend on pd-cli. This parity test
