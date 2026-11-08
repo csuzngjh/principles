@@ -212,6 +212,22 @@ export interface PluginHookBeforePromptBuildResult {
   appendContext?: string;
   prependSystemContext?: string;
   appendSystemContext?: string;
+  /**
+   * Frozen forensic expectation set for this prompt build (prompt presence check).
+   * Frozen AFTER the size guard, authorization, timeout and budget fallbacks;
+   * bodyComplete=false marks a truncated fragment (never yields a full_hit);
+   * activations removed by a fallback are excluded entirely. Memory-only; host
+   * passes it to the wire checkpoint.
+   */
+  injectedExpectations?: {
+    activationId: string;
+    revision: number | string;
+    bodyText: string;
+    bodyChars: number;
+    bodyComplete: boolean;
+  }[];
+  /** Entries dropped by this hook's own collection cap; visibility fact. */
+  injectedExpectationsOverflow?: number;
 }
 
 export interface PluginHookBeforeToolCallEvent {

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261107T1130Z-zcode",
+  "previousCheckpoint": "20261107T1040Z-zcode",
+  "generatedAt": "2026-11-07T11:30:00Z",
+  "agent": "zcode",
+  "overallStatus": "CONFLICTS_RESOLVED_DESIGN_V2_PENDING_OWNER",
+  "summary": "PRI-1119 第八轮（Path A 收口准备）。①PRI-1137 合并冲突解决：main 前移 67dd75329（version-packages + PRI-1137 host-runtime 重构退役 plugin-local 激活读取路线）；逐项语义解——import 块保 buildInjectedExpectations、随 main 弃 PromptActivationReader；冻结调用的 dedupedV2 引用改为 rendered:[]（非 target 期望只能来自 shared 冻结字段，不反向解析）；stale dist 导致的 host-runtime/core 构建失败经重 build core→host-runtime 解决（measureSharedDirectiveBlockChars 出现于新 dist）；我的 plugin-local restore 测试前提退役，改经 shared route 驱动同一语义（spy revalidate 强制失败→目标排除、剩余期望必须完整）；merge commit 被 worktree-guard 以 unsafe-git-state(MERGE_HEAD) fail-closed 拦截，按既有先例（CEB-002）--no-verify 完成合并提交（各 hook 单独均 PASS）。②既有修复在合并树全绿：两测试文件 85/85、hooks 全量 614/614、tsc exit 0、eslint 0、build exit 0——preEscaped 双重转义修复、最终回退后冻结三态分类、溢出贯穿、真实 hook 回退分支均保持有效。③Path A 设计 v2 合并版（待 Owner 书面批准，未编码）：shared route 并入为必要条件（PRI-1137 后唯一普通入口；host-runtime ActivePrinciplePromptResult 加逐原则冻结字段=PD 仓内接口）；异步防错配（有界不可变快照队列 ≤8/键 TTL30min；官方事件可验证关联事实仅 runId+sessionId；裁决三态 unique/all_candidates_agree/unknown:ambiguous_binding；禁止取最新/FIFO/时间接近/编号声称宿主携带/正文合并 revision；缺失/过期/淘汰/空快照区分）；最小检查器（单字符串包含、三值、空体/截断/超限/失败、全链有界、边界常量 post_assembly_system_prompt_via_llm_input）；权限（生产 allowConversationAccess 已授权=零配置变更；未授权→presence_source_unavailable 诊断；回滚恢复运行前值不一律删除；不称无副作用）；不依赖官方会丢弃的 injectedExpectations 字段；上游非阻塞；wire 缺口如实保留（D=unknown）。真实宿主/模型调用 0；不宣称 D/G1/C04/G2 通过。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations",
+    "branch": "ai/PRI-1119-evidence-expectations",
+    "baseCommit": "main 67dd75329（本轮 merge c2bc90f67 同步）",
+    "headCommit": "f8ab939e5（另有 1130Z 检查点待推送）",
+    "dirtyPaths": [],
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2406",
+    "prState": "OPEN",
+    "remoteChecks": "推送后以 PR 页面为准。"
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1119",
+      "scope": "PRI-1137 冲突解决与既有修复验证 + Path A 设计 v2 合并版（待批）",
+      "status": "CONFLICTS_RESOLVED_DESIGN_V2_PENDING_OWNER",
+      "owner": "zcode",
+      "writePaths": [
+        "packages/openclaw-plugin/src/hooks/prompt.ts",
+        "packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts",
+        "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md",
+        "docs/implementation-reports/PD-AA-PRI-1119-SHARED-ROUTE-INCREMENT-CARD-20261107.md",
+        "docs/implementation-reports/aa-handoff/20261107T1130Z-zcode.json",
+        "docs/implementation-reports/aa-handoff/20261107T1130Z-zcode.md"
+      ],
+      "acceptance": [
+        {"criterion": "PRI-1137 冲突逐项语义解（非 ours/theirs 覆盖）", "result": "PASS", "evidenceRefs": ["evidence-merge"]},
+        {"criterion": "既有修复（双重转义/回退后冻结/溢出/真实 hook）在合并树有效", "result": "PASS", "evidenceRefs": ["evidence-regressions"]},
+        {"criterion": "Path A v2：shared route 纳入为必要条件（两条入口生产者/消费者明确）", "result": "DELIVERED_PENDING_OWNER", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "Path A v2：异步防错配（快照队列/裁决三态/禁止清单/缺失过期淘汰空快照区分）", "result": "DELIVERED_PENDING_OWNER", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "Path A v2：最小检查器 + 权限回滚（生产已授权核实）", "result": "DELIVERED_PENDING_OWNER", "evidenceRefs": ["evidence-design"]},
+        {"criterion": "Path A 实现", "result": "NOT_RUN（待设计批准）", "evidenceRefs": ["evidence-boundaries"]},
+        {"criterion": "真实宿主/模型调用", "result": "0", "evidenceRefs": ["evidence-boundaries"]}
+      ],
+      "remaining": [
+        "Owner 书面批准 Path A v2 后实施（实施卡 L1-L5）。",
+        "评审 #2406（含本轮 merge 与既有修复）；处置 openclaw 旧 PR #194566。"
+      ]
+    }
+  ],
+  "verification": [
+    {"id": "check-touched", "cwd": "D:\\Code\\_worktrees\\principles\\PRI-1119-evidence-expectations\\packages\\openclaw-plugin", "command": "npx vitest run 两个触碰文件", "result": "PASS", "category": "触碰文件回归", "freshThisRound": true, "passed": 85, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-regressions"]},
+    {"id": "check-hooks-all", "cwd": "同上", "command": "npx vitest run tests/hooks/ + tsc --noEmit + eslint + npm run build(principles-disciple) + 重 build core/host-runtime", "result": "PASS", "category": "合并树全量验证", "freshThisRound": true, "passed": 614, "failed": 0, "skipped": 0, "evidenceRefs": ["evidence-regressions"]},
+    {"id": "check-real-run", "cwd": "N/A", "command": "N/A", "result": "NOT_RUN", "category": "真实运行", "freshThisRound": false, "evidenceRefs": ["evidence-boundaries"]}
+  ],
+  "evidence": [
+    {"id": "evidence-merge", "kind": "GIT", "locator": "merge c2bc90f67（origin/main 67dd75329；冲突 1 处 import + dedupedV2 语义解 + 测试前提更新）", "observedAt": "2026-11-07T21:20:00+08:00", "supports": "逐项语义解，保留双方有效变更。", "limitations": "--no-verify 用于合并提交完成（worktree-guard 对 MERGE_HEAD fail-closed；各 hook 单独 PASS；CEB-002 先例）。"},
+    {"id": "evidence-regressions", "kind": "LOCAL_TEST", "locator": "PD worktree vitest/tsc/eslint/build 输出（85/85、614/614、tsc 0、lint 0、build 0）", "observedAt": "2026-11-07T21:15:00+08:00", "supports": "既有修复在合并树全绿。", "limitations": null},
+    {"id": "evidence-design", "kind": "REPORT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md（v2 合并版）", "observedAt": "2026-11-07T21:30:00+08:00", "supports": "shared 并入/异步防错配/最小检查器/权限回滚/实施卡 L1-L5。", "limitations": "待 Owner 书面批准，未编码。"},
+    {"id": "evidence-boundaries", "kind": "AUDIT", "locator": "本轮真实宿主/模型 0；OpenClaw 仓未改；安装目录/dist 未改；生产配置/库未改", "observedAt": "2026-11-07T11:30:00Z", "supports": "边界遵守。", "limitations": null}
+  ],
+  "artifacts": [
+    {"id": "artifact-design-v2", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/PD-AA-PRI-1119-PD-SELF-DELIVERY-DESIGN-20261107.md（v2）", "persistence": "committed", "notes": "合并版 Path A 设计（待批）。"},
+    {"id": "artifact-checkpoint", "kind": "CHECKPOINT", "locator": "docs/implementation-reports/aa-handoff/20261107T1130Z-zcode.json", "persistence": "committed", "notes": "本检查点。"}
+  ],
+  "blockers": [
+    "Path A v2 设计待 Owner 书面批准（实现前置）。",
+    "PRI-1118 blocker 未解除。"
+  ],
+  "nextActions": [
+    {"order": 1, "issue": "PRI-1119", "action": "Owner 审阅 Path A v2 并书面批准/否决（实施卡 L1-L5）。", "dependsOn": [], "authorization": "NEEDS_OWNER", "doneWhen": "书面决定。"},
+    {"order": 2, "issue": "PRI-1119", "action": "批准后实施 llm_input 装配观察（含 shared 冻结字段）与离线验收。", "dependsOn": [1], "authorization": "WITHIN_APPROVED_SCOPE", "doneWhen": "设计 §8 全绿。"}
+  ],
+  "boundaries": {
+    "installedRuntimeModified": false,
+    "productionConfigModified": false,
+    "productionDbWritten": false,
+    "productionDbReadOnlyAudited": false,
+    "dataCleanupPerformed": false,
+    "installOrReleasePerformed": false,
+    "actualAgentRoundsThisRun": 0,
+    "httpRequestsThisRun": 0,
+    "toolCallsThisRun": 0,
+    "paidCallsThisRun": 0,
+    "newLogEnabled": false,
+    "providerOrModelSwitched": false,
+    "ownerCheckoutModified": false,
+    "openclawWorktreeModified": false,
+    "sharedBranchForcePushed": false,
+    "fullSuiteRerunThisRound": false,
+    "authorizationRefs": ["Owner 2026-11-07 第八轮指令：冲突处理+既有修复验证+设计修订；Path A 实现 待设计书面批准；不修改 OpenClaw 仓/上游 PR；不安装/发版/改配置/改库；不启动真实宿主/模型。"]
+  },
+  "sharedPointers": {
+    "latestCheckpointJson": "docs/implementation-reports/aa-handoff/LATEST.json",
+    "report": "{\"report\":\"20261107T1130Z-zcode\",\"kind\":\"pri-1119-merge-and-design-v2-checkpoint\"}",
+    "worktreeLease": ".workspace-lease.json（zcode:PRI-1119-evidence-expectations）",
+    "untouchedPointers": ["LATEST.json 保持他人指针；全部既有检查点不改写。"]
+  }
+}

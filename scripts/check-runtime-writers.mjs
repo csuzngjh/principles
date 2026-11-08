@@ -42,10 +42,6 @@ export const WRITE_PRIMITIVE =
  */
 export const ALLOWED_RUNTIME_WRITERS = [
   {
-    file: 'packages/host-runtime/src/product-telemetry/service.ts',
-    reason: 'Removes orphaned workspace-scoped export locks beside the workspace state file — never the canonical runtime tree.',
-  },
-  {
     file: 'packages/openclaw-plugin/src/core/mcp-binding.ts',
     reason: 'Writes ONLY the PD-owned mcp-binding.json beside the plugin payload root (extensionRoot); the canonical runtime tree appears solely in a read-only existsSync/readFileSync probe of ~/.pd/runtime/pd-mcp-server/dist/index.js, and layout ownership stays with @principles/install-layout (Gate 4, SPEC §3.5).',
   },
