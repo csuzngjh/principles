@@ -692,7 +692,7 @@ describe('Adaptive activation — actual local prompt entry', () => {
         capacitySource: 'operator_declared',
         capacityStatus: 'confirmed',
         contextWindowTokens: 1_048_576,
-        policyVersion: 'model_aware_v2',
+        policyVersion: 'model_aware',
       },
       adaptivePriority: { artifactId: `art-${target}`, activationId: `act_prompt_${target}` }, deadlineAt: Date.now() + 15000 });
     expect(packed.adaptivePacking?.status).toBe('prioritized');
@@ -1573,7 +1573,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.budgetCapacitySource).toBe('host_effective_window');
     expect(payload.budgetCapacityStatus).toBe('confirmed');
     expect(payload.budgetContextWindowTokens).toBe(256_000);
-    expect(payload.budgetPolicyVersion).toBe('model_aware_v2');
+    expect(payload.budgetPolicyVersion).toBe('model_aware');
     expect(payload.budgetFallbackReason).toBeUndefined();
   });
 
@@ -1615,7 +1615,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.budgetCapacitySource).toBe('operator_declared');
     expect(payload.budgetCapacityStatus).toBe('confirmed');
     expect(payload.budgetContextWindowTokens).toBe(400_000);
-    expect(payload.budgetPolicyVersion).toBe('model_aware_v2');
+    expect(payload.budgetPolicyVersion).toBe('model_aware');
     expect(payload.budgetFallbackReason).toBeUndefined();
   });
 
@@ -1639,7 +1639,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.budgetCapacitySource).toBe('legacy_fallback');
     expect(payload.budgetCapacityStatus).toBe('unknown');
     expect(payload.budgetContextWindowTokens).toBeUndefined();
-    expect(payload.budgetPolicyVersion).toBe('model_aware_v2');
+    expect(payload.budgetPolicyVersion).toBe('model_aware');
     expect(payload.budgetFallbackReason).toBe('host_capacity_absent');
   });
 
