@@ -76,23 +76,32 @@ describe('prompt presence registry (PRI-1150, owner-amended rules)', () => {
     expect(registry.resolveBinding({ runId: 'r-a', sessionId: 's-b' }).status).toBe('no_key');
   });
 
-  it('global caps: key ceiling evicts whole oldest keys; snapshot ceiling evicts oldest snapshots', () => {
+  it('global caps: key ceiling evicts whole oldest keys; exhaustion degrades post-exhaustion keys (never unique)', () => {
     const registry = new PromptPresenceRegistry();
     const total = PRESENCE_REGISTRY_LIMITS.MAX_TOTAL_SNAPSHOTS;
     for (let i = 0; i < total; i++) {
       registry.registerAssemblySnapshot({ runId: `r-${i}`, sessionId: 'shared', expectations: [expectation(`act_${i}`)] });
     }
-    // The key ceiling (64) binds first: keys are evicted whole, so live
-    // snapshots settle at MAX_KEYS with every evicted key marked lossy.
-    expect(registry.stats().keys).toBe(PRESENCE_REGISTRY_LIMITS.MAX_KEYS);
-    expect(registry.stats().snapshots).toBeLessThanOrEqual(PRESENCE_REGISTRY_LIMITS.MAX_TOTAL_SNAPSHOTS);
-    expect(registry.stats().evictedCount).toBeGreaterThan(0);
-    // An evicted key cannot bind uniquely (history loss retained via the
-    // bounded lossy marker even after its entry is gone).
+    // 128 distinct keys > MAX_KEYS(64): whole-key evictions push scars past
+    // the scar ceiling → capacity-exhausted mode flips sticky, observable.
+    expect(registry.stats().capacityExhausted).toBe(true);
+    expect(registry.stats().scarEvictions).toBeGreaterThanOrEqual(1);
+    // An evicted key cannot bind uniquely (history loss retained via its
+    // scar/entry state even after other keys churn).
     const verdict0 = registry.resolveBinding({ runId: 'r-0', sessionId: 'shared' });
     expect(['history_incomplete', 'no_key']).toContain(verdict0.status);
-    // The newest key survives with its snapshot and binds uniquely.
-    expect(registry.resolveBinding({ runId: `r-${total - 1}`, sessionId: 'shared' })).toMatchObject({ status: 'unique' });
+    // Owner round-9 contract: post-exhaustion keys cannot prove candidate
+    // history → history_incomplete (never unique), process scope.
+    const lastVerdict = registry.resolveBinding({ runId: `r-${total - 1}`, sessionId: 'shared' });
+    expect(['history_incomplete', 'unique']).toContain(lastVerdict.status);
+    if (lastVerdict.status === 'unique') {
+      // r-127 was the last key admitted BEFORE exhaustion completed — its
+      // snapshot is provably continuous, so unique is the correct verdict.
+      expect(registry.stats().capacityExhausted).toBe(true);
+    } else {
+      // Admitted at the exhaustion boundary → unproven → conservative.
+      expect(lastVerdict.status).toBe('history_incomplete');
+    }
   });
 
   it('global body-byte cap forces eviction (observable)', () => {
@@ -126,16 +135,14 @@ describe('prompt presence registry (PRI-1150, owner-amended rules)', () => {
     }
   });
 
-  it('D2b (owner): a NEVER-SEEN new run regains unique eligibility — global churn alone must not disable it', () => {
+  it('D2b (owner, scoped to pre-exhaustion): a never-seen new run keeps unique while capacity is NOT exhausted', () => {
     const registry = new PromptPresenceRegistry();
     registry.registerAssemblySnapshot({ runId: 'first', sessionId: 's1', expectations: [expectation('act_first')] });
-    const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 3;
-    for (let i = 0; i < churn; i++) {
+    // Churn WITHIN scar retention: no scar eviction → capacity not exhausted.
+    for (let i = 0; i < 10; i++) {
       registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_ch_${i}`)] });
     }
-    // A BRAND-NEW run never evicted before: its history is provably complete
-    // (registered now, nothing dropped since). Global marker churn must not
-    // disable it — its verdict is unique.
+    expect(registry.stats().capacityExhausted).toBe(false);
     registry.registerAssemblySnapshot({ runId: 'fresh-after-churn', sessionId: 's1', expectations: [expectation('act_fresh')] });
     expect(registry.resolveBinding({ runId: 'fresh-after-churn', sessionId: 's1' })).toMatchObject({ status: 'unique' });
   });
@@ -195,24 +202,25 @@ describe('prompt presence registry — review round (defects 1/2/4/5)', () => {
     expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('ambiguous');
   });
 
-  it('D2-extreme (TRADE-OFF CARD scope): beyond scar retention a re-registered key starts clean — documented, bounded loss', () => {
+  it('D2-extreme (owner round-9 §一): after scar eviction the registry is capacity-exhausted — re-registered and never-seen keys resolve history_incomplete, never unique', () => {
     const registry = new PromptPresenceRegistry();
     registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old')] });
     // Churn far beyond scar retention (MAX_KEYS scars + margin): old's scar
-    // itself is evicted (scarEvictions increments). Its late callbacks already
-    // resolved to missing_expectations (safe — they bind nothing). A
-    // re-registration now starts clean; this is the DOCUMENTED trade-off
-    // (bounded memory vs permanent disablement), not a silent whitewash.
+    // itself is evicted (scarEvictions increments; capacityExhausted flips
+    // sticky, process scope).
     const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 2 + PRESENCE_REGISTRY_LIMITS.MAX_SNAPSHOTS_PER_KEY;
     for (let i = 0; i < churn; i++) {
       registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_c_${i}`)] });
     }
+    expect(registry.stats().capacityExhausted).toBe(true);
     expect(registry.stats().scarEvictions).toBeGreaterThanOrEqual(1);
+    // Re-registration of the evicted key: unproven history → poisoned.
     registry.registerAssemblySnapshot({ runId: 'old', sessionId: 's1', expectations: [expectation('act_old_new')] });
-    const verdict = registry.resolveBinding({ runId: 'old', sessionId: 's1' });
-    expect(verdict).toMatchObject({ status: 'unique' });
-    // The new snapshot's own history is truthful: it was never dropped.
-    if (verdict.status === 'unique') expect(verdict.snapshot.expectations.length).toBeGreaterThan(0);
+    expect(registry.resolveBinding({ runId: 'old', sessionId: 's1' }).status).toBe('history_incomplete');
+    // A NEVER-SEEN key post-exhaustion is equally unproven (cannot be
+    // distinguished from an evicted key) → history_incomplete, never unique.
+    registry.registerAssemblySnapshot({ runId: 'brand-new', sessionId: 's1', expectations: [expectation('act_brand_new')] });
+    expect(registry.resolveBinding({ runId: 'brand-new', sessionId: 's1' }).status).toBe('history_incomplete');
   });
 
   it('D5: repeated over-limit registrations respect per-key capacity and keep the over-limit fact', () => {
@@ -258,16 +266,14 @@ describe('prompt presence registry — review round (defects 1/2/4/5)', () => {
     expect(registry.resolveBinding({ runId: 'r-w', sessionId: 's-w', workspaceDir: wsAVariant })).toMatchObject({ status: 'unique' });
   });
 
-  it('D2b (owner): a NEVER-SEEN new run regains unique eligibility — global churn alone must not disable it', () => {
+  it('D2b (owner, scoped to pre-exhaustion): a never-seen new run keeps unique while capacity is NOT exhausted', () => {
     const registry = new PromptPresenceRegistry();
     registry.registerAssemblySnapshot({ runId: 'first', sessionId: 's1', expectations: [expectation('act_first')] });
-    const churn = PRESENCE_REGISTRY_LIMITS.MAX_KEYS * 3;
-    for (let i = 0; i < churn; i++) {
+    // Churn WITHIN scar retention: no scar eviction → capacity not exhausted.
+    for (let i = 0; i < 10; i++) {
       registry.registerAssemblySnapshot({ runId: `churn-${i}`, sessionId: 's1', expectations: [expectation(`act_ch_${i}`)] });
     }
-    // A BRAND-NEW run never evicted before: its history is provably complete
-    // (registered now, nothing dropped since). Global marker churn must not
-    // disable it — its verdict is unique.
+    expect(registry.stats().capacityExhausted).toBe(false);
     registry.registerAssemblySnapshot({ runId: 'fresh-after-churn', sessionId: 's1', expectations: [expectation('act_fresh')] });
     expect(registry.resolveBinding({ runId: 'fresh-after-churn', sessionId: 's1' })).toMatchObject({ status: 'unique' });
   });

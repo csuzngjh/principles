@@ -117,22 +117,28 @@ export class PromptPresenceRegistry {
   private evictedCount = 0;
   private expiredCount = 0;
   /**
-   * PRI-1150 review (D2/D2b resolution): whole-key evictions keep a SCAR entry
-   * (snapshots=[], historyComplete=false) bounded by MAX_KEYS — the entry
-   * itself IS the loss marker, so no separate tombstone table exists. When
-   * scars overflow (heavy churn beyond MAX_KEYS keys), the OLDEST scar is
-   * evicted and its fact is unrecoverable: that key's late callbacks degrade
-   * to missing_expectations (SAFE — they bind nothing), and a re-registration
-   * of such a key starts CLEAN (documented trade-off). Host runIds are unique
-   * per turn, so an evicted key can never collide with a genuinely new run's
-   * key — new runs stay uniquely bindable.
+   * PRI-1150 review (D2/D2b resolution, owner round-9 amendments): whole-key
+   * evictions keep a SCAR entry (snapshots=[], historyComplete=false) bounded
+   * by MAX_KEYS — the entry itself IS the loss marker; no tombstone table.
+   * When scars overflow (heavy churn beyond MAX_KEYS keys), the OLDEST scar is
+   * evicted: the registry then enters CAPACITY-EXHAUSTED mode (sticky, process
+   * scope) — entries created afterwards cannot prove candidate-history
+   * completeness, so they NEVER resolve unique (owner round-9 §一: no unique
+   * without provable complete history; degradation is process-scope, sticky
+   * until restart, and observable via stats). Entries that already held
+   * snapshots before exhaustion keep their provable continuity.
    */
   private scarEvictions = 0;
+  /** Sticky: true once any scar had to be evicted (bounded observation window begun). */
+  private capacityExhausted = false;
 
   constructor(private readonly now: () => number = Date.now) {}
 
   /** Observable counters (for events/diagnostics; no body content). */
-  stats(): { keys: number; snapshots: number; totalBodyBytes: number; evictedCount: number; expiredCount: number; scars: number; scarEvictions: number } {
+  stats(): {
+    keys: number; snapshots: number; totalBodyBytes: number; evictedCount: number; expiredCount: number;
+    scars: number; scarEvictions: number; capacityExhausted: boolean;
+  } {
     const scars = [...this.entries.values()].filter((e) => e.historyComplete === false && e.snapshots.length === 0).length;
     return {
       keys: this.entries.size,
@@ -142,6 +148,7 @@ export class PromptPresenceRegistry {
       expiredCount: this.expiredCount,
       scars,
       scarEvictions: this.scarEvictions,
+      capacityExhausted: this.capacityExhausted,
     };
   }
 
@@ -182,13 +189,12 @@ export class PromptPresenceRegistry {
   }
 
   /**
-   * PRI-1150 review (D2/D2b): instead of a separate lossy-marker set (whose
-   * FIFO eviction silently whitewashed history and poisoned unrelated new
-   * keys), whole-key evictions leave a bounded SCAR ENTRY in place — the
-   * entry itself carries the loss fact. Scar entries are bounded by the same
-   * MAX_KEYS ceiling; overflowing scars increment scarEvictions and the
-   * corresponding keys become indistinguishable from brand-new keys
-   * (documented trade-off — see the checkpoint card).
+   * PRI-1150 review (D2/D2b): whole-key evictions leave a bounded SCAR ENTRY
+   * (snapshots=[], historyComplete=false) — the entry itself carries the loss
+   * fact. Scar entries are bounded by MAX_KEYS; overflowing scars increment
+   * scarEvictions, flip the registry into CAPACITY-EXHAUSTED mode (sticky),
+   * and the affected keys become indistinguishable from brand-new keys —
+   * which post-exhaustion resolve conservatively (never unique).
    */
   private pushScar(key: string): void {
     const existing = this.entries.get(key);
@@ -196,13 +202,15 @@ export class PromptPresenceRegistry {
       return; // Scar already in place.
     }
     this.entries.set(key, { snapshots: [], nextAssemblySeq: 0, historyComplete: false });
-    // Bounded: drop the oldest EMPTY entry (scar) when over capacity.
+    // Bounded: drop the oldest EMPTY entry (scar) when over capacity. Dropping
+    // a scar flips the registry into capacity-exhausted mode (sticky).
     while (this.entries.size > PRESENCE_REGISTRY_LIMITS.MAX_KEYS) {
       const oldest = [...this.entries.keys()].find((k) => this.entries.get(k)!.snapshots.length === 0)
         ?? this.entries.keys().next().value;
       if (oldest === undefined) break;
       this.entries.delete(oldest);
       this.scarEvictions += 1;
+      this.capacityExhausted = true;
     }
   }
 
@@ -279,10 +287,12 @@ export class PromptPresenceRegistry {
     const lossBefore = entrySweptLoss
       || (entry !== undefined && entry.snapshots.length === 0 && entry.historyComplete === false);
     if (!entry || !this.entries.has(key)) {
-      // Brand-new key: no in-process record exists, and host runIds are unique
-      // per turn, so this run's callbacks can never collide with an evicted
-      // run's key — its history is provably complete (trade-off card).
-      entry = { snapshots: [], nextAssemblySeq: 0, historyComplete: true };
+      // Brand-new key BEFORE exhaustion: provably complete (no in-process loss
+      // ever touched it, and host runIds are unique per turn). AFTER
+      // exhaustion (capacityExhausted sticky): an absent key is
+      // indistinguishable from an evicted-scar key, so its history starts
+      // unproven — such runs resolve history_incomplete (owner round-9 §一).
+      entry = { snapshots: [], nextAssemblySeq: 0, historyComplete: !this.capacityExhausted };
       this.entries.set(key, entry);
     }
 
