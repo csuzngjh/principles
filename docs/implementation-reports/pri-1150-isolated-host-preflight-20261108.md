@@ -1,97 +1,113 @@
 # PRI-1152 Path A 隔离宿主验证：离线预检报告（随运行卡，工具 v3.1）
 
-- 文档 ID：`pri-1150-isolated-host-preflight-20261108`。文件名沿用旧名以保护既有指针；本文按复核修复后的工具全文改写。
-- 结论：**目前没有任何候选能达到 READY，也就没有可申请真实运行的执行包。** v3 包已作废，并已被外部清理删除（运行卡 §15）。尚未合并的 B1 修复（#2427）之外，还有两项新阻断需要 Owner 决定：B2，presence hook surface 未分类（运行卡 §0.3）；B3，生产 PD 已升级为同样含 presence 代码的 3.0.2（运行卡 §0.4）。真实宿主和模型**均未启动**，运行预算零消耗。
-- 说明：本文不声称「全部预检通过」。下面每一项都写明对象、命令、退出码和结果。
+- 文档 ID：`pri-1150-isolated-host-preflight-20261108`。文件名沿用旧名，以保护既有指针；本文已按 B2/B3 收口后的工具全文改写。
+- **结论**：
+  - 目前**没有可申请真实运行的执行包**：v3.1 尚未生成。
+  - 三项阻断的修复都已推送，但都未合并：B1 在 #2427，B2 在 #2431，B3 在 #2424。
+  - 用当前工具（#2424 `18bd45487`）对 **B1+B2 合并构建**做离线预演：exit 0，READY。这只是离线证据，不是 v3.1，不得批准或执行。
+  - v3 包已丢失（LOST / UNAVAILABLE），只剩转录记录。
+  - 真实宿主和模型**均未启动**，运行预算零消耗。
+- 说明：本文不声称「全部预检通过」。每一项都写明对象、命令、退出码和结果。
 
 ## 1. 预检口径（现行工具）
 
-`--verify` 与 `--execute` 共用 `preflightPack`，必需检查共 21 项。`summarizePreflight` 是唯一的 READY 判定点：
+`--verify` 与 `--execute` 共用 `preflightPack`。判定规则：
 
-- 21 项全部为 PASS 才 READY；
-- 缺少的项按 NOT_RUN 计，NOT_RUN 不算通过；
-- 退出码只取决于 READY；
-- 只有同时带 `--full --selftest` 才可能 READY。
+- `summarizePreflight` 是唯一的 READY 判定点。`PREFLIGHT_REQUIRED_CHECKS` 中的每一项都必须已产生且为 PASS；缺少的项按 NOT_RUN 计，NOT_RUN 不算通过。
+- 测试逐项比对「实际产生的检查集合」和「必需集合」，两者必须完全一致。**项数只是结果，不是完整性的证明。**
+- 退出码只取决于 READY。只有同时带 `--full --selftest` 才可能 READY。
 
-| # | 检查 | 内容 |
-|---|---|---|
-| 1 | manifest | 清单 schema `pd-presence-exec-pack/v2`、卡版本 `pri1152-run-card-v3.1` |
-| 2 | node-identity | 运行复核的 node 与冻结的 node 路径、版本、sha256 一致 |
-| 3 | host-identity | 宿主版本、build commit、CLI 哈希一致，无 lifecycle 标记 |
-| 4 | host-tree | 宿主全树重算哈希（需 `--full`） |
-| 5 | host-registry-tarball | prepare 时与 npm 缓存 tarball 的逐文件对照结果 |
-| 6 | candidate-payload | 候选树、bundle 和外部依赖都在包内 |
-| 7 | presence-durability | bundle 中 `recordPromptPresenceObserved` 记录后立即写盘（B1） |
-| 7a | presence-surface | 包内 bundle 的 `PLUGIN_SURFACE_REGISTRY` 默认启用 `hook:llm_input_presence`，否则 `guardHook` 注册空操作（B2） |
-| 8 | execution-code | 启动器闭包 11 个脚本和 3 个工作区 dist 与冻结哈希一致 |
-| 9 | budget-consistency | 冻结预算、代码常量、每回合预算三者一致 |
-| 10 | host-config | 只加载候选、工具全拒、MCP 关闭、两个回环 provider |
-| 11 | pd-config-and-retry | 真实加载器解析 PD 配置；宿主重试关闭 |
-| 12 | fixture-assembly | 夹具经正式存储写入，shared 路由冻结完整、只转义一次 |
-| 13 | round-inputs | 两回合输入与金标数据集哈希 |
-| 14 | environment-isolation | 用当前父进程环境重建允许列表环境，全部路径在包内 |
-| 15 | production-plugin-exclusion | 包内无发现根，宿主不含 PD，生产 PD 不能产生 presence 事件 |
-| 16 | pollution-baseline | 每个生产审计目标都可读、可哈希（只读） |
-| 17 | endpoint-port | 冻结端口此刻可绑定、可连接；**不是预留** |
-| 18 | termination-tool | 进程树终止工具可用 |
-| 19 | process-sweep | 进程查询可用，且除启动器及其祖先外没有进程引用该包 |
-| 20 | protocol-selftest | 包内官方 transports 自测（需 `--selftest`，且 host-tree 已 PASS） |
+| 检查 | 内容 |
+|---|---|
+| manifest | 清单 schema 为 `pd-presence-exec-pack/v2`，卡版本为 `pri1152-run-card-v3.1` |
+| node-identity | 执行复核的 node 与冻结记录的路径、版本、sha256 一致 |
+| host-identity | 宿主版本、build commit、CLI 哈希一致，没有 lifecycle 标记 |
+| host-tree | 宿主全树重算哈希（需 `--full`） |
+| host-registry-tarball | prepare 时与 npm 缓存 tarball 的逐文件对照结果 |
+| candidate-payload | 候选树、bundle 和外部依赖都在包内；**B3 新增入口检查**：`package.json` 的 `openclaw.extensions` 必须正好是冻结的入口，并解析到候选根内的冻结 bundle |
+| presence-durability | bundle 中 `recordPromptPresenceObserved` 记录后立即写盘（B1） |
+| presence-surface | 包内 bundle 的 `PLUGIN_SURFACE_REGISTRY` 默认启用 `hook:llm_input_presence`，否则 `guardHook` 注册空操作（B2） |
+| execution-code | 启动器闭包和启动器加载的工作区 dist 与冻结哈希一致 |
+| budget-consistency | 冻结预算、代码常量、每回合预算三者一致 |
+| host-config | 只加载候选、工具全拒、MCP 关闭、两个回环 provider；**B3 新增**：宿主日志用 `logging.file` 固定在包内，`level` 为 info |
+| pd-config-and-retry | 用真实加载器解析 PD 配置；宿主重试已关闭 |
+| fixture-assembly | 夹具经正式存储写入，shared 路由冻结结果完整、只转义一次 |
+| round-inputs | 两个回合的输入与金标数据集哈希一致 |
+| environment-isolation | 用当前父进程环境重建允许列表环境，全部路径在包内 |
+| production-plugin-exclusion | 包内没有发现根，宿主不含 PD，生产插件位于包外。**B3：生产插件是否含 presence 代码不再是必要条件**，只记录为环境事实 |
+| pollution-baseline | 每个生产审计目标都可读、可哈希（只读） |
+| endpoint-port | 冻结端口此刻可绑定、可连接；**这不是预留** |
+| termination-tool | 进程树终止工具可用 |
+| process-sweep | 进程查询可用，且除启动器及其祖先外，没有进程引用该包 |
+| protocol-selftest | 用包内官方 transports 自测（需 `--selftest`，且 host-tree 已 PASS） |
+
+每个回合的判定（不属于预检，只在获批的 `--execute` 中运行）新增：
+
+- `candidate-registration-source`：首项验收，见运行卡 §0.4；
+- `candidate-code-unchanged`：回合后候选代码文件未被改动；
+- `presence-event`：只计本回合追加的、与宿主报告的 `sessionId` 一致、时间戳在回合窗口内的事件。
 
 ## 2. 实测记录
 
-| 对象 | 工具 | 命令 | 退出码 | 结果 |
-|---|---|---|---|---|
-| v3 包 `pp-20261108T095217Z`（清单 `b16e8128…b895`） | 旧工具 `aabbd4550` | `--verify --full --selftest`（09:57Z） | 1 | 12 PASS / 1 FAIL（`presence-durability`）。旧工具不计端口、终止工具、清扫和自测，这正是本次复核修复的问题之一 |
-| 同一 v3 包 | 现行工具 `8860abcea` | `--verify --full --selftest`（12:48Z） | 1 | 17 PASS / 3 FAIL：`manifest`（旧 schema 和卡版本）、`presence-durability`（B1）、`execution-code`（无执行代码绑定）。复核前后六个冻结文件 sha256 一致 |
-| 预演包 `rehearsal-not-approvable`（清单 `463d694f…d310`），候选为 B1 分支构建 | 工具 `641b2c5cb`（20 项，没有 `presence-surface`） | `--prepare` 后 `--verify --full --selftest`（13:28Z） | 0 / 0 | 20/20。**这是假通过**：当时的工具漏检了 B2，已被下面 `rehearsal2` 的结果取代 |
-| 预演包 `rehearsal-pre-b1-main-candidate`（清单 `40dfc6d8…8d8c`），候选为 main 源码构建 | 工具 `641b2c5cb` | 同上（13:35Z） | 0 / 1 | 19 PASS / 1 FAIL：`presence-durability` |
-| 预演包 `rehearsal2-b1-candidate`（清单 `6ed87629…abf4`），候选为 B1 分支构建 | 工具 `dfe661a11`（21 项） | 同上（14:0xZ） | 0 / 1 | **19 PASS / 2 FAIL**：`presence-surface`（B2）、`production-plugin-exclusion`（B3） |
-| 预演包 `rehearsal2-main-candidate`（清单 `b4b1c1cb…e191`），候选为 main 源码构建 | 工具 `dfe661a11` | 同上 | 0 / 1 | **18 PASS / 3 FAIL**：`presence-durability`（B1）、`presence-surface`（B2）、`production-plugin-exclusion`（B3） |
+**修复后（工具 #2424 `18bd45487`，B3 已包含）**：
 
-预演包位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`，**不是 v3.1，不得批准或执行**。v3 包及其两份报告已在 21:03 被外部进程删除，结论按删除前的输出抄录。`production-plugin-exclusion` 在 13:35Z 还是 PASS，到 rehearsal2 时变为 FAIL，原因是生产 PD 在 21:58（+08:00）升级到了 3.0.2（运行卡 §0.4）。
+| 预演包（不可批准） | 候选来源 | 命令 | 退出码（prepare / verify） | 结果 |
+|---|---|---|---|---|
+| `rehearsal3-b1b2-candidate`（清单 `7531fe16e75dc1b2f1eba03701b1c7c1f0c6fb3b3f7b64a53e99a5e85fc4f572`） | B2 分支（含 B1）`build:bundle` 产物：registry 有条目，并调用 `flushEvents()` | `--prepare` 后 `--verify --full --selftest` | 0 / 0 | **READY**，必需检查全部 PASS，实际产生的检查集合与必需集合一致。生产 PD 3.0.2 存在，但不再阻断 |
+| `rehearsal3-b1-candidate`（清单 `f1db0324428938e4e21232d85b709e2a5d5a72495ff88701d241a4dbc35818b7`） | B1 分支 `build:bundle` 产物 | 同上 | 0 / 1 | 只有 `presence-surface` FAIL（B2 未修） |
+| `rehearsal3-main-candidate`（清单 `bf8b19c7e022caa7a7c96c1dd7643dcff3d39dfa0980b39e7d2a2a91cd48e980`） | main 源码 `build:bundle` 产物 | 同上 | 0 / 1 | `presence-durability`（B1）和 `presence-surface`（B2）FAIL |
+
+预演包的完整目录位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`。清单和预检报告已复制到池外 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\`，并逐文件校验了 sha256。**这些都不是 v3.1**：候选取自未合并的分支，工具也取自未合并的分支。
+
+**修复前的历史记录**：
+
+| 对象 | 工具 | 退出码 | 结果 |
+|---|---|---|---|
+| v3 包 `pp-20261108T095217Z`（清单 `b16e8128…b895`）〔转录，包已丢失〕 | 旧工具 `aabbd4550` | 1 | 12 PASS / 1 FAIL（`presence-durability`）。旧工具不统计端口、终止工具、清扫和自测 |
+| 同一 v3 包〔转录，包已丢失〕 | `8860abcea` | 1 | 17 PASS / 3 FAIL：`manifest`、`presence-durability`、`execution-code` |
+| `rehearsal-not-approvable`（`463d694f…d310`），B1 构建 | `641b2c5cb` | 0 | 20/20，**假通过**：当时没有 `presence-surface` 检查，漏检了 B2 |
+| `rehearsal2-b1-candidate`（`6ed87629…abf4`） | `dfe661a11` | 1 | 19 PASS / 2 FAIL：`presence-surface`（B2）和 `production-plugin-exclusion`（B3 的旧判据） |
+| `rehearsal2-main-candidate`（`b4b1c1cb…e191`） | `dfe661a11` | 1 | 18 PASS / 3 FAIL：B1、B2、B3 的旧判据 |
 
 ## 3. 测试与守卫
 
 | 命令 | 退出码 | 结果 |
 |---|---|---|
-| `npx vitest run __tests__/aa-presence-run.test.mjs`（scripts） | 0 | 69/69（含 B2 检查后；加入 B2 检查前 61/61 连续 3 轮） |
-| `npx vitest run __tests__/aa-presence-run.test.mjs __tests__/aa-controlled-admission.test.mjs` | 0 | 95/95 |
-| `npx vitest run tests/hooks/{isolated-host-presence-fixture,llm-input-presence,prompt-presence-registry,runtime-prompt-activation}.test.ts`（插件） | 0 | 100/100 |
-| `npm run check:runtime-contract / repo-hygiene / security-baseline / workspace-tools / runtime-writers / naming-policy / docs-structure` | 均为 0 | PASS |
-| `npm run error:context -- --base origin/main` | 0 | EP-10/09/08/01/14/03 HIGH，逐项处理见 PR #2424 |
-| PR #2424 CI（head `641b2c5cb`） | — | 28 pass，1 skipping（CodeRabbit：仓库星数不足，自动评审不运行），0 fail |
-| B1 PR #2427 CI（head `8dec1a833`） | — | 24 pass，5 skipping（按影响范围跳过的包级任务和 CodeRabbit），0 fail |
+| `npx vitest run __tests__/aa-presence-run.test.mjs __tests__/aa-controlled-admission.test.mjs`（scripts，B3 后，连续 3 轮） | 0 | 125/125 ×3（其中 aa-presence-run 91 项） |
+| 插件 `tests/hooks/{isolated-host-presence-fixture,llm-input-presence,prompt-presence-registry}.test.ts`（#2424 分支） | 0 | 27/27 |
+| `check:runtime-contract / repo-hygiene / security-baseline / workspace-tools / runtime-writers / naming-policy` | 均为 0 | PASS |
+| eslint（改动的 5 个文件） | 0 | PASS |
+| B2 分支：经注册链的回归 + 守卫 | 修复前 1，修复后 0 | 修复前 SKIP、0 事件；守卫有 3 项失败（未分类、9≠8）。修复后 46/46 |
+| B2 分支：core feature-flags | 0 | 204/204 |
+| B2 分支：插件全量 | 1 | 2331 通过，2 失败，13 跳过。2 项失败是本机环境问题（MSYS tar、EPERM 清理临时目录），在不含 B2 的 #2427 worktree 上同样失败 |
 
-跳过项不算通过。本地未跑完整 `verify:merge`，以 CI 的 Verify Merge Gate 为准。
+CI 结果以各 PR 页面为准。跳过项不算通过。本地未跑完整 `verify:merge`。
 
-## 4. 反例覆盖（新增，均为离线、假宿主、临时目录）
+## 4. 反例覆盖（均为离线：假宿主、临时目录）
 
-- **READY 统一判定**：
-  - 端口被占、终止工具不可用、进程查询失败、有其他进程引用包、协议自测失败：每种情况都是 `ready=false`、exit 1，且 `--execute` 在启动任何宿主之前拒绝（宿主启动 0）；
-  - 历史预检文件写着通过，`--execute` 不采信；
-  - 只带 `--full`、只带 `--selftest` 或两者都不带：exit 1；
-  - 两个预检同时写报告，文件名不冲突。
-- **端口不是预留**：预检时端口空闲、执行时被占用，结果为 `stoppedAt=endpoint-bind`，宿主启动 0，预算 0，保留 `run-record.json`。
-- **清扫与启动器祖先**：父进程命令行含包路径时，查询结果排除启动器及其祖先，但仍能找到同级的其他进程。
-- **执行代码绑定**：prepare 之后改启动器、帮助模块、预算常量或工作区 dist，清单哈希不变，但旧批准不能运行（`execution-code` FAIL，宿主启动 0）。只改无关文档、`.d.ts` 或 `.map`，包仍然有效。没有执行代码绑定的旧清单一律拒绝。
-- **预算绑定**：批准文件中的预算与冻结值不同则拒绝；改动冻结预算后旧批准失效，重新批准也会因 `budget-consistency` 被拒；账本使用冻结值。
-- **污染审计**（临时模拟生产目录）：
-  - 已归因：R1 后停止，R2 不启动，不得 `completed`；
-  - 静态安装文件变化：停止并标明待人工复核，不断言由实验造成；
-  - 活动库或日志变化但无标记：记录为不能归因，运行继续并可 `completed`；
-  - 审计无法完成：停止，写明原因，写出 `run-record.json`；
-  - 基线取不到：在任何写入和计账之前拒绝；
-  - 审计全程只读，生产文件保持宿主写入后的原样。
+**B3 候选身份**：
 
-## 5. NOT RUN（只有获批真实运行才能产生）
+- 生产插件含有相同事件代码时，`production-plugin-exclusion` 为 PASS，版本作为环境事实记录。
+- 注册来源指向生产路径或其他候选：判为 `outside`，R1 失败，R2 不启动。
+- 注册来源缺失：判为失败，即使 presence 事件完全正确也不能替代；`(unknown)` 和多个来源互相冲突同样判失败。
+- 回合开始前就已存在于宿主日志中的注册行，不计入本回合。
+- 回合开始前的旧事件行，以及 `sessionId` 与宿主报告不一致的事件，都不计入。宿主没有报告 `sessionId` 时 `presence-event` 判失败。
+- 注册行只出现在包内宿主日志（JSON 记录）中也能确认。路径里自带的括号（如 `(x86)`）会保留。
+- 入口检查：`openclaw.extensions` 有两个条目、指向包外、或指向非冻结文件，都判失败。
+- 宿主配置：`logging.file` 不在包内，或 `level` 不是 info，判失败。
 
-1. 官方宿主是否确实加载了候选插件（R1 首项判定）。
-2. 真实 `llm_input` 派发与 presence 事件落盘。
-3. 宿主实际请求形状，以及可能的额外调用。
-4. 宿主退出时序、实际工具面。
-5. 生产污染的真实前后对照。
-6. Mimosa 完整安全审计：提交和推送时均为 `scanner_enobufs`，未得出结论，不作安全声明。
+**此前已有的反例**（统一 READY、端口、清扫、执行代码绑定、预算绑定、污染审计）继续通过，明细见上一版报告和修复卡。
+
+## 5. NOT RUN（只有获批的真实运行才能产生）
+
+1. 官方宿主运行时能否取得注册来源，以及它出现在 stdout、stderr 还是宿主日志中（R1 首项验收）。
+2. 真实的 `llm_input` 派发与 presence 事件落盘。
+3. 宿主 `--json` 输出中的 `sessionId` 与事件 `sessionId` 是否一致。
+4. 宿主实际的请求形状，以及可能的额外调用。
+5. 宿主退出时序、实际工具面。
+6. 生产污染的真实前后对照。
+7. Mimosa 完整安全审计：提交和推送时均为 `scanner_enobufs`，未得出结论，不作安全声明。
 
 ## 6. 生产污染边界（本轮）
 
-本轮对生产路径只做读取：全局宿主安装、生产插件、`~\.openclaw\openclaw.json`、生产 workspace 的 state.db 与日志目录、npm 缓存。预演包的 prepare 和 verify 只在会话临时目录里写入。不能用 mtime 或「未检索到标记」证明零写入，规则见运行卡 §11。
+本轮对生产路径只做读取：全局宿主安装、生产插件、`~\.openclaw\openclaw.json`、生产 workspace 的 state.db 与日志目录、npm 缓存。预演包的 prepare 和 verify 只写会话临时目录；证据副本只写 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\`。不能用 mtime 或「未检索到标记」来证明零写入，规则见运行卡 §11。
