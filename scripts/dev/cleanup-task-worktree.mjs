@@ -57,6 +57,7 @@ import {
   detachInternalLinks,
   formatProgress,
   isPathInsideRoot,
+  readRegularFileNoFollow,
   REMOVAL_REASONS,
 } from './lib/residue-delete.mjs';
 import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';
@@ -187,11 +188,11 @@ function isWithinPath(root, candidate) {
  */
 function resolveWorktreeAdminDir(worktreePath, commonDir) {
   const markerPath = path.join(worktreePath, '.git');
-  const markerStat = fs.lstatSync(markerPath);
-  if (!markerStat.isFile() || markerStat.isSymbolicLink()) {
-    throw new Error('worktree .git marker is not a regular file');
-  }
-  const markerContents = fs.readFileSync(markerPath, 'utf8');
+  // One-fd snapshot: fstat the descriptor and read through it, then compare
+  // against a fresh lstat of the path (regular-file assertion included). A
+  // path-based lstat-then-read would race a marker swapped in between
+  // (CodeQL js/file-system-race).
+  const markerContents = readRegularFileNoFollow(markerPath);
   const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
   if (!markerLine) throw new Error('worktree .git marker has no gitdir pointer');
   const rawAdminDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();

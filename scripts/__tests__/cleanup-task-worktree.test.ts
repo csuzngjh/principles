@@ -947,7 +947,15 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
         expect(fs.existsSync(wt)).toBe(true);
         expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
         expect(fs.existsSync(path.join(wt, 'relative-gitdir.txt'))).toBe(true);
-        expect(fs.readFileSync(markerFile, 'utf-8')).toContain('gitdir: ' + path.relative(wt, adminDir));
+        // One-fd snapshot read (CodeQL js/file-system-race fix pattern).
+        const markerFd = fs.openSync(markerFile, 'r');
+        let currentMarker;
+        try {
+          currentMarker = fs.readFileSync(markerFd, 'utf-8');
+        } finally {
+          fs.closeSync(markerFd);
+        }
+        expect(currentMarker).toContain('gitdir: ' + path.relative(wt, adminDir));
       }
     } finally {
       // Restore the canonical marker so the fixture stays consistent, using

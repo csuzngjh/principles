@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { gitCommonDirAbsolute, listWorktrees, normalizeGitPath, runGit } from './git.mjs';
 import { readLeaseState } from './workspace-lifecycle.mjs';
-import { classifyReparsePoints, removeResidueTree, REMOVAL_REASONS } from './residue-delete.mjs';
+import {
+  classifyReparsePoints,
+  readRegularFileNoFollow,
+  removeResidueTree,
+  REMOVAL_REASONS,
+} from './residue-delete.mjs';
 
 /** Re-read both halves of writer ownership immediately before a path mutation. */
 async function ownershipError(cwd, worktreePath, stage) {
@@ -37,28 +42,6 @@ async function ownershipError(cwd, worktreePath, stage) {
     };
   }
   return null;
-}
-
-/**
- * Open a marker without following a symlink/reparse point and prove that the
- * opened file is still the regular file named by the path. O_NONBLOCK prevents
- * a malicious FIFO from hanging the cleanup process on POSIX.
- */
-function readRegularFileNoFollow(filePath) {
-  const flags = fs.constants.O_RDONLY
-    | (process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
-  const fd = fs.openSync(filePath, flags);
-  try {
-    const opened = fs.fstatSync(fd);
-    const named = fs.lstatSync(filePath);
-    if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
-      || opened.dev !== named.dev || opened.ino !== named.ino) {
-      throw new Error('marker changed or is not a regular file');
-    }
-    return fs.readFileSync(fd, 'utf-8');
-  } finally {
-    fs.closeSync(fd);
-  }
 }
 
 /** Resolve Git's reverse gitdir pointer, which may be relative to adminDir. */

@@ -185,6 +185,32 @@ export function canonicalPath(p) {
   }
 }
 
+/**
+ * Open a file without following a symlink/reparse point and prove that the
+ * opened file is still the regular file named by the path: ONE descriptor is
+ * fstat'd and read, then compared against a fresh lstat of the path. A
+ * path-based lstat-then-read would race a symlink swapped in between; the
+ * fd snapshot closes that window (CodeQL js/file-system-race fix pattern).
+ * O_NONBLOCK additionally prevents a malicious FIFO from hanging the caller
+ * on POSIX.
+ */
+export function readRegularFileNoFollow(filePath) {
+  const flags = fs.constants.O_RDONLY
+    | (process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  const fd = fs.openSync(filePath, flags);
+  try {
+    const opened = fs.fstatSync(fd);
+    const named = fs.lstatSync(filePath);
+    if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
+      || opened.dev !== named.dev || opened.ino !== named.ino) {
+      throw new Error(filePath + ' changed or is not a regular file');
+    }
+    return fs.readFileSync(fd, 'utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 // A `..` component cannot be normalised lexically when a link precedes it. On
 // POSIX a backslash is an ordinary FILENAME character, so only `/` separates
 // components there; on Windows both separators count.
