@@ -32,7 +32,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { createRequire } from 'node:module';
-import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
+import { openRunContext, acquireRunLock, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 import { fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
@@ -91,6 +91,7 @@ const repoRoot = path.resolve(here, '..', '..', '..');
 let runCtx;
 try {
   runCtx = openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath: path.join(here, 'golden-dataset.json'), phaseInfo: { provider, model, apiKeyEnv } });
+  acquireRunLock({ runDir: runCtx.runDir, runId: runCtx.runId, phase: PHASES.d6Pending });
 } catch (error) {
   console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
   process.exit(1);

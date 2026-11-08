@@ -36,7 +36,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
-import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
+import { openRunContext, acquireRunLock, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const worktreeRoot = path.resolve(here, '..', '..', '..');
@@ -70,6 +70,7 @@ if (!process.env[apiKeyEnv]) {
 let runCtx;
 try {
   runCtx = openRunContext({ runIdArg, resultsRoot, repoRoot: worktreeRoot, datasetPath: path.join(here, 'golden-dataset.json'), phaseInfo: { provider, model, apiKeyEnv } });
+  acquireRunLock({ runDir: runCtx.runDir, runId: runCtx.runId, phase: PHASES.openclawHost });
 } catch (error) {
   console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
   process.exit(1);
@@ -101,7 +102,7 @@ const distFingerprint = Object.fromEntries(
   ['signal-collector-host.js', 'trajectory.js', 'evolution-reducer.js', 'signal-keyword-store.js'].map((fileName) => {
     const file = path.join(distDir, fileName);
     return [fileName, fs.existsSync(file)
-      ? 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16)
+      ? 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
       : 'missing'];
   }),
 );
@@ -481,6 +482,11 @@ const summary = {
   records,
 };
 fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 2));
-recordPhase(metaPath, meta, PHASES.openclawHost, { finished_at: summary.finished_at ?? new Date().toISOString(), ok: summary.ok, totals: summary.totals });
+recordPhase(metaPath, meta, PHASES.openclawHost, {
+  finished_at: summary.finished_at ?? new Date().toISOString(),
+  ok: summary.ok,
+  totals: summary.totals,
+  dist_fingerprint: summary.dist_fingerprint,
+});
 console.log(JSON.stringify({ ok: summary.ok, totals: summary.totals, llm_summary: summary.llm_summary, summary_file: summaryFile }, null, 2));
 process.exit(summary.ok ? 0 : 1);

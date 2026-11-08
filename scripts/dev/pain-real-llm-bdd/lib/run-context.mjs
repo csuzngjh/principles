@@ -31,6 +31,91 @@ export function generateRunId(now = new Date()) {
   return `run-${stamp}-${rand}`;
 }
 
+export function validateRunId(runId) {
+  if (typeof runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) {
+    throw Object.assign(
+      new Error(`invalid run_id '${String(runId)}': must match [A-Za-z0-9][A-Za-z0-9._-]* and must not start with a dot (no path escape)`),
+      { code: 'invalid_run_id', nextAction: 'use a filesystem-safe run id beginning with a letter or digit' },
+    );
+  }
+  return runId;
+}
+
+/**
+ * Acquire one exclusive process lock for the entire run_id.
+ *
+ * Every phase (including metrics) holds this lock until process exit, so
+ * --append cannot accidentally authorize two concurrent writers. A lock left
+ * by a forced process termination is deliberately NOT auto-stolen: inspect
+ * its pid and remove it manually only after confirming that process is gone.
+ */
+export function acquireRunLock({ runDir, runId, phase }) {
+  validateRunId(runId);
+  const lockPath = path.join(runDir, '.active-run.lock');
+  const token = crypto.randomBytes(16).toString('hex');
+  const lockRecord = {
+    schema: 'pri-1147-run-lock/1',
+    run_id: runId,
+    phase,
+    pid: process.pid,
+    started_at: new Date().toISOString(),
+    token,
+  };
+
+  let fd;
+  try {
+    fd = fs.openSync(lockPath, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify(lockRecord, null, 2));
+    fs.fsyncSync(fd);
+  } catch (error) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* preserve original error */ }
+      fd = undefined;
+      try { fs.unlinkSync(lockPath); } catch { /* preserve original error */ }
+    }
+    if (error?.code === 'EEXIST') {
+      let holder = null;
+      try { holder = JSON.parse(fs.readFileSync(lockPath, 'utf8')); } catch { /* lock may be partial/unreadable */ }
+      const details = holder
+        ? `phase=${holder.phase ?? 'unknown'} pid=${holder.pid ?? 'unknown'} started_at=${holder.started_at ?? 'unknown'}`
+        : 'holder metadata is unreadable';
+      throw Object.assign(
+        new Error(`run_id '${runId}' is already active (${details})`),
+        {
+          code: 'run_already_active',
+          nextAction: 'wait for the active phase to finish. If it was forcibly terminated, verify the recorded PID is gone before manually removing .active-run.lock; --append does not bypass this lock.',
+        },
+      );
+    }
+    throw error;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    process.removeListener('exit', release);
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+    try {
+      const current = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      if (current.token === token) fs.unlinkSync(lockPath);
+    } catch {
+      // Exit cleanup is best-effort; never mask the original process result.
+    }
+  };
+  const onSignal = (signal) => {
+    release();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  process.on('exit', release);
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  return { lockPath, release };
+}
+
 export function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
@@ -51,15 +136,8 @@ export function gitCommitSha(repoRoot) {
  * @returns {{runId, runDir, meta: object, createdNew: boolean}}
  */
 export function openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, phaseInfo }) {
-  // PRI-1150 review P2-C: `.` and `..` pass the charset regex but are path
-  // segments that escape `runs/` — reject them (and leading dots) explicitly.
-  if (
-    runIdArg !== null && runIdArg !== undefined
-    && (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(String(runIdArg)))
-  ) {
-    throw new Error(`invalid run_id '${runIdArg}': must match [A-Za-z0-9][A-Za-z0-9._-]* and must not start with a dot (no path escape)`);
-  }
-  const runId = runIdArg ?? generateRunId();
+  const runId = runIdArg === null || runIdArg === undefined ? generateRunId() : String(runIdArg);
+  validateRunId(runId);
   const runDir = path.join(resultsRoot, 'runs', runId);
   fs.mkdirSync(runDir, { recursive: true });
   const metaPath = path.join(runDir, 'run-meta.json');

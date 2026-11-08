@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import { classifySampleOutcome, SAMPLE_OUTCOMES, EXECUTION_FAILURE_OUTCOMES, STAGE2_DECIDED_OUTCOMES } from '../dev/pain-real-llm-bdd/lib/outcomes.mjs';
 import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows } from '../dev/pain-real-llm-bdd/lib/metrics-core.mjs';
-import { assertFreshOutputs, generateRunId, openRunContext, recordPhase, PHASES } from '../dev/pain-real-llm-bdd/lib/run-context.mjs';
+import { acquireRunLock, assertFreshOutputs, generateRunId, openRunContext, recordPhase, PHASES } from '../dev/pain-real-llm-bdd/lib/run-context.mjs';
 import * as lib from '../dev/pain-real-llm-bdd/lib/chain-harness.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -336,6 +336,31 @@ describe('run isolation (P1-2)', () => {
       const reread = JSON.parse(fs.readFileSync(ctx.metaPath, 'utf8'));
       expect(reread.phases.d6_pending.ok).toBe(true);
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('one run_id has an exclusive lock across phases and releases it on completion', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pri1147-run-lock-test-'));
+    const runDir = path.join(tmp, 'runs', 'run-lock');
+    fs.mkdirSync(runDir, { recursive: true });
+    let first;
+    let second;
+    try {
+      first = acquireRunLock({ runDir, runId: 'run-lock', phase: PHASES.codexChain });
+      const lockPath = path.join(runDir, '.active-run.lock');
+      const holder = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      expect(holder).toMatchObject({ run_id: 'run-lock', phase: PHASES.codexChain, pid: process.pid });
+      expect(() => acquireRunLock({ runDir, runId: 'run-lock', phase: PHASES.metrics })).toThrow(/already active/);
+
+      first.release();
+      expect(fs.existsSync(lockPath)).toBe(false);
+
+      second = acquireRunLock({ runDir, runId: 'run-lock', phase: PHASES.metrics });
+      expect(JSON.parse(fs.readFileSync(lockPath, 'utf8')).phase).toBe(PHASES.metrics);
+    } finally {
+      first?.release();
+      second?.release();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

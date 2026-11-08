@@ -80,6 +80,15 @@ function writeRunDir(root, runId, files) {
   return runDir;
 }
 
+function validDistFingerprint() {
+  return {
+    'signal-collector-host.js': `sha256:${'a'.repeat(64)}`,
+    'trajectory.js': `sha256:${'b'.repeat(64)}`,
+    'evolution-reducer.js': `sha256:${'c'.repeat(64)}`,
+    'signal-keyword-store.js': `sha256:${'d'.repeat(64)}`,
+  };
+}
+
 function baseRunFiles(runId, chainRows, { datasetSha = FROZEN_SHA } = {}) {
   // Rows are stamped with THIS run's id (the real chain runner derives it from
   // --run-id); keeps foreign-run scenarios expressible without ambiguity.
@@ -92,12 +101,13 @@ function baseRunFiles(runId, chainRows, { datasetSha = FROZEN_SHA } = {}) {
       provider: 'test',
       model: 'test-model',
       api_key_env: 'TEST_KEY',
+      phases: {},
     },
     'codex-chain.summary.json': { ok: true, run_id: runId, provider: 'test', model: 'test-model', partial_run: false },
     'codex-chain.jsonl': stamped.map((r) => JSON.stringify(r)).join('\n'),
     'd6-pending.summary.json': { ok: true, run_id: runId },
     'fault-injection.summary.json': { ok: true, run_id: runId },
-    'openclaw-host.summary.json': { ok: true, run_id: runId },
+    'openclaw-host.summary.json': { ok: true, run_id: runId, dist_fingerprint: validDistFingerprint() },
   };
 }
 
@@ -137,6 +147,43 @@ describe('compute-metrics REAL CLI (spawns node, temp results roots)', () => {
     const perSample = JSON.parse(fs.readFileSync(path.join(evidenceDir, 'per-sample.json'), 'utf8'));
     expect(perSample.run_id).toBe(runId);
     expect(perSample.dataset_sha256_matches).toBe(true);
+    expect(summary.integrity.openclaw_dist_fingerprint_ok).toBe(true);
+    expect(summary.phase_summaries.openclaw_host.dist_fingerprint).toEqual(validDistFingerprint());
+    expect(perSample.openclaw_dist_fingerprint).toEqual(validDistFingerprint());
+  });
+
+  it('missing OpenClaw dist fingerprint → exit 1, ok=false, NO evidence published', () => {
+    const root = path.join(tempRoot, 'missing-dist-fingerprint');
+    const runId = 'run-cli-dist-fingerprint';
+    const files = baseRunFiles(runId, cleanChainRows());
+    files['openclaw-host.summary.json'].dist_fingerprint['signal-collector-host.js'] = 'missing';
+    writeRunDir(root, runId, files);
+    const { result, stdoutJson } = runCli(root, runId);
+    expect(stdoutJson).not.toBeNull();
+    expect(result.status).toBe(1);
+    expect(stdoutJson.ok).toBe(false);
+    expect(stdoutJson.integrity.openclaw_dist_fingerprint_ok).toBe(false);
+    expect(fs.existsSync(path.join(evidenceRoot, `pri-1147-${runId}`))).toBe(false);
+  });
+
+  it('metrics refuses to run while another phase holds the same run_id lock', () => {
+    const root = path.join(tempRoot, 'active-run-lock');
+    const runId = 'run-cli-active-lock';
+    const runDir = writeRunDir(root, runId, baseRunFiles(runId, cleanChainRows()));
+    fs.writeFileSync(path.join(runDir, '.active-run.lock'), JSON.stringify({
+      schema: 'pri-1147-run-lock/1',
+      run_id: runId,
+      phase: 'codex_chain',
+      pid: 12345,
+      started_at: new Date().toISOString(),
+      token: 'test-lock-token',
+    }));
+    const { result } = runCli(root, runId);
+    let stderrJson = null;
+    try { stderrJson = JSON.parse(result.stderr); } catch { /* malformed failure output is itself a test failure */ }
+    expect(result.status).toBe(1);
+    expect(stderrJson?.reason).toBe('run_already_active');
+    expect(fs.existsSync(path.join(runDir, 'metrics-summary.json'))).toBe(false);
   });
 
   it('wrong dataset SHA in run-meta → exit 1, ok=false, NO evidence published', () => {

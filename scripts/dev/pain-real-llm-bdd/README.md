@@ -6,7 +6,7 @@ Golden 数据集冻结的真实 LLM BDD 实验（Codex 主数据集 / D6 pending
 - 驱动**真实生产链**（`processHookInvocation` → ingestion → admission → pending → `runStage2CorrectionCycle`，Stage-2 分类器由 `createSignalClassifierForWorkspace` 从 workspace 自己的 `.pd/config.yaml` 解析，真实 provider 调用）；
 - 不伪造任何 LLM 结果；expected_* 标签只来自 `golden-dataset.json`（冻结于第一次模型调用之前，不得在看到模型输出后修改）；
 - 样本环境在 `os.tmpdir()`；SQL 全参数化；日志/证据经 `redactSecrets`，任何脚本都不打印 API key 值（只引用 env 变量名）；
-- **运行隔离**：一次完整实验共用一个 `--run-id`，所有阶段只写 `.tmp/pri-1147/runs/<run_id>/`；目标文件已存在时**拒绝运行**（须换新 run_id 或显式 `--append`），绝不静默覆盖/追加；`run-meta.json` 记录 git commit SHA、数据集 SHA-256、provider/model（仅凭据名）与各阶段起止时间/样本数；
+- **运行隔离**：一次完整实验共用一个 `--run-id`，所有阶段只写 `.tmp/pri-1147/runs/<run_id>/`；目标文件已存在时**拒绝运行**（须换新 run_id 或显式 `--append`），绝不静默覆盖/追加；每个阶段及 metrics 还必须持有同一 `.active-run.lock` 独占锁，禁止同一 run_id 并发写入，`--append` 不绕过锁；`run-meta.json` 记录 git commit SHA、数据集 SHA-256、provider/model（仅凭据名）与各阶段起止时间/样本数；
 - **结局分类学**（`lib/outcomes.mjs`）：每样本恰一个 `final_outcome` ∈ {admitted, resolved_none, stage1_not_admitted, abandoned_low_confidence, abandoned_llm_error, pending_unresolved, classifier_unavailable, execution_error}——hook 失败/缺 observation/分类器不可用是**执行失败**，永远不是语义 NONE；有效的 NONE 必须是真实模型调用且返回 none@conf≥阈值；低置信度/错误耗尽 5 次尝试的 abandoned 是**未决结果**（不计入 Stage-2 准确率分母）；Stage-2 准确率只统计模型裁决的样本（admitted/resolved_none）。
 
 ## 前置条件
@@ -45,6 +45,8 @@ node scripts/dev/pain-real-llm-bdd/run-openclaw-host.mjs \
 node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 ```
 
+**串行执行约束**：同一 `run_id` 的 Phase 1–5 必须依次完成。每个脚本（包括 metrics）启动时通过 `O_EXCL` 创建 `.active-run.lock`；已有锁时立即失败，即使传入 `--append` 也不允许并发写入。正常退出自动释放锁；若进程被强制终止，先核实锁记录中的 PID 已不存在，再手动删除该 run 目录中的锁文件，或直接使用新的 run_id。不要在实验阶段之间并发启动脚本。
+
 通用参数：`--samples A1,A2`（仅 codex-chain；部分样本 → `partial_run: true`，门禁 `overall_ok=false`）、`--append`（显式授权向已有 run 目录追加）、`--results-root`（默认 `.tmp/pri-1147`）、`--timeout-ms`、`--max-tokens`、`--base-url`、`--reasoning false`。OpenClaw 子集另有 `--poll-seconds`（默认 90）。
 
 ## 产物位置
@@ -55,7 +57,7 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 | `.tmp/pri-1147/runs/<run_id>/codex-chain.summary.json` | run-codex-chain | 运行汇总（run_id/partial/git sha/dataset sha/结局计数/执行失败清单） |
 | `.tmp/pri-1147/runs/<run_id>/d6-pending.summary.json` | run-d6-pending | S1–S7 检查记录 |
 | `.tmp/pri-1147/runs/<run_id>/summary` 文件 ×3 | 三阶段脚本 | 各自 ok/totals/run_id |
-| `.tmp/pri-1147/runs/<run_id>/metrics-summary.json` | compute-metrics | 五项门禁 + 混淆矩阵/精度/Stage-2 精度/LLM 统计 |
+| `.tmp/pri-1147/runs/<run_id>/metrics-summary.json` | compute-metrics | 五项门禁 + 混淆矩阵/精度/Stage-2 精度/LLM 统计 + OpenClaw dist SHA-256 指纹 |
 | `docs/reports/evidence/pri-1147-<run_id>/per-sample.json` | compute-metrics | **脱敏证据**（仅标识/期望/观测/结局/延迟/哈希；不含文本/日志/凭据） |
 
 样本环境（workspace + CODEX_HOME + trajectory.db）在 `os.tmpdir()` 的临时根下，保留作证据，报告评审后手动删除。

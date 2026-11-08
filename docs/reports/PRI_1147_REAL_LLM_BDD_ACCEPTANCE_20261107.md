@@ -211,7 +211,7 @@ node scripts/dev/pain-real-llm-bdd/compute-metrics.mjs --run-id $RUN_ID
 
 ### 裁定：**READY_FOR_OWNER_REVIEW**
 
-整改指令 §九 的十一问逐项回答：
+整改指令 §九 的十二问逐项回答：
 
 1. **本轮修复了哪些真实缺陷？** 三个 P1：①BDD 失败判定（hook 失败/classifier 不可用/循环耗尽曾被静默当作正常语义结果或 false；现按 8 态分类学判定，退出码如实反映失败）；②重复运行数据污染（固定结果路径可被覆盖/追加、无 run_id；现 run_id 隔离 + 拒绝覆盖 + 完整性校验）；③D-DEF1 验收语义不一致（fault 脚本期待旧 Bug 复现、harness 用 120s 预算掩码；现默认预算全量 + D-DEF1-postfix 修复后回归）。另加 P2 验收门禁（combined.ok 只看主数据集 → 五状态门禁 + run_id 一致性）。
 2. **哪些生产代码保持不变？** 除 D-DEF1 整数钳制（历史轮，保留未回退）外，本轮零生产代码改动——检测语义、D5/D6 行为、词表、prompt、阈值全部未动。

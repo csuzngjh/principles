@@ -56,7 +56,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
-import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
+import { openRunContext, acquireRunLock, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const hostRuntime = await import('@principles/host-runtime');
 const codexAdapter = await import('@principles/codex-adapter');
@@ -104,6 +104,7 @@ const repoRoot = path.resolve(here, '..', '..', '..');
 let runCtx;
 try {
   runCtx = openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath: path.join(here, 'golden-dataset.json'), phaseInfo: { provider, model, apiKeyEnv } });
+  acquireRunLock({ runDir: runCtx.runDir, runId: runCtx.runId, phase: PHASES.faultInjection });
 } catch (error) {
   console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
   process.exit(1);

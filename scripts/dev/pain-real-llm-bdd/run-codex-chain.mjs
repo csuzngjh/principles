@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as lib from './lib/chain-harness.mjs';
 import { classifySampleOutcome } from './lib/outcomes.mjs';
-import { openRunContext, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
+import { openRunContext, acquireRunLock, assertFreshOutputs, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
@@ -78,6 +78,7 @@ if (unknownSamples.length > 0) {
 let runContext;
 try {
   runContext = openRunContext({ runIdArg, resultsRoot, repoRoot, datasetPath, phaseInfo: { provider, model, apiKeyEnv } });
+  acquireRunLock({ runDir: runContext.runDir, runId: runContext.runId, phase: PHASES.codexChain });
 } catch (error) {
   console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_context_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the run directory' }));
   process.exit(1);

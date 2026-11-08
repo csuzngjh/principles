@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { validateDatasetRows, computeDatasetMetrics, computeGates, buildEvidenceRows, reconcileRowExpectedWithDataset } from './lib/metrics-core.mjs';
+import { acquireRunLock, validateRunId, recordPhase, PHASES } from './lib/run-context.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
@@ -44,10 +45,22 @@ if (!runId) {
   }));
   process.exit(1);
 }
+try {
+  validateRunId(runId);
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code ?? 'invalid_run_id', details: String(error.message), nextAction: error.nextAction }));
+  process.exit(1);
+}
 
 const runDir = path.join(resultsRoot, 'runs', runId);
 if (!fs.existsSync(runDir)) {
   console.error(JSON.stringify({ ok: false, reason: 'run_dir_missing', details: runDir, nextAction: 'run the four phases with the same --run-id first' }));
+  process.exit(1);
+}
+try {
+  acquireRunLock({ runDir, runId, phase: PHASES.metrics });
+} catch (error) {
+  console.error(JSON.stringify({ ok: false, reason: error.code ?? 'run_lock_failed', details: String(error.message), nextAction: error.nextAction ?? 'inspect the active run lock' }));
   process.exit(1);
 }
 
@@ -77,6 +90,21 @@ const d6Summary = readJsonOptional(path.join(runDir, 'd6-pending.summary.json'))
 const faultSummary = readJsonOptional(path.join(runDir, 'fault-injection.summary.json'));
 const openclawSummary = readJsonOptional(path.join(runDir, 'openclaw-host.summary.json'));
 
+const REQUIRED_OPENCLAW_DIST_FILES = [
+  'signal-collector-host.js',
+  'trajectory.js',
+  'evolution-reducer.js',
+  'signal-keyword-store.js',
+];
+const openclawDistFingerprint = openclawSummary?.dist_fingerprint ?? null;
+const openclawDistFingerprintOk = openclawDistFingerprint !== null
+  && typeof openclawDistFingerprint === 'object'
+  && !Array.isArray(openclawDistFingerprint)
+  && REQUIRED_OPENCLAW_DIST_FILES.every((fileName) =>
+    Object.hasOwn(openclawDistFingerprint, fileName)
+    && typeof openclawDistFingerprint[fileName] === 'string'
+    && /^sha256:[0-9a-f]{64}$/.test(openclawDistFingerprint[fileName]));
+
 const isPartial = chainSummary.partial_run === true;
 const validation = validateDatasetRows(chain, dataset);
 
@@ -103,7 +131,8 @@ const integrityOk = datasetShaMatches
   && foreignRunIdRows.length === 0
   && runIdMissingRows.length === 0
   && metaIdentityOk
-  && expectedContradictions.length === 0;
+  && expectedContradictions.length === 0
+  && openclawDistFingerprintOk;
 
 // Metrics classification and evidence must NOT trust unverified inline labels:
 // reconcile every row's expected block to the authoritative frozen entry.
@@ -122,6 +151,7 @@ const integrity = {
   run_id_missing_rows: runIdMissingRows,
   meta_identity_ok: metaIdentityOk,
   expected_contradiction_count: expectedContradictions.length,
+  openclaw_dist_fingerprint_ok: openclawDistFingerprintOk,
 };
 const finalOk = gates.overall_ok && integrityOk;
 const metricsSummary = {
@@ -145,7 +175,12 @@ const metricsSummary = {
   phase_summaries: {
     d6_pending: d6Summary === null ? { present: false } : { present: true, ok: d6Summary.ok === true, totals: d6Summary.totals ?? null },
     fault_injection: faultSummary === null ? { present: false } : { present: true, ok: faultSummary.ok === true, totals: faultSummary.totals ?? null, honesty: faultSummary.honesty ?? null },
-    openclaw_host: openclawSummary === null ? { present: false } : { present: true, ok: openclawSummary.ok === true, totals: openclawSummary.totals ?? null },
+    openclaw_host: openclawSummary === null ? { present: false } : {
+      present: true,
+      ok: openclawSummary.ok === true,
+      totals: openclawSummary.totals ?? null,
+      dist_fingerprint: openclawDistFingerprint,
+    },
   },
   fp_list: datasetMetrics.fp_list,
   fn_list: datasetMetrics.fn_list,
@@ -169,6 +204,7 @@ if (!isPartial && finalOk) {
     dataset_sha256: declaredDatasetSha,
     frozen_dataset_sha256: frozenDatasetSha,
     dataset_sha256_matches: datasetShaMatches,
+    openclaw_dist_fingerprint: openclawDistFingerprint,
     provider: runMeta?.provider ?? null,
     model: runMeta?.model ?? null,
     generated_at: new Date().toISOString(),
@@ -204,6 +240,15 @@ if (!isPartial && finalOk) {
     gates,
     dataset_problems: validation.problems,
   }, null, 2));
+}
+
+if (runMeta !== null && runMeta.unreadable !== true && typeof runMeta === 'object') {
+  recordPhase(path.join(runDir, 'run-meta.json'), runMeta, PHASES.metrics, {
+    finished_at: new Date().toISOString(),
+    ok: finalOk,
+    integrity_ok: integrityOk,
+    openclaw_dist_fingerprint_ok: openclawDistFingerprintOk,
+  });
 }
 
 console.log(JSON.stringify({
