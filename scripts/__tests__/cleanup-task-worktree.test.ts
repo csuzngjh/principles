@@ -1044,6 +1044,55 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
 
   // ---- Rollback state machine: fault injection at each compensated step ----
 
+  it.skipIf(process.platform !== 'linux' && process.platform !== 'win32')(
+    'refuses to delete while a process still holds a file open inside the quarantine (P1-1)',
+    async () => {
+      const { wt } = await makeTask('held-handle');
+      const commonDir = await gitCommonDirAbsolute(primary);
+      let quarantine = '';
+      let heldFd: number | null = null;
+      try {
+        const result = await withMutationLock(
+          { commonDir, operation: 'worktree-remove', target: wt },
+          () => removeWorktreeSafely({
+            cwd: primary,
+            worktreePath: wt,
+            primaryPath: primary,
+            onQuarantined: (moved) => {
+              quarantine = moved;
+              // A writer (dev server, editor, log appender) that opened a
+              // tracked file before the move keeps its handle across it.
+              heldFd = fs.openSync(path.join(moved, 'held-handle.txt'), 'r+');
+            },
+          }),
+        );
+        expect(result.ok).toBe(false);
+        expect(result.reasonCode).toBe('QUIESCENCE_UNPROVEN');
+        expect(result.reason).toContain('cannot be proven');
+        // Nothing was deleted: the tree is intact wherever it is reported.
+        const treePath = result.restoreState === 'RESTORE_COMPLETED' ? result.restoredPath : result.quarantinePath;
+        if (process.platform === 'win32') {
+          // The open handle also blocks moving the tree back: preserved in place.
+          expect(result.restoreState).toBe('QUARANTINE_PRESERVED');
+          expect(treePath).toBe(quarantine);
+        } else {
+          // POSIX renames ignore open descriptors: restored, fd still valid.
+          expect(result.restoreState).toBe('RESTORE_COMPLETED');
+          expect(treePath).toBe(wt);
+        }
+        expect(fs.readFileSync(path.join(treePath as string, 'held-handle.txt'), 'utf-8')).toBe('x\n');
+        expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(treePath as string))).toBe(true);
+      } finally {
+        if (heldFd !== null) fs.closeSync(heldFd);
+        if (quarantine && fs.existsSync(quarantine)) {
+          await git(primary, 'worktree', 'move', quarantine, wt);
+          fs.rmdirSync(path.dirname(quarantine));
+        }
+      }
+    },
+    120_000,
+  );
+
   /** Trigger a post-move refusal (a late untracked write) so the rollback runs. */
   const lateWriter = (captured: { quarantine: string }) => (moved: string) => {
     captured.quarantine = moved;

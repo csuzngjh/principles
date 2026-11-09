@@ -736,7 +736,12 @@ async function main() {
         : shellRemains ? REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL : REMOVAL_REASONS.REMOVAL_FAILED;
       const nextAction = failureReason === REMOVAL_REASONS.OWNERSHIP_CHANGED
         ? 'The worktree ownership or contents changed during cleanup. Preserve it, inspect git status --porcelain, lease state and git worktree list --porcelain, then retry only after the owner change is understood.'
-        : failureReason === REMOVAL_REASONS.EXTERNAL_TARGET_LOST
+        : failureReason === REMOVAL_REASONS.QUIESCENCE_UNPROVEN
+          ? 'Nothing was deleted. A process may still hold a file, directory or working directory inside the worktree (see the reason above). ' +
+            'Close that editor, terminal, dev server or watcher (or wait for it to exit), then re-run npm run dev:worktree:cleanup -- ' +
+            shellPath(args.target) + ' . If the reason says no inspection mechanism exists for this platform, this tool cannot prove removal safe here: ' +
+            'the worktree is left intact — do NOT fall back to git worktree remove or a recursive delete; escalate instead.'
+          : failureReason === REMOVAL_REASONS.EXTERNAL_TARGET_LOST
           ? 'An external target may have been damaged. Stop cleanup and restore or independently verify every reported target before any retry.'
           : shellRemains
             ? 'Do NOT delete it with a recursive delete. The junction-safe residue path is the only authorised removal: npm run dev:workspace:cleanup -- --residue ' +

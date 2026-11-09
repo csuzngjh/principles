@@ -295,6 +295,9 @@ export const REMOVAL_REASONS = Object.freeze({
   SCAN_INCOMPLETE: 'SCAN_INCOMPLETE',
   OWNERSHIP_CHANGED: 'OWNERSHIP_CHANGED',
   MUTATION_LOCK_UNAVAILABLE: 'MUTATION_LOCK_UNAVAILABLE',
+  // Some process may still hold a file, directory or mapping inside the
+  // quarantine (or no mechanism can prove otherwise): nothing is deleted.
+  QUIESCENCE_UNPROVEN: 'QUIESCENCE_UNPROVEN',
   REMOVAL_FAILED: 'REMOVAL_FAILED',
   REMOVAL_FAILED_RESIDUE_SHELL: 'REMOVAL_FAILED_RESIDUE_SHELL',
   UNEXPECTED_ERROR: 'UNEXPECTED_ERROR',

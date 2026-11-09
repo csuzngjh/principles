@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { gitCommonDirAbsolute, listWorktrees, normalizeGitPath, runGit } from './git.mjs';
 import { readLeaseState } from './workspace-lifecycle.mjs';
+import { proveQuarantineQuiescent } from './quiescence.mjs';
 import {
   classifyReparsePoints,
   readRegularFileNoFollow,
@@ -801,6 +802,39 @@ export async function removeWorktreeSafely({
   const afterMoveError = await ownershipError(gitCwd, quarantinePath, 'before no-follow deletion');
   if (afterMoveError) {
     return refuse(afterMoveError.reasonCode, afterMoveError.reason);
+  }
+
+  // Nothing may still hold anything inside the quarantine. A handle opened
+  // before the move survives the rename and keeps writing; deleting the tree
+  // would send those writes into unlinked files and lose them silently. A
+  // second `git status` cannot see a writer that has not written yet, so this
+  // is a positive proof taken immediately before the deletion — and when it
+  // cannot be given, NOTHING is deleted.
+  const quiescence = proveQuarantineQuiescent({ quarantinePath, quarantineParent });
+  if (!quiescence.proven) {
+    const reason = 'refusing to delete: it cannot be proven that no process still holds a handle inside the ' +
+      'quarantine (' + quiescence.mechanism + '): ' + quiescence.reason;
+    if (quiescence.displacedTo) {
+      // The probe moved the private parent and could not move it back: the
+      // tree is intact under the probe name. Report it there, untouched.
+      return {
+        ok: false,
+        reasonCode: REMOVAL_REASONS.QUIESCENCE_UNPROVEN,
+        reason: reason + '; the tree is intact at ' + path.join(quiescence.displacedTo, 'worktree'),
+        restoreState: 'RESTORE_FAILED',
+        recoveryPath: path.join(quiescence.displacedTo, 'worktree'),
+        adminDirPath: linkage.adminDir,
+        quiescence,
+        notes,
+      };
+    }
+    return refuse(REMOVAL_REASONS.QUIESCENCE_UNPROVEN, reason, { quiescence });
+  }
+  if (quiescence.uninspectedProcesses > 0) {
+    notes.push(
+      'quiescence proven (' + quiescence.mechanism + ') against every process this user can inspect; ' +
+      quiescence.uninspectedProcesses + ' process(es) of other users or non-dumpable processes are outside that boundary'
+    );
   }
 
   const removal = removeResidueTree(quarantinePath, {
