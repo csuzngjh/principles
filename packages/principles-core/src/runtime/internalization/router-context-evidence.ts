@@ -7,7 +7,10 @@ export const RouterContextReceiptSchema = Type.Object({
   schemaVersion: Type.Literal('router-context-v1'),
   taskId: Type.String({ minLength: 1 }),
   runId: Type.String({ minLength: 1 }),
-  outputSchemaRef: Type.Literal('diagnostician-output-v1'),
+  // PRI-1139: new receipts carry the version-neutral canonical ref; receipts
+  // persisted before the cutover keep the versioned spelling. Both are valid
+  // reads of the same immutable artifact contract.
+  outputSchemaRef: Type.Union([Type.Literal('diagnostician-output'), Type.Literal('diagnostician-output-v1')]),
   contextHash: Type.String({ minLength: 1 }),
   messageDigest: DigestSchema,
   systemPromptDigest: DigestSchema,

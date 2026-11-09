@@ -1,6 +1,11 @@
 # PRI-1104 单版本收敛：事实基线与分阶段计划（PR-1 地基）
 
-> 状态：PR-1（PRI-1134）落地。本文是 `docs/audit/` 的当前状态报告，取代
+> 状态：PR-1（PRI-1134）落地；PR-2~PR-6（PRI-1135/1136/1137/1138/1139）已全部实施。
+> PR-6（PRI-1139，2026-11-08）：13 个 registry key 已切中性 canonical、schemaVersion 写 `current`（双读 `1`）、
+> `approval-review` / `model_aware` 写入侧切换、`/api` canonical 客户端切换（服务端保留 `/api/v1` alias）、
+> `versioned-output-ref` 守门已翻 gated。本文其余内容保留为 PR-1 时的基线记录。
+>
+> 原文（PR-1 状态）：取代
 > `.tmp/v1v2-audit/REPORT.md` 作为验收依据（后者仅作历史快照，勿删勿改）。
 > 基线 commit：`9f477a9fc8cfa59204ce7aa4018637fbacdbb7a5`（origin/main，含 PR #2332 / #2365）。
 

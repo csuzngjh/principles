@@ -303,7 +303,7 @@ describe('buildFeedbackDiagnostics', () => {
 
     // P0-2: versions/platform now come from /api/health, not config.
     // Config failure only affects featureFlags.
-    expect(diag.featureFlags.unavailableReason).toContain('/api/v1/config/summary fetch failed');
+    expect(diag.featureFlags.unavailableReason).toContain('/api/config/summary fetch failed');
     expect(diag.featureFlags.unavailableReason).toContain('connection refused');
     // health succeeded but has no versions field → recorded as unavailable
     expect(diag.versions.unavailableReason).toContain('versions not in health response');

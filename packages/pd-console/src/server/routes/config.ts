@@ -2,10 +2,10 @@
  * Config API Routes — PRI-309
  *
  * Console backend APIs for the Control Center:
- * - GET  /api/v1/config/summary          — redacted config summary
- * - GET  /api/v1/config/catalog           — available runtime/model catalog
- * - PATCH /api/v1/config/agents/:name/binding — update agent runtime binding
- * - GET  /api/v1/config/readiness/:name   — readiness test for agent
+ * - GET  /api/config/summary          — redacted config summary
+ * - GET  /api/config/catalog           — available runtime/model catalog
+ * - PATCH /api/config/agents/:name/binding — update agent runtime binding
+ * - GET  /api/config/readiness/:name   — readiness test for agent
  *
  * Security:
  * - Never returns raw provider objects, tokens, API keys, or env values
@@ -401,6 +401,6 @@ export async function handleConfigRoute(
   }
 
   // 404 fallback
-  sendNotFound(res, `Route /api/v1/config${subPath} not found`);
+  sendNotFound(res, `Route /api/config${subPath} not found`);
 }
 

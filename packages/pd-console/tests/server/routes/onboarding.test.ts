@@ -157,7 +157,7 @@ function makeMockChildEmitSuccess(demoJson: Record<string, unknown>): ReturnType
 
 // -- Tests --
 
-describe('POST /api/v1/onboarding/run-demo', () => {
+describe('POST /api/onboarding/run-demo', () => {
   it('Given flag enabled, When POST run-demo, Then spawns pd demo story-a and returns 200 with demo result', async () => {
     const demoResult = {
       status: 'passed',
@@ -171,7 +171,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     vi.mocked(spawn).mockReturnValue(makeMockChildEmitSuccess(demoResult) as never);
 
     const res = makeRes();
-    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+    await handleOnboardingRoute(makePostReq('/api/onboarding/run-demo'), res, {
       workspaceDir,
       subPath: '/run-demo',
     });
@@ -211,7 +211,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
       stages: [{ name: 'valid', status: 'passed' }, null],
     }) as never);
     const res = makeRes();
-    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+    await handleOnboardingRoute(makePostReq('/api/onboarding/run-demo'), res, {
       workspaceDir, subPath: '/run-demo',
     });
     expect(getStatus(res)).toBe(500);
@@ -221,7 +221,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     writeConfig(false);
 
     const res = makeRes();
-    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+    await handleOnboardingRoute(makePostReq('/api/onboarding/run-demo'), res, {
       workspaceDir,
       subPath: '/run-demo',
     });
@@ -241,7 +241,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     });
 
     const res = makeRes();
-    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+    await handleOnboardingRoute(makePostReq('/api/onboarding/run-demo'), res, {
       workspaceDir,
       subPath: '/run-demo',
     });
@@ -269,7 +269,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
     };
     vi.mocked(spawn).mockReturnValue(child as never);
     const res = makeRes();
-    const promise = handleOnboardingRoute(makePostReq('/api/v1/onboarding/run-demo'), res, {
+    const promise = handleOnboardingRoute(makePostReq('/api/onboarding/run-demo'), res, {
       workspaceDir, subPath: '/run-demo',
     });
     setTimeout(() => { handlers.close?.forEach(cb => cb(1)); }, 0);
@@ -284,7 +284,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
 
   it('Given GET method on /run-demo, When called, Then returns 405 method_not_allowed', async () => {
     const res = makeRes();
-    await handleOnboardingRoute(makeGetReq('/api/v1/onboarding/run-demo'), res, {
+    await handleOnboardingRoute(makeGetReq('/api/onboarding/run-demo'), res, {
       workspaceDir,
       subPath: '/run-demo',
     });
@@ -298,7 +298,7 @@ describe('POST /api/v1/onboarding/run-demo', () => {
 
   it('Given unknown subPath, When POST, Then returns 404 not_found', async () => {
     const res = makeRes();
-    await handleOnboardingRoute(makePostReq('/api/v1/onboarding/unknown'), res, {
+    await handleOnboardingRoute(makePostReq('/api/onboarding/unknown'), res, {
       workspaceDir,
       subPath: '/unknown',
     });

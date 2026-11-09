@@ -1472,10 +1472,12 @@ export class TrajectoryDatabase {
     for (const w of result.warnings) {
       console.info(`[PD:TrajectoryDatabase] schema init warning: ${w}`);
     }
-    const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
-    this.migrateSchema(row?.version);
+    this.migrateSchema();
     // PRI-1135: single version-row writer — the same core function used by
     // initTrajectorySchema and, indirectly, every raw host-runtime open path.
+    // PRI-1139: the schema_version epoch is now fully internal to the DDL
+    // owner (trajectory-schema.ts) — this used to be the last external read,
+    // and it only fed a migrateSchema parameter the method never used.
     convergeTrajectorySchemaVersion(this.db);
   }
 
@@ -1486,7 +1488,7 @@ export class TrajectoryDatabase {
   }
 
    
-  private migrateSchema(_fromVersion?: number): void {
+  private migrateSchema(): void {
     this.db.exec(`
       DROP VIEW IF EXISTS v_daily_metrics;
       CREATE VIEW IF NOT EXISTS v_daily_metrics AS

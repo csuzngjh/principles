@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from './update-timeout.js';
 import {
   loadPdConfig,
@@ -290,7 +290,7 @@ interface AppServices {
   feedbackChannelConfig: FeedbackChannelConfig;
 }
 
-async function initServices(workspaceDir: string, authConfig: AuthConfig): Promise<AppServices> {
+export async function initServices(workspaceDir: string, authConfig: AuthConfig): Promise<AppServices> {
   const configStore = new WorkspaceConfigStore();
   const workspaceService = new WorkspaceService(configStore);
 
@@ -348,7 +348,7 @@ async function initServices(workspaceDir: string, authConfig: AuthConfig): Promi
   };
 }
 
-async function closeServices(): Promise<void> {
+export async function closeServices(): Promise<void> {
   disposeFeedbackReportModels();
   disposeFailedTasksModels();
   disposeReceiptsModels();
@@ -367,7 +367,7 @@ async function closeServices(): Promise<void> {
 
 // ── Route handler ───────────────────────────────────────────────────────────
 
-function handleRequest(services: AppServices): (req: http.IncomingMessage, res: http.ServerResponse) => void {
+export function handleRequest(services: AppServices): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   const { handleWorkspacesRoute } = createWorkspacesRoutes(services.configStore, services.workspaceService);
 
   return (req: http.IncomingMessage, res: http.ServerResponse): void => {
@@ -404,9 +404,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       }
 
       // ── API routes ──────────────────────────────────────────────────
+      // PRI-1139: canonical API paths are version-neutral. The deprecated
+      // `/api/v1/` prefix is a frozen wire literal kept as a read alias: strip
+      // it once here, then dispatch on the canonical `/api/...` form below, so
+      // both spellings reach the exact same handler branch by construction.
+      const routePath = urlPath.startsWith('/api/v1/') ? `/api/${urlPath.slice('/api/v1/'.length)}` : urlPath;
 
       // GET /api/feedback/submit/channels — submit-ladder probe
-      if (urlPath === '/api/feedback/submit/channels') {
+      if (routePath === '/api/feedback/submit/channels') {
         asyncHandler(() => handleFeedbackChannelsRoute(req, res, {
           workspaceDir: services.workspaceDir,
           channelConfig: services.feedbackChannelConfig,
@@ -418,60 +423,54 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 
       // GET/POST /api/feedback/reports, /api/feedback/reports/:id,
       // POST /api/feedback/reports/:id/submit
-      if (urlPath === '/api/feedback/reports' || urlPath.startsWith('/api/feedback/reports/')) {
-        const subPath = urlPath.slice('/api/feedback/reports'.length);
+      if (routePath === '/api/feedback/reports' || routePath.startsWith('/api/feedback/reports/')) {
+        const subPath = routePath.slice('/api/feedback/reports'.length);
         asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags, maintainerEmail: services.maintainerEmail, channelConfig: services.feedbackChannelConfig }))(req, res);
         return;
       }
 
-      // Task 9: GET /api/v1/failed-tasks, /api/v1/failed-tasks/:id
-      if (urlPath === '/api/v1/failed-tasks' || urlPath.startsWith('/api/v1/failed-tasks/')) {
-        const subPath = urlPath.slice('/api/v1/failed-tasks'.length);
+      // Task 9: GET /api/failed-tasks, /api/failed-tasks/:id
+      if (routePath === '/api/failed-tasks' || routePath.startsWith('/api/failed-tasks/')) {
+        const subPath = routePath.slice('/api/failed-tasks'.length);
         asyncHandler(() => handleFailedTasksRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
         return;
       }
 
-      // PRI-533: GET /api/v1/receipts/counts, /api/v1/receipts/principles/:id
-      if (urlPath === '/api/v1/receipts' || urlPath.startsWith('/api/v1/receipts/')) {
-        const subPath = urlPath.slice('/api/v1/receipts'.length);
+      // PRI-533: GET /api/receipts/counts, /api/receipts/principles/:id
+      if (routePath === '/api/receipts' || routePath.startsWith('/api/receipts/')) {
+        const subPath = routePath.slice('/api/receipts'.length);
         asyncHandler(() => handleReceiptsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
-      // GET /api/v1/approvals/grouped (MUST be before approvals catch-all)
-      if (urlPath === '/api/v1/approvals/grouped') {
+      // GET /api/approvals/grouped (MUST be before approvals catch-all)
+      if (routePath === '/api/approvals/grouped') {
         asyncHandler(() => handleApprovalsGroupedRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 
-      // GET /api/v1/approvals, /api/v1/approvals/:id, POST /api/v1/approvals/:id/approve, /api/v1/approvals/:id/reject
-      if (urlPath.startsWith('/api/v1/approvals')) {
-        const subPath = urlPath.slice('/api/v1/approvals'.length);
+      // GET /api/approvals, /api/approvals/:id, POST /api/approvals/:id/approve, /api/approvals/:id/reject
+      if (routePath.startsWith('/api/approvals')) {
+        const subPath = routePath.slice('/api/approvals'.length);
         asyncHandler(() => handleApprovalsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
       // GET /api/principles/core — read-only PD Core Principles reference
       // (MUST be before the /api/principles catch-all so "core" is not parsed
-      // as a principle id; the /api/v1/principles mount does not expose it.)
-      if (urlPath === '/api/principles/core') {
+      // as a principle id; the /api/principles mount does not expose it.)
+      if (routePath === '/api/principles/core') {
         asyncHandler(() => handleCorePrinciplesRoute(req, res))(req, res);
         return;
       }
 
-      // GET /api/principles, /api/principles/:id
-      if (urlPath === '/api/principles' || urlPath.startsWith('/api/principles/')) {
-        const subPath = urlPath.slice('/api/principles'.length);
-        asyncHandler(() => handlePrinciplesRoute({ req, res, workspaceDir: services.workspaceDir, subPath }))(req, res);
-        return;
-      }
-
-      // GET /api/v1/principles/:id/governance
-      // Owner Decision Experience v1: canonical Owner decision projection —
-      // dispatched BEFORE the principles catch-all so the static inbox path is
-      // never parsed as `/:id` (SPEC §15). Read-only; flag-gated inside.
-      if (urlPath.startsWith('/api/v1/principles/')) {
-        const subPath = urlPath.slice('/api/v1/principles'.length);
+      // PRI-1139: ONE canonical principles mount. Owner-decision sub-paths
+      // dispatch BEFORE the plain principles catch-all so the static inbox
+      // path is never parsed as /:id (SPEC §15); both the deprecated
+      // /api/v1/principles alias and the pre-cutover unversioned mount reach
+      // this same branch.
+      if (routePath === '/api/principles' || routePath.startsWith('/api/principles/')) {
+        const subPath = routePath.slice('/api/principles'.length);
         if (subPath === '/owner-decision-inbox') {
           asyncHandler(() => handleOwnerDecisionInboxRoute({ req, res, workspaceDir: services.workspaceDir, featureFlags: services.feedbackFlags, now: () => new Date().toISOString() }))(req, res);
           return;
@@ -491,15 +490,16 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
+
       // Workspace management routes
-      if (urlPath === '/api/workspaces' || urlPath.startsWith('/api/workspaces/')) {
-        const subPath = urlPath.slice('/api/workspaces'.length);
+      if (routePath === '/api/workspaces' || routePath.startsWith('/api/workspaces/')) {
+        const subPath = routePath.slice('/api/workspaces'.length);
         asyncHandler(() => handleWorkspacesRoute(req, res, subPath))(req, res);
         return;
       }
 
       // GET /api/update/history (MUST be before update catch-all)
-      if (urlPath === '/api/update/history') {
+      if (routePath === '/api/update/history') {
         asyncHandler(() => handleUpdateHistoryRoute(req, res, services.workspaceDir, ''))(req, res);
         return;
       }
@@ -508,16 +508,16 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // POST /api/update/recovery/resolve (MUST be before the update
       // catch-all; PRI-848/853 surfaces — resolve runs the pure journal
       // decision, it does not re-point installation state itself).
-      if (urlPath === '/api/update/recovery' || urlPath.startsWith('/api/update/recovery/') || urlPath.startsWith('/api/update/transaction/')) {
-        const subPath = urlPath.slice('/api/update'.length);
+      if (routePath === '/api/update/recovery' || routePath.startsWith('/api/update/recovery/') || routePath.startsWith('/api/update/transaction/')) {
+        const subPath = routePath.slice('/api/update'.length);
         asyncHandler(() => handleUpdateTransactionRoute(req, res, subPath))(req, res);
         return;
       }
 
       // Update routes: GET /api/update/check, POST /api/update/apply-full
       // (handleUpdateRoute 404s every other subPath)
-      if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
-        const subPath = urlPath.slice('/api/update'.length);
+      if (routePath === '/api/update' || routePath.startsWith('/api/update/')) {
+        const subPath = routePath.slice('/api/update'.length);
         const isApply = subPath === '/apply';
         const isApplyFull = subPath === '/apply-full';
         const isCheck = subPath === '/check';
@@ -532,32 +532,32 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // Config API routes: /api/v1/config/summary, /api/v1/config/catalog,
-      // /api/v1/config/agents/:name/binding, /api/v1/config/readiness/:name
-      if (urlPath === '/api/v1/config' || urlPath.startsWith('/api/v1/config/')) {
-        const subPath = urlPath.slice('/api/v1/config'.length);
+      // Config API routes: /api/config/summary, /api/config/catalog,
+      // /api/config/agents/:name/binding, /api/config/readiness/:name
+      if (routePath === '/api/config' || routePath.startsWith('/api/config/')) {
+        const subPath = routePath.slice('/api/config'.length);
         asyncHandler(() => handleConfigRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 
-      // CR8: GET /api/v1/lifecycle/principles/:principleId
-      if (urlPath.startsWith('/api/v1/lifecycle')) {
-        const subPath = urlPath.slice('/api/v1/lifecycle'.length);
+      // CR8: GET /api/lifecycle/principles/:principleId
+      if (routePath.startsWith('/api/lifecycle')) {
+        const subPath = routePath.slice('/api/lifecycle'.length);
         asyncHandler(() => handleLifecycleRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
       // SPEC-PD-EXAMINER-001 v0.9 §8: Examiner offline studies (local-dev
       // scope — the route answers 503 when the lab tooling is not present).
-      if (urlPath === '/api/v1/examiner' || urlPath.startsWith('/api/v1/examiner/')) {
-        const subPath = urlPath.slice('/api/v1/examiner'.length);
+      if (routePath === '/api/examiner' || routePath.startsWith('/api/examiner/')) {
+        const subPath = routePath.slice('/api/examiner'.length);
         asyncHandler(() => handleExaminerRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
-      // CR8: GET /api/v1/activations
-      if (urlPath === '/api/v1/activations' || urlPath.startsWith('/api/v1/activations/')) {
-        const subPath = urlPath.slice('/api/v1/activations'.length);
+      // CR8: GET /api/activations
+      if (routePath === '/api/activations' || routePath.startsWith('/api/activations/')) {
+        const subPath = routePath.slice('/api/activations'.length);
         // ADR-0022 (PRI-578): single resolver — env > ~/.pd/owner.json > none
         const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         const ownerActor = services.authConfig.isEnabled() && identity.ownerId && identity.credentialId
@@ -570,15 +570,15 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // ADR-0022 (PRI-578): /api/v1/owner-identity — GET status, POST register, DELETE unregister
-      if (urlPath === '/api/v1/owner-identity' || urlPath.startsWith('/api/v1/owner-identity/')) {
-        const subPath = urlPath.slice('/api/v1/owner-identity'.length);
+      // ADR-0022 (PRI-578): /api/owner-identity — GET status, POST register, DELETE unregister
+      if (routePath === '/api/owner-identity' || routePath.startsWith('/api/owner-identity/')) {
+        const subPath = routePath.slice('/api/owner-identity'.length);
         asyncHandler(() => handleOwnerIdentityRoute(req, res, defaultOwnerIdentityHomeDir(), subPath, services.authConfig))(req, res);
         return;
       }
 
-      // PRI-585: GET /api/v1/governance/experience (flag-gated read-only snapshot)
-      if (urlPath === '/api/v1/governance/experience') {
+      // PRI-585: GET /api/governance/experience (flag-gated read-only snapshot)
+      if (routePath === '/api/governance/experience') {
         asyncHandler(() => handleGovernanceExperienceRoute(req, res, {
           workspaceDir: services.workspaceDir,
           featureFlags: services.feedbackFlags,
@@ -587,28 +587,28 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // CR8: GET /api/v1/governance/queue
-      if (urlPath === '/api/v1/governance/queue') {
+      // CR8: GET /api/governance/queue
+      if (routePath === '/api/governance/queue') {
         asyncHandler(() => handleGovernanceRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 
-      if (urlPath === '/api/v1/governance/rule-candidate-bindings' || urlPath.startsWith('/api/v1/governance/rule-candidate-bindings/')) {
+      if (routePath === '/api/governance/rule-candidate-bindings' || routePath.startsWith('/api/governance/rule-candidate-bindings/')) {
         const { ownerId, credentialId } = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         asyncHandler(() => handleRuleCandidateBindingsRoute(req, res, {
           workspaceDir: services.workspaceDir,
-          subPath: urlPath.slice('/api/v1/governance/rule-candidate-bindings'.length),
+          subPath: routePath.slice('/api/governance/rule-candidate-bindings'.length),
           ownerIdentity: services.authConfig.isEnabled() && ownerId !== null && credentialId !== null
             ? { ownerId, credentialId } : null,
         }))(req, res);
         return;
       }
 
-      // PRI-629: GET/POST /api/v1/governance/owner-decisions — unified Owner Inbox
+      // PRI-629: GET/POST /api/governance/owner-decisions — unified Owner Inbox
       // (read projection + resolution). Identity derived server-side (SPEC §29):
       // configured owner when registered, else the authenticated console operator.
-      if (urlPath === '/api/v1/governance/owner-decisions' || urlPath.startsWith('/api/v1/governance/owner-decisions/')) {
-        const subPath = urlPath.slice('/api/v1/governance/owner-decisions'.length);
+      if (routePath === '/api/governance/owner-decisions' || routePath.startsWith('/api/governance/owner-decisions/')) {
+        const subPath = routePath.slice('/api/governance/owner-decisions'.length);
         const odIdentity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         const { ownerId, credentialId } = odIdentity;
         const authEnabledForOwner = services.authConfig.isEnabled()
@@ -623,51 +623,51 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      if (urlPath.startsWith('/api/v1/governance/design-gate/')) {
+      if (routePath.startsWith('/api/governance/design-gate/')) {
         const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         const { ownerId, credentialId } = identity;
         asyncHandler(() => handleDesignGateRoute(req, res, {
           workspaceDir: services.workspaceDir,
-          subPath: urlPath.slice('/api/v1/governance/design-gate'.length),
+          subPath: routePath.slice('/api/governance/design-gate'.length),
           ownerIdentity: services.authConfig.isEnabled() && ownerId !== null && credentialId !== null
             ? { ownerId, credentialId } : null,
         }))(req, res);
         return;
       }
 
-      // PRI-466/477: GET/POST/PUT /api/v1/intent (+ /init, /content sub-paths)
-      if (urlPath === '/api/v1/intent' || urlPath.startsWith('/api/v1/intent/')) {
-        const subPath = urlPath === '/api/v1/intent' ? '' : urlPath.slice('/api/v1/intent'.length);
+      // PRI-466/477: GET/POST/PUT /api/intent (+ /init, /content sub-paths)
+      if (routePath === '/api/intent' || routePath.startsWith('/api/intent/')) {
+        const subPath = routePath === '/api/intent' ? '' : routePath.slice('/api/intent'.length);
         asyncHandler(() => handleIntentRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 
-      // PRI-470: IntentDecisionRecord (POST/GET /api/v1/intent-decisions, /:id, /summary)
-      if (urlPath === '/api/v1/intent-decisions' || urlPath.startsWith('/api/v1/intent-decisions/')) {
-        const subPath = urlPath.slice('/api/v1/intent-decisions'.length);
+      // PRI-470: IntentDecisionRecord (POST/GET /api/intent-decisions, /:id, /summary)
+      if (routePath === '/api/intent-decisions' || routePath.startsWith('/api/intent-decisions/')) {
+        const subPath = routePath.slice('/api/intent-decisions'.length);
         asyncHandler(() => handleIntentDecisionsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
-      // Onboarding wizard: POST /api/v1/onboarding/run-demo — spawns `pd demo story-a`
+      // Onboarding wizard: POST /api/onboarding/run-demo — spawns `pd demo story-a`
       // (spec 2026-06-30-new-user-onboarding-design.md §6.3 改动 5)
-      if (urlPath === '/api/v1/onboarding' || urlPath.startsWith('/api/v1/onboarding/')) {
-        const subPath = urlPath === '/api/v1/onboarding' ? '' : urlPath.slice('/api/v1/onboarding'.length);
+      if (routePath === '/api/onboarding' || routePath.startsWith('/api/onboarding/')) {
+        const subPath = routePath === '/api/onboarding' ? '' : routePath.slice('/api/onboarding'.length);
         asyncHandler(() => handleOnboardingRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 
-      // PRI-331: GET /api/v1/evidence-chain
-      if (urlPath === '/api/v1/evidence-chain') {
+      // PRI-331: GET /api/evidence-chain
+      if (routePath === '/api/evidence-chain') {
         asyncHandler(() => handleEvidenceChainRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 
-      // PD v2 Phase 1: POST /api/v1/evidence/outcomes — Owner outcome feedback
+      // PD v2 Phase 1: POST /api/evidence/outcomes — Owner outcome feedback
       // into the normalized evidence ledger. Identity derived server-side,
       // same rule as owner-decisions (configured owner or authenticated
       // console operator; never a body-supplied identity).
-      if (urlPath === '/api/v1/evidence/outcomes') {
+      if (routePath === '/api/evidence/outcomes') {
         const eoIdentity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
         const { ownerId, credentialId } = eoIdentity;
         const authEnabledForOwner = services.authConfig.isEnabled()
@@ -682,7 +682,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       }
 
       // GET /api/health
-      if (urlPath === '/api/health') {
+      if (routePath === '/api/health') {
         asyncHandler(() => handleHealthRoute(req, res, {
           workspaceDir: services.workspaceDir,
           authenticationMode: services.authConfig.isEnabled() ? 'authenticated' : 'no_auth',
@@ -691,7 +691,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       }
 
       // 404 fallback for API routes
-      sendNotFound(res, `Route ${urlPath} not found`);
+      sendNotFound(res, `Route ${routePath} not found`);
       return;
     }
 
@@ -768,7 +768,26 @@ export async function main(): Promise<void> {
   });
 }
 
-main().catch((err: unknown) => {
-  console.error('[pd-console] Fatal startup error:', err);
-  process.exit(1);
-});
+// cli-7 / PRI-892 precedent: importing this module (a test driving
+// handleRequest directly, for example) must NOT start a production console.
+// The unguarded call bound port 3100 and initialized the first registered
+// workspace — including the real ~/.pd history reconciliation and the
+// ~/.openclaw/extensions backup migration — as an import side effect.
+// Node hands argv[1] as the unresolved link path while import.meta.url is the
+// realpath, so canonicalize before comparing.
+function isMainModuleEntry(): boolean {
+  const [, entry] = process.argv;
+  if (!entry) return false;
+  try {
+    return pathToFileURL(fs.realpathSync(entry)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModuleEntry()) {
+  main().catch((err: unknown) => {
+    console.error('[pd-console] Fatal startup error:', err);
+    process.exit(1);
+  });
+}

@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { PDErrorCategorySchema } from './error-categories.js';
 import { GovernanceTimestampSchema } from './governance-timestamp-schema.js';
+import { RuntimeContractSchemaVersionSchema } from './schema-version.js';
 
 const NonEmptyStringSchema = Type.String({ minLength: 1 });
 // PRI-798: pattern-based (instance-agnostic) instead of a FormatRegistry
@@ -23,7 +24,7 @@ export const RevisionIdentitySchema = Type.Union([
 ]);
 
 const governanceFactBase = {
-  schemaVersion: Type.Literal('1'), sourceRef: SourceRefSchema, principleId: NonEmptyStringSchema,
+  schemaVersion: RuntimeContractSchemaVersionSchema, sourceRef: SourceRefSchema, principleId: NonEmptyStringSchema,
   artifactId: Type.Optional(NonEmptyStringSchema), taskId: Type.Optional(NonEmptyStringSchema),
   lineageKey: Type.Optional(NonEmptyStringSchema), lineageConfidence: LineageConfidenceSchema,
   revisionIdentity: Type.Optional(RevisionIdentitySchema), occurredAt: Type.Optional(TimestampSchema), recordedAt: TimestampSchema,
@@ -77,7 +78,7 @@ export const LineageContextSchema = Type.Object({
   revisionIdentities: Type.Array(RevisionIdentitySchema), confidence: LineageConfidenceSchema, sourceRefs: Type.Array(SourceRefSchema),
 }, { additionalProperties: false });
 export const GovernanceFactsSchema = Type.Object({
-  schemaVersion: Type.Literal('1'), principleId: NonEmptyStringSchema, asOf: TimestampSchema, lineage: LineageContextSchema,
+  schemaVersion: RuntimeContractSchemaVersionSchema, principleId: NonEmptyStringSchema, asOf: TimestampSchema, lineage: LineageContextSchema,
   principle: PrincipleFactSchema, tasks: Type.Array(TaskFactSchema), runnerVerdicts: Type.Array(RunnerVerdictFactSchema),
   derivedRelations: Type.Array(DerivedRelationFactSchema), approvals: Type.Array(ApprovalFactSchema), activations: Type.Array(ActivationFactSchema),
   timelineEvents: Type.Array(TimelineEventSchema), collectionIssues: Type.Array(DataQualityIssueSchema),
@@ -128,7 +129,7 @@ export const OwnerGovernanceSummarySchema = Type.Object({
 }, { additionalProperties: false });
 export const DataQualitySchema = Type.Object({ degraded: Type.Boolean(), issues: Type.Array(DataQualityIssueSchema) }, { additionalProperties: false });
 export const OwnerGovernanceViewSchema = Type.Object({
-  schemaVersion: Type.Literal('1'), principleId: NonEmptyStringSchema, asOf: TimestampSchema,
+  schemaVersion: RuntimeContractSchemaVersionSchema, principleId: NonEmptyStringSchema, asOf: TimestampSchema,
   summary: OwnerGovernanceSummarySchema, principleState: PrincipleStateSchema, process: ProcessViewSchema,
   automation: AutomationViewSchema, attention: AttentionViewSchema, activationSummary: ActivationSummarySchema,
   timeline: Type.Array(TimelineEventSchema), sourceRefs: Type.Array(SourceRefSchema), dataQuality: DataQualitySchema,

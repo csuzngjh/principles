@@ -15,6 +15,7 @@
 import path from 'node:path';
 import {
   PiAiRuntimeAdapter,
+  RUNTIME_CONTRACT_SCHEMA_VERSION,
   SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
   buildLlmPrompt,
   resolveLlmClassificationPayload,
@@ -61,8 +62,10 @@ export interface CreateSignalClassifierOptions {
  * packages/principles-core/src/runtime/adapter/output-schema-registry.ts:
  * the adapter fails loud (`output_invalid`) on an unregistered ref, and the
  * catch below would silently degrade Stage 2 to "no classification".
+ * PRI-1139: version-neutral canonical key; the pre-cutover `-v2` spelling
+ * still resolves through the registry's PRI-1104 alias table.
  */
-export const SIGNAL_CLASSIFICATION_SCHEMA_REF = 'signal-classification-output-v2';
+export const SIGNAL_CLASSIFICATION_SCHEMA_REF = 'signal-classification-output';
 
 /** Build the classifier from an already-resolved profile (no config I/O). */
 export function createSignalLlmClassifier(
@@ -92,7 +95,7 @@ export function createSignalLlmClassifier(
     const effectiveTimeoutMs = callOptions?.timeoutMs ?? timeoutMs;
     try {
       const handle = await adapter.startRun({
-        agentSpec: { agentId: 'signal-collector', schemaVersion: '1' },
+        agentSpec: { agentId: 'signal-collector', schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
         inputPayload: { prompt },
         contextItems: [],
         timeoutMs: effectiveTimeoutMs,

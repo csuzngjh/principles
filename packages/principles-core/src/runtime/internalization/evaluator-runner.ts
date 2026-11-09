@@ -25,6 +25,7 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import { selectTaskRevisionArtifact } from './peer-runner-contracts.js';
 import { verifyArtifactCandidateIdentity, type CandidateIdentityPort } from './candidate-identity.js';
 import type { CandidateIdentityReceipt } from '../types/rule-candidate-binding.js';
@@ -709,11 +710,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // progressive_evaluator branch was retired with PRI-819 R-06.
     const { message, systemPrompt } = await this.buildEvaluatorPrompt(taskId, context);
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'evaluator-output-v1',
+      outputSchemaRef: 'evaluator-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

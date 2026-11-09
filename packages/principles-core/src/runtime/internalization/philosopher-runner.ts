@@ -16,7 +16,7 @@
  *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
  *   2. resolve Dreamer dependency from dependencyTaskIds
  *   3. fetch Dreamer artifact via PIArtifactStore
- *   4. startRun with outputSchemaRef: 'philosopher-output-v1'
+ *   4. startRun with outputSchemaRef: 'philosopher-output'
  *   5. pollUntilTerminal
  *   6. fetchOutput → validate as unknown → cast to PhilosopherOutputV1
  *   7. updateRunOutput → persist serialized output
@@ -26,6 +26,7 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { PhilosopherOutputV1, PhilosopherValidator } from './philosopher-output.js';
 import type { TaskRecord } from '../task-status.js';
 import type { OutputLanguage } from '../language-directive.js';
@@ -199,11 +200,11 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
     });
 
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
-      outputSchemaRef: 'philosopher-output-v1',
+      outputSchemaRef: 'philosopher-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

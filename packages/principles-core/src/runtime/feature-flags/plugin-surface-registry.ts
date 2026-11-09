@@ -54,6 +54,16 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     description: 'LLM output analysis for pain signal extraction',
   },
   {
+    // PRI-1150 Path A shipped this registration without a registry entry, so
+    // guardHook installed a no-op and the observation never ran (PRI-1152 B2).
+    id: 'hook:llm_input_presence',
+    kind: 'hook',
+    category: 'core',
+    enabledByDefault: true,
+    since: '2026-11-08',
+    description: 'Post-assembly presence observation on the official llm_input hook: fact-only containment check of the frozen directives, no body text (PRI-1150 Path A)',
+  },
+  {
     id: 'hook:before_reset',
     kind: 'hook',
     category: 'quiet',

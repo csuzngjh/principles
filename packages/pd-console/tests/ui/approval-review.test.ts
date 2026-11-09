@@ -45,6 +45,25 @@ describe('one response binds readable material to the submitted approval snapsho
     expect(validateApprovalReview({ ...value, review: { ...value.review, expectedReview: missing } })).toBeNull();
     expect(validateApprovalReview({ ...value, review: { expectedReview: missing, material: { ...value.review.material, availability: 'missing', statement: null, exactBody: null } } })).not.toBeNull();
   });
+  it('PRI-1139: accepts the canonical guard version and echoes either spelling verbatim', () => {
+    // The server now mints 'approval-review'; guards minted before the
+    // cutover keep 'approval-review-v1'. Both validate, and the reconstructed
+    // submission guard must round-trip whichever spelling it read.
+    const canonical = fixture();
+    canonical.writeGuardVersion = 'approval-review';
+    canonical.review.expectedReview.schemaVersion = 'approval-review';
+    const parsedCanonical = validateApprovalReview(canonical);
+    expect(parsedCanonical).not.toBeNull();
+    expect(parsedCanonical?.expectedReview.schemaVersion).toBe('approval-review');
+
+    const legacy = validateApprovalReview(fixture());
+    expect(legacy).not.toBeNull();
+    expect(legacy?.expectedReview.schemaVersion).toBe('approval-review-v1');
+
+    const unknown = fixture();
+    unknown.writeGuardVersion = 'approval-review-v9';
+    expect(validateApprovalReview(unknown)).toBeNull();
+  });
 });
 
 

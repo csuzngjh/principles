@@ -92,7 +92,7 @@ export function typeboxToOpenAIJsonSchema(schema: TSchema | Record<string, unkno
 
 /**
  * 生成合法的 JSON Schema name（OpenAI 要求 ^[a-zA-Z0-9_-]+$）。
- * schemaRef（如 'philosopher-output-v1'）已符合；此处兜底清理非法字符。
+ * schemaRef（如 'philosopher-output'）已符合；此处兜底清理非法字符。
  */
 export function sanitizeSchemaName(schemaRef: string): string {
   const cleaned = schemaRef.replace(/[^a-zA-Z0-9_-]/g, '_');

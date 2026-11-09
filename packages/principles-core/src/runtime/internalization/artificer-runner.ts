@@ -22,7 +22,7 @@
  *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
  *   2. resolve Scribe dependency from dependencyTaskIds
  *   3. fetch Scribe artifact via PIArtifactStore
- *   4. startRun with outputSchemaRef: 'artificer-rule-output-v2'
+ *   4. startRun with outputSchemaRef: 'artificer-rule-output'
  *   5. pollUntilTerminal (inherited)
  *   6. fetchOutput → validate as unknown → cast to ArtificerRuleOutput
  *   7. checkLineageIntegrity (sourceScribeArtifactId consistency, ERR-008)
@@ -33,6 +33,7 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
+import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import type { ArtificerRuleOutput, ArtificerValidator, GoldenTraceCaseInput } from './artificer-output.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
@@ -1062,7 +1063,7 @@ ${context.revisionFeedback}
       : message;
 
     return this.runtimeAdapter.startRun({
-      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: finalMessage,
       // Structured system context for L2's deterministic tools. This is the
@@ -1073,7 +1074,7 @@ ${context.revisionFeedback}
           ...(this.behaviorExamplePack !== undefined ? { ownerCases: [boundPackForPrompt(this.behaviorExamplePack).sourceNegativeCase, ...boundPackForPrompt(this.behaviorExamplePack).positiveCounterexamples] } : {}),
         },
       }) }] : [],
-      outputSchemaRef: 'artificer-rule-output-v2',
+      outputSchemaRef: 'artificer-rule-output',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });

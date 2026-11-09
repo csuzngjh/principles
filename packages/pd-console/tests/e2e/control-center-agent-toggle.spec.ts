@@ -1,11 +1,11 @@
 /* eslint-disable */
 // E2E 流程测试：Control Center 代理开关切换 — 验证开关真实影响 .pd/config.yaml 持久化
 // 和 UI 状态。这是 PR #1086 的功能验证测试，确保开关不是"装饰按钮"而是真实
-// 调用 PATCH /api/v1/config/agents/:name/binding，后端写入 config.yaml，
+// 调用 PATCH /api/config/agents/:name/binding，后端写入 config.yaml，
 // resolveAgentRuntimeBinding 在运行时读取该字段决定代理是否执行。
 //
 // 链路核实（PR #1086 评审）：
-//   UI toggle → onBindingChange → PATCH /api/v1/config/agents/:name/binding
+//   UI toggle → onBindingChange → PATCH /api/config/agents/:name/binding
 //   → pd-config-store.updateAgentBinding → 写 .pd/config.yaml
 //   → resolveAgentRuntimeBinding(effective, name).readiness === 'disabled' when enabled=false
 //   → runtime-internalization-run-rulehost.ts 检查 binding，artificer/evaluator
@@ -42,7 +42,7 @@ async function apiPatch(path: string, body: unknown): Promise<{ status: number; 
 
 /** 从 GET /summary 提取指定 agent 的 enabled 状态 */
 async function getAgentEnabled(agentName: string): Promise<boolean> {
-  const resp = await apiGet('/api/v1/config/summary');
+  const resp = await apiGet('/api/config/summary');
   expect(resp.status).toBe(200);
   const body = resp.body as {
     success: boolean;
@@ -56,7 +56,7 @@ async function getAgentEnabled(agentName: string): Promise<boolean> {
 
 /** 通过 API 设置 agent 的 enabled 状态（用于测试 setup/teardown） */
 async function setAgentEnabled(agentName: string, enabled: boolean): Promise<void> {
-  const resp = await apiPatch(`/api/v1/config/agents/${agentName}/binding`, {
+  const resp = await apiPatch(`/api/config/agents/${agentName}/binding`, {
     runtimeProfile: 'pd.default',
     enabled,
   });

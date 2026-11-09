@@ -1,6 +1,6 @@
 /**
  * PRI-956 (F15, R1 merge-readiness D1/D2/D3/D5): REAL-DB route tests for the
- * runtime-revocation disclosure on GET /api/v1/principles.
+ * runtime-revocation disclosure on GET /api/principles.
  *
  * Unlike the model-level tests (which only pin annotation given an ID set),
  * these drive `handlePrinciplesRoute` against a REAL workspace: a real
@@ -25,7 +25,7 @@ import { handlePrinciplesRoute, disposePrinciplesModels } from '../../../src/ser
 let workspaceDir: string;
 
 function request(): IncomingMessage {
-  return { method: 'GET', url: '/api/v1/principles?filter=all' } as IncomingMessage;
+  return { method: 'GET', url: '/api/principles?filter=all' } as IncomingMessage;
 }
 
 function response(): ServerResponse & { body: string; statusCode: number } {

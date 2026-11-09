@@ -738,7 +738,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           {
             parseFailureReason: 'unknown_output_schema_ref',
             outputSchemaRef: schemaRef,
-            nextAction: `Register the schema in OUTPUT_SCHEMA_REGISTRY or pass a known ref (e.g. 'diag-rootcause-output-v1')`,
+            nextAction: `Register the schema in OUTPUT_SCHEMA_REGISTRY or pass a known ref (e.g. 'diag-rootcause-output')`,
           },
         );
       }
