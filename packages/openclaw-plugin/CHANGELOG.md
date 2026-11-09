@@ -1,5 +1,11 @@
 # principles-disciple
 
+## 3.1.1
+
+### Patch Changes
+
+- 498016c: Write the post-assembly presence observation to the event log when it is recorded, so a one-shot host that exits on its own no longer loses it (PRI-1152).
+
 ## 3.1.0
 
 ### Minor Changes
