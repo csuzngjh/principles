@@ -237,7 +237,7 @@ function normalizeDiagnosticianRecommendation(raw: unknown): { text: string } | 
 /**
  * Extract a validated Recommendation from the three historical contentJson shapes:
  *   1. { recommendation: {...} }  — manual E2E wrapper
- *   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
+ *   2. DiagnosticianOutputV2      — { summary, rootCause, recommendations: [...] }
  *   3. bare Recommendation-like object
  *
  * rc-1/rc-2: the value is untrusted — every branch validates before returning.
@@ -253,7 +253,7 @@ function extractRecommendationFromContentJson(parsed: unknown): Recommendation |
     const norm = normalizeDiagnosticianRecommendation(inner);
     if (norm) return validateRecommendation(norm);
   }
-  // Shape 2: DiagnosticianOutputV1 with recommendations[].
+  // Shape 2: DiagnosticianOutputV2 (or its router envelope) with recommendations[].
   if (Object.hasOwn(parsed, 'recommendations')) {
     const arr = parsed.recommendations;
     if (Array.isArray(arr) && arr.length > 0) {

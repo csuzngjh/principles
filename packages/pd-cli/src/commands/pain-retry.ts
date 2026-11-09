@@ -651,6 +651,9 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
 
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
     const perStageTimeoutMs = pipelineTimeoutMs / 3;
+    // PRI-1146 / SPEC v0.6 §5: trusted canonical principle source for the
+    // router (one ledger adapter, same authority as the intake paths below).
+    const routerLedgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const rootCauseRunner = new DiagRootCauseRunner(
       { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
@@ -660,7 +663,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: routerLedgerAdapter },
       { owner: 'pd-cli-pain-retry', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
 

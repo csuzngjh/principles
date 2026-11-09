@@ -12,7 +12,7 @@
  *   deferred                  — intentionally skipped, never enters executable pipeline
  */
 
-import type { DiagnosticianRecommendation, RecommendationKind } from '../diagnostician-output.js';
+import type { RecommendationKind } from '../diagnostician-output.js';
 
 // ── Route kinds ─────────────────────────────────────────────────────────────
 
@@ -49,10 +49,29 @@ KIND_ROUTE_MAP.defer = 'deferred';
 
 // ── Pure decision function ──────────────────────────────────────────────────
 
+/**
+ * Structural input for the route decision. Deliberately narrower than
+ * DiagnosticianRecommendationV2 (the route reads only kind + readiness
+ * fields), and kind is a plain string because callers hand in resolved
+ * recommendations whose kind is validated at intake — unknown values are
+ * handled defensively below, not assumed away (PRI-1146 rc-2 cleanup: the
+ * old signature forced `as` casts at every CLI call site).
+ */
+export interface InternalizationRouteInput {
+  kind: string;
+  abstractedPrinciple?: string;
+  triggerPattern?: string;
+  action?: string;
+}
+
 export function decideInternalizationRoute(
-  recommendation: DiagnosticianRecommendation,
+  recommendation: InternalizationRouteInput,
 ): InternalizationRouteDecision {
-  const route = KIND_ROUTE_MAP[recommendation.kind] ?? 'deferred';
+  // rc-5: hasOwn proves membership before the Record lookup; the cast only
+  // re-narrows what hasOwn already established.
+  const route = Object.hasOwn(KIND_ROUTE_MAP, recommendation.kind)
+    ? KIND_ROUTE_MAP[recommendation.kind as RecommendationKind]
+    : 'deferred';
 
   // Handle unknown/invalid kinds
   if (route === 'deferred' && recommendation.kind !== 'defer') {

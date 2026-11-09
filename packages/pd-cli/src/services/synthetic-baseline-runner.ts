@@ -173,6 +173,8 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
       },
     );
 
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+
     const routerRunner = new DiagRouterRunner(
       {
         stateManager,
@@ -180,6 +182,10 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
         eventEmitter,
         artifactStore: stateManager.piArtifactStore,
         committer,
+        // PRI-1146: trusted canonical principle exposure for the synthetic
+        // router runs — reads the same synthetic ledger (usually empty → proven
+        // empty exposure, receipt `available` with principles: []).
+        trustedPrincipleSource: ledgerAdapter,
       },
       {
         owner: 'synthetic-baseline',
@@ -198,7 +204,6 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
       perStageTimeoutMs: 10000,
     });
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
     const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
     const bridge = new PainSignalBridge({

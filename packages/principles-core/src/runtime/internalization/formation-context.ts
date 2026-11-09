@@ -78,7 +78,7 @@ export const FORMATION_LINEAGE_ID_LIMIT = 16;
 /**
  * Diagnostic stage task kinds that can carry the source diagnosis, in
  * descending authority. `diag_router` emits the canonical
- * `DiagnosticianOutputV1`; the earlier stages emit narrower schemas handled by
+ * `DiagnosticianOutputV2`; the earlier stages emit narrower schemas handled by
  * the tolerant readers below.
  */
 export const FORMATION_DIAGNOSIS_TASK_KINDS = ['diag_router', 'diag_distiller', 'diag_rootcause'] as const;
@@ -357,7 +357,7 @@ export function projectDreamerProposals(
 
 /**
  * Tolerant projection over a diagnostic stage artifact. `diag_router` emits the
- * canonical `DiagnosticianOutputV1`; earlier stages expose a narrower schema,
+ * canonical `DiagnosticianOutputV2`; earlier stages expose a narrower schema,
  * so unresolvable fields are recorded in `omittedFields` instead of failing.
  */
 export function projectDiagnosisOutput(

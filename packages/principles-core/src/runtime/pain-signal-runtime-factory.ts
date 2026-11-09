@@ -19,6 +19,7 @@ import { SplitDiagnosticianRunner } from './internalization/split-diagnostician-
 import { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js';
 import { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
 import { DiagRouterRunner } from './internalization/diag-router-runner.js';
+import { isRouterTrustedPrincipleSource } from './internalization/router-context-evidence.js';
 import { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-output.js';
 import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
 import { resolveOutputLanguage } from './language-directive.js';
@@ -758,7 +759,17 @@ async function constructBridge(
     { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
   );
   const routerRunner = new DiagRouterRunner(
-    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
+    {
+      stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer,
+      // PRI-1146 / SPEC v0.6 §5: the trusted canonical principle exposure is
+      // assembled BEFORE the model call. The concrete PrincipleTreeLedgerAdapter
+      // implements the port; a narrow LedgerAdapter double without the port is
+      // detected structurally and degrades to a typed `source_not_configured`
+      // receipt (observable, never a guessed allowlist).
+      trustedPrincipleSource: isRouterTrustedPrincipleSource(opts.ledgerAdapter)
+        ? opts.ledgerAdapter
+        : { readTrustedPrinciples: () => ({ status: 'unavailable' as const, reason: 'source_not_configured' as const }) },
+    },
     // PRI-818 (R-08): effectiveConfig must reach Stage C like it does for
     // Stage A/B — without it, isDegradationEnabled() is always false and the
     // ADR-0019 rate-limit fast-fail degradation path can never fire here.

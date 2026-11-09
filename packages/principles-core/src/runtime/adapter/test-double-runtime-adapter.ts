@@ -2,13 +2,13 @@
  * TestDoubleRuntimeAdapter — test double for PDRuntimeAdapter.
  *
  * First real implementation of the M1 PDRuntimeAdapter interface.
- * Default behavior: succeed-on-first-poll with valid DiagnosticianOutputV1.
+ * Default behavior: succeed-on-first-poll with valid DiagnosticianOutputV2.
  * All methods overridable via TestDoubleBehaviorOverrides callbacks.
  *
  * BUG-008: Default fetchOutput dispatches stage-aware mock outputs based on
  * taskId prefix (diag_rootcause/diag_distiller/diag_router), reusing fixtures
- * from split-pipeline-fixtures.ts. Non-split taskIds fall back to the
- * original monolithic DiagnosticianOutputV1 shape (backward-compatible).
+ * from split-pipeline-fixtures.ts. Non-split taskIds fall back to a default
+ * V2 diagnostician output (PRI-1146: V2 is the only contract).
  */
 import type {
   PDRuntimeAdapter,
@@ -152,18 +152,19 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
       };
     }
 
-    // Backward-compatible: monolithic DiagnosticianOutputV1 for non-split taskIds
+    // Default V2 diagnostician output for non-split taskIds (PRI-1146 V2 Only).
+    // No taskId: the V2 root is closed and lineage is runner-owned.
     return {
       runId,
       payload: {
+        schemaVersion: 'diagnostician-output-v2',
         valid: true,
         diagnosisId: 'td-diag-default',
-        taskId: this.defaultTaskId,
         summary: 'TestDouble default summary',
         rootCause: 'TestDouble default root cause',
         violatedPrinciples: [],
         evidence: [],
-        recommendations: [{ kind: 'defer', description: 'TestDouble default: no actionable recommendation' }],
+        recommendations: [{ kind: 'defer', description: 'TestDouble default: no actionable recommendation', recommendationRef: 'defer-1' }],
         confidence: 0.9,
       },
     };

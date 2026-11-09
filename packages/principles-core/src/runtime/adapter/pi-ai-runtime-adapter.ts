@@ -10,7 +10,7 @@
  * Error mapping:
  *   AbortError (signal.timeout) → timeout
  *   JSON extraction failure → output_invalid
- *   DiagnosticianOutputV1Schema validation failure → output_invalid
+ *   DiagnosticianOutputV2Schema validation failure → output_invalid
  *   Missing apiKeyEnv → runtime_unavailable
  *   Retries exhausted → execution_failed
  */
@@ -1173,7 +1173,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * arguments that we validate against the schema.
    *
    * PRI-284: Tool definition uses params.schema (per-runner) instead of
-   * hardcoded DiagnosticianOutputV1Schema.
+   * a hardcoded stage schema.
    */
    
   private async tryToolCallPath(

@@ -234,7 +234,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
   // Resolve runtime kind. P1 fix (mirrors pain-retry.ts): pd diagnose run
   // must NOT default to test-double. Without --runtime, the split pipeline
-  // would validate the test-double's stale DiagnosticianOutputV1-shaped
+  // would validate the test-double's stale diagnostician-output-shaped
   // payload against DiagRootCauseOutputV1Schema and fail with
   // max_attempts_exceeded — silently producing failed/fake diagnostic data
   // in a real workspace. Fall back to .pd/config.yaml first; refuse if
@@ -418,6 +418,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     const resolvedKind = typeof runtimeAdapter.kind === 'function' ? runtimeAdapter.kind() : runtimeKind;
     const perStageTimeoutMs = pipelineTimeoutMs / 3;
+    // PRI-1146 / SPEC v0.6 §5: the router's trusted canonical principle source.
+    // One adapter instance serves both the router exposure and the intake path
+    // below (same ledger authority).
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const rootCauseRunner = new DiagRootCauseRunner(
       { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler },
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
@@ -427,7 +431,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
     const routerRunner = new DiagRouterRunner(
-      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer },
+      { stateManager, runtimeAdapter, eventEmitter, artifactStore: stateManager.piArtifactStore, committer, trustedPrincipleSource: ledgerAdapter },
       { owner: 'pd-cli-diagnose', runtimeKind: resolvedKind, outputLanguage, timeoutMs: perStageTimeoutMs, effectiveConfig },
     );
 
@@ -550,7 +554,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         });
       }
     } else {
-      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+      // ledgerAdapter was constructed above (shared with the router runner).
       // PRI-917 v0.3.3 — auto-path Reuse Review Gate: inject the semantic reuse
       // recommendation hook. Undefined when reuseEvaluation.enabled=false →
       // intake behaves exactly as before (T11 rollback switch).

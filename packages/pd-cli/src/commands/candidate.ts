@@ -353,7 +353,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
     const recommendation = resolveCandidateRecommendation(candidate, stateManager, opts.candidateId);
 
-    const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+    const decision = decideInternalizationRoute(recommendation);
 
     // PRI-435: Resolve sourcePainId from the canonical diagnostician task chain.
     // The CandidateRecord does not carry sourcePainId — it must be looked up
@@ -1734,7 +1734,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
-      const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+      const decision = decideInternalizationRoute(recommendation);
 
       // PRI-435: Resolve sourcePainId from the canonical diagnostician task chain.
       // Missing/malformed sourcePainId must fail loud per-candidate with no side effects.
@@ -1831,7 +1831,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
-      const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+      const decision = decideInternalizationRoute(recommendation);
 
       // PRI-435: Resolve sourcePainId from the canonical diagnostician task chain.
       // Missing/malformed sourcePainId must fail loud per-candidate with no side effects.
@@ -2020,7 +2020,7 @@ export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise
 
     const recommendation = resolveCandidateRecommendation(candidate, stateManager, opts.candidateId);
 
-    const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+    const decision = decideInternalizationRoute(recommendation);
 
     const result = {
       candidateId: opts.candidateId,
