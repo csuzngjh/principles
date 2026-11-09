@@ -1,7 +1,8 @@
 # PRI-1152 Path A 隔离宿主验证运行卡 v3.1（`pri1152-run-card-v3.1`）
 
 - 文档 ID：`pri-1150-isolated-host-run-card-20261108`（文件名沿用，保护既有指针）。v3.1 取代 v1/v2/v3 的全部可执行内容；v3 的数值只保留为历史记录。
-- 状态：**🟡 离线准备完成，等待 Owner 批准**。真实运行未批准、未执行，真实宿主和模型均未启动，运行预算零消耗。B1、B2、B3 的修复都已进入 main（§0）。v3.1 执行包从 main `9353cec35` 构建生成，离线预检结果为 READY（§0.5）。
+- 状态：**🟢 已获 Owner 书面批准，并已执行一次（2026-11-09T02:07:44Z–02:09:11Z），运行结果为 `completed`**。R1、R2 的全部判定都通过；预算用量为宿主启动 2 次、provider HTTP 2 次、工具 0 次、付费 0 次。结果见 `pri-1152-isolated-host-run-result-20261109.md`。同一执行包不能再次执行（`run\` 已存在）。本卡以下各节保持批准时的内容；批准时的原文副本存放在池外归档目录的 `repo\` 下（sha256 `1194559c…5b6a`）。
+- 批准前状态：离线准备完成，B1、B2、B3 的修复都已进入 main（§0）。v3.1 执行包从 main `9353cec35` 构建生成，离线预检结果为 READY（§0.5）。
 - **批准对象（两项必须同时绑定）**：
   - 卡版本：`pri1152-run-card-v3.1`
   - 执行清单 sha256：`0e2dc6e332f02c315082487f7cf2c6caca73cd26209ad7b774d8fdfe157e6c2c`
@@ -375,6 +376,11 @@ node scripts/dev/aa-controlled-admission/presence-run.mjs --verify --pack D:\Cod
   - 本卡中的 v3 取值全部换成 v3.1 的实际取值，v3 数值只作为〔转录〕历史保留；
   - 证据在池外另存于 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\pp-20261109T010443Z\`；
   - 真实运行仍未批准、未执行。
+- **执行（2026-11-09，Owner 书面批准后）**：
+  - 按 §12 第 9–10 步，由空白模板生成 `approval.json`（离线校验违规 0 项），`--execute` 运行一次，结果 `completed`；
+  - R1、R2 的全部判定都通过，预算用量 2/2/0/0；
+  - 注册来源只出现在 stderr，`agent exec` 没有生成宿主日志文件；`tools.deny=["*"]` 下请求仍带 3 个 bridge 工具定义，工具调用为 0；
+  - 详见 `pri-1152-isolated-host-run-result-20261109.md`。
 
 ## 15. 事件：v3 执行包被外部清理删除（2026-11-08 21:03，+08:00）
 
