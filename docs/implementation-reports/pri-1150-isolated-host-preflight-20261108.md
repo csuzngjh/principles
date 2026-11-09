@@ -1,11 +1,12 @@
 # PRI-1152 Path A 隔离宿主验证：离线预检报告（随运行卡，工具 v3.1）
 
-- 文档 ID：`pri-1150-isolated-host-preflight-20261108`。文件名沿用旧名，以保护既有指针；本文已按 B2/B3 收口后的工具全文改写。
+- 文档 ID：`pri-1150-isolated-host-preflight-20261108`。文件名沿用旧名，以保护既有指针；本文已按 v3.1 执行包的实测结果改写。
 - **结论**：
-  - 目前**没有可申请真实运行的执行包**：v3.1 尚未生成。
-  - 三项阻断的修复都已推送，但都未合并：B1 在 #2427，B2 在 #2431，B3 在 #2424。
-  - 用当前工具（#2424 `18bd45487`）对 **B1+B2 合并构建**做离线预演：exit 0，READY。这只是离线证据，不是 v3.1，不得批准或执行。
-  - v3 包已丢失（LOST / UNAVAILABLE），只剩转录记录。
+  - **v3.1 执行包已生成，离线预检 READY，可以提交 Owner 审批**：packId `pp-20261109T010443Z`，卡版本 `pri1152-run-card-v3.1`，清单 sha256 `0e2dc6e332f02c315082487f7cf2c6caca73cd26209ad7b774d8fdfe157e6c2c`。
+  - 构建来源是 main `9353cec35`。B1、B2 由 #2431 带入（`30ccf33f1`），B3 和日志证据完整性由 #2424 带入（`9353cec35`）。
+  - `--verify --full --selftest`：exit 0，21 PASS / 0 FAIL / 0 NOT_RUN；实际产生的检查集合与必需集合逐项一致（第 2 节）。
+  - 这是离线证据。它说明执行包具备申请真实运行的条件，**不等于批准**，也不证明宿主真实加载了候选（第 5 节）。
+  - v3 包已丢失（LOST / UNAVAILABLE），只剩转录记录；预演包只作历史参考，不得批准或执行。
   - 真实宿主和模型**均未启动**，运行预算零消耗。
 - 说明：本文不声称「全部预检通过」。每一项都写明对象、命令、退出码和结果。
 
@@ -50,7 +51,27 @@
 
 ## 2. 实测记录
 
-**修复后（工具 #2424 `18bd45487`，B3 已包含）**：
+**v3.1 执行包（可提交审批）**：工具和候选都取自 main `9353cec358733f64d73b755ad5e54aa3e01bd106`，工作树 `D:\Code\_worktrees\principles\PRI-1152-v31-pack`（分支 `ai/PRI-1152-v31-pack`，tracked tree clean）。
+
+| 步骤 | 命令 | 退出码 | 结果 |
+|---|---|---|---|
+| 构建 | `packages/openclaw-plugin`：`npm run build:bundle`（非压缩），连续两次 | 0 / 0 | 两次的 bundle sha256 都是 `dfdf4c98d8ba10709e947a7f5a070fe2501e0b27bc3c54dc5501027ab3c4f3b0`（39230713 B） |
+| prepare | `node scripts/dev/aa-controlled-admission/presence-run.mjs --prepare --repo D:\Code\_worktrees\principles\PRI-1152-v31-pack` | 0 | PACK `…\artifacts\pri-1152-isolated-host\pp-20261109T010443Z`；清单 sha256 `0e2dc6e332f02c315082487f7cf2c6caca73cd26209ad7b774d8fdfe157e6c2c`（另用 `sha256sum` 复算一致）；卡版本 `pri1152-run-card-v3.1`；端口 10448；预算 2/2/0/0 |
+| 预检 | `node scripts/dev/aa-controlled-admission/presence-run.mjs --verify --pack <PACK> --full --selftest` | 0 | **READY**：21 PASS / 0 FAIL / 0 NOT_RUN。报告 `PACK\preflight\verify-20261109T010931Z-5c8729bc.json`，自测账本 `PACK\preflight\selftest-ledger-20261109T010931Z-b50ad023.json`（5 次回环请求，宿主启动 0 次） |
+| 集合比对 | 独立脚本：从被绑定的 `lib/presence-pack.mjs` 导入 `PREFLIGHT_REQUIRED_CHECKS`，与报告的 `checks[].id` 逐项比对 | 0 | 必需 21 项，产生 21 项；缺失 0、多余 0、重复 0；全部 PASS |
+
+各项判定的要点：
+
+- `presence-durability` = `flushed_on_record`（B1）；`presence-surface` = `enabled_by_default`（B2）。
+- `candidate-payload`：入口为 `./dist/bundle.js`，解析到冻结 bundle；`better-sqlite3` 从包内解析；`bufferutil`、`utf-8-validate` 不存在（B3）。
+- `host-tree`（`--full`）：44592 个文件全树重算，treeSha256 `d0d151c1…5495` 一致；`host-registry-tarball`：15180 个文件对照，0 处不一致，0 个多余。
+- `host-config`：宿主日志 `logging.file` 位于包内，`level: info`。
+- `production-plugin-exclusion`：生产 PD 3.0.2 含有同样的事件代码，只记为环境事实。
+- `protocol-selftest`：responses、completions 两个正例被接受；`[DONE]`-only responses 和无 terminal completions 两个负例被拒绝；`[DONE]`-only completions 只作记录。
+- `endpoint-port`：10448 此刻可绑定、可连接（不是预留）；`process-sweep`：没有进程引用 PACK。
+- 预检前后：清单、宿主配置、PD 配置、会话设置、`state.db`、两个回合输入的 sha256 都与清单记录一致；没有 `run\`。预检新增了两个带时间戳的文件（报告、自测账本），并更新了 SQLite 共享内存索引 `state.db-shm` 的修改时间（不在冻结范围内）。
+
+**预演包（工具 #2424 `18bd45487`，历史参考，不可批准）**：
 
 | 预演包（不可批准） | 候选来源 | 命令 | 退出码（prepare / verify） | 结果 |
 |---|---|---|---|---|
@@ -58,7 +79,7 @@
 | `rehearsal3-b1-candidate`（清单 `f1db0324428938e4e21232d85b709e2a5d5a72495ff88701d241a4dbc35818b7`） | B1 分支 `build:bundle` 产物 | 同上 | 0 / 1 | 只有 `presence-surface` FAIL（B2 未修） |
 | `rehearsal3-main-candidate`（清单 `bf8b19c7e022caa7a7c96c1dd7643dcff3d39dfa0980b39e7d2a2a91cd48e980`） | main 源码 `build:bundle` 产物 | 同上 | 0 / 1 | `presence-durability`（B1）和 `presence-surface`（B2）FAIL |
 
-预演包的完整目录位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`。清单和预检报告已复制到池外 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\`，并逐文件校验了 sha256。**这些都不是 v3.1**：候选取自未合并的分支，工具也取自未合并的分支。
+预演包的完整目录位于会话临时目录 `D:\Code\.pd-tmp\principles\20261108\task-pri1152-rehearsal-211918-7ffe9a\`。清单和预检报告已复制到池外 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\`，并逐文件校验了 sha256。**这些都不是 v3.1**：候选和工具都取自当时尚未合并的分支。
 
 **修复前的历史记录**：
 
@@ -74,6 +95,7 @@
 
 | 命令 | 退出码 | 结果 |
 |---|---|---|
+| `npx vitest run __tests__/aa-presence-run.test.mjs __tests__/aa-controlled-admission.test.mjs`（scripts，v3.1 工作树 = main `9353cec35`，1 轮） | 0 | 134/134（aa-presence-run 100 项 + aa-controlled-admission 34 项），含两条日志完整性反例的端到端用例 |
 | `npx vitest run __tests__/aa-presence-run.test.mjs __tests__/aa-controlled-admission.test.mjs`（scripts，B3 后，连续 3 轮） | 0 | 125/125 ×3（其中 aa-presence-run 91 项） |
 | 插件 `tests/hooks/{isolated-host-presence-fixture,llm-input-presence,prompt-presence-registry}.test.ts`（#2424 分支） | 0 | 27/27 |
 | `check:runtime-contract / repo-hygiene / security-baseline / workspace-tools / runtime-writers / naming-policy` | 均为 0 | PASS |
@@ -115,4 +137,4 @@ CI 结果以各 PR 页面为准。跳过项不算通过。本地未跑完整 `ve
 
 ## 6. 生产污染边界（本轮）
 
-本轮对生产路径只做读取：全局宿主安装、生产插件、`~\.openclaw\openclaw.json`、生产 workspace 的 state.db 与日志目录、npm 缓存。预演包的 prepare 和 verify 只写会话临时目录；证据副本只写 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\`。不能用 mtime 或「未检索到标记」来证明零写入，规则见运行卡 §11。
+本轮对生产路径只做读取：全局宿主安装、生产插件、`~\.openclaw\openclaw.json`、生产 workspace 的 state.db 与日志目录、npm 缓存。v3.1 的 prepare 和 verify 只写 PACK（v3.1 工作树中被 gitignore 的 `artifacts\pri-1152-isolated-host\`）；构建只写 `packages/openclaw-plugin/dist`；证据副本只写 `D:\Code\principles\artifacts\pri-1152-isolated-host-evidence\`。不能用 mtime 或「未检索到标记」来证明零写入，规则见运行卡 §11。
