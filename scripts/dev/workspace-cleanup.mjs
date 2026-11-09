@@ -337,6 +337,11 @@ async function main() {
   const applied = [];
   const refused = [];
   const blockedBranches = new Set();
+  // Trees whose rollback could not re-link them to Git (restoreState
+  // RESTORE_FAILED). Git lists such a worktree at a path the tree is NOT at,
+  // and the global prune deletes exactly that kind of admin entry — which
+  // would orphan a tree that still exists. Any entry here blocks the prune.
+  const relinkRequired = [];
   const refuseWorktree = (action, reason) => {
     refused.push({ action, reason });
     if (action.branch) blockedBranches.add(action.branch);
@@ -459,13 +464,23 @@ async function main() {
             restoredPath: safeRemoval.restoredPath,
             adminDirPath: safeRemoval.adminDirPath,
             residueKind: safeRemoval.residueKind,
+            restoreState: safeRemoval.restoreState,
+            recoveryPath: safeRemoval.recoveryPath,
           };
         });
         if (verdict.ok) applied.push(action);
-        else refuseWorktree(
-          action,
-          verdict.reason + (verdict.quarantinePath ? ' (quarantine: ' + verdict.quarantinePath + ')' : '')
-        );
+        else {
+          if (verdict.restoreState === 'RESTORE_FAILED') relinkRequired.push(verdict.recoveryPath || action.target || '(unknown)');
+          refuseWorktree(
+            action,
+            verdict.reason + (verdict.quarantinePath ? ' (quarantine: ' + verdict.quarantinePath + ')' : '') +
+              // The tree and Git's admin pointer disagree: a prune would delete
+              // the admin metadata of a tree that still exists.
+              (verdict.restoreState === 'RESTORE_FAILED' && verdict.recoveryPath
+                ? ' — do NOT run git worktree prune; relink it first with: git worktree repair ' + shellPath(verdict.recoveryPath)
+                : '')
+          );
+        }
       } catch (err) {
         refuseWorktree(action, 'mutation lock unavailable: ' + (err && err.message ? err.message : String(err)));
       }
@@ -509,7 +524,12 @@ async function main() {
   // it is skipped with a note (prune is an opportunistic optimization).
   const pruneSafety = await assessWorktreePruneSafety(cwd);
   let pruned = false;
-  if (pruneSafety.safe) {
+  if (relinkRequired.length > 0) {
+    notes.push(
+      'skipped global worktree prune — ' + relinkRequired.length + ' tree(s) must be relinked with git worktree repair first ' +
+        '(a prune now would delete the admin metadata of a tree that still exists): ' + relinkRequired.join(', ')
+    );
+  } else if (pruneSafety.safe) {
     try {
       await withMutationLock({ commonDir, operation: 'worktree-prune', target: 'global' }, async () => {
         await runGit(['worktree', 'prune'], { cwd, allowFailure: true });

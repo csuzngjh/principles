@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { gitCommonDirAbsolute, normalizeGitPath, runGit } from '../dev/lib/git.mjs';
 import { withMutationLock } from '../dev/lib/git-mutation-lock.mjs';
 import { readRegularFileNoFollow } from '../dev/lib/residue-delete.mjs';
@@ -741,6 +741,8 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     const outside = makeExternalInstall('marker-swap');
     const before = fingerprintTree(outside);
     const commonDir = await gitCommonDirAbsolute(primary);
+    // The rollback contract: the ORIGINAL (pre-move) marker bytes come back.
+    const preMoveMarker = readRegularFileNoFollow(path.join(wt, '.git'));
     let quarantine = '';
     let originalMarker = '';
     try {
@@ -762,10 +764,23 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
         }),
       );
       expect(result.ok).toBe(false);
-      expect(result.quarantinePath).toBe(quarantine);
       expect(fingerprintTree(outside)).toBe(before);
       const listed = await worktreeList(primary);
-      expect(listed.some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(quarantine))).toBe(true);
+      if (result.restoreState === 'QUARANTINE_PRESERVED') {
+        // Windows: the swapped entry is a directory junction, which an atomic
+        // file rename may not replace — the rollback stops and preserves the
+        // quarantine, still registered with Git.
+        expect(result.quarantinePath).toBe(quarantine);
+        expect(listed.some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(quarantine))).toBe(true);
+      } else {
+        // POSIX: the swapped entry is a symlink; the rollback REPLACES the link
+        // entry with the original marker (never following it) and the
+        // worktree is restored intact at its original path.
+        expect(result.restoreState).toBe('RESTORE_COMPLETED');
+        expect(result.restoredPath).toBe(wt);
+        expect(readRegularFileNoFollow(path.join(wt, '.git'))).toBe(preMoveMarker);
+        expect(listed.some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+      }
     } finally {
       if (quarantine && fs.existsSync(quarantine)) {
         const marker = path.join(quarantine, '.git');
@@ -786,6 +801,7 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
   it.skipIf(process.platform === 'win32')('does not block when a non-cooperating writer replaces the .git marker with a FIFO', async () => {
     const { wt } = await makeTask('marker-fifo');
     const commonDir = await gitCommonDirAbsolute(primary);
+    const preMoveMarker = readRegularFileNoFollow(path.join(wt, '.git'));
     let quarantine = '';
     let originalMarker = '';
     try {
@@ -805,10 +821,13 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
         }),
       );
       expect(result.ok).toBe(false);
-      expect(result.quarantinePath).toBe(quarantine);
       expect(result.reason).toContain('not a regular file');
-      expect(fs.existsSync(quarantine)).toBe(true);
-      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(quarantine))).toBe(true);
+      // The rollback replaces the FIFO ENTRY with the original marker (an
+      // atomic rename never opens or follows it) and restores the worktree.
+      expect(result.restoreState).toBe('RESTORE_COMPLETED');
+      expect(result.restoredPath).toBe(wt);
+      expect(readRegularFileNoFollow(path.join(wt, '.git'))).toBe(preMoveMarker);
+      expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
     } finally {
       if (quarantine && fs.existsSync(quarantine)) {
         const marker = path.join(quarantine, '.git');
@@ -1021,6 +1040,167 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     } finally {
       await git(primary, 'worktree', 'prune').catch(() => undefined);
     }
+  }, 120_000);
+
+  // ---- Rollback state machine: fault injection at each compensated step ----
+
+  /** Trigger a post-move refusal (a late untracked write) so the rollback runs. */
+  const lateWriter = (captured: { quarantine: string }) => (moved: string) => {
+    captured.quarantine = moved;
+    fs.writeFileSync(path.join(moved, 'late-writer.txt'), 'written during quarantine\n', 'utf-8');
+  };
+
+  it('rollback: a failed admin-pointer restore is compensated back into a consistent quarantine', async () => {
+    const { wt } = await makeTask('rollback-pointer-fails');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const adminPointer = path.join(await adminDirOfWorktree(commonDir, wt), 'gitdir');
+    const captured = { quarantine: '' };
+    const realRename = fs.renameSync.bind(fs);
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      // Fail ONLY the rollback's pointer restore (temp -> <admin>/gitdir),
+      // after the tree itself has already been renamed back.
+      if (captured.quarantine && normalizeGitPath(String(to)) === normalizeGitPath(adminPointer)
+        && !fs.existsSync(captured.quarantine)) {
+        throw Object.assign(new Error('simulated pointer write failure'), { code: 'EIO' });
+      }
+      return realRename(from, to);
+    });
+    let result;
+    try {
+      result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({ cwd: primary, worktreePath: wt, primaryPath: primary, onQuarantined: lateWriter(captured) }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.ok).toBe(false);
+    // Compensation moved the tree BACK into the quarantine, where the admin
+    // pointer still names it: consistent, prune-safe, and reported truthfully.
+    expect(result.restoreState).toBe('QUARANTINE_PRESERVED');
+    expect(result.quarantinePath).toBe(captured.quarantine);
+    expect(fs.existsSync(captured.quarantine)).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(fs.readFileSync(path.join(captured.quarantine, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(captured.quarantine))).toBe(true);
+    expect(result.notes.join(' ')).toContain('moving the tree back into the quarantine');
+    // Fixture hygiene: return the preserved quarantine to its original path.
+    await git(primary, 'worktree', 'move', captured.quarantine, wt);
+    fs.rmdirSync(path.dirname(captured.quarantine));
+  }, 120_000);
+
+  it('rollback: when compensation fails too, reports where the tree REALLY is and how to relink it', async () => {
+    const { wt } = await makeTask('rollback-compensation-fails');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const adminDir = await adminDirOfWorktree(commonDir, wt);
+    const adminPointer = path.join(adminDir, 'gitdir');
+    const captured = { quarantine: '' };
+    const realRename = fs.renameSync.bind(fs);
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      const rollingBack = captured.quarantine && !fs.existsSync(captured.quarantine);
+      if (rollingBack && normalizeGitPath(String(to)) === normalizeGitPath(adminPointer)) {
+        throw Object.assign(new Error('simulated pointer write failure'), { code: 'EIO' });
+      }
+      // ...and the compensating rename (original -> quarantine) fails as well.
+      if (rollingBack && normalizeGitPath(String(from)) === normalizeGitPath(wt)
+        && normalizeGitPath(String(to)) === normalizeGitPath(captured.quarantine)) {
+        throw Object.assign(new Error('simulated compensation failure'), { code: 'EBUSY' });
+      }
+      return realRename(from, to);
+    });
+    let result;
+    try {
+      result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({ cwd: primary, worktreePath: wt, primaryPath: primary, onQuarantined: lateWriter(captured) }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.ok).toBe(false);
+    expect(result.restoreState).toBe('RESTORE_FAILED');
+    // The tree is at the ORIGINAL path; the quarantine no longer exists and is
+    // therefore NOT reported as a recovery location.
+    expect(result.recoveryPath).toBe(wt);
+    expect(result.quarantinePath).toBeUndefined();
+    expect(result.restoredPath).toBeUndefined();
+    expect(normalizeGitPath(result.adminDirPath)).toBe(normalizeGitPath(adminDir));
+    expect(fs.readFileSync(path.join(wt, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
+    expect(result.reason).toContain('RESTORE FAILED');
+    expect(result.notes.join(' ')).toContain('compensation failed');
+    // The reported repair really relinks the tree.
+    await git(primary, 'worktree', 'repair', wt);
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+    fs.rmdirSync(path.dirname(captured.quarantine));
+  }, 120_000);
+
+  it('rollback never asks Git to move the quarantine back (only the forward move uses git)', async () => {
+    const { wt } = await makeTask('rollback-no-git-move');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const moves: string[][] = [];
+    const runGitCommand = async (args: string[], options: { cwd: string; allowFailure?: boolean }) => {
+      if (args[0] === 'worktree' && args[1] === 'move') moves.push(args);
+      return runGit(args, options);
+    };
+    const captured = { quarantine: '' };
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: primary, worktreePath: wt, primaryPath: primary, runGitCommand, onQuarantined: lateWriter(captured),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.restoreState).toBe('RESTORE_COMPLETED');
+    expect(moves).toHaveLength(1);
+    expect(normalizeGitPath(moves[0][2])).toBe(normalizeGitPath(wt));
+    expect(fs.readFileSync(path.join(wt, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
+  }, 120_000);
+
+  it('rollback refuses to move a tree whose admin pointer no longer provably belongs to it', async () => {
+    const { wt } = await makeTask('rollback-foreign-pointer');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const adminPointer = path.join(await adminDirOfWorktree(commonDir, wt), 'gitdir');
+    const captured = { quarantine: '' };
+    let pointerBeforeTamper = '';
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: primary,
+        worktreePath: wt,
+        primaryPath: primary,
+        onQuarantined: (moved) => {
+          lateWriter(captured)(moved);
+          // A non-cooperating process re-points the admin entry elsewhere.
+          pointerBeforeTamper = readRegularFileNoFollow(adminPointer);
+          const foreign = path.join(root, 'someone-else', '.git').split(path.sep).join('/') + '\n';
+          const fd = fs.openSync(adminPointer, 'r+');
+          try {
+            fs.writeFileSync(fd, foreign, 'utf-8');
+            fs.ftruncateSync(fd, Buffer.byteLength(foreign, 'utf-8'));
+          } finally {
+            fs.closeSync(fd);
+          }
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.restoreState).toBe('RESTORE_FAILED');
+    // Nothing was moved: the tree stays exactly where it was.
+    expect(result.recoveryPath).toBe(captured.quarantine);
+    expect(fs.existsSync(captured.quarantine)).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(fs.readFileSync(path.join(captured.quarantine, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
+    expect(result.notes.join(' ')).toContain('rollback refused');
+    // Fixture hygiene: restore the pointer and move the tree back.
+    const fd = fs.openSync(adminPointer, 'r+');
+    try {
+      fs.writeFileSync(fd, pointerBeforeTamper, 'utf-8');
+      fs.ftruncateSync(fd, Buffer.byteLength(pointerBeforeTamper, 'utf-8'));
+    } finally {
+      fs.closeSync(fd);
+    }
+    await git(primary, 'worktree', 'move', captured.quarantine, wt);
+    fs.rmdirSync(path.dirname(captured.quarantine));
   }, 120_000);
 
   it('restores the worktree when the .git marker uses a relative gitdir pointer', async () => {

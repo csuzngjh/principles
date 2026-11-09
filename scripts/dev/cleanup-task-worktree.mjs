@@ -623,11 +623,36 @@ async function main() {
           removalError.restoredPath = safeRemoval.restoredPath;
           removalError.adminDirPath = safeRemoval.adminDirPath;
           removalError.residueKind = safeRemoval.residueKind;
+          removalError.restoreState = safeRemoval.restoreState;
+          removalError.recoveryPath = safeRemoval.recoveryPath;
           throw removalError;
         }
         removedWorktree = target.path;
       });
     } catch (err) {
+      // A rollback that could not re-link the tree is the most urgent state:
+      // the tree and Git's admin pointer disagree, and a `git worktree prune`
+      // would delete the admin metadata of a tree that still exists.
+      if (err && err.restoreState === 'RESTORE_FAILED') {
+        fail(
+          args,
+          CODES.CHECK_FAILED,
+          'Cleanup was refused and the rollback could not re-link the worktree:\n' +
+            (err && err.message ? err.message : String(err)),
+          (err.recoveryPath
+            ? 'The tree is intact at ' + err.recoveryPath + '. Do NOT run git worktree prune. From the primary checkout run: git worktree repair ' +
+              shellPath(err.recoveryPath) + ' , then confirm it with git worktree list --porcelain.'
+            : 'The tree was not found at the original or the quarantine path. Do NOT run git worktree prune; inspect ' +
+              (err.adminDirPath || 'the worktree admin directory') + ' and escalate.'),
+          {
+            reason: err.reason || REMOVAL_REASONS.REMOVAL_FAILED,
+            restoreState: 'RESTORE_FAILED',
+            ...(err.recoveryPath ? { recoveryPath: err.recoveryPath } : {}),
+            ...(err.adminDirPath ? { adminDirPath: err.adminDirPath } : {}),
+          }
+        );
+        return;
+      }
       const changedTargets = changedExternalTargets(targetSnapshots);
       if (changedTargets.length > 0) {
         fail(
