@@ -97,7 +97,7 @@
     "lefthook": "^2.2.2",
     "lint-staged": "^17.6.0",
     "semver": "^7.8.5",
-    "vitest": "^5.0.0"
+    "vitest": "^5.1.0"
   },
   "dependencies": {
     "glob": "^13.0.6"
