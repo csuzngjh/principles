@@ -72,5 +72,9 @@
     "action": "not merged and not modified (git-2; its writer lease active until 19:03Z)",
     "conflictingStatements": "L1/L3/L4 \"recoverable\" and \"disable L2 last\" are superseded by this closeout wording",
     "ownerDecision": "whether to fold that branch into #2454"
+  },
+  "ci": {
+    "checkedAt": "2026-11-10",
+    "result": "26 SUCCESS + 1 SKIPPED, 0 failures; mergeable=MERGEABLE"
   }
 }

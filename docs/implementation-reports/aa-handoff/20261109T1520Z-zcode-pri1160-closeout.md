@@ -29,7 +29,7 @@
 - 本地发布意图守卫：PASS，结论为不需要 changeset。
 - `workspace-tools` 守卫：PASS，21/21。
 - eslint：exit 0。
-- CI：以 PR 页面为准。
+- CI：27 项检查，26 SUCCESS + 1 SKIPPED，0 失败（2026-11-10 核对）。
 
 ## 未执行
 
