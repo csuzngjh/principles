@@ -6,7 +6,7 @@
  *
  *   - 'router'    → NO validator mock is injected. DiagRouterRunner validates
  *                   through the real TypeBox pipeline baked into the class
- *                   (Value.Check on DiagnosticianOutputV1 + predecessor schemas
+ *                   (Value.Check on DiagnosticianOutputV2 + predecessor schemas
  *                   in buildContext). Lowering it to a mock validator would
  *                   delete the only runner-level real-schema evidence in the
  *                   region.
@@ -33,7 +33,8 @@ import { DiagRootCauseRunner } from '../../diag-rootcause-runner.js';
 import type { DiagRootCauseRunnerDeps } from '../../diag-rootcause-runner.js';
 import { DiagDistillerRunner } from '../../diag-distiller-runner.js';
 import type { DiagDistillerRunnerDeps } from '../../diag-distiller-runner.js';
-import type { DiagnosticianOutputV1 } from '../../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../../diagnostician-output.js';
+import type { RouterTrustedPrinciple, RouterTrustedPrincipleSource } from '../../../internalization/router-context-evidence.js';
 import { DefaultDiagRootCauseValidator } from '../../../diagnostician/diag-rootcause-output.js';
 import type { DiagRootCauseOutputV1 } from '../../../diagnostician/diag-rootcause-output.js';
 import { DefaultDiagDistillerValidator } from '../../../diagnostician/diag-distiller-output.js';
@@ -198,12 +199,23 @@ export function makeDistillerOutput(
   };
 }
 
-export function makeRouterOutput(overrides: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
+export function makeRouterOutput(overrides: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 {
   return {
     ...MOCK_ROUTER_OUTPUTS.R6,
     diagnosisId: 'diag-001',
     ...overrides,
   };
+}
+
+/**
+ * PRI-1146: default trusted principle source for the router harness — a
+ * PROVEN empty exposure (ledger readable, no eligible principles). Tests that
+ * need a real allowlist pass their own source via harness overrides.
+ */
+export function makeTrustedPrincipleSource(
+  principles: readonly RouterTrustedPrinciple[] = [],
+): RouterTrustedPrincipleSource {
+  return { readTrustedPrinciples: () => ({ status: 'ok', principles: [...principles] }) };
 }
 
 // ── Predecessor artifact store ────────────────────────────────────────────────
@@ -364,6 +376,7 @@ interface SharedMocks {
 
 export type DiagRouterMocks = SharedMocks & {
   _committer: { commit: MockFn };
+  _trustedPrincipleSource: { readTrustedPrinciples: MockFn };
 };
 
 export type DiagRootCauseMocks = SharedMocks & {
@@ -413,6 +426,10 @@ function createRouterHarness(overrides: Record<string, unknown> = {}): DiagRoute
     candidateCount: 1,
   };
   const _committer = { commit: vi.fn().mockResolvedValue(commitResult) };
+  // PRI-1146: proven-empty trusted exposure by default (see makeTrustedPrincipleSource).
+  const _trustedPrincipleSource = {
+    readTrustedPrinciples: vi.fn().mockReturnValue({ status: 'ok', principles: [] }),
+  };
 
   const artifactStore = makePredecessorStore(
     { rootcause: 'valid', distiller: 'valid' },
@@ -425,10 +442,12 @@ function createRouterHarness(overrides: Record<string, unknown> = {}): DiagRoute
     eventEmitter: castEventEmitter(_eventEmitter),
     artifactStore,
     committer: _committer,
+    trustedPrincipleSource: _trustedPrincipleSource,
     _stateManager,
     _runtimeAdapter,
     _eventEmitter,
     _committer,
+    _trustedPrincipleSource,
     ...overrides,
   } as DiagRouterHarness['deps'];
 

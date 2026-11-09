@@ -44,7 +44,7 @@ import { CandidateIntakeService } from '../candidate-intake-service.js';
 import { computeEffectivePdConfig, getDefaultPdConfig } from '../config/index.js';
 import type { PdConfig } from '../config/index.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -110,15 +110,16 @@ const TASK_ID = `diagnosis_${PAIN_ID}`;
 const readyEnv = (name: string): string | undefined =>
   name === 'PRI638_CHARACTERIZATION_KEY' ? 'test-sentinel-not-a-credential' : undefined;
 
-function makeOutput(rootCause: string, over: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
+function makeOutput(rootCause: string, over: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-638',
     summary: 'PRI-638 recovery probe diagnosis',
     rootCause,
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'tool_calls:1', note: 'characterization evidence' }],
-    recommendations: [{ kind: 'defer', description: 'no actionable principle' }],
+    recommendations: [{ kind: 'defer', description: 'no actionable principle', recommendationRef: 'defer-1' }],
     confidence: 0.7,
     ...over,
   };

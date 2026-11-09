@@ -223,7 +223,7 @@ describe('repairMalformedJson', () => {
     expect(result).toBeNull();
   });
 
-  it('repairs DiagnosticianOutputV1-like malformed JSON', () => {
+  it('repairs diagnostician-output-like malformed JSON', () => {
     const input = '{"diagnosisId":"diag-1","summary":"test","rootCause":"the "primary" issue","violatedPrinciples":[],"evidence":[],"recommendations":[],"confidence":0.8}';
     const result = repairMalformedJson(input);
     expect(result).not.toBeNull();

@@ -331,9 +331,9 @@ export function extractIntakeRecommendation(
   }
   try {
     const parsed = JSON.parse(artifact.contentJson) as unknown;
-    // Three historical shapes can land in contentJson:
+    // Three shapes can land in contentJson:
     //   1. { recommendation: {...} }  — manual E2E wrapper
-    //   2. DiagnosticianOutputV1      — { summary, rootCause, recommendations: [...] }
+    //   2. DiagnosticianOutputV2 (or its router envelope) — { summary, rootCause, recommendations: [...] }
     //   3. bare Recommendation-like object
     // rc-1/rc-2: parsed is untrusted — validate, never cast. rc-5: Object.hasOwn.
     const rec = extractRecommendationFromContentJson(parsed);

@@ -339,11 +339,11 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
-      { schemaRef: 'diagnostician-output-v1' },
+      { schemaRef: 'diagnostician-output' },
     );
 
     expect(result.repairAttempts).toHaveLength(1);
-    expect(result.repairAttempts[0]?.schemaRef).toBe('diagnostician-output-v1');
+    expect(result.repairAttempts[0]?.schemaRef).toBe('diagnostician-output');
     expect(result.repairAttempts[0]?.attempt).toBe(1);
     expect(result.repairAttempts[0]?.repaired).toBe(true);
     expect(result.repairAttempts[0]?.repairPromptVersion).toBe('2'); // v2 = PRI-621 full-schema repair prompt
@@ -357,7 +357,7 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
-      { schemaRef: 'diagnostician-output-v1', maxRepairAttempts: 1, _testJitterMs: 0 },
+      { schemaRef: 'diagnostician-output', maxRepairAttempts: 1, _testJitterMs: 0 },
     );
 
     expect(result.repairAttempts).toHaveLength(1);
@@ -401,7 +401,7 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
       {
-        schemaRef: 'diagnostician-output-v1',
+        schemaRef: 'diagnostician-output',
         originalOutput: originalWithLineage,
       },
     );
@@ -415,10 +415,10 @@ describe('attemptStructuredOutputRepair', () => {
 
   it('formatRepairPrompt includes schemaRef when provided (PRI-200)', () => {
     const prompt = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS, {
-      schemaRef: 'diagnostician-output-v1',
+      schemaRef: 'diagnostician-output',
     });
 
-    expect(prompt).toContain('SCHEMA REF: diagnostician-output-v1');
+    expect(prompt).toContain('SCHEMA REF: diagnostician-output');
   });
 
   it('refreshes schema errors across repair attempts (PRI-200)', async () => {

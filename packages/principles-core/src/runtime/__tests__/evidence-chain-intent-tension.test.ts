@@ -7,7 +7,7 @@ import type { IntentTension } from '../types/evidence-chain-contract.js';
  * PRI-469: surface intentTension through EvidenceChain.
  *
  * Production architecture: DiagnosticianCommitter writes the full
- * DiagnosticianOutputV1 (rootCause + intentTension) to the `artifacts` table
+ * DiagnosticianOutputV2 (rootCause + intentTension) to the `artifacts` table
  * (artifact_kind = 'diagnostician_output', column content_json), NOT to
  * tasks.diagnostic_json. These tests verify assembleEvidenceChain extracts
  * intentTension from the diagnosticArtifacts parameter with runtime validation,

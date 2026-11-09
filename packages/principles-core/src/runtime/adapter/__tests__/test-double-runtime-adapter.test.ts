@@ -9,7 +9,7 @@ import { TestDoubleRuntimeAdapter } from '../test-double-runtime-adapter.js';
 import type { TestDoubleBehaviorOverrides } from '../test-double-runtime-adapter.js';
 import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
 import { DiagDistillerOutputV1Schema } from '../../diagnostician/diag-distiller-output.js';
-import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 
 describe('TestDoubleRuntimeAdapter', () => {
   describe('default behavior', () => {
@@ -39,7 +39,7 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(status.endedAt).toBeDefined();
     });
 
-    it('fetchOutput returns valid DiagnosticianOutputV1 payload by default', async () => {
+    it('fetchOutput returns valid DiagnosticianOutputV2 payload by default', async () => {
       const adapter = new TestDoubleRuntimeAdapter({}, 'task-42');
       const output = await adapter.fetchOutput('td-1');
       expect(output).not.toBeNull();
@@ -47,7 +47,9 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(result.runId).toBe('td-1');
       const {payload} = result;
       expect(payload.valid).toBe(true);
-      expect(payload.taskId).toBe('task-42');
+      // PRI-1146 V2: the closed V2 root has NO taskId (lineage is runner-owned).
+      expect(payload.taskId).toBeUndefined();
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
       expect(payload.summary).toBeTruthy();
       expect(payload.rootCause).toBeTruthy();
       expect(payload.confidence).toBeGreaterThanOrEqual(0);
@@ -124,7 +126,7 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(payload.sourceRootCauseArtifactId).toBeTruthy();
     });
 
-    it('dispatches DiagnosticianOutputV1 for diag_router taskId', async () => {
+    it('dispatches DiagnosticianOutputV2 for diag_router taskId', async () => {
       const adapter = new TestDoubleRuntimeAdapter();
       const handle = await adapter.startRun({
         agentSpec: { agentId: 'test', schemaVersion: 'v1' },
@@ -138,12 +140,13 @@ describe('TestDoubleRuntimeAdapter', () => {
       if (!output) throw new Error('output is null');
       const payload = output.payload as Record<string, unknown>;
       expect(payload.valid).toBe(true);
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
       expect(payload.summary).toBeTruthy();
       expect(payload.rootCause).toBeTruthy();
       expect(Array.isArray(payload.recommendations)).toBe(true);
     });
 
-    it('falls back to monolithic DiagnosticianOutputV1 for non-split taskId', async () => {
+    it('falls back to the default DiagnosticianOutputV2 for non-split taskId', async () => {
       const adapter = new TestDoubleRuntimeAdapter({}, 'my-task');
       const handle = await adapter.startRun({
         agentSpec: { agentId: 'test', schemaVersion: 'v1' },
@@ -157,12 +160,14 @@ describe('TestDoubleRuntimeAdapter', () => {
       if (!output) throw new Error('output is null');
       const payload = output.payload as Record<string, unknown>;
       expect(payload.valid).toBe(true);
-      expect(payload.taskId).toBe('my-task');
+      // PRI-1146 V2: the closed V2 root carries no taskId (lineage is runner-owned).
+      expect(payload.taskId).toBeUndefined();
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
       // Monolithic output should NOT have rootCauseCategory
       expect(payload.rootCauseCategory).toBeUndefined();
     });
 
-    it('falls back to defaultTaskId when no taskRef provided', async () => {
+    it('falls back to the default DiagnosticianOutputV2 when no taskRef provided', async () => {
       const adapter = new TestDoubleRuntimeAdapter({}, 'fallback-task');
       const handle = await adapter.startRun({
         agentSpec: { agentId: 'test', schemaVersion: 'v1' },
@@ -174,7 +179,13 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(output).not.toBeNull();
       if (!output) throw new Error('output is null');
       const payload = output.payload as Record<string, unknown>;
-      expect(payload.taskId).toBe('fallback-task');
+      // PRI-1146 V2: the defaultTaskId no longer surfaces in the closed V2
+      // payload; the observable fallback is the default V2 shape itself.
+      expect(payload.taskId).toBeUndefined();
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
+      expect(payload.recommendations).toEqual([
+        { kind: 'defer', description: 'TestDouble default: no actionable recommendation', recommendationRef: 'defer-1' },
+      ]);
     });
   });
 
@@ -291,7 +302,7 @@ describe('TestDoubleRuntimeAdapter', () => {
       ).toBe(true);
     });
 
-    it('Scenario C: Stage C (diag_router) output passes DiagnosticianOutputV1Schema', async () => {
+    it('Scenario C: Stage C (diag_router) output passes DiagnosticianOutputV2Schema', async () => {
       const adapter = new TestDoubleRuntimeAdapter();
       const stageCTaskId = `diag_router-${PARENT_TASK_ID}`;
       const handle = await adapter.startRun({
@@ -309,10 +320,10 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(payload.valid).toBe(true);
 
       // Schema validation
-      const schemaValid = Value.Check(DiagnosticianOutputV1Schema, payload);
+      const schemaValid = Value.Check(DiagnosticianOutputV2Schema, payload);
       expect(
         schemaValid,
-        `Stage C output failed DiagnosticianOutputV1Schema validation. Errors: ${[...Value.Errors(DiagnosticianOutputV1Schema, payload)].map(e => `${e.path}: ${e.message}`).join('; ')}`,
+        `Stage C output failed DiagnosticianOutputV2Schema validation. Errors: ${[...Value.Errors(DiagnosticianOutputV2Schema, payload)].map(e => `${e.path}: ${e.message}`).join('; ')}`,
       ).toBe(true);
     });
 
@@ -442,8 +453,9 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(output).not.toBeNull();
       if (!output) throw new Error('output is null');
       const payload = output.payload as Record<string, unknown>;
-      // Should fall back to monolithic output
-      expect(payload.taskId).toBe('fallback-task');
+      // Should fall back to the default V2 output (closed root: no taskId)
+      expect(payload.taskId).toBeUndefined();
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
       expect(payload.rootCauseCategory).toBeUndefined();
     });
 
@@ -460,8 +472,9 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(output).not.toBeNull();
       if (!output) throw new Error('output is null');
       const payload = output.payload as Record<string, unknown>;
-      // Should fall back to monolithic output with defaultTaskId
-      expect(payload.taskId).toBe('fallback-task');
+      // Should fall back to the default V2 output (closed root: no taskId)
+      expect(payload.taskId).toBeUndefined();
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
     });
 
     it('handles taskRef without taskId gracefully', async () => {
@@ -478,8 +491,9 @@ describe('TestDoubleRuntimeAdapter', () => {
       expect(output).not.toBeNull();
       if (!output) throw new Error('output is null');
       const payload = output.payload as Record<string, unknown>;
-      // Should fall back to monolithic output with defaultTaskId
-      expect(payload.taskId).toBe('fallback-task');
+      // Should fall back to the default V2 output (closed root: no taskId)
+      expect(payload.taskId).toBeUndefined();
+      expect(payload.schemaVersion).toBe('diagnostician-output-v2');
     });
 
     it('handles multiple sequential runs with different taskIds', async () => {

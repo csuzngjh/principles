@@ -16,7 +16,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { DiagRootCauseOutputV1, IntentTension } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
 import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
@@ -121,8 +121,8 @@ function makeDistillerOutput(): DiagDistillerOutputV1 {
   };
 }
 
-function makeRouterOutput(intentTension?: unknown): DiagnosticianOutputV1 {
-  const base: DiagnosticianOutputV1 = {
+function makeRouterOutput(intentTension?: unknown): DiagnosticianOutputV2 {
+  const base: DiagnosticianOutputV2 = {
     ...MOCK_ROUTER_OUTPUTS.R6,
     diagnosisId: 'diag-001',
   };
@@ -160,7 +160,7 @@ function populatePredecessorArtifacts(store: MemoryPIArtifactStore, rootCauseOut
 
 function createMockDeps(
   rootCauseOutput: DiagRootCauseOutputV1,
-  routerOutput: DiagnosticianOutputV1,
+  routerOutput: DiagnosticianOutputV2,
   overrides: Partial<DiagRouterRunnerDeps> = {},
 ): DiagRouterRunnerDeps & {
   _stateManager: Record<string, ReturnType<typeof vi.fn>>;
@@ -229,6 +229,8 @@ function createMockDeps(
     eventEmitter: _eventEmitter as unknown as StoreEventEmitter,
     artifactStore,
     committer: _committer,
+    // PRI-1146: proven-empty trusted exposure (harness default).
+    trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok' as const, principles: [] }) },
     _stateManager,
     _runtimeAdapter,
     _committer,
@@ -274,7 +276,7 @@ describe('DiagRouterRunner — PRI-468 Stage C intentTension passthrough', () =>
     const commitMock = deps._committer.commit;
     if (!commitMock) throw new Error('commit mock not configured');
     const [commitCall] = commitMock.mock.calls;
-    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV1;
+    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV2;
     expect(committedOutput.intentTension).toBeDefined();
     expect(committedOutput.intentTension).toEqual(VALID_INTENT_TENSION);
   });
@@ -299,7 +301,7 @@ describe('DiagRouterRunner — PRI-468 Stage C intentTension passthrough', () =>
     const commitMock = deps._committer.commit;
     if (!commitMock) throw new Error('commit mock not configured');
     const [commitCall] = commitMock.mock.calls;
-    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV1;
+    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV2;
     expect(committedOutput.intentTension).toBeUndefined();
   });
 
@@ -332,7 +334,7 @@ describe('DiagRouterRunner — PRI-468 Stage C intentTension passthrough', () =>
     const commitMock = deps._committer.commit;
     if (!commitMock) throw new Error('commit mock not configured');
     const [commitCall] = commitMock.mock.calls;
-    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV1;
+    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV2;
     expect(committedOutput.intentTension).toBeUndefined();
 
     // Verify telemetry was emitted for the strip (EP-03 / ERR-002: observable)
@@ -378,7 +380,7 @@ describe('DiagRouterRunner — PRI-468 Stage C intentTension passthrough', () =>
     const commitMock = deps._committer.commit;
     if (!commitMock) throw new Error('commit mock not configured');
     const [commitCall] = commitMock.mock.calls;
-    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV1;
+    const committedOutput = commitCall?.[0]?.output as DiagnosticianOutputV2;
     expect(committedOutput.intentTension).toEqual(VALID_INTENT_TENSION);
     expect(committedOutput.intentTension).not.toEqual(llmTension);
 

@@ -1,20 +1,17 @@
 /**
  * PRI-43: Core InternalizationRoute model tests
  *
- * Verifies that decideInternalizationRoute maps each DiagnosticianRecommendation
+ * Verifies that decideInternalizationRoute maps each recommendation
  * kind to the correct internalization pipeline route with proper readiness
  * and missing-field diagnostics.
  */
 import { describe, it, expect } from 'vitest';
-import type { DiagnosticianRecommendation } from '../diagnostician-output.js';
+import type { InternalizationRouteInput } from '../internalization/internalization-route.js';
 
 function makeRecommendation(
-  overrides: Partial<DiagnosticianRecommendation> & Pick<DiagnosticianRecommendation, 'kind'>,
-): DiagnosticianRecommendation {
-  return {
-    description: 'test recommendation',
-    ...overrides,
-  };
+  overrides: Partial<InternalizationRouteInput> & Pick<InternalizationRouteInput, 'kind'>,
+): InternalizationRouteInput {
+  return { ...overrides };
 }
 
 describe('decideInternalizationRoute', () => {
@@ -150,7 +147,7 @@ describe('decideInternalizationRoute', () => {
   it('unknown/invalid kind maps to deferred with reason explaining unrecognized kind', async () => {
     const { decideInternalizationRoute } = await import('../internalization/internalization-route.js');
     const rec = makeRecommendation({
-      kind: 'unknown_nonsense' as DiagnosticianRecommendation['kind'],
+      kind: 'unknown_nonsense',
     });
     const decision = decideInternalizationRoute(rec);
 

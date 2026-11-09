@@ -16,7 +16,7 @@ import { DefaultSchemaPromptAdapter } from '../schema-prompt-adapter.js';
 import { DefaultDiagnosticianValidator } from '../../runner/default-validator.js';
 import { DefaultDiagRootCauseValidator } from '../../diagnostician/diag-rootcause-output.js';
 import { DefaultDiagDistillerValidator } from '../../diagnostician/diag-distiller-output.js';
-import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import { DiagRootCauseOutputV1Schema } from '../../diagnostician/diag-rootcause-output.js';
 import { DiagDistillerOutputV1Schema } from '../../diagnostician/diag-distiller-output.js';
 import { ARTIFICER_PROTOCOL_INSTRUCTION } from '../../internalization/artificer-prompt-builder.js';
@@ -37,8 +37,12 @@ async function expectExamplePassesValidator<T>(
   // Production runners reconcile lineage echoes (reconcileLineageEcho)
   // BEFORE validation, so a synthesized taskId placeholder is normalized to
   // the authoritative value. Simulate that step here — the invariant under
-  // test is the example's SEMANTIC content, not lineage echo.
-  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+  // test is the example's SEMANTIC content, not lineage echo. PRI-1146: only
+  // schemas that DECLARE taskId (rootcause/distiller) get the echo; the V2
+  // diagnostician root is closed and carries no lineage field — injecting one
+  // would fail validation for a correct example.
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    && Object.hasOwn(parsed, 'taskId')) {
     (parsed as Record<string, unknown>).taskId = `${label}-task`;
   }
   // The `as T` only satisfies the declared parameter type; the production
@@ -67,7 +71,7 @@ describe('PRI-817: synthesized prompt examples pass their production validators'
 
   it('diag_router example passes DefaultDiagnosticianValidator', async () => {
     await expectExamplePassesValidator(
-      DiagnosticianOutputV1Schema,
+      DiagnosticianOutputV2Schema,
       new DefaultDiagnosticianValidator(),
       'diag-router',
     );

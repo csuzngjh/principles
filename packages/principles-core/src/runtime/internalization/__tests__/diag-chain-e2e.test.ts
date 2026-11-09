@@ -15,10 +15,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { DiagRootCauseOutputV1Schema, DefaultDiagRootCauseValidator } from '../../diagnostician/diag-rootcause-output.js';
 import { DiagDistillerOutputV1Schema, DefaultDiagDistillerValidator } from '../../diagnostician/diag-distiller-output.js';
-import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseRunner } from '../diag-rootcause-runner.js';
 import type { DiagRootCauseRunnerDeps } from '../diag-rootcause-runner.js';
@@ -72,7 +72,7 @@ function makeDistillerOutput(overrides: Partial<DiagDistillerOutputV1> = {}): Di
 }
 
 /** Happy-path output using cached real LLM data (R6 fixture) with test-local IDs. */
-function makeRouterOutput(): DiagnosticianOutputV1 {
+function makeRouterOutput(): DiagnosticianOutputV2 {
   return {
     ...MOCK_ROUTER_OUTPUTS.R6,
     diagnosisId: 'diag-e2e-001',
@@ -188,7 +188,7 @@ describe('Diag chain e2e', () => {
 
   it('Stage C output passes TypeBox schema validation', () => {
     const output = makeRouterOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, output)).toBe(true);
+    expect(Value.Check(DiagnosticianOutputV2Schema, output)).toBe(true);
   });
 
   it('artifact chain is internally consistent', () => {
@@ -359,6 +359,7 @@ describe('Diag chain e2e', () => {
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       committer: committer,
+      trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -738,6 +739,7 @@ describe('Diag chain e2e', () => {
       eventEmitter: eventEmitter as unknown as StoreEventEmitter,
       artifactStore,
       committer: committer,
+      trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },
     };
 
     const routerRunner = new DiagRouterRunner(routerDeps, {
@@ -831,7 +833,7 @@ describe('Diag chain e2e', () => {
     const committer = { commit: vi.fn() };
 
     const routerRunner = new DiagRouterRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer, trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) } },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -942,6 +944,7 @@ describe('Diag chain e2e', () => {
           eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
           artifactStore: stateManager.piArtifactStore,
           committer,
+          trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },
         },
         { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
       );

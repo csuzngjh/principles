@@ -28,7 +28,7 @@ import { SqliteConnection } from '../store/sqlite-connection.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { SqliteDiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import { evaluateAndPersistAdmissionFromStore } from '../pain-signal-bridge.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 const dirs: string[] = [];
 const workspaces: RealWorkspace[] = [];
@@ -42,15 +42,16 @@ const NOW = '2026-10-14T12:00:00.000Z';
 const REAL_SQLITE_TIMEOUT_MS = 30_000;
 
 /** Round marker → distinct output so a cross-round substitution is observable. */
-function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV1 {
+function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: `diag-${round}`,
     summary: `summary ${round}`,
     rootCause: `root cause ${round}`,
     violatedPrinciples: [],
     evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
-    recommendations: [{ kind: 'principle', description: `Principle from ${round}` }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, recommendationRef: `principle-${round}` }],
     // r1 is well evidenced; r2 is deliberately WEAK (confidence .2, one
     // evidence entry) so "r2 changed r1's verdict" is unambiguous.
     confidence: round === 'r1' ? 0.9 : 0.2,
@@ -228,11 +229,11 @@ describe('round binding: the owning run is the only admissible output', () => {
       // Reproduce the pre-fix selection shape: reverse task order, first
       // parseable output — independent of any candidate's sourceRunId.
       const runs = await ws.manager.getRunsByTask(router);
-      let picked: DiagnosticianOutputV1 | undefined;
+      let picked: DiagnosticianOutputV2 | undefined;
       for (let i = runs.length - 1; i >= 0 && picked === undefined; i -= 1) {
         const raw = runs[i]?.outputPayload;
         if (typeof raw !== 'string' || raw.length === 0) continue;
-        picked = JSON.parse(raw) as DiagnosticianOutputV1;
+        picked = JSON.parse(raw) as DiagnosticianOutputV2;
       }
       const ownRun = await ws.manager.getRun((await ws.manager.getCandidate(candidateId))?.sourceRunId ?? '');
       // The defect is real: the shared output is r2's, NOT the candidate's own r1.

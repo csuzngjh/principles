@@ -20,7 +20,7 @@ import type { PainSignalBridgeResult } from '../pain-signal-bridge.js';
 import type { RuntimeStateManager, CandidateRecord } from '../store/runtime-state-manager.js';
 import type { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 import type { PainProvenance } from '../admission-gate.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 
@@ -66,28 +66,30 @@ function makeLedgerEntry(candidateId: string): LedgerPrincipleEntry {
   };
 }
 
-function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
+function makeHighConfidenceOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-high',
     summary: 'Valid diagnosis with sufficient evidence',
     rootCause: 'Identified root cause from session trace',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'session-trace-1', note: 'Owner confirmed behavior' }],
-    recommendations: [{ kind: 'principle', description: 'Valid principle from evidence' }],
+    recommendations: [{ kind: 'principle', description: 'Valid principle from evidence', recommendationRef: 'principle-1' }],
     confidence: 0.85,
   };
 }
 
-function makeLowConfidenceOutput(): DiagnosticianOutputV1 {
+function makeLowConfidenceOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-low',
     summary: 'Low confidence diagnosis',
     rootCause: 'Insufficient evidence',
     violatedPrinciples: [],
     evidence: [],
-    recommendations: [{ kind: 'principle', description: 'Low confidence principle' }],
+    recommendations: [{ kind: 'principle', description: 'Low confidence principle', recommendationRef: 'principle-1' }],
     confidence: 0.3,
   };
 }
@@ -104,7 +106,7 @@ interface MockDeps {
 
 function makeMockDeps(overrides: {
   candidates?: CandidateRecord[];
-  output?: DiagnosticianOutputV1;
+  output?: DiagnosticianOutputV2;
   runOutputPayload?: string;
   ledgerEntries?: Map<string, LedgerPrincipleEntry>;
   createTaskFn?: (input: Record<string, unknown>) => Promise<unknown>;
@@ -790,7 +792,8 @@ describe('PRI-456: shapeBridgeResult edge cases', () => {
       makeCandidate('c-gated', 'principle'),
     ];
     // High confidence for principle, defer always deferred, low confidence for gated
-    const output: DiagnosticianOutputV1 = {
+    const output: DiagnosticianOutputV2 = {
+      schemaVersion: 'diagnostician-output-v2',
       valid: true,
       diagnosisId: 'diag-mix',
       summary: 'Mixed admission',
@@ -798,9 +801,9 @@ describe('PRI-456: shapeBridgeResult edge cases', () => {
       violatedPrinciples: [],
       evidence: [{ sourceRef: 'test', note: 'Evidence' }],
       recommendations: [
-        { kind: 'principle', description: 'Principle 1' },
-        { kind: 'defer', description: 'Defer 1' },
-        { kind: 'principle', description: 'Principle 2' },
+        { kind: 'principle', description: 'Principle 1', recommendationRef: 'principle-1' },
+        { kind: 'defer', description: 'Defer 1', recommendationRef: 'defer-1' },
+        { kind: 'principle', description: 'Principle 2', recommendationRef: 'principle-2' },
       ],
       confidence: 0.85,
     };

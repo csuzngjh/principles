@@ -21,7 +21,7 @@ import { SqliteConnection } from '../store/sqlite-connection.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { SqliteDiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 import type { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
 import type { RunnerResult } from '../runner/runner-result.js';
@@ -31,15 +31,16 @@ const PARENT = 'diagnosis_pain_router_real';
 const ROUTER = `diag_router-${PARENT}`;
 const NOW = '2026-10-14T10:00:00.000Z';
 
-function routerOutput(): DiagnosticianOutputV1 {
+function routerOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-router-real',
     summary: 'router summary',
     rootCause: 'router root cause',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'trace-router-1', note: 'router evidence' }],
-    recommendations: [{ kind: 'principle', description: 'Router principle' }],
+    recommendations: [{ kind: 'principle', description: 'Router principle', recommendationRef: 'principle-1' }],
     confidence: 0.9,
   };
 }
@@ -123,15 +124,16 @@ async function seedSplitDiagnosis(ws: RealWorkspace, opts: { candidateStatus?: '
   }
 }
 
-function roundOutput(round: 'r1' | 'r2', confidence = round === 'r1' ? 0.9 : 0.2): DiagnosticianOutputV1 {
+function roundOutput(round: 'r1' | 'r2', confidence = round === 'r1' ? 0.9 : 0.2): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: `diag-${round}`,
     summary: `summary ${round}`,
     rootCause: `root cause ${round}`,
     violatedPrinciples: [],
     evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
-    recommendations: [{ kind: 'principle', description: `Principle from ${round}` }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, recommendationRef: `principle-${round}` }],
     confidence,
   };
 }
