@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261109T1342Z-zcode",
+  "previousCheckpoint": "20261109T1204Z-zcode",
+  "generatedAt": "2026-11-09T13:42:57Z",
+  "agent": "zcode",
+  "task": "PRI-1119 A线：收口 #2449（清单修复）、修订 #2451（身份设计与验收条件）、有截止点的产品入口裁决",
+  "overallStatus": "MANIFEST_FIX_READY_FOR_REVIEW__IDENTITY_DESIGN_REVISED__NORMAL_ENTRY_BLOCKED",
+  "mainTipAtCheckpoint": "61babcf69 (chore(codex): refresh published runtime pins #2447)",
+  "prs": {
+    "2449": {
+      "purpose": "插件清单 adaptiveActivation 声明 principleId（additionalProperties:false 保留）+ 清单×读取器联合回归 + changeset principles-disciple patch",
+      "branch": "ai/PRI-1119-aa-manifest-principleid",
+      "netDiffVsMain": [".changeset/adaptive-activation-principle-id-schema.md (principles-disciple + create-principles-disciple: patch)", "packages/openclaw-plugin/openclaw.plugin.json", "packages/openclaw-plugin/tests/manifest-adaptive-activation.test.ts"],
+      "headHistory": ["916b78965 fix commit", "c2e21b451 git-7 merge of 7d78bd6d3", "010f882c3 git-7 merge of 4d1eda89a", "805a6d01c git-7 merge of 61babcf69", "c0c032510 changeset adds create-principles-disciple: patch (final this round)"],
+      "releaseIntentFix": "805a6d01c failed Verify Merge Gate: release intent guard N-5/C4 (plugin released without installer). Cause: #2446 consumed main's pending create-principles-disciple changeset (dependabot-2439) that previously satisfied C4. Fix: changeset declares 'create-principles-disciple': patch; local preview PR_BASE_SHA=61babcf69 -> RELEASE_INTENT_GUARD PASS; CI on c0c032510: all checks complete, 0 failures, mergeStateStatus CLEAN",
+      "tests": "packages/openclaw-plugin: npx vitest run tests/manifest-adaptive-activation.test.ts tests/hooks/adaptive-activation-config.test.ts tests/manifest-skills.test.ts tests/hooks/controlled-admission.test.ts tests/hooks/runtime-prompt-activation.test.ts -> 5 files 130/130 PASS (12 joint + 118 existing), on 805a6d01c tree",
+      "layerReport": {
+        "hostLoadLayer_manifest": "unknown key, empty-string identity, wrong type, softTimeoutMs out of range/non-integer -> rejected",
+        "runtimeLayer_reader": "mixed identity, partial pinned identity, whitespace-only identity, invalid expiresAt (annotation-only on host), workspace mismatch, expiry -> null fallback to Native",
+        "bothPass": "valid pinned identity, valid principleId identity"
+      },
+      "conclusionBound": "合法配置可通过清单校验；正常入口触发仍需身份（未解决）"
+    },
+    "2451": {
+      "purpose": "身份缺口的上游设计提案与发版依赖评估（文档）；本轮修订为 v2",
+      "branch": "ai/PRI-1119-aa-host-identity-design",
+      "remoteUpdateObserved": "73d2a58fa = 'Merge branch main' (parents 353fd81a1 + 61babcf69), authored outside this session; fast-forwarded onto it, never overwritten",
+      "v2Changes": [
+        "结论收窄：对已核对的官方 embedded 正常入口，若采用宿主原生消息身份，当前需要宿主侧接线",
+        "修正 v1 表述：tag release-publish/5e1a27a9bcc4 的 package.json 为 2026.11.1；npm latest 2026.11.2 的源提交未定位、未核对",
+        "历史检索按实际范围表述：本地克隆 origin/main 单文件 -S 检索",
+        "补身份数据流：准入 agent-runner-execute.ts:261(restart-recovery 控制器) -> 绑定 chat-user-turn-recorder.ts:65 -> 传递 agent-runner-embedded-candidate.ts:196 -> 调用点可得 attempt-prompt-build.ts:216/329/536 -> 缺口 L159；重试/重建归属与非聊天触发标为待证",
+        "运行验收升级：正文与身份属于同一当前接纳用户轮；P1/P2 两轮连续不同输入正例 + N1-N6 反例；不可证明归属则保留缺失并回 Native"
+      ]
+    }
+  },
+  "normalEntryVerdict": {
+    "question": "Owner 能否通过现有受支持的操作路径，触发交付验收并提供与本轮用户输入可靠绑定的身份？",
+    "answer": "BLOCKED",
+    "timeBox": "≤ half working day (used ~1h)",
+    "pathsExamined": [
+      {"path": "gateway local 聊天 -> embedded runner（Owner 现有工作模式）", "version": "installed OpenClaw 2026.11.1 (4ffdd20)", "result": "事件只含 {prompt, messages}；PD 映射在无身份时 fail-closed（principle_mapping_has_no_admission_identity）", "evidence": "dist/context-engine-maintenance-B3wgO8Sx.mjs:326-329; packages/openclaw-plugin/src/index.ts:266-283"},
+      {"path": "agentsapi harness（官方，事件可带 currentUserMessage+ID）", "version": "installed 2026.11.1 extension", "result": "不适用：该 harness 在 OpenAI 托管 Linux VM 执行、用 OpenAI API key 认证——另一宿主执行模式且涉及外部执行与凭据，不是 Owner 现有受支持的工作路径；采用需另行授权与独立 G0/G1，PD 链路在该路径未验证", "evidence": "dist/extensions/agentsapi/README.md; dist/agentsapi-attempt-CUirEvwK.mjs:212"},
+      {"path": "PD 自有接口：受控准入", "result": "不适用：操作者冻结输入 + 一次性消费 + 仅钉死 ID，#2436 对 principleId 映射拒绝；SPEC §7 禁止作为普通入口", "evidence": "packages/openclaw-plugin/src/index.ts:272-305"},
+      {"path": "PD 自行推断身份", "result": "禁止：首行标记/prompt 哈希/sessionId/runId 各守已有语义，不能充当请求身份"}
+    ],
+    "missingCapability": "embedded prompt-build 的 before_prompt_build 事件未携带当前用户轮的 content 与 idempotencyKey，尽管 attempt 作用域内已有 userTurnTranscriptRecorder.message（attempt-prompt-build.ts:159 调用点未传；L536 已读取该键）",
+    "minimalDependency": "宿主侧接线（#2451 §3）-> 官方发版 -> Owner 授权升级本机宿主 -> #2451 §4 有界运行验收",
+    "upstreamWiring": "单独待 Owner 决策；本轮不提交上游代码或 PR",
+    "investigationClosed": true
+  },
+  "unchanged": ["PRI-1118 依赖维持", "G1/C04/G2 状态未动", "PRI-1160 按自身范围（B 线注入精简）推进，未受影响", "LATEST.json 未修改", "历史检查点未修改"],
+  "budget": {"hostStarts": 0, "modelCalls": 0, "paidCalls": 0, "productionConfigChanges": 0, "upstreamCodeOrPRs": 0, "merges": 0},
+  "latestPointer": "LATEST.json not modified"
+}
