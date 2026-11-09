@@ -119,6 +119,7 @@ export default defineConfig({
                 { text: '06 | The Expanding Boundary: The Tower, the Boat, and the Silicon Amoeba', link: '/abyss/06-expanding-boundary' },
                 { text: '07 | The Goal Management Paradox: The Better We Get at Achieving Goals, the Farther We May Drift', link: '/abyss/07-goal-management-paradox' },
                 { text: '08 | A Goal Is Not a Prompt: When Agents Learn to Execute, Who Is Responsible for Judgment?', link: '/abyss/08-goal-not-a-prompt' },
+                { text: '09 | AI Remembers What We Did, but Not Always Why', link: '/abyss/09-remember-why' },
               ]
             }
           ]
@@ -168,6 +169,7 @@ export default defineConfig({
                 { text: '06 | 智能的膨胀边界：巨塔、小艇与硅基阿米巴', link: '/zh/abyss/06-expanding-boundary' },
                 { text: '07 | 当我们越来越擅长实现目标，为什么反而可能离目标越来越远？', link: '/zh/abyss/07-goal-management-paradox' },
                 { text: '08 | 目标不是一段 Prompt：当智能体学会执行，谁来负责判断？', link: '/zh/abyss/08-goal-not-a-prompt' },
+                { text: '09 | AI 记得我们做过什么，却未必记得为什么', link: '/zh/abyss/09-remember-why' },
               ]
             }
           ]

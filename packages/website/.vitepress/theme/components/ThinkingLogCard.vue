@@ -25,44 +25,44 @@
              880w variant is chosen on retina too instead of falling back to
              the 1916w original. -->
         <img
-          src="/images/abyss/08/abyss-08-cover.webp"
-          :srcset="`/images/abyss/08/abyss-08-cover-880.webp 880w, /images/abyss/08/abyss-08-cover.webp 1916w`"
+          src="/images/abyss/09/abyss-09-cover.webp"
+          :srcset="`/images/abyss/09/abyss-09-cover-880.webp 880w, /images/abyss/09/abyss-09-cover.webp 1913w`"
           sizes="(max-width: 767px) 100vw, min(46vw, 461px)"
           width="880"
-          height="377"
+          height="378"
           loading="lazy"
           decoding="async"
-          :alt="lang === 'zh-CN' ? '潜艇在深渊海沟中航行的文章封面' : 'Article cover of a submarine navigating an abyssal trench'"
+          :alt="lang === 'zh-CN' ? '全息记忆引擎之环的文章封面' : 'Article cover of a holographic memory engine ring'"
         />
         <div class="thumb-overlay"></div>
       </div>
       
       <div class="journal-body">
         <div class="journal-meta">
-          <span class="journal-series">LOG #008</span>
+          <span class="journal-series">LOG #009</span>
           <span class="meta-dot">&middot;</span>
-          <span class="journal-date">2026-10-30</span>
+          <span class="journal-date">2026-11-09</span>
         </div>
 
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '目标不是一段 Prompt：当智能体学会执行，谁来负责判断？' : 'A Goal Is Not a Prompt: When Agents Learn to Execute, Who Is Responsible for Judgment?' }}
+          {{ lang === 'zh-CN' ? 'AI 记得我们做过什么，却未必记得为什么' : 'AI Remembers What We Did, but Not Always Why' }}
         </h3>
 
         <p class="journal-excerpt">
           {{ lang === 'zh-CN'
-            ? '从圣塔菲号的错误命令，到西蒙的决策前提与 Bungay 的三重落差：当智能体学会执行，谁来负责判断？探讨“我打算”式的意图协作，以及从服从指令到共同承担判断的第三条道路。'
-            : 'From the Santa Fe\'s wrong order to Simon\'s decision premises and Bungay\'s three gaps: when agents learn to execute, who judges what is worth doing? Exploring "I intend to..." collaboration and the third path from obedience to shared judgment.'
+            ? '从潜艇换班的航海日志到 Anthropic 的“记忆是预测”：AI 记住了我们做过什么，未必理解为什么。探讨围绕长期意图组织记忆的 PIAAM 方向——什么值得记住，什么可以放下，什么时候应该重新想起。'
+            : 'From a submarine\'s watch-change log to Anthropic\'s "memory is a prediction": AI remembers what we did, yet may not understand why. Exploring PIAAM — organizing agent memory around persistent intent: what to remember, what to let go, and when to recall.'
           }}
         </p>
 
         <div class="journal-tags">
-          <span class="j-tag">{{ lang === 'zh-CN' ? '意图领导' : 'Intent-Based Leadership' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '决策前提' : 'Decision Premises' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '长期记忆' : 'Long-Term Memory' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '持续意图' : 'Persistent Intent' }}</span>
           <span class="j-tag">{{ lang === 'zh-CN' ? '人机协作' : 'Human–AI Collaboration' }}</span>
         </div>
 
         <div class="journal-action">
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/08-goal-not-a-prompt' : '/abyss/08-goal-not-a-prompt'" class="read-link">
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/09-remember-why' : '/abyss/09-remember-why'" class="read-link">
             <span>{{ lang === 'zh-CN' ? '阅读文章' : 'Read the article' }}</span>
             <span class="arrow">&rarr;</span>
           </a>
