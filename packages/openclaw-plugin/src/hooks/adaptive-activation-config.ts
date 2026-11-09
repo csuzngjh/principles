@@ -61,13 +61,14 @@ export function readAdaptiveActivationConfig(pluginConfig: unknown, workspaceDir
   const canonical = (value: string) => process.platform === 'win32' ? resolve(value).toLowerCase() : resolve(value);
   if (canonical(workspace) !== canonical(workspaceDir)) return null;
 
-  const hasPinned = typeof artifactId === 'string' && artifactId.trim().length > 0
-    && typeof activationId === 'string' && activationId.trim().length > 0;
   const hasPrinciple = typeof principleId === 'string' && principleId.trim().length > 0;
   // rc-3: a partially-specified identity must never degrade into a guess.
   const artifactOrActivationPresent = artifactId !== undefined || activationId !== undefined;
   if (hasPrinciple && artifactOrActivationPresent) return null;
   if (hasPrinciple) return { principleId, ...timing };
-  if (hasPinned) return { artifactId: artifactId as string, activationId: activationId as string, ...timing };
+  if (typeof artifactId === 'string' && artifactId.trim().length > 0
+    && typeof activationId === 'string' && activationId.trim().length > 0) {
+    return { artifactId, activationId, ...timing };
+  }
   return null;
 }
