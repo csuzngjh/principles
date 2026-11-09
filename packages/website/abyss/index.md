@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #009 · 2026-11-09</div>
+  <a class="abyss-title" href="/abyss/09-remember-why">09 | AI Remembers What We Did, but Not Always Why</a>
+  <p class="abyss-desc">From a submarine's watch-change log to Anthropic's "memory is a prediction": AI remembers what we did, yet may not understand why. Explores PIAAM — organizing agent memory around persistent intent: what is worth remembering, what can be let go, and when to recall it.</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #008 · 2026-10-30</div>
   <a class="abyss-title" href="/abyss/08-goal-not-a-prompt">08 | A Goal Is Not a Prompt: When Agents Learn to Execute, Who Is Responsible for Judgment?</a>
   <p class="abyss-desc">From the Santa Fe's wrong order to Simon's decision premises and Bungay's three gaps: when agents learn to execute, who is responsible for judging what is worth doing? Explores "I intend to..." collaboration, a four-question deliberation frame, and the third path from obeying orders to shared judgment.</p>

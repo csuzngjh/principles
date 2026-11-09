@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261109T0145Z-zcode",
+  "previousCheckpoint": "20261108T1718Z-zcode",
+  "generatedAt": "2026-11-09T01:45:00Z",
+  "agent": "zcode",
+  "overallStatus": "PRI1152_V31_OFFLINE_READY_AWAITING_OWNER_APPROVAL_REAL_RUN_NOT_APPROVED",
+  "summary": "v3.1 隔离宿主执行包离线准备完成：从 main 9353cec35 新建工作树，build:bundle（非压缩）两次哈希一致，--prepare 生成 pp-20261109T010443Z（清单 sha256 0e2dc6e3…6c2c，卡版本 pri1152-run-card-v3.1），--verify --full --selftest 两次均 exit 0、READY 21/0/0，独立脚本确认实际检查集合与 PREFLIGHT_REQUIRED_CHECKS 相等。证据已在 worktree 池外留档并逐文件校验 sha256。真实宿主、模型调用和 --execute 均未执行，等待 Owner 对卡版本和清单 sha256 的书面批准。",
+  "baseline": {
+    "mainSha": "9353cec358733f64d73b755ad5e54aa3e01bd106",
+    "b1b2": "30ccf33f1cec2599dc0b82872c606838d725c70d (#2431 squash; carries the #2427 B1 commits)",
+    "b3AndLogIntegrity": "9353cec358733f64d73b755ad5e54aa3e01bd106 (#2424 squash; equals #2424 head 1c13b61bb for the pack tool, tests and docs)",
+    "pr2427": "OPEN; its content is in main via #2431; closing is the Owner's reconciliation",
+    "checkedHow": "git grep on origin/main (flushEvents in recordPromptPresenceObserved; hook:llm_input_presence core/enabledByDefault; logEvidenceIntegrity, candidateRegistrationVerdict, PREFLIGHT_REQUIRED_CHECKS); git diff 1c13b61bb origin/main on pack files = empty; scripts suites 134/134 on the baseline"
+  },
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1152-v31-pack",
+    "branch": "ai/PRI-1152-v31-pack",
+    "createdWith": "npm run dev:worktree -- PRI-1152 v31-pack (base origin/main 9353cec35)",
+    "writer": "zcode (dev:worktree:claim: lease + git worktree lock)",
+    "readiness": "npm run dev:worktree:ready -> READY, exit 0 (L1/L2/L3 ok)",
+    "bootstrapNote": "bootstrap reported NOT READY only because scripts/setup-worktree.mjs:356 still requires CLAUDE.md, which #2423 removed; follow-up, not fixed here",
+    "mustPersist": "the pack and the bound execution code live here; do not clean up, rebuild, switch branches or edit the bound scripts before the approved --execute"
+  },
+  "candidate": {
+    "build": "packages/openclaw-plugin: npm run build:bundle (minify:false), twice",
+    "bundleSha256": "dfdf4c98d8ba10709e947a7f5a070fe2501e0b27bc3c54dc5501027ab3c4f3b0",
+    "bundleBytes": 39230713,
+    "reproducible": "both builds produced the same sha256",
+    "pluginVersion": "3.1.0",
+    "entry": "openclaw.extensions = [\"./dist/bundle.js\"]",
+    "tree": "193 files, 81797509 B, treeSha256 cb11f967c7cb51e77bd4671d59d46ed6639d956b188f73a01fd12d2dd3917597"
+  },
+  "host": {
+    "version": "2026.11.1",
+    "buildCommit": "4ffdd2047d192dd65554de3c8c46c0e0197c6e2a",
+    "buildId": "2026.11.1-release-4ffdd2047d19-2026-11-05T01-26-26.075Z",
+    "builtAt": "2026-11-05T01:26:26.075Z",
+    "stagedTree": "44592 files, 530686533 B, treeSha256 d0d151c116919ed6f2411611e0baae79c804fe7e96855cf7b653a00b5dc27495",
+    "registryTarball": "sha512-2pSbt/taBKM/ofPXsiOEmVefgUdVHYRZOmcWNDyx67WUfeGFXqtfqLvtwYOiH4NcLolDSLMUgsno2oYhTVXptw==, 15180 files compared, 0 mismatched, 0 extra",
+    "cliSha256": "469e60c9f60b615ff71c985a54238ee532a8f949866d76aebe7d6e4bc7219902"
+  },
+  "pack": {
+    "packId": "pp-20261109T010443Z",
+    "packRoot": "D:\\Code\\_worktrees\\principles\\PRI-1152-v31-pack\\artifacts\\pri-1152-isolated-host\\pp-20261109T010443Z",
+    "createdAt": "2026-11-09T01:06:46.312Z",
+    "cardVersion": "pri1152-run-card-v3.1",
+    "manifestSha256": "0e2dc6e332f02c315082487f7cf2c6caca73cd26209ad7b774d8fdfe157e6c2c",
+    "manifestSha256Recomputed": "sha256sum after prepare and after both verifies: identical",
+    "endpoint": "127.0.0.1:10448 (allocated at prepare; not a reservation)",
+    "budget": { "hostStarts": 2, "providerHttp": 2, "toolCalls": 0, "paidCalls": 0, "perRound": "1/1/0/0" },
+    "source": "headSha 9353cec35, branch ai/PRI-1152-v31-pack, trackedTreeClean true",
+    "prepareCommand": "node scripts/dev/aa-controlled-admission/presence-run.mjs --prepare --repo D:\\Code\\_worktrees\\principles\\PRI-1152-v31-pack",
+    "prepareExit": 0
+  },
+  "preflight": {
+    "command": "node scripts/dev/aa-controlled-admission/presence-run.mjs --verify --pack <PACK> --full --selftest",
+    "runs": [
+      {
+        "when": "after prepare, before the docs commit",
+        "exitCode": 0,
+        "ready": true,
+        "summary": "21 PASS / 0 FAIL / 0 NOT_RUN",
+        "report": "PACK\\preflight\\verify-20261109T010931Z-5c8729bc.json",
+        "reportSha256": "db853b247cb990a218f498a37d0d5257a14c771913299e6346d6311d0dc06a11",
+        "selftestLedger": "PACK\\preflight\\selftest-ledger-20261109T010931Z-b50ad023.json (5 loopback requests, 0 host starts)"
+      },
+      {
+        "when": "after docs commit c08cd03d7",
+        "exitCode": 0,
+        "ready": true,
+        "summary": "21 PASS / 0 FAIL / 0 NOT_RUN",
+        "report": "PACK\\preflight\\verify-20261109T014007Z-de2944e0.json",
+        "reportSha256": "e203f18464a020ff6ccf131ca87a61d8c76a6ac43cef3b178cdc8a7e0d0c0ad9",
+        "selftestLedger": "PACK\\preflight\\selftest-ledger-20261109T014007Z-9de83069.json"
+      }
+    ],
+    "independentSetAudit": "check-set.mjs imports PREFLIGHT_REQUIRED_CHECKS from the bound lib/presence-pack.mjs and compares it with report.checks[].id: required 21, produced 21, missing 0, unexpected 0, duplicates 0, all PASS (both runs)",
+    "packStateAfterVerify": "manifest, host config, PD config, settings, state.db and both inputs hash to the manifest values; no run/ directory; verify added its two timestamped files and touched the mtime of the SQLite index state.db-shm (not frozen)"
+  },
+  "tests": "scripts: aa-presence-run 100 + aa-controlled-admission 34 = 134/134 on the baseline (1 run)",
+  "evidenceArchive": {
+    "root": "D:\\Code\\principles\\artifacts\\pri-1152-isolated-host-evidence\\pp-20261109T010443Z\\",
+    "files": 19,
+    "bytes": 8549373,
+    "verification": "copy then per-file sha256 compare (0 mismatched); sha256sum -c 19/19 OK; sources re-hashed 0 diff",
+    "index": "README.md + SHA256SUMS.json (sha256 a43c19602a9b5be5de2742c12208c74b194253550d51dfe0c1903076febf2087) in that directory; root README.md has an index row",
+    "contents": "pack/{manifest.json, approval.template.json (blank), candidate-files.json, host-files.json, preflight/ 2 reports + 2 ledgers}; repo/ run card v3.1 + preflight report at c08cd03d7; session-records/ prepare/verify stdout, check-set.mjs + 2 results, bundle sha256 x2, suite log",
+    "gitIgnored": "git check-ignore hits .gitignore:274 /artifacts/; git status --porcelain shows nothing under artifacts",
+    "notArchived": "host copy (~530 MB), candidate dir, config with the per-pack loopback key, fixture db stay in PACK; the PACK cannot be rebuilt byte for byte"
+  },
+  "approval": {
+    "object": "card version pri1152-run-card-v3.1 + manifest sha256 0e2dc6e332f02c315082487f7cf2c6caca73cd26209ad7b774d8fdfe157e6c2c",
+    "status": "NOT APPROVED",
+    "template": "PACK\\approval.template.json, blank (approvedBy/approvedAt/approvalEvidence empty)",
+    "rule": "the agent never fills or forwards an approval; real host start, model calls and --execute wait for the Owner's written approval of exactly this pair",
+    "supersedes": "v3 values pri1152-run-card-v3 + b16e8128…b895 are void; v3 pack stays LOST; rehearsal packs are historical only"
+  },
+  "notRun": [
+    "real host start, real model call, --execute",
+    "whether the official host emits the registration line and where (R1 first acceptance check)",
+    "real llm_input dispatch and event write; sessionId consistency; real request shape; exit timing; tool surface; production pollution before/after",
+    "local verify:merge (CI is authoritative)",
+    "Mimosa full audit (scanner_enobufs on commit; no security claim)"
+  ],
+  "conclusionBound": "只验证宿主装配观察连通；D=unknown；G1/C04/G2 待验收；不宣称送达、遵循或行为改善；真实运行未批准、未执行",
+  "followUps": [
+    "scripts/setup-worktree.mjs health check still requires CLAUDE.md (removed by #2423)",
+    "#2427 reconciliation (OPEN, content in main)",
+    "worktree-pool incident ticket (blocked by Linear free-plan limit)",
+    "optional: a full out-of-pool copy of the PACK if the Owner wants protection against another pool wipe"
+  ],
+  "latestPointer": "LATEST.json not modified"
+}

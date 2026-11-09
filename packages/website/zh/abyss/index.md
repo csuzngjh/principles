@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #009 · 2026-11-09</div>
+  <a class="abyss-title" href="/zh/abyss/09-remember-why">09 | AI 记得我们做过什么，却未必记得为什么</a>
+  <p class="abyss-desc">从潜艇换班的航海日志到 Anthropic 的“记忆是预测”：AI 记住了我们做过什么，未必理解为什么。探讨围绕长期意图组织记忆的 PIAAM 方向——什么值得记住，什么可以放下，什么时候应该重新想起。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #008 · 2026-10-30</div>
   <a class="abyss-title" href="/zh/abyss/08-goal-not-a-prompt">08 | 目标不是一段 Prompt：当智能体学会执行，谁来负责判断？</a>
   <p class="abyss-desc">从圣塔菲号的错误命令到西蒙的决策前提与 Bungay 的三重落差：当智能体学会执行，谁来负责判断什么值得做？探讨“我打算”式的意图协作、四问审议框架，以及从服从指令到共同承担判断的第三条道路。</p>

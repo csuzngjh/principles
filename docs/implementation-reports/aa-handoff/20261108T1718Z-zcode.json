@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261108T1718Z-zcode",
+  "previousCheckpoint": "20261108T1415Z-zcode",
+  "generatedAt": "2026-11-08T17:18:00Z",
+  "agent": "zcode",
+  "overallStatus": "PRI1152_B2_B3_IMPLEMENTED_NOT_MERGED_V31_NOT_GENERATED_REAL_RUN_NOT_APPROVED",
+  "summary": "B2/B3 收口完成（代码、反例、回归、推送）。B2（#2431，叠在 #2427 上）：hook:llm_input_presence 登记为 core、enabledByDefault:true（Owner 批准），经正式 plugin.register 注册链的离线回归（修复前 SKIP 且 0 事件，修复后恰好 1 条 unique full_hit 落盘），守卫改为识别变量形式注册并断言调用点计数与运行时取值，ERR-025 新增复现记录。B3（#2424）：候选身份改为四项联合证据（冻结配置、入口与代码完整性、本回合注册来源、事件与宿主 sessionId/回合窗口/provider-model 绑定），宿主日志用 logging.file 固定在包内，生产插件不再作为「不能产生事件」的必要条件、只记环境事实；缺失/unknown/越界/冲突的注册来源都判失败，presence 事件不能替代。离线反例 91+34 项（连续 3 轮 125/125）。用 B1+B2 合并构建预演：READY（21 项必需检查全部 PASS）；B1-only 与 main 构建分别只被 presence-surface、presence-durability+presence-surface 阻断。v3.1 未生成；真实宿主/模型零启动；不签收 D/G1/C04/G2。",
+  "git": {
+    "b2": {
+      "branch": "ai/PRI-1152-presence-surface-registry",
+      "prUrl": "https://github.com/csuzngjh/principles/pull/2431",
+      "base": "main",
+      "dependsOn": "#2427 (stacked)",
+      "commits": ["be3cac5b0 registry entry + regression + guard fix", "37bde3991 ERR-025 occurrence"],
+      "reviewScope": "only commits after e2105ff49 until #2427 merges"
+    },
+    "b3": {
+      "branch": "ai/PRI-1152-isolated-host-exec-pack",
+      "prUrl": "https://github.com/csuzngjh/principles/pull/2424",
+      "commits": ["18bd45487 registration-source gate + event identity + entry check + pinned host log", "this checkpoint commit"]
+    }
+  },
+  "verification": {
+    "b2": "registration-chain regression red→green (SKIP/0 events → 1 unique full_hit); guard red→green (unclassified + 9≠8 → 44/44); core feature-flags 204/204; tsc/eslint 0; release-intent PASS (core+plugin+installer patch)",
+    "b3": "scripts 125/125 x3 (aa-presence-run 91 + aa-controlled-admission 34); plugin presence 27/27; 6 guards 0; eslint 0",
+    "rehearsals": "B1+B2 candidate READY; B1-only blocked by presence-surface; main blocked by presence-durability+presence-surface (manifests 7531fe16…, f1db0324…, bf8b19c7…)",
+    "notRun": "verify:merge locally; Mimosa full audit (scanner_enobufs); real host/model; whether the official host emits the registration line (R1 first check)"
+  },
+  "evidence": {
+    "archive": "D:\\Code\\principles\\artifacts\\pri-1152-isolated-host-evidence\\ (52 files, 652692 bytes, per-file sha256 verified, /artifacts/ ignored, README index)",
+    "v3": "LOST/UNAVAILABLE; run-card v3 values are transcriptions, labeled 〔转录〕",
+    "incident": "docs/implementation-reports/pri-1152-incident-20261108-worktree-wipe.md (Linear create failed: USAGE_LIMIT_EXCEEDED free-plan issue limit)"
+  },
+  "v31": "NOT generated. After Owner merges #2427+#2431+#2424: new worktree from main via dev:worktree → build:bundle (non-minified) → --prepare → --verify --full --selftest READY → update card to v3.1 with new manifest sha → Owner approves → archive copy outside the pool → --execute. The required-check list is verified set-equal to what preflight produces; the count is not the completeness proof.",
+  "conclusionBound": "D=unknown；不签收 G1/C04/G2；不宣称送达、遵循或行为改善；真实运行未批准未执行",
+  "latestPointer": "LATEST.json not modified"
+}

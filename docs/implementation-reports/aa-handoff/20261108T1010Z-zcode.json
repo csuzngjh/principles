@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261108T1010Z-zcode",
+  "previousCheckpoint": "20261108T0200Z-zcode",
+  "generatedAt": "2026-11-08T10:10:00Z",
+  "agent": "zcode",
+  "overallStatus": "PRI1152_PREP_READY_PENDING_OWNER_B1_DECISION",
+  "summary": "PRI-1152 执行包交付（未启动真实宿主/模型）。可复现执行包 pp-20261108T095217Z：官方宿主 2026.11.1（build 4ffdd2047d1）逐字节复制并经 npm 缓存 tarball（SRI 一致）逐文件验证 15180 文件；候选 bundle（与 main f7cdc5a15 源码一致）sha256 773c5965…4192；夹具经 SqliteTaskStore/SqlitePIArtifactStore/SqliteActivationStateStore 正式入口（approvals=0，authority=system_policy）；两协议假 provider 端点（R1 /v1/responses response.completed，R2 /v1/chat/completions finish_reason+DONE，拒绝先于读 body，无 429）并用包内官方 @openclaw/ai 传输层自测通过（含两个负例）；环境允许列表（HOME/USERPROFILE/APPDATA/TEMP/XDG 全部重定向进包，凭证/NODE_OPTIONS 全丢）；预算 2/2/0/0 + 失败即停 + 进程树清扫有离线假宿主反例全绿；--execute 需与 manifest sha256 绑定的批准文件。🔴 阻断 B1（已离线复现）：recordPromptPresenceObserved 只缓冲不落盘，一次性 agent exec 自然退出时事件丢失（.tmp/pri1152-flush-probe 对照实验）——需 Owner 批准最小修复（record 后 flushEvents()，独立小 PR），修复后重新 prepare 产生新 manifest sha256 再批准。预检 verify --full --selftest：12 PASS / 1 FAIL（即 B1 项 presence-durability），port probe ok，taskkill/sweep 可用。测试：scripts 66/66（31 新增）+ plugin presence 100/100；tsc/eslint/六项 guard 绿。真实运行未批准未执行；D=unknown；不签收 G1/C04/G2。",
+  "git": {
+    "repo": "D:\\Code\\_worktrees\\principles\\PRI-1152-isolated-host-exec-pack",
+    "branch": "ai/PRI-1152-isolated-host-exec-pack",
+    "baseCommit": "f7cdc5a1515e7dcdb9ed4c0a5bf4da30f831e77d (origin/main, #2412 merged)",
+    "headCommit": "750c91e0e (plus this checkpoint commit); merged origin/main d34b7c012 at a8fec75d0",
+    "prUrl": "https://github.com/csuzngjh/principles/pull/2424",
+    "commits": [
+      "d7c94f07e feat(aa): PRI-1152 Path A isolated-host execution pack, offline preflight and approval-gated launcher",
+      "aabbd4550 fix(aa): PRI-1152 tolerate only the consumed lifecycle marker in host tarball provenance",
+      "c63b863c7 docs(aa): PRI-1152 run card v3 and preflight report with real pack values",
+      "a8fec75d0 Merge origin/main (d34b7c012) — candidate packages: version-only + host-installer (not in bundle)",
+      "750c91e0e fix(aa): PRI-1152 stop fingerprinting the generated placeholder key (CodeQL)"
+    ]
+  },
+  "tasks": [
+    {
+      "issue": "PRI-1152",
+      "state": "In Progress -> In Review (after PR)",
+      "deliverables": [
+        "scripts/dev/aa-controlled-admission/presence-run.mjs (--prepare/--verify/--execute, approval-gated)",
+        "scripts/dev/aa-controlled-admission/lib/presence-{endpoint,config,fixture,pack}.mjs, protocol-selftest.mjs",
+        "scripts/dev/aa-controlled-admission/lib/{ledger,env-isolation,workspace-seed}.mjs small fixes",
+        "scripts/__tests__/aa-presence-run.test.mjs (31, fake-host offline counterexamples)",
+        "packages/openclaw-plugin/tests/hooks/isolated-host-presence-fixture.test.ts (3)",
+        "docs/implementation-reports/pri-1150-isolated-host-run-card-20261108.md (v3, real values)",
+        "docs/implementation-reports/pri-1150-isolated-host-preflight-20261108.md (rewritten)",
+        "exec pack: artifacts/pri-1152-isolated-host/pp-20261108T095217Z (manifest sha256 b16e81284bd1975036c3560f022d28610f1c43550d245e0e4610f926e383b895)"
+      ],
+      "blocker": "B1 presence event durability (needs Owner-approved minimal fix in openclaw-plugin/src/core/event-log.ts; NOT implemented in this branch per task scope)"
+    },
+    {
+      "issue": "PRI-1119",
+      "note": "parent; Path A isolated-host run pending approval + B1; no G1 claim"
+    },
+    {
+      "issue": "PRI-1105",
+      "note": "umbrella; recorded prep progress"
+    }
+  ],
+  "verification": {
+    "scriptsTests": "66/66 (aa-presence-run 32 + aa-controlled-admission 34)",
+    "pluginTests": "100/100 (fixture 3 + llm-input-presence + registry + runtime-prompt-activation)",
+    "verifyReport": "artifacts/pri-1152-isolated-host/pp-20261108T095217Z/preflight/verify-20261108T095712Z.json (12 PASS / 1 FAIL presence-durability=B1; selftest PASS 5 cases; port 8652 bindable)",
+    "guards": "runtime-writers/workspace-tools/repo-hygiene/security-baseline/naming-policy/runtime-contract all green; tsc --noEmit plugin green"
+  },
+  "conclusionBound": "只验证宿主装配观察连通的准备；D=unknown；不签收 G1/C04/G2；真实宿主/模型未启动；#2412 后观察功能零改动",
+  "ci": "first run on a8fec75d0: Verify Merge Gate PASS; Check PR Size cancelled (labeler image download 504, env); CodeQL 1 high (js/insufficient-password-hash on placeholder key fingerprint) -> fixed in 750c91e0e",
+  "linear": {
+    "PRI-1152": "In Review via linear-cli handoff (PR #2424 linked, summary comment)",
+    "PRI-1119": "progress comment",
+    "PRI-1105": "progress comment",
+    "PRI-1150": "kept Done (not reopened)"
+  }
+}
