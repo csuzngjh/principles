@@ -638,7 +638,7 @@ async function main() {
           args,
           CODES.CHECK_FAILED,
           'Cleanup was refused and the rollback could not re-link the worktree:\n' +
-            (err && err.message ? err.message : String(err)),
+            (err.message ? err.message : String(err)),
           (err.recoveryPath
             ? 'The tree is intact at ' + err.recoveryPath + '. Do NOT run git worktree prune. From the primary checkout run: git worktree repair ' +
               shellPath(err.recoveryPath) + ' , then confirm it with git worktree list --porcelain.'
