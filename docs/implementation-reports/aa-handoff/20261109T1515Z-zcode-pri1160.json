@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261109T1515Z-zcode-pri1160",
+  "previousCheckpoint": "20261109T1440Z-zcode-pri1160",
+  "generatedAt": "2026-11-09T15:15:42Z",
+  "agent": "zcode",
+  "ticket": "PRI-1160",
+  "task": "四条历史 system_policy 原则的治理裁决材料复核与补缺 + 治理后一次性复测准备",
+  "overallStatus": "KEEP_NATIVE__GOVERNANCE_MATERIALS_AWAIT_OWNER_DECISION__POST_RETEST_NOT_RUN",
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1160-governance-refresh",
+    "branch": "ai/PRI-1160-governance-refresh",
+    "base": "2308a677d (pushed tip of ai/PRI-1105-aa-b-optional-trim: prior PRI-1160 closeout materials)",
+    "baseRationale": "the governed materials, frozen baseline and retest script live only on that pushed branch; this round adds gap-fills on top of it instead of copying them onto main"
+  },
+  "priorWorktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1105-aa-b-optional-trim",
+    "head": "2308a677d (== origin)",
+    "uncommitted": "none",
+    "lease": "zcode:PRI-1105-aa-b-optional-trim active until 2026-11-09T17:17:35Z — respected; no write, claim or lease change; local evidence read via copies only"
+  },
+  "reviewOfPriorMaterials": {
+    "complete": ["per-item identity/source/use/assembly/overlap/loss/recovery/recommendation (legacy-four-governance §1-§2)", "Console paths (§3, code-verified, UI not clicked)", "frozen budgets/rotation/inputs (§4 + script ROUNDS)", "Token NOT RUN"],
+    "gapsFilled": [
+      "current state not re-verified at handoff -> 15:04Z consistent snapshot, governance tables row-level equal to 13:21Z",
+      "baseline reproducibility unproven -> PRE re-run on 15:04Z copy: 81,364 == 81,364, 20/20 rounds identical finalSha256/included sets",
+      "artifactId values absent (desensitized JSON) so the documented recovery command was not executable -> operator ID table with real activationId/artifactId",
+      "compare() covers presence only -> pre-registered key-constraint checklist K1-K5 (incl. content-level check for the L2->L3 merge path), frozen script unchanged"
+    ]
+  },
+  "currentState": {
+    "snapshot": { "takenAt": "2026-11-09T15:04:21Z", "walBytesBeforeAfter": [0, 0], "sourceHashStableAcrossCopy": true, "stateDbSha256": "24c6e36c0e85f0adb6687d47e76d8a31e891d36933a900a17f81a01571a5819c" },
+    "priorSnapshotStateDbSha256": "830fbd24b8abf502f22931a4fdbd2b1a321955e05713ace27863f589347796a5",
+    "governanceTablesRowLevelEqual": { "activations": 32, "approvals": 57, "activation_decisions": 3, "activation_control_states": 2, "pi_artifacts": 1192, "allEqual": true },
+    "wholeFileHashDiffers": "non-governance tables only",
+    "population": { "promptActivations": 18, "owner": 14, "systemPolicy": 4, "readerWarnings": 0 },
+    "verdict": "current activations identical to the historical snapshot; Owner has not acted in Console"
+  },
+  "baselineReproducibility": {
+    "assemblyCodeUnchangedSince": "8a791cfcfb -> current main e7c7e6bba: only principles-core/src/runtime/adapter/pi-ai-http-transport.ts changed in the three source dirs (unrelated to assembly)",
+    "frozenSumFinalChars": 81364,
+    "rerunSumFinalChars": 81364,
+    "roundDiffs": 0,
+    "principleDiffs": 0,
+    "reproducible": true
+  },
+  "items": [
+    { "item": "L1", "pidHash": "77cce881e23b", "basePosition": 1, "authority": "system_policy", "recommendation": "KEEP", "recoverableAfterDisable": true },
+    { "item": "L2", "pidHash": "016647f08388", "basePosition": 2, "authority": "system_policy", "recommendation": "KEEP (merge alternative: revise L3 first, disable L2 last)", "recoverableAfterDisable": false },
+    { "item": "L3", "pidHash": "98a62956a843", "basePosition": 3, "authority": "system_policy", "recommendation": "KEEP", "recoverableAfterDisable": true },
+    { "item": "L4", "pidHash": "b60e75145eda", "basePosition": 5, "authority": "system_policy", "recommendation": "KEEP", "recoverableAfterDisable": true }
+  ],
+  "futureStrategyCandidates": "none — no scenario-level evidence; L2/L3 overlap handled by the governance merge path",
+  "postGovernanceRetest": {
+    "status": "NOT RUN",
+    "precondition": "Owner completes per-item decisions in the official Console; all-keep -> record KEEP_NATIVE and close without retest",
+    "command": "node scripts/dev/aa-selector/pri1160-legacy-retest.mjs --ws <consistent-snapshot sandbox> --items D:\\Code\\principles\\artifacts\\pri-1160\\legacy-items.tsv --pre docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json --out <post.json>",
+    "report": ["oldContentReductionChars", "refillChars + added", "netFinalChange", "K1-K5", "per-round accounting identity", "Token NOT RUN (no reliable tokenizer for the production model)"]
+  },
+  "deliverables": [
+    "docs/implementation-reports/pri-1160-governance-refresh-20261109.md (this round, gap-fills)",
+    "docs/implementation-reports/pri-1160-legacy-four-governance-20261109.md/.json (prior, unchanged)",
+    "docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json (prior frozen baseline, unchanged)",
+    "scripts/dev/aa-selector/pri1160-legacy-retest.mjs (prior, frozen compare(), unchanged)",
+    "D:\\Code\\principles\\artifacts\\pri-1160\\legacy-items.tsv + README.md (git-16 managed root, gitignored, sha256 c28cc520ee75…)"
+  ],
+  "budget": { "governanceWrites": 0, "productionConfigChanges": 0, "hostStarts": 0, "modelCalls": 0, "consoleActions": 0 },
+  "latestPointer": "LATEST.json not modified"
+}
