@@ -1205,6 +1205,41 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     expect(fs.readFileSync(path.join(wt, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
   }, 120_000);
 
+  it('refuses through the OWNERSHIP proof when the moved marker names no provable admin directory', async () => {
+    const { wt } = await makeTask('unprovable-relative-marker');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const preMoveMarker = readRegularFileNoFollow(path.join(wt, '.git'));
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: primary,
+        worktreePath: wt,
+        primaryPath: primary,
+        onQuarantined: (moved) => {
+          // A relative pointer that resolves to no admin directory from
+          // either base (quarantine or original position).
+          const bogus = 'gitdir: ../../no/such/admin/dir\n';
+          const fd = fs.openSync(path.join(moved, '.git'), 'r+');
+          try {
+            fs.writeFileSync(fd, bogus, 'utf-8');
+            fs.ftruncateSync(fd, Buffer.byteLength(bogus, 'utf-8'));
+          } finally {
+            fs.closeSync(fd);
+          }
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    // The refusal comes from the ownership proof, not from a later step.
+    expect(result.reasonCode).toBe('REMOVAL_FAILED');
+    expect(result.reason).toContain('could not isolate the worktree gitdir marker before safe deletion');
+    // The verified rollback restored the ORIGINAL marker and the tree.
+    expect(result.restoreState).toBe('RESTORE_COMPLETED');
+    expect(readRegularFileNoFollow(path.join(wt, '.git'))).toBe(preMoveMarker);
+    expect(fs.readFileSync(path.join(wt, 'unprovable-relative-marker.txt'), 'utf-8')).toBe('x\n');
+    expect((await worktreeList(primary)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(true);
+  }, 120_000);
+
   it('rollback never moves the tree onto something that now occupies the original path', async () => {
     const { wt } = await makeTask('rollback-occupied-original');
     const commonDir = await gitCommonDirAbsolute(primary);

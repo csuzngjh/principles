@@ -835,13 +835,26 @@ export async function removeWorktreeSafely({
       'quarantine (' + quiescence.mechanism + '): ' + quiescence.reason;
     if (quiescence.displacedTo) {
       // The probe moved the private parent and could not move it back: the
-      // tree is intact under the probe name. Report it there, untouched.
+      // tree is intact under the probe name. Its .git marker was already
+      // detached for the deletion, and `git worktree repair` needs it to find
+      // the admin directory — put it back (the probe path has the same depth
+      // as the quarantine, so a relative pointer resolves identically).
+      const recoveryPath = path.join(quiescence.displacedTo, 'worktree');
+      let relinkable = true;
+      try {
+        writeAtomic(path.join(recoveryPath, '.git'), markerContents !== null ? markerContents : linkage.originalMarkerBytes);
+      } catch (err) {
+        relinkable = false;
+        notes.push('could not restore the .git marker in the displaced tree (' + String((err && err.message) || err) +
+          '); it must be recreated with the original contents before git worktree repair can relink it');
+      }
       return {
         ok: false,
         reasonCode: REMOVAL_REASONS.QUIESCENCE_UNPROVEN,
-        reason: reason + '; the tree is intact at ' + path.join(quiescence.displacedTo, 'worktree'),
+        reason: reason + '; the tree is intact at ' + recoveryPath +
+          (relinkable ? '' : ' but its .git marker could not be restored'),
         restoreState: 'RESTORE_FAILED',
-        recoveryPath: path.join(quiescence.displacedTo, 'worktree'),
+        recoveryPath,
         adminDirPath: linkage.adminDir,
         quiescence,
         notes,

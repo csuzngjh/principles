@@ -50,8 +50,9 @@ import {
   runGit,
 } from './lib/git.mjs';
 import { collectPrIndex, readLeaseState } from './lib/workspace-lifecycle.mjs';
-import { withMutationLock } from './lib/git-mutation-lock.mjs';
+import { mutationLockPath, withMutationLock } from './lib/git-mutation-lock.mjs';
 import {
+  canonicalPath,
   classifyReparsePoints,
   detachExternalLinks,
   detachInternalLinks,
@@ -258,10 +259,18 @@ export function fingerprintExternalTarget(dir, { excludePaths = [] } = {}) {
  */
 export function snapshotExternalTargets(links, { excludePaths = [], root = null } = {}) {
   const snapshots = new Map();
+  // Link targets are canonical (realpath) while the worktree path and the
+  // exclusions may be lexical — a pool reached through a junction/symlink
+  // would make a self-cycle target look external and an excluded subtree look
+  // foreign. Compare canonical with canonical (case-sensitively, as both come
+  // from realpath).
+  const canonicalOrResolved = (p) => canonicalPath(p) || path.resolve(p);
+  const canonicalRoot = root ? canonicalOrResolved(root) : null;
+  const canonicalExcludes = excludePaths.map(canonicalOrResolved);
   for (const link of links) {
     const candidate = link.canonicalTarget || link.probeTarget;
     if (!candidate) continue;
-    if (root && isPathInsideRoot(root, candidate)) continue;
+    if (canonicalRoot && isPathInsideRoot(canonicalRoot, candidate, { caseSensitive: true })) continue;
     const target = path.resolve(candidate);
     const key = process.platform === 'win32' ? target.toLowerCase() : target;
     if (snapshots.has(key)) continue;
@@ -269,8 +278,8 @@ export function snapshotExternalTargets(links, { excludePaths = [], root = null 
     snapshots.set(key, {
       path: target,
       existedBefore,
-      excludePaths: excludePaths.map((item) => path.resolve(item)),
-      fingerprint: existedBefore ? fingerprintExternalTarget(target, { excludePaths }) : null,
+      excludePaths: canonicalExcludes,
+      fingerprint: existedBefore ? fingerprintExternalTarget(target, { excludePaths: canonicalExcludes }) : null,
     });
   }
   return [...snapshots.values()];
@@ -506,6 +515,11 @@ async function main() {
           (link) => link.canonicalTarget && link.unsafeReason === 'outside'
         );
         const expectedRemovalPaths = [target.path];
+        // THE CLEANUP WRITES ITS OWN MUTATION LOCK while the snapshots are
+        // compared: releasing it truncates the record file, which under a
+        // target containing the Git common directory is an EXPECTED change
+        // and must not be reported as EXTERNAL_TARGET_LOST (CodeRabbit r6).
+        expectedRemovalPaths.push(mutationLockPath(commonDir));
         if (externalTargets.some((link) => isWithinPath(link.canonicalTarget, commonDir))) {
           try {
             expectedRemovalPaths.push(resolveWorktreeAdminDir(target.path, commonDir));
