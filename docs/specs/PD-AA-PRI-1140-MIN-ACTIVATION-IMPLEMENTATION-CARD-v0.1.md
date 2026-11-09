@@ -85,5 +85,5 @@ Owner 原文逐字记录于 Linear 评论 `9f0e1bcc`。工程解读与落地方�
 
 - **实现**：提交 `3c7d4ef9a`。共享装配入口只新增可选 `additiveOnly` 门槛，钉死路径与受控准入不变。新增 `would_displace_native_assembly` 回退原因；provider 解析后按剩余软截止重新计时（rc-7）。
 - **测试**：host-runtime 新增 9 项，插件配置新增 3 项，真实装配链新增 5 项。`runtime-prompt-activation` 78/78 通过，host-runtime tests 全部通过。product-telemetry 并发套件从仓库根运行时，因 fork 字面路径依赖 cwd 而失败；改用包目录作 cwd 运行 6/6 通过，属既有环境问题，与本改动无关。
-- **离线比较**（一轮，`pri-1140-min-activation-replay-results-20261109.md`）：18 个回合全部没有命中失败判据；候选臂最终正文与普通 Native 18/18 逐字节一致。A3 中干预在修订后恢复（钉死臂 `target_unavailable` → 候选臂 `target_present`，owner 授权核对通过）。A4、A8、D2 按条件 #3 保留原 Native，并记录将被挤出的集合。交付信号轮的解析开销为 +1.5 至 +4.3 ms，非目标轮为 0。
+- **离线比较**（一轮，`pri-1140-min-activation-replay-results-20261109.md`）：18 个回合全部没有命中失败判据；候选臂最终正文与普通 Native 18/18 逐字节一致。A3 恢复映射解析和授权记录（钉死臂 `target_unavailable` → 候选臂 `target_present`，owner 授权核对通过），正文原本就包含新版。A4 预算不足、目标未装配；A4、A8、D2 按条件 #3 保留原 Native，并记录将被挤出的集合。交付信号轮的解析开销为 +1.5 至 +4.3 ms，非目标轮为 0。
 - **决定**：**保留候选，供接入评审**，结论只覆盖换版后的干预连续性。预算不足时无法恢复正文在场，原因是 greedy 头寸单调递减，这是条件 #3 的直接结果，详见比较报告 §5。本轮没有发现需要模型辅助的语义缺口。
