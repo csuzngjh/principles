@@ -23,7 +23,8 @@ import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { buildInjectedExpectations } from './prompt-presence-expectations.js';
 import { getPromptPresenceRegistry } from './prompt-presence-registry.js';
 import { revalidateAdaptivePrinciple, type ActivePrinciplePromptResult } from '@principles/host-runtime';
-import { readAdaptiveActivationConfig } from './adaptive-activation-config.js';
+import { readAdaptiveActivationConfig, isPrincipleIdentityMapping } from './adaptive-activation-config.js';
+import { takeAdaptivePrincipleResolution } from './adaptive-principle-resolution.js';
 import {
   isControlledAdmissionConfigured,
   takeControlledAdmissionHandoff,
@@ -550,16 +551,40 @@ export async function handleBeforePromptBuild(
   const isUserInteraction = isUserInteractionTrigger(trigger);
   const api = ctx.api;
   const adaptiveMapping = readAdaptiveActivationConfig(api?.pluginConfig, workspaceDir, adaptiveStartedAt);
+  // PRI-1140: a {principleId} mapping carries no local target identity — the
+  // provider resolved it against the CURRENT authorized set for THIS
+  // invocation. Consume that resolution exactly once, whatever the re-read
+  // mapping now says, so it never lingers; a replay or a duplicate callback
+  // that finds it gone degrades to the native baseline (same safety shape as a
+  // lost controlled-admission handoff).
+  const principleResolution = takeAdaptivePrincipleResolution(sharedActivePrinciplePrompt?.adaptivePacking?.hookInvocationId);
+  // PRI-1140 closeout: the mapping was just re-read. A principle mapping keeps
+  // this invocation's priority only while it still names the principle the
+  // provider resolved. Switched mid-flight to another principle → THIS round
+  // falls back to Native (the terminal record stays with the original
+  // invocation and target); the next request resolves the current mapping.
+  const principleMappingChanged = adaptiveMapping !== null && isPrincipleIdentityMapping(adaptiveMapping)
+    && principleResolution !== undefined && principleResolution.principleId !== adaptiveMapping.principleId;
+  // The concrete target identity this invocation may use: the pinned mapping
+  // itself, or the provider's principle resolution. Undefined = no verified
+  // identity, so nothing downstream may fabricate one.
+  const mappingTarget: { artifactId: string; activationId: string } | undefined = !adaptiveMapping
+    ? undefined
+    : isPrincipleIdentityMapping(adaptiveMapping)
+      ? (principleResolution && !principleMappingChanged
+        ? { artifactId: principleResolution.artifactId, activationId: principleResolution.activationId }
+        : undefined)
+      : adaptiveMapping;
   // A mapping can expire or be disabled while the shared packer is running.
   // In that case discard its additional contribution before assembling anything.
   const preparedPacking = sharedActivePrinciplePrompt?.adaptivePacking;
-  if (preparedPacking?.nativeBaseline && (!adaptiveMapping
-    || preparedPacking.targetActivationId !== adaptiveMapping.activationId
-    || preparedPacking.targetSnapshot?.artifactId !== adaptiveMapping.artifactId)) {
+  if (preparedPacking?.nativeBaseline && (!mappingTarget
+    || preparedPacking.targetActivationId !== mappingTarget.activationId
+    || preparedPacking.targetSnapshot?.artifactId !== mappingTarget.artifactId)) {
     sharedActivePrinciplePrompt = preparedPacking.nativeBaseline;
   }
   const adaptiveInvocationId = preparedPacking?.hookInvocationId
-    ?? (adaptiveMapping ? beginAdaptivePromptInvocation(ctx, adaptiveMapping, sharedActivePrinciplePrompt ? 'shared' : 'plugin_local') : undefined);
+    ?? (mappingTarget ? beginAdaptivePromptInvocation(ctx, mappingTarget, sharedActivePrinciplePrompt ? 'shared' : 'plugin_local') : undefined);
   const recordAdaptive = (record: AdaptiveDeliveryRecord) => {
     try { wctx.eventLog.recordAdaptiveDelivery(sessionId, record); } catch (error) {
       logger?.warn?.(`[PD:AA] Invocation journal unavailable: ${String(error)}`);
@@ -568,7 +593,7 @@ export async function handleBeforePromptBuild(
   // A config reload may replace the mapping after packing. The terminal record
   // still belongs to the invocation's original target, never the replacement.
   const journalTarget = preparedPacking?.hookInvocationId && preparedPacking.targetArtifactId
-    ? { artifactId: preparedPacking.targetArtifactId, activationId: preparedPacking.targetActivationId } : adaptiveMapping ?? undefined;
+    ? { artifactId: preparedPacking.targetArtifactId, activationId: preparedPacking.targetActivationId } : mappingTarget ?? undefined;
   // Reuse the snapshot taken when this invocation opened. A runtime/config
   // change after that point must not rewrite the invocation's own evidence.
   const journalRuntimeMode = sharedActivePrinciplePrompt ? 'shared' : 'plugin_local';
@@ -881,9 +906,12 @@ export async function handleBeforePromptBuild(
 
     if (sharedActivePrinciplePrompt) {
       const packing = sharedActivePrinciplePrompt.adaptivePacking;
-      if (adaptiveMapping && packing?.targetSnapshot && packing.targetBody && packing.nativeBaseline
-        && packing.targetActivationId === adaptiveMapping.activationId
-        && packing.targetSnapshot.artifactId === adaptiveMapping.artifactId) {
+      // PRI-1140: the identity comparison uses the invocation's resolved
+      // target (pinned mapping or provider principle resolution) — never an
+      // unresolved principleId.
+      if (adaptiveMapping && mappingTarget && packing?.targetSnapshot && packing.targetBody && packing.nativeBaseline
+        && packing.targetActivationId === mappingTarget.activationId
+        && packing.targetSnapshot.artifactId === mappingTarget.artifactId) {
         const baseline = packing.nativeBaseline;
         adaptiveDeadlineAt = Math.min(packing.deadlineAt ?? adaptiveStartedAt + adaptiveMapping.softTimeoutMs, adaptiveMapping.expiresAtMs);
         const handedOff = takeControlledAdmissionHandoff(event, packing.hookInvocationId);
@@ -920,7 +948,10 @@ export async function handleBeforePromptBuild(
         if (typeof text === 'string' && typeof id === 'string' && id.trim() && sessionId) {
           adaptiveAdmissionId = id;
           adaptiveOutcome = { text: sharedActivePrinciplePrompt.additionalContext,
-            reason: text.split(/\r?\n/, 1)[0] === '[PD-AA:delivery-review:v1]' ? 'shared_priority_unavailable' : 'scene_not_matched',
+            // PRI-1140 closeout: a mid-flight principle switch is recorded as
+            // such on the ORIGINAL invocation instead of a generic reason.
+            reason: principleMappingChanged ? 'adaptive_mapping_changed'
+              : text.split(/\r?\n/, 1)[0] === '[PD-AA:delivery-review:v1]' ? 'shared_priority_unavailable' : 'scene_not_matched',
             addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
         }
       }
