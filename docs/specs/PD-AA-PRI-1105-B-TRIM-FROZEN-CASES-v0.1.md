@@ -64,7 +64,7 @@
 
 ### 2.4 T 组：生产链与失败回退（实施后由 vitest 证明，非重放）
 
-T1 provider → 共享装配 → Hook：最终 `prependSystemContext` 中的指令段等于 Native 去掉可省块；journal 闭合记录写明省略集合与规则。T2 Hook 终验失败（目标正文不全、重验失效、截止、超预算）→ 使用现有回退文本，该文本取自**未裁剪**的 `nativeBaseline`（Native 去目标，或超预算时为完整 Native），不保留任何省略。T3 映射中途更换 → Native。T4 受控准入分支 → 不裁剪。T5 开关字段不是布尔值 → 映射无效 → Native。T6 字段缺省 → 与 `main` 逐字节一致。
+T1 provider → 共享装配 → Hook：最终 `prependSystemContext` 中的指令段等于 Native 去掉可省块；journal 闭合记录写明省略集合与规则。T2 Hook 终验失败（目标正文不全、重验失效、截止、超预算）→ 使用现有回退文本，该文本取自**未裁剪**的 `nativeBaseline`（Native 去目标，或超预算时为完整 Native），不保留任何省略。T3 映射中途更换 → Native。T4 受控准入分支 → 不裁剪。T5 开关字段不是布尔值 → 映射无效 → Native。T6 字段缺省 → 与 `main` 逐字节一致。T7 manifest 一致性：`openclaw.plugin.json` 的 `adaptiveActivation` schema 接受布尔值的 `omitSystemPolicyOrdinary`，拒绝非布尔值，与读取器的判定一致（防止配置后插件整体加载失败）。
 
 ## 3. 判定线（比较前冻结）
 
@@ -79,3 +79,4 @@ T1 provider → 共享装配 → Hook：最终 `prependSystemContext` 中的指�
 ## 4. 修订记录
 
 - v0.1（2026-11-09）：首版冻结。
+- 2026-11-09T13:05Z（候选实现和任何候选运行之前）：T 组新增 T7（manifest 一致性），依据是 A 线 #2448 阻断 2 的同类风险。R、FX、E 组的标注和 §3 判定线均未改动。

@@ -23,6 +23,7 @@ hook:before_prompt_build → host-runtime beforePromptBuild（index.ts，转发�
 | 文件 | 改动 |
 |---|---|
 | `openclaw-plugin/src/hooks/adaptive-activation-config.ts` | 两种映射新增可选 `omitSystemPolicyOrdinary: boolean`；值存在但不是布尔 → 映射无效（失败关闭，与 PRI-1140 歧义规则一致） |
+| `openclaw-plugin/openclaw.plugin.json` | 在 `configSchema.properties.adaptiveActivation`（`additionalProperties:false`）中声明 `omitSystemPolicyOrdinary: {type: boolean, default: false}`。**必需**：未声明时，宿主校验失败会导致 PD 插件**整体**加载失败（A 线 #2448 §4 已对宿主 bundle 取证）。另加该字段的 schema↔读取器一致性测试 |
 | `openclaw-plugin/src/index.ts` | 哨兵分支返回 `omitSystemPolicyOrdinary: true`；受控准入分支不返回 |
 | `host-runtime/src/index.ts` | provider 结果类型、布尔校验与转发 |
 | `host-runtime/src/active-principle-prompt.ts` | builder 可选输入；两个返回点做删减；`adaptivePacking` 增加 `omittedActivationIds` 与 `omission`（`trimmed`/`none_eligible`/`skipped:<原因>`）；`nativeBaseline` 不裁剪 |
@@ -32,6 +33,8 @@ hook:before_prompt_build → host-runtime beforePromptBuild（index.ts，转发�
 ## 4. 预计收益与开销（由 Native 基线逐块加和推算，非候选运行结果）
 
 真实样本 principleId 路径：20 个交付轮合计 −8.77%，单轮 −8.8% 至 −41.9%，模型感知预算轮 −16.6%（9208→7676）。钉死路径合计 −14.03%。11 个 `would_displace` 轮按设计不省。开销只有内存过滤，加上对最终集合重渲染一次（每轮 ≤ 18 块），无 I/O、无模型调用。通过线：中位数增加 ≤ 2 ms；非交付轮零新增。
+
+**生产可达性（如实）**：以上数字来自带消息身份的事件（harness 与 PRI-1140 相同，按 agentsapi 形态构造）。已安装宿主 OpenClaw 2026.11.1 的 embedded 生产路径不提供消息身份，provider 根本走不到交付标记分支（A 线 #2448 阻断 1）。因此**今天 R-SP-1 的生产收益为 0**。principleId 变体还要等 manifest 补上 `principleId`（#2448 阻断 2 / fix2，属于 PRI-1140 收尾，不在本卡范围）。本卡的验收边界是离线装配回归，这一点不变。
 
 ## 5. 失败处理
 
@@ -47,8 +50,13 @@ hook:before_prompt_build → host-runtime beforePromptBuild（index.ts，转发�
 
 ## 8. 需要 Owner 决定的一件事
 
-**A（本卡）**：批准 R-SP-1 作为首条删减策略，按冻结判定线做一轮离线验收后决定保留候选或保留 Native。**B（不写代码）**：直接在 Console 治理这 4 条存量激活（批准则变为 owner，停用则所有轮次都不再注入）。选 B 后，本工作区的 R-SP-1 收益归零，B 线结论为 `KEEP_NATIVE`。两者不互斥，但 B 会让 A 在本工作区失去对象。**建议：A**——保留存量供普通轮次使用，同时让交付轮只装配 Owner 批准的内容。若 Owner 本意是让这 4 条在所有轮次退出，应选 B。
+**A（本卡）**：批准 R-SP-1 作为首条删减策略，按冻结判定线做一轮离线验收后决定保留候选或保留 Native。**B（不写代码）**：直接在 Console 治理这 4 条存量激活（批准则变为 owner，停用则所有轮次都不再注入）。选 B 后，本工作区的 R-SP-1 收益归零，B 线结论为 `KEEP_NATIVE`。两者不互斥，但 B 会让 A 在本工作区失去对象。**生效时间不同**：B 在今天的安装版上立即对所有轮次生效；A 的生产效果要等 #2448 两项阻断修复后才能到达。**建议：A**——这是 B 线要交付的可复用策略代码和离线证据，保留存量供普通轮次使用，同时让交付轮只装配 Owner 批准的内容。若 Owner 的本意是让这 4 条立刻在所有轮次退出，应选 B。
 
 ## 9. 范围与结论上限
 
 零模型调用、零宿主运行、不启用生产、不改 Runtime V2 治理状态。结论只覆盖：交付轮最终指令正文变短，且关键内容不丢失。不主张行为改善、送达确认（D 仍 unknown）或覆盖提升。后续候选（本卡不做）：每块重复的样板句（约 87 字符/块）；先删减再加入目标，用于恢复 `would_displace` 轮的覆盖（需另行授权挤出）；语义近重复无法用确定性规则处理，留作模型方案反例。
+
+## 10. 修订记录（批准前）
+
+- 2026-11-09T12:30Z：首版提交 `d6a8f8f9a`（sha256 `99d52ff1…7043`），Linear 评论 `b627aede`。
+- 2026-11-09T13:05Z：仍在批准前，依据 A 线 #2448 的宿主取证修订两处，规则与判定线均不变。① §3 补上 `openclaw.plugin.json` 的字段声明和一致性测试（缺这一项时，配置该字段会让插件整体加载失败）。② §4/§8 写明生产可达性：今天的生产收益为 0；B 方案立即生效，A 方案要等阻断修复。请以本修订版批准。
