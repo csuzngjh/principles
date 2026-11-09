@@ -80,3 +80,4 @@ T1 provider → 共享装配 → Hook：最终 `prependSystemContext` 中的指�
 
 - v0.1（2026-11-09）：首版冻结。
 - 2026-11-09T13:05Z（候选实现和任何候选运行之前）：T 组新增 T7（manifest 一致性），依据是 A 线 #2448 阻断 2 的同类风险。R、FX、E 组的标注和 §3 判定线均未改动。
+- 2026-11-09（裁决，PRI-1160）：实施卡 R-SP-1 **未获批准**，结论 KEEP_NATIVE（裁决全文见实施卡 §11）。候选臂不会运行，§3 判定线随之作废；本文件各组标注**保持原样**，仅作可追溯记录。两点更正供阅读本文件时注意：① 「可省」列只表示 R-SP-1 的分类结果，不表示内容可以省略；② R 组「Native」列是带映射的交付轮输出，其中钉死路径 k7–k17 为 `prioritized`，**不是普通 Native**。后续复测以普通 Native 为基线，见 `docs/implementation-reports/pri-1160-legacy-four-governance-20261109.md` §5。

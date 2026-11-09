@@ -1,6 +1,6 @@
 # PRI-1105 B 线实施卡 v0.1：交付轮省略无 Owner 批准的普通指令（R-SP-1）
 
-状态：**待 Owner 书面批准（未编码）** · 冻结案例：`PD-AA-PRI-1105-B-TRIM-FROZEN-CASES-v0.1.md`（先于候选结果写定）· 缺口报告：`docs/implementation-reports/pri-1105-b-step1-gap-20261109.md`
+状态：**已裁决——未获批准，KEEP_NATIVE（2026-11-09，裁决见 §10）** · 冻结案例：`PD-AA-PRI-1105-B-TRIM-FROZEN-CASES-v0.1.md`（先于候选结果写定，标注未改动）· 缺口报告：`docs/implementation-reports/pri-1105-b-step1-gap-20261109.md`（历史记录，保留）· 后续工单真源：**PRI-1160**（存量治理清单见 `docs/implementation-reports/pri-1160-legacy-four-governance-20261109.md`）
 
 ## 1. 已复现的缺口（真实样本）
 
@@ -60,3 +60,13 @@ hook:before_prompt_build → host-runtime beforePromptBuild（index.ts，转发�
 
 - 2026-11-09T12:30Z：首版提交 `d6a8f8f9a`（sha256 `99d52ff1…7043`），Linear 评论 `b627aede`。
 - 2026-11-09T13:05Z：仍在批准前，依据 A 线 #2448 的宿主取证修订两处，规则与判定线均不变。① §3 补上 `openclaw.plugin.json` 的字段声明和一致性测试（缺这一项时，配置该字段会让插件整体加载失败）。② §4/§8 写明生产可达性：今天的生产收益为 0；B 方案立即生效，A 方案要等阻断修复。请以本修订版批准。
+
+## 11. 裁决（2026-11-09，Owner 治理方案 B）：R-SP-1 未获批准，本轮结论 KEEP_NATIVE
+
+Owner 未批准本卡，并给出裁决方向：按方案 B 处理四条历史存量（在 Console 逐条治理），装配策略**保留现有 Native，不做按场景省略**。本节修正当前结论；§1–§9 与缺口报告保留为历史，不改写。
+
+1. **R-SP-1 未获批准，不实施。** 候选臂从未运行：§4 的全部数字（−8.77%、−16.6% 等）是按 Native 基线逐块加和得到的**推算值，不是实测结果**，任何后续材料不得将其引用为已获得的运行收益。
+2. **方法修正一（授权标签不能决定可省性）。** 卡 §2 用 `authority === 'system_policy'` 作为省略资格，这条推理不成立：缺批准行只说明授权来源无法核实，不说明内容可以省；旧自动激活路径关闭也只说明不再产生新行，不判定存量应停用。空 `mandatoryPrincipleIds` 同样不构成其他内容可省的依据。四条存量的处置改为逐条治理材料（PRI-1160），由 Owner 在 Console 逐条决定。
+3. **方法修正二（对照基线错误）。** 卡 §3 把裁剪放在 `target_present`/`prioritized` 两个返回点上，候选臂因此只会是**优先装配结果**的子集；卡 §2 末句「候选正文 ⊆ Native 正文」对 `prioritized` 回合不成立。冻结案例 R 组的「Native」列取的是带映射的交付轮输出：`target_present` 与 `would_displace` 回合恰好等于普通 Native，钉死路径 k7–k17 的 `prioritized` 回合则已相对普通 Native 加入目标并挤出内容。应当冻结的对照是**普通 Native** 的最终正文；优先装配新增或挤出的内容必须分别报告，不能混在"裁剪收益"里。后续任何精简卡都须以普通 Native 为对照、以普通 Native 为回退。
+4. **判定线相应失效。** 冻结案例 §3 的 HF/B/C 判定线基于 R-SP-1 候选臂，随本裁决一并作废；R/FX/E 组标注与基线报告保留可追溯。若未来提出新的可省规则，须以明确可省依据 + 普通 Native 对照另立实施卡（PRI-1105 总单 B 线描述不变）。
+5. **后续以 PRI-1160 为工单真源**（首张独立票）：逐条决策材料、复测方案与 Owner 操作路径都记录在那里；PRI-1105 总单只保留摘要与链接。

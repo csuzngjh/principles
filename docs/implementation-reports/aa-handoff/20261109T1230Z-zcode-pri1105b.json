@@ -3,7 +3,7 @@
   "issue": "PRI-1105",
   "line": "B",
   "issueTitle": "[AA v0.6] Principle Intervention Loop 总单 · B 线：首条注入精简策略",
-  "stage": "card-awaiting-owner-approval-not-coded",
+  "stage": "adjudicated-keep-native (was: card-awaiting-owner-approval-not-coded)",
   "timestampUtc": "2026-11-09T12:30Z",
   "worktree": {
     "path": "D:\\Code\\_worktrees\\principles\\PRI-1105-aa-b-optional-trim",
@@ -176,5 +176,21 @@
     ],
     "harnessEventShape": "identity-bearing (agentsapi-like), same as PRI-1140 harness",
     "bLineBoundary": "offline assembly regression (unchanged)"
+  },
+  "adjudication": {
+    "date": "2026-11-09",
+    "ticket": "PRI-1160",
+    "decision": "R-SP-1 not approved; Owner governance option B",
+    "currentConclusion": "KEEP_NATIVE",
+    "predictedBenefitStatus": "estimate by per-block arithmetic over the Native baseline; candidate never ran; NOT a measured result",
+    "methodCorrections": [
+      "authority label cannot decide omissibility (missing approval row / closed legacy path / empty mandatory list are not omission evidence)",
+      "the frozen comparison baseline must be ordinary Native, not the prioritized assembly; additions/displacements by prioritized packing must be reported separately"
+    ],
+    "supersededBy": {
+      "document": "docs/implementation-reports/pri-1160-legacy-four-governance-20261109.md",
+      "checkpoint": "20261109T1440Z-zcode-pri1160"
+    },
+    "note": "appended; the fields above are kept as the historical record"
   }
 }

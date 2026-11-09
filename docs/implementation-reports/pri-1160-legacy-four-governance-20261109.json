@@ -1,0 +1,294 @@
+{
+ "document": "pri-1160-legacy-four-governance",
+ "ticket": "PRI-1160",
+ "conclusion": "KEEP_NATIVE · 存量治理待 Owner 逐条决定",
+ "generatedAt": "2026-11-09T14:29:02.624Z",
+ "desensitization": "principle ids appear only as sha256(principleId)[0:12]; no principle text, titles, raw activation/artifact ids or workspace paths. Titles for Console lookup are in the companion Markdown.",
+ "sources": {
+  "snapshot": {
+   "takenAt": "2026-11-09T13:21:39.525Z",
+   "stateDbSha256": "830fbd24b8abf502f22931a4fdbd2b1a321955e05713ace27863f589347796a5",
+   "ledgerSha256": "e90f5657f40ade19dde799ff24f57e5db79e1b92cdd1607c19666b8ae9ef9bf4",
+   "consistency": "WAL 0 bytes before/after copy; source sha256 stable across copy"
+  },
+  "historicalEvents": {
+   "events": 208,
+   "window": "2026-11-02..2026-11-09 (local copies of the daily event logs)"
+  },
+  "productionGuard": {
+   "governanceTablesUnchanged": true,
+   "tables": [
+    "activations",
+    "approvals",
+    "activation_decisions",
+    "activation_control_states",
+    "pi_artifacts"
+   ],
+   "note": "all rehearsals ran on throwaway copies; production governance tables identical before/after (full-row digests)"
+  },
+  "preBaseline": {
+   "path": "docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json",
+   "sha256": "f36604a22f1369b3aea2eb1b578c716b1220791865544324bcaf2f17b27d8ce3",
+   "rounds": 20,
+   "sumFinalChars": 81364
+  }
+ },
+ "population": {
+  "promptActivations": 18,
+  "ownerApproved": 14,
+  "noApprovalRow": 4
+ },
+ "orderingFact": "Native base order is activated_at ASC; the four legacy items are the oldest activations (positions per item). Any restore or revision re-stamps activated_at and moves the item to the end of the base order.",
+ "items": [
+  {
+   "id": "L1",
+   "pidHash": "77cce881e23b",
+   "textChars": 178,
+   "activatedAt": "2026-09-18T23:42:53.642Z",
+   "basePosition": 1,
+   "approvalRows": 0,
+   "provenance": {
+    "candidate": {
+     "kind": "principle",
+     "confidence": 0.55,
+     "status": "consumed",
+     "createdAt": "2026-09-17T03:39:47.416Z",
+     "sourceArtifactHash": "7c15372d6ff6"
+    },
+    "rollout": {
+     "decision": "approve_rollout",
+     "at": "2026-09-18T23:42:53.636Z"
+    },
+    "pipeline": "principle_candidate → philosopher → scribe → rollout_reviewer → prompt activation in the same minute, no approval row (pre-PRI-811-Phase-B auto-activation path)",
+    "otherChannelActivations": 0,
+    "ownerArtifactLineageReferencesIt": false
+   },
+   "assembly": {
+    "historicalEventsIncluded": "195/208",
+    "exclusionBreakdown": {
+     "fair_rotation_v1/budget=2000": 12,
+     "fair_rotation_v1/budget=4000": 1
+    },
+    "baselineRoundsIncluded": [
+     "4000-k13",
+     "4000-k15",
+     "4000-k16",
+     "4000-k17",
+     "4000-k18",
+     "4000-FIFO",
+     "15625-k1"
+    ]
+   },
+   "overlap": {
+    "closestOwner": {
+     "ownerHash": "1b258fd34eca",
+     "jaccard": 0.055,
+     "contains": false
+    },
+    "ownerContainment": false,
+    "closestLegacySibling": {
+     "legacyHash": "b60e75145eda",
+     "jaccard": 0.059
+    }
+   },
+   "rehearsal": {
+    "deactivate": "ok (4/4 on copy)",
+    "restoreAfterDeactivate": "ok: pd runtime activation dispatch --confirm → queued_for_approval → approve → activated",
+    "restoredForm": {
+     "authority": "owner",
+     "blockChars": 382,
+     "activationId": "regenerated (act_prompt_<ledger uuid>_<suffix>)",
+     "targetRef": "ledger://<its own ledger candidate principle uuid>",
+     "directiveIdUnchanged": true,
+     "basePosition": "moves to the end (new activated_at)"
+    },
+    "proposeRevisionWhileLive": "ok: new validated artifact + pending approval queued (approval not executed on copy)"
+   }
+  },
+  {
+   "id": "L2",
+   "pidHash": "016647f08388",
+   "textChars": 178,
+   "activatedAt": "2026-09-18T23:46:34.005Z",
+   "basePosition": 2,
+   "approvalRows": 0,
+   "provenance": {
+    "candidate": {
+     "kind": "prompt",
+     "confidence": 0.72,
+     "status": "consumed",
+     "createdAt": "2026-09-17T04:58:16.969Z",
+     "sourceArtifactHash": "6334ef583c16"
+    },
+    "rollout": {
+     "decision": "approve_rollout",
+     "at": "2026-09-18T23:46:34.001Z"
+    },
+    "pipeline": "principle_candidate → philosopher → scribe → rollout_reviewer → prompt activation in the same minute, no approval row (pre-PRI-811-Phase-B auto-activation path)",
+    "otherChannelActivations": 0,
+    "ownerArtifactLineageReferencesIt": false
+   },
+   "assembly": {
+    "historicalEventsIncluded": "195/208",
+    "exclusionBreakdown": {
+     "fair_rotation_v1/budget=2000": 12,
+     "fair_rotation_v1/budget=4000": 1
+    },
+    "baselineRoundsIncluded": [
+     "4000-k1",
+     "4000-k15",
+     "4000-k16",
+     "4000-k17",
+     "4000-k18",
+     "4000-FIFO",
+     "15625-k1"
+    ]
+   },
+   "overlap": {
+    "closestOwner": {
+     "ownerHash": "1b258fd34eca",
+     "jaccard": 0.101,
+     "contains": false
+    },
+    "ownerContainment": false,
+    "closestLegacySibling": {
+     "legacyHash": "98a62956a843",
+     "jaccard": 0.192
+    }
+   },
+   "rehearsal": {
+    "deactivate": "ok (4/4 on copy)",
+    "restoreAfterDeactivate": "refused: identity gate candidate_kind_invalid (candidate kind=prompt); no approval row to reopen → no official restore path",
+    "restoredForm": null,
+    "proposeRevisionWhileLive": "refused: revision_enqueue_failed/candidate_kind_invalid"
+   }
+  },
+  {
+   "id": "L3",
+   "pidHash": "98a62956a843",
+   "textChars": 182,
+   "activatedAt": "2026-09-18T23:47:35.697Z",
+   "basePosition": 3,
+   "approvalRows": 0,
+   "provenance": {
+    "candidate": {
+     "kind": "principle",
+     "confidence": 0.72,
+     "status": "consumed",
+     "createdAt": "2026-09-17T04:58:16.969Z",
+     "sourceArtifactHash": "6334ef583c16"
+    },
+    "rollout": {
+     "decision": "approve_rollout",
+     "at": "2026-09-18T23:47:35.694Z"
+    },
+    "pipeline": "principle_candidate → philosopher → scribe → rollout_reviewer → prompt activation in the same minute, no approval row (pre-PRI-811-Phase-B auto-activation path)",
+    "otherChannelActivations": 0,
+    "ownerArtifactLineageReferencesIt": false
+   },
+   "assembly": {
+    "historicalEventsIncluded": "208/208",
+    "exclusionBreakdown": {},
+    "baselineRoundsIncluded": [
+     "4000-k1",
+     "4000-k2",
+     "4000-k15",
+     "4000-k16",
+     "4000-k17",
+     "4000-k18",
+     "4000-FIFO",
+     "15625-k1"
+    ]
+   },
+   "overlap": {
+    "closestOwner": {
+     "ownerHash": "1f819865af11",
+     "jaccard": 0.08,
+     "contains": false
+    },
+    "ownerContainment": false,
+    "closestLegacySibling": {
+     "legacyHash": "016647f08388",
+     "jaccard": 0.192
+    }
+   },
+   "rehearsal": {
+    "deactivate": "ok (4/4 on copy)",
+    "restoreAfterDeactivate": "ok: pd runtime activation dispatch --confirm → queued_for_approval → approve → activated",
+    "restoredForm": {
+     "authority": "owner",
+     "blockChars": 400,
+     "activationId": "regenerated (act_prompt_<ledger uuid>_<suffix>)",
+     "targetRef": "ledger://<its own ledger candidate principle uuid>",
+     "directiveIdUnchanged": true,
+     "basePosition": "moves to the end (new activated_at)"
+    },
+    "proposeRevisionWhileLive": "ok: new validated artifact + pending approval queued (approval not executed on copy)"
+   }
+  },
+  {
+   "id": "L4",
+   "pidHash": "b60e75145eda",
+   "textChars": 117,
+   "activatedAt": "2026-09-19T22:23:21.516Z",
+   "basePosition": 5,
+   "approvalRows": 0,
+   "provenance": {
+    "candidate": {
+     "kind": "principle",
+     "confidence": 0.72,
+     "status": "consumed",
+     "createdAt": "2026-09-19T17:54:19.388Z",
+     "sourceArtifactHash": "45a52db4d33f"
+    },
+    "rollout": {
+     "decision": "approve_rollout",
+     "at": "2026-09-19T22:23:21.511Z"
+    },
+    "pipeline": "principle_candidate → philosopher → scribe → rollout_reviewer → prompt activation in the same minute, no approval row (pre-PRI-811-Phase-B auto-activation path)",
+    "otherChannelActivations": 0,
+    "ownerArtifactLineageReferencesIt": false
+   },
+   "assembly": {
+    "historicalEventsIncluded": "208/208",
+    "exclusionBreakdown": {},
+    "baselineRoundsIncluded": [
+     "4000-k1",
+     "4000-k2",
+     "4000-k3",
+     "4000-k4",
+     "4000-k16",
+     "4000-k17",
+     "4000-k18",
+     "4000-FIFO",
+     "15625-k1"
+    ]
+   },
+   "overlap": {
+    "closestOwner": {
+     "ownerHash": "88016712a787",
+     "jaccard": 0.075,
+     "contains": false
+    },
+    "ownerContainment": false,
+    "closestLegacySibling": {
+     "legacyHash": "016647f08388",
+     "jaccard": 0.063
+    }
+   },
+   "rehearsal": {
+    "deactivate": "ok (4/4 on copy)",
+    "restoreAfterDeactivate": "ok: pd runtime activation dispatch --confirm → queued_for_approval → approve → activated",
+    "restoredForm": {
+     "authority": "owner",
+     "blockChars": 321,
+     "activationId": "regenerated (act_prompt_<ledger uuid>_<suffix>)",
+     "targetRef": "ledger://<its own ledger candidate principle uuid>",
+     "directiveIdUnchanged": true,
+     "basePosition": "moves to the end (new activated_at)"
+    },
+    "proposeRevisionWhileLive": "ok: new validated artifact + pending approval queued (approval not executed on copy)"
+   }
+  }
+ ]
+}
