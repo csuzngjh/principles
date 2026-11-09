@@ -1,0 +1,61 @@
+{
+  "checkpointId": "20261109T1520Z-zcode-pri1160-closeout",
+  "issue": "PRI-1160",
+  "stage": "closed-out-keep-native-owner-per-item-decision-pending",
+  "conclusion": "KEEP_NATIVE",
+  "timestampUtc": "2026-11-09T15:20Z",
+  "closeoutStatus": {
+    "actualGovernanceChanges": 0,
+    "postGovernanceRetest": "NOT RUN",
+    "measuredSavings": "none",
+    "ownerPerItemDecision": "PENDING — 'keep all four' is a recommendation, not an Owner approval"
+  },
+  "authoritativeConclusions": {
+    "L1_L3_L4": "On a throwaway copy the restore request was verified to queue; re-activation still requires Console approval; re-activation after Console approval was NOT verified this round. (An earlier CLI-approval rehearsal observation is kept in the record but is not a restore conclusion.)",
+    "L2": "Under the current build, the verified dispatch, approval-reopen and revision paths cannot restore it.",
+    "consolidationOrder": "Fold L2-only constraints into L3 first; after Owner approval and verification that the new version is in effect, the Owner decides whether to disable L2."
+  },
+  "correctionsWrittenTo": [
+    "docs/implementation-reports/pri-1160-legacy-four-governance-20261109.md (dated correction block after the legend; original body unchanged)",
+    "docs/implementation-reports/pri-1160-legacy-four-governance-20261109.json (top-level corrections[]; original fields unchanged)",
+    "docs/implementation-reports/aa-handoff/20261109T1440Z-zcode-pri1160.md (appended section)",
+    "docs/implementation-reports/aa-handoff/20261109T1440Z-zcode-pri1160.json (textually appended corrections[]; only the former last line gained a comma)"
+  ],
+  "evidenceDelivery": {
+    "method": "reviewable PR + local managed archive (AGENTS.md git-16)",
+    "pullRequest": "https://github.com/csuzngjh/principles/pull/2454",
+    "branch": "ai/PRI-1105-aa-b-optional-trim",
+    "base": "main @ e7c7e6bba (git-7 merge 35b773e4f)",
+    "committedContent": "desensitized documents, desensitized evidence JSON, frozen pre-governance baseline, two offline scripts under scripts/dev/aa-selector",
+    "localArchive": {
+      "path": "D:\\Code\\principles\\artifacts\\pri-1160-legacy-governance-evidence\\",
+      "files": 96,
+      "bytes": 178937265,
+      "perFileSha256Mismatches": 0,
+      "index": ["README.md", "SHA256SUMS.json"],
+      "gitignored": "verified: git check-ignore hits .gitignore:274 /artifacts/; absent from git status --porcelain",
+      "sourceDeleted": false,
+      "note": "contains read-only copies of the real workspace state.db — local only"
+    }
+  },
+  "rollback": "documents and offline retest tooling; revert the PR commits; no runtime impact",
+  "preservedUnchanged": [
+    "docs/specs/PD-AA-PRI-1105-B-TRIM-FROZEN-CASES-v0.1.md annotations",
+    "docs/implementation-reports/pri-1105-b-step1-gap-20261109.{md,json}",
+    "docs/implementation-reports/pri-1105-b-baseline-report-20261109.json",
+    "docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json",
+    "docs/implementation-reports/aa-handoff/LATEST.json"
+  ],
+  "verification": {
+    "retestReproducibleAfterMergingMain": "20/20 rounds identical (text sha256, chars, selection); sum 81364",
+    "releaseIntentGuardLocal": "PASS (intent=none-needed)",
+    "workspaceToolsGuard": "PASS; check-workspace-tools.test.ts 21/21",
+    "eslintRetestScript": "exit 0",
+    "productionGovernanceTablesDuringRehearsal": "identical full-row digests",
+    "ci": "pending at checkpoint time"
+  },
+  "notRun": ["post-governance retest", "Console UI clicks", "Console approval after a restore request", "approval of a propose-revision", "tokens"],
+  "authorizationBoundary": { "productionCodeChanges": 0, "realHostRuns": 0, "modelCalls": 0, "governanceWrites": 0, "consoleRuns": 0 },
+  "nextStep": "Owner decides per item in the Console; then consistent snapshot -> sandbox -> pri1160-legacy-retest.mjs --pre <frozen baseline>.",
+  "notOverwritten": ["docs/implementation-reports/aa-handoff/LATEST.json"]
+}
