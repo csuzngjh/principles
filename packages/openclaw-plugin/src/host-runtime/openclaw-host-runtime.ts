@@ -35,12 +35,15 @@ export interface OpenClawHostRuntimeOptions {
   adaptivePriorityProvider?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): {
     artifactId: string;
     activationId: string;
+    /** PRI-1140: true for principle-identity resolution (additive-only packing). */
+    additiveOnly?: boolean;
     hookInvocationId?: string;
     signal?: AbortSignal;
     deadlineAt?: number;
   } | undefined | Promise<{
     artifactId: string;
     activationId: string;
+    additiveOnly?: boolean;
     hookInvocationId?: string;
     signal?: AbortSignal;
     deadlineAt?: number;
