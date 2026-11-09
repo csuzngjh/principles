@@ -303,17 +303,40 @@ Before the tree is deleted, the quarantine is re-checked with a SECOND
 `git status`: a writer that ignores the mutation lock can commit bytes between
 the pre-move check and the rename (the rename does not stop an open handle), so a
 single pre-move check is never proof that the tree is quiet. Any change appearing
-after the move restores the worktree intact and refuses the deletion. On partial
-failure, the helper attempts to restore the worktree path (trusting verified disk
-state over the error text, completing rollbacks git refuses to perform) or
-preserves its quarantine path for manual inspection; no recursive-delete fallback
-is allowed. Every path-based unlink in the detach passes and in the no-follow
-walk re-verifies the recorded `dev`/`ino` identity of the ancestor directory
-chain first: a parent swapped for a junction mid-deletion fails closed instead
-of redirecting the unlink outside the tree (Node has no unlink-at-fd primitive;
-identity verification plus fail-closed is the strongest available guarantee).
-A scanned directory that becomes an ordinary file mid-removal is never unlinked:
-it may be someone's data written through a non-cooperating handle (git-4).
+after the move restores the worktree intact and refuses the deletion.
+
+A status check cannot see a writer that holds a handle but has not written yet,
+and deleting a held file loses whatever is written through that handle later —
+on Windows too, where the unlink succeeds because Node opens files with
+`FILE_SHARE_DELETE`. So immediately before the deletion the helper requires a
+positive **quiescence proof** (`scripts/dev/lib/quiescence.mjs`): on Linux no
+process may hold a descriptor, working directory, root or memory mapping inside
+the quarantine (`/proc` scan); on Windows the private quarantine parent must
+rename out and back (Windows refuses that rename while any handle is open in the
+subtree). Platforms without such a mechanism are always refused. Without a
+proof nothing is deleted (`QUIESCENCE_UNPROVEN`).
+
+The Git admin linkage (marker, admin directory, reverse pointer) is proven
+before anything moves, and its original bytes are kept. Every refusal after the
+move runs ONE rollback that never invokes `git worktree move`: original marker,
+rename back, original pointer — each step compensated so Git's admin pointer is
+never left naming a location the tree is not at. The reported outcome is read
+back from disk: `RESTORE_COMPLETED`, `QUARANTINE_PRESERVED` (tree intact in
+quarantine, still registered), or `RESTORE_FAILED` (the tree's real location
+plus `git worktree repair <path>` to relink it; the batch sweep skips its global
+prune until then). No recursive-delete fallback is allowed. Every path-based
+unlink in the detach passes and in the no-follow walk re-verifies the recorded
+`dev`/`ino` identity (exact bigint values) of the ancestor directory chain
+first: a parent swapped for a junction mid-deletion fails closed instead of
+redirecting the unlink outside the tree. A scanned directory that becomes an
+ordinary file mid-removal is never unlinked: it may be someone's data written
+through a non-cooperating handle (git-4).
+
+The limits of these guarantees — the identity-check-to-unlink window (Node has
+no `unlinkat(dirfd)`), the point-in-time nature of the quiescence proof, the
+Linux processes that cannot be inspected without privileges, and unsupported
+platforms — are stated as an accepted safety boundary in ERR-098 and require
+explicit Owner acceptance.
 
 `classifyReparsePoints` refuses with `EXTERNAL_LINKS_PRESENT` — listing each
 link, its target and why it is unsafe — when a target lies outside the tree,

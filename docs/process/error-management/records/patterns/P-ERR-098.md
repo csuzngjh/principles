@@ -58,9 +58,49 @@ chain first — a parent swapped for a junction mid-deletion fails closed instea
 of redirecting the unlink outside the tree. Worktrees containing initialized
 submodules are quarantined via a verified manual rename with re-anchored
 submodule admin pointers (git refuses `git worktree move` for them outright);
-the shared `<commonDir>/modules` area is never deleted. Rollbacks trust
-verified disk state over the error text and complete moves git itself refuses
-(relative gitdir markers fail git's move-time validation). Undetectable
-residual risk, recorded honestly: a writer holding an unlinked file descriptor
-can keep writing into a deleted inode on POSIX — Node has no handle-enumeration
-primitive, so that class is documented here instead of being silently ignored.
+the shared `<commonDir>/modules` area is never deleted.
+
+**Owner review hardening (PRI-1143, 2026-11-09)** — three gaps the round-3
+text understated, now closed:
+
+- *Writers that have not written yet.* A second status cannot see a process
+  that holds a handle but has not written. Verified on Windows too: libuv opens
+  files with FILE_SHARE_DELETE, so unlinking a held file SUCCEEDS and later
+  writes through the old handle are lost. Deletion now requires a positive
+  quiescence proof taken immediately before it (`scripts/dev/lib/quiescence.mjs`):
+  Linux scans every `/proc/<pid>/{fd,cwd,root,maps}`; Windows renames the
+  private quarantine parent out and back (Windows refuses that rename while
+  ANY handle is open anywhere in the subtree — verified for file, directory
+  and working-directory handles at any depth); every other platform has no
+  mechanism and is refused. No proof ⇒ nothing deleted (`QUIESCENCE_UNPROVEN`).
+- *Rollbacks.* No rollback ever invokes `git worktree move` (an earlier note
+  claiming this was only true for one of two rollback paths). One rollback
+  restores the original marker and pointer bytes captured before the move,
+  compensates each step, and reports the outcome derived from disk:
+  `RESTORE_COMPLETED`, `QUARANTINE_PRESERVED`, or `RESTORE_FAILED` with the
+  tree's real location and `git worktree repair` as the relink step. While any
+  tree needs relinking the batch sweep skips its global prune — a prune deletes
+  exactly the admin entry of a tree Git no longer locates.
+- *Exact identity.* dev/ino are compared as bigints; NTFS file ids exceed 2^53
+  and rounded to JS numbers two different entries could compare equal.
+
+**Accepted safety boundary — REQUIRES EXPLICIT OWNER ACCEPTANCE.** These are
+the limits of what Node's filesystem API can prove; they are stated, not hidden:
+
+1. *Identity-check-to-unlink window.* Node has no `unlinkat(dirfd)` primitive,
+   so every unlink is path-based: the identity check and the unlink are two
+   syscalls. A process that swaps an ancestor between them can redirect ONE
+   unlink. Only a process with the invoking user's (or higher) privileges can
+   restructure the private quarantine, and such a process can already delete
+   whatever that unlink could reach — the race grants no privilege, and the
+   accidental interference of ordinary tools is caught by the checks.
+2. *Quiescence is a point-in-time proof.* A process that opens a NEW handle
+   after the proof must first discover the freshly created private quarantine
+   path.
+3. *Linux inspection boundary.* Processes of other users — and non-dumpable or
+   setuid processes, whose `/proc` entry is owned by root — cannot be inspected
+   without privileges; they are counted (`uninspectedProcesses`) and reported,
+   not proven absent. A process of the invoking user that cannot be inspected
+   fails the proof. Processes in other PID namespaces are invisible.
+4. *Unsupported platforms* (macOS, BSD) never prove quiescence, so cleanup
+   always refuses there until an inspection mechanism exists.

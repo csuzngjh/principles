@@ -508,11 +508,13 @@ function describeRestoreOutcome(outcome) {
  * Remove an already-authorized, porcelain-clean worktree without giving Git a
  * recursive delete over a directory that can acquire a junction after preflight.
  *
- * The worktree is first renamed (not recursively traversed) into a unique
- * quarantine sibling. A no-follow filesystem walk deletes that private tree.
- * Its exact Git admin directory is then resolved from the moved .git marker,
- * cross-checked against the admin directory's reverse gitdir pointer, and
- * removed with the same no-follow walker. No recursive Git deletion is used.
+ * The Git admin linkage is proven first and its original bytes kept. The
+ * worktree is then renamed (not recursively traversed) into a unique
+ * quarantine sibling, re-checked (second status), and deleted by a no-follow
+ * filesystem walk ONLY after a quiescence proof shows no process still holds
+ * anything inside it. Its exact admin directory — bound to the pre-move proof
+ * — is removed with the same no-follow walker. No recursive Git deletion is
+ * used, and any refusal after the move runs one git-free, compensated rollback.
  *
  * The caller MUST hold the repository mutation lock for this entire operation.
  * MUTATION-GUARDED-HELPER: both callers invoke this function inside the same
@@ -525,8 +527,12 @@ function describeRestoreOutcome(outcome) {
  *          expectedDeletedPaths?: string[],
  *          runGitCommand?: typeof runGit}} opts
  * @returns {Promise<{ok: boolean, reason?: string, reasonCode?: string,
- *          quarantinePath?: string, restoredPath?: string, removal?: object,
- *          notes: string[]}>}
+ *          restoreState?: 'RESTORE_COMPLETED'|'QUARANTINE_PRESERVED'|'RESTORE_FAILED',
+ *          restoredPath?: string, quarantinePath?: string, recoveryPath?: string,
+ *          adminDirPath?: string, quiescence?: object, removal?: object,
+ *          notes: string[]}>} on refusal, `restoreState` says where the intact
+ *          tree is: restoredPath (original path), quarantinePath (preserved), or
+ *          recoveryPath (RESTORE_FAILED — relink with `git worktree repair`).
  */
 
 export async function removeWorktreeSafely({
