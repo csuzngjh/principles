@@ -1,0 +1,59 @@
+{
+  "checkpointId": "20261109T0526Z-zcode",
+  "issue": "PRI-1140",
+  "issueTitle": "[AA Selector][M] 开发最小激活策略：交付验收场景与 Native 离线对比",
+  "stage": "implemented-and-compared-keep-candidate-awaits-pr-ci",
+  "timestampUtc": "2026-11-09T05:26Z",
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1140-aa-selector-min-native",
+    "branch": "ai/PRI-1140-aa-selector-min-native",
+    "head": "3c7d4ef9aea3348a87c988fc58c0a69ee3d2bfe6",
+    "commits": [
+      "1ec7204b8 docs: 实施卡 v0.1 + 冻结案例清单（批准前）",
+      "07974984e docs: Owner 批准与补充条件（验收依据）",
+      "3c7d4ef9a feat: 修订后干预连续——按现行原则身份解析交付映射（additive-only）+ 测试 + changeset"
+    ],
+    "base": "9d1a456ab5becabd04307d01042ad4b9d7b901e4"
+  },
+  "approval": {
+    "card": "PD-AA-PRI-1140-MIN-ACTIVATION-IMPLEMENTATION-CARD-v0.1",
+    "cardSha256": "05a6d0dd3d7d36b6ba56c31a695694b2ecb7da7e17834b30a764aa1aab5e5bd7",
+    "frozenCasesSha256": "bed270cfe51d7c061f4ad81ada99efa33a15ec1845f418e98d6745e383a98396",
+    "linearComment": "9f0e1bcc",
+    "supplementaryConditionsRecorded": ["additive-only（挤出即回退 Native + 记录原因）", "补预算不足反例（A8）", "选中后撤销/替换→本轮回退、下轮重解析", "真实装配链回归", "沿用冻结 16 例一轮定保留/放弃", "A4 三项核对（授权/非目标轮次/旧路径兼容）", "报告字符变化与解析开销", "结论限定为换版后的干预连续性", "零模型调用、零生产启用"]
+  },
+  "implementation": {
+    "entry": "resolveAdaptivePriorityForHook（插件）→ buildActivePrinciplePromptContext（共享装配入口，新增可选 additiveOnly 门槛）",
+    "newExports": ["resolveCurrentAuthorizedActivationByPrincipleId (host-runtime)", "adaptive-principle-resolution 记忆模块（有界 Map/TTL/消费一次）", "adaptive-activation-config principleId 变体（歧义配置失败关闭）"],
+    "unchanged": "钉死映射路径与受控准入语义（特征化锁定）；无映射配置的生产行为",
+    "fallbackReasons": ["principle_not_currently_authorized", "ambiguous_current_activations", "candidates_unavailable", "would_displace_native_assembly"]
+  },
+  "tests": {
+    "new": "host-runtime 9 + plugin config 3 + real-chain 5",
+    "targeted": "runtime-prompt-activation 78/78; host-runtime tests suite green; adaptive suites green",
+    "environmental": "product-telemetry-control-state-concurrency 从仓库根跑失败（fork 字面路径按 cwd 解析），以包目录为 cwd 6/6 通过；与本改动无关，主检出旧 main 同样失败"
+  },
+  "comparison": {
+    "rounds": "一轮有效比较（第 1 次运行为 harness 接线错误：映射缺 workspaceDir 被静默拒绝；修正并加完整性断言；第 2 次为首个有效比较；第 3 次仅新增授权事实字段，18 回合输出与第 2 次逐项一致）",
+    "cases": "17 = 16 夹具例（C1/C2 各两回合，共 18 回合）+ F1 重放",
+    "report": "docs/implementation-reports/pri-1140-min-activation-replay-results-20261109.md",
+    "rawReport": "docs/implementation-reports/pri-1140-replay-report-20261109.json (sha256 ce3971d946485fb81a0d9d5204c86bc81357153b59ef34224cdea9fec5b010a6)",
+    "harness": "scripts/dev/aa-selector/pri1140-replay.mjs (sha256 0f4730aa20286fd51dae2a9d7b3040d1cd92095be33ff7e78d6d188fa4319f07)",
+    "headline": [
+      "18 回合失败判据全否（未授权注入/必需内容丢失/超目标新增/关键机会退化）",
+      "候选臂最终正文与普通 Native 18/18 逐字节一致（字符差 0）",
+      "A3：钉死臂 target_unavailable（干预死亡）→ 候选臂 target_present + owner 授权核对（干预恢复）",
+      "A4/A8/D2：additive 门槛回退原 Native，记录 would_displace_native_assembly + 将被挤出集合 [act-O6-small, act-O1-scope]；钉死臂（A8/D2）仍按旧语义挤出（兼容性对照）",
+      "解析开销：交付信号轮 provider 中位数 +1.5～+4.3 ms；非目标轮 0（信号门先于解析）",
+      "确定性：每臂 15 次迭代一致；A4/A8 各 3 次重放一致；state.db 全程只读"
+    ]
+  },
+  "decision": "保留候选，供接入评审（基准=Owner 补充条件：换版后干预连续性恢复 + 无失败判据 + 非交付轮零开销）。结论限定为换版后的干预连续性；不主张行为改善或覆盖扩张。派生事实：预算不足域「恢复目标」仅恢复到干预层面（greedy 头寸单调递减证明）；无模型辅助比较的反例移交。",
+  "boundaries": "零真实模型调用；零生产启用；无真实宿主运行；D=unknown；G1/C04/G2 原状；fixture 不计 L2",
+  "nextSteps": [
+    "推送分支并创建 PR（PULL_REQUEST_TEMPLATE，含错误模式路由与 Task Risk Contract）",
+    "CI required 门禁（Verify Merge Gate 等）",
+    "Linear 结果评论 + PRI-1140 → In Review",
+    "记忆更新"
+  ]
+}

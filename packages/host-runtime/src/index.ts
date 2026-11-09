@@ -261,12 +261,23 @@ export function createProductionHostRuntime(
     adaptivePriorityProvider?: (event: HostEvent) => {
       artifactId: string;
       activationId: string;
+      /**
+       * PRI-1140: true when the provider resolved the target by CURRENT
+       * principle identity (revision-resilient selection). The shared
+       * assembly then runs its prioritized repack additively — it may place
+       * the target first, but must never squeeze out content the native
+       * baseline already assembled (otherwise the native baseline is kept and
+       * `would_displace_native_assembly` is recorded). Absent/false keeps the
+       * legacy pinned-identity semantics untouched.
+       */
+      additiveOnly?: boolean;
       hookInvocationId?: string;
       signal?: AbortSignal;
       deadlineAt?: number;
     } | undefined | Promise<{
       artifactId: string;
       activationId: string;
+      additiveOnly?: boolean;
       hookInvocationId?: string;
       signal?: AbortSignal;
       deadlineAt?: number;
@@ -345,6 +356,7 @@ export function createProductionHostRuntime(
           adaptivePriority = await options.adaptivePriorityProvider(event);
           if (adaptivePriority && (typeof adaptivePriority.artifactId !== 'string' || !adaptivePriority.artifactId.trim()
             || typeof adaptivePriority.activationId !== 'string' || !adaptivePriority.activationId.trim()
+            || (adaptivePriority.additiveOnly !== undefined && typeof adaptivePriority.additiveOnly !== 'boolean')
             || (adaptivePriority.deadlineAt !== undefined && !Number.isFinite(adaptivePriority.deadlineAt)))) {
             adaptivePriority = undefined;
           }
@@ -363,6 +375,7 @@ export function createProductionHostRuntime(
         ...(roundKey !== undefined ? { roundKey } : {}),
         ...(adaptivePriority ? {
           adaptivePriority: { artifactId: adaptivePriority.artifactId, activationId: adaptivePriority.activationId },
+          ...(adaptivePriority.additiveOnly === true ? { additiveOnly: true } : {}),
           ...(adaptivePriority.signal ? { signal: adaptivePriority.signal } : {}),
           ...(adaptivePriority.deadlineAt !== undefined ? { deadlineAt: adaptivePriority.deadlineAt } : {}),
           ...(adaptivePriority.hookInvocationId ? { hookInvocationId: adaptivePriority.hookInvocationId } : {}),
