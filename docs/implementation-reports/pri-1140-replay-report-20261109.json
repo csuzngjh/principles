@@ -1,0 +1,2386 @@
+{
+  "schema": "pd-pri1140-replay-report/v1",
+  "commit": "3c7d4ef9a",
+  "startedAt": "2026-11-09T05:17:05.955Z",
+  "finishedAt": "2026-11-09T05:17:11.897Z",
+  "node": "v26.12.1",
+  "iterationsPerArm": 15,
+  "modelCalls": 0,
+  "tokenMethod": "estTokens = floor(chars / 4) — coarse estimate for reference only; chars is the production budget unit and the judgment currency",
+  "timingMethod": "process.hrtime.bigint() wall clock; provider = resolveAdaptivePriorityForHook (includes principle resolution read on the candidate arm), builder = buildActivePrinciplePromptContext; 2 warmups discarded, median/min/max over the measured iterations",
+  "cases": [
+    {
+      "caseId": "A1",
+      "category": "交付",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.281,
+              "min": 0.212,
+              "max": 0.337
+            },
+            "builderMs": {
+              "median": 5.998,
+              "min": 5.44,
+              "max": 6.491
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.974,
+              "min": 1.825,
+              "max": 2.367
+            },
+            "builderMs": {
+              "median": 5.333,
+              "min": 5.013,
+              "max": 5.84
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.693,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A2",
+      "category": "交付/目标已存在",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 4,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "7c4b683a43523197b727308d63c1492a588fc4fd73ee0126e75f6cfcba96f6ab",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "7c4b683a43523197b727308d63c1492a588fc4fd73ee0126e75f6cfcba96f6ab",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.214,
+              "min": 0.199,
+              "max": 0.252
+            },
+            "builderMs": {
+              "median": 5.421,
+              "min": 5.105,
+              "max": 6.252
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "7c4b683a43523197b727308d63c1492a588fc4fd73ee0126e75f6cfcba96f6ab",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.917,
+              "min": 1.774,
+              "max": 2.333
+            },
+            "builderMs": {
+              "median": 5.39,
+              "min": 4.991,
+              "max": 5.952
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.703,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A3",
+      "category": "交付/钉失效-预算充足",
+      "shape": "revised",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v1",
+        "act-delivery-v1"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v1",
+              "activationId": "act-delivery-v1",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "target_unavailable",
+              "targetActivationId": "act-delivery-v1",
+              "displacedActivationIds": [],
+              "targetAuthority": null
+            },
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.179,
+              "min": 0.167,
+              "max": 0.223
+            },
+            "builderMs": {
+              "median": 1.804,
+              "min": 1.716,
+              "max": 1.941
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 2.024,
+              "min": 1.909,
+              "max": 3.13
+            },
+            "builderMs": {
+              "median": 5.404,
+              "min": 5.058,
+              "max": 6.396
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.845,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A4",
+      "category": "交付/钉失效-预算紧张",
+      "shape": "revised",
+      "regime": "tight-drop",
+      "pin": [
+        "art-delivery-v1",
+        "act-delivery-v1"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 1973,
+          "plainNative": {
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": false
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v1",
+              "activationId": "act-delivery-v1",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "target_unavailable",
+              "targetActivationId": "act-delivery-v1",
+              "displacedActivationIds": [],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.218,
+              "min": 0.194,
+              "max": 0.251
+            },
+            "builderMs": {
+              "median": 1.894,
+              "min": 1.808,
+              "max": 2.275
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "would_displace_native_assembly",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [
+                "act-O6-small",
+                "act-O1-scope"
+              ],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 2.092,
+              "min": 1.941,
+              "max": 2.368
+            },
+            "builderMs": {
+              "median": 3.71,
+              "min": 3.587,
+              "max": 4.741
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.874,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A5",
+      "category": "交付/候选失效",
+      "shape": "retired",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v1",
+        "act-delivery-v1"
+      ],
+      "keyOpportunity": false,
+      "resolution": {
+        "ok": false,
+        "reason": "principle_not_currently_authorized",
+        "readerWarnings": 0
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 2018,
+          "plainNative": {
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": false
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v1",
+              "activationId": "act-delivery-v1",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "target_unavailable",
+              "targetActivationId": "act-delivery-v1",
+              "displacedActivationIds": [],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.181,
+              "min": 0.165,
+              "max": 0.202
+            },
+            "builderMs": {
+              "median": 1.712,
+              "min": 1.635,
+              "max": 1.759
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.693,
+              "min": 1.59,
+              "max": 1.948
+            },
+            "builderMs": {
+              "median": 1.68,
+              "min": 1.605,
+              "max": 2.79
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": [
+              "[PD:AA] principle resolution refused: {\"reason\":\"principle_not_currently_authorized\",\"principleId\":\"DELIVERY\",\"warnings\":0,\"nextAction\":\"the mapping target is not uniquely currently authorized; ordinary Native assembly continues\"}"
+            ]
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.512,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A6",
+      "category": "交付/歧义",
+      "shape": "ambiguous",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": false,
+        "reason": "ambiguous_current_activations",
+        "readerWarnings": 0
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 2470,
+          "plainNative": {
+            "textSha256": "7909fe9532692ddeb4a979e18505b7722069108f9b38c24503ffaa23d4fea1f5",
+            "chars": 2406,
+            "estTokens": 601,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": false
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "target_ambiguous",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": null
+            },
+            "textSha256": "7909fe9532692ddeb4a979e18505b7722069108f9b38c24503ffaa23d4fea1f5",
+            "chars": 2406,
+            "estTokens": 601,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.176,
+              "min": 0.163,
+              "max": 0.23
+            },
+            "builderMs": {
+              "median": 1.831,
+              "min": 1.709,
+              "max": 2.412
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "7909fe9532692ddeb4a979e18505b7722069108f9b38c24503ffaa23d4fea1f5",
+            "chars": 2406,
+            "estTokens": 601,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.729,
+              "min": 1.612,
+              "max": 1.956
+            },
+            "builderMs": {
+              "median": 1.682,
+              "min": 1.619,
+              "max": 2.121
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": [
+              "[PD:AA] principle resolution refused: {\"reason\":\"ambiguous_current_activations\",\"principleId\":\"DELIVERY\",\"warnings\":0,\"nextAction\":\"the mapping target is not uniquely currently authorized; ordinary Native assembly continues\"}"
+            ]
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.553,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A7",
+      "category": "交付/读取降级",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": false,
+        "reason": "candidates_unavailable",
+        "readerWarnings": 1
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "authority_unavailable",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [
+                "act-delivery-v2"
+              ],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [
+              "act-delivery-v2"
+            ],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.202,
+              "min": 0.175,
+              "max": 0.249
+            },
+            "builderMs": {
+              "median": 3.592,
+              "min": 3.409,
+              "max": 4.491
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.769,
+              "min": 1.607,
+              "max": 1.956
+            },
+            "builderMs": {
+              "median": 1.733,
+              "min": 1.605,
+              "max": 2.359
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": [
+              "[PD:AA] principle resolution refused: {\"reason\":\"candidates_unavailable\",\"principleId\":\"DELIVERY\",\"warnings\":1,\"nextAction\":\"the mapping target is not uniquely currently authorized; ordinary Native assembly continues\"}"
+            ]
+          },
+          "deltaChars": {
+            "principleMinusPinned": 237,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": false,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.567,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "A8",
+      "category": "交付/预算不足反例（Owner 新增）",
+      "shape": "revised",
+      "regime": "tight-drop",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 1973,
+          "plainNative": {
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": false
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "prioritized",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [
+                "act-O6-small",
+                "act-O1-scope"
+              ],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "59355a877829143a0118c2437a481870b7326911ebd6df127a5c5a4f6a52c546",
+            "chars": 1768,
+            "estTokens": 442,
+            "includedActivationIds": [
+              "act-delivery-v2",
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask"
+            ],
+            "missingVsNative": [
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "extraVsNative": [
+              "act-delivery-v2"
+            ],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.212,
+              "min": 0.176,
+              "max": 0.236
+            },
+            "builderMs": {
+              "median": 5.236,
+              "min": 4.96,
+              "max": 5.499
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "would_displace_native_assembly",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [
+                "act-O6-small",
+                "act-O1-scope"
+              ],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.815,
+              "min": 1.736,
+              "max": 10.678
+            },
+            "builderMs": {
+              "median": 3.451,
+              "min": 3.197,
+              "max": 4.315
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 186,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": false,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.603,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "B1",
+      "category": "普通执行",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": false,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "normal",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.013,
+              "min": 0.012,
+              "max": 0.014
+            },
+            "builderMs": {
+              "median": 1.693,
+              "min": 1.571,
+              "max": 1.96
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.013,
+              "min": 0.012,
+              "max": 0.014
+            },
+            "builderMs": {
+              "median": 1.625,
+              "min": 1.55,
+              "max": 1.768
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 0,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "B2",
+      "category": "普通执行/标记非首行",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": false,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "secondLine",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.013,
+              "min": 0.013,
+              "max": 0.024
+            },
+            "builderMs": {
+              "median": 1.698,
+              "min": 1.651,
+              "max": 1.988
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.014,
+              "min": 0.012,
+              "max": 0.016
+            },
+            "builderMs": {
+              "median": 1.732,
+              "min": 1.606,
+              "max": 1.859
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 0.001,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "C1",
+      "category": "阶段切换/实现→验收",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "normal",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.015,
+              "min": 0.013,
+              "max": 0.024
+            },
+            "builderMs": {
+              "median": 1.754,
+              "min": 1.614,
+              "max": 2.822
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.014,
+              "min": 0.012,
+              "max": 0.02
+            },
+            "builderMs": {
+              "median": 1.748,
+              "min": 1.65,
+              "max": 1.985
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": -0.001,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        },
+        {
+          "turn": 1,
+          "message": "sentinel",
+          "roundKey": 2,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "aea3bd84b94b1a84dccaae8a380e0ca2a5a91f177c510532c2697dadf3355520",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "aea3bd84b94b1a84dccaae8a380e0ca2a5a91f177c510532c2697dadf3355520",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.205,
+              "min": 0.178,
+              "max": 0.236
+            },
+            "builderMs": {
+              "median": 5.003,
+              "min": 4.844,
+              "max": 5.311
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "aea3bd84b94b1a84dccaae8a380e0ca2a5a91f177c510532c2697dadf3355520",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 1.983,
+              "min": 1.716,
+              "max": 5.229
+            },
+            "builderMs": {
+              "median": 5.429,
+              "min": 4.915,
+              "max": 13.052
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 1.778,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "C2",
+      "category": "阶段切换/验收→实现",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.363,
+              "min": 0.313,
+              "max": 0.541
+            },
+            "builderMs": {
+              "median": 10.424,
+              "min": 8.596,
+              "max": 12.796
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "target_present",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 4.63,
+              "min": 3.335,
+              "max": 7.085
+            },
+            "builderMs": {
+              "median": 11.138,
+              "min": 9.6,
+              "max": 14.93
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 4.267,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        },
+        {
+          "turn": 1,
+          "message": "normal",
+          "roundKey": 2,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "aea3bd84b94b1a84dccaae8a380e0ca2a5a91f177c510532c2697dadf3355520",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "aea3bd84b94b1a84dccaae8a380e0ca2a5a91f177c510532c2697dadf3355520",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.022,
+              "min": 0.019,
+              "max": 0.032
+            },
+            "builderMs": {
+              "median": 3.301,
+              "min": 2.75,
+              "max": 5.854
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "aea3bd84b94b1a84dccaae8a380e0ca2a5a91f177c510532c2697dadf3355520",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope",
+              "act-O2-evidence"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.02,
+              "min": 0.018,
+              "max": 0.025
+            },
+            "builderMs": {
+              "median": 3.539,
+              "min": 3.032,
+              "max": 4.192
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": -0.002,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D1",
+      "category": "预算不足/目标超大",
+      "shape": "oversized",
+      "regime": "oversized",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 4830,
+          "plainNative": {
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": false
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "target_does_not_fit",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.34,
+              "min": 0.277,
+              "max": 0.444
+            },
+            "builderMs": {
+              "median": 7.362,
+              "min": 6.325,
+              "max": 9.507
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "target_does_not_fit",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 4.021,
+              "min": 3.419,
+              "max": 4.879
+            },
+            "builderMs": {
+              "median": 7.918,
+              "min": 6.676,
+              "max": 13.322
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 3.681,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "D2",
+      "category": "预算不足/需挤出",
+      "shape": "current",
+      "regime": "tight-drop",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": true,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "sentinel",
+          "roundKey": 1,
+          "budgetChars": 1973,
+          "plainNative": {
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": false
+          },
+          "pinnedArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": false
+            },
+            "adaptivePacking": {
+              "status": "prioritized",
+              "reason": null,
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [
+                "act-O6-small",
+                "act-O1-scope"
+              ],
+              "targetAuthority": "owner"
+            },
+            "textSha256": "59355a877829143a0118c2437a481870b7326911ebd6df127a5c5a4f6a52c546",
+            "chars": 1768,
+            "estTokens": 442,
+            "includedActivationIds": [
+              "act-delivery-v2",
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask"
+            ],
+            "missingVsNative": [
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "extraVsNative": [
+              "act-delivery-v2"
+            ],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.369,
+              "min": 0.299,
+              "max": 2.069
+            },
+            "builderMs": {
+              "median": 11.389,
+              "min": 9.348,
+              "max": 12.949
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": {
+              "artifactId": "art-delivery-v2",
+              "activationId": "act-delivery-v2",
+              "additiveOnly": true
+            },
+            "adaptivePacking": {
+              "status": "unavailable",
+              "reason": "would_displace_native_assembly",
+              "targetActivationId": "act-delivery-v2",
+              "displacedActivationIds": [
+                "act-O6-small",
+                "act-O1-scope"
+              ],
+              "targetAuthority": null
+            },
+            "textSha256": "473be5f3c2d9c09f04c187da26a695a57ea16329477a2b86c9b7aa507030aac4",
+            "chars": 1954,
+            "estTokens": 488,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": false,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 4.119,
+              "min": 3.25,
+              "max": 4.998
+            },
+            "builderMs": {
+              "median": 6.822,
+              "min": 6.277,
+              "max": 8.167
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 186,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": false,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 3.75,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "E1",
+      "category": "信号不明/自然语言",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": false,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "natural",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.021,
+              "min": 0.018,
+              "max": 0.087
+            },
+            "builderMs": {
+              "median": 3.298,
+              "min": 2.886,
+              "max": 4.829
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.024,
+              "min": 0.02,
+              "max": 0.027
+            },
+            "builderMs": {
+              "median": 3.425,
+              "min": 2.942,
+              "max": 3.955
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": 0.003,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    },
+    {
+      "caseId": "E2",
+      "category": "信号不明/agent-to-agent",
+      "shape": "current",
+      "regime": "ample",
+      "pin": [
+        "art-delivery-v2",
+        "act-delivery-v2"
+      ],
+      "keyOpportunity": false,
+      "resolution": {
+        "ok": true,
+        "artifactId": "art-delivery-v2",
+        "activationId": "act-delivery-v2",
+        "authority": "owner",
+        "approvedBy": "owner-replay"
+      },
+      "turns": [
+        {
+          "turn": 0,
+          "message": "agent",
+          "roundKey": 1,
+          "budgetChars": 2255,
+          "plainNative": {
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "targetCurrentCovered": true
+          },
+          "pinnedArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.02,
+              "min": 0.019,
+              "max": 0.025
+            },
+            "builderMs": {
+              "median": 3.534,
+              "min": 2.619,
+              "max": 5.146
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "principleArm": {
+            "providerPriority": null,
+            "adaptivePacking": null,
+            "textSha256": "a256c242ceef795069fd68ebffa4429d4c4c74d015c62e02f85b469e83341d08",
+            "chars": 2191,
+            "estTokens": 547,
+            "includedActivationIds": [
+              "act-O2-evidence",
+              "act-O3-tests",
+              "act-O4-secrets",
+              "act-O5-ask",
+              "act-O6-small",
+              "act-delivery-v2",
+              "act-O1-scope"
+            ],
+            "missingVsNative": [],
+            "extraVsNative": [],
+            "targetCurrentCovered": true,
+            "staleRevisionPresent": false,
+            "nonLiveIncluded": [],
+            "providerMs": {
+              "median": 0.019,
+              "min": 0.018,
+              "max": 0.054
+            },
+            "builderMs": {
+              "median": 4.042,
+              "min": 3.421,
+              "max": 4.717
+            },
+            "deterministicAcrossIterations": true,
+            "providerWarnings": []
+          },
+          "deltaChars": {
+            "principleMinusPinned": 0,
+            "principleMinusPlainNative": 0
+          },
+          "sameTextAsPinned": true,
+          "sameTextAsPlainNative": true,
+          "resolutionOverheadMs": -0.001,
+          "stateDbUnchanged": true,
+          "failures": {
+            "unauthorizedInjection": false,
+            "requiredContentLoss": false,
+            "onlyTargetMayBeAdded": true,
+            "keyOpportunityRegressionVsPlainNative": false
+          }
+        }
+      ]
+    }
+  ],
+  "f1ReplayDeterminism": [
+    {
+      "replayOf": "A4",
+      "runs": 3,
+      "identical": true,
+      "stateDbUnchanged": true
+    },
+    {
+      "replayOf": "A8",
+      "runs": 3,
+      "identical": true,
+      "stateDbUnchanged": true
+    }
+  ]
+}

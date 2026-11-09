@@ -26,6 +26,7 @@ export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild, beginAdaptivePromptInvocation, prepareOpenClawPromptRound } from './hooks/prompt.js';
+import { resolveCurrentAuthorizedActivationByPrincipleId } from '@principles/host-runtime';
 import { createAdaptiveHookRegistrationRecorder, setAdaptiveHookSet } from './core/adaptive-config-identity.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
@@ -58,7 +59,8 @@ import { resolveCommandWorkspaceDir, resolveExplicitPdWorkspaceDir, resolveHookW
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { checkSurfaceGuard, guardHook, guardService, safeStringifyPreview } from '@principles/core/runtime';
 import { createOpenClawHostRuntime } from './host-runtime/openclaw-host-runtime.js';
-import { readAdaptiveActivationConfig } from './hooks/adaptive-activation-config.js';
+import { readAdaptiveActivationConfig, isPrincipleIdentityMapping } from './hooks/adaptive-activation-config.js';
+import { rememberAdaptivePrincipleResolution } from './hooks/adaptive-principle-resolution.js';
 import { claimControlledAdmission, isControlledAdmissionConfigured } from './hooks/controlled-admission.js';
 import { resolveCurrentUserMessage } from './hooks/prompt-helpers.js';
 import { isUserInteractionTrigger } from './core/signal-collector-host.js';
@@ -233,12 +235,23 @@ export function syncMcpBindingFromExplicitWorkspace(options: {
  * The pre-selection half claims the operator admission (or begins a native
  * delivery invocation) BEFORE the shared selector builds the prompt; the
  * resulting priority is handed to `buildActivePrinciplePromptContext`.
+ *
+ * PRI-1140: a `{principleId}` mapping resolves to the AT MOST ONE currently
+ * authorized prompt activation of that principle at provider time (fresh per
+ * request — a revision that lands before the next prompt build is picked up
+ * without any config edit). The resolution is remembered for the SAME
+ * invocation's post-selection half and the priority is marked `additiveOnly`:
+ * the shared assembly may place the target first but must never squeeze out
+ * content the native baseline already assembled. Resolution failures fall
+ * closed to Native with a structured reason. The controlled-admission branch
+ * keeps requiring the pinned mapping (its manifest binds exact artifact
+ * identity) and the pinned mapping itself behaves byte-identically to before.
  */
-export function resolveAdaptivePriorityForHook(
+export async function resolveAdaptivePriorityForHook(
   event: PluginHookBeforePromptBuildEvent,
   context: PluginHookAgentContext,
   api: Parameters<typeof handleBeforePromptBuild>[1]['api'],
-): { artifactId: string; activationId: string; hookInvocationId?: string; signal?: AbortSignal; deadlineAt?: number } | undefined {
+): Promise<{ artifactId: string; activationId: string; additiveOnly?: boolean; hookInvocationId?: string; signal?: AbortSignal; deadlineAt?: number } | undefined> {
   const startedAt = Date.now();
   if (!api) return undefined;
   const workspaceDir = context.workspaceDir;
@@ -261,6 +274,13 @@ export function resolveAdaptivePriorityForHook(
     // admission covers exactly one frozen input; consumption happens here
     // (the earliest selection point) and is handed to the same-round
     // beforePromptBuild callback through the claim cache.
+    // PRI-1140: the admission manifest binds an exact artifact/activation
+    // identity, so a principle mapping has no admission semantics — fail
+    // closed instead of claiming against an unresolved target.
+    if (isPrincipleIdentityMapping(mapping)) {
+      api.logger.warn('[PD:AA] controlled admission refused: {"reason":"principle_mapping_has_no_admission_identity"}');
+      return undefined;
+    }
     if (!isControlledAdmissionConfigured()) return undefined;
     const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
     if (deadlineAt - Date.now() <= 0) return undefined;
@@ -291,6 +311,50 @@ export function resolveAdaptivePriorityForHook(
   const deadlineAt = Math.min(startedAt + mapping.softTimeoutMs, mapping.expiresAtMs);
   const remainingMs = deadlineAt - Date.now();
   if (remainingMs <= 0) return undefined;
+  // PRI-1140: principle-identity resolution runs ONLY on confirmed
+  // delivery-signal rounds, so ordinary rounds keep today's cost (zero reads
+  // here). A failed resolution is a structured fallback to Native, never a
+  // guessed target.
+  if (isPrincipleIdentityMapping(mapping)) {
+    const resolution = await resolveCurrentAuthorizedActivationByPrincipleId({
+      workspaceDir,
+      principleId: mapping.principleId,
+    });
+    if (!resolution.ok) {
+      api.logger.warn(`[PD:AA] principle resolution refused: ${JSON.stringify({
+        reason: resolution.reason,
+        principleId: mapping.principleId,
+        warnings: resolution.warnings.length,
+        nextAction: 'the mapping target is not uniquely currently authorized; ordinary Native assembly continues',
+      })}`);
+      return undefined;
+    }
+    // rc-7: the read above consumed part of the soft deadline — recompute the
+    // remaining window from the clock instead of reusing the pre-read value.
+    const remainingAfterResolution = deadlineAt - Date.now();
+    if (remainingAfterResolution <= 0) {
+      api.logger.warn(`[PD:AA] principle resolution refused: ${JSON.stringify({
+        reason: 'deadline',
+        principleId: mapping.principleId,
+        nextAction: 'the soft deadline expired during resolution; ordinary Native assembly continues',
+      })}`);
+      return undefined;
+    }
+    const hookInvocationId = beginAdaptivePromptInvocation(
+      { ...context, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'] },
+      { artifactId: resolution.artifactId, activationId: resolution.activationId },
+      'shared',
+    );
+    rememberAdaptivePrincipleResolution(hookInvocationId, resolution);
+    return {
+      artifactId: resolution.artifactId,
+      activationId: resolution.activationId,
+      additiveOnly: true,
+      hookInvocationId,
+      signal: AbortSignal.timeout(remainingAfterResolution),
+      deadlineAt,
+    };
+  }
   return {
     artifactId: mapping.artifactId,
     activationId: mapping.activationId,
