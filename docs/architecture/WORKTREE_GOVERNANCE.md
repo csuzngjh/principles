@@ -205,8 +205,14 @@ npm run dev:workspace:cleanup -- --apply
 Removal requires PROVEN completion — GitHub `PR MERGED` first (the only evidence
 that covers a squash merge, where the branch tip can never be an ancestor), else
 ancestry to `origin/main` — plus: clean, not primary, no active lease, not
-Git-locked, and status readable. Every one of those is re-checked at apply time,
-because a snapshot from minutes ago is not evidence. An open PR is never swept.
+Git-locked, status readable, and a COMPLETE reparse-point scan proving no link
+can carry the deletion outside the worktree (ERR-098: `git worktree remove`
+follows those links; porcelain-clean is not by itself evidence that deleting is
+safe). An unreadable directory makes the scan incomplete and is a REFUSAL —
+`SCAN_INCOMPLETE` — never an empty result. Every one of those is re-checked at
+apply time, and the scan, the decision and the removal share one mutation-lock
+span, because a snapshot from minutes ago is not evidence. An open PR is never
+swept.
 
 ### 4.6 Migrate
 
@@ -281,6 +287,76 @@ to a recursive remover:
 Acceptance criterion: a residue directory containing a junction to important data
 is removed, and the target is bit-for-bit intact. This is covered by a test.
 
+The same rule gates the **removal** path (PRI-1143). The scan, the refusal
+decision, quarantining, no-follow deletion and Git metadata unregistration all run
+inside ONE `withMutationLock` span. A Git mutex alone does not prevent an editor
+that ignores the mutex from creating a late junction, so Git NEVER recursively
+deletes the live worktree directory: the tool moves it into a unique quarantine
+sibling — via `git worktree move` for submodule-free worktrees, or via a verified
+manual rename plus admin-pointer re-anchoring for worktrees Git refuses to move
+(initialized submodules) — then uses the junction-safe `removeResidueTree` walk to
+remove its contents, and finally removes ONLY the exact admin directory named by
+the moved `.git` marker after its reverse pointer names the quarantine back. No
+recursive Git deletion is ever invoked, not even against a verified-absent path.
+
+Before the tree is deleted, the quarantine is re-checked with a SECOND
+`git status`: a writer that ignores the mutation lock can commit bytes between
+the pre-move check and the rename (the rename does not stop an open handle), so a
+single pre-move check is never proof that the tree is quiet. Any change appearing
+after the move restores the worktree intact and refuses the deletion.
+
+A status check cannot see a writer that holds a handle but has not written yet,
+and deleting a held file loses whatever is written through that handle later —
+on Windows too, where the unlink succeeds because Node opens files with
+`FILE_SHARE_DELETE`. So immediately before the deletion the helper requires a
+positive **quiescence proof** (`scripts/dev/lib/quiescence.mjs`): on Linux no
+process may hold a descriptor, working directory, root or memory mapping inside
+the quarantine (`/proc` scan); on Windows the private quarantine parent must
+rename out and back (Windows refuses that rename while any handle is open in the
+subtree). Platforms without such a mechanism are always refused. Without a
+proof nothing is deleted (`QUIESCENCE_UNPROVEN`).
+
+The Git admin linkage (marker, admin directory, reverse pointer) is proven
+before anything moves, and its original bytes are kept. Every refusal after the
+move runs ONE rollback that never invokes `git worktree move`: original marker,
+rename back, original pointer — each step compensated so Git's admin pointer is
+never left naming a location the tree is not at. The reported outcome is read
+back from disk: `RESTORE_COMPLETED`, `QUARANTINE_PRESERVED` (tree intact in
+quarantine, still registered), or `RESTORE_FAILED` (the tree's real location
+plus `git worktree repair <path>` to relink it; the batch sweep skips its global
+prune until then). No recursive-delete fallback is allowed. Every path-based
+unlink in the detach passes and in the no-follow walk re-verifies the recorded
+`dev`/`ino` identity (exact bigint values) of the ancestor directory chain
+first: a parent swapped for a junction mid-deletion fails closed instead of
+redirecting the unlink outside the tree. A scanned directory that becomes an
+ordinary file mid-removal is never unlinked: it may be someone's data written
+through a non-cooperating handle (git-4).
+
+The limits of these guarantees — the identity-check-to-unlink window (Node has
+no `unlinkat(dirfd)`), the point-in-time nature of the quiescence proof, the
+Linux processes that cannot be inspected without privileges, and unsupported
+platforms — are stated as an accepted safety boundary in ERR-098 and require
+explicit Owner acceptance.
+
+`classifyReparsePoints` refuses with `EXTERNAL_LINKS_PRESENT` — listing each
+link, its target and why it is unsafe — when a target lies outside the tree,
+cannot be resolved by the filesystem, or contains a `..` component (lexical
+normalisation is not what the OS does when a link precedes it). A verified
+self/ancestor cycle is also unsafe for recursive traversal but is detached
+as a link, without deleting its internal target. A scan that cannot enumerate every
+directory refuses with `SCAN_INCOMPLETE`: an unreadable directory may hide exactly
+such a link, and git-14 forbids acting on unknowns. Targets are compared
+case-sensitively after `realpath`, because Windows supports per-directory case
+sensitivity. `--detach-external-links` opts into detaching them first — one at a
+time, each target re-verified — and the tool then re-checks a content-level
+fingerprint (relative path + byte size) of every external target that existed
+before the delete, so partial deletion INSIDE a still-present directory is
+detected. Targets that were already missing are not reported as lost. A link
+proven to stay inside the tree, non-cyclically, never blocks a removal: it dies
+with the tree. The batch sweep (`dev:workspace:cleanup -- --apply`) shares the same
+lock and no-follow removal. It refuses external or unresolvable links, but
+may safely unlink proven-internal links and same-tree ancestor cycles.
+
 ### 5.2 Observability of long deletions
 
 Deleting 50k+ files on Windows takes minutes. The walk prints progress inline —
@@ -318,6 +394,7 @@ deleted live one.
 | --- | --- | --- |
 | Share `node_modules` with the primary to save time | readiness would report `PRIMARY_LEAKAGE`; tests would exercise the wrong build | `npm run dev:worktree:bootstrap` (npm cache is shared automatically) |
 | `git worktree remove --force` on a dirty tree | destroys unknown work (git-4) | commit a WIP commit, or remove the files yourself |
+| `git worktree remove` on a worktree whose ignored output junctions out of it | git recurses through those links and deletes files that were never in the worktree (ERR-098) | the removal already refuses with `EXTERNAL_LINKS_PRESENT` and lists each link plus its target; re-run with `--detach-external-links` only after reading that list |
 | unlock + remove a locked worktree | the lock means an active claim | `npm run dev:worktree:release`, after confirming the writer is gone |
 | delete a residue directory to reclaim ~800 MB | its dirtiness is unprovable | review the snapshot, then `--residue <path> --ack-unknown --apply` |
 | hand-write `.git/worktrees/<name>/` to "repair" it | unsupported; git's own state must stay git's | report it as UNKNOWN and decide with `--ack-unknown` |
