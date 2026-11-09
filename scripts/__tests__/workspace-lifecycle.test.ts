@@ -22,6 +22,7 @@ import { normalizeGitPath } from '../dev/lib/git.mjs';
 import {
   commitFile,
   git,
+  makeJunction,
   removeFixture,
   runDevScript,
   setupOriginFixture,
@@ -188,7 +189,7 @@ async function makeTask(primary: string, slug: string): Promise<{ wt: string; br
   // classifier, not the (multi-minute) bootstrap → ready path, which has its own
   // coverage. Without it create reports CREATED_NOT_READY and exits non-zero.
   const r = await runDevScript('create-task-worktree.mjs', ['PRI-800', slug, '--skip-bootstrap', '--json'], { cwd: primary });
-  expect(r.code).toBe(0);
+  expect(r.code, 'fixture worktree creation failed: ' + r.stdout + r.stderr).toBe(0);
   const out = JSON.parse(r.stdout) as { worktree: string; branch: string };
   await commitFile(out.worktree, slug + '.txt', 'x\n', 'task commit ' + slug);
   return { wt: out.worktree, branch: out.branch };
@@ -420,6 +421,39 @@ describe('workspace-cleanup (integration)', () => {
       fs.writeFileSync(siblingGitFile, gitPointer, 'utf-8');
     }
   });
+
+  it('REFUSES a merged worktree whose ignored junction points OUTSIDE it (ERR-098 / PRI-1143)', async () => {
+    const { wt, branch } = await makeTask(fixture.primary, 'junction-external');
+    await mergeIntoMain(fixture.primary, branch);
+
+    const outside = path.join(fixture.root, 'outside-global-install');
+    fs.mkdirSync(path.join(outside, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'dist', 'keep.txt'), 'KEEP ME\n', 'utf-8');
+    const link = path.join(wt, 'node_modules', 'openclaw');
+    makeJunction(link, outside);
+
+    try {
+      const r = await runDevScript('workspace-cleanup.mjs', ['--apply', '--grace-days', '0', '--json'], { cwd: fixture.primary, env: SKIP_GH });
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      const out = JSON.parse(r.stdout) as {
+        refused: Array<{ action: { kind: string; path?: string }; reason: string }>;
+      };
+      const refusal = out.refused.find(
+        (x) => x.action.kind === 'remove-worktree' && samePath(x.action.path, wt, fixture.primary)
+      );
+      expect(refusal, 'the sweep must refuse this worktree').toBeDefined();
+      expect(refusal?.reason).toContain('EXTERNAL_LINKS_PRESENT');
+
+      // Nothing was deleted: worktree, branch and the external install survive.
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(fs.readFileSync(path.join(outside, 'dist', 'keep.txt'), 'utf-8')).toBe('KEEP ME\n');
+      const stillThere = await git(fixture.primary, 'rev-parse', '--verify', 'refs/heads/' + branch);
+      expect(stillThere.trim().length).toBeGreaterThan(0);
+    } finally {
+      // Never let removeFixture recurse through a junction (ERR-098).
+      try { fs.unlinkSync(link); } catch { /* already detached */ }
+    }
+  }, 120_000);
 });
 
 describe('workspace-cleanup prune safety (PRI-712)', () => {

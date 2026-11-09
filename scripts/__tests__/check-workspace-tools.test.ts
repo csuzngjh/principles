@@ -143,16 +143,104 @@ describe('workspace tools gate', () => {
   }, 60_000);
 
   it('fails when a MUTATION-GUARDED-HELPER is called outside a withMutationLock span', async () => {
-    const target = path.join(fixture, 'scripts', 'dev', 'workspace-cleanup.mjs');
+    const target = path.join(fixture, 'scripts', 'dev', 'lib', 'safe-worktree-remove.mjs');
     fs.writeFileSync(
       target,
-      fs.readFileSync(target, 'utf-8') + "\nawait removeWorktree('/somewhere', '/wt', []);\n",
+      fs.readFileSync(target, 'utf-8') + "\nawait removeWorktreeSafely({ cwd: '/somewhere', worktreePath: '/wt', primaryPath: '/somewhere' });\n",
       'utf-8',
     );
     const result = await runGate(fixture);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('git-mutation-mutex');
     expect(result.stderr).toContain('MUTATION-GUARDED-HELPER');
+  }, 60_000);
+
+  /** Resolve a fixture dev-entry target with an explicit containment check. */
+  function devEntryTarget(name: string): string {
+    const devDir = path.join(fixture, 'scripts', 'dev');
+    const resolved = path.join(devDir, name);
+    if (!resolved.startsWith(devDir + path.sep)) throw new Error('fixture target escaped the dev directory');
+    return resolved;
+  }
+
+  it.each(['cleanup-task-worktree.mjs', 'workspace-cleanup.mjs'])(
+    'fails when %s calls the imported destructive helper outside the mutation lock',
+    async (entrypoint) => {
+      const target = devEntryTarget(entrypoint);
+      fs.writeFileSync(
+        target,
+        fs.readFileSync(target, 'utf-8') +
+          "\nremoveWorktreeSafely({ cwd: '/somewhere', worktreePath: '/wt', primaryPath: '/somewhere' });\n",
+        'utf-8',
+      );
+      const result = await runGate(fixture);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('git-mutation-mutex');
+      expect(result.stderr).toContain('calls imported removeWorktreeSafely() outside');
+      expect(result.stderr).toContain(entrypoint);
+    },
+    60_000,
+  );
+
+  it('refuses an aliased import of the destructive helper (the scan cannot verify renamed call sites)', async () => {
+    const target = devEntryTarget('workspace-cleanup.mjs');
+    const original = fs.readFileSync(target, 'utf-8');
+    const patched = original.replace(
+      "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
+      "import { removeWorktreeSafely as removeSafely } from './lib/safe-worktree-remove.mjs';",
+    );
+    expect(patched, 'the import line must exist so the injection is real').not.toBe(original);
+    fs.writeFileSync(target, patched, 'utf-8');
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('git-mutation-mutex');
+    expect(result.stderr).toContain('imports removeWorktreeSafely with an alias');
+  }, 60_000);
+
+  it('refuses a namespace import of the destructive helper module (member calls escape the scan)', async () => {
+    const target = devEntryTarget('workspace-cleanup.mjs');
+    const original = fs.readFileSync(target, 'utf-8');
+    const patched = original.replace(
+      "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
+      "import * as safeRemoval from './lib/safe-worktree-remove.mjs';",
+    );
+    expect(patched, 'the import line must exist so the injection is real').not.toBe(original);
+    fs.writeFileSync(target, patched + '\nvoid safeRemoval;\n', 'utf-8');
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('git-mutation-mutex');
+    expect(result.stderr).toContain('as a namespace');
+  }, 60_000);
+
+  it('a commented-out import ABOVE the real one cannot hide an unlocked call (gate bypass)', async () => {
+    const target = devEntryTarget('workspace-cleanup.mjs');
+    const original = fs.readFileSync(target, 'utf-8');
+    const realImport = "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';";
+    expect(original.includes(realImport), 'the import line must exist so the injection is real').toBe(true);
+    fs.writeFileSync(
+      target,
+      original.replace(realImport, "// import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';\n" + realImport) +
+        "\nremoveWorktreeSafely({ cwd: '/somewhere', worktreePath: '/wt', primaryPath: '/somewhere' });\n",
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('calls imported removeWorktreeSafely() outside');
+    expect(result.stderr).toContain('workspace-cleanup.mjs');
+  }, 60_000);
+
+  it('does not misreport removeWorktreeSafely mentions inside comments or strings', async () => {
+    const target = devEntryTarget('cleanup-task-worktree.mjs');
+    fs.writeFileSync(
+      target,
+      fs.readFileSync(target, 'utf-8') +
+        '\n// removeWorktreeSafely({ cwd: "/x", worktreePath: "/y", primaryPath: "/z" }) is guarded at its real call site.\n' +
+        "const note = 'removeWorktreeSafely() must stay inside the lock';\nvoid note;\n",
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain('calls imported removeWorktreeSafely() outside');
   }, 60_000);
 
   it('fails when a background service is introduced', async () => {

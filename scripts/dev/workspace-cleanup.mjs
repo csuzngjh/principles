@@ -42,10 +42,12 @@ import {
   classifyRecords,
   collectWorkspaceState,
   planCleanup,
+  readLeaseState,
 } from './lib/workspace-lifecycle.mjs';
 import { withMutationLock } from './lib/git-mutation-lock.mjs';
 import { CODES } from './lib/preflight.mjs';
-import { formatProgress, removeResidueTree, scanReparsePoints } from './lib/residue-delete.mjs';
+import { assertDeletableRoot, formatProgress, removeResidueTree, scanReparsePoints, classifyReparsePoints, detachInternalLinks, REMOVAL_REASONS } from './lib/residue-delete.mjs';
+import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';
 
 function parseArgs(argv) {
   const args = { apply: false, json: false, graceDays: GRACE_DAYS_DEFAULT, skipGh: false, residue: null, ackUnknown: false };
@@ -82,6 +84,15 @@ function print(args, payload, lines) {
   else console.log(lines.join('\n'));
 }
 
+/** Never inline a path containing shell metacharacters into a paste-ready command. */
+function shellPath(p) {
+  const unsafeChars = process.platform === 'win32' ? '"&|%!^<>$`\'' : '\\"&|%!^<>$`\'';
+  for (const ch of p) {
+    if (unsafeChars.includes(ch) || ch === '\n' || ch === '\r') return '"<copy path from JSON output>"';
+  }
+  return '"' + p + '"';
+}
+
 function describeAction(action) {
   const lines = [];
   if (action.kind === 'remove-worktree') {
@@ -92,32 +103,6 @@ function describeAction(action) {
   }
   for (const item of action.evidence) lines.push('  evidence: ' + item);
   return lines;
-}
-
-/**
- * One `git worktree remove`, with the single sanctioned --force retry.
- * MUTATION-GUARDED-HELPER: this hoisted mutation helper is legal only because
- * every call site runs inside a withMutationLock span (check-workspace-tools
- * enforces that contract per call site, PRI-796).
- */
-async function removeWorktree(cwd, worktreePath, notes) {
-  let removeError = '';
-  try {
-    await runGit(['worktree', 'remove', worktreePath], { cwd });
-  } catch (err) {
-    removeError = err && err.message ? err.message : String(err);
-  }
-  if (!removeError) return true;
-  // Porcelain was clean at apply time, so only ignored build output (e.g.
-  // node_modules) can block removal; one --force retry is safe in exactly
-  // that situation. Double --force is never used.
-  try {
-    await runGit(['worktree', 'remove', '--force', worktreePath], { cwd });
-    notes.push('removal needed one --force pass for ignored build output (porcelain was clean)');
-    return true;
-  } catch (err2) {
-    return err2 && err2.message ? err2.message : String(err2);
-  }
 }
 
 /** Is `worktreePath` currently Git-locked? Reads the live worktree list. */
@@ -173,13 +158,42 @@ async function runResidueMode(args) {
         ...entry.reasons.map((r) => '    note: ' + r),
         '',
         '  Deleting it destroys any uncommitted work irrecoverably. If you have reviewed it and accept that:',
-        '    npm run dev:workspace:cleanup -- --residue "' + entry.path + '" --ack-unknown --apply',
+        '    npm run dev:workspace:cleanup -- --residue ' + shellPath(entry.path) + ' --ack-unknown --apply',
       ]
     );
     process.exit(1);
   }
 
-  const preflight = scanReparsePoints(entry.path);
+  const rootGuard = assertDeletableRoot(entry.path, { primaryPath: state.primaryPath });
+  if (!rootGuard.ok) {
+    print(
+      args,
+      { ok: false, code: CODES.CHECK_FAILED, error: rootGuard.error, target: entry.path },
+      ['[workspace-cleanup] REFUSED — ' + rootGuard.error]
+    );
+    process.exit(1);
+    return;
+  }
+  const preflight = scanReparsePoints(rootGuard.resolved);
+  if (preflight.unreadable.length > 0) {
+    const unreadable = preflight.unreadable.slice(0, 20);
+    print(
+      args,
+      {
+        ok: false,
+        code: CODES.CHECK_FAILED,
+        error: 'residue scan incomplete; refusing before deleting any file or directory',
+        target: entry.path,
+        unreadable,
+      },
+      [
+        '[workspace-cleanup] REFUSED — residue scan incomplete; nothing was deleted.',
+        ...unreadable.map((item) => '  unreadable: ' + item.path + ' — ' + item.error),
+      ]
+    );
+    process.exit(1);
+    return;
+  }
   const lines = ['[workspace-cleanup] residue target: ' + entry.path];
   lines.push('  class: ' + entry.residueClass + '  shape: ' + entry.residueShape);
   for (const e of entry.evidence) lines.push('  evidence: ' + e);
@@ -250,8 +264,13 @@ async function main() {
     return;
   }
 
-  const cwd = process.cwd();
-  const state = await collectWorkspaceState({ cwd, skipGh: args.skipGh });
+  const invocationCwd = process.cwd();
+  const state = await collectWorkspaceState({ cwd: invocationCwd, skipGh: args.skipGh });
+  // A batch may remove the worktree from which it was launched. All subsequent
+  // Git operations therefore use the stable primary checkout as control plane.
+  const cwd = state.primaryPath || invocationCwd;
+  // A batch may remove its original cwd; release that directory handle first.
+  process.chdir(cwd);
   const others = state.records.filter((r) => !(r.kind === 'worktree' && r.isPrimary));
   const classified = classifyRecords(others, { graceDays: args.graceDays, now: state.now });
   const plan = planCleanup(classified);
@@ -306,7 +325,7 @@ async function main() {
         lines.push('  ' + r.path + '  [' + r.residueClass + ' / ' + r.residueShape + ']');
         if (r.recoveredBranch) lines.push('    task branch (recovered from lease): ' + r.recoveredBranch);
         for (const reason of r.reasons) lines.push('    note: ' + reason);
-        lines.push('    to remove explicitly: npm run dev:workspace:cleanup -- --residue "' + r.path + '" --ack-unknown --apply');
+        lines.push('    to remove explicitly: npm run dev:workspace:cleanup -- --residue ' + shellPath(r.path) + ' --ack-unknown --apply');
       }
     }
     for (const note of state.notes) lines.push('Note: ' + note);
@@ -317,6 +336,20 @@ async function main() {
   // ---- apply mode: execute exactly the computed plan, re-verifying each. ----
   const applied = [];
   const refused = [];
+  const blockedBranches = new Set();
+  // Items that leave Git admin state the global prune must not touch:
+  //  - RESTORE_FAILED: Git lists the worktree at a path the tree is NOT at,
+  //    and prune deletes exactly that kind of admin entry — orphaning a tree
+  //    that still exists;
+  //  - REMOVAL_FAILED_RESIDUE_SHELL: our no-follow admin-directory removal
+  //    REFUSED (e.g. reparse points inside it); prune would delete that same
+  //    directory with Git's recursive, junction-following delete (ERR-098).
+  // Any entry here blocks the prune for this run.
+  const pruneBlockers = [];
+  const refuseWorktree = (action, reason) => {
+    refused.push({ action, reason });
+    if (action.branch) blockedBranches.add(action.branch);
+  };
   const notes = [...state.notes];
   const commonDir = await gitCommonDirAbsolute(cwd);
 
@@ -324,37 +357,156 @@ async function main() {
     if (action.kind === 'remove-worktree') {
       const worktreePath = action.path;
       if (normalizeGitPath(worktreePath, cwd) === normalizeGitPath(primaryPath, cwd)) {
-        refused.push({ action, reason: 'refusing the primary checkout' });
+        refuseWorktree(action, 'refusing the primary checkout');
         continue;
       }
       // SPEC §14.1 — re-verify freshness NOW, not at plan time.
       const status = await runGit(['status', '--porcelain'], { cwd: worktreePath, allowFailure: true });
       if (status === null) {
-        refused.push({ action, reason: 'worktree status unreadable at apply time' });
+        refuseWorktree(action, 'worktree status unreadable at apply time');
         continue;
       }
       if (status.trim().length > 0) {
-        refused.push({ action, reason: 'worktree became dirty at apply time — unknown work preserved' });
+        refuseWorktree(action, 'worktree became dirty at apply time — unknown work preserved');
         continue;
       }
       if (await isLockedAtApplyTime(cwd, worktreePath)) {
-        refused.push({ action, reason: 'worktree is Git-locked at apply time — release the claim first (never auto-unlocked)' });
+        refuseWorktree(action, 'worktree is Git-locked at apply time — release the claim first (never auto-unlocked)');
         continue;
       }
+
+      // The scan and all path mutations share the Git mutation lock. The actual
+      // tree deletion is a no-follow filesystem walk in a quarantine sibling;
+      // Git is used only for atomic move and metadata unregister, never recursive
+      // deletion. Non-cooperating writers cannot make Git traverse a late junction.
       try {
-        const result = await withMutationLock({ commonDir, operation: 'worktree-remove', target: worktreePath }, () =>
-          removeWorktree(cwd, worktreePath, notes)
-        );
-        if (result === true) applied.push(action);
-        else refused.push({ action, reason: 'git worktree remove failed: ' + result });
+        const verdict = await withMutationLock({ commonDir, operation: 'worktree-remove', target: worktreePath }, async () => {
+          const lease = readLeaseState(worktreePath);
+          if (lease.phase === 'active' || lease.phase === 'invalid') {
+            return { ok: false, reason: 'worktree lease is ' + lease.phase + ' at apply time' };
+          }
+          let liveList = await listWorktrees(cwd);
+          let liveEntry = liveList.find((w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(worktreePath, cwd));
+          if (!liveEntry) return { ok: false, reason: 'worktree is no longer registered at apply time' };
+          if (liveEntry.locked) return { ok: false, reason: 'worktree is Git-locked at apply time' };
+
+          const currentLease = readLeaseState(worktreePath);
+          const listed = await listWorktrees(cwd);
+          const currentEntry = listed.find((w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(worktreePath, cwd));
+          if (currentLease.phase === 'active' || currentLease.phase === 'invalid' || !currentEntry || currentEntry.locked) {
+            return { ok: false, reason: 'worktree writer ownership changed inside mutation lock; refusing deletion' };
+          }
+          const linkScan = classifyReparsePoints(worktreePath);
+          if (!linkScan.complete) {
+            return {
+              ok: false,
+              reason:
+                'the reparse-point scan could NOT prove the whole worktree is readable (' +
+                linkScan.unreadable.length + ' unreadable directory/directories, first: ' +
+                (linkScan.unreadable[0] ? linkScan.unreadable[0].path : 'worktree root') +
+                ') — an unreadable directory may hide a junction pointing outside it (ERR-098); ' +
+                REMOVAL_REASONS.SCAN_INCOMPLETE,
+            };
+          }
+          const unsafeExternal = linkScan.external.filter((link) => link.unsafeReason !== 'cycle');
+          if (unsafeExternal.length > 0) {
+            const first = unsafeExternal[0];
+            return {
+              ok: false,
+              reason:
+                unsafeExternal.length +
+                ' reparse point(s) must not be traversed (outside / unresolvable / non-lexical; internal ancestor cycles are detached safely) — first: ' +
+                first.path + ' -> ' + (first.target || '<unreadable target>') +
+                ' [' + (first.unsafeReason || 'outside') + ']; ' +
+                REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT +
+                '; detach the links, then run: npm run dev:worktree:cleanup -- ' +
+                shellPath(worktreePath) + ' --detach-external-links',
+            };
+          }
+
+          const expectedDeletedPaths = [];
+          const safeInternalLinks = [
+            ...linkScan.internal,
+            ...linkScan.external.filter((link) => link.unsafeReason === 'cycle'),
+          ];
+          if (safeInternalLinks.length > 0) {
+            // A second ownership check is deliberately adjacent to the unlink.
+            const leaseBeforeDetach = readLeaseState(worktreePath);
+            if (leaseBeforeDetach.phase === 'active' || leaseBeforeDetach.phase === 'invalid') {
+              return { ok: false, reason: 'worktree lease became ' + leaseBeforeDetach.phase + ' before internal-link detachment' };
+            }
+            liveList = await listWorktrees(cwd);
+            liveEntry = liveList.find((w) => normalizeGitPath(w.path, cwd) === normalizeGitPath(worktreePath, cwd));
+            if (!liveEntry || liveEntry.locked) {
+              return { ok: false, reason: 'worktree ownership changed before internal-link detachment' };
+            }
+            const internal = detachInternalLinks(worktreePath);
+            if (!internal.ok) {
+              return {
+                ok: false,
+                reason: 'could not detach ' + safeInternalLinks.length + ' verified internal/cycle reparse point(s) before safe removal; ' +
+                  (internal.complete ? REMOVAL_REASONS.EXTERNAL_LINKS_PRESENT : REMOVAL_REASONS.SCAN_INCOMPLETE),
+              };
+            }
+            expectedDeletedPaths.push(...internal.detached.map((item) => item.path));
+            notes.push('detached ' + internal.detached.length + ' verified internal/cycle reparse point(s) before safe removal');
+          }
+
+          const safeRemoval = await removeWorktreeSafely({
+            cwd,
+            worktreePath,
+            primaryPath,
+            expectedDeletedPaths,
+            onProgress: args.json ? null : (progress) => console.log(formatProgress(progress)),
+          });
+          notes.push(...safeRemoval.notes);
+          return {
+            ok: safeRemoval.ok,
+            reason: safeRemoval.reason,
+            reasonCode: safeRemoval.reasonCode,
+            removedPath: safeRemoval.removedPath,
+            quarantinePath: safeRemoval.quarantinePath,
+            restoredPath: safeRemoval.restoredPath,
+            adminDirPath: safeRemoval.adminDirPath,
+            residueKind: safeRemoval.residueKind,
+            restoreState: safeRemoval.restoreState,
+            recoveryPath: safeRemoval.recoveryPath,
+          };
+        });
+        if (verdict.ok) applied.push(action);
+        else {
+          if (verdict.restoreState === 'RESTORE_FAILED') {
+            pruneBlockers.push(
+              (verdict.recoveryPath || action.target || '(unknown)') + ' (needs git worktree repair before any prune)'
+            );
+          } else if (verdict.reasonCode === REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL) {
+            pruneBlockers.push(
+              (verdict.adminDirPath || verdict.quarantinePath || action.target || '(unknown)') +
+                ' (admin metadata the no-follow removal refused; a prune would delete it recursively)'
+            );
+          }
+          refuseWorktree(
+            action,
+            verdict.reason + (verdict.quarantinePath ? ' (quarantine: ' + verdict.quarantinePath + ')' : '') +
+              // The tree and Git's admin pointer disagree: a prune would delete
+              // the admin metadata of a tree that still exists.
+              (verdict.restoreState === 'RESTORE_FAILED' && verdict.recoveryPath
+                ? ' — do NOT run git worktree prune; relink it first with: git worktree repair ' + shellPath(verdict.recoveryPath)
+                : '')
+          );
+        }
       } catch (err) {
-        refused.push({ action, reason: 'mutation lock unavailable: ' + (err && err.message ? err.message : String(err)) });
+        refuseWorktree(action, 'mutation lock unavailable: ' + (err && err.message ? err.message : String(err)));
       }
       continue;
     }
 
     // delete-branch
     const branch = action.branch;
+    if (blockedBranches.has(branch)) {
+      refused.push({ action, reason: 'worktree removal was refused or failed; branch deletion skipped' });
+      continue;
+    }
     const exists = (await runGit(['rev-parse', '--verify', 'refs/heads/' + branch], { cwd, allowFailure: true })) !== null;
     if (!exists) {
       notes.push('branch already gone: ' + branch);
@@ -386,7 +538,12 @@ async function main() {
   // it is skipped with a note (prune is an opportunistic optimization).
   const pruneSafety = await assessWorktreePruneSafety(cwd);
   let pruned = false;
-  if (pruneSafety.safe) {
+  if (pruneBlockers.length > 0) {
+    notes.push(
+      'skipped global worktree prune — ' + pruneBlockers.length + ' item(s) left Git admin state a prune must not touch: ' +
+        pruneBlockers.join(', ')
+    );
+  } else if (pruneSafety.safe) {
     try {
       await withMutationLock({ commonDir, operation: 'worktree-prune', target: 'global' }, async () => {
         await runGit(['worktree', 'prune'], { cwd, allowFailure: true });
@@ -433,5 +590,22 @@ async function main() {
 
 const isMain = process.argv[1] && process.argv[1].endsWith('workspace-cleanup.mjs');
 if (isMain) {
-  await main();
+  const jsonMode = process.argv.includes('--json');
+  // cli-1: even an unexpected rejection must leave exactly one parseable JSON
+  // object on stdout, never a bare stack trace.
+  main().catch((err) => {
+    const message = String((err && err.message) || err);
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        ok: false,
+        code: CODES.CHECK_FAILED,
+        error: message,
+        reason: REMOVAL_REASONS.UNEXPECTED_ERROR,
+        nextAction: 'Inspect the error above; do not fall back to a recursive delete or a bare `git worktree remove`.',
+      }, null, 2));
+    } else {
+      console.error('[workspace-cleanup] UNEXPECTED FAILURE: ' + message);
+    }
+    process.exitCode = 1;
+  });
 }
