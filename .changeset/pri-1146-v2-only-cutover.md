@@ -1,6 +1,7 @@
 ---
 '@principles/core': major
 '@principles/pd-cli': major
+'create-principles-disciple': patch
 ---
 
 # PRI-1146: Diagnostician Output V2 Only — 唯一生产契约切换与 V1 彻底退役
@@ -21,5 +22,9 @@ Owner 决策（2026-11-06）：Diagnostician Output 采用 V2 Only / Clean Break
 
 - diagnose/pain-retry 构造注入 trustedPrincipleSource；诊断输出契约随 core 升级为 V2 Only（CLI 输出与落库工件均为 V2）。
 - synthetic baseline / flood simulation fixtures 输出 V2。
+
+## create-principles-disciple (patch)
+
+- 随包发布的 pd-console 展示文案与 e2e seed 同步 V2 契约（agent-metadata 输出说明、e2e-seed 诊断字面量）。
 
 Breaking：V1 诊断输出、V1 registry ref 与 V1 兼容读取路径全部移除；本机旧 V1 数据按 Owner 授权清理重置，不提供迁移。

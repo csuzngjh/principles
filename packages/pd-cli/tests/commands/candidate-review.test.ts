@@ -128,13 +128,14 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
     startedAt: now,
     endedAt: now,
     outputPayload: JSON.stringify({
+      schemaVersion: 'diagnostician-output-v2',
       valid: true,
       diagnosisId: `diag-${candidateId}`,
       summary: 'seeded diagnosis',
       rootCause: 'seeded root cause',
       violatedPrinciples: [],
       evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
-      recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT }],
+      recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: CANDIDATE_TEXT }],
       confidence: opts.confidence ?? 0.9,
     }),
   });

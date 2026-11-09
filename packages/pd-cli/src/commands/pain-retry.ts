@@ -485,16 +485,20 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         onFetchOutput: (_runId: string) => ({
           runId: _runId,
           payload: {
+            // PRI-1146: V2 is the only accepted contract (closed root — no
+            // taskId; every rec carries a unique artifact-local ref; the rule
+            // rec carries a structured association).
+            schemaVersion: 'diagnostician-output-v2',
             valid: true,
             diagnosisId: `diag-retry-${Date.now()}`,
-            taskId,
             summary: 'CLI retry test diagnosis — validate tool arguments before execution',
             rootCause: 'Test root cause — missing argument validation',
             violatedPrinciples: [],
-            evidence: [],
+            evidence: [{ sourceRef: `pain://${taskId}`, note: 'CLI retry test evidence' }],
             recommendations: [
-              { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
-              { kind: 'rule', description: 'Use schema validation for external inputs' },
+              { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures', recommendationRef: 'principle-1', abstractedPrinciple: 'Validate tool arguments before execution.' },
+              { kind: 'rule', description: 'Use schema validation for external inputs', recommendationRef: 'rule-1', triggerPattern: 'external input', action: 'Run schema validation before use',
+                principleAssociation: { status: 'linked', relation: 'implements', target: { type: 'recommendation_ref', recommendationRef: 'principle-1' }, rationale: 'Schema validation operationalizes argument validation.', evidenceRefs: [`pain://${taskId}`] } },
             ],
             confidence: 0.9,
           },
