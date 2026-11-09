@@ -224,6 +224,65 @@ export interface SharedDirectivePacking {
 }
 
 /**
+ * PRI-1140: resolve a configured principle identity to the AT MOST ONE
+ * currently-authorized prompt activation of that principle, so a delivery
+ * mapping survives Owner revisions (the prompt-replacement flow deactivates
+ * the pinned activation) without editing plugin config per revision. Read-only
+ * over the SAME candidates reader the shared assembly uses — selection never
+ * creates authorization, and the downstream guards in
+ * `buildActivePrinciplePromptContext` re-verify authority/content before any
+ * injection. Errors fail closed to Native: the caller gets a structured
+ * reason, never a guess.
+ */
+export type ResolveCurrentAuthorizedActivationResult =
+  | { ok: true; principleId: string; artifactId: string; activationId: string; warnings: string[] }
+  | {
+    ok: false;
+    reason: 'principle_not_currently_authorized' | 'ambiguous_current_activations' | 'candidates_unavailable';
+    warnings: string[];
+  };
+
+export async function resolveCurrentAuthorizedActivationByPrincipleId(input: {
+  workspaceDir: string;
+  principleId: string;
+}): Promise<ResolveCurrentAuthorizedActivationResult> {
+  const principleId = typeof input.principleId === 'string' ? input.principleId.trim() : '';
+  if (!principleId) {
+    return { ok: false, reason: 'principle_not_currently_authorized', warnings: [] };
+  }
+  // Mirrors the adaptive authority re-read (noBusyWait): an optional
+  // enhancement must not hold the host behind the synchronous busy wait; a
+  // read warning means the candidate set itself is not trustworthy, so the
+  // resolution fails closed instead of selecting from a degraded list.
+  const candidates = await readPromptActivationCandidates({
+    workspaceDir: input.workspaceDir,
+    includeAuthority: true,
+    noBusyWait: true,
+  });
+  if (candidates.aborted || candidates.warnings.length > 0) {
+    return { ok: false, reason: 'candidates_unavailable', warnings: candidates.warnings };
+  }
+  const matches = candidates.principles.filter((principle) => principle.principleId === principleId);
+  if (matches.length === 0) {
+    return { ok: false, reason: 'principle_not_currently_authorized', warnings: candidates.warnings };
+  }
+  if (matches.length > 1) {
+    return { ok: false, reason: 'ambiguous_current_activations', warnings: candidates.warnings };
+  }
+  const [resolved] = matches;
+  if (!resolved) {
+    return { ok: false, reason: 'principle_not_currently_authorized', warnings: candidates.warnings };
+  }
+  return {
+    ok: true,
+    principleId: resolved.principleId,
+    artifactId: resolved.artifactId,
+    activationId: resolved.activationId,
+    warnings: candidates.warnings,
+  };
+}
+
+/**
  * PRI-1137 final review P1-5: did the AUTHORIZATION FACTS of the adaptive
  * priority target change between the native snapshot (first read) and the
  * authorized snapshot (second read)? The packed directive is annotated from
@@ -353,6 +412,18 @@ export async function buildActivePrinciplePromptContext(input: {
   promptBudget?: PromptBudgetResolution;
   /** Optional single already-qualified activation to place first in this pack pass. */
   adaptivePriority?: { artifactId: string; activationId: string };
+  /**
+   * PRI-1140 (Owner supplementary condition): additive-only adaptive packing.
+   * Only meaningful together with `adaptivePriority`. When true, the
+   * prioritized repack is accepted ONLY if it keeps every activation the
+   * native baseline already assembled (a pure superset — the target may be
+   * placed first, but nothing native-included may be squeezed out); otherwise
+   * the native baseline is kept and the would-be displacement is recorded via
+   * `adaptivePacking.reason='would_displace_native_assembly'` +
+   * `displacedActivationIds`. The legacy pinned-identity path is unaffected
+   * (its budget-driven displacement semantics are preserved verbatim).
+   */
+  additiveOnly?: boolean;
   /** Principles in the native pack that adaptive packing must preserve. */
   mandatoryPrincipleIds?: string[];
   /** Request cancellation forwarded to the final read-only target revalidation. */
@@ -588,13 +659,27 @@ export async function buildActivePrinciplePromptContext(input: {
     || mandatoryIds.some((id) => !prioritizedPacking.included.some((principle) => principle.principleId === id))) {
     return { ...nativeResult, adaptivePacking: report('unavailable', 'mandatory_constraint_displaced') };
   }
-
-  const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
-  if (!stillValid) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_changed') };
   const prioritizedActivationIds = new Set(prioritizedPacking.included.map((principle) => principle.activationId));
   const displacedActivationIds = nativePacking.included
     .filter((principle) => !prioritizedActivationIds.has(principle.activationId))
     .map((principle) => principle.activationId);
+  // PRI-1140: an additive-only target may never squeeze out content the
+  // native baseline already assembled. Decided BEFORE the revalidation read so
+  // a refused placement costs no further I/O; the would-be displacement is the
+  // recorded reason (bounded like the other diagnostic id lists).
+  if (input.additiveOnly === true && displacedActivationIds.length > 0) {
+    return {
+      ...nativeResult,
+      adaptivePacking: report(
+        'unavailable',
+        'would_displace_native_assembly',
+        displacedActivationIds.slice(0, MAX_SHARED_DIAGNOSTIC_IDS),
+      ),
+    };
+  }
+
+  const stillValid = await revalidateAdaptivePrinciple(input.workspaceDir, authorizedTarget, signal);
+  if (!stillValid) return { ...nativeResult, adaptivePacking: report('unavailable', 'target_changed') };
   const result = makeResult(prioritizedPacking, principles, prepared('prioritized', displacedActivationIds));
   // Adaptive assembly is deliberately limited to the existing renderer's Native budget cap.
   return result;

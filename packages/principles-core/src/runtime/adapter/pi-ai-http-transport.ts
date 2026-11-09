@@ -39,6 +39,30 @@ const ignoreDispatcherError = (_error: unknown): void => {
 };
 
 /**
+ * Reconcile the two `Response` declarations behind pi-ai's FetchFunction.
+ *
+ * pi-ai declares `FetchFunction = typeof globalThis.fetch`, so its Response
+ * is the ambient one from the `undici-types` bundled with @types/node. From
+ * @types/node 26.6.6 (undici-types ~8.9) that declaration adds a `textStream`
+ * getter, while undici@7 still ships its own Response declaration without it.
+ * Both declarations describe the SAME Node runtime object — Node's built-in
+ * undici Response — so the mismatch lives only in the published .d.ts files,
+ * not in the value handed to pi-ai.
+ *
+ * Keep that reconciliation in the single I/O seam that owns the undici import
+ * rather than scattering casts. pi-ai never reads `textStream`; the response
+ * is returned untouched (no wrapper, no re-fetch, same dispatcher behaviour).
+ * The downcast is deliberately narrow: `undici.Response` is the structural
+ * supertype (it only lacks the new getter), so this is an ordinary TypeScript
+ * downcast between declarations of one runtime class, not an `any` escape.
+ */
+type PiAiResponse = Awaited<ReturnType<FetchFunction>>;
+
+function asPiAiResponse(response: undici.Response): PiAiResponse {
+  return response as PiAiResponse;
+}
+
+/**
  * Create a fetch bound to a dedicated undici Agent with the 300s
  * headers/body idle caps disabled. Exported for the mechanism regression
  * test, which recreates the exact PRI-683 failure at 1s scale by passing a
@@ -52,8 +76,8 @@ export function createBoundPiAiFetch(
 ): FetchFunction {
   const agent = new undici.Agent(agentOptions);
   EventEmitter.prototype.on.call(agent, 'error', ignoreDispatcherError);
-  const boundFetch: FetchFunction = (input, init) =>
-    undici.fetch(input, { ...init, dispatcher: agent });
+  const boundFetch: FetchFunction = async (input, init) =>
+    asPiAiResponse(await undici.fetch(input, { ...init, dispatcher: agent }));
   return boundFetch;
 }
 

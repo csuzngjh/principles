@@ -1,5 +1,25 @@
 # create-principles-disciple
 
+## 1.148.4
+
+### Patch Changes
+
+- 6b5a4cc: Adaptive Activation config compat: declare the `principleId` mapping identity in the plugin manifest `configSchema` (`adaptiveActivation.properties`, `additionalProperties: false` retained). The #2436 runtime reader already accepted this key, but the undeclared key made any principleId config fail the host's load-time plugin-config validation and take down the entire plugin (PRI-1119 PR #2448 blocker 2). Legacy pinned `(artifactId, activationId)` configs are unaffected: identical keywords, identity arbitration stays at the runtime reader (mixed/partial/blank-identity configs keep failing closed to Native at runtime, not at load). The installer bundles the plugin, so it ships the corrected manifest in the same release.
+
+## 1.148.3
+
+### Patch Changes
+
+- 73c5ea7: Dependency bump: tuf-js from 6.0.1 to 6.0.2 (installer runtime dependency, shipped inside create-principles-disciple).
+
+## 1.148.2
+
+### Patch Changes
+
+- 517e338: feat(openclaw-plugin,host-runtime): revision-resilient adaptive delivery mapping via current principle identity (PRI-1140)
+  
+  The `adaptiveActivation` mapping may now name a `principleId` instead of a pinned `(artifactId, activationId)`. On a delivery-signal round the provider resolves it to the at-most-one currently authorized prompt activation (`resolveCurrentAuthorizedActivationByPrincipleId`, read-only), so an Owner prompt revision no longer silently kills the intervention until the plugin config is edited by hand. The principle path packs additively (`additiveOnly`): it never squeezes out content the native assembly already holds — such a placement keeps the native assembly and records `would_displace_native_assembly`. The pinned mapping and the controlled-admission path are unchanged; a config without `principleId` behaves byte-identically.
+
 ## 1.148.1
 
 ### Patch Changes
