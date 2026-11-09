@@ -10,11 +10,14 @@
 // holds anything inside the quarantine:
 //
 //   linux   every /proc/<pid>/{fd,cwd,root,maps} entry is scanned for a path
-//           inside the quarantine. A process of THIS user whose descriptors
-//           cannot be read fails the proof. Processes of other users (root,
-//           and non-dumpable / setuid processes, whose /proc entry is owned by
-//           root) cannot be inspected without privileges: they are counted and
-//           reported as outside the proof boundary.
+//           inside the quarantine. Processes that cannot be inspected without
+//           privileges are counted and reported as outside the proof boundary:
+//           other users' processes (and non-dumpable ones, whose /proc entry is
+//           owned by root), and same-user processes whose own credentials
+//           explain the denial (setgid, a different uid set, or permitted
+//           capabilities — e.g. Debian/Ubuntu's setgid ssh-agent). A same-user
+//           process denied for any reason its credentials do NOT explain fails
+//           the proof.
 //   win32   the private quarantine parent is renamed out and back. Windows
 //           refuses to rename a directory while ANY handle is open anywhere in
 //           its subtree — file (read, write or append), directory handle, or
@@ -47,6 +50,37 @@ function message(err) {
 }
 
 /**
+ * Linux grants /proc/<pid>/fd only when ptrace read access is allowed, which
+ * also requires the target to hold no credentials the caller lacks. A process
+ * of the same uid can therefore be uninspectable for a known reason: it runs
+ * setgid (Debian/Ubuntu ship ssh-agent setgid), with a different uid set, or
+ * with permitted capabilities. Those are reported as outside the proof
+ * boundary, exactly like other users' processes. Any denial its credentials do
+ * NOT explain stays a hard failure.
+ *
+ * @returns {string|null} the credential difference that explains the denial
+ */
+function credentialsExplainDenial(procDir, myUid, myGid) {
+  let status;
+  try {
+    status = fs.readFileSync(path.posix.join(procDir, 'status'), 'utf8');
+  } catch {
+    return null;
+  }
+  const field = (name) => {
+    const line = status.split('\n').find((entry) => entry.startsWith(name + ':'));
+    return line ? line.slice(name.length + 1).trim() : '';
+  };
+  const ids = (name) => field(name).split(/\s+/).filter(Boolean).map(Number);
+  const reasons = [];
+  if (ids('Uid').some((id) => id !== myUid)) reasons.push('Uid ' + field('Uid'));
+  if (myGid !== null && ids('Gid').some((id) => id !== myGid)) reasons.push('Gid ' + field('Gid'));
+  const capPrm = field('CapPrm');
+  if (capPrm !== '' && !/^0+$/.test(capPrm)) reasons.push('CapPrm ' + capPrm);
+  return reasons.length > 0 ? reasons.join(', ') : null;
+}
+
+/**
  * Linux: one pass over /proc. Returns the holders found, the number of
  * processes outside the inspectable boundary, or an `unprovable` reason.
  */
@@ -62,7 +96,9 @@ function scanProcFs(quarantineRoot) {
     return { unprovable: '/proc is not readable (' + message(err) + ')' };
   }
   const myUid = typeof process.getuid === 'function' ? process.getuid() : null;
+  const myGid = typeof process.getgid === 'function' ? process.getgid() : null;
   const holders = [];
+  const elevated = [];
   let uninspected = 0;
   for (const pid of pids) {
     const procDir = path.posix.join('/proc', pid);
@@ -78,7 +114,20 @@ function scanProcFs(quarantineRoot) {
     } catch (err) {
       if (err && (err.code === 'ENOENT' || err.code === 'ESRCH')) continue;
       if (myUid !== null && ownerUid === myUid) {
-        return { unprovable: 'process ' + pid + ' belongs to this user but its descriptors are unreadable (' + message(err) + ')' };
+        const explanation = credentialsExplainDenial(procDir, myUid, myGid);
+        let command = '?';
+        try {
+          command = fs.readFileSync(path.posix.join(procDir, 'comm'), 'utf8').trim();
+        } catch {
+          /* exited mid-scan */
+        }
+        if (explanation === null) {
+          return {
+            unprovable: 'process ' + pid + ' (' + command + ') belongs to this user, its descriptors are unreadable (' +
+              message(err) + ') and its credentials do not explain the denial',
+          };
+        }
+        elevated.push({ pid: Number(pid), command, credentials: explanation });
       }
       uninspected += 1;
       continue;
@@ -120,7 +169,7 @@ function scanProcFs(quarantineRoot) {
       /* exited mid-scan: its descriptors were already checked */
     }
   }
-  return { holders, uninspected };
+  return { holders, elevated, uninspected };
 }
 
 function proveLinux(quarantinePath) {
@@ -139,7 +188,7 @@ function proveLinux(quarantinePath) {
     // A transient reader (an indexer, a watcher reading one file) disappears
     // between passes; a real holder is seen on every pass.
     if (last.holders.length === 0) {
-      return { proven: true, mechanism, uninspectedProcesses: last.uninspected };
+      return { proven: true, mechanism, uninspectedProcesses: last.uninspected, uninspectedDetail: last.elevated };
     }
   }
   const shown = last.holders.slice(0, 5)
@@ -150,6 +199,7 @@ function proveLinux(quarantinePath) {
     mechanism,
     holders: last.holders,
     uninspectedProcesses: last.uninspected,
+    uninspectedDetail: last.elevated,
     reason: last.holders.length + ' handle(s) inside the quarantine are still held: ' + shown +
       (last.holders.length > 5 ? '; …' : ''),
   };
@@ -207,7 +257,11 @@ function proveWindows(quarantineParent) {
  * @param {{quarantinePath: string, quarantineParent: string, platform?: string}} opts
  * @returns {{proven: boolean, mechanism: string, reason?: string,
  *            holders?: Array<{pid: number, command: string, kind: string, path: string}>,
- *            uninspectedProcesses?: number, displacedTo?: string}}
+ *            uninspectedProcesses?: number,
+ *            uninspectedDetail?: Array<{pid: number, command: string, credentials: string}>,
+ *            displacedTo?: string}}
+ *          `uninspectedDetail` names the same-user processes that could not be
+ *          inspected and the credentials that explain why.
  *          `displacedTo` is set only when a Windows probe moved the quarantine
  *          parent and could not move it back: the tree is then under that path.
  */

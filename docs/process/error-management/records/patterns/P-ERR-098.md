@@ -97,10 +97,14 @@ the limits of what Node's filesystem API can prove; they are stated, not hidden:
 2. *Quiescence is a point-in-time proof.* A process that opens a NEW handle
    after the proof must first discover the freshly created private quarantine
    path.
-3. *Linux inspection boundary.* Processes of other users — and non-dumpable or
-   setuid processes, whose `/proc` entry is owned by root — cannot be inspected
-   without privileges; they are counted (`uninspectedProcesses`) and reported,
-   not proven absent. A process of the invoking user that cannot be inspected
+3. *Linux inspection boundary.* Processes that cannot be inspected without
+   privileges are counted (`uninspectedProcesses`) and reported, not proven
+   absent: other users' processes, non-dumpable or setuid ones (their `/proc`
+   entry is owned by root), and same-user processes whose own credentials
+   explain the denial — setgid, a different uid set, or permitted capabilities
+   (Debian/Ubuntu ship `ssh-agent` setgid; GitHub's Ubuntu runner has such a
+   process too). Those are named with the credential difference in the result.
+   A same-user process denied for any reason its credentials do NOT explain
    fails the proof. Processes in other PID namespaces are invisible.
 4. *Unsupported platforms* (macOS, BSD) never prove quiescence, so cleanup
    always refuses there until an inspection mechanism exists.

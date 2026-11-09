@@ -34,6 +34,12 @@ describe.skipIf(!supported)('proveQuarantineQuiescent on a supported platform', 
     const result = proveQuarantineQuiescent({ quarantinePath, quarantineParent });
     expect(result.proven, result.reason).toBe(true);
     expect(result.mechanism).toBe(process.platform === 'linux' ? 'linux-procfs' : 'win32-rename-probe');
+    // Same-user processes that could not be inspected (e.g. a setgid
+    // ssh-agent; GitHub's Ubuntu runner has one) are part of the reported
+    // boundary — each must carry the credential difference that explains it.
+    for (const item of result.uninspectedDetail ?? []) {
+      expect(item.credentials, 'pid ' + item.pid + ' (' + item.command + ')').toMatch(/^(Uid|Gid|CapPrm) /);
+    }
   });
 
   it('refuses while a file deep inside the tree is held open, and proves it once closed', () => {

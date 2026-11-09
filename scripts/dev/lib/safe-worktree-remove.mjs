@@ -850,9 +850,14 @@ export async function removeWorktreeSafely({
     return refuse(REMOVAL_REASONS.QUIESCENCE_UNPROVEN, reason, { quiescence });
   }
   if (quiescence.uninspectedProcesses > 0) {
+    const named = (quiescence.uninspectedDetail || [])
+      .slice(0, 5)
+      .map((item) => item.command + ' (pid ' + item.pid + ', ' + item.credentials + ')')
+      .join('; ');
     notes.push(
       'quiescence proven (' + quiescence.mechanism + ') against every process this user can inspect; ' +
-      quiescence.uninspectedProcesses + ' process(es) of other users or non-dumpable processes are outside that boundary'
+      quiescence.uninspectedProcesses + ' process(es) are outside that boundary (other users, non-dumpable, ' +
+      'or same-user with elevated credentials' + (named ? ': ' + named : '') + ')'
     );
   }
 
