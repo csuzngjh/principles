@@ -337,11 +337,15 @@ async function main() {
   const applied = [];
   const refused = [];
   const blockedBranches = new Set();
-  // Trees whose rollback could not re-link them to Git (restoreState
-  // RESTORE_FAILED). Git lists such a worktree at a path the tree is NOT at,
-  // and the global prune deletes exactly that kind of admin entry — which
-  // would orphan a tree that still exists. Any entry here blocks the prune.
-  const relinkRequired = [];
+  // Items that leave Git admin state the global prune must not touch:
+  //  - RESTORE_FAILED: Git lists the worktree at a path the tree is NOT at,
+  //    and prune deletes exactly that kind of admin entry — orphaning a tree
+  //    that still exists;
+  //  - REMOVAL_FAILED_RESIDUE_SHELL: our no-follow admin-directory removal
+  //    REFUSED (e.g. reparse points inside it); prune would delete that same
+  //    directory with Git's recursive, junction-following delete (ERR-098).
+  // Any entry here blocks the prune for this run.
+  const pruneBlockers = [];
   const refuseWorktree = (action, reason) => {
     refused.push({ action, reason });
     if (action.branch) blockedBranches.add(action.branch);
@@ -459,6 +463,7 @@ async function main() {
           return {
             ok: safeRemoval.ok,
             reason: safeRemoval.reason,
+            reasonCode: safeRemoval.reasonCode,
             removedPath: safeRemoval.removedPath,
             quarantinePath: safeRemoval.quarantinePath,
             restoredPath: safeRemoval.restoredPath,
@@ -470,7 +475,16 @@ async function main() {
         });
         if (verdict.ok) applied.push(action);
         else {
-          if (verdict.restoreState === 'RESTORE_FAILED') relinkRequired.push(verdict.recoveryPath || action.target || '(unknown)');
+          if (verdict.restoreState === 'RESTORE_FAILED') {
+            pruneBlockers.push(
+              (verdict.recoveryPath || action.target || '(unknown)') + ' (needs git worktree repair before any prune)'
+            );
+          } else if (verdict.reasonCode === REMOVAL_REASONS.REMOVAL_FAILED_RESIDUE_SHELL) {
+            pruneBlockers.push(
+              (verdict.adminDirPath || verdict.quarantinePath || action.target || '(unknown)') +
+                ' (admin metadata the no-follow removal refused; a prune would delete it recursively)'
+            );
+          }
           refuseWorktree(
             action,
             verdict.reason + (verdict.quarantinePath ? ' (quarantine: ' + verdict.quarantinePath + ')' : '') +
@@ -524,10 +538,10 @@ async function main() {
   // it is skipped with a note (prune is an opportunistic optimization).
   const pruneSafety = await assessWorktreePruneSafety(cwd);
   let pruned = false;
-  if (relinkRequired.length > 0) {
+  if (pruneBlockers.length > 0) {
     notes.push(
-      'skipped global worktree prune — ' + relinkRequired.length + ' tree(s) must be relinked with git worktree repair first ' +
-        '(a prune now would delete the admin metadata of a tree that still exists): ' + relinkRequired.join(', ')
+      'skipped global worktree prune — ' + pruneBlockers.length + ' item(s) left Git admin state a prune must not touch: ' +
+        pruneBlockers.join(', ')
     );
   } else if (pruneSafety.safe) {
     try {

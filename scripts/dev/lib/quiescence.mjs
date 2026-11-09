@@ -180,8 +180,19 @@ function scanProcFs(quarantineRoot) {
           break;
         }
       }
-    } catch {
-      /* exited mid-scan: its descriptors were already checked */
+    } catch (err) {
+      // ENOENT/ESRCH: the process exited mid-scan and its descriptors were
+      // already checked. Any other denial is a live process this scan cannot
+      // inspect (e.g. LSM confinement): treat it as a holder rather than
+      // silently concluding it has no mapping (CodeRabbit round 6, Major).
+      if (!err || (err.code !== 'ENOENT' && err.code !== 'ESRCH')) {
+        holders.push({
+          pid: Number(pid),
+          command: '?',
+          kind: 'maps-unreadable',
+          path: path.posix.join(procDir, 'maps') + ' (' + message(err) + ')',
+        });
+      }
     }
   }
   return { holders, elevated, uninspected };

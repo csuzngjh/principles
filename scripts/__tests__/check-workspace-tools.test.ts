@@ -212,6 +212,23 @@ describe('workspace tools gate', () => {
     expect(result.stderr).toContain('as a namespace');
   }, 60_000);
 
+  it('a commented-out import ABOVE the real one cannot hide an unlocked call (gate bypass)', async () => {
+    const target = devEntryTarget('workspace-cleanup.mjs');
+    const original = fs.readFileSync(target, 'utf-8');
+    const realImport = "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';";
+    expect(original.includes(realImport), 'the import line must exist so the injection is real').toBe(true);
+    fs.writeFileSync(
+      target,
+      original.replace(realImport, "// import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';\n" + realImport) +
+        "\nremoveWorktreeSafely({ cwd: '/somewhere', worktreePath: '/wt', primaryPath: '/somewhere' });\n",
+      'utf-8',
+    );
+    const result = await runGate(fixture);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('calls imported removeWorktreeSafely() outside');
+    expect(result.stderr).toContain('workspace-cleanup.mjs');
+  }, 60_000);
+
   it('does not misreport removeWorktreeSafely mentions inside comments or strings', async () => {
     const target = devEntryTarget('cleanup-task-worktree.mjs');
     fs.writeFileSync(

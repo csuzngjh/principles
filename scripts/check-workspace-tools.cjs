@@ -353,10 +353,12 @@ for (const file of devFiles) {
     // blankNonCode preserves length: when the match region is blanked, it was
     // inside a comment or string, not executable code.
     masked.slice(matchIndex, matchIndex + 6).trim().length > 0;
-  const namedImport = source.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su);
-  const namespaceImport = source.match(/import\s*\*\s*as\s*(\w+)\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/su);
-  const realNamedImport = namedImport && inCodeContext(namedImport.index) ? namedImport : null;
-  const realNamespaceImport = namespaceImport && inCodeContext(namespaceImport.index) ? namespaceImport : null;
+  // Only matches in executable code count, and EVERY match is considered: the
+  // first textual match may be a comment that precedes the real import, and
+  // picking it would skip the call-site scan entirely (a gate bypass).
+  const firstInCode = (re) => [...source.matchAll(re)].find((match) => inCodeContext(match.index)) || null;
+  const realNamedImport = firstInCode(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/gsu);
+  const realNamespaceImport = firstInCode(/import\s*\*\s*as\s*(\w+)\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/gsu);
   if (realNamedImport && /\bremoveWorktreeSafely\s+as\s+\w+/.test(realNamedImport[1])) {
     // An alias renames every call site out of the scan below — a blind spot,
     // so the import form is refused outright instead of being silently skipped.
