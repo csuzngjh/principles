@@ -34,11 +34,14 @@ describe.skipIf(!supported)('proveQuarantineQuiescent on a supported platform', 
     const result = proveQuarantineQuiescent({ quarantinePath, quarantineParent });
     expect(result.proven, result.reason).toBe(true);
     expect(result.mechanism).toBe(process.platform === 'linux' ? 'linux-procfs' : 'win32-rename-probe');
-    // Same-user processes that could not be inspected (systemd's non-dumpable
-    // (sd-pam) runs on GitHub's Ubuntu runner) are part of the reported
-    // boundary — each must carry the reason that explains the denial.
+    // Same-user processes that could not be FULLY inspected (systemd's
+    // non-dumpable (sd-pam), or a process whose maps are denied while its
+    // descriptors were readable — GitHub's Ubuntu runner has such a process)
+    // are part of the reported boundary — each must carry the reason that
+    // explains the denial.
     for (const item of result.uninspectedDetail ?? []) {
-      expect(item.credentials, 'pid ' + item.pid + ' (' + item.command + ')').toMatch(/^(Uid|Gid|CapPrm|non-dumpable) /);
+      expect(item.credentials, 'pid ' + item.pid + ' (' + item.command + ')')
+        .toMatch(/(^(Uid|Gid|CapPrm|non-dumpable) |maps unreadable)/);
     }
   });
 

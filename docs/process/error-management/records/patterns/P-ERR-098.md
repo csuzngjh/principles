@@ -97,17 +97,22 @@ the limits of what Node's filesystem API can prove; they are stated, not hidden:
 2. *Quiescence is a point-in-time proof.* A process that opens a NEW handle
    after the proof must first discover the freshly created private quarantine
    path.
-3. *Linux inspection boundary.* Processes that cannot be inspected without
-   privileges are counted (`uninspectedProcesses`) and reported, not proven
+3. *Linux inspection boundary.* Processes that cannot be FULLY inspected are
+   counted (`uninspectedProcesses`) and named with the reason, not proven
    absent: other users' processes; non-dumpable processes (systemd's
    `(sd-pam)`, `ssh-agent`, `gpg-agent` — the kernel gives their
-   `/proc/<pid>/fd` to root even though `/proc/<pid>` still shows the user;
-   GitHub's Ubuntu runner has one); and same-user processes whose credentials
-   explain the denial (setgid, a different uid set, or permitted capabilities).
-   Those are named with the reason in the result. A dumpable same-user process
-   denied for any reason that is NOT explained (typically LSM confinement — a
-   snap-packaged editor and its integrated terminal) fails the proof, because
-   it is exactly the kind of process that could hold the tree. Processes in
-   other PID namespaces are invisible.
+   `/proc/<pid>/fd` to root even though `/proc/<pid>` still shows the user);
+   same-user processes whose credentials explain a denial (setgid, a different
+   uid set, permitted capabilities); and processes whose `/proc/<pid>/maps` is
+   denied while their descriptors WERE inspectable (LSM rules or a dumpability
+   transition mid-scan — GitHub's Ubuntu runner has one; on such hosts the
+   refusal proposed in an earlier review round would have blocked every
+   removal). For that last class the file-descriptor dimension is fully
+   inspected and the mapping dimension is reported uninspected; deleting an
+   mmap'd file with no open fd loses late writes exactly like an unlinked fd —
+   covered by the unlinked-fd boundary above. A dumpable same-user process
+   denied BOTH its descriptors and an explanation fails the proof, because it
+   is exactly the kind of process that could hold the tree. Processes in other
+   PID namespaces are invisible.
 4. *Unsupported platforms* (macOS, BSD) never prove quiescence, so cleanup
    always refuses there until an inspection mechanism exists.

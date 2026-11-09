@@ -10,15 +10,17 @@
 // holds anything inside the quarantine:
 //
 //   linux   every /proc/<pid>/{fd,cwd,root,maps} entry is scanned for a path
-//           inside the quarantine. Processes that cannot be inspected without
-//           privileges are counted and reported as outside the proof boundary:
-//           other users' processes, non-dumpable processes (systemd's
+//           inside the quarantine. Processes that cannot be FULLY inspected
+//           are counted and reported as outside the proof boundary (with the
+//           reason): other users' processes; non-dumpable processes (systemd's
 //           (sd-pam), ssh-agent, gpg-agent — detected from the root-owned fd
-//           directory), and same-user processes whose own credentials explain
-//           the denial (setgid, a different uid set, or permitted
-//           capabilities). A dumpable same-user process denied for any reason
-//           its credentials do NOT explain (e.g. LSM confinement, as with a
-//           snap-packaged editor's terminal) fails the proof.
+//           directory); same-user processes whose credentials explain a
+//           denial (setgid, a different uid set, permitted capabilities); and
+//           processes whose maps are denied while their descriptors were
+//           readable (LSM rules, dumpability transitions) — for those the fd
+//           dimension was fully inspected and only the mapping dimension is
+//           unverified. A dumpable same-user process denied BOTH its
+//           descriptors and an explanation fails the proof.
 //   win32   the private quarantine parent is renamed out and back. Windows
 //           refuses to rename a directory while ANY handle is open anywhere in
 //           its subtree — file (read, write or append), directory handle, or
@@ -181,17 +183,22 @@ function scanProcFs(quarantineRoot) {
         }
       }
     } catch (err) {
-      // ENOENT/ESRCH: the process exited mid-scan and its descriptors were
-      // already checked. Any other denial is a live process this scan cannot
-      // inspect (e.g. LSM confinement): treat it as a holder rather than
-      // silently concluding it has no mapping (CodeRabbit round 6, Major).
       if (!err || (err.code !== 'ENOENT' && err.code !== 'ESRCH')) {
-        holders.push({
+        // The fd directory WAS readable, so this process's open file handles
+        // were fully inspected; only its memory-mapping dimension is denied
+        // (LSM rules, or a dumpability transition mid-scan). It is counted as
+        // outside the boundary — named, with the reason — instead of being
+        // silently assumed to have no mappings and instead of failing every
+        // removal on hosts where such processes exist (GitHub's Ubuntu
+        // runner: pid 1348). Deleting an mmap'd file with no open fd loses
+        // late writes the same way an unlinked fd does: that accepted
+        // boundary in ERR-098 covers it, and it is REPORTED here.
+        elevated.push({
           pid: Number(pid),
           command: '?',
-          kind: 'maps-unreadable',
-          path: path.posix.join(procDir, 'maps') + ' (' + message(err) + ')',
+          credentials: 'maps unreadable (' + message(err) + ') though its descriptors were inspectable',
         });
+        uninspected += 1;
       }
     }
   }
