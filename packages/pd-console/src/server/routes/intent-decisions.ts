@@ -2,12 +2,12 @@
  * IntentDecisions route — HTTP surface for IntentDecisionRecord (PRI-470, SPEC §21.7).
  *
  * Endpoints (all gated by the `intent_engineering` feature flag):
- * - POST   /api/v1/intent-decisions                       → create (201) or idempotent replay (200)
- * - GET    /api/v1/intent-decisions?painId=…              → list by painId
- * - GET    /api/v1/intent-decisions?taskId=…              → list by taskId
- * - GET    /api/v1/intent-decisions/summary               → tallied summary (MUST precede /:id)
- * - GET    /api/v1/intent-decisions/:id                   → single record
- * - POST   /api/v1/intent-decisions/:id/follow-up         → dispatch governed follow-up (PRI-471)
+ * - POST   /api/intent-decisions                       → create (201) or idempotent replay (200)
+ * - GET    /api/intent-decisions?painId=…              → list by painId
+ * - GET    /api/intent-decisions?taskId=…              → list by taskId
+ * - GET    /api/intent-decisions/summary               → tallied summary (MUST precede /:id)
+ * - GET    /api/intent-decisions/:id                   → single record
+ * - POST   /api/intent-decisions/:id/follow-up         → dispatch governed follow-up (PRI-471)
  *
  * PRI-471 follow-up types (SPEC §22.1.4):
  * - link_candidate         — record which existing principle candidate the Owner
@@ -229,7 +229,7 @@ const FOLLOW_UP_TYPES: ReadonlySet<FollowUpType> = new Set([
 ]);
 
 /**
- * Validate the body of POST /api/v1/intent-decisions/:id/follow-up.
+ * Validate the body of POST /api/intent-decisions/:id/follow-up.
  *
  * Body shape: `{ type: 'link_candidate' | 'guide_rulehost' | 'generate_patch_proposal', candidateId?: string }`
  *
@@ -307,7 +307,7 @@ export async function handleIntentDecisionsRoute(
 
   const model = getModel(workspaceDir);
 
-  // POST /api/v1/intent-decisions — create / idempotent replay
+  // POST /api/intent-decisions — create / idempotent replay
   if (req.method === 'POST' && (subPath === '' || subPath === '/')) {
     try {
       const body = await readBody(req);
@@ -342,7 +342,7 @@ export async function handleIntentDecisionsRoute(
     return;
   }
 
-  // GET /api/v1/intent-decisions — list by painId OR taskId (exactly one required)
+  // GET /api/intent-decisions — list by painId OR taskId (exactly one required)
   if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
     try {
       const query = parseQuery(req.url ?? '');
@@ -379,7 +379,7 @@ export async function handleIntentDecisionsRoute(
     return;
   }
 
-  // GET /api/v1/intent-decisions/summary — MUST be matched before /:id
+  // GET /api/intent-decisions/summary — MUST be matched before /:id
   if (req.method === 'GET' && subPath === '/summary') {
     try {
       const summary = await model.getSummary();
@@ -390,7 +390,7 @@ export async function handleIntentDecisionsRoute(
     return;
   }
 
-  // GET /api/v1/intent-decisions/:id — single record
+  // GET /api/intent-decisions/:id — single record
   const detailMatch = /^[/]([^/]+)$/.exec(subPath);
   if (req.method === 'GET' && detailMatch) {
     const [, rawId] = detailMatch;
@@ -418,7 +418,7 @@ export async function handleIntentDecisionsRoute(
     return;
   }
 
-  // POST /api/v1/intent-decisions/:id/follow-up — PRI-471 governed follow-up
+  // POST /api/intent-decisions/:id/follow-up — PRI-471 governed follow-up
   // (SPEC §22.1.4). MUST be matched before the catch-all 404 below.
   const followUpMatch = /^[/]([^/]+)[/]follow-up$/.exec(subPath);
   if (req.method === 'POST' && followUpMatch) {
@@ -527,7 +527,7 @@ export async function handleIntentDecisionsRoute(
     return;
   }
 
-  sendNotFound(res, 'Route /api/v1/intent-decisions' + subPath + ' not found');
+  sendNotFound(res, 'Route /api/intent-decisions' + subPath + ' not found');
 }
 
 /**

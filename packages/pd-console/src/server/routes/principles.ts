@@ -29,9 +29,10 @@ function getModel(workspaceDir: string): PrinciplesConsoleModel {
  * GET /api/principles/core — read-only PD Core Principles reference (PRI-641).
  *
  * Served directly from the canonical `CORE_PRINCIPLES` registry (no ledger /
- * DB read). Dispatched in server/index.ts BEFORE the `/api/principles`
- * catch-all so `core` is never parsed as `/:id`; the `/api/v1/principles`
- * mount intentionally does NOT expose this endpoint.
+ * DB read). Dispatched in server/index.ts as an exact-match BEFORE the merged
+ * `/api/principles` mount so `core` is never parsed as `/:id` — under the
+ * PRI-1139 canonical dispatch this endpoint answers on both the canonical
+ * path and the deprecated `/api/v1` alias.
  *
  * Owner Decision Experience v1: the canonical Owner decision read endpoints
  * live in routes/owner-decision.ts and dispatch from handlePrinciplesRoute.
@@ -204,7 +205,7 @@ export async function handlePrinciplesRoute({
   featureFlags,
   now = () => new Date().toISOString(),
 }: PrinciplesRouteParams): Promise<void> {
-  // GET /api/v1/principles/:id/governance. Gate before constructing any
+  // GET /api/principles/:id/governance. Gate before constructing any
   // Console model or projection reader so flag-off is a true no-read path.
   const governanceMatch = /^\/([^/]+)\/governance$/.exec(subPath);
   if (req.method === 'GET' && governanceMatch) {

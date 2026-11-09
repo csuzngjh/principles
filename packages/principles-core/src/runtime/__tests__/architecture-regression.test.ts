@@ -2062,15 +2062,16 @@ describe('PRI-111 ArtificerRunner boundary', () => {
     expect(src).toContain('DefaultArtificerValidator');
   });
 
-  it('SCHEMA_REGISTRY: shared output-schema-registry registers unified artificer-rule-output-v2 schema', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    // The registry lives in adapter/output-schema-registry.ts (single source of
-    // truth for schema-gated output). Assert there.
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
-    expect(src).toContain('artificer-rule-output-v2');
-    expect(src).not.toContain('artificer-rule-output-v1');
-    expect(src).toContain('ArtificerRuleOutputSchema');
+  it('SCHEMA_REGISTRY: shared output-schema-registry registers unified artificer-rule-output schema', async () => {
+    // PRI-1139: runtime has() assertion instead of source-text matching —
+    // the source still contains the versioned spelling inside the alias
+    // table, so a text scan can no longer distinguish canonical keys from
+    // compat aliases (plan §12 item 2).
+    const { OUTPUT_SCHEMA_REGISTRY, resolveOutputSchema } = await import('../adapter/output-schema-registry.js');
+    expect(OUTPUT_SCHEMA_REGISTRY.has('artificer-rule-output')).toBe(true);
+    expect(OUTPUT_SCHEMA_REGISTRY.has('artificer-rule-output-v1')).toBe(false);
+    // The pre-cutover v2 spelling stays readable through the alias table.
+    expect(resolveOutputSchema('artificer-rule-output-v2')).toBe(OUTPUT_SCHEMA_REGISTRY.get('artificer-rule-output'));
   });
 });
 
@@ -2148,12 +2149,12 @@ describe('PRI-EVAL EvaluatorRunner boundary', () => {
     expect(src).not.toContain("from './evaluator-prompt-builder.js'");
   });
 
-  it('SCHEMA_REGISTRY: shared output-schema-registry registers evaluator-output-v1 schema', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
-    expect(src).toContain('evaluator-output-v1');
-    expect(src).toContain('EvaluatorOutputV1Schema');
+  it('SCHEMA_REGISTRY: shared output-schema-registry registers evaluator-output schema', async () => {
+    // PRI-1139: runtime has() assertion (plan §12 item 2) — see the
+    // artificer twin above for the rationale.
+    const { OUTPUT_SCHEMA_REGISTRY, resolveOutputSchema } = await import('../adapter/output-schema-registry.js');
+    expect(OUTPUT_SCHEMA_REGISTRY.has('evaluator-output')).toBe(true);
+    expect(resolveOutputSchema('evaluator-output-v1')).toBe(OUTPUT_SCHEMA_REGISTRY.get('evaluator-output'));
   });
 });
 
@@ -2215,12 +2216,12 @@ describe('PRI-RR RolloutReviewerRunner boundary', () => {
     expect(src).not.toContain("from './rollout-reviewer-prompt-builder.js'");
   });
 
-  it('SCHEMA_REGISTRY: shared output-schema-registry registers rollout-reviewer-output-v1 schema', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
-    expect(src).toContain('rollout-reviewer-output-v1');
-    expect(src).toContain('RolloutReviewerOutputV1Schema');
+  it('SCHEMA_REGISTRY: shared output-schema-registry registers rollout-reviewer-output schema', async () => {
+    // PRI-1139: runtime has() assertion (plan §12 item 2) — see the
+    // artificer twin above for the rationale.
+    const { OUTPUT_SCHEMA_REGISTRY, resolveOutputSchema } = await import('../adapter/output-schema-registry.js');
+    expect(OUTPUT_SCHEMA_REGISTRY.has('rollout-reviewer-output')).toBe(true);
+    expect(resolveOutputSchema('rollout-reviewer-output-v1')).toBe(OUTPUT_SCHEMA_REGISTRY.get('rollout-reviewer-output'));
   });
 });
 

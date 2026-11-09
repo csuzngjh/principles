@@ -20,7 +20,7 @@ export async function handleApprovalsGroupedRoute(
   workspaceDir: string,
 ): Promise<void> {
   if (req.method !== 'GET') {
-    sendNotFound(res, 'Route /api/v1/approvals/grouped not found');
+    sendNotFound(res, 'Route /api/approvals/grouped not found');
     return;
   }
 
@@ -29,7 +29,7 @@ export async function handleApprovalsGroupedRoute(
   // applicable hosts would take different routes. No new persisted config.
   // The roster is the host-runtime one (openclaw|codex|workbuddy) — the
   // focus page offers all three, so the API must accept all three.
-  const url = new URL(req.url ?? '/api/v1/approvals/grouped', 'http://localhost');
+  const url = new URL(req.url ?? '/api/approvals/grouped', 'http://localhost');
   let targetHost: PromptInjectionTargetHost | undefined;
   const rawHost = url.searchParams.get('host');
   if (rawHost !== null) {

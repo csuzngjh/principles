@@ -160,13 +160,13 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     }
     server = http.createServer((req, res) => {
       const urlPath = req.url?.split('?')[0] ?? '/';
-      if (urlPath.startsWith('/api/v1/approvals')) {
-        const subPath = urlPath.slice('/api/v1/approvals'.length);
+      if (urlPath.startsWith('/api/approvals')) {
+        const subPath = urlPath.slice('/api/approvals'.length);
         asyncHandler((rq, rs) => handleApprovalsRoute(rq, rs, tmpDir, subPath))(req, res);
         return;
       }
-      if (urlPath.startsWith('/api/v1/activations')) {
-        const subPath = urlPath.slice('/api/v1/activations'.length);
+      if (urlPath.startsWith('/api/activations')) {
+        const subPath = urlPath.slice('/api/activations'.length);
         asyncHandler((rq, rs) => handleActivationsRoute(rq, rs, tmpDir, subPath))(req, res);
         return;
       }
@@ -190,7 +190,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
   });
 
   it('AC-11 propose: creates a NEW validated artifact + pending approval, returns the diff and capacity prediction; the old artifact stays immutable and the old activation stays live', async () => {
-    const res = await fetchJson(`/api/v1/activations/${SCENARIO_A.activationId}/propose-revision`, {
+    const res = await fetchJson(`/api/activations/${SCENARIO_A.activationId}/propose-revision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statement: '保留触发条件、动作与例外的最短正文' }),
@@ -235,7 +235,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     const before = (sqliteConn.getDb()
       .prepare("SELECT COUNT(*) AS n FROM pi_artifacts WHERE source_principle_id = ?")
       .get(SCENARIO_A.principle) as { n: number }).n;
-    const res = await fetchJson(`/api/v1/activations/${SCENARIO_A.activationId}/propose-revision`, {
+    const res = await fetchJson(`/api/activations/${SCENARIO_A.activationId}/propose-revision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statement: '另一个不同正文' }),
@@ -258,7 +258,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
       .prepare('SELECT artifact_id FROM approvals WHERE approval_id = ?')
       .get(approvalId) as { artifact_id: string }).artifact_id;
 
-    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'approve the injectable revision', intentReviewed: true, reviewedArtifactId: newArtifactId }),
@@ -295,7 +295,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     const approvalId = (sqliteConn.getDb()
       .prepare("SELECT approval_id FROM approvals WHERE status = 'approved' AND channel = 'prompt' AND artifact_id LIKE 'pi-art-%' LIMIT 1")
       .get() as { approval_id: string }).approval_id;
-    const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    const res = await fetchJson(`/api/approvals/${approvalId}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note: 'replay' }),
@@ -307,7 +307,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     const artifactsBefore = countArtifacts(SCENARIO_B.principle);
     const approvalsBefore = countPendingApprovals(SCENARIO_B.principle);
 
-    const unchanged = await fetchJson(`/api/v1/activations/${SCENARIO_B.activationId}/propose-revision`, {
+    const unchanged = await fetchJson(`/api/activations/${SCENARIO_B.activationId}/propose-revision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statement: SCENARIO_B.longStatement }),
@@ -317,7 +317,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     expect(unchangedBody.error).toBe('revision_validation_failed');
     expect(unchangedBody.message).toContain('statement_unchanged');
 
-    const empty = await fetchJson(`/api/v1/activations/${SCENARIO_B.activationId}/propose-revision`, {
+    const empty = await fetchJson(`/api/activations/${SCENARIO_B.activationId}/propose-revision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statement: '   ' }),
@@ -329,7 +329,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
   });
 
   it('AC-11 approval rejection: the old activation keeps working — no replacement, no new activation', async () => {
-    const propose = await fetchJson(`/api/v1/activations/${SCENARIO_B.activationId}/propose-revision`, {
+    const propose = await fetchJson(`/api/activations/${SCENARIO_B.activationId}/propose-revision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statement: '被拒绝的精简正文' }),
@@ -338,7 +338,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     const approvalId = getStringField(getDataObject(propose.body), 'approvalId');
     expect(approvalId).toBeDefined();
 
-    const reject = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, {
+    const reject = await fetchJson(`/api/approvals/${approvalId}/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason: '拒绝该精简版本' }),
@@ -362,7 +362,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
   });
 
   it('AC-11 propose on a deactivated/non-prompt activation → 404, no writes', async () => {
-    const res = await fetchJson('/api/v1/activations/act-does-not-exist/propose-revision', {
+    const res = await fetchJson('/api/activations/act-does-not-exist/propose-revision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ statement: 'whatever' }),
@@ -370,7 +370,7 @@ describe('PD_PROMPT_CAPACITY_V1 R-B3 — reviewable replacement (AC-11 matrix)',
     expect(res.status).toBe(404);
   });
 it('shows retained intent with the revision and refuses approval until it is reviewed', async () => {
-  const proposed = await fetchJson(`/api/v1/activations/${SCENARIO_C.activationId}/propose-revision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statement: '禁止忽略触发条件；提交前完成必要验证。' }) });
+  const proposed = await fetchJson(`/api/activations/${SCENARIO_C.activationId}/propose-revision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statement: '禁止忽略触发条件；提交前完成必要验证。' }) });
   expect(proposed.status).toBe(200);
   const data = getDataObject(proposed.body);
   const approvalId = getStringField(data, 'approvalId');
@@ -390,7 +390,7 @@ it('shows retained intent with the revision and refuses approval until it is rev
   sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(revisionArtifact.contentJson, revisionArtifactId);
   expect(group?.revisionReview?.oldStatement).toBe(SCENARIO_C.longStatement);
   expect(group?.revisionReview?.intentFields.ownerIntent).toBe('keep statements injectable');
-  const refused = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: false }) });
+  const refused = await fetchJson(`/api/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: false }) });
   expect(refused.status).toBe(409);
   expect(sqliteConn.getDb().prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId)).toEqual({ status: 'pending' });
 });
@@ -402,7 +402,7 @@ it('preserves the approved decision and the old live version after replacement p
   expect(typeof approvalId).toBe('string');
   sqliteConn.getDb().exec("CREATE TRIGGER review_fail_supersede BEFORE INSERT ON activation_decisions WHEN NEW.decision = 'supersede' BEGIN SELECT RAISE(ABORT, 'injected supersede persistence failure'); END");
   try {
-    const response = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: true, reviewedArtifactId: group?.records.find((record) => record.id === approvalId)?.artifactId }) });
+    const response = await fetchJson(`/api/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: true, reviewedArtifactId: group?.records.find((record) => record.id === approvalId)?.artifactId }) });
     expect(response.status).toBe(500);
     expect(sqliteConn.getDb().prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId)).toEqual({ status: 'approved' });
     expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get(SCENARIO_C.artifactId)).toEqual({ deactivated_at: null });
@@ -412,7 +412,7 @@ it('preserves the approved decision and the old live version after replacement p
 
 it('retries an approved failed replacement without rewriting the Owner decision', async () => {
   const row = sqliteConn.getDb().prepare("SELECT a.approval_id, a.decided_by FROM approvals a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id WHERE p.source_principle_id = ? AND a.status = 'approved'").get(SCENARIO_C.principle) as { approval_id: string; decided_by: string };
-  const response = await fetchJson(`/api/v1/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
+  const response = await fetchJson(`/api/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
   expect(response.status).toBe(200);
   expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get(row.approval_id)).toEqual({ status: 'approved', decided_by: row.decided_by });
   expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get(SCENARIO_C.artifactId)).not.toEqual({ deactivated_at: null });
@@ -421,10 +421,10 @@ it('retries an approved failed replacement without rewriting the Owner decision'
 
 it('guarded recovery of an approved failed replacement preserves the original decision', async () => {
   const row = sqliteConn.getDb().prepare("SELECT a.approval_id, a.decided_by FROM approvals a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id WHERE p.source_principle_id = ? AND a.status = 'approved'").get(SCENARIO_C.principle) as { approval_id: string; decided_by: string };
-  const detail = await fetchJson(`/api/v1/approvals/${row.approval_id}`);
+  const detail = await fetchJson(`/api/approvals/${row.approval_id}`);
   const data = getDataObject(detail.body);
   if (!data || typeof data.review !== 'object' || data.review === null || !Object.hasOwn(data.review, 'expectedReview')) throw new Error('missing review guard');
-  const response = await fetchJson(`/api/v1/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
+  const response = await fetchJson(`/api/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
   expect(response.status).toBe(200);
   expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get(row.approval_id)).toEqual({ status: 'approved', decided_by: row.decided_by });
   expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get(SCENARIO_C.artifactId)).not.toEqual({ deactivated_at: null });
@@ -437,7 +437,7 @@ it('refuses an apparently completed retry when the historical supersede decision
   const oldActivationId = `act_prompt_${principleId}`;
   seedLedgerPrinciple(principleId, 'Before changes, inspect production callers.');
   seedLiveOversizedActivation(oldActivationId, oldArtifactId, `task-${principleId}`, principleId, 'Before changes, inspect production callers.');
-  const proposal = await fetchJson(`/api/v1/activations/${oldActivationId}/propose-revision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statement: 'Before edits, inspect callers.' }) });
+  const proposal = await fetchJson(`/api/activations/${oldActivationId}/propose-revision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statement: 'Before edits, inspect callers.' }) });
   const data = getDataObject(proposal.body);
   const approvalId = getStringField(data, 'approvalId');
   const newArtifactId = getStringField(data, 'newArtifactId');
@@ -449,7 +449,7 @@ it('refuses an apparently completed retry when the historical supersede decision
   sqliteConn.getDb().prepare("INSERT INTO activations (activation_id,idempotency_key,artifact_id,channel,action,target_ref,activated_at) VALUES (?,?,?,'prompt','prompt_activate',?,?)").run(output.activationId, `${newArtifactId}::prompt`, newArtifactId, output.targetRef, '2026-10-08T03:00:00Z');
   sqliteConn.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE artifact_id = ?').run('2026-10-08T03:00:00Z', oldArtifactId);
   sqliteConn.getDb().prepare("UPDATE approvals SET status = 'approved', decided_by = 'Alice', decided_at = ? WHERE approval_id = ?").run('2026-10-08T03:00:00Z', approvalId);
-  const response = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true }) });
+  const response = await fetchJson(`/api/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true }) });
   expect(response.status).toBe(500);
   expect(sqliteConn.getDb().prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId)).toEqual({ status: 'approved' });
   expect(sqliteConn.getDb().prepare("SELECT * FROM activation_decisions WHERE artifact_id = ? AND decision = 'supersede'").all(oldArtifactId)).toHaveLength(0);
@@ -476,7 +476,7 @@ it('blocks batch confirmation across different revisions and reports malformed p
   // Multi-pending ambiguity is a group fact, not a per-record defect.
   expect(group?.records.some((entry) => entry.revisionReviewUnavailable === true)).toBe(false);
   const [firstId, secondId] = ids;
-  const stale = await fetchJson(`/api/v1/approvals/apr_prompt_${secondId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: true, reviewedArtifactId: firstId }) });
+  const stale = await fetchJson(`/api/approvals/apr_prompt_${secondId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: true, reviewedArtifactId: firstId }) });
   expect(stale.status).toBe(409);
   expect(sqliteConn.getDb().prepare('SELECT status FROM approvals WHERE artifact_id = ?').get(secondId)).toEqual({ status: 'pending' });
   sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run('{malformed', artifactId);
@@ -520,7 +520,7 @@ it.each([
   const old = 'Before editing runtime code, verify production callers; documentation-only changes are exempt.';
   seedLedgerPrinciple(principleId, old);
   seedLiveOversizedActivation(activationId, artifactId, `task-${principleId}`, principleId, old);
-  const proposal = await fetchJson(`/api/v1/activations/${activationId}/propose-revision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statement }) });
+  const proposal = await fetchJson(`/api/activations/${activationId}/propose-revision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statement }) });
   const data = getDataObject(proposal.body);
   const approvalId = getStringField(data, 'approvalId');
   const newArtifactId = getStringField(data, 'newArtifactId');
@@ -532,10 +532,10 @@ it.each([
   expect(group?.revisionReview?.oldStatement).toBe(old);
   expect(group?.revisionReview?.newStatement).toBe(statement);
   expect(group?.revisionReview?.intentFields.validationExpectation).toContain('trigger/action/exception');
-  const refused = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: false }) });
+  const refused = await fetchJson(`/api/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: false }) });
   expect(refused.status).toBe(409);
   expect(sqliteConn.getDb().prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId)).toEqual({ status: 'pending' });
-  const rejection = await fetchJson(`/api/v1/approvals/${approvalId}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'New statement changes the retained intent.' }) });
+  const rejection = await fetchJson(`/api/approvals/${approvalId}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'New statement changes the retained intent.' }) });
   expect(rejection.status).toBe(200);
   expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get(artifactId)).toEqual({ deactivated_at: null });
 });

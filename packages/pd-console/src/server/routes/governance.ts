@@ -55,7 +55,7 @@ export function resolveOwnerConfigSnapshot(
 }
 
 /**
- * GET /api/v1/governance/experience — read-only Governance Experience Snapshot
+ * GET /api/governance/experience — read-only Governance Experience Snapshot
  * v1.5.1 (PRI-585).
  *
  * Flag contract (SPEC §14.1): with `governance_experience_v1` disabled the
@@ -68,7 +68,7 @@ export async function handleGovernanceExperienceRoute(
   ctx: GovernanceExperienceContext,
 ): Promise<void> {
   if (req.method !== 'GET') {
-    sendError(res, 405, 'method_not_allowed', 'Use GET for /api/v1/governance/experience.', { nextAction: 'Retry with GET.' });
+    sendError(res, 405, 'method_not_allowed', 'Use GET for /api/governance/experience.', { nextAction: 'Retry with GET.' });
     return;
   }
 
@@ -99,7 +99,7 @@ export async function handleGovernanceRoute(
   workspaceDir: string,
 ): Promise<void> {
   if (req.method !== 'GET') {
-    sendNotFound(res, 'Route /api/v1/governance/queue not found');
+    sendNotFound(res, 'Route /api/governance/queue not found');
     return;
   }
 

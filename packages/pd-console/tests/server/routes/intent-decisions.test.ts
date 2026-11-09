@@ -140,7 +140,7 @@ describe('IntentDecisions route — flag gate', () => {
   it('returns 403 when intent_engineering is disabled', async () => {
     writeConfig(false);
     const res = makeRes();
-    await handleIntentDecisionsRoute(makeGetReq('/api/v1/intent-decisions'), res, workspaceDir, '');
+    await handleIntentDecisionsRoute(makeGetReq('/api/intent-decisions'), res, workspaceDir, '');
     expect(getStatus(res)).toBe(403);
     const body = parseError(res);
     expect(body.success).toBe(false);
@@ -151,7 +151,7 @@ describe('IntentDecisions route — flag gate', () => {
   it('returns 403 when no config exists (defaults)', async () => {
     fs.unlinkSync(path.join(pdDir, 'config.yaml'));
     const res = makeRes();
-    await handleIntentDecisionsRoute(makeGetReq('/api/v1/intent-decisions'), res, workspaceDir, '');
+    await handleIntentDecisionsRoute(makeGetReq('/api/intent-decisions'), res, workspaceDir, '');
     expect(getStatus(res)).toBe(403);
     expect(parseError(res).reason).toBe('flag_disabled');
   });
@@ -163,7 +163,7 @@ describe('IntentDecisions route — POST create', () => {
   it('returns 201 with the created record', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', VALID_INPUT),
+      makePostReq('/api/intent-decisions', VALID_INPUT),
       res,
       workspaceDir,
       '',
@@ -185,7 +185,7 @@ describe('IntentDecisions route — POST create', () => {
     // First POST → 201
     const res1 = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', VALID_INPUT),
+      makePostReq('/api/intent-decisions', VALID_INPUT),
       res1,
       workspaceDir,
       '',
@@ -196,7 +196,7 @@ describe('IntentDecisions route — POST create', () => {
     const replayInput = { ...VALID_INPUT, id: 'idr-002-different-id' };
     const res2 = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', replayInput),
+      makePostReq('/api/intent-decisions', replayInput),
       res2,
       workspaceDir,
       '',
@@ -217,7 +217,7 @@ describe('IntentDecisions route — POST create', () => {
     };
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', input),
+      makePostReq('/api/intent-decisions', input),
       res,
       workspaceDir,
       '',
@@ -234,7 +234,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when body is invalid JSON', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', '{not valid json'),
+      makePostReq('/api/intent-decisions', '{not valid json'),
       res,
       workspaceDir,
       '',
@@ -247,7 +247,7 @@ describe('IntentDecisions route — POST validation', () => {
     void _omit;
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', noId),
+      makePostReq('/api/intent-decisions', noId),
       res,
       workspaceDir,
       '',
@@ -260,7 +260,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when source is invalid', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', { ...VALID_INPUT, source: 'bogus' }),
+      makePostReq('/api/intent-decisions', { ...VALID_INPUT, source: 'bogus' }),
       res,
       workspaceDir,
       '',
@@ -272,7 +272,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when evidenceStrength is invalid', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', { ...VALID_INPUT, evidenceStrength: 'bogus' }),
+      makePostReq('/api/intent-decisions', { ...VALID_INPUT, evidenceStrength: 'bogus' }),
       res,
       workspaceDir,
       '',
@@ -284,7 +284,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when ownerAction is invalid', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', { ...VALID_INPUT, ownerAction: 'bogus' }),
+      makePostReq('/api/intent-decisions', { ...VALID_INPUT, ownerAction: 'bogus' }),
       res,
       workspaceDir,
       '',
@@ -296,7 +296,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when relatedIntentFields contains an invalid field', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', { ...VALID_INPUT, relatedIntentFields: ['why', 'bogus'] }),
+      makePostReq('/api/intent-decisions', { ...VALID_INPUT, relatedIntentFields: ['why', 'bogus'] }),
       res,
       workspaceDir,
       '',
@@ -308,7 +308,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when evidenceRefs is not an array', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', { ...VALID_INPUT, evidenceRefs: 'not-an-array' }),
+      makePostReq('/api/intent-decisions', { ...VALID_INPUT, evidenceRefs: 'not-an-array' }),
       res,
       workspaceDir,
       '',
@@ -320,7 +320,7 @@ describe('IntentDecisions route — POST validation', () => {
   it('returns 400 when an optional field has the wrong type', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', { ...VALID_INPUT, note: 123 }),
+      makePostReq('/api/intent-decisions', { ...VALID_INPUT, note: 123 }),
       res,
       workspaceDir,
       '',
@@ -336,7 +336,7 @@ describe('IntentDecisions route — GET list', () => {
   it('returns 400 when neither painId nor taskId is provided', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions'),
+      makeGetReq('/api/intent-decisions'),
       res,
       workspaceDir,
       '',
@@ -348,7 +348,7 @@ describe('IntentDecisions route — GET list', () => {
   it('returns 400 when both painId and taskId are provided', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions?painId=p1&taskId=t1'),
+      makeGetReq('/api/intent-decisions?painId=p1&taskId=t1'),
       res,
       workspaceDir,
       '',
@@ -361,7 +361,7 @@ describe('IntentDecisions route — GET list', () => {
     // Seed a record
     const seedRes = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', VALID_INPUT),
+      makePostReq('/api/intent-decisions', VALID_INPUT),
       seedRes,
       workspaceDir,
       '',
@@ -370,7 +370,7 @@ describe('IntentDecisions route — GET list', () => {
 
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions?painId=pain-001'),
+      makeGetReq('/api/intent-decisions?painId=pain-001'),
       res,
       workspaceDir,
       '',
@@ -385,7 +385,7 @@ describe('IntentDecisions route — GET list', () => {
   it('lists records by taskId', async () => {
     const seedRes = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', VALID_INPUT),
+      makePostReq('/api/intent-decisions', VALID_INPUT),
       seedRes,
       workspaceDir,
       '',
@@ -394,7 +394,7 @@ describe('IntentDecisions route — GET list', () => {
 
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions?taskId=task-001'),
+      makeGetReq('/api/intent-decisions?taskId=task-001'),
       res,
       workspaceDir,
       '',
@@ -408,7 +408,7 @@ describe('IntentDecisions route — GET list', () => {
   it('returns empty array for unknown painId', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions?painId=nonexistent'),
+      makeGetReq('/api/intent-decisions?painId=nonexistent'),
       res,
       workspaceDir,
       '',
@@ -425,7 +425,7 @@ describe('IntentDecisions route — GET /:id', () => {
   it('returns 200 with the record when found', async () => {
     const seedRes = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', VALID_INPUT),
+      makePostReq('/api/intent-decisions', VALID_INPUT),
       seedRes,
       workspaceDir,
       '',
@@ -434,7 +434,7 @@ describe('IntentDecisions route — GET /:id', () => {
 
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions/idr-001'),
+      makeGetReq('/api/intent-decisions/idr-001'),
       res,
       workspaceDir,
       '/idr-001',
@@ -447,7 +447,7 @@ describe('IntentDecisions route — GET /:id', () => {
   it('returns 404 when the record is not found', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions/nonexistent'),
+      makeGetReq('/api/intent-decisions/nonexistent'),
       res,
       workspaceDir,
       '/nonexistent',
@@ -462,7 +462,7 @@ describe('IntentDecisions route — GET /summary and route precedence', () => {
   it('returns 200 with empty summary when no records exist', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions/summary'),
+      makeGetReq('/api/intent-decisions/summary'),
       res,
       workspaceDir,
       '/summary',
@@ -479,13 +479,13 @@ describe('IntentDecisions route — GET /summary and route precedence', () => {
   it('returns tallied counts after records are created', async () => {
     // Seed two records with different ownerActions
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', VALID_INPUT),
+      makePostReq('/api/intent-decisions', VALID_INPUT),
       makeRes(),
       workspaceDir,
       '',
     );
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', {
+      makePostReq('/api/intent-decisions', {
         ...VALID_INPUT,
         id: 'idr-002',
         painId: 'pain-002',
@@ -498,7 +498,7 @@ describe('IntentDecisions route — GET /summary and route precedence', () => {
 
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions/summary'),
+      makeGetReq('/api/intent-decisions/summary'),
       res,
       workspaceDir,
       '/summary',
@@ -516,7 +516,7 @@ describe('IntentDecisions route — GET /summary and route precedence', () => {
     // Since /summary matches first, it returns the summary object.
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions/summary'),
+      makeGetReq('/api/intent-decisions/summary'),
       res,
       workspaceDir,
       '/summary',
@@ -534,7 +534,7 @@ describe('IntentDecisions route — unknown sub-path', () => {
   it('returns 404 for an unmatched sub-path', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq('/api/v1/intent-decisions/foo/bar'),
+      makeGetReq('/api/intent-decisions/foo/bar'),
       res,
       workspaceDir,
       '/foo/bar',
@@ -544,7 +544,7 @@ describe('IntentDecisions route — unknown sub-path', () => {
 
   it('returns 404 for PUT (unmatched method falls through)', async () => {
     const req = new EventEmitter();
-    Object.assign(req, { method: 'PUT', url: '/api/v1/intent-decisions' });
+    Object.assign(req, { method: 'PUT', url: '/api/intent-decisions' });
     const res = makeRes();
     await handleIntentDecisionsRoute(
       req as unknown as IncomingMessage,
@@ -563,7 +563,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const input = { ...VALID_INPUT, ...overrides };
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions', input),
+      makePostReq('/api/intent-decisions', input),
       res,
       workspaceDir,
       '',
@@ -579,7 +579,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision({ ownerAction: 'promote_to_rulehost' });
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'guide_rulehost' }),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, { type: 'guide_rulehost' }),
       res,
       workspaceDir,
       `/${id}/follow-up`,
@@ -599,7 +599,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
   it('guide_rulehost returns 404 when the decision does not exist', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions/nonexistent/follow-up', { type: 'guide_rulehost' }),
+      makePostReq('/api/intent-decisions/nonexistent/follow-up', { type: 'guide_rulehost' }),
       res,
       workspaceDir,
       '/nonexistent/follow-up',
@@ -612,7 +612,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision({ ownerAction: 'revise_intent' });
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'generate_patch_proposal' }),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, { type: 'generate_patch_proposal' }),
       res,
       workspaceDir,
       `/${id}/follow-up`,
@@ -636,7 +636,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
   it('generate_patch_proposal returns 404 when the decision does not exist', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions/nonexistent/follow-up', { type: 'generate_patch_proposal' }),
+      makePostReq('/api/intent-decisions/nonexistent/follow-up', { type: 'generate_patch_proposal' }),
       res,
       workspaceDir,
       '/nonexistent/follow-up',
@@ -649,7 +649,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     // Dispatch follow-up
     const dispatchRes = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'generate_patch_proposal' }),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, { type: 'generate_patch_proposal' }),
       dispatchRes,
       workspaceDir,
       `/${id}/follow-up`,
@@ -659,7 +659,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     // Fresh GET — the persisted patchProposalId must be there (EP-07 / ERR-015).
     const getRes = makeRes();
     await handleIntentDecisionsRoute(
-      makeGetReq(`/api/v1/intent-decisions/${id}`),
+      makeGetReq(`/api/intent-decisions/${id}`),
       getRes,
       workspaceDir,
       `/${id}`,
@@ -674,7 +674,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision({ ownerAction: 'confirm_drift' });
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, {
         type: 'link_candidate',
         candidateId: 'cand-from-evidence',
       }),
@@ -696,7 +696,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision({ ownerAction: 'confirm_drift' });
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'link_candidate' }),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, { type: 'link_candidate' }),
       res,
       workspaceDir,
       `/${id}/follow-up`,
@@ -710,7 +710,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision({ ownerAction: 'confirm_drift' });
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, {
         type: 'link_candidate',
         candidateId: '',
       }),
@@ -724,7 +724,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
   it('link_candidate returns 404 when the decision does not exist', async () => {
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions/nonexistent/follow-up', {
+      makePostReq('/api/intent-decisions/nonexistent/follow-up', {
         type: 'link_candidate',
         candidateId: 'cand-x',
       }),
@@ -740,7 +740,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision();
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { candidateId: 'c-1' }),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, { candidateId: 'c-1' }),
       res,
       workspaceDir,
       `/${id}/follow-up`,
@@ -753,7 +753,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision();
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, { type: 'bogus_type' }),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, { type: 'bogus_type' }),
       res,
       workspaceDir,
       `/${id}/follow-up`,
@@ -766,7 +766,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     const id = await seedDecision();
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, '{not valid'),
+      makePostReq(`/api/intent-decisions/${id}/follow-up`, '{not valid'),
       res,
       workspaceDir,
       `/${id}/follow-up`,
@@ -779,7 +779,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
     writeConfig(false);
     const res = makeRes();
     await handleIntentDecisionsRoute(
-      makePostReq('/api/v1/intent-decisions/some-id/follow-up', { type: 'guide_rulehost' }),
+      makePostReq('/api/intent-decisions/some-id/follow-up', { type: 'guide_rulehost' }),
       res,
       workspaceDir,
       '/some-id/follow-up',
@@ -799,7 +799,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
       fs.unlinkSync(path.join(pdDir, 'state.db'));
       const res = makeRes();
       await handleIntentDecisionsRoute(
-        makePostReq('/api/v1/intent-decisions/any/follow-up', {
+        makePostReq('/api/intent-decisions/any/follow-up', {
           type: 'link_candidate',
           candidateId: 'cand-1',
         }),
@@ -820,7 +820,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
       fs.unlinkSync(path.join(pdDir, 'state.db'));
       const res = makeRes();
       await handleIntentDecisionsRoute(
-        makePostReq('/api/v1/intent-decisions/any/follow-up', { type: 'generate_patch_proposal' }),
+        makePostReq('/api/intent-decisions/any/follow-up', { type: 'generate_patch_proposal' }),
         res,
         workspaceDir,
         '/any/follow-up',
@@ -840,7 +840,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
       const id = await seedDecision({ ownerAction: 'confirm_drift' });
       const res = makeRes();
       await handleIntentDecisionsRoute(
-        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+        makePostReq(`/api/intent-decisions/${id}/follow-up`, {
           type: 'link_candidate',
           candidateId: '  cand-trimmed  ',
         }),
@@ -859,7 +859,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
       const id = await seedDecision({ ownerAction: 'confirm_drift' });
       const res = makeRes();
       await handleIntentDecisionsRoute(
-        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+        makePostReq(`/api/intent-decisions/${id}/follow-up`, {
           type: 'link_candidate',
           candidateId: '   ',
         }),
@@ -875,7 +875,7 @@ describe('IntentDecisions route — POST /:id/follow-up', () => {
       const id = await seedDecision({ ownerAction: 'confirm_drift' });
       const res = makeRes();
       await handleIntentDecisionsRoute(
-        makePostReq(`/api/v1/intent-decisions/${id}/follow-up`, {
+        makePostReq(`/api/intent-decisions/${id}/follow-up`, {
           type: 'link_candidate',
           candidateId: 123,
         }),

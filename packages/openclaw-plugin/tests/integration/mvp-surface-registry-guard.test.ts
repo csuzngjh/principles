@@ -7,6 +7,7 @@ import {
   getSurfacesByCategory,
   getSurfacesByKind,
 } from '@principles/core/runtime';
+import { makeLlmInputPresenceRegistration } from '../../src/hooks/llm-input-presence.js';
 
 function findRepoRoot(cwd: string): string {
   let dir = cwd;
@@ -30,6 +31,27 @@ interface ApiOnRegistration {
   surfaceId: string | null;
   rawLine: string;
   index: number;
+  /** Non-literal recorder arguments, resolved at runtime through VARIABLE_REGISTRATION_VALUES. */
+  variableArgs?: { surfaceExpr: string; eventExpr: string };
+}
+
+/**
+ * Registrations that hand the recorder computed values instead of literals
+ * (PRI-1152 B2). A source scan cannot evaluate them, so each expression is
+ * resolved here through the production factory. A new variable-form
+ * registration fails the guard until it is added to this table.
+ */
+const VARIABLE_REGISTRATION_VALUES: Record<string, () => string> = {
+  'llmInputPresence.surfaceId': () => makeLlmInputPresenceRegistration({ getEventLog: () => undefined }).surfaceId,
+  'llmInputPresence.event': () => makeLlmInputPresenceRegistration({ getEventLog: () => undefined }).event,
+};
+
+const QUOTED_ARG = /^(['"])([^'"]+)\1$/;
+const EXPRESSION_ARG = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+
+/** Every place index.ts hands a handler to the host, whatever its argument form. */
+function countRegistrationCallSites(source: string): number {
+  return (source.match(/(?:\bapi\.on|\bhookRegistrations\.register)\s*\(/g) ?? []).length;
 }
 
 function extractApiOnRegistrations(source: string): ApiOnRegistration[] {
@@ -37,24 +59,42 @@ function extractApiOnRegistrations(source: string): ApiOnRegistration[] {
   // PRI-1110: hooks are registered through the recorder that captures the
   // actual registration for the AA config identity fingerprint. Accept both
   // forms; every registration must still be guardHook-wrapped and classified.
-  const pattern = /(?:api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*)|(?:hookRegistrations\.register\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*)/g;
-  let match: RegExpExecArray | null;
-  let regIndex = 0;
-  while ((match = pattern.exec(source)) !== null) {
+  // PRI-1152 B2: recorder arguments may be literals OR simple expressions
+  // (`llmInputPresence.surfaceId`). The former literal-only pattern skipped the
+  // expression form entirely, so an unclassified surface merged green.
+  const pattern = /(?:api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*)|(?:hookRegistrations\.register\s*\(\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*,\s*)/g;
+  for (const match of source.matchAll(pattern)) {
     const legacyEvent = match[1];
-    const recordedSurfaceId = match[2];
-    const event = legacyEvent ?? match[3]!;
-    const afterMatch = source.slice(match.index + match[0].length);
+    const surfaceArg = match[2];
+    const eventArg = match[3];
+    const afterMatch = source.slice((match.index ?? 0) + match[0].length);
     const guardHookMatch = afterMatch.match(/^guardHook\s*\(\s*['"]([^'"]+)['"]\s*,/);
     const guardSurfaceId = guardHookMatch ? guardHookMatch[1] : null;
-    const surfaceId = recordedSurfaceId === undefined
-      ? guardSurfaceId
-      : (guardSurfaceId === recordedSurfaceId ? guardSurfaceId : null);
+    const index = registrations.length;
+    if (legacyEvent !== undefined) {
+      registrations.push({ event: legacyEvent, surfaceId: guardSurfaceId, rawLine: match[0], index });
+      continue;
+    }
+    const surfaceLiteral = surfaceArg!.match(QUOTED_ARG)?.[2];
+    const eventLiteral = eventArg!.match(QUOTED_ARG)?.[2];
+    if (surfaceLiteral !== undefined && eventLiteral !== undefined) {
+      registrations.push({
+        event: eventLiteral,
+        surfaceId: guardSurfaceId === surfaceLiteral ? guardSurfaceId : null,
+        rawLine: match[0],
+        index,
+      });
+      continue;
+    }
+    // Variable form: the guardHook literal is the classification authority;
+    // the runtime values are checked against it in the tests below.
+    const wellFormed = [surfaceArg!, eventArg!].every((arg) => QUOTED_ARG.test(arg) || EXPRESSION_ARG.test(arg));
     registrations.push({
-      event,
-      surfaceId,
+      event: eventLiteral ?? (VARIABLE_REGISTRATION_VALUES[eventArg!]?.() ?? eventArg!),
+      surfaceId: wellFormed ? guardSurfaceId : null,
       rawLine: match[0],
-      index: regIndex++,
+      index,
+      variableArgs: { surfaceExpr: surfaceArg!, eventExpr: eventArg! },
     });
   }
   return registrations;
@@ -161,6 +201,25 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
 
     it('has at least one hook registration', () => {
       expect(registrations.length).toBeGreaterThan(0);
+    });
+
+    it('every registration call site is seen by the extractor (no argument form escapes the guard)', () => {
+      expect(registrations.length).toBe(countRegistrationCallSites(source));
+    });
+
+    it('variable-form registrations resolve at runtime to the surface their guardHook names', () => {
+      const variable = registrations.filter((r) => r.variableArgs !== undefined);
+      expect(variable.length).toBeGreaterThan(0);
+      for (const reg of variable) {
+        const { surfaceExpr, eventExpr } = reg.variableArgs!;
+        for (const expr of [surfaceExpr, eventExpr].filter((arg) => !QUOTED_ARG.test(arg))) {
+          expect(Object.keys(VARIABLE_REGISTRATION_VALUES), `add ${expr} to VARIABLE_REGISTRATION_VALUES`).toContain(expr);
+        }
+        const runtimeSurface = VARIABLE_REGISTRATION_VALUES[surfaceExpr]?.() ?? surfaceExpr.match(QUOTED_ARG)?.[2];
+        expect(runtimeSurface).toBe(reg.surfaceId);
+      }
+      expect(VARIABLE_REGISTRATION_VALUES['llmInputPresence.event']?.()).toBe('llm_input');
+      expect(variable.map((r) => r.event)).toContain('llm_input');
     });
 
     it('every hook handler is wrapped with guardHook()', () => {

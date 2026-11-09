@@ -47,7 +47,7 @@ describe('proposePromptRevision', () => {
     expect(res.data?.ok).toBe(true);
     expect(res.data?.approvalId).toBe('apr-1');
     const [path, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit];
-    expect(path).toBe('/api/v1/activations/act-1/propose-revision');
+    expect(path).toBe('/api/activations/act-1/propose-revision');
     expect(JSON.parse(String(init.body))).toEqual({ statement: 'new statement', host: 'codex' });
   });
 
