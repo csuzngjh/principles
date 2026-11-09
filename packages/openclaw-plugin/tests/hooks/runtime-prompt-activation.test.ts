@@ -255,7 +255,16 @@ interface AdaptivePriority {
   deadlineAt?: number;
 }
 
-async function buildSharedPrompt(ctx: AgentCtx, extra: { roundKey?: number; adaptivePriority?: AdaptivePriority } = {}): Promise<ActivePrinciplePromptResult> {
+interface AdaptivePriority {
+  artifactId: string;
+  activationId: string;
+  additiveOnly?: boolean;
+  hookInvocationId?: string;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+}
+
+async function buildSharedPrompt(ctx: AgentCtx, extra: { roundKey?: number; adaptivePriority?: AdaptivePriority; promptBudget?: ReturnType<typeof resolvePromptBudget> } = {}): Promise<ActivePrinciplePromptResult> {
   const facts = ctx as unknown as SharedPromptCtx;
   const declaredWindow = operatorDeclaredContextWindow(
     loadPdConfigForPlugin(facts.workspaceDir).effective.config.promptBudget,
@@ -268,21 +277,24 @@ async function buildSharedPrompt(ctx: AgentCtx, extra: { roundKey?: number; adap
     ...(extra.roundKey !== undefined ? { roundKey: extra.roundKey } : {}),
     ...(extra.adaptivePriority ? {
       adaptivePriority: { artifactId: extra.adaptivePriority.artifactId, activationId: extra.adaptivePriority.activationId },
+      ...(extra.adaptivePriority.additiveOnly === true ? { additiveOnly: true } : {}),
       ...(extra.adaptivePriority.hookInvocationId ? { hookInvocationId: extra.adaptivePriority.hookInvocationId } : {}),
       ...(extra.adaptivePriority.signal ? { signal: extra.adaptivePriority.signal } : {}),
       ...(extra.adaptivePriority.deadlineAt !== undefined ? { deadlineAt: extra.adaptivePriority.deadlineAt } : {}),
     } : {}),
-    promptBudget: resolvePromptBudget({
-      ...(declaredWindow !== undefined ? { operatorDeclared: { contextWindowTokens: declaredWindow } } : {}),
-      hostCapacity: !hasModelContext ? undefined : {
-        contextTokenBudget: facts.contextTokenBudget,
-        contextWindowSource: facts.contextWindowSource,
-      },
-      modelIdentity: !hasModelContext ? undefined : {
-        providerId: facts.modelProviderId,
-        modelId: facts.modelId,
-      },
-      catalog: getPromptModelCatalog(),
+    ...(extra.promptBudget !== undefined ? { promptBudget: extra.promptBudget } : {
+      promptBudget: resolvePromptBudget({
+        ...(declaredWindow !== undefined ? { operatorDeclared: { contextWindowTokens: declaredWindow } } : {}),
+        hostCapacity: !hasModelContext ? undefined : {
+          contextTokenBudget: facts.contextTokenBudget,
+          contextWindowSource: facts.contextWindowSource,
+        },
+        modelIdentity: !hasModelContext ? undefined : {
+          providerId: facts.modelProviderId,
+          modelId: facts.modelId,
+        },
+        catalog: getPromptModelCatalog(),
+      }),
     }),
   });
 }
@@ -324,6 +336,8 @@ function insertValidatedPrincipleArtifact(overrides: {
   text?: string;
   validationStatus?: string;
   contentJson?: string;
+  /** Distinct per artifact revision — the (source_task_id, artifact_kind) unique index forbids same-task upsert. */
+  sourceTaskId?: string;
 }) {
   const {
     artifactId,
@@ -331,6 +345,7 @@ function insertValidatedPrincipleArtifact(overrides: {
     text = TEST_PRINCIPLE_TEXT,
     validationStatus = 'validated',
     contentJson,
+    sourceTaskId = `task_${principleId}`,
   } = overrides;
 
   const db = sqliteConn.getDb();
@@ -342,7 +357,7 @@ function insertValidatedPrincipleArtifact(overrides: {
   `).run(
     artifactId,
     'principle',
-    `task_${principleId}`,
+    sourceTaskId,
     principleId,
     null,
     '[]',
@@ -393,7 +408,7 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
     const ctx = configured(target!);
     const evt = admitted() as Parameters<typeof handleBeforePromptBuild>[0];
-    const priority = resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+    const priority = await resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
     const result = await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext).toContain(`${target}-body-`);
     expect(result?.prependSystemContext?.split(`${target}-body-`)).toHaveLength(2);
@@ -419,7 +434,7 @@ describe('Adaptive activation — actual local prompt entry', () => {
     const ctx = configured('AA-only');
     const evt = admitted() as Parameters<typeof handleBeforePromptBuild>[0];
     const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
-    const priority = resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+    const priority = await resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
     const result = await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext?.split('AA-only-body')).toHaveLength(2);
     expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"addedTarget":false'));
@@ -863,6 +878,207 @@ describe('Adaptive activation — actual local prompt entry', () => {
   });
 });
 
+describe('PRI-1140 principle-identity mapping — real production chain', () => {
+  beforeEach(async () => {
+    const { resetAdaptivePrincipleResolutionForTest } = await import('../../src/hooks/adaptive-principle-resolution.js');
+    resetAdaptivePrincipleResolutionForTest();
+  });
+
+  /**
+   * Revision fixture (real prompt-replacement shape): OLD revision's
+   * activation deactivated, NEW revision live, same principleId.
+   */
+  async function seedRevisedDelivery() {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-delivery-v1', principleId: 'DELIVERY', text: 'OLD-DELIVERY-SELF-CHECK', sourceTaskId: 'task-delivery-v1' });
+    await insertPromptActivation({ artifactId: 'art-delivery-v1', principleId: 'DELIVERY-old' });
+    insertValidatedPrincipleArtifact({ artifactId: 'art-delivery-v2', principleId: 'DELIVERY', text: 'NEW-DELIVERY-SELF-CHECK', sourceTaskId: 'task-delivery-v2' });
+    await insertPromptActivation({ artifactId: 'art-delivery-v2', principleId: 'DELIVERY-new' });
+    // Deactivate the pre-revision activation (what prompt replacement does).
+    sqliteConn.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?')
+      .run(new Date().toISOString(), 'act_prompt_DELIVERY-old');
+  }
+
+  async function approve(artifactId: string) {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
+      VALUES (?, ?, 'prompt', 'low', 'approved', 1, ?, ?, 'owner-1')
+    `).run(`approval-${artifactId}`, artifactId, now, now);
+  }
+
+  function configuredPrinciple(principleId: string) {
+    const ctx = makeCtx();
+    if (!ctx.api) throw new Error('test requires plugin API');
+    ctx.api.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, principleId,
+      expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    return ctx;
+  }
+
+  function configuredPinned(principleId: string) {
+    const ctx = makeCtx();
+    if (!ctx.api) throw new Error('test requires plugin API');
+    ctx.api.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, artifactId: `art-${principleId}`,
+      activationId: `act_prompt_${principleId}`, expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    return ctx;
+  }
+
+  function configuredPinnedMapping(mapping: { artifactId: string; activationId: string }) {
+    const ctx = makeCtx();
+    if (!ctx.api) throw new Error('test requires plugin API');
+    ctx.api.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, ...mapping,
+      expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    return ctx;
+  }
+
+  const sentinelEvent = () => ({ ...makeMinimalEvent(), currentUserMessage: '[PD-AA:delivery-review:v1]\nReview delivery', currentUserMessageId: 'host-admission-1' }) as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+
+  it('restores the intervention after revision: old pinned mapping dies, principle mapping re-binds the current version through the same chain', async () => {
+    await seedRevisedDelivery();
+    await approve('art-delivery-v2');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+
+    // Old fixed mapping (pinned to the deactivated pre-revision activation):
+    // the intervention is dead — structured unavailable, no new content.
+    const oldCtx = configuredPinnedMapping({ artifactId: 'art-delivery-v1', activationId: 'act_prompt_DELIVERY-old' });
+    const oldPriority = await resolveAdaptivePriorityForHook(sentinelEvent(), oldCtx, oldCtx.api!);
+    expect(oldPriority).toMatchObject({ artifactId: 'art-delivery-v1', activationId: 'act_prompt_DELIVERY-old' });
+    const oldResult = await handleBeforePromptBuild(sentinelEvent(), oldCtx, await buildSharedPrompt(oldCtx, { adaptivePriority: oldPriority ?? undefined }));
+    expect(oldResult?.prependSystemContext).not.toContain('OLD-DELIVERY-SELF-CHECK');
+    expect(oldCtx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"reason":"target_unavailable"'));
+
+    journal.mockClear();
+    // New principle mapping: resolution + additive priority through the SAME
+    // shared assembly entry, without any config edit.
+    const newCtx = configuredPrinciple('DELIVERY');
+    const newPriority = await resolveAdaptivePriorityForHook(sentinelEvent(), newCtx, newCtx.api!);
+    expect(newPriority).toMatchObject({
+      artifactId: 'art-delivery-v2',
+      activationId: 'act_prompt_DELIVERY-new',
+      additiveOnly: true,
+    });
+    expect(newPriority?.hookInvocationId).toBeTruthy();
+    const newResult = await handleBeforePromptBuild(sentinelEvent(), newCtx, await buildSharedPrompt(newCtx, { adaptivePriority: newPriority ?? undefined }));
+    expect(newResult?.prependSystemContext).toContain('NEW-DELIVERY-SELF-CHECK');
+    expect(newResult?.prependSystemContext).not.toContain('OLD-DELIVERY-SELF-CHECK');
+    expect(newResult?.prependSystemContext?.split('NEW-DELIVERY-SELF-CHECK')).toHaveLength(2);
+    // Authorization re-verified: owner annotation rides the directive.
+    expect(newResult?.prependSystemContext).toMatch(/<directive id="DELIVERY"[^>]*authority="owner"/);
+    // One invocation journal: open at provider time, closed with the selected outcome.
+    expect(journal).toHaveBeenCalledTimes(2);
+    const start = journal.mock.calls[0]![1] as Record<string, unknown>;
+    const end = journal.mock.calls[1]![1] as Record<string, unknown>;
+    expect(start).toMatchObject({ receiptState: 'open', artifactId: 'art-delivery-v2', activationId: 'act_prompt_DELIVERY-new' });
+    expect(end).toMatchObject({
+      hookInvocationId: start.hookInvocationId, receiptState: 'closed', execution: 'completed',
+      payload: 'prepared', selection: 'selected', artifactId: 'art-delivery-v2',
+    });
+  });
+
+  it('budget-insufficient counterexample: the principle path never squeezes native content and records the would-be displacement', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA-only', principleId: 'AA-only', text: 'AA-only-body' });
+    await insertPromptActivation({ artifactId: 'art-AA-only', principleId: 'AA-only' });
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const { renderPrinciplesToDirectives } = await import('@principles/core/runtime');
+    const { escapeXml } = await import('@principles/core/prompt-builder');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+
+    // Native assembles AA-only; the principle target is NOT the target of the
+    // mapping (a different principle) and cannot join without displacement.
+    insertValidatedPrincipleArtifact({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY', text: `DELIVERY-${'x'.repeat(2000)}` });
+    await insertPromptActivation({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY' });
+    await approve('art-DELIVERY');
+    const candidates = await import('@principles/host-runtime').then(({ readPromptActivationCandidates }) =>
+      readPromptActivationCandidates({ workspaceDir: tempWorkspaceDir, includeAuthority: true }));
+    const target = candidates.principles.find((principle) => principle.principleId === 'DELIVERY')!;
+    const cost = (entries: typeof candidates.principles) => renderPrinciplesToDirectives(entries, new Set(entries.map((entry) => entry.principleId)), { escapeFn: escapeXml }).length;
+    const singleBudget = Math.max(...candidates.principles.map((principle) => cost([principle])));
+    const promptBudget = { ...resolvePromptBudget(), budgetChars: singleBudget + 2 };
+
+    const ctx = configuredPrinciple('DELIVERY');
+    const priority = await resolveAdaptivePriorityForHook(sentinelEvent(), ctx, ctx.api!);
+    expect(priority?.additiveOnly).toBe(true);
+    const result = await handleBeforePromptBuild(sentinelEvent(), ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority ?? undefined, promptBudget }));
+    // Native assembly preserved verbatim; no displacement, no added target.
+    expect(result?.prependSystemContext).toContain('AA-only-body');
+    expect(result?.prependSystemContext).not.toContain('DELIVERY-');
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"reason":"would_displace_native_assembly"'));
+    expect(journal.mock.calls[1]![1]).toMatchObject({
+      receiptState: 'closed', execution: 'degraded', payload: 'none', selection: 'unavailable',
+    });
+  });
+
+  it('fails closed with a structured reason when the principle has no current activation, and records nothing fake', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-retired', principleId: 'RETIRED', text: 'RETIRED-BODY' });
+    await insertPromptActivation({ artifactId: 'art-retired', principleId: 'RETIRED' });
+    sqliteConn.getDb().prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?')
+      .run(new Date().toISOString(), 'act_prompt_RETIRED');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+
+    const native = await buildSharedPrompt(makeCtx());
+    const ctx = configuredPrinciple('RETIRED');
+    const priority = await resolveAdaptivePriorityForHook(sentinelEvent(), ctx, ctx.api!);
+    expect(priority).toBeUndefined();
+    expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('"reason":"principle_not_currently_authorized"'));
+    const result = await handleBeforePromptBuild(sentinelEvent(), ctx, native);
+    expect(result?.prependSystemContext).not.toContain('RETIRED-BODY');
+    // No resolution → no invocation identity → no fabricated journal record.
+    expect(journal).not.toHaveBeenCalled();
+  });
+
+  it('refuses a principle mapping on the controlled-admission branch (manifest binds exact artifact identity)', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY', text: 'NEW-DELIVERY-SELF-CHECK' });
+    await insertPromptActivation({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY' });
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    // Embedded-shape event: no native message identity → controlled-admission branch.
+    const embedded = { prompt: 'hello', messages: [], trigger: 'user', sessionId: 'test-session-v2', currentUserMessage: '[PD-AA:delivery-review:v1]\nReview' } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+    const ctx = configuredPrinciple('DELIVERY');
+    const priority = await resolveAdaptivePriorityForHook(embedded, ctx, ctx.api!);
+    expect(priority).toBeUndefined();
+    expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('principle_mapping_has_no_admission_identity'));
+  });
+
+  it('a resolution remembered for one invocation cannot leak into a duplicate callback', async () => {
+    insertValidatedPrincipleArtifact({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY', text: 'NEW-DELIVERY-SELF-CHECK' });
+    await insertPromptActivation({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY' });
+    await approve('art-DELIVERY');
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const ctx = configuredPrinciple('DELIVERY');
+    const evt = sentinelEvent();
+    const priority = await resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+    expect(priority?.additiveOnly).toBe(true);
+    const first = await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority ?? undefined }));
+    expect(first?.prependSystemContext).toContain('NEW-DELIVERY-SELF-CHECK');
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"reason":"native_already_contains_target"'));
+    // Duplicate callback for the same invocation: the resolution was consumed,
+    // so the adaptive contribution degrades to the native baseline (same text,
+    // no second contribution claim) — never a re-applied priority.
+    const duplicate = await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority ?? undefined }));
+    expect(duplicate?.prependSystemContext).toBe(first?.prependSystemContext);
+    expect(ctx.api?.logger?.info).toHaveBeenCalledWith(expect.stringContaining('"reason":"shared_priority_unavailable"'));
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+    const closes = journal.mock.calls.filter(([, record]) => (record as Record<string, unknown>).receiptState === 'closed');
+    expect(closes.length).toBeGreaterThanOrEqual(1);
+    expect(closes[0]![1]).toMatchObject({ receiptState: 'closed', payload: 'prepared', selection: 'selected' });
+  });
+});
+
 describe('Controlled admission — real local/shared entries', () => {
   const admissionRoots: string[] = [];
 
@@ -955,7 +1171,7 @@ describe('Controlled admission — real local/shared entries', () => {
     const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
     // PRI-1137: admission is claimed by the production provider in the
     // pre-selection phase; the same event instance carries the claim handoff.
-    const priority = resolveAdaptivePriorityForHook(event, ctx, ctx.api!);
+    const priority = await resolveAdaptivePriorityForHook(event, ctx, ctx.api!);
     const result = await handleBeforePromptBuild(event, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext).toContain('AA-19-body-');
     expect(consumed().consumedAt).toBeTruthy();
@@ -978,7 +1194,7 @@ describe('Controlled admission — real local/shared entries', () => {
       currentUserMessageId: 'native-1' } as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
-    const priority = resolveAdaptivePriorityForHook(event, ctx, ctx.api!);
+    const priority = await resolveAdaptivePriorityForHook(event, ctx, ctx.api!);
     const result = await handleBeforePromptBuild(event, ctx, await buildSharedPrompt(ctx, { adaptivePriority: priority }));
     expect(result?.prependSystemContext).toContain('AA-19-body-');
     expect(consumed().consumedAt).toBeNull();
