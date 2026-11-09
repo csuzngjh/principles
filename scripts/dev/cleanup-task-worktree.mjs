@@ -60,7 +60,7 @@ import {
   readRegularFileNoFollow,
   REMOVAL_REASONS,
 } from './lib/residue-delete.mjs';
-import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';
+import { removeWorktreeSafely, resolveAdminDirFromMarkerBytes } from './lib/safe-worktree-remove.mjs';
 import { CODES } from './lib/preflight.mjs';
 
 function parseArgs(argv) {
@@ -184,40 +184,19 @@ function isWithinPath(root, candidate) {
 /**
  * Resolve the exact Git admin directory for a registered worktree. It is
  * excluded from external-target fingerprints only after both pointer directions
- * prove the directory belongs to this worktree and this repository.
+ * prove the directory belongs to this worktree and this repository — the same
+ * single proof removeWorktreeSafely uses, so the two can never drift apart
+ * (relative pointers included).
  */
 function resolveWorktreeAdminDir(worktreePath, commonDir) {
   const markerPath = path.join(worktreePath, '.git');
-  // One-fd snapshot: fstat the descriptor and read through it, then compare
-  // against a fresh lstat of the path (regular-file assertion included). A
-  // path-based lstat-then-read would race a marker swapped in between
-  // (CodeQL js/file-system-race).
-  const markerContents = readRegularFileNoFollow(markerPath);
-  const markerLine = markerContents.split(/\r?\n/).find((line) => /^\s*gitdir:\s*/i.test(line));
-  if (!markerLine) throw new Error('worktree .git marker has no gitdir pointer');
-  const rawAdminDir = markerLine.replace(/^\s*gitdir:\s*/i, '').trim();
-  const candidate = path.resolve(path.dirname(markerPath), rawAdminDir);
-  const adminRoot = path.resolve(commonDir, 'worktrees');
-  const adminRootStat = fs.lstatSync(adminRoot);
-  const candidateStat = fs.lstatSync(candidate);
-  if (!adminRootStat.isDirectory() || adminRootStat.isSymbolicLink()
-    || !candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
-    throw new Error('worktree admin directory or its parent is not a real directory');
-  }
-  const canonicalRoot = fs.realpathSync.native(adminRoot);
-  const canonicalCandidate = fs.realpathSync.native(candidate);
-  if (!isWithinPath(canonicalRoot, canonicalCandidate)
-    || path.relative(canonicalRoot, canonicalCandidate).includes(path.sep)) {
-    throw new Error('worktree admin directory is not a direct child of the canonical admin root');
-  }
-  const reversePointer = readRegularFileNoFollow(path.join(canonicalCandidate, 'gitdir')).trim();
-  const reversePath = path.isAbsolute(reversePointer)
-    ? path.resolve(reversePointer)
-    : path.resolve(canonicalCandidate, reversePointer);
-  if (path.resolve(reversePath) !== path.resolve(markerPath)) {
-    throw new Error('worktree admin reverse pointer does not resolve to the original .git marker');
-  }
-  return canonicalCandidate;
+  return resolveAdminDirFromMarkerBytes({
+    // One-fd snapshot read (CodeQL js/file-system-race).
+    markerBytes: readRegularFileNoFollow(markerPath),
+    markerDirs: [worktreePath],
+    commonDir,
+    expectedMarkerPath: markerPath,
+  });
 }
 
 export function fingerprintExternalTarget(dir, { excludePaths = [] } = {}) {

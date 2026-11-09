@@ -183,15 +183,14 @@ describe('workspace tools gate', () => {
   );
 
   it('refuses an aliased import of the destructive helper (the scan cannot verify renamed call sites)', async () => {
-    const target = devEntryTarget('cleanup-task-worktree.mjs');
-    fs.writeFileSync(
-      target,
-      fs.readFileSync(target, 'utf-8').replace(
-        "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
-        "import { removeWorktreeSafely as removeSafely } from './lib/safe-worktree-remove.mjs';",
-      ),
-      'utf-8',
+    const target = devEntryTarget('workspace-cleanup.mjs');
+    const original = fs.readFileSync(target, 'utf-8');
+    const patched = original.replace(
+      "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
+      "import { removeWorktreeSafely as removeSafely } from './lib/safe-worktree-remove.mjs';",
     );
+    expect(patched, 'the import line must exist so the injection is real').not.toBe(original);
+    fs.writeFileSync(target, patched, 'utf-8');
     const result = await runGate(fixture);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('git-mutation-mutex');
@@ -199,15 +198,14 @@ describe('workspace tools gate', () => {
   }, 60_000);
 
   it('refuses a namespace import of the destructive helper module (member calls escape the scan)', async () => {
-    const target = devEntryTarget('cleanup-task-worktree.mjs');
-    fs.writeFileSync(
-      target,
-      fs.readFileSync(target, 'utf-8').replace(
-        "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
-        "import * as safeRemoval from './lib/safe-worktree-remove.mjs';",
-      ) + '\nvoid safeRemoval;\n',
-      'utf-8',
+    const target = devEntryTarget('workspace-cleanup.mjs');
+    const original = fs.readFileSync(target, 'utf-8');
+    const patched = original.replace(
+      "import { removeWorktreeSafely } from './lib/safe-worktree-remove.mjs';",
+      "import * as safeRemoval from './lib/safe-worktree-remove.mjs';",
     );
+    expect(patched, 'the import line must exist so the injection is real').not.toBe(original);
+    fs.writeFileSync(target, patched + '\nvoid safeRemoval;\n', 'utf-8');
     const result = await runGate(fixture);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('git-mutation-mutex');

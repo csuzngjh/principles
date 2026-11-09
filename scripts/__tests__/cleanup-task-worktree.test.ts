@@ -19,7 +19,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { gitCommonDirAbsolute, normalizeGitPath, runGit } from '../dev/lib/git.mjs';
 import { withMutationLock } from '../dev/lib/git-mutation-lock.mjs';
 import { readRegularFileNoFollow } from '../dev/lib/residue-delete.mjs';
-import { removeWorktreeSafely, resolveAdminReversePointer } from '../dev/lib/safe-worktree-remove.mjs';
+import {
+  removeWorktreeSafely,
+  resolveAdminDirFromMarkerBytes,
+  resolveAdminReversePointer,
+} from '../dev/lib/safe-worktree-remove.mjs';
 import {
   changedExternalTargets,
   fingerprintExternalTarget,
@@ -509,6 +513,120 @@ describe('cleanup-task-worktree junction safety (ERR-098 / PRI-1143)', () => {
     expect(fs.existsSync(wt)).toBe(false);
     await expect(git(primary, 'rev-parse', '--verify', 'refs/heads/' + branch)).rejects.toThrow();
   }, 120_000);
+});
+
+// git >= 2.48 can link worktrees with RELATIVE paths (`--relative-paths`,
+// `worktree.useRelativePaths`). Only a git that writes them can exercise the
+// real end-to-end path; older gits skip that one case with an explicit reason.
+const gitVersionText = execFileSync('git', ['--version']).toString();
+const gitVersionMatch = gitVersionText.match(/git version (\d+)\.(\d+)/);
+const gitWritesRelativeWorktreePaths = gitVersionMatch !== null &&
+  (Number(gitVersionMatch[1]) > 2 || (Number(gitVersionMatch[1]) === 2 && Number(gitVersionMatch[2]) >= 48));
+
+describe('admin ownership proof with relative pointers (PRI-1143 P2)', () => {
+  /** A synthetic but on-disk worktree linkage: <base>/repo/.git/worktrees/wt1 <-> <base>/<dirName>. */
+  function buildLinkage(label: string, worktreeDirName: string) {
+    const base = path.join(root, 'admin-proof');
+    const scenario = path.join(base, label);
+    if (!scenario.startsWith(base + path.sep)) throw new Error('scenario escaped the fixture');
+    const commonDir = path.join(scenario, 'repo', '.git');
+    const adminDir = path.join(commonDir, 'worktrees', 'wt1');
+    const worktreeDir = path.join(scenario, worktreeDirName);
+    fs.mkdirSync(adminDir, { recursive: true });
+    fs.mkdirSync(worktreeDir, { recursive: true });
+    const toGitForm = (p: string) => p.split(path.sep).join('/');
+    return { commonDir, adminDir, worktreeDir, toGitForm };
+  }
+
+  it('accepts a relative reverse pointer resolved against the ADMIN directory, not process.cwd()', () => {
+    const { commonDir, adminDir, worktreeDir, toGitForm } = buildLinkage('relative-reverse', 'wt1');
+    const markerPath = path.join(worktreeDir, '.git');
+    // Exactly what git >= 2.48 writes for a relative worktree.
+    fs.writeFileSync(path.join(adminDir, 'gitdir'), toGitForm(path.relative(adminDir, markerPath)) + '\n', 'utf-8');
+    const markerBytes = 'gitdir: ' + toGitForm(path.relative(worktreeDir, adminDir)) + '\n';
+    expect(path.relative(process.cwd(), worktreeDir)).not.toBe('');
+    const proven = resolveAdminDirFromMarkerBytes({
+      markerBytes, markerDirs: [worktreeDir], commonDir, expectedMarkerPath: markerPath,
+    });
+    expect(normalizeGitPath(proven)).toBe(normalizeGitPath(adminDir));
+  });
+
+  it('resolves a marker git rewrote relative to the NEW position after a move', () => {
+    // Mirror the real layout: the quarantine is one level deeper than the
+    // original worktree (<pool>/.pd-worktree-cleanup-X/worktree vs <pool>/wt),
+    // so a relative marker resolves to different places from the two bases.
+    const { commonDir, adminDir, worktreeDir, toGitForm } = buildLinkage(
+      'rewritten-after-move', path.join('.pd-worktree-cleanup-test', 'worktree'),
+    );
+    const originalDir = path.join(path.dirname(path.dirname(worktreeDir)), 'original-position');
+    const movedMarker = path.join(worktreeDir, '.git');
+    fs.writeFileSync(path.join(adminDir, 'gitdir'), toGitForm(path.relative(adminDir, movedMarker)) + '\n', 'utf-8');
+    const markerBytes = 'gitdir: ' + toGitForm(path.relative(worktreeDir, adminDir)) + '\n';
+    // Anchoring only at the original position (the pre-fix behaviour) names the
+    // wrong directory and is refused...
+    expect(() => resolveAdminDirFromMarkerBytes({
+      markerBytes, markerDirs: [originalDir], commonDir, expectedMarkerPath: movedMarker,
+    })).toThrow();
+    // ...while trying both bases proves the real admin directory.
+    const proven = resolveAdminDirFromMarkerBytes({
+      markerBytes, markerDirs: [worktreeDir, originalDir], commonDir, expectedMarkerPath: movedMarker,
+    });
+    expect(normalizeGitPath(proven)).toBe(normalizeGitPath(adminDir));
+  });
+
+  it('refuses a relative reverse pointer that names a different worktree', () => {
+    const { commonDir, adminDir, worktreeDir, toGitForm } = buildLinkage('other-worktree', 'wt1');
+    const otherMarker = path.join(path.dirname(worktreeDir), 'someone-else', '.git');
+    fs.writeFileSync(path.join(adminDir, 'gitdir'), toGitForm(path.relative(adminDir, otherMarker)) + '\n', 'utf-8');
+    const markerBytes = 'gitdir: ' + toGitForm(path.relative(worktreeDir, adminDir)) + '\n';
+    expect(() => resolveAdminDirFromMarkerBytes({
+      markerBytes, markerDirs: [worktreeDir], commonDir, expectedMarkerPath: path.join(worktreeDir, '.git'),
+    })).toThrow(/does not name the expected worktree marker/);
+  });
+
+  it('binds to the admin directory proven before the move (expectedAdminDir)', () => {
+    const { commonDir, adminDir, worktreeDir, toGitForm } = buildLinkage('bound-admin', 'wt1');
+    const markerPath = path.join(worktreeDir, '.git');
+    fs.writeFileSync(path.join(adminDir, 'gitdir'), toGitForm(markerPath) + '\n', 'utf-8');
+    const otherAdmin = path.join(commonDir, 'worktrees', 'wt2');
+    fs.mkdirSync(otherAdmin, { recursive: true });
+    const markerBytes = 'gitdir: ' + toGitForm(adminDir) + '\n';
+    expect(() => resolveAdminDirFromMarkerBytes({
+      markerBytes, markerDirs: [worktreeDir], commonDir, expectedMarkerPath: markerPath, expectedAdminDir: otherAdmin,
+    })).toThrow(/different admin directory/);
+  });
+
+  it.skipIf(!gitWritesRelativeWorktreePaths)(
+    'removes a real worktree whose Git linkage uses relative paths end to end (git >= 2.48)',
+    async () => {
+      const repo = path.join(root, 'relative-paths-repo');
+      fs.mkdirSync(repo, { recursive: true });
+      await git(repo, 'init', '-b', 'main');
+      await git(repo, 'config', 'user.email', 't@t');
+      await git(repo, 'config', 'user.name', 't');
+      // Both `worktree add` and the cleanup's own `worktree move` write
+      // relative pointers — the move rewrites the marker relative to the
+      // QUARANTINE, which is the case the original-position anchor missed.
+      await git(repo, 'config', 'worktree.useRelativePaths', 'true');
+      fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n', 'utf-8');
+      await git(repo, 'add', '.');
+      await git(repo, 'commit', '-m', 'init');
+      const wt = path.join(root, 'relative-paths-worktree');
+      await git(repo, 'worktree', 'add', wt, '-b', 'relative-task');
+      const marker = readRegularFileNoFollow(path.join(wt, '.git'));
+      expect(path.isAbsolute(marker.replace(/^gitdir:\s*/, '').trim()), 'git must have written a relative marker').toBe(false);
+
+      const commonDir = await gitCommonDirAbsolute(repo);
+      const result = await withMutationLock(
+        { commonDir, operation: 'worktree-remove', target: wt },
+        () => removeWorktreeSafely({ cwd: repo, worktreePath: wt, primaryPath: repo }),
+      );
+      expect(result.ok, String(result.reason) + ' ' + result.notes.join('; ')).toBe(true);
+      expect(fs.existsSync(wt)).toBe(false);
+      expect((await worktreeList(repo)).some((entry) => normalizeGitPath(entry.path) === normalizeGitPath(wt))).toBe(false);
+    },
+    120_000,
+  );
 });
 
 
