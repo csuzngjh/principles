@@ -172,7 +172,8 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
 |---|---|
 | `host-exit`：退出码 0，未超时 | 超时、spawn 失败 |
 | `host-envelope`：`--json` 输出 ok=true、status=ok，final 含 `PRESENCE-ACK`；输出中的 `sessionId` 作为本回合的宿主运行身份 | 空文本（例如只有 `[DONE]` 的片段） |
-| `candidate-registration-source`（首项验收）：本回合进程输出或追加到包内宿主日志的注册行恰好指向冻结候选根（可以有多行，但必须完全一致） | 缺失、`(unknown)`、指向生产路径或其他候选、多个来源互相冲突；用 presence 事件代替 |
+| `log-evidence-complete`：本回合宿主日志与 presence 事件日志的增量读取无截断、无缩短、无读取失败；任何一项失败都记录失败步骤、原因与错误码（`HOST_LOG_TRUNCATED`/`HOST_LOG_SHRUNK`/`HOST_LOG_READ_FAILED`/`EVENTS_LOG_*`） | 截断的增量（可见前缀之后还有未读字节）、缩短后重读出基线前的旧行、读取报错 |
+| `candidate-registration-source`（首项验收）：本回合进程输出或追加到包内宿主日志的注册行恰好指向冻结候选根（可以有多行，但必须完全一致）；日志证据不完整时该来源判 `incomplete`，同样失败 | 缺失、`(unknown)`、指向生产路径或其他候选、多个来源互相冲突、来源所在日志不完整；用 presence 事件代替 |
 | `candidate-code-unchanged`：回合结束后，候选的代码文件（入口、bundle、清单、外部依赖）仍是冻结字节 | 任何代码文件被改动、缺失或新增 |
 | `endpoint-one-request`：本回合恰好 1 次 served，0 次 refused | 第 2 次请求（宿主内部重试）、任何 refused |
 | `endpoint-api-path`：R1 为 `/v1/responses`，R2 为 `/v1/chat/completions` | 另一种 API 的路径 |
@@ -323,6 +324,7 @@ R2 只改三处：`state\R1`→`state\R2`，`--model pdpresence-completions/isol
   - B2：presence surface 登记为 core，并新增经正式注册链的回归和守卫修正（#2431）；
   - B3：候选身份改为四项联合证据（注册来源、入口与代码完整性、事件与宿主身份绑定），宿主日志固定在包内，生产版本只作环境事实（#2424）；
   - v3 包标记为 LOST / UNAVAILABLE，抄录的数值标注为转录记录。
+- **日志证据完整性（本次，#2424）**：新增回合判定 `log-evidence-complete`。宿主日志或 presence 日志增量出现截断、缩短或读取失败时，对应证据标为不完整，记录失败步骤、原因与错误码；回合判失败，R1 失败即不启动 R2。`candidate-registration-source` 对不完整的日志来源一律判 `incomplete`，不得用可见前缀或重读出的旧行确认候选（两条指定反例覆盖）。
 
 ## 15. 事件：v3 执行包被外部清理删除（2026-11-08 21:03，+08:00）
 

@@ -180,9 +180,11 @@ const MAX_ROUND_DELTA_BYTES = 32 * 1024 * 1024;
 /**
  * The bytes appended to `path` after `fromByte` (bounded). A shrunken file is
  * read whole and flagged. The append is detected through the same single fd the
- * read uses (fstat after open), so there is no exists/stat/open race: a file
- * removed between checks makes openSync throw and is reported as empty, never
- * as a confirmed absence.
+ * read uses (fstat after open), so there is no exists/stat/open race. A file
+ * that is absent counts as empty only when no baseline existed; a missing file
+ * WITH a baseline is `shrunk` (the previously-read bytes are gone). Any open or
+ * read failure other than absence is reported as `readError`; the caller must
+ * treat that evidence as incomplete, never as a clean empty read.
  */
 export function readAppended(path, fromByte = 0, maxBytes = MAX_ROUND_DELTA_BYTES) {
   let fd;
@@ -190,9 +192,11 @@ export function readAppended(path, fromByte = 0, maxBytes = MAX_ROUND_DELTA_BYTE
   try {
     fd = openSync(path, 'r');
     size = fstatSync(fd).size;
-  } catch {
+  } catch (error) {
     if (fd !== undefined) closeSync(fd);
-    return { text: '', fromByte, bytes: 0, truncated: false, shrunk: false };
+    const code = String(error?.code ?? 'E_READ');
+    if (code === 'ENOENT' && fromByte === 0) return { text: '', fromByte, bytes: 0, truncated: false, shrunk: false };
+    return { text: '', fromByte, bytes: 0, truncated: false, shrunk: fromByte > 0, readError: { code, message: String(error?.message ?? error) } };
   }
   try {
     const shrunk = size < fromByte;
@@ -202,9 +206,30 @@ export function readAppended(path, fromByte = 0, maxBytes = MAX_ROUND_DELTA_BYTE
     const buffer = Buffer.alloc(length);
     readSync(fd, buffer, 0, length, start);
     return { text: buffer.toString('utf8'), fromByte: start, bytes: length, truncated: size - start > maxBytes, shrunk };
+  } catch (error) {
+    return { text: '', fromByte, bytes: 0, truncated: false, shrunk: size < fromByte, readError: { code: String(error?.code ?? 'E_READ'), message: String(error?.message ?? error) } };
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Fail-closed log-evidence audit for one round. Truncation, shrink or a read
+ * failure in the host-log or presence-log delta makes the affected evidence
+ * incomplete: each failure is a step with a stable code and reason, and the
+ * round gate fails on it.
+ */
+export function logEvidenceIntegrity({ hostLogDelta, presenceFiles }) {
+  const steps = [];
+  if (hostLogDelta?.shrunk) steps.push({ step: 'host-log-delta', code: 'HOST_LOG_SHRUNK', reason: 'the host log shrank below the round baseline; previously-read bytes are gone' });
+  if (hostLogDelta?.truncated) steps.push({ step: 'host-log-delta', code: 'HOST_LOG_TRUNCATED', reason: 'the host log delta exceeds the read cap; bytes beyond it were not examined' });
+  if (hostLogDelta?.readError) steps.push({ step: 'host-log-delta', code: 'HOST_LOG_READ_FAILED', reason: `${hostLogDelta.readError.code}: ${hostLogDelta.readError.message}` });
+  for (const file of presenceFiles ?? []) {
+    if (file.shrunk) steps.push({ step: `presence-events:${file.name}`, code: 'EVENTS_LOG_SHRUNK', reason: 'the event log shrank below the round baseline; previously-read bytes are gone' });
+    if (file.truncated) steps.push({ step: `presence-events:${file.name}`, code: 'EVENTS_LOG_TRUNCATED', reason: 'the event log delta exceeds the read cap; bytes beyond it were not examined' });
+    if (file.readError) steps.push({ step: `presence-events:${file.name}`, code: 'EVENTS_LOG_READ_FAILED', reason: `${file.readError.code}: ${file.readError.message}` });
+  }
+  return { complete: steps.length === 0, steps };
 }
 
 /** Presence events appended to the isolated workspace's event logs since `baseline` was taken. */
@@ -215,7 +240,10 @@ export function readPresenceEventsSince(workspaceDir, baseline = new Map()) {
   if (!existsSync(logsDir)) return { logsDir, files, events };
   for (const name of readdirSync(logsDir).filter((file) => file.startsWith('events_') && file.endsWith('.jsonl')).sort()) {
     const delta = readAppended(join(logsDir, name), baseline.get(name) ?? 0);
-    files.push({ name, fromByte: delta.fromByte, bytes: delta.bytes, shrunk: delta.shrunk, truncated: delta.truncated });
+    files.push({
+      name, fromByte: delta.fromByte, bytes: delta.bytes, shrunk: delta.shrunk, truncated: delta.truncated,
+      ...(delta.readError ? { readError: delta.readError } : {}),
+    });
     for (const line of delta.text.split('\n')) {
       if (!line.trim()) continue;
       try {
@@ -270,17 +298,24 @@ export function extractRegistrationPaths(text, source) {
  * discovered candidate's realpath'd root as `api.rootDir` (4ffdd2047d1
  * registry-api.ts / discovery.ts), and the plugin logs it from register(). Only
  * this round's process output and the bytes appended to the pinned host log
- * during the round are read. Missing, unknown, outside or conflicting sources
- * never confirm the candidate, and a presence event cannot stand in for them.
+ * during the round are read. Missing, unknown, outside, conflicting or
+ * INCOMPLETE sources never confirm the candidate, and a presence event cannot
+ * stand in for them: a truncated delta can hide a conflicting line after its
+ * visible prefix, and a shrunk file re-exposes pre-baseline lines.
  */
 export function candidateRegistrationVerdict({ sources, candidateRoot }) {
-  const found = sources.flatMap((row) => extractRegistrationPaths(row.text, row.source));
+  const incomplete = sources.filter((row) => row.complete === false);
+  const found = sources.filter((row) => row.complete !== false).flatMap((row) => extractRegistrationPaths(row.text, row.source));
   const base = {
     candidateRoot,
     lineCount: found.length,
     lines: found.slice(0, 20),
     sourcesWithLines: [...new Set(found.map((row) => row.source))],
+    incompleteSources: incomplete.map((row) => ({ source: row.source, code: row.integrityCode ?? 'LOG_EVIDENCE_INCOMPLETE', reason: row.integrityReason ?? 'the source was flagged incomplete' })),
   };
+  if (incomplete.length > 0) {
+    return { ...base, status: 'incomplete', reason: 'a log evidence source was incomplete (truncated, shrunk or unreadable); the visible lines cannot prove which copy registered' };
+  }
   if (found.length === 0) return { ...base, status: 'missing', reason: 'no registration line in this round\'s host output or host log delta' };
   if (found.some((row) => row.path === '' || row.path === '(unknown)')) return { ...base, status: 'unknown', reason: 'the host passed no plugin rootDir' };
   const distinct = [];
@@ -303,7 +338,7 @@ const FORBIDDEN_REASONS = new Set(['missing_expectations', 'expectations_expired
  * so the API path is proven by the endpoint record, never by the event. The
  * candidate is proven by its own registration source, never by the event.
  */
-export function evaluatePresenceRound({ round, hostResult, endpointRecords, presenceEvents, registration, window, candidateCode }) {
+export function evaluatePresenceRound({ round, hostResult, endpointRecords, presenceEvents, registration, window, candidateCode, logIntegrity }) {
   const checks = [];
   const add = (id, ok, detail, evidence = {}) => checks.push({ id, ok, detail, evidence });
 
@@ -317,8 +352,12 @@ export function evaluatePresenceRound({ round, hostResult, endpointRecords, pres
       ok: envelope?.ok ?? null, status: envelope?.status ?? null, provider: envelope?.provider ?? null, model: envelope?.model ?? null, sessionId: hostSessionId,
     });
 
+  add('log-evidence-complete', logIntegrity?.complete === true,
+    'the host-log and presence-log deltas of this round were read without truncation, shrink or read failure', logIntegrity ?? {
+      complete: false, steps: [{ step: 'log-evidence', code: 'LOG_EVIDENCE_NOT_COLLECTED', reason: 'no log integrity audit was supplied' }],
+    });
   add('candidate-registration-source', registration?.status === 'confirmed',
-    'this round\'s own plugin registration line names the frozen candidate root (missing, unknown, outside or conflicting sources fail)', registration ?? { status: 'not_collected' });
+    'this round\'s own plugin registration line names the frozen candidate root (missing, unknown, outside, conflicting or incomplete sources fail)', registration ?? { status: 'not_collected' });
   add('candidate-code-unchanged', candidateCode?.ok === true,
     'the candidate\'s entry, bundle, manifests and external dependency are still the frozen bytes after the round', candidateCode ?? { ok: false, reason: 'not_checked' });
 
@@ -589,13 +628,25 @@ export async function execute({
       const endpointRecords = endpoint.roundObservations(round.id);
       writeJson(join(layout.runDir, 'evidence', `${round.id}.endpoint.json`), endpointRecords, 'wx');
       // Candidate identity: this round's own registration lines from the host
-      // process output and the bytes the host appended to its pinned log.
+      // process output and the bytes the host appended to its pinned log. The
+      // log delta is audited first: truncation, shrink or a read failure makes
+      // the source incomplete, and an incomplete source never confirms.
       const hostLogDelta = readAppended(manifest.paths.hostLogPath, hostLogBefore);
+      const presence = readPresenceEventsSince(manifest.paths.workspaceDir, eventLogsBefore);
+      const logIntegrity = logEvidenceIntegrity({ hostLogDelta, presenceFiles: presence.files });
+      const hostLogComplete = !hostLogDelta.truncated && !hostLogDelta.shrunk && !hostLogDelta.readError;
+      const hostLogStep = logIntegrity.steps.find((row) => row.step === 'host-log-delta');
       const registration = candidateRegistrationVerdict({
         sources: [
           { source: 'host-stdout', text: hostResult.stdout },
           { source: 'host-stderr', text: hostResult.stderr },
-          { source: 'host-log', text: hostLogDelta.text },
+          {
+            source: 'host-log',
+            text: hostLogDelta.text,
+            complete: hostLogComplete,
+            integrityCode: hostLogStep?.code,
+            integrityReason: hostLogStep?.reason,
+          },
         ],
         candidateRoot: manifest.candidate.root,
       });
@@ -604,8 +655,8 @@ export async function execute({
         hostLogBytesRead: hostLogDelta.bytes,
         hostLogTruncated: hostLogDelta.truncated,
         hostLogShrunk: hostLogDelta.shrunk,
+        ...(hostLogDelta.readError ? { hostLogReadError: hostLogDelta.readError } : {}),
       }, 'wx');
-      const presence = readPresenceEventsSince(manifest.paths.workspaceDir, eventLogsBefore);
       writeJson(join(layout.runDir, 'evidence', `${round.id}.presence-events.json`), {
         window: { startedAt, endedAt },
         appendedFiles: presence.files,
@@ -614,7 +665,7 @@ export async function execute({
       const candidateCode = candidateCodeDrift(manifest);
       writeJson(join(layout.runDir, 'evidence', `${round.id}.candidate-code.json`), candidateCode, 'wx');
       const gate = evaluatePresenceRound({
-        round, hostResult, endpointRecords, presenceEvents: presence.events, registration, candidateCode,
+        round, hostResult, endpointRecords, presenceEvents: presence.events, registration, candidateCode, logIntegrity,
         window: { startedAt, endedAt },
       });
       writeJson(join(layout.runDir, 'evidence', `${round.id}.gate.json`), gate, 'wx');

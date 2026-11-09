@@ -41,10 +41,11 @@
 | process-sweep | 进程查询可用，且除启动器及其祖先外，没有进程引用该包 |
 | protocol-selftest | 用包内官方 transports 自测（需 `--selftest`，且 host-tree 已 PASS） |
 
-每个回合的判定（不属于预检，只在获批的 `--execute` 中运行）新增：
+每个回合的判定（不属于预检，只在获批的 `--execute` 中运行）：
 
-- `candidate-registration-source`：首项验收，见运行卡 §0.4；
-- `candidate-code-unchanged`：回合后候选代码文件未被改动；
+- `log-evidence-complete`：宿主日志与 presence 日志增量的完整性审计（`logEvidenceIntegrity`）。截断（超出读取上限）、缩短（低于回合基线，重读会暴露基线前字节）、读取失败（打开或读取出错，记录平台错误码）各自的步骤、原因、错误码都会写入证据；任何一项不完整，该回合判失败。
+- `candidate-registration-source`：首项验收，见运行卡 §0.4。日志来源不完整时判 `incomplete`，不用可见前缀确认。
+- `candidate-code-unchanged`：回合后候选代码文件未被改动。
 - `presence-event`：只计本回合追加的、与宿主报告的 `sessionId` 一致、时间戳在回合窗口内的事件。
 
 ## 2. 实测记录
@@ -85,14 +86,18 @@ CI 结果以各 PR 页面为准。跳过项不算通过。本地未跑完整 `ve
 
 ## 4. 反例覆盖（均为离线：假宿主、临时目录）
 
-**B3 候选身份**：
+**B3 候选身份与日志证据完整性**：
 
 - 生产插件含有相同事件代码时，`production-plugin-exclusion` 为 PASS，版本作为环境事实记录。
 - 注册来源指向生产路径或其他候选：判为 `outside`，R1 失败，R2 不启动。
 - 注册来源缺失：判为失败，即使 presence 事件完全正确也不能替代；`(unknown)` 和多个来源互相冲突同样判失败。
 - 回合开始前就已存在于宿主日志中的注册行，不计入本回合。
 - 回合开始前的旧事件行，以及 `sessionId` 与宿主报告不一致的事件，都不计入。宿主没有报告 `sessionId` 时 `presence-event` 判失败。
-- 注册行只出现在包内宿主日志（JSON 记录）中也能确认。路径里自带的括号（如 `(x86)`）会保留。
+- **反例一（截断）**：宿主日志增量的可见前缀包含正确候选注册行，但截断点之后还有冲突来源。单元级：`candidateRegistrationVerdict` 判 `incomplete`（码 `HOST_LOG_TRUNCATED`），带冲突行与不带都不得确认；回合门 `log-evidence-complete` 失败。端到端（假宿主 `log-truncated` 模式：正确行 + 33 MiB 填充越过 32 MiB 读取上限 + 冲突行在截断点之后）：R1 失败、失败项恰为 `log-evidence-complete` + `candidate-registration-source`，R2 未启动。
+- **反例二（缩短）**：文件缩短到低于回合基线后，重读从字节 0 开始，重新暴露出基线前既有的注册行。单元级：`readAppended` 判 `shrunk`、文本含旧行，判定 `incomplete`（码 `HOST_LOG_SHRUNK`），不得确认。端到端（假宿主 `log-shrink` 模式，回合前预写正确行）：R1 失败、失败项同上，R2 未启动。
+- 读取失败：打开目录（平台错误码 EISDIR/EPERM）时 `readAppended` 返回 `readError`，审计步骤码 `HOST_LOG_READ_FAILED`，回合失败；带基线的文件缺失判 `shrunk`。
+- presence 事件日志文件的截断、缩短、读取失败分别映射到 `EVENTS_LOG_TRUNCATED`/`EVENTS_LOG_SHRUNK`/`EVENTS_LOG_READ_FAILED`。
+- 注册行只出现在包内宿主日志（JSON 记录）中也能确认；路径里自带的括号（如 `(x86)`）会保留。
 - 入口检查：`openclaw.extensions` 有两个条目、指向包外、或指向非冻结文件，都判失败。
 - 宿主配置：`logging.file` 不在包内，或 `level` 不是 info，判失败。
 

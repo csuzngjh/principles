@@ -29,7 +29,7 @@ import {
 } from '../dev/aa-controlled-admission/lib/presence-pack.mjs';
 import { runProtocolSelftest } from '../dev/aa-controlled-admission/lib/protocol-selftest.mjs';
 import {
-  APPROVAL_SCHEMA, candidateRegistrationVerdict, evaluatePresenceRound, execute, extractRegistrationPaths, main, preflightPack, readAppended, validateApproval,
+  APPROVAL_SCHEMA, candidateRegistrationVerdict, evaluatePresenceRound, execute, extractRegistrationPaths, logEvidenceIntegrity, main, preflightPack, readAppended, validateApproval,
 } from '../dev/aa-controlled-admission/presence-run.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -699,6 +699,7 @@ describe('round gate — counterexamples', () => {
     })],
     registration: { status: 'confirmed', relation: 'equal', path: 'X:\\pack\\candidate\\principles-disciple' },
     candidateCode: { ok: true },
+    logIntegrity: { complete: true, steps: [] },
   };
   const goodData = good.presenceEvents[0].entry.data;
 
@@ -728,6 +729,9 @@ describe('round gate — counterexamples', () => {
     ['event from another session', { presenceEvents: [event({ ...goodData, sessionId: 'other-session' })] }, 'presence-event'],
     ['event stamped before the round', { presenceEvents: [event(goodData, '2026-11-09T00:59:59.000Z')] }, 'presence-event'],
     ['host reported no session identity', { hostResult: { ...good.hostResult, stdout: JSON.stringify({ ok: true, status: 'ok', final: PRESENCE_ANSWER }) } }, 'presence-event'],
+    ['host log delta truncated', { logIntegrity: { complete: false, steps: [{ step: 'host-log-delta', code: 'HOST_LOG_TRUNCATED', reason: 'cap' }] } }, 'log-evidence-complete'],
+    ['presence event log shrunk', { logIntegrity: { complete: false, steps: [{ step: 'presence-events:events_x.jsonl', code: 'EVENTS_LOG_SHRUNK', reason: 'gone' }] } }, 'log-evidence-complete'],
+    ['log integrity not collected', { logIntegrity: undefined }, 'log-evidence-complete'],
   ])('fails on %s', (_label, override, failingCheck) => {
     const verdict = evaluatePresenceRound({ ...good, ...override });
     expect(verdict.ok).toBe(false);
@@ -793,6 +797,105 @@ describe('candidate registration source — parsing and verdict', () => {
   });
 });
 
+describe('log evidence integrity — truncated, shrunk or unreadable deltas fail the round', () => {
+  const root = mkdtempSync(join(tmpdir(), 'pp-logint-'));
+  const candidateRoot = join(root, 'candidate', 'principles-disciple');
+  const productionRoot = join(root, 'home', '.openclaw', 'extensions', 'principles-disciple');
+  mkdirSync(candidateRoot, { recursive: true });
+  mkdirSync(productionRoot, { recursive: true });
+  const line = (path) => `Principles Disciple Plugin registered. (Path: ${path})`;
+
+  it('counterexample 1: the visible prefix names the candidate, but a conflicting source hides beyond the truncation point', () => {
+    const delta = {
+      text: `${line(candidateRoot)}\n${'x'.repeat(64)}\n`, // the prefix LOOKS correct…
+      truncated: true, // …but the cap cut the file: a conflicting line follows beyond it
+    };
+    const integrity = logEvidenceIntegrity({ hostLogDelta: delta, presenceFiles: [] });
+    expect(integrity.complete).toBe(false);
+    expect(integrity.steps).toEqual([expect.objectContaining({ step: 'host-log-delta', code: 'HOST_LOG_TRUNCATED' })]);
+    // The verdict must NOT confirm from the prefix.
+    const verdict = candidateRegistrationVerdict({
+      sources: [{ source: 'host-log', text: delta.text, complete: false, integrityCode: integrity.steps[0].code, integrityReason: integrity.steps[0].reason }],
+      candidateRoot,
+    });
+    expect(verdict.status).toBe('incomplete');
+    expect(verdict.incompleteSources[0]).toMatchObject({ source: 'host-log', code: 'HOST_LOG_TRUNCATED' });
+    // The same holds when the conflicting line IS visible within the prefix.
+    const withConflict = candidateRegistrationVerdict({
+      sources: [{ source: 'host-log', text: `${delta.text}${line(productionRoot)}\n`, complete: false, integrityCode: 'HOST_LOG_TRUNCATED', integrityReason: 'cap' }],
+      candidateRoot,
+    });
+    expect(withConflict.status).toBe('incomplete');
+    // And a perfect presence event cannot substitute in the gate.
+    const gate = evaluatePresenceRound({
+      round: R1, window: { startedAt: '2026-11-09T01:00:00.000Z', endedAt: '2026-11-09T01:00:30.000Z' },
+      hostResult: { exitCode: 0, timedOut: false, spawnError: null, stdout: JSON.stringify({ ok: true, status: 'ok', final: PRESENCE_ANSWER, sessionId: 's' }) },
+      endpointRecords: [{ decision: 'served', path: '/v1/responses', api: 'openai-responses', authMatchesFakeKey: true, model: PRESENCE_MODEL_ID }],
+      presenceEvents: [], registration: verdict, candidateCode: { ok: true }, logIntegrity: integrity,
+    });
+    expect(gate.ok).toBe(false);
+    expect(gate.checks.filter((row) => !row.ok).map((row) => row.id)).toEqual(expect.arrayContaining(['log-evidence-complete', 'candidate-registration-source']));
+  });
+
+  it('counterexample 2: a shrunk file is re-read from zero and re-exposes a pre-baseline registration line', () => {
+    const file = join(root, 'shrunk.log');
+    const preBaseline = `${line(candidateRoot)}\nfiller from a previous session\n`;
+    writeFileSync(file, preBaseline);
+    const baseline = Buffer.byteLength(preBaseline, 'utf8');
+    // The file shrinks below the baseline; the remaining bytes re-expose the old line.
+    writeFileSync(file, `${line(candidateRoot)}\n`);
+    const delta = readAppended(file, baseline);
+    expect(delta.shrunk).toBe(true);
+    expect(delta.text).toContain(line(candidateRoot));
+    const integrity = logEvidenceIntegrity({ hostLogDelta: delta, presenceFiles: [] });
+    expect(integrity.complete).toBe(false);
+    expect(integrity.steps).toEqual([expect.objectContaining({ step: 'host-log-delta', code: 'HOST_LOG_SHRUNK' })]);
+    // The re-read old line looks like a perfect confirm; the shrink must veto it.
+    const verdict = candidateRegistrationVerdict({
+      sources: [{ source: 'host-log', text: delta.text, complete: false, integrityCode: 'HOST_LOG_SHRUNK', integrityReason: integrity.steps[0].reason }],
+      candidateRoot,
+    });
+    expect(verdict.status).toBe('incomplete');
+    expect(verdict.status).not.toBe('confirmed');
+  });
+
+  it('a missing file with a baseline is shrunk; an unreadable file never reads as a clean empty log', () => {
+    const gone = join(root, 'gone.log');
+    expect(readAppended(gone, 4096)).toMatchObject({ shrunk: true, text: '', bytes: 0 });
+    const locked = join(root, 'locked');
+    mkdirSync(locked);
+    const delta = readAppended(locked, 0);
+    // POSIX: opening a directory fails with EISDIR and surfaces as a read
+    // failure. Windows: the open succeeds but yields no bytes. Either way the
+    // result must never look like a confirmed clean read.
+    if (delta.readError) {
+      expect(delta.readError.code).toBe('EISDIR');
+      expect(logEvidenceIntegrity({ hostLogDelta: delta, presenceFiles: [] }).steps[0])
+        .toEqual(expect.objectContaining({ code: 'HOST_LOG_READ_FAILED', step: 'host-log-delta' }));
+    } else {
+      expect(delta.text).toBe('');
+      expect(delta.bytes).toBe(0);
+    }
+    // The read-failure mapping itself, deterministic on every platform.
+    const synthetic = { text: '', fromByte: 0, bytes: 0, truncated: false, shrunk: false, readError: { code: 'EISDIR', message: 'illegal operation on a directory' } };
+    expect(logEvidenceIntegrity({ hostLogDelta: synthetic, presenceFiles: [] }).steps[0])
+      .toEqual(expect.objectContaining({ code: 'HOST_LOG_READ_FAILED', step: 'host-log-delta', reason: expect.stringContaining('EISDIR') }));
+  });
+
+  it('presence-file truncation, shrink and read failure map to their own steps', () => {
+    const integrity = logEvidenceIntegrity({
+      hostLogDelta: { text: '', truncated: false, shrunk: false },
+      presenceFiles: [
+        { name: 'events_a.jsonl', truncated: true, shrunk: false },
+        { name: 'events_b.jsonl', truncated: false, shrunk: true },
+        { name: 'events_c.jsonl', truncated: false, shrunk: false, readError: { code: 'EBADF', message: 'bad file descriptor' } },
+      ],
+    });
+    expect(integrity.complete).toBe(false);
+    expect(integrity.steps.map((row) => row.code)).toEqual(['EVENTS_LOG_TRUNCATED', 'EVENTS_LOG_SHRUNK', 'EVENTS_LOG_READ_FAILED']);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // End-to-end execute with a FAKE host (offline). The fake speaks the real
 // endpoint protocol and mimics only the plugin's event-log line.
@@ -832,6 +935,16 @@ else {
   const registered = (root) => 'Principles Disciple Plugin registered. (Path: ' + root + ')';
   if (mode === 'reg-prod') process.stderr.write('[plugins] ' + registered(prod.pluginRoot) + '\n');
   else if (mode === 'reg-log-only') appendFileSync(config.logging.file, JSON.stringify({ 0: registered(candidateRoot), _meta: { logLevelName: 'INFO', name: 'plugins' } }) + '\n');
+  else if (mode === 'log-truncated') {
+    // The visible prefix names the candidate, then >32 MiB of padding pushes
+    // everything after it past the read cap — including a conflicting line.
+    appendFileSync(config.logging.file, registered(candidateRoot) + '\n' + 'x'.repeat(33 * 1024 * 1024) + '\n[plugins] ' + registered(prod.pluginRoot) + '\n');
+  }
+  else if (mode === 'log-shrink') {
+    // Shrink the log below the round baseline: the reader re-reads from byte 0
+    // and re-exposes a pre-baseline registration line.
+    writeFileSync(config.logging.file, registered(candidateRoot) + '\n');
+  }
   else if (mode !== 'reg-missing' && mode !== 'stale-reg') process.stderr.write('[plugins] ' + registered(candidateRoot) + '\n');
   const [providerId, model] = arg('model').split('/');
   const provider = config.models.providers[providerId];
@@ -1260,6 +1373,38 @@ describe('candidate identity — joint evidence (B3)', () => {
     const evidence = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.registration-source.json'), 'utf8'));
     expect(evidence).toMatchObject({ status: 'confirmed', relation: 'equal', sourcesWithLines: ['host-log'] });
   }, 180_000);
+
+  it('counterexample 1, end to end: a truncated host-log delta whose visible prefix names the candidate fails R1 and R2 never starts', async () => {
+    const { packRoot, operatorEnv, realHome } = await makePack();
+    setModes(packRoot, { R1: 'log-truncated', R2: 'ok' });
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.stopReasons).toEqual(['round_gate_failed']);
+    expect(record.rounds[0].failedChecks).toEqual(['log-evidence-complete', 'candidate-registration-source']);
+    expect(hostStarts(packRoot)).toEqual(['R1']);
+    const evidence = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.registration-source.json'), 'utf8'));
+    expect(evidence.status).toBe('incomplete');
+    expect(evidence.hostLogTruncated).toBe(true);
+    expect(evidence.incompleteSources[0]).toMatchObject({ source: 'host-log', code: 'HOST_LOG_TRUNCATED' });
+    const gate = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.gate.json'), 'utf8'));
+    expect(gate.checks.find((row) => row.id === 'log-evidence-complete').evidence.steps[0]).toMatchObject({ code: 'HOST_LOG_TRUNCATED', step: 'host-log-delta' });
+  }, 240_000);
+
+  it('counterexample 2, end to end: a shrunk host log that re-exposes the pre-baseline line fails R1 and R2 never starts', async () => {
+    const { packRoot, operatorEnv, realHome, manifest } = await makePack();
+    setModes(packRoot, { R1: 'log-shrink', R2: 'ok' });
+    // A correct-looking registration line is already in the log before the round.
+    writeFileSync(manifest.paths.hostLogPath, `[plugins] Principles Disciple Plugin registered. (Path: ${manifest.candidate.root})\nfiller from a previous session\n`);
+    const record = await execute({ packRoot, approvalPath: approve(packRoot), operatorEnv, realHome });
+    expect(record).toMatchObject({ status: 'stopped', stoppedAt: 'R1' });
+    expect(record.stopReasons).toEqual(['round_gate_failed']);
+    expect(record.rounds[0].failedChecks).toEqual(['log-evidence-complete', 'candidate-registration-source']);
+    expect(hostStarts(packRoot)).toEqual(['R1']);
+    const evidence = JSON.parse(readFileSync(join(packRoot, 'run', 'evidence', 'R1.registration-source.json'), 'utf8'));
+    expect(evidence.status).toBe('incomplete');
+    expect(evidence.hostLogShrunk).toBe(true);
+    expect(evidence.incompleteSources[0]).toMatchObject({ source: 'host-log', code: 'HOST_LOG_SHRUNK' });
+  }, 240_000);
 
   it('a registration source pointing at the production plugin fails R1 and R2 never starts', async () => {
     const { packRoot, operatorEnv, realHome } = await makePack();
