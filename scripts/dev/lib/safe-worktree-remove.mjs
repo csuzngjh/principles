@@ -444,6 +444,19 @@ function rollbackToOriginal({ worktreePath, quarantinePath, quarantineParent, li
     notes.push('rollback refused: the tree and its admin pointer are not in a provably-owned quarantine state');
     return before;
   }
+  // Never move the tree onto something someone else created at the original
+  // path: a POSIX rename silently REPLACES an empty directory. The tree stays
+  // intact in the quarantine instead (reported as preserved).
+  let originalPathOccupied = true;
+  try {
+    fs.lstatSync(worktreePath);
+  } catch (err) {
+    originalPathOccupied = !(err && err.code === 'ENOENT');
+  }
+  if (originalPathOccupied) {
+    notes.push('rollback refused: something now occupies the original path ' + worktreePath + '; the tree stays in quarantine');
+    return before;
+  }
   const restoreQuarantineMarker = () => {
     if (quarantineMarkerBytes === null) return;
     try {

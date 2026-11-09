@@ -738,7 +738,7 @@ async function main() {
         ? 'The worktree ownership or contents changed during cleanup. Preserve it, inspect git status --porcelain, lease state and git worktree list --porcelain, then retry only after the owner change is understood.'
         : failureReason === REMOVAL_REASONS.QUIESCENCE_UNPROVEN
           ? 'Nothing was deleted. A process may still hold a file, directory or working directory inside the worktree (see the reason above). ' +
-            'Close that editor, terminal, dev server or watcher (or wait for it to exit), then re-run npm run dev:worktree:cleanup -- ' +
+            'Close that editor, terminal, dev server or watcher (a git fsmonitor daemon counts: run git fsmonitor--daemon stop inside the worktree), or wait for it to exit, then re-run npm run dev:worktree:cleanup -- ' +
             shellPath(args.target) + ' . If the reason says no inspection mechanism exists for this platform, this tool cannot prove removal safe here: ' +
             'the worktree is left intact — do NOT fall back to git worktree remove or a recursive delete; escalate instead.'
           : failureReason === REMOVAL_REASONS.EXTERNAL_TARGET_LOST

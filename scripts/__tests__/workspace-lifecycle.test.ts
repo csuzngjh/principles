@@ -189,7 +189,7 @@ async function makeTask(primary: string, slug: string): Promise<{ wt: string; br
   // classifier, not the (multi-minute) bootstrap → ready path, which has its own
   // coverage. Without it create reports CREATED_NOT_READY and exits non-zero.
   const r = await runDevScript('create-task-worktree.mjs', ['PRI-800', slug, '--skip-bootstrap', '--json'], { cwd: primary });
-  expect(r.code).toBe(0);
+  expect(r.code, 'fixture worktree creation failed: ' + r.stdout + r.stderr).toBe(0);
   const out = JSON.parse(r.stdout) as { worktree: string; branch: string };
   await commitFile(out.worktree, slug + '.txt', 'x\n', 'task commit ' + slug);
   return { wt: out.worktree, branch: out.branch };

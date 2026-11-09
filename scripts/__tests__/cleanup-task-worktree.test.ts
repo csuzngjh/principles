@@ -1205,6 +1205,37 @@ describe('quarantine removal: late non-cooperating Junction (ERR-098)', () => {
     expect(fs.readFileSync(path.join(wt, 'late-writer.txt'), 'utf-8')).toBe('written during quarantine\n');
   }, 120_000);
 
+  it('rollback never moves the tree onto something that now occupies the original path', async () => {
+    const { wt } = await makeTask('rollback-occupied-original');
+    const commonDir = await gitCommonDirAbsolute(primary);
+    const captured = { quarantine: '' };
+    const result = await withMutationLock(
+      { commonDir, operation: 'worktree-remove', target: wt },
+      () => removeWorktreeSafely({
+        cwd: primary,
+        worktreePath: wt,
+        primaryPath: primary,
+        onQuarantined: (moved) => {
+          captured.quarantine = moved;
+          // Someone else creates an EMPTY directory at the original path. A
+          // POSIX rename of the tree would silently replace it.
+          fs.mkdirSync(wt);
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.restoreState).toBe('QUARANTINE_PRESERVED');
+    expect(result.quarantinePath).toBe(captured.quarantine);
+    expect(result.notes.join(' ')).toContain('occupies the original path');
+    // The newcomer's directory is untouched and the tree is intact in quarantine.
+    expect(fs.readdirSync(wt)).toEqual([]);
+    expect(fs.readFileSync(path.join(captured.quarantine, 'rollback-occupied-original.txt'), 'utf-8')).toBe('x\n');
+    // Fixture hygiene.
+    fs.rmdirSync(wt);
+    await git(primary, 'worktree', 'move', captured.quarantine, wt);
+    fs.rmdirSync(path.dirname(captured.quarantine));
+  }, 120_000);
+
   it('rollback refuses to move a tree whose admin pointer no longer provably belongs to it', async () => {
     const { wt } = await makeTask('rollback-foreign-pointer');
     const commonDir = await gitCommonDirAbsolute(primary);
