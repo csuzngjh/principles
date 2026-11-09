@@ -49,5 +49,22 @@
   "unknowns": ["behavioral value of the four directives", "why production shared-route rounds are FIFO (no round key) — follow-up candidate, not investigated", "ordering of L4 activation vs the Phase B cutover on 2026-09-19"],
   "authorizationBoundary": { "productionCodeChanges": 0, "realHostRuns": 0, "modelCalls": 0, "governanceWrites": 0, "consoleRuns": 0 },
   "nextStep": "Owner decides per item in the Console (recommendation: keep all four). Then: consistent snapshot -> sandbox -> run the retest harness with --pre against the frozen baseline -> report old-content reduction and net final change separately.",
-  "notOverwritten": ["docs/implementation-reports/aa-handoff/LATEST.json"]
+  "notOverwritten": ["docs/implementation-reports/aa-handoff/LATEST.json"],
+  "corrections": [
+    {
+      "date": "2026-11-09",
+      "authority": "closeout wording (supersedes the stronger fields below; original fields kept as the rehearsal record)",
+      "L1_L3_L4": "restore request verified to QUEUE on a throwaway copy; re-activation still requires Console approval; re-activation after Console approval NOT verified this round. The earlier activated/owner/-8/regenerated-id/moved-to-end observation came from a CLI approval (pd activation approve, not the Console approval entry which also takes the expectedReview guard) and is not a restore conclusion.",
+      "L2": "under the current build, the verified dispatch (rehearsal refused: candidate_kind_invalid), reopen (not applicable: no approval row, verified by query) and revision (rehearsal refused: revision_enqueue_failed) paths cannot restore it.",
+      "consolidationOrder": "first fold L2-only constraints into L3, Owner approves, verify the new version is in effect, THEN the Owner decides whether to disable L2.",
+      "closeout": {
+        "conclusion": "KEEP_NATIVE",
+        "actualGovernanceChanges": 0,
+        "postGovernanceRetest": "NOT RUN",
+        "measuredSavings": "none",
+        "ownerPerItemDecision": "PENDING (keep-all is a recommendation, not an approval)"
+      },
+      "deliveryAndRollback": "documents and offline retest tooling (two scripts under scripts/dev/aa-selector); rollback = revert the commits; frozen baselines, raw evidence and LATEST.json untouched; evidence delivery recorded in checkpoint 20261109T1520Z-zcode-pri1160-closeout"
+    }
+  ]
 }
