@@ -57,5 +57,20 @@
   "notRun": ["post-governance retest", "Console UI clicks", "Console approval after a restore request", "approval of a propose-revision", "tokens"],
   "authorizationBoundary": { "productionCodeChanges": 0, "realHostRuns": 0, "modelCalls": 0, "governanceWrites": 0, "consoleRuns": 0 },
   "nextStep": "Owner decides per item in the Console; then consistent snapshot -> sandbox -> pri1160-legacy-retest.mjs --pre <frozen baseline>.",
-  "notOverwritten": ["docs/implementation-reports/aa-handoff/LATEST.json"]
+  "notOverwritten": ["docs/implementation-reports/aa-handoff/LATEST.json"],
+  "parallelSession": {
+    "detectedAt": "2026-11-09T15:20Z",
+    "branch": "ai/PRI-1160-governance-refresh",
+    "head": "270c5406a",
+    "base": "2308a677d",
+    "files": [
+      "docs/implementation-reports/pri-1160-governance-refresh-20261109.md",
+      "docs/implementation-reports/aa-handoff/20261109T1515Z-zcode-pri1160.{md,json}"
+    ],
+    "localArchive": "artifacts/pri-1160/",
+    "overlapWithThisPR": "none (new files only)",
+    "action": "not merged and not modified (git-2; its writer lease active until 19:03Z)",
+    "conflictingStatements": "L1/L3/L4 \"recoverable\" and \"disable L2 last\" are superseded by this closeout wording",
+    "ownerDecision": "whether to fold that branch into #2454"
+  }
 }
