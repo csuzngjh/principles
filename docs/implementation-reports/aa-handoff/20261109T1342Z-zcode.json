@@ -11,8 +11,9 @@
     "2449": {
       "purpose": "插件清单 adaptiveActivation 声明 principleId（additionalProperties:false 保留）+ 清单×读取器联合回归 + changeset principles-disciple patch",
       "branch": "ai/PRI-1119-aa-manifest-principleid",
-      "netDiffVsMain": [".changeset/adaptive-activation-principle-id-schema.md", "packages/openclaw-plugin/openclaw.plugin.json", "packages/openclaw-plugin/tests/manifest-adaptive-activation.test.ts"],
-      "headHistory": ["916b78965 fix commit", "c2e21b451 git-7 merge of 7d78bd6d3", "010f882c3 git-7 merge of 4d1eda89a", "805a6d01c git-7 merge of 61babcf69 (final this round)"],
+      "netDiffVsMain": [".changeset/adaptive-activation-principle-id-schema.md (principles-disciple + create-principles-disciple: patch)", "packages/openclaw-plugin/openclaw.plugin.json", "packages/openclaw-plugin/tests/manifest-adaptive-activation.test.ts"],
+      "headHistory": ["916b78965 fix commit", "c2e21b451 git-7 merge of 7d78bd6d3", "010f882c3 git-7 merge of 4d1eda89a", "805a6d01c git-7 merge of 61babcf69", "c0c032510 changeset adds create-principles-disciple: patch (final this round)"],
+      "releaseIntentFix": "805a6d01c failed Verify Merge Gate: release intent guard N-5/C4 (plugin released without installer). Cause: #2446 consumed main's pending create-principles-disciple changeset (dependabot-2439) that previously satisfied C4. Fix: changeset declares 'create-principles-disciple': patch; local preview PR_BASE_SHA=61babcf69 -> RELEASE_INTENT_GUARD PASS; CI on c0c032510: all checks complete, 0 failures, mergeStateStatus CLEAN",
       "tests": "packages/openclaw-plugin: npx vitest run tests/manifest-adaptive-activation.test.ts tests/hooks/adaptive-activation-config.test.ts tests/manifest-skills.test.ts tests/hooks/controlled-admission.test.ts tests/hooks/runtime-prompt-activation.test.ts -> 5 files 130/130 PASS (12 joint + 118 existing), on 805a6d01c tree",
       "layerReport": {
         "hostLoadLayer_manifest": "unknown key, empty-string identity, wrong type, softTimeoutMs out of range/non-integer -> rejected",
