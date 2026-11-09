@@ -8,6 +8,12 @@
 //
 // The read side uses the same production stores/resolver the plugin uses; the
 // directive id asserted by the gate is the resolved principleId.
+//
+// PRI-1152: the write side also goes through the formal store entries
+// (SqliteTaskStore.createTask, SqlitePIArtifactStore.createArtifact,
+// SqliteActivationStateStore.recordActivation) — no row is inserted by hand
+// and no approvals row is written, so the prompt route derives the honest
+// `system_policy` authority for this isolated test fixture.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -16,6 +22,7 @@ import {
   SqliteActivationStateStore,
   SqliteConnection,
   SqlitePIArtifactStore,
+  SqliteTaskStore,
   resolvePrincipleFromArtifact,
 } from '@principles/core/runtime';
 
@@ -27,7 +34,7 @@ function sha256File(filePath) {
  * Create `.pd/state.db` with exactly one prompt activation for one validated
  * principle artifact. Idempotent inputs; the caller supplies the frozen ids.
  */
-export function seedControlledWorkspace({
+export async function seedControlledWorkspace({
   workspaceDir,
   artifactId,
   activationId,
@@ -45,18 +52,28 @@ export function seedControlledWorkspace({
 
   const connection = new SqliteConnection({ workspaceDir });
   try {
-    const db = connection.getDb();
     const createdAt = activatedAt;
+    const sourceTaskId = `task-${artifactId}`;
     const contentJson = JSON.stringify({ principleId, text: principleText, language: 'zh' });
-    db.prepare(
-      "INSERT OR IGNORE INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, 'diagnosis', 'pending', ?, ?)",
-    ).run(`task-${artifactId}`, createdAt, createdAt);
-    db.prepare(
-      `INSERT OR IGNORE INTO pi_artifacts
-         (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-       VALUES (?, 'principle', ?, ?, NULL, '[]', 'validated', ?, ?, ?)`,
-    ).run(artifactId, `task-${artifactId}`, principleId, contentJson, createdAt, createdAt);
-    new SqliteActivationStateStore(connection).recordActivation({
+    await new SqliteTaskStore(connection).createTask({
+      taskId: sourceTaskId,
+      taskKind: 'diagnosis',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+    });
+    await new SqlitePIArtifactStore(connection).createArtifact({
+      artifactId,
+      artifactKind: 'principle',
+      sourceTaskId,
+      sourcePrincipleId: principleId,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    await new SqliteActivationStateStore(connection).recordActivation({
       activationId,
       idempotencyKey: `aa-prompt-${activationId}`,
       artifactId,
@@ -68,6 +85,7 @@ export function seedControlledWorkspace({
       deactivatedAt: null,
     });
     // Checkpoint before closing so the frozen main file contains every page.
+    const db = connection.getDb();
     try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* default journal mode has no WAL */ }
   } finally {
     connection.close();

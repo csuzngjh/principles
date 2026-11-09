@@ -343,6 +343,60 @@ for (const file of devFiles) {
   }
 }
 
+// Imported destructive helpers are guarded at their CALL SITES too. The helper
+// definition cannot prove that an entry point invokes it under the repository
+// mutation mutex; check every imported removeWorktreeSafely() call independently.
+for (const file of devFiles) {
+  const source = fs.readFileSync(file, 'utf8');
+  const masked = blankNonCode(source);
+  const inCodeContext = (matchIndex) =>
+    // blankNonCode preserves length: when the match region is blanked, it was
+    // inside a comment or string, not executable code.
+    masked.slice(matchIndex, matchIndex + 6).trim().length > 0;
+  // Only matches in executable code count, and EVERY match is considered: the
+  // first textual match may be a comment that precedes the real import, and
+  // picking it would skip the call-site scan entirely (a gate bypass).
+  const firstInCode = (re) => [...source.matchAll(re)].find((match) => inCodeContext(match.index)) || null;
+  const realNamedImport = firstInCode(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/gsu);
+  const realNamespaceImport = firstInCode(/import\s*\*\s*as\s*(\w+)\s*from\s*['"][^'"]*safe-worktree-remove\.mjs['"]/gsu);
+  if (realNamedImport && /\bremoveWorktreeSafely\s+as\s+\w+/.test(realNamedImport[1])) {
+    // An alias renames every call site out of the scan below — a blind spot,
+    // so the import form is refused outright instead of being silently skipped.
+    fail(
+      'git-mutation-mutex',
+      path.relative(ROOT, file) + ' imports removeWorktreeSafely with an alias; the call-site mutation-lock scan cannot verify it. Import it under its own name.',
+    );
+    continue;
+  }
+  if (realNamespaceImport) {
+    // swr.removeWorktreeSafely(...) escapes the identifier scan below.
+    fail(
+      'git-mutation-mutex',
+      path.relative(ROOT, file) + ' imports safe-worktree-remove.mjs as a namespace (' + realNamespaceImport[1] +
+        '); the call-site mutation-lock scan cannot verify member calls. Use a named import.',
+    );
+    continue;
+  }
+  if (!realNamedImport) {
+    continue;
+  }
+  const spans = mutationLockSpans(masked);
+  const rel = path.relative(ROOT, file);
+  const lineOf = (at) => source.slice(0, at).split('\n').length;
+  const callRe = /\bremoveWorktreeSafely\s*\(/g;
+  // Scan the MASKED source so mentions inside comments and strings are not
+  // misreported as unlocked calls, while real call sites keep their offsets
+  // (blankNonCode preserves string length and therefore every index).
+  for (const call of masked.matchAll(callRe)) {
+    if (!spans.some(([start, end]) => call.index >= start && call.index < end)) {
+      fail(
+        'git-mutation-mutex',
+        rel + ':' + lineOf(call.index) + ' calls imported removeWorktreeSafely() outside a withMutationLock() span'
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // H. The governance IDs this change introduced are actually documented.
 // ---------------------------------------------------------------------------

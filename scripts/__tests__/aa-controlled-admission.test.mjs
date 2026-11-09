@@ -312,9 +312,9 @@ describe('environment isolation — inherited production paths', () => {
     })).toThrow(/environment escape/);
   });
 
-  it('refuses a plan whose workspace, state or config escapes the run directory', () => {
+  it('refuses a plan whose workspace, state or config escapes the run directory', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-plan-escape-'));
-    const frozen = makeFrozenExperiment(join(dir, 'experiment'));
+    const frozen = await makeFrozenExperiment(join(dir, 'experiment'));
     expect(assertPlanInsideExperimentRoot({ runDir: frozen.runDir, plan: frozen.plan }).checked.length).toBeGreaterThan(0);
     expect(() => assertPlanInsideExperimentRoot({
       runDir: frozen.runDir,
@@ -772,7 +772,7 @@ function makeIsolatedHost(root, version = '2026.11.1') {
   return { root, pkg };
 }
 
-function makeFrozenExperiment(dir, { toolName = 'read', port = 18082 } = {}) {
+async function makeFrozenExperiment(dir, { toolName = 'read', port = 18082 } = {}) {
   const runDir = join(dir, 'run');
   const workspaceDir = join(runDir, 'positive', 'workspace');
   const controlWorkspaceDir = join(runDir, 'control', 'workspace');
@@ -793,7 +793,7 @@ function makeFrozenExperiment(dir, { toolName = 'read', port = 18082 } = {}) {
     expiresAt: '2026-11-07T00:00:00.000Z',
     softTimeoutMs: 5000,
   };
-  const workspaceTarget = seedControlledWorkspace({
+  const workspaceTarget = await seedControlledWorkspace({
     workspaceDir,
     artifactId: mapping.artifactId,
     activationId: mapping.activationId,
@@ -853,7 +853,7 @@ describe('launcher boundary — frozen files and isolated host', () => {
   it('seeds one target that the production stores resolve with the same principleId', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-seed-'));
     const workspaceDir = join(dir, 'workspace');
-    const target = seedControlledWorkspace({
+    const target = await seedControlledWorkspace({
       workspaceDir,
       artifactId: 'artifact-seed',
       activationId: 'activation-seed',
@@ -871,9 +871,9 @@ describe('launcher boundary — frozen files and isolated host', () => {
     expect(read.stateDbSha256).toBe(target.stateDbSha256);
   });
 
-  it('refuses a changed config, fixture or admission', () => {
+  it('refuses a changed config, fixture or admission', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-frozen-'));
-    const frozen = makeFrozenExperiment(dir);
+    const frozen = await makeFrozenExperiment(dir);
     expect(verifyPlanIntegrity({ ...frozen })).toEqual([]);
 
     writeFileSync(frozen.configPath, `${readFileSync(frozen.configPath, 'utf8')}\n`, 'utf8');
@@ -900,9 +900,9 @@ describe('launcher boundary — frozen files and isolated host', () => {
     expect(verifyPlanIntegrity({ ...frozen, admission })).toContain('manifest sha256 changed after admission was written');
   });
 
-  it('refuses a positive workspace whose target state.db changed after freezing', () => {
+  it('refuses a positive workspace whose target state.db changed after freezing', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-frozen-ws-'));
-    const frozen = makeFrozenExperiment(dir);
+    const frozen = await makeFrozenExperiment(dir);
     expect(verifyPlanIntegrity({ ...frozen })).toEqual([]);
     const stateDbPath = frozen.plan.workspaceTarget.stateDbPath;
     writeFileSync(stateDbPath, `${readFileSync(stateDbPath)}\n`);
@@ -927,12 +927,12 @@ describe('launcher boundary — frozen files and isolated host', () => {
     expect(wrongVersion.ok).toBe(false);
   });
 
-  it('refuses to execute when the P0 report is from another host or bundle', () => {
+  it('refuses to execute when the P0 report is from another host or bundle', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'aa-exec-frozen-'));
     const hostDir = join(dir, 'host');
     makeIsolatedHost(hostDir);
     const profile = resolveHostProfile({ hostRoot: hostDir });
-    const frozen = makeFrozenExperiment(join(dir, 'experiment'));
+    const frozen = await makeFrozenExperiment(join(dir, 'experiment'));
     frozen.plan.host = { ...hostIdentity(profile), hostRoot: profile.hostRoot };
     const p0 = {
       schemaVersion: 'pd-aa-p0-preflight/v1',

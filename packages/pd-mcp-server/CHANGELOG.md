@@ -1,5 +1,13 @@
 # @principles/pd-mcp-server
 
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [8da2cdc]
+- Updated dependencies [30ccf33]
+  - @principles/core@6.0.0
+
 ## 0.3.1
 
 ### Patch Changes

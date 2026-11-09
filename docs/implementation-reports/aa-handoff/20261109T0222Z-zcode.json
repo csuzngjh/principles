@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261109T0222Z-zcode",
+  "previousCheckpoint": "20261109T0145Z-zcode",
+  "generatedAt": "2026-11-09T02:22:27Z",
+  "agent": "zcode",
+  "overallStatus": "PRI1152_V31_APPROVED_RUN_COMPLETED_BOTH_ROUNDS_PASS_CONCLUSION_BOUNDED",
+  "summary": "Owner 书面批准 pri1152-run-card-v3.1 + 清单 0e2dc6e3…6c2c 后，--execute 运行一次：status completed，R1（responses）与 R2（completions）14 项判定全部 PASS，预算用量 2/2/0/0（within budget，0 拒绝，0 回合外请求），端点已关闭，清扫无残留，污染审计 unattributed-changes-noted（12 个目标 unchanged，1 个生产活动库无运行标记、不归因）。结论上限不变：只证明宿主装配观察连通；D=unknown；G1/C04/G2 待验收。",
+  "approval": {
+    "ownerText": "批准执行 pri1152-run-card-v3.1，清单 SHA-256 为 0e2dc6e332f02c315082487f7cf2c6caca73cd26209ad7b774d8fdfe157e6c2c。仅限隔离 OpenClaw 和本地假 provider，最多 2 次宿主启动、2 次 provider HTTP 请求，工具调用和付费调用均为 0。失败即停，不自动重试。",
+    "receivedAt": "2026-11-09T02:05:05Z",
+    "record": "Linear PRI-1152 comment 10164b47-6302-4f90-a131-13ef4df9f740",
+    "approvalFile": "PACK\\approval.json sha256 180ee6c785b51f8a60c91549a34761fe0d8588c020c9060c966be515fe83005c (template fields untouched; validateApproval 0 violations before execute)"
+  },
+  "execution": {
+    "command": "node scripts/dev/aa-controlled-admission/presence-run.mjs --execute --pack <PACK> --approval <PACK>\\approval.json",
+    "attempts": 1,
+    "startedAt": "2026-11-09T02:07:44Z",
+    "endedAt": "2026-11-09T02:09:11Z",
+    "exitCode": 0,
+    "status": "completed",
+    "stoppedAt": null,
+    "stopReasons": [],
+    "preflightBeforeRun": "READY 21/21; independent set audit equal; selftest ledger selftest-ledger-20261109T020750Z-cfda0b63.json (5 loopback requests, 0 host starts, outside the run budget per card §6/§9)",
+    "ledger": { "used": { "hostStarts": 2, "providerHttp": 2, "toolCalls": 0, "paidCalls": 0 }, "withinBudget": true, "refusals": 0, "outsideRounds": 0 },
+    "endpoint": "bound 127.0.0.1:10448, closed, port refuses connections afterwards",
+    "sweeps": "per-round and final sweep ok, no residual process",
+    "runRecordSha256": "c109ec983d212451a74973a65b580c9f2d43db4ef78a4420bda4b39e134a1def"
+  },
+  "rounds": {
+    "R1": { "api": "openai-responses", "path": "/v1/responses", "exitCode": 0, "gate": "14/14 PASS", "sessionId": "e156f9d6-4f85-4a94-9adf-2315d5ee0766", "registration": "confirmed (2 stderr lines = frozen candidate root)", "presence": "1 event, unique, full_hit, actualBodyChars 278", "startToRequestSeconds": 39.9, "responseToExitSeconds": 0.69 },
+    "R2": { "api": "openai-completions", "path": "/v1/chat/completions", "exitCode": 0, "gate": "14/14 PASS", "sessionId": "79054669-46aa-46ea-a9a3-f0b093a2cc40", "registration": "confirmed (2 stderr lines = frozen candidate root)", "presence": "1 event, unique, full_hit, actualBodyChars 278", "startToRequestSeconds": 35.4, "responseToExitSeconds": 0.66 }
+  },
+  "formerlyNotRun": {
+    "registrationSource": "host stderr only, twice per round (register() runs twice); the pinned logging.file was never created under agent exec",
+    "llmInputDispatch": "one presence event per round, ~0.75 s before the provider request, on disk before the natural exit",
+    "sessionIdConsistency": "event sessionId/runId == host --json sessionId in both rounds",
+    "requestShape": "1 POST per round, stream true, body 14608/14674 B; no title/compaction calls; 0 outside-round requests",
+    "exitTiming": "start→request 39.9/35.4 s; response→exit 0.69/0.66 s; no timeout or kill",
+    "toolSurface": "tools.deny=[\"*\"] still sends 3 tool definitions: dispatch_action, tool_describe, tool_search; bridgeCalls 0/0/0, codeModeEngaged false, no tool activity",
+    "pollution": "13 targets: 12 unchanged, 1 live store D:\\.openclaw\\workspace\\.pd\\state.db changed-independent-writer-possible (no run marker); verdict unattributed-changes-noted; not proof of zero writes"
+  },
+  "evidence": {
+    "pack": "D:\\Code\\_worktrees\\principles\\PRI-1152-v31-pack\\artifacts\\pri-1152-isolated-host\\pp-20261109T010443Z\\run\\",
+    "archive": "D:\\Code\\principles\\artifacts\\pri-1152-isolated-host-evidence\\pp-20261109T010443Z\\run-20261109T0207Z\\ (29 files, sha256sum -c 29/29 OK; SHA256SUMS.json sha256 9541d3318771c26eeb66cc625da2b028cd584b9d4aed06182e76a8f8b761e02b; +2 files in SHA256SUMS.addendum.json)",
+    "report": "docs/implementation-reports/pri-1152-isolated-host-run-result-20261109.md"
+  },
+  "conclusionBound": "只证明未修改官方宿主上的装配观察连通；D=unknown；不签收 G1/C04/G2；不证明送达、遵循或行为改善",
+  "notProven": [
+    "whether the principle text is in the request body (out of card scope, §7)",
+    "behavior under a real model, including whether the 3 bridge tools would be called or refused",
+    "absence of other host egress (no network-layer monitoring; stderr shows no network errors)",
+    "Mimosa full audit (scanner_enobufs; no security claim)"
+  ],
+  "followUps": [
+    "any real-model run card must address the 3 bridge tool definitions that survive tools.deny=[\"*\"]",
+    "agent exec ignores logging.file; registration evidence comes from stderr",
+    "#2427 reconciliation; scripts/setup-worktree.mjs CLAUDE.md check; incident ticket",
+    "the pack executed once and cannot run again (run/ exists)"
+  ],
+  "latestPointer": "LATEST.json not modified"
+}
