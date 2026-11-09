@@ -1,5 +1,18 @@
 # @principles/pd-cli
 
+## 1.168.1
+
+### Patch Changes
+
+- Updated dependencies [8da2cdc]
+- Updated dependencies [30ccf33]
+- Updated dependencies [30ccf33]
+  - @principles/core@6.0.0
+  - @principles/host-runtime@3.1.0
+  - principles-disciple@3.1.0
+  - @principles/codex-adapter@0.8.5
+  - @principles/workbuddy-adapter@0.5.7
+
 ## 1.168.0
 
 ### Minor Changes
