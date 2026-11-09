@@ -553,20 +553,27 @@ export async function handleBeforePromptBuild(
   const adaptiveMapping = readAdaptiveActivationConfig(api?.pluginConfig, workspaceDir, adaptiveStartedAt);
   // PRI-1140: a {principleId} mapping carries no local target identity — the
   // provider resolved it against the CURRENT authorized set for THIS
-  // invocation. Consume that resolution exactly once; a replay or a duplicate
-  // callback that finds it gone degrades to the native baseline (same safety
-  // shape as a lost controlled-admission handoff). The next request resolves
-  // fresh, so a revision that lands between rounds is picked up next round.
-  const principleResolution = adaptiveMapping && isPrincipleIdentityMapping(adaptiveMapping)
-    ? takeAdaptivePrincipleResolution(sharedActivePrinciplePrompt?.adaptivePacking?.hookInvocationId)
-    : undefined;
+  // invocation. Consume that resolution exactly once, whatever the re-read
+  // mapping now says, so it never lingers; a replay or a duplicate callback
+  // that finds it gone degrades to the native baseline (same safety shape as a
+  // lost controlled-admission handoff).
+  const principleResolution = takeAdaptivePrincipleResolution(sharedActivePrinciplePrompt?.adaptivePacking?.hookInvocationId);
+  // PRI-1140 closeout: the mapping was just re-read. A principle mapping keeps
+  // this invocation's priority only while it still names the principle the
+  // provider resolved. Switched mid-flight to another principle → THIS round
+  // falls back to Native (the terminal record stays with the original
+  // invocation and target); the next request resolves the current mapping.
+  const principleMappingChanged = adaptiveMapping !== null && isPrincipleIdentityMapping(adaptiveMapping)
+    && principleResolution !== undefined && principleResolution.principleId !== adaptiveMapping.principleId;
   // The concrete target identity this invocation may use: the pinned mapping
   // itself, or the provider's principle resolution. Undefined = no verified
   // identity, so nothing downstream may fabricate one.
   const mappingTarget: { artifactId: string; activationId: string } | undefined = !adaptiveMapping
     ? undefined
     : isPrincipleIdentityMapping(adaptiveMapping)
-      ? (principleResolution ? { artifactId: principleResolution.artifactId, activationId: principleResolution.activationId } : undefined)
+      ? (principleResolution && !principleMappingChanged
+        ? { artifactId: principleResolution.artifactId, activationId: principleResolution.activationId }
+        : undefined)
       : adaptiveMapping;
   // A mapping can expire or be disabled while the shared packer is running.
   // In that case discard its additional contribution before assembling anything.
@@ -941,7 +948,10 @@ export async function handleBeforePromptBuild(
         if (typeof text === 'string' && typeof id === 'string' && id.trim() && sessionId) {
           adaptiveAdmissionId = id;
           adaptiveOutcome = { text: sharedActivePrinciplePrompt.additionalContext,
-            reason: text.split(/\r?\n/, 1)[0] === '[PD-AA:delivery-review:v1]' ? 'shared_priority_unavailable' : 'scene_not_matched',
+            // PRI-1140 closeout: a mid-flight principle switch is recorded as
+            // such on the ORIGINAL invocation instead of a generic reason.
+            reason: principleMappingChanged ? 'adaptive_mapping_changed'
+              : text.split(/\r?\n/, 1)[0] === '[PD-AA:delivery-review:v1]' ? 'shared_priority_unavailable' : 'scene_not_matched',
             addedTarget: false, displacedActivationIds: [], selectedPrincipleIds: sharedActivePrinciplePrompt.principleIds };
         }
       }

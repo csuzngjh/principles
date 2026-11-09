@@ -1077,6 +1077,83 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
     expect(closes.length).toBeGreaterThanOrEqual(1);
     expect(closes[0]![1]).toMatchObject({ receiptState: 'closed', payload: 'prepared', selection: 'selected' });
   });
+
+  it('discards the round priority when the mapping switches to another principle between provider and hook; the terminal record stays with the original invocation and target', async () => {
+    // Legacy FIFO (no round key) stops at the first non-fit, so the additive
+    // target-first repack can add A WITHOUT displacing anything — A's
+    // candidate assembly is then observably different from Native.
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA1-FILL', principleId: 'AA1-FILL', text: 'FILL-BODY-small' });
+    await insertPromptActivation({ artifactId: 'art-AA1-FILL', principleId: 'AA1-FILL' });
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA2-BIG', principleId: 'AA2-BIG', text: `BIG-BODY-${'b'.repeat(4000)}` });
+    await insertPromptActivation({ artifactId: 'art-AA2-BIG', principleId: 'AA2-BIG' });
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA3-TGT', principleId: 'AA3-TGT', text: 'TARGET-A-BODY' });
+    await insertPromptActivation({ artifactId: 'art-AA3-TGT', principleId: 'AA3-TGT' });
+    insertValidatedPrincipleArtifact({ artifactId: 'art-AA4-B', principleId: 'AA4-B', text: 'TARGET-B-BODY' });
+    await insertPromptActivation({ artifactId: 'art-AA4-B', principleId: 'AA4-B' });
+    await approve('art-AA3-TGT');
+    await approve('art-AA4-B');
+
+    const { renderPrinciplesToDirectives } = await import('@principles/core/runtime');
+    const { escapeXml } = await import('@principles/core/prompt-builder');
+    const { readPromptActivationCandidates } = await import('@principles/host-runtime');
+    const candidates = await readPromptActivationCandidates({ workspaceDir: tempWorkspaceDir, includeAuthority: true });
+    const pick = (principleId: string) => {
+      const found = candidates.principles.find((principle) => principle.principleId === principleId);
+      if (!found) throw new Error(`fixture principle missing: ${principleId}`);
+      return found;
+    };
+    const render = (entries: typeof candidates.principles, selfReportInstruction: boolean) => renderPrinciplesToDirectives(
+      entries, new Set(entries.map((entry) => entry.principleId)), { escapeFn: escapeXml, selfReportInstruction }).length;
+    const targetAndFill = [pick('AA3-TGT'), pick('AA1-FILL')];
+    // Room for A + FILL (either renderer footer), far below FILL + BIG.
+    const promptBudget = { ...resolvePromptBudget(), budgetChars: Math.max(render(targetAndFill, false), render(targetAndFill, true)) + 100 };
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+
+    // Provider resolves A, which stays validly authorized throughout.
+    const ctx = configuredPrinciple('AA3-TGT');
+    const evt = sentinelEvent();
+    const priority = await resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+    expect(priority).toMatchObject({ artifactId: 'art-AA3-TGT', activationId: 'act_prompt_AA3-TGT', additiveOnly: true });
+    const shared = await buildSharedPrompt(ctx, { adaptivePriority: priority ?? undefined, promptBudget });
+    const nativeShared = await buildSharedPrompt(makeCtx(), { promptBudget });
+    // Precondition: A's candidate assembly differs observably from Native.
+    expect(shared.adaptivePacking).toMatchObject({ status: 'prioritized', displacedActivationIds: [] });
+    expect(shared.additionalContext).toContain('TARGET-A-BODY');
+    expect(nativeShared.additionalContext).not.toContain('TARGET-A-BODY');
+    expect(shared.additionalContext).not.toBe(nativeShared.additionalContext);
+
+    // The mapping is switched to principle B before the hook re-reads it.
+    ctx.api!.pluginConfig = { adaptiveActivation: {
+      enabled: true, workspaceDir: tempWorkspaceDir, principleId: 'AA4-B',
+      expiresAt: new Date(Date.now() + 60000).toISOString(), softTimeoutMs: 15000,
+    } };
+    const result = await handleBeforePromptBuild(evt, ctx, shared);
+
+    // Native reference: the same round assembled without any priority.
+    const nativeFinal = await handleBeforePromptBuild(sentinelEvent(), configuredPrinciple('AA4-B'), nativeShared);
+    expect(result?.prependSystemContext).toBe(nativeFinal?.prependSystemContext);
+    expect(result?.prependSystemContext).not.toContain('TARGET-A-BODY');
+
+    // Terminal record: the ORIGINAL invocation and target, never a success.
+    const closes = journal.mock.calls
+      .map(([, record]) => record as Record<string, unknown>)
+      .filter((record) => record.receiptState === 'closed' && record.hookInvocationId === priority?.hookInvocationId);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toMatchObject({
+      artifactId: 'art-AA3-TGT', activationId: 'act_prompt_AA3-TGT',
+      execution: 'degraded', selection: 'unavailable', payload: 'none', addedTarget: false,
+      reason: 'adaptive_mapping_changed',
+    });
+    expect(closes[0]).not.toHaveProperty('targetBodySha256');
+
+    // Next round resolves the CURRENT mapping (B) fresh.
+    const next = await resolveAdaptivePriorityForHook(sentinelEvent(), ctx, ctx.api!);
+    expect(next).toMatchObject({ artifactId: 'art-AA4-B', activationId: 'act_prompt_AA4-B', additiveOnly: true });
+  });
 });
 
 describe('Controlled admission — real local/shared entries', () => {
