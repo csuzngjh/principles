@@ -99,12 +99,15 @@ the limits of what Node's filesystem API can prove; they are stated, not hidden:
    path.
 3. *Linux inspection boundary.* Processes that cannot be inspected without
    privileges are counted (`uninspectedProcesses`) and reported, not proven
-   absent: other users' processes, non-dumpable or setuid ones (their `/proc`
-   entry is owned by root), and same-user processes whose own credentials
-   explain the denial — setgid, a different uid set, or permitted capabilities
-   (Debian/Ubuntu ship `ssh-agent` setgid; GitHub's Ubuntu runner has such a
-   process too). Those are named with the credential difference in the result.
-   A same-user process denied for any reason its credentials do NOT explain
-   fails the proof. Processes in other PID namespaces are invisible.
+   absent: other users' processes; non-dumpable processes (systemd's
+   `(sd-pam)`, `ssh-agent`, `gpg-agent` — the kernel gives their
+   `/proc/<pid>/fd` to root even though `/proc/<pid>` still shows the user;
+   GitHub's Ubuntu runner has one); and same-user processes whose credentials
+   explain the denial (setgid, a different uid set, or permitted capabilities).
+   Those are named with the reason in the result. A dumpable same-user process
+   denied for any reason that is NOT explained (typically LSM confinement — a
+   snap-packaged editor and its integrated terminal) fails the proof, because
+   it is exactly the kind of process that could hold the tree. Processes in
+   other PID namespaces are invisible.
 4. *Unsupported platforms* (macOS, BSD) never prove quiescence, so cleanup
    always refuses there until an inspection mechanism exists.

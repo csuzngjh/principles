@@ -12,12 +12,13 @@
 //   linux   every /proc/<pid>/{fd,cwd,root,maps} entry is scanned for a path
 //           inside the quarantine. Processes that cannot be inspected without
 //           privileges are counted and reported as outside the proof boundary:
-//           other users' processes (and non-dumpable ones, whose /proc entry is
-//           owned by root), and same-user processes whose own credentials
-//           explain the denial (setgid, a different uid set, or permitted
-//           capabilities — e.g. Debian/Ubuntu's setgid ssh-agent). A same-user
-//           process denied for any reason its credentials do NOT explain fails
-//           the proof.
+//           other users' processes, non-dumpable processes (systemd's
+//           (sd-pam), ssh-agent, gpg-agent — detected from the root-owned fd
+//           directory), and same-user processes whose own credentials explain
+//           the denial (setgid, a different uid set, or permitted
+//           capabilities). A dumpable same-user process denied for any reason
+//           its credentials do NOT explain (e.g. LSM confinement, as with a
+//           snap-packaged editor's terminal) fails the proof.
 //   win32   the private quarantine parent is renamed out and back. Windows
 //           refuses to rename a directory while ANY handle is open anywhere in
 //           its subtree — file (read, write or append), directory handle, or
@@ -114,7 +115,21 @@ function scanProcFs(quarantineRoot) {
     } catch (err) {
       if (err && (err.code === 'ENOENT' || err.code === 'ESRCH')) continue;
       if (myUid !== null && ownerUid === myUid) {
-        const explanation = credentialsExplainDenial(procDir, myUid, myGid);
+        let explanation = credentialsExplainDenial(procDir, myUid, myGid);
+        if (explanation === null) {
+          // A NON-DUMPABLE process (prctl PR_SET_DUMPABLE 0: systemd's
+          // (sd-pam), ssh-agent, gpg-agent) also refuses ptrace reads. The
+          // kernel (task_dump_owner) then gives its /proc/<pid> entries to
+          // root — except world-readable directories such as /proc/<pid>
+          // itself, which is why it looked like ours. stat (not readdir) of
+          // the fd directory is permitted and shows that owner.
+          try {
+            const fdOwnerUid = fs.statSync(path.posix.join(procDir, 'fd')).uid;
+            if (fdOwnerUid !== myUid) explanation = 'non-dumpable (its fd directory is owned by uid ' + fdOwnerUid + ')';
+          } catch {
+            /* exited mid-scan */
+          }
+        }
         let command = '?';
         try {
           command = fs.readFileSync(path.posix.join(procDir, 'comm'), 'utf8').trim();
@@ -123,8 +138,8 @@ function scanProcFs(quarantineRoot) {
         }
         if (explanation === null) {
           return {
-            unprovable: 'process ' + pid + ' (' + command + ') belongs to this user, its descriptors are unreadable (' +
-              message(err) + ') and its credentials do not explain the denial',
+            unprovable: 'process ' + pid + ' (' + command + ') belongs to this user and is dumpable, its descriptors are ' +
+              'unreadable (' + message(err) + ') and its credentials do not explain the denial (an LSM-confined process?)',
           };
         }
         elevated.push({ pid: Number(pid), command, credentials: explanation });
