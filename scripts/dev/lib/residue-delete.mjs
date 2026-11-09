@@ -199,8 +199,8 @@ export function readRegularFileNoFollow(filePath) {
     | (process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
   const fd = fs.openSync(filePath, flags);
   try {
-    const opened = fs.fstatSync(fd);
-    const named = fs.lstatSync(filePath);
+    const opened = fs.fstatSync(fd, { bigint: true });
+    const named = fs.lstatSync(filePath, { bigint: true });
     if (!opened.isFile() || !named.isFile() || named.isSymbolicLink()
       || opened.dev !== named.dev || opened.ino !== named.ino) {
       throw new Error(filePath + ' changed or is not a regular file');
@@ -220,8 +220,11 @@ const NON_LEXICAL_TARGET = process.platform === 'win32' ? /(^|[\\/])\.\.([\\/]|$
  * One recorded filesystem identity: what `lstat` said about a path at scan
  * time. `dev`/`ino` are the OS-level identity of the EXACT object named by the
  * path (a directory entry or a link itself — never its target, because lstat
- * does not follow reparse points).
- * @typedef {{path: string, dev: number, ino: number, kind: 'directory'|'link'}} IdentityEntry
+ * does not follow reparse points). They are exact DECIMAL STRINGS of the
+ * bigint stats: NTFS file ids exceed 2^53 (as JS numbers two different files
+ * could compare equal), and link rows travel in operator JSON payloads, which
+ * cannot serialize a BigInt.
+ * @typedef {{path: string, dev: string, ino: string, kind: 'directory'|'link'}} IdentityEntry
  */
 
 /**
@@ -247,14 +250,14 @@ function captureIdentityChain(root, linkPath) {
   const dirSegments = segments.slice(0, -1);
   for (let i = 0; i <= dirSegments.length; i += 1) {
     if (i > 0) current = path.join(current, dirSegments[i - 1]);
-    const stat = fs.lstatSync(current);
+    const stat = fs.lstatSync(current, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw new Error('ancestor ' + current + ' is not a real directory');
     }
-    chain.push({ path: current, dev: stat.dev, ino: stat.ino, kind: 'directory' });
+    chain.push({ path: current, dev: String(stat.dev), ino: String(stat.ino), kind: 'directory' });
   }
-  const linkStat = fs.lstatSync(linkResolved);
-  chain.push({ path: linkResolved, dev: linkStat.dev, ino: linkStat.ino, kind: 'link' });
+  const linkStat = fs.lstatSync(linkResolved, { bigint: true });
+  chain.push({ path: linkResolved, dev: String(linkStat.dev), ino: String(linkStat.ino), kind: 'link' });
   return chain;
 }
 
@@ -271,7 +274,7 @@ function verifyIdentityChain(chain) {
   for (const entry of chain) {
     let stat;
     try {
-      stat = fs.lstatSync(entry.path);
+      stat = fs.lstatSync(entry.path, { bigint: true });
     } catch (err) {
       return entry.path + ' disappeared since the scan: ' + String((err && err.code) || err);
     }
@@ -281,7 +284,7 @@ function verifyIdentityChain(chain) {
     if (entry.kind === 'link' && !stat.isSymbolicLink()) {
       return entry.path + ' is no longer a reparse point (replaced since the scan)';
     }
-    if (stat.dev !== entry.dev || stat.ino !== entry.ino) {
+    if (String(stat.dev) !== entry.dev || String(stat.ino) !== entry.ino) {
       return entry.path + ' changed identity since the scan (dev/ino mismatch)';
     }
   }
@@ -604,7 +607,7 @@ export function removeResidueTree(root, opts = {}) {
   }
 
   const started = now();
-  const rootIdentityStat = fs.lstatSync(guard.resolved);
+  const rootIdentityStat = fs.lstatSync(guard.resolved, { bigint: true });
   const rootIdentity = { dev: rootIdentityStat.dev, ino: rootIdentityStat.ino };
   const preflight = scanReparsePoints(guard.resolved);
   if (preflight.unreadable.length > 0) {
@@ -668,7 +671,7 @@ export function removeResidueTree(root, opts = {}) {
     } catch (openError) {
       let stat;
       try {
-        stat = fs.lstatSync(dir);
+        stat = fs.lstatSync(dir, { bigint: true });
       } catch {
         if (openError && openError.code === 'ENOENT') return false;
         throw openError;
@@ -699,7 +702,7 @@ export function removeResidueTree(root, opts = {}) {
 
     let stat;
     try {
-      stat = fs.lstatSync(dir);
+      stat = fs.lstatSync(dir, { bigint: true });
     } catch (err) {
       handle.closeSync();
       throw err;
@@ -730,16 +733,17 @@ export function removeResidueTree(root, opts = {}) {
     // child mutation below is preceded by a re-check against this identity: if
     // an ancestor swapped this path for a junction, lstat now names a different
     // object and the deletion fails closed instead of unlinking outside the
-    // tree (Node has no unlink-at-fd primitive to do better).
+    // tree (Node has no unlink-at-fd primitive to do better). Identities are
+    // bigint dev/ino: NTFS file ids exceed 2^53 and would round as numbers.
     const dirIdentity = { dev: stat.dev, ino: stat.ino };
     const assertParentStable = () => {
-      const now = fs.lstatSync(dir);
+      const now = fs.lstatSync(dir, { bigint: true });
       if (now.isSymbolicLink() || !now.isDirectory() || now.dev !== dirIdentity.dev || now.ino !== dirIdentity.ino) {
         throw new Error('directory ' + dir + ' was replaced during deletion; refusing path-based unlink (fail-closed)');
       }
     };
     const assertChildUnchanged = (full, childStat) => {
-      const now = fs.lstatSync(full);
+      const now = fs.lstatSync(full, { bigint: true });
       if (now.dev !== childStat.dev || now.ino !== childStat.ino) {
         throw new Error('entry ' + full + ' changed identity during deletion; refusing to unlink it (fail-closed)');
       }
@@ -751,7 +755,7 @@ export function removeResidueTree(root, opts = {}) {
         const full = path.join(dir, entry.name);
         let childStat;
         try {
-          childStat = fs.lstatSync(full);
+          childStat = fs.lstatSync(full, { bigint: true });
         } catch (err) {
           if (err && err.code === 'ENOENT') continue;
           throw err;
@@ -789,7 +793,7 @@ export function removeResidueTree(root, opts = {}) {
     walk(guard.resolved, true, rootIdentity);
     // The final rmdir resolves the root path through its ancestors too. Verify
     // the root still names the directory this walk emptied before removing it.
-    const rootNow = fs.lstatSync(guard.resolved);
+    const rootNow = fs.lstatSync(guard.resolved, { bigint: true });
     if (rootNow.isSymbolicLink() || !rootNow.isDirectory()
       || rootNow.dev !== rootIdentity.dev || rootNow.ino !== rootIdentity.ino) {
       throw new Error('tree root ' + guard.resolved + ' was replaced during deletion; refusing the final rmdir (fail-closed)');

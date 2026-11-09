@@ -535,11 +535,16 @@ describe('fail-closed boundary cases (ERR-098 review)', () => {
     const verdict = classifyReparsePoints(tree);
     const row = verdict.external.find((l) => l.path === link);
     expect(row?.ancestorIdentity).toBeTruthy();
-    const chain = row?.ancestorIdentity as Array<{ path: string; kind: string }>;
+    const chain = row?.ancestorIdentity as Array<{ path: string; kind: string; dev: string; ino: string }>;
     // Root → parent directories → the link itself.
     expect(chain.map((entry) => entry.kind)).toEqual(['directory', 'directory', 'link']);
     expect(path.resolve(chain[0].path)).toBe(path.resolve(tree));
     expect(path.resolve(chain[2].path)).toBe(path.resolve(link));
+    // Identity is EXACT (bigint stats; NTFS file ids exceed 2^53) and stored as
+    // decimal strings, because link rows travel in operator JSON payloads and
+    // JSON.stringify throws on a BigInt.
+    expect(chain[2].ino).toBe(String(fs.lstatSync(link, { bigint: true }).ino));
+    expect(() => JSON.stringify(verdict)).not.toThrow();
   });
 
   it('a parent swapped for a junction BEFORE the detach pass never causes deletion through the swap (external)', () => {
