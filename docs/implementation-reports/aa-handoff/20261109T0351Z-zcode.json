@@ -1,0 +1,44 @@
+{
+  "checkpointId": "20261109T0351Z-zcode",
+  "issue": "PRI-1140",
+  "issueTitle": "[AA Selector][M] 开发最小激活策略：交付验收场景与 Native 离线对比",
+  "stage": "implementation-card-delivered-awaiting-owner-approval",
+  "timestampUtc": "2026-11-09T03:51Z",
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1140-aa-selector-min-native",
+    "branch": "ai/PRI-1140-aa-selector-min-native",
+    "base": "9d1a456ab5becabd04307d01042ad4b9d7b901e4",
+    "baseNote": "origin/main at creation, fetched; includes #2432 (PRI-1152 v3.1 run results)",
+    "writer": "zcode",
+    "ready": "L1/L2/L3 pass (dev:worktree:ready exit 0); bootstrap FAILED only from the known stale CLAUDE.md check (setup-worktree.mjs:356, CLAUDE.md dropped by #2423) — same tool defect documented in PRI-1152"
+  },
+  "linear": {
+    "status": "In Progress (started 2026-11-09T03:26Z)",
+    "parent": "PRI-1122 (Done)",
+    "related": ["PRI-1105 (In Progress)", "PRI-1141 (Backlog, bounded diagnostic = historical input)"]
+  },
+  "survey": {
+    "scenarioMapping": "readAdaptiveActivationConfig (packages/openclaw-plugin/src/hooks/adaptive-activation-config.ts): workspace-scoped expiring mapping pinning (artifactId, activationId); scene signal = first-line sentinel [PD-AA:delivery-review:v1] or PRI-1152 controlled admission",
+    "priorityEntry": "resolveAdaptivePriorityForHook (packages/openclaw-plugin/src/index.ts:237) wired as adaptivePriorityProvider into createOpenClawHostRuntime (index.ts:418); consumed at host-runtime/src/index.ts:341-396",
+    "sharedAssemblyEntry": "buildActivePrinciplePromptContext (packages/host-runtime/src/active-principle-prompt.ts:338): native baseline -> authority re-read (strict) -> prioritized (target first, budget-driven displacement, mandatory preserved, final render); zero changes planned to this entry"
+  },
+  "reproducibleNativeGap": "AA mapping pins activation identity; the existing Owner prompt-replacement governance flow (packages/principles-core/src/runtime/activation/prompt-replacement.ts) supersedes it (new artifact+activation, old deactivatedAt set); filterPromptActivations drops deactivated rows -> buildActivePrinciplePromptContext returns target_unavailable (active-principle-prompt.ts:534) -> every later delivery-acceptance round silently degrades to plain Native until the Owner hand-edits plugin config. Offline-reproducible with a fixture state.db.",
+  "frozenCases": {
+    "doc": "docs/specs/PD-AA-PRI-1140-FROZEN-CASES-v0.1.md",
+    "count": 16,
+    "categories": { "delivery": "A1-A7 (incl. target-already-present A2, stale-pin A3/A4)", "normalExecution": "B1-B2", "stageSwitch": "C1-C2", "targetAlreadyPresent": "A2", "budgetInsufficient": "D1-D2", "unclearSignal": "E1-E2", "replayDeterminism": "F1" },
+    "discipline": "annotations written BEFORE any candidate implementation or comparison run; A6 native-expectation factual error corrected pre-commit with a dated revision record (code returns full baseline {...nativeResult} for principle ambiguity, active-principle-prompt.ts:537-539); no annotations may change after candidate outputs exist"
+  },
+  "implementationCard": {
+    "doc": "docs/specs/PD-AA-PRI-1140-MIN-ACTIVATION-IMPLEMENTATION-CARD-v0.1.md",
+    "minimalChange": "selection granularity: resolve configured principleId to the at-most-one currently-authorized prompt activation at request time (host-runtime exported readonly resolver reusing readPromptActivationCandidates; plugin sentinel branch resolves; controlled-admission branch unchanged); shared assembly entry untouched; pinned-mapping path byte-identical (characterization-locked)",
+    "errorContextRouting": "EP-12 HIGH (zero new writes into host-managed paths), EP-02/EP-03/EP-07 (production-entry evidence, structured degradation reasons, bounded Map cache keyed by hookInvocationId) — folded into card §10"
+  },
+  "decisionRule": "keep candidate iff delivery key coverage improves (A4-class) with no case showing unauthorized injection / required-content loss / key-opportunity regression and acceptable cost (zero extra reads on non-delivery rounds; at most one readonly resolution read per delivery round); otherwise keep Native",
+  "boundaries": "zero real model calls; no production enablement; no Runtime V2 governance changes; G1/C04/G2 keep original status; PRI-1122 two-stage design NOT in this ticket; mandatoryPrincipleIds recorded as production-empty (no scope expansion)",
+  "nextSteps": [
+    "Owner written approval of card v0.1 (post approval evidence as Linear comment; approval binds card doc hash)",
+    "then in one consecutive pass: implement resolver + config/provider/hook changes + tests, run targeted suites, run the 16-case offline comparison, produce per-case metrics + keep/abandon decision, create PR, checkpoints, set PRI-1140 In Review"
+  ],
+  "stopCondition": "no coding before Owner written approval of this card version"
+}

@@ -136,11 +136,11 @@
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.6",
     "fast-check": "4.10.2",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.0"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
   },
   "license": "Apache-2.0",
   "repository": {
