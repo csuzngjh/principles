@@ -24,12 +24,13 @@
  * for precise uninstall.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
+import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -323,9 +324,376 @@ export function detectCodexMarketplaceState(codexHome?: string): CodexMarketplac
   return { state: 'installed', version: best.dirName, versionDir: path.join(cachePluginRoot, best.dirName) };
 }
 
+// ─── Runtime cohort reconciliation (update chain, 2026-11-11) ───────────────
+/**
+ * The runtime Codex hooks actually load is the PLUGIN_DATA copy, and its
+ * intended version is the one pinned by the payload's `runtime-version.json`.
+ * Until 2026-11-11 nothing reconciled the two: a Marketplace payload update
+ * left PLUGIN_DATA one cohort behind its own pin, and pd-hook only RESOLVED a
+ * runtime — it never installed one. These helpers OBSERVE that drift and call
+ * the plugin's existing `scripts/pd-setup.cjs` authority to materialize the
+ * pin. They are not a second runtime installer.
+ */
+export interface CodexRuntimeCohort {
+  readonly codexAdapter: string;
+  readonly hostRuntime: string;
+  readonly core: string;
+  readonly mcpServer: string;
+}
+
+const RUNTIME_COMPONENT_DIRS = {
+  codexAdapter: 'codex-adapter',
+  hostRuntime: 'host-runtime',
+  core: 'core',
+  mcpServer: 'pd-mcp-server',
+} as const;
+
+export interface CodexCommandResult {
+  readonly ok: boolean;
+  /** Bounded diagnostic detail (stderr tail / error message) for reason text. */
+  readonly detail?: string;
+}
+
+export interface CodexInstallerDeps {
+  /**
+   * Codex home override. Tests inject a temp home; the default is CODEX_HOME
+   * or ~/.codex, the same authority the Marketplace detector already uses.
+   */
+  readonly codexHome?: string;
+  /**
+   * Canonical PD runtime root (`~/.pd/runtime`). Its component versions define
+   * "the PD release being installed", i.e. the target the cached Marketplace
+   * payload is compared against. This is the same layout pd-cli's
+   * delivery-surfaces authority reads.
+   */
+  readonly canonicalRuntimeDir?: string;
+  /** Command runner (default: spawnSync). Tests inject a fake host boundary. */
+  readonly runCommand?: (file: string, args: readonly string[], timeoutMs: number) => CodexCommandResult;
+}
+
+function readPackageVersion(pkgJsonPath: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+    if (!isRecord(parsed)) return undefined;
+    const value = parsed.version;
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function pinField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function buildCohort(values: Record<keyof CodexRuntimeCohort, string | undefined>): CodexRuntimeCohort | undefined {
+  const { codexAdapter, hostRuntime, core, mcpServer } = values;
+  if (codexAdapter === undefined || hostRuntime === undefined || core === undefined || mcpServer === undefined) {
+    return undefined;
+  }
+  return { codexAdapter, hostRuntime, core, mcpServer };
+}
+
+/** The cohort a plugin payload declares in `<pluginRoot>/runtime-version.json`. */
+export function readPinnedRuntimeCohort(pluginRoot: string): CodexRuntimeCohort | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path.join(pluginRoot, 'runtime-version.json'), 'utf-8'));
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) return undefined;
+  return buildCohort({
+    codexAdapter: pinField(parsed, 'codexAdapter'),
+    hostRuntime: pinField(parsed, 'hostRuntime'),
+    core: pinField(parsed, 'core'),
+    mcpServer: pinField(parsed, 'mcpServer'),
+  });
+}
+
+/** The canonical PD runtime's actual versions (`<runtimeDir>/<component>/package.json`). */
+export function readCanonicalRuntimeCohort(runtimeDir: string): CodexRuntimeCohort | undefined {
+  return buildCohort({
+    codexAdapter: readPackageVersion(path.join(runtimeDir, RUNTIME_COMPONENT_DIRS.codexAdapter, 'package.json')),
+    hostRuntime: readPackageVersion(path.join(runtimeDir, RUNTIME_COMPONENT_DIRS.hostRuntime, 'package.json')),
+    core: readPackageVersion(path.join(runtimeDir, RUNTIME_COMPONENT_DIRS.core, 'package.json')),
+    mcpServer: readPackageVersion(path.join(runtimeDir, RUNTIME_COMPONENT_DIRS.mcpServer, 'package.json')),
+  });
+}
+
+/** The cohort installed in PLUGIN_DATA (`<runtimeDir>/node_modules/<pkg>/package.json`). */
+export function readInstalledRuntimeCohort(runtimeDir: string): CodexRuntimeCohort | undefined {
+  const packageDirs = {
+    codexAdapter: '@principles/codex-adapter',
+    hostRuntime: '@principles/host-runtime',
+    core: '@principles/core',
+    mcpServer: '@principles/pd-mcp-server',
+  } as const;
+  return buildCohort({
+    codexAdapter: readPackageVersion(path.join(runtimeDir, 'node_modules', packageDirs.codexAdapter, 'package.json')),
+    hostRuntime: readPackageVersion(path.join(runtimeDir, 'node_modules', packageDirs.hostRuntime, 'package.json')),
+    core: readPackageVersion(path.join(runtimeDir, 'node_modules', packageDirs.core, 'package.json')),
+    mcpServer: readPackageVersion(path.join(runtimeDir, 'node_modules', packageDirs.mcpServer, 'package.json')),
+  });
+}
+
+function semverParts(value: string): [number, number, number] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value);
+  if (match === null) return undefined;
+  const major = Number.parseInt(match[1] ?? '', 10);
+  const minor = Number.parseInt(match[2] ?? '', 10);
+  const patch = Number.parseInt(match[3] ?? '', 10);
+  return [major, minor, patch].every((n) => Number.isFinite(n)) ? [major, minor, patch] : undefined;
+}
+
+/** Numeric semver compare; unparsable values compare equal (never a guess). */
+export function compareRuntimeVersions(a: string, b: string): number {
+  const left = semverParts(a);
+  const right = semverParts(b);
+  if (left === undefined || right === undefined) return 0;
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** True when ANY pinned component is older than the target cohort. */
+export function isRuntimeCohortBehind(pin: CodexRuntimeCohort, target: CodexRuntimeCohort): boolean {
+  const keys: readonly (keyof CodexRuntimeCohort)[] = ['codexAdapter', 'hostRuntime', 'core', 'mcpServer'];
+  return keys.some((key) => compareRuntimeVersions(pin[key], target[key]) < 0);
+}
+
+export function cohortsEqual(left: CodexRuntimeCohort, right: CodexRuntimeCohort): boolean {
+  const keys: readonly (keyof CodexRuntimeCohort)[] = ['codexAdapter', 'hostRuntime', 'core', 'mcpServer'];
+  return keys.every((key) => compareRuntimeVersions(left[key], right[key]) === 0);
+}
+
+export function describeRuntimeCohort(cohort: CodexRuntimeCohort): string {
+  return `codex-adapter@${cohort.codexAdapter} host-runtime@${cohort.hostRuntime} core@${cohort.core} mcp-server@${cohort.mcpServer}`;
+}
+
+/** `<home>/plugins/cache/<marketplace>/principles-disciple/<version>` → marketplace name. */
+function deriveMarketplaceName(versionDir: string): string | undefined {
+  const marketplace = path.basename(path.dirname(path.dirname(versionDir)));
+  return /^[A-Za-z0-9._-]+$/.test(marketplace) ? marketplace : undefined;
+}
+
+/**
+ * Default command runner. `codex` on Windows is a `.cmd`/`.ps1` shim that
+ * CreateProcess cannot execute directly, so the Windows branch goes through
+ * the command processor; every argument passed here is a validated literal
+ * (marketplace name `/^[A-Za-z0-9._-]+$/`, absolute paths), never user input.
+ */
+function defaultRunCommand(file: string, args: readonly string[], timeoutMs: number): CodexCommandResult {
+  const isWindows = process.platform === 'win32';
+  const result = spawnSync(file, [...args], {
+    encoding: 'utf-8',
+    timeout: timeoutMs,
+    windowsHide: true,
+    shell: isWindows,
+  });
+  const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : '';
+  const error = result.error instanceof Error ? result.error.message : undefined;
+  const ok = result.status === 0 && error === undefined;
+  const detail = stderr.length > 0 ? stderr.slice(-400) : error;
+  return { ok, ...(detail === undefined ? {} : { detail }) };
+}
+
+/**
+ * Resolve Codex's PLUGIN_DATA root. ensurePluginData creates
+ * `<home>/plugins/data/principles-disciple-<marketplace>`, and Codex sets
+ * PLUGIN_DATA for hooks but never creates the directory, so an existing single
+ * match wins; otherwise the caller's derived path is used (first-run create).
+ */
+export function resolvePluginDataRoot(codexHome: string, marketplace: string): string | undefined {
+  const dataRoot = path.join(codexHome, 'plugins', 'data');
+  try {
+    const entries = readdirSync(dataRoot);
+    const matches = entries.filter((entry) => entry.startsWith('principles-disciple-'));
+    if (matches.length === 1) {
+      const [only] = matches;
+      return only === undefined ? undefined : path.join(dataRoot, only);
+    }
+  } catch {
+    // Not created yet — the derived path below is the first-run target.
+  }
+  return /^[A-Za-z0-9._-]+$/.test(marketplace) ? path.join(dataRoot, `principles-disciple-${marketplace}`) : undefined;
+}
+
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────
 export class CodexHostInstaller implements HostInstaller {
   readonly hostId = 'codex';
+
+  private readonly deps: CodexInstallerDeps;
+
+  constructor(deps: CodexInstallerDeps = {}) {
+    this.deps = deps;
+  }
+
+  private codexHome(): string {
+    return this.deps.codexHome ?? getCodexDir();
+  }
+
+  /**
+   * Run `codex plugin add <plugin>@<marketplace>`. Re-adding an installed
+   * plugin is the host's own in-place refresh path — no uninstall/remove is
+   * involved (Owner requirement 2026-11-11).
+   */
+  private runMarketplaceAdd(marketplace: string): CodexCommandResult {
+    const args = ['plugin', 'add', `principles-disciple@${marketplace}`];
+    const run = this.deps.runCommand ?? defaultRunCommand;
+    return run('codex', args, 120_000);
+  }
+
+  /**
+   * Materialize the payload's pinned runtime in PLUGIN_DATA through the
+   * plugin's EXISTING setup authority (scripts/pd-setup.cjs). `--skip-init`
+   * and `--ingest skip` keep this a runtime/binding repair: no workspace
+   * initialization, no consent decision, no interactive prompt.
+   */
+  private runRuntimeSetup(pluginRoot: string, pluginDataRoot: string, workspaceDir: string): CodexCommandResult {
+    const setupEntry = path.join(pluginRoot, 'scripts', 'pd-setup.cjs');
+    const args = [
+      setupEntry,
+      '--plugin-root', pluginRoot,
+      '--plugin-data', pluginDataRoot,
+      '--workspace', workspaceDir,
+      '--skip-init',
+      '--ingest', 'skip',
+      '--json',
+    ];
+    const run = this.deps.runCommand ?? defaultRunCommand;
+    return run(process.execPath, args, 600_000);
+  }
+
+  /**
+   * Reconcile an installed Marketplace plugin with the PD release being
+   * installed:
+   *   1. payload: refresh the cache in place when its pins trail the canonical
+   *      runtime (`codex plugin add`, no uninstall);
+   *   2. runtime: install the payload's own pins into PLUGIN_DATA when they
+   *      differ (pd-setup.cjs — the single runtime materialization authority).
+   * Every unverifiable/unreachable step is reported with reason + nextAction,
+   * never silently swallowed (rc-9).
+   */
+  private reconcileInstalledPlugin(
+    marketplace: { readonly version: string; readonly versionDir: string },
+    ctx: HostInstallContext,
+  ): HostInstallResult {
+    const notes: string[] = [];
+    const marketplaceName = deriveMarketplaceName(marketplace.versionDir);
+    if (marketplaceName === undefined) {
+      return {
+        success: false,
+        hostId: this.hostId,
+        configAction: 'skipped',
+        manualActionRequired: true,
+        reason: `The Codex Marketplace cache path does not expose a usable marketplace name: ${marketplace.versionDir}`,
+        nextAction: 'Re-add the Marketplace and plugin: codex plugin marketplace add <owner/repo>, then codex plugin add principles-disciple@<marketplace>.',
+      };
+    }
+
+    const canonicalRuntimeDir = this.deps.canonicalRuntimeDir ?? getPdRuntimeDir();
+    const canonical = readCanonicalRuntimeCohort(canonicalRuntimeDir);
+    const pinBefore = readPinnedRuntimeCohort(marketplace.versionDir);
+
+    let current = { version: marketplace.version, versionDir: marketplace.versionDir };
+    let payloadRefreshed = false;
+
+    if (canonical === undefined || pinBefore === undefined) {
+      // Not a failure of this installer: the cached payload may still be
+      // current. But freshness is UNVERIFIABLE, so say so instead of printing
+      // the old "already installed" comfort line (Owner requirement 3).
+      notes.push(canonical === undefined
+        ? `payload freshness is unverifiable: the canonical PD runtime was not readable at ${canonicalRuntimeDir}`
+        : `payload freshness is unverifiable: ${path.join(current.versionDir, 'runtime-version.json')} is unreadable`);
+    } else if (isRuntimeCohortBehind(pinBefore, canonical)) {
+      const refresh = this.runMarketplaceAdd(marketplaceName);
+      if (!refresh.ok) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configAction: 'skipped',
+          manualActionRequired: true,
+          reason: `The installed Codex plugin (cache ${current.version}, pinned ${describeRuntimeCohort(pinBefore)}) is behind the PD release being installed (${describeRuntimeCohort(canonical)}), and the in-place refresh failed${refresh.detail === undefined ? '' : `: ${refresh.detail}`}.`,
+          nextAction: `Run "codex plugin add principles-disciple@${marketplaceName}" (no uninstall needed) and re-run this installer — the installer then aligns the plugin runtime with the refreshed pin.`,
+        };
+      }
+      const after = detectCodexMarketplaceState(this.codexHome());
+      if (after.state === 'installed') {
+        current = { version: after.version, versionDir: after.versionDir };
+      }
+      payloadRefreshed = true;
+      notes.push(`payload refreshed ${marketplace.version} → ${current.version}`);
+    } else {
+      notes.push(`payload ${current.version} is current for the installed PD release`);
+    }
+
+    const pin = readPinnedRuntimeCohort(current.versionDir);
+    if (pin === undefined) {
+      // A payload whose pin cannot be read is left exactly as it is — the
+      // installer must not guess a runtime cohort. Freshness is reported as
+      // UNVERIFIED rather than as "already installed" (rc-9 / requirement 3).
+      notes.push(`runtime pin unreadable in ${current.versionDir} — runtime alignment unverified`);
+      return {
+        success: true,
+        hostId: this.hostId,
+        configPath: current.versionDir,
+        configAction: payloadRefreshed ? 'updated' : 'preserved',
+        reason: `Codex Marketplace plugin ${current.version}: ${notes.join('; ')}.`,
+        nextAction: 'Verify manually with pd-status; reinstall the payload with codex plugin add principles-disciple@'
+          + `${marketplaceName} if the runtime pin stays unreadable (no uninstall needed).`,
+      };
+    }
+
+    const pluginDataRoot = resolvePluginDataRoot(this.codexHome(), marketplaceName);
+    if (pluginDataRoot === undefined) {
+      return {
+        success: false,
+        hostId: this.hostId,
+        configAction: 'skipped',
+        manualActionRequired: true,
+        reason: `The Codex plugin data directory could not be resolved for marketplace "${marketplaceName}".`,
+        nextAction: 'Run: $pd-control setup — it reports the resolved plugin data path and installs the pinned runtime.',
+      };
+    }
+    const runtimeDir = path.join(pluginDataRoot, 'runtime');
+    const installed = readInstalledRuntimeCohort(runtimeDir);
+    let runtimeReconciled = false;
+
+    if (installed !== undefined && cohortsEqual(installed, pin)) {
+      notes.push(`runtime matches the payload pin (${describeRuntimeCohort(pin)})`);
+    } else {
+      const setup = this.runRuntimeSetup(current.versionDir, pluginDataRoot, ctx.workspaceDir);
+      const verified = readInstalledRuntimeCohort(runtimeDir);
+      if (!setup.ok || verified === undefined || !cohortsEqual(verified, pin)) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configAction: 'skipped',
+          manualActionRequired: true,
+          reason: `The Codex plugin runtime in ${runtimeDir} does not match the payload pin (${describeRuntimeCohort(pin)}) and the automatic install did not verify${setup.detail === undefined ? '' : `: ${setup.detail}`}.`,
+          nextAction: 'Run: $pd-control setup — it installs the pinned runtime and verifies the exact bytes. If it also fails, check that npm is on PATH.',
+        };
+      }
+      runtimeReconciled = true;
+      notes.push(`runtime installed at the payload pin (${describeRuntimeCohort(pin)})`);
+    }
+
+    const updated = payloadRefreshed || runtimeReconciled;
+    return {
+      success: true,
+      hostId: this.hostId,
+      configPath: current.versionDir,
+      configAction: updated ? 'updated' : 'preserved',
+      reason: `Codex Marketplace plugin ${current.version}: ${notes.join('; ')}.`,
+      nextAction: updated
+        ? 'Start a new Codex session (or restart Codex) so the refreshed plugin and runtime load. Verify with pd-status afterwards.'
+        : 'Nothing to update. Start a Codex session and run the plugin setup ($pd-control setup) if conversation-ingestion consent is still pending.',
+    };
+  }
 
   /**
    * RETIRED for new registrations (Codex Governance Closure Slice D; SPEC rev
@@ -336,8 +704,13 @@ export class CodexHostInstaller implements HostInstaller {
    * structured refusal that points at the supported path, and when a legacy
    * PD global registration is detected it offers the explicit migration
    * route (precise uninstall → Marketplace plugin → $pd-control setup consent).
+   *
+   * UPDATE CHAIN (2026-11-11): for an already-installed Marketplace plugin
+   * this method now RECONCILES instead of reporting the old "already
+   * installed" comfort line — it refreshes a stale payload in place and
+   * installs the payload's own runtime pins into PLUGIN_DATA.
    */
-  async install(_ctx: HostInstallContext): Promise<HostInstallResult> {
+  async install(ctx: HostInstallContext): Promise<HostInstallResult> {
     const hooksJsonPath = getCodexHooksJsonPath();
     const legacy = detectLegacyCodexHookRegistration();
     if (legacy.detected) {
@@ -354,15 +727,9 @@ export class CodexHostInstaller implements HostInstaller {
     // Marketplace contract (2026-11-07): the retired global-hook installer
     // never writes anything; the Codex end state is reported honestly in
     // three states and never executes the retired registration logic.
-    const marketplace = detectCodexMarketplaceState();
+    const marketplace = detectCodexMarketplaceState(this.codexHome());
     if (marketplace.state === 'installed') {
-      return {
-        success: true,
-        hostId: this.hostId,
-        configAction: 'preserved',
-        reason: `Codex Marketplace plugin already installed and confirmable (cache version ${marketplace.version}).`,
-        nextAction: 'If not done yet, start a Codex session and run the plugin setup ($pd-control setup) — it verifies Node/runtime/workspace/trust and records the conversation-ingestion consent.',
-      };
+      return this.reconcileInstalledPlugin(marketplace, ctx);
     }
     // 'not_installed' and 'unknown' both leave a manual step pending. They are
     // NOT failures of anything this installer attempted (it never writes), so
@@ -465,13 +832,12 @@ export class CodexHostInstaller implements HostInstaller {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   detect(): HostDetectResult {
     const markerPath = getPdHookMarkerPath();
     const hooksJsonPath = getCodexHooksJsonPath();
     const wrapperPath = path.join(getPdCodexDir(), 'pd-hook-entry.cjs');
 
-    const paths = [
+    const paths: { exists: boolean; path: string; name: string; type: 'file' | 'dir' }[] = [
       {
         exists: existsSync(markerPath),
         path: markerPath,
@@ -515,6 +881,21 @@ export class CodexHostInstaller implements HostInstaller {
       } catch {
         // Malformed hooks.json — treat as not installed (will be cleaned on uninstall)
       }
+    }
+
+    // UPDATE CHAIN (2026-11-11): the supported install path is the Marketplace
+    // plugin, which leaves NO marker/hooks.json. Detection that only looked at
+    // the retired global-hook artifacts reported a Marketplace-only Codex as
+    // "not installed", so host auto-coverage skipped it.
+    const marketplace = detectCodexMarketplaceState(this.codexHome());
+    if (marketplace.state === 'installed') {
+      installed = true;
+      paths.push({
+        exists: true,
+        path: marketplace.versionDir,
+        name: `Codex Marketplace plugin ${marketplace.version}`,
+        type: 'dir',
+      });
     }
 
     return { installed, paths };
