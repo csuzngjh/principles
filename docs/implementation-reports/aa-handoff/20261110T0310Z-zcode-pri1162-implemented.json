@@ -42,7 +42,7 @@
   "verification": {
     "newSuite": "5/5 green",
     "adjacentRegression": "prompt-production-chain + runtime-prompt-activation 91/91 green",
-    "ci": "backfilled from PR page after push"
+    "ci": "29 SUCCESS + 2 SKIPPED, 0 failed (backfilled 2026-11-10T03:35Z from PR #2460; mergeable=MERGEABLE)"
   },
   "boundaries": { "hostStarts": 0, "modelCalls": 0, "installs": 0, "productionWrites": 0, "latestJsonTouched": false },
   "mimosaNote": "scanner_enobufs recurred; no security conclusion claimed"

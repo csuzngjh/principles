@@ -21,7 +21,8 @@
 
 ## 测试与 CI
 
-- 定向回归：新套件 5/5；`prompt-production-chain` + `runtime-prompt-activation` 91/91；CI 以 PR 页面为准（回填检查点）。
+- 定向回归：新套件 5/5；`prompt-production-chain` + `runtime-prompt-activation` 91/91。
+- CI（2026-11-10T03:35Z 回填）：PR [#2460](https://github.com/csuzngjh/principles/pull/2460) **29 SUCCESS + 2 SKIPPED，0 失败**，mergeable=MERGEABLE，待 Owner 合并。
 
 ## 边界
 
