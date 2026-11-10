@@ -136,6 +136,7 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
   it('normalizes a self-asserted valid=false and still succeeds (PRI-675)', async () => {
     const selfDeclaredInvalid = { ...makeDreamerOutput(), valid: false };
     vi.mocked(deps.runtimeAdapter.fetchOutput).mockResolvedValue({
+      runId: 'run-001',
       payload: selfDeclaredInvalid,
     });
 
