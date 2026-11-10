@@ -1,0 +1,37 @@
+{
+  "checkpointId": "20261110T0030Z-zcode-pri1161-implemented",
+  "issue": "PRI-1161",
+  "relatedIssues": ["PRI-1105", "PRI-1160"],
+  "stage": "implemented-and-compared-keep-pr-open-ci-pending",
+  "decision": "KEEP",
+  "timestampUtc": "2026-11-10T00:30Z",
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1161-directive-boilerplate",
+    "branch": "ai/PRI-1161-directive-boilerplate",
+    "base": "origin/main e7c7e6bba",
+    "commits": ["a7dd7c1af approval+caller audit", "7e5b467bd implementation+tests+changeset", "1159cd32a comparison report+decision", "<next> checkpoint"]
+  },
+  "approval": { "date": "2026-11-10", "card": "PD-AA-PRI-1161-BOILERPLATE-HOIST-IMPLEMENTATION-CARD-v0.1 @ 1f6ca5c04 (sha efc3c779…07d24)", "conditions": ["only public statement + per-block repeated line change; per-principle body/order/attributes/escaping/authority/<directive> boundaries untouched", "two-layer comparison: fixed-set exact −86×N+53 (owner formula corrected from −87; sentence is 85 chars) + shared-entry final outputs; tight rounds report boilerplate/refill/net separately", "coverage: empty/single/multi/escape/self-report/exact-budget-boundary/forensics slices; refill must be rule-explainable; any loss/deviation/unexpected-selection-change = fail", "PRI-1160 old baseline and hashes preserved; post-governance retest under new renderer requires a NEW same-renderer pre-governance freeze"] },
+  "implementation": {
+    "files": [
+      "packages/principles-core/src/runtime/activation/prompt-activation-reader-contract.ts (blockLines 5→4; headerLine 125→178)",
+      "packages/host-runtime/tests/prompt-injection-golden-characterization.test.ts (golden bytes +53/−86×4=1289)",
+      "packages/host-runtime/tests/active-principle-prompt-fair-rotation.test.ts (fixture text 300→386 keeps the tuned boundary)",
+      "golden/projection/deliverability cost models and pins updated (+53 wrapper delta, single-item −33)"
+    ],
+    "newTests": "packages/host-runtime/tests/pri1161-boilerplate-hoist.test.ts (6 cases: empty/single/multi/escape/self-report identity/exact budget boundary/forensics slices)",
+    "callersAudit": "card §7: slice-class consumers (same-source containment) and whole-render class (single-item fit — consistent with projection; fits can only get easier); no bare-block-body consumer; no path paused"
+  },
+  "twoLayerComparison": {
+    "layer1": { "rounds": 20, "exactFormulaAllRounds": true, "formula": "newLen = oldLen − 86×N + 53", "structure": "removals = N boilerplate lines + old header; only addition = new header; open-tags & MANDATORY lines byte-identical; apply-line 0; constraint exactly once; old header gone", "source": "frozen PRI-1160 baseline (sha256 f36604a2…) same snapshot 830fbd24…, old-side sha verified 20/20" },
+    "layer2": { "rounds": 20, "identity": "net = 86×N_common − 53 − refill + removedOld, exact on all rounds (incl. the two rotation-shift rounds k9/k13)", "modelAware": "9208 → 7713, net −1495 = −16.2% (≥15% line PASS)", "fifo4000": "boiler −602, header +53, refill +881 (3 principles refill) → net +332 (final text GREW; three columns reported separately as required)", "rotationShiftAttribution": "old packer + new costs reproduce the new set exactly (k9 verified) — shift fully attributable to cost change through the unchanged rule" },
+    "correction": "card said −87/block; sentence is 85 chars → −86/block, single-item −33. Savings slightly below card estimate but pass lines hold. Reported to Owner."
+  },
+  "tests": { "core": "534", "hostRuntime": "71 files, 802 passed, 1 pre-existing skip", "plugin": "targeted 79 + full 2354 passed (BDD EPERM + tar failures are local env, CI authoritative)", "pdCli": "3", "eslint": "0 errors on changed files" },
+  "notRun": ["CI (pending at checkpoint time)", "tokens (no reliable tokenizer)", "host startup / model calls / governance writes (out of scope, 0)"],
+  "notOverwritten": ["docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json", "docs/implementation-reports/pri-1105-b-baseline-report-20261109.json", "docs/implementation-reports/aa-handoff/LATEST.json"],
+  "ci": {
+    "checkedAt": "2026-11-10T01:05Z",
+    "result": "28 SUCCESS + 3 SKIPPED, 0 failures; mergeable=MERGEABLE"
+  }
+}

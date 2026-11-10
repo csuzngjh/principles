@@ -1,6 +1,6 @@
 {
   "name": "@principles/core",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "Pure-logic core of Principles Disciple, an AI Agent Governance System - pain signal capture and principle proposal (no I/O)",
   "type": "module",
   "main": "./dist/index.js",

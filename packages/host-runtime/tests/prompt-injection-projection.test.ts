@@ -72,9 +72,12 @@ async function seedPromptActivations(
 // 755 chars + 394 per 400-char entry), a 4000-char budget admits 5 of 11
 // entries (3444 chars). The old fixture assumed the deleted list route billed
 // ~413/entry and admitted 9.
+// PRI-1161: each entry is 86 chars cheaper and the wrapper is +53; the text is
+// scaled by the same 86 so the per-entry cost (and therefore the tuned
+// admitted count) is preserved exactly under the hoisted renderer.
 const FIFO_11 = Array.from({ length: 11 }, (_, i) => ({
   principleId: `P_FIFO_${String(i + 1).padStart(2, '0')}`,
-  text: 'X'.repeat(400),
+  text: 'X'.repeat(486),
 }));
 const FIFO_11_INJECTED = 5;
 

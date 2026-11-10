@@ -371,7 +371,10 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     // PRI-1137: openclaw now bills the shared directive render. The single-item
     // cost is the production serializer's output: a fixed directive wrapper
     // (755 measured) + the entry's id + text.
-    const sharedCost = (textLen: number) => 755 + 'B-1'.length + textLen;
+    // PRI-1161: a single-item render = header +53 AND its one block -86, so
+    // the wrapper is 755 - 33 = 722 (verified against the live serializer).
+    // All tier boundaries below derive from this constant.
+    const sharedCost = (textLen: number) => 722 + 'B-1'.length + textLen;
     const textFor = (cost: number) => 'x'.repeat(cost - sharedCost(0));
     const artifactFor = (text: string) => ({ artifactId: 'art-B-1', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'B-1', text }), validationStatus: 'validated' as const });
 
@@ -416,7 +419,8 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(verdict.route).toBe('shared_render');
       expect(verdict.budgetScope).toBe('full_directive_context');
       // PRI-1137: 1250 chars of text + fixed wrapper + id = 2009 for EVERY host.
-      expect(verdict.costChars).toBe(2009);
+      // PRI-1161: single-item render = header +53, block -86 → 1976 (−33).
+      expect(verdict.costChars).toBe(1976);
     }
   });
 
@@ -430,7 +434,7 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(result.route).toBe('shared_render');
       expect(result.hostKind).toBe('workbuddy');
       expect(result.basis).toBe('explicit_target');
-      expect(result.costChars).toBe(2009);
+      expect(result.costChars).toBe(1976); // PRI-1161: 2009 − 33.
       expect(result.budgetScope).toBe('full_directive_context');
     }
 
@@ -454,22 +458,23 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     }
   });
 
-  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (31759 → 32114)', async () => {
+  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (31726 → 32081)', async () => {
     // The footer costs +355 chars (measured). Scale the text to 31000 so the
-    // plain render (31759) stays inside the 32000 max tier while the footer
-    // render (32114) crosses it — the footer alone flips the verdict.
+    // plain render (31726 after the PRI-1161 single-item −33) stays inside the
+    // 32000 max tier while the footer render (32081) crosses it — the footer
+    // alone flips the verdict.
     const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(31000) }), validationStatus: 'validated' as const };
     const plainDir = tempWorkspace({ declare: ['codex'] });
     const plain = await checkPromptArtifactDeliverability({ workspaceDir: plainDir, artifact });
     expect(plain.status).toBe('model_dependent');
-    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(31759);
+    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(31726);
 
     const selfReportDir = tempWorkspace({ declare: ['codex'], selfReport: true });
     const withFooter = await checkPromptArtifactDeliverability({ workspaceDir: selfReportDir, artifact });
     expect(withFooter.status).toBe('undeliverable');
     if (withFooter.status === 'undeliverable') {
-      expect(withFooter.costChars).toBe(32114);
-      expect(withFooter.overByChars).toBe(114);
+      expect(withFooter.costChars).toBe(32081); // PRI-1161: 32114 − 33.
+      expect(withFooter.overByChars).toBe(81);
     }
   });
 
@@ -480,15 +485,17 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       selfReportEnabled: false,
     });
     // The shared directive render bills the wrapper + the real id + text.
-    const expected = 755 + longTitleId.length + 30;
+    // PRI-1161: single-item wrapper 755 -> 722 (header +53, one block -86).
+    const expected = 722 + longTitleId.length + 30;
     expect(fit.costChars).toBe(expected);
-    expect(fit.costChars).not.toBe(755 + '0'.repeat(36).length + 30);
+    expect(fit.costChars).not.toBe(722 + '0'.repeat(36).length + 30);
   });
 
   it('several host facts → one confirmed verdict: the artifact is judged by the single shared serializer', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
     // PRI-1137: with ONE route there is no per-host divergence to report. An
-    // 800-char statement costs 1559 on the shared render → model_dependent.
+    // 800-char statement costs 1526 on the shared render → model_dependent
+    // (PRI-1161: single-item −33).
     const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(800) }), validationStatus: 'validated' as const };
     const result = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact });
     expect(result.status).toBe('model_dependent');
@@ -496,7 +503,7 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(result.route).toBe('shared_render');
       expect(result.basis).toBe('single_route_all_hosts');
       expect(result.hostKind).toBeUndefined();
-      expect(result.costChars).toBe(1559);
+      expect(result.costChars).toBe(1526);
       expect(result.budgetScope).toBe('full_directive_context');
     }
   });
@@ -538,11 +545,12 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
   });
 
   it('SPEC §6.3 consistency: an entry in (1250, 4000] that fits the fallback estimate is model_dependent — never an unconditional injectable (CodeRabbit review)', async () => {
-    // 1500-char statement → shared cost 2289 (755 wrapper + 26 authority + id +
-    // text): fits the console's fallback projection budget (4000), sits IN the
-    // current window, yet exceeds the measured floor — on a 32K/64K model
-    // (budget = floor) it would NOT inject. The status surface must tell the
-    // Owner exactly what the approval-time precheck tells them: model_dependent.
+    // 1500-char statement → shared cost 2256 (755−33 wrapper + 26 authority +
+    // id + text, PRI-1161): fits the console's fallback projection budget
+    // (4000), sits IN the current window, yet exceeds the measured floor — on a
+    // 32K/64K model (budget = floor) it would NOT inject. The status surface
+    // must tell the Owner exactly what the approval-time precheck tells them:
+    // model_dependent.
     const dir = tempWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'MID-BAND', 'B'.repeat(1500));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
@@ -550,7 +558,7 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     const row = report.statuses[0];
     expect(row.status).toBe('model_dependent');
     expect(row.inCurrentWindow).toBe(true);
-    expect(row.costChars).toBe(2289);
+    expect(row.costChars).toBe(2256);
     expect(row.reason).toContain('model_dependent_capacity');
     expect(row.reason).toContain('fallback-budget estimate');
   });
@@ -587,7 +595,7 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     expect(report.statuses).toHaveLength(1);
     expect(report.statuses[0].status).toBe('injectable');
     expect(report.statuses[0].route).toBe('shared_render');
-    expect(report.statuses[0].costChars).toBe(788);
+    expect(report.statuses[0].costChars).toBe(755); // PRI-1161: 788 − 33.
     expect(report.statuses[0].inCurrentWindow).toBe(true);
   });
 
