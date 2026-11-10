@@ -18,7 +18,7 @@ import type {
   LoadedImplementation,
 } from './rule-host-contracts.js';
 import { validateCorrectionProposal } from './correction-proposal.js';
-import { validateRuleHostResult } from './rule-host-validator.js';
+import { normalizeRuleHostResult } from './rule-host-result-normalizer.js';
 
 export interface DecisionMergeLogger {
   warn?: (_message: string) => void;
@@ -60,20 +60,18 @@ export function mergeDecisions(
 
     for (const impl of implementations) {
       try {
-        const result = impl.evaluate(input);
+        const result = normalizeRuleHostResult(impl.evaluate(input));
 
-        // PRI-437: Defense-in-depth — validate result before accessing fields.
-        // The primary validation is in rule-host.ts at the VM trust boundary,
-        // but this guard protects against any implementation provider that
-        // bypasses the production RuleHost validation path.
-        const validation = validateRuleHostResult(result);
-        if (!validation.valid) {
-          const reason = `invalid RuleHostResult: ${validation.errors.join('; ')}`;
+        // B1: unusable output is fail-closed (requireApproval) instead of being
+        // dropped. Dropping it let another rule's `allow` win the merge, so a
+        // rule that meant to block silently disappeared. The degradation is
+        // still reported as unhealthy — visibility, not silent fallback.
+        if (result.degraded !== undefined) {
+          const reason = `invalid RuleHostResult: ${result.degraded.notes ?? 'unknown invalid result'}`;
           logger?.warn?.(
             `[RuleHost] Implementation ${impl.implId} returned ${reason}`
           );
           logger?.onImplementationUnhealthy?.(impl, reason);
-          continue;
         }
 
         if (!result.matched) {
@@ -131,10 +129,12 @@ export function mergeDecisions(
     }
 
     if (approvals.length > 0) {
+      const degraded = approvals.find((approval) => approval.degraded !== undefined)?.degraded;
       return {
         decision: 'requireApproval',
         matched: true,
         reason: approvals.map((a) => a.reason).join('; '),
+        ...(degraded !== undefined ? { degraded } : {}),
         diagnostics: approvals.reduce<Record<string, unknown>>(
           (acc, a, i) => {
             const prefix = a.ruleId ?? `approval_${i}`;

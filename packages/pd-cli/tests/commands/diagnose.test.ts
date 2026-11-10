@@ -1101,6 +1101,168 @@ describe('pd diagnose run — auto-intake after success', () => {
   });
 });
 
+describe('pd diagnose run --preflight (SPEC v0.8 §9.2)', () => {
+  const BASE_RESOLVED = {
+    result: {
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+    },
+    runtimeProfileId: 'default',
+    runtimeProfileLabel: 'Default',
+    legacyWarnings: [],
+    configSource: '.pd/config.yaml',
+    configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // mockReset (not just clear) so a `mockReturnValueOnce` queued by an
+    // earlier test cannot leak into the preflight verdict.
+    mockResolveRuntimeFromPdConfig.mockReset();
+    mockResolveRuntimeFromPdConfig.mockReturnValue(BASE_RESOLVED);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.isRuntimeConfigError).mockReset();
+    vi.mocked(coreRuntime.isRuntimeConfigError).mockReturnValue(false);
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReset();
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReturnValue({ available: true });
+  });
+
+  it('PRE-01: ok verdict prints machine-readable JSON and constructs no state store', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    const coreRuntime = await import('@principles/core/runtime');
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      preflight: true,
+      json: true,
+    });
+
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.reason).toBeUndefined();
+    expect(parsed.runtimeKind).toBe('pi-ai');
+    expect(parsed.runtimeProfileId).toBe('default');
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(coreRuntime.RuntimeStateManager)).not.toHaveBeenCalled();
+    expect(vi.mocked(coreRuntime.run)).not.toHaveBeenCalled();
+    expect(mockGetTask).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRE-02: capability disabled → exit 1 with capability_disabled and zero state construction', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReturnValueOnce({
+      available: false,
+      reason: 'capability_disabled',
+      message: 'diagnostician disabled by config',
+      nextAction: 'pd config set diagnostician.enabled true',
+    });
+
+    await handleDiagnoseRun({ taskId: 'test-task-1', workspace: '/tmp/fake-workspace', preflight: true, json: true });
+
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toBe('capability_disabled');
+    expect(parsed.nextAction).toBe('pd config set diagnostician.enabled true');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(coreRuntime.RuntimeStateManager)).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRE-03: malformed config → config_malformed with the loader next action', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: { category: 'config_invalid', message: 'broken yaml', nextAction: 'fix .pd/config.yaml' },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: {
+        ok: false,
+        errors: [{ reason: 'yaml parse error', nextAction: 'fix .pd/config.yaml' }],
+      },
+    });
+
+    await handleDiagnoseRun({ taskId: 'test-task-1', workspace: '/tmp/fake-workspace', preflight: true, json: true });
+
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toBe('config_malformed');
+    expect(parsed.message).toBe('yaml parse error');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRE-04: unresolvable runtime binding → runtime_unbound', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
+      result: { category: 'runtime_not_configured', message: 'no model profile', nextAction: 'pd config set models.default' },
+      legacyWarnings: [],
+      configSource: '.pd/config.yaml',
+      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
+    });
+    vi.mocked((await import('@principles/core/runtime')).isRuntimeConfigError).mockReturnValueOnce(true);
+
+    await handleDiagnoseRun({ taskId: 'test-task-1', workspace: '/tmp/fake-workspace', preflight: true, json: true });
+
+    const parsed = JSON.parse(consoleSpy.mock.calls[0][0] as string);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toBe('runtime_unbound');
+    expect(parsed.nextAction).toBe('pd config set models.default');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRE-05: text mode reports the refusal on stderr, not stdout JSON', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+    const coreRuntime = await import('@principles/core/runtime');
+    vi.mocked(coreRuntime.resolveDiagnosticianCapability).mockReturnValueOnce({
+      available: false,
+      message: 'diagnostician disabled by config',
+      nextAction: 'pd config set diagnostician.enabled true',
+    });
+
+    await handleDiagnoseRun({ taskId: 'test-task-1', workspace: '/tmp/fake-workspace', preflight: true });
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(errorSpy.mock.calls.map((call) => String(call[0])).join('\n')).toContain('diagnostician disabled by config');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('PRE-06: the real CLI registration declares --preflight on `diagnose run` (cli-7)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, resolve } = await import('node:path');
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../src/index.ts'), 'utf8');
+    expect(source).toMatch(/\.command\('run'\)[\s\S]*?\.option\('--preflight'/);
+    expect(source).toMatch(/await handleDiagnoseRun\(opts\)/);
+  });
+});
+
 describe('Commander wiring for --no-intake', () => {
   function createDiagnoseProgram(): { program: Command; capturedOpts: Record<string, unknown> } {
     const program = new Command();

@@ -334,6 +334,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // contract, output whitelist, HostAdapter decode/encode for all 4 events).
   // Roll back = set host.codex.enabled: false in .pd/config.yaml.
   { id: 'host.codex', category: 'core', enabled: true, since: '2026-08-11', description: 'ADR-0020: Codex CLI host adapter. Default ON (flipped 2026-08-12 after PRI-282 E2E). Flag-off = pd-hook.js outputs {} + exit 0 + SystemLogger records skip (rc-9). Disable via .pd/config.yaml: host.codex: { enabled: false }.' },
+  // PRI-1170 Adaptive Activation: model-assisted incremental principle selection
+  // on the Codex UserPromptSubmit hook. INDEPENDENT of host.codex (that flag is
+  // the whole PD hook). Default OFF; enabling also requires a complete pi-ai
+  // runtime profile + API key, otherwise the hook stays on Native. Flag-off =
+  // byte-identical Native output and zero model requests.
+  { id: 'host.codex.adaptive_activation', category: 'quiet', enabled: false, since: '2026-11-10', description: 'PRI-1170 Adaptive Activation (Codex UserPromptSubmit). Independent quiet flag, default OFF. Enable via .pd/config.yaml: host.codex.adaptive_activation: { enabled: true } plus a configured internalAgents.defaultRuntime pi-ai profile. Flag-off = native output unchanged, zero model requests.' },
   // WorkBuddy host adapter (SPEC workbuddy-host-adapter v0.3.0, OD-03). Third
   // ADR-0020 host. Quiet, default OFF: install does NOT enable; the user
   // opts in explicitly. Flag-off = the WorkBuddy hook entry emits neutral JSON
@@ -384,6 +390,14 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // Default off; flag-off = no pain_diagnoses writes AND the Stage A prompt
   // is byte-identical to the pre-feature prompt. Roll back = set enabled: false.
   { id: 'pain_diagnosis_persistence', category: 'quiet', enabled: false, since: '2026-08-23', description: 'Persist diagnostician root-cause attribution to pain_diagnoses (state.db, keyed by canonical pain_id) + Evidence First attribution rules in the Stage A prompt. Default off; flag-off = no writes, prompt byte-identical.' },
+  // L3 — automatic diagnosis in OpenClaw (SPEC-PD-AGENT-PAIN-INGRESS-001 §8.4 /
+  // TECHNICAL-DESIGN §8.4). Gates ONE half of the degradation ladder: the
+  // OpenClaw internalization_auto_consumer service runs at most one diagnostician
+  // task per 120s tick. L2 (Console request-driven) is NOT gated by this flag.
+  // Default on: a diagnosed pain is the escalation path an Owner expects after a
+  // pain signal, and flag-off leaves the task pending for L2 (not lost).
+  // Roll back = set features.openclaw_diagnostician_consumer.enabled: false.
+  { id: 'openclaw_diagnostician_consumer', category: 'quiet', enabled: true, since: '2026-11-11', description: 'L3 automatic diagnosis on the OpenClaw consumer tick (≤1 diagnostician task per 120s). Default on; flag-off = tasks stay pending for the Console request-driven path (L2), nothing is dropped.' },
   // Governance Experience Snapshot v1.5.1 (PRI-584~587). Read-only workspace
   // governance experience: batch collector reuses the existing projection
   // (deriveOwnerGovernanceView) once per workspace; GET /api/v1/governance/experience

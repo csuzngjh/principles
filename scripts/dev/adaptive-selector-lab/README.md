@@ -50,3 +50,35 @@ The main builder now sends the identical context as a JSON string. A regression 
 Owner approved the remaining 3 Decisions +6 GLM attempts for dev-02..04 and catalog-proven canonical aliases. The `--execute-approved-final-three` run completed: all nine requests HTTP200; C and D made identical choices, each matching 2/3 of the frozen allowed sets. Cumulative attempts remain decision6 / GLM6, including prior failures. No further real calls are authorized by these consumed flags/claims.
 
 See `PD-AA-PRI-1141-FINAL-DIAGNOSTIC-20261106.md` and the immutable `2026-11-05T23-45-11-762Z/results.json` plus `analysis.json`. The canonical model comes from the selected free catalog row, not guessed suffixes. No generalized accuracy, behavioral improvement, gating savings or production activation claim follows from this small synthetic diagnostic.
+
+## PRI-1122 single-model selection arm (offline)
+
+`orchestrator.mjs` adds an isolated two-mode opportunity runner over the REAL Runtime V2 Reader and the REAL shared assembly: `native` (zero model sends) and `single-model` (one generic-model reference, then PD revalidation + additive assembly). The generic model only returns `{status, id, digest}`; it never owns authorization, revision, dedup, budget or final text.
+
+```powershell
+node --test scripts/dev/adaptive-selector-lab/orchestrator.test.mjs
+node scripts/dev/adaptive-selector-lab/orchestrate.mjs --mode native --workspace <seeded-workspace>
+```
+
+`orchestrate.mjs` refuses a real call without `--execute-approved-20261110` and the credential env, and this delivery has not issued one. Offline evaluation drives the real `PiAiRuntimeAdapter` through `--fixture-response`. Frozen cases, budget card and the NOT RUN report live under `docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-*` and `docs/implementation-reports/PD-AA-PRI-1122-SINGLE-MODEL-SELECTOR-20261110.md`. The historical CLI, fixtures, hashes and consumed approval claims above are unchanged.
+
+### Approved branch (`--mode approved`)
+
+The only real-call path is now a separate mode. It reads everything from the frozen batch and refuses every command-line override of `--workspace`, `--current-input`, `--prior`, `--round-key`, `--budget-chars`, `--fixture-response` and `--approval` (`REAL_BRANCH_ARGUMENT_FORBIDDEN`).
+
+```powershell
+node scripts/dev/adaptive-selector-lab/orchestrate.mjs --mode approved --execute-approved-20261110
+```
+
+- Inputs: `docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-RUN-MANIFEST-v0.1.json` (per-case candidate order, round-key mode, budget rule) plus the frozen cases file, whose SHA-256 the manifest records. A drifted frozen file or a changed run-card version is refused before the claim (`MANIFEST_DRIFT`, `RUN_CARD_VERSION_MISMATCH`).
+- Approval record: `docs/specs/APPROVAL-PRI-1122-SINGLE-MODEL-v0.2.json`, in the repository's existing approval-file shape (`schemaVersion` / `approvedBy` / `approvedAt` / `approvalEvidence` / `cardVersion` / `manifestSha256`, plus the request cap). The flag is only the explicit execute switch; every approval field is read from the record.
+- Order of the boundary: the ACTUAL manifest is hashed and compared with the approval record, then the one-shot claim is created, and only then the first request may leave. Re-freezing the case file and its manifest hash while keeping the old approval is refused before the claim (`APPROVAL_RECORD_INVALID`), and a missing record is `APPROVAL_RECORD_MISSING`.
+- Claim binding: run-card version, full manifest SHA-256, frozen-cases SHA-256, request cap, approval-record SHA-256 and approval reference are written into `APPROVAL-PRI-1122-SINGLE-MODEL-v0.2-CLAIM.json` with an exclusive create. A repeated or concurrent execution is refused before the network (`APPROVAL_ALREADY_CLAIMED`) — the same one-shot claim mechanism as the #2368 runs.
+- Request accounting: one send per opportunity, a cumulative 12-request cap, and a write-ahead ledger entry persisted before the `fetch` call, so failed and timed-out attempts still count.
+- Rollback is `git revert`. Claim and ledger stay as evidence and are never cleaned; a failed claimed batch settles on the actual ledger, and rerunning requires a NEW approval — deleting the claim file does not restore quota.
+- Acceptance is fake-transport only: `approved-run.test.mjs` drives the entry with an injected `fetch` and proves zero requests for unapproved, missing-approval, drifted, re-frozen-with-stale-approval, overridden, repeated and concurrent invocations, plus a refused 13th send. Real measurement stays `NOT RUN` until the budget card is approved.
+
+```powershell
+node --test scripts/dev/adaptive-selector-lab/
+```
+

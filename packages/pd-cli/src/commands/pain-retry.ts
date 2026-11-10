@@ -194,7 +194,8 @@ function parsePainDetectedData(value: unknown):
     const prov = obj.provenance;
     // host_context_bound is the current value (SPEC §12); the legacy
     // openclaw_context_bound spelling remains valid for replay of old dead letters.
-    if (prov !== 'host_context_bound' && prov !== 'openclaw_context_bound' && prov !== 'owner_reported_no_host_trace' && prov !== 'automatic_hook') {
+    if (prov !== 'host_context_bound' && prov !== 'openclaw_context_bound' && prov !== 'owner_reported_no_host_trace' && prov !== 'automatic_hook'
+      && prov !== 'agent_reported_owner_approved') {
       return { valid: false, error: `painData.provenance is not a known literal (got ${JSON.stringify(prov)})` };
     }
     data.provenance = prov === 'openclaw_context_bound' ? 'host_context_bound' : prov;

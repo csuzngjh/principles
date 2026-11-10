@@ -6,6 +6,15 @@ import type { RunRecord, RunStore, TolerantRunListResult } from './run-store.js'
 export class MemoryRunStore implements RunStore {
   private readonly runs = new Map<string, RunRecord>();
 
+  /**
+   * @param taskKindOf Run rows carry no task_kind column, so the SQLite
+   *   task/runs join cannot be reproduced in memory. The caller that seeds
+   *   runs supplies the attribution; when it cannot answer, the run is not
+   *   attributed to any kind (null) rather than guessed — fabricating
+   *   activity would defeat the L2b activity signal.
+   */
+  constructor(private readonly taskKindOf?: (taskId: string) => string | undefined) {}
+
   async createRun(record: Omit<RunRecord, 'createdAt' | 'updatedAt'>): Promise<RunRecord> {
     const now = new Date().toISOString();
     const full: RunRecord = { ...record, createdAt: now, updatedAt: now };
@@ -36,6 +45,15 @@ export class MemoryRunStore implements RunStore {
     const updated: RunRecord = { ...existing, ...patch };
     this.runs.set(runId, updated);
     return updated;
+  }
+
+  async getLatestRunStartedAtForTaskKind(taskKind: string): Promise<string | null> {
+    let latest: string | null = null;
+    for (const run of this.runs.values()) {
+      if (this.taskKindOf?.(run.taskId) !== taskKind) continue;
+      if (latest === null || run.startedAt > latest) latest = run.startedAt;
+    }
+    return latest;
   }
 
   async deleteRun(runId: string): Promise<boolean> {

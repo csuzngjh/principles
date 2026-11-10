@@ -224,6 +224,21 @@ export class SqliteRunStore implements RunStore {
     return { runs, degradedRuns };
   }
 
+  async getLatestRunStartedAtForTaskKind(taskKind: string): Promise<string | null> {
+    const db = this.connection.getDb();
+    const row = db
+      .prepare(`
+        SELECT MAX(r.started_at) AS latest
+        FROM runs r
+        JOIN tasks t ON t.task_id = r.task_id
+        WHERE t.task_kind = ?
+      `)
+      .get(taskKind) as { latest?: unknown } | undefined;
+    // Trust boundary: MAX() of a TEXT column is unknown to us until checked.
+    const latest = row?.latest;
+    return typeof latest === 'string' && latest.length > 0 ? latest : null;
+  }
+
   async deleteRun(runId: string): Promise<boolean> {
     const db = this.connection.getDb();
     const result = db.prepare('DELETE FROM runs WHERE run_id = ?').run(runId);

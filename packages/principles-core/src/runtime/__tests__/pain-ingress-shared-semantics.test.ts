@@ -11,6 +11,12 @@
 import { describe, it, expect } from 'vitest';
 import { evaluatePainIngress, parsePainIngressReport } from '../pain-ingress.js';
 import type { PainIngressReport, IngressEvidenceEntry } from '../pain-ingress.js';
+import {
+  checkIngressTopLevelConsistency,
+  deriveProvenanceFromIngressFacts,
+  parsePainIngressV1Payload,
+  validateOriginCorrelationInvariant,
+} from '../pain-ingress-payload.js';
 
 const SESSION = 'sess-openclaw-1';
 const ENTRIES: [IngressEvidenceEntry, ...IngressEvidenceEntry[]] = [
@@ -130,5 +136,89 @@ describe('Blocking 1 — one semantic authority for both adapters (Cases A–E)'
     const decision = evaluatePainIngress(parsed.report);
     expect(decision.action).toBe('submit');
     expect((ENTRIES as readonly IngressEvidenceEntry[]).length).toBe(2);
+  });
+});
+
+describe('parsePainIngressReport — principle_deviation anchor contract (v0.8 §5.6)', () => {
+  it('requires an anchor for a principle deviation', () => {
+    const parsed = parsePainIngressReport(openclawReport({ painType: 'principle_deviation' }));
+    expect(parsed).toMatchObject({ ok: false, reasonCode: 'anchor_invalid' });
+  });
+
+  it('rejects an anchor with an empty half', () => {
+    const parsed = parsePainIngressReport(openclawReport({
+      painType: 'principle_deviation',
+      deviationAnchor: { principleId: '', principleVersion: '2' },
+    }));
+    expect(parsed).toMatchObject({ ok: false, reasonCode: 'anchor_invalid' });
+  });
+
+  it('rejects an anchor attached to a non-deviation pain type', () => {
+    const parsed = parsePainIngressReport(openclawReport({
+      deviationAnchor: { principleId: 'P1', principleVersion: '2' },
+    }));
+    expect(parsed).toMatchObject({ ok: false, reasonCode: 'anchor_invalid' });
+  });
+
+  it('keeps a complete anchor on the parsed report', () => {
+    const parsed = parsePainIngressReport(openclawReport({
+      painType: 'principle_deviation',
+      deviationAnchor: { principleId: 'P1', principleVersion: '2' },
+    }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.report.deviationAnchor).toEqual({ principleId: 'P1', principleVersion: '2' });
+  });
+});
+
+describe('mcp_agent_assisted provenance (v0.8 §6.6.3)', () => {
+  const MCP_ORIGIN = { kind: 'owner_manual', channel: 'mcp_agent_assisted' } as const;
+  const UNBOUND = { status: 'unbound', reason: 'external_cli' } as const;
+
+  it('parses the channel and derives agent_reported_owner_approved — never owner_reported', () => {
+    const parsed = parsePainIngressReport(openclawReport({
+      origin: MCP_ORIGIN,
+      correlation: UNBOUND,
+      evidence: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(deriveProvenanceFromIngressFacts(parsed.report.origin, parsed.report.correlation))
+      .toBe('agent_reported_owner_approved');
+  });
+
+  it('rejects an MCP origin that claims a bound host session', () => {
+    expect(validateOriginCorrelationInvariant(MCP_ORIGIN, {
+      status: 'bound',
+      hostKind: 'openclaw',
+      sessionId: SESSION,
+    })).toBe('origin_correlation_mismatch');
+  });
+
+  it('applies the same invariant on persisted v1 re-entry', () => {
+    const rejected = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: MCP_ORIGIN,
+      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: SESSION },
+      evidenceClass: { status: 'available', entryCount: 1 },
+    });
+    expect(rejected).toEqual({ ok: false, reasonCode: 'origin_correlation_mismatch' });
+  });
+
+  it('round-trips through the v1 payload with a consistent top-level provenance', () => {
+    const parsed = parsePainIngressV1Payload({
+      version: 'v1',
+      origin: MCP_ORIGIN,
+      correlation: UNBOUND,
+      evidenceClass: { status: 'unavailable', reason: 'not_applicable_unbound' },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(checkIngressTopLevelConsistency({
+      payload: parsed.payload,
+      topLevelProvenance: 'agent_reported_owner_approved',
+      topLevelSessionIdHint: null,
+      topLevelEvidenceCount: 0,
+    })).toBeNull();
   });
 });

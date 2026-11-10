@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getDefaultPdConfig } from '@principles/core/runtime';
+import { getDefaultPdConfig, DIAGNOSTICIAN_FAIR_SHARE_SCOPE } from '@principles/core/runtime';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
 import { createRuntimeStateHandle } from '@principles/core/runtime';
 void vi;
@@ -57,10 +57,10 @@ describe('review round-3: fair-share pick with persisted rotation cursor', () =>
     // Cycle 1 (fresh process equivalent: new handle each cycle = restart).
     const handle1 = await createRuntimeStateHandle({ workspaceDir: root, readonly: false });
     try {
-      const cursorBefore = await handle1.stateManager.getDiagnosticianServiceCursor('codex-worker-diagnostician-fair-share');
+      const cursorBefore = await handle1.stateManager.getDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE);
       void cursorBefore;
       await runCodexWorkspaceWorkerCycle({ workspaceDir: root });
-      const cursor1 = await handle1.stateManager.getDiagnosticianServiceCursor('codex-worker-diagnostician-fair-share');
+      const cursor1 = await handle1.stateManager.getDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE);
       expect(cursor1).not.toBeNull();
       served.push(cursor1!.lastTaskId);
     } finally {
@@ -70,7 +70,7 @@ describe('review round-3: fair-share pick with persisted rotation cursor', () =>
     const handle2 = await createRuntimeStateHandle({ workspaceDir: root, readonly: false });
     try {
       await runCodexWorkspaceWorkerCycle({ workspaceDir: root });
-      const cursor2 = await handle2.stateManager.getDiagnosticianServiceCursor('codex-worker-diagnostician-fair-share');
+      const cursor2 = await handle2.stateManager.getDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE);
       expect(cursor2).not.toBeNull();
       served.push(cursor2!.lastTaskId);
       // Rotation: the two cycles served DIFFERENT classes.
