@@ -9,6 +9,10 @@
  * - Graceful degradation includes a reason (Rule 9)
  */
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
+import type {
+  CompatibilityScanUnscannableView,
+  CompatibilityScanViewData,
+} from '../../shared/compatibility-scan-contract.js';
 
 /**
  * PRI-1139 read-side whitelist for governance/owner-decision `schemaVersion`
@@ -3951,6 +3955,47 @@ export function validateOwnerDecisionsData(v: unknown): OwnerDecisionsData | nul
     }
   }
   return { items, total: v.total, generatedAt: v.generatedAt, readIssues };
+}
+
+// ── 5B-F: rule compatibility scan view (read-only endpoint) ─────────────────
+
+const COMPATIBILITY_SCAN_STATUSES = new Set<string>([
+  'clean',
+  'incomplete',
+  'legacy_dependency',
+  'no_state_db',
+  'scan_failed',
+]);
+
+export function validateCompatibilityScanView(v: unknown): CompatibilityScanViewData | null {
+  if (!isObject(v)) return null;
+  const { status } = v;
+  if (!isString(status) || !COMPATIBILITY_SCAN_STATUSES.has(status)) return null;
+  const { scannedActivations } = v;
+  const { findingsTotal } = v;
+  if (!isNumber(scannedActivations) || !Number.isInteger(scannedActivations) || scannedActivations < 0) return null;
+  if (!isNumber(findingsTotal) || !Number.isInteger(findingsTotal) || findingsTotal < 0) return null;
+  if (!Object.hasOwn(v, 'unscannable') || !Array.isArray(v.unscannable)) return null;
+  const unscannable: CompatibilityScanUnscannableView[] = [];
+  for (const entry of v.unscannable) {
+    if (!isObject(entry)) return null;
+    const { reason } = entry;
+    const { count } = entry;
+    if (!isString(reason) || reason.length === 0) return null;
+    if (!isNumber(count) || !Number.isInteger(count) || count <= 0) return null;
+    if (!Object.hasOwn(entry, 'sampleActivationIds') || !Array.isArray(entry.sampleActivationIds)) return null;
+    if (!entry.sampleActivationIds.every((id: unknown) => isString(id))) return null;
+    unscannable.push({ reason, count, sampleActivationIds: [...entry.sampleActivationIds] as string[] });
+  }
+  const view: CompatibilityScanViewData = {
+    status: status as CompatibilityScanViewData['status'],
+    scannedActivations,
+    unscannable,
+    findingsTotal,
+  };
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) view.reason = v.reason;
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) view.nextAction = v.nextAction;
+  return view;
 }
 
 export interface OwnerResolutionResultData {
