@@ -1,6 +1,6 @@
 {
   "name": "create-principles-disciple",
-  "version": "1.148.9",
+  "version": "1.148.10",
   "description": "Interactive CLI installer for Principles Disciple OpenClaw plugin",
   "type": "module",
   "bin": {
@@ -63,7 +63,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.2.0",
     "@earendil-works/pi-ai": "1.4.0",
-    "@principles/install-layout": "^0.5.0",
+    "@principles/install-layout": "^0.6.0",
     "@sinclair/typebox": "^0.34.52",
     "@tufjs/models": "3.0.1",
     "@inquirer/prompts": "^8.7.2",
