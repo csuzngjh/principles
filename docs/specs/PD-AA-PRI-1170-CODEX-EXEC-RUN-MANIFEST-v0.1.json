@@ -1,0 +1,87 @@
+{
+  "schema": "pd-pri1170-codex-exec-run-manifest/v0.1",
+  "ticket": "PRI-1170",
+  "status": "FROZEN_NOT_EXECUTED",
+  "frozenAt": "2026-11-11T07:51:01+08:00",
+  "runCard": {
+    "version": "v0.1",
+    "file": "docs/specs/PD-AA-PRI-1170-CODEX-EXEC-RUN-CARD-v0.1.md",
+    "sha256": "c51fd02a57e868a231849f0b189e4896613580c2ff22122c1a84ca5c4204af88"
+  },
+  "frozenCases": {
+    "file": "docs/specs/PD-AA-PRI-1170-CODEX-EXEC-FROZEN-CASES-v0.1.json",
+    "sha256": "b7060f726db5e4b3e8202aef1845991227900a4fe18eabd3db542ad81d102bc6"
+  },
+  "selectedCaseIds": [
+    "exec-append",
+    "exec-abstain",
+    "exec-nofit"
+  ],
+  "limits": {
+    "maxTotalRequests": 3,
+    "perCaseWallClockMs": 5000,
+    "batchWallClockMs": 20000,
+    "firstByteTimeoutMs": 10000,
+    "generationTimeoutMs": 10000,
+    "maxOutputTokens": 512,
+    "maxRetries": 0,
+    "maxRepairAttempts": 0,
+    "providerFallback": 0,
+    "modelSwitch": 0
+  },
+  "transport": {
+    "provider": "zai-coding-plan",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "model": "glm-5.3-flash",
+    "apiKeyEnv": "ZAI_CODING_CN_API_KEY",
+    "stream": true,
+    "temperature": 0,
+    "reasoning": "low"
+  },
+  "host": {
+    "hookEvent": "UserPromptSubmit",
+    "hookTimeoutSec": 5,
+    "hookTimeoutSource": "plugins/principles-disciple/hooks/hooks.json",
+    "entryPath": "packages/codex-adapter/src/pd-hook.ts::processHookInvocation",
+    "sharedSelection": "packages/host-runtime/src/adaptive-selection.ts::runAdaptiveSelection",
+    "sharedProvider": "packages/host-runtime/src/adaptive-priority-provider.ts::createAdaptivePriorityProviderForConfig"
+  },
+  "executionVersion": {
+    "mergedCommit": "9ae19367f2c7feb03517a15cefb449b4f4398bb8",
+    "mergedTree": "a51e3e5b0df63ff7e9a6f79e12aef69a2b20d1c1",
+    "baseHead": "09e7ac968",
+    "runnerPath": "scripts/dev/adaptive-selector-lab/pd-hook-approved-run.mjs",
+    "runnerSha256": "824b4c9323d65b16dba5d99ef6f81fddd2ca4702c1e37c95547a381255b28df0"
+  },
+  "outbound": {
+    "dataClass": "ISOLATED_FIXTURE_ONLY",
+    "included": [
+      "fixed merged selection system prompt",
+      "frozen current-turn prompt (<= 6000 chars)",
+      "up to 12 candidates as {ref, text <= 600 chars, digest=sha256(sent text)}"
+    ],
+    "excluded": [
+      "conversation history",
+      "prior messages",
+      "real user files",
+      "persona or memory",
+      "credentials",
+      "raw provider responses",
+      "production ticket content"
+    ]
+  },
+  "costBasis": {
+    "model": "glm-5.3-flash",
+    "assertedAmount": "unknown",
+    "unit": "server-reported usage only (prompt_tokens/completion_tokens/total_tokens)",
+    "note": "No monetary price is inferred when the response carries none. Previous PRI-1122 12-request quota is consumed and not reusable."
+  },
+  "stopRules": [
+    "any approval/hash/version drift refuses before any request",
+    "request cap 3 is enforced write-ahead before the network call",
+    "per-case 5s host deadline aborts the transport and keeps Native",
+    "batch 20s wall clock marks the remaining cases NOT_RUN",
+    "protocol or timeout failure closes the batch without extra requests",
+    "zero retries, zero repair, zero provider fallback, zero model switching"
+  ]
+}

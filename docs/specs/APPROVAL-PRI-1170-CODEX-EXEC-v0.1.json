@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "pd-pri1170-codex-exec-approval/v1",
+  "ticket": "PRI-1170",
+  "approvedBy": "Owner",
+  "approvedAt": "2026-11-11T07:51:01+08:00",
+  "approvalEvidence": "Owner 2026-11-11 批准 PRI-1170 小批真实验收：按四条执行，无需逐条请示；硬上限 3 次实际请求，仅隔离夹具，零重试、零换模型；旧 12 次额度已消费，不得复用。",
+  "cardVersion": "v0.1",
+  "manifestFile": "docs/specs/PD-AA-PRI-1170-CODEX-EXEC-RUN-MANIFEST-v0.1.json",
+  "manifestSha256": "c397ad1bed8e2655a64fe1863d6b62580249c7e6d0ab077529b57e75288f816a",
+  "frozenCasesSha256": "b7060f726db5e4b3e8202aef1845991227900a4fe18eabd3db542ad81d102bc6",
+  "runnerSha256": "824b4c9323d65b16dba5d99ef6f81fddd2ca4702c1e37c95547a381255b28df0",
+  "maxTotalRequests": 3,
+  "perCaseWallClockMs": 5000,
+  "batchWallClockMs": 20000,
+  "maxOutputTokensPerRequest": 512,
+  "transport": {
+    "provider": "zai-coding-plan",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "model": "glm-5.3-flash"
+  },
+  "costBasis": "provider-reported usage only; monetary amount unknown; low-cost model fixed by this record",
+  "priorQuota": "PRI-1122 12-request quota consumed; not reusable",
+  "scope": "Only the three frozen representative cases support this acceptance judgment. TUI, real-host request delivery and behavior-improvement claims keep their prior evidence status.",
+  "expiresAt": "2026-11-12T07:51:01+08:00",
+  "approvedCaseIds": [
+    "exec-append",
+    "exec-abstain",
+    "exec-nofit"
+  ]
+}
