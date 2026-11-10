@@ -41,12 +41,13 @@ class FakeState implements DiagnosticianCandidateStatePort {
   ) {}
 
   async listTasks(options: Parameters<DiagnosticianCandidateStatePort['listTasks']>[0]): Promise<TaskRecord[]> {
+    const filter = options ?? {};
     const filtered = this.tasks.filter(
-      (candidate) => candidate.taskKind === options.taskKind
-        && (options.status === undefined || candidate.status === options.status),
+      (candidate) => candidate.taskKind === filter.taskKind
+        && (filter.status === undefined || candidate.status === filter.status),
     );
     filtered.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-    return filtered.slice(0, options.limit ?? filtered.length);
+    return filtered.slice(0, filter.limit ?? filtered.length);
   }
 
   async getDiagnosticianServiceCursor(scope: string): Promise<Cursor> {
@@ -59,7 +60,9 @@ class FakeState implements DiagnosticianCandidateStatePort {
     scope: string,
     value: { lastUpdatedAt: string; lastTaskId?: string },
   ): Promise<void> {
-    this.cursor = value;
+    this.cursor = value.lastTaskId === undefined
+      ? null
+      : { lastUpdatedAt: value.lastUpdatedAt, lastTaskId: value.lastTaskId };
     this.cursorWrites.push({ scope, value });
   }
 }
