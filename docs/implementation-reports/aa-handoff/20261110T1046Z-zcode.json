@@ -31,13 +31,20 @@
     "fullCheckChanged": "last complete run exit 1; sole red = dead export scan; NOT rerun after fixes (scan cannot finish in bounded time on this box)",
     "skipDeadcode": "OPENCLAW_CHECK_CHANGED_SKIP_DEADCODE=1 pnpm check:changed → exit 0 on final state (log .tmp/check-changed-skip-deadcode-4.log)",
     "deadcodeDiagnosis": {
+      "statementSplit": "three separate records: full-tree findings / production timeout / partial gate",
       "scriptScan": "passed, 0 entries",
-      "fullTreeScan": "10 unused exports, all in files untouched by the patch; 0 of the 10 symbols appear in the patch files' baseline versions; diff is pure additions (no removed export/import)",
-      "productionScan": "timed out after 600s and was terminated — the source of 'failed:1 / 600.21s'",
+      "fullTreeScan": "10 unused exports, NO direct overlap with the patch: all in files untouched by it; 0 of the 10 symbols appear in the patch files' baseline versions; diff is pure additions (no removed export/import)",
+      "productionScan": "timed out after 600s and was terminated — ATTRIBUTION UNDETERMINED: the scan never completed, so its (potential) findings cannot be ruled in or out for this patch; direct source of 'failed:1 / 600.21s'",
       "runner": "hung in terminating after the timeout; stopped at the 5-minute cutoff; leftover knip processes 0",
-      "baselineContrastRun": "not performed — attribution already settled by zero symbol overlap + pure-addition diff",
+      "skipDeadcode": "partial gate passes (exit 0 on final state)",
+      "baselineContrastRun": "not performed — full-tree attribution settled by zero symbol overlap + pure-addition diff; the production scan produced no output to compare",
       "fullLog": ".tmp/deadcode-with-patch.log"
     }
+  },
+  "recoveryPathCheck": {
+    "question": "can a rebuilt recorder be provably attributed to the current turn on existing recovery paths?",
+    "answer": "no old-turn recorder reuse mechanism exists — restart-resume injects a NEW resume turn (session-restart-resume.ts:75-77 fixed text, normal recording path, new sourceId → new key); in-run retry uses the SAME recorder instance (dispatch-layer verified); reply-input-admission.ts:84 treats already-persisted recorders idempotently; all 15 non-test files touching restartRecovery are session-slot/lifecycle orchestration, none rebuild an old turn's recorder",
+    "verdict": "NO COMMIT BLOCKER — remaining gap is a missing fixture, filed as an upstream review question (should a regression test pin recovery-path identity semantics)"
   },
   "retryRebuildEvidence": {
     "inRunRetry": "dispatch-layer verified — real prepareAndDispatchEmbeddedRunAttempt hands the same recorder instance to every attempt (toBe); later run gets its own; the run-loop per-attempt '{...params}' spread (run-loop.ts:305-311) is mirrored in the test, the real run-loop function is not driven",
