@@ -370,6 +370,12 @@ export {
   DIAGNOSTICIAN_CAPABILITY_DISABLED,
   type DiagnosticianCapability,
 } from './diagnostician-capability.js';
+// Diagnostician candidate selection shared by the Codex worker and OpenClaw L3
+export {
+  DIAGNOSTICIAN_FAIR_SHARE_SCOPE,
+  pickDiagnosticianCandidate,
+  type DiagnosticianCandidateStatePort,
+} from './diagnostician-candidate.js';
 // Runtime Adapter (M4)
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
 export type { TestDoubleBehaviorOverrides } from './adapter/index.js';

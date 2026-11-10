@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 1993,
+  "count": 1996,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -261,6 +261,7 @@
     "DIAGNOSTICIAN_CAPABILITY_DISABLED",
     "DIAGNOSTICIAN_EDGES",
     "DIAGNOSTICIAN_ENVELOPE_KEYS",
+    "DIAGNOSTICIAN_FAIR_SHARE_SCOPE",
     "DIAGNOSTICIAN_STAGE_KINDS",
     "DREAMER_L2_TOOL_WHITELIST",
     "DailyStats",
@@ -332,6 +333,7 @@
     "DiagnosticianBacklogHealth",
     "DiagnosticianBacklogOptions",
     "DiagnosticianBacklogSnapshot",
+    "DiagnosticianCandidateStatePort",
     "DiagnosticianCapability",
     "DiagnosticianCommitter",
     "DiagnosticianContextPayload",
@@ -1864,6 +1866,7 @@
     "parsePainIngressV1Payload",
     "parseSeedSourcePainId",
     "persistPainDiagnosis",
+    "pickDiagnosticianCandidate",
     "planOwnerVerdictOverrideResume",
     "preflightArtificerIntentBasis",
     "preflightArtificerOwnerEvidence",

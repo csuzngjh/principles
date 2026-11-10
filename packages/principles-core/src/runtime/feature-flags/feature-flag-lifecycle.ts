@@ -238,6 +238,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Root-cause attribution proven accurate in dogfood pain diagnoses',
     retirementCriteria: 'Attribution persistence direction descoped',
   },
+  openclaw_diagnostician_consumer: {
+    decision: 'KEEP_QUIET',
+    consumers: ['openclaw-plugin internalization_auto_consumer service tick', 'host-runtime runPendingDiagnosticianOnce'],
+    evidence: 'SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §8.4: L3 automatic diagnosis is the default escalation path; shipped default-on because the pre-feature behaviour had NO automatic diagnosis at all, so enabling cannot regress an existing flow. Flag-off degrades to L2 (Console request-driven) with tasks left pending, never dropped.',
+    decided: '2026-11-11',
+    graduationCriteria: 'Real OpenClaw workspace evidence: at least one pain submitted via pd_submit_pain is automatically diagnosed by the consumer tick (T36 served with a real task transition, not only the reason string) — only then promote to GRADUATE',
+    retirementCriteria: 'L3 automatic diagnosis is removed from the product, or the ladder becomes fully request-driven',
+  },
   governance_experience_v1: {
     decision: 'GRADUATE',
     consumers: ['pd-console/src/server/routes/governance* experience endpoint', 'pd-console Focus page'],

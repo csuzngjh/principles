@@ -43,6 +43,7 @@ export * from './host-liveness-contract.js';
 // auto-consumer + Companion workspace worker call the same cycle).
 export * from './internalization-consumer-governance.js';
 export * from './internalization-consumer-cycle.js';
+export * from './diagnostician-auto-run.js';
 // PRI-634-F R2: durable host-authored tool declaration — hosts persist, host-
 // neutral consumers (pd-cli/pd-console) resolve through the ONE resolver.
 export * from './host-tool-declaration.js';
