@@ -76,8 +76,8 @@
     "compile-principles": "node scripts/compile-principles.mjs"
   },
   "devDependencies": {
-    "@principles/core": "^6.0.1",
-    "@principles/host-runtime": "^3.1.3",
+    "@principles/core": "^7.0.0",
+    "@principles/host-runtime": "^3.2.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",
