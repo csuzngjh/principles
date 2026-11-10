@@ -10,7 +10,7 @@
  */
 'use strict';
 
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -353,6 +353,77 @@ function resolvePluginSourceSnapshot(pluginRoot) {
   };
 }
 
+/** Versions of the CANONICAL shared runtime (`~/.pd/runtime`) — the PD release
+ *  this machine actually installed.
+ *
+ *  Comparing a local marketplace SOURCE's pins against these versions answers
+ *  "is my source behind the release?" with no network call. Before 2026-11-11
+ *  pd-status only compared the installed cache with its source, so a source
+ *  that was itself stale still produced "matches marketplace source" — a false
+ *  comfort the Owner explicitly rejected.
+ */
+function readCanonicalRuntimeVersions() {
+  const runtimeDir = path.join(os.homedir(), '.pd', 'runtime');
+  const dirNames = { codexAdapter: 'codex-adapter', hostRuntime: 'host-runtime', core: 'core', mcpServer: 'pd-mcp-server' };
+  const read = (dirName) => {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(runtimeDir, dirName, 'package.json'), 'utf8'));
+      return typeof pkg?.version === 'string' ? pkg.version : 'unknown';
+    } catch {
+      return 'not-installed';
+    }
+  };
+  return {
+    codexAdapter: read(dirNames.codexAdapter),
+    hostRuntime: read(dirNames.hostRuntime),
+    core: read(dirNames.core),
+    mcpServer: read(dirNames.mcpServer),
+  };
+}
+
+/** Pins that trail the canonical runtime, one row per component ([] = current
+ *  or not comparable). Used to detect a stale marketplace SOURCE checkout. */
+function findPinsBehindCanonical(pins, canonical) {
+  if (!pins || typeof pins !== 'object' || !canonical || typeof canonical !== 'object') return [];
+  const rows = [];
+  for (const key of ['codexAdapter', 'hostRuntime', 'core', 'mcpServer']) {
+    const pinned = pins[key];
+    const release = canonical[key];
+    if (typeof pinned !== 'string' || typeof release !== 'string') continue;
+    if (pinned === 'not-installed' || release === 'not-installed' || release === 'unknown') continue;
+    if (compareVersionDirs(pinned, release) < 0) rows.push({ key, pinned, release });
+  }
+  return rows;
+}
+
+/** How far a local marketplace SOURCE checkout trails its own `origin/main` ref.
+ *
+ *  The snapshot check compares cache vs source; when both are identical it
+ *  still cannot tell whether the SOURCE itself is stale (2026-11-11 gap). This
+ *  answers that from LOCAL git state only — no network, no fetch: `origin/main`
+ *  is whatever the last fetch recorded, which is the checkout's own knowledge
+ *  of upstream. Non-git sources are `comparable: false` (unverifiable, never a
+ *  stale guess), and any git failure degrades to that same state (rc-9). */
+function readCheckoutBehindOrigin(sourceDir) {
+  const git = (args) => spawnSync('git', ['-C', sourceDir, ...args], {
+    encoding: 'utf8', timeout: 5_000, windowsHide: true,
+  });
+  const inside = git(['rev-parse', '--is-inside-work-tree']);
+  if (inside.status !== 0 || String(inside.stdout).trim() !== 'true') {
+    return { comparable: false, reason: 'not_a_git_checkout' };
+  }
+  const head = git(['rev-parse', 'HEAD']);
+  const origin = git(['rev-parse', '--verify', '--quiet', 'origin/main']);
+  if (head.status !== 0 || origin.status !== 0) {
+    return { comparable: false, reason: 'origin_main_ref_unavailable' };
+  }
+  const behind = git(['rev-list', '--count', 'HEAD..origin/main']);
+  if (behind.status !== 0 || !/^\d+$/.test(String(behind.stdout).trim())) {
+    return { comparable: false, reason: 'origin_main_comparison_failed' };
+  }
+  return { comparable: true, behind: Number(String(behind.stdout).trim()) };
+}
+
 /** An initialized user workspace takes precedence; otherwise use the nearest project. */
 function locateWorkspace(startDir) {
   const userWorkspace = path.join(codexDir(), 'pd-workspace');
@@ -459,6 +530,7 @@ module.exports = {
   codexDir,
   compareVersionDirs,
   ensurePluginData,
+  findPinsBehindCanonical,
   locatePluginData,
   locatePluginRoot,
   locateWorkspace,
@@ -466,6 +538,8 @@ module.exports = {
   pdEntryFromGlobalRoot,
   pdEntryFromPath,
   pdEntryFromShimLines,
+  readCanonicalRuntimeVersions,
+  readCheckoutBehindOrigin,
   readInstalledRuntimeVersions,
   readMarketplaceSources,
   requireFlagValue,
