@@ -62,6 +62,41 @@ const REUSE_EVALUATION_KEYS: ReadonlySet<string> = new Set(['enabled', 'runtimeP
  */
 const PROMPT_BUDGET_KEYS: ReadonlySet<string> = new Set(['declaredContextWindowTokens', 'hosts']);
 
+/**
+ * Closed-world key set for `runtimeProfiles.*` pi-ai profiles.
+ *
+ * This is a compile-time exhaustive table (`Record<keyof PdLocalRuntimeProfile, true>`),
+ * not a hand-maintained string list: adding a field to `PdLocalRuntimeProfile`
+ * fails typechecking until the field is registered here. The validator then
+ * self-checks "every supplied field is present in the validated result", so a
+ * field that is registered but not copied into the constructor fails LOUD
+ * instead of disappearing (incident 2026-11-10: `systemPrompt` was declared and
+ * consumed downstream but silently dropped by the validator).
+ */
+const PROFILE_FIELDS: Record<keyof PdLocalRuntimeProfile, true> = {
+  type: true,
+  provider: true,
+  model: true,
+  apiKeyEnv: true,
+  baseUrl: true,
+  timeoutMs: true,
+  maxRetries: true,
+  maxTokens: true,
+  reasoning: true,
+  systemPrompt: true,
+};
+
+/**
+ * Fields intentionally NOT copied from the raw profile into the validated one.
+ *
+ * MUST stay empty. Every entry is a sanctioned silent drop, and each entry is
+ * exactly the kind of hiding place this self-check exists to eliminate — a
+ * non-empty exclusion set is the next silent-leak surface. Adding an entry
+ * requires a test proving the drop is intended.
+ */
+const PROFILE_FIELD_EXCLUSIONS: ReadonlySet<keyof PdLocalRuntimeProfile> =
+  new Set<keyof PdLocalRuntimeProfile>();
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -290,12 +325,30 @@ function validatePdLocalProfile(
     errors.push(err(`${path}.reasoning`, `profile '${profileId}' reasoning must be one of: ${VALID_REASONING_LEVELS.join(', ')} or false, got ${safePreview(reasoning)}`, `Fix reasoning in profile '${profileId}'`));
   }
 
+  // Optional profile-level system prompt (DPB-07: the system prompt belongs to
+  // the agent profile). Consumed by createAdapterConfigFromProfile → adapter
+  // config, so it must survive validation (incident 2026-11-10: it did not).
+  const systemPrompt = readOwn(raw, 'systemPrompt');
+  if (systemPrompt !== undefined && !isString(systemPrompt)) {
+    errors.push(err(`${path}.systemPrompt`, `profile '${profileId}' systemPrompt must be a string, got ${safePreview(systemPrompt)}`, `Fix systemPrompt in profile '${profileId}'`));
+  }
+
   // Reject raw secret values
   const forbiddenValueKeys = ['apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token', 'secret', 'password', 'auth'];
   for (const fk of forbiddenValueKeys) {
     if (Object.hasOwn(raw, fk)) {
       errors.push(err(`${path}.${fk}`, `profile '${profileId}' contains forbidden secret field '${fk}'`, `Remove '${fk}' from profile '${profileId}' — use 'apiKeyEnv' for env var name reference (ADR-0016 §2.2)`));
     }
+  }
+
+  // Closed-world keys: an unrecognized key is a config error, not a silent drop
+  // (rc-3). Without this, a misspelled field looks configured while nothing
+  // reads it. Forbidden secret keys already reported above are skipped so the
+  // operator sees the precise reason instead of a duplicate "unknown field".
+  for (const key of Object.keys(raw)) {
+    if (Object.hasOwn(PROFILE_FIELDS, key)) continue;
+    if (forbiddenValueKeys.includes(key)) continue;
+    errors.push(err(`${path}.${key}`, `profile '${profileId}' has unknown field '${key}'`, `Remove '${key}' from profile '${profileId}', or fix its spelling`));
   }
 
   if (errors.length > 0) {
@@ -313,6 +366,26 @@ function validatePdLocalProfile(
   if (isNumber(maxRetries)) result.maxRetries = maxRetries;
   if (isNumber(maxTokens)) result.maxTokens = maxTokens;
   if (reasoning !== undefined) result.reasoning = reasoning as PdLocalRuntimeProfile['reasoning'];
+  if (isString(systemPrompt)) result.systemPrompt = systemPrompt;
+
+  // "Supplied ⊆ result" self-check. PROFILE_FIELDS is exhaustive over
+  // `keyof PdLocalRuntimeProfile`, so a field added to the interface cannot be
+  // forgotten here: it either typechecks in the table and is copied above, or
+  // this check fails loud for any config that supplies it.
+  const dropped = Object.keys(raw).filter(
+    (key) =>
+      Object.hasOwn(PROFILE_FIELDS, key) &&
+      raw[key] !== undefined &&
+      !PROFILE_FIELD_EXCLUSIONS.has(key as keyof PdLocalRuntimeProfile) &&
+      !Object.hasOwn(result, key),
+  );
+  if (dropped.length > 0) {
+    return {
+      ok: false,
+      errors: dropped.map((key) =>
+        err(`${path}.${key}`, `profile '${profileId}' field '${key}' was read but not copied into the validated result`, `Fix validatePdLocalProfile: copy '${key}' into the result (see PROFILE_FIELDS)`)),
+    };
+  }
   return { ok: true, value: result };
 }
 
@@ -348,6 +421,16 @@ function validateRuntimeProfile(
 
 // ── Internal Agent Binding Validation ───────────────────────────────────────
 
+/**
+ * Closed-world key set for `internalAgents.agents.<name>` bindings.
+ * Compile-time exhaustive (same reason as PROFILE_FIELDS): a field added to
+ * `InternalAgentBinding` cannot be forgotten here.
+ */
+const INTERNAL_AGENT_BINDING_FIELDS: Record<keyof InternalAgentBinding, true> = {
+  enabled: true,
+  runtimeProfile: true,
+};
+
 function validateInternalAgentBinding(
   raw: unknown,
   path: string,
@@ -369,6 +452,13 @@ function validateInternalAgentBinding(
   const runtimeProfileRaw = readOwn(raw, 'runtimeProfile');
   if (runtimeProfileRaw !== undefined && !isString(runtimeProfileRaw)) {
     errors.push(err(`${path}.runtimeProfile`, `agent '${agentName}' runtimeProfile must be a string, got ${typeof runtimeProfileRaw}`, `Fix runtimeProfile of agent '${agentName}' to a profile ID`));
+  }
+
+  // Closed-world keys (same posture as profiles, reuseEvaluation and
+  // promptBudget): a key nothing reads is ghost configuration, not a no-op.
+  for (const key of Object.keys(raw)) {
+    if (Object.hasOwn(INTERNAL_AGENT_BINDING_FIELDS, key)) continue;
+    errors.push(err(`${path}.${key}`, `agent '${agentName}' has unknown field '${key}'`, `Remove '${key}' from agent '${agentName}', or fix its spelling`));
   }
 
   if (errors.length > 0) {
