@@ -1,7 +1,7 @@
 # 配置字段静默丢弃：结构性修法方案与影响面
 
 - 日期：2026-11-10
-- 状态：**只出方案与影响面，未实施**
+- 状态：**已裁定（Owner 2026-11-10），按 §9 实施，独立 PR**
 - 关联：`docs/plans/2026-11-10-architecture-complexity-remediation-plan.md`（Phase 3A / 事故 #2）
 - 结论级别：给 Owner 决策的输入，不是排期
 
@@ -326,8 +326,16 @@ New external capability:      NO
 
 ---
 
-## 9. 待 Owner 决定的三件事
+## 9. Owner 裁定（2026-11-10，已决）
 
-1. 采 C（+ 编译期表），还是直接上 A'？
-2. `splitPipelineTimeoutMs` 走向 (a) 实现消费者 / (b) 删除？
-3. 未知键的处理姿态：立即 error（与 5 个既有 section 一致），还是先 warning 一个版本？
+1. **采 C（+ 编译期穷尽表）**，作为独立 PR 实施；不采用 A'。
+2. `splitPipelineTimeoutMs` → **(b) 从类型删除**，不实现消费者。release note 明写"该字段自引入起从未被读取"。
+3. 未知键 → **立即 error**（与 5 个既有 section 一致），按行为变更记 `changeset minor`。
+
+附加约束（Owner 原话要点）：
+
+- 排除项今天必须是空集，并有"为空"的测试；排除表一旦有内容就是下一个静默漏水点，这条写进代码注释。
+- 红→绿必须先证明"今天两个字段都会丢"（`systemPrompt`、`splitPipelineTimeoutMs`），改后必须保留且未知键报错。
+- 结构性保护测试若只能靠编译期穷尽表实现，必须写明"它靠类型系统，不是运行时测试"，不许写成"测试已覆盖"。
+- 不动 `effective.ts`、redaction、20+ 处 profile 重建点。
+- 配置修复 PR 独立建，不与 2B-a 混在同一个 PR。
