@@ -9,20 +9,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import * as yaml from 'js-yaml';
-import {
-  SqliteActivationStateStore,
-  SqliteConnection,
-  getDefaultPdConfig,
-  resolvePromptBudget,
-  measureSharedDirectiveBlockChars,
-  sharedDirectiveBaseChars,
-} from '@principles/core/runtime';
-import { escapeXml } from '@principles/core/prompt-builder';
+import { resolvePromptBudget } from '@principles/core/runtime';
 import {
   buildActivePrinciplePromptContext,
   readPromptActivationCandidates,
 } from '@principles/host-runtime';
+import {
+  measureFixtureCosts as costs,
+  mutateFixtureDb as mutateDb,
+  seedFixtureWorkspace as seedWorkspace,
+} from './fixture-workspace.mjs';
 import { PiAiRuntimeAdapter } from '../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js';
 import {
   LIMITS,
@@ -50,50 +46,6 @@ const tempWorkspace = (label) => {
   return fs.mkdtempSync(path.join(os.tmpdir(), `pri1122-${label}-${counter}-`));
 };
 
-async function seedWorkspace(workspaceDir, specs) {
-  fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
-  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(getDefaultPdConfig()), 'utf8');
-  const connection = new SqliteConnection(workspaceDir);
-  try {
-    const db = connection.getDb();
-    const insertArtifact = db.prepare(`
-      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-      VALUES (?, 'principle', ?, ?, '[]', 'validated', ?, ?, ?)
-    `);
-    const approve = db.prepare(`
-      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
-      VALUES (?, ?, 'prompt', 'low', 'approved', 1, ?, ?, 'owner-test')
-    `);
-    const store = new SqliteActivationStateStore(connection);
-    let index = 0;
-    for (const spec of specs) {
-      const at = new Date(Date.UTC(2026, 10, 10, 0, 0, 0) + index * 1000).toISOString();
-      index += 1;
-      const artifactId = spec.artifactId ?? `art-${spec.key}`;
-      const activationId = spec.activationId ?? `act-${spec.key}`;
-      insertArtifact.run(artifactId, `task-${artifactId}`, spec.principleId, JSON.stringify({ principleId: spec.principleId, text: spec.text }), at, at);
-      await store.recordActivation({
-        activationId,
-        idempotencyKey: `${artifactId}::prompt`,
-        artifactId,
-        channel: 'prompt',
-        action: 'prompt_activate',
-        targetRef: `ledger://${spec.principleId}`,
-        activatedAt: at,
-        deactivatedAt: null,
-      });
-      if (spec.approved !== false) approve.run(`approval-${artifactId}`, artifactId, at, at);
-    }
-  } finally {
-    connection.close();
-  }
-}
-
-function mutateDb(workspaceDir, run) {
-  const connection = new SqliteConnection(workspaceDir);
-  try { run(connection.getDb()); } finally { connection.close(); }
-}
-
 const deleteApproval = (workspaceDir, artifactId) => mutateDb(workspaceDir,
   (db) => db.prepare('DELETE FROM approvals WHERE artifact_id = ?').run(artifactId));
 
@@ -103,17 +55,6 @@ const deactivate = (workspaceDir, activationId) => mutateDb(workspaceDir,
 const rewriteArtifact = (workspaceDir, artifactId, principleId, text) => mutateDb(workspaceDir,
   (db) => db.prepare('UPDATE pi_artifacts SET content_json = ?, updated_at = ? WHERE artifact_id = ?')
     .run(JSON.stringify({ principleId, text }), new Date().toISOString(), artifactId));
-
-async function costs(workspaceDir) {
-  const read = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
-  const base = sharedDirectiveBaseChars({ escapeFn: escapeXml, selfReportInstruction: false });
-  const byPrincipleId = {};
-  for (const principle of read.principles) {
-    byPrincipleId[principle.principleId] = measureSharedDirectiveBlockChars(principle,
-      { escapeFn: escapeXml, selfReportInstruction: false });
-  }
-  return { base, byPrincipleId, order: read.principles.map((principle) => principle.principleId) };
-}
 
 async function selectionPayload(workspaceDir, principleId) {
   if (principleId === null) return { status: 'none_applicable', id: null, digest: null };

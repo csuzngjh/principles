@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-// PRI-1122 isolated orchestration entry. Two modes:
+// PRI-1122 isolated orchestration entry. Three modes:
 //   native        — current Native assembly only (zero model sends)
 //   single-model  — one generic-model selection opportunity feeding the SAME
-//                   shared assembly, with a hard single-send transport gate.
+//                   shared assembly, with a hard single-send transport gate
+//   approved      — the ONLY real-call branch. Its workspace, case ids, inputs,
+//                   priors, candidates and budgets come from the frozen manifest;
+//                   the command line cannot override any of them.
 //
 // Offline evaluation uses --fixture-response to drive the REAL PiAiRuntimeAdapter
 // over a fake fetch. A real call additionally requires an explicit approval flag
@@ -15,18 +18,26 @@ import {
   buildBoundedSelectionInput,
   createSingleModelSelector,
   runSelectionOpportunity,
+  summarizeOpportunity,
   LIMITS,
   SELECTOR_SYSTEM,
   hash,
 } from './orchestrator.mjs';
+import { loadApprovedPlan, runApprovedBatch } from './approved-run.mjs';
 export const APPROVAL_FLAG = '--execute-approved-20261110';
+
+// Every field the frozen manifest owns. Their presence in approved mode is a
+// hard refusal, not a silent override.
+const APPROVED_FORBIDDEN_FLAGS = ['--workspace', '--current-input', '--prior', '--round-key',
+  '--budget-chars', '--fixture-response'];
 
 function parseArgs(argv) {
   const args = { mode: 'native', workspace: null, currentInput: null, roundKey: 1,
-    budgetChars: null, prior: [], fixtureResponse: null, approved: false, out: null };
+    budgetChars: null, prior: [], fixtureResponse: null, approved: false, out: null, seen: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     const value = argv[index + 1];
+    args.seen.push(key);
     if (key === '--mode') { args.mode = value; index += 1; }
     else if (key === '--workspace') { args.workspace = value; index += 1; }
     else if (key === '--current-input') { args.currentInput = value; index += 1; }
@@ -38,7 +49,12 @@ function parseArgs(argv) {
     else if (key === APPROVAL_FLAG) { args.approved = true; }
     else throw new Error(`unknown argument: ${key}`);
   }
-  if (!['native', 'single-model'].includes(args.mode)) throw new Error('INVALID_MODE');
+  if (!['native', 'single-model', 'approved'].includes(args.mode)) throw new Error('INVALID_MODE');
+  if (args.mode === 'approved') {
+    const overridden = args.seen.filter((key) => APPROVED_FORBIDDEN_FLAGS.includes(key));
+    if (overridden.length > 0) throw new Error(`REAL_BRANCH_ARGUMENT_FORBIDDEN ${overridden.join(' ')}`);
+    return args;
+  }
   if (!args.workspace) throw new Error('--workspace <dir> is required');
   if (!Number.isFinite(args.roundKey) || args.roundKey < 0) throw new Error('INVALID_ROUND_KEY');
   if (args.budgetChars !== null && (!Number.isFinite(args.budgetChars) || args.budgetChars < 1)) throw new Error('INVALID_BUDGET');
@@ -57,49 +73,10 @@ function sseFetch(payload) {
   };
 }
 
-function brief(result) {
-  return {
-    schema: result.schema,
-    hookInvocationId: result.hookInvocationId,
-    outcome: result.outcome,
-    selection: result.selection,
-    model: result.model,
-    assembly: {
-      adaptiveStatus: result.assembly.adaptiveStatus,
-      adaptiveReason: result.assembly.adaptiveReason,
-      fallback: result.assembly.fallback,
-      fallbackReason: result.assembly.fallbackReason,
-      selectedButNotPacked: result.assembly.selectedButNotPacked,
-      targetSnapshotVerified: result.assembly.targetSnapshotVerified,
-      targetChangedDuringWait: result.assembly.targetChangedDuringWait,
-      candidateCount: result.assembly.candidateCount,
-      candidateRefs: result.assembly.candidateRefs,
-      priorDropped: result.assembly.priorDropped,
-      nativeActivationIds: result.assembly.nativeActivationIds ?? [],
-      finalActivationIds: result.assembly.finalActivationIds ?? [],
-      addedTarget: result.assembly.addedTarget ?? false,
-      addedOther: result.assembly.addedOther ?? [],
-      lostNative: result.assembly.lostNative ?? [],
-      orderChanged: result.assembly.orderChanged ?? false,
-      mandatoryPreserved: result.assembly.mandatoryPreserved ?? true,
-      targetAlreadyInNative: result.assembly.targetAlreadyInNative ?? false,
-      targetDirectiveCount: result.assembly.targetDirectiveCount ?? 0,
-      nativeChars: result.assembly.nativeChars ?? null,
-      finalChars: result.assembly.finalChars ?? null,
-      deltaChars: result.assembly.deltaChars ?? null,
-      nativeDroppedActivationIds: result.assembly.nativeDroppedActivationIds ?? [],
-      nativeOversizedActivationIds: result.assembly.nativeOversizedActivationIds ?? [],
-      nativeTruncated: result.assembly.nativeTruncated ?? false,
-      readerWarnings: result.assembly.readerWarnings ?? [],
-    },
-    textSha256: hash(result.additionalContext),
-    nativeTextSha256: hash(result.nativeContext),
-    textChars: result.additionalContext.length,
-  };
-}
-
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function run(argv, overrides = {}) {
+  const args = parseArgs(argv);
+  const root = overrides.root ?? process.cwd();
+  if (args.mode === 'approved') return runApprovedBranch(args, root, overrides);
   const workspaceDir = path.resolve(args.workspace);
   const { resolvePromptBudget } = await import('@principles/core/runtime');
   const defaults = resolvePromptBudget();
@@ -108,7 +85,7 @@ async function main() {
   if (args.mode === 'native') {
     const { buildActivePrinciplePromptContext } = await import('@principles/host-runtime');
     const native = await buildActivePrinciplePromptContext({ workspaceDir, roundKey: args.roundKey, promptBudget });
-    const output = {
+    return {
       mode: 'native',
       roundKey: args.roundKey,
       budgetChars: promptBudget.budgetChars,
@@ -122,8 +99,6 @@ async function main() {
       warnings: native.warnings,
       modelSends: 0,
     };
-    process.stdout.write(`${JSON.stringify(output)}\n`);
-    return;
   }
 
   let fixture = null;
@@ -162,7 +137,7 @@ async function main() {
   const deadlineAt = now() + LIMITS.selectTimeoutMs;
   const selector = createSingleModelSelector({
     PiAiRuntimeAdapter,
-    fetch: real ? globalThis.fetch : sseFetch(payload),
+    fetch: real ? (overrides.fetch ?? globalThis.fetch) : sseFetch(payload),
     now,
     deadlineAt,
   });
@@ -178,7 +153,30 @@ async function main() {
     select: selector.select,
     selectorReport: selector.report,
   });
-  const output = { mode: 'single-model', elapsedMs: Date.now() - started, selectorSystemSha256: hash(SELECTOR_SYSTEM), ...brief(result) };
+  return { mode: 'single-model', elapsedMs: Date.now() - started, selectorSystemSha256: hash(SELECTOR_SYSTEM), ...summarizeOpportunity(result) };
+}
+
+// The real-call branch: approval flag, credential, frozen plan, exclusive claim,
+// then one bounded opportunity per frozen case. Every refusal here happens
+// before the first request.
+async function runApprovedBranch(args, root, overrides) {
+  if (!args.approved) throw new Error('EXPLICIT_APPROVAL_REQUIRED');
+  if (!process.env.ZAI_CODING_CN_API_KEY) throw new Error('MISSING_CREDENTIAL_REFERENCE');
+  const plan = loadApprovedPlan({ root });
+  const reportsRoot = overrides.reportsRoot
+    ?? path.join(root, 'docs/implementation-reports/aa-selector-experiments');
+  const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js');
+  const outcome = await runApprovedBatch({
+    plan,
+    reportsRoot,
+    fetch: overrides.fetch ?? globalThis.fetch,
+    adapter: PiAiRuntimeAdapter,
+  });
+  return { mode: 'approved', ...outcome.summary, claim: outcome.claim };
+}
+
+async function main() {
+  const output = await run(process.argv.slice(2));
   process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 

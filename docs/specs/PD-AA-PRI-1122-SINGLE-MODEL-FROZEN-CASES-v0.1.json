@@ -2,6 +2,14 @@
   "schema": "pd-aa-pri1122-single-model-frozen-cases/v0.1",
   "status": "FROZEN_NOT_EXECUTED",
   "frozenAt": "2026-11-10",
+  "amendments": [
+    {
+      "at": "2026-11-10",
+      "scope": "candidatePool + execution wiring, before any real call",
+      "change": "added fixture_oversized_control (role native_blocking_control) and recorded the per-case assembly plan in PD-AA-PRI-1122-SINGLE-MODEL-RUN-MANIFEST-v0.1.json",
+      "reason": "Native 漏目标且 additive 全保留在贪心装填下数学上不可能：若目标因预算未装入，则 Native 已选集加目标必然超预算。legacy FIFO 在第一个未装入候选处停止，因此需要一个确定性的超大控制项，让 Native 先停在它上面，目标才能在不挤掉 Native 已选原则的前提下前置装入。控制项不是可选目标，也不改动任何案例的输入、允许集合或禁止错误；本次补充发生在任何真实调用之前，状态仍为 FROZEN_NOT_EXECUTED。"
+    }
+  ],
   "dataClass": "SYNTHETIC_DEVELOPMENT_AND_HELDOUT_TEXT_NO_PRODUCTION_DATA",
   "authorization": {
     "currentScope": "offline implementation, fake transport, evaluation preparation",
@@ -37,10 +45,19 @@
         "revision": "1",
         "text": "判断依赖缺失的关键信息时，明确未知，避免把推测当成事实。",
         "role": "missing_context"
+      },
+      {
+        "id": "fixture_oversized_control",
+        "revision": "1",
+        "text": "避免为假设的未来需求预建抽象、适配器和额外服务；只有在出现第二个真实实现时才引入抽象层，并优先复用已有的模块边界与调用路径。审查中发现的邻近改进记为后续事项，不扩大当前任务的改动范围；为整洁感而重构没有当前证据支撑的模块，会把可验证的小改动变成难以复核的大改动，因此本轮只在必要位置做最小修改。",
+        "role": "native_blocking_control",
+        "usableAsTarget": false,
+        "note": "装配控制项，不是可选目标。legacy FIFO 在第一个未装入的候选处停止，因此这一项会让 Native 漏掉排在其后、但仍可追加装入的目标；任何把它当作选择目标的行为都记为协议错误。"
       }
     ],
     "candidatePoolFrozen": true,
-    "authorizationSnapshot": "all four candidates carry owner approval and current activation at freeze time; any revocation, revision or authority change invalidates the case for that arm",
+    "candidateRoleConstraint": "只有 role 不等于 native_blocking_control 的候选允许被选为动态目标；控制项只影响 Native 的 FIFO 停止位置",
+    "authorizationSnapshot": "all five candidates carry owner approval and current activation at freeze time; any revocation, revision or authority change invalidates the case for that arm",
     "selectionProtocol": {
       "output": "{status: selected|none_applicable|uncertain, id, digest}",
       "digest": "sha256(candidate text)",

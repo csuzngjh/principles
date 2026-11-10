@@ -62,3 +62,20 @@ node scripts/dev/adaptive-selector-lab/orchestrate.mjs --mode native --workspace
 
 `orchestrate.mjs` refuses a real call without `--execute-approved-20261110` and the credential env, and this delivery has not issued one. Offline evaluation drives the real `PiAiRuntimeAdapter` through `--fixture-response`. Frozen cases, budget card and the NOT RUN report live under `docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-*` and `docs/implementation-reports/PD-AA-PRI-1122-SINGLE-MODEL-SELECTOR-20261110.md`. The historical CLI, fixtures, hashes and consumed approval claims above are unchanged.
 
+### Approved branch (`--mode approved`)
+
+The only real-call path is now a separate mode. It reads everything from the frozen batch and refuses every command-line override of `--workspace`, `--current-input`, `--prior`, `--round-key`, `--budget-chars` and `--fixture-response` (`REAL_BRANCH_ARGUMENT_FORBIDDEN`).
+
+```powershell
+node scripts/dev/adaptive-selector-lab/orchestrate.mjs --mode approved --execute-approved-20261110
+```
+
+- Inputs: `docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-RUN-MANIFEST-v0.1.json` (per-case candidate order, round-key mode, budget rule) plus the frozen cases file, whose SHA-256 the manifest records. A drifted frozen file or a changed run-card version is refused before the claim (`MANIFEST_DRIFT`, `RUN_CARD_VERSION_MISMATCH`).
+- Approval binding: run-card version, manifest SHA-256 and the 12-request cap are written into `APPROVAL-PRI-1122-SINGLE-MODEL-v0.2-CLAIM.json` with an exclusive create. A repeated or concurrent execution is refused before the network (`APPROVAL_ALREADY_CLAIMED`) — the same one-shot claim mechanism as the #2368 runs.
+- Request accounting: one send per opportunity, a cumulative 12-request cap, and a write-ahead ledger entry persisted before the `fetch` call, so failed and timed-out attempts still count.
+- Acceptance is fake-transport only: `approved-run.test.mjs` drives the entry with an injected `fetch` and proves zero requests for unapproved, drifted, overridden, repeated and concurrent invocations, plus a refused 13th send. Real measurement stays `NOT RUN` until the budget card is approved.
+
+```powershell
+node --test scripts/dev/adaptive-selector-lab/
+```
+

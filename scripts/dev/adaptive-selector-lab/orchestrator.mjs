@@ -340,9 +340,27 @@ export async function runSelectionOpportunity(input) {
   const native = await deps.buildContext(base);
   const summary = (selection, finalResult, extras = {}) => {
     const target = extras.target ?? null;
+    // Even without a target the report must show what Native carried, otherwise
+    // an abstain case cannot be audited against the Native baseline.
     const cov = target
       ? coverage({ native, final: finalResult, target, targetBody: extras.targetBody ?? null })
-      : null;
+      : {
+        nativeActivationIds: native.activationIds,
+        nativePrincipleIds: native.principleIds,
+        finalActivationIds: finalResult.activationIds ?? native.activationIds,
+        finalPrincipleIds: finalResult.principleIds ?? native.principleIds,
+        addedTarget: false,
+        addedOther: [],
+        lostNative: [],
+        orderChanged: false,
+        mandatoryPreserved: true,
+        targetAlreadyInNative: false,
+        targetInFinal: false,
+        targetDirectiveCount: 0,
+        nativeChars: native.additionalContext.length,
+        finalChars: finalResult.additionalContext.length,
+        deltaChars: finalResult.additionalContext.length - native.additionalContext.length,
+      };
     return {
       schema: 'pd-pri1122-single-model-selection/v1',
       hookInvocationId,
@@ -563,3 +581,47 @@ export async function runSelectionOpportunity(input) {
     targetSnapshotVerified: packing.targetSnapshot ? sameSnapshot(packing.targetSnapshot, target) : null,
   });
 }
+
+// Stable projection of one opportunity for CLI and run-ledger output. Bodies are
+// reduced to digests so a report can be reviewed without carrying raw text.
+export function summarizeOpportunity(result) {
+  return {
+    schema: result.schema,
+    hookInvocationId: result.hookInvocationId,
+    outcome: result.outcome,
+    selection: result.selection,
+    model: result.model,
+    assembly: {
+      adaptiveStatus: result.assembly.adaptiveStatus,
+      adaptiveReason: result.assembly.adaptiveReason,
+      fallback: result.assembly.fallback,
+      fallbackReason: result.assembly.fallbackReason,
+      selectedButNotPacked: result.assembly.selectedButNotPacked,
+      targetSnapshotVerified: result.assembly.targetSnapshotVerified,
+      targetChangedDuringWait: result.assembly.targetChangedDuringWait,
+      candidateCount: result.assembly.candidateCount,
+      candidateRefs: result.assembly.candidateRefs,
+      priorDropped: result.assembly.priorDropped,
+      nativeActivationIds: result.assembly.nativeActivationIds ?? [],
+      finalActivationIds: result.assembly.finalActivationIds ?? [],
+      addedTarget: result.assembly.addedTarget ?? false,
+      addedOther: result.assembly.addedOther ?? [],
+      lostNative: result.assembly.lostNative ?? [],
+      orderChanged: result.assembly.orderChanged ?? false,
+      mandatoryPreserved: result.assembly.mandatoryPreserved ?? true,
+      targetAlreadyInNative: result.assembly.targetAlreadyInNative ?? false,
+      targetDirectiveCount: result.assembly.targetDirectiveCount ?? 0,
+      nativeChars: result.assembly.nativeChars ?? null,
+      finalChars: result.assembly.finalChars ?? null,
+      deltaChars: result.assembly.deltaChars ?? null,
+      nativeDroppedActivationIds: result.assembly.nativeDroppedActivationIds ?? [],
+      nativeOversizedActivationIds: result.assembly.nativeOversizedActivationIds ?? [],
+      nativeTruncated: result.assembly.nativeTruncated ?? false,
+      readerWarnings: result.assembly.readerWarnings ?? [],
+    },
+    textSha256: hash(result.additionalContext),
+    nativeTextSha256: hash(result.nativeContext),
+    textChars: result.additionalContext.length,
+  };
+}
+
