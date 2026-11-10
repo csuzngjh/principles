@@ -9,6 +9,10 @@
  * - Graceful degradation includes a reason (Rule 9)
  */
 import type { GovernanceExperienceSnapshot, OwnerGovernanceView, OwnerDecisionViewCore } from '@principles/core/runtime';
+import type {
+  CompatibilityScanUnscannableView,
+  CompatibilityScanViewData,
+} from '../../shared/compatibility-scan-contract.js';
 
 /**
  * PRI-1139 read-side whitelist for governance/owner-decision `schemaVersion`
@@ -1326,6 +1330,12 @@ export interface ActivationRecordData {
   ownerReviewDueAt?: string;
   /** PD_PROMPT_CAPACITY_V1 R-A3: injection status for live prompt activations. */
   promptInjection?: PromptActivationInjectionStatusWire;
+  /**
+   * 5B-D: server-side per-row degradation (e.g. the artifact behind this
+   * activation no longer exists). The server has always produced this; the
+   * browser whitelist dropped it, so a broken row looked healthy.
+   */
+  warning?: string;
 }
 
 const PROMPT_INJECTION_STATUS_KINDS: ReadonlySet<string> = new Set([
@@ -1384,6 +1394,9 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
     ...(Object.hasOwn(v, 'promptInjection')
       ? (() => { const s = validatePromptActivationInjectionStatus(v.promptInjection); return s !== null ? { promptInjection: s } : {}; })()
       : {}),
+    // 5B-D: optional, but if the server sent a warning it must be a non-empty
+    // string — a malformed value is dropped rather than rendered as "[object]".
+    ...(Object.hasOwn(v, 'warning') && isString(v.warning) && v.warning.length > 0 ? { warning: v.warning } : {}),
   };
 }
 
@@ -3799,10 +3812,54 @@ function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | 
   };
 }
 
+/**
+ * 5B-E: rows the owner-decision list could not read. The server has produced
+ * this since PR #2480 (`OwnerDecisionReadIssue`), but the browser parser
+ * rebuilt the payload without it, so "nothing to decide" and "could not read"
+ * stayed indistinguishable on the page.
+ */
+export interface OwnerDecisionReadIssueData {
+  scope: 'rulecode_shadow';
+  reason: 'owner_review_read_failed' | 'readiness_not_actionable' | 'shadow_scan_unavailable';
+  count: number;
+  sampleActivationIds: string[];
+  detail?: string;
+}
+
 export interface OwnerDecisionsData {
   items: OwnerDecisionItemData[];
   total: number;
   generatedAt: string;
+  /** rc-9: empty = no decision row was silently dropped by the server. */
+  readIssues: OwnerDecisionReadIssueData[];
+}
+
+const OWNER_DECISION_READ_ISSUE_REASONS = new Set<string>([
+  'owner_review_read_failed',
+  'readiness_not_actionable',
+  'shadow_scan_unavailable',
+]);
+
+function validateOwnerDecisionReadIssue(v: unknown): OwnerDecisionReadIssueData | null {
+  if (!isObject(v)) return null;
+  if (v.scope !== 'rulecode_shadow') return null;
+  const { reason } = v;
+  const { count } = v;
+  if (!isString(reason) || !OWNER_DECISION_READ_ISSUE_REASONS.has(reason)) return null;
+  if (!isNumber(count) || !Number.isInteger(count) || count <= 0) return null;
+  if (!Object.hasOwn(v, 'sampleActivationIds') || !Array.isArray(v.sampleActivationIds)) return null;
+  if (!v.sampleActivationIds.every((id) => typeof id === 'string')) return null;
+  const issue: OwnerDecisionReadIssueData = {
+    scope: 'rulecode_shadow',
+    reason: reason as OwnerDecisionReadIssueData['reason'],
+    count,
+    sampleActivationIds: [...v.sampleActivationIds] as string[],
+  };
+  if (Object.hasOwn(v, 'detail')) {
+    if (!isString(v.detail)) return null;
+    issue.detail = v.detail;
+  }
+  return issue;
 }
 
 export function validateOwnerDecisionItem(v: unknown): OwnerDecisionItemData | null {
@@ -3886,7 +3943,59 @@ export function validateOwnerDecisionsData(v: unknown): OwnerDecisionsData | nul
   }
   if (!Object.hasOwn(v, 'total') || !isNumber(v.total)) return null;
   if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
-  return { items, total: v.total, generatedAt: v.generatedAt };
+  // 5B-E: absent → [] (older server); present-but-malformed → reject the whole
+  // payload rather than render a partial list that looks complete.
+  const readIssues: OwnerDecisionReadIssueData[] = [];
+  if (Object.hasOwn(v, 'readIssues')) {
+    if (!Array.isArray(v.readIssues)) return null;
+    for (const entry of v.readIssues) {
+      const issue = validateOwnerDecisionReadIssue(entry);
+      if (issue === null) return null;
+      readIssues.push(issue);
+    }
+  }
+  return { items, total: v.total, generatedAt: v.generatedAt, readIssues };
+}
+
+// ── 5B-F: rule compatibility scan view (read-only endpoint) ─────────────────
+
+const COMPATIBILITY_SCAN_STATUSES = new Set<string>([
+  'clean',
+  'incomplete',
+  'legacy_dependency',
+  'no_state_db',
+  'scan_failed',
+]);
+
+export function validateCompatibilityScanView(v: unknown): CompatibilityScanViewData | null {
+  if (!isObject(v)) return null;
+  const { status } = v;
+  if (!isString(status) || !COMPATIBILITY_SCAN_STATUSES.has(status)) return null;
+  const { scannedActivations } = v;
+  const { findingsTotal } = v;
+  if (!isNumber(scannedActivations) || !Number.isInteger(scannedActivations) || scannedActivations < 0) return null;
+  if (!isNumber(findingsTotal) || !Number.isInteger(findingsTotal) || findingsTotal < 0) return null;
+  if (!Object.hasOwn(v, 'unscannable') || !Array.isArray(v.unscannable)) return null;
+  const unscannable: CompatibilityScanUnscannableView[] = [];
+  for (const entry of v.unscannable) {
+    if (!isObject(entry)) return null;
+    const { reason } = entry;
+    const { count } = entry;
+    if (!isString(reason) || reason.length === 0) return null;
+    if (!isNumber(count) || !Number.isInteger(count) || count <= 0) return null;
+    if (!Object.hasOwn(entry, 'sampleActivationIds') || !Array.isArray(entry.sampleActivationIds)) return null;
+    if (!entry.sampleActivationIds.every((id: unknown) => isString(id))) return null;
+    unscannable.push({ reason, count, sampleActivationIds: [...entry.sampleActivationIds] as string[] });
+  }
+  const view: CompatibilityScanViewData = {
+    status: status as CompatibilityScanViewData['status'],
+    scannedActivations,
+    unscannable,
+    findingsTotal,
+  };
+  if (Object.hasOwn(v, 'reason') && isString(v.reason)) view.reason = v.reason;
+  if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) view.nextAction = v.nextAction;
+  return view;
 }
 
 export interface OwnerResolutionResultData {

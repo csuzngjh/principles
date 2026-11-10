@@ -1537,13 +1537,15 @@ function buildGatewayRefusalResult(
  * block the upgrade.
  */
 /**
- * Compatibility preflight status taxonomy (P1-3, 2026-08-20).
+ * Compatibility preflight status taxonomy (P1-3, 2026-08-20; `incomplete` 5B).
  *
  * The scanner's status is preserved end-to-end so a refusal names the real
  * cause instead of smearing every failure into "legacy RuleCode":
  *
  *   clean             → allow upgrade
  *   no_state_db       → allow (nothing persisted to be incompatible)
+ *   incomplete        → allow + warn (nothing found, but some ACTIVE rows
+ *                       could not be read — see summarizeCompatibilityVisibility)
  *   legacy_dependency → refuse → migrate/deactivate the listed rules
  *   scan_failed       → refuse → repair DB / permissions
  *   scan_unavailable  → refuse → repair/re-download the installer
@@ -1552,10 +1554,19 @@ function buildGatewayRefusalResult(
  */
 export type CompatibilityStatus =
   | 'clean'
+  | 'incomplete'
   | 'no_state_db'
   | 'legacy_dependency'
   | 'scan_failed'
   | 'scan_unavailable';
+
+/** One validated `skipped` bucket from the scanner payload (rc-1/rc-4). */
+export interface CompatibilitySkippedBucket {
+  reason: string;
+  /** Always > 0 — the scanner only emits buckets it counted. */
+  count: number;
+  sampleActivationIds: string[];
+}
 
 export interface LegacyRulePreflightOutcome {
   ok: boolean;
@@ -1563,6 +1574,17 @@ export interface LegacyRulePreflightOutcome {
   /** rc-9: structured reason + remediation whenever ok=false. */
   reason?: string;
   remediation?: string;
+  /**
+   * 5B: ACTIVE rows the scanner could NOT read, straight from the payload.
+   * Present on successful scans; empty = every ACTIVE row was scanned.
+   * This is visibility, not a refusal signal (see the install preflight).
+   */
+  skipped?: CompatibilitySkippedBucket[];
+  /**
+   * 5B: how many ACTIVE rows the scanner actually inspected. `0` with a
+   * non-empty `skipped` means this upgrade verified NO rule at all.
+   */
+  scannedActivations?: number;
 }
 
 /** Injected runner so tests can exercise refusal without a built pd-cli. */
@@ -1619,16 +1641,48 @@ function protocolInvalid(detail: string): LegacyRulePreflightOutcome {
   };
 }
 
+const MAX_SKIP_BUCKETS = 50;
+/** Sentinel so "absent scannedActivations" stays distinguishable from 0. */
+const INVALID_COUNT = Symbol('invalid-count');
+type ParsedCount = number | undefined | typeof INVALID_COUNT;
+
+/** rc-4: validate every bucket field, not just "is an array". */
+function parseSkippedBuckets(value: unknown): CompatibilitySkippedBucket[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_SKIP_BUCKETS) return null;
+  const buckets: CompatibilitySkippedBucket[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) return null;
+    const {reason} = entry;
+    const {count} = entry;
+    const samples = entry.sampleActivationIds;
+    if (typeof reason !== 'string' || reason.length === 0) return null;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) return null;
+    if (!Array.isArray(samples) || !samples.every((id) => typeof id === 'string')) return null;
+    buckets.push({ reason, count, sampleActivationIds: [...samples] });
+  }
+  return buckets;
+}
+
+function parseScannedActivations(value: unknown): ParsedCount {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return INVALID_COUNT;
+  return value;
+}
+
 /**
  * Strict (ok, status) protocol parse (P2, 2026-08-20).
  *
  * Boolean `ok` alone is NOT authoritative — the (ok, status) pair is the
- * contract. Only ok=true + (clean|no_state_db) is a successful scan. Every
- * other combination fails closed:
- *   - ok=true + refusal/success-impossible status → protocol invalid
- *   - ok=false + clean|no_state_db/unknown   → protocol invalid
+ * contract. Only ok=true + (clean|no_state_db|incomplete) is a successful
+ * scan. Every other combination fails closed:
+ *   - ok=true + refusal status                    → protocol invalid
+ *   - ok=true + clean/no_state_db + skipped rows  → protocol invalid (a
+ *     consumer may never quietly downgrade `incomplete` to `clean`)
+ *   - ok=true + incomplete + empty skipped        → protocol invalid
+ *   - ok=false + clean|no_state_db|incomplete/unknown → protocol invalid
  *   - ok=false + legacy_dependency|scan_failed|scan_unavailable → refusal
- *   - non-boolean / missing ok               → protocol invalid
+ *   - non-boolean / missing ok                    → protocol invalid
  * The payload is never trusted to self-describe a pass.
  */
 export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflightOutcome {
@@ -1648,9 +1702,35 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
   const reason = typeof parsed.reason === 'string' ? parsed.reason : undefined;
   const remediation = typeof parsed.remediation === 'string' ? parsed.remediation : undefined;
 
+  const skipped = parseSkippedBuckets(parsed.skipped);
+  if (skipped === null) {
+    return protocolInvalid('skipped is not a valid [{reason,count,sampleActivationIds}] array');
+  }
+  const scannedActivations = parseScannedActivations(parsed.scannedActivations);
+  if (scannedActivations === INVALID_COUNT) {
+    return protocolInvalid('scannedActivations is not a non-negative integer');
+  }
+  const skippedTotal = skipped.reduce((sum, bucket) => sum + bucket.count, 0);
+  const visibility = {
+    skipped,
+    ...(scannedActivations !== undefined ? { scannedActivations } : {}),
+  };
+
   if (parsed.ok === true) {
     if (status === 'clean' || status === 'no_state_db') {
-      return { ok: true, status };
+      // Hard constraint (5B): `incomplete` must never be degraded to `clean`
+      // by a consumer. A payload that admits it skipped rows while claiming
+      // clean is self-contradictory, not a pass.
+      if (skipped.length > 0) {
+        return protocolInvalid(`ok=true with status=${status} but skipped=${skippedTotal}`);
+      }
+      return { ok: true, status, ...visibility };
+    }
+    if (status === 'incomplete') {
+      if (skipped.length === 0) {
+        return protocolInvalid('ok=true with status=incomplete but skipped is empty');
+      }
+      return { ok: true, status, ...visibility };
     }
     return protocolInvalid(`ok=true with status=${status}`);
   }
@@ -1663,6 +1743,68 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
   }
 
   return protocolInvalid(`ok is not a boolean`);
+}
+
+export interface CompatibilityVisibility {
+  /**
+   * none     → every ACTIVE row was scanned;
+   * warning  → some rows unreadable, at least one rule was still verified;
+   * critical → NO ACTIVE row was verified this run.
+   */
+  level: 'none' | 'warning' | 'critical';
+  lines: string[];
+}
+
+/**
+ * 5B: turn the scan's `skipped` buckets into operator-facing lines.
+ *
+ * INTENTIONAL CHOICE — these are warnings, never a refusal. A non-interactive
+ * install that hard-failed here would strand the user: the old installation is
+ * untouched, but the upgrade is blocked with no in-product repair path (they
+ * would have to hand-edit the workspace DB before the installer would run).
+ * Escalate to a hard failure only if a real incident is attributed to an
+ * upgrade that ran with unverified ACTIVE rules; the escalation condition is
+ * then `level === 'critical'` (zero rules verified) and belongs here.
+ */
+export function summarizeCompatibilityVisibility(
+  outcome: Pick<LegacyRulePreflightOutcome, 'skipped' | 'scannedActivations'>,
+  workspaceDir: string,
+): CompatibilityVisibility {
+  const skipped = outcome.skipped ?? [];
+  if (skipped.length === 0) return { level: 'none', lines: [] };
+
+  const total = skipped.reduce((sum, bucket) => sum + bucket.count, 0);
+  const rows = skipped.map((bucket) => {
+    const sample = bucket.sampleActivationIds.length > 0 ? ` (sample: ${bucket.sampleActivationIds.join(', ')})` : '';
+    return `${bucket.reason}=${bucket.count}${sample}`;
+  });
+  const nextCommand = `pd runtime compatibility-scan --workspace "${workspaceDir}" --json`;
+
+  if (outcome.scannedActivations === 0) {
+    const border = '!'.repeat(74);
+    return {
+      level: 'critical',
+      lines: [
+        border,
+        '!! WARNING: THIS UPGRADE DID NOT VERIFY ANY RULE COMPATIBILITY',
+        `!! ${total} ACTIVE rule(s) could not be read and 0 ACTIVE rule(s) were scanned,`,
+        '!! so no ACTIVE rule was checked for retired-contract dependencies.',
+        `!! ${rows.join(' | ')}`,
+        '!! The upgrade proceeds; verify now:',
+        `!!   ${nextCommand}`,
+        border,
+      ],
+    };
+  }
+
+  return {
+    level: 'warning',
+    lines: [
+      `warning: ${total} ACTIVE rule(s) could not be read during the compatibility check — their compatibility is NOT verified.`,
+      ...rows.map((row) => `  ${row}`),
+      `next: ${nextCommand}`,
+    ],
+  };
 }
 
 /**
@@ -4212,6 +4354,13 @@ export interface InstallResult {
    * it verbatim to the Console `gatewayNotice` contract (PRI-723 legacy path
    * parity). */
   gatewayNotice?: string;
+  /**
+   * 5B: ACTIVE rules the upgrade compatibility check could not read. Present
+   * ONLY when non-empty. `success` is NOT affected — the install completed,
+   * but those rules' compatibility is unverified (see the printed block).
+   * Carried here so `--json`/quiet mode is not the only blind path.
+   */
+  compatibilityWarnings?: string[];
 }
 
 /** Observability record for one installer transaction (ADR-0024 D-2). */
@@ -4800,12 +4949,21 @@ export async function install(
     // a refusal leaves the existing installation completely untouched. Only
     // meaningful when the target workspace already has PD state; fresh
     // workspaces scan clean (no state.db → nothing persisted to conflict).
+    //
+    // 5B: rows the scan could not read are surfaced as warnings, never as a
+    // refusal — see summarizeCompatibilityVisibility for why, and for the
+    // condition under which that choice should be revisited.
+    let compatibilityVisibility: CompatibilityVisibility = { level: 'none', lines: [] };
     if (existsSync(path.join(path.resolve(options.workspaceDir), '.pd', 'state.db'))) {
       if (spinner) updateProgress(spinner, stepIndex, 'Checking workspace rule compatibility...');
       const compat = await runLegacyRuleContractPreflight(pluginDir, options.workspaceDir);
       if (!compat.ok) {
         if (!quiet) logger.error(compat.reason ?? 'legacy_rule_contract_dependency');
         return buildCompatibilityRefusalResult(options, compat);
+      }
+      compatibilityVisibility = summarizeCompatibilityVisibility(compat, options.workspaceDir);
+      if (!quiet) {
+        for (const line of compatibilityVisibility.lines) logger.warn(line);
       }
     }
     stepIndex++;
@@ -5288,6 +5446,13 @@ export async function install(
       }
     }
 
+    // 5B: the preflight warning scrolls away during a multi-minute install, so
+    // the end summary repeats the zero-visibility block verbatim. This is
+    // still a warning: the install completed and success is unchanged.
+    if (!quiet && compatibilityVisibility.level === 'critical') {
+      for (const line of compatibilityVisibility.lines) logger.warn(line);
+    }
+
     // P0-2: terminate + join the verified child before any later step that
     // may touch the runtime tree (here: none destructive, but a wedged child
     // must not leak past the install either).
@@ -5354,6 +5519,7 @@ export async function install(
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,
+      ...(compatibilityVisibility.lines.length > 0 ? { compatibilityWarnings: compatibilityVisibility.lines } : {}),
       ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),
       journal: installerJournalRecord(journal),
     };

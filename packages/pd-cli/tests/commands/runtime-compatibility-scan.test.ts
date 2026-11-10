@@ -11,6 +11,8 @@
  *   - SCAN-03: workspace without state.db → exit 0, status no_state_db
  *   - SCAN-04: --json emits exactly one parseable JSON object (cli-1)
  *   - SCAN-05: command wiring — real Commander registration (cli-7)
+ *   - SCAN-08: unreadable rows → status incomplete, exit 0, text says INCOMPLETE
+ *   - SCAN-09: --json carries status incomplete + skipped (machine consumer)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -164,6 +166,46 @@ describe('pd runtime compatibility-scan', () => {
     expect(parsed['skipped']).toEqual([
       { reason: 'invalid_content_json', count: 1, sampleActivationIds: ['act-art-bad2'] },
     ]);
+  });
+
+  it('SCAN-08: unreadable rows → status incomplete, exit 0, text never claims a clean scan (5B-C)', async () => {
+    await seedActiveRuleWithRawContent('art-bad3', 'rule-bad3', '{not json');
+    await handleRuntimeCompatibilityScan({ workspace: tempWorkspaceDir });
+    // A warning, not a gate: the scan itself completed.
+    expect(process.exitCode).toBeUndefined();
+    const text = capturedStdout();
+    expect(text).toContain('status: incomplete');
+    expect(text).toContain('INCOMPLETE');
+    expect(text).toContain('unverified');
+    expect(text).toContain('invalid_content_json=1 (sample: act-art-bad3)');
+    // The pre-5B "nothing to see" line must not appear for an incomplete scan.
+    expect(text).not.toContain('No active rule references a retired RuleHost contract symbol.');
+  });
+
+  it('SCAN-09: --json carries status incomplete and the skipped breakdown (5B-C)', async () => {
+    await seedActiveRuleWithRawContent('art-bad4', 'rule-bad4', '{not json');
+    await handleRuntimeCompatibilityScan({ workspace: tempWorkspaceDir, json: true });
+    expect(process.exitCode).toBeUndefined();
+    const parsed = JSON.parse(capturedStdout()) as Record<string, unknown>;
+    expect(parsed['status']).toBe('incomplete');
+    expect(parsed['ok']).toBe(true);
+    expect(parsed['findings']).toEqual([]);
+    expect(parsed['skipped']).toEqual([
+      { reason: 'invalid_content_json', count: 1, sampleActivationIds: ['act-art-bad4'] },
+    ]);
+  });
+
+  it('SCAN-10: a failed scan never claims "no active rule references" (5B audit)', async () => {
+    // Before 5B the empty-findings else-branch also caught scan_failed, so a
+    // completely failed scan still printed the "nothing to see" sentence.
+    conn.close();
+    fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'state.db'), 'this is not a sqlite database');
+    await handleRuntimeCompatibilityScan({ workspace: tempWorkspaceDir });
+    expect(process.exitCode).toBe(1);
+    const text = capturedStdout();
+    expect(text).toContain('status: scan_failed');
+    expect(text).toContain('compatibility scan FAILED');
+    expect(text).not.toContain('No active rule references a retired RuleHost contract symbol.');
   });
 
   it('SCAN-05: command is registered on a real Commander program (cli-7)', async () => {

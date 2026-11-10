@@ -12,6 +12,7 @@ import {
   disableActivation,
   fetchLifecycleMetrics,
   fetchReceiptCounts,
+  fetchCompatibilityScan,
   fetchRuleCodeOwnerReview,
   fetchApprovedRuleRevisionPreview,
   reviseApprovedRuleOnce,
@@ -29,6 +30,7 @@ import type {
   ReceiptEvidenceCoverageData,
   RuleCodeOwnerReviewData,
 } from "../../api.js";
+import type { CompatibilityScanViewData } from "../../../shared/compatibility-scan-contract.js";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import {
   validateLifecycleMetricsData,
@@ -217,7 +219,7 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
   </div>;
 }
 
-function ActivationFactCard({
+export function ActivationFactCard({
   record,
   lifecycleData,
   receiptCount,
@@ -372,6 +374,18 @@ function ActivationFactCard({
 
       {/* Action / target / time */}
       {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">{t('pages.activation.legacyUnknown', { due: record.ownerReviewDueAt ? formatDate(record.ownerReviewDueAt, i18n.language, DATETIME_OPTS) : t('pages.activation.sevenDays') })}</div>}
+      {/* 5B-D: per-row server degradation (e.g. orphaned artifact_id). The
+          server always computed this; before 5B the browser whitelist dropped
+          the field, so the row rendered as if it were healthy. */}
+      {record.warning !== undefined && (
+        <div
+          role="alert"
+          className="mt-3 border-l-2 border-danger px-3 text-[12px] leading-relaxed text-danger"
+          data-testid={`activation-warning-${record.activationId}`}
+        >
+          {record.warning}
+        </div>
+      )}
       <div className="text-ink-3 text-[13px] leading-relaxed space-y-1">
         <div>
           <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.actionLabel")}</span>{" "}
@@ -667,6 +681,10 @@ export function ActivationPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [disablingIds, setDisablingIds] = useState<Set<string>>(new Set());
   const [degradedNote, setDegradedNote] = useState<string | null>(null);
+  // 5B-F: read-only compatibility scan (reason-granular). Supplementary: a
+  // failed scan never blocks the page, but it is never silently omitted.
+  const [compatScan, setCompatScan] = useState<CompatibilityScanViewData | null>(null);
+  const [compatScanError, setCompatScanError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
@@ -675,6 +693,8 @@ export function ActivationPage() {
     setReceiptCounts(null);
     setReceiptDegraded(null);
     setReceiptCoverage(null);
+    setCompatScan(null);
+    setCompatScanError(null);
 
     const result = await fetchAllActivations();
 
@@ -726,6 +746,19 @@ export function ActivationPage() {
     } catch (err) {
       // EP-03: counts are optional — degrade with reason, never block the page.
       setReceiptDegraded({ reason: err instanceof Error ? err.message : String(err) });
+    }
+
+    // 5B-F: rule compatibility scan (read-only). Supplementary like the receipt
+    // counts: a failure degrades with a reason, it never blocks the page.
+    try {
+      const scanResult = await fetchCompatibilityScan();
+      if (scanResult.success) {
+        setCompatScan(scanResult.data);
+      } else {
+        setCompatScanError(scanResult.error);
+      }
+    } catch (err) {
+      setCompatScanError(err instanceof Error ? err.message : String(err));
     }
 
     // Pre-fetch lifecycle metrics for active principles with rules
@@ -944,6 +977,49 @@ export function ActivationPage() {
           data-testid="receipt-counts-coverage"
         >
           <ReceiptCoverageDisclosure coverage={receiptCoverage} />
+        </div>
+      )}
+
+      {/* 5B-F: rule compatibility scan — the same scan the installer preflight
+          and `pd runtime compatibility-scan` use. Reason-granular by design:
+          counts + bounded activation-id samples, never a per-row dump. */}
+      {compatScanError !== null && (
+        <div
+          className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2"
+          data-testid="compatibility-scan-degraded"
+        >
+          {t("pages.activation.compatibilityScanUnavailable", { reason: compatScanError })}
+        </div>
+      )}
+      {compatScan !== null && (
+        <div
+          className="mt-4 bg-surface/60 border-l-2 border-line px-3 py-2 text-[13px] text-ink-4"
+          data-testid="compatibility-scan"
+        >
+          <p className="font-medium text-ink-3">{t("pages.activation.compatibilityScanTitle")}</p>
+          <p className="mt-1" data-testid="compatibility-scan-status">
+            {t("pages.activation.compatibilityScanStatus", {
+              status: compatScan.status,
+              scanned: compatScan.scannedActivations,
+            })}
+          </p>
+          {compatScan.unscannable.length > 0 ? (
+            <>
+              <p className="mt-2 text-ink-3">{t("pages.activation.compatibilityScanUnscannableTitle")}</p>
+              <ul className="mt-1 space-y-0.5 font-mono text-[12px]">
+                {compatScan.unscannable.map((entry) => (
+                  <li key={entry.reason} data-testid={`compatibility-scan-unscannable-${entry.reason}`}>
+                    {entry.reason}={entry.count}
+                    {entry.sampleActivationIds.length > 0 ? ` (sample: ${entry.sampleActivationIds.join(", ")})` : ""}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="mt-1" data-testid="compatibility-scan-empty">
+              {t("pages.activation.compatibilityScanEmpty")}
+            </p>
+          )}
         </div>
       )}
 

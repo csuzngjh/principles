@@ -27,6 +27,7 @@ import {
   runLegacyRuleContractPreflight,
   ensureBundledPdCliResolution,
   parseCompatibilityScanStdout,
+  summarizeCompatibilityVisibility,
   type LegacyRulePreflightRunner,
 } from '../src/installer.js';
 
@@ -360,5 +361,118 @@ describe('parseCompatibilityScanStdout', () => {
     expect(notJson.ok).toBe(false);
     expect(notJson.status).toBe('scan_failed');
     expect(notJson.reason).toContain('not JSON');
+  });
+});
+
+// ── 5B: `incomplete` is allowed, observable, and never silently `clean` ─────
+
+describe('parseCompatibilityScanStdout — incomplete (5B)', () => {
+  const skippedBucket = { reason: 'invalid_content_json', count: 2, sampleActivationIds: ['act-a', 'act-b'] };
+
+  it('ok=true + incomplete + skipped → allowed with the skip buckets preserved', () => {
+    const out = parseCompatibilityScanStdout(
+      JSON.stringify({ ok: true, status: 'incomplete', scannedActivations: 3, skipped: [skippedBucket] }),
+    );
+    expect(out.ok).toBe(true);
+    expect(out.status).toBe('incomplete');
+    expect(out.scannedActivations).toBe(3);
+    expect(out.skipped).toEqual([skippedBucket]);
+  });
+
+  it('ok=true + incomplete + empty skipped → protocol invalid', () => {
+    const out = parseCompatibilityScanStdout(
+      JSON.stringify({ ok: true, status: 'incomplete', scannedActivations: 0, skipped: [] }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('status=incomplete but skipped is empty');
+  });
+
+  // Hard constraint: no consumer may downgrade `incomplete` into a pass that
+  // claims full coverage. A payload that admits skips while saying `clean` is
+  // refused rather than accepted with the skips dropped.
+  it('ok=true + clean + non-empty skipped → protocol invalid (never downgraded)', () => {
+    const out = parseCompatibilityScanStdout(
+      JSON.stringify({ ok: true, status: 'clean', scannedActivations: 0, skipped: [skippedBucket] }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('ok=true with status=clean but skipped=2');
+  });
+
+  it('ok=false + incomplete → protocol invalid (incomplete is never a refusal)', () => {
+    const out = parseCompatibilityScanStdout(
+      JSON.stringify({ ok: false, status: 'incomplete', skipped: [skippedBucket] }),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.status).toBe('scan_failed');
+    expect(out.reason).toContain('ok=false with status=incomplete');
+  });
+
+  it('malformed skipped buckets fail closed (rc-4)', () => {
+    const cases: unknown[] = [
+      { ok: true, status: 'incomplete', skipped: 'nope' },
+      { ok: true, status: 'incomplete', skipped: [{ reason: 'x', count: 0, sampleActivationIds: [] }] },
+      { ok: true, status: 'incomplete', skipped: [{ reason: 'x', count: 1, sampleActivationIds: [1] }] },
+      { ok: true, status: 'incomplete', skipped: [{ reason: '', count: 1, sampleActivationIds: [] }] },
+      { ok: true, status: 'incomplete', scannedActivations: -1, skipped: [skippedBucket] },
+    ];
+    for (const payload of cases) {
+      const out = parseCompatibilityScanStdout(JSON.stringify(payload));
+      expect(out.ok, JSON.stringify(payload)).toBe(false);
+      expect(out.status, JSON.stringify(payload)).toBe('scan_failed');
+    }
+  });
+});
+
+describe('summarizeCompatibilityVisibility — three tiers (5B)', () => {
+  const ws = 'C:/ws';
+
+  it('no skipped rows → level none, no output', () => {
+    const visibility = summarizeCompatibilityVisibility({ skipped: [], scannedActivations: 4 }, ws);
+    expect(visibility.level).toBe('none');
+    expect(visibility.lines).toEqual([]);
+  });
+
+  it('partial skip (some rules verified) → level warning with per-reason counts and the next command', () => {
+    const visibility = summarizeCompatibilityVisibility(
+      {
+        skipped: [{ reason: 'invalid_content_json', count: 2, sampleActivationIds: ['act-a'] }],
+        scannedActivations: 3,
+      },
+      ws,
+    );
+    expect(visibility.level).toBe('warning');
+    const text = visibility.lines.join('\n');
+    expect(text).toContain('invalid_content_json=2 (sample: act-a)');
+    expect(text).toContain('NOT verified');
+    expect(text).toContain(`pd runtime compatibility-scan --workspace "${ws}" --json`);
+    // Non-blocking by construction: no refusal-shaped wording.
+    expect(text).not.toContain('DID NOT VERIFY ANY RULE COMPATIBILITY');
+  });
+
+  it('zero rules verified (scannedActivations=0 + skipped) → level critical with the explicit escalation block', () => {
+    const visibility = summarizeCompatibilityVisibility(
+      {
+        skipped: [{ reason: 'missing_implementation_code', count: 2, sampleActivationIds: ['act-a', 'act-b'] }],
+        scannedActivations: 0,
+      },
+      ws,
+    );
+    expect(visibility.level).toBe('critical');
+    const text = visibility.lines.join('\n');
+    expect(text).toContain('THIS UPGRADE DID NOT VERIFY ANY RULE COMPATIBILITY');
+    expect(text).toContain('missing_implementation_code=2');
+    expect(text).toContain(`pd runtime compatibility-scan --workspace "${ws}" --json`);
+    // The escalation is still a warning block, not a failure result.
+    expect(visibility.lines[0]).toContain('!!!!');
+  });
+
+  it('absent scannedActivations is not treated as zero visibility', () => {
+    const visibility = summarizeCompatibilityVisibility(
+      { skipped: [{ reason: 'invalid_content_json', count: 1, sampleActivationIds: [] }] },
+      ws,
+    );
+    expect(visibility.level).toBe('warning');
   });
 });
