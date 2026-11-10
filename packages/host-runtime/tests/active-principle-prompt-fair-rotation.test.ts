@@ -106,9 +106,12 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
   it('rotates the scan start and continues past non-fitting entries under a round key', async () => {
     const workspaceDir = tempWorkspace();
     // Directive blocks are ~350c each under the 2000c budget → roughly 5 fit.
+    // PRI-1161: each block is 86 chars cheaper than the pre-hoist renderer;
+    // the text length is scaled up by the same 86 so the tuned boundary
+    // (which entries fit at 2000c) is preserved exactly.
     const entries = Array.from({ length: 8 }, (_, i) => ({
       principleId: `SH_R${i}`,
-      text: 'r'.repeat(300),
+      text: 'r'.repeat(386),
     }));
     await seedPromptActivations(workspaceDir, entries);
 

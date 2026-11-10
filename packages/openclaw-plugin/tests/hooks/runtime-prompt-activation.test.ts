@@ -2096,8 +2096,12 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     // P0-G: 中性标题 + authority 标注 (不再无条件声称 Owner-approved)
     expect(ctx).toContain('ACTIVE BEHAVIOR DIRECTIVES');
     expect(ctx).toContain('authority=');
+    // PRI-1161: the constraint framing lives once in the shared header
+    // ("mandatory active behavior constraints ... not background context");
+    // the per-block copy was removed.
     expect(ctx).toContain('active behavior constraint');
-    expect(ctx).toContain('Do not treat this as background context');
+    expect(ctx).toContain('not background context');
+    expect(ctx.split('not background context').length - 1).toBe(1);
   });
 
   it('prependSystemContext includes safety boundary disclaimer', async () => {
