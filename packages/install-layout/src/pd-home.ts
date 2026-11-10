@@ -142,6 +142,12 @@ function canonicalizeDeepestExisting(target: string): string | null {
   }
 }
 
+/**
+ * Production PD home. `OPENCLAW_STATE_DIR` (absolute) wins over
+ * `OPENCLAW_HOME` — kept in its legacy meaning here, i.e. the `.openclaw`
+ * directory itself — which wins over `<realHome>/.openclaw`. A non-absolute
+ * `OPENCLAW_STATE_DIR` is refused instead of being resolved against the cwd.
+ */
 function productionPaths(realHome: string, env: Readonly<Record<string, string | undefined>>): PdHomeResolution {
   // PRI-1165: OPENCLAW_STATE_DIR is OpenClaw's authoritative state dir, so PD's
   // `openclawHome` follows it when set. OPENCLAW_HOME stays as the legacy

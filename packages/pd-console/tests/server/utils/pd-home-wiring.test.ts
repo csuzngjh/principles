@@ -12,6 +12,8 @@ import { defaultConsolePort } from '../../../src/server/console-ports.js';
 
 const created: string[] = [];
 let previousRoot: string | undefined;
+let previousStateDir: string | undefined;
+let previousOpenClawHome: string | undefined;
 
 function tempDir(label: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `pd-console-iso-${label}-`));
@@ -21,11 +23,21 @@ function tempDir(label: string): string {
 
 beforeEach(() => {
   previousRoot = process.env.PD_EXPERIMENT_ROOT;
+  previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  previousOpenClawHome = process.env.OPENCLAW_HOME;
+  // These tests exercise the resolver through `getPdHome()` (process.env), so an
+  // ambient OpenClaw selector would silently retarget `openclawHome`.
+  delete process.env.OPENCLAW_STATE_DIR;
+  delete process.env.OPENCLAW_HOME;
 });
 
 afterEach(() => {
   if (previousRoot === undefined) delete process.env.PD_EXPERIMENT_ROOT;
   else process.env.PD_EXPERIMENT_ROOT = previousRoot;
+  if (previousStateDir === undefined) delete process.env.OPENCLAW_STATE_DIR;
+  else process.env.OPENCLAW_STATE_DIR = previousStateDir;
+  if (previousOpenClawHome === undefined) delete process.env.OPENCLAW_HOME;
+  else process.env.OPENCLAW_HOME = previousOpenClawHome;
   for (const dir of created.splice(0)) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
