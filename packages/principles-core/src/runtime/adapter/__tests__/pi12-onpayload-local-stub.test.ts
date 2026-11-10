@@ -155,6 +155,7 @@ describe('wire-level onPayload (loopback HTTP stub, default suite)', () => {
       inputPayload: 'Diagnose this pain signal: an agent skipped verification three times in one week.',
       contextItems: [],
       outputSchemaRef: SCHEMA_REF,
+      timeoutMs: 10_000,
     };
 
     const handle = await adapter.startRun(input);
@@ -163,6 +164,7 @@ describe('wire-level onPayload (loopback HTTP stub, default suite)', () => {
     // 1. The rewrite actually reached the wire.
     expect(captured).toHaveLength(1);
     const [request] = captured;
+    if (!request) throw new Error('unreachable: one request asserted');
     expect(request.url).toContain('/chat/completions');
     expect(request.authorization).toBe(`Bearer local-stub-key`);
     expect(request.body.model).toBe(MODEL_ID);
