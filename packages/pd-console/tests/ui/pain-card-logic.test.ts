@@ -5,10 +5,14 @@ import {
   shouldRenderIntentTensionPanel,
   shouldRenderFollowUpActions,
   buildIntentDecisionPayload,
+  isAgentReportedOwnerApproved,
+  AGENT_REPORTED_PROVENANCE_LABEL_KEY,
   type IntentDecisionContext,
   type RecordData,
 } from '../../src/ui/pages/pain/pain-card-helpers.js';
 import type { IntentTensionData, IntentDecisionRecordData } from '../../src/ui/utils/validators.js';
+import zhCN from '../../src/ui/i18n/zh-CN.json';
+import en from '../../src/ui/i18n/en.json';
 
 /**
  * PRI-344: Pure-function tests for the EvidenceChainCard refactoring.
@@ -443,5 +447,49 @@ describe('PRI-470: buildIntentDecisionPayload', () => {
     const context: IntentDecisionContext = { id: 'decision-uuid-10', recordId: 'pain_abc' };
     const payload = buildIntentDecisionPayload(tension, context, { ownerAction: 'observe' });
     expect(payload.evidenceRefs).toEqual([]);
+  });
+});
+
+// ── SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance badge ──────────────
+
+describe('pain card — agent-reported provenance badge', () => {
+  const zhPain = zhCN.pages.pain;
+  const enPain = en.pages.pain;
+
+  it('selects the neutral badge for agent_reported_owner_approved', () => {
+    expect(isAgentReportedOwnerApproved({
+      ...FULL_RECORD,
+      provenance: 'agent_reported_owner_approved',
+    })).toBe(true);
+  });
+
+  it('leaves the three legacy provenance values on the unchanged source-kind path', () => {
+    for (const provenance of ['host_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const) {
+      expect(isAgentReportedOwnerApproved({ ...FULL_RECORD, provenance })).toBe(false);
+    }
+    expect(isAgentReportedOwnerApproved(FULL_RECORD)).toBe(false);
+  });
+
+  it('uses neutral wording in both locales', () => {
+    expect(zhPain.provenanceAgentReportedOwnerApproved).toBe('智能体报告，拥有者已授权');
+    expect(enPain.provenanceAgentReportedOwnerApproved).toBe('Reported by an agent, authorized by the Owner');
+  });
+
+  it('never exposes the internal enum literal or reads as the Owner\'s own observation', () => {
+    for (const label of [zhPain.provenanceAgentReportedOwnerApproved, enPain.provenanceAgentReportedOwnerApproved]) {
+      expect(label).not.toContain('agent_reported_owner_approved');
+      expect(label).not.toContain('owner_reported');
+      expect(label).not.toContain('host_context_bound');
+      // Must not present agent-reported pain as something the Owner observed.
+      expect(label).not.toContain('拥有者观察');
+      expect(label).not.toContain('拥有者报告');
+      expect(label.toLowerCase()).not.toContain('owner observed');
+      expect(label.toLowerCase()).not.toContain('owner-reported');
+    }
+  });
+
+  it('resolves the badge label through the i18n key, not a raw value', () => {
+    expect(AGENT_REPORTED_PROVENANCE_LABEL_KEY).toBe('pages.pain.provenanceAgentReportedOwnerApproved');
+    expect(zhPain.provenanceAgentReportedOwnerApproved).toBeTruthy();
   });
 });
