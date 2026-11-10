@@ -195,6 +195,19 @@ describe('pd runtime compatibility-scan', () => {
     ]);
   });
 
+  it('SCAN-10: a failed scan never claims "no active rule references" (5B audit)', async () => {
+    // Before 5B the empty-findings else-branch also caught scan_failed, so a
+    // completely failed scan still printed the "nothing to see" sentence.
+    conn.close();
+    fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'state.db'), 'this is not a sqlite database');
+    await handleRuntimeCompatibilityScan({ workspace: tempWorkspaceDir });
+    expect(process.exitCode).toBe(1);
+    const text = capturedStdout();
+    expect(text).toContain('status: scan_failed');
+    expect(text).toContain('compatibility scan FAILED');
+    expect(text).not.toContain('No active rule references a retired RuleHost contract symbol.');
+  });
+
   it('SCAN-05: command is registered on a real Commander program (cli-7)', async () => {
     const { Command } = await import('commander');
     const { registerRuntimeCompatibilityScanCommand } = await import('../../src/commands/runtime-compatibility-scan.js');

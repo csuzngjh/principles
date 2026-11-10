@@ -65,6 +65,10 @@ function formatTextOutput(output: ActivationCompatibilityScanResult): string {
       const sample = entry.sampleActivationIds.length > 0 ? ` (sample: ${entry.sampleActivationIds.join(', ')})` : '';
       lines.push(`  ${entry.reason}=${entry.count}${sample}`);
     }
+  } else if (output.status === 'scan_failed') {
+    // A failed scan has no evidence at all — before 5B this fell through to the
+    // "nothing to see" sentence, which was a false clean claim (SCAN-10).
+    lines.push('The compatibility scan FAILED: no conclusion about rule compatibility can be drawn.');
   } else {
     lines.push('No active rule references a retired RuleHost contract symbol.');
   }
