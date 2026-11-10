@@ -72,6 +72,24 @@ async function seedActiveRule(artifactId: string, ruleId: string, implementation
   });
 }
 
+async function seedActiveRuleWithRawContent(artifactId: string, ruleId: string, contentJson: string): Promise<void> {
+  const now = new Date().toISOString();
+  conn.getDb().prepare(`
+    INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+    VALUES (?, 'rule', ?, ?, ?, '[]', 'validated', ?, ?, ?)
+  `).run(artifactId, `task-${artifactId}`, `principle-${ruleId}`, ruleId, contentJson, now, now);
+  await new SqliteActivationStateStore(conn).recordActivation({
+    activationId: `act-${artifactId}`,
+    idempotencyKey: `${artifactId}::code_tool_hook`,
+    artifactId,
+    channel: 'code_tool_hook',
+    action: 'code_tool_hook_live_activate',
+    targetRef: `impl://${ruleId}`,
+    activatedAt: now,
+    deactivatedAt: null,
+  });
+}
+
 function capturedStdout(): string {
   const calls = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls;
   return calls.map(c => String(c[0] ?? '')).join('\n');
@@ -127,6 +145,25 @@ describe('pd runtime compatibility-scan', () => {
     expect(out.endsWith('}')).toBe(true);
     expect(() => JSON.parse(out)).not.toThrow();
     expect((out.match(/\{/g) ?? []).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('SCAN-06: text output reports skipped rows, not just --json (2B-a)', async () => {
+    await seedActiveRuleWithRawContent('art-bad', 'rule-bad', '{not json');
+    await handleRuntimeCompatibilityScan({ workspace: tempWorkspaceDir });
+    // Skipping is observability, not a failure (status/ok semantics unchanged).
+    expect(process.exitCode).toBeUndefined();
+    const text = capturedStdout();
+    expect(text).toContain('skipped: 1 active row(s) could not be scanned');
+    expect(text).toContain('invalid_content_json=1');
+  });
+
+  it('SCAN-07: --json carries the skipped breakdown (2B-a)', async () => {
+    await seedActiveRuleWithRawContent('art-bad2', 'rule-bad2', '{not json');
+    await handleRuntimeCompatibilityScan({ workspace: tempWorkspaceDir, json: true });
+    const parsed = JSON.parse(capturedStdout()) as Record<string, unknown>;
+    expect(parsed['skipped']).toEqual([
+      { reason: 'invalid_content_json', count: 1, sampleActivationIds: ['act-art-bad2'] },
+    ]);
   });
 
   it('SCAN-05: command is registered on a real Commander program (cli-7)', async () => {

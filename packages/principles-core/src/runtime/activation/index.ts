@@ -70,8 +70,20 @@ export type {
   OwnerPromotionActor, OwnerPromotionRequest, PromotionCommitInput, OwnerPromotionResult,
   RuleCodeOwnerDecisionServiceDeps,
 } from './rulecode-owner-decision-service.js';
-export { REQUIRED_PROMOTION_CHECK_IDS, evaluateRuleCodePromotionReadiness } from './promotion-readiness-evaluator.js';
-export type { PromotionCheckId, PromotionReadinessCheck, PromotionReadinessEvaluationInput } from './promotion-readiness-evaluator.js';
+export {
+  REQUIRED_PROMOTION_CHECK_IDS,
+  PROMOTION_EVIDENCE_THRESHOLDS,
+  evaluateRuleCodePromotionReadiness,
+  evaluatePromotionEvidenceCriteria,
+  explainPromotionReadiness,
+} from './promotion-readiness-evaluator.js';
+export type {
+  PromotionCheckId,
+  PromotionReadinessCheck,
+  PromotionReadinessEvaluationInput,
+  PromotionEvidenceCriterionId,
+  PromotionEvidenceCriterion,
+} from './promotion-readiness-evaluator.js';
 export { PromotionReadinessReader } from './promotion-readiness-reader.js';
 export type { PromotionReadinessReaderDeps } from './promotion-readiness-reader.js';
 export { evaluateRuleCodeSafetyCircuit, initialRuleCodeSafetyCircuitState } from './rulecode-safety-circuit-breaker.js';

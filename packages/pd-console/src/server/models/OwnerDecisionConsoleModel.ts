@@ -57,10 +57,45 @@ export interface OwnerDecisionItem {
   readonly createdAt: string;
 }
 
+/**
+ * rc-9 — 一条"本应进入收件箱但没有出现"的 RuleCode 条目。
+ *
+ * 收件箱此前用 `catch { continue; }` 吞掉 owner-review 读取失败，于是
+ * "没有待决"与"读不到"在页面上同形。这里把每类跳过显式计数，并保留
+ * 有界样本用于归因（rc-8：不放大输出）。
+ */
+export interface OwnerDecisionReadIssue {
+  readonly scope: 'rulecode_shadow';
+  readonly reason: 'owner_review_read_failed' | 'readiness_not_actionable' | 'shadow_scan_unavailable';
+  readonly count: number;
+  /** 最多 5 个 activation id，仅用于归因。 */
+  readonly sampleActivationIds: readonly string[];
+  /** 首个跳过原因的短摘要（≤200 字符）。 */
+  readonly detail?: string;
+}
+
 export interface OwnerDecisionListResult {
   readonly items: readonly OwnerDecisionItem[];
   readonly total: number;
   readonly generatedAt: string;
+  /** rc-9：空数组 = 没有任何条目被静默吞掉。 */
+  readonly readIssues: readonly OwnerDecisionReadIssue[];
+}
+
+interface MutableOwnerDecisionReadIssue {
+  scope: 'rulecode_shadow';
+  reason: OwnerDecisionReadIssue['reason'];
+  count: number;
+  sampleActivationIds: string[];
+  detail?: string;
+}
+
+/** 每条 issue 保留的样本上限，防止异常放大响应体。 */
+const MAX_READ_ISSUE_SAMPLES = 5;
+const MAX_READ_ISSUE_DETAIL_CHARS = 200;
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 const GOVERNANCE_TASK_KINDS = new Set(['evaluator', 'rollout_reviewer']);
@@ -250,13 +285,39 @@ export class OwnerDecisionConsoleModel {
   async listOwnerDecisionItems(routeContext?: { servedThroughAuthenticatedConsoleRoute: boolean }): Promise<OwnerDecisionListResult> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { items: [], total: 0, generatedAt: new Date().toISOString() };
+      return { items: [], total: 0, generatedAt: new Date().toISOString(), readIssues: [] };
     }
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const db = conn.getDb();
       const artifactStore: PIArtifactStore = new SqlitePIArtifactStore(conn);
       const items: OwnerDecisionItem[] = [];
+      // rc-9：被跳过/读取失败的条目必须可计数、可归因，不能只体现在"条数变少"。
+      const issueByReason = new Map<OwnerDecisionReadIssue['reason'], MutableOwnerDecisionReadIssue>();
+      const recordReadIssue = (
+        reason: OwnerDecisionReadIssue['reason'],
+        activationId: string,
+        detail?: string,
+      ): void => {
+        let issue = issueByReason.get(reason);
+        if (issue === undefined) {
+          issue = { scope: 'rulecode_shadow', reason, count: 0, sampleActivationIds: [] };
+          issueByReason.set(reason, issue);
+        }
+        issue.count += 1;
+        if (
+          activationId.length > 0
+          && issue.sampleActivationIds.length < MAX_READ_ISSUE_SAMPLES
+          && !issue.sampleActivationIds.includes(activationId)
+        ) {
+          issue.sampleActivationIds.push(activationId);
+        }
+        if (detail !== undefined && detail.length > 0 && issue.detail === undefined) {
+          issue.detail = detail.length > MAX_READ_ISSUE_DETAIL_CHARS
+            ? `${detail.slice(0, MAX_READ_ISSUE_DETAIL_CHARS)}…`
+            : detail;
+        }
+      };
 
       // ── 1. needs_human_review 的 decision-capable 任务 (PRI-629 核心) ──
       let nhrRows: Record<string, unknown>[] = [];
@@ -336,8 +397,13 @@ export class OwnerDecisionConsoleModel {
             // Console HTTP surface for the visibility evaluation; promotion
             // still re-evaluates at the real owner-review/promote entry.
             const review = await activationModel.getOwnerReview(activationId, true, { routeContext });
-            if (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') continue;
-          } catch {
+            if (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') {
+              // 非待决：不进收件箱，但必须留下计数与原因（否则该 activation 永久不可见）。
+              recordReadIssue('readiness_not_actionable', activationId, `readiness=${review.readiness.status}`);
+              continue;
+            }
+          } catch (error) {
+            recordReadIssue('owner_review_read_failed', activationId, describeError(error));
             continue;
           }
           items.push({
@@ -356,11 +422,17 @@ export class OwnerDecisionConsoleModel {
             createdAt: typeof row.activated_at === 'string' ? row.activated_at : '',
           });
         }
-      } catch {
-        // activations 表缺失 → 跳过
+      } catch (error) {
+        // activations 表缺失 → 无影子规则可列；这本身是降级事实，必须可见。
+        recordReadIssue('shadow_scan_unavailable', '', describeError(error));
       }
 
-      return { items, total: items.length, generatedAt: new Date().toISOString() };
+      return {
+        items,
+        total: items.length,
+        generatedAt: new Date().toISOString(),
+        readIssues: [...issueByReason.values()],
+      };
     } finally {
       conn.close();
     }
