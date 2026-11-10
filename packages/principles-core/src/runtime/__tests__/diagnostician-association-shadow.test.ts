@@ -117,7 +117,7 @@ function resolve(input: {
 }) {
   return resolveSourceDeclaredRelations({
     envelope: input.envelope ?? makeEnvelope(makeOutput()),
-    runOutput: 'runOutput' in input ? input.runOutput : makeOutput(),
+    runOutput: Object.hasOwn(input, 'runOutput') ? input.runOutput : makeOutput(),
     // P2-02: the resolver now requires the persisted run lineage it loaded the
     // output from, and verifies the artifact + run output are the same source.
     runLineage: input.runLineage ?? { taskId: TASK_ID, runId: RUN_ID },
