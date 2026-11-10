@@ -71,41 +71,32 @@ function criterion(
   return found;
 }
 
-const ONE_SHORT: {
+const ONE_SHORT_CASES: {
   criterionId: PromotionEvidenceCriterionId;
-  label: string;
   shadowSummary: Partial<PromotionEvidenceSnapshot['shadowSummary']>;
   expectedCurrent: number;
   expectedThreshold: number;
-  expectedShortfall: number;
 }[] = [
   {
     criterionId: 'shadow_observed',
-    label: '19 observed samples against a threshold of 20',
     shadowSummary: { observed: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples - 1 },
     expectedCurrent: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples - 1,
     expectedThreshold: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples,
-    expectedShortfall: 1,
   },
   {
     criterionId: 'shadow_matched',
-    label: '2 matched samples against a threshold of 3',
     shadowSummary: { matched: PROMOTION_EVIDENCE_THRESHOLDS.minMatchedSamples - 1 },
     expectedCurrent: PROMOTION_EVIDENCE_THRESHOLDS.minMatchedSamples - 1,
     expectedThreshold: PROMOTION_EVIDENCE_THRESHOLDS.minMatchedSamples,
-    expectedShortfall: 1,
   },
   {
     criterionId: 'shadow_neutral_control',
-    label: '0 neutral-control samples against a threshold of 1',
     shadowSummary: { neutralControl: PROMOTION_EVIDENCE_THRESHOLDS.minNeutralControlSamples - 1 },
     expectedCurrent: PROMOTION_EVIDENCE_THRESHOLDS.minNeutralControlSamples - 1,
     expectedThreshold: PROMOTION_EVIDENCE_THRESHOLDS.minNeutralControlSamples,
-    expectedShortfall: 1,
   },
   {
     criterionId: 'shadow_age',
-    label: '23 hours of shadow observation against a threshold of 24 hours',
     shadowSummary: {
       firstObservedAt: new Date(
         Date.parse(CREATED_AT) - (PROMOTION_EVIDENCE_THRESHOLDS.minShadowAgeMs - ONE_HOUR_MS),
@@ -113,9 +104,16 @@ const ONE_SHORT: {
     },
     expectedCurrent: PROMOTION_EVIDENCE_THRESHOLDS.minShadowAgeMs - ONE_HOUR_MS,
     expectedThreshold: PROMOTION_EVIDENCE_THRESHOLDS.minShadowAgeMs,
-    expectedShortfall: ONE_HOUR_MS,
   },
 ];
+
+// Labels and shortfalls are derived too: a literal "19 against 20" or a literal
+// "1" here would be a second truth that silently lies once a threshold changes.
+const ONE_SHORT = ONE_SHORT_CASES.map(testCase => ({
+  ...testCase,
+  label: `${testCase.criterionId} at ${testCase.expectedCurrent} against ${testCase.expectedThreshold}`,
+  expectedShortfall: testCase.expectedThreshold - testCase.expectedCurrent,
+}));
 
 describe('promotion evidence criteria', () => {
   it.each(ONE_SHORT)('reports exactly what is missing for $label', testCase => {
@@ -139,6 +137,24 @@ describe('promotion evidence criteria', () => {
     }
     expect(evaluate(snapshot).status).toBe('ready');
     expect(explainPromotionReadiness(snapshot, 'ready')).toBeNull();
+  });
+
+  it('never reports a negative shortfall when a criterion is exceeded', () => {
+    const snapshot = snapshotWith({ observed: PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples + 5 });
+    const entry = criterion(evaluatePromotionEvidenceCriteria(snapshot), 'shadow_observed');
+
+    expect(entry.current).toBe(PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples + 5);
+    expect(Object.hasOwn(entry, 'shortfall')).toBe(false);
+    expect(evaluate(snapshot).status).toBe('ready');
+  });
+
+  it('treats a missing first observation as a full age shortfall, not as satisfied', () => {
+    const snapshot = snapshotWith({ firstObservedAt: null });
+    const entry = criterion(evaluatePromotionEvidenceCriteria(snapshot), 'shadow_age');
+
+    expect(entry.current).toBeNull();
+    expect(entry.shortfall).toBe(PROMOTION_EVIDENCE_THRESHOLDS.minShadowAgeMs);
+    expect(evaluate(snapshot).status).toBe('evidence_insufficient');
   });
 
   it('explains gaps only for an evidence-insufficient result', () => {
