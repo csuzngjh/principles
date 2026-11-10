@@ -187,16 +187,21 @@ Agent 观察到"相对锚点的显著背离"
 ┌─────────────────────────────────────────────────────────────┐
 │ 门 3：内容是否结构化到六项？                                │
 │  - reason 里有：锚点 / 锚点来源+引用等级 / 观察到的行为 /   │
-│    背离 / 为什么值得记录 / 上下文                            │
+│    背离 / 上下文；"为什么值得记录"为辅助项，不作门槛        │
 │  - 不含分数、严重度、会话 id、推测性类型                     │
 └─────────────────────────────────────────────────────────────┘
         │
         ▼
-MCP Tool `pd_submit_pain`
-        │  core capability：校验 + 组装 + 提交
-        ▼
-PainToPrincipleService.recordPain({ asyncMode: true })
+Handler：生成身份（在任何写入/deadline 之前）
+  painId = mcp_<epoch_ms>_<8-hex>
+  taskId = diagnosis_<painId>
         │
+        ▼
+MCP Tool `pd_submit_pain`
+        │  core capability：校验 + 使用传入身份 + 提交
+        ▼
+PainToPrincipleService.recordPain({ painId, taskId, asyncMode: true })
+        │  （capability 不重新生成、不覆盖这两个 ID）
         ▼
 state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
                     diagnostic_json.anchor = {type, ref}）
@@ -220,11 +225,14 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 新增 `packages/principles-core/src/runtime/pain-submit-capability.ts`，对外通过 `@principles/core/runtime/pain-submit-capability` 暴露。它：
 
 - 不 import MCP SDK（core 保持 SDK-free，沿用 `pain-recall-capability` 的边界）；
-- 只接收已解析的 `workspaceDir` 与已校验的结构化输入；
-- 负责锚点校验、构造 `painId`、调用 `recordPain`、组装回执；
+- 只接收已解析的 `workspaceDir`、Handler 预生成的 `painId` / `taskId` 与已校验的结构化输入；
+- **必须使用传入的 `painId` / `taskId`，不得重新生成或覆盖**；若缺少则视为非法调用并失败关闭；
+- 负责锚点校验、调用 `recordPain`、组装回执；
 - 让三宿主共享同一份语义（P4/P6）。
 
-`pd-mcp-server` 只负责：协议 schema → zod → capability → 信封/预算。
+只读回查优先复用既有 `RuntimeStateManager.getTask(taskId)` / TaskStore；**只有**在现有公开接口不足以完成有界回查时，才增加最小只读接口（不新增数据库、注册表、状态服务）。
+
+`pd-mcp-server` 只负责：协议 schema → zod → **生成身份** → capability → 信封/预算 → 超时回查。
 
 ---
 
@@ -330,7 +338,7 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 
 **哪些不再适用**：recall 的 `readOnlyHint:true`、以及"只读工具无需写入治理"的结论。
 
-**实施门槛**：OG-4 未获授权前，本设计只能停留在文档与测试替身；**不得**把 `pd_submit_pain` 注册进生产 `server.ts`，也不得通过在宿主侧追加 matcher 来自行"补齐"治理。OG-4 的授权状态只能由 Owner 给出，本文件不自行宣布已授权。
+**实施门槛**：OG-4 是**生产交付 Gate**，不是"新增系统建设任务"。OG-4 未获授权前，生产环境**不注册**写类 MCP Tool——本设计只能停留在文档与测试替身；**不得**把 `pd_submit_pain` 注册进生产 `server.ts`，也不得通过在宿主侧追加 matcher 或本地开关来自行"补齐"治理。OG-4 获授权后，才允许注册并以 `readOnlyHint:false` 声明。OG-4 的授权状态只能由 Owner 给出，本文件不自行宣布已授权。
 
 **不得为此新建**：独立审批服务、Owner 确认界面、审批 Token、审批库、三套宿主专用治理系统。现有机制不足的部分，列为实施前置问题（见 §16.4）。
 
@@ -473,6 +481,7 @@ V0.6 的"超 32 KiB → `failed`"被推翻。V0.7 的顺序是：
 6. 锚点有效性校验（§5.6）→ 失败则结构化拒绝，零写入
 7. 调用 submitPainCapability({ workspaceDir, painId, taskId, input })
    - 内部走既有 evaluatePainIngress()（唯一准入）→ PainToPrincipleService.recordPain()
+   - **capability 必须使用传入的 painId / taskId，不得重新生成或覆盖**；缺失即非法调用、失败关闭（§3.2）
    - asyncMode:true；recordObservability 见 §6.7（不再固定 false）
 8. 正常返回 → 组装 submitted 回执（painId / taskId 来自第 5 步）
 9. 写入中超时（runWithDeadline timedOut，F60）→ 用第 5 步已知 taskId 做有界回查（§5.7）
@@ -550,6 +559,7 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 |---|---|
 | 谁生成 `painId` | MCP Handler，在校验通过后、调用提交能力之前 |
 | `taskId` 怎么得到 | 确定性派生 `diagnosis_<painId>`（F61），不依赖写入结果 |
+| Core Capability 是否另生成身份 | **不生成**：只接收并使用 Handler 传入的 `painId` / `taskId`；缺失即失败关闭 |
 | Handler 能否在开始写入前持有 | **能**；这是本修订的核心要求 |
 | 超时后底层写入是否继续 | **会继续**：`runWithDeadline()` 只停止等待，不取消 `fn()`（F60） |
 | 查到任务是否等于"本次提交成功" | **是**（本次 `painId` 唯一），但只证明**任务行已写入**；不证明诊断已执行 |
@@ -565,8 +575,10 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
      ├── 命中 → 返回最小 submitted（painId / taskId / workspaceDir / status:pending）
      ├── 未命中 → submit_unconfirmed（不得称"未创建"、不得返回普通 failed）
      └── 回查本身失败/再次超时 → submit_unconfirmed
-  → 不自动重试写入（会制造第二条任务）
+  → 不自动重新提交（会制造第二条任务）
 ```
+
+回查只复用既有只读能力：`RuntimeStateManager.getTask(taskId)` / TaskStore 查询（F61）；**不新增**数据库、任务注册表或状态服务。只有现有公开接口无法完成这次有界回查时，才允许增加一个最小只读接口。
 
 **状态语义**：
 
@@ -575,7 +587,7 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 | `submitted` | 任务行已确认存在 | `pd task show <taskId>` |
 | `submit_unconfirmed` | 写入结果未知 | `pd task show <taskId>` / `pd task list --kind diagnostician`；用预生成的 `painId` 在 `tasks.input_ref` 中查找 |
 
-**禁止**：新增幂等库、Session Registry、对结果未知的提交自动重试、超时直接宣称失败、已成功却返回普通失败、无法确定时宣称一定成功。
+**禁止**：新增幂等库、Session Registry、对结果未知的提交自动重试、超时直接宣称失败、已成功却返回普通失败、无法确定时宣称一定成功、超时后自动重新提交、capability 重新生成或覆盖 Handler 传入的身份。
 
 **并发与容量**：继续复用既有 `AdmissionLimiter`（§5.5 第 2 步）与既有 orphan 跟踪（F60）；不新增超时任务注册表。
 
@@ -591,10 +603,10 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 | 2 | 锚点来源 + 引用等级 | `verbatim` / `paraphrase` / `recollection` / `inference` |
 | 3 | 观察到的行为 | 具体动作、顺序、跳过、越界 |
 | 4 | 背离 | 没做 / 做反了 / 做了但绕过 |
-| 5 | 为什么值得记录 | 未来哪类任务会改变判断 |
+| 5 | 为什么值得记录（辅助） | 未来哪类任务会改变判断；用于帮助 Owner 判断注意力优先级，**不是准入门槛** |
 | 6 | 上下文 | 任务类型、仓库/目录、可公开的环境事实 |
 
-`reason` 不要求机器可解析；服务器只检查长度与非空。结构化的是 `anchorType` / `anchorRef`。
+`reason` 不要求机器可解析；服务器只检查长度与非空。结构化的是 `anchorType` / `anchorRef`。**Pain 是否成立只看锚点 / 具体行为 / 显著背离三项**；第 5 项缺失不构成拒绝理由。
 
 ## 6.2 `anchor` 的持久化落点
 
@@ -645,9 +657,10 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 
 | 输入 | 行为 |
 |---|---|
-| 带 `painType` | 原值透传；构造 `painIngress.v1`（v1 payload 不含 `painType`，它作为独立入参传给 `recordPain`）；走 `evaluatePainIngress()` |
-| 省略 `painType` | Handler 归一为中性默认 **`principle_deviation`**；**仍然**构造 `painIngress.v1`；**仍然**走 `evaluatePainIngress()` |
-| 任何情况 | 只有一条准入路径；legacy 分支不再由本 Tool 触发 |
+| MCP 带 `painType` | 原值透传；构造 `painIngress.v1`（v1 payload 不含 `painType`，它作为独立入参传给 `recordPain`）；走 `evaluatePainIngress()` |
+| MCP 省略 `painType` | Handler 归一为中性默认 **`principle_deviation`**；**仍然**构造 `painIngress.v1`；**仍然**走 `evaluatePainIngress()` |
+| CLI 手动报告 | **本轮不改**：`pd pain record` 继续保持既有 `user_frustration` 行为；CLI 产品语义不在本 SPEC 修订范围 |
+| 任何情况 | MCP 只有一条准入路径；legacy 分支不再由本 Tool 触发 |
 
 `principle_deviation` 是本 SPEC 的锚点式 Pain 的**语义默认**：Agent 提交的是"相对锚点的行为背离"，不是工具故障、不是子 Agent 错误、也不是 Owner 情绪。它不是"未知"的假类别，而是准确描述。
 
@@ -665,13 +678,13 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 | `runtime/pain-ingress-payload.ts:280-283`（`parsePainIngressReport` 白名单） | 枚举白名单同步，否则带新值的报告会被 `invalid_input` 拒绝 |
 | `runtime/pain-signal-bridge.ts:92`（`PainDetectedData.painType`） | 同上 |
 | `runtime/evolution-types.ts:63,118,143,264,311,340` | TypeBox 联合与映射；当前已含 `dispatch_error`，但不含 `principle_deviation`。**Observability 开启时会把 `painType` 写进 `evolution.jsonl`**，不同步会让下游 schema 拒绝新值 |
-| `pd-cli/src/commands/pain-record.ts:128,466` | 去掉硬编码 `user_frustration`，改由显式参数或默认值决定 |
-| `pain-signal-bridge.ts:389`（legacy 归一） | 不再把缺失类型塞成 `user_frustration`；legacy 行只做"读取既有字段"，不新增类型 |
-| 现有断言 `user_frustration` 的测试 | 逐条判断是"CLI 显式传值"还是"默认值假设"；后者改为 `principle_deviation` |
+| `pd-cli/src/commands/pain-record.ts:128,466` | **本轮不改**：CLI 手动报告保持 `user_frustration`；不新增 CLI 参数、不改 CLI 产品语义 |
+| `pain-signal-bridge.ts:389`（legacy 归一） | **本轮不改**既有 legacy 归一逻辑；只要求新 MCP 写入不产生 legacy-only 记录（§6.3.3） |
+| 现有断言 `user_frustration` 的测试 | **无需改动**（CLI 行为不变）；只新增 MCP 路径缺省为 `principle_deviation` 的断言 |
 | Parser / Validator（`parsePainIngressV1Payload`） | **无需改**：v1 payload 不含 `painType`，重入校验不会因新值失败 |
 | 持久化消费者（`buildDiagnosticJson`、Admission、Read Model、Console 展示） | `diagnostic_json` 不含 `painType`，因此这些路径**不受影响**；只有 Observability 的 evolution 流需要同步 |
 
-`PainProvenance` **不扩展**（它是来源，不是类型，见 §6.6）。
+**类型与来源是两件事**：本节只处理 `painType`（Pain 的分类）。来源/作者归属由 §6.6 处理——那里新增一个 provenance 值 `agent_reported_owner_approved`，与本节无关，不得互相替代。
 
 ## 6.4 严重度
 
@@ -735,7 +748,8 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 |---|---|---|
 | 省略 `--score` | 写 `DEFAULT_PAIN_SCORE = 40` → `severityFromScore(40)` → `moderate`；**四处默认值一起改** | 与 MCP 入口同一把尺子，避免"同一个问题两个严重度" |
 | 显式 `--score` | 保留，作为人工提级通道 | 产品与操作权限要求；见下方边界 |
-| `painType` 默认 | 不再硬编码 `user_frustration`；省略时落 `principle_deviation`（§6.3） | 类型 ≠ 严重度（F25） |
+| `painType` 默认（MCP） | MCP 路径省略时落 `principle_deviation`（§6.3）；**不得**回填 `user_frustration` | 类型 ≠ 严重度（F25） |
+| `painType`（CLI） | **本轮不改**：`pd pain record` 保持既有 `user_frustration`；CLI 产品语义不在本次修订范围 | 冻结范围 |
 | `diagnostician_async_cli` | 保持默认关，不随 L3 毕业翻转 | 改变手动提交体感（提交即返回），等真实取证后再评估 |
 
 ### 6.5.1 `--score` 的权限边界（必须如实写明）
@@ -802,7 +816,7 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 
 **不扩展**：不新增第二套 Origin/Provenance 模型、不新增 `originChannel` 表、不新增 `reportedBy` 字段。
 
-**若 Owner 决定不扩展 provenance**：则必须显式接受"MCP 路径 provenance 仍为 `owner_reported_no_host_trace`，但这是技术含义（无宿主 trace），不是作者声明"这一事实，并在 Console 文案与 Skill 中说明；本文件不自行选择这条路径。
+**唯一方案**：`mcp_agent_assisted` + `agent_reported_owner_approved` 是本节确定的最终取值，不再保留"是否扩展 provenance"的待选项。其含义固定为"事实由 Agent 观察、提交经 Owner 授权"；**Owner 授权 ≠ Owner 是事实报告者**，因此不得写成 `owner_statement`，也不得在 `correctionEvidence.classification` 中使用 `owner_statement`（除非逐字引用 Owner 原话并显式标注）。
 
 ## 6.7 Observability 与可见性
 
@@ -1168,7 +1182,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 | SPEC | 测试落点 | 断言 |
 |---|---|---|
-| T01 | `packages/pd-mcp-server/src/__tests__/submit-tool.test.ts` | `tools/list` 同时包含 `pd_submit_pain` 与 `pd_recall_principle_pains` |
+| T01 | `packages/pd-mcp-server/src/__tests__/submit-tool.test.ts` | **前置：OG-4 已授权**（未授权时 `pd_submit_pain` 不进入生产注册，见 T43）；满足后 `tools/list` 同时包含 `pd_submit_pain` 与 `pd_recall_principle_pains` |
 | T02 | 同上 | 缺 `reason` / 超 2000 / 非法 enum → 结构化错误，且 `getTask` 无新行 |
 | T03 | `pain-submit-capability.test.ts` | `diagnostic_json.anchor == {type, ref}` |
 | T04 | 同上 | 缺 `anchorType`/`anchorRef` → schema 拒绝，无新行 |
@@ -1229,7 +1243,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 |---|---|---|
 | T41 | 超时身份与对账（10 例） | ①写入前失败；②写入成功；③写入后回执超预算；④写入中超时；⑤超时后回查命中；⑥超时后回查未命中；⑦回查本身失败；⑧后台写入迟到完成；⑨两次并发写入；⑩结果未知时不自动重提交。每例都断言 `painId` 在写入前已存在、`taskId` 确定性派生 |
 | T42 | 有效锚点十例 | active+范围匹配（接受）、active+不适用（背景）、candidate（背景）、probation（接受但披露）、archived（拒绝）、deprecated（拒绝）、不存在（拒绝）、版本错误（拒绝）、Ledger 损坏（失败关闭）、Owner 当前要求与历史原则冲突（按 `owner_expectation` 且披露冲突） |
-| T43 | OG-4 门槛 | 无授权记录时 `pd_submit_pain` 不得出现在生产 `tools/list`；不得用宿主 matcher 自行补齐；`readOnlyHint:false` 在描述中声明 |
+| T43 | OG-4 门槛 | OG-4 是**生产交付 Gate**，不是新增系统建设任务。OG-4 未授权 → 生产环境不注册写类 MCP Tool，`pd_submit_pain` 不得出现在生产 `tools/list`；授权后才注册并声明 `readOnlyHint:false`；不得自行宣称已获授权，不得用宿主 matcher 或本地开关补齐 |
 | T44 | 来源归属（7 例） | Owner 直接报告、Agent 提议 Owner 同意、Agent 提议 Owner 拒绝、无 Session 的 Agent Observation、已保存记录重读、Admission 解释、Console 展示；断言不写 `owner_statement`、不标 `user_frustration`、`origin.channel=mcp_agent_assisted`、`parseOrigin` 接受、provenance 不显示成 Owner reported |
 | T45 | Observability A/B | A(true) 与 B(false) 各自写了哪些记录；B 下 Console 不可见、Recall 出现 `pain_event_only_in_state_db`；选定的 MCP 路径必须可见（`pain_events` 有行） |
 
@@ -1402,12 +1416,11 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 **为什么三项都只写目标、不写"已完成"**：本轮权限只到文档；任何"已改为中等 / 已分发 / 已保持"的完成态结论，都必须等实现后由 T07 / T39 / T40 的真实读回证明。
 
-## 16.4 仍待确认
+## 16.4 实施前置（外部前提，非设计待定项）
 
-1. **OG-4 系统层授权**（§5.1.1）：Owner 必须明确授权"允许 PD 新增一个 MCP 写入能力并交付三宿主"。未授权前，`pd_submit_pain` 只能存在于设计与测试替身。
-2. **provenance 是否新增值**（§6.6.4）：本文件倾向新增 `agent_reported_owner_approved`；若 Owner 选择复用 `owner_reported_no_host_trace`，必须接受并说明其技术含义，不得把它展示成"Owner 亲自报告"。
+1. **OG-4 系统层授权**（§5.1.1）：这是生产交付 Gate，不属本轮实施范围。OG-4 未授权时生产环境不注册写类 MCP Tool，`pd_submit_pain` 只能存在于设计与测试替身；授权后才注册并声明 `readOnlyHint:false`。不得自行宣称已获授权。**本节不新增审批系统，也不改宿主治理架构。**
 
-除上述两项外，此前三项已由 Owner 裁定，见 §16.3。
+已确定、不再作为待选项：provenance 新增 `agent_reported_owner_approved`（§6.6.4），配合 `origin.channel = mcp_agent_assisted`；不保留"复用 `owner_reported_no_host_trace`"作为备选。
 
 ## 16.5 post-review 七项修订对照
 
@@ -1450,6 +1463,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| 0.8 收口修订 | 2026-11-10 | 四项收口，版本号仍为 0.8：§6.1 "为什么值得记录"降为辅助、Pain 成立只看三要素；§3/§3.2/§5.5/§5.7 Handler 预生成身份、capability 只使用不覆盖、超时复用 RuntimeStateManager/TaskStore 有界回查且不自动重提交；§6.3 MCP 缺省 `principle_deviation` 且 CLI 保持 `user_frustration` 不变；§6.6 provenance 唯一方案 `agent_reported_owner_approved`（删除待选项）；§5.1.1/§10 T01/T43/§16.4 OG-4 生产交付 Gate |
 | 0.8 post-review corrections | 2026-11-10 | 七项定点修订，版本号仍为 0.8：§5.1.1 OG-4 治理合同；§5.5 身份预生成；§5.6/§5.6.1 有效锚点；§5.7 `submit_unconfirmed` 与有界回查；§6.3 `painType` 单一路径 + `principle_deviation`；§6.4/§6.5 四处 `DEFAULT_PAIN_SCORE=40` 与 `--score` 权限边界；§6.6 来源 channel/provenance 扩展；§6.7 Observability 可见性；§7.2 三宿主来源；§9 失败与幂等；§10 A11–A16 / T14b / T41–T45；§16.4 两项待确认 |
 | 0.8 | 2026-11-10 | Owner 追加裁定 1–3：CLI 省略 `--score` 改落 moderate（代码未改，§6.5）；WorkBuddy Skill 由安装器分发并废弃旧 `pd-record-pain`（§7.4，目标行为）；`diagnostician_async_cli` 保持默认关；新增 F53–F54、T39–T40；三项待确认清零 |
 | 0.7 | 2026-11-10 | 按 Owner A–D 裁定重写；锚点三源与六项内容；`anchor` 落 `diagnostic_json`；默认中等；`mode` 可选且 v1 省略；授权模型；L2 同源+预检+spawn；L2b 扩展既有 `StalledDiagnosticianTaskReadModel` 并用 `runs.started_at`；L3 复用既有游标 authority 并删除 `cursorScope`；三宿主 Instructions 清单；A/B/C 测试矩阵；Complexity Delta 分链路；仍需确认 3 项 |

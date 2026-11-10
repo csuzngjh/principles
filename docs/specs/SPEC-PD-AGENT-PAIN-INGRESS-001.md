@@ -36,6 +36,17 @@
 | C6 | `origin.kind = owner_manual` + `channel = mcp_agent_assisted` 未被 `parseOrigin()` 白名单接受；Owner 同意提交 ≠ Owner 亲自报告，草案未区分事实作者归属。 | §7.5；TD §6.6 |
 | C7 | 草案称 `recordObservability:false` 不影响可见性。实际 false 跳过 trajectory.db `pain_events`，Console 读 trajectory.db 将看不到该 Pain。 | §7.6；TD §7 |
 
+#### v0.8 收口修订 — 2026-11-10
+
+> 版本号仍为 **0.8**。只消除影响实现判断的矛盾，不新增需求、不重写章节。
+
+| # | 收口项 | 修订落点 |
+|---|---|---|
+| C8 | Pain 判断条件不得被"长期价值 / 复发 / 损失"反向绑架：统一为"明确锚点 + 具体行为 + 显著背离"；D4 只决定注意力优先级 | §1.3、§5.1、§5.3；TD §6.1 |
+| C9 | `painId` / `taskId` 生成职责：Handler 在提交与 deadline 之前生成，Core Capability 只使用不覆盖；超时用已知 `taskId` 有界回查，不自动重提交 | §7.4、§8；TD §3、§3.2、§5.5、§5.7 |
+| C10 | `painType` 与 provenance 分离：MCP 缺省 `principle_deviation`（CLI 保持 `user_frustration` 不变）；provenance 唯一方案 `agent_reported_owner_approved` | §3.1、§6.3、§7.5；TD §6.3、§6.6 |
+| C11 | OG-4 定位为生产交付 Gate：未授权不注册写类 Tool，授权后才注册并 `readOnlyHint:false`；T01 以授权为前置 | §7.7、T01、T43；TD §5.1.1、§10 T01/T43、§16.4 |
+
 ### v0.7 — 2026-11-10（锚点式 Pain 定义）
 
 Owner 决策（附件裁定，逐条落地）：
@@ -292,13 +303,17 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 ## 5.1 何时应该提出
 
-同时满足时，Agent 应主动准备一条候选 Pain：
+同时满足前三条时，Agent 应主动准备一条候选 Pain：
 
 1. 存在明确锚点（§1.4），且锚点可追溯到具体出处；
 2. 能指出 Agent 的具体行为（做了什么 / 没做什么 / 顺序错了 / 跳过了步骤 / 越过了边界）；
-3. 该行为与锚点要求存在可描述的差距；
-4. 该差距会改变未来类似任务的判断依据；
-5. 无需假设"已经造成损失"。
+3. 该行为与锚点要求存在可描述的差距（显著背离）。
+
+第 4 条只是**辅助说明**，不是准入条件：
+
+4. （辅助）该差距是否可能影响未来类似任务的判断依据——用于说明"为什么值得 Owner 注意"，**不得**因为暂时答不上来就否定第 1–3 条。
+
+**明确不作为否决理由**：只发生过一次、任务最终成功、尚未造成实际损失、暂时无法证明会影响未来类似任务、暂时无法证明长期复用价值。这些都不能改变"Pain 是否成立"。
 
 示例：锚点是原则"改动公共接口前核对所有调用方"，Agent 实际直接改了接口但本次恰好没崩——仍然构成 Pain，因为背离成立，损失不是条件。
 
@@ -322,7 +337,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | 2 | **锚点来源** | 并注明引用等级（`verbatim` / `paraphrase` / `recollection` / `inference`） |
 | 3 | **观察到的行为** | 具体动作、顺序、跳过或越界；不写"质量不好" |
 | 4 | **背离** | 与锚点的差距；说明是"没做""做反了""做了但绕过" |
-| 5 | **为什么值得记录** | 未来什么样的任务会因此改变判断；不得用"影响很大"代替 |
+| 5 | **为什么值得记录**（辅助） | 用于帮助 Owner 判断注意力优先级；**不要求**必须证明会改变未来任务判断，**不得**把它当作额外准入条件 |
 | 6 | **上下文** | 任务类型、所在仓库/目录、可公开的环境事实；不写敏感信息 |
 
 若确实无法给出第 1 或第 3 项，不得提交（回到 §5.2）。
@@ -404,13 +419,14 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 | 项 | 目标 |
 |---|---|
-| 提交路径 | **唯一一条**：始终构造 `painIngress.v1` → `evaluatePainIngress()` → `recordPain()`，不新增 legacy 写入分支 |
-| `painType` | Handler 侧可选；省略时写入**中性默认 `principle_deviation`**（明示的默认，不是原因猜测） |
+| 提交路径 | **唯一一条**：MCP 路径始终构造 `painIngress.v1` → `evaluatePainIngress()` → `recordPain()`，不新增 legacy 写入分支 |
+| `painType`（MCP） | Handler 侧可选；省略时写入**中性默认 `principle_deviation`**（明示的默认，不是原因猜测） |
+| `painType`（CLI） | **本轮不改**：`pd pain record` 继续保持既有 `user_frustration` 行为；CLI 产品语义不在本 SPEC 修订范围 |
 | 枚举 | 最小必要扩展：新增 `principle_deviation`。既有三个值保留用于真实工具失败 / 子代理错误 / Owner 挫败，**不得**把 Agent 观察归为 `user_frustration` |
-| legacy 数据 | 只保留**读取兼容**：旧记录仍可读，但归一不得再伪造类型；新写入不得产生 legacy-only 记录 |
+| legacy 数据 | 只保留**读取兼容**：旧记录仍可读；本轮不改既有 legacy 归一逻辑；新 MCP 写入不得产生 legacy-only 记录 |
 | 下游 | `diagnostic_json` 现状与目标都**不含** `painType`，因此新增值不会改变诊断器读到的材料；`painType` 只作 Observability（`evolution.jsonl`）与后续统计的分类提示 |
 
-**枚举扩展的影响面**（实现时必须逐项处理）：`pain-ingress-payload.ts`（`parsePainIngressReport` 白名单 `:280-283` 与 report 联合 `:117`）、`pain-signal-bridge.ts:92`（`PainDetectedData` 联合）、`evolution-types.ts:63/118/143/264/311/340`（TypeBox 联合，已含 `dispatch_error` 但不含新值）、CLI 硬编码点 `pain-record.ts:121-131`、legacy 归一 `pain-signal-bridge.ts:389`、以及所有断言 `user_frustration` 的测试（`pain-ingress-*` / `pain-signal-*` / `golden-path-*`）。**注意**：`parsePainIngressV1Payload` 不校验 `painType`（v1 payload 无此字段），所以重入校验不会因新值失败；真正需要同步的是 report parser 与 evolution schema。
+**枚举扩展的影响面**（实现时必须逐项处理）：`pain-ingress-payload.ts`（`parsePainIngressReport` 白名单 `:280-283` 与 report 联合 `:117`）、`pain-signal-bridge.ts:92`（`PainDetectedData` 联合）、`evolution-types.ts:63/118/143/264/311/340`（TypeBox 联合，已含 `dispatch_error` 但不含新值）。**CLI 硬编码点 `pain-record.ts:121-131` 本轮保持不变**；既有断言 `user_frustration` 的 CLI 测试无需改动，只新增 MCP 路径的 `principle_deviation` 断言。**注意**：`parsePainIngressV1Payload` 不校验 `painType`（v1 payload 无此字段），所以重入校验不会因新值失败；真正需要同步的是 report parser 与 evolution schema。
 
 ## 6.4 CLI 手动入口与 `diagnostician_async_cli`（Owner 追加裁定 1 / 3）
 
@@ -506,11 +522,12 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | `deriveProvenanceFromIngressFacts` | `automatic_hook` → `automatic_hook`；bound → `host_context_bound`；否则 `owner_reported_no_host_trace`（`:412-419`） |
 | 作者归属 | 仅显式 `--owner-statement` 才写 `correctionEvidence.classification='owner_statement'`；read model 的 `rawStatement` 恒为 null、`isOriginalOwnerStatement` 恒为 false（`pain-recall-read-model.ts:102-122`） |
 
-**目标行为**：
+**目标行为（唯一方案，不留待选项）**：
 
-- Agent 提议 + Owner 同意 → `origin.kind = owner_manual`，`channel = mcp_agent_assisted`（**新增值**）；`correlation = unbound` + `missing_host_session`；`evidence = unavailable` + `not_applicable_unbound`。**不写** `owner_statement`，除非 Owner 原话被逐字引用且显式标注。
-- 来源（provenance）必须与作者归属一致：现有三值中 `owner_reported_no_host_trace` 会把作者说成 Owner，`host_context_bound` 不成立。**最小扩展**是给 `PainProvenance` 增加 `agent_reported_owner_approved`，并在 `deriveProvenanceFromIngressFacts` 中把 `mcp_agent_assisted`（unbound）映射到它。影响面：`admission-gate.ts` 的枚举与归一、`evidence-guards.ts` 的 `isOwnerExplicitManual`（豁免依据是 **Owner 已授权**，不是 Owner 亲自观察，须注释写明）、`context-payload.ts` 的 `Type.Literal`、`pain-retry.ts` 白名单、Console/Read Model 的展示标签。
-- 若 Owner 决定**不扩展** provenance：必须接受 `owner_reported_no_host_trace` 在此仅表示"无宿主 trace"这一技术含义，并在 Console 文案与 Skill 中说明它是技术标签、不是作者声明；**不得**把它展示成"Owner 亲自报告"。
+- Agent 提议 + Owner 同意 → `origin.kind = owner_manual`，`channel = mcp_agent_assisted`（**新增值**）；`correlation = unbound` + `missing_host_session`；`evidence = unavailable` + `not_applicable_unbound`。
+- provenance = **`agent_reported_owner_approved`**（**新增值**）：含义是"事实由 Agent 观察、提交经 Owner 授权"。在 `deriveProvenanceFromIngressFacts` 中由 `mcp_agent_assisted`（unbound）映射得到。
+- **Owner 授权 ≠ Owner 是事实报告者**：不得把 Agent 的描述写进 `owner_statement` / `correctionEvidence.classification='owner_statement'`；除非 Owner 原话被逐字引用且显式标注，否则不写 `owner_statement`。
+- 影响面：`pain-ingress-payload.ts` 的 origin 联合与 `parseOrigin` 白名单、`validateOriginCorrelationInvariant`（`mcp_agent_assisted` 必须 unbound）、`admission-gate.ts` 的 `PainProvenance` 联合与归一、`evidence-guards.ts` 的 `isOwnerExplicitManual`（豁免依据是 **Owner 已授权**，不是 Owner 亲自观察，须注释写明）、`context-payload.ts` 的 `Type.Literal`、`pain-retry.ts` 白名单、Console/Read Model 展示标签。
 - 复用现有 CLI channel 冒充 MCP 提交会造成错误归属，**不可取**；不建第二套 Origin/Provenance 模型。
 
 ## 7.6 Observability 可见性（post-review 修订）
@@ -541,11 +558,12 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - 当前 MCP 只注册一个只读工具 `pd_recall_principle_pains`，`readOnlyHint: true`（`pd-mcp-server/src/server.ts:147`）；**不存在 `pd_submit_pain`，也没有写类 MCP 工具先例**。
 - 现有 PreToolUse matcher 匹配 `Bash|apply_patch`，对 MCP 工具名零命中；tool-semantics registry 只登记宿主原生工具（`workbuddy-adapter/src/tool-semantics.ts:23-37`），MCP 工具未登记。
 
-**结论与门槛**：
+**结论与门槛（生产交付 Gate）**：
 
-- `pd_submit_pain` 注册为 `readOnlyHint: false`；其 matcher 与 tool-semantics 条目必须在 **OG-4 授权后**才能落地。
-- OG-4 未授权时，本 SPEC 的 MCP 写能力只能停留在设计阶段；实现或发布前必须以 OG-4 为 Gate。
-- 不新建审批服务、Owner 确认界面、审批 Token、审批库或三套宿主专用治理；现有机制不足的部分列为实施前置问题。
+- OG-4 **未授权** → 生产环境**不注册**写类 MCP Tool（`server.ts` 的 `tools/list` 不出现 `pd_submit_pain`）；只能存在于设计与测试替身。
+- OG-4 **已授权** → 才允许注册 `pd_submit_pain`，并使用 `readOnlyHint: false`；其 matcher 与 tool-semantics 条目同步落地。
+- 不得自行宣称已获授权；不得通过宿主配置、临时 matcher 或本地开关绕过该 Gate。
+- 不新建审批服务、Owner 确认界面、审批 Token、审批库或三套宿主专用治理；不要求三宿主逐次原生审批。现有机制不足的部分列为实施前置问题。
 
 ---
 
@@ -554,6 +572,8 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | 场景 | 行为 |
 |---|---|
 | 同一 Agent 重复提交 | v1 不去重；每次生成新 painId |
+| 身份生成时机 | MCP Handler 在提交调用与 deadline **之前**生成 `painId`，并按既有规则派生 `taskId = diagnosis_<painId>`；Core Capability 只使用、**不得重新生成或覆盖** |
+| 超时后自动重新提交 | **禁止**：只做一次有界回查，复用现有 RuntimeStateManager / TaskStore 只读能力 |
 | 并发提交 | 依赖 SQLite 既有并发控制；失败即 `failed`，不静默 |
 | 重复 taskId | `createTask` 抛错 → 回执 `failed` |
 | 异步落库失败 | `failed` + `nextAction`，不得声称已排队 |
@@ -656,7 +676,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 | 编号 | 场景 | 期望 |
 |---|---|---|
-| T01 | MCP Tool 注册 | 三宿主 `tools/list` 可见 `pd_submit_pain`，recall 仍在 |
+| T01 | MCP Tool 注册（前置：OG-4 已授权） | **OG-4 已授权是前置条件**；满足后三宿主 `tools/list` 可见 `pd_submit_pain`，recall 仍在 |
 | T02 | 参数校验 | 缺 `reason` / 超长 / 非法 enum → 结构化错误 |
 | T03 | 锚点结构化 | `anchorType` + `anchorRef` 落进 `diagnostic_json.anchor` |
 | T04 | 锚点缺失 | schema 拒绝，零任务；不产生 `anchor:unstructured` 记录 |
@@ -664,7 +684,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | T06 | 冲突披露 | 双锚点冲突时诊断材料保留双方 |
 | T07 | 默认严重度 | MCP 省略 `score` 与 CLI 省略 `--score` 均落 `moderate`；必须真实读回 `tasks.diagnostic_json`、`pain_events`、events JSONL 三处，任何一处都不得是 80 或 `severe`；显式 `--score` 仍按既有阈值生效 |
 | T08 | 提级禁止 | 任何参数都无法让 Agent 提级 |
-| T09 | `painType` 省略 | 省略时写 `principle_deviation`；**不得**出现 `user_frustration`；带/不带 `painType` 走同一条 v1 准入路径，准入结论一致 |
+| T09 | `painType` 省略（MCP） | MCP 省略时写 `principle_deviation`；**不得**出现 `user_frustration`；带/不带 `painType` 走同一条 v1 准入路径，准入结论一致。CLI 手动报告行为不变（仍为 `user_frustration`），不在本测试断言范围 |
 | T10 | 落库 | `tasks` 1 行 pending，`input_ref=painId` |
 | T11 | 回执最小集 | 含 painId / taskId / workspaceDir / status |
 | T12 | `mode` 可证 | 可证明时才出现；不可证明时字段缺失 |
@@ -691,7 +711,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | T40 | 异步 flag 默认关 | 未显式开启 `diagnostician_async_cli` 时，`pd pain record` 保持等待诊断的既有路径 |
 | T41 | 超时对账 | 写入中超时 → `submit_unconfirmed` + 已知 `painId`/`taskId`；有界回查命中/未命中/回查失败三种结果分别符合 §7.4；**不得**自动重提交 |
 | T42 | 有效锚点十例 | active+范围匹配 / active+不适用 / candidate / probation / archived / deprecated / 不存在 / 版本错误 / Ledger 损坏 / Owner 当前要求与历史原则冲突——逐个断言"能否作当前违规依据" |
-| T43 | OG-4 门槛 | 未授权时不得注册写类 Tool；注册时必须 `readOnlyHint:false`，并有 OG-4 授权的 matcher 与 tool-semantics 条目 |
+| T43 | OG-4 门槛 | OG-4 是**生产交付 Gate**（不是新增系统建设任务）：未授权时生产环境不注册写类 Tool；授权后才注册，且必须 `readOnlyHint:false`，并有 OG-4 授权的 matcher 与 tool-semantics 条目；不得自行宣称已获授权或通过宿主配置绕过 |
 | T44 | 来源归属 | Owner 直接报告 / Agent 提议 Owner 同意 / Agent 提议被拒绝 / 无 Session 的 Agent 观察 / 重读已存记录 / Admission 解释 / Console 展示——作者归属不因"同意"而改变，不写 `owner_statement` |
 | T45 | Observability 可见性 | MCP 提交在无 bound session 时，Console Pain 列表与 `pd recall` 均能看到该 Pain；不得只留在 `tasks` |
 
