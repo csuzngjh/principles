@@ -1,6 +1,6 @@
 # PD-AA PRI-1162 实施卡 v0.1 — OpenClaw 共享装配轮次键（单 Session FIFO 覆盖偏差）
 
-状态：**待 Owner 书面批准**（批准前不改动任何生产代码）。调查基于 `origin/main 698de3fb4`（含 #2455 新渲染器），分支 `ai/PRI-1162-fifo-round-key`。
+状态：**Owner 已书面批准 §4/§5 离线测试范围（2026-11-10，附四条验收说明，见 §6）；实施已完成**。调查基于 `origin/main 698de3fb4`（含 #2455 新渲染器），分支 `ai/PRI-1162-fifo-round-key`。
 
 ## 1. 问题与复现（反例）
 
@@ -30,15 +30,20 @@ Owner 任务书里"当前共享生产路径缺少 roundKey 时走 FIFO"在**仓�
 
 定向回归现状（PRI-1137 遗产已覆盖大部分）：一轮单写、同 run 重试、写入失败降级、heartbeat/空消息/解析失败/缺 sessionId、缺 DB 可观察、事件与选择一致、空候选集+roundKey 不 NaN。
 
-## 3. 唯一真实缺口（本票范围外，须上报）
+## 3. 独立待核查项（按 Owner 验收说明 3 措辞：疑似发布物与源码不一致）
 
-**已安装生产（`~/.openclaw/extensions/principles-disciple` 3.1.3）恒 FIFO 的根因是发布物过期，不是源码缺失**：
+**已安装生产（`~/.openclaw/extensions/principles-disciple` 3.1.3）恒 FIFO 的现象，疑似发布物与源码不一致**。确认差异前的判定依据（哈希、版本、构建参数已保留）：
 
-- npm `principles-disciple@3.1.3` 的运行时入口 `dist/bundle.js`（`openclaw.extensions` 唯一入口，sha256 前 16 `7301253d09d3c4a9`）**不含** `prepareOpenClawPromptRound`/`nextSessionTurnOrdinal`（含 host-runtime 半的 `roundKeyProvider` 消费逻辑但无提供方 → 恒 undefined → 恒 FIFO）；
-- v3.1.3 git tag（`e7c7e6bba`）源码**含**完整实现；本工作树现构建 esbuild bundle **含**全部符号（`b19f0ec18f29598a`）；
-- 即发布管线把一份早于 #2398 的 bundle 发布为 3.1.3。修复归发版/安装管线（独立授权），本票不改，仅在 Linear 上报。
+| 证据 | 值 |
+|---|---|
+| npm `principles-disciple@3.1.3` `dist/bundle.js` sha256 | `7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d` |
+| 已安装 `~/.openclaw/extensions/principles-disciple/dist/bundle.js` sha256 | 同上（逐字节一致，mtime 2026-11-09 22:53:48 +0800） |
+| 对应源码版本 | git tag `v3.1.3` = `e7c7e6bba`（其 `packages/openclaw-plugin/src/hooks/prompt.ts` 含 `prepareOpenClawPromptRound` 2 处） |
+| 现构建对照 | 本工作树 `node esbuild.config.js` 产出 sha256 `b19f0ec18f29598a1ff4462156caac8b7f56611e9a46d8b646c49b75dfaa8d66`，含全部轮次键符号 |
+| 发布物构建参数（既定流程） | 插件 `prepack` = `npm run build:production`（`esbuild.config.js --production`）+ `build:types`；bundle 是 OpenClaw 唯一运行时入口（`openclaw.extensions: ["./dist/bundle.js"]`） |
+| 行为对照判定 | 发布 bundle 不含 `prepareOpenClawPromptRound`/`nextSessionTurnOrdinal`（0 命中），但含 host-runtime 半的 `roundKeyProvider` 消费逻辑 → 提供方缺失 → 恒 `legacy_fifo_prefix_v1`；源码与现构建均含完整链路 |
 
-生产侧影响：装上含 #2398 的版本后轮转即生效，无需配置变更。
+结论措辞：**疑似**发布管线将早于 #2398 的构建发布为 3.1.3。核查与修复归发版/安装管线（独立工单），本票不改、不等待；装上含 #2398 的构建后轮转即生效，无需配置变更。
 
 ## 4. 提议（Owner 批准后执行）
 
@@ -67,4 +72,18 @@ Owner 任务书里"当前共享生产路径缺少 roundKey 时走 FIFO"在**仓�
 
 ## 7. 边界
 
-本轮及批准后执行均为离线：宿主启动 0、真实模型调用 0、生产治理写入 0；生产工作区只读（沙箱为 WAL-0 一致性副本）。已安装运行时目录不动。
+本轮及批准后执行均为离线：宿主启动 0、真实模型调用 0、安装与生产写入 0；生产工作区只读（沙箱为 WAL-0 一致性副本）。已安装运行时目录不动。
+
+## 8. Owner 批准与执行记录（2026-11-10）
+
+Owner 批准实施卡 §4/§5 的离线测试范围，附四条验收说明：
+
+1. 复用 #2398 已有接线，生产代码零改动；补最能发现接线退化的测试（连续轮推进、同轮重试稳定、非用户轮/缺键回 FIFO）；短 Session 重开、双 Session、工作区隔离若已有等价覆盖可引用现有测试。
+2. 冻结输入比较 FIFO 与轮转，报告覆盖、最长未入选间隔及实际装配；18 轮通过线仅适用于已冻结的候选/预算/轮次推进条件；单列本身放不下的候选并保留原始失败结果。
+3. 3.1.3 发布问题写成独立待核查项，保留 npm 与安装产物哈希、对应源码版本和构建参数，以实际接线或离线行为对照判定；确认前用「疑似发布物与源码不一致」。
+4. 交回 PR、最终 head、覆盖数据、测试与 CI；结论分「仓库共享入口已验证」与「发布版本尚待验证」；宿主启动、模型调用、安装和生产写入均为 0。
+
+执行结果（详见 `docs/implementation-reports/pri-1162-round-key-comparison-20261110.{md,json}` 与检查点）：
+
+- 生产代码改动 0；新增 `tests/hooks/pri1162-round-key-coverage.test.ts` 5 例（T1 连续轮推进含"离开 FIFO 前缀"断言、T2 同轮重试字节稳定、T3 subagent 触发回 FIFO、T4 重开无计数残留、T5 双 Session 交替隔离）；等价覆盖引用：heartbeat/空消息/解析失败/缺 sessionId/写失败（`prompt-production-chain.test.ts` P1-3）、查询层 session 隔离（`trajectory.test.ts` 'isolates by sessionId'）、16 轮连续覆盖窗口（`prompt-production-chain.test.ts` T-PROD-01）。
+- 冻结输入一轮比较全过通过线：4000 预算 FIFO 12 轮恒 10/18（8 饿死、恒 3727 字符、逐轮字节一致）；轮转 12 轮窗口 17/18 ≥ 14 ✅、18 连续轮 **18/18 全覆盖** ✅（2500 辅口径同型）；oversized 单列 = 0 条（本快照无此类候选，逐轮原始 oversized/dropped 记录保留于报告 JSON）；开销无增益（轮转均 2.95ms/轮 vs FIFO 3.14ms/轮）。

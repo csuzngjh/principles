@@ -1,0 +1,49 @@
+{
+  "checkpoint": "20261110T0310Z-zcode-pri1162-implemented",
+  "ticket": "PRI-1162",
+  "decision": "KEEP_REPO_VERIFIED_RELEASE_PENDING",
+  "conclusionLayers": {
+    "repoSharedEntryVerified": "#2398 wiring fixes the single-session FIFO coverage deviation under the frozen inputs: budget 4000 FIFO constant 10/18 (8 starved, byte-identical rounds at 3727 chars) vs rotation 17/18 in the frozen 12-round window (pass line >=14) and 18/18 full coverage in 18 consecutive rounds; budget 2500 same shape (6/18 -> 18/18); same-run retry byte-stable; non-user/missing-key rounds fall back to FIFO",
+    "releasePendingVerification": "installed 3.1.3 runs FIFO forever; suspected published-artifact/source mismatch (wording per Owner acceptance note 3) — verification and fix belong to a separate release-pipeline ticket"
+  },
+  "branch": "ai/PRI-1162-fifo-round-key",
+  "base": "origin/main 4000adc49",
+  "card": "docs/specs/PD-AA-PRI-1162-ROUND-KEY-IMPLEMENTATION-CARD-v0.1.md (section 8 = approval + execution record)",
+  "ownerApproval": "2026-11-10, card v0.1 sections 4/5 offline test scope, four acceptance notes (zero production code changes; frozen-input comparison with oversized listed separately; release issue as independent suspect item with hashes kept; conclusions split repo vs release)",
+  "deliverables": {
+    "productionCodeChanges": 0,
+    "newTests": "packages/openclaw-plugin/tests/hooks/pri1162-round-key-coverage.test.ts (T1 consecutive rounds advance rotation incl. oldest-candidate-absent-on-start>0 anti-FIFO assertion; T2 same-run retry byte-stable; T3 subagent trigger -> FIFO; T4 reopen no counter carry-over; T5 two sessions alternate isolated)",
+    "equivalentCoverageReferenced": "prompt-production-chain P1-3 cases (heartbeat/empty/resolution-failure/missing-sessionId/write-failure), trajectory.test.ts 'isolates by sessionId', T-PROD-01 16-round coverage window",
+    "comparisonHarness": "scripts/dev/aa-selector/pri1162-round-key-comparison.mjs (committed)",
+    "comparisonReport": "docs/implementation-reports/pri-1162-round-key-comparison-20261110.{md,json}"
+  },
+  "frozenInputs": {
+    "stateDbSha256": "830fbd24b8abf502f22931a4fdbd2b1a321955e05713ace27863f589347796a5",
+    "candidates": 18,
+    "budgets": [4000, 2500],
+    "rotationDrive": "roundKey = k+1 (persisted-turn semantic), k = 1..18",
+    "fifoDrive": "roundKey absent"
+  },
+  "results": {
+    "budget4000": { "fifo": { "selected": 10, "starved": 8, "charsPerRoundConstant": 3727 }, "rotationWindow12": 17, "rotationFullCycle18": 18, "passLine": "all pass (>=14 window; every starved candidate seen; FIFO byte-identical)" },
+    "budget2500": { "fifo": { "selected": 6, "starved": 12, "charsPerRoundConstant": 2444 }, "rotationWindow12": 17, "rotationFullCycle18": 18, "passLine": "all pass" },
+    "oversizedListedSeparately": { "count": 0, "note": "max block 1219 < 2500; raw per-round oversized/dropped classifications preserved in report JSON" },
+    "overhead": { "rotationAvgMsPerRound": 2.95, "fifoAvgMsPerRound": 3.14, "budgetArithmetic": "strict additive, unchanged" }
+  },
+  "suspectReleaseDiscrepancy": {
+    "npmBundleSha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d",
+    "installedBundleSha256": "identical byte-for-byte (mtime 2026-11-09 22:53:48 +0800)",
+    "sourceTag": "v3.1.3 = e7c7e6bba (prompt.ts contains prepareOpenClawPromptRound x2)",
+    "freshBuildSha256": "b19f0ec18f29598a1ff4462156caac8b7f56611e9a46d8b646c49b75dfaa8d66 (esbuild from worktree, contains all round-key symbols)",
+    "publishBuildParams": "plugin prepack = build:production (esbuild --production) + build:types; bundle.js is the sole openclaw.extensions runtime entry",
+    "behaviorComparison": "published bundle lacks plugin-half symbols (0 hits) but has host-runtime roundKeyProvider consumer -> provider absent -> legacy_fifo_prefix_v1 forever",
+    "scope": "release/installer pipeline; separate ticket; PRI-1162 does not change or wait on it"
+  },
+  "verification": {
+    "newSuite": "5/5 green",
+    "adjacentRegression": "prompt-production-chain + runtime-prompt-activation 91/91 green",
+    "ci": "backfilled from PR page after push"
+  },
+  "boundaries": { "hostStarts": 0, "modelCalls": 0, "installs": 0, "productionWrites": 0, "latestJsonTouched": false },
+  "mimosaNote": "scanner_enobufs recurred; no security conclusion claimed"
+}
