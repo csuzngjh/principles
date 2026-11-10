@@ -10,9 +10,9 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as net from 'net';
 import { errorMessage } from './response.js';
+import { getPdHome } from './pd-home.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,12 +40,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * Resolve the OpenClaw config directory.
- * Priority: OPENCLAW_HOME env var > ~/.openclaw
+ *
+ * PRI-872: derived from the process-wide PD home (production keeps
+ * OPENCLAW_HOME > ~/.openclaw; an experiment instance reads its own root), so
+ * the console never reports or probes the production gateway from a second
+ * instance.
  */
 function resolveOpenClawConfigDir(): string {
-  const envHome = process.env.OPENCLAW_HOME;
-  if (envHome && envHome.trim().length > 0) return path.resolve(envHome);
-  return path.join(os.homedir(), '.openclaw');
+  return getPdHome().openclawHome;
 }
 
 /**
@@ -134,6 +136,16 @@ export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
  * with a structured reason + nextAction instead of crashing mid-update.
  */
 function runGatewayServiceCommand(subcommand: 'stop' | 'start', extraArgs: readonly string[] = []): GatewayControlResult {
+  // PRI-872: `openclaw gateway stop|start` drives the MACHINE-LEVEL service
+  // (launchd/systemd/schtasks), not a process this console owns. An experiment
+  // instance must never stop the production gateway — its own gateway is a
+  // foreground `openclaw gateway run` owned by the experiment launcher.
+  if (getPdHome().mode === 'experiment') {
+    return {
+      ok: false,
+      error: 'experimental_instance: the machine-level OpenClaw service belongs to the production install; the experiment gateway runs in the foreground under the experiment launcher and must be restarted there.',
+    };
+  }
   try {
     // EP-08: argv array + typed subcommand union — every argv is a constant
     // literal, so no external input can reach the command line. shell:true is
