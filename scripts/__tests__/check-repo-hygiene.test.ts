@@ -9,6 +9,7 @@ import {
   ALLOWLIST,
   checkWorktreeIntegrity,
   checkRootScruffFiles,
+  checkAdapterChainMock,
   ROOT_LOCAL_FILES,
 } from '../check-repo-hygiene.js';
 import { LEASE_FILENAME } from '../dev/lib/workspace-lease.mjs';
@@ -74,6 +75,52 @@ describe('check-repo-hygiene', () => {
 
     it('allows allowlisted template files (e.g. WORKBOARD.json)', () => {
       expect(checkFile('packages/openclaw-plugin/templates/workspace/.state/WORKBOARD.json')).toBeNull();
+    });
+  });
+
+  describe('checkAdapterChainMock', () => {
+    const ADAPTER_TEST = 'packages/principles-core/src/runtime/adapter/__tests__/example.test.ts';
+
+    it('ignores files outside the adapter test directory', () => {
+      const content = "vi.mock('@earendil-works/pi-ai/compat', () => ({}));";
+      expect(checkAdapterChainMock('packages/principles-core/src/runtime/other.test.ts', content)).toBeNull();
+    });
+
+    it('names a chain-wide mock as a finding', () => {
+      const content = "import { vi } from 'vitest';\n\nvi.mock('@earendil-works/pi-ai/compat', () => ({}));\n";
+      const finding = checkAdapterChainMock(ADAPTER_TEST, content);
+      expect(finding).not.toBeNull();
+      expect(finding?.line).toBe(3);
+      expect(finding?.reason).toContain('@earendil-works/pi-ai/compat');
+    });
+
+    it('accepts the faux harness factory, including the multi-line form', () => {
+      const content = [
+        "vi.mock('@earendil-works/pi-ai/compat', async (importActual) =>",
+        "  (await import('./fixtures/faux-pi-ai-harness.js')).fauxCompatMockFactory(importActual));",
+        '',
+      ].join('\n');
+      expect(checkAdapterChainMock(ADAPTER_TEST, content)).toBeNull();
+    });
+
+    it('accepts a mock with a reasoned exemption marker', () => {
+      const content = [
+        '// adapter-chain-mock-exempt: per-API fetch binding is invisible to faux',
+        "vi.mock('@earendil-works/pi-ai/compat', () => ({}));",
+        '',
+      ].join('\n');
+      expect(checkAdapterChainMock(ADAPTER_TEST, content)).toBeNull();
+    });
+
+    it('reports a marker with no reason instead of accepting it', () => {
+      const content = [
+        '// adapter-chain-mock-exempt:',
+        "vi.mock('@earendil-works/pi-ai/compat', () => ({}));",
+        '',
+      ].join('\n');
+      const finding = checkAdapterChainMock(ADAPTER_TEST, content);
+      expect(finding?.line).toBe(1);
+      expect(finding?.reason).toContain('has no reason');
     });
   });
 

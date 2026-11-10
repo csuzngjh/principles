@@ -29,6 +29,7 @@ const hoisted = vi.hoisted((): {
 
 /* eslint-disable @typescript-eslint/max-params -- runAgentLoop mock mirrors the real 5-param signature */
 // Mock runAgentLoop — the adapter's only entry into pi-agent-core.
+// adapter-chain-mock-exempt: structural-only — mocks runAgentLoop; two cases depend on pathological transcripts a real loop cannot produce (content: null, no assistant message) — those assertions need a redesign, not fabricated input. No defect injection was run for this file.
 vi.mock('@earendil-works/pi-agent-core', () => ({
    
   runAgentLoop: vi.fn(async (
