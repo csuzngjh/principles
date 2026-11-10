@@ -15,7 +15,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { LEASE_FILENAME } from './dev/lib/workspace-lease.mjs';
 
@@ -296,6 +296,114 @@ export function checkRootScruffFiles({ cwd } = {}) {
   return { scruffFiles };
 }
 
+// ── Adapter-layer test convention (see packages/principles-core/src/runtime/
+//    adapter/__tests__/README.md) ────────────────────────────────────────────
+// Adapter tests default to the Pi faux provider: the real stream runs against a
+// scripted model. Mocking a chain module instead asserts the config object the
+// adapter built, not what the provider received — the exact blind spot that let
+// a dropped `maxTokens` pass 8/8 mocked tests. The mock itself is allowed (some
+// contracts cannot be observed through faux), but only with a written reason:
+//
+//   // adapter-chain-mock-exempt: <why faux cannot cover this contract>
+//
+// This is a content rule, not a new gate: it runs inside the existing
+// repo-hygiene check, which pre-commit and verify:merge already invoke.
+
+/** Directory whose tests are held to the faux-by-default convention. */
+export const ADAPTER_TEST_DIR = 'packages/principles-core/src/runtime/adapter/__tests__/';
+
+const ADAPTER_TEST_FILE_RE = /\.(?:test|spec)\.tsx?$/;
+
+/** Modules whose wholesale mock replaces the real model chain. */
+export const MODEL_CHAIN_MODULES = ['@earendil-works/pi-ai', '@earendil-works/pi-ai/compat', '@earendil-works/pi-agent-core'];
+
+/** The harness factory that keeps the real module and redirects catalog lookups only. */
+const HARNESS_FACTORY_MARKER = 'fauxCompatMockFactory';
+
+export const CHAIN_EXEMPT_MARKER_RE = /adapter-chain-mock-exempt:/;
+export const CHAIN_EXEMPT_RE = /adapter-chain-mock-exempt:[ \t]*(\S.*?)(?:\*\/|\}?)?[ \t]*$/m;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+const CHAIN_MOCK_RE = new RegExp(
+  String.raw`\bvi\s*\.\s*(?:mock|doMock)\s*\(\s*['"](?:${MODEL_CHAIN_MODULES.map(escapeRegExp).join('|')})['"]`,
+);
+
+/** Line number (1-based) of a character offset. */
+function lineAt(content, index) {
+  return content.slice(0, index).split('\n').length;
+}
+
+/**
+ * Check one adapter test file against the faux-by-default convention.
+ *
+ * Pure (file content in, finding out) so it is unit-testable; the caller does
+ * the I/O. Returns null when the file is compliant or out of scope.
+ *
+ * Fail-loud rules (rc-3): a marker without a reason is reported as its own
+ * finding rather than silently accepted.
+ *
+ * @param {string} filePath - repository-relative path
+ * @param {string} content - file contents
+ * @returns {{ line: number, reason: string } | null}
+ */
+export function checkAdapterChainMock(filePath, content) {
+  const normalized = normalizePath(filePath);
+  if (!normalized.startsWith(ADAPTER_TEST_DIR) || !ADAPTER_TEST_FILE_RE.test(normalized)) return null;
+  if (typeof content !== 'string') return null;
+
+  const firstMock = CHAIN_MOCK_RE.exec(content);
+  if (!firstMock) return null;
+
+  if (CHAIN_EXEMPT_MARKER_RE.test(content)) {
+    const markerIndex = content.search(CHAIN_EXEMPT_MARKER_RE);
+    const markerLine = content.slice(markerIndex).split('\n')[0];
+    const reasonMatch = CHAIN_EXEMPT_RE.exec(markerLine);
+    if (!reasonMatch) {
+      return {
+        line: lineAt(content, markerIndex),
+        reason: 'adapter-chain-mock-exempt marker has no reason; write why faux cannot cover this contract',
+      };
+    }
+    return null;
+  }
+
+  // The harness factory is the sanctioned shape: real module kept, only
+  // getModel/getProviders redirected. It may sit on a following line because
+  // the factory is often a multi-line arrow.
+  const window = content.slice(firstMock.index, firstMock.index + 400);
+  if (window.includes(HARNESS_FACTORY_MARKER)) return null;
+
+  const moduleName = firstMock[0].match(/['"]([^'"]+)['"]/u)?.[1] ?? 'a model chain module';
+  return {
+    line: lineAt(content, firstMock.index),
+    reason:
+      `mocks "${moduleName}" instead of running the real stream against the faux provider ` +
+      '(packages/principles-core/src/runtime/adapter/__tests__/README.md)',
+  };
+}
+
+/**
+ * Check every adapter test in `files` (already scoped by the caller's mode).
+ * A tracked-but-deleted file is skipped here (worktree integrity reports it);
+ * any other unreadable file throws, because a silent skip would make the gate
+ * pass vacuously (rc-9).
+ */
+function checkAdapterTests(files) {
+  const findings = [];
+  for (const file of files) {
+    const normalized = normalizePath(file);
+    if (!normalized.startsWith(ADAPTER_TEST_DIR) || !ADAPTER_TEST_FILE_RE.test(normalized)) continue;
+    if (!existsSync(join(process.cwd(), file))) continue;
+    const content = readFileSync(join(process.cwd(), file), 'utf8');
+    const finding = checkAdapterChainMock(file, content);
+    if (finding) findings.push({ file, ...finding });
+  }
+  return findings;
+}
+
 /**
  * Main entry point.
  */
@@ -378,6 +486,37 @@ function main() {
       console.error('  4. If it is someone else\'s work or its origin is unknown: stop and ask the Owner.');
       process.exit(1);
     }
+  }
+
+  // 5. Adapter-layer test convention — a chain-wide mock must state its reason
+  //    (both modes: staged commits and the full merge gate).
+  let adapterFindings;
+  try {
+    adapterFindings = checkAdapterTests(files);
+  } catch (error) {
+    console.error('[REPO HYGIENE] Failed - adapter test convention check did not complete\n');
+    console.error(`Reason: ${error.message}`);
+    console.error('\nNext action: the check needs read access to the adapter test files it was given.');
+    process.exit(1);
+    return;
+  }
+  if (adapterFindings.length > 0) {
+    console.error(`[REPO HYGIENE] Failed - ${adapterFindings.length} adapter test(s) bypass the real model chain\n`);
+    console.error('Reason: These tests mock a pi-ai chain module instead of running the real stream against');
+    console.error('the faux provider, so they observe the config object the adapter built rather than what the');
+    console.error('provider received. Mocking is allowed when faux genuinely cannot observe the contract, but');
+    console.error('the reason must be written down.\n');
+    console.error('Offending locations:');
+    for (const finding of adapterFindings) {
+      console.error(`  - ${finding.file}:${finding.line}`);
+      console.error(`    Reason: ${finding.reason}`);
+    }
+    console.error('\nNext action (see packages/principles-core/src/runtime/adapter/__tests__/README.md):');
+    console.error('  1. Preferred: run the real stream against the faux provider (fauxCompatMockFactory).');
+    console.error('  2. If the contract is genuinely outside faux, add one comment:');
+    console.error('       // adapter-chain-mock-exempt: <why faux cannot cover this contract>');
+    process.exit(1);
+    return;
   }
 
   if (violations.length > 0) {
