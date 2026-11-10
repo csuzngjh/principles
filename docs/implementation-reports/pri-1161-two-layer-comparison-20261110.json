@@ -1,0 +1,1293 @@
+{
+ "generatedAt": "2026-11-10T00:36:52.112Z",
+ "renderer": {
+  "old": "pre-PRI-1161 builders (base 594 sr-off / 949 sr-on)",
+  "new": "PRI-1161 hoisted (base 647 sr-off / 1002 sr-on)",
+  "constants": {
+   "perBlock": -86,
+   "header": 53,
+   "singleItemNet": -33
+  },
+  "correctionNote": "card v0.1 said -87 per block; the sentence is 85 chars, so the precise constant is -86. Substance unchanged; surfaced to Owner."
+ },
+ "layer1": [
+  {
+   "round": "4000-k1",
+   "n": 7,
+   "oldLen": 3685,
+   "newLen": 3136,
+   "formula": "-86*7+53",
+   "expectedLen": 3136,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "8112bb8a9e1b08453ac61a501992f78848e3eae68eef8921edb966fbce34fcd4"
+  },
+  {
+   "round": "4000-k2",
+   "n": 8,
+   "oldLen": 3996,
+   "newLen": 3361,
+   "formula": "-86*8+53",
+   "expectedLen": 3361,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 8,
+   "newSha256": "1a2a95cd68ff4641365ffa0b654bd65aa4e5566b9b2193f7a5ab27f8009ff1e5"
+  },
+  {
+   "round": "4000-k3",
+   "n": 7,
+   "oldLen": 3686,
+   "newLen": 3137,
+   "formula": "-86*7+53",
+   "expectedLen": 3137,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "1a3d42ed99682a740bb974f634b4a05d65a0c9ab98adf9a32fbad78a1be88449"
+  },
+  {
+   "round": "4000-k4",
+   "n": 7,
+   "oldLen": 3729,
+   "newLen": 3180,
+   "formula": "-86*7+53",
+   "expectedLen": 3180,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "865367a5748bac2bff211e8b6f26fd018c08efdfc2c3d98578a8dc0946f7bf8b"
+  },
+  {
+   "round": "4000-k5",
+   "n": 7,
+   "oldLen": 3793,
+   "newLen": 3244,
+   "formula": "-86*7+53",
+   "expectedLen": 3244,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "ad9dc7c88499bc40950b59eeaa42b80b2c7b86644a8705c6f742a806212bd09b"
+  },
+  {
+   "round": "4000-k6",
+   "n": 7,
+   "oldLen": 3705,
+   "newLen": 3156,
+   "formula": "-86*7+53",
+   "expectedLen": 3156,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "344b1f92891b9eda4fea9f1b9cccf997b10d0d287230022c25d92326041ca922"
+  },
+  {
+   "round": "4000-k7",
+   "n": 7,
+   "oldLen": 3748,
+   "newLen": 3199,
+   "formula": "-86*7+53",
+   "expectedLen": 3199,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "2ec73aa5cad8a73b215d38602f5838e010e8e754cb8177710587f13165ed7953"
+  },
+  {
+   "round": "4000-k8",
+   "n": 7,
+   "oldLen": 3740,
+   "newLen": 3191,
+   "formula": "-86*7+53",
+   "expectedLen": 3191,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "71be8c7f7ac080fcd4ac7a7c3bad60a6d2d8912dd082f2d5b18e098fd4fbef17"
+  },
+  {
+   "round": "4000-k9",
+   "n": 7,
+   "oldLen": 3688,
+   "newLen": 3139,
+   "formula": "-86*7+53",
+   "expectedLen": 3139,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "2da1aa457c80e20ebf8739a4b5ad70b33fff0dc7cff441dc0e2f0113eaa115d1"
+  },
+  {
+   "round": "4000-k10",
+   "n": 5,
+   "oldLen": 3816,
+   "newLen": 3439,
+   "formula": "-86*5+53",
+   "expectedLen": 3439,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 5,
+   "newSha256": "f20e3d9482800970608be5dded952368ec886326301ebb9a4ff1942505abf2d3"
+  },
+  {
+   "round": "4000-k11",
+   "n": 5,
+   "oldLen": 3871,
+   "newLen": 3494,
+   "formula": "-86*5+53",
+   "expectedLen": 3494,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 5,
+   "newSha256": "fe712f836c93ac38adb4b6da056832b043e97bdf3cc1ea9fdf19a0cf870068ea"
+  },
+  {
+   "round": "4000-k12",
+   "n": 5,
+   "oldLen": 3810,
+   "newLen": 3433,
+   "formula": "-86*5+53",
+   "expectedLen": 3433,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 5,
+   "newSha256": "1a58dbe7c95cc8595e96bff50aab24e71bf2b3539532e492f6ea8689e3dced87"
+  },
+  {
+   "round": "4000-k13",
+   "n": 5,
+   "oldLen": 3824,
+   "newLen": 3447,
+   "formula": "-86*5+53",
+   "expectedLen": 3447,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 5,
+   "newSha256": "f1bc5f513166c482df8e12996aa57f4c5ca9f4bec826a145e0cd8c2d09b3188e"
+  },
+  {
+   "round": "4000-k14",
+   "n": 4,
+   "oldLen": 3706,
+   "newLen": 3415,
+   "formula": "-86*4+53",
+   "expectedLen": 3415,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 4,
+   "newSha256": "a8d83a27e73882fc3bb2a4e8128f21cff1fed0442123e7f9a3a96f45b178ac63"
+  },
+  {
+   "round": "4000-k15",
+   "n": 7,
+   "oldLen": 3921,
+   "newLen": 3372,
+   "formula": "-86*7+53",
+   "expectedLen": 3372,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "10a879a506a24e5e9d6aba375f84745895bc5c80893b37ebd96b5d98eff47f92"
+  },
+  {
+   "round": "4000-k16",
+   "n": 7,
+   "oldLen": 3835,
+   "newLen": 3286,
+   "formula": "-86*7+53",
+   "expectedLen": 3286,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "7611bb787b8779236403e01349a5382f0c5579867c71870795c2418d3be6887b"
+  },
+  {
+   "round": "4000-k17",
+   "n": 7,
+   "oldLen": 3967,
+   "newLen": 3418,
+   "formula": "-86*7+53",
+   "expectedLen": 3418,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "60f243276081509ecaaed0a012655ccdb520b6642b2e8861102f521bffba2259"
+  },
+  {
+   "round": "4000-k18",
+   "n": 8,
+   "oldLen": 3984,
+   "newLen": 3349,
+   "formula": "-86*8+53",
+   "expectedLen": 3349,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 8,
+   "newSha256": "d1d1588ee2022609720fe56ef92d45b3e0ce2f27853d7a6422398950a59bfddc"
+  },
+  {
+   "round": "4000-FIFO",
+   "n": 7,
+   "oldLen": 3652,
+   "newLen": 3103,
+   "formula": "-86*7+53",
+   "expectedLen": 3103,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 7,
+   "newSha256": "7a39c2bbd324422c62b1c62c259c8aa986bc130a89008ac76b52d6665e93b80e"
+  },
+  {
+   "round": "15625-k1",
+   "n": 18,
+   "oldLen": 9208,
+   "newLen": 7713,
+   "formula": "-86*18+53",
+   "expectedLen": 7713,
+   "exactFormula": true,
+   "removedLines": [
+    "These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "Apply this as an active behavior constraint. Do not treat this as background context."
+   ],
+   "addedLines": [
+    "These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."
+   ],
+   "removedAreExpected": true,
+   "addedIsOnlyNewHeader": true,
+   "oldHeaderGone": true,
+   "openTagsByteIdentical": true,
+   "mandatoryLinesByteIdentical": true,
+   "applyLineCount": 0,
+   "constraintCount": 1,
+   "directiveCount": 18,
+   "newSha256": "89595dcce2a568fbfbedcacc61204e214856d09aee9b68a518b86399bc8a4793"
+  }
+ ],
+ "layer2": [
+  {
+   "round": "4000-k1",
+   "budgetChars": 4000,
+   "roundKey": 1,
+   "oldLen": 3685,
+   "newLen": 3778,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "18febfd4d1cf",
+    "666cd9b116fb"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 642,
+   "removedOldChars": 0,
+   "net": -93,
+   "netPct": -2.5,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k2",
+   "budgetChars": 4000,
+   "roundKey": 2,
+   "oldLen": 3996,
+   "newLen": 3979,
+   "oldInjected": 8,
+   "newInjected": 10,
+   "addedHashes": [
+    "666cd9b116fb",
+    "1b258fd34eca"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "fd3fc40e512d"
+   ],
+   "boilerplateReduction": 688,
+   "baseIncrease": 53,
+   "refillChars": 618,
+   "removedOldChars": 0,
+   "net": 17,
+   "netPct": 0.4,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k3",
+   "budgetChars": 4000,
+   "roundKey": 3,
+   "oldLen": 3686,
+   "newLen": 3964,
+   "oldInjected": 7,
+   "newInjected": 10,
+   "addedHashes": [
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "fd3fc40e512d"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "fd3fc40e512d"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 827,
+   "removedOldChars": 0,
+   "net": -278,
+   "netPct": -7.5,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k4",
+   "budgetChars": 4000,
+   "roundKey": 4,
+   "oldLen": 3729,
+   "newLen": 3777,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "d6a64aba4d9e",
+    "887cb01e5a99"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 597,
+   "removedOldChars": 0,
+   "net": -48,
+   "netPct": -1.3,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k5",
+   "budgetChars": 4000,
+   "roundKey": 5,
+   "oldLen": 3793,
+   "newLen": 3881,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "887cb01e5a99",
+    "329a9650f664"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 637,
+   "removedOldChars": 0,
+   "net": -88,
+   "netPct": -2.3,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k6",
+   "budgetChars": 4000,
+   "roundKey": 6,
+   "oldLen": 3705,
+   "newLen": 3832,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "329a9650f664",
+    "88016712a787"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "88016712a787"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 676,
+   "removedOldChars": 0,
+   "net": -127,
+   "netPct": -3.4,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k7",
+   "budgetChars": 4000,
+   "roundKey": 7,
+   "oldLen": 3748,
+   "newLen": 3774,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "88016712a787",
+    "fd3fc40e512d"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "88016712a787",
+    "fd3fc40e512d"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 575,
+   "removedOldChars": 0,
+   "net": -26,
+   "netPct": -0.7,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k8",
+   "budgetChars": 4000,
+   "roundKey": 8,
+   "oldLen": 3740,
+   "newLen": 3972,
+   "oldInjected": 7,
+   "newInjected": 10,
+   "addedHashes": [
+    "fd3fc40e512d",
+    "77cce881e23b",
+    "b039f2657194"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "88016712a787",
+    "fd3fc40e512d",
+    "77cce881e23b",
+    "b039f2657194"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 781,
+   "removedOldChars": 0,
+   "net": -232,
+   "netPct": -6.2,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k9",
+   "budgetChars": 4000,
+   "roundKey": 9,
+   "oldLen": 3688,
+   "newLen": 3783,
+   "oldInjected": 7,
+   "newInjected": 6,
+   "addedHashes": [
+    "94007117c207"
+   ],
+   "removedHashes": [
+    "88016712a787",
+    "fd3fc40e512d"
+   ],
+   "newInjectedHashesOrdered": [
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "94007117c207"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 1219,
+   "removedOldChars": 747,
+   "net": -95,
+   "netPct": -2.6,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k10",
+   "budgetChars": 4000,
+   "roundKey": 10,
+   "oldLen": 3816,
+   "newLen": 3999,
+   "oldInjected": 5,
+   "newInjected": 7,
+   "addedHashes": [
+    "88016712a787",
+    "b039f2657194"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "94007117c207",
+    "88016712a787",
+    "b039f2657194"
+   ],
+   "boilerplateReduction": 430,
+   "baseIncrease": 53,
+   "refillChars": 560,
+   "removedOldChars": 0,
+   "net": -183,
+   "netPct": -4.8,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k11",
+   "budgetChars": 4000,
+   "roundKey": 11,
+   "oldLen": 3871,
+   "newLen": 3971,
+   "oldInjected": 5,
+   "newInjected": 7,
+   "addedHashes": [
+    "fd3fc40e512d",
+    "b039f2657194"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "94007117c207",
+    "88016712a787",
+    "fd3fc40e512d",
+    "b039f2657194"
+   ],
+   "boilerplateReduction": 430,
+   "baseIncrease": 53,
+   "refillChars": 477,
+   "removedOldChars": 0,
+   "net": -100,
+   "netPct": -2.6,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k12",
+   "budgetChars": 4000,
+   "roundKey": 12,
+   "oldLen": 3810,
+   "newLen": 3968,
+   "oldInjected": 5,
+   "newInjected": 7,
+   "addedHashes": [
+    "77cce881e23b",
+    "b039f2657194"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "887cb01e5a99",
+    "329a9650f664",
+    "94007117c207",
+    "88016712a787",
+    "fd3fc40e512d",
+    "77cce881e23b",
+    "b039f2657194"
+   ],
+   "boilerplateReduction": 430,
+   "baseIncrease": 53,
+   "refillChars": 535,
+   "removedOldChars": 0,
+   "net": -158,
+   "netPct": -4.1,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k13",
+   "budgetChars": 4000,
+   "roundKey": 13,
+   "oldLen": 3824,
+   "newLen": 3993,
+   "oldInjected": 5,
+   "newInjected": 6,
+   "addedHashes": [
+    "ca5a080972d6",
+    "b039f2657194"
+   ],
+   "removedHashes": [
+    "77cce881e23b"
+   ],
+   "newInjectedHashesOrdered": [
+    "329a9650f664",
+    "94007117c207",
+    "88016712a787",
+    "fd3fc40e512d",
+    "ca5a080972d6",
+    "b039f2657194"
+   ],
+   "boilerplateReduction": 430,
+   "baseIncrease": 53,
+   "refillChars": 850,
+   "removedOldChars": 390,
+   "net": -169,
+   "netPct": -4.4,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k14",
+   "budgetChars": 4000,
+   "roundKey": 14,
+   "oldLen": 3706,
+   "newLen": 3950,
+   "oldInjected": 4,
+   "newInjected": 6,
+   "addedHashes": [
+    "77cce881e23b",
+    "b039f2657194"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "94007117c207",
+    "88016712a787",
+    "fd3fc40e512d",
+    "ca5a080972d6",
+    "77cce881e23b",
+    "b039f2657194"
+   ],
+   "boilerplateReduction": 344,
+   "baseIncrease": 53,
+   "refillChars": 535,
+   "removedOldChars": 0,
+   "net": -244,
+   "netPct": -6.6,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k15",
+   "budgetChars": 4000,
+   "roundKey": 15,
+   "oldLen": 3921,
+   "newLen": 3993,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "b60e75145eda",
+    "1f819865af11"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "88016712a787",
+    "fd3fc40e512d",
+    "ca5a080972d6",
+    "77cce881e23b",
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 621,
+   "removedOldChars": 0,
+   "net": -72,
+   "netPct": -1.8,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k16",
+   "budgetChars": 4000,
+   "roundKey": 16,
+   "oldLen": 3835,
+   "newLen": 3968,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "1f819865af11",
+    "871d0283b206"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "fd3fc40e512d",
+    "ca5a080972d6",
+    "77cce881e23b",
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 682,
+   "removedOldChars": 0,
+   "net": -133,
+   "netPct": -3.5,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k17",
+   "budgetChars": 4000,
+   "roundKey": 17,
+   "oldLen": 3967,
+   "newLen": 3996,
+   "oldInjected": 7,
+   "newInjected": 9,
+   "addedHashes": [
+    "871d0283b206",
+    "1b258fd34eca"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "ca5a080972d6",
+    "77cce881e23b",
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "1b258fd34eca"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 578,
+   "removedOldChars": 0,
+   "net": -29,
+   "netPct": -0.7,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-k18",
+   "budgetChars": 4000,
+   "roundKey": 18,
+   "oldLen": 3984,
+   "newLen": 3984,
+   "oldInjected": 8,
+   "newInjected": 10,
+   "addedHashes": [
+    "769cea41ddb0",
+    "18febfd4d1cf"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "77cce881e23b",
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "fd3fc40e512d"
+   ],
+   "boilerplateReduction": 688,
+   "baseIncrease": 53,
+   "refillChars": 635,
+   "removedOldChars": 0,
+   "net": 0,
+   "netPct": 0,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "4000-FIFO",
+   "budgetChars": 4000,
+   "roundKey": null,
+   "oldLen": 3652,
+   "newLen": 3984,
+   "oldInjected": 7,
+   "newInjected": 10,
+   "addedHashes": [
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "fd3fc40e512d"
+   ],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "77cce881e23b",
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "fd3fc40e512d"
+   ],
+   "boilerplateReduction": 602,
+   "baseIncrease": 53,
+   "refillChars": 881,
+   "removedOldChars": 0,
+   "net": -332,
+   "netPct": -9.1,
+   "selectionChangeExplainable": true
+  },
+  {
+   "round": "15625-k1",
+   "budgetChars": 15625,
+   "roundKey": 1,
+   "oldLen": 9208,
+   "newLen": 7713,
+   "oldInjected": 18,
+   "newInjected": 18,
+   "addedHashes": [],
+   "removedHashes": [],
+   "newInjectedHashesOrdered": [
+    "016647f08388",
+    "98a62956a843",
+    "b039f2657194",
+    "b60e75145eda",
+    "1f819865af11",
+    "871d0283b206",
+    "769cea41ddb0",
+    "18febfd4d1cf",
+    "666cd9b116fb",
+    "1b258fd34eca",
+    "d6a64aba4d9e",
+    "887cb01e5a99",
+    "329a9650f664",
+    "94007117c207",
+    "88016712a787",
+    "fd3fc40e512d",
+    "ca5a080972d6",
+    "77cce881e23b"
+   ],
+   "boilerplateReduction": 1548,
+   "baseIncrease": 53,
+   "refillChars": 0,
+   "removedOldChars": 0,
+   "net": 1495,
+   "netPct": 16.2,
+   "selectionChangeExplainable": true
+  }
+ ],
+ "verdict": {
+  "layer1ExactFormulaAllRounds": true,
+  "layer1StructureAllRounds": true,
+  "layer2NoRemovals": false,
+  "layer2SelectionChangesExplainable": true,
+  "b3Line15625": {
+   "net": 1495,
+   "pct": 16.2,
+   "pass": true
+  }
+ }
+}
