@@ -14,24 +14,11 @@ vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
-const spike = vi.hoisted(() => {
-  const state: { fauxModel: unknown } = { fauxModel: undefined };
-  return state;
-});
-
-vi.mock('@earendil-works/pi-ai/compat', async (importActual) => {
-  const actual: Record<string, unknown> = await importActual();
-  const actualGetModel = actual.getModel as (provider: unknown, id: unknown) => unknown;
-  const actualGetProviders = actual.getProviders as () => unknown[];
-  return {
-    ...actual,
-    getModel: vi.fn((provider: unknown, id: unknown) =>
-      provider === 'faux' ? spike.fauxModel : actualGetModel(provider, id)),
-    getProviders: vi.fn(() => ['faux', ...actualGetProviders()]),
-  };
-});
+vi.mock('@earendil-works/pi-ai/compat', async (importActual) =>
+  (await import('./fixtures/faux-pi-ai-harness.js')).fauxCompatMockFactory(importActual));
 
 import { storeEmitter } from '../../store/event-emitter.js';
+import { setFauxCompatModel } from './fixtures/faux-pi-ai-harness.js';
 import { registerFauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai/compat';
 import { L2AgentLoopAdapter } from '../l2-agent-loop-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
@@ -119,7 +106,7 @@ function capture(seen: SeenRequest[]) {
 beforeEach(() => {
   vi.clearAllMocks();
   registration = registerFauxProvider({ models: [{ id: 'faux-1' }] });
-  spike.fauxModel = registration.getModel('faux-1');
+  setFauxCompatModel(registration.getModel('faux-1'));
   process.env.TEST_API_KEY = 'test-key';
 });
 
