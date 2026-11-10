@@ -1,0 +1,117 @@
+{
+  "schema": "pd-aa-pri1122-single-model-run-manifest/v0.1",
+  "status": "FROZEN_NOT_EXECUTED",
+  "frozenAt": "2026-11-10",
+  "purpose": "真实分支的唯一输入来源。工作区夹具、案例 ID、当前输入、事前上下文、候选与预算全部从这里和冻结批次解析；命令行不得覆盖这些字段。",
+  "runCard": {
+    "version": "v0.2",
+    "file": "docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-BUDGET-CARD-v0.2.md",
+    "maxTotalRequests": 12
+  },
+  "frozenCases": {
+    "file": "docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-FROZEN-CASES-v0.1.json",
+    "sha256": "5baec57099720712467bb2caf5a5770f59834d6f64613f8d41a195c6bc757dec"
+  },
+  "limits": {
+    "maxTotalRequests": 12,
+    "maxSendsPerOpportunity": 1,
+    "timeoutMs": 10000,
+    "maxOutputTokens": 512,
+    "maxTransportFailures": 2
+  },
+  "workspaceFixtures": {
+    "materialization": "每个案例在运行目录下新建一次性 SQLite 工作区：五个合成候选各自带 owner 批准与当前激活，activation 时间按 candidateOrder 递增，因此 Runtime V2 读取顺序等于 candidateOrder。",
+    "candidates": "候选正文与角色只来自冻结批次的 sharedInputs.candidateSet；本清单只写引用与顺序。",
+    "budgetRule": "promptBudget = resolvePromptBudget() 的默认值，仅 budgetChars 被本清单的 budget 规则替换；块大小由 measureSharedDirectiveBlockChars 在真实工作区上测量。",
+    "roundKeyRule": "roundKey=null 表示 legacy FIFO（Native 在第一个未装入候选处停止）；数字表示 fair rotation。"
+  },
+  "cases": [
+    {
+      "id": "dev-01",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_preserve", "fixture_verify", "fixture_explicit_goal", "fixture_uncertainty"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "dev-02",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_preserve", "fixture_verify", "fixture_uncertainty", "fixture_explicit_goal"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "dev-03",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_explicit_goal", "fixture_verify", "fixture_preserve", "fixture_uncertainty"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "dev-04",
+      "roundKey": null,
+      "candidateOrder": ["fixture_preserve", "fixture_oversized_control", "fixture_verify", "fixture_explicit_goal"],
+      "budget": {
+        "kind": "native_kept_plus_target",
+        "keptPrincipleIds": ["fixture_preserve"],
+        "targetPrincipleId": "fixture_verify",
+        "slackChars": 10
+      }
+    },
+    {
+      "id": "dev-05",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_uncertainty", "fixture_verify", "fixture_preserve", "fixture_explicit_goal"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "dev-06",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_preserve", "fixture_verify", "fixture_uncertainty", "fixture_explicit_goal"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "dev-07",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_verify", "fixture_preserve", "fixture_explicit_goal", "fixture_uncertainty"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "dev-08",
+      "roundKey": null,
+      "candidateOrder": ["fixture_preserve", "fixture_explicit_goal", "fixture_verify", "fixture_uncertainty"],
+      "budget": {
+        "kind": "native_kept_plus_target",
+        "keptPrincipleIds": ["fixture_preserve", "fixture_explicit_goal"],
+        "targetPrincipleId": "fixture_verify",
+        "deficitChars": 5
+      }
+    },
+    {
+      "id": "eval-01",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_preserve", "fixture_verify", "fixture_uncertainty", "fixture_explicit_goal"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "eval-02",
+      "roundKey": null,
+      "candidateOrder": ["fixture_preserve", "fixture_oversized_control", "fixture_verify", "fixture_uncertainty"],
+      "budget": {
+        "kind": "native_kept_plus_target",
+        "keptPrincipleIds": ["fixture_preserve"],
+        "targetPrincipleId": "fixture_verify",
+        "slackChars": 10
+      }
+    },
+    {
+      "id": "eval-03",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_preserve", "fixture_verify", "fixture_explicit_goal", "fixture_uncertainty"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    },
+    {
+      "id": "eval-04",
+      "roundKey": 1,
+      "candidateOrder": ["fixture_verify", "fixture_preserve", "fixture_uncertainty", "fixture_explicit_goal"],
+      "budget": { "kind": "all_candidates", "slackChars": 100 }
+    }
+  ]
+}
