@@ -75,6 +75,21 @@ function seedActiveCodeToolHookRule(
   `).run(activationId, `idem-${activationId}`, artifactId, ruleId, new Date().toISOString());
 }
 
+function seedRawContentRule(
+  ws: TestWorkspace,
+  spec: { artifactId: string; activationId: string; contentJson: string },
+): void {
+  const { artifactId, activationId, contentJson } = spec;
+  // pi_artifacts is unique on (source_task_id, artifact_kind, revision_epoch),
+  // so each seeded malformed artifact needs its own task.
+  const artifact = createRuleArtifact({ artifactId, sourceTaskId: `task-${artifactId}`, sourceRuleId: `rule-${artifactId}`, contentJson });
+  seedArtifactToDb(ws, artifact);
+  ws.connection.getDb().prepare(`
+    INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+    VALUES (?, ?, ?, 'code_tool_hook', 'code_tool_hook_shadow_activate', ?, ?, NULL, NULL)
+  `).run(activationId, `idem-${activationId}`, artifactId, `impl://${artifactId}`, new Date().toISOString());
+}
+
 describe('ActivationCompatibilityReadModel', () => {
   it('detects an active rule that reads the retired recentThinking contract', () => {
     const ws = createBareWorkspace();
@@ -150,6 +165,68 @@ describe('ActivationCompatibilityReadModel', () => {
       const artifacts = db.prepare('SELECT COUNT(*) AS n FROM pi_artifacts').get() as { n: number };
       expect(activations.n).toBe(1);
       expect(artifacts.n).toBeGreaterThanOrEqual(1);
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  // ── 2B-a: skipped rows must be counted and attributable ──────────────────
+
+  it('counts an unparseable content_json instead of dropping the row silently', () => {
+    const ws = createBareWorkspace();
+    try {
+      seedRawContentRule(ws, { artifactId: 'art-bad-json', activationId: 'act-bad-json', contentJson: '{not json' });
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      // 2B-a keeps `clean`/`ok` semantics: a skipped row does not fail the scan.
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe('clean');
+      expect(result.scannedActivations).toBe(0);
+      expect(result.skipped).toEqual([
+        { reason: 'invalid_content_json', count: 1, sampleActivationIds: ['act-bad-json'] },
+      ]);
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it('attributes a JSON payload that is not an object and one without implementationCode', () => {
+    const ws = createBareWorkspace();
+    try {
+      seedRawContentRule(ws, { artifactId: 'art-array', activationId: 'act-array', contentJson: '[]' });
+      seedRawContentRule(ws, { artifactId: 'art-no-code', activationId: 'act-no-code', contentJson: JSON.stringify({ ruleId: 'rule-x' }) });
+      seedRawContentRule(ws, { artifactId: 'art-empty-json', activationId: 'act-empty-json', contentJson: '' });
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      expect(result.skipped).toEqual(expect.arrayContaining([
+        { reason: 'content_not_object', count: 1, sampleActivationIds: ['act-array'] },
+        { reason: 'missing_implementation_code', count: 1, sampleActivationIds: ['act-no-code'] },
+        { reason: 'missing_content_json', count: 1, sampleActivationIds: ['act-empty-json'] },
+      ]));
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it('aggregates per reason and caps sampleActivationIds at five', () => {
+    const ws = createBareWorkspace();
+    try {
+      for (let i = 0; i < 6; i += 1) {
+        seedRawContentRule(ws, { artifactId: `art-bad-${i}`, activationId: `act-bad-${i}`, contentJson: '{oops' });
+      }
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      expect(result.skipped).toHaveLength(1);
+      expect(result.skipped[0]).toMatchObject({ reason: 'invalid_content_json', count: 6 });
+      expect(result.skipped[0]?.sampleActivationIds).toHaveLength(5);
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it('reports an empty skipped list when every active row was scanned', () => {
+    const ws = createBareWorkspace();
+    try {
+      seedActiveCodeToolHookRule(ws, { artifactId: 'art-clean-2', ruleId: 'rule-clean-v2', implementationCode: CLEAN_V2_CODE, activationId: 'act-clean-2' });
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      expect(result.skipped).toEqual([]);
     } finally {
       ws.cleanup();
     }
