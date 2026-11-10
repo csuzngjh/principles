@@ -1,0 +1,479 @@
+// PRI-1122 single-model selection arm — acceptance wiring tests.
+//
+// Fake transport drives the REAL PiAiRuntimeAdapter; the REAL Runtime V2 Reader
+// and the REAL shared assembly (`buildActivePrinciplePromptContext`) produce the
+// final text. No network, no production workspace, no governance write besides
+// the throwaway fixture workspaces under the OS temp directory.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import * as yaml from 'js-yaml';
+import {
+  SqliteActivationStateStore,
+  SqliteConnection,
+  getDefaultPdConfig,
+  resolvePromptBudget,
+  measureSharedDirectiveBlockChars,
+  sharedDirectiveBaseChars,
+} from '@principles/core/runtime';
+import { escapeXml } from '@principles/core/prompt-builder';
+import {
+  buildActivePrinciplePromptContext,
+  readPromptActivationCandidates,
+} from '@principles/host-runtime';
+import { PiAiRuntimeAdapter } from '../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js';
+import {
+  LIMITS,
+  buildBoundedSelectionInput,
+  createSingleModelSelector,
+  localFailureCode,
+  runSelectionOpportunity,
+  validateSelectionResult,
+  hash,
+} from './orchestrator.mjs';
+
+process.env.ZAI_CODING_CN_API_KEY = process.env.ZAI_CODING_CN_API_KEY || 'fake-test-key';
+
+const TEXT = {
+  SCOPE: '只修改与任务直接相关的文件，邻近改进记为后续事项。',
+  BIG: '避免为假设的未来需求预建抽象和额外服务。'.repeat(40),
+  DELIVERY: '交付验收前以可观察证据自检：先列出验收基准与已有证据；缺证据时如实限定结论。',
+  TESTS: '修复缺陷时先写能复现问题的回归测试，再改实现。',
+  DRAFT: '起草阶段先明确目标与约束，不提前宣称完成。',
+};
+
+let counter = 0;
+const tempWorkspace = (label) => {
+  counter += 1;
+  return fs.mkdtempSync(path.join(os.tmpdir(), `pri1122-${label}-${counter}-`));
+};
+
+async function seedWorkspace(workspaceDir, specs) {
+  fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), yaml.dump(getDefaultPdConfig()), 'utf8');
+  const connection = new SqliteConnection(workspaceDir);
+  try {
+    const db = connection.getDb();
+    const insertArtifact = db.prepare(`
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES (?, 'principle', ?, ?, '[]', 'validated', ?, ?, ?)
+    `);
+    const approve = db.prepare(`
+      INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, confidence, requested_at, decided_at, decided_by)
+      VALUES (?, ?, 'prompt', 'low', 'approved', 1, ?, ?, 'owner-test')
+    `);
+    const store = new SqliteActivationStateStore(connection);
+    let index = 0;
+    for (const spec of specs) {
+      const at = new Date(Date.UTC(2026, 10, 10, 0, 0, 0) + index * 1000).toISOString();
+      index += 1;
+      const artifactId = spec.artifactId ?? `art-${spec.key}`;
+      const activationId = spec.activationId ?? `act-${spec.key}`;
+      insertArtifact.run(artifactId, `task-${artifactId}`, spec.principleId, JSON.stringify({ principleId: spec.principleId, text: spec.text }), at, at);
+      await store.recordActivation({
+        activationId,
+        idempotencyKey: `${artifactId}::prompt`,
+        artifactId,
+        channel: 'prompt',
+        action: 'prompt_activate',
+        targetRef: `ledger://${spec.principleId}`,
+        activatedAt: at,
+        deactivatedAt: null,
+      });
+      if (spec.approved !== false) approve.run(`approval-${artifactId}`, artifactId, at, at);
+    }
+  } finally {
+    connection.close();
+  }
+}
+
+function mutateDb(workspaceDir, run) {
+  const connection = new SqliteConnection(workspaceDir);
+  try { run(connection.getDb()); } finally { connection.close(); }
+}
+
+const deleteApproval = (workspaceDir, artifactId) => mutateDb(workspaceDir,
+  (db) => db.prepare('DELETE FROM approvals WHERE artifact_id = ?').run(artifactId));
+
+const deactivate = (workspaceDir, activationId) => mutateDb(workspaceDir,
+  (db) => db.prepare('UPDATE activations SET deactivated_at = ? WHERE activation_id = ?').run(new Date().toISOString(), activationId));
+
+const rewriteArtifact = (workspaceDir, artifactId, principleId, text) => mutateDb(workspaceDir,
+  (db) => db.prepare('UPDATE pi_artifacts SET content_json = ?, updated_at = ? WHERE artifact_id = ?')
+    .run(JSON.stringify({ principleId, text }), new Date().toISOString(), artifactId));
+
+async function costs(workspaceDir) {
+  const read = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
+  const base = sharedDirectiveBaseChars({ escapeFn: escapeXml, selfReportInstruction: false });
+  const byPrincipleId = {};
+  for (const principle of read.principles) {
+    byPrincipleId[principle.principleId] = measureSharedDirectiveBlockChars(principle,
+      { escapeFn: escapeXml, selfReportInstruction: false });
+  }
+  return { base, byPrincipleId, order: read.principles.map((principle) => principle.principleId) };
+}
+
+async function selectionPayload(workspaceDir, principleId) {
+  if (principleId === null) return { status: 'none_applicable', id: null, digest: null };
+  if (typeof principleId === 'object') return principleId;
+  const read = await readPromptActivationCandidates({ workspaceDir, includeAuthority: true });
+  const index = read.principles.findIndex((principle) => principle.principleId === principleId);
+  assert.notEqual(index, -1, `fixture principle ${principleId} must be an active candidate`);
+  return { status: 'selected', id: `c${index + 1}`, digest: hash(read.principles[index].text) };
+}
+
+function sse(payload) {
+  const packets = [
+    { id: 'fake', model: 'glm-5.3-flash', choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(payload) }, finish_reason: null }] },
+    { id: 'fake', model: 'glm-5.3-flash', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+  ];
+  return new Response(packets.map((packet) => `data: ${JSON.stringify(packet)}\n\n`).join('') + 'data: [DONE]\n\n',
+    { headers: { 'Content-Type': 'text/event-stream' } });
+}
+
+function selectorFor({ payload, fetchOverride, now = Date.now, deadlineAt = Date.now() + LIMITS.selectTimeoutMs }) {
+  const sends = [];
+  const fetch = async (url, init) => {
+    sends.push({ url, init });
+    if (fetchOverride) return fetchOverride({ url, init, sends });
+    return sse(payload);
+  };
+  const selector = createSingleModelSelector({ PiAiRuntimeAdapter, fetch, now, deadlineAt });
+  return { select: selector.select, selectorReport: selector.report, sends };
+}
+
+const budgetResolution = (budgetChars) => ({ ...resolvePromptBudget(), budgetChars });
+
+async function fourCandidateWorkspace(label) {
+  const workspaceDir = tempWorkspace(label);
+  await seedWorkspace(workspaceDir, [
+    { key: 'A', principleId: 'SCOPE', text: TEXT.SCOPE },
+    { key: 'B', principleId: 'BIG', text: TEXT.BIG },
+    { key: 'T', principleId: 'DELIVERY', text: TEXT.DELIVERY },
+    { key: 'C', principleId: 'TESTS', text: TEXT.TESTS },
+  ]);
+  const measured = await costs(workspaceDir);
+  assert.deepEqual(measured.order, ['SCOPE', 'BIG', 'DELIVERY', 'TESTS']);
+  return { workspaceDir, ...measured };
+}
+
+test('bounded input separates the current instruction from prior history and drops whole old messages', () => {
+  const candidates = [
+    { principleId: 'P1', artifactId: 'a1', activationId: 'x1', artifactContentSha256: 'a'.repeat(64), text: '原则一', authority: 'owner', approvedBy: 'owner-test' },
+  ];
+  const priorMessages = ['x'.repeat(LIMITS.maxInputChars), '第一条历史', '第二条历史'];
+  const bounded = buildBoundedSelectionInput({ currentInput: '当前任务：交付验收', priorMessages, candidates });
+  assert.equal(bounded.ok, true);
+  assert.equal(bounded.payload.currentInstruction, '当前任务：交付验收');
+  assert.equal(bounded.payload.candidates.length, 1);
+  assert.equal(bounded.payload.candidates[0].ref, 'c1');
+  assert.equal(bounded.byRef.get('c1').principle.principleId, 'P1');
+  // The oversized history message is dropped whole, the newest short one kept.
+  assert.equal(bounded.payload.priorContext.some((message) => message.text === 'x'.repeat(LIMITS.maxInputChars)), false);
+  assert.equal(bounded.payload.priorContext.at(-1).text, '第二条历史');
+  assert.equal(bounded.priorDropped, 1);
+  // Evaluation answers are never part of the model input.
+  assert.equal(JSON.stringify(bounded.payload).includes('allowedSelections'), false);
+});
+
+test('candidate cap refuses instead of truncating and falls back to Native with zero sends', async () => {
+  const { workspaceDir } = await fourCandidateWorkspace('cap');
+  const principles = Array.from({ length: LIMITS.maxCandidates + 1 }, (_, index) => ({
+    principleId: `P${index}`,
+    artifactId: `a${index}`,
+    activationId: `x${index}`,
+    artifactContentSha256: 'b'.repeat(64),
+    text: `原则${index}`,
+    authority: 'owner',
+    approvedBy: 'owner-test',
+  }));
+  let called = 0;
+  const result = await runSelectionOpportunity({
+    workspaceDir,
+    promptBudget: budgetResolution(100000),
+    currentInput: '继续实现',
+    readCandidates: async () => ({ principles, warnings: [], aborted: false, selfReportEnabled: false }),
+    select: async () => { called += 1; throw new Error('must not be called'); },
+    selectorReport: () => ({ sends: 0, status: 'not_called', failure: null }),
+  });
+  assert.equal(called, 0);
+  assert.equal(result.selection.reason, 'candidate_cap_exceeded');
+  assert.equal(result.model.sends, 0);
+  assert.equal(result.outcome, 'native_baseline');
+  assert.equal(result.additionalContext, result.nativeContext);
+});
+
+test('positive: Native misses the target, generic model selects it, shared assembly adds it and keeps the native set', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('positive');
+  // Legacy Native stops at the first non-fit (BIG), leaving DELIVERY out even
+  // though it would fit later. Placing it first must not displace SCOPE.
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+  assert.deepEqual(native.activationIds, ['act-A']);
+  assert.equal(native.additionalContext.includes(TEXT.DELIVERY), false);
+
+  const { select, selectorReport, sends } = selectorFor({ payload: await selectionPayload(workspaceDir, 'DELIVERY') });
+  const result = await runSelectionOpportunity({
+    workspaceDir,
+    promptBudget,
+    currentInput: '请交付验收：这次改动已经全部完成了吗？',
+    priorMessages: ['先完成草稿，暂不进入验收。'],
+    select,
+    selectorReport,
+  });
+
+  assert.equal(result.outcome, 'dynamic_added');
+  assert.equal(result.selection.status, 'selected');
+  assert.equal(result.selection.principleId, 'DELIVERY');
+  assert.equal(result.model.sends, 1);
+  assert.equal(sends.length, 1);
+  assert.equal(result.assembly.targetSnapshotVerified, true);
+  assert.equal(result.assembly.addedTarget, true);
+  assert.equal(result.assembly.lostNative.length, 0);
+  assert.equal(result.assembly.mandatoryPreserved, true);
+  assert.equal(result.assembly.targetDirectiveCount, 1);
+  assert.deepEqual(result.assembly.finalActivationIds, ['act-T', 'act-A']);
+  assert.equal(result.additionalContext.includes(TEXT.DELIVERY), true);
+  assert.equal(result.additionalContext.includes(TEXT.SCOPE), true);
+});
+
+test('no applicable principle abstains and keeps the Native text byte-identical', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('abstain');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + 10);
+  const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+  const { select, selectorReport } = selectorFor({ payload: { status: 'none_applicable', id: null, digest: null } });
+  const result = await runSelectionOpportunity({
+    workspaceDir,
+    promptBudget,
+    currentInput: '继续实现下一个模块',
+    priorMessages: ['历史消息里提到“请交付验收”，但那是上一次任务。'],
+    select,
+    selectorReport,
+  });
+  assert.equal(result.selection.status, 'none_applicable');
+  assert.equal(result.outcome, 'selection_abstained');
+  assert.equal(result.additionalContext, native.additionalContext);
+  assert.equal(result.additionalContext.includes('请交付验收'), false);
+  assert.equal(result.additionalContext.includes('继续实现下一个模块'), false);
+});
+
+test('gate: Native already carries the target; it is reported once and never counted as dynamic', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('present');
+  const total = Object.values(byPrincipleId).reduce((sum, value) => sum + value, 0);
+  const promptBudget = budgetResolution(base + total + 100);
+  const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+  assert.equal(native.activationIds.includes('act-T'), true);
+  const { select, selectorReport } = selectorFor({ payload: await selectionPayload(workspaceDir, 'DELIVERY') });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收', select, selectorReport,
+  });
+  assert.equal(result.outcome, 'target_present');
+  assert.equal(result.assembly.targetAlreadyInNative, true);
+  assert.equal(result.assembly.addedTarget, false);
+  assert.equal(result.assembly.targetDirectiveCount, 1);
+  assert.equal(result.additionalContext, native.additionalContext);
+});
+
+test('tight budget: target is selected but cannot be packed; the text stays Native', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('tight');
+  const promptBudget = budgetResolution(base + byPrincipleId.DELIVERY + 5);
+  const native = await buildActivePrinciplePromptContext({ workspaceDir, promptBudget });
+  assert.deepEqual(native.activationIds, ['act-A']);
+  const { select, selectorReport } = selectorFor({ payload: await selectionPayload(workspaceDir, 'DELIVERY') });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收', select, selectorReport,
+  });
+  assert.equal(result.selection.status, 'selected');
+  assert.equal(result.outcome, 'selected_not_packed');
+  assert.equal(result.assembly.selectedButNotPacked, true);
+  assert.equal(result.assembly.adaptiveReason, 'mandatory_constraint_displaced');
+  assert.equal(result.additionalContext, native.additionalContext);
+  assert.deepEqual(result.assembly.finalActivationIds, native.activationIds);
+});
+
+test('out-of-candidate and previous-round references fail closed to Native', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('reference');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+
+  const outside = selectorFor({ payload: { status: 'selected', id: 'c9', digest: 'f'.repeat(64) } });
+  const first = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: outside.select, selectorReport: outside.selectorReport,
+  });
+  assert.equal(first.outcome, 'selection_failed');
+  assert.equal(first.selection.reason, 'SELECTION_REFERENCE_INVALID');
+  assert.equal(first.additionalContext, first.nativeContext);
+
+  // A response minted against another call's candidate order cannot be replayed
+  // into this call: c1 now points at a different text digest.
+  const stale = await selectionPayload(workspaceDir, 'SCOPE');
+  stale.digest = 'e'.repeat(64);
+  const replay = selectorFor({ payload: stale });
+  const second = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: replay.select, selectorReport: replay.selectorReport,
+  });
+  assert.equal(second.outcome, 'selection_failed');
+  assert.equal(second.selection.reason, 'SELECTION_REFERENCE_INVALID');
+  assert.equal(second.additionalContext, second.nativeContext);
+});
+
+test('a revised target during the model wait is rejected; Native is re-read', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('revised');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const payload = await selectionPayload(workspaceDir, 'DELIVERY');
+  const selector = selectorFor({
+    fetchOverride: () => {
+      rewriteArtifact(workspaceDir, 'art-T', 'DELIVERY', '交付验收（修订版）：只引用可复核的产物。');
+      return sse(payload);
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: selector.select, selectorReport: selector.selectorReport,
+  });
+  assert.equal(result.selection.status, 'selected');
+  assert.equal(result.outcome, 'native_baseline');
+  assert.equal(result.assembly.fallback, 'reread_native_after_revalidation_failure');
+  assert.equal(result.assembly.fallbackReason, 'pre_assembly_revalidation_failed');
+  assert.equal(result.additionalContext.includes('修订版'), false);
+  assert.equal(result.additionalContext.includes(TEXT.DELIVERY), false);
+});
+
+test('an authorization change during the model wait is rejected even when ids match', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('authority');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const payload = await selectionPayload(workspaceDir, 'DELIVERY');
+  const selector = selectorFor({
+    fetchOverride: () => {
+      deleteApproval(workspaceDir, 'art-T'); // owner → system_policy, same ids/text
+      return sse(payload);
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: selector.select, selectorReport: selector.selectorReport,
+  });
+  assert.equal(result.outcome, 'native_baseline');
+  assert.equal(result.assembly.fallback, 'reread_native_after_revalidation_failure');
+  assert.equal(result.additionalContext.includes(TEXT.DELIVERY), false);
+});
+
+test('revalidation passes but the packer next read sees a changed revision: increment is dropped', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('packer-drift');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const payload = await selectionPayload(workspaceDir, 'DELIVERY');
+  const selector = selectorFor({ payload });
+  let adaptiveCalls = 0;
+  const buildContext = async (args) => {
+    if (args.adaptivePriority) {
+      adaptiveCalls += 1;
+      // The pre-assembly revalidation has already passed; change the artifact
+      // right before the packer's own first read.
+      rewriteArtifact(workspaceDir, 'art-T', 'DELIVERY', '交付验收（装配时改写）：这条正文不应被注入。');
+    }
+    return buildActivePrinciplePromptContext(args);
+  };
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: selector.select, selectorReport: selector.selectorReport, buildContext,
+  });
+  assert.equal(adaptiveCalls, 1);
+  assert.equal(result.outcome, 'native_baseline');
+  assert.equal(result.assembly.fallbackReason, 'target_snapshot_mismatch');
+  assert.equal(result.assembly.targetChangedDuringWait, true);
+  assert.equal(result.additionalContext.includes('装配时改写'), false);
+});
+
+test('a late but structurally valid response is not applied, and a second send is blocked before the network', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('late');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const payload = await selectionPayload(workspaceDir, 'DELIVERY');
+  let clock = 1_000_000;
+  const deadlineAt = clock + 1_000;
+  const selector = selectorFor({
+    payload, now: () => clock, deadlineAt,
+    fetchOverride: ({ sends }) => {
+      assert.equal(sends.length, 1);
+      clock = deadlineAt + 1; // arrives one tick after the frozen deadline
+      return sse(payload);
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收', deadlineAt,
+    select: selector.select, selectorReport: selector.selectorReport,
+  });
+  assert.equal(result.outcome, 'selection_failed');
+  assert.equal(result.selection.reason, 'SELECTION_EXPIRED');
+  assert.equal(result.model.sends, 1);
+  assert.equal(selector.sends.length, 1);
+  assert.equal(result.additionalContext, result.nativeContext);
+
+  await assert.rejects(selector.select({ input: { payload: {}, entries: [] } }), /REQUEST_BUDGET_EXHAUSTED/);
+  assert.equal(selector.sends.length, 1);
+});
+
+test('deadline cancellation reaches fetch, and Native still returns', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('cancel');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  let aborted = false;
+  const selector = selectorFor({
+    deadlineAt: Date.now() + 80,
+    fetchOverride: ({ init }) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        aborted = true;
+        reject(new Error('aborted-by-deadline'));
+      }, { once: true });
+    }),
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: selector.select, selectorReport: selector.selectorReport,
+  });
+  assert.equal(aborted, true);
+  assert.equal(result.model.sends, 1);
+  assert.equal(result.outcome, 'selection_failed');
+  assert.equal(result.additionalContext, result.nativeContext);
+});
+
+test('malformed output and a failing assembly dependency both fall back to Native', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('malformed');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+
+  const malformed = selectorFor({ payload: { status: 'bogus', id: null, digest: null } });
+  const first = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: malformed.select, selectorReport: malformed.selectorReport,
+  });
+  assert.equal(first.outcome, 'selection_failed');
+  assert.equal(first.selection.reason, 'SELECTION_PROTOCOL_INVALID');
+  assert.equal(first.additionalContext, first.nativeContext);
+
+  const payload = await selectionPayload(workspaceDir, 'DELIVERY');
+  const valid = selectorFor({ payload });
+  const buildContext = async (args) => {
+    if (args.adaptivePriority) throw new Error('assembly dependency down');
+    return buildActivePrinciplePromptContext(args);
+  };
+  const second = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: valid.select, selectorReport: valid.selectorReport, buildContext,
+  });
+  assert.equal(second.outcome, 'native_baseline');
+  assert.equal(second.assembly.fallbackReason, 'assembly_dependency_failed');
+  assert.equal(second.additionalContext, second.nativeContext);
+});
+
+test('ambiguous duplicate references, digest mismatch and structural errors are protocol failures', () => {
+  const entries = [
+    { ref: 'c1', text: '同一原则的旧版正文', principle: { principleId: 'DUP', artifactId: 'a1', activationId: 'x1' } },
+    { ref: 'c2', text: '同一原则的新版正文', principle: { principleId: 'DUP', artifactId: 'a2', activationId: 'x2' } },
+  ];
+  assert.throws(() => validateSelectionResult({ status: 'selected', id: 'c1', digest: hash(entries[0].text) }, entries), /SELECTION_AMBIGUOUS/);
+  assert.throws(() => validateSelectionResult({ status: 'selected', id: 'c1', digest: hash('wrong') }, [entries[0]]), /SELECTION_REFERENCE_INVALID/);
+  assert.throws(() => validateSelectionResult({ status: 'uncertain', id: 'c1', digest: null }, entries), /SELECTION_PROTOCOL_INVALID/);
+  assert.deepEqual(validateSelectionResult({ status: 'uncertain', id: null, digest: null }, entries), { status: 'uncertain', id: null, digest: null });
+  assert.equal(localFailureCode(new Error('SELECTION_AMBIGUOUS')), 'SELECTION_AMBIGUOUS');
+});

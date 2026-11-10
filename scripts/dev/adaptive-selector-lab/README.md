@@ -50,3 +50,15 @@ The main builder now sends the identical context as a JSON string. A regression 
 Owner approved the remaining 3 Decisions +6 GLM attempts for dev-02..04 and catalog-proven canonical aliases. The `--execute-approved-final-three` run completed: all nine requests HTTP200; C and D made identical choices, each matching 2/3 of the frozen allowed sets. Cumulative attempts remain decision6 / GLM6, including prior failures. No further real calls are authorized by these consumed flags/claims.
 
 See `PD-AA-PRI-1141-FINAL-DIAGNOSTIC-20261106.md` and the immutable `2026-11-05T23-45-11-762Z/results.json` plus `analysis.json`. The canonical model comes from the selected free catalog row, not guessed suffixes. No generalized accuracy, behavioral improvement, gating savings or production activation claim follows from this small synthetic diagnostic.
+
+## PRI-1122 single-model selection arm (offline)
+
+`orchestrator.mjs` adds an isolated two-mode opportunity runner over the REAL Runtime V2 Reader and the REAL shared assembly: `native` (zero model sends) and `single-model` (one generic-model reference, then PD revalidation + additive assembly). The generic model only returns `{status, id, digest}`; it never owns authorization, revision, dedup, budget or final text.
+
+```powershell
+node --test scripts/dev/adaptive-selector-lab/orchestrator.test.mjs
+node scripts/dev/adaptive-selector-lab/orchestrate.mjs --mode native --workspace <seeded-workspace>
+```
+
+`orchestrate.mjs` refuses a real call without `--execute-approved-20261110` and the credential env, and this delivery has not issued one. Offline evaluation drives the real `PiAiRuntimeAdapter` through `--fixture-response`. Frozen cases, budget card and the NOT RUN report live under `docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-*` and `docs/implementation-reports/PD-AA-PRI-1122-SINGLE-MODEL-SELECTOR-20261110.md`. The historical CLI, fixtures, hashes and consumed approval claims above are unchanged.
+

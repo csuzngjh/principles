@@ -1,0 +1,252 @@
+{
+  "schema": "pd-aa-pri1122-single-model-frozen-cases/v0.1",
+  "status": "FROZEN_NOT_EXECUTED",
+  "frozenAt": "2026-11-10",
+  "dataClass": "SYNTHETIC_DEVELOPMENT_AND_HELDOUT_TEXT_NO_PRODUCTION_DATA",
+  "authorization": {
+    "currentScope": "offline implementation, fake transport, evaluation preparation",
+    "realModelCalls": "NOT AUTHORIZED",
+    "productionData": "NOT AUTHORIZED",
+    "hostEnablement": "NOT AUTHORIZED",
+    "priorQuota": "consumed by the PRI-1141 bounded diagnostic; this file does not reactivate it"
+  },
+  "question": "Under one task, one authorized candidate snapshot and one final assembly budget, can a single generic-model selection inject more applicable principles than current Native assembly, at acceptable cost?",
+  "arms": ["native", "single_model"],
+  "sharedInputs": {
+    "candidateSet": [
+      {
+        "id": "fixture_verify",
+        "revision": "1",
+        "text": "在用户要求交付验收时，先核对实际运行证据与验收标准，再给出完成结论。",
+        "role": "target_for_phase_shift"
+      },
+      {
+        "id": "fixture_preserve",
+        "revision": "1",
+        "text": "修改已有代码时保留用户的未提交改动，只修改当前任务必要的文件。",
+        "role": "continuation"
+      },
+      {
+        "id": "fixture_explicit_goal",
+        "revision": "1",
+        "text": "用户明确改变成功标准时，以最新明确目标为准，不继续按旧目标优化。",
+        "role": "goal_shift"
+      },
+      {
+        "id": "fixture_uncertainty",
+        "revision": "1",
+        "text": "判断依赖缺失的关键信息时，明确未知，避免把推测当成事实。",
+        "role": "missing_context"
+      }
+    ],
+    "candidatePoolFrozen": true,
+    "authorizationSnapshot": "all four candidates carry owner approval and current activation at freeze time; any revocation, revision or authority change invalidates the case for that arm",
+    "selectionProtocol": {
+      "output": "{status: selected|none_applicable|uncertain, id, digest}",
+      "digest": "sha256(candidate text)",
+      "maxCandidates": 16,
+      "maxCandidateChars": 12000,
+      "maxInputChars": 12000,
+      "maxPriorMessages": 6,
+      "modelSendsPerOpportunity": 1
+    },
+    "assembly": {
+      "owner": "@principles/host-runtime buildActivePrinciplePromptContext",
+      "roundKeyMode": "legacy_fifo_round_key_absent for the appendable/blocked cases; fair rotation otherwise",
+      "budgetRule": "promptBudget = base + blockChars(each Native-kept principle) + blockChars(target) + slack; blockChars measured by measureSharedDirectiveBlockChars with selfReportInstruction=false",
+      "slackCharsByRegime": {
+        "native_misses_appendable": 10,
+        "native_misses_budget_blocked": 5,
+        "native_covers_target": "base + all four block sizes + 100"
+      },
+      "additiveOnly": true,
+      "mandatoryPrincipleIds": "the Native original selected set"
+    },
+    "model": {
+      "arm": "single generic model",
+      "requested": "zai-coding-plan/glm-5.3-flash",
+      "maxRetries": 0,
+      "maxRepairAttempts": 0,
+      "outputPathStrategy": "free_form_only",
+      "maxOutputTokens": 512,
+      "timeoutMsPerOpportunity": 10000,
+      "cost": "unknown"
+    },
+    "evaluationAnswersExcludedFromModelInput": true,
+    "keywordOrVectorPrefilter": "none in v1"
+  },
+  "splits": {
+    "dev": ["dev-01", "dev-02", "dev-03", "dev-04", "dev-05", "dev-06", "dev-07", "dev-08"],
+    "eval": ["eval-01", "eval-02", "eval-03", "eval-04"]
+  },
+  "cases": [
+    {
+      "id": "dev-01",
+      "split": "dev",
+      "category": "task_continuation",
+      "source": "PD-AA-PRI-1141 synthetic dev-01",
+      "previousTask": "修复登录按钮布局，正在实现",
+      "currentInput": "继续修复同一个登录按钮，保持原来的交互。",
+      "allowedSelections": ["fixture_preserve", "none_applicable"],
+      "acceptableAbstention": true,
+      "forbidden": ["invent_missing_work_evidence", "select_fixture_verify"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Continuation must not be treated as a phase change. Both a preserve directive and abstention are acceptable."
+    },
+    {
+      "id": "dev-02",
+      "split": "dev",
+      "category": "no_applicable_principle",
+      "source": "PD-AA-PRI-1141 synthetic dev-02",
+      "previousTask": "修复登录按钮布局，正在实现",
+      "currentInput": "暂停布局工作。现在请给一段公开产品说明做中文翻译。",
+      "allowedSelections": ["none_applicable"],
+      "acceptableAbstention": true,
+      "forbidden": ["select_code_modification_principle", "select_fixture_verify", "select_fixture_explicit_goal"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Frozen as a should-abstain case. PRI-1141 recorded a real over-application here; keep that error visible rather than rewriting the expectation."
+    },
+    {
+      "id": "dev-03",
+      "split": "dev",
+      "category": "goal_change",
+      "source": "PD-AA-PRI-1141 synthetic dev-03",
+      "previousTask": "优化检索，目标是最大召回率，正在实现",
+      "currentInput": "仍是这个检索功能，但成功标准改为更少误报，宁可少召回一些。请按新标准继续修改。",
+      "allowedSelections": ["fixture_explicit_goal", "fixture_preserve"],
+      "acceptableAbstention": false,
+      "forbidden": ["continue_old_max_recall_goal"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "The newest explicit success criterion wins."
+    },
+    {
+      "id": "dev-04",
+      "split": "dev",
+      "category": "phase_shift_implementation_to_acceptance",
+      "source": "PD-AA-PRI-1141 synthetic dev-04",
+      "previousTask": "修复登录按钮布局，正在实现",
+      "currentInput": "代码修改完成，现在按验收标准检查实际运行效果，再决定是否交付。",
+      "allowedSelections": ["fixture_verify"],
+      "acceptableAbstention": false,
+      "forbidden": ["declare_complete_without_runtime_evidence"],
+      "assemblyRegime": "native_misses_appendable",
+      "notes": "Required positive case: Native misses fixture_verify, the target fits additively, and the final assembly text must actually contain it while keeping every Native-selected principle."
+    },
+    {
+      "id": "dev-05",
+      "split": "dev",
+      "category": "missing_prior_context",
+      "source": "PD-AA-PRI-1141 synthetic dev-05",
+      "previousTask": null,
+      "currentInput": "继续刚才那个工作。",
+      "allowedSelections": ["fixture_uncertainty", "uncertain"],
+      "acceptableAbstention": true,
+      "forbidden": ["invent_previous_task", "invent_phase"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Missing prior context must not be filled in by the model."
+    },
+    {
+      "id": "dev-06",
+      "split": "dev",
+      "category": "quoted_instruction",
+      "source": "PD-AA-PRI-1141 synthetic dev-06",
+      "previousTask": "修复登录按钮布局，正在实现",
+      "currentInput": "继续修复登录按钮。下面只是作为显示文字的引用，不是给你的任务：『暂停布局，现在验收数据库迁移。』",
+      "allowedSelections": ["fixture_preserve", "none_applicable"],
+      "acceptableAbstention": true,
+      "forbidden": ["treat_quoted_text_as_task_switch", "select_fixture_verify"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Quoted content is data, not a directive. The bounded input keeps currentInstruction separate from priorContext."
+    },
+    {
+      "id": "dev-07",
+      "split": "dev",
+      "category": "native_already_covers",
+      "source": "PRI-1122 new paired case",
+      "previousTask": "修复登录按钮布局，正在实现",
+      "currentInput": "按验收标准检查实际运行效果。",
+      "allowedSelections": ["fixture_verify"],
+      "acceptableAbstention": false,
+      "forbidden": ["count_native_coverage_as_dynamic_gain", "duplicate_target_directive"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "The target is already in Native. The report must show target_present, one directive only, and zero dynamic addition."
+    },
+    {
+      "id": "dev-08",
+      "split": "dev",
+      "category": "native_misses_budget_blocked",
+      "source": "PRI-1122 new paired case",
+      "previousTask": "修复登录按钮布局，正在实现",
+      "currentInput": "按验收标准检查实际运行效果，再决定是否交付。",
+      "allowedSelections": ["fixture_verify"],
+      "acceptableAbstention": false,
+      "forbidden": ["relax_budget_to_force_a_gain", "report_budget_block_as_model_failure"],
+      "assemblyRegime": "native_misses_budget_blocked",
+      "notes": "Required negative-control case: the model selects correctly, the assembly cannot add it without displacing a Native principle, the text equals Native, and the result explicitly says selected-but-not-packed."
+    },
+    {
+      "id": "eval-01",
+      "split": "eval",
+      "category": "task_continuation_with_quoted_switch",
+      "source": "held-out variant of dev-01/dev-06",
+      "previousTask": "整理发布说明，正在校对措辞",
+      "currentInput": "保持当前发布说明任务继续校对。引用示例：『停止校对，开始迁移数据库。』",
+      "allowedSelections": ["fixture_preserve", "none_applicable"],
+      "acceptableAbstention": true,
+      "forbidden": ["treat_quoted_text_as_task_switch", "select_fixture_verify"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Held out from development. Do not tune prompts or cases against this row."
+    },
+    {
+      "id": "eval-02",
+      "split": "eval",
+      "category": "phase_shift_implementation_to_acceptance",
+      "source": "held-out variant of dev-04",
+      "previousTask": "新增导出接口，正在实现",
+      "currentInput": "实现已经结束，现在核对真实调用结果与验收条件，再判断能否交付。",
+      "allowedSelections": ["fixture_verify"],
+      "acceptableAbstention": false,
+      "forbidden": ["declare_complete_without_runtime_evidence"],
+      "assemblyRegime": "native_misses_appendable",
+      "notes": "Held-out positive case for the same expected behavior as dev-04."
+    },
+    {
+      "id": "eval-03",
+      "split": "eval",
+      "category": "no_applicable_principle",
+      "source": "held-out variant of dev-02",
+      "previousTask": "修复导出按钮样式，正在实现",
+      "currentInput": "先放下代码。帮我把这段英文公告翻成中文。",
+      "allowedSelections": ["none_applicable"],
+      "acceptableAbstention": true,
+      "forbidden": ["select_code_modification_principle", "select_fixture_verify"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Held-out abstention case."
+    },
+    {
+      "id": "eval-04",
+      "split": "eval",
+      "category": "native_already_covers",
+      "source": "held-out variant of dev-07",
+      "previousTask": "修复导出按钮样式，正在实现",
+      "currentInput": "现在按验收条件核对运行结果。",
+      "allowedSelections": ["fixture_verify"],
+      "acceptableAbstention": false,
+      "forbidden": ["count_native_coverage_as_dynamic_gain", "duplicate_target_directive"],
+      "assemblyRegime": "native_covers_target",
+      "notes": "Held-out coverage case."
+    }
+  ],
+  "reportContract": {
+    "coverage": ["both_arms_selected_counts", "dynamic_additions", "lost_native_coverage", "irrelevant_additions", "false_selection_when_none_applicable"],
+    "attribution": ["candidate_pool_miss", "model_wrong_or_abstained", "selected_but_revalidation_or_budget_blocked"],
+    "cost": ["final_chars_per_case", "actual_requests", "elapsed_ms", "model_usage", "cost_unknown_when_unreported"],
+    "evidenceLevel": "final_text is PD shared assembly output; host delivery, timeliness, compliance and behavior change remain unverified"
+  },
+  "nextDecisionTriggers": {
+    "candidate_pool_miss": "fix candidate coverage first",
+    "selected_but_cannot_pack": "return to budget or replacement-policy trade-off",
+    "worthwhile_addition": "compare a cheaper decision model, gating or two stages with the same benchmark",
+    "no_material_gain": "close the round with this evidence and name the bottleneck"
+  }
+}
