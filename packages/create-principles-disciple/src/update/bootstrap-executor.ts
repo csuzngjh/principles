@@ -16,8 +16,6 @@
  * never writes installation files directly.
  */
 import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   parseBootstrapRequest,
@@ -26,6 +24,7 @@ import {
   type BootstrapResponse,
 } from './bootstrap-protocol.js';
 import { createReleaseManagerAuthority } from './release-manager-authority.js';
+import { resolvePdHome } from '@principles/install-layout';
 
 export interface BootstrapExecutorResult {
   readonly response: BootstrapResponse;
@@ -51,27 +50,41 @@ export async function runBootstrapExecutor(options: BootstrapExecutorOptions): P
     if (request.op === 'ping') {
       response = { ok: true, result: { pong: true } };
     } else {
-      const authority = createReleaseManagerAuthority({
-        pdHome: path.join(os.homedir(), '.pd'),
-        // The executor resolves the metadata source exactly like the Console:
-        // process env first, then the durable install.json tier. No guessing.
-        metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
-      });
-      // Only apply passes the authority readiness gate — read ops (inspect /
-      // check) must answer on ANY installation so the repair flow can see the
-      // actual state; check carries its own policy gating.
-      if (request.op === 'apply' && !authority.kinds['apply-full'].ready) {
-        const readiness = authority.kinds['apply-full'];
+      // PRI-872: the executor runs detached from the Console that spawned it,
+      // so it must resolve the SAME home through the same authority. Without
+      // this an experiment Console's update transaction would target the
+      // production install — the exact dual-open failure this ticket removes.
+      const pdHome = resolvePdHome();
+      if (!pdHome.ok) {
         response = {
           ok: false,
-          reason: readiness.reasons[0] ?? 'install_state_corrupt',
-          message: 'The installation is not ready for a signed release update.',
-          nextAction: 'Run the official installer (npx create-principles-disciple) to repair the installation, then retry.',
+          reason: pdHome.reason,
+          message: pdHome.message,
+          nextAction: pdHome.nextAction,
         };
       } else {
-        // handleBootstrapRequest never throws: manager failures come back as
-        // structured protocol refusals.
-        response = await handleBootstrapRequest(request, authority.manager);
+        const authority = createReleaseManagerAuthority({
+          pdHome: pdHome.pdHome,
+          // The executor resolves the metadata source exactly like the Console:
+          // process env first, then the durable install.json tier. No guessing.
+          metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
+        });
+        // Only apply passes the authority readiness gate — read ops (inspect /
+        // check) must answer on ANY installation so the repair flow can see the
+        // actual state; check carries its own policy gating.
+        if (request.op === 'apply' && !authority.kinds['apply-full'].ready) {
+          const readiness = authority.kinds['apply-full'];
+          response = {
+            ok: false,
+            reason: readiness.reasons[0] ?? 'install_state_corrupt',
+            message: 'The installation is not ready for a signed release update.',
+            nextAction: 'Run the official installer (npx create-principles-disciple) to repair the installation, then retry.',
+          };
+        } else {
+          // handleBootstrapRequest never throws: manager failures come back as
+          // structured protocol refusals.
+          response = await handleBootstrapRequest(request, authority.manager);
+        }
       }
     }
   } catch (error) {

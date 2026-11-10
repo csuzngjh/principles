@@ -38,6 +38,7 @@
     "check:workspace-artifacts": "node scripts/build/check-workspace-artifacts.mjs",
     "check-satellite-bundle-deps": "npm run build:bundle --workspace=principles-disciple",
     "doctor": "node scripts/doctor.mjs",
+    "dev:console:experiment": "node scripts/dev/console-experiment.mjs",
     "dev:worktree": "node scripts/dev/create-task-worktree.mjs",
     "dev:worktree:check": "node scripts/dev/check-dev-worktree.mjs",
     "dev:worktree:bootstrap": "node scripts/dev/bootstrap-worktree.mjs",
