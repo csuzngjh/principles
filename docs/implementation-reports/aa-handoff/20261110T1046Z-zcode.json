@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261110T1046Z-zcode",
+  "previousCheckpoint": "20261110T0710Z-zcode",
+  "generatedAt": "2026-11-10T10:46:28Z",
+  "agent": "zcode",
+  "task": "PRI-1119 A线：#2476 已批准实现范围——OpenClaw embedded 身份接线本地补丁 + 定向测试 + 门禁诊断",
+  "overallStatus": "PATCH_LOCAL_READY__FULL_GATE_UNRESOLVED",
+  "openclawPatch": {
+    "worktree": "D:/Code/_worktrees/openclaw/pri1119-identity-wiring",
+    "branch": "ai/pri1119-identity-wiring (NOT pushed)",
+    "base": "baccc7e152916c7f4a48596b5cb544c12264ac54",
+    "commit": "10a949cd5a58a0ad0e50904ddad0bbdafeef01e2",
+    "files": [
+      "src/agents/embedded-agent-runner/run/attempt-prompt-build.ts +9",
+      "src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts +25",
+      "src/agents/embedded-agent-runner/run/attempt.prompt-helpers.test.ts +81",
+      "src/agents/embedded-agent-runner/run/attempt-prompt-build.decision.test.ts +96",
+      "src/agents/embedded-agent-runner/run.overflow-compaction.loop.test.ts +55"
+    ],
+    "total": "+266/-0"
+  },
+  "tests": {
+    "helpers": "16/16 (node scripts/run-vitest.mjs run src/agents/embedded-agent-runner/run/attempt.prompt-helpers.test.ts)",
+    "decision": "18/18 (node scripts/run-vitest.mjs run src/agents/embedded-agent-runner/run/attempt-prompt-build.decision.test.ts)",
+    "runLoop": "14/14 (node scripts/run-vitest.mjs run src/agents/embedded-agent-runner/run.overflow-compaction.loop.test.ts)",
+    "oldImplFails": "reverting the two production files → wiring arm fails 'expected undefined to be Round A body'; restored → passes",
+    "note": "attempt-prompt-phase.test.ts mocks attempt-prompt-build.js entirely, so wiring regression lives in the decision test (real assembly)"
+  },
+  "gate": {
+    "fullCheckChanged": "last complete run exit 1; sole red = dead export scan; NOT rerun after fixes (scan cannot finish in bounded time on this box)",
+    "skipDeadcode": "OPENCLAW_CHECK_CHANGED_SKIP_DEADCODE=1 pnpm check:changed → exit 0 on final state (log .tmp/check-changed-skip-deadcode-4.log)",
+    "deadcodeDiagnosis": {
+      "statementSplit": "three separate records: full-tree findings / production timeout / partial gate",
+      "scriptScan": "passed, 0 entries",
+      "fullTreeScan": "10 unused exports, NO direct overlap with the patch: all in files untouched by it; 0 of the 10 symbols appear in the patch files' baseline versions; diff is pure additions (no removed export/import)",
+      "productionScan": "timed out after 600s and was terminated — ATTRIBUTION UNDETERMINED: the scan never completed, so its (potential) findings cannot be ruled in or out for this patch; direct source of 'failed:1 / 600.21s'",
+      "runner": "hung in terminating after the timeout; stopped at the 5-minute cutoff; leftover knip processes 0",
+      "skipDeadcode": "partial gate passes (exit 0 on final state)",
+      "baselineContrastRun": "not performed — full-tree attribution settled by zero symbol overlap + pure-addition diff; the production scan produced no output to compare",
+      "fullLog": ".tmp/deadcode-with-patch.log"
+    }
+  },
+  "recoveryPathCheck": {
+    "question": "can a rebuilt recorder be provably attributed to the current turn on existing recovery paths?",
+    "answer": "no old-turn recorder reuse mechanism exists — restart-resume injects a NEW resume turn (session-restart-resume.ts:75-77 fixed text, normal recording path, new sourceId → new key); in-run retry uses the SAME recorder instance (dispatch-layer verified); reply-input-admission.ts:84 treats already-persisted recorders idempotently; all 15 non-test files touching restartRecovery are session-slot/lifecycle orchestration, none rebuild an old turn's recorder",
+    "verdict": "NO COMMIT BLOCKER — remaining gap is a missing fixture, filed as an upstream review question (should a regression test pin recovery-path identity semantics)"
+  },
+  "retryRebuildEvidence": {
+    "inRunRetry": "dispatch-layer verified — real prepareAndDispatchEmbeddedRunAttempt hands the same recorder instance to every attempt (toBe); later run gets its own; the run-loop per-attempt '{...params}' spread (run-loop.ts:305-311) is mirrored in the test, the real run-loop function is not driven",
+    "attemptToEvent": "assembly-layer verified — real prepareEmbeddedAttemptPromptAssembly: positive, two consecutive turns each own pairing, excludeFromContext both absent, no recorder none",
+    "helper": "helper-level only",
+    "restartRecovery": "NOT VERIFIED — no reusable fixture within budget; verified call sites: agent-runner-execute.ts:129,231 (admitUserTurn + claim wrapper), chat-user-turn-recorder.ts:144 (idempotencyKey: sourceId); gap: no test drives a recovery re-admission asserting the rebuilt recorder keeps the original idempotencyKey",
+    "crossTurnLeakage": "none observed"
+  },
+  "pdSide": {
+    "commit": "de94950a6 (on #2476 branch ai/PRI-1119-host-identity-patch-card)",
+    "testFile": "packages/openclaw-plugin/tests/hooks/runtime-prompt-activation.test.ts +3 arms (cron/heartbeat/subagent with identity + delivery marker)",
+    "assertions": "resolveAdaptivePriorityForHook returns undefined; no adaptive delivery journal; Native rotation may still select the same authorized activation (outside this gate)",
+    "suite": "82/82",
+    "guardLocation": "packages/openclaw-plugin/src/index.ts:266 (trigger gate before identity/mapping reads)",
+    "writer": "this session (lease zcode:PRI-1119-host-identity-patch-card)"
+  },
+  "budget": {"hostStarts": 0, "modelCalls": 0, "productionWrites": 0, "upstreamPushes": 0, "installs": 0},
+  "untouched": ["B线 v5 封存", "G1/C04/G2 与请求正文证据状态", "LATEST.json 与历史检查点", "生产配置（仍无 adaptiveActivation）"]
+}

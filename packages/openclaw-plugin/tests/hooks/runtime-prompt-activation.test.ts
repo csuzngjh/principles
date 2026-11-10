@@ -1052,6 +1052,31 @@ describe('PRI-1140 principle-identity mapping — real production chain', () => 
     expect(ctx.api?.logger?.warn).toHaveBeenCalledWith(expect.stringContaining('principle_mapping_has_no_admission_identity'));
   });
 
+  it.each(['cron', 'heartbeat', 'subagent'] as const)(
+    'resolves no adaptive priority and records no adaptive delivery for non-user trigger %s even with identity and delivery marker',
+    async (trigger) => {
+      insertValidatedPrincipleArtifact({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY', text: 'NEW-DELIVERY-SELF-CHECK' });
+      await insertPromptActivation({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY' });
+      await approve('art-DELIVERY');
+      const { resolveAdaptivePriorityForHook } = await import('../../src/index.js');
+      const ctx = configuredPrinciple('DELIVERY');
+      (ctx as { trigger?: string }).trigger = trigger;
+      // A non-chat turn may legitimately carry identity AND the delivery marker;
+      // the trigger gate must still refuse adaptive resolution (identity is
+      // relevance, not authorization). The NATIVE rotation may still pack the
+      // same authorized activation — that is ordinary PD behavior, not this gate.
+      const evt = { ...sentinelEvent(), trigger } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+      const priority = await resolveAdaptivePriorityForHook(evt, ctx, ctx.api!);
+      expect(priority).toBeUndefined();
+      const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+      const { EventLogService } = await import('../../src/core/event-log.js');
+      const journal = (EventLogService.get as ReturnType<typeof vi.fn>)().recordAdaptiveDelivery as ReturnType<typeof vi.fn>;
+      journal.mockClear();
+      await handleBeforePromptBuild(evt, ctx, await buildSharedPrompt(ctx));
+      expect(journal).not.toHaveBeenCalled();
+    },
+  );
+
   it('a resolution remembered for one invocation cannot leak into a duplicate callback', async () => {
     insertValidatedPrincipleArtifact({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY', text: 'NEW-DELIVERY-SELF-CHECK' });
     await insertPromptActivation({ artifactId: 'art-DELIVERY', principleId: 'DELIVERY' });
