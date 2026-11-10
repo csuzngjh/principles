@@ -14,7 +14,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { codexDir, compareVersionDirs, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, readInstalledRuntimeVersions, requireFlagValue, resolvePluginSourceSnapshot } = require('./pd-locate.cjs');
+const { codexDir, compareVersionDirs, findPinsBehindCanonical, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, readCanonicalRuntimeVersions, readCheckoutBehindOrigin, readInstalledRuntimeVersions, requireFlagValue, resolvePluginSourceSnapshot } = require('./pd-locate.cjs');
 
 /** Case-insensitive on Windows, where the same directory can resolve with a
  * different drive-letter case than the one setup recorded. */
@@ -206,11 +206,39 @@ function main() {
     } else if (drift < 0) {
       push('snapshot', 'degraded',
         `installed plugin ${snapshot.installedVersion} is older than its marketplace source ${snapshot.sourceVersion} (${snapshot.source})`,
-        `Reinstall from the source: codex plugin remove principles-disciple@${snapshot.marketplace} && codex plugin add principles-disciple@${snapshot.marketplace}`);
+        `Re-run the installer: it refreshes this payload in place (codex plugin add principles-disciple@${snapshot.marketplace}, no uninstall) and then aligns the pinned runtime.`);
     } else if (drift > 0) {
-      push('snapshot', 'ok', `plugin ${snapshot.installedVersion} is newer than its marketplace source ${snapshot.sourceVersion} (source checkout may be behind)`);
+      push('snapshot', 'degraded',
+        `plugin ${snapshot.installedVersion} is newer than its marketplace source ${snapshot.sourceVersion} — the source checkout at ${snapshot.source} is behind the installed plugin`,
+        `Update the marketplace source (git pull in ${snapshot.source}) and re-run the installer so every installed host tracks the same release.`);
     } else {
-      push('snapshot', 'ok', `plugin ${snapshot.installedVersion} matches marketplace source ${snapshot.source}`);
+      // Cache == source says NOTHING about the source being current: a stale
+      // local checkout satisfied this check while the PD release installed on
+      // the machine had already moved on (false comfort, 2026-11-11). Compare
+      // the source's pins against the canonical runtime instead of stopping at
+      // "matches marketplace source".
+      let sourcePins = null;
+      try { sourcePins = JSON.parse(fs.readFileSync(path.join(snapshot.pluginDir, 'runtime-version.json'), 'utf8')); } catch { /* reported below as unverified */ }
+      const behind = findPinsBehindCanonical(sourcePins, readCanonicalRuntimeVersions());
+      if (behind.length > 0) {
+        const pinsText = behind.map((row) => `${row.key}@${row.pinned} < ${row.release}`).join(', ');
+        push('snapshot', 'degraded',
+          `plugin ${snapshot.installedVersion} matches its marketplace source, but that source is behind the installed PD release (${pinsText})`,
+          `Update the marketplace source checkout (git pull in ${snapshot.source}) and re-run the installer — it refreshes the plugin payload and pinned runtime in place on every installed host, no uninstall needed.`);
+      } else {
+        // Cache == source == this machine's release still does not prove the
+        // local source CHECKOUT is current: it can trail its own origin/main
+        // (2026-11-11 gap — "matches the marketplace source" was false
+        // comfort). Local git state only, no network/fetch.
+        const checkout = readCheckoutBehindOrigin(snapshot.source);
+        if (checkout.comparable && checkout.behind > 0) {
+          push('snapshot', 'degraded',
+            `plugin ${snapshot.installedVersion} matches its marketplace source, but that local checkout is ${checkout.behind} commit(s) behind origin/main (${snapshot.source})`,
+            `Update the marketplace source checkout (git -C "${snapshot.source}" pull --ff-only), then re-run the installer — it refreshes the plugin payload and pinned runtime in place on every installed host, no uninstall needed.`);
+        } else {
+          push('snapshot', 'ok', `plugin ${snapshot.installedVersion} matches marketplace source ${snapshot.source}`);
+        }
+      }
     }
   } else {
     push('snapshot', 'ok', 'installed snapshot freshness not verifiable (plugin_root_not_located)');
@@ -244,7 +272,7 @@ function main() {
     } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime || core !== pins.core
       || (typeof pins.mcpServer === 'string' && mcpServer !== pins.mcpServer)) {
       const pinnedSuffix = typeof pins.mcpServer === 'string' ? `+mcp-server@${pins.mcpServer}` : '';
-      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime}+core@${core}+mcp-server@${mcpServer} != pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}${pinnedSuffix}`, 'Re-run $pd-control setup to realign the runtime with the pinned versions.');
+      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime}+core@${core}+mcp-server@${mcpServer} != pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}${pinnedSuffix}`, 'Re-run the installer — it installs the pinned runtime automatically; or run $pd-control setup to realign the runtime with the pinned versions.');
     } else {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} mcp-server@${mcpServer} (pinned match)`);
     }
