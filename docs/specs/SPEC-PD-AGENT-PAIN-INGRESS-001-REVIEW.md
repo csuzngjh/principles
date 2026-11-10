@@ -1,11 +1,11 @@
 # SPEC-PD-AGENT-PAIN-INGRESS-001 技术审查报告
 
-- **被审查对象**：`docs/specs/SPEC-PD-AGENT-PAIN-INGRESS-001.md` **V0.8**（含 `v0.8 post-review corrections`）
-- **审查目标产物**：V0.8 定点修订 + 本报告 §8 的七项复核
+- **被审查对象**：`docs/specs/SPEC-PD-AGENT-PAIN-INGRESS-001.md` **V0.8**（含 `v0.8 post-review corrections` + `v0.8 收口修订`）
+- **审查目标产物**：V0.8 定点修订 + P0-1 / P0-2 / P1 / 来源字段最终收口 + 本报告 §8 的代码复核
 - **审查日期**：2026-11-10
-- **审查性质**：只读代码核验 + 文档评审 + 锚点式定义重审 + post-review 七项代码复核
+- **审查性质**：只读代码核验 + 文档评审 + 锚点式定义重审 + post-review 代码复核 + 最终收口核对
 - **未做**：未修改产品源码 / schema / 依赖 / 三宿主配置；未重启 Gateway；本批修订未改代码，只改三份文档
-- **结论**：**PARTIALLY_VERIFIED**（理由见 §6；post-review 七项全部成立，见 §8）
+- **结论**：文档就绪 `READY_FOR_IMPLEMENTATION_REVIEW`；开发实施**允许启动**；生产交付**未授权**（OG-4）。整体验收仍为 **PARTIALLY_VERIFIED**（理由见 §3/§6）
 
 ---
 
@@ -211,15 +211,23 @@
 
 ---
 
-## 3. 仍然阻断"整体 READY"的事项
+## 3. 三种状态必须分开看
+
+| 状态 | 当前判定 | 含义 |
+|---|---|---|
+| **文档就绪** | `READY_FOR_IMPLEMENTATION_REVIEW` | SPEC V0.8 / 本报告 / 技术方案三者自洽，可直接照文档实现 |
+| **开发实施** | **允许启动** | 不受 OG-4 未授权影响：可在开发分支实现 Core Capability、MCP Handler、准入与持久化逻辑，编写并运行测试，在隔离非生产环境做端到端验证 |
+| **生产交付** | **未授权，不得交付** | OG-4 未获授权前不得在生产 MCP Server 注册 `pd_submit_pain`、不得分发到生产宿主、不得正式发布或部署，也不得用本地开关/宿主 matcher 绕过 |
+
+**仍未完成、因此整体不能称完全验收的事项**：
 
 | # | 事项 | 为什么不能在本轮关闭 |
 |---|---|---|
-| 1 | 三宿主真实落库（T18/T21） | 需要重新安装运行时并做活体调用 |
+| 1 | 三宿主真实落库（T18/T21） | 需要实现 + 重新安装运行时并做活体调用 |
 | 2 | 授权行为真实验收（T05/T06/T23） | 需要 Instructions 落地 + Harness 行为证据 |
 | 3 | L3 自动执行（T36–T38） | 需要 flag、service、能力三条件在真实环境验证 |
 | 4 | 回执预算上限 | 需在实现时实测 MCP 响应体大小，本文档不写死未经证实的数值 |
-| 5 | OG-4 系统层授权（生产交付 Gate） | 由 Owner 决策；未授权时生产环境不注册写类 MCP Tool（详见 §8.3） |
+| 5 | OG-4 系统层授权 | 由 Owner 决策；这只阻断**生产交付**，不阻断开发实施（详见 §8.3） |
 
 **WorkBuddy MCP 会话身份不再阻断 V1**：V0.7 明确三宿主统一 Unbound，身份缺失不是缺陷。
 
@@ -267,12 +275,12 @@
 | **E3** | Node `spawn` 的异步错误语义（语言层，未做端到端复现） |
 | **E4** | WorkBuddy MCP 会话身份（**V0.7 不再作为阻断项**） |
 
-**结论：PARTIALLY_VERIFIED。**
+**结论：PARTIALLY_VERIFIED（整体验收状态保留）。**
 
-- 产品定义与合同层：V0.8 已把 13 个关注点与 post-review 七项全部收敛，且每条都有代码事实支撑（§8）；
-- 仍不能称 `READY_FOR_IMPLEMENTATION_REVIEW`（整体）的原因有两类：**提交链路的三宿主真实落库 + 授权行为 + L3 自动执行尚未在真实宿主上取证**；以及 **OG-4 系统层授权尚未由 Owner 给出**。
-
-文档范围结论：**READY_FOR_IMPLEMENTATION_REVIEW**（SPEC V0.8 / 本报告 / 技术方案三者自洽）；但**实现范围**受 §8.3 的外部前提约束——OG-4 未授权前写类 Tool 不得进入生产。
+- **文档就绪**：V0.8 已把 13 个关注点与 post-review 七项收敛，且每条都有代码事实支撑（§8），可判 `READY_FOR_IMPLEMENTATION_REVIEW`；
+- **开发实施**：**允许启动**，不受 OG-4 未授权影响（§3）；三份文档已足以指导实现；
+- **生产交付**：仍不能称完成——**三宿主真实落库 + 授权行为 + L3 自动执行尚未在真实宿主上取证**，且 **OG-4 系统层授权尚未由 Owner 给出**。这两类原因只影响"生产交付"，不影响"文档就绪"与"开发实施"。
+- **不得虚构已完成真实宿主验证**：本报告未声称任何活体验收已通过。
 
 ---
 
@@ -302,8 +310,8 @@
 | P1-2 | archived/deprecated 可作有效锚点 | **REPRODUCED** | 五要件 + 逐状态判定；archived/deprecated/candidate 不作当前违规依据 | §1.4.1、§12 T42 | §5.6、§5.6.1、§10 X03/T42 | T42 十例 | **CLOSED（文档）** |
 | P1-3 | 超时后无已知身份可回查 | **REPRODUCED** | Handler 在提交与 deadline 之前预生成 `painId`，`taskId` 确定性派生；**capability 只使用、不重新生成/覆盖**；超时用已知 `taskId` 经现有 RuntimeStateManager / TaskStore 有界回查，**不自动重提交** | §7.4、§8、§12 T41 | §3.2、§5.5、§5.7、§9、§10 T14b/T41 | T41 十例 | **CLOSED（文档）** |
 | P1-4 | 默认 `score=80` 传播路径不完整 | **REPRODUCED** | 四处统一 `DEFAULT_PAIN_SCORE = 40`；真实读回三处存储；`--score` 无鉴权须写明 | §6.1、§6.2、§6.4、§12 T07 | §6.4、§6.5、§10 A11/A16/T07 | T07 + A11 | **CLOSED（文档）** |
-| P1-5 | 写类 MCP 缺 OG-4 治理合同 | **REPRODUCED** | OG-4 是**生产交付 Gate**，不是新增系统建设任务：未授权 → 生产不注册写类 Tool；授权后才注册并 `readOnlyHint:false`；不得自行宣称已获授权 | §7.7、§12 T01/T43 | §5.1.1、§11 第 0 步、§16.4 | T01 前置 + T43 | **OPEN（待 Owner 授权，非文档待定项）** |
-| P2-1 | Agent Observation 与 Owner Pain 来源混同 | **REPRODUCED** | 新增 `mcp_agent_assisted` channel + `agent_reported_owner_approved` provenance；不写 `owner_statement` | §7.5、§12 T44 | §6.6、§7.2、§10 T44 | T44 七例 | **CLOSED（文档，扩展待实现）** |
+| P1-5 | 写类 MCP 缺 OG-4 治理合同 | **REPRODUCED** | OG-4 是**生产交付 Gate**：未授权 → 生产不注册写类 Tool；**开发实施照常允许**（实现、测试、非生产端到端验证）；授权后才注册并 `readOnlyHint:false`；不得自行宣称已获授权 | §7.7、§12 T01/T43 | §5.1.1、§11 第 0 步、§16.4 | T01 前置 + T43 | **OPEN（生产交付未授权；不阻断开发）** |
+| P2-1 | Agent Observation 与 Owner Pain 来源混同 | **REPRODUCED** | 新增 `mcp_agent_assisted` channel + `agent_reported_owner_approved` provenance；`evaluatePainIngress()` 需在该 channel 上走 MCP 专用分支（先于通用 Unbound 分支）；不写 `owner_statement` | §7.5、§12 T44 | §6.6.3–§6.6.5、§7.2、§10 T44 | T44（5 项断言） | **CLOSED（文档）；代码扩展属下一阶段** |
 | P2-2 | `recordObservability:false` 的真实影响 | **REPRODUCED（原结论被推翻）** | MCP 不再固定 false；保留默认 true；不新增表 | §7.6、§12 T45 | §6.7、§10 T45 | T45 A/B | **CLOSED（文档）** |
 
 ### 8.2 逐项代码事实
@@ -342,14 +350,15 @@
 - `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 要求写类 MCP 工具治理走 OG-4；`:399` "设计位（未授权）"，`:436` "未启动"。
 - 仓库无授权记录；当前 MCP 只有只读 `pd_recall_principle_pains`（`server.ts:147`，`readOnlyHint:true`）；`pd_submit_pain` 不存在。
 - PreToolUse matcher 只匹配 `Bash|apply_patch`；tool-semantics 只登记宿主原生工具。
-- 结论：OG-4 是**生产交付 Gate**，不是新增系统建设任务：未授权时生产环境不注册写类 MCP Tool（`pd_submit_pain` 不进 `tools/list`）；授权后才注册，并以 `readOnlyHint:false` 声明；不得自行宣布已授权，也不得通过宿主配置绕过。本轮不实施 OG-4、不新增审批系统。
+- 结论：OG-4 是**生产交付 Gate**，不是新增系统建设任务，也不是开发启动 Gate：未授权时**允许**实现 Core Capability / MCP Handler / 准入与持久化逻辑、编写并运行测试、在隔离非生产环境做端到端验证；**禁止**生产注册 `pd_submit_pain`、生产分发、正式发布，以及用本地开关或宿主 matcher 绕过。授权后才注册并以 `readOnlyHint:false` 声明，完成既有 matcher 与 tool-semantics 接入。本轮不实施 OG-4、不新增审批系统。
 
 **P2-1 来源归属**
 
 - `PainProvenance` 是三值字符串枚举（`admission-gate.ts:4-7`）。
 - `parseOrigin()` 白名单 6 个 `owner_manual` channel + `automatic_hook`，**不含** `mcp_agent_assisted`（`pain-ingress-payload.ts:147-161`）。
 - 现有三值无法准确表达"Agent 观察 + Owner 授权"。
-- 结论：新增 channel `mcp_agent_assisted`（unbound）+ provenance `agent_reported_owner_approved`，含义固定为"事实由 Agent 观察、提交经 Owner 授权"；**Owner 授权 ≠ Owner 是事实报告者**，不得写成 `owner_statement`。完整影响面见 TD §6.6.4；不建第二套模型，**不保留待选方案**。
+- `evaluatePainIngress()`：`owner_manual` + `unbound` 会落入通用外部 CLI 分支（`pain-ingress.ts:231-240`），返回 `submit` 但附"`Re-run with --session <id>`"提示；这对 MCP Agent 报告是错误引导。
+- 结论：新增 channel `mcp_agent_assisted`（unbound）+ provenance `agent_reported_owner_approved`，含义固定为"事实由 Agent 观察、提交经 Owner 授权"；**Owner 授权 ≠ Owner 是事实报告者**，不得写成 `owner_statement`。`evaluatePainIngress()` 必须在通用 Unbound 分支**之前**识别该 channel，走统一提交路径、不返回 `--session` 提示、不伪造 Host Session / Trajectory Evidence。完整影响面与五项测试断言见 TD §6.6.4/§6.6.5；不建第二套模型，**不保留待选方案**。
 
 **P2-2 Observability**
 
@@ -360,15 +369,28 @@
 
 ### 8.3 明确未闭合 / 不计为已修复
 
-| 项 | 状态 | 说明 |
-|---|---|---|
-| OG-4 系统层授权 | **OPEN（外部前提，非文档待定项）** | 生产交付 Gate：未授权时生产环境不注册写类 MCP Tool，实现只能停在测试替身。这是 Owner 决策，不是文档能关闭的事项 |
-| 真实宿主落库 / 授权行为 / L3 自动执行 | **NOT RUN** | 需要实现 + 重新安装后在真实宿主取证，本轮未执行 |
-| 四处默认值的代码修改 | **NOT RUN** | 本轮只改文档；代码仍是 80 |
+按三种状态记，不混为一谈：
+
+| 状态 | 项 | 判定 | 说明 |
+|---|---|---|---|
+| 文档就绪 | 三份文档自洽、P0-1/P0-2/P1 已落入文档 | **CLOSED（文档）** | 可判 `READY_FOR_IMPLEMENTATION_REVIEW` |
+| 开发实施 | Core Capability / MCP Handler / 准入与持久化 / 测试 / 非生产端到端验证 | **允许启动，不受 OG-4 影响** | OG-4 未授权不等于开发被阻断 |
+| 生产交付 | OG-4 系统层授权 | **OPEN（生产交付未授权）** | 未授权时不得在生产注册 `pd_submit_pain`、不得分发、不得发布；这是 Owner 决策，不是文档待定项 |
+| 生产交付 | 三宿主真实落库 / 授权行为 / L3 自动执行 | **NOT RUN** | 需要实现 + 重新安装后在真实宿主取证；本轮**未**做任何活体验证 |
+| 代码 | 四处默认值（`80` → `40`）、provenance 扩展、`evaluatePainIngress` MCP 分支 | **NOT RUN（下一阶段）** | 本轮只改文档；代码仍为现值 |
 
 > 设计层面**不再存在待选项**：provenance 已确定为 `agent_reported_owner_approved`（配合 `mcp_agent_assisted`），不保留"复用旧值"的备选。
 
-### 8.4 本轮四项收口记录
+### 8.4 本轮四项修订记录（P0-1 / P0-2 / P1 / 来源字段）
+
+| # | 问题 | 事实 | 修复决定 | 落点 | 状态 |
+|---|---|---|---|---|---|
+| C-5 | Tool Description 要求 Agent 解释"为什么未来任务会因此改变判断"，把长期价值变成提交前置 | TD §5.2 原文为第 2 步单点要求 | 第 2 步改为 ①锚点及出处 ②具体行为 ③背离 ④必要时补充影响；并写明四项"不要求"，无法证明不得成为拒绝理由；Pain 成立只看三要素 | TD §5.2；SPEC §1.3/§5.1/§5.3（已一致） | **CLOSED（文档）** |
+| C-6 | OG-4 被写成"未授权只能做文档与测试替身"，误伤开发启动 | TD §5.1.1、§11 第 0 步原措辞过度 | 拆成"未授权允许 / 未授权禁止"两栏；只禁生产注册、生产分发、正式发布与绕过；开发、实现、测试、非生产端到端验证全部允许 | TD §5.1.1、§11.0、§16.4；SPEC §7.7 | **CLOSED（文档）** |
+| C-7 | `evaluatePainIngress()` 会把 MCP Unbound Owner Manual 报告送进通用 CLI 分支并提示 `--session` 重提 | `pain-ingress.ts:231-240` 的通用分支 | 在该分支之前识别 `mcp_agent_assisted`；走统一 `submit`；不返回 `--session` 提示；不伪造 Host Session / Evidence / `owner_statement`；provenance 走既有派生 | TD §6.6.4（新增行）、§6.6.5（新小节）、T44（5 项断言）；REVIEW §8.2 | **CLOSED（文档）** |
+| C-8 | SPEC §2 架构图把 Channel 写成 Origin 类型（`origin=mcp_agent_assisted`） | SPEC 与 TD 的 Origin 结构不一致 | 统一为 `origin.kind=owner_manual` + `origin.channel=mcp_agent_assisted`；全篇不再把 Channel 当 Origin 类型 | SPEC §2 | **CLOSED（文档）** |
+
+### 8.5 上一轮四项收口记录（保留）
 
 | # | 原问题 | 代码/文档事实 | 修复决定 | 落点 | 测试 | 状态 |
 |---|---|---|---|---|---|---|
@@ -376,6 +398,23 @@
 | C-2 | `painId` / `taskId` 生成职责不清，超时后无身份可用 | CLI 已在 `recordPain` 前生成 `painId`；`taskId` 由 `createDiagnosticianTaskId` 确定性派生 | Handler 在提交与 deadline 之前生成两个 ID；Core Capability 只使用、不得重新生成/覆盖；超时用已知 `taskId` 经现有 RuntimeStateManager / TaskStore 有界回查；不自动重提交，不新增数据库/注册表/状态服务 | SPEC §7.4、§8；TD §3、§3.2、§5.5、§5.7 | T41 十例 | **CLOSED（文档）** |
 | C-3 | `painType` 与 provenance 两套语义被混为一谈，且"不扩展 provenance"与"新增值"自相矛盾 | `PainProvenance` 三值枚举；`parseOrigin` 无 `mcp_agent_assisted`；v1 payload / `diagnostic_json` 均不含 `painType` | 类型：MCP 缺省 `principle_deviation`（进枚举与 `evolution.jsonl` 类型合同，`diagnostic_json` 不加字段），CLI 保持 `user_frustration` 不变。来源：`mcp_agent_assisted` + `agent_reported_owner_approved` 为唯一方案，Owner 授权 ≠ 事实报告者，不写 `owner_statement` | SPEC §3.1、§6.3、§7.5；TD §6.3、§6.6 | T09、T44 | **CLOSED（文档）** |
 | C-4 | OG-4 被写成"新增系统建设任务"，与"未授权不得生产注册"混在一起 | 仓库无 OG-4 授权记录；当前 MCP 仅只读 recall | OG-4 定位为生产交付 Gate：未授权 → 生产不注册写类 Tool；授权后才注册 `pd_submit_pain` 且 `readOnlyHint:false`；不得自行宣称授权、不得绕过；T01 以 OG-4 已授权为前置，T43 保留未授权禁止注册验证 | SPEC §7.7、§12 T01/T43；TD §5.1.1、§10 T01/T43、§16.4 | T01、T43 | **CLOSED（文档）** |
+
+### 8.6 交叉一致性核对结果
+
+| # | 核对项 | 结果 | 依据 |
+|---|---|---|---|
+| 1 | Pain 三要素（锚点 / 具体行为 / 显著背离） | 一致 | SPEC §1.3、§5.1；TD §6.1 |
+| 2 | D4 仅辅助注意力优先级，不改变 Pain 是否成立 | 一致 | SPEC §1.3、§5.3；TD §6.1 |
+| 3 | Owner 授权 ≠ Owner 是事实报告者 | 一致 | SPEC §7.5；TD §6.6.4/§6.6.5 |
+| 4 | `mcp_agent_assisted` 始终 Unbound | 一致 | SPEC §7.5；TD §6.6.3/§6.6.5（invariant） |
+| 5 | provenance 始终 `agent_reported_owner_approved` | 一致 | SPEC §7.5；TD §6.6.4/§6.6.5 |
+| 6 | `painType`（MCP）默认 `principle_deviation` | 一致 | SPEC §3.1、§6.3；TD §6.3 |
+| 7 | CLI 保持 `user_frustration` | 一致 | SPEC §6.3；TD §6.3.3/§6.3.5 |
+| 8 | `painId` / `taskId` 由 Handler 在提交与 deadline 前生成 | 一致 | SPEC §7.4、§8；TD §3、§3.2、§5.5 |
+| 9 | 超时只做有界回查，不自动重提交 | 一致 | SPEC §7.4、§8；TD §5.7、§9 |
+| 10 | OG-4 始终为生产交付 Gate（不阻断开发） | 一致 | SPEC §7.7、T01/T43；TD §5.1.1、§11.0、§16.4 |
+| 11 | `diagnostic_json` 无新增字段 | 一致 | SPEC §3.1、§6.3；TD §6.3.2 |
+| 12 | 无新数据库 / 审批系统 / 第二套 Pain 模型 | 一致 | SPEC §7.7；TD §6.6.5 边界、§12 |
 
 ---
 
@@ -388,4 +427,4 @@
 | **E3** | Node `spawn` 异步错误语义（沿用） |
 | **E4** | 无新增未证实事实 |
 
-**本轮结论**：七项均以当前源码复核成立；三份文档的定点修订已完成。整体仍为 **PARTIALLY_VERIFIED**，因为 OG-4 授权与真实宿主取证尚未发生。
+**本轮结论**：七项均以当前源码复核成立；三份文档的定点修订已完成；P0-1 / P0-2 / P1 / 来源字段四项已落入文档（§8.4）。整体仍为 **PARTIALLY_VERIFIED**，因为 OG-4 授权与真实宿主取证尚未发生——这只影响生产交付，不影响文档就绪与开发实施。

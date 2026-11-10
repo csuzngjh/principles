@@ -46,6 +46,10 @@
 | C9 | `painId` / `taskId` 生成职责：Handler 在提交与 deadline 之前生成，Core Capability 只使用不覆盖；超时用已知 `taskId` 有界回查，不自动重提交 | §7.4、§8；TD §3、§3.2、§5.5、§5.7 |
 | C10 | `painType` 与 provenance 分离：MCP 缺省 `principle_deviation`（CLI 保持 `user_frustration` 不变）；provenance 唯一方案 `agent_reported_owner_approved` | §3.1、§6.3、§7.5；TD §6.3、§6.6 |
 | C11 | OG-4 定位为生产交付 Gate：未授权不注册写类 Tool，授权后才注册并 `readOnlyHint:false`；T01 以授权为前置 | §7.7、T01、T43；TD §5.1.1、§10 T01/T43、§16.4 |
+| C12 | 取消"长期价值"对提交的隐性限制：Tool 只需说明锚点/行为/背离/必要时影响；四项"不要求" | TD §5.2；SPEC §1.3、§5.1、§5.3 |
+| C13 | OG-4 只限制生产交付，不限制开发启动：明确"未授权允许 / 禁止"两栏；开发与非生产端到端验证不等授权 | §7.7、§12 T01/T43；TD §5.1.1、§11.0、§16.4 |
+| C14 | `evaluatePainIngress()` 必须先识别 `mcp_agent_assisted` 再走统一提交，不返回 `--session` 重提提示 | §7.5、§12 T44；TD §6.6.4、§6.6.5 |
+| C15 | 统一 Origin 表达：`origin.kind=owner_manual` + `origin.channel=mcp_agent_assisted`，不把 Channel 写成 Origin 类型 | §2 |
 
 ### v0.7 — 2026-11-10（锚点式 Pain 定义）
 
@@ -225,7 +229,7 @@ PD MCP Server（与 recall 同进程）
   ▼
 @principles/core/runtime/pain-submit-capability
   │  A. painId
-  │  B. PainIngressReport（origin=mcp_agent_assisted, correlation=unbound, evidence=not_applicable_unbound）
+  │  B. PainIngressReport（origin.kind=owner_manual + origin.channel=mcp_agent_assisted, correlation=unbound, evidence=not_applicable_unbound）
   │  C. evaluatePainIngress
   │  D. PainToPrincipleService({asyncMode:true}).recordPain
   │  E. 回执（只回填已持久化事实）
@@ -527,7 +531,8 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - Agent 提议 + Owner 同意 → `origin.kind = owner_manual`，`channel = mcp_agent_assisted`（**新增值**）；`correlation = unbound` + `missing_host_session`；`evidence = unavailable` + `not_applicable_unbound`。
 - provenance = **`agent_reported_owner_approved`**（**新增值**）：含义是"事实由 Agent 观察、提交经 Owner 授权"。在 `deriveProvenanceFromIngressFacts` 中由 `mcp_agent_assisted`（unbound）映射得到。
 - **Owner 授权 ≠ Owner 是事实报告者**：不得把 Agent 的描述写进 `owner_statement` / `correctionEvidence.classification='owner_statement'`；除非 Owner 原话被逐字引用且显式标注，否则不写 `owner_statement`。
-- 影响面：`pain-ingress-payload.ts` 的 origin 联合与 `parseOrigin` 白名单、`validateOriginCorrelationInvariant`（`mcp_agent_assisted` 必须 unbound）、`admission-gate.ts` 的 `PainProvenance` 联合与归一、`evidence-guards.ts` 的 `isOwnerExplicitManual`（豁免依据是 **Owner 已授权**，不是 Owner 亲自观察，须注释写明）、`context-payload.ts` 的 `Type.Literal`、`pain-retry.ts` 白名单、Console/Read Model 展示标签。
+- **提交路径**：MCP Agent 的 Unbound 报告必须进入统一提交路径并被接受，**不得**返回"用 CLI `--session` 重新提交"的提示——Agent Observation 不是 Owner 在 CLI 亲自提交。
+- 影响面：`pain-ingress-payload.ts` 的 origin 联合与 `parseOrigin` 白名单、`validateOriginCorrelationInvariant`（`mcp_agent_assisted` 必须 unbound）、`pain-ingress.ts` 的 `evaluatePainIngress()`（在通用 Unbound 分支**之前**识别该 channel）、`admission-gate.ts` 的 `PainProvenance` 联合与归一、`evidence-guards.ts` 的 `isOwnerExplicitManual`（豁免依据是 **Owner 已授权**，不是 Owner 亲自观察，须注释写明）、`context-payload.ts` 的 `Type.Literal`、`pain-retry.ts` 白名单、Console/Read Model 展示标签。
 - 复用现有 CLI channel 冒充 MCP 提交会造成错误归属，**不可取**；不建第二套 Origin/Provenance 模型。
 
 ## 7.6 Observability 可见性（post-review 修订）
@@ -558,11 +563,12 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - 当前 MCP 只注册一个只读工具 `pd_recall_principle_pains`，`readOnlyHint: true`（`pd-mcp-server/src/server.ts:147`）；**不存在 `pd_submit_pain`，也没有写类 MCP 工具先例**。
 - 现有 PreToolUse matcher 匹配 `Bash|apply_patch`，对 MCP 工具名零命中；tool-semantics registry 只登记宿主原生工具（`workbuddy-adapter/src/tool-semantics.ts:23-37`），MCP 工具未登记。
 
-**结论与门槛（生产交付 Gate）**：
+**结论与门槛（生产交付 Gate，不是开发启动 Gate）**：
 
-- OG-4 **未授权** → 生产环境**不注册**写类 MCP Tool（`server.ts` 的 `tools/list` 不出现 `pd_submit_pain`）；只能存在于设计与测试替身。
-- OG-4 **已授权** → 才允许注册 `pd_submit_pain`，并使用 `readOnlyHint: false`；其 matcher 与 tool-semantics 条目同步落地。
-- 不得自行宣称已获授权；不得通过宿主配置、临时 matcher 或本地开关绕过该 Gate。
+- OG-4 **未授权**时**允许**：开发分支实现 Core Capability 与 MCP Handler、完成 origin / provenance / 准入 / 持久化逻辑、编写与运行自动化测试、在隔离非生产环境用测试数据做端到端集成验证、验证 MCP 协议 / 回执 / 超时 / 并发与异常处理。
+- OG-4 **未授权**时**禁止**：生产 MCP Server 注册 `pd_submit_pain`（`server.ts` 的 `tools/list` 不出现该 Tool）、把写类 Tool 分发到生产宿主、正式发布或部署该写入能力、通过本地开关 / 宿主 matcher 或其他方式绕过该 Gate。
+- OG-4 **已授权** → 才进入生产注册与交付，并使用 `readOnlyHint: false`；其 matcher 与 tool-semantics 条目同步落地。
+- 不得自行宣称已获授权。原有 OG-4 安全边界不得删除或降级。
 - 不新建审批服务、Owner 确认界面、审批 Token、审批库或三套宿主专用治理；不要求三宿主逐次原生审批。现有机制不足的部分列为实施前置问题。
 
 ---
@@ -711,8 +717,8 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 | T40 | 异步 flag 默认关 | 未显式开启 `diagnostician_async_cli` 时，`pd pain record` 保持等待诊断的既有路径 |
 | T41 | 超时对账 | 写入中超时 → `submit_unconfirmed` + 已知 `painId`/`taskId`；有界回查命中/未命中/回查失败三种结果分别符合 §7.4；**不得**自动重提交 |
 | T42 | 有效锚点十例 | active+范围匹配 / active+不适用 / candidate / probation / archived / deprecated / 不存在 / 版本错误 / Ledger 损坏 / Owner 当前要求与历史原则冲突——逐个断言"能否作当前违规依据" |
-| T43 | OG-4 门槛 | OG-4 是**生产交付 Gate**（不是新增系统建设任务）：未授权时生产环境不注册写类 Tool；授权后才注册，且必须 `readOnlyHint:false`，并有 OG-4 授权的 matcher 与 tool-semantics 条目；不得自行宣称已获授权或通过宿主配置绕过 |
-| T44 | 来源归属 | Owner 直接报告 / Agent 提议 Owner 同意 / Agent 提议被拒绝 / 无 Session 的 Agent 观察 / 重读已存记录 / Admission 解释 / Console 展示——作者归属不因"同意"而改变，不写 `owner_statement` |
+| T43 | OG-4 门槛 | OG-4 是**生产交付 Gate**（不是开发启动 Gate，也不是新增系统建设任务）：未授权时生产环境不注册写类 Tool；授权后才注册，且必须 `readOnlyHint:false`，并有 OG-4 授权的 matcher 与 tool-semantics 条目；不得自行宣称已获授权或通过宿主配置绕过。开发与非生产集成测试不受此 Gate 限制 |
+| T44 | 来源归属 | MCP Agent 的 Unbound 报告进入统一提交路径，**不提示**用 CLI `--session` 重提；provenance 为 `agent_reported_owner_approved`；Owner 直接报告 / Agent 提议 Owner 同意 / Agent 提议被拒绝 / 无 Session 的 Agent 观察 / 重读已存记录 / Admission 解释 / Console 展示——作者归属不因"同意"而改变，不写 `owner_statement`，Console 不显示为 Owner 亲自报告 |
 | T45 | Observability 可见性 | MCP 提交在无 bound session 时，Console Pain 列表与 `pd recall` 均能看到该 Pain；不得只留在 `tasks` |
 
 ---
@@ -735,7 +741,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 - Skill 分发必须看**安装后**的插件根与旧文件处置结果（T39），不能只看仓库里有没有源文件；
 - 锚点有效性必须用 T42 的十种状态逐一验证，不能把 `warnings: non_active` 当作替代品；
 - 超时合同必须用 T41 的真实超时 + 回查验证，不能只断言"返回 `submit_unconfirmed` 字符串"；
-- OG-4 未授权时，写类 MCP Tool 不得进入实现验收（T43）。
+- OG-4 未授权时，T43 只做**生产注册**的负向断言（`pd_submit_pain` 不进生产 `tools/list`）；开发阶段的非生产集成测试不需要等待 OG-4。
 
 **C. 禁止的验收方式**
 
