@@ -3808,10 +3808,54 @@ function validateOwnerDecisionReview(value: unknown): OwnerDecisionReviewData | 
   };
 }
 
+/**
+ * 5B-E: rows the owner-decision list could not read. The server has produced
+ * this since PR #2480 (`OwnerDecisionReadIssue`), but the browser parser
+ * rebuilt the payload without it, so "nothing to decide" and "could not read"
+ * stayed indistinguishable on the page.
+ */
+export interface OwnerDecisionReadIssueData {
+  scope: 'rulecode_shadow';
+  reason: 'owner_review_read_failed' | 'readiness_not_actionable' | 'shadow_scan_unavailable';
+  count: number;
+  sampleActivationIds: string[];
+  detail?: string;
+}
+
 export interface OwnerDecisionsData {
   items: OwnerDecisionItemData[];
   total: number;
   generatedAt: string;
+  /** rc-9: empty = no decision row was silently dropped by the server. */
+  readIssues: OwnerDecisionReadIssueData[];
+}
+
+const OWNER_DECISION_READ_ISSUE_REASONS = new Set<string>([
+  'owner_review_read_failed',
+  'readiness_not_actionable',
+  'shadow_scan_unavailable',
+]);
+
+function validateOwnerDecisionReadIssue(v: unknown): OwnerDecisionReadIssueData | null {
+  if (!isObject(v)) return null;
+  if (v.scope !== 'rulecode_shadow') return null;
+  const { reason } = v;
+  const { count } = v;
+  if (!isString(reason) || !OWNER_DECISION_READ_ISSUE_REASONS.has(reason)) return null;
+  if (!isNumber(count) || !Number.isInteger(count) || count <= 0) return null;
+  if (!Object.hasOwn(v, 'sampleActivationIds') || !Array.isArray(v.sampleActivationIds)) return null;
+  if (!v.sampleActivationIds.every((id) => typeof id === 'string')) return null;
+  const issue: OwnerDecisionReadIssueData = {
+    scope: 'rulecode_shadow',
+    reason: reason as OwnerDecisionReadIssueData['reason'],
+    count,
+    sampleActivationIds: [...v.sampleActivationIds] as string[],
+  };
+  if (Object.hasOwn(v, 'detail')) {
+    if (!isString(v.detail)) return null;
+    issue.detail = v.detail;
+  }
+  return issue;
 }
 
 export function validateOwnerDecisionItem(v: unknown): OwnerDecisionItemData | null {
@@ -3895,7 +3939,18 @@ export function validateOwnerDecisionsData(v: unknown): OwnerDecisionsData | nul
   }
   if (!Object.hasOwn(v, 'total') || !isNumber(v.total)) return null;
   if (!Object.hasOwn(v, 'generatedAt') || !isString(v.generatedAt)) return null;
-  return { items, total: v.total, generatedAt: v.generatedAt };
+  // 5B-E: absent → [] (older server); present-but-malformed → reject the whole
+  // payload rather than render a partial list that looks complete.
+  const readIssues: OwnerDecisionReadIssueData[] = [];
+  if (Object.hasOwn(v, 'readIssues')) {
+    if (!Array.isArray(v.readIssues)) return null;
+    for (const entry of v.readIssues) {
+      const issue = validateOwnerDecisionReadIssue(entry);
+      if (issue === null) return null;
+      readIssues.push(issue);
+    }
+  }
+  return { items, total: v.total, generatedAt: v.generatedAt, readIssues };
 }
 
 export interface OwnerResolutionResultData {
