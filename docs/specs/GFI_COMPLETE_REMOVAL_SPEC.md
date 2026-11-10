@@ -1481,6 +1481,13 @@ PD 应当直接使用真实行为证据，而不是依靠一个综合摩擦分�
 - 本轮**不触碰真实 Owner 数据**；没有可靠迁移方案前不实施。
 - 独立跟踪：**Linear PRI-1149**（备份 / 原子写入 / 完整性校验 / 回滚策略）。
   该事项**不归入** PRI-1104（V1/V2 架构任务）。
+- 2026-11-10 进展：迁移工具已实现（`scripts/gfi-workspace-json-migration.mjs`，
+  `npm run gfi:migrate`），含 dry-run / 备份 / 原子写入 / 回读校验 / 自动回滚 / 幂等；
+  测试 `scripts/__tests__/gfi-workspace-json-migration.test.ts` 18/18 通过，
+  测试全程只使用隔离临时工作区。完整说明见
+  `docs/reports/GFI_WORKSPACE_JSON_MIGRATION.md`。
+- **真实 Owner 数据迁移仍未执行**：`--apply` 需显式 `--confirm-owner-authorization`，
+  实际执行须 Owner 单独授权。在该步骤完成前 GFI-1 仍保持 NOT_IMPLEMENTED。
 
 ### GFI-2 — `gone` tombstone（**OWNER_APPROVED / SPEC_ALIGNMENT_REQUIRED → 已对齐**）
 
