@@ -1,5 +1,12 @@
 # @principles/host-runtime
 
+## 3.2.1
+
+### Patch Changes
+
+- Updated dependencies [93288c7]
+  - @principles/install-layout@0.6.0
+
 ## 3.2.0
 
 ### Minor Changes
