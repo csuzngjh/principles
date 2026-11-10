@@ -1,6 +1,6 @@
-# PRI-1163 受控宿主验收运行卡 v2（`pri1163-round-key-run-card-v2`）— 待 Owner 批准
+# PRI-1163 受控宿主验收运行卡 v2（`pri1163-round-key-run-card-v2`）— **非执行候选（仅留档）**
 
-状态：**离线准备完成、预检 READY（14/14，exit 0），等待 Owner 批准执行**。v2 取代 v1 的全部可执行内容（执行器按 #2424 机制加固后重新冻结；v1 包 `pp-20261110T0452Z`/清单 `1cb7ed0b…` 与更早的 `77c207bc…` 均作废，从未批准也从未执行）。本卡不执行；`--execute` 需批准文件绑定**卡版本 + 清单 sha256 + 冻结预算 + 执行代码（启动器脚本哈希）**四者。宿主启动 0、provider 请求 0、工具 0、付费 0（截至本卡交付）。
+状态：**ARCHIVED / NON-EXECUTION CANDIDATE**。本卡与执行器（`scripts/dev/aa-controlled-admission/round-key-run.mjs` + `lib/roundkey-*`）保留在归档分支 `ai/PRI-1163-round-key-run-tooling`，**仅留档**：PR #2468 的合并范围已收窄为发布审计与事故清理终态，不含本工具与卡。PRI-1163 的主动宿主验证已指定给 Gateway 会话；本包 `ca680b7d…2a38a` 仅留档，**不再申请批准或执行**（`--execute` 保留四项绑定拒绝逻辑，但没有任何待批事项；v1 包/清单全部作废）。宿主启动 0、provider 请求 0、工具 0、付费 0（全部执行预算从未消耗）。
 
 ## 1. 目标与结论上限
 
