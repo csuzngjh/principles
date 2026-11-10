@@ -18,6 +18,7 @@ import {
   SUBMIT_PAIN_CAPABILITY_ID,
 } from '../pain-submit-capability.js';
 import { evaluatePainIngress } from '../pain-ingress.js';
+import { parsePainIngressReport } from '../pain-ingress-payload.js';
 import { createDiagnosticianTaskId } from '../pain-signal-bridge.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { computeEffectivePdConfig, getDefaultPdConfig, type PdConfig } from '../config/index.js';
@@ -176,6 +177,68 @@ describe('MCP ingress report and admission (§6.6)', () => {
     // there is no session it could ever supply.
     expect(decision.warnings.join(' ')).not.toMatch(/--session/);
     expect(decision.warnings.join(' ')).toMatch(/context_unbound/);
+  });
+
+  // The MCP branch sits BEFORE the generic unbound branch. Proving that needs
+  // two reports that differ in ONE fact — the channel — and still produce
+  // different decisions. Identical facts declared as `external_cli_unbound`
+  // get the generic "re-run with --session" advice; `mcp_agent_assisted` is
+  // recognised earlier and must never see it. If the ordering regressed, the
+  // MCP report would fall through to the generic branch and this test fails.
+  it('matches the MCP branch before the generic unbound branch — channel alone decides', () => {
+    const generic = parsePainIngressReport({
+      identity: { kind: 'manual_pain_id', painId: 'mcp_3' },
+      painType: 'principle_deviation',
+      source: 'external_cli_unbound',
+      reason: BASE_INPUT.reason,
+      origin: { kind: 'owner_manual', channel: 'external_cli_unbound' },
+      correlation: { status: 'unbound', reason: 'missing_host_session' },
+      evidence: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      deviationAnchor: { principleId: 'P-42', principleVersion: '1' },
+    });
+    expect(generic.ok).toBe(true);
+    if (!generic.ok) return;
+
+    const genericDecision = evaluatePainIngress(generic.report);
+    expect(genericDecision.action).toBe('submit');
+    if (genericDecision.action !== 'submit') return;
+    expect(genericDecision.legacy.provenance).toBe('owner_reported_no_host_trace');
+    expect(genericDecision.warnings.join(' ')).toMatch(/--session/);
+
+    const mcp = buildMcpIngressReport({
+      painId: 'mcp_3',
+      input: BASE_INPUT,
+      anchor: { principleId: 'P-42', principleVersion: '1' },
+    });
+    if ('error' in mcp) throw new Error(mcp.message);
+
+    const mcpDecision = evaluatePainIngress(mcp);
+    expect(mcpDecision.action).toBe('submit');
+    if (mcpDecision.action !== 'submit') return;
+    expect(mcpDecision.legacy.provenance).toBe('agent_reported_owner_approved');
+    expect(mcpDecision.warnings.join(' ')).not.toMatch(/--session/);
+    expect(mcpDecision.warnings).not.toEqual(genericDecision.warnings);
+  });
+
+  it('refuses an MCP report that claims a host-bound correlation', () => {
+    const parsed = parsePainIngressReport({
+      identity: { kind: 'manual_pain_id', painId: 'mcp_4' },
+      painType: 'principle_deviation',
+      source: 'mcp_agent_assisted',
+      reason: BASE_INPUT.reason,
+      origin: { kind: 'owner_manual', channel: 'mcp_agent_assisted' },
+      correlation: { status: 'bound', hostKind: 'openclaw', sessionId: 'session-123' },
+      evidence: { status: 'unavailable', reason: 'not_applicable_unbound' },
+      deviationAnchor: { principleId: 'P-42', principleVersion: '1' },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const decision = evaluatePainIngress(parsed.report);
+    expect(decision.action).toBe('refuse');
+    if (decision.action !== 'refuse') return;
+    expect(decision.reasonCode).toBe('origin_correlation_mismatch');
+    expect(decision.warning).toMatch(/MCP agent-assisted/);
   });
 
   it('refuses a principle_deviation with no anchor at the parser level', () => {
