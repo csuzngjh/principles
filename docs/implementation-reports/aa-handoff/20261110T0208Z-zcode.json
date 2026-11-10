@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261110T0208Z-zcode",
+  "previousCheckpoint": "20261109T1342Z-zcode",
+  "generatedAt": "2026-11-10T02:08:09Z",
+  "agent": "zcode",
+  "task": "PRI-1119 A线：入口决策卡——PD 自有显式入口核查（Console/CLI/MCP/受控准入）+ 上游立项卡（基于 #2451）+ 版本档位更新",
+  "overallStatus": "READY_FOR_OWNER_DECISION__NORMAL_ENTRY_BLOCKED_UPSTREAM_ONLY__PD_OWNED_ENTRY_NOT_AVAILABLE",
+  "mainTipAtCheckpoint": "4000adc495a7c146f4d9282c114d0d936d8e196a (chore: version packages #2457)",
+  "worktree": {
+    "branch": "ai/PRI-1119-entry-decision-card",
+    "dir": "D:/Code/_worktrees/principles/PRI-1119-entry-decision-card",
+    "base": "4000adc49 (origin/main, fetched at creation)",
+    "bootstrap": "READY（唯一 fail=CLAUDE.md 缺失，已知假警，以 worktree-ready READY 为准）"
+  },
+  "deliverables": {
+    "decisionCard": "docs/implementation-reports/PD-AA-PRI-1119-ENTRY-DECISION-20261110.md",
+    "verdict": "入口 A（普通 OpenClaw 聊天交付标记）= BLOCKED，唯一余留阻断 = 宿主 embedded 事件不带用户轮身份；入口 B（PD 自有显式入口）= 无可用既有受支持入口；整体 READY_FOR_OWNER_DECISION，裁决对象 = D1 批准上游立项 / D2 维持 Native 结束本轮"
+  },
+  "pdOwnedEntryVerdict": {
+    "question": "已有 PD 自有入口能否把「操作、输入、随后实际被装配的同一轮」可靠绑定？",
+    "answer": "NOT_AVAILABLE",
+    "surfacesExamined": [
+      {"surface": "pd-console", "result": "29 路由全为治理/examiner(offline-stub 唯一可达模式)/update；delivery-review 0 命中；无路由驱动宿主装配", "evidence": "packages/pd-console/src/server/routes/ 清单; routes/examiner-executor.ts:1-9"},
+      {"surface": "pd-cli", "result": "治理/runtime 命令面；runtime activation dispatch=治理种入不产生宿主轮；version --delivery=发布交付面检查（同名不同物）；delivery-review 0 命中", "evidence": "packages/pd-cli/src/commands/ 清单; services/delivery-surfaces.ts:1-22"},
+      {"surface": "pd-mcp-server", "result": "单一 pd-recall 召回工具，不驱动装配", "evidence": "src/server.ts:132-136"},
+      {"surface": "受控准入（env PD_AA_ADMISSION_FILE）", "result": "冻结输入+一次性消费+仅钉死 ID；#2436 起 principleId 映射拒绝；SPEC §7 禁作普通入口（11-09 已裁决）", "evidence": "hooks/controlled-admission.ts:19,132; index.ts:270-306"},
+      {"surface": "PRI-1152 执行包", "result": "#2432 MERGED 仅运行卡+结果文档；packages/ 无产品入口代码（仅测试 fixture）；假 provider", "evidence": "gh pr view 2432; rg exec-pack/isolated-host"},
+      {"surface": "agentsapi harness", "result": "事件带身份但为 OpenAI 托管 VM 另一执行模式（11-09 已裁决）", "evidence": "阻断报告 §3; #2451 §1"}
+    ],
+    "bindingGap": "Console/CLI 操作发生在 PD 进程与存储；宿主装配轮在 OpenClaw prompt-build；2026.11.1 embedded 事件只含 {prompt, messages}，无字段承载操作来源——显式入口方案仍需先解决与入口 A 相同的宿主身份缺口",
+    "adaptiveOnlyProductionChain": "packages/openclaw-plugin/src/index.ts:482 注册 adaptivePriorityProvider -> src/host-runtime/openclaw-host-runtime.ts:150-153 桥接 -> packages/host-runtime/src/index.ts:352-356 消费"
+  },
+  "versionTierUpdate": {
+    "deltaVs20261109": "阻断 2（manifest 缺 principleId）已随发布+安装闭环；阻断 1（宿主身份）不变",
+    "npmPublished": "principles-disciple 3.1.3 (latest, #2453 version packages)——含 #2436+#2449",
+    "installedExtension": "~/.openclaw/extensions/principles-disciple = 3.1.3（openclaw.plugin.json:49 principleId；dist/bundle.js 命中 principle_mapping_has_no_admission_identity）",
+    "canonicalRuntime": "~/.pd/runtime = core 6.0.0 / host-runtime 3.1.0（dist/active-principle-prompt.js 命中解析器+additiveOnly/would_displace_native_assembly）/ plugin 目录 3.1.1（落后于扩展壳 3.1.3，观察项不阻断）",
+    "installedHost": "OpenClaw 2026.11.1（不变，身份缺口未变；npm 2026.11.2 源未核对维持未知）",
+    "mainUnreleased": "插件 3.1.3 / core 6.0.0 / host-runtime 3.1.1 / pd-cli 1.168.1 / installer 1.148.4",
+    "productionConfig": "openclaw.json 与工作区 config.yaml 均无 adaptiveActivation（未启用，纯 Native）",
+    "operationalNote": "此时启用映射安全但无效（每轮 fail-closed 回 Native）——不要现在启用"
+  },
+  "upstreamProjectCard": {
+    "basis": "#2451 §3（接线设计）+ §4（P1/P2+N1-N6 验收判据）",
+    "steps": ["① 上游接线（attempt-prompt-build.ts:159 + helper 参数，PD 侧零改动）——待 Owner 批准立项，AI 不提交上游", "② 上游评审+官方发版（等待时间未知保留）", "③ 本机升级（Owner 安装授权）", "④ 验收：Object.keys(event) 探针 -> §7 有界运行 -> G1 正常入口验收卡；三元工具拒绝路径专项核对为验收卡前置"],
+    "unknowns": ["retry/rebuild recorder 复用", "非聊天触发 recorder 缺省", "excludeFromContext 身份透出", "上游发版时间", "npm 2026.11.2 是否已含接线"]
+  },
+  "unchanged": ["PRI-1118 依赖维持（Todo）", "G1/C04/G2 状态未动", "PRI-1162（B 线轮转）不受影响，其轮次序数不充当 A 线请求身份", "LATEST.json 未修改", "历史检查点未修改", "#2448/#2451 分支与文件未触碰"],
+  "budget": {"hostStarts": 0, "modelCalls": 0, "paidCalls": 0, "productionConfigChanges": 0, "upstreamCodeOrPRs": 0, "merges": 0},
+  "latestPointer": "LATEST.json not modified"
+}
