@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PDRuntimeError } from '../../error-categories.js';
 
 // Mock @earendil-works/pi-ai/compat (value facade used by the adapter) at module level
-// adapter-chain-mock-exempt: mocks completeSimple to assert adapter error mapping and retry; the streaming-aggregation gap is covered by pi12-spike-oneshot.test.ts against the faux provider (README: deliberately not migrated).
+// adapter-chain-mock-exempt: injection-tested — mocks completeSimple to assert adapter error mapping and retry; the streaming-aggregation gap is covered by pi12-spike-oneshot.test.ts against the faux provider (README: deliberately not migrated; PoV archive records the defect injection).
 vi.mock('@earendil-works/pi-ai/compat', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),

@@ -109,13 +109,45 @@ Mocking a chain module (`@earendil-works/pi-ai`,
 faux harness factory requires one comment in the file:
 
 ```ts
-// adapter-chain-mock-exempt: <why faux cannot cover this contract>
+// adapter-chain-mock-exempt: <injection-tested|structural-only> — <why faux cannot cover this contract>
 ```
+
+The tag records **how the exemption was established**, and it is not decoration:
+
+* `injection-tested` — a realistic defect was planted in production code and the
+  old suite went red under it, so this file is *known* to catch what faux would
+  catch;
+* `structural-only` — no defect was planted; the reason is structural (the
+  contract sits outside what faux observes).
+
+A written reason is not evidence of verification. Readers must be able to tell
+`injection-tested` from `structural-only` without asking anyone.
+
+Current exemptions:
+
+| File | Status | Why |
+| --- | --- | --- |
+| `pi-ai-runtime-adapter.test.ts` | `injection-tested` | PoV below: defect turned the old suite red, so faux adds no blind-spot coverage here. |
+| `artificer-l2-adapter.test.ts` | `structural-only` | Asserts loop-orchestration branches (maxTurns, beforeToolCall, timeout); its model path is covered by `l2-adapters-g2-maxtokens.test.ts` on the real loop. |
+| `l2-agent-loop-adapter.test.ts` | `structural-only` | Two cases need pathological transcripts a real loop cannot produce; the assertions need a redesign, not faux. |
+| `pd-stream-simple.test.ts` | `structural-only` | Asserts per-API fetch binding, which sits below faux (wire-level exception above). |
+| `runtime-config-contract.test.ts` | `structural-only` | Asserts provider/model/timeout precedence resolved before any model call; a scripted model never reaches it. |
 
 `npm run check:repo-hygiene` (also the pre-commit hook) fails on an adapter test
 that mocks a chain module without this marker, and reports a marker with an
 empty reason as its own finding. The marker is not a waiver of judgement — it is
 the place where the reason is written down.
+
+## Reverting the guard (read before reverting either commit)
+
+Revert `chore(repo-hygiene): flag adapter tests that mock the whole model chain`
+**before** `test(adapter): record why five legacy suites still mock the model
+chain`. Reverting the annotations first leaves five suites mocking a chain
+module with no marker, so `check:repo-hygiene` (and therefore the next commit)
+turns red.
+
+If that already happened: restore the five marker lines, or revert the guard as
+well, then run `node scripts/check-repo-hygiene.js all` — exit 0 means recovered.
 
 ## Deliberately not migrated
 
