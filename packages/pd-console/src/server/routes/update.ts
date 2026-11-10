@@ -6,6 +6,7 @@ import * as os from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound, errorMessage } from '../utils/response.js';
+import { getPdHome, isExperimentInstance } from '../utils/pd-home.js';
 import { appendUpdateHistory } from './update-history.js';
 import type * as authorityModule from 'create-principles-disciple/update-console';
 
@@ -64,7 +65,7 @@ async function checkUpdate(authority: Authority, res: ServerResponse): Promise<v
  */
 async function applyFullUpdate(authority: Authority, res: ServerResponse, workspaceDir: string): Promise<void> {
   const layout = await import('create-principles-disciple/update-console');
-  const pdHomePaths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const pdHomePaths = layout.resolvePdHomePaths(getPdHome().pdHome);
   const entryPath = path.join(pdHomePaths.bootstrapExecutorDir, 'dist', 'bootstrap-entry.js');
 
   // Readiness already re-verified the registration digest, but the route owns
@@ -203,24 +204,38 @@ export async function handleUpdateRoute(
   let mod: AuthorityModule | undefined;
   let authority: Authority | undefined;
   let failure = { reason: 'installer_missing', message: 'ReleaseManager is unavailable.', nextAction: REPAIR_ACTION, transactionOpened: false };
-  try {
-    mod = await import('create-principles-disciple/update-console');
-    authority = mod.createReleaseManagerAuthority({
-      pdHome: path.join(os.homedir(), '.pd'),
-      metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
-    });
-    const readiness = authority.kinds[subPath === '/check' ? 'check' : 'apply-full'];
-    if (!readiness.ready || authority.installStatus === null) {
-      failure = { ...failure, reason: readiness.reasons.join(',') || 'install_state_corrupt', message: 'The installation is not ready for a signed release update.' };
-    } else {
-      if (subPath === '/check') await checkUpdate(authority, res);
-      else await applyFullUpdate(authority, res, workspaceDir);
-      return;
+  // PRI-872: an experiment console owns `<root>/.pd`, which is not a signed
+  // install. Refuse explicitly instead of letting the readiness gate report a
+  // misleading `install_state_corrupt` — and, above all, keep the real
+  // installer (which stops the machine-level gateway and swaps the production
+  // runtime) unreachable from a second instance.
+  if (isExperimentInstance()) {
+    failure = {
+      reason: 'experimental_instance',
+      message: 'This console is an experiment instance; product updates apply to the production installation only.',
+      nextAction: 'Run the update from the production console, or install the experiment build with the official installer while PD_EXPERIMENT_ROOT points at this root.',
+      transactionOpened: false,
+    };
+  } else {
+    try {
+      mod = await import('create-principles-disciple/update-console');
+      authority = mod.createReleaseManagerAuthority({
+        pdHome: getPdHome().pdHome,
+        metadataBaseUrl: process.env.PD_RELEASE_METADATA_URL,
+      });
+      const readiness = authority.kinds[subPath === '/check' ? 'check' : 'apply-full'];
+      if (!readiness.ready || authority.installStatus === null) {
+        failure = { ...failure, reason: readiness.reasons.join(',') || 'install_state_corrupt', message: 'The installation is not ready for a signed release update.' };
+      } else {
+        if (subPath === '/check') await checkUpdate(authority, res);
+        else await applyFullUpdate(authority, res, workspaceDir);
+        return;
+      }
+    } catch (error) {
+      failure = mod
+        ? mod.mapReleaseManagerError(error)
+        : { ...failure, message: errorMessage(error) };
     }
-  } catch (error) {
-    failure = mod
-      ? mod.mapReleaseManagerError(error)
-      : { ...failure, message: errorMessage(error) };
   }
   console.error(`[update] ${subPath} refused (${failure.reason}): ${failure.message}`);
   if (subPath === '/check') {

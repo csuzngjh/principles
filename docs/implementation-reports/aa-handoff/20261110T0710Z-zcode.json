@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261110T0710Z-zcode",
+  "previousCheckpoint": "20261110T0208Z-zcode",
+  "generatedAt": "2026-11-10T07:10:35Z",
+  "agent": "zcode",
+  "task": "PRI-1119 A线：宿主身份最小补丁卡——基于 #2451/#2458 的可批准上游接线实施底稿（只读核查+补丁卡，零实施）",
+  "overallStatus": "PATCH_CARD_DELIVERED_AWAITING_OWNER_APPROVAL_TO_IMPLEMENT__UPSTREAM_GAP_CONFIRMED_AT_BACCC7E1529__NO_EQUIVALENT_WIRING",
+  "mainTipAtCheckpoint": "125b506f706 (origin/main, PD repo, fetched at worktree creation)",
+  "openclawBaseline": {
+    "ref": "origin/main baccc7e152916c7f4a48596b5cb544c12264ac54 (2026-11-10 fetch)",
+    "versionFile": "2026.11.2 (close-out bd0557f4fac #195249)",
+    "npmLatest": "2026.11.2 (npm view; source now locatable = main 2026.11.2 line — closes #2451 open item)",
+    "installedHost": "2026.11.1 (unchanged)",
+    "installedPdExtension": "3.1.3 (unchanged)"
+  },
+  "worktree": {
+    "branch": "ai/PRI-1119-host-identity-patch-card",
+    "dir": "D:/Code/_worktrees/principles/PRI-1119-host-identity-patch-card",
+    "base": "125b506f706 (origin/main, fetched at creation)",
+    "bootstrap": "READY",
+    "writer": "zcode (claim + git lock)"
+  },
+  "deliverables": {
+    "patchCard": "docs/implementation-reports/PD-AA-PRI-1119-HOST-IDENTITY-PATCH-CARD-20261110.md",
+    "approvalObject": "按补丁卡 §3/§6 在 OpenClaw 仓隔离任务工作树实施两文件补丁+测试扩展，跑定向测试与 pnpm check:changed，产出最小上游提交草案；不提交上游、不安装、不启用、不动生产"
+  },
+  "verificationIncrements": [
+    {"fact": "缺口仍在且无等价接线", "evidence": "attempt-prompt-build.ts:159 仍只传 {prompt,messages}; git log -S currentUserMessage（两目标文件）=0; git grep currentUserMessage -- src/agents/embedded-agent-runner/ =0 @ baccc7e1529"},
+    {"fact": "事件契约已存在，补丁零类型/协议/SDK 改动", "evidence": "src/plugins/hook-before-agent-start.types.ts:24-37 已声明可选 currentUserMessage/currentUserMessageId（omission is legacy / stable native admission identity）"},
+    {"fact": "harness 参照实现参数与展开规则", "evidence": "src/agents/harness/prompt-compaction-hook-helpers.ts:38-77（文本展开/ID=显式参数或 idempotencyKey/条件写入）"},
+    {"fact": "数据流行号更新至 baccc7e1529", "evidence": "chat-user-turn-recorder.ts:144; agent-runner-execute.ts:129,231; backend.ts:39; run-attempt-dispatch.ts:471; agent-runner-run-params.ts:181; attempt-prompt-build.ts:216,329,400-401,536"},
+    {"fact": "触发无关语义（新核实）", "evidence": "src/cron/isolated-agent/run-prompt-executor.ts:185-199 创建 recorder; run.fallback-transcript-turn.test.ts:30 断言 message.idempotencyKey 已定义 → 持久化用户轮的运行（聊天/cron/子代理）接线后都携带该轮自己的身份"},
+    {"fact": "另一调用方不受影响（不触碰）", "evidence": "src/agents/cli-runner/prepare.ts:87,647（新参数可选，天然兼容）"},
+    {"fact": "既有测试底座", "evidence": "attempt.prompt-helpers.test.ts:64-91 build() 覆盖模式 + fake hookRunner 捕获事件首参"}
+  ],
+  "patchShape": {
+    "files": [
+      "src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts (+~15 行：可选 currentUserMessage 参数 + harness 规则展开)",
+      "src/agents/embedded-agent-runner/run/attempt-prompt-build.ts (+~4 行：recorder.message 经 excludeFromContext 门传入)",
+      "attempt.prompt-helpers.test.ts 扩展 + 调用点接线测试两臂"
+    ],
+    "mustBeAbsent": ["M1 preserveExactPrompt（hook 不运行）", "M2 无 recorder/message undefined", "M3 content 展开为空串", "M4 idempotencyKey 缺失→仅 ID 缺", "M5 excludeFromContext===true→两字段全缺（保守门，留上游评审）", "M6 归属无法证明"],
+    "identityRule": "身份即宿主准入写下的 idempotencyKey；不派生、不合成、不加触发分支"
+  },
+  "acceptanceCorrectionProposal": "#2458 §7 N1/N2 从「事件不含身份字段」修正为安全判据「PD 不触发、回 Native」；事件形状如实记录（cron 证据使原形状预测不成立）；P1/P2/N3-N6 不变",
+  "budget": {"gatewayStarts": 0, "modelCalls": 0, "productionWrites": 0, "upstreamCommits": 0, "installs": 0},
+  "untouched": ["LATEST.json 与历史检查点", "#2448/#2451/#2458 分支与文件", "~/.pd、~/.openclaw、生产库、两处生产配置", "PRI-1163 B线（独立推进，互不等待）"],
+  "nextOwnerDecision": "批准补丁卡 §9 批准对象 → AI 实施 + 定向测试 + 产出上游提交草案；上游提交/发版/升级/验收各按序另行批准"
+}
