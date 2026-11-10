@@ -126,17 +126,16 @@ afterEach(() => {
 describe('P2: Dreamer L2 honors StartRunInput.maxTokens on every loop turn', () => {
   it('a present budget reaches the provider verbatim on every turn', async () => {
     faux().setResponses([recordWire(true), recordWire(true), recordWire(true)]);
-    try {
-      await makeDreamer().startRun(makeInput({ maxTokens: 1234 }));
-    } catch { /* no submit_output — the recorded wire options are the assertion */ }
+    // No submit_output is ever scripted, so the turn cap must fail loud.
+    await expect(makeDreamer().startRun(makeInput({ maxTokens: 1234 })))
+      .rejects.toMatchObject({ category: 'output_invalid' });
     expect(wire.map((call) => call.maxTokens)).toEqual([1234, 1234]);
   });
 
   it('an absent budget keeps legacy behavior: no maxTokens key reaches the provider (pi-ai native defaulting)', async () => {
     faux().setResponses([recordWire(false)]);
-    try {
-      await makeDreamer().startRun(makeInput());
-    } catch { /* no submit_output */ }
+    await expect(makeDreamer().startRun(makeInput()))
+      .rejects.toMatchObject({ category: 'output_invalid' });
     expect(wire.length).toBe(1);
     const [first] = wire;
     if (!first) throw new Error('the provider was never called');
@@ -145,9 +144,8 @@ describe('P2: Dreamer L2 honors StartRunInput.maxTokens on every loop turn', () 
 
   it('the model output ceiling caps an oversized budget (32000 over 99000)', async () => {
     faux().setResponses([recordWire(false)]);
-    try {
-      await makeDreamer().startRun(makeInput({ maxTokens: 99_000 }));
-    } catch { /* no submit_output */ }
+    await expect(makeDreamer().startRun(makeInput({ maxTokens: 99_000 })))
+      .rejects.toMatchObject({ category: 'output_invalid' });
     expect(wire.length).toBe(1);
     expect(wire[0]?.maxTokens).toBe(32_000);
   });
@@ -164,27 +162,24 @@ describe('P2: Dreamer L2 honors StartRunInput.maxTokens on every loop turn', () 
 describe('P2: Artificer L2 honors StartRunInput.maxTokens (min with profile default)', () => {
   it('per-request 777 wins over the profile default (8192)', async () => {
     faux().setResponses([recordWire(false), recordWire(false), recordWire(false)]);
-    try {
-      await makeArtificer(8192).startRun(makeInput({ maxTokens: 777, agentSpec: { agentId: 'artificer', schemaVersion: 'v1' } }));
-    } catch { /* no submit_rulecode */ }
+    await expect(makeArtificer(8192).startRun(makeInput({ maxTokens: 777, agentSpec: { agentId: 'artificer', schemaVersion: 'v1' } })))
+      .rejects.toMatchObject({ category: 'output_invalid' });
     expect(wire.length).toBeGreaterThan(0);
     expect(wire.every((call) => call.maxTokens === 777)).toBe(true);
   });
 
   it('profile default still applies when no per-request budget is passed (8192)', async () => {
     faux().setResponses([recordWire(false), recordWire(false), recordWire(false)]);
-    try {
-      await makeArtificer(8192).startRun(makeInput({ agentSpec: { agentId: 'artificer', schemaVersion: 'v1' } }));
-    } catch { /* no submit_rulecode */ }
+    await expect(makeArtificer(8192).startRun(makeInput({ agentSpec: { agentId: 'artificer', schemaVersion: 'v1' } })))
+      .rejects.toMatchObject({ category: 'output_invalid' });
     expect(wire.length).toBeGreaterThan(0);
     expect(wire.every((call) => call.maxTokens === 8192)).toBe(true);
   });
 
   it('an oversized per-request budget is capped by the profile (4096 over 900000)', async () => {
     faux().setResponses([recordWire(false), recordWire(false), recordWire(false)]);
-    try {
-      await makeArtificer(4096).startRun(makeInput({ maxTokens: 900_000, agentSpec: { agentId: 'artificer', schemaVersion: 'v1' } }));
-    } catch { /* no submit_rulecode */ }
+    await expect(makeArtificer(4096).startRun(makeInput({ maxTokens: 900_000, agentSpec: { agentId: 'artificer', schemaVersion: 'v1' } })))
+      .rejects.toMatchObject({ category: 'output_invalid' });
     expect(wire.length).toBeGreaterThan(0);
     expect(wire.every((call) => call.maxTokens === 4096)).toBe(true);
   });
