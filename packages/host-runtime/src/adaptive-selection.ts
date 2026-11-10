@@ -289,24 +289,27 @@ function emptyDiagnostics(admissionDeadlineAt: number): AdaptiveSelectionDiagnos
   };
 }
 
+/** rc-1/rc-2: parsed payloads are unknown until this guard passes. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function parseFinishMetadata(raw: string): FinishMetadata {
   const result: FinishMetadata = {finishReason: 'unknown', usage: null};
   const absorb = (parsed: unknown): void => {
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-    const record = parsed as Record<string, unknown>;
-    const {choices} = record;
+    if (!isRecord(parsed)) return;
+    const {choices} = parsed;
     if (Array.isArray(choices) && choices.length > 0) {
       const [first] = choices;
-      if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
-        const finish = (first as Record<string, unknown>).finish_reason;
+      if (isRecord(first)) {
+        const finish = first.finish_reason;
         if (typeof finish === 'string' && finish) result.finishReason = finish;
       }
     }
-    const {usage} = record;
-    if (usage !== null && typeof usage === 'object' && !Array.isArray(usage)) {
-      const usageRecord = usage as Record<string, unknown>;
-      const input = usageRecord.prompt_tokens ?? usageRecord.input_tokens;
-      const output = usageRecord.completion_tokens ?? usageRecord.output_tokens;
+    const {usage} = parsed;
+    if (isRecord(usage)) {
+      const input = usage.prompt_tokens ?? usage.input_tokens;
+      const output = usage.completion_tokens ?? usage.output_tokens;
       result.usage = {
         inputTokens: typeof input === 'number' ? input : null,
         outputTokens: typeof output === 'number' ? output : null,
@@ -378,7 +381,8 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
       }
       let body: Record<string, unknown> | null;
       try {
-        body = typeof requestInit.body === 'string' ? (JSON.parse(requestInit.body) as Record<string, unknown>) : null;
+        const parsed: unknown = typeof requestInit.body === 'string' ? JSON.parse(requestInit.body) : null;
+        body = isRecord(parsed) ? parsed : null;
       } catch {
         body = null;
       }
