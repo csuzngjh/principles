@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   assertNoDowngrade,
   checkMetadata,
+  classifyCohort,
+  deferredReport,
+  gitIsAncestor,
   nextPins,
   PUBLISH_RECHECK_TIMEOUT_MS,
   PUBLISH_WAIT_TIMEOUT_MS,
@@ -236,7 +240,19 @@ describe('Codex runtime delivery authority and discoverability', () => {
         now: () => 0,
         sleep: () => undefined,
         resolve: () => ({ ...incomplete, sha: 'b'.repeat(40) }),
+        isAncestor: () => false,
       })).toThrow(/not the current release cohort/);
+    });
+
+    it('refuses to decide anything when the ancestry authority was never wired', () => {
+      expect(() => waitForPublishedCohort({
+        sha,
+        timeoutMs: 60_000,
+        intervalMs: 5_000,
+        now: () => 0,
+        sleep: () => undefined,
+        resolve: () => ({ ...incomplete, sha: 'b'.repeat(40) }),
+      })).toThrow(/ancestry authority is not wired/);
     });
 
     it('does not retry a registry query failure', () => {
@@ -253,6 +269,183 @@ describe('Codex runtime delivery authority and discoverability', () => {
         },
       })).toThrow(/registry query failed/);
       expect(calls).toBe(1);
+    });
+  });
+
+  // The maintenance leg runs AFTER npm publication, but the 16-leg matrix takes
+  // 64-105 minutes; a newer Version Packages PR routinely lands in that window.
+  // That case must hand off (the newer cohort's run owns delivery) instead of
+  // failing the release train — while every other mismatch stays a hard
+  // failure. Measured 2026-11-10: runs 42750562739 / 42753009939 / 42771071290
+  // all died here with `target is not the current release cohort`.
+  describe('superseded cohort defers; every other mismatch still fails', () => {
+    const target = 'a'.repeat(40);
+    const newer = 'c'.repeat(40);
+    const controls = { timeoutMs: 60_000, intervalMs: 5_000, now: () => 0, sleep: () => undefined };
+    const cohort = (sha: string, publishComplete = true) => ({
+      cohort: true,
+      sha,
+      publishComplete,
+      packages: [
+        { name: '@principles/codex-adapter', version: '0.8.7', published: publishComplete },
+        { name: '@principles/host-runtime', version: '3.2.1', published: publishComplete },
+        { name: '@principles/core', version: '7.0.0', published: publishComplete },
+        { name: '@principles/pd-mcp-server', version: '0.3.3', published: publishComplete },
+      ],
+    });
+
+    it('case 1: the target IS the current cohort — publishes normally, ancestry is never consulted', () => {
+      const result = waitForPublishedCohort({
+        ...controls,
+        sha: target,
+        resolve: () => cohort(target),
+        isAncestor: () => {
+          throw new Error('ancestry must not be consulted when the cohort matches');
+        },
+      });
+      expect(result.outcome).toBe('published');
+      expect(result.publishComplete).toBe(true);
+    });
+
+    it('case 2: a proven newer cohort supersedes the target — deferred, names it, does not wait', () => {
+      let calls = 0;
+      const result = waitForPublishedCohort({
+        ...controls,
+        sha: target,
+        resolve: () => {
+          calls += 1;
+          return cohort(newer);
+        },
+        isAncestor: (ancestor: string, descendant: string) => ancestor === target && descendant === newer,
+      });
+      expect(result.outcome).toBe('deferred');
+      expect(result.supersededBy).toBe(newer);
+      expect(result.target).toBe(target);
+      expect(calls).toBe(1); // a hand-off is not a retry loop
+    });
+
+    it('case 2 boundary: the newer cohort need not be published yet — its own run owns delivery', () => {
+      const result = waitForPublishedCohort({
+        ...controls,
+        sha: target,
+        resolve: () => cohort(newer, false),
+        isAncestor: () => true,
+      });
+      expect(result.outcome).toBe('deferred');
+      expect(result.supersededBy).toBe(newer);
+    });
+
+    it('case 3a: a different SHA that is NOT a descendant is a real failure', () => {
+      expect(() => waitForPublishedCohort({
+        ...controls,
+        sha: target,
+        resolve: () => cohort(newer),
+        isAncestor: () => false,
+      })).toThrow(/not the current release cohort/);
+    });
+
+    it('case 3b: ancestry is not proof — the newer commit must be a reproduced Version Packages landing commit', () => {
+      expect(() => waitForPublishedCohort({
+        ...controls,
+        sha: target,
+        resolve: () => ({ ...cohort(newer), cohort: false }),
+        isAncestor: () => true,
+      })).toThrow(/not a proven Version Packages landing commit/);
+    });
+
+    it('case 3c: a target newer than the resolved main spine still fails', () => {
+      const older = 'd'.repeat(40);
+      expect(() => waitForPublishedCohort({
+        ...controls,
+        sha: target,
+        resolve: () => cohort(older),
+        isAncestor: (ancestor: string, descendant: string) => ancestor === older && descendant === target,
+      })).toThrow(/supersession is not proven/);
+    });
+
+    it('case 3d: an incomplete CURRENT cohort still exhausts the budget and fails', () => {
+      let clock = 0;
+      let caught: unknown;
+      try {
+        waitForPublishedCohort({
+          sha: target,
+          timeoutMs: 15_000,
+          recheckMs: 0,
+          intervalMs: 5_000,
+          now: () => clock,
+          sleep: (ms: number) => {
+            clock += ms;
+          },
+          resolve: () => cohort(target, false),
+          isAncestor: () => true,
+        });
+      } catch (error) {
+        caught = error;
+      }
+      const message = caught instanceof Error ? caught.message : String(caught);
+      expect(message).toContain('@principles/core@7.0.0');
+      expect(message).toContain('after 15000ms');
+      expect(clock).toBe(15_000);
+    });
+  });
+
+  describe('classifyCohort: only a proven ancestor may defer', () => {
+    const target = 'a'.repeat(40);
+    const newer = 'c'.repeat(40);
+
+    it('keeps the four verdicts distinct', () => {
+      expect(classifyCohort({ sha: target, latest: { cohort: true, sha: target } })).toEqual({ outcome: 'current' });
+      expect(classifyCohort({ sha: target, latest: { cohort: true, sha: newer }, isAncestor: () => true }))
+        .toEqual({ outcome: 'superseded', supersededBy: newer });
+      expect(classifyCohort({ sha: target, latest: { cohort: true, sha: newer }, isAncestor: () => false }).outcome)
+        .toBe('unrelated');
+      expect(classifyCohort({ sha: target, latest: { cohort: false, sha: newer }, isAncestor: () => true }).outcome)
+        .toBe('unproven');
+      expect(classifyCohort({ sha: target, latest: null, isAncestor: () => true }).outcome).toBe('unproven');
+    });
+
+    it('refuses to answer without a wired authority, instead of guessing either way', () => {
+      expect(() => classifyCohort({ sha: target, latest: { cohort: true, sha: newer } }))
+        .toThrow(/ancestry authority is not wired/);
+    });
+
+    it('the production authority answers real git ancestry, and an unanswerable question is an error', () => {
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+      expect(gitIsAncestor(head, head)).toBe(true);
+      // A SHA git cannot resolve is an unanswered question, never "no".
+      expect(() => gitIsAncestor('f'.repeat(40), head)).toThrow(/ancestry check failed/);
+    });
+  });
+
+  describe('deferral is visible on all three surfaces', () => {
+    const target = 'a'.repeat(40);
+    const newer = 'c'.repeat(40);
+    const report = deferredReport({ target, supersededBy: newer });
+
+    it('payload is an explicit deferral, never an empty success', () => {
+      expect(report.payload).toEqual({ ok: true, changed: false, deferred: true, cohort: target, supersededBy: newer });
+    });
+
+    it('the stdout line names both cohorts', () => {
+      expect(report.line).toContain('deferred');
+      expect(report.line).toContain(target);
+      expect(report.line).toContain(newer);
+    });
+
+    it('the job summary says no pins changed and who owns the update', () => {
+      expect(report.summary).toContain('deferred');
+      expect(report.summary).toContain(`\`${target}\``);
+      expect(report.summary).toContain(`\`${newer}\``);
+      expect(report.summary).toContain('Pins changed:** none');
+      expect(report.summary).toContain("newer cohort's own release run");
+    });
+
+    it('the CLI wires the git ancestry authority and the step summary', () => {
+      const source = fs.readFileSync(path.join(root, 'scripts/release/sync-codex-runtime-pins.mjs'), 'utf8');
+      expect(source).toMatch(/isAncestor:\s*gitIsAncestor/);
+      expect(source).toContain("'merge-base', '--is-ancestor'");
+      expect(source).toContain('GITHUB_STEP_SUMMARY');
+      expect(source).toContain('appendStepSummary(');
     });
   });
 
