@@ -7,6 +7,81 @@ export const REQUIRED_PROMOTION_CHECK_IDS = [
 ] as const;
 
 export type PromotionCheckId = typeof REQUIRED_PROMOTION_CHECK_IDS[number];
+
+/**
+ * The four numeric evidence thresholds for promotion. THE single definition:
+ * the evaluator, the explanation projection and every consumer (tests
+ * included) read their numbers from here, so no second set of constants can
+ * drift from the judgment it describes.
+ */
+export const PROMOTION_EVIDENCE_THRESHOLDS = Object.freeze({
+  minObservedSamples: 20,
+  minMatchedSamples: 3,
+  minNeutralControlSamples: 1,
+  minShadowAgeMs: 24 * 60 * 60 * 1000,
+});
+
+export type PromotionEvidenceCriterionId =
+  | 'shadow_observed'
+  | 'shadow_matched'
+  | 'shadow_neutral_control'
+  | 'shadow_age';
+
+export interface PromotionEvidenceCriterion {
+  criterionId: PromotionEvidenceCriterionId;
+  /** Measured value; null when the snapshot carries no measurement at all. */
+  current: number | null;
+  threshold: number;
+  /** Distance to the threshold. Absent once the criterion is satisfied. */
+  shortfall?: number;
+}
+
+function criterionFor(
+  criterionId: PromotionEvidenceCriterionId,
+  current: number | null,
+  threshold: number,
+): PromotionEvidenceCriterion {
+  const measured = current !== null && Number.isFinite(current) ? current : null;
+  if (measured !== null && measured >= threshold) {
+    return { criterionId, current: measured, threshold };
+  }
+  return { criterionId, current: measured, threshold, shortfall: threshold - (measured ?? 0) };
+}
+
+/**
+ * Explain the numeric evidence dimension: what each threshold currently is,
+ * what it must reach, and how far it still is. Pure — the same snapshot always
+ * yields the same criteria.
+ */
+export function evaluatePromotionEvidenceCriteria(
+  evidenceSnapshot: PromotionEvidenceSnapshot,
+): PromotionEvidenceCriterion[] {
+  const summary = evidenceSnapshot.shadowSummary;
+  const shadowAgeMs = summary.firstObservedAt === null
+    ? null
+    : Date.parse(evidenceSnapshot.createdAt) - Date.parse(summary.firstObservedAt);
+  return [
+    criterionFor('shadow_observed', summary.observed, PROMOTION_EVIDENCE_THRESHOLDS.minObservedSamples),
+    criterionFor('shadow_matched', summary.matched, PROMOTION_EVIDENCE_THRESHOLDS.minMatchedSamples),
+    criterionFor('shadow_neutral_control', summary.neutralControl, PROMOTION_EVIDENCE_THRESHOLDS.minNeutralControlSamples),
+    criterionFor('shadow_age', shadowAgeMs, PROMOTION_EVIDENCE_THRESHOLDS.minShadowAgeMs),
+  ];
+}
+
+/**
+ * Project the gaps a consumer may display for a readiness result. Returns null
+ * unless the result is `evidence_insufficient`: a blocked hard check or an
+ * unavailable telemetry source is a different obstacle, and "still need N
+ * samples" would describe the wrong reason.
+ */
+export function explainPromotionReadiness(
+  evidenceSnapshot: PromotionEvidenceSnapshot,
+  status: PromotionReadinessResult['status'],
+): PromotionEvidenceCriterion[] | null {
+  if (status !== 'evidence_insufficient') return null;
+  return evaluatePromotionEvidenceCriteria(evidenceSnapshot);
+}
+
 export interface PromotionReadinessCheck {
   checkId: PromotionCheckId;
   status: 'passed' | 'failed';
@@ -58,14 +133,8 @@ export function evaluateRuleCodePromotionReadiness(input: PromotionReadinessEval
   const failedChecks = safetyGateResults
     .filter(check => check.status === 'failed')
     .map(check => ({ checkId: check.checkId, reasonCode: check.reasonCode ?? 'hard_check_failed' }));
-  const summary = evidenceSnapshot.shadowSummary;
-  const shadowAgeMs = summary.firstObservedAt === null
-    ? null
-    : Date.parse(evidenceSnapshot.createdAt) - Date.parse(summary.firstObservedAt);
-  const insufficientEvidence = summary.observed === null || summary.observed < 20
-    || summary.matched === null || summary.matched < 3
-    || summary.neutralControl === null || summary.neutralControl < 1
-    || shadowAgeMs === null || !Number.isFinite(shadowAgeMs) || shadowAgeMs < 24 * 60 * 60 * 1000;
+  const criteria = evaluatePromotionEvidenceCriteria(evidenceSnapshot);
+  const insufficientEvidence = criteria.some(criterion => criterion.shortfall !== undefined);
   return {
     status: failedChecks.length > 0 ? 'blocked' : insufficientEvidence ? 'evidence_insufficient' : 'ready', evaluationId: input.evaluationId,
     artifactId: input.artifactId, artifactDigest: input.artifactDigest, evidenceSnapshot, failedChecks,
