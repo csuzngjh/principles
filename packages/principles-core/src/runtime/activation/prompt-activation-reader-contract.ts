@@ -303,7 +303,8 @@ function sharedDirectiveHeaderLines(): string[] {
     // PRI-1161 (Owner-approved card v0.1): the per-block "Apply this as an
     // active behavior constraint..." line was hoisted HERE, stated once in the
     // shared position, instead of repeating verbatim inside every directive
-    // block (87 chars × N blocks). Same instruction, one copy.
+    // block (86 chars × N blocks; 85-char sentence + one newline).
+    // Same instruction, one copy.
     'These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.',
     'For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.',
     '',
