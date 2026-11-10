@@ -63,12 +63,25 @@ function fakeRuntime(overrides: Partial<DiagnosticianRuntime> = {}): Diagnostici
 
 function digestWorkspace(workspaceDir: string): string {
   const pdDir = path.join(workspaceDir, '.pd');
-  if (!fs.existsSync(pdDir)) return 'missing';
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(pdDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+    throw error;
+  }
   const hash = crypto.createHash('sha256');
-  for (const name of fs.readdirSync(pdDir).sort()) {
-    const filePath = path.join(pdDir, name);
-    hash.update(name);
-    if (fs.statSync(filePath).isFile()) hash.update(fs.readFileSync(filePath));
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isFile()) continue;
+    hash.update(entry.name);
+    try {
+      hash.update(fs.readFileSync(path.join(pdDir, entry.name)));
+    } catch (error) {
+      // A file vanishing mid-scan is not a state change we caused; skip it
+      // instead of stat-then-read, which CodeQL flags as a filesystem race.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
   }
   return hash.digest('hex');
 }
