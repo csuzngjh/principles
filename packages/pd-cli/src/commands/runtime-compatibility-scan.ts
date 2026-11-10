@@ -10,8 +10,11 @@
  *
  * Output contract (cli-1 strict-json, cli-5 no mutation, cli-6 nextAction):
  * - --json emits exactly one parseable JSON object on stdout.
- * - clean / no_state_db → exit 0; legacy_dependency / scan_failed → exit 1
- *   with reason + nextAction. The command never writes to the workspace.
+ * - clean / no_state_db / incomplete → exit 0. `incomplete` = nothing was
+ *   found, but some ACTIVE rows could not be read, so their compatibility is
+ *   unverified; it is a warning, never an upgrade gate (ok stays true).
+ * - legacy_dependency / scan_failed → exit 1 with reason + nextAction.
+ *   The command never writes to the workspace.
  *
  * ERR refs: ERR-001/ERR-005 (rows validated from unknown), ERR-002 (every
  * refusal carries reason + nextAction), ERR-014 (bounded JSON output of
@@ -53,6 +56,15 @@ function formatTextOutput(output: ActivationCompatibilityScanResult): string {
   if (output.findings.length > 0) {
     lines.push('Retired-contract dependencies (these rules will NOT execute on this runtime):');
     for (const f of output.findings) lines.push(formatFinding(f));
+  } else if (output.status === 'incomplete') {
+    // Never print the "nothing to see" line here: findings are empty only
+    // because some rows could not be read, not because every row was checked.
+    lines.push('No active rule was FOUND to reference a retired RuleHost contract symbol,');
+    lines.push('but this scan is INCOMPLETE: some active rules could not be read, so their compatibility is unverified.');
+    for (const entry of output.skipped) {
+      const sample = entry.sampleActivationIds.length > 0 ? ` (sample: ${entry.sampleActivationIds.join(', ')})` : '';
+      lines.push(`  ${entry.reason}=${entry.count}${sample}`);
+    }
   } else {
     lines.push('No active rule references a retired RuleHost contract symbol.');
   }
@@ -82,6 +94,8 @@ export async function handleRuntimeCompatibilityScan(opts: RuntimeCompatibilityS
       return;
     }
     emitResult(output, { json: opts.json ?? false, formatText: formatTextOutput });
+    // Only a failed scan exits non-zero. `incomplete` is ok=true by design:
+    // it reports unverified rows, it does not block.
     if (!output.ok) {
       process.exitCode = 1;
     }
