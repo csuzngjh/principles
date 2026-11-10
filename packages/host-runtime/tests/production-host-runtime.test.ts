@@ -533,8 +533,9 @@ describe('shared production RuleHost gate kernel', () => {
     await seedLiveRule(workspaceDir, `function evaluate() { return { decision: 'block' }; }`);
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
 
-    // B1: an unreadable block used to be dropped (`allow`). It is now enforced
-    // fail-closed as requireApproval and stays observable in warnings.
+    // B1: an unreadable block used to be dropped (`allow`). It is now normalized
+    // (contract-level fail-closed) to requireApproval and stays observable in
+    // warnings; this gate itself does not block.
     const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
     expect(result).toMatchObject({
       decision: 'allow',

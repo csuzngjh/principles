@@ -701,10 +701,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         // B1: one reading of unusable output. Previously this branch warned and
         // `continue`d, so the rule silently stopped participating and another
         // rule's allow could win the merge. Normalization keeps it in the merge
-        // as a fail-closed requireApproval marked `degraded`.
+        // as a contract-level fail-closed requireApproval marked `degraded`.
         const normalized = normalizeRuleHostResult(batchResult.result);
         if (normalized.degraded !== undefined) {
-          addWarning(warnings, `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`, 'fix the RuleCode result and reactivate the rule; invalid output is enforced as requireApproval (fail-closed)');
+          addWarning(warnings, `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`, 'fix the RuleCode result and reactivate the rule; invalid output is normalized to requireApproval (fail-closed in the contract, not enforced as a block by this gate)');
         }
         const validatedResult = normalized.matched
           ? { ...normalized, ruleId: candidate.ruleId, principleId: candidate.principleId }
