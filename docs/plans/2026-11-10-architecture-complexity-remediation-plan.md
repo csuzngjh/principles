@@ -1,10 +1,10 @@
 # PD 架构复杂度整改实施计划（2026-11-10）
 
-- 性质：**计划文档**。Rev.2（2026-11-10）。本轮只改文档，不改产品代码。
+- 性质：**计划文档**。Rev.3（2026-11-11）。5A/5B 已合入主干，Rev.2 的"本轮只改文档，不改产品代码"已不适用。
 - 依据：
   - `docs/reports/PD_ARCHITECTURE_COMPLEXITY_REVIEW_20261110.md`（下称"评审报告"）
   - `docs/reports/PD_ARCHITECTURE_REMEDIATION_PLAN_INDEPENDENT_REVIEW_20261110.md`（下称"独立评审"，裁定 CONDITIONAL）
-- 5A 已实施：PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，3 文件、零对外契约变更、未合并。
+- 5A 已实施并合入：PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，3 文件、零对外契约变更，2026-11-10 合入。
 - **口径声明**：所有行数标注 `total`（`Get-Content` 行数）或 `non-blank`（`Measure-Object -Line`）。前一版混用了两种口径，本版逐处标注。
 - **执行顺序见 §10**（本版已重排，不再沿用 5 → 3 → 1）。
 
