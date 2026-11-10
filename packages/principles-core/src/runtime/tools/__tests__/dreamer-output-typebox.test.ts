@@ -99,14 +99,20 @@ describe('PRI-419 dreamer-output-typebox consistency', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('valid=false is schema-acceptable but rejected by the production validator (semantic rule)', async () => {
-    // The schema declares `valid: Type.Boolean()`, so any boolean passes structural check.
-    // The production validator enforces the business rule `valid === true` separately.
-    // This documents the contract split: schema = structure, validator = semantics.
+  // PRI-675 REVERSES the PRI-419 semantic rule below. `valid` is the model's
+  // self-assertion, not a validation input: the production path normalizes the
+  // claim to the runtime truth (DreamerRunner.postFetchTransform) before
+  // validation runs, so a validator gate on it could only ever fire for direct
+  // callers — a rule unreachable in production is a trap, not a defense. The
+  // original rule let a model with 100% schema-consistent content kill the chain
+  // by writing `"valid": false` (2026-09-05: prompt dreamer, glm-5.3-flash, 3/3
+  // identical failures where this was the ONLY error).
+  // Contract split that still holds: schema = structure, validator = content.
+  it('valid=false is schema-acceptable and is not a validation input (PRI-675)', async () => {
     const sample = validOutput({ valid: false });
     expect(Value.Check(DreamerOutputV1Schema, sample)).toBe(true);
     const result = await validator.validate(sample, TASK_ID);
-    expect(result.valid).toBe(false);
+    expect(result.valid).toBe(true);
   });
 
   it('the typebox and @sinclair schemas declare the same required property names', () => {

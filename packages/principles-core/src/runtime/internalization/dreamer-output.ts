@@ -130,9 +130,16 @@ export class DefaultDreamerValidator implements DreamerValidator {
       errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
     }
 
-    if (record.valid !== true) {
-      errors.push('output.valid must be true');
-    }
+    // PRI-675: `valid` is the Dreamer's own claim about its output, not a fact.
+    // The authoritative verdict is this function's return value, and the flag
+    // has no downstream consumer (the artifact is stored either way). Gating on
+    // it let a model with fully schema-consistent content kill the chain by
+    // writing `"valid": false` — 2026-09-05 prompt-channel dreamer on
+    // glm-5.3-flash failed 3/3 with this as the ONLY error while every required
+    // field was filled. DreamerRunner.postFetchTransform normalizes the claim
+    // to the runtime truth, and the schema layer still requires the field to be
+    // a boolean, so removing the semantic gate here drops the trap without
+    // weakening content validation.
 
     if (!Array.isArray(record.candidates)) {
       errors.push('candidates must be an array');

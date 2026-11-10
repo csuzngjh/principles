@@ -131,6 +131,43 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
     );
   });
 
+  // PRI-675 regression: the model's own `valid: false` must not fail the chain.
+  // Real validator + real runner: only the LLM payload is missing-behaving.
+  it('normalizes a self-asserted valid=false and still succeeds (PRI-675)', async () => {
+    const selfDeclaredInvalid = { ...makeDreamerOutput(), valid: false };
+    vi.mocked(deps.runtimeAdapter.fetchOutput).mockResolvedValue({
+      runId: 'run-001',
+      payload: selfDeclaredInvalid,
+    });
+
+    const runner = new DreamerRunner(
+      { ...deps, validator: new DefaultDreamerValidator() },
+      {
+        owner: 'test',
+        runtimeKind: 'dreamer',
+        pollIntervalMs: 10,
+        timeoutMs: 1000,
+      },
+    );
+
+    const result = await runner.run('task-dreamer-001');
+
+    expect(result.status).toBe('succeeded');
+    expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalled();
+
+    const [artifact] = await artifactStore.listBySourceTaskId('task-dreamer-001');
+    expect(artifact).toBeDefined();
+    if (!artifact) throw new Error('expected a stored artifact');
+    // Stored artifact carries the runtime truth, not the model's claim.
+    expect(JSON.parse(artifact.contentJson).valid).toBe(true);
+
+    const overrideEvent = vi.mocked(deps.eventEmitter.emitTelemetry).mock.calls
+      .find(([event]) => (event as { eventType?: string }).eventType === 'dreamer_self_attested_valid_overridden');
+    expect(overrideEvent).toBeDefined();
+    const overridePayload = overrideEvent ? (overrideEvent[0] as { payload: Record<string, unknown> }).payload : null;
+    expect(overridePayload?.assertedValid).toBe(false);
+  });
+
   it('adapter failure: task retried, no artifact created', async () => {
     vi.mocked(deps.runtimeAdapter.startRun).mockRejectedValue(
       new Error('Runtime unavailable'),

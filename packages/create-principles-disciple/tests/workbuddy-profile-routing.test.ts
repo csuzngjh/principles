@@ -778,3 +778,54 @@ describe('round-4 S2: model resolution at the governance write boundary', () => 
     expect(readiness.readiness, readiness.reason ?? '').toBe('ready');
   });
 });
+
+/**
+ * Regression (dogfood 2026-11-10): an install/update scoped to ONE host
+ * replaces the SHARED runtime (~/.pd/runtime) but used to leave every other
+ * installed host's mcp-binding.json pinned to the previous MCP server version.
+ * WorkBuddy then failed closed at launch with
+ * `binding_version_mismatch:0.2.1!=0.3.2` until the operator happened to
+ * re-run `install --host workbuddy`. The sibling host must be refreshed in the
+ * same run.
+ */
+describe('install() refreshes sibling-host bindings when the shared runtime is replaced', () => {
+  it('a later install for ANOTHER host rewrites the previously installed WorkBuddy marketplace AND cache bindings', { timeout: 300_000 }, async () => {
+    const lab = currentLab();
+
+    // 1. Attach WorkBuddy: the install manifest now records it and its binding
+    // pins the runtime's MCP server version.
+    const first = await install(baseOptions(lab), lab.payloadDir, { quiet: true });
+    expect(first.success, `install failed: ${first.error ?? first.reason} Next: ${first.nextAction}`).toBe(true);
+
+    const marketplaceBindingPath = path.join(lab.sandbox, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json');
+    const readBinding = (file: string): { versions: { mcpServer: string } } =>
+      JSON.parse(fs.readFileSync(file, 'utf8')) as { versions: { mcpServer: string } };
+    expect(readBinding(marketplaceBindingPath).versions.mcpServer).toBe(PAYLOAD_VERSION);
+
+    // The host launches the launcher from the engine CACHE copy, not the
+    // marketplace source — both must carry the current pin.
+    const registryPath = path.join(process.env.WORKBUDDY_CONFIG_DIR!, 'plugins', 'installed_plugins.json');
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8')) as { plugins: Record<string, { installPath: string }> };
+    const cacheDir = Object.values(registry.plugins)[0]!.installPath;
+    const cacheBindingPath = path.join(cacheDir, 'mcp-binding.json');
+    expect(readBinding(cacheBindingPath).versions.mcpServer).toBe(PAYLOAD_VERSION);
+
+    // 2. Simulate what the PREVIOUS runtime left behind: both copies pin an
+    // older MCP server (this is the exact state found on 2026-11-10).
+    for (const bindingPath of [marketplaceBindingPath, cacheBindingPath]) {
+      const stale = readBinding(bindingPath);
+      stale.versions.mcpServer = '0.0.9';
+      fs.writeFileSync(bindingPath, JSON.stringify(stale, null, 2) + '\n');
+    }
+
+    // 3. Install ANOTHER host (the update path's default target). This is the
+    // run that replaces the shared runtime.
+    const second = await install({ ...baseOptions(lab), host: 'openclaw' }, lab.payloadDir, { quiet: true });
+    expect(second.success, `install failed: ${second.error ?? second.reason} Next: ${second.nextAction}`).toBe(true);
+
+    // 4. WorkBuddy was refreshed to the new runtime pin without a second
+    // `--host workbuddy` run.
+    expect(readBinding(marketplaceBindingPath).versions.mcpServer).toBe(PAYLOAD_VERSION);
+    expect(readBinding(cacheBindingPath).versions.mcpServer).toBe(PAYLOAD_VERSION);
+  });
+});
