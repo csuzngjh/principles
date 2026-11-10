@@ -65,6 +65,31 @@ async function selectionPayload(workspaceDir, principleId) {
   return { status: 'selected', id: `c${index + 1}`, digest: hash(read.principles[index].text) };
 }
 
+// Read the candidate list out of the ACTUAL outbound request body. The tests
+// below build their answer from this, so a payload that forgets the locally
+// precomputed digest fails here instead of silently passing.
+function requestCandidates(send) {
+  assert.ok(send, 'the selection request must have been sent');
+  const body = JSON.parse(send.init.body);
+  const message = (body.messages ?? []).find(
+    (item) => typeof item.content === 'string' && item.content.trim().startsWith('{'),
+  );
+  assert.ok(message, 'the selection payload must be sent as a JSON message');
+  const payload = JSON.parse(message.content);
+  assert.ok(Array.isArray(payload.candidates), 'the request must carry a candidate list');
+  return payload.candidates;
+}
+
+function echoFromRequest(sends, marker) {
+  const candidates = requestCandidates(sends.at(-1));
+  const candidate = candidates.find((item) => item.text.includes(marker));
+  assert.ok(candidate, `the request must carry the candidate containing ${marker}`);
+  assert.equal(typeof candidate.digest, 'string', 'the request must carry a locally precomputed digest');
+  assert.match(candidate.digest, /^[a-f0-9]{64}$/u, 'the digest must be a sha256 hex string');
+  assert.equal(candidate.digest, hash(candidate.text), 'the digest must be sha256 of the candidate text');
+  return { status: 'selected', id: candidate.ref, digest: candidate.digest };
+}
+
 function sse(payload) {
   const packets = [
     { id: 'fake', model: 'glm-5.3-flash', choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(payload) }, finish_reason: null }] },
@@ -74,11 +99,12 @@ function sse(payload) {
     { headers: { 'Content-Type': 'text/event-stream' } });
 }
 
-function selectorFor({ payload, fetchOverride, now = Date.now, deadlineAt = Date.now() + LIMITS.selectTimeoutMs }) {
+function selectorFor({ payload, choose, fetchOverride, now = Date.now, deadlineAt = Date.now() + LIMITS.selectTimeoutMs }) {
   const sends = [];
   const fetch = async (url, init) => {
     sends.push({ url, init });
     if (fetchOverride) return fetchOverride({ url, init, sends });
+    if (choose) return sse(choose({ url, init, sends }));
     return sse(payload);
   };
   const selector = createSingleModelSelector({ PiAiRuntimeAdapter, fetch, now, deadlineAt });
@@ -155,7 +181,11 @@ test('positive: Native misses the target, generic model selects it, shared assem
   assert.deepEqual(native.activationIds, ['act-A']);
   assert.equal(native.additionalContext.includes(TEXT.DELIVERY), false);
 
-  const { select, selectorReport, sends } = selectorFor({ payload: await selectionPayload(workspaceDir, 'DELIVERY') });
+  // The answer is minted from the ACTUAL request body: reference AND digest
+  // come out of the payload PD really sent, never from a test-side hash.
+  const { select, selectorReport, sends } = selectorFor({
+    choose: ({ sends: sent }) => echoFromRequest(sent, TEXT.DELIVERY),
+  });
   const result = await runSelectionOpportunity({
     workspaceDir,
     promptBudget,
@@ -165,6 +195,14 @@ test('positive: Native misses the target, generic model selects it, shared assem
     selectorReport,
   });
 
+  // Checked AFTER the run so a missing digest fails with its real name instead
+  // of being swallowed as a transport error by the adapter.
+  const outbound = requestCandidates(sends[0]);
+  assert.ok(outbound.length > 0);
+  for (const candidate of outbound) {
+    assert.equal(typeof candidate.digest, 'string', 'the outbound payload must carry a locally precomputed digest');
+    assert.equal(candidate.digest, hash(candidate.text), 'the outbound digest must be sha256 of the candidate text');
+  }
   assert.equal(result.outcome, 'dynamic_added');
   assert.equal(result.selection.status, 'selected');
   assert.equal(result.selection.principleId, 'DELIVERY');
@@ -178,6 +216,49 @@ test('positive: Native misses the target, generic model selects it, shared assem
   assert.deepEqual(result.assembly.finalActivationIds, ['act-T', 'act-A']);
   assert.equal(result.additionalContext.includes(TEXT.DELIVERY), true);
   assert.equal(result.additionalContext.includes(TEXT.SCOPE), true);
+  assert.equal(result.model.diagnostics.httpStatus, 200);
+  assert.equal(result.model.diagnostics.finishReason, 'stop');
+  assert.equal(Number.isFinite(result.model.diagnostics.firstByteAt), true);
+});
+
+test('gate: a reply without the digest carried by the request can never select', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('no-digest');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  // Models cannot compute sha256. Without a digest in the payload the model can
+  // only answer selected+null, and PD must refuse instead of applying text.
+  const { select, selectorReport, sends } = selectorFor({
+    choose: ({ sends: sent }) => {
+      const [candidate] = requestCandidates(sent.at(-1));
+      assert.equal(typeof candidate.text, 'string');
+      return { status: 'selected', id: candidate.ref, digest: null };
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '请交付验收', select, selectorReport,
+  });
+  assert.equal(sends.length, 1);
+  assert.equal(result.model.sends, 1);
+  assert.equal(result.outcome, 'selection_failed');
+  assert.equal(result.selection.reason, 'SELECTION_REFERENCE_INVALID');
+  assert.equal(result.additionalContext, result.nativeContext);
+  assert.equal(result.additionalContext.includes(TEXT.DELIVERY), false);
+});
+
+test('gate: a fabricated digest for a real reference is rejected', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('fake-digest');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const { select, selectorReport } = selectorFor({
+    choose: ({ sends }) => {
+      const [candidate] = requestCandidates(sends.at(-1));
+      return { status: 'selected', id: candidate.ref, digest: hash('guessed-body') };
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '请交付验收', select, selectorReport,
+  });
+  assert.equal(result.outcome, 'selection_failed');
+  assert.equal(result.selection.reason, 'SELECTION_REFERENCE_INVALID');
+  assert.equal(result.additionalContext, result.nativeContext);
 });
 
 test('no applicable principle abstains and keeps the Native text byte-identical', async () => {
@@ -300,6 +381,48 @@ test('an authorization change during the model wait is rejected even when ids ma
   assert.equal(result.outcome, 'native_baseline');
   assert.equal(result.assembly.fallback, 'reread_native_after_revalidation_failure');
   assert.equal(result.additionalContext.includes(TEXT.DELIVERY), false);
+});
+
+test('a deactivated target during the model wait is rejected; Native is re-read', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('deactivated');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  const selector = selectorFor({
+    choose: ({ sends }) => {
+      const answer = echoFromRequest(sends, TEXT.DELIVERY);
+      deactivate(workspaceDir, 'act-T');
+      return answer;
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收',
+    select: selector.select, selectorReport: selector.selectorReport,
+  });
+  assert.equal(result.selection.status, 'selected');
+  assert.equal(result.outcome, 'native_baseline');
+  assert.equal(result.assembly.fallbackReason, 'pre_assembly_revalidation_failed');
+  assert.equal(result.additionalContext.includes(TEXT.DELIVERY), false);
+});
+
+test('an HTTP failure is not retried: exactly one send and no repair round', async () => {
+  const { workspaceDir, base, byPrincipleId } = await fourCandidateWorkspace('no-retry');
+  const promptBudget = budgetResolution(base + byPrincipleId.SCOPE + byPrincipleId.DELIVERY + 10);
+  let calls = 0;
+  const { select, selectorReport, sends } = selectorFor({
+    fetchOverride: () => {
+      calls += 1;
+      return new Response('{"error":"upstream"}', { status: 500, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+  const result = await runSelectionOpportunity({
+    workspaceDir, promptBudget, currentInput: '交付验收', select, selectorReport,
+  });
+  assert.equal(calls, 1);
+  assert.equal(sends.length, 1);
+  assert.equal(result.model.sends, 1);
+  assert.equal(result.outcome, 'selection_failed');
+  assert.equal(result.additionalContext, result.nativeContext);
+  assert.equal(result.model.diagnostics.httpStatus, 500);
+  assert.equal(result.model.diagnostics.finishReason, 'unknown');
 });
 
 test('revalidation passes but the packer next read sees a changed revision: increment is dropped', async () => {
