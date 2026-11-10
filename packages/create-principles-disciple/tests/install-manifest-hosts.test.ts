@@ -100,8 +100,8 @@ describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
 
     const summary = summarizeTouchedHosts(
       [
-        { success: true, hostId: 'openclaw', configAction: 'updated' },
-        { success: true, hostId: 'codex', configAction: 'updated' },
+        { success: true, hostId: 'openclaw', configAction: 'updated', nextAction: '' },
+        { success: true, hostId: 'codex', configAction: 'updated', nextAction: '' },
       ],
       { canonicalRuntimeDir: path.join(root, 'canonical'), codexRuntimeDir: path.join(root, 'codex') },
     );
@@ -118,7 +118,7 @@ describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
     writeCohort(path.join(root, 'canonical'), '7.2.0');
 
     const summary = summarizeTouchedHosts(
-      [{ success: true, hostId: 'openclaw', configAction: 'updated' }],
+      [{ success: true, hostId: 'openclaw', configAction: 'updated', nextAction: '' }],
       { canonicalRuntimeDir: path.join(root, 'canonical'), codexRuntimeReadable: false },
     ).join('\n');
 
