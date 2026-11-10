@@ -528,14 +528,32 @@ describe('shared production RuleHost gate kernel', () => {
     });
   });
 
-  it('fails open observably for malformed implementation output', async () => {
+  it('fails closed for malformed implementation output', async () => {
     const workspaceDir = tempWorkspace();
     await seedLiveRule(workspaceDir, `function evaluate() { return { decision: 'block' }; }`);
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
 
+    // B1: an unreadable block used to be dropped (`allow`). It is now enforced
+    // fail-closed as requireApproval and stays observable in warnings.
+    const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    expect(result).toMatchObject({
+      decision: 'allow',
+      metadata: { ruleDecision: 'requireApproval', evaluatedLiveRules: 1 },
+    });
+    expect(result.warnings?.join('\n')).toContain('invalid RuleHostResult');
+  });
+
+  it('does not let another allow win over a malformed block result', async () => {
+    const workspaceDir = tempWorkspace();
+    await seedLiveRule(workspaceDir, `function evaluate() { return { decision: 'block' }; }`, undefined, '-garbage');
+    await seedLiveRule(workspaceDir, `function evaluate() { return { decision: 'allow', matched: true, reason: 'safe' }; }`, undefined, '-allower');
+    const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
+
+    // Counterexample for the old behaviour: the malformed block was skipped and
+    // the second rule's allow ended the merge, so the block silently vanished.
     await expect(runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
       decision: 'allow',
-      warnings: [expect.stringMatching(/invalid RuleHostResult.*nextAction=/)],
+      metadata: { ruleDecision: 'requireApproval', evaluatedLiveRules: 2 },
     });
   });
 
@@ -676,12 +694,14 @@ describe('shared production RuleHost gate kernel', () => {
     }));
   });
 
-  it('keeps winning activation identity after skipping an invalid earlier live result', async () => {
+  it('keeps winning activation identity when an earlier live result is unusable', async () => {
     const workspaceDir = tempWorkspace();
     await seedRuleActivation(workspaceDir, { suffix: '-invalid-first', action: 'code_tool_hook_live_activate', implementationCode: 'function evaluate() { return { decision: "invalid" }; }' });
     await seedRuleActivation(workspaceDir, { suffix: '-valid-second', action: 'code_tool_hook_live_activate', implementationCode: SHARED_GATE_CODE });
     const runtime = createProductionHostRuntime({ afterToolCall: async (event) => ({ decision: 'observe', source: event.source }) });
     const result = await runtime.dispatch(gateEvent(workspaceDir, '/etc/passwd'));
+    // B1: the unusable result now merges as requireApproval; a real block still
+    // wins and keeps its own activation identity.
     expect(result.decision).toBe('deny');
     expect(result.warnings?.join('\n')).toContain('invalid RuleHostResult');
     expect(readEvaluations(result.metadata).find(entry => entry.activationMode === 'live')).toMatchObject({

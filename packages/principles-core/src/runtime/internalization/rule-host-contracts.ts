@@ -88,6 +88,16 @@ export interface RuleHostResult {
   principleId?: string;
   /** Present when decision is 'auto_correct'. Must pass validateCorrectionProposal(). */
   correctionProposal?: CorrectionProposal;
+  /**
+   * B1: present only when the producer's raw output was unusable and the
+   * decision was synthesized fail-closed by normalizeRuleHostResult(). It marks
+   * the result as a degradation, not the rule's own opinion, so consumers never
+   * report it as an enforcement fact. `decision` stays the single verdict field.
+   */
+  degraded?: {
+    reasonCode: 'invalid_result';
+    notes?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

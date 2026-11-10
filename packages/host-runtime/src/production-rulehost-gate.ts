@@ -6,10 +6,10 @@ import {
   deriveToolHintsFromCanonicalKind,
   estimateLineChanges,
   mergeDecisions,
+  normalizeRuleHostResult,
   SqliteConnection,
   UNAVAILABLE_RULE_CONTEXT,
   validateRuleContextV2,
-  validateRuleHostResult,
   verifyPiArtifactRowDigest,
   RECOVERY_CONTROL_SURFACES,
   type LoadedImplementation,
@@ -109,10 +109,6 @@ function isRuleMeta(value: unknown): value is RuleHostMeta {
 
 function isRuleContext(value: unknown): value is RuleContextV2 {
   return validateRuleContextV2(value).valid;
-}
-
-function isRuleResult(value: unknown): value is RuleHostResult {
-  return validateRuleHostResult(value).valid;
 }
 
 export interface ProductionRuleContextRequest {
@@ -666,14 +662,14 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 addWarning(warnings, `implementation_unhealthy: ${batchResult && !batchResult.ok ? batchResult.error ?? 'unknown child error' : 'rule_batch_result_missing'}`, 'fix the shadow RuleCode and reactivate the rule; live enforcement is unaffected');
                 continue;
               }
-              const validation = validateRuleHostResult(batchResult.result);
-              if (!isRuleResult(batchResult.result)) {
-                addWarning(warnings, `invalid RuleHostResult: ${validation.errors.join('; ')}`, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
+              const normalized = normalizeRuleHostResult(batchResult.result);
+              if (normalized.degraded !== undefined) {
+                addWarning(warnings, `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`, 'fix the shadow RuleCode result and reactivate the rule; live enforcement is unaffected');
                 continue;
               }
-              const shadowResult = batchResult.result.matched
-                ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
-                : batchResult.result;
+              const shadowResult = normalized.matched
+                ? { ...normalized, ruleId: candidate.ruleId, principleId: candidate.principleId }
+                : normalized;
               shadowEvaluations.push({
                 toolName: input.toolName,
                 filePath: action.normalizedPath,
@@ -702,14 +698,17 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           addWarning(warnings, `implementation_unhealthy: ${batchResult.error ?? 'unknown child error'}`, 'fix the RuleCode and reactivate the rule');
           continue;
         }
-        const validation = validateRuleHostResult(batchResult.result);
-        if (!isRuleResult(batchResult.result)) {
-          addWarning(warnings, `invalid RuleHostResult: ${validation.errors.join('; ')}`, 'fix the RuleCode result and reactivate the rule');
-          continue;
+        // B1: one reading of unusable output. Previously this branch warned and
+        // `continue`d, so the rule silently stopped participating and another
+        // rule's allow could win the merge. Normalization keeps it in the merge
+        // as a fail-closed requireApproval marked `degraded`.
+        const normalized = normalizeRuleHostResult(batchResult.result);
+        if (normalized.degraded !== undefined) {
+          addWarning(warnings, `invalid RuleHostResult: ${normalized.degraded.notes ?? 'unknown invalid result'}`, 'fix the RuleCode result and reactivate the rule; invalid output is enforced as requireApproval (fail-closed)');
         }
-        const validatedResult = batchResult.result.matched
-          ? { ...batchResult.result, ruleId: candidate.ruleId, principleId: candidate.principleId }
-          : batchResult.result;
+        const validatedResult = normalized.matched
+          ? { ...normalized, ruleId: candidate.ruleId, principleId: candidate.principleId }
+          : normalized;
         implementations.push({ ...candidate, evaluate: () => validatedResult });
         liveEvaluatedResults.push(validatedResult);
       }

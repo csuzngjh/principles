@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 1987,
+  "count": 1988,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1846,6 +1846,7 @@
     "normalizeInterventionEvidenceBatch",
     "normalizeOwnerIdentity",
     "normalizePathPure",
+    "normalizeRuleHostResult",
     "operatorDeclaredContextWindow",
     "ownerIdentityFilePath",
     "ownerRetryNeedsHumanReviewTask",

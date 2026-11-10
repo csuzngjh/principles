@@ -840,6 +840,8 @@ export { mergeDecisions } from './internalization/rule-host-evaluator.js';
 // RuleHost result validator (PRI-437)
 export type { RuleHostResultValidationResult } from './internalization/rule-host-validator.js';
 export { validateRuleHostResult } from './internalization/rule-host-validator.js';
+// RuleHost result normalization (B1): one fail-closed reading of unusable output
+export { normalizeRuleHostResult } from './internalization/rule-host-result-normalizer.js';
 export type { RuleHostImplementationProvider } from './internalization/rule-host-adapter.js';
 
 // Principle tree domain types (PRI-51)
