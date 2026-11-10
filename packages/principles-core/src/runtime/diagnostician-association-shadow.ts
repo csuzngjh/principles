@@ -49,9 +49,11 @@ interface ShadowSources {
   resolvePrincipleCandidate: (candidateId: string) => unknown;
 }
 
-/** Offline/read-only composition over a hand-assembled context. Kept for
- * callers that already hold a verified context (tests, replay tooling); the
- * production-facing envelope entry point is `resolveSourceDeclaredRelations`. */
+/** Offline/read-only composition over a hand-assembled context (tests and
+ * replay tooling). Like `resolveSourceDeclaredRelations` below, it has NO
+ * production caller yet — the envelope reader is the persisted-shape
+ * counterpart, not a wired production entry point (PRI-1146 P2-02: production
+ * delivery remains follow-up while OD-01/02/03 are pending). */
 export function proposeShadowAssociations(
   output: unknown,
   context: unknown,
@@ -116,7 +118,7 @@ export function proposeShadowAssociations(
   return { ok: true, proposals: proposed };
 }
 
-// ── Envelope-driven source-declared-relation resolution (production shape) ───
+// ── Envelope-driven source-declared-relation resolution (persisted shape; no production caller yet) ───
 
 /** One persisted candidate row of the artifact (loaded by the caller). */
 export interface SourceRelationCandidateRow {
@@ -170,7 +172,7 @@ export interface ResolveSourceDeclaredRelationsInput {
   /** Shared ledger port: principle-kind candidate → canonical identity. */
   resolvePrincipleCandidate: (candidateId: string) => unknown;
   /** Shared ledger port: canonical principle current eligibility. */
-  resolveCanonicalEligibility: (principleId: string) => { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' };
+  resolveCanonicalEligibility: (principleId: string) => { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' | 'ledger_unavailable' | 'ledger_corrupt' };
 }
 
 /**
@@ -190,6 +192,16 @@ export interface ResolveSourceDeclaredRelationsInput {
  *  4. anything unprovable stays a structured `unresolved` with nextAction.
  *
  * Semantic correctness is never claimed (`not_evaluated`).
+ *
+ * Delivery boundary (PRI-1146 P2-02): this resolver is NOT wired into any
+ * production path yet — no console, CLI or runner calls it, and nothing
+ * consumes its results outside tests. It reads the canonical persisted shape
+ * so a future Owner-facing read surface can adopt it unchanged; wiring it (and
+ * acting on any `proposed` result) is explicit follow-up work while
+ * OD-01/02/03 remain pending. It never writes ruleCandidateBindings, never
+ * triggers Scribe, never activates a Principle, and a `proposed` result is a
+ * system source declaration (`basis: 'source_declared_relation'`), never an
+ * Owner Identity Receipt.
  */
 export function resolveSourceDeclaredRelations(
   input: ResolveSourceDeclaredRelationsInput,
@@ -255,10 +267,15 @@ export function resolveSourceDeclaredRelations(
     if (target.type === 'canonical_principle') {
       const eligibility = input.resolveCanonicalEligibility(target.principleId);
       if (!eligibility.eligible) {
+        const ledgerUnprovable = eligibility.reason === 'ledger_unavailable' || eligibility.reason === 'ledger_corrupt';
         resolutions.push(unresolved({
           candidateId: row.candidateId, recommendationRef,
-          reason: eligibility.reason === 'missing' ? 'target_missing' : 'target_ineligible',
-          nextAction: 'Review the target principle in the Owner Console; it is missing or not in an eligible lifecycle state.',
+          reason: eligibility.reason === 'missing' ? 'target_missing'
+            : eligibility.reason === 'ineligible' ? 'target_ineligible'
+            : eligibility.reason,
+          nextAction: ledgerUnprovable
+            ? 'The Principle Ledger could not be read; repair the ledger read path and retry the read-only resolution. Canonical associations stay unresolved.'
+            : 'Review the target principle in the Owner Console; it is missing or not in an eligible lifecycle state.',
         }));
         continue;
       }

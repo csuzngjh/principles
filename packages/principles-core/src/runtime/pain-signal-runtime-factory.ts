@@ -598,7 +598,7 @@ export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
 // Pain Diagnosis Persistence: the bridge emits ad-hoc event names that are not
 // in the closed TelemetryEventType union, so only the two persistence
 // degradation events are mapped onto the registered degradation_triggered
-// channel. The bridge's OTHER event names (candidate_admission_decision,
+// channel. The bridge's OTHER legacy event names (candidate_admission_decision,
 // candidate_dreamer_task_seeded, candidate_dreamer_task_seed_failed,
 // candidate_not_internalizable) were dormant on main — no emitter was wired
 // there — and must STAY dormant here: forwarding them as degradation_triggered
@@ -617,6 +617,12 @@ const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
  * Map a PainSignalBridge telemetry event onto a storable TelemetryEvent.
  * Returns null for bridge events that were not emitted in production before
  * the persistence feature (they keep their pre-main dormant status).
+ *
+ * PRI-1146 (G6 / P1-01): REGISTERED event types pass through verbatim. The
+ * closed union is the registration authority, so an event that is in it is a
+ * real, first-class telemetry signal — mapping it to null (the pre-fix fate of
+ * replay_review_source_invalid) silently dropped the bridge's skip evidence on
+ * the production path.
  */
 const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
   'reuse_gate_triggered',
@@ -624,6 +630,10 @@ const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
   // signal must survive the mapping so an injected workspace sink can persist
   // it (observation only — never decision storage, SPEC v0.3.2 §11).
   'reuse_evaluation_unavailable',
+  // PRI-1146 G6 (rc-9): the replay intake review skipped a candidate because
+  // its persisted owning payload was unparseable or a retired non-V2 shape —
+  // the skip must reach the durable workspace sink, never vanish in mapping.
+  'replay_review_source_invalid',
 ]);
 
 export function mapBridgeTelemetryToStoreEvent(event: {

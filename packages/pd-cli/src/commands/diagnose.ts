@@ -12,7 +12,6 @@ import {
   SqliteDiagnosticianCommitter,
   SqliteTrajectoryLocator,
   SqliteSourceTraceLocator,
-  StoreEventEmitter,
   SplitDiagnosticianRunner,
   DiagRootCauseRunner,
   DiagDistillerRunner,
@@ -379,7 +378,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       throw err;
     }
 
-    const eventEmitter = new StoreEventEmitter();
+    // PRI-1146 P1-01: the split runners emit through the SAME workspace-scoped
+    // sink as the bridge/persistence path — allowlisted critical events (e.g.
+    // diag_router_trusted_context_unavailable) reach critical-events.jsonl
+    // instead of the unsubscribed bare singleton; everything else forwards
+    // upstream unchanged.
+    const eventEmitter = diagnoseTelemetry;
     const committer = new SqliteDiagnosticianCommitter(sqliteConn);
 
     // PRI-336: Read outputLanguage from workspace config

@@ -82,13 +82,13 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
     const isVerbose = options?.verbose === true;
     const detailErrors: string[] = [];
     const areas = new Set<'schema' | 'association'>();
-    const fail = (area: 'schema' | 'association', msg: string): DiagnosticianValidationResult => {
+    const fail = (area: 'schema' | 'association', msg: string): DiagnosticianValidationResult | undefined => {
       if (!isVerbose) {
         return buildFailure(`1 field invalid: ${area === 'association' ? 'association' : 'field'}`, [msg], [area]);
       }
       areas.add(area);
       detailErrors.push(msg);
-      return undefined as unknown as DiagnosticianValidationResult;
+      return undefined;
     };
 
     // ── Step 2: Semantic checks FIRST (better error messages with actual values) ──

@@ -132,6 +132,25 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
     }),
   });
   const runId = randomUUID();
+  // PRI-1146 (V2 Only): the seeded provenance must be a legal V2 chain.
+  const recommendation = {
+    kind: 'principle' as const,
+    description: CANDIDATE_TEXT,
+    triggerPattern: CANDIDATE_TRIGGER,
+    action: CANDIDATE_ACTION,
+    recommendationRef: 'principle-1',
+  };
+  const v2Output = {
+    schemaVersion: 'diagnostician-output-v2',
+    valid: true,
+    diagnosisId: `diag-${candidateId}`,
+    summary: 'seeded diagnosis',
+    rootCause: 'seeded root cause',
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
+    recommendations: [recommendation],
+    confidence: 0.9,
+  };
   await stateManager.runStore.createRun({
     runId,
     taskId,
@@ -140,17 +159,7 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
     executionStatus: 'succeeded',
     startedAt: now,
     endedAt: now,
-    outputPayload: JSON.stringify({
-      schemaVersion: 'diagnostician-output-v2',
-      valid: true,
-      diagnosisId: `diag-${candidateId}`,
-      summary: 'seeded diagnosis',
-      rootCause: 'seeded root cause',
-      violatedPrinciples: [],
-      evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
-      recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'seeded recommendation' }],
-      confidence: 0.9,
-    }),
+    outputPayload: JSON.stringify(v2Output),
   });
   if (opts.painId !== undefined) {
     await stateManager.recordPainDiagnosis({
@@ -174,8 +183,8 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
       artifactId,
       runId,
       taskId,
-      'principle',
-      JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+      'diagnostician_output',
+      JSON.stringify({ ...v2Output, trustedContextReceipt: { schemaVersion: 'router-context-v2' } }),
       now,
     );
     db.prepare(`
@@ -191,7 +200,7 @@ async function seedPrincipleCandidate(opts: { painId?: string } = {}): Promise<s
       '测试候选',
       CANDIDATE_TEXT,
       0.9,
-      JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+      JSON.stringify(recommendation),
       `${artifactId}::prompt`,
       now,
     );

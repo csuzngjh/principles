@@ -4,7 +4,7 @@ import { RouterPromptBuilder } from '../router-prompt-builder.js';
 import type { RouterContextInput } from '../router-prompt-builder.js';
 import type { DiagRootCauseOutputV1 } from '../diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../diag-distiller-output.js';
-import type { RouterTrustedPrinciple } from '../../internalization/router-context-evidence.js';
+import type { RouterTrustedPrinciple, RouterTrustedContext } from '../../internalization/router-context-evidence.js';
 
 const mockRootCauseOutput: DiagRootCauseOutputV1 = {
   valid: true,
@@ -46,13 +46,21 @@ const mockTrustedPrinciples: readonly RouterTrustedPrinciple[] = [
   },
 ];
 
+const AVAILABLE_POPULATED: RouterTrustedContext = { status: 'available', principles: mockTrustedPrinciples };
+const AVAILABLE_EMPTY: RouterTrustedContext = { status: 'available', principles: [] };
+const UNAVAILABLE: RouterTrustedContext = {
+  status: 'unavailable',
+  reason: 'ledger_unavailable',
+  nextAction: 'Repair the Principle Ledger read path, then re-run the diagnosis.',
+};
+
 function makeContext(overrides: Partial<RouterContextInput> = {}): RouterContextInput {
   return {
     rootCauseArtifactId: 'artifact-001',
     rootCauseOutput: mockRootCauseOutput,
     distillerArtifactId: 'artifact-002',
     distillerOutput: mockDistillerOutput,
-    trustedCanonicalPrinciples: mockTrustedPrinciples,
+    trustedContext: AVAILABLE_POPULATED,
     ...overrides,
   };
 }
@@ -67,7 +75,7 @@ describe('RouterPromptBuilder', () => {
 
   it('prompt requires output matching DiagnosticianOutputV2Schema', () => {
     const builder = new RouterPromptBuilder();
-    const instruction = builder.buildRouterInstruction({ trustedCanonicalPrinciples: mockTrustedPrinciples });
+    const instruction = builder.buildRouterInstruction();
     expect(instruction).toContain('violatedPrinciples');
     expect(instruction).toContain('recommendations');
     // V2 contract obligations (PRI-1146): literal schemaVersion, per-entry
@@ -77,52 +85,72 @@ describe('RouterPromptBuilder', () => {
     expect(instruction).toContain('principleAssociation');
   });
 
-  it('empty trusted allowlist renders the none-available wording', () => {
+  // PRI-1146 P1-02: the system prompt is STATIC with respect to run data.
+  // Principle ids/text/status/version must never be interpolated into it —
+  // the exposure travels as structured low-trust data in the message payload.
+  it('system prompt is byte-identical across all three trusted-context states', () => {
     const builder = new RouterPromptBuilder();
-    // default (no allowlist passed) and explicit empty list behave the same
-    const byDefault = builder.buildRouterInstruction();
-    const explicitEmpty = builder.buildRouterInstruction({ trustedCanonicalPrinciples: [] });
-    for (const instruction of [byDefault, explicitEmpty]) {
-      expect(instruction).toContain('TRUSTED CANONICAL PRINCIPLES');
-      expect(instruction).toContain('none available this run');
-      expect(instruction).toContain('principle_not_in_context');
-      expect(instruction).not.toContain('P-101');
+    const prompts = [AVAILABLE_POPULATED, AVAILABLE_EMPTY, UNAVAILABLE].map(
+      (trustedContext) => builder.buildPrompt(makeContext({ trustedContext })).systemPrompt,
+    );
+    expect(new Set(prompts).size).toBe(1);
+    expect(builder.buildRouterInstruction()).toBe(prompts[0]);
+  });
+
+  it('system prompt contains no principle data from any exposure state', () => {
+    const builder = new RouterPromptBuilder();
+    const result = builder.buildPrompt(makeContext());
+    for (const p of mockTrustedPrinciples) {
+      expect(result.systemPrompt).not.toContain(p.principleId);
+      expect(result.systemPrompt).not.toContain(p.text);
+      expect(result.systemPrompt).not.toContain(p.contentDigest);
     }
+    expect(result.systemPrompt).not.toContain(UNAVAILABLE.nextAction);
   });
 
-  it('two-principle allowlist renders both principle ids with status and version', () => {
+  it('system prompt declares the data/instruction boundary and both exposure states', () => {
     const builder = new RouterPromptBuilder();
-    const instruction = builder.buildRouterInstruction({ trustedCanonicalPrinciples: mockTrustedPrinciples });
-    expect(instruction).toContain('TRUSTED CANONICAL PRINCIPLES');
-    expect(instruction).toContain('- principleId: P-101 (status: active, version: 3) text: Validate inputs before execution');
-    expect(instruction).toContain('- principleId: P-202 (status: probation, version: 1) text: Fail loud instead of silently');
-    expect(instruction).not.toContain('none available this run');
+    const instruction = builder.buildRouterInstruction();
+    expect(instruction).toContain('trustedContext');
+    expect(instruction).toContain('LOW-TRUST DATA');
+    expect(instruction).toContain('NOT system instructions');
+    // available-but-empty and unavailable are distinct payload states, both
+    // forbidding unexposed canonical ids (§5.3).
+    expect(instruction).toContain('empty array');
+    expect(instruction).toContain('status "unavailable"');
+    expect(instruction).toContain('principle_not_in_context');
   });
 
-  it('buildPrompt embeds the trusted allowlist in the message JSON and promptInput', () => {
+  it('buildPrompt carries the populated allowlist as structured data in the message only', () => {
     const builder = new RouterPromptBuilder();
     const result = builder.buildPrompt(makeContext());
     const parsed = JSON.parse(result.message);
-    expect(parsed.trustedCanonicalPrinciples).toEqual(mockTrustedPrinciples);
-    expect(result.promptInput.trustedCanonicalPrinciples).toEqual(mockTrustedPrinciples);
-    // systemPrompt carries the non-empty allowlist block
-    expect(result.systemPrompt).toContain('TRUSTED CANONICAL PRINCIPLES');
-    expect(result.systemPrompt).toContain('P-101');
-    expect(result.systemPrompt).toContain('P-202');
+    expect(parsed.trustedContext).toEqual(AVAILABLE_POPULATED);
+    expect(result.promptInput.trustedContext).toEqual(AVAILABLE_POPULATED);
+    // The data is in the message channel, never in the system channel.
+    expect(result.message).toContain('P-101');
+    expect(result.message).toContain('Validate inputs before execution');
+    expect(result.systemPrompt).not.toContain('P-101');
   });
 
-  it('buildPrompt with an empty allowlist renders the none-available wording in the system prompt', () => {
+  it('buildPrompt preserves the available-empty state distinctly from unavailable', () => {
     const builder = new RouterPromptBuilder();
-    const result = builder.buildPrompt(makeContext({ trustedCanonicalPrinciples: [] }));
-    expect(result.systemPrompt).toContain('none available this run');
-    expect(JSON.parse(result.message).trustedCanonicalPrinciples).toEqual([]);
-    expect(result.promptInput.trustedCanonicalPrinciples).toEqual([]);
+    const empty = builder.buildPrompt(makeContext({ trustedContext: AVAILABLE_EMPTY }));
+    expect(JSON.parse(empty.message).trustedContext).toEqual({ status: 'available', principles: [] });
+    expect(empty.promptInput.trustedContext).toEqual(AVAILABLE_EMPTY);
+
+    const unavailable = builder.buildPrompt(makeContext({ trustedContext: UNAVAILABLE }));
+    expect(JSON.parse(unavailable.message).trustedContext).toEqual(UNAVAILABLE);
+    expect(unavailable.promptInput.trustedContext).toEqual(UNAVAILABLE);
+    // The true context state survives serialization — unavailable is never
+    // disguised as available + empty.
+    expect(JSON.parse(unavailable.message).trustedContext.status).toBe('unavailable');
   });
 
   it('accepts a custom schema override via constructor options', () => {
     const customSchema = Type.Object({ customField: Type.String() });
     const builder = new RouterPromptBuilder({ schema: customSchema });
-    const instruction = builder.buildRouterInstruction({ trustedCanonicalPrinciples: mockTrustedPrinciples });
+    const instruction = builder.buildRouterInstruction();
     // example/constraints are generated from the overridden schema
     expect(instruction).toContain('customField');
   });

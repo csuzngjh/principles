@@ -141,6 +141,18 @@ export const RouterContextReceiptSchema = Type.Object({
 });
 export type RouterContextReceipt = Static<typeof RouterContextReceiptSchema>;
 
+/**
+ * The trusted-context state as it travels in the router prompt INPUT payload
+ * (structured, low-trust data channel — PRI-1146 P1-02). Mirrors the receipt
+ * schema's `canonicalPrinciples` union above; the schema remains the validation
+ * authority at the persistence boundary. Principle data never enters the
+ * system prompt — the static prompt declares the data/instruction boundary and
+ * the receipt's messageDigest binds exactly this payload.
+ */
+export type RouterTrustedContext =
+  | { status: 'available'; principles: readonly RouterTrustedPrinciple[] }
+  | { status: 'unavailable'; reason: 'ledger_unavailable' | 'ledger_corrupt' | 'source_not_configured'; nextAction: string };
+
 /** Read only a system-produced artifact envelope, never a model response. */
 export function readRouterContextReceipt(
   envelope: unknown,
@@ -172,8 +184,17 @@ export function verifyRouterContextReceipt(
   expected: {
     taskId: string; runId: string; contextHash: string; message: string; systemPrompt: string;
     predecessors: { artifactId: string; content: unknown }[];
-    /** What the caller can prove was actually exposed (runner replay); optional. */
-    exposed?: { principles: readonly RouterTrustedPrinciple[]; evidenceRefs: readonly string[] };
+    /**
+     * What the caller can prove was actually exposed (runner replay); optional.
+     * A discriminated union mirrors the receipt's `canonicalPrinciples`: the
+     * caller declares whether the exposure was provably `available` (with the
+     * exact principle set) or typed `unavailable` (with reason + nextAction).
+     * `evidenceRefs` is verified in BOTH states — the Stage A evidence refs are
+     * digest-bound to the message regardless of ledger provability.
+     */
+    exposed?:
+      | { status: 'available'; principles: readonly RouterTrustedPrinciple[]; evidenceRefs: readonly string[] }
+      | { status: 'unavailable'; reason: 'ledger_unavailable' | 'ledger_corrupt' | 'source_not_configured'; nextAction: string; evidenceRefs: readonly string[] };
   },
 ): ReturnType<typeof readRouterContextReceipt> {
   const result = readRouterContextReceipt(envelope, expected);
@@ -194,23 +215,33 @@ export function verifyRouterContextReceipt(
   }
   if (expected.exposed) {
     // The receipt must match the exposure the caller can reconstruct from the
-    // persisted prompt input — same principle set (id + digest) and same
-    // evidence refs. A receipt claiming exposure the input cannot show (or
-    // vice versa) is a mismatch, not a partial pass.
-    const receiptPrinciples = result.receipt.canonicalPrinciples.status === 'available'
-      ? result.receipt.canonicalPrinciples.principles : undefined;
-    if (!receiptPrinciples) return mismatch();
-    if (receiptPrinciples.length !== expected.exposed.principles.length) return mismatch();
-    const expectedById = new Map(expected.exposed.principles.map((p) => [p.principleId, p]));
-    if (expectedById.size !== expected.exposed.principles.length) return mismatch();
-    for (const entry of receiptPrinciples) {
-      const match = expectedById.get(entry.principleId);
-      if (!match || match.contentDigest !== entry.contentDigest) return mismatch();
-    }
+    // persisted prompt input. Evidence refs are verified in BOTH states: they
+    // are digest-bound to the message even when the ledger is unprovable.
     const expectedRefs = new Set(expected.exposed.evidenceRefs);
     if (expectedRefs.size !== expected.exposed.evidenceRefs.length) return mismatch();
     if (result.receipt.evidenceRefs.length !== expectedRefs.size
       || result.receipt.evidenceRefs.some((ref) => !expectedRefs.has(ref))) return mismatch();
+
+    const receiptExposure = result.receipt.canonicalPrinciples;
+    if (expected.exposed.status === 'available') {
+      // Same principle set (id + digest). A receipt claiming exposure the
+      // input cannot show (or vice versa) is a mismatch, not a partial pass.
+      if (receiptExposure.status !== 'available') return mismatch();
+      const receiptPrinciples = receiptExposure.principles;
+      if (receiptPrinciples.length !== expected.exposed.principles.length) return mismatch();
+      const expectedById = new Map(expected.exposed.principles.map((p) => [p.principleId, p]));
+      if (expectedById.size !== expected.exposed.principles.length) return mismatch();
+      for (const entry of receiptPrinciples) {
+        const match = expectedById.get(entry.principleId);
+        if (!match || match.contentDigest !== entry.contentDigest) return mismatch();
+      }
+    } else {
+      // The caller proved the exposure was unprovable: the receipt must carry
+      // the SAME typed unavailable reason + nextAction, never an allowlist.
+      if (receiptExposure.status !== 'unavailable') return mismatch();
+      if (receiptExposure.reason !== expected.exposed.reason
+        || receiptExposure.nextAction !== expected.exposed.nextAction) return mismatch();
+    }
   }
   return result;
 }

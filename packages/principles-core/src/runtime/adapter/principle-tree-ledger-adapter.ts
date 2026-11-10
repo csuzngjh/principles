@@ -274,11 +274,16 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
    * principle target: exists AND is in an association-eligible lifecycle
    * state (same rule the identity resolver applies to binding targets).
    * Read-only; used by the shadow source-relation resolver.
+   *
+   * An unreadable ledger is NOT `missing` (which asserts the principle does
+   * not exist): it is `ledger_corrupt` / `ledger_unavailable`, mirroring the
+   * identity resolver's classification, so the caller can distinguish "target
+   * absent" from "cannot prove the target's state" (rc-9-no-silent-fallback).
    */
-  getCanonicalPrincipleEligibility(principleId: string): { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' } {
+  getCanonicalPrincipleEligibility(principleId: string): { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' | 'ledger_unavailable' | 'ledger_corrupt' } {
     const state = readLedgerFileState(this.#stateDir);
     if (state.availability.status === 'unreadable') {
-      return { eligible: false, reason: 'missing' };
+      return { eligible: false, reason: state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable' };
     }
     const principle = Object.hasOwn(state.ledger.tree.principles, principleId)
       ? state.ledger.tree.principles[principleId]

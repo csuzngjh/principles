@@ -43,9 +43,13 @@
  */
 
 import { randomUUID } from 'crypto';
+import { Value } from '@sinclair/typebox/value';
 import type { LedgerAdapter, LedgerPrincipleEntry, Recommendation } from './candidate-intake.js';
 import { CandidateIntakeError, INTAKE_ERROR_CODES, isRecord, validateRecommendation } from './candidate-intake.js';
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
+import type { CandidateRecord } from './store/candidate/candidate-store.js';
+import type { ArtifactRecord } from './store/artifact/artifact-store.js';
+import { readDiagnosticianOutputFromEnvelope } from './diagnostician-output.js';
 import {
   isPrincipleLedgerEligibleKind,
   validateRecommendationKind,
@@ -218,6 +222,18 @@ export interface CandidateIntakeServiceOptions {
 }
 
 /**
+ * PRI-1146 / SPEC-PD-RULE-ASSOCIATION-005 v0.6 (V2 Only / Clean Break) — task
+ * kinds whose candidates MUST prove a complete DiagnosticianOutputV2 lineage
+ * before this service may write them to the Principle Ledger.
+ *
+ * Candidates are minted by `SqliteDiagnosticianCommitter` on the router
+ * sub-task (`diag_router`) or, in the retired monolithic era, on the top
+ * `diagnostician` task. Those are the only Diagnostician-pipeline sources
+ * today; any other task kind keeps the historical extraction untouched.
+ */
+const STRICT_V2_PROVENANCE_TASK_KINDS: ReadonlySet<string> = new Set(['diagnostician', 'diag_router']);
+
+/**
  * Normalize a DiagnosticianRecommendation-shaped object to the Recommendation
  * contract by mapping `description` → `text`. The diagnostician-committer stores
  * `JSON.stringify(rec)` where rec has `description`, but the intake service's
@@ -226,6 +242,12 @@ export interface CandidateIntakeServiceOptions {
  *
  * Returns the normalized object, or `null` if the input is not a record carrying
  * a string `description`. The result MUST still pass `validateRecommendation`.
+ *
+ * ⚠ PRI-1146: this normalization is for HISTORICAL / NON-DIAGNOSTICIAN sources
+ * only. Diagnostician-sourced candidates never reach it — they are verified
+ * against their owning V2 output (`#verifyDiagnosticianV2Provenance`), where a
+ * V1 recommendation is rejected precisely because it has no
+ * `recommendationRef`. Do not route that path through here.
  */
 function normalizeDiagnosticianRecommendation(raw: unknown): { text: string } | null {
   if (!isRecord(raw)) return null;
@@ -538,16 +560,47 @@ export class CandidateIntakeService {
       );
     }
 
-    // 4b/4c. Extract the recommendation via the SHARED semantics extraction
-    // (PRI-917 PR3A C4) — the exact logic `pd candidate review` uses to show
-    // the Owner what this candidate claims, so proposal and intake can never
-    // disagree about the input. Failures carry the same CandidateIntakeError
-    // this method always threw.
-    const extracted = extractIntakeRecommendation(candidate, artifact);
-    if (!extracted.ok) {
-      throw extracted.error;
+    // 4a. PRI-1146 (SPEC v0.6 §4, Diagnostician V2 Only / Clean Break) — close
+    // the V1 compatibility entrance for Diagnostician-sourced candidates.
+    //
+    // The historical extraction below is deliberately permissive (it accepts
+    // V1 `{text,...}` payloads and manufactures `text` from a V1
+    // `description`). That is fine for legacy sources, but for a Diagnostician
+    // candidate it would let a V1 recommendation enter the Principle Ledger
+    // with no provenance at all. The source is classified by the OWNING TASK
+    // (rc-6: a persisted record, never a task-id string), and such candidates
+    // must instead prove the full V2 lineage before any ledger write.
+    const owningTask = await this.#stateManager.getTask(candidate.taskId);
+    if (!owningTask) {
+      // Unreachable through the production stores: principle_candidates.task_id
+      // is NOT NULL with a cascading FK (sqlite-connection.ts) and
+      // PRAGMA foreign_keys = ON. Fail loud rather than fall back to the
+      // permissive legacy path on a corrupt/mocked database (rc-3, rc-9).
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Candidate ${candidateId} references owning task ${candidate.taskId}, which does not exist. ` +
+          "The candidate's provenance cannot be classified, so no Principle Ledger entry was written and the candidate record was preserved. " +
+          'nextAction: repair the workspace state (pd runtime internalization integrity-repair) and retry intake.',
+        { candidateId, reason: 'owning_task_missing' },
+      );
     }
-    const recommendation: Recommendation = extracted.recommendation;
+
+    let recommendation: Recommendation;
+    if (STRICT_V2_PROVENANCE_TASK_KINDS.has(owningTask.taskKind)) {
+      recommendation = await this.#verifyDiagnosticianV2Provenance(candidate, artifact);
+    } else {
+      // 4b/4c. Extract the recommendation via the SHARED semantics extraction
+      // (PRI-917 PR3A C4) — the exact logic `pd candidate review` uses to show
+      // the Owner what this candidate claims, so proposal and intake can never
+      // disagree about the input. Failures carry the same CandidateIntakeError
+      // this method always threw. Historical non-Diagnostician sources keep
+      // this behavior unchanged (PRI-1146).
+      const extracted = extractIntakeRecommendation(candidate, artifact);
+      if (!extracted.ok) {
+        throw extracted.error;
+      }
+      ({ recommendation } = extracted);
+    }
 
     // 4d. PRI-917 Slice 2 — reuse gate.
     //
@@ -828,6 +881,213 @@ export class CandidateIntakeService {
         { candidateId, cause: err },
       );
     }
+  }
+
+  /**
+   * PRI-1146 (SPEC v0.6 §4) — prove a Diagnostician-sourced candidate's
+   * complete V2 lineage before the Principle Ledger may write it.
+   *
+   * Every step reuses the persisted records and the SHARED V2 reader
+   * (`readDiagnosticianOutputFromEnvelope`): owning task (existence + kind
+   * checked by the caller) → owning run → artifact → run.outputPayload → V2 →
+   * artifact.contentJson → V2 envelope → both outputs are the SAME output →
+   * candidate.sourceRecommendationJson is exactly ONE recommendation of that
+   * output, located by its `recommendationRef`.
+   *
+   * Rejections are fail-loud (`INPUT_INVALID`) with a structured `reason` and
+   * `nextAction`, and they happen BEFORE any ledger write: the candidate row
+   * and its audit trail stay untouched. The permissive legacy extraction —
+   * including the V1 `description` → `text` normalization — is never used for
+   * these sources, so a V1 recommendation cannot enter the ledger by
+   * satisfying the local Recommendation schema alone.
+   */
+  async #verifyDiagnosticianV2Provenance(
+    candidate: CandidateRecord,
+    artifact: ArtifactRecord,
+  ): Promise<Recommendation> {
+    const { candidateId } = candidate;
+    const refusal = (reason: string, detail: string, nextAction: string): CandidateIntakeError =>
+      new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Candidate ${candidateId} failed Diagnostician V2 provenance validation (${reason}): ${detail} ` +
+          'No Principle Ledger entry was written and the candidate record was preserved. ' +
+          `nextAction: ${nextAction}`,
+        { candidateId, reason, nextAction },
+      );
+
+    // ── Own run + task/run/artifact lineage ──
+    const sourceRunId = typeof candidate.sourceRunId === 'string' ? candidate.sourceRunId.trim() : '';
+    if (sourceRunId === '') {
+      throw refusal(
+        'owning_run_missing',
+        'the candidate has no source run reference.',
+        're-commit the diagnosis output so the candidate carries its owning run, then retry intake.',
+      );
+    }
+    const run = await this.#stateManager.getRun(sourceRunId);
+    if (!run) {
+      throw refusal(
+        'owning_run_missing',
+        `the candidate's source run ${sourceRunId} does not exist.`,
+        'repair the workspace state (pd runtime internalization integrity-repair) and retry intake.',
+      );
+    }
+    if (run.taskId !== candidate.taskId || artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId) {
+      throw refusal(
+        'lineage_mismatch',
+        `lineage is inconsistent (candidate task ${candidate.taskId}, candidate run ${sourceRunId}, run.taskId ${run.taskId}, ` +
+          `artifact ${artifact.artifactId} run ${artifact.runId} task ${artifact.taskId}).`,
+        'restore a consistent task/run/artifact lineage; a Diagnostician candidate may only be intaken from its own run and artifact.',
+      );
+    }
+    if (run.executionStatus !== 'succeeded') {
+      throw refusal(
+        'owning_run_not_succeeded',
+        `the owning run ${sourceRunId} has executionStatus '${run.executionStatus}'.`,
+        'wait for the diagnosing run to succeed (or repair it) before intaking its candidates.',
+      );
+    }
+
+    // ── Run output: the bare V2 output written by the runner ──
+    const runOutputPayload = typeof run.outputPayload === 'string' ? run.outputPayload.trim() : '';
+    if (runOutputPayload === '') {
+      throw refusal(
+        'owning_output_missing',
+        `the owning run ${sourceRunId} has no outputPayload.`,
+        're-run the diagnosis with DiagnosticianOutputV2 output; the candidate has no owning output to be verified against.',
+      );
+    }
+    let runPayload: unknown;
+    try {
+      runPayload = JSON.parse(runOutputPayload);
+    } catch (err: unknown) {
+      throw refusal(
+        'owning_output_unparseable',
+        `the owning run's outputPayload is not parseable JSON: ${err instanceof Error ? err.message : String(err)}.`,
+        'repair or re-run the diagnosis so the owning run carries a valid DiagnosticianOutputV2 payload.',
+      );
+    }
+    const runOutput = readDiagnosticianOutputFromEnvelope(runPayload);
+    if (!runOutput) {
+      throw refusal(
+        'owning_output_not_v2',
+        "the owning run's outputPayload is not a valid DiagnosticianOutputV2 (V1 payloads are not accepted).",
+        're-run the diagnosis with DiagnosticianOutputV2 output; V1 candidates cannot be intaken.',
+      );
+    }
+
+    // ── Artifact content: the committed V2 output (optionally the router envelope) ──
+    const artifactContent = typeof artifact.contentJson === 'string' ? artifact.contentJson.trim() : '';
+    if (artifactContent === '') {
+      throw refusal(
+        'artifact_content_unparseable',
+        `artifact ${artifact.artifactId} has no contentJson.`,
+        'repair the artifact row and retry intake; the candidate must be verified against its owning V2 artifact.',
+      );
+    }
+    let artifactPayload: unknown;
+    try {
+      artifactPayload = JSON.parse(artifactContent);
+    } catch (err: unknown) {
+      throw refusal(
+        'artifact_content_unparseable',
+        `artifact ${artifact.artifactId} contentJson is not parseable JSON: ${err instanceof Error ? err.message : String(err)}.`,
+        'repair the artifact row and retry intake; the candidate must be verified against its owning V2 artifact.',
+      );
+    }
+    const artifactOutput = readDiagnosticianOutputFromEnvelope(artifactPayload);
+    if (!artifactOutput) {
+      throw refusal(
+        'artifact_not_v2_envelope',
+        `artifact ${artifact.artifactId} contentJson is not a valid DiagnosticianOutputV2 or its router envelope (V1 artifact content is not accepted).`,
+        're-run the diagnosis with DiagnosticianOutputV2 output; V1 artifacts cannot back an intake.',
+      );
+    }
+    if (!Value.Equal(runOutput, artifactOutput)) {
+      throw refusal(
+        'run_artifact_content_mismatch',
+        'the owning run outputPayload and the artifact contentJson do not carry the same V2 output (Run/Artifact version mismatch).',
+        'repair the run/artifact pair so both persist the same DiagnosticianOutputV2 before intaking its candidates.',
+      );
+    }
+
+    // ── Candidate recommendation: exactly one V2 recommendation of the owning output ──
+    const sourceRecJson = typeof candidate.sourceRecommendationJson === 'string' ? candidate.sourceRecommendationJson.trim() : '';
+    if (sourceRecJson === '') {
+      throw refusal(
+        'source_recommendation_missing',
+        'the candidate has no sourceRecommendationJson.',
+        're-commit the diagnosis output so the candidate carries its recommendation; the ledger entry cannot be reconstructed from the title/description alone.',
+      );
+    }
+    let sourceRec: unknown;
+    try {
+      sourceRec = JSON.parse(sourceRecJson);
+    } catch (err: unknown) {
+      throw refusal(
+        'source_recommendation_unparseable',
+        `the candidate sourceRecommendationJson is not parseable JSON: ${err instanceof Error ? err.message : String(err)}.`,
+        'repair or re-commit the candidate so its recommendation is persisted verbatim, then retry intake.',
+      );
+    }
+    if (!isRecord(sourceRec)) {
+      throw refusal(
+        'source_recommendation_invalid',
+        'the candidate sourceRecommendationJson does not serialize an object.',
+        'repair or re-commit the candidate so its recommendation is persisted verbatim, then retry intake.',
+      );
+    }
+    const { recommendationRef } = sourceRec;
+    if (typeof recommendationRef !== 'string' || recommendationRef.trim() === '') {
+      throw refusal(
+        'recommendation_ref_missing',
+        'the candidate sourceRecommendationJson has no non-empty recommendationRef (V1 recommendations and description→text-normalized shapes are not accepted).',
+        're-run the diagnosis with DiagnosticianOutputV2 output; V1 candidates cannot be intaken.',
+      );
+    }
+    const matches = runOutput.recommendations.filter((rec) => rec.recommendationRef === recommendationRef);
+    if (matches.length === 0) {
+      throw refusal(
+        'recommendation_ref_not_found',
+        `recommendationRef '${recommendationRef}' does not exist in the owning V2 output.`,
+        'repair or re-run the diagnosis; the candidate does not belong to the output it references.',
+      );
+    }
+    if (matches.length > 1) {
+      throw refusal(
+        'recommendation_ref_duplicate',
+        `recommendationRef '${recommendationRef}' appears ${matches.length} times in the owning V2 output, so the candidate→recommendation mapping is ambiguous.`,
+        're-run the diagnosis with unique recommendationRef values per recommendation.',
+      );
+    }
+    const [matched] = matches;
+    if (!matched) {
+      throw refusal(
+        'recommendation_ref_not_found',
+        `recommendationRef '${recommendationRef}' could not be resolved in the owning V2 output.`,
+        'repair or re-run the diagnosis; the candidate does not belong to the output it references.',
+      );
+    }
+    if (!Value.Equal(sourceRec, matched)) {
+      throw refusal(
+        'source_recommendation_mismatch',
+        `the candidate sourceRecommendationJson is not exactly the V2 recommendation '${recommendationRef}' it references.`,
+        're-commit the diagnosis output so the candidate persists its recommendation verbatim, then retry intake.',
+      );
+    }
+    if (matched.kind !== 'principle') {
+      throw refusal(
+        'recommendation_kind_mismatch',
+        `the referenced V2 recommendation kind is '${matched.kind}', not 'principle'.`,
+        'no Principle Ledger entry can be created for this candidate; route it through its own kind instead.',
+      );
+    }
+    return {
+      text: matched.description,
+      ...(matched.triggerPattern !== undefined ? { triggerPattern: matched.triggerPattern } : {}),
+      ...(matched.action !== undefined ? { action: matched.action } : {}),
+      ...(matched.abstractedPrinciple !== undefined ? { abstractedPrinciple: matched.abstractedPrinciple } : {}),
+    };
   }
 
   /**

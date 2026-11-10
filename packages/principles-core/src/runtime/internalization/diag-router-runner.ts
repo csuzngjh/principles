@@ -317,7 +317,17 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         rootCauseOutput: context.rootCauseOutput,
         distillerArtifactId: context.distillerArtifactId,
         distillerOutput: context.distillerOutput,
-        trustedCanonicalPrinciples: context.trustedPrinciples,
+        // PRI-1146 P1-02 / §5.3: the exposure state travels as structured
+        // low-trust data in the message — available (possibly empty) vs typed
+        // unavailable are distinct payload states, never rendered into the
+        // static system prompt.
+        trustedContext: context.trustedPrinciplesUnavailable
+          ? {
+            status: 'unavailable',
+            reason: context.trustedPrinciplesUnavailable.reason,
+            nextAction: context.trustedPrinciplesUnavailable.nextAction,
+          }
+          : { status: 'available', principles: context.trustedPrinciples },
       },
       {
         outputLanguage: this.resolvedOptions.outputLanguage,
@@ -438,7 +448,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         { artifactId: context.rootCauseArtifactId, content: context.rootCauseOutput },
         { artifactId: context.distillerArtifactId, content: context.distillerOutput },
       ],
-      exposed: { principles: context.trustedPrinciples, evidenceRefs: exposedEvidenceRefs },
+      exposed: { ...canonicalPrinciples, evidenceRefs: exposedEvidenceRefs },
     });
     if (receiptCheck.status !== 'available') {
       throw new PDRuntimeError('input_invalid', `Invalid router context receipt: ${receiptCheck.reason}`);

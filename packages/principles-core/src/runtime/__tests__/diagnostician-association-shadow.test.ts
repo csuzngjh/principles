@@ -112,7 +112,7 @@ function resolve(input: {
   runOutput?: unknown;
   candidates?: readonly SourceRelationCandidateRow[];
   resolvePrincipleCandidate?: (id: string) => unknown;
-  resolveCanonicalEligibility?: (id: string) => { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' };
+  resolveCanonicalEligibility?: (id: string) => { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' | 'ledger_unavailable' | 'ledger_corrupt' };
 }) {
   return resolveSourceDeclaredRelations({
     envelope: input.envelope ?? makeEnvelope(makeOutput()),
@@ -192,6 +192,46 @@ describe('resolveSourceDeclaredRelations (read-only shadow, SPEC v0.6 §6)', () 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.resolutions[0]).toMatchObject({ status: 'unresolved', reason: 'target_missing', authorizesGeneration: false });
+  });
+
+  it('unresolved: canonical target eligibility unprovable propagates ledger_unavailable (not target_missing)', () => {
+    const canonicalRule: DiagnosticianRecommendationV2 = {
+      ...ruleRec,
+      principleAssociation: {
+        status: 'linked', relation: 'implements',
+        target: { type: 'canonical_principle', principleId: PRINCIPLE_ID },
+        rationale: 'x', evidenceRefs: [EVIDENCE_REF],
+      },
+    };
+    const result = resolve({
+      envelope: makeEnvelope(makeOutput([principleRec, canonicalRule])),
+      runOutput: makeOutput([principleRec, canonicalRule]),
+      candidates: makeRows([principleRec, canonicalRule], ['principle', 'rule']),
+      resolveCanonicalEligibility: () => ({ eligible: false, reason: 'ledger_unavailable' }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.resolutions[0]).toMatchObject({ status: 'unresolved', reason: 'ledger_unavailable', authorizesGeneration: false });
+  });
+
+  it('unresolved: canonical target eligibility unprovable propagates ledger_corrupt (not target_ineligible)', () => {
+    const canonicalRule: DiagnosticianRecommendationV2 = {
+      ...ruleRec,
+      principleAssociation: {
+        status: 'linked', relation: 'implements',
+        target: { type: 'canonical_principle', principleId: PRINCIPLE_ID },
+        rationale: 'x', evidenceRefs: [EVIDENCE_REF],
+      },
+    };
+    const result = resolve({
+      envelope: makeEnvelope(makeOutput([principleRec, canonicalRule])),
+      runOutput: makeOutput([principleRec, canonicalRule]),
+      candidates: makeRows([principleRec, canonicalRule], ['principle', 'rule']),
+      resolveCanonicalEligibility: () => ({ eligible: false, reason: 'ledger_corrupt' }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.resolutions[0]).toMatchObject({ status: 'unresolved', reason: 'ledger_corrupt', authorizesGeneration: false });
   });
 
   it('unresolved: persisted recommendation no longer matches the artifact (stale)', () => {

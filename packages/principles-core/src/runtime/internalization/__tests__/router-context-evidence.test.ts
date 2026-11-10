@@ -64,7 +64,7 @@ const EXPOSED_B = makeTrusted({ principleId: '22222222-2222-4222-8222-2222222222
 
 const TASK_ID = 'diag_router-001';
 const RUN_ID = 'run-router-001';
-const MESSAGE = JSON.stringify({ taskId: TASK_ID, trustedCanonicalPrinciples: [EXPOSED_A, EXPOSED_B] });
+const MESSAGE = JSON.stringify({ taskId: TASK_ID, trustedContext: { status: 'available', principles: [EXPOSED_A, EXPOSED_B] } });
 const SYSTEM_PROMPT = 'router instruction';
 const PREDECESSORS = [
   { artifactId: 'pi-art-rc-001', content: { summary: 'root cause' } },
@@ -98,7 +98,7 @@ const VERIFY_ARGS = {
   message: MESSAGE,
   systemPrompt: SYSTEM_PROMPT,
   predecessors: PREDECESSORS,
-  exposed: { principles: [EXPOSED_A, EXPOSED_B], evidenceRefs: ['trace:1', 'trace:2'] },
+  exposed: { status: 'available' as const, principles: [EXPOSED_A, EXPOSED_B], evidenceRefs: ['trace:1', 'trace:2'] },
 };
 
 // ── Receipt schema/read ───────────────────────────────────────────────────────
@@ -183,24 +183,68 @@ describe('verifyRouterContextReceipt exposure re-verification', () => {
 
   it('rejects when the receipt exposure differs from the reconstructable exposure (extra principle)', () => {
     const extra = makeTrusted({ principleId: '33333333-3333-4333-8333-333333333333', status: 'active', version: 1, text: 'not in receipt' });
-    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), { ...VERIFY_ARGS, exposed: { principles: [EXPOSED_A, EXPOSED_B, extra], evidenceRefs: ['trace:1', 'trace:2'] } });
+    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), { ...VERIFY_ARGS, exposed: { status: 'available', principles: [EXPOSED_A, EXPOSED_B, extra], evidenceRefs: ['trace:1', 'trace:2'] } });
     expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
   });
 
   it('rejects when a principle digest drifted (stale exposure)', () => {
     const drifted = { ...EXPOSED_B, contentDigest: sha('different content') };
-    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), { ...VERIFY_ARGS, exposed: { principles: [EXPOSED_A, drifted], evidenceRefs: ['trace:1', 'trace:2'] } });
+    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), { ...VERIFY_ARGS, exposed: { status: 'available', principles: [EXPOSED_A, drifted], evidenceRefs: ['trace:1', 'trace:2'] } });
     expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
   });
 
   it('rejects when evidenceRefs exposure differs', () => {
-    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), { ...VERIFY_ARGS, exposed: { principles: [EXPOSED_A, EXPOSED_B], evidenceRefs: ['trace:1'] } });
+    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), { ...VERIFY_ARGS, exposed: { status: 'available', principles: [EXPOSED_A, EXPOSED_B], evidenceRefs: ['trace:1'] } });
     expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
   });
 
   it('rejects a receipt recording unavailable context when exposure is claimed', () => {
     const receipt = makeReceipt({ canonicalPrinciples: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'x' } });
     const result = verifyRouterContextReceipt(envelopeWith(receipt), VERIFY_ARGS);
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+  });
+
+  it('verifies a typed unavailable exposure (reason + nextAction + evidenceRefs) without an allowlist', () => {
+    const receipt = makeReceipt({ canonicalPrinciples: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run' } });
+    const result = verifyRouterContextReceipt(envelopeWith(receipt), {
+      ...VERIFY_ARGS,
+      exposed: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run', evidenceRefs: ['trace:1', 'trace:2'] },
+    });
+    expect(result.status).toBe('available');
+  });
+
+  it('rejects an unavailable exposure claim when the receipt records an available allowlist', () => {
+    const result = verifyRouterContextReceipt(envelopeWith(makeReceipt()), {
+      ...VERIFY_ARGS,
+      exposed: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run', evidenceRefs: ['trace:1', 'trace:2'] },
+    });
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+  });
+
+  it('rejects an unavailable exposure whose reason drifted from the receipt', () => {
+    const receipt = makeReceipt({ canonicalPrinciples: { status: 'unavailable', reason: 'ledger_corrupt', nextAction: 'repair and re-run' } });
+    const result = verifyRouterContextReceipt(envelopeWith(receipt), {
+      ...VERIFY_ARGS,
+      exposed: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run', evidenceRefs: ['trace:1', 'trace:2'] },
+    });
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+  });
+
+  it('rejects an unavailable exposure whose nextAction drifted from the receipt', () => {
+    const receipt = makeReceipt({ canonicalPrinciples: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run' } });
+    const result = verifyRouterContextReceipt(envelopeWith(receipt), {
+      ...VERIFY_ARGS,
+      exposed: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'a different next action', evidenceRefs: ['trace:1', 'trace:2'] },
+    });
+    expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+  });
+
+  it('verifies evidenceRefs even when the exposure is unavailable', () => {
+    const receipt = makeReceipt({ canonicalPrinciples: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run' } });
+    const result = verifyRouterContextReceipt(envelopeWith(receipt), {
+      ...VERIFY_ARGS,
+      exposed: { status: 'unavailable', reason: 'ledger_unavailable', nextAction: 'repair and re-run', evidenceRefs: ['trace:1'] },
+    });
     expect(result).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
   });
 
@@ -265,5 +309,20 @@ describe('PrincipleTreeLedgerAdapter.readTrustedPrinciples', () => {
     expect(adapter.getCanonicalPrincipleEligibility('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')).toEqual({ eligible: true });
     expect(adapter.getCanonicalPrincipleEligibility('ffffffff-ffff-4fff-8fff-ffffffffffff')).toEqual({ eligible: false, reason: 'ineligible' });
     expect(adapter.getCanonicalPrincipleEligibility('00000000-0000-4000-8000-000000000000')).toEqual({ eligible: false, reason: 'missing' });
+  });
+
+  it('getCanonicalPrincipleEligibility classifies an unreadable ledger as ledger_unavailable, never missing', () => {
+    fs.writeFileSync(path.join(stateDir, 'principle_training_state.json'), '{ not json');
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    expect(adapter.getCanonicalPrincipleEligibility('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'))
+      .toEqual({ eligible: false, reason: 'ledger_unavailable' });
+  });
+
+  it('getCanonicalPrincipleEligibility classifies binding corruption as ledger_corrupt', () => {
+    fs.writeFileSync(path.join(stateDir, 'principle_training_state.json'),
+      JSON.stringify({ tree: { principles: {}, ruleCandidateBindings: 'not-an-object' } }));
+    const adapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    expect(adapter.getCanonicalPrincipleEligibility('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'))
+      .toEqual({ eligible: false, reason: 'ledger_corrupt' });
   });
 });

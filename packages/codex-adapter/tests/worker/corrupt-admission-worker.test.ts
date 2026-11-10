@@ -142,9 +142,11 @@ async function seedHealthyAndCorrupt(): Promise<Seeded> {
 
   const connection = new SqliteConnection(root);
   try {
+    // PRI-1146 P1-03: the committed artifact must itself be a V2 envelope —
+    // intake now refuses diagnostician candidates whose artifact is not V2.
     await new SqliteDiagnosticianCommitter(connection).commit({
       runId: 'run-r5', taskId: ROUTER, output: routerOutput() as never,
-      idempotencyKey: `${ROUTER}:run-r5`, contentJson: '{}',
+      idempotencyKey: `${ROUTER}:run-r5`,
     });
   } finally {
     connection.close();
