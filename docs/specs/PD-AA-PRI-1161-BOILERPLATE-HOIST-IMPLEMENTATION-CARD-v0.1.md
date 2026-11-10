@@ -1,6 +1,6 @@
 # PRI-1161 实施卡 v0.1：把逐块重复的样板句合并到公共位置
 
-状态：**待 Owner 书面批准（未编码）** · 工单：PRI-1161（关联 PRI-1105）· 测量：`docs/implementation-reports/pri-1161-boilerplate-measurement-20261110.json` · 基准：`origin/main` `e7c7e6bba` 渲染器，真实快照沙箱（归档 2026-11-09T13:21:39Z，18 条激活）
+状态：**已批准并实施（Owner 2026-11-10，附四项条件，见 §6；批准原文为本会话 Owner 指令，逐字要点已录）** · 工单：PRI-1161（关联 PRI-1105）· 测量：`docs/implementation-reports/pri-1161-boilerplate-measurement-20261110.json` · 基准：`origin/main` `e7c7e6bba` 渲染器，真实快照沙箱（归档 2026-11-09T13:21:39Z，18 条激活）
 
 ## 1. 已核实的重复（真实数据）
 
@@ -47,3 +47,33 @@
 - **回滚**：revert PR 即可；无新 flag、无配置、无 schema 变更。golden 测试随 PR 一并回到原措辞。
 - **changeset**：`@principles/core`（渲染文本变化）+ `@principles/host-runtime` + `principles-disciple` 与 `create-principles-disciple`（C4 隐性依赖）。
 - **边界**：生产治理写入、宿主启动、真实模型调用、生产启用均为 0；零新存储；Complexity Delta 全 NO。
+
+## 6. Owner 批准与条件（2026-11-10）
+
+Owner 批准实施卡 v0.1（提交 `1f6ca5c04`，卡哈希 `efc3c779…07d24`），附四项条件：
+
+| # | 条件（摘要） | 落地 |
+|---|---|---|
+| 1 | 只改公共说明和逐块重复行；逐原则正文、顺序、属性、转义、授权字段和 `<directive>` 边界保持原样。实现前逐一核对生产调用者；若有消费者单独使用块正文且不附公共头部，保留原语义；无法保证则报告调用点与反例、暂停该路径 | 调用者审计见 §7：全部调用者分两类（切片类=同源包含比对，整渲染类=与 projection 同口径的长度计量），无「裸块正文」消费者，无需暂停任何路径 |
+| 2 | 固定同一入选集合与顺序，字符差精确符合 `−87×N + 53`，并比对实际正文与属性；再走现行共享装配入口验证最终输出；两层分别报告；按卡执行 15% 通过线；紧预算轮把样板减少、补位、净变化分开计量 | 两层比较见实现轮报告（层 1 = 冻结基线同集合重渲染；层 2 = 现行共享入口 20 轮） |
+| 3 | 覆盖空集、单条、多条、转义、self-report、精确预算边界及逐原则取证切片；补位必须由现有装配规则解释；正文或授权丢失、预算偏差、取证误判、意外选中变化任一即失败并保留原渲染 | 测试矩阵见 §4 + 新增针对性测试；失败判据即 HF1–HF5 |
+| 4 | 保留 PRI-1160 旧基线与原始哈希；以后在新渲染器下做治理后复测，另冻结同一渲染器版本的治理前基线，避免把样板节省算进治理收益 | 冻结文件零改动；复测脚本注释与收口检查点写明渲染器版本分界 |
+
+边界确认：本轮只做离线验证，宿主启动、真实模型调用、生产治理写入均为 0。交付 PR/base/head、两层对比、测试与 CI、保留或放弃决定和检查点；FIFO 问题留在独立范围。
+
+## 7. 调用者审计（实现前，逐文件）
+
+| 调用者 | 用法 | 类别 | 结论 |
+|---|---|---|---|
+| `host-runtime/active-principle-prompt.ts` | 装配入口整渲染 + targetBody 单条渲染取切片 | 切片+整渲染 | 边界不变；整渲染与 builders 同步 |
+| `host-runtime/prompt-activation-deliverability.ts` `computePromptSingleItemFit` | 单条整渲染长度作审批期 fits 成本，注释明示「与共享 projection 的 usedChars 同口径」 | 整渲染 | 与 projection（measure/base 派生）同步变小；fits 只会更容易成立，无丢失 |
+| `host-runtime/prompt-injection-status.ts` | 消费 computePromptSingleItemFit → `classifySingleItemBudgetTier(costChars)` | 整渲染 | 同上；档位只会下移（更便宜），可解释 |
+| `host-runtime/prompt-injection-projection.ts` | measure/base 逐块成本 | 派生 | 自动同步 |
+| `core/adaptive-principle-intervention.ts:123` | 单条渲染取 `<directive>` 切片做同源包含 | 切片 | 边界不变即安全 |
+| `core/prompt-builder/xml-escape.ts` | 仅注释引用 | — | 无影响 |
+| `openclaw-plugin/hooks/prompt.ts:1237` | 终验 body 切片 `includes` | 切片 | 安全 |
+| 插件存在性取证 `buildInjectedExpectations` | bodyText 切片 + 最终装配包含 | 切片 | 安全；bodyText 不再含样板行，与最终正文同源 |
+| `pd-cli/tests/scripts/prompt-capacity-measurement.test.ts:34` | 测试内单条整渲染 | 测试 | 如断言绝对字符数则按新渲染器更新预期 |
+| `host-runtime/tests/prompt-injection-golden-characterization.test.ts` | golden 文本含被删句 | 测试 | 按新渲染器更新 golden（唯一硬编码处） |
+
+**无「单独使用块正文且不附公共头部」的消费者；无需暂停任何路径。**
