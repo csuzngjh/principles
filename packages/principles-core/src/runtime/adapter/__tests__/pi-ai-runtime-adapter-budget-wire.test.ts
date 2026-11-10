@@ -186,6 +186,9 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     expect(body.max_tokens).toBe(512);
     const responseFormat = body.response_format as { type?: string };
     expect(responseFormat?.type).toBe('json_schema'); // proof this is the json path
+    const envelope = body.response_format as { json_schema?: { name?: string; schema?: { required?: string[] } } };
+    expect(envelope?.json_schema?.name).toBe('learning-lab-actor-action');
+    expect(envelope?.json_schema?.schema?.required).toContain('type'); // schema BODY, not only the envelope
     expect(Value.Check(LearningLabActorActionV1Schema, output?.payload)).toBe(true);
   });
 
