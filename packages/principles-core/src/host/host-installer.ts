@@ -143,6 +143,13 @@ export interface HostInstallResult {
    * Optional: hosts that either installed or genuinely failed omit it.
    */
   readonly manualActionRequired?: boolean;
+  /**
+   * Non-fatal facts the operator must SEE in the install summary, not just in
+   * a log (rc-9: graceful degradation stays observable). Used by the WorkBuddy
+   * legacy-skill retirement, which preserves every file it cannot prove is an
+   * unmodified published payload. Optional: hosts with nothing to report omit it.
+   */
+  readonly warnings?: readonly string[];
 }
 
 export interface HostUninstallResult {
