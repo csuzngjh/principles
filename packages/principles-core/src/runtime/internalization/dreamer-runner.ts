@@ -396,6 +396,25 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
       this.emitEvent('lineage_echo_corrected', taskId, { correctedFields, seedPresent: seed !== null });
     }
     stripFabricatedCorePrincipleIds(untrustedOutput);
+
+    // PRI-675: `valid` is an untrusted self-assertion, same class as the
+    // lineage echoes above — the runtime's verdict is the validator, and the
+    // flag has no downstream consumer. A model that fills every required field
+    // but writes `"valid": false` must not be able to fail the chain; the
+    // claim is normalized to the runtime truth on a successful fetch and the
+    // override stays observable (rc-9) so a model that keeps disagreeing with
+    // its own output is still measurable.
+    if (untrustedOutput !== null && typeof untrustedOutput === 'object' && !Array.isArray(untrustedOutput)) {
+      const record = untrustedOutput as Record<string, unknown>;
+      if (record.valid !== true) {
+        this.emitEvent('self_attested_valid_overridden', taskId, {
+          assertedValid: typeof record.valid === 'boolean' ? record.valid : (record.valid ?? null),
+          assertedType: typeof record.valid,
+          nextAction: 'valid_is_derived_from_validation_not_from_the_model',
+        });
+        record.valid = true;
+      }
+    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: DreamerOutput): void {
