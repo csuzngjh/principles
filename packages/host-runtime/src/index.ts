@@ -30,6 +30,9 @@ export * from './prompt-injection-event-evidence.js';
 // events — console surfaces forecast under the budget the last real
 // injection used (SPEC §6.1), labelled with source + observation time.
 export * from './prompt-injection-budget-observation.js';
+// RuleCode shadow telemetry scan: ONE filesystem reader for CLI promotion
+// review and the Console Owner review (5B deduplication).
+export * from './rulecode-event-collection.js';
 export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';

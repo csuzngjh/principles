@@ -1,5 +1,4 @@
 import * as path from 'path';
-import * as fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import {
@@ -30,6 +29,7 @@ import {
 import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime';
 import {
   checkPromptArtifactDeliverabilityById,
+  collectRuleCodeEventEntries,
   linkAdaptiveBehaviorEvidence,
   RUNTIME_EVENT_LOG_CANDIDATE_DIRS,
   reconcileAdaptiveJournal,
@@ -114,48 +114,11 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
  */
 export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVENT_LOG_CANDIDATE_DIRS;
 
-export interface CollectedRuleCodeEventEntries {
-  entries: unknown[];
-  /** Number of candidate directories that actually exist on disk. */
-  sourceDirsFound: number;
-}
-
-/**
- * Collect rulehost telemetry entries from all candidate log directories.
- * Malformed lines are excluded individually. A directory counts as a source
- * only after it can be enumerated, so an unreadable path cannot be mistaken
- * for a healthy channel with zero events (ERR-002).
- *
- * Exact lines copied between candidate directories are deduplicated by
- * priority. Different events in same-named daily files are retained.
- */
-export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
-  const entries: unknown[] = [];
-  let sourceDirsFound = 0;
-  const higherPriorityLines = new Set<string>();
-  for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
-    const logsDir = path.join(workspaceDir, ...candidate.split('/'));
-    if (!fs.existsSync(logsDir)) continue;
-    try {
-      const files = fs.readdirSync(logsDir)
-        .filter(name => /^events_.*\.jsonl$/.test(name))
-        .sort()
-        .slice(-7);
-      sourceDirsFound += 1;
-      const currentSourceLines: string[] = [];
-      for (const file of files) {
-        const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
-        for (const line of lines) {
-          currentSourceLines.push(line);
-          if (higherPriorityLines.has(line)) continue;
-          try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
-        }
-      }
-      for (const line of currentSourceLines) higherPriorityLines.add(line);
-    } catch { /* unreadable directory contributes no entries */ }
-  }
-  return { entries, sourceDirsFound };
-}
+// 5B: the scan itself lives in host-runtime so the CLI and the Console Owner
+// review cannot drift. Kept as a re-export because existing tests import it
+// from this module.
+export { collectRuleCodeEventEntries };
+export type { CollectedRuleCodeEventEntries } from '@principles/host-runtime';
 
 /** Exported for PRI-577 regression tests and reuse by promote evidence assembly. */
 export function readShadowSummaryForActivation(workspaceDir: string, activationId: string, targetHostKind?: string): PromotionEvidenceSnapshot['shadowSummary'] {
@@ -793,7 +756,9 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
         nextAction: `Re-run with --confirm using evidence snapshot ${result.evidenceSnapshotDigest}.`,
       };
       if (opts.json) console.log(JSON.stringify(output));
-      else console.log(`Would promote: ${result.activationId}`);
+      else {
+        console.log(`Would promote: ${result.activationId}`);
+      }
       return;
     }
     const output: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId: result.activationId, promotedAt: result.promotedAt };
