@@ -40,7 +40,13 @@
     "rows": "id 1215/1216 session fixture-sess-0001 idx 2/3; id 1217 session dbg-sess idx 2; all 2026-11-10T03:35:12-41Z, fixture test texts; events JSONL zero contamination (buffer never flushed)",
     "impact": "per-session isolation -> zero impact on real sessions/ordinals; governance noise only (1213->1216 rows)",
     "containment": "PD_WORKSPACE_DIR pinned to temp dir on re-run; production re-verified untouched (still exactly 3 synthetic rows)",
-    "proposedCleanup": "DELETE FROM user_turns WHERE id IN (1215,1216,1217) — awaiting Owner approval; full backup copy and row contents archived in worktree .tmp/pri-1163/prod-evidence/"
+    "cleanupFinalState": {
+      "approval": "Owner in-conversation structured-option approval ~2026-11-10T04:07Z ('批准，现在清理'), same reply kept PR #2468 for review",
+      "executed": "DELETE FROM user_turns WHERE id IN (1215,1216,1217) on D:/.openclaw/workspace/.state/trajectory.db ~04:12Z; in-transaction changes=3 exactly; pre-delete scope re-verified on the live connection; total 1216->1213; residual synthetic sessions 0; independent readonly recheck consistent; no FK references to user_turns; other tables (correction_samples/pain_events/signal_confirmations/task_outcomes/principle_events) zero contamination",
+      "evidenceCorrection": "an earlier PR comment claimed a named pre-delete backup file 'pre-delete-backup.db' — FALSE: the backup cp was blocked by a security hook and never ran; that filename was an accidentally auto-created 0-byte file (now removed). Actual protection: pre-delete snapshot pre-delete-snapshot-20261110T0344Z.db (03:44Z, 42373120 bytes, sha256 8ca0b80846db67906604b6007d89aca2a7f79b7bfb4af61013fc7d2b02921c95, total=1216, contains all 3 rows) + full logged row contents + sibling session's 02:58Z prod-copy (total=1213, zero synthetic rows) proving the pre-incident baseline was 1213",
+      "closureChain": "baseline 1213 + incident 3 = pre-delete 1216 - deleted 3 = post-delete 1213 (matches baseline exactly)",
+      "dataProtection": "production-data copies stay in gitignored .tmp/ only, never committed; committed evidence limited to hashes, row counts and the synthetic row contents"
+    }
   },
   "boundaries": { "hostStarts": 0, "modelCalls": 0, "installs": 0, "publishes": 0, "productionWrites": "3 synthetic rows (incident, disclosed above); all other reads via copies/readonly" },
   "mimosaNote": "scanner_enobufs recurrence risk acknowledged; no security conclusion claimed"

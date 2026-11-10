@@ -77,7 +77,11 @@
 ## 5. 边界与事故披露
 
 - 宿主启动 0、模型调用 0、安装 0、发布 0；生产工作区只读（trajectory/events 均走副本或只读 grep）。
-- **事故（已披露、待 Owner 裁决清理）**：夹具首次运行（11-10 03:35Z 前后）发生非预期生产写入：插件把显式声明工作区（`~/.openclaw/principles-disciple.json` → `D:\.openclaw\workspace`）**优先于** hook ctx 的临时 workspaceDir，2 轮夹具轮次把 3 行合成 `user_turns` 写入生产 trajectory.db（id 1215/1216，session `fixture-sess-0001`，idx 2/3；id 1217，session `dbg-sess`，idx 2；内容均为夹具测试文本）。事件日志**零污染**（缓冲未及落盘进程即退出）。影响评估：`user_turns` 按 session 隔离，合成会话永不复用，对真实会话与轮次序数**零影响**；仅构成治理数据噪声（1213→1216 行）。隔离修复：进程内 `PD_WORKSPACE_DIR` 钉到临时区后重跑，复核生产零新增。清理提案（待批准）：`DELETE FROM user_turns WHERE id IN (1215,1216,1217)`，全量备份副本与逐行内容已留档于核查工作树 `.tmp/pri-1163/prod-evidence/`。
+- **事故（已披露）→ 清理终态（Owner 批准后执行）**：夹具首次运行（11-10 03:35Z 前后）发生非预期生产写入：插件把显式声明工作区（`~/.openclaw/principles-disciple.json` → `D:\.openclaw\workspace`）**优先于** hook ctx 的临时 workspaceDir，2 轮夹具轮次把 3 行合成 `user_turns` 写入生产 trajectory.db。事件日志**零污染**（缓冲未及落盘进程即退出）。影响评估：`user_turns` 按 session 隔离，合成会话永不复用，对真实会话与轮次序数**零影响**；仅构成治理数据噪声（1213→1216 行）。隔离修复：进程内 `PD_WORKSPACE_DIR` 钉到临时区后重跑，复核生产零新增。
+  - **批准引用**：Owner 于 2026-11-10 ~04:07Z 在本会话内以结构化选项批准「批准，现在清理」（AskUserQuestion 回答，附「保留待审」处置 PR #2468）。
+  - **执行**（04:12Z 前后，`DELETE FROM user_turns WHERE id IN (1215,1216,1217)`，事务内 `changes=3` 恰好 3 行）：删除前在该连接复核 3 行内容逐项吻合；删除后总数 1216→**1213**、合成会话残留 0；独立只读连接二次复核一致。范围核验同时确认无外键引用 `user_turns`、correction_samples/pain_events/signal_confirmations/task_outcomes/principle_events 零污染。
+  - **精确范围（3 行全部内容）**：id 1215 / `fixture-sess-0001` / turn_index 2 / 03:35:12.377Z / "round one: please check the boundary cases"；id 1216 / `fixture-sess-0001` / turn_index 3 / 03:35:12.627Z / "round two: now extend the boundary matrix"；id 1217 / `dbg-sess` / turn_index 2 / 03:35:41.153Z / "hello world one"。
+  - **备份与基线（含一处证据事故的诚实更正）**：此前 PR 评论所称「删除前全量备份 `pre-delete-backup.db` 留档」**不成立**——备份 cp 命令被 Mimosa 拦截未执行，同名文件是 check 脚本读写打开误建的 0 字节空库，已删除并在此更正。实际有效保护：①删前快照 `.tmp/pri-1163/prod-evidence/pre-delete-snapshot-20261110T0344Z.db`（03:44Z 取，42,373,120 字节，sha256 `8ca0b80846db67906604b6007d89aca2a7f79b7bfb4af61013fc7d2b02921c95`，total=1216、含全部 3 行）；②上述逐行内容完整留档；③前序会话证据目录 `D:/Code/.pd-tmp/principles/20261110/task-pri1162-release-audit-104223-769862/prod-copy/trajectory.db`（02:58Z，total=1213、零合成行）证明事故前基线=1213。闭环链：基线 1213 + 事故 3 = 删前 1216 − 删除 3 = 删后 1213，与基线精确一致。含生产数据的副本一律留在 gitignored 的 `.tmp/`，**永不入库**；入库证据仅限哈希、行数与合成行内容。
 
 ---
 
