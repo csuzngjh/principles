@@ -760,17 +760,24 @@ async function constructBridge(
   //
   // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
   // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
+  // PRI-1146 (round 2, P1-01): runner telemetry uses the SAME effective sink as
+  // the bridge. When a workspace-scoped sink is injected (CLI short processes),
+  // allowlisted runner events (e.g. diag_router_trusted_context_unavailable)
+  // persist to critical-events.jsonl; the sink forwards every non-allowlisted
+  // event to the storeEmitter singleton, so existing DB telemetry is preserved
+  // without duplicating the event. Absent a sink, behavior is unchanged.
+  const runnerEventEmitter = opts.telemetrySink ?? storeEmitter;
   const rootCauseRunner = new DiagRootCauseRunner(
-    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
+    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
     { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
   );
   const distillerRunner = new DiagDistillerRunner(
-    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
     { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
   );
   const routerRunner = new DiagRouterRunner(
     {
-      stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer,
+      stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, committer,
       // PRI-1146 / SPEC v0.6 §5: the trusted canonical principle exposure is
       // assembled BEFORE the model call. The concrete PrincipleTreeLedgerAdapter
       // implements the port; a narrow LedgerAdapter double without the port is

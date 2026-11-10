@@ -17,7 +17,6 @@ import {
   SqliteDiagnosticianCommitter,
   SqliteTrajectoryLocator,
   SqliteSourceTraceLocator,
-  StoreEventEmitter,
   SplitDiagnosticianRunner,
   DiagRootCauseRunner,
   DiagDistillerRunner,
@@ -615,7 +614,11 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
-    const eventEmitter = new StoreEventEmitter();
+    // PRI-1146 (round 2, P1-01): use the workspace-scoped sink, not a bare
+    // StoreEventEmitter with no subscribers. The sink persists allowlisted
+    // runner events (e.g. diag_router_trusted_context_unavailable) and forwards
+    // all other events to the storeEmitter singleton.
+    const eventEmitter = createWorkspaceTelemetryEmitter(workspaceDir);
     const committer = new SqliteDiagnosticianCommitter(sqliteConn);
 
     // PRI-336: Read outputLanguage from workspace config
