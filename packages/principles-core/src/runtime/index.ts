@@ -479,6 +479,7 @@ export type {
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability, appendEventLogLine } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
+export { DEFAULT_PAIN_SCORE } from './pain-severity.js';
 export { sanitizeString, sanitizeValue, sanitizeToolParams, convergePath, MAX_EVIDENCE_VALUE_CHARS } from './evidence-sanitizer.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
 export { createPainSignalBridge, invalidatePainSignalBridge, disposePainSignalBridgesForWorkspace, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, resolveRuntimeConfigForAgent, resolveRuntimeConfigForProfile, AGENT_NAME_FOR_TASK_KIND, SPLIT_PIPELINE_TOTAL_TIMEOUT_MS, mapBridgeTelemetryToStoreEvent, createBridgeTelemetryEventEmitter, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';

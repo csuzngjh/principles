@@ -363,7 +363,6 @@ describe('pd pain record', () => {
   // 10. recordPain called with correct arguments
   it('passes correct arguments to recordPain', async () => {
     await handlePainRecord({ reason: 'test pain', score: 90, source: 'ci' });
-
     expect(lastRecordPainInput).toBeTruthy();
     expect(lastRecordPainInput!.painType).toBe('user_frustration');
     expect(lastRecordPainInput!.source).toBe('ci');
@@ -377,6 +376,29 @@ describe('pd pain record', () => {
     expect(lastRecordPainInput!.evidence).toEqual([]);
     expect(lastRecordPainInput!.recordObservability).toBe(false);
     expect(lastRecordPainInput!.provenance).toBe('owner_reported_no_host_trace');
+  });
+
+  // §6.4 (T07): the CLI must not fabricate a severe score when --score is absent.
+  it('T07: defaults an omitted --score to DEFAULT_PAIN_SCORE (40) and shows it', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handlePainRecord({ reason: 'test pain' });
+
+    expect(lastRecordPainInput!.score).toBe(40);
+    const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('Score: 40');
+
+    logSpy.mockRestore();
+  });
+
+  it('T07: keeps an explicit --score authoritative (80 stays severe-grade input)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await handlePainRecord({ reason: 'test pain', score: 80 });
+
+    expect(lastRecordPainInput!.score).toBe(80);
+
+    logSpy.mockRestore();
   });
 
   // ── PRI-341 → PRI-642: evidence passthrough and --session flag ─────────────

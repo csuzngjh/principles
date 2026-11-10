@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import Database from 'better-sqlite3';
 import {
   submitPainCapability,
   validateSubmissionAnchor,
@@ -207,7 +208,23 @@ describe('submitPainCapability (§5.5–§5.7)', () => {
     const diagnostic = JSON.parse(String(task?.diagnosticJson)) as Record<string, unknown>;
     expect(diagnostic?.deviationAnchor).toEqual({ principleId: 'P-42', principleVersion: '1' });
     expect(diagnostic?.provenance).toBe('agent_reported_owner_approved');
+    // T07: no self-assessed score — severity lands on the shared default.
+    expect(diagnostic?.severity).toBe('moderate');
     await manager.close();
+
+    // T07 observability read-back: the MCP path never supplies a score, so the
+    // persisted trajectory row must carry DEFAULT_PAIN_SCORE (40), not 80.
+    const db = new Database(path.join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const painRow = db.prepare('SELECT score, severity FROM pain_events').get() as {
+        score: number;
+        severity: string;
+      };
+      expect(painRow.score).toBe(40);
+      expect(painRow.severity).toBe('moderate');
+    } finally {
+      db.close();
+    }
   });
 
   it('refuses without a handler-generated painId and writes nothing', async () => {
