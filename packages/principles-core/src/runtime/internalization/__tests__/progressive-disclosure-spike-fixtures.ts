@@ -18,7 +18,7 @@
  * repo — no invented fields:
  *   diag_rootcause → `DiagRootCauseOutputV1`  (diagnostician/diag-rootcause-output.ts)
  *   diag_distiller → `DiagDistillerOutputV1`  (diagnostician/diag-distiller-output.ts)
- *   diag_router    → `DiagnosticianOutputV1`  (diagnostician-output.ts)
+ *   diag_router    → `DiagnosticianOutputV2`  (diagnostician-output.ts)
  *   dreamer        → `DreamerOutputV1`        (dreamer-output.ts)
  *   philosopher    → `PhilosopherOutputV1`    (philosopher-output.ts)
  *   scribe         → `ScribeOutputV1`         (scribe-output.ts)
@@ -37,7 +37,7 @@
 
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { DreamerOutputV1 } from '../dreamer-output.js';
 import type { PhilosopherOutputV1 } from '../philosopher-output.js';
 import type { ScribeOutputV1 } from '../scribe-output.js';
@@ -135,7 +135,7 @@ export interface SpikeChain {
   readonly expectedDefect: SpikeExpectedDefect;
   readonly diagRootCause: SpikeChainHop<DiagRootCauseOutputV1>;
   readonly diagDistiller: SpikeChainHop<DiagDistillerOutputV1>;
-  readonly diagRouter: SpikeChainHop<DiagnosticianOutputV1>;
+  readonly diagRouter: SpikeChainHop<DiagnosticianOutputV2>;
   readonly dreamer: SpikeChainHop<DreamerOutputV1>;
   readonly philosopher: SpikeChainHop<PhilosopherOutputV1>;
   readonly scribe: SpikeChainHop<ScribeOutputV1>;
@@ -443,7 +443,8 @@ function buildChain(spec: ChainSpec): SpikeChain {
 
   // diag_router 的 rootCause / evidence 来自 Stage A，confidence 来自 Stage B —
   // 这是 diag-router-runner.postFetchTransform 强制注入的不变式，不是随手写的值。
-  const routerContent: DiagnosticianOutputV1 = {
+  const routerContent: DiagnosticianOutputV2 = {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId,
     summary: 'Agent 在跨包导出符号上跳过影响面枚举，需要一条成文约束。',
@@ -461,6 +462,7 @@ function buildChain(spec: ChainSpec): SpikeChain {
         kind: 'principle',
         description: '沉淀一条「改动跨包共享符号前先量出影响面」的原则。',
         abstractedPrinciple: '改动跨包共享符号前，先把影响面变成一份可核对的清单。',
+        recommendationRef: 'principle-1',
       },
     ],
     confidence: DISTILLER_CONFIDENCE,
@@ -787,7 +789,7 @@ export function findSpikeLineageViolations(chain: SpikeChain): readonly SpikeLin
     }
   }
 
-  // contentJson.taskId ⟺ hop.taskId. diag_router excluded: DiagnosticianOutputV1
+  // contentJson.taskId ⟺ hop.taskId. diag_router excluded: DiagnosticianOutputV2
   // has no taskId field (removed in PRI-272 so the LLM cannot fabricate lineage).
   const taskIdBearingHops: readonly { readonly hop: SpikeChainHop<{ readonly taskId: string }> }[] = [
     { hop: chain.diagRootCause },

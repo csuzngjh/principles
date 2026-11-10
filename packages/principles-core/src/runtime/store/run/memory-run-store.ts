@@ -29,7 +29,7 @@ export class MemoryRunStore implements RunStore {
 
   async updateRun(
     runId: string,
-    patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputRef' | 'outputPayload' | 'errorCategory' | 'executionStatus'>>,
+    patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputRef' | 'inputPayload' | 'outputPayload' | 'errorCategory' | 'executionStatus'>>,
   ): Promise<RunRecord> {
     const existing = this.runs.get(runId);
     if (!existing) throw new Error(`Run not found: ${runId}`);

@@ -276,6 +276,8 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       },
     );
 
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+
     const routerRunner = new DiagRouterRunner(
       {
         stateManager,
@@ -283,6 +285,9 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
         eventEmitter,
         artifactStore: stateManager.piArtifactStore,
         committer,
+        // PRI-1146: trusted canonical principle exposure for the flood
+        // simulation router runs (same synthetic ledger authority as intake).
+        trustedPrincipleSource: ledgerAdapter,
       },
       {
         owner: 'pain-flood-simulation',
@@ -301,7 +306,6 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       perStageTimeoutMs: 10000,
     });
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
     const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
     const bridge = new PainSignalBridge({

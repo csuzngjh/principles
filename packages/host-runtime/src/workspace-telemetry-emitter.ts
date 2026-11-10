@@ -40,6 +40,10 @@ import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime
  *     Rule 4 降级放行 CREATE 时 Owner 必须能事后取证「复用保护为何没拦」。
  *     注意 reuse_evaluation_recommended 刻意不入列：recommended 已由
  *     candidateOutcomes / reuseEvidence 持久承载，落盘会形成第二决策日志）
+ *   - diag_router_trusted_context_unavailable / replay_review_source_invalid
+ *     （PRI-1146 P1-01：低频 skip/degradation 取证 — 前者记录 ledger 不可证明
+ *     时 canonical association 为何保持 unresolved，后者是 replay review skip
+ *     的唯一持久记录；见 Set 内注释）
  *
  * 落点 `<workspaceDir>/.pd/telemetry/critical-events.jsonl`（JSONL，一行一
  * 事件，含完整 TelemetryEvent）。同步 append：事件量小（allowlist 限流），
@@ -60,6 +64,15 @@ const CRITICAL_EVENT_ALLOWLIST: ReadonlySet<string> = new Set([
   'artificer_blocked_on_owner_evidence',
   'reuse_gate_triggered',
   'reuse_evaluation_unavailable',
+  // PRI-1146 (P1-01 / rc-9): typed-unavailable diagnosis runs and replay-review
+  // skips must be reconstructable after the fact. Both are low-frequency skip/
+  // degradation evidence: the router event records WHY canonical associations
+  // stayed unresolved when the ledger was unprovable (the receipt is the
+  // primary proof; this line survives even if the artifact write later fails),
+  // and the replay event records WHY a pending candidate was not reuse-reviewed
+  // (its only durable record — the candidate row itself carries no skip reason).
+  'diag_router_trusted_context_unavailable',
+  'replay_review_source_invalid',
 ]);
 
 export type WorkspaceTelemetryPersistFailureSink = (detailJson: string) => void;

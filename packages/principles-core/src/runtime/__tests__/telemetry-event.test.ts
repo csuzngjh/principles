@@ -58,6 +58,39 @@ describe('TelemetryEvent schema — runner event registration', () => {
     expect(result.event?.eventType).toBe('evaluator_decision_recorded');
   });
 
+  it('accepts diag_router_trusted_context_unavailable event (PRI-1146)', () => {
+    const event = {
+      eventType: 'diag_router_trusted_context_unavailable',
+      traceId: 'diag_router-diagnosis_pain-001',
+      timestamp: new Date().toISOString(),
+      sessionId: 'session-p1-01',
+      agentId: 'diagnostician',
+      payload: { reason: 'ledger_unavailable' },
+    };
+    const result = validateTelemetryEvent(event);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.event?.eventType).toBe('diag_router_trusted_context_unavailable');
+  });
+
+  it('accepts replay_review_source_invalid event (PRI-1146 G6)', () => {
+    const event = {
+      eventType: 'replay_review_source_invalid',
+      traceId: 'cand-001',
+      timestamp: new Date().toISOString(),
+      sessionId: 'pd-cli-diagnose',
+      payload: {
+        candidateId: 'cand-001',
+        reason: 'owning_output_not_v2',
+        nextAction: 'Re-run the diagnosis so the candidate is minted from a V2 artifact.',
+      },
+    };
+    const result = validateTelemetryEvent(event);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.event?.eventType).toBe('replay_review_source_invalid');
+  });
+
   it('rejects unknown event type artificer_nonexistent_event', () => {
     const event = {
       eventType: 'artificer_nonexistent_event',

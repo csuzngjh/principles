@@ -9,8 +9,15 @@ import type { LedgerPrinciple } from '../src/runtime/types/ledger-store.js';
 const PID = '11111111-2222-4222-8222-222222222222';
 function material(id: string, kind: 'rule' | 'principle') {
   const taskId = 'router-' + id, runId = 'run-' + id, artifactId = 'artifact-' + id;
-  const recommendation = { kind, description: 'Protect the approved scope.' };
-  const payload = JSON.stringify({ valid: true, diagnosisId: id, summary: 'Scope violation', rootCause: 'Design: scope check missing', confidence: 0.9, violatedPrinciples: [], evidence: [], recommendations: [recommendation] });
+  // PRI-1146 V2 recommendation: unique recommendationRef; rule recs require
+  // triggerPattern+action+principleAssociation. 'Protect the approved scope.'
+  // must appear EXACTLY ONCE (in the candidate-matching rec) so the
+  // differentPayload string-replace below breaks the digest match on purpose.
+  const recommendation =
+    kind === 'rule'
+      ? { kind, description: 'Protect the approved scope.', recommendationRef: 'rule-1', triggerPattern: 'approved-scope', action: 'Check the approved scope before writing.', principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } }
+      : { kind, description: 'Protect the approved scope.', recommendationRef: 'principle-1' };
+  const payload = JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: id, summary: 'Scope violation', rootCause: 'Design: scope check missing', confidence: 0.9, violatedPrinciples: [], evidence: [], recommendations: [recommendation] });
   return {
     candidate: { candidateId: id, taskId, sourceRunId: runId, artifactId, rawRecommendationKind: kind, sourceRecommendationJson: JSON.stringify(recommendation) },
     task: { taskId, taskKind: 'diag_router', status: 'succeeded', inputRef: 'parent-' + id },

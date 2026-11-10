@@ -21,28 +21,46 @@ exports[`DefaultSchemaPromptAdapter > generateExample() > generateExample matche
     {
       "kind": "principle",
       "description": "Example principle recommendation",
+      "recommendationRef": "principle-1",
       "abstractedPrinciple": "Abstracted principle text (max 200 chars)"
     },
     {
       "kind": "rule",
       "description": "Example rule recommendation",
+      "recommendationRef": "rule-1",
       "triggerPattern": "pattern-to-match",
-      "action": "action-to-take"
+      "action": "action-to-take",
+      "principleAssociation": {
+        "status": "linked",
+        "relation": "implements",
+        "target": {
+          "type": "recommendation_ref",
+          "recommendationRef": "principle-1"
+        },
+        "rationale": "This rule operationalizes the principle above",
+        "evidenceRefs": [
+          "source-ref-1"
+        ]
+      }
     },
     {
       "kind": "implementation",
-      "description": "Example implementation recommendation"
+      "description": "Example implementation recommendation",
+      "recommendationRef": "implementation-1"
     },
     {
       "kind": "prompt",
-      "description": "Example prompt recommendation"
+      "description": "Example prompt recommendation",
+      "recommendationRef": "prompt-1"
     },
     {
       "kind": "defer",
-      "description": "Example defer recommendation"
+      "description": "Example defer recommendation",
+      "recommendationRef": "defer-1"
     }
   ],
-  "confidence": 0.85
+  "confidence": 0.85,
+  "schemaVersion": "diagnostician-output-v2"
 }"
 `;
 
@@ -58,15 +76,9 @@ exports[`generateConstraints() > generateConstraints matches snapshot 1`] = `
   evidence: object[] (required)
     .sourceRef: string {minLength: 1} (required)
     .note: string {minLength: 1} (required)
-  recommendations: object[] (required)
-    .kind: union {enum: principle | rule | implementation | prompt | defer} (required)
-    .description: string {minLength: 1} (required)
-    .triggerPattern: string {description: Required when kind is "rule". Regex or keyword pattern for interception.} (optional)
-    .action: string {description: Required when kind is "rule". Action to take when pattern matches.} (optional)
-    .abstractedPrinciple: string {description: Required when kind is "principle". Highly abstracted, reusable wisdom (≤200 chars).} (optional)
-    Conditional: "rule" kind → triggerPattern and action are required
-    Conditional: "principle" kind → abstractedPrinciple is required
+  recommendations: unknown[] (required)
   confidence: number {description: A number between 0.0 and 1.0 (NOT a string, NOT a percentage), min: 0, max: 1} (required)
   ambiguityNotes: string[] (optional)
-  intentTension: object (optional)"
+  intentTension: object (optional)
+  schemaVersion: string (required)"
 `;

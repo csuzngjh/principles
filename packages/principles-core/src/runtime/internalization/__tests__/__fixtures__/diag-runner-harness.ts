@@ -6,7 +6,7 @@
  *
  *   - 'router'    → NO validator mock is injected. DiagRouterRunner validates
  *                   through the real TypeBox pipeline baked into the class
- *                   (Value.Check on DiagnosticianOutputV1 + predecessor schemas
+ *                   (Value.Check on DiagnosticianOutputV2 + predecessor schemas
  *                   in buildContext). Lowering it to a mock validator would
  *                   delete the only runner-level real-schema evidence in the
  *                   region.
@@ -26,6 +26,7 @@
  * stage files — see docs/testing/internalization-test-value-audit.md §Diag
  * Runner Recommendation (plan B).
  */
+import { createHash } from 'node:crypto';
 import { vi } from 'vitest';
 import { DiagRouterRunner } from '../../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../../diag-router-runner.js';
@@ -33,7 +34,8 @@ import { DiagRootCauseRunner } from '../../diag-rootcause-runner.js';
 import type { DiagRootCauseRunnerDeps } from '../../diag-rootcause-runner.js';
 import { DiagDistillerRunner } from '../../diag-distiller-runner.js';
 import type { DiagDistillerRunnerDeps } from '../../diag-distiller-runner.js';
-import type { DiagnosticianOutputV1 } from '../../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../../diagnostician-output.js';
+import type { RouterTrustedPrinciple, RouterTrustedPrincipleSource } from '../../../internalization/router-context-evidence.js';
 import { DefaultDiagRootCauseValidator } from '../../../diagnostician/diag-rootcause-output.js';
 import type { DiagRootCauseOutputV1 } from '../../../diagnostician/diag-rootcause-output.js';
 import { DefaultDiagDistillerValidator } from '../../../diagnostician/diag-distiller-output.js';
@@ -57,6 +59,12 @@ import {
 export type DiagRunnerRole = 'router' | 'rootcause' | 'distiller';
 
 type MockFn = ReturnType<typeof vi.fn>;
+/**
+ * A mocked dependency member: usually a single `vi.fn()`, but the state manager
+ * exposes one nested collaborator (`runStore.updateRun`) that the runner calls
+ * directly, so a nested record of mocks is also valid here.
+ */
+type MockField = MockFn | Record<string, MockFn>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -198,12 +206,23 @@ export function makeDistillerOutput(
   };
 }
 
-export function makeRouterOutput(overrides: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
+export function makeRouterOutput(overrides: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 {
   return {
     ...MOCK_ROUTER_OUTPUTS.R6,
     diagnosisId: 'diag-001',
     ...overrides,
   };
+}
+
+/**
+ * PRI-1146: default trusted principle source for the router harness — a
+ * PROVEN empty exposure (ledger readable, no eligible principles). Tests that
+ * need a real allowlist pass their own source via harness overrides.
+ */
+export function makeTrustedPrincipleSource(
+  principles: readonly RouterTrustedPrinciple[] = [],
+): RouterTrustedPrincipleSource {
+  return { readTrustedPrinciples: () => ({ status: 'ok', principles: [...principles] }) };
 }
 
 // ── Predecessor artifact store ────────────────────────────────────────────────
@@ -299,6 +318,9 @@ function makeStateManagerMock(
       degradedRuns: [],
     }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
+    // PRI-1146 P2-01: runners persist the exact submitted input payload so a
+    // new process can rebuild invocation evidence.
+    runStore: { updateRun: vi.fn().mockResolvedValue(undefined) },
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
@@ -313,7 +335,15 @@ function makeRuntimeAdapterMock(runId: string, output: unknown) {
     kind: vi.fn().mockReturnValue(RUNTIME_KIND),
     getCapabilities: vi.fn(),
     healthCheck: vi.fn(),
-    startRun: vi.fn().mockResolvedValue(runHandle),
+    // PRI-1146 P1-02: the router runner requires the adapter-attested digest of
+    // the effective system prompt. This double merges no layers, so the digest
+    // of the submitted prompt IS the effective one.
+    startRun: vi.fn().mockImplementation(async (input: { systemPrompt?: string }) => ({
+      ...runHandle,
+      ...(typeof input?.systemPrompt === 'string'
+        ? { systemPromptDigest: createHash('sha256').update(input.systemPrompt).digest('hex') }
+        : {}),
+    })),
     pollRun: vi.fn().mockResolvedValue(succeededStatus),
     fetchOutput: vi.fn().mockResolvedValue({ payload: output }),
     cancelRun: vi.fn().mockResolvedValue(undefined),
@@ -338,7 +368,7 @@ function makeOptions(owner: string): PeerRunnerOptions {
   };
 }
 
-function castStateManager(_sm: Record<string, MockFn>): RuntimeStateManager {
+function castStateManager(_sm: Record<string, MockField>): RuntimeStateManager {
   // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial mock, not untrusted runtime data
   return _sm as unknown as RuntimeStateManager;
 }
@@ -357,13 +387,14 @@ export interface DiagRunnerUnderTest {
 }
 
 interface SharedMocks {
-  _stateManager: Record<string, MockFn>;
+  _stateManager: Record<string, MockField>;
   _runtimeAdapter: Record<string, MockFn>;
   _eventEmitter: Record<string, MockFn>;
 }
 
 export type DiagRouterMocks = SharedMocks & {
   _committer: { commit: MockFn };
+  _trustedPrincipleSource: { readTrustedPrinciples: MockFn };
 };
 
 export type DiagRootCauseMocks = SharedMocks & {
@@ -413,6 +444,10 @@ function createRouterHarness(overrides: Record<string, unknown> = {}): DiagRoute
     candidateCount: 1,
   };
   const _committer = { commit: vi.fn().mockResolvedValue(commitResult) };
+  // PRI-1146: proven-empty trusted exposure by default (see makeTrustedPrincipleSource).
+  const _trustedPrincipleSource = {
+    readTrustedPrinciples: vi.fn().mockReturnValue({ status: 'ok', principles: [] }),
+  };
 
   const artifactStore = makePredecessorStore(
     { rootcause: 'valid', distiller: 'valid' },
@@ -425,10 +460,12 @@ function createRouterHarness(overrides: Record<string, unknown> = {}): DiagRoute
     eventEmitter: castEventEmitter(_eventEmitter),
     artifactStore,
     committer: _committer,
+    trustedPrincipleSource: _trustedPrincipleSource,
     _stateManager,
     _runtimeAdapter,
     _eventEmitter,
     _committer,
+    _trustedPrincipleSource,
     ...overrides,
   } as DiagRouterHarness['deps'];
 

@@ -14,8 +14,15 @@ function principle(id = PID): LedgerPrinciple {
   return { id, version: 1, text: 'Protect an explicitly approved scope.', triggerPattern: 'write', action: 'check', status: 'candidate', priority: 'P1', scope: 'general', evaluability: 'deterministic', valueScore: 0, adherenceRate: 0, painPreventedCount: 0, derivedFromPainIds: ['source'], ruleIds: [], conflictsWithPrincipleIds: [], createdAt: NOW, updatedAt: NOW };
 }
 function material(id: string, kind: 'rule' | 'principle'): RuleCandidateMaterial {
-  const rec = JSON.stringify({ kind, description: 'Protect an explicitly approved scope.' });
-  const output = JSON.stringify({ valid: true, diagnosisId: 'diagnosis', summary: 'Scope violation', rootCause: 'Design: missing scope check', confidence: 0.9, violatedPrinciples: [], evidence: [], recommendations: [JSON.parse(rec)] });
+  // PRI-1146 V2 recommendations: unique recommendationRef; rule recs require
+  // triggerPattern+action+principleAssociation (unresolved is schema-valid and
+  // is exactly the case where the Owner binding decision matters).
+  const recommendation =
+    kind === 'rule'
+      ? { kind, description: 'Protect an explicitly approved scope.', recommendationRef: 'rule-1', triggerPattern: 'approved-scope', action: 'Check the approved scope before writing.', principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } }
+      : { kind, description: 'Protect an explicitly approved scope.', recommendationRef: 'principle-1' };
+  const rec = JSON.stringify(recommendation);
+  const output = JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'diagnosis', summary: 'Scope violation', rootCause: 'Design: missing scope check', confidence: 0.9, violatedPrinciples: [], evidence: [], recommendations: [recommendation] });
   return {
     candidate: { candidateId: id, taskId: 'diagnosis', sourceRunId: 'run', artifactId: 'artifact', rawRecommendationKind: kind, sourceRecommendationJson: rec },
     task: { taskId: 'diagnosis', taskKind: 'diagnostician', status: 'succeeded', inputRef: 'pain-original' },

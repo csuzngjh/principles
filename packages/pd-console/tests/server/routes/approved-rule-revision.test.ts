@@ -24,7 +24,12 @@ async function seedApprovedRule(workspaceDir: string) {
   const now = '2026-11-01T00:00:00.000Z';
   const principleId = '11111111-1111-4111-8111-111111111111';
   await manager.createTask({ taskId: 'diagnosis', taskKind: 'diagnostician', inputRef: 'owner-original-pain', status: 'succeeded', attemptCount: 1, maxAttempts: 3 });
-  const output = { valid: true, diagnosisId: 'diagnosis', summary: 'Owner required approval.', rootCause: 'Skipped design.', violatedPrinciples: [], evidence: [], confidence: 0.9, recommendations: [{ kind: 'rule' as const, description: 'Require approval before governed changes.' }, { kind: 'principle' as const, description: 'Respect approved change boundaries.' }] };
+  const output = { schemaVersion: 'diagnostician-output-v2' as const, valid: true, diagnosisId: 'diagnosis', summary: 'Owner required approval.', rootCause: 'Skipped design.', violatedPrinciples: [], evidence: [], confidence: 0.9, recommendations: [
+    { kind: 'rule' as const, recommendationRef: 'rule-1', description: 'Require approval before governed changes.', triggerPattern: 'governed change', action: 'require approval',
+      // No evidence entries in this fixture output → no linkable evidenceRefs.
+      principleAssociation: { status: 'unresolved' as const, reason: 'no_supported_target' as const } },
+    { kind: 'principle' as const, recommendationRef: 'principle-1', description: 'Respect approved change boundaries.' },
+  ] };
   await manager.runStore.createRun({ runId: 'diagnosis-run', taskId: 'diagnosis', runtimeKind: 'test-double', startedAt: now, attemptNumber: 1, executionStatus: 'succeeded', outputPayload: JSON.stringify(output) });
   await new SqliteDiagnosticianCommitter(manager.connection).commit({ taskId: 'diagnosis', runId: 'diagnosis-run', output, idempotencyKey: 'fixture' });
   const candidates = await manager.getCandidatesByTaskId('diagnosis');

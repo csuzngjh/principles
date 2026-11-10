@@ -394,7 +394,7 @@ export class RuntimeStateManager {
 
   /**
    * Write output payload to a run record.
-   * Per D-04: DiagnosticianOutputV1 JSON serialized into RunRecord.outputPayload.
+   * Per D-04: DiagnosticianOutputV2 JSON serialized into RunRecord.outputPayload.
    */
   async updateRunOutput(runId: string, outputPayload: string): Promise<RunRecord> {
     this.assertInitialized();

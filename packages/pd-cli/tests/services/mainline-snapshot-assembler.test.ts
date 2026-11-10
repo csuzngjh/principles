@@ -20,7 +20,7 @@ import {
   EMPTY_CONTEXT_SENTINEL,
 } from '@principles/core/runtime';
 import type {
-  DiagnosticianOutputV1,
+  DiagnosticianOutputV2,
   RuntimeReadinessSnapshot,
 } from '@principles/core/runtime';
 import { assembleMainlineSnapshot } from '../../src/services/mainline-snapshot-assembler.js';
@@ -45,7 +45,7 @@ function healthyReadiness(): RuntimeReadinessSnapshot {
   };
 }
 
-function validDiagnosticianOutput(painId: string): DiagnosticianOutputV1 {
+function validDiagnosticianOutput(painId: string): DiagnosticianOutputV2 {
   return {
     valid: true,
     diagnosisId: `diag-${painId}`,
@@ -57,8 +57,10 @@ function validDiagnosticianOutput(painId: string): DiagnosticianOutputV1 {
       kind: 'principle',
       description: 'Read AGENTS.md and PLAN.md before editing protected files',
       abstractedPrinciple: 'Read workspace instructions before protected edits',
+      recommendationRef: 'principle-1',
     }],
     confidence: 0.9,
+    schemaVersion: 'diagnostician-output-v2',
   };
 }
 
@@ -94,7 +96,7 @@ async function seedDiagnosisTask(sm: RuntimeStateManager, painId: string): Promi
 async function runDiagnosisToSucceeded(
   sm: RuntimeStateManager,
   taskId: string,
-  output: DiagnosticianOutputV1,
+  output: DiagnosticianOutputV2,
 ): Promise<{ runId: string; artifactId: string }> {
   const committer = new SqliteDiagnosticianCommitter(sm.connection);
   await sm.acquireLease({ taskId, owner: 'test-owner', durationMs: 60_000, runtimeKind: 'openclaw' });
@@ -520,7 +522,7 @@ describe('assembleMainlineSnapshot', () => {
     if (!runId) throw new Error(`No run created for task ${routerTaskId}`);
 
     // Directly insert artifact with a DIFFERENT painId in content_json
-    // (simulates lineage mismatch — committer stores DiagnosticianOutputV1
+    // (simulates lineage mismatch — committer stores DiagnosticianOutputV2
     // which doesn't have painId, but the assembler reads it for lineage checks)
     const artifactId = 'mismatch-artifact-001';
     const contentJson = JSON.stringify({

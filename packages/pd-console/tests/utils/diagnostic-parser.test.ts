@@ -10,11 +10,16 @@ import {
 describe('parseDiagnosticianOutput', () => {
   it('parses valid full diagnostician output', () => {
     const input = JSON.stringify({
+      schemaVersion: 'diagnostician-output-v2',
+      valid: true,
+      diagnosisId: 'diag-1',
+      summary: 'Input validation gap',
       rootCause: 'Missing input validation',
       confidence: 0.85,
       violatedPrinciples: [{ principleId: 'p1', title: 'Validate input', rationale: 'Should validate' }],
       evidence: [{ sourceRef: 'file.ts:10', note: 'Missing check' }],
-      recommendations: [{ kind: 'rule', description: 'Add validation', triggerPattern: 'input', action: 'validate' }],
+      recommendations: [{ kind: 'rule', recommendationRef: 'rule-1', description: 'Add validation', triggerPattern: 'input', action: 'validate',
+        principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } }],
       ambiguityNotes: ['Low confidence on secondary cause'],
     });
     const result = parseDiagnosticianOutput(input);

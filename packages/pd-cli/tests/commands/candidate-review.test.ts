@@ -118,6 +118,28 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
       workspaceDir: null,
     }),
   });
+  // PRI-1146: a Diagnostician-sourced candidate must carry the full V2
+  // provenance the production committer writes (bare V2 in the run payload,
+  // the router envelope in the artifact, the exact recommendation in the
+  // candidate) — the intake write boundary verifies all three.
+  const recommendation = {
+    kind: 'principle' as const,
+    recommendationRef: 'candidate-1',
+    description: CANDIDATE_TEXT,
+    triggerPattern: CANDIDATE_TRIGGER,
+    action: CANDIDATE_ACTION,
+  };
+  const v2Output = {
+    schemaVersion: 'diagnostician-output-v2' as const,
+    valid: true,
+    diagnosisId: `diag-${candidateId}`,
+    summary: 'seeded diagnosis',
+    rootCause: 'seeded root cause',
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
+    recommendations: [recommendation],
+    confidence: opts.confidence ?? 0.9,
+  };
   const runId = randomUUID();
   await stateManager.runStore.createRun({
     runId,
@@ -127,16 +149,7 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
     executionStatus: 'succeeded',
     startedAt: now,
     endedAt: now,
-    outputPayload: JSON.stringify({
-      valid: true,
-      diagnosisId: `diag-${candidateId}`,
-      summary: 'seeded diagnosis',
-      rootCause: 'seeded root cause',
-      violatedPrinciples: [],
-      evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
-      recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT }],
-      confidence: opts.confidence ?? 0.9,
-    }),
+    outputPayload: JSON.stringify(v2Output),
   });
   if (opts.painId !== undefined) {
     // Real pain_diagnoses write — the reuse evidence resolves its painId here.
@@ -161,11 +174,10 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
       artifactId,
       runId,
       taskId,
-      'principle',
+      'diagnostician_output',
       JSON.stringify({
-        text: CANDIDATE_TEXT,
-        triggerPattern: CANDIDATE_TRIGGER,
-        action: CANDIDATE_ACTION,
+        ...v2Output,
+        trustedContextReceipt: { schemaVersion: 'router-context-v2' },
       }),
       now,
     );
@@ -182,11 +194,7 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
       '测试候选',
       CANDIDATE_TEXT,
       opts.confidence ?? 0.9,
-      JSON.stringify({
-        text: CANDIDATE_TEXT,
-        triggerPattern: CANDIDATE_TRIGGER,
-        action: CANDIDATE_ACTION,
-      }),
+      JSON.stringify(recommendation),
       `${artifactId}::prompt`,
       now,
     );

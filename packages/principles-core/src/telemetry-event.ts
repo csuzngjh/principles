@@ -313,6 +313,18 @@ export const TelemetryEventType = Type.Union([
   //   reason. Non-fatal — principle artifact is already written.
   Type.Literal('evaluator_rule_assembled'),
   Type.Literal('evaluator_rule_assembly_failed'),
+  // PRI-1146: the router context receipt must be reconstructible after a
+  // restart, which requires the exact invocation message to be persisted. The
+  // peer runners emit these when that write fails, so evidence loss is never
+  // silent (the run then fails loud).
+  Type.Literal('artificer_input_payload_persist_failed'),
+  Type.Literal('diag_distiller_input_payload_persist_failed'),
+  Type.Literal('diag_rootcause_input_payload_persist_failed'),
+  Type.Literal('diag_router_input_payload_persist_failed'),
+  Type.Literal('dreamer_input_payload_persist_failed'),
+  Type.Literal('evaluator_input_payload_persist_failed'),
+  Type.Literal('philosopher_input_payload_persist_failed'),
+  Type.Literal('scribe_input_payload_persist_failed'),
   // ── PRI-773 catch-up: register the remaining real emit surface. ──
   // Every name below has a live this.emitEvent/emitRolloutReviewerEvent/
   // eventType call site in principles-core (verified by
@@ -434,6 +446,9 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diag_router_task_leased'),
   Type.Literal('diag_router_task_retried'),
   Type.Literal('diag_router_task_succeeded'),
+  // PRI-1146: the router's trusted canonical principle exposure could not be
+  // proven this run — the receipt records typed unavailable (never a guess).
+  Type.Literal('diag_router_trusted_context_unavailable'),
   Type.Literal('diag_router_update_output_failed'),
   Type.Literal('diag_router_wrong_task_kind'),
   // Diag distiller runner (PRI-625 split pipeline)
@@ -506,6 +521,10 @@ export const TelemetryEventType = Type.Union([
   // exclusively in Principle.reuseEvidence[]; this event is never decision
   // storage and never influences outcomes by itself.
   Type.Literal('reuse_gate_triggered'),
+  // PRI-1146 (G6 / rc-9): the bridge's replay intake review skipped a
+  // candidate because its persisted source payload was unparseable or a
+  // retired non-V2 shape — the skip is recorded, never silent.
+  Type.Literal('replay_review_source_invalid'),
   Type.Literal('rollout_completion_intent_finalize_terminal'),
   Type.Literal('rollout_completion_intent_resumed'),
   Type.Literal('rollout_completion_intent_stale_epoch'),

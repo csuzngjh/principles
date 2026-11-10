@@ -5,7 +5,7 @@ import type { RuntimeStateManager, CandidateRecord } from '../../store/runtime-s
 import type { CandidateIntakeService } from '../../candidate-intake-service.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../../candidate-intake.js';
 import type { RunnerResult } from '../runner-result.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 
 const PAIN_ID = 'manual_1779766506353_uotlzvdu';
 const TASK_ID = `diagnosis_${PAIN_ID}`;
@@ -40,8 +40,9 @@ function makeLedgerEntry(candidateId: string): LedgerPrincipleEntry {
   };
 }
 
-function makeLowConfidenceOutput(): DiagnosticianOutputV1 {
+function makeLowConfidenceOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-001',
     summary: 'Conversation entries with empty text content prevent root cause analysis',
@@ -49,19 +50,20 @@ function makeLowConfidenceOutput(): DiagnosticianOutputV1 {
     violatedPrinciples: [],
     evidence: [],
     recommendations: [
-      { kind: 'principle', description: 'Ensure conversation entries have text content' },
-      { kind: 'rule', description: 'Validate input before diagnosis' },
-      { kind: 'implementation', description: 'Add input validation' },
-      { kind: 'prompt', description: 'Prompt for evidence' },
-      { kind: 'defer', description: 'Defer until evidence available' },
+      { kind: 'principle', description: 'Ensure conversation entries have text content', recommendationRef: 'principle-1' },
+      { kind: 'rule', description: 'Validate input before diagnosis', recommendationRef: 'rule-1', triggerPattern: 'input', action: 'validate it', principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
+      { kind: 'implementation', description: 'Add input validation', recommendationRef: 'implementation-1' },
+      { kind: 'prompt', description: 'Prompt for evidence', recommendationRef: 'prompt-1' },
+      { kind: 'defer', description: 'Defer until evidence available', recommendationRef: 'defer-1' },
     ],
     confidence: 0.35,
     ambiguityNotes: ['No other evidence available; only ambiguity note indicates empty content'],
   };
 }
 
-function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
+function makeHighConfidenceOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-002',
     summary: 'Valid diagnosis with sufficient evidence',
@@ -69,7 +71,7 @@ function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'session-trace-1', note: 'Owner confirmed behavior' }],
     recommendations: [
-      { kind: 'principle', description: 'Valid principle from evidence' },
+      { kind: 'principle', description: 'Valid principle from evidence', recommendationRef: 'principle-1' },
     ],
     confidence: 0.85,
   };
@@ -77,7 +79,7 @@ function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
 
 function makeBridgeDeps(overrides: {
   candidates?: CandidateRecord[];
-  output?: DiagnosticianOutputV1;
+  output?: DiagnosticianOutputV2;
   intakeResults?: Map<string, { id: string }>;
 }) {
   const intakeResults = overrides.intakeResults ?? new Map<string, { id: string }>();

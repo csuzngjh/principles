@@ -9,7 +9,7 @@
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
-import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV1 } from '@principles/core/runtime';
+import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV2 } from '@principles/core/runtime';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
@@ -569,7 +569,8 @@ console.log('[e2e-seed] principle_applications seeded: 4 receipt states for R1 v
 // 真实 SqliteDiagnosticianCommitter 提交（material 校验全链可过），保证
 // review/bind 路径在 e2e 中走的是与生产一致的候选血缘。
 const RULE_BINDING_PRINCIPLE_ID = 'e2e00000-0000-4000-8000-0000000000c1';
-const designGateOutput: DiagnosticianOutputV1 = {
+const designGateOutput: DiagnosticianOutputV2 = {
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'e2e-rule-binding-design-gate',
   summary: 'The design change shipped without confirmation.',
@@ -578,11 +579,15 @@ const designGateOutput: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'principle', description: '非简单行为变更必须先获得确认的设计。' },
-    { kind: 'rule', description: '要求先交付经确认的设计，再进行非简单行为变更。' },
+    { kind: 'principle', description: '非简单行为变更必须先获得确认的设计。', recommendationRef: 'principle-1' },
+    { kind: 'rule', description: '要求先交付经确认的设计，再进行非简单行为变更。', recommendationRef: 'rule-1',
+      triggerPattern: 'design.*change|nontrivial.*change',
+      action: 'Require a confirmed design before non-trivial behavior changes.',
+      principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
   ],
 };
-const replyOutput: DiagnosticianOutputV1 = {
+const replyOutput: DiagnosticianOutputV2 = {
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'e2e-rule-binding-reply',
   summary: 'The conclusion was buried.',
@@ -591,7 +596,10 @@ const replyOutput: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.85,
   recommendations: [
-    { kind: 'rule', description: '面向拥有者的回复必须以一句可独立成立的结论开头。' },
+    { kind: 'rule', description: '面向拥有者的回复必须以一句可独立成立的结论开头。', recommendationRef: 'rule-1',
+      triggerPattern: 'reply|response|answer',
+      action: 'Open owner-facing replies with a self-contained conclusion sentence.',
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } },
   ],
 };
 const insertDiagnosisTask = stateDb.prepare(`

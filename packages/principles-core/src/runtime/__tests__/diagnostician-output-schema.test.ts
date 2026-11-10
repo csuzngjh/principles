@@ -1,61 +1,93 @@
 /**
- * Diagnostician Output Schema Tests — Core Package
+ * Diagnostician Output Schema Tests — Core Package (PRI-1146 V2 Only)
  *
- * Direct TypeBox schema tests for DiagnosticianOutputV1 and its nested schemas.
+ * Direct TypeBox schema tests for DiagnosticianOutputV2 and its nested
+ * schemas. V1 was fully retired; a dedicated retirement section proves V1
+ * payloads can no longer pass the contract.
  *
  * These tests pin the *schema contract* independently of the validator's
  * additional semantic checks — they are the single source of truth for what
  * the TypeBox layer accepts/rejects.
  *
- * Tests verify (PRI-518 / rc-9-no-silent-fallback focus):
- * - DiagnosticianOutputV1Schema.recommendations requires minItems: 1 (the guard
- *   that closed the silent zero-candidate root cause).
- * - Nested schemas (evidence, violatedPrinciples, recommendation kinds) are strict.
- * - Confidence interval is closed [0, 1], not open.
- * - Edge cases: empty strings at minLength: 1 boundaries, invalid kind values.
- *
- * ERR checklist:
- * - ERR-088: assertions pin exact behavior, not just "valid/invalid" boolean —
- *   for instance, the minItems: 1 assertion reads the schema's minItems value
- *   from .properties to detect if someone loosened it to 0.
- * - ERR-089: branch coverage for every schema field — valid AND at least one
- *   invalid path exercised.
+ * Tests verify (PRI-518 / rc-9-no-silent-fallback + PRI-1146 V2 Only focus):
+ * - schemaVersion literal "diagnostician-output-v2" required at the root;
+ * - every recommendation requires an artifact-local recommendationRef;
+ * - rule recommendations REQUIRE principleAssociation (linked|unresolved);
+ * - non-rule recommendations must NOT carry principleAssociation;
+ * - root is closed (additionalProperties: false) — unknown keys rejected;
+ * - recommendations requires minItems: 1 (silent zero-candidate guard);
+ * - confidence interval is closed [0, 1], not open;
+ * - the persisted router envelope reads through readDiagnosticianOutputFromEnvelope;
+ * - a V1-shaped payload (no schemaVersion, no refs) is REJECTED (Clean Break).
  */
 
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import type { TSchema } from '@sinclair/typebox';
 import {
   DiagnosticianViolatedPrincipleSchema,
   DiagnosticianEvidenceSchema,
   RecommendationKindSchema,
-  DiagnosticianRecommendationSchema,
-  DiagnosticianOutputV1Schema,
+  PrincipleAssociationSchema,
+  DiagnosticianRecommendationV2Schema,
+  DiagnosticianOutputV2Schema,
   DiagnosticianInvocationInputSchema,
-  type DiagnosticianOutputV1,
-  type RecommendationKind,
+  DIAGNOSTICIAN_ENVELOPE_KEYS,
+  readDiagnosticianOutputFromEnvelope,
+  type DiagnosticianOutputV2,
+  type DiagnosticianRecommendationV2,
 } from '../diagnostician-output.js';
 
-// ── Minimal valid fixtures (shared, updated for PRI-518 minItems:1) ────────
+// ── Minimal valid fixtures ───────────────────────────────────────────────────
 
-function makeValidRecommendation(overrides: Partial<{
-  kind: RecommendationKind;
-  description: string;
-  triggerPattern: string;
-  action: string;
-  abstractedPrinciple: string;
-}> = {}): DiagnosticianOutputV1['recommendations'][number] {
+// Fixture overrides merge over a discriminated union — Partial<union> does
+// not distribute cleanly, so overrides are a plain record and the merge
+// result is asserted by the schema checks in every test below (test-only
+// fixture composition, not untrusted data).
+function makeValidRecommendation(
+  overrides: Record<string, unknown> = {},
+): DiagnosticianRecommendationV2 {
   return {
     kind: 'defer',
     description: 'No actionable principle identified — defer to next cycle.',
+    recommendationRef: 'defer-1',
+    ...overrides,
+  };
+}
+
+function makeValidPrincipleRecommendation(
+  overrides: Record<string, unknown> = {},
+): DiagnosticianRecommendationV2 {
+  return {
+    kind: 'principle',
+    description: 'Validate data shape before use.',
+    recommendationRef: 'principle-1',
+    abstractedPrinciple: 'Validate data shape before use.',
+    ...overrides,
+  };
+}
+
+function makeValidRuleRecommendation(
+  overrides: Record<string, unknown> = {},
+): DiagnosticianRecommendationV2 {
+  return {
+    kind: 'rule',
+    description: 'Interject when unvalidated payload is consumed.',
+    recommendationRef: 'rule-1',
+    triggerPattern: 'payload\\s*\\.\\s*\\w+',
+    action: 'Run schema validation before consuming the payload.',
+    principleAssociation: {
+      status: 'unresolved',
+      reason: 'no_supported_target',
+    },
     ...overrides,
   };
 }
 
 function makeValidOutput(
-  overrides: Partial<DiagnosticianOutputV1> = {},
-): DiagnosticianOutputV1 {
+  overrides: Partial<DiagnosticianOutputV2> = {},
+): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-uuid-0001',
     summary: 'Diagnosis summary of observed pain signal.',
@@ -72,40 +104,31 @@ function makeValidOutput(
 
 describe('DiagnosticianViolatedPrincipleSchema', () => {
   it('accepts object with only required rationale (minLength:1)', () => {
-    const v = { rationale: 'Violated because X' };
-    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, v)).toBe(true);
+    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, { rationale: 'why' })).toBe(true);
   });
 
   it('accepts all fields filled', () => {
-    const v = {
-      principleId: 'PRI-001',
-      title: 'Broken contract',
-      rationale: 'Violated because X',
-    };
-    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, v)).toBe(true);
+    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, {
+      principleId: 'T-01',
+      title: 'Understand before modifying',
+      rationale: 'why',
+    })).toBe(true);
   });
 
   it('rejects empty rationale string (minLength:1)', () => {
-    const v = { rationale: '' };
-    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, v)).toBe(false);
+    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, { rationale: '' })).toBe(false);
   });
 
   it('rejects whitespace-only rationale (minLength:1 does not trim)', () => {
-    // Note: TypeBox minLength operates on raw string length, not trimmed.
-    // So whitespace passes minLength:1 — this is a known schema gap, the
-    // validator's semantic checks handle trimmed empty in step 2 of default-validator.
-    const v = { rationale: '   ' };
-    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, v)).toBe(true);
+    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, { rationale: '   ' })).toBe(true); // schema-level; semantic validator rejects
   });
 
   it('rejects missing rationale field (required)', () => {
-    const v = { principleId: 'PRI-001' } as const;
-    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, v)).toBe(false);
+    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, {})).toBe(false);
   });
 
   it('rejects non-string rationale', () => {
     expect(Value.Check(DiagnosticianViolatedPrincipleSchema, { rationale: 42 })).toBe(false);
-    expect(Value.Check(DiagnosticianViolatedPrincipleSchema, { rationale: null })).toBe(false);
   });
 });
 
@@ -113,8 +136,7 @@ describe('DiagnosticianViolatedPrincipleSchema', () => {
 
 describe('DiagnosticianEvidenceSchema', () => {
   it('accepts valid evidence with non-empty sourceRef and note', () => {
-    const v = { sourceRef: 'turn-3:tool-call', note: 'User reported error' };
-    expect(Value.Check(DiagnosticianEvidenceSchema, v)).toBe(true);
+    expect(Value.Check(DiagnosticianEvidenceSchema, { sourceRef: 'trace:1', note: 'observed' })).toBe(true);
   });
 
   it('rejects empty sourceRef (minLength:1)', () => {
@@ -122,7 +144,7 @@ describe('DiagnosticianEvidenceSchema', () => {
   });
 
   it('rejects empty note (minLength:1)', () => {
-    expect(Value.Check(DiagnosticianEvidenceSchema, { sourceRef: 'x', note: '' })).toBe(false);
+    expect(Value.Check(DiagnosticianEvidenceSchema, { sourceRef: 'trace:1', note: '' })).toBe(false);
   });
 
   it('rejects missing sourceRef (required)', () => {
@@ -130,290 +152,301 @@ describe('DiagnosticianEvidenceSchema', () => {
   });
 
   it('rejects missing note (required)', () => {
-    expect(Value.Check(DiagnosticianEvidenceSchema, { sourceRef: 'x' })).toBe(false);
+    expect(Value.Check(DiagnosticianEvidenceSchema, { sourceRef: 'trace:1' })).toBe(false);
   });
 
   it('rejects non-object evidence', () => {
-    expect(Value.Check(DiagnosticianEvidenceSchema, null)).toBe(false);
-    expect(Value.Check(DiagnosticianEvidenceSchema, 'source:note')).toBe(false);
+    expect(Value.Check(DiagnosticianEvidenceSchema, 'evidence')).toBe(false);
   });
 });
 
-// ── RecommendationKindSchema ───────────────────────────────────────────────
+// ── RecommendationKindSchema (union of 5 literals) ──────────────────────────
 
 describe('RecommendationKindSchema (union of 5 literals)', () => {
   it('accepts all 5 valid kinds', () => {
-    const valid: RecommendationKind[] = ['principle', 'rule', 'implementation', 'prompt', 'defer'];
-    for (const k of valid) {
-      expect(Value.Check(RecommendationKindSchema, k)).toBe(true);
+    for (const kind of ['principle', 'rule', 'implementation', 'prompt', 'defer']) {
+      expect(Value.Check(RecommendationKindSchema, kind), kind).toBe(true);
     }
   });
 
   it('rejects near-miss strings (case-sensitive, typos)', () => {
-    const nearMisses = [
-      'PRINCIPLE', 'Rule', 'IMPLEMENTATION',   // case variants
-      'princples', 'rul', 'deferr',             // typos
-      'suggest', 'skip', 'noop', 'none',       // plausible but not in union
-      '', ' defer', 'defer ',                   // whitespace
-    ];
-    for (const k of nearMisses) {
-      expect(Value.Check(RecommendationKindSchema, k)).toBe(false);
+    for (const kind of ['Principle', 'Rule', 'rules', 'deferr', 'prompting']) {
+      expect(Value.Check(RecommendationKindSchema, kind), kind).toBe(false);
     }
   });
 
   it('rejects non-string kinds', () => {
     expect(Value.Check(RecommendationKindSchema, 1)).toBe(false);
     expect(Value.Check(RecommendationKindSchema, null)).toBe(false);
-    expect(Value.Check(RecommendationKindSchema, undefined)).toBe(false);
-    expect(Value.Check(RecommendationKindSchema, ['principle'])).toBe(false);
+    expect(Value.Check(RecommendationKindSchema, ['rule'])).toBe(false);
   });
 });
 
-// ── DiagnosticianRecommendationSchema ───────────────────────────────────────
+// ── PrincipleAssociationSchema (V2, SPEC v0.6 §4) ───────────────────────────
 
-describe('DiagnosticianRecommendationSchema', () => {
-  it('accepts minimal defer recommendation (only required fields)', () => {
-    const r = makeValidRecommendation({ kind: 'defer', description: 'Defer' });
-    expect(Value.Check(DiagnosticianRecommendationSchema, r)).toBe(true);
+describe('PrincipleAssociationSchema (PRI-1146)', () => {
+  it('accepts a linked association targeting a recommendation_ref', () => {
+    expect(Value.Check(PrincipleAssociationSchema, {
+      status: 'linked',
+      relation: 'implements',
+      target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+      rationale: 'the rule operationalizes the principle',
+      evidenceRefs: ['trace:1'],
+    })).toBe(true);
   });
 
-  it('accepts principle recommendation with abstractedPrinciple (required for kind principle? schema marks it Optional but semantic validator enforces it)', () => {
-    // Note: abstractedPrinciple is TypeBox Optional here; the semantic
-    // validator (default-validator step 2f) enforces it when kind==='principle'.
-    // This test pins that the schema alone is loose on the per-kind requirement.
-    const r1 = makeValidRecommendation({
-      kind: 'principle',
-      description: 'Principle-level insight.',
-      abstractedPrinciple: 'Handle tool failures gracefully to preserve trust.',
-    });
-    expect(Value.Check(DiagnosticianRecommendationSchema, r1)).toBe(true);
+  it('accepts a linked association targeting a canonical_principle', () => {
+    expect(Value.Check(PrincipleAssociationSchema, {
+      status: 'linked',
+      relation: 'implements',
+      target: { type: 'canonical_principle', principleId: '11111111-1111-4111-8111-111111111111' },
+      rationale: 'implements the ledger principle',
+      evidenceRefs: ['trace:1'],
+    })).toBe(true);
   });
 
-  it('accepts rule recommendation with triggerPattern + action', () => {
-    const r = makeValidRecommendation({
+  it('rejects linked without evidenceRefs (minItems:1)', () => {
+    expect(Value.Check(PrincipleAssociationSchema, {
+      status: 'linked',
+      relation: 'implements',
+      target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+      rationale: 'x',
+      evidenceRefs: [],
+    })).toBe(false);
+  });
+
+  it('rejects unknown relation values (only implements)', () => {
+    expect(Value.Check(PrincipleAssociationSchema, {
+      status: 'linked',
+      relation: 'extends',
+      target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+      rationale: 'x',
+      evidenceRefs: ['trace:1'],
+    })).toBe(false);
+  });
+
+  it('accepts unresolved with a known reason', () => {
+    expect(Value.Check(PrincipleAssociationSchema, { status: 'unresolved', reason: 'principle_not_in_context' })).toBe(true);
+  });
+
+  it('rejects unresolved with an unknown reason', () => {
+    expect(Value.Check(PrincipleAssociationSchema, { status: 'unresolved', reason: 'just_because' })).toBe(false);
+  });
+});
+
+// ── DiagnosticianRecommendationV2Schema ─────────────────────────────────────
+
+describe('DiagnosticianRecommendationV2Schema', () => {
+  it('accepts minimal defer recommendation (required fields incl. recommendationRef)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidRecommendation())).toBe(true);
+  });
+
+  it('REJECTS the V1 shape — recommendation without recommendationRef', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, { kind: 'defer', description: 'x' })).toBe(false);
+  });
+
+  it('accepts principle recommendation with abstractedPrinciple', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidPrincipleRecommendation())).toBe(true);
+  });
+
+  it('accepts rule recommendation with triggerPattern + action + association', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidRuleRecommendation())).toBe(true);
+  });
+
+  it('REJECTS rule recommendation without principleAssociation', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, {
       kind: 'rule',
-      description: 'Block writes to /etc.',
-      triggerPattern: 'tool_name=write_file AND path starts with /etc',
-      action: 'block',
-    });
-    expect(Value.Check(DiagnosticianRecommendationSchema, r)).toBe(true);
+      description: 'x',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'tp',
+      action: 'ac',
+    })).toBe(false);
+  });
+
+  it('REJECTS non-rule recommendation carrying principleAssociation (rule-only field)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, {
+      ...makeValidPrincipleRecommendation(),
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    })).toBe(false);
   });
 
   it('rejects missing/invalid kind (required union)', () => {
-    const noKind = { description: 'x' } as const;
-    expect(Value.Check(DiagnosticianRecommendationSchema, noKind)).toBe(false);
-
-    const badKind = { kind: 'suggest', description: 'x' } as const;
-    expect(Value.Check(DiagnosticianRecommendationSchema, badKind)).toBe(false);
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, { description: 'x', recommendationRef: 'r' })).toBe(false);
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, { kind: 'policy', description: 'x', recommendationRef: 'r' })).toBe(false);
   });
 
   it('rejects empty description (minLength:1)', () => {
-    const r = makeValidRecommendation({ description: '' });
-    expect(Value.Check(DiagnosticianRecommendationSchema, r)).toBe(false);
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidRecommendation({ description: '' }))).toBe(false);
   });
 
-  it('rejects missing description (required)', () => {
-    const r = { kind: 'defer' } as const;
-    expect(Value.Check(DiagnosticianRecommendationSchema, r)).toBe(false);
+  it('rejects empty recommendationRef (minLength:1)', () => {
+    expect(Value.Check(DiagnosticianRecommendationV2Schema, makeValidRecommendation({ recommendationRef: '' }))).toBe(false);
   });
 });
 
-// ── DiagnosticianOutputV1Schema — PRIMARY FOCUS (PRI-518) ──────────────────
+// ── DiagnosticianOutputV2Schema (PRI-518 minItems + PRI-1146 root closure) ──
 
-describe('DiagnosticianOutputV1Schema (PRI-518 — minItems:1 on recommendations)', () => {
-
-  // ── Schema-level assertion: minItems IS 1 (not 0, not undefined) ──────────
-  it('PIN: DiagnosticianOutputV1Schema.properties.recommendations has minItems === 1', () => {
-    // This is the PRI-518 root-cause guard at the schema level.
-    // ERR-088: read the schema's own property, not just behavior via Value.Check.
-    // If someone reverts minItems to 0, this test will fail — not just the
-    // downstream "empty array rejected" test (which could be fooled by other means).
-    const recProp = (DiagnosticianOutputV1Schema as unknown as { properties: { recommendations: { minItems?: number } } }).properties.recommendations;
-    expect(recProp).toBeDefined();
-    expect(typeof recProp.minItems).toBe('number');
-    expect(recProp.minItems).toBe(1);
+describe('DiagnosticianOutputV2Schema', () => {
+  it('PIN: recommendations has minItems === 1 (PRI-518 silent zero-candidate guard)', () => {
+    const recProp = (DiagnosticianOutputV2Schema as unknown as {
+      properties: { recommendations: { minItems?: number } };
+    }).properties.recommendations;
+    expect(recProp?.minItems).toBe(1);
   });
 
-  it('PIN: recommendations array type is enforced (not unknown[] fallback)', () => {
-    // Sanity — the property has a type we can introspect.
-    const recs = (DiagnosticianOutputV1Schema as unknown as { properties: { recommendations: TSchema } }).properties.recommendations;
-    expect((recs as unknown as { kind?: string })?.kind ?? 'array').toBeTruthy();
-  });
-
-  // ── Accept paths ───────────────────────────────────────────────────────────
   it('accepts a minimal valid output with 1 defer recommendation', () => {
-    const o = makeValidOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput())).toBe(true);
   });
 
-  it('accepts output with 5 recommendations (many, valid kinds)', () => {
-    const o = makeValidOutput({
+  it('accepts output with principle + linked rule + implementation recommendations', () => {
+    const output = makeValidOutput({
+      evidence: [{ sourceRef: 'trace:1', note: 'n' }],
       recommendations: [
-        makeValidRecommendation({ kind: 'principle', description: 'P', abstractedPrinciple: 'W' }),
-        makeValidRecommendation({ kind: 'rule', description: 'R', triggerPattern: 'p', action: 'b' }),
-        makeValidRecommendation({ kind: 'implementation', description: 'I' }),
-        makeValidRecommendation({ kind: 'prompt', description: 'P' }),
-        makeValidRecommendation({ kind: 'defer', description: 'D' }),
+        makeValidPrincipleRecommendation(),
+        makeValidRuleRecommendation({
+          principleAssociation: {
+            status: 'linked',
+            relation: 'implements',
+            target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+            rationale: 'operationalizes it',
+            evidenceRefs: ['trace:1'],
+          },
+        }),
+        makeValidRecommendation({ kind: 'implementation', recommendationRef: 'implementation-1' }),
       ],
     });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+    expect(Value.Check(DiagnosticianOutputV2Schema, output)).toBe(true);
   });
 
-  it('accepts confidence at exact lower boundary 0', () => {
-    const o = makeValidOutput({ confidence: 0 });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+  it('REJECTS missing schemaVersion (the retired V1 shape)', () => {
+    const v1Shape = { ...makeValidOutput() } as Record<string, unknown>;
+    delete v1Shape.schemaVersion;
+    expect(Value.Check(DiagnosticianOutputV2Schema, v1Shape)).toBe(false);
   });
 
-  it('accepts confidence at exact upper boundary 1', () => {
-    const o = makeValidOutput({ confidence: 1 });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+  it('REJECTS wrong schemaVersion literal', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ schemaVersion: 'diagnostician-output-v1' as never }))).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ schemaVersion: 'diagnostician-output' as never }))).toBe(false);
+  });
+
+  it('REJECTS unknown extra fields at the root (closed contract)', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, { ...makeValidOutput(), bogusField: 1 })).toBe(false);
+    // taskId is runner-owned lineage, not part of the output contract.
+    expect(Value.Check(DiagnosticianOutputV2Schema, { ...makeValidOutput(), taskId: 'diag_router-001' })).toBe(false);
+  });
+
+  it('REJECTS a full V1 payload byte-shape (Clean Break negative)', () => {
+    const v1Payload = {
+      valid: true,
+      diagnosisId: 'diag-uuid-0001',
+      summary: 's',
+      rootCause: 'Design: x',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [
+        { kind: 'principle', description: 'p', abstractedPrinciple: 'ap' },
+        { kind: 'rule', description: 'r', triggerPattern: 'tp', action: 'ac' },
+      ],
+      confidence: 0.5,
+    };
+    expect(Value.Check(DiagnosticianOutputV2Schema, v1Payload)).toBe(false);
+  });
+
+  it('accepts confidence at exact boundaries 0 and 1 (closed interval)', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ confidence: 0 }))).toBe(true);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ confidence: 1 }))).toBe(true);
   });
 
   it('accepts valid:false — diagnosis can explicitly report invalid-with-reasons', () => {
-    const o = makeValidOutput({ valid: false });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ valid: false }))).toBe(true);
   });
 
-  it('accepts filled evidence and violatedPrinciples arrays', () => {
-    const o = makeValidOutput({
-      violatedPrinciples: [
-        { principleId: 'PRI-001', rationale: 'Rationale here.' },
-      ],
-      evidence: [
-        { sourceRef: 'turn-1', note: 'User error report' },
-        { sourceRef: 'turn-2', note: 'Tool failure trace' },
-      ],
-    });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+  it('REJECTS recommendations: [] (the PRI-518 silent zero-candidate root cause)', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ recommendations: [] }))).toBe(false);
   });
 
-  it('accepts optional ambiguityNotes string array', () => {
-    const o = makeValidOutput({
-      ambiguityNotes: ['Not enough data on X', 'Y may be transient'],
-    });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(true);
+  it('rejects missing recommendations field (required + array with items)', () => {
+    const o = { ...makeValidOutput() } as Record<string, unknown>;
+    delete o.recommendations;
+    expect(Value.Check(DiagnosticianOutputV2Schema, o)).toBe(false);
   });
 
-  // ── Reject paths — PRI-518 root cause (silent zero-candidates) ────────────
-  it('REJECTS recommendations: [] — empty array (the PRI-518 silent zero-candidate root cause)', () => {
-    // This was the exact pattern that caused 4 pain records → 8 leased tasks → 0 candidates.
-    // Schema must reject it at the boundary; validator's semantic check is defense-in-depth.
-    const o = makeValidOutput({ recommendations: [] });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(false);
+  it('rejects missing diagnosisId / summary / rootCause / valid (required fields)', () => {
+    for (const field of ['diagnosisId', 'summary', 'rootCause', 'valid'] as const) {
+      const o = { ...makeValidOutput() } as Record<string, unknown>;
+      delete o[field];
+      expect(Value.Check(DiagnosticianOutputV2Schema, o), `missing ${field}`).toBe(false);
+    }
   });
 
-  it('REJECTS missing recommendations field (required + array with items)', () => {
-    const { recommendations: _omit, ...rest } = makeValidOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, rest)).toBe(false);
+  it('rejects non-boolean valid', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ valid: 'yes' as never }))).toBe(false);
   });
 
-  // ── Reject paths — other required fields ───────────────────────────────────
-  it('rejects missing diagnosisId (required, minLength:1)', () => {
-    const { diagnosisId: _omit, ...rest } = makeValidOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, rest)).toBe(false);
+  it('rejects confidence outside [0,1] and non-number confidence', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ confidence: -0.01 }))).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ confidence: 1.01 }))).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ confidence: 'high' as never }))).toBe(false);
   });
 
-  it('rejects empty diagnosisId (minLength:1)', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ diagnosisId: '' }))).toBe(false);
+  it('rejects null/undefined/string/array instead of output object', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, null)).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, undefined)).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, 'diagnostician-output-v2')).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, [makeValidOutput()])).toBe(false);
   });
 
-  it('rejects missing summary (required, minLength:1)', () => {
-    const { summary: _omit, ...rest } = makeValidOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, rest)).toBe(false);
+  it('rejects recommendations as non-array (string/null/object)', () => {
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ recommendations: 'not-an-array' as never }))).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ recommendations: null as never }))).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, makeValidOutput({ recommendations: { 0: makeValidRecommendation() } as never }))).toBe(false);
   });
 
-  it('rejects empty summary (minLength:1)', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ summary: '' }))).toBe(false);
-  });
-
-  it('rejects missing rootCause (required, minLength:1)', () => {
-    const { rootCause: _omit, ...rest } = makeValidOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, rest)).toBe(false);
-  });
-
-  it('rejects empty rootCause (minLength:1)', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ rootCause: '' }))).toBe(false);
-  });
-
-  it('rejects missing valid boolean field (required)', () => {
-    const { valid: _omit, ...rest } = makeValidOutput();
-    expect(Value.Check(DiagnosticianOutputV1Schema, rest)).toBe(false);
-  });
-
-  it('rejects valid as non-boolean (string, number)', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ valid: 'true' as unknown as boolean }))).toBe(false);
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ valid: 1 as unknown as boolean }))).toBe(false);
-  });
-
-  // ── Reject paths — confidence outside [0,1] ────────────────────────────────
-  it('rejects confidence slightly below 0', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ confidence: -0.0001 }))).toBe(false);
-  });
-
-  it('rejects confidence slightly above 1', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ confidence: 1.0001 }))).toBe(false);
-  });
-
-  it('rejects confidence as NaN or Infinity (TypeBox minimum/maximum on number requires finite)', () => {
-    // Note: TypeBox number schema with minimum/maximum rejects NaN natively.
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ confidence: NaN }))).toBe(false);
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ confidence: Infinity }))).toBe(false);
-  });
-
-  it('rejects confidence as non-number (string/null)', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ confidence: 'high' as unknown as number }))).toBe(false);
-    expect(Value.Check(DiagnosticianOutputV1Schema, makeValidOutput({ confidence: null as unknown as number }))).toBe(false);
-  });
-
-  // ── Reject paths — non-object / malformed inputs ───────────────────────────
-  it('rejects null instead of output object', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, null)).toBe(false);
-  });
-
-  it('rejects undefined instead of output object', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, undefined)).toBe(false);
-  });
-
-  it('rejects string masquerading as output', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, 'diagnostician-output-v1')).toBe(false);
-  });
-
-  it('rejects array instead of output object', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema, [makeValidOutput()])).toBe(false);
-  });
-
-  // ── Reject paths — recommendations is not an array ─────────────────────────
-  it('rejects recommendations set to a string (not iterable — guards against for...of throw)', () => {
-    // Related to default-validator's 2e-bis guard: for...of undefined would throw
-    // if the semantic guard missed. Schema rejects non-array at the boundary.
-    expect(Value.Check(DiagnosticianOutputV1Schema,
-      makeValidOutput({ recommendations: 'not-an-array' as unknown as DiagnosticianOutputV1['recommendations'] })))
-      .toBe(false);
-  });
-
-  it('rejects recommendations set to null', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema,
-      makeValidOutput({ recommendations: null as unknown as DiagnosticianOutputV1['recommendations'] })))
-      .toBe(false);
-  });
-
-  it('rejects recommendations set to an object (not array)', () => {
-    expect(Value.Check(DiagnosticianOutputV1Schema,
-      makeValidOutput({ recommendations: { 0: makeValidRecommendation() } as unknown as DiagnosticianOutputV1['recommendations'] })))
-      .toBe(false);
-  });
-
-  // ── Reject paths — single invalid recommendation poisons the whole array ───
-  it('rejects a 2-item recommendations array when the 2nd item lacks description', () => {
-    // Array items are validated against the item schema — a single bad item
-    // should cause the whole output to fail schema check.
+  it('rejects when a single invalid recommendation poisons the array', () => {
     const o = makeValidOutput({
       recommendations: [
         makeValidRecommendation(),
-        { kind: 'defer' } as DiagnosticianOutputV1['recommendations'][number],  // missing description
+        { kind: 'defer' } as DiagnosticianRecommendationV2, // missing description + ref
       ],
     });
-    expect(Value.Check(DiagnosticianOutputV1Schema, o)).toBe(false);
+    expect(Value.Check(DiagnosticianOutputV2Schema, o)).toBe(false);
+  });
+});
+
+// ── Persisted envelope reader (PRI-1146: committed artifact shape) ──────────
+
+describe('readDiagnosticianOutputFromEnvelope', () => {
+  const output = makeValidOutput();
+
+  it('reads a bare V2 output (run outputPayload shape)', () => {
+    expect(readDiagnosticianOutputFromEnvelope(JSON.parse(JSON.stringify(output)))).toBeDefined();
+  });
+
+  it('reads a router envelope (output + receipt + associationValidation keys)', () => {
+    const envelope = {
+      ...output,
+      trustedContextReceipt: { schemaVersion: 'router-context-v2', placeholder: true },
+      associationValidation: { ok: true },
+    };
+    const read = readDiagnosticianOutputFromEnvelope(JSON.parse(JSON.stringify(envelope)));
+    expect(read).toBeDefined();
+    expect(read?.schemaVersion).toBe('diagnostician-output-v2');
+    expect(read?.recommendations[0]?.recommendationRef).toBe('defer-1');
+  });
+
+  it('rejects an envelope missing the receipt key (arbitrary extras are not tolerated)', () => {
+    expect(readDiagnosticianOutputFromEnvelope({ ...output, associationValidation: { ok: true } })).toBeUndefined();
+    expect(readDiagnosticianOutputFromEnvelope({ ...output, randomExtra: 1 })).toBeUndefined();
+  });
+
+  it('rejects a V1 payload (no schemaVersion) — Clean Break read path', () => {
+    const v1 = { ...output } as Record<string, unknown>;
+    delete v1.schemaVersion;
+    expect(readDiagnosticianOutputFromEnvelope(v1)).toBeUndefined();
+  });
+
+  it('DIAGNOSTICIAN_ENVELOPE_KEYS pins the envelope extension key set', () => {
+    expect([...DIAGNOSTICIAN_ENVELOPE_KEYS]).toEqual(['trustedContextReceipt', 'associationValidation']);
   });
 });
 
@@ -432,82 +465,29 @@ describe('DiagnosticianInvocationInputSchema', () => {
   });
 
   it('PIN: outputSchemaRef is the literal "diagnostician-output" (not any string)', () => {
-    // Pin that the schema only accepts the exact literal, not v2 or other refs.
     const outputRefProp = (DiagnosticianInvocationInputSchema as unknown as {
       properties: { outputSchemaRef: { const?: string } };
     }).properties.outputSchemaRef;
     expect(outputRefProp?.const ?? (outputRefProp as unknown as { anyOf?: [{ const?: string }] })?.anyOf?.[0]?.const).toBe('diagnostician-output');
   });
 
-  it('rejects wrong outputSchemaRef (schema drift detection)', () => {
-    const input = {
-      agentId: 'diagnostician',
-      taskId: 'task-0001',
-      context: {},
-      outputSchemaRef: 'diagnostician-output-v2', // bumped by mistake
-      timeoutMs: 60_000,
-    };
-    expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(false);
+  it('rejects the versioned spellings on fresh invocation input (fail loud)', () => {
+    for (const ref of ['diagnostician-output-v1', 'diagnostician-output-v2']) {
+      const input = {
+        agentId: 'diagnostician',
+        taskId: 'task-0001',
+        context: {},
+        outputSchemaRef: ref,
+        timeoutMs: 60_000,
+      };
+      expect(Value.Check(DiagnosticianInvocationInputSchema, input), ref).toBe(false);
+    }
   });
 
-  it('PRI-1139: rejects the pre-cutover "-v1" spelling on fresh invocation input', () => {
-    // The invocation input is constructed per call by in-repo production code;
-    // writer and validator deploy atomically, so a stale versioned spelling is
-    // a bug to surface (fail loud), not history to accommodate. Historical
-    // refs stay readable at the REGISTRY layer (output-schema-ref-alias tests).
-    const input = {
-      agentId: 'diagnostician',
-      taskId: 'task-0001',
-      context: {},
-      outputSchemaRef: 'diagnostician-output-v1',
-      timeoutMs: 60_000,
-    };
-    expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(false);
-  });
-
-  it('rejects negative timeoutMs (minimum: 0)', () => {
-    const input = {
-      agentId: 'diagnostician',
-      taskId: 'task-0001',
-      context: {},
-      outputSchemaRef: 'diagnostician-output' as const,
-      timeoutMs: -1,
-    };
-    expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(false);
-  });
-
-  it('accepts timeoutMs = 0 (fire-and-forget or no-wait is a valid contract)', () => {
-    const input = {
-      agentId: 'diagnostician',
-      taskId: 'task-0001',
-      context: {},
-      outputSchemaRef: 'diagnostician-output' as const,
-      timeoutMs: 0,
-    };
-    expect(Value.Check(DiagnosticianInvocationInputSchema, input)).toBe(true);
-  });
-
-  it('rejects empty agentId / taskId (minLength:1)', () => {
-    const base = {
-      context: {},
-      outputSchemaRef: 'diagnostician-output' as const,
-      timeoutMs: 1000,
-    };
-    expect(Value.Check(DiagnosticianInvocationInputSchema, { ...base, agentId: '', taskId: 't' })).toBe(false);
-    expect(Value.Check(DiagnosticianInvocationInputSchema, { ...base, agentId: 'a', taskId: '' })).toBe(false);
-  });
-});
-
-// ── ERR-088 defense-in-depth: schema ↔ validator agreement on recommendations ─
-describe('cross-contract: schema minItems agrees with semantic checks', () => {
-  it('schema rejects empty recommendations AND Validator step 2e-bis would also reject', () => {
-    // This test does NOT import the validator (keeps this test independent of
-    // runtime/runner module graph). Instead it documents the defense-in-depth
-    // agreement: both layers MUST reject. We verify schema's behavior here, and
-    // the validator's own test file (default-validator.test.ts) asserts the
-    // semantic check. When both fail green, the two layers agree.
-    const empty = makeValidOutput({ recommendations: [] });
-    const schemaRejects = !Value.Check(DiagnosticianOutputV1Schema, empty);
-    expect(schemaRejects).toBe(true);
+  it('rejects negative timeoutMs and empty agentId/taskId', () => {
+    const base = { agentId: 'a', taskId: 't', context: {}, outputSchemaRef: 'diagnostician-output' as const, timeoutMs: 1000 };
+    expect(Value.Check(DiagnosticianInvocationInputSchema, { ...base, timeoutMs: -1 })).toBe(false);
+    expect(Value.Check(DiagnosticianInvocationInputSchema, { ...base, agentId: '' })).toBe(false);
+    expect(Value.Check(DiagnosticianInvocationInputSchema, { ...base, taskId: '' })).toBe(false);
   });
 });

@@ -17,7 +17,7 @@
 
 import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../diagnostician/diag-distiller-output.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 // ── R6: refactor_regression, T-01/T-03 ──────────────────────────────────────
 // PRI-363 refactor behavior regression (stage enum change broke tests)
@@ -84,8 +84,9 @@ export const MOCK_DISTILLER_OUTPUTS: { R6: DiagDistillerOutputV1 } = {
   },
 };
 
-export const MOCK_ROUTER_OUTPUTS: { R6: DiagnosticianOutputV1 } = {
+export const MOCK_ROUTER_OUTPUTS: { R6: DiagnosticianOutputV2 } = {
   R6: {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-manual_1781081305247',
     summary: 'PRI-363 重构因缺乏影响面评估与向后兼容机制导致枚举变更破坏下游契约；需建立重构前全面评估与兼容性保障规范，避免破坏性变更波及依赖。',
@@ -112,17 +113,27 @@ export const MOCK_ROUTER_OUTPUTS: { R6: DiagnosticianOutputV1 } = {
       {
         kind: 'principle',
         description: '重构或修改核心契约前，必须全面评估影响范围并建立向后兼容机制，避免破坏性变更直接波及下游依赖。',
+        recommendationRef: 'principle-1',
         abstractedPrinciple: '重构或修改核心契约前，必须全面评估影响范围并建立向后兼容机制，避免破坏性变更直接波及下游依赖。',
       },
       {
         kind: 'rule',
         description: '当代码涉及枚举值、接口签名或核心控制流条件判断变更时，强制触发影响面扫描与契约验证流程。',
+        recommendationRef: 'rule-1',
         triggerPattern: 'enum.*change|interface.*modify|stage.*value.*update|contract.*break',
         action: '执行静态依赖分析并运行下游集成测试套件，确认行为等价性后方可合并。',
+        principleAssociation: {
+          status: 'linked',
+          relation: 'implements',
+          target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+          rationale: '该规则把「重构前必须评估影响面并保障兼容」的原则落实为可拦截的具体触发条件与动作。',
+          evidenceRefs: ['owner_reported:cli'],
+        },
       },
       {
         kind: 'implementation',
         description: '在核心控制流与底层枚举之间引入版本兼容层或适配器模式，隔离重构变更对下游逻辑的直接冲击。',
+        recommendationRef: 'implementation-1',
       },
     ],
     confidence: 0.85,

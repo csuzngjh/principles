@@ -62,14 +62,16 @@ const NOW = '2026-10-14T12:00:00.000Z';
 const WORKER_CYCLE_TIMEOUT_MS = 30_000;
 
 function routerOutput(): object {
+  // PRI-1146: V2 is the only accepted diagnostician contract.
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-r5',
     summary: 's',
     rootCause: 'rc',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'trace-r5', note: 'e' }],
-    recommendations: [{ kind: 'principle', description: 'R5 principle' }],
+    recommendations: [{ kind: 'principle', description: 'R5 principle', recommendationRef: 'principle-1' }],
     confidence: 0.9,
   };
 }
@@ -140,9 +142,11 @@ async function seedHealthyAndCorrupt(): Promise<Seeded> {
 
   const connection = new SqliteConnection(root);
   try {
+    // PRI-1146 P1-03: the committed artifact must itself be a V2 envelope —
+    // intake now refuses diagnostician candidates whose artifact is not V2.
     await new SqliteDiagnosticianCommitter(connection).commit({
       runId: 'run-r5', taskId: ROUTER, output: routerOutput() as never,
-      idempotencyKey: `${ROUTER}:run-r5`, contentJson: '{}',
+      idempotencyKey: `${ROUTER}:run-r5`,
     });
   } finally {
     connection.close();
