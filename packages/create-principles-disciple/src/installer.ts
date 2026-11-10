@@ -36,7 +36,7 @@ import {
   type VerificationResult,
   type RuntimeProfileInput,
 } from './mvp-config.js';
-import { getHostInstallers, type HostTarget } from './installers/index.js';
+import { detectInstalledHosts, getHostInstallers, type DetectedHost, type HostTarget } from './installers/index.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
@@ -267,6 +267,40 @@ export function resolveHostRefreshTargets(persistedHosts: readonly string[], hos
     targets.push(persisted);
   }
   return targets;
+}
+
+/** Union the detected (already-installed) hosts into the manifest host list. */
+function withDetectedHosts(hosts: readonly string[], detected: readonly DetectedHost[]): string[] {
+  const merged = [...hosts];
+  for (const host of detected) {
+    if (!merged.includes(host.hostId)) merged.push(host.hostId);
+  }
+  return merged;
+}
+
+export interface UpgradeHostPlan {
+  /** Hosts refreshed in this upgrade (requested + already-installed others). */
+  readonly refreshTargets: HostTarget[];
+  /** Installed hosts PD had not recorded before — the silent-skip case. */
+  readonly newlyCovered: DetectedHost[];
+}
+
+/**
+ * One upgrade must cover every host that already carries PD (2026-11-11).
+ * Pure so the coverage rule is testable without running a whole install.
+ */
+export function planUpgradeHosts(
+  requested: HostTarget,
+  persistedHosts: readonly string[],
+  detected: readonly DetectedHost[],
+): UpgradeHostPlan {
+  return {
+    refreshTargets: resolveHostRefreshTargets(
+      [...persistedHosts, ...detected.map((host) => host.hostId)],
+      requested,
+    ),
+    newlyCovered: detected.filter((host) => !persistedHosts.includes(host.hostId)),
+  };
 }
 
 /**
@@ -5001,7 +5035,17 @@ export async function install(
     // host config. A malformed manifest must not be discovered only after the
     // old installation has already been replaced (rc-3/rc-9).
     const persistedHostsBeforeRun = readPersistedInstallHosts();
-    installManifestHosts = resolveInstallManifestHosts(options.host);
+    // UPDATE CHAIN (2026-11-11): a host installed outside the manifest (e.g. a
+    // Codex Marketplace plugin added by hand) used to stay on the old release
+    // while the upgrade reported success. Detect every host that already
+    // carries PD and include it in BOTH the manifest record and the refresh
+    // set, so one upgrade brings all hosts forward without uninstall/reinstall.
+    const detectedHostsBeforeRun = detectInstalledHosts();
+    const hostPlan = planUpgradeHosts(options.host, persistedHostsBeforeRun, detectedHostsBeforeRun);
+    installManifestHosts = withDetectedHosts(resolveInstallManifestHosts(options.host), detectedHostsBeforeRun);
+    for (const detectedHost of hostPlan.newlyCovered) {
+      logger.info(`Detected installed host "${detectedHost.hostId}" (${detectedHost.evidence}) — included in this upgrade.`);
+    }
     if (installsOpenClaw(options.host)) migrateLegacyPdBackups();
     const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall(options.host);
     backupDir = backupDirFromResult;
@@ -5318,13 +5362,13 @@ export async function install(
     // next launch (binding_version_mismatch). Refresh them through their real
     // host installers here — best effort only: the requested host succeeded,
     // and a sibling refresh failure must not roll back the working runtime.
-    const refreshTargets = resolveHostRefreshTargets(persistedHostsBeforeRun, options.host);
+    const { refreshTargets } = hostPlan;
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
       const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx);
       for (const hr of refreshResults) {
         if (hr.success) {
-          logger.info(`Host "${hr.hostId}" refreshed for the new runtime${hr.reason ? `: ${hr.reason}` : ''}.`);
+          logger.info(`Host "${hr.hostId}" refresh: ${hr.configAction === 'updated' ? 'updated' : 'no change needed'}${hr.reason ? ` — ${hr.reason}` : ''}.`);
         } else {
           // rc-9: never silent — state the reason and the exact recovery step.
           logger.warn(`Host "${hr.hostId}" refresh failed: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction ?? `npx create-principles-disciple install --host ${hr.hostId}`}`);

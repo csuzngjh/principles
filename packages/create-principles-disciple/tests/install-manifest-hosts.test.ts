@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeInstallManifestHosts, resolveHostRefreshTargets } from '../src/installer.js';
+import { mergeInstallManifestHosts, planUpgradeHosts, resolveHostRefreshTargets } from '../src/installer.js';
 
 describe('mergeInstallManifestHosts', () => {
   it('preserves OpenClaw ownership when Codex is attached later', () => {
@@ -51,5 +51,26 @@ describe('resolveHostRefreshTargets', () => {
   it('never refreshes the host this run already installs, and ignores unknown registrations', () => {
     expect(resolveHostRefreshTargets(['workbuddy', 'gamma'], 'workbuddy')).toEqual([]);
     expect(resolveHostRefreshTargets(['openclaw', 'gamma'], 'workbuddy')).toEqual(['openclaw']);
+  });
+});
+
+describe('planUpgradeHosts (update chain 2026-11-11)', () => {
+  it('covers a host installed outside the manifest instead of silently leaving it on the old release', () => {
+    // BEFORE: `--host openclaw` refreshed only the manifest hosts → a Codex
+    // plugin added by hand stayed stale while the upgrade reported success.
+    const plan = planUpgradeHosts('openclaw', [], [
+      { hostId: 'codex', evidence: '/home/u/.codex/plugins/cache/principles/principles-disciple/0.3.19' },
+    ]);
+    expect(plan.refreshTargets).toEqual(['codex']);
+    expect(plan.newlyCovered.map((host) => host.hostId)).toEqual(['codex']);
+  });
+
+  it('covers every detected host on one upgrade, without repeating the requested one', () => {
+    const plan = planUpgradeHosts('openclaw', ['openclaw', 'codex', 'workbuddy'], [
+      { hostId: 'codex', evidence: 'codex cache' },
+      { hostId: 'workbuddy', evidence: 'workbuddy registry' },
+    ]);
+    expect(plan.refreshTargets).toEqual(['codex', 'workbuddy']);
+    expect(plan.newlyCovered).toEqual([]);
   });
 });
