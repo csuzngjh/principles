@@ -158,8 +158,10 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 | 批次 | 内容 | 公共契约 | 逆序可回退 |
 |---|---|---|---|
 | **5A** ✅ | 4 个数值阈值收口 + `status` 派生 + `explainPromotionReadiness`；包内导出 | 否 | 是（单 commit `d7f2f46`） |
-| **5B** | ① 10 个 `checkId` 的硬检查也进入可解释投影（当前只有 `failedChecks`，缺"为什么没过"）；② Console / CLI 渲染 criteria 与 remaining；③ 两份 `collectRuleCodeEventEntries` 提取到 core（见 §2.5）；④ 双语文案 `zh-CN.json` / `en.json`；⑤ 公共导出的 `.changeset` | 否（仍在包内） | 需 5A 存在；单独回退 5B 会回到"只有 status" |
+| **5B** 🚧 | ① 10 个 `checkId` 的硬检查也进入可解释投影（当前只有 `failedChecks`，缺"为什么没过"）；② Console / CLI 渲染 criteria 与 remaining；③ 两份 `collectRuleCodeEventEntries` 收敛到 `@principles/host-runtime`（原计划写 core，实际按 AGENTS.md §8.1 seam 归属改为 host-runtime，见 §2.5）；④ 双语文案 `zh-CN.json` / `en.json`；⑤ 公共导出的 `.changeset` | 否（仍在包内） | 需 5A 存在；单独回退 5B 会回到"只有 status" |
 | **5C** | 把 `criteria` 提升为 `PromotionReadinessResult` 必填字段，删掉重复派生调用；更新 3 个构造夹具 + 5 个断言文件 + UI 校验器 | **是** | **不可独立回退**（5B 已按投影函数读取；回退 5C 必须同时回退 5B） |
+
+> **状态更正（2026-11-10）**：5B 此前被 #2491 的标题误标为"已合并"，实际代码未落地。当前在本 PR（分支 `ai/adhoc-20261110-5b-criteria-promotion`）实现，**未合并**；`criteria` 保持可选字段，5C 未做。
 
 **结论**：5A → 5B → 5C 只保证**逆序回退**。这与前一版"每批可独立 revert"不同，见 §7。
 
@@ -183,8 +185,8 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 
 **R4 改成什么、为什么这样才会先红：**
 
-- 做法：把 `collectRuleCodeEventEntries` 提取到 core（`rulecode-shadow-summary.ts` 旁），CLI 与 console 只保留一行委托。守卫有两条：
-  1. **结构守卫**：`rg "function collectRuleCodeEventEntries"` 在非 core 包必须为 0（提取后成立）。
+- 做法：把 `collectRuleCodeEventEntries` 收敛到 `@principles/host-runtime`（`rulecode-event-collection.ts`），CLI 与 console 只保留一行委托/再导出。**落点偏差说明（2026-11-10）**：原稿写"提取到 core"，但 core 新增 fs I/O 必须登记 `io-seam-registry.json`（AGENTS.md §8.1）；而 `@principles/host-runtime` 已拥有 `RUNTIME_EVENT_LOG_CANDIDATE_DIRS` 与运行时日志读取职责，CLI 与 console 均已依赖它，故改为该包。守卫有两条：
+  1. **结构守卫**：`rg "function collectRuleCodeEventEntries"` 在 `@principles/host-runtime` 之外必须为 0（提取后成立）。
   2. **行为等价守卫**：同一组 fixture 目录（含坏行、不可读目录、重复行、跨目录优先级）喂给"提取前实现"的冻结快照与提取后实现，逐字段相等。
 - **它如何先红**：在当前代码上写第 1 条守卫，会立刻红（`rg` 命中 2 处）。这就是"先红"的证据——它红在"复制事实存在"，而不是红在"结果不一致"。第 2 条守卫在提取前后都是绿的，它的价值是防未来漂移，因此**明确标注为回归保护，不作为红→绿证据**。
 - 这样改避免了前一版的根本问题：用一个今天本来就绿的断言（两份摘要相等）冒充"改造前会错"。
@@ -192,7 +194,7 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 ### 2.6 停止条件（出现即停、上报）
 
 1. 出现"为了让测试变绿需要放宽 `blocked` / fail-closed 判定"。
-2. 需要引入第二份阈值定义。摘要侧允许"提取到 core"，但不得出现第二份聚合实现。
+2. 需要引入第二份阈值定义。摘要侧允许"收敛到 `@principles/host-runtime`"，但不得出现第二份聚合实现。
 3. 契约变更范围超出开工前写死的清单（5C 开工前必须列出文件路径，超出即停；不再使用"8 个测试文件"这种模糊数字）。
 4. **开工前写死"预计改动文件清单（路径 + 数量）"**，实际超出即停。取消"回归面超过预估 1.5 倍"这种没有基线的写法。
 5. 5A/5B 改完后，下列三种输入仍无法区分则停并重估方向：
@@ -204,7 +206,7 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 ### 2.7 回滚方式
 
 - 5A：单 commit revert，无持久化。
-- 5B：拆成"core 提取"与"两处展示"两个提交；展示侧可按包 revert 回"只有计数"。
+- 5B：拆成"host-runtime 提取"与"两处展示"两个提交；展示侧可按包 revert 回"只有计数"。
 - 5C：revert 契约提交 **必须连同 5B 一起**，否则 5B 读取的字段消失。
 - **全程无数据迁移**：`criteria` 不写入 `activation_evidence_snapshots`。
 
@@ -255,18 +257,24 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 
 做完 2B 与 1A 之后，会存在 3 个"带原因的结论"的真实形状（readiness、scan、outcome）。**到那时再抽，才有 3 个真实实现可比对**；现在抽只能猜。这条与独立评审 O1 的差异是有意的，理由是 P7（不做投机抽象）。
 
-### 2B.5 未决决策：`clean` 是否应吸收跳过行（随 5B 排）
+### 2B.5 `clean` 是否吸收跳过行（**已被 #2491 实施；本节曾滞后于代码**）
 
-**决定（Owner 2026-11-10）**：2B-a 不改 `clean` 语义，只加 `skipped[]`；"跳过 > 0 时不得返回 `clean`"作为**独立决策**，与 5B 一起排，不在 2B-a 里顺手改。
+> **文档漂移更正（2026-11-10，随 5B 回写）**：本节原先写"2B-a 只加 `skipped[]`，不改 `clean` 语义"。这与当前代码不符——PR #2491 已把状态扩为 `'clean' | 'incomplete' | 'legacy_dependency' | 'no_state_db' | 'scan_failed'`，并把 `clean` 收紧为"findings 为空**且** skipped 为空"；跳过 > 0 返回 `incomplete`（`activation-compatibility-read-model.ts:53-63`、`:193-194`）。计划文本是旧稿，代码为准。
 
-待决策的问题与两种走向：
+**Owner 2026-11-10 的原始裁定**：2B-a 不改 `clean` 语义，只加 `skipped[]`；"跳过 > 0 时不得返回 `clean`"作为**独立决策**，不在 2B-a 里顺手改。
+
+**实际落地（#2491）**：独立决策选择了"引入第三态"，但以**不升级为阻塞**的方式实现——`incomplete` 与 `clean` 并列，而不是让同一个 `clean` 承担两种含义；`ok` 仍只表示"扫描跑完"，不是严重度信号（`:44-50`、`:198`），是否阻塞由 CLI/Console 各自决定。
+
+仍未决的问题：`incomplete` 是否要在 CLI 退出码或 Console 顶部横幅上升级为显式警告。当前两者都只透出 status，不改变退出码。
+
+两种走向的对照保留如下（第二行即当前实现）：
 
 | 走向 | 语义 | 风险 |
 | --- | --- | --- |
 | 保持 `clean`（今天） | `clean` = "已解析的行里没有遗留契约依赖" | 操作者可能把"部分行没解析"读成"确实干净"——计数器可见但不强制 |
-| 引入 `partial_scan`（或 `clean` 需 `skipped.length === 0`） | `clean` = "全部 ACTIVE 行都被检查过且通过" | 升级路径上可能把"数据库里有坏行"升级为阻塞；需要 CLI/Console 同步改文案与退出码 |
+| 引入 `partial_scan`（或 `clean` 需 `skipped.length === 0`） | `clean` = "全部 ACTIVE 行都被检查过且通过" | **已采用（实现为 `incomplete`）**：升级路径上可能把"数据库里有坏行"升级为阻塞；当前通过 `ok` 不联动规避，CLI/Console 文案已同步渲染该状态 |
 
-评估该决策时必须同时看：`pd-cli` 的退出码、Console 的 `status` 渲染、以及 5B 的 `criteria` 文案。**在 5B 的 UI 文案定稿前不要单独改 `clean`**，否则会出现"CLI 说不干净、Console 说没问题"的分裂。
+评估该决策时必须同时看：`pd-cli` 的退出码、Console 的 `status` 渲染、以及 5B 的 `criteria` 文案。**5B 的 criteria 只描述晋升就绪（promotion readiness），不改写 compatibility-scan 的 `clean`/`incomplete` 文案**；两处状态词汇必须保持各自独立，否则会出现"CLI 说不干净、Console 说没问题"的分裂。
 
 ---
 
@@ -285,7 +293,7 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 | 4 个 loader 都调用同一个 core 校验 | pd-cli `loadPdConfig:112`、host-runtime `loadPdConfigForPlugin:75`、console `loadPdConfig:249`、installer `validateConfigYamlFull:481` |
 | effective 若拿到字段会保留 | `pd-config-effective.ts` 的 `{ ...profile }` |
 
-**结论**：根因是 core 一处字段白名单漏项。合并 4 个 loader **不会**修复它；做 3B/3C 之后 `systemPrompt` 仍然丢。真正修复它的是 3A 的"字段覆盖率测试 + 补齐 validate/effective 拷贝"。
+**结论**：根因是 core 一处字段白名单漏项。合并 4 个 loader **不会**修复它；做 3B/3C 之后 `systemPrompt` 仍然丢。真正修复它的是 3A 的"字段覆盖率测试 + 补齐 validate 的字段拷贝"（`effective` 无需改动，见 §3.3 Owner 裁定）。
 
 ### 3.2 Phase 3 的真实收益重估
 
@@ -307,7 +315,7 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 
 | 批次 | 内容 | 状态 |
 |---|---|---|
-| **3A** | core 新增 `readWorkspaceConfig()`（`config` + `fieldStatus` + `warnings`）；补齐 `validatePdLocalProfile` / `validateOpenClawProfile` / `effective` 的字段拷贝；字段覆盖率测试 | **必做** |
+| **3A** | core 新增 `readWorkspaceConfig()`（`config` + `fieldStatus` + `warnings`）；补齐 `validatePdLocalProfile` / `validateOpenClawProfile` 的字段拷贝；字段覆盖率测试。**按 Owner 2026-11-10 窄化裁定：实际只改 `pd-config-validate.ts` + `pd-config-types.ts`，不动 `effective.ts`**（见下方注） | **必做** |
 | 3B+3C | 两个同构 loader 委托 core（合并为一批） | 可选，不排期（触发条件见 §8） |
 | 3D-read | console 读委托 core | 可选 |
 | 3D-write | `writeWorkspaceConfig` + 3 个写入口收敛（保注释） | 可选，独立决策 |
@@ -563,7 +571,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 
 **结论（二选一，本计划选前者）**：
 
-- ✅ **调整批次切法**：已拆 `3D-read` / `3D-write`、`1C-read` / `1C-write`，并把 5B 拆成"core 提取"与"两处展示"两个提交。
+- ✅ **调整批次切法**：已拆 `3D-read` / `3D-write`、`1C-read` / `1C-write`，并把 5B 拆成"host-runtime 提取"与"两处展示"两个提交。
 - ❌ 承认只能逆序撤 → 不作为结论，因为拆分成本很低。
 
 **统一规则**：所有批次保证"**逆序可回退**"；不保证"任选一批撤回"。任何 PR 描述里不得再写"可独立 revert"，除非该批次的依赖为空。
@@ -594,7 +602,7 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 
 | 项 | 触发条件 |
 |---|---|
-| 第 2 项（规则评估四合一） | ① 5B 的 criteria 已合并；② **任一 PR 同时修改** `production-rulehost-gate.ts` 与 `rule-host.ts` 即启动；③ 或出现"同一缺陷在 ≥2 个宿主各修一次"的第二次实例；④ 每 6 周复核一次并记录"继续暂缓"的理由 |
+| 第 2 项（规则评估四合一） | ① 5B 的 criteria 已合并（**当前事实：未合并**，见 §2.3 状态更正；本条触发条件尚未满足）；② **任一 PR 同时修改** `production-rulehost-gate.ts` 与 `rule-host.ts` 即启动；③ 或出现"同一缺陷在 ≥2 个宿主各修一次"的第二次实例；④ 每 6 周复核一次并记录"继续暂缓"的理由 |
 | 第 4 项（安装五阶段） | ① `writeWorkspaceConfig` 已合并；② 安装侧出现"binding 版本不同步"类问题的第二次实例；③ 每 6 周复核一次并记录理由 |
 | 3B/3C（配置 loader 委托） | 下次因其他原因改到该 loader 时顺带做；不做等价矩阵，除非同行 |
 | 3D-write | console 写路径出现一次真实写坏配置的事故，或出现第二个写者 |
@@ -781,7 +789,7 @@ foreach($p in @('principles-core\src\runtime\index.ts','pd-console\src\ui\utils\
 | 2B-a | `fix(core)!: report skipped rows in activation compatibility scan` | revert（连带 CLI 输出测试） | 否 |
 | 2B-b | `fix(console): surface unreadable decisions instead of dropping them` | revert | 否 |
 | 2B-c | `fix(console): render per-activation artifact warning` | revert | 否 |
-| 5B-core | `refactor(core): extract rulecode event collection` | revert（需 5B-ui 之后） | 否 |
+| 5B-core | `refactor(host-runtime): extract rulecode event collection` | revert（需 5B-ui 之后） | 否 |
 | 5B-ui | `feat(console,cli): show promotion criteria remaining` | 按包 revert | 否 |
 | 5C | `refactor(core)!: add criteria to PromotionReadinessResult` | revert **必须连带 5B** | 否 |
 | 3A | `feat(core): cover every declared config field in validate/effective` | revert | 否 |
