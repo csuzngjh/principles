@@ -82,7 +82,7 @@
 | S18b–h | Shadow 双来源负向 | PASS 7/7 | V1 run output / 缺失 run output → `run_output_invalid`；不同但合法的 V2 → `run_output_recommendation_ref_mismatch`；recommendationRef 集合不一致 → `run_output_recommendation_ref_mismatch`；artifact envelope 损坏 → `context_receipt_invalid`；run lineage 不匹配（两种）→ `run_lineage_mismatch` |
 | S18i | 负向无副作用 | PASS | 无 resolutions、无 binding、无生成授权，持久化状态不变 |
 
-**合计：37 项断言全部 PASS，0 BLOCKED。** 执行命令：
+**合计：40 项断言全部 PASS（S1–S8 共 8 项，S9–S13 共 12 项，S14–S18 共 20 项），0 BLOCKED。** S8（空白初始化）不单列断言，其证据是 step1 在重建后的空白工作区完成初始化并跑通全链。
 
 ```text
 node .tmp/pri1146/e2e/step1-cli-spine.mjs
