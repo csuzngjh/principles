@@ -138,13 +138,15 @@ that mocks a chain module without this marker, and reports a marker with an
 empty reason as its own finding. The marker is not a waiver of judgement — it is
 the place where the reason is written down.
 
-## Reverting the guard (read before reverting either commit)
+## Reverting the guard (read before reverting the guard or the annotations)
 
 Revert `chore(repo-hygiene): flag adapter tests that mock the whole model chain`
-**before** `test(adapter): record why five legacy suites still mock the model
-chain`. Reverting the annotations first leaves five suites mocking a chain
-module with no marker, so `check:repo-hygiene` (and therefore the next commit)
-turns red.
+**before** the two annotation commits — `test(adapter): record why five legacy
+suites still mock the model chain` and
+`docs(adapter-tests): mark each exemption injection-tested or structural-only`,
+which edit the same five marker lines and must go together. Reverting the
+annotations first leaves five suites mocking a chain module with no marker, so
+`check:repo-hygiene` (and therefore the next commit) turns red.
 
 If that already happened: restore the five marker lines, or revert the guard as
 well, then run `node scripts/check-repo-hygiene.js all` — exit 0 means recovered.
