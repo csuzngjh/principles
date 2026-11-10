@@ -1326,6 +1326,12 @@ export interface ActivationRecordData {
   ownerReviewDueAt?: string;
   /** PD_PROMPT_CAPACITY_V1 R-A3: injection status for live prompt activations. */
   promptInjection?: PromptActivationInjectionStatusWire;
+  /**
+   * 5B-D: server-side per-row degradation (e.g. the artifact behind this
+   * activation no longer exists). The server has always produced this; the
+   * browser whitelist dropped it, so a broken row looked healthy.
+   */
+  warning?: string;
 }
 
 const PROMPT_INJECTION_STATUS_KINDS: ReadonlySet<string> = new Set([
@@ -1384,6 +1390,9 @@ function validateActivationRecord(v: unknown): ActivationRecordData | null {
     ...(Object.hasOwn(v, 'promptInjection')
       ? (() => { const s = validatePromptActivationInjectionStatus(v.promptInjection); return s !== null ? { promptInjection: s } : {}; })()
       : {}),
+    // 5B-D: optional, but if the server sent a warning it must be a non-empty
+    // string — a malformed value is dropped rather than rendered as "[object]".
+    ...(Object.hasOwn(v, 'warning') && isString(v.warning) && v.warning.length > 0 ? { warning: v.warning } : {}),
   };
 }
 

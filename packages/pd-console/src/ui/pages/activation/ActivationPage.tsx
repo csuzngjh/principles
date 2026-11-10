@@ -217,7 +217,7 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
   </div>;
 }
 
-function ActivationFactCard({
+export function ActivationFactCard({
   record,
   lifecycleData,
   receiptCount,
@@ -372,6 +372,18 @@ function ActivationFactCard({
 
       {/* Action / target / time */}
       {record.legacyDecisionUnknown && <div className="mt-3 border-l-2 border-amber px-3 text-[12px] text-amber">{t('pages.activation.legacyUnknown', { due: record.ownerReviewDueAt ? formatDate(record.ownerReviewDueAt, i18n.language, DATETIME_OPTS) : t('pages.activation.sevenDays') })}</div>}
+      {/* 5B-D: per-row server degradation (e.g. orphaned artifact_id). The
+          server always computed this; before 5B the browser whitelist dropped
+          the field, so the row rendered as if it were healthy. */}
+      {record.warning !== undefined && (
+        <div
+          role="alert"
+          className="mt-3 border-l-2 border-danger px-3 text-[12px] leading-relaxed text-danger"
+          data-testid={`activation-warning-${record.activationId}`}
+        >
+          {record.warning}
+        </div>
+      )}
       <div className="text-ink-3 text-[13px] leading-relaxed space-y-1">
         <div>
           <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.actionLabel")}</span>{" "}
