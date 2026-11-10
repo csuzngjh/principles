@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import {
   createRuntimeStateHandle, PrincipleTreeLedgerAdapter, SqliteDiagnosticianCommitter, reviseRuleBindingOnce,
-  createPITaskDiagnosticJson, type RuntimeStateHandle, type DiagnosticianOutputV1,
+  createPITaskDiagnosticJson, type RuntimeStateHandle, type DiagnosticianOutputV2,
 } from '@principles/core/runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { RuleCandidateBindingConsoleModel } from '../../src/server/models/RuleCandidateBindingConsoleModel.js';
@@ -19,7 +19,7 @@ const TARGET_PRINCIPLE_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
  * pain_events (trajectory.db), the ledger binding, and the internalization
  * chain (dreamer→…→artificer) — without any new persisted state.
  */
-const boundDiagnosis: DiagnosticianOutputV1 = {
+const boundDiagnosis: DiagnosticianOutputV2 = {
   valid: true,
   diagnosisId: 'projection-bound-diagnosis',
   summary: 'The design change shipped unconfirmed.',
@@ -28,9 +28,18 @@ const boundDiagnosis: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'principle', description: 'Non-trivial behavior changes need a confirmed design first.' },
-    { kind: 'rule', description: 'Require a confirmed design before non-trivial behavior changes.' },
+    { kind: 'principle', description: 'Non-trivial behavior changes need a confirmed design first.', recommendationRef: 'principle-1' },
+    {
+      kind: 'rule',
+      description: 'Require a confirmed design before non-trivial behavior changes.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'non-trivial behavior change',
+      action: 'require a confirmed design first',
+      // No evidence entries in this fixture output → no linkable evidenceRefs.
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    },
   ],
+  schemaVersion: 'diagnostician-output-v2',
 };
 
 type Fixture = {
@@ -60,9 +69,16 @@ async function createFixture(): Promise<Fixture> {
   if (!principleCandidate || !ruleCandidate) throw new Error('Real committer did not produce both candidates.');
 
   // A second, unlinked rule candidate on its own pain (direct provenance).
-  const twinOutput: DiagnosticianOutputV1 = {
+  const twinOutput: DiagnosticianOutputV2 = {
     ...boundDiagnosis, diagnosisId: 'projection-twin-diagnosis',
-    recommendations: [{ kind: 'rule', description: 'Front-load the conclusion in every owner-facing reply.' }],
+    recommendations: [{
+      kind: 'rule',
+      description: 'Front-load the conclusion in every owner-facing reply.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'owner-facing reply',
+      action: 'front-load the conclusion',
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    }],
   };
   await handle.stateManager.createTask({ taskId: 'diagnosis-twin', taskKind: 'diagnostician', status: 'succeeded', inputRef: 'pain-unlinked', attemptCount: 1, maxAttempts: 3 });
   await handle.stateManager.runStore.createRun({ runId: 'run-twin', taskId: 'diagnosis-twin', runtimeKind: 'test-double', startedAt: NOW, attemptNumber: 1, executionStatus: 'succeeded', outputPayload: JSON.stringify(twinOutput) });

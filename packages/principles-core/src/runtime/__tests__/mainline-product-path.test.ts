@@ -14,7 +14,7 @@ import {
   EMPTY_CONTEXT_SENTINEL,
 } from '../index.js';
 import type {
-  DiagnosticianOutputV1,
+  DiagnosticianOutputV2,
   MainlineSnapshot,
   RuntimeReadinessSnapshot,
   PDRuntimeAdapter,
@@ -93,8 +93,9 @@ function diagnosticianDiagnosticJson(painId: string): string {
   });
 }
 
-function validDiagnosticianOutput(painId: string): DiagnosticianOutputV1 {
+function validDiagnosticianOutput(painId: string): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: `diag-${painId}`,
     summary: 'Repeated edits without reading instructions first',
@@ -105,6 +106,7 @@ function validDiagnosticianOutput(painId: string): DiagnosticianOutputV1 {
       kind: 'principle',
       description: 'Read AGENTS.md and PLAN.md before editing protected files',
       abstractedPrinciple: 'Read workspace instructions before protected edits',
+      recommendationRef: 'principle-1',
     }],
     confidence: 0.9,
   };

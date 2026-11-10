@@ -20,7 +20,7 @@ import { SqliteDiagnosticianCommitter, type CommitInput } from './commit/diagnos
 import { Value } from '@sinclair/typebox/value';
 import { Type } from '@sinclair/typebox';
 import { proposeShadowAssociations } from '../diagnostician-association-shadow.js';
-import type { DiagnosticianOutputV1, DiagnosticianOutputV2 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 describe('SqliteDiagnosticianCommitter', () => {
   let tmpdir = '';
@@ -63,8 +63,9 @@ describe('SqliteDiagnosticianCommitter', () => {
     });
   }
 
-  function makeOutput(overrides: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
+  function makeOutput(overrides: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 {
     return {
+      schemaVersion: 'diagnostician-output-v2',
       valid: true,
       diagnosisId: 'diag-1',
       summary: 'Test diagnosis',
@@ -72,9 +73,9 @@ describe('SqliteDiagnosticianCommitter', () => {
       violatedPrinciples: [],
       evidence: [],
       recommendations: [
-        { kind: 'principle', description: 'Use immutable data structures' },
-        { kind: 'rule', description: 'Always validate input' },
-        { kind: 'principle', description: 'Prefer composition over inheritance' },
+        { kind: 'principle', description: 'Use immutable data structures', recommendationRef: 'principle-1' },
+        { kind: 'rule', description: 'Always validate input', recommendationRef: 'rule-1', triggerPattern: 'input', action: 'validate it', principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
+        { kind: 'principle', description: 'Prefer composition over inheritance', recommendationRef: 'principle-2' },
       ],
       confidence: 0.85,
       ...overrides,
@@ -192,13 +193,13 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-extract-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: 'Principle 1' },
-          { kind: 'rule', description: 'Rule 1', triggerPattern: '^src/', action: 'block' },
-          { kind: 'implementation', description: 'Impl 1' },
-          { kind: 'principle', description: 'Principle 2' },
-          { kind: 'prompt', description: 'Prompt 1' },
-          { kind: 'defer', description: 'Defer 1' },
-          { kind: 'principle', description: 'Principle 3' },
+          { kind: 'principle', description: 'Principle 1', recommendationRef: 'principle-1' },
+          { kind: 'rule', description: 'Rule 1', recommendationRef: 'rule-1', triggerPattern: '^src/', action: 'block', principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' } },
+          { kind: 'implementation', description: 'Impl 1', recommendationRef: 'implementation-1' },
+          { kind: 'principle', description: 'Principle 2', recommendationRef: 'principle-2' },
+          { kind: 'prompt', description: 'Prompt 1', recommendationRef: 'prompt-1' },
+          { kind: 'defer', description: 'Defer 1', recommendationRef: 'defer-1' },
+          { kind: 'principle', description: 'Principle 3', recommendationRef: 'principle-3' },
         ],
       }),
       idempotencyKey: 'ik-extract-1',
@@ -321,14 +322,14 @@ describe('SqliteDiagnosticianCommitter', () => {
     expect(artifactCount.count).toBe(0);
   });
 
-  it('invalid DiagnosticianOutputV1 throws input_invalid error', async () => {
+  it('invalid DiagnosticianOutputV2 throws input_invalid error', async () => {
     await createTaskAndRun('task-invalid-1', 'run-invalid-1');
 
     const input: CommitInput = {
       runId: 'run-invalid-1',
       taskId: 'task-invalid-1',
-      // Missing required fields — not a valid DiagnosticianOutputV1
-      output: { valid: true } as DiagnosticianOutputV1,
+      // Missing required fields — not a valid DiagnosticianOutputV2
+      output: { valid: true } as DiagnosticianOutputV2,
       idempotencyKey: 'ik-invalid-1',
     };
 
@@ -348,9 +349,9 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-idem-key-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: 'Principle A' },
-          { kind: 'principle', description: 'Principle B' },
-          { kind: 'principle', description: 'Principle C' },
+          { kind: 'principle', description: 'Principle A', recommendationRef: 'principle-a' },
+          { kind: 'principle', description: 'Principle B', recommendationRef: 'principle-b' },
+          { kind: 'principle', description: 'Principle C', recommendationRef: 'principle-c' },
         ],
       }),
       idempotencyKey: 'ik-idem-key-1',
@@ -397,7 +398,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       runId: 'run-defer-1',
       taskId: 'task-defer-1',
       output: makeOutput({
-        recommendations: [{ kind: 'defer', description: 'Insufficient evidence to recommend an action' }],
+        recommendations: [{ kind: 'defer', description: 'Insufficient evidence to recommend an action', recommendationRef: 'defer-1' }],
       }),
       idempotencyKey: 'ik-defer-1',
     };
@@ -409,7 +410,7 @@ describe('SqliteDiagnosticianCommitter', () => {
   it('null/undefined output throws PDRuntimeError(input_invalid), not a native TypeError (rc-1/rc-3)', async () => {
     await createTaskAndRun('task-null-1', 'run-null-1');
 
-    for (const badOutput of [null, undefined, 'not-an-object'] as unknown as DiagnosticianOutputV1[]) {
+    for (const badOutput of [null, undefined, 'not-an-object'] as unknown as DiagnosticianOutputV2[]) {
       const input: CommitInput = {
         runId: 'run-null-1',
         taskId: 'task-null-1',
@@ -430,7 +431,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-title-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: 'Always prefer immutable data structures' },
+          { kind: 'principle', description: 'Always prefer immutable data structures', recommendationRef: 'principle-1' },
         ],
       }),
       idempotencyKey: 'ik-title-1',
@@ -456,7 +457,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       taskId: 'task-desc-len-1',
       output: makeOutput({
         recommendations: [
-          { kind: 'principle', description: longDescription },
+          { kind: 'principle', description: longDescription, recommendationRef: 'principle-1' },
         ],
       }),
       idempotencyKey: 'ik-desc-len-1',

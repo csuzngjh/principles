@@ -239,7 +239,7 @@ function resolveDiagRouter(output: Record<string, unknown>): StageResolution {
       affectedComponents: violatedIds.length > 0 ? violatedIds.join(' / ') : null,
       rootSymptom: summary,
       category: firstRecommendationKind,
-      // DiagnosticianOutputV1 has no severity-equivalent field → omitted.
+      // DiagnosticianOutputV2 has no severity-equivalent field → omitted.
       severity: null,
     },
   };

@@ -104,7 +104,13 @@ describe('E2E: pd candidate intake flow', () => {
     }
   });
 
-  function insertPendingCandidate(candidateId: string, taskId: string, artifactId: string, runId: string) {
+  function insertPendingCandidate(
+    candidateId: string,
+    taskId: string,
+    artifactId: string,
+    runId: string,
+    provenance: 'v2' | 'v1' = 'v2',
+  ) {
     const now = new Date().toISOString();
 
     // CR-03: the intake write permission is the full admission gate over
@@ -123,35 +129,48 @@ describe('E2E: pd candidate intake flow', () => {
         workspaceDir: null,
       }), `pain-e2e-${candidateId}`);
 
+    const v2Output = {
+      schemaVersion: 'diagnostician-output-v2',
+      valid: true,
+      diagnosisId: `diag-${candidateId}`,
+      summary: 'e2e seeded diagnosis',
+      rootCause: 'seeded root cause',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'e2e:trace-1', note: 'seeded output evidence' }],
+      recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'Always write tests' }],
+      confidence: 0.95,
+    };
     db.prepare('INSERT OR IGNORE INTO runs (run_id, task_id, runtime_kind, execution_status, attempt_number, started_at, created_at, updated_at, output_payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(runId, taskId, 'openclaw-cli', 'succeeded', 1, now, now, now, JSON.stringify({
-        valid: true,
-        diagnosisId: `diag-${candidateId}`,
-        summary: 'e2e seeded diagnosis',
-        rootCause: 'seeded root cause',
-        violatedPrinciples: [],
-        evidence: [{ sourceRef: 'e2e:trace-1', note: 'seeded output evidence' }],
-        recommendations: [{ kind: 'principle', description: 'Always write tests' }],
-        confidence: 0.95,
-      }));
+      .run(runId, taskId, 'openclaw-cli', 'succeeded', 1, now, now, now, JSON.stringify(v2Output));
 
-    const artifactContent = JSON.stringify({
-      recommendation: {
-        title: 'Test Principle',
-        text: 'Always write tests',
-        triggerPattern: 'missing tests',
-        action: 'add test files',
-      },
-    });
+    // PRI-1146 (V2 Only): a Diagnostician candidate is only legal when its
+    // owning run carries a V2 output, its artifact carries the V2 (router
+    // envelope) output, and its source recommendation is the exact V2
+    // recommendation. The key `provenance: 'v1'` seeds the retired shape so
+    // the negative test can prove intake closes that entrance.
+    const artifactContent = provenance === 'v2'
+      ? JSON.stringify({ ...v2Output, trustedContextReceipt: { schemaVersion: 'router-context-v2' } })
+      : JSON.stringify({
+        recommendation: {
+          title: 'Test Principle',
+          text: 'Always write tests',
+          triggerPattern: 'missing tests',
+          action: 'add test files',
+        },
+      });
+    const artifactKind = provenance === 'v2' ? 'diagnostician_output' : 'diagnostician_output_v1';
     db.prepare('INSERT OR IGNORE INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(artifactId, runId, taskId, 'diagnostician_output_v1', artifactContent, now);
+      .run(artifactId, runId, taskId, artifactKind, artifactContent, now);
 
     db.prepare('INSERT OR IGNORE INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(`commit-${candidateId}`, taskId, runId, artifactId, `key-${candidateId}`, 'committed', now);
 
+    const sourceRecommendationJson = provenance === 'v2'
+      ? JSON.stringify(v2Output.recommendations[0])
+      : artifactContent;
     db.prepare(`INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(candidateId, artifactId, taskId, runId, 'Test Principle', 'Always write tests', 0.95, artifactContent, `candidate-key-${candidateId}`, 'pending', now);
+      .run(candidateId, artifactId, taskId, runId, 'Test Principle', 'Always write tests', 0.95, sourceRecommendationJson, `candidate-key-${candidateId}`, 'pending', now);
   }
 
   function runPdCommand(args: string[]): { stdout: string; stderr: string; status: number } {
@@ -356,5 +375,32 @@ describe('E2E: pd candidate intake flow', () => {
     const row = db.prepare('SELECT status FROM principle_candidates WHERE candidate_id = ?')
       .get(candidateId) as { status: string };
     expect(row.status).toBe('consumed');
+  });
+
+  it('Test 7 (PRI-1146 V2 only): V1 Diagnostician provenance is rejected before any ledger write', () => {
+    const candidateId = 'e2e-cand-007-v1';
+    const taskId = 'e2e-task-007-v1';
+    const artifactId = 'e2e-art-007-v1';
+    const runId = 'e2e-run-007-v1';
+
+    insertPendingCandidate(candidateId, taskId, artifactId, runId, 'v1');
+
+    const { stdout, stderr, status } = runPdCommand([
+      'candidate', 'intake',
+      '--candidate-id', candidateId,
+      '--workspace', tempWorkspace,
+      '--json',
+    ]);
+
+    expect(status).toBe(1);
+    expect(stdout.trim()).toBe('');
+    expect(stderr).toContain('artifact_not_v2_envelope');
+    expect(stderr).toContain('No Principle Ledger entry was written');
+    expect(stderr).toContain('nextAction:');
+    // No ledger entry, candidate preserved as pending (audit trail intact).
+    expect(readLedgerFile(tempWorkspace)).toEqual([]);
+    const row = db.prepare('SELECT status FROM principle_candidates WHERE candidate_id = ?')
+      .get(candidateId) as { status: string };
+    expect(row.status).toBe('pending');
   });
 });

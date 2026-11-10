@@ -233,7 +233,7 @@ describe('output-repair-contract', () => {
   describe('OutputEvidencePack shape', () => {
     it('can construct a valid evidence pack', () => {
       const pack: OutputEvidencePack = {
-        schemaRef: 'diagnostician-output-v1',
+        schemaRef: 'diagnostician-output',
         provider: 'openrouter',
         model: 'anthropic/claude-sonnet-4',
         promptContractVersion: '1',
@@ -243,7 +243,7 @@ describe('output-repair-contract', () => {
         ],
         repairAttempts: [
           {
-            schemaRef: 'diagnostician-output-v1',
+            schemaRef: 'diagnostician-output',
             attempt: 1,
             rawOutputPreview: '{"valid":true,...}',
             validationErrors: [
@@ -256,7 +256,7 @@ describe('output-repair-contract', () => {
         finalFailureReason: 'repair_exhausted',
       };
 
-      expect(pack.schemaRef).toBe('diagnostician-output-v1');
+      expect(pack.schemaRef).toBe('diagnostician-output');
       expect(pack.provider).toBe('openrouter');
       expect(pack.model).toBe('anthropic/claude-sonnet-4');
       expect(pack.finalFailureReason).toBe('repair_exhausted');

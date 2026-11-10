@@ -9,7 +9,7 @@ import {
   SqliteDiagnosticianCommitter,
   type RuntimeStateHandle,
   type RuleCandidateMaterial,
-  type DiagnosticianOutputV1,
+  type DiagnosticianOutputV2,
 } from '@principles/core/runtime';
 import { addPrincipleToLedger, appendReuseEvidence, loadLedger } from '@principles/core/principle-tree-ledger';
 import { OwnerDecisionConsoleModel } from '../../src/server/models/OwnerDecisionConsoleModel.js';
@@ -22,7 +22,7 @@ const NOW = '2026-10-25T00:00:00.000Z';
 const PRINCIPLE_ID = '11111111-2222-4222-8222-222222222222';
 const RULE_TARGET_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
-const diagnosis: DiagnosticianOutputV1 = {
+const diagnosis: DiagnosticianOutputV2 = {
   valid: true,
   diagnosisId: 'identity-consumer-diagnosis',
   summary: 'The write accepted an out-of-scope destination.',
@@ -31,9 +31,18 @@ const diagnosis: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'principle', description: 'Keep every write within its authorized scope.' },
-    { kind: 'rule', description: 'Reject writes that escape the authorized scope.' },
+    { kind: 'principle', description: 'Keep every write within its authorized scope.', recommendationRef: 'principle-1' },
+    {
+      kind: 'rule',
+      description: 'Reject writes that escape the authorized scope.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'write outside authorized scope',
+      action: 'reject the write',
+      // No evidence entries in this fixture output → no linkable evidenceRefs.
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    },
   ],
+  schemaVersion: 'diagnostician-output-v2',
 };
 
 type Fixture = {

@@ -5,19 +5,20 @@
  * Single source of truth for PiAiRuntimeAdapter (and any future
  * PDRuntimeAdapter). Extracted from pi-ai-runtime-adapter.ts so every caller
  * validates Stage A/B outputs against the correct schema
- * instead of hardcoding DiagnosticianOutputV1Schema.
+ * instead of hardcoding a stage-specific schema.
  *
  * Why this matters: the split diagnostician pipeline runs three stages, each
  * producing a DIFFERENT output shape:
  *   - Stage A (diag_rootcause) → DiagRootCauseOutputV1 (causalChain, rootCauseCategory)
  *   - Stage B (diag_distiller) → DiagDistillerOutputV1 (abstractedPrinciple, rationale)
- *   - Stage C (diag_router)    → DiagnosticianOutputV1  (violatedPrinciples, recommendations)
+ *   - Stage C (diag_router)    → DiagnosticianOutputV2 (violatedPrinciples,
+ *     recommendations with recommendationRef + principleAssociation — PRI-1146 V2 Only)
  * Stage runners pass `outputSchemaRef` on StartRunInput to name which shape they
  * expect; adapters MUST resolve the schema from this registry rather than assume
- * DiagnosticianOutputV1 (which only matches Stage C).
+ * a single stage's shape.
  */
 import type { TSchema } from '@sinclair/typebox';
-import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../diagnostician-output.js';
 import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
 import { DiagDistillerOutputV1Schema } from '../diagnostician/diag-distiller-output.js';
 import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
@@ -41,7 +42,11 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
   // before the cutover still resolves through OUTPUT_SCHEMA_REF_ALIASES below,
   // so historical refs stay readable while every production writer uses the
   // canonical key.
-  ['diagnostician-output', DiagnosticianOutputV1Schema],
+  // PRI-1146 (V2 Only / Clean Break): `diagnostician-output` now resolves to
+  // the V2 schema, and Diagnostician's own versioned alias pair was REMOVED —
+  // `diagnostician-output-v1` intentionally no longer resolves (fail-loud
+  // `Unknown outputSchemaRef`). Every other stage keeps its alias pair.
+  ['diagnostician-output', DiagnosticianOutputV2Schema],
   ['diag-rootcause-output', DiagRootCauseOutputV1Schema],
   ['diag-distiller-output', DiagDistillerOutputV1Schema],
   ['dreamer-output', DreamerOutputV1Schema],
@@ -76,12 +81,12 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
  * reverted independently: whichever ref the writer uses, the reader resolves.
  *
  * Deliberately NOT listed: retired v1 refs such as
- * `signal-classification-output-v1`. Those were removed as an intentional
- * breaking change (GFI removal SPEC); re-admitting them would hide the
+ * `signal-classification-output-v1` — and, since PRI-1146, Diagnostician's
+ * own `diagnostician-output-v1`. Those were removed as an intentional
+ * breaking change (Clean Break); re-admitting them would hide the
  * fail-loud `Unknown outputSchemaRef` contract.
  */
 const CONTRACT_REF_PAIRS: readonly (readonly [string, string])[] = [
-  ['diagnostician-output', 'diagnostician-output-v1'],
   ['diag-rootcause-output', 'diag-rootcause-output-v1'],
   ['diag-distiller-output', 'diag-distiller-output-v1'],
   ['dreamer-output', 'dreamer-output-v1'],

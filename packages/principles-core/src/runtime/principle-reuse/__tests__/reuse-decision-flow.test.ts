@@ -13,7 +13,7 @@ import type { ReuseDecision, ReuseProposal } from '../reuse-proposal.js';
 import { PainSignalBridge } from '../../pain-signal-bridge.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqliteDiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 
 /**
  * PRI-917 Slice 2 — the reuse gate inside `CandidateIntakeService.intake()`.
@@ -60,6 +60,30 @@ async function seedPrincipleCandidate(
   const artifactId = randomUUID();
   const now = new Date().toISOString();
 
+  // PRI-1146 (V2 Only): intake enforces the full DiagnosticianOutputV2
+  // provenance for candidates owned by `diagnostician` / `diag_router` tasks.
+  // Seed the production shape: run.outputPayload = bare V2 output,
+  // artifact.contentJson = the router envelope, sourceRecommendationJson =
+  // the exact V2 recommendation.
+  const recommendation = {
+    kind: opts.kind ?? 'principle',
+    description: opts.text ?? CANDIDATE_TEXT,
+    triggerPattern: opts.trigger ?? CANDIDATE_TRIGGER,
+    action: opts.action ?? CANDIDATE_ACTION,
+    recommendationRef: 'principle-1',
+  };
+  const v2Output = {
+    schemaVersion: 'diagnostician-output-v2',
+    valid: true,
+    diagnosisId: `diag-${candidateId}`,
+    summary: 'Seeded reuse candidate',
+    rootCause: 'People: seeded diagnosis',
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: 'input', note: 'Seeded evidence' }],
+    recommendations: [recommendation],
+    confidence: 0.9,
+  };
+
   // principle_candidates has real FKs on tasks and runs, so seed both.
   const taskId = randomUUID();
   if (opts.painId !== undefined) {
@@ -98,6 +122,7 @@ async function seedPrincipleCandidate(
     executionStatus: 'succeeded',
     startedAt: now,
     endedAt: now,
+    outputPayload: JSON.stringify(v2Output),
   });
 
   const db = new Database(join(workspaceDir, '.pd', 'state.db'));
@@ -111,13 +136,8 @@ async function seedPrincipleCandidate(
       artifactId,
       runId,
       taskId,
-      'principle',
-      JSON.stringify({
-        principleId: candidateId,
-        text: opts.text ?? CANDIDATE_TEXT,
-        triggerPattern: opts.trigger ?? CANDIDATE_TRIGGER,
-        action: opts.action ?? CANDIDATE_ACTION,
-      }),
+      'diagnostician_output',
+      JSON.stringify({ ...v2Output, trustedContextReceipt: { schemaVersion: 'router-context-v2' } }),
       now,
     );
     db.prepare(`
@@ -133,11 +153,7 @@ async function seedPrincipleCandidate(
       '测试候选',
       opts.text ?? CANDIDATE_TEXT,
       0.9,
-      JSON.stringify({
-        text: opts.text ?? CANDIDATE_TEXT,
-        triggerPattern: opts.trigger ?? CANDIDATE_TRIGGER,
-        action: opts.action ?? CANDIDATE_ACTION,
-      }),
+      JSON.stringify(recommendation),
       `${artifactId}::prompt`,
       now,
       opts.kind ?? 'principle',
@@ -861,7 +877,7 @@ describe('v0.3.3 T11 — disabled capability restores the exact pre-v0.3.3 behav
     const runId = randomUUID();
     await stateManager.createTask({ taskId: topId, taskKind: 'diagnostician', status: 'succeeded', inputRef: 'pain-replay', attemptCount: 1, maxAttempts: 3, diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace', evidence: [{ sourceRef: 'input', note: 'Owner evidence' }] }) });
     await stateManager.createTask({ taskId: routerId, taskKind: 'diag_router', status: 'succeeded', inputRef: topId, attemptCount: 1, maxAttempts: 3 });
-    const output: DiagnosticianOutputV1 = { valid: true, diagnosisId: topId, summary: 'Replay diagnosis', rootCause: 'People: evidence was ignored', violatedPrinciples: [], evidence: [{ sourceRef: 'input', note: 'Owner evidence' }], confidence: 0.9, recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }] };
+    const output: DiagnosticianOutputV2 = { schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: topId, summary: 'Replay diagnosis', rootCause: 'People: evidence was ignored', violatedPrinciples: [], evidence: [{ sourceRef: 'input', note: 'Owner evidence' }], confidence: 0.9, recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION, recommendationRef: 'principle-1' }] };
     await stateManager.runStore.createRun({ runId, taskId: routerId, runtimeKind: 'openclaw', attemptNumber: 1, executionStatus: 'succeeded', startedAt: new Date().toISOString(), outputPayload: JSON.stringify(output) });
     const connection = new SqliteConnection(workspaceDir);
     try {
@@ -1067,6 +1083,26 @@ describe('v0.3.3 T15 — router-subtask candidates resolve their painId through 
       resultRef: '',
       diagnosticJson: undefined,
     });
+    // PRI-1146 (V2 Only): the router run and artifact must carry a legal
+    // DiagnosticianOutputV2 for intake to accept the candidate provenance.
+    const routerRecommendation = {
+      kind: 'principle' as const,
+      description: CANDIDATE_TEXT,
+      triggerPattern: CANDIDATE_TRIGGER,
+      action: CANDIDATE_ACTION,
+      recommendationRef: 'principle-1',
+    };
+    const routerOutput = {
+      schemaVersion: 'diagnostician-output-v2',
+      valid: true,
+      diagnosisId: topTaskId,
+      summary: 'Router lineage candidate',
+      rootCause: 'People: top-level diagnosis for router lineage',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [routerRecommendation],
+      confidence: 0.9,
+    };
     const routerRunId = randomUUID();
     await stateManager.runStore.createRun({
       runId: routerRunId,
@@ -1076,7 +1112,7 @@ describe('v0.3.3 T15 — router-subtask candidates resolve their painId through 
       executionStatus: 'succeeded',
       startedAt: now,
       endedAt: now,
-      outputPayload: JSON.stringify({ diagnosisId: topTaskId }),
+      outputPayload: JSON.stringify(routerOutput),
     });
 
     // Candidate minted on the ROUTER sub-task — the production shape that the
@@ -1092,8 +1128,8 @@ describe('v0.3.3 T15 — router-subtask candidates resolve their painId through 
         artifactId,
         routerRunId,
         routerTaskId,
-        'principle',
-        JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+        'diagnostician_output',
+        JSON.stringify({ ...routerOutput, trustedContextReceipt: { schemaVersion: 'router-context-v2' } }),
         now,
       );
       db.prepare(`
@@ -1109,7 +1145,7 @@ describe('v0.3.3 T15 — router-subtask candidates resolve their painId through 
         '测试候选（router 子任务）',
         CANDIDATE_TEXT,
         0.78,
-        JSON.stringify({ text: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }),
+        JSON.stringify(routerRecommendation),
         `${artifactId}::prompt`,
         now,
       );
@@ -1189,7 +1225,7 @@ describe('PRI-939 Option A — unavailable evaluation is visible on the CREATE r
     const runId = randomUUID();
     await stateManager.createTask({ taskId: topId, taskKind: 'diagnostician', status: 'succeeded', inputRef: 'pain-degradation', attemptCount: 1, maxAttempts: 3, diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace', evidence: [{ sourceRef: 'input', note: 'Owner evidence' }] }) });
     await stateManager.createTask({ taskId: routerId, taskKind: 'diag_router', status: 'succeeded', inputRef: topId, attemptCount: 1, maxAttempts: 3 });
-    const output: DiagnosticianOutputV1 = { valid: true, diagnosisId: topId, summary: 'Degradation visibility', rootCause: 'People: evidence was ignored', violatedPrinciples: [], evidence: [{ sourceRef: 'input', note: 'Owner evidence' }], confidence: 0.9, recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION }] };
+    const output: DiagnosticianOutputV2 = { schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: topId, summary: 'Degradation visibility', rootCause: 'People: evidence was ignored', violatedPrinciples: [], evidence: [{ sourceRef: 'input', note: 'Owner evidence' }], confidence: 0.9, recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT, triggerPattern: CANDIDATE_TRIGGER, action: CANDIDATE_ACTION, recommendationRef: 'principle-1' }] };
     await stateManager.runStore.createRun({ runId, taskId: routerId, runtimeKind: 'openclaw', attemptNumber: 1, executionStatus: 'succeeded', startedAt: new Date().toISOString(), outputPayload: JSON.stringify(output) });
     const connection = new SqliteConnection(workspaceDir);
     try {

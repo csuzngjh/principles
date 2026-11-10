@@ -2,12 +2,13 @@
  * DiagRouterRunner — Stage C runner for the split diagnostician pipeline.
  *
  * Receives both Stage A (Root Cause) and Stage B (Distiller) artifacts and
- * produces the final DiagnosticianOutputV1 — the unchanged downstream contract
- * consumed by the rest of the system.
+ * produces the final DiagnosticianOutputV2 — the ONLY production diagnostician
+ * contract (PRI-1146 V2 Only / Clean Break; SPEC v0.6).
  *
  * Unlike Stages A and B which only write PIArtifacts, Stage C commits via
- * DiagnosticianCommitter (same as the monolithic DiagnosticianRunner) and
- * calls the onDiagnosisComplete bridge callback (INF-9).
+ * DiagnosticianCommitter (same as the historical monolithic runner) and
+ * persists the trusted-context receipt + read-only association validation
+ * alongside the output inside the artifact envelope.
  *
  * Extends BasePeerRunner following the DreamerRunner pattern (PRI-302).
  * The shared lease → buildContext → invoke → poll → fetch → validate →
@@ -24,16 +25,17 @@
  *   - Router MUST NOT re-derive root causes or invent new principles
  *
  * @see PRI-372
+ * @see PRI-1146
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 
 import { createHash } from 'node:crypto';
 import { RUNTIME_CONTRACT_SCHEMA_VERSION } from '../schema-version.js';
 import { Value } from '@sinclair/typebox/value';
-import { verifyRouterContextReceipt } from './router-context-evidence.js';
+import { verifyRouterContextReceipt, type RouterTrustedPrinciple, type RouterTrustedPrincipleSource } from './router-context-evidence.js';
 import type { RunHandle } from '../runtime-protocol.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
-import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../diagnostician-output.js';
 import type { DiagRootCauseOutputV1 } from '../diagnostician/diag-rootcause-output.js';
 import { DiagRootCauseOutputV1Schema } from '../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../diagnostician/diag-distiller-output.js';
@@ -44,8 +46,8 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RouterPromptBuilder } from '../diagnostician/router-prompt-builder.js';
-import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
+import { validateDiagnosticianAssociations } from '../diagnostician-association-validation.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import type {
   PeerRunnerOptions,
@@ -64,11 +66,26 @@ interface DiagRouterContext {
   readonly rootCauseOutput: DiagRootCauseOutputV1;
   readonly distillerArtifactId: string;
   readonly distillerOutput: DiagDistillerOutputV1;
+  /**
+   * PRI-1146 / SPEC v0.6 §5: canonical principles the system exposes to the
+   * model for this run, read BEFORE the model call from the authoritative
+   * ledger. Empty when the ledger holds no eligible principles (a proven
+   * empty exposure). When provability itself fails, `trustedPrinciples` is
+   * empty AND `trustedPrinciplesUnavailable` carries the typed reason — the
+   * receipt then records `unavailable` and canonical associations stay
+   * unresolved rather than guessed.
+   */
+  readonly trustedPrinciples: readonly RouterTrustedPrinciple[];
+  readonly trustedPrinciplesUnavailable?: { reason: 'ledger_unavailable' | 'ledger_corrupt' | 'source_not_configured'; nextAction: string };
   invocationEvidence?: {
     taskId: string;
     message: string;
-    systemPrompt: string;
     messageDigest: string;
+    /**
+     * SHA-256 of the EXACT effective system prompt the runtime adapter handed
+     * to the model provider — all prompt layers merged by the adapter's single
+     * merge path (PRI-1146 P1-02). Never derived from the base layer alone.
+     */
     systemPromptDigest: string;
     predecessorDigests: { artifactId: string; contentDigest: string }[];
   };
@@ -85,6 +102,14 @@ interface DiagRouterContext {
 
 export interface DiagRouterRunnerDeps extends PeerRunnerDeps {
   readonly committer: DiagnosticianCommitter;
+  /**
+   * PRI-1146: trusted canonical principle source. Required — the router must
+   * decide the exposure allowlist (or record a typed unavailable) BEFORE the
+   * model call; there is no legitimate "no source" production state. The
+   * runtime factory and CLI paths inject the Principle Ledger adapter; tests
+   * inject deterministic doubles.
+   */
+  readonly trustedPrincipleSource: RouterTrustedPrincipleSource;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -94,21 +119,50 @@ export interface DiagRouterRunnerOptions extends PeerRunnerOptions {
   readonly effectiveConfig?: EffectivePdConfig;
 }
 
+// ── Envelope association evaluation (module-level, no runner state) ──────────
+
+/**
+ * SPEC v0.6 §6/§7 — run the pure association structural validation against
+ * the exposure actually recorded in the receipt, for the artifact envelope.
+ * Read-only: the result never gates the commit (a hallucinated canonical
+ * target degrades that rule's association to unresolved, it does not discard
+ * the diagnosis) and never authorizes binding or generation.
+ */
+function evaluateAssociationsForEnvelope(
+  output: DiagnosticianOutputV2,
+  canonicalPrinciples: { status: 'available'; principles: readonly RouterTrustedPrinciple[] } | { status: 'unavailable'; reason: string; nextAction: string },
+  evidenceRefs: string[],
+): ReturnType<typeof validateDiagnosticianAssociations> {
+  if (canonicalPrinciples.status !== 'available') {
+    return {
+      ok: false,
+      reason: 'context_invalid',
+      nextAction: canonicalPrinciples.nextAction,
+    };
+  }
+  return validateDiagnosticianAssociations(output, {
+    principleIds: canonicalPrinciples.principles.map((p) => p.principleId),
+    evidenceRefs,
+  });
+}
+
 // ── DiagRouterRunner ─────────────────────────────────────────────────────────
 
 /**
  * Stage C runner for the split diagnostician pipeline.
  *
- * Produces the final DiagnosticianOutputV1 by routing the distilled principle
+ * Produces the final DiagnosticianOutputV2 by routing the distilled principle
  * from Stage B into the appropriate recommendation taxonomy kind(s). Commits
- * via DiagnosticianCommitter (same as the monolithic DiagnosticianRunner) and
- * calls onDiagnosisComplete after commit.
+ * via DiagnosticianCommitter with the trusted-context receipt and read-only
+ * association validation embedded in the artifact envelope.
  *
  * @see PRI-372
+ * @see PRI-1146
  */
-export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, DiagnosticianOutputV1> {
+export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, DiagnosticianOutputV2> {
   private readonly committer: DiagnosticianCommitter;
   private readonly defaultValidator: DefaultDiagnosticianValidator;
+  private readonly trustedPrincipleSource: RouterTrustedPrincipleSource;
 
   constructor(deps: DiagRouterRunnerDeps, options: DiagRouterRunnerOptions) {
     super(deps, options, {
@@ -125,6 +179,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     });
     this.committer = deps.committer;
     this.defaultValidator = new DefaultDiagnosticianValidator();
+    this.trustedPrincipleSource = deps.trustedPrincipleSource;
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -214,6 +269,32 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw new PDRuntimeError('input_invalid', `No distiller artifact found for DiagRouter task ${taskId}`);
     }
 
+    // PRI-1146 / SPEC v0.6 §5: assemble the trusted canonical principle
+    // exposure BEFORE the model call. Read failures are typed and observable —
+    // the run proceeds with an `unavailable` receipt rather than guessing an
+    // allowlist (canonical associations then stay unresolved).
+    let trustedPrinciples: readonly RouterTrustedPrinciple[] = [];
+    let trustedPrinciplesUnavailable: DiagRouterContext['trustedPrinciplesUnavailable'];
+    try {
+      const exposure = this.trustedPrincipleSource.readTrustedPrinciples();
+      if (exposure.status === 'ok') {
+        trustedPrinciples = exposure.principles;
+      } else {
+        trustedPrinciplesUnavailable = {
+          reason: exposure.reason,
+          nextAction: 'Repair the Principle Ledger read path, then re-run the diagnosis; canonical principle associations stay unresolved until the exposure is provable.',
+        };
+        this.emitEvent('trusted_context_unavailable', taskId, { reason: exposure.reason });
+      }
+    } catch (err) {
+      // The port itself threw (not a typed unavailable) — fail loud, do not
+      // silently treat a broken source as an empty ledger.
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Trusted principle source threw while assembling the router context for task ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     // Compute contextHash
     const contextRefs: string[] = [rootCauseArtifactId, distillerArtifactId];
     const contextHash = BasePeerRunner.hashContextRefs(contextRefs);
@@ -225,6 +306,8 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       rootCauseOutput,
       distillerArtifactId,
       distillerOutput,
+      trustedPrinciples,
+      ...(trustedPrinciplesUnavailable ? { trustedPrinciplesUnavailable } : {}),
     };
 
     return context;
@@ -238,6 +321,17 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         rootCauseOutput: context.rootCauseOutput,
         distillerArtifactId: context.distillerArtifactId,
         distillerOutput: context.distillerOutput,
+        // PRI-1146 P1-02 / §5.3: the exposure state travels as structured
+        // low-trust data in the message — available (possibly empty) vs typed
+        // unavailable are distinct payload states, never rendered into the
+        // static system prompt.
+        trustedContext: context.trustedPrinciplesUnavailable
+          ? {
+            status: 'unavailable',
+            reason: context.trustedPrinciplesUnavailable.reason,
+            nextAction: context.trustedPrinciplesUnavailable.nextAction,
+          }
+          : { status: 'available', principles: context.trustedPrinciples },
       },
       {
         outputLanguage: this.resolvedOptions.outputLanguage,
@@ -245,19 +339,22 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     );
 
     // System-owned evidence from the exact message submitted, never model output.
-    // Router currently receives no trusted canonical Principle allowlist.
+    // The trusted allowlist travels INSIDE the message (the runtime adapter
+    // ignores StartRunInput.contextItems), so the message digest below is the
+    // exposure proof.
     context.invocationEvidence = {
       taskId,
       message,
-      systemPrompt,
       messageDigest: createHash('sha256').update(message).digest('hex'),
-      systemPromptDigest: createHash('sha256').update(systemPrompt).digest('hex'),
+      // Filled from the runtime handle below — the adapter merges profile
+      // layers, so only it can attest the system prompt the provider received.
+      systemPromptDigest: '',
       predecessorDigests: [
         { artifactId: context.rootCauseArtifactId, contentDigest: createHash('sha256').update(JSON.stringify(context.rootCauseOutput)).digest('hex') },
         { artifactId: context.distillerArtifactId, contentDigest: createHash('sha256').update(JSON.stringify(context.distillerOutput)).digest('hex') },
       ],
     };
-    return this.runtimeAdapter.startRun({
+    const runHandle = await this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
@@ -266,12 +363,37 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });
+
+    // PRI-1146 P1-02: bind the receipt to the provider-visible prompt. The
+    // adapter is the only component that knows every merged layer; when it
+    // cannot attest the effective prompt there is no honest digest to record,
+    // so fail loud instead of hashing the base layer and claiming provenance.
+    const providerPromptDigest = runHandle.systemPromptDigest;
+    if (typeof providerPromptDigest !== 'string' || !/^[a-f0-9]{64}$/.test(providerPromptDigest)) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Runtime adapter did not report the effective system prompt digest for task ${taskId}; the router receipt cannot bind the prompt actually sent to the provider.`,
+      );
+    }
+    context.invocationEvidence.systemPromptDigest = providerPromptDigest;
+    return runHandle;
+  }
+
+  /**
+   * P2-01: persist the exact router message so a NEW process can rebuild the
+   * invocation evidence and run the full receipt verification (not just a
+   * structural read) from immutable persisted data.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  protected override getInvocationInputPayload(context: DiagRouterContext): string | undefined {
+    return context.invocationEvidence?.message;
   }
 
   async validateOutput(output: unknown, taskId: string, _context: DiagRouterContext): Promise<PeerRunnerValidationResult> {
-    // Step 1: TypeBox schema check
-    if (!Value.Check(DiagnosticianOutputV1Schema, output)) {
-      const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, output)]
+    // Step 1: TypeBox schema check (V2 — the only contract; a V1 payload
+    // missing schemaVersion/recommendationRef fails here, no fallback).
+    if (!Value.Check(DiagnosticianOutputV2Schema, output)) {
+      const schemaErrors = [...Value.Errors(DiagnosticianOutputV2Schema, output)]
         .slice(0, 5)
         .map((e) => `${e.path}: ${e.message}`);
       return {
@@ -281,7 +403,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       };
     }
 
-    // Step 2: Semantic validation via DefaultDiagnosticianValidator
+    // Step 2: Semantic + artifact-local association validation (ASSC-1..4)
     const result = await this.defaultValidator.validate(output, taskId);
     return {
       valid: result.valid,
@@ -294,11 +416,11 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
   async succeedTask(
     taskId: string,
     runId: string,
-    output: DiagnosticianOutputV1,
+    output: DiagnosticianOutputV2,
     task: TaskRecord,
     contextHash: string,
     context: DiagRouterContext,
-  ): Promise<PeerRunnerResult<DiagnosticianOutputV1>> {
+  ): Promise<PeerRunnerResult<DiagnosticianOutputV2>> {
     // 1. Store output before commit
     try {
       await this.stateManager.updateRunOutput(runId, JSON.stringify(output));
@@ -315,10 +437,23 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     if (!evidence || evidence.taskId !== taskId) {
       throw new PDRuntimeError('input_invalid', 'Router invocation context evidence is missing or belongs to another task');
     }
+    // Evidence refs actually exposed this run = the Stage A evidence sourceRefs
+    // shipped inside the router prompt input (digest-bound to the message).
+    const exposedEvidenceRefs = [...new Set(context.rootCauseOutput.evidence.map((ev) => ev.sourceRef))];
+    const canonicalPrinciples = context.trustedPrinciplesUnavailable
+      ? {
+        status: 'unavailable' as const,
+        reason: context.trustedPrinciplesUnavailable.reason,
+        nextAction: context.trustedPrinciplesUnavailable.nextAction,
+      }
+      : {
+        status: 'available' as const,
+        principles: context.trustedPrinciples,
+      };
     const routerContentJson = JSON.stringify({
       ...output,
       trustedContextReceipt: {
-        schemaVersion: 'router-context-v1',
+        schemaVersion: 'router-context-v2',
         taskId,
         runId,
         outputSchemaRef: 'diagnostician-output',
@@ -326,24 +461,26 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         messageDigest: evidence.messageDigest,
         systemPromptDigest: evidence.systemPromptDigest,
         predecessorDigests: evidence.predecessorDigests,
-        canonicalPrinciples: {
-          status: 'unavailable',
-          reason: 'router_has_no_system_canonical_principle_allowlist',
-          nextAction: 'Keep source association in shadow; provide a system-owned invocation allowlist before canonical association.',
-        },
+        evidenceRefs: exposedEvidenceRefs,
+        canonicalPrinciples,
       },
+      // Read-only association validation against the trusted exposure (SPEC
+      // v0.6 §6/§7): structural results only — semanticCorrectness stays
+      // not_evaluated and nothing here authorizes binding or generation.
+      associationValidation: evaluateAssociationsForEnvelope(output, canonicalPrinciples, exposedEvidenceRefs),
     });
     // Check the persisted shape at the real write boundary.
     const persistedEnvelope: unknown = JSON.parse(routerContentJson);
     const receiptCheck = verifyRouterContextReceipt(persistedEnvelope, {
-      taskId, runId, contextHash, message: evidence.message, systemPrompt: evidence.systemPrompt,
+      taskId, runId, contextHash, message: evidence.message, systemPromptDigest: evidence.systemPromptDigest,
       predecessors: [
         { artifactId: context.rootCauseArtifactId, content: context.rootCauseOutput },
         { artifactId: context.distillerArtifactId, content: context.distillerOutput },
       ],
+      exposed: { ...canonicalPrinciples, evidenceRefs: exposedEvidenceRefs },
     });
     if (receiptCheck.status !== 'available') {
-      throw new PDRuntimeError('input_invalid', 'Invalid router context receipt');
+      throw new PDRuntimeError('input_invalid', `Invalid router context receipt: ${receiptCheck.reason}`);
     }
     let commitResult: CommitResult;
     try {
@@ -364,7 +501,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       throw commitErr;
     }
 
-    // 2b. Dual-write the DiagnosticianOutputV1 into pi_artifacts (PRI-667).
+    // 2b. Dual-write the DiagnosticianOutputV2 into pi_artifacts (PRI-667).
     // The committer's legacy `artifacts` row is the candidate-intake source;
     // the downstream internalization runners read their predecessors ONLY
     // from pi_artifacts — without this row the evaluator cannot resolve its
@@ -408,6 +545,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
         kind: rec.kind,
         description: rec.description,
         sourceRunId: runId,
+        recommendationRef: rec.recommendationRef,
       });
     }
 
@@ -476,8 +614,11 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
    * Also re-injects taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
    */
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown, context: DiagRouterContext): void {
-    // Legacy: re-inject taskId if stripped by adapter
-    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
+    // PRI-1146: the legacy "re-inject taskId if stripped" shim is REMOVED.
+    // The V2 root is closed (`additionalProperties: false`) and has no
+    // taskId field — lineage is owned by the runner/TaskRecord and no
+    // production consumer reads it from the diagnostician output. Injecting
+    // it would fail V2 schema validation for every run.
 
     // P0: Inject invariant fields from upstream artifacts
     if (typeof untrustedOutput === 'object' && untrustedOutput !== null && !Array.isArray(untrustedOutput)) {
@@ -523,8 +664,8 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       // PRI-468: intentTension ← Stage A (additive passthrough, SPEC §18)
       //
       // Stage C MUST NOT generate intentTension when Stage A omitted it
-      // (SPEC §18.2). Only copy it through when Stage A actually produced
-      // a defined value. If Stage A did not produce one (absent or
+      // (SPEC §18.2). Only copy it through when Stage A actually produced a
+      // defined value. If Stage A did not produce one (absent or
       // undefined), strip any LLM-hallucinated intentTension.
       const stageAIntentTension = context.rootCauseOutput.intentTension;
       if (stageAIntentTension !== undefined) {
@@ -550,7 +691,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     }
   }
 
-  protected override emitSuccessTelemetry(taskId: string, output: DiagnosticianOutputV1, _context: DiagRouterContext): void {
+  protected override emitSuccessTelemetry(taskId: string, output: DiagnosticianOutputV2, _context: DiagRouterContext): void {
     const recommendationKinds = output.recommendations.map((r) => r.kind);
     const kindHistogram: Record<string, number> = {};
     for (const kind of recommendationKinds) {

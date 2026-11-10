@@ -7,7 +7,7 @@ import {
   createRuntimeStateHandle,
   SqliteDiagnosticianCommitter,
   type RuntimeStateHandle,
-  type DiagnosticianOutputV1,
+  type DiagnosticianOutputV2,
 } from '@principles/core/runtime';
 import { RuleCandidateBindingConsoleModel } from '../../src/server/models/RuleCandidateBindingConsoleModel.js';
 
@@ -22,7 +22,7 @@ const NOW = '2026-10-26T00:00:00.000Z';
  * aggregation owner dedupes by candidateId; the shared store query keeps
  * its existing semantics for every other consumer.
  */
-const splitDiagnosis: DiagnosticianOutputV1 = {
+const splitDiagnosis: DiagnosticianOutputV2 = {
   valid: true,
   diagnosisId: 'queue-dedup-split-diagnosis',
   summary: 'The change shipped without a confirmed design.',
@@ -31,12 +31,20 @@ const splitDiagnosis: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'rule', description: 'Require a confirmed design before non-trivial behavior changes.' },
+    {
+      kind: 'rule',
+      description: 'Require a confirmed design before non-trivial behavior changes.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'non-trivial behavior change',
+      action: 'require a confirmed design first',
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    },
   ],
+  schemaVersion: 'diagnostician-output-v2',
 };
 
 /** Same pain, same rule text, TWO distinct candidates — must both stay visible. */
-const twinTextDiagnosis: DiagnosticianOutputV1 = {
+const twinTextDiagnosis: DiagnosticianOutputV2 = {
   valid: true,
   diagnosisId: 'queue-dedup-twin-diagnosis',
   summary: 'The reply buried the conclusion.',
@@ -45,9 +53,24 @@ const twinTextDiagnosis: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.8,
   recommendations: [
-    { kind: 'rule', description: 'Front-load the conclusion in every owner-facing reply.' },
-    { kind: 'rule', description: 'Front-load the conclusion in every owner-facing reply.' },
+    {
+      kind: 'rule',
+      description: 'Front-load the conclusion in every owner-facing reply.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'owner-facing reply',
+      action: 'front-load the conclusion',
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    },
+    {
+      kind: 'rule',
+      description: 'Front-load the conclusion in every owner-facing reply.',
+      recommendationRef: 'rule-2',
+      triggerPattern: 'owner-facing reply',
+      action: 'front-load the conclusion',
+      principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+    },
   ],
+  schemaVersion: 'diagnostician-output-v2',
 };
 
 type Fixture = {
@@ -61,7 +84,7 @@ type Fixture = {
 
 async function commitDiagnosis(
   handle: RuntimeStateHandle,
-  args: { taskId: string; inputRef: string; runId: string; output: DiagnosticianOutputV1; key: string },
+  args: { taskId: string; inputRef: string; runId: string; output: DiagnosticianOutputV2; key: string },
 ): Promise<void> {
   await handle.stateManager.createTask({
     taskId: args.taskId, taskKind: args.taskId.startsWith('diag_router') ? 'diag_router' : 'diagnostician',
@@ -148,7 +171,7 @@ describe('rule binding queue aggregation (PRI-1048)', () => {
   it('drives the queue cap to its boundary: 201 candidates → 200 items, truncated, true count kept (ERR-134)', async () => {
     // One diagnosis whose output carries 201 distinct rule recommendations —
     // the real committer creates one candidate per recommendation.
-    const flood: DiagnosticianOutputV1 = {
+    const flood: DiagnosticianOutputV2 = {
       valid: true,
       diagnosisId: 'queue-dedup-flood-diagnosis',
       summary: 'Flood.',
@@ -159,7 +182,12 @@ describe('rule binding queue aggregation (PRI-1048)', () => {
       recommendations: Array.from({ length: 201 }, (_, index) => ({
         kind: 'rule' as const,
         description: `Flood rule candidate #${index + 1}.`,
+        recommendationRef: `rule-${index + 1}`,
+        triggerPattern: 'flood',
+        action: 'cap the queue',
+        principleAssociation: { status: 'unresolved' as const, reason: 'no_supported_target' as const },
       })),
+      schemaVersion: 'diagnostician-output-v2',
     };
     await commitDiagnosis(fixture.handle, {
       taskId: 'diagnosis-flood', inputRef: 'pain-flood', runId: 'run-flood',

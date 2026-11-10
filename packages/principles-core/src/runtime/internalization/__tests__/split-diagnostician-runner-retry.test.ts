@@ -13,7 +13,7 @@ import { describe, it, expect, vi, type Mock } from 'vitest';
 import type { PeerRunnerResult } from '../../runner/peer-runner-types.js';
 import type { DiagRootCauseOutputV1 } from '../../diagnostician/diag-rootcause-output.js';
 import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-output.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -157,8 +157,8 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
         runners.rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
         runners.distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
         runners.routerRunner.run
-          .mockResolvedValueOnce(makeRetriedResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID, 'Schema validation failed'))
-          .mockResolvedValueOnce(makeSucceededResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID));
+          .mockResolvedValueOnce(makeRetriedResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID, 'Schema validation failed'))
+          .mockResolvedValueOnce(makeSucceededResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID));
       },
     },
   ] as const)('should retry Stage $stage when sub-runner returns retried, then succeed', async ({ stageRunnerKey, seed }) => {
@@ -167,7 +167,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     const runners: StageRunners = {
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>(),
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>(),
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>(),
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>(),
     };
 
     seed(runners);
@@ -200,7 +200,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -228,7 +228,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -258,7 +258,7 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -291,11 +291,11 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const stateManager = makeMockStateManager(tasks);
     const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
     const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
-    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
 
     rootCauseRunner.run.mockResolvedValue(makeSucceededResult<DiagRootCauseOutputV1>(STAGE_A_TASK_ID));
     distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
-    routerRunner.run.mockResolvedValue(makeSucceededResult<DiagnosticianOutputV1>(STAGE_C_TASK_ID));
+    routerRunner.run.mockResolvedValue(makeSucceededResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID));
 
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
@@ -335,7 +335,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -365,7 +365,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -396,7 +396,7 @@ describe('Bug-N: SplitDiagnosticianRunner parent task lease acquisition', () => 
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -435,7 +435,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: rootCauseRunner as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -469,7 +469,7 @@ describe('SplitDiagnosticianRunner terminal-state persistence', () => {
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
       distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
-      routerRunner: makeMockRunner<DiagnosticianOutputV1>() as never,
+      routerRunner: makeMockRunner<DiagnosticianOutputV2>() as never,
       stateManager: stateManager as never,
       committer: makeMockCommitter(),
       perStageTimeoutMs: 30_000,
@@ -520,17 +520,18 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       },
     ]);
 
-    const validOutput: DiagnosticianOutputV1 = {
+    const validOutput: DiagnosticianOutputV2 = {
+      schemaVersion: 'diagnostician-output-v2',
       valid: true,
       diagnosisId: 'fallback-diag',
       summary: 'Fallback diagnosis after cache unreadable',
       rootCause: 'Fallback: corrupt cache',
       violatedPrinciples: [],
       evidence: [{ sourceRef: 'rerun', note: 'Rerun produced valid output' }],
-      recommendations: [{ kind: 'defer', description: 'Cache was corrupt; reran Stage C' }],
+      recommendations: [{ kind: 'defer', description: 'Cache was corrupt; reran Stage C', recommendationRef: 'defer-1' }],
       confidence: 0.8,
     };
-    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
     routerRunner.run.mockResolvedValue({
       status: 'succeeded',
       taskId: STAGE_C_TASK_ID,
@@ -567,14 +568,15 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       }),
     };
     const stateManager = makeMockStateManager(tasks);
-    const cachedOutput: DiagnosticianOutputV1 = {
+    const cachedOutput: DiagnosticianOutputV2 = {
+      schemaVersion: 'diagnostician-output-v2',
       valid: true,
       diagnosisId: 'cached-001',
       summary: 'Cached diagnosis',
       rootCause: 'From previous successful run',
       violatedPrinciples: [],
       evidence: [],
-      recommendations: [{ kind: 'defer', description: 'Cached: no action' }],
+      recommendations: [{ kind: 'defer', description: 'Cached: no action', recommendationRef: 'defer-1' }],
       confidence: 0.9,
     };
     stateManager.getRunsByTask = vi.fn().mockResolvedValue([
@@ -585,7 +587,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       },
     ]);
 
-    const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
 
     const runner = new SplitDiagnosticianRunner({
       rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
@@ -637,20 +639,21 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         },
       ]);
 
-      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
       routerRunner.run.mockResolvedValue({
         status: 'succeeded',
         taskId: STAGE_C_TASK_ID,
         attemptCount: 1,
         contextHash: 'ctx-rerun-invalid',
         output: {
+          schemaVersion: 'diagnostician-output-v2',
           valid: true,
           diagnosisId: 'rerun-diag',
           summary: 'Rerun after invalid cache',
           rootCause: 'Rerun root cause',
           violatedPrinciples: [],
           evidence: [{ sourceRef: 'rerun', note: 'note' }],
-          recommendations: [{ kind: 'defer', description: 'rerun defer' }],
+          recommendations: [{ kind: 'defer', description: 'rerun defer', recommendationRef: 'defer-1' }],
           confidence: 0.7,
         },
       });
@@ -677,7 +680,7 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       );
       expect(routerRunner.run).toHaveBeenCalledWith(STAGE_C_TASK_ID);
       if (result.status === 'succeeded') {
-        expect((result.output as DiagnosticianOutputV1).diagnosisId).toBe('rerun-diag');
+        expect((result.output as DiagnosticianOutputV2).diagnosisId).toBe('rerun-diag');
       }
     });
 
@@ -713,20 +716,21 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         },
       ]);
 
-      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
       routerRunner.run.mockResolvedValue({
         status: 'succeeded',
         taskId: STAGE_C_TASK_ID,
         attemptCount: 1,
         contextHash: 'ctx-rerun-throws',
         output: {
+          schemaVersion: 'diagnostician-output-v2',
           valid: true,
           diagnosisId: 'rerun-after-throw',
           summary: 'Rerun after validator throw',
           rootCause: 'Rerun root cause',
           violatedPrinciples: [],
           evidence: [{ sourceRef: 'rerun', note: 'note' }],
-          recommendations: [{ kind: 'defer', description: 'rerun defer' }],
+          recommendations: [{ kind: 'defer', description: 'rerun defer', recommendationRef: 'defer-1' }],
           confidence: 0.7,
         },
       });
@@ -776,14 +780,14 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         runId: 'run-sc-new-valid',
         executionStatus: 'succeeded',
         outputPayload: JSON.stringify({
-          valid: true, diagnosisId: 'good-new', summary: 'Newest cached diagnosis', rootCause: 'r',
-          violatedPrinciples: [], evidence: [], recommendations: [{ kind: 'defer', description: 'd' }],
+          schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'good-new', summary: 'Newest cached diagnosis', rootCause: 'r',
+          violatedPrinciples: [], evidence: [], recommendations: [{ kind: 'defer', description: 'd', recommendationRef: 'defer-1' }],
           confidence: 0.9,
         }),
       };
       stateManager.getRunsByTask = vi.fn().mockResolvedValue([oldInvalid, newerValid]);
 
-      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
       const runner = new SplitDiagnosticianRunner({
         rootCauseRunner: makeMockRunner<DiagRootCauseOutputV1>() as never,
         distillerRunner: makeMockRunner<DiagDistillerOutputV1>() as never,
@@ -800,13 +804,13 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
       expect(routerRunner.run).not.toHaveBeenCalled();
       expect(stateManager.updateTask).not.toHaveBeenCalled();
       if (result.status === 'succeeded') {
-        expect((result.output as DiagnosticianOutputV1).diagnosisId).toBe('good-new');
+        expect((result.output as DiagnosticianOutputV2).diagnosisId).toBe('good-new');
       }
     });
 
     it('re-runs Stage C when the cached succeeded run has no outputPayload at all', async () => {
       // Previously a succeeded run with a null/undefined payload produced
-      // `output: undefined as DiagnosticianOutputV1` — a succeeded diagnosis
+      // `output: undefined as DiagnosticianOutputV2` — a succeeded diagnosis
       // with no content flowing to the bridge.
       const tasks: Record<string, TaskRecord> = {
         [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
@@ -825,20 +829,21 @@ describe('SplitDiagnosticianRunner Stage C corrupt outputPayload', () => {
         },
       ]);
 
-      const routerRunner = makeMockRunner<DiagnosticianOutputV1>();
+      const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
       routerRunner.run.mockResolvedValue({
         status: 'succeeded',
         taskId: STAGE_C_TASK_ID,
         attemptCount: 1,
         contextHash: 'ctx-rerun-empty',
         output: {
+          schemaVersion: 'diagnostician-output-v2',
           valid: true,
           diagnosisId: 'rerun-empty-diag',
           summary: 'Rerun after empty cache',
           rootCause: 'Rerun root cause',
           violatedPrinciples: [],
           evidence: [{ sourceRef: 'rerun', note: 'note' }],
-          recommendations: [{ kind: 'defer', description: 'rerun defer' }],
+          recommendations: [{ kind: 'defer', description: 'rerun defer', recommendationRef: 'defer-1' }],
           confidence: 0.7,
         },
       });

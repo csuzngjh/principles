@@ -28,7 +28,7 @@ export interface PainDiagnosisRecord {
   painId: string;
   /** The diagnostician task that produced this diagnosis. */
   taskId: string;
-  /** diagnosisId from DiagnosticianOutputV1. */
+  /** diagnosisId from DiagnosticianOutputV2. */
   diagnosisId: string;
   /** Root-cause category parsed from the validated rootCause prefix. */
   category: RootCauseCategory;
@@ -81,7 +81,7 @@ export function isRootCauseCategory(value: unknown): value is RootCauseCategory 
 }
 
 /**
- * Parse the root-cause category from a DiagnosticianOutputV1.rootCause prefix
+ * Parse the root-cause category from a DiagnosticianOutputV2.rootCause prefix
  * ("People: ...", "Design: ...", "Assumption: ...", "Tooling: ...").
  *
  * The split-pipeline validator (DefaultDiagRootCauseValidator step 4b) and the

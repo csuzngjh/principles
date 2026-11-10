@@ -31,9 +31,9 @@ const mockGetCandidateImpl = vi.fn(async (candidateId: string) => {
 const mockGetRunsByTask = vi.fn().mockResolvedValue([{
     runId: 'run-underlying', status: 'succeeded',
     // SPEC review round-3 P1: the full admission re-evaluation reads the
-    // latest run output — a valid admitting DiagnosticianOutputV1 keeps the
+    // latest run output — a valid admitting DiagnosticianOutputV2 keeps the
     // original retry flow for these fixtures.
-    outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
   }]);
 // SPEC-CODEX-PAIN-CLOSURE-001 round-5: the write gate resolves each
 // candidate's own diagnostic round via getRun(candidate.sourceRunId).
@@ -41,7 +41,7 @@ const mockGetRunsByTask = vi.fn().mockResolvedValue([{
 // hangs off, so this seam answers with that owning run.
 const mockGetRun = vi.fn(async (runId: string) => (runId === 'run-underlying' ? {
   runId: 'run-underlying', taskId: 'diagnosis_test-pain-1', status: 'succeeded', executionStatus: 'succeeded' as const,
-  outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+  outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
 } : null));
 const mockGetArtifact = vi.fn().mockResolvedValue(null);
 
@@ -339,7 +339,7 @@ describe('pd pain retry — validation and error paths', () => {
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
     }]);
     mockResolveRuntimeConfig.mockReturnValue({
       runtimeKind: 'pi-ai',
@@ -704,7 +704,7 @@ describe('pd pain retry — success paths', () => {
     // (the original flow asserted intake proceeds on these fixtures).
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
     }]);
     mockGetAdmissionDocument.mockResolvedValue({
       ok: true,
@@ -993,7 +993,7 @@ describe('pd pain retry — human-readable output', () => {
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
     }]);
     mockIntake.mockReset();
     mockDeadLetterGetByPainId.mockReturnValue(null);
@@ -1200,7 +1200,7 @@ describe('BUG-1 (PRI-442): pain retry — effectiveConfig wiring to split-pipeli
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
     }]);
     mockIntake.mockReset();
     // PRI-934: null = nothing recovered, no mutation (post-clearAllMocks re-prime).
@@ -1342,7 +1342,7 @@ describe('PRI-934: pd pain retry — failed-task recovery', () => {
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
     }]);
     mockIntake.mockReset();
     mockRecoverFailedTask.mockResolvedValue(null);
@@ -1630,8 +1630,9 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
     rootCause: 'People: Agent retried without inspecting the lease state',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'tool_calls:1', note: 'test evidence' }],
-    recommendations: [{ kind: 'defer' as const, description: 'no actionable principle' }],
+    recommendations: [{ kind: 'defer' as const, description: 'no actionable principle', recommendationRef: 'defer-1' }],
     confidence: 0.7,
+    schemaVersion: 'diagnostician-output-v2' as const,
   };
 
   beforeEach(() => {
@@ -1656,7 +1657,7 @@ describe('PRI-935: pd pain retry — pain_diagnoses ledger dispatch', () => {
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd', recommendationRef: 'principle-1' }], confidence: 0.95, schemaVersion: 'diagnostician-output-v2' }),
     }]);
     mockIntake.mockReset();
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });

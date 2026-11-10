@@ -17,7 +17,7 @@ import {
   SqliteConnection,
   SqliteDiagnosticianCommitter,
   type RunnerResult,
-  type DiagnosticianOutputV1,
+  type DiagnosticianOutputV2,
 } from '@principles/core/runtime';
 import { BehaviorExamplePackAssembler } from '@principles/host-runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
@@ -158,8 +158,8 @@ function runCount(root: string, taskId: string): number {
   }
 }
 
-/** A schema-valid DiagnosticianOutputV1 the fake diagnosis produces. */
-function fakeDiagnosis(taskId: string): DiagnosticianOutputV1 {
+/** A schema-valid DiagnosticianOutputV2 the fake diagnosis produces. */
+function fakeDiagnosis(taskId: string): DiagnosticianOutputV2 {
   return {
     valid: true,
     diagnosisId: `diag-${taskId}`,
@@ -171,9 +171,10 @@ function fakeDiagnosis(taskId: string): DiagnosticianOutputV1 {
       { sourceRef: 'codex:transcript', note: 'correction turn observed' },
     ],
     recommendations: [
-      { kind: 'principle', description: '修改前先调查已有实现', abstractedPrinciple: '修改前先调查已有实现' },
+      { kind: 'principle', description: '修改前先调查已有实现', abstractedPrinciple: '修改前先调查已有实现', recommendationRef: 'principle-1' },
     ],
     confidence: 0.9,
+    schemaVersion: 'diagnostician-output-v2',
   };
 }
 

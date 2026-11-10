@@ -37,12 +37,12 @@ const { MockRuntimeStateManager, rearmGateSeams, mockGetCandidatesByTaskId, mock
     mockAppendAdmissionEvaluation.mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } });
     mockGetRunsByTask.mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'd' }], confidence: 0.95 }),
     }]);
     // Round-5: answer the owning-round lookup for the fixture sourceRunId.
     mockGetRun.mockImplementation(async (runId: string) => (runId === 'run-underlying' ? {
       runId: 'run-underlying', taskId: 'test-task-1', status: 'succeeded', executionStatus: 'succeeded' as const,
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'd' }], confidence: 0.95 }),
     } : null));
     mockGetArtifact.mockResolvedValue(null);
   }
@@ -208,14 +208,14 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
       status: 'succeeded',
       taskId: 'test-task-1',
       output: {
+        schemaVersion: 'diagnostician-output-v2',
         valid: true,
         diagnosisId: 'diag-123',
-        taskId: 'test-task-1',
         summary: 'Test diagnosis summary',
         rootCause: 'Test: test root cause',
         violatedPrinciples: [],
         evidence: [],
-        recommendations: [{ kind: 'implementation', description: 'Test recommendation' }],
+        recommendations: [{ kind: 'implementation', recommendationRef: 'x-1', description: 'Test recommendation' }],
         confidence: 0.9,
       },
     }),
@@ -285,15 +285,15 @@ const SUCCEEDED_RESULT = {
   status: 'succeeded' as const,
   taskId: 'test-task-1',
   output: {
+    schemaVersion: 'diagnostician-output-v2' as const,
     valid: true,
     diagnosisId: 'diag-123',
-    taskId: 'test-task-1',
     summary: 'Test diagnosis summary',
     rootCause: 'Test: test root cause',
     violatedPrinciples: [],
     evidence: [],
     recommendations: [
-      { kind: 'principle', description: 'Always validate tool arguments before execution' },
+      { kind: 'principle', recommendationRef: 'x-1', description: 'Always validate tool arguments before execution' },
     ],
     confidence: 0.9,
   },

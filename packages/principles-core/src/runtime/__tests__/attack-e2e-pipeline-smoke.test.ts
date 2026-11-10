@@ -28,6 +28,7 @@ import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { SqliteContextAssembler } from '../store/context/sqlite-context-assembler.js';
 import { SqliteHistoryQuery } from '../store/history/sqlite-history-query.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
+import { createHash } from 'node:crypto';
 import { SplitDiagnosticianRunner } from '../internalization/split-diagnostician-runner.js';
 import { DiagRootCauseRunner } from '../internalization/diag-rootcause-runner.js';
 import { DiagDistillerRunner } from '../internalization/diag-distiller-runner.js';
@@ -36,7 +37,7 @@ import { DefaultDiagRootCauseValidator } from '../diagnostician/diag-rootcause-o
 import { DefaultDiagDistillerValidator } from '../diagnostician/diag-distiller-output.js';
 import { type DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import { SqliteDiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, StartRunInput, StructuredRunOutput, RuntimeKind, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem } from '../runtime-protocol.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
 import { CandidateIntakeService } from '../candidate-intake-service.js';
@@ -180,7 +181,11 @@ class MockRuntimeAdapter implements PDRuntimeAdapter {
       ? { runId, payload }
       : null;
     this.runs.set(runId, { status, output });
-    return { runId, runtimeKind: 'pi-ai', startedAt: new Date().toISOString() };
+    // Adapter contract: report the digest of the prompt actually handed to the
+    // provider. This mock has no profile layer, so the effective prompt is the
+    // caller's systemPrompt.
+    const systemPromptDigest = createHash('sha256').update(input.systemPrompt ?? '', 'utf8').digest('hex');
+    return { runId, runtimeKind: 'pi-ai', startedAt: new Date().toISOString(), systemPromptDigest };
   }
 
   async pollRun(runId: string): Promise<RunStatus> {
@@ -201,8 +206,9 @@ class MockRuntimeAdapter implements PDRuntimeAdapter {
   async appendContext?(_runId: string, _items: ContextItem[]): Promise<void> { void _runId; void _items; }
 }
 
-function makeDiagnosticianOutput(overrides?: Partial<DiagnosticianOutputV1>): DiagnosticianOutputV1 {
+function makeDiagnosticianOutput(overrides?: Partial<DiagnosticianOutputV2>): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: `diag-attack-${Date.now()}`,
     summary: 'Attack test diagnosis',
@@ -210,7 +216,7 @@ function makeDiagnosticianOutput(overrides?: Partial<DiagnosticianOutputV1>): Di
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'test', note: 'Attack test evidence' }],
     recommendations: [
-      { kind: 'principle', description: 'Always validate inputs before processing', abstractedPrinciple: 'Always validate inputs before processing' },
+      { kind: 'principle', description: 'Always validate inputs before processing', abstractedPrinciple: 'Always validate inputs before processing', recommendationRef: 'principle-1' },
     ],
     confidence: 0.9,
     ...overrides,
@@ -271,6 +277,7 @@ function makeSplitRunner(
       eventEmitter,
       artifactStore: stateManager.piArtifactStore,
       committer,
+      trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },
     },
     {
       owner: options.owner ?? 'attack-test',
@@ -564,6 +571,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     const hugeRecommendations = Array.from({ length: 500 }, (_, i) => ({
       kind: 'principle' as const,
       description: `Principle ${i}: `.repeat(20),
+      recommendationRef: `principle-${i}`,
     }));
 
     mockAdapter.nextOutput = makeDiagnosticianOutput({

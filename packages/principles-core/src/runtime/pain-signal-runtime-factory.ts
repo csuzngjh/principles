@@ -19,6 +19,7 @@ import { SplitDiagnosticianRunner } from './internalization/split-diagnostician-
 import { DiagRootCauseRunner } from './internalization/diag-rootcause-runner.js';
 import { DiagDistillerRunner } from './internalization/diag-distiller-runner.js';
 import { DiagRouterRunner } from './internalization/diag-router-runner.js';
+import { isRouterTrustedPrincipleSource } from './internalization/router-context-evidence.js';
 import { DefaultDiagRootCauseValidator } from './diagnostician/diag-rootcause-output.js';
 import { DefaultDiagDistillerValidator } from './diagnostician/diag-distiller-output.js';
 import { resolveOutputLanguage } from './language-directive.js';
@@ -597,7 +598,7 @@ export class DisabledDiagnosticianRunner implements DiagnosticianRunnerLike {
 // Pain Diagnosis Persistence: the bridge emits ad-hoc event names that are not
 // in the closed TelemetryEventType union, so only the two persistence
 // degradation events are mapped onto the registered degradation_triggered
-// channel. The bridge's OTHER event names (candidate_admission_decision,
+// channel. The bridge's OTHER legacy event names (candidate_admission_decision,
 // candidate_dreamer_task_seeded, candidate_dreamer_task_seed_failed,
 // candidate_not_internalizable) were dormant on main — no emitter was wired
 // there — and must STAY dormant here: forwarding them as degradation_triggered
@@ -616,6 +617,12 @@ const BRIDGE_DEGRADATION_EVENT_TYPES: ReadonlySet<string> = new Set([
  * Map a PainSignalBridge telemetry event onto a storable TelemetryEvent.
  * Returns null for bridge events that were not emitted in production before
  * the persistence feature (they keep their pre-main dormant status).
+ *
+ * PRI-1146 (G6 / P1-01): REGISTERED event types pass through verbatim. The
+ * closed union is the registration authority, so an event that is in it is a
+ * real, first-class telemetry signal — mapping it to null (the pre-fix fate of
+ * replay_review_source_invalid) silently dropped the bridge's skip evidence on
+ * the production path.
  */
 const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
   'reuse_gate_triggered',
@@ -623,6 +630,10 @@ const BRIDGE_PASSTHROUGH_EVENT_TYPES: ReadonlySet<string> = new Set([
   // signal must survive the mapping so an injected workspace sink can persist
   // it (observation only — never decision storage, SPEC v0.3.2 §11).
   'reuse_evaluation_unavailable',
+  // PRI-1146 G6 (rc-9): the replay intake review skipped a candidate because
+  // its persisted owning payload was unparseable or a retired non-V2 shape —
+  // the skip must reach the durable workspace sink, never vanish in mapping.
+  'replay_review_source_invalid',
 ]);
 
 export function mapBridgeTelemetryToStoreEvent(event: {
@@ -749,16 +760,33 @@ async function constructBridge(
   //
   // P0-1 fix: onDiagnosisComplete is no longer wired into the router.
   // The bridge (PainSignalBridge.onPainDetected) is the sole invocation point.
+  // PRI-1146 (round 2, P1-01): runner telemetry uses the SAME effective sink as
+  // the bridge. When a workspace-scoped sink is injected (CLI short processes),
+  // allowlisted runner events (e.g. diag_router_trusted_context_unavailable)
+  // persist to critical-events.jsonl; the sink forwards every non-allowlisted
+  // event to the storeEmitter singleton, so existing DB telemetry is preserved
+  // without duplicating the event. Absent a sink, behavior is unchanged.
+  const runnerEventEmitter = opts.telemetrySink ?? storeEmitter;
   const rootCauseRunner = new DiagRootCauseRunner(
-    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
+    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagRootCauseValidator(), contextAssembler, intentDocReader: opts.intentDocReader },
     { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
   );
   const distillerRunner = new DiagDistillerRunner(
-    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
+    { stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultDiagDistillerValidator() },
     { owner: opts.owner ?? 'pain-signal-bridge', runtimeKind: runtimeConfig.runtimeKind, outputLanguage, effectiveConfig: opts.effectiveConfig },
   );
   const routerRunner = new DiagRouterRunner(
-    { stateManager, runtimeAdapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, committer },
+    {
+      stateManager, runtimeAdapter, eventEmitter: runnerEventEmitter, artifactStore: stateManager.piArtifactStore, committer,
+      // PRI-1146 / SPEC v0.6 §5: the trusted canonical principle exposure is
+      // assembled BEFORE the model call. The concrete PrincipleTreeLedgerAdapter
+      // implements the port; a narrow LedgerAdapter double without the port is
+      // detected structurally and degrades to a typed `source_not_configured`
+      // receipt (observable, never a guessed allowlist).
+      trustedPrincipleSource: isRouterTrustedPrincipleSource(opts.ledgerAdapter)
+        ? opts.ledgerAdapter
+        : { readTrustedPrinciples: () => ({ status: 'unavailable' as const, reason: 'source_not_configured' as const }) },
+    },
     // PRI-818 (R-08): effectiveConfig must reach Stage C like it does for
     // Stage A/B — without it, isDegradationEnabled() is always false and the
     // ADR-0019 rate-limit fast-fail degradation path can never fire here.

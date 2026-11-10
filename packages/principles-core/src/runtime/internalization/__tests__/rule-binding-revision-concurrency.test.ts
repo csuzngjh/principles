@@ -6,14 +6,15 @@ import { createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata } 
 import { reviseRuleBindingOnce } from '../rule-binding-revision.js';
 import { createRuntimeStateHandle, type RuntimeStateHandle } from '../../runtime-state-handle.js';
 import { SqliteDiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { CandidatePrincipleIdentityResolution } from '../../adapter/principle-tree-ledger-adapter.js';
 
 const NOW = '2026-10-25T00:00:00.000Z';
 const BINDING_REVISION = 4;
 const MAX_ATTEMPTS = 5;
 
-const diagnosis: DiagnosticianOutputV1 = {
+const diagnosis: DiagnosticianOutputV2 = {
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'binding-revision-diagnosis',
   summary: 'The operation accepted an unscoped path.',
@@ -22,7 +23,14 @@ const diagnosis: DiagnosticianOutputV1 = {
   evidence: [],
   confidence: 0.9,
   recommendations: [
-    { kind: 'rule', description: 'Reject writes that escape the approved scope.' },
+    {
+      kind: 'rule',
+      description: 'Reject writes that escape the approved scope.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'write.*(path|scope)',
+      action: 'Reject the write and request a scoped path.',
+      principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' },
+    },
   ],
 };
 

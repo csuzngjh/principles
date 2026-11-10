@@ -61,10 +61,11 @@ Schema 版本独立于 npm 版本，因为多个 npm minor 可能共享同一个
 // @principles/core/runtime/schema-version.ts（PRI-1139 收敛后）
 export const RUNTIME_CONTRACT_SCHEMA_VERSION = 'current' as const;
 
-// output contract ref 为版本中性的 canonical key（PRI-1104 / PRI-1139）；
-// 历史 -vN 拼写经 OUTPUT_SCHEMA_REF_ALIASES 兼容读取：
-// 'diagnostician-output'   ← canonical（唯一当前写入标准）
-// 'diagnostician-output-v1' ← 仅历史读取（alias）
+// output contract ref 为版本中性的 canonical key（PRI-1104 / PRI-1139）。
+// PRI-1146 V2 Only：Diagnostician 的历史 -vN 拼写已退役——
+// 'diagnostician-output'    ← canonical（唯一契约，解析到 V2 schema）
+// 'diagnostician-output-v1' ← 已删除（不再解析，fail-loud）；
+// 其他 Stage 的 -vN alias 不受影响。
 ```
 
 ---

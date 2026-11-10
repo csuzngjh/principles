@@ -132,26 +132,63 @@ function isRecommendationArraySchema(schema: Record<string, unknown>): boolean {
   const items = getArrayItems(recsProp);
   if (!items) return false;
 
+  // V1 shape: a plain object item schema with a kind union property.
   const itemProps = getProperties(items);
-  if (!itemProps) return false;
+  if (itemProps) {
+    const kindProp = itemProps.kind;
+    if (isRecord(kindProp)) {
+      const anyOf = getUnionSchemas(kindProp, 'anyOf');
+      if (anyOf && anyOf.some(s => isRecord(s) && s.const === 'principle')) return true;
+    }
+  }
 
-  const kindProp = itemProps.kind;
-  if (!isRecord(kindProp)) return false;
+  // PRI-1146 V2 shape: a discriminated union of per-kind variants. The rule
+  // variant narrows kind to a literal; every other kind shares one variant
+  // whose kind is itself a union of literals. Match either spelling of
+  // "principle" so the diagnostician example path (and its domain-aware
+  // synthesis) keeps firing instead of falling back to the generic
+  // synthesizer, whose output would violate the production validator (PRI-817).
+  const variants = getUnionSchemas(items, 'anyOf');
+  if (variants) {
+    return variants.some((variant) => {
+      if (!isRecord(variant)) return false;
+      const variantProps = getProperties(variant);
+      if (!variantProps) return false;
+      const kindProp = variantProps.kind;
+      if (!isRecord(kindProp)) return false;
+      if (kindProp.const === 'principle') return true;
+      const kindAnyOf = getUnionSchemas(kindProp, 'anyOf');
+      return kindAnyOf !== null && kindAnyOf.some(s => isRecord(s) && s.const === 'principle');
+    });
+  }
 
-  const anyOf = getUnionSchemas(kindProp, 'anyOf');
-  if (!anyOf) return false;
-
-  return anyOf.some(s => isRecord(s) && s.const === 'principle');
+  return false;
 }
+
+/**
+ * PRI-1146: artifact-local example refs. The rule variant links to the
+ * principle variant via recommendation_ref and cites the example evidence —
+ * a structurally valid association under DefaultDiagnosticianValidator
+ * (target exists, is kind 'principle', evidenceRef traces to evidence[]).
+ */
+const EXAMPLE_EVIDENCE_REF = 'source-ref-1';
 
 function generateRecommendationExample(kind: string): Record<string, unknown> {
   const base: Record<string, unknown> = {
     kind,
     description: `Example ${kind} recommendation`,
+    recommendationRef: `${kind}-1`,
   };
   if (kind === 'rule') {
     base.triggerPattern = 'pattern-to-match';
     base.action = 'action-to-take';
+    base.principleAssociation = {
+      status: 'linked',
+      relation: 'implements',
+      target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+      rationale: 'This rule operationalizes the principle above',
+      evidenceRefs: [EXAMPLE_EVIDENCE_REF],
+    };
   }
   if (kind === 'principle') {
     base.abstractedPrinciple = 'Abstracted principle text (max 200 chars)';
