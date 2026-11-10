@@ -32,6 +32,7 @@ import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle
 import { handleExaminerRoute } from './routes/examiner.js';
 import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
 import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js';
+import { handleCompatibilityScanRoute } from './routes/compatibility-scan.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
 import { handleOwnerDecisionsRoute } from './routes/owner-decisions.js';
@@ -436,6 +437,13 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/failed-tasks' || routePath.startsWith('/api/failed-tasks/')) {
         const subPath = routePath.slice('/api/failed-tasks'.length);
         asyncHandler(() => handleFailedTasksRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
+        return;
+      }
+
+      // 5B-F: GET /api/runtime/compatibility-scan — read-only rule
+      // compatibility scan (reason-granular; never the per-row findings).
+      if (routePath === '/api/runtime/compatibility-scan') {
+        asyncHandler(() => handleCompatibilityScanRoute(req, res, services.workspaceDir))(req, res);
         return;
       }
 

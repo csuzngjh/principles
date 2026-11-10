@@ -42,17 +42,32 @@ export interface ActivationCompatibilitySkipped {
 }
 
 export interface ActivationCompatibilityScanResult {
+  /**
+   * "The scan itself did not crash." `ok` is deliberately NOT a
+   * severity/blocking signal: an `incomplete` scan (some rows unreadable) is
+   * still a completed scan, and consumers decide how loudly to surface it.
+   */
   ok: boolean;
   workspaceDir: string;
-  /** 'clean' = no retired-contract dependencies; 'legacy_dependency' = findings present. */
-  status: 'clean' | 'legacy_dependency' | 'no_state_db' | 'scan_failed';
+  /**
+   * 'clean'              = findings empty AND skipped empty (every active row
+   *                        was scanned and none has a retired dependency);
+   * 'incomplete'         = findings empty AND skipped non-empty (nothing was
+   *                        found, but at least one active row could not be
+   *                        read — NOT equivalent to clean);
+   * 'legacy_dependency'  = findings present (dominates `incomplete`: findings
+   *                        are never merged into `incomplete`);
+   * 'no_state_db'        = fresh workspace, nothing persisted to scan;
+   * 'scan_failed'        = the scan threw.
+   */
+  status: 'clean' | 'incomplete' | 'legacy_dependency' | 'no_state_db' | 'scan_failed';
   findings: LegacyRuleContractFinding[];
   scannedActivations: number;
   /**
    * ACTIVE rows that were NOT scanned, aggregated by reason. Empty = every
-   * row was scanned. This is additive observability only: `status` and `ok`
-   * keep their pre-2B-a meaning, so a skipped row never turns `clean` into a
-   * failure on its own.
+   * row was scanned. Non-empty forces `status` to at least `incomplete`:
+   * silently reporting `clean` while whole rows were unreadable was the 5B
+   * defect this field's consumers relied on not happening.
    */
   skipped: ActivationCompatibilitySkipped[];
   reason?: string;
@@ -171,19 +186,33 @@ export class ActivationCompatibilityReadModel {
       }
 
       const findings = scanLegacyRuleContractDependencies(sources);
+      const skippedEntries = skipped();
+      // findings > skipped > clean: a real finding is the strongest signal, and
+      // `incomplete` is never merged into it (the status stays one value while
+      // both arrays remain available to the caller).
+      const status: ActivationCompatibilityScanResult['status'] =
+        findings.length > 0 ? 'legacy_dependency' : skippedEntries.length > 0 ? 'incomplete' : 'clean';
       return {
+        // `ok` = the scan ran to completion; it is not a severity signal, so
+        // neither skipped rows nor the status above may flip it.
         ok: findings.length === 0,
         workspaceDir: this.workspaceDir,
-        status: findings.length === 0 ? 'clean' : 'legacy_dependency',
+        status,
         findings,
         scannedActivations: sources.length,
-        skipped: skipped(),
+        skipped: skippedEntries,
         ...(findings.length > 0
           ? {
               reason: 'legacy_rule_contract_dependency',
               nextAction: 'Migrate or deactivate the listed rules before upgrading. The current installation is untouched.',
             }
-          : {}),
+          : skippedEntries.length > 0
+            ? {
+                reason: 'unscannable_active_rows',
+                nextAction:
+                  'Some ACTIVE rules could not be read, so their compatibility is unverified. Run `pd runtime compatibility-scan` for the per-reason counts and activation ids, then repair or re-activate those rules.',
+              }
+            : {}),
       };
     } catch (err) {
       // rc-9: structured failure, never a silent pass on an unreadable DB —

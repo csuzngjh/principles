@@ -177,13 +177,98 @@ describe('ActivationCompatibilityReadModel', () => {
     try {
       seedRawContentRule(ws, { artifactId: 'art-bad-json', activationId: 'act-bad-json', contentJson: '{not json' });
       const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
-      // 2B-a keeps `clean`/`ok` semantics: a skipped row does not fail the scan.
-      expect(result.ok).toBe(true);
-      expect(result.status).toBe('clean');
       expect(result.scannedActivations).toBe(0);
       expect(result.skipped).toEqual([
         { reason: 'invalid_content_json', count: 1, sampleActivationIds: ['act-bad-json'] },
       ]);
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  // ── 5B-A: `clean` means "nothing to find AND everything was scanned" ─────
+
+  it('reports incomplete (not clean) when every active row could not be scanned', () => {
+    const ws = createBareWorkspace();
+    try {
+      seedRawContentRule(ws, { artifactId: 'art-unreadable-1', activationId: 'act-unreadable-1', contentJson: '{not json' });
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      // `ok` keeps its "the scan itself did not crash" meaning — an
+      // incomplete scan is observability, not a crash.
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe('incomplete');
+      expect(result.findings).toEqual([]);
+      expect(result.reason).toBe('unscannable_active_rows');
+      expect(result.nextAction).toBeDefined();
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it('reports incomplete when a readable row exists but another row was skipped', () => {
+    const ws = createBareWorkspace();
+    try {
+      seedActiveCodeToolHookRule(ws, { artifactId: 'art-clean-3', ruleId: 'rule-clean-v2', implementationCode: CLEAN_V2_CODE, activationId: 'act-clean-3' });
+      seedRawContentRule(ws, { artifactId: 'art-unreadable-2', activationId: 'act-unreadable-2', contentJson: '[]' });
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe('incomplete');
+      expect(result.scannedActivations).toBe(1);
+      expect(result.skipped).toHaveLength(1);
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  // Hard constraint: `incomplete` is a distinct status. It must never be
+  // merged into `legacy_dependency` and must never be downgraded to `clean`.
+  // This test enumerates the skipped non-empty shapes; if an implementation
+  // change turns any of them into `clean`, it goes red.
+  it('never reports clean while any active row was skipped', () => {
+    const cases: { name: string; seed: (ws: TestWorkspace) => void }[] = [
+      {
+        name: 'only skipped rows',
+        seed: (ws) => seedRawContentRule(ws, { artifactId: 'only-skip', activationId: 'act-only-skip', contentJson: '{oops' }),
+      },
+      {
+        name: 'clean row + skipped row',
+        seed: (ws) => {
+          seedActiveCodeToolHookRule(ws, { artifactId: 'mixed-clean', ruleId: 'rule-mixed-clean', implementationCode: CLEAN_V2_CODE, activationId: 'act-mixed-clean' });
+          seedRawContentRule(ws, { artifactId: 'mixed-skip', activationId: 'act-mixed-skip', contentJson: '{oops' });
+        },
+      },
+      {
+        name: 'legacy row + skipped row',
+        seed: (ws) => {
+          seedActiveCodeToolHookRule(ws, { artifactId: 'mixed-legacy', ruleId: 'rule-mixed-legacy', implementationCode: LEGACY_RECENT_THINKING_CODE, activationId: 'act-mixed-legacy' });
+          seedRawContentRule(ws, { artifactId: 'legacy-skip', activationId: 'act-legacy-skip', contentJson: '{oops' });
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const ws = createBareWorkspace();
+      try {
+        testCase.seed(ws);
+        const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+        expect(result.skipped.length, `${testCase.name}: fixture must produce a skip`).toBeGreaterThan(0);
+        expect(result.status, `${testCase.name}: skipped rows must not read as clean`).not.toBe('clean');
+      } finally {
+        ws.cleanup();
+      }
+    }
+  });
+
+  it('keeps legacy_dependency when findings and skipped rows coexist (never merged into incomplete)', () => {
+    const ws = createBareWorkspace();
+    try {
+      seedActiveCodeToolHookRule(ws, { artifactId: 'art-legacy-4', ruleId: 'rule-legacy-4', implementationCode: LEGACY_RECENT_THINKING_CODE, activationId: 'act-legacy-4' });
+      seedRawContentRule(ws, { artifactId: 'art-bad-4', activationId: 'act-bad-4', contentJson: '{oops' });
+      const result = new ActivationCompatibilityReadModel({ workspaceDir: ws.workspaceDir }).scan();
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe('legacy_dependency');
+      expect(result.findings).toHaveLength(1);
+      expect(result.skipped).toHaveLength(1);
     } finally {
       ws.cleanup();
     }

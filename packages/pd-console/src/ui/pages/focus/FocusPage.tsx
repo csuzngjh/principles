@@ -20,7 +20,7 @@ import type {
   DegradedSignal,
   ActivationRecord,
 } from "../../api.js";
-import type { OwnerDecisionItemData } from "../../utils/validators.js";
+import type { OwnerDecisionItemData, OwnerDecisionReadIssueData } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
 import { OwnerWorkbench, type OwnerWorkItem, type OwnerWorkItemKind } from "./OwnerWorkbench.js";
@@ -672,6 +672,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const [ruleCodeErrorReason, setRuleCodeErrorReason] = useState<string | null>(null);
   // PRI-629: 统一 Owner Inbox — 两种模式都加载 (决策与治理摘要模式正交)
   const [ownerDecisionItems, setOwnerDecisionItems] = useState<OwnerDecisionItemData[]>([]);
+  const [ownerDecisionReadIssues, setOwnerDecisionReadIssues] = useState<OwnerDecisionReadIssueData[]>([]);
   const [ownerDecisionError, setOwnerDecisionError] = useState<string | null>(null);
   // Owner Decision Experience v1: canonical decision inbox (3 groups + aggregate
   // historical notice). Display-only; degradation is observable, never silent.
@@ -688,7 +689,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     setLoadingState("loaded");
     setPendingSources(FOCUS_SOURCES);
     setExperienceData(null); setQueueData(null); setGroupedData(null);
-    setRuleCodeItems([]); setBindingQueue(null); setOwnerDecisionItems([]); setOwnerInbox(null);
+    setRuleCodeItems([]); setBindingQueue(null); setOwnerDecisionItems([]); setOwnerDecisionReadIssues([]); setOwnerInbox(null);
     setErrorMessage(null);
     setGroupedErrorReason(null);
     setRuleCodeErrorReason(null);
@@ -728,7 +729,12 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         if (result.success) setBindingQueue(result.data); else setBindingError(result.error);
       }, setBindingError),
       settle('decisions', fetchOwnerDecisions(), result => {
-        if (result.success) setOwnerDecisionItems(result.data.items); else setOwnerDecisionError(result.error);
+        if (result.success) {
+          setOwnerDecisionItems(result.data.items);
+          // 5B-E: rows the server could not read are part of the payload; keep
+          // them so the section can say the list may be incomplete.
+          setOwnerDecisionReadIssues(result.data.readIssues);
+        } else setOwnerDecisionError(result.error);
       }, setOwnerDecisionError),
       settle('inbox', fetchOwnerDecisionInbox(), result => {
         if (result.success) setOwnerInbox(result.data);
@@ -972,6 +978,27 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
         {ownerDecisionError !== null && <p role="alert" className="text-amber text-[13px]">{t('pages.focus.ownerDecision.loadError')}</p>}
+        {/* 5B-E: the server reports decision rows it could not read. Before 5B
+            the browser parser dropped this array, so "nothing to decide" and
+            "could not read" rendered identically. */}
+        {ownerDecisionReadIssues.length > 0 && (
+          <div
+            role="status"
+            data-testid="owner-decisions-read-issues"
+            className="mb-4 border-l-2 border-amber pl-3 text-[13px] text-amber"
+          >
+            <p>{t('pages.focus.ownerDecision.readIssuesTitle')}</p>
+            <ul className="mt-1 space-y-0.5 font-mono text-[12px]">
+              {ownerDecisionReadIssues.map((issue) => (
+                <li key={issue.reason} data-testid={`owner-decision-read-issue-${issue.reason}`}>
+                  {issue.reason}={issue.count}
+                  {issue.sampleActivationIds.length > 0 ? ` (sample: ${issue.sampleActivationIds.join(', ')})` : ''}
+                  {issue.detail !== undefined ? ` — ${issue.detail}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
         {/* PD_PROMPT_CAPACITY_V1 R-A1 / PRI-1066 / PRI-1137: the host picker
             must stay reachable whenever the capacity route is unconfirmed — it
