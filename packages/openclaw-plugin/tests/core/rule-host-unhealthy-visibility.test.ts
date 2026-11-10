@@ -250,7 +250,13 @@ var meta = { name: 'invalid-result-rule', version: '1', ruleId: '${RULE_ID_BROKE
     await insertActivation();
 
     const ruleHost = new RuleHost(tempStateDir, { warn: () => {} }, { workspaceDir: tempWorkspaceDir });
-    expect(ruleHost.evaluate(makeInput())).toBeUndefined();
+    // B1: the same illegal result the shared gate used to drop (`allow`) is now
+    // fail-closed on BOTH consumers — requireApproval marked `degraded`.
+    expect(ruleHost.evaluate(makeInput())).toMatchObject({
+      decision: 'requireApproval',
+      matched: true,
+      degraded: { reasonCode: 'invalid_result' },
+    });
     EventLogService.get(tempStateDir).flush();
 
     const events = readTodayEvents(tempStateDir);
