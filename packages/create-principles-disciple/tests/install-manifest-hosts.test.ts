@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeInstallManifestHosts } from '../src/installer.js';
+import { mergeInstallManifestHosts, resolveHostRefreshTargets } from '../src/installer.js';
 
 describe('mergeInstallManifestHosts', () => {
   it('preserves OpenClaw ownership when Codex is attached later', () => {
@@ -30,5 +30,26 @@ describe('mergeInstallManifestHosts', () => {
       { layoutVersion: 1, mode: 'canonical', hosts: [42] },
       'codex',
     )).toThrow('install_manifest_malformed');
+  });
+});
+
+/**
+ * The shared runtime (~/.pd/runtime) is replaced by every install/update, so a
+ * host the manifest already records must be refreshed even when the run targets
+ * a different host — its mcp-binding.json pins the MCP server version.
+ */
+describe('resolveHostRefreshTargets', () => {
+  it('refreshes a previously installed WorkBuddy host when the run targets OpenClaw', () => {
+    expect(resolveHostRefreshTargets(['openclaw', 'workbuddy'], 'openclaw')).toEqual(['workbuddy']);
+  });
+
+  it("keeps WorkBuddy opt-in: 'all' refreshes it only because the manifest already records it", () => {
+    expect(resolveHostRefreshTargets(['openclaw', 'codex'], 'all')).toEqual([]);
+    expect(resolveHostRefreshTargets(['openclaw', 'codex', 'workbuddy'], 'all')).toEqual(['workbuddy']);
+  });
+
+  it('never refreshes the host this run already installs, and ignores unknown registrations', () => {
+    expect(resolveHostRefreshTargets(['workbuddy', 'gamma'], 'workbuddy')).toEqual([]);
+    expect(resolveHostRefreshTargets(['openclaw', 'gamma'], 'workbuddy')).toEqual(['openclaw']);
   });
 });
