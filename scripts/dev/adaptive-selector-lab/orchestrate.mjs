@@ -4,13 +4,15 @@
 //   single-model  — one generic-model selection opportunity feeding the SAME
 //                   shared assembly, with a hard single-send transport gate
 //   approved      — the ONLY real-call branch. Its workspace, case ids, inputs,
-//                   priors, candidates and budgets come from the frozen manifest;
-//                   the command line cannot override any of them.
+//                   priors, candidates and budgets come from the frozen manifest,
+//                   and its card version, manifest SHA-256 and request cap come
+//                   from an independent approval record; the command line cannot
+//                   override any of them.
 //
 // Offline evaluation uses --fixture-response to drive the REAL PiAiRuntimeAdapter
-// over a fake fetch. A real call additionally requires an explicit approval flag
-// and the credential environment variable; without both it refuses before any
-// network work.
+// over a fake fetch. A real call additionally requires the explicit approval flag,
+// a valid approval record and the credential environment variable; without all
+// three it refuses before any network work.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,13 +25,13 @@ import {
   SELECTOR_SYSTEM,
   hash,
 } from './orchestrator.mjs';
-import { loadApprovedPlan, runApprovedBatch } from './approved-run.mjs';
+import { APPROVAL_FILE, loadApprovedPlan, runApprovedBatch } from './approved-run.mjs';
 export const APPROVAL_FLAG = '--execute-approved-20261110';
 
-// Every field the frozen manifest owns. Their presence in approved mode is a
-// hard refusal, not a silent override.
+// Every field the frozen manifest or the approval record owns. Their presence in
+// approved mode is a hard refusal, not a silent override.
 const APPROVED_FORBIDDEN_FLAGS = ['--workspace', '--current-input', '--prior', '--round-key',
-  '--budget-chars', '--fixture-response'];
+  '--budget-chars', '--fixture-response', '--approval'];
 
 function parseArgs(argv) {
   const args = { mode: 'native', workspace: null, currentInput: null, roundKey: 1,
@@ -45,6 +47,7 @@ function parseArgs(argv) {
     else if (key === '--round-key') { args.roundKey = Number(value); index += 1; }
     else if (key === '--budget-chars') { args.budgetChars = Number(value); index += 1; }
     else if (key === '--fixture-response') { args.fixtureResponse = value; index += 1; }
+    else if (key === '--approval') { args.approval = value; index += 1; }
     else if (key === '--out') { args.out = value; index += 1; }
     else if (key === APPROVAL_FLAG) { args.approved = true; }
     else throw new Error(`unknown argument: ${key}`);
@@ -156,9 +159,9 @@ export async function run(argv, overrides = {}) {
   return { mode: 'single-model', elapsedMs: Date.now() - started, selectorSystemSha256: hash(SELECTOR_SYSTEM), ...summarizeOpportunity(result) };
 }
 
-// The real-call branch: approval flag, credential, frozen plan, exclusive claim,
-// then one bounded opportunity per frozen case. Every refusal here happens
-// before the first request.
+// The real-call branch: approval flag, credential, frozen plan, approval record
+// bound to the actual manifest, exclusive claim, then one bounded opportunity per
+// frozen case. Every refusal here happens before the first request.
 async function runApprovedBranch(args, root, overrides) {
   if (!args.approved) throw new Error('EXPLICIT_APPROVAL_REQUIRED');
   if (!process.env.ZAI_CODING_CN_API_KEY) throw new Error('MISSING_CREDENTIAL_REFERENCE');
@@ -168,6 +171,7 @@ async function runApprovedBranch(args, root, overrides) {
   const { PiAiRuntimeAdapter } = await import('../../../packages/principles-core/dist/runtime/adapter/pi-ai-runtime-adapter.js');
   const outcome = await runApprovedBatch({
     plan,
+    approvalPath: path.join(root, APPROVAL_FILE),
     reportsRoot,
     fetch: overrides.fetch ?? globalThis.fetch,
     adapter: PiAiRuntimeAdapter,

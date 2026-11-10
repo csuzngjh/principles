@@ -105,7 +105,7 @@ New external/network capability: NO（仅 lab 入口在显式批准标志 + 凭�
 
 ## 回滚
 
-删除三个 lab 文件与本报告/冻结文件即可；无生产 wiring、无数据库迁移、无配置默认值变更、无安装目录写入。真实模式需显式批准标志与凭据，本轮未发起调用，回滚不涉及运行时状态。
+代码回滚用 `git revert`；无生产 wiring、无数据库迁移、无配置默认值变更、无安装目录写入，回滚不涉及运行时状态。真实模式需显式批准标志、批准记录与凭据，本轮未发起调用。已产生的认领与台账保留作证据，不清理、不重置。
 
 ## 未执行检查（NOT RUN）
 
@@ -123,8 +123,9 @@ New external/network capability: NO（仅 lab 入口在显式批准标志 + 凭�
 ### 1. 真实分支只吃冻结批次
 
 - `--mode approved` 是本轮唯一的真实分支。它出现在命令行之外的一切输入都来自冻结批次：案例 ID 集合、当前指令、事前上下文、分片取自 `PD-AA-PRI-1122-SINGLE-MODEL-FROZEN-CASES-v0.1.json`；候选顺序、roundKey 模式与预算规则取自 `PD-AA-PRI-1122-SINGLE-MODEL-RUN-MANIFEST-v0.1.json`。
-- `--workspace`、`--current-input`、`--prior`、`--round-key`、`--budget-chars`、`--fixture-response` 任一出现即 `REAL_BRANCH_ARGUMENT_FORBIDDEN`，在解析阶段就拒绝。
+- `--workspace`、`--current-input`、`--prior`、`--round-key`、`--budget-chars`、`--fixture-response`、`--approval` 任一出现即 `REAL_BRANCH_ARGUMENT_FORBIDDEN`，在解析阶段就拒绝。固定批准标志 `--execute-approved-20261110` 只是显式执行开关，不携带任何批准数据。
 - 清单记录冻结案例文件的 SHA-256；文件漂移即 `MANIFEST_DRIFT`，运行卡版本不符即 `RUN_CARD_VERSION_MISMATCH`，案例集合不一致即 `CASE_LIST_DRIFT`，全部发生在认领与发送之前。
+- 独立批准记录 `docs/specs/APPROVAL-PRI-1122-SINGLE-MODEL-v0.2.json` 沿用仓库既有批准文件形态（`schemaVersion` / `approvedBy` / `approvedAt` / `approvalEvidence` / `cardVersion` / `manifestSha256`，另加请求上限），拒绝码为 `APPROVAL_RECORD_MISSING` / `APPROVAL_RECORD_INVALID`。批准绑定的是**实际清单**的完整 SHA-256；因此同时改案例文件与清单内记录的哈希、但保留旧批准，仍会在认领之前被拒。
 - 预算不写死数字：按冻结规则（`base + 已保留块 + 目标块 ± slack/缺额`）在真实工作区上测量解析，装配默认值一旦变化会被测试直接暴露，而不是悄悄用旧预算。
 - 冻结批次新增装配控制项 `fixture_oversized_control` 并记录修正原因（`amendments`）。它只决定 legacy FIFO 的停止位置，不是可选目标；控制项被选为目标按协议错误处理。
 - 原有 14 条回归与离线 CLI（自定义工作区 + `--fixture-response`）保留不变；`fixture-workspace.mjs` 只是把测试里的夹具播种与块测量提取为共享模块，行为未变。
@@ -133,7 +134,8 @@ New external/network capability: NO（仅 lab 入口在显式批准标志 + 凭�
 
 | 项 | 行为 |
 | --- | --- |
-| 认领 | `APPROVAL-PRI-1122-SINGLE-MODEL-v0.2-CLAIM.json` 以 `wx` 独占创建，写入运行卡版本、清单 SHA-256、12 次上限与案例 ID 列表 |
+| 边界顺序 | 实际清单与批准记录比对 → `wx` 独占认领 → 才允许第一次发送 |
+| 认领 | `APPROVAL-PRI-1122-SINGLE-MODEL-v0.2-CLAIM.json` 以 `wx` 独占创建，写入运行卡版本、清单 SHA-256、冻结案例 SHA-256、12 次上限、案例 ID 列表、批准记录 SHA-256 与批准引用 |
 | 重复执行 | 认领文件已存在 → `APPROVAL_ALREADY_CLAIMED`，出网前拒绝 |
 | 并发执行 | 同一认领路径，只有一方获得 `wx`，另一方出网前拒绝 |
 | 每机会发送 | 1 次；第二次尝试 → `REQUEST_BUDGET_EXHAUSTED` |
@@ -146,9 +148,11 @@ New external/network capability: NO（仅 lab 入口在显式批准标志 + 凭�
 
 | 场景 | 拒绝码 | 实际请求数 |
 | --- | --- | --- |
-| 未批准 | `EXPLICIT_APPROVAL_REQUIRED` | 0 |
-| 冻结清单漂移 | `MANIFEST_DRIFT` | 0（且不写认领文件） |
-| 命令行覆盖冻结字段（6 个 flag 各一次） | `REAL_BRANCH_ARGUMENT_FORBIDDEN` | 0（且不写认领文件） |
+| 未批准（无批准标志） | `EXPLICIT_APPROVAL_REQUIRED` | 0 |
+| 有批准标志但无批准记录 | `APPROVAL_RECORD_MISSING` | 0（且不写认领文件） |
+| 冻结案例文件漂移 | `MANIFEST_DRIFT` | 0（且不写认领文件） |
+| **同时改案例文件与清单内记录的哈希、保留原批准** | `APPROVAL_RECORD_INVALID`（`approval is not bound to this manifest sha256`） | **0（且不写认领文件）** |
+| 命令行覆盖冻结字段（7 个 flag 各一次，含 `--approval`） | `REAL_BRANCH_ARGUMENT_FORBIDDEN` | 0（且不写认领文件） |
 | 同一批准重复执行 | `APPROVAL_ALREADY_CLAIMED` | 0（首批 12 次已计入） |
 | 同一批准并发执行 | 一方 `APPROVAL_ALREADY_CLAIMED` | 合计 12，没有第二次批量 |
 | 第 13 次发送 | `REQUEST_BUDGET_EXHAUSTED` | 12，未新增 |
@@ -175,8 +179,8 @@ node --test scripts/dev/adaptive-selector-lab/                          exit 0
 
 | 范围 | 通过 | 失败 | 跳过 |
 | --- | --- | --- | --- |
-| 新增 approved 分支测试 | 8 | 0 | 0 |
-| lab 全量（历史 29 + orchestrator 14 + approved 8） | 51 | 0 | 0 |
+| 新增 approved 分支测试 | 10 | 0 | 0 |
+| lab 全量（历史 29 + orchestrator 14 + approved 10） | 53 | 0 | 0 |
 
 ### 6. 复杂度增量（增补部分）
 
@@ -191,9 +195,12 @@ New host/platform-specific behavior: NO
 New external/network capability: NO（仅被批准分支，本轮 0 次调用）
 ```
 
-### 7. 回滚
+### 7. 回滚与额度收口
 
-删除认领文件即可让下一次批准重新可用；删除 `approved-run.mjs`、`approved-run.test.mjs`、运行清单与预算卡 v0.2 即可回到 v0.1 状态。无生产 wiring、无迁移、无默认值变更、无安装目录写入。
+- 代码回滚用 `git revert` 即可：manifest 与 cases 只是 lab 输入，没有生产 wiring、数据库迁移、配置默认值变更或安装目录写入。
+- 认领文件与逐请求台账**保留作证据，不要清理**：它们记录批准引用、清单哈希、冻结案例哈希、批准记录哈希与每一笔请求。
+- 已认领的批次即使失败或中途停止，也按**实际台账**收口；不重置、不忽略已用额度。
+- 删除认领文件**不是**恢复额度的方式。再次运行必须取得新批准（新的批准记录绑定新的卡版本或清单 SHA-256）；同一批准只能被执行一次。
 
 ### 8. 仍未执行
 

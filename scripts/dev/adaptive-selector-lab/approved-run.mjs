@@ -4,8 +4,11 @@
 //   * the run plan comes ONLY from the frozen batch + run manifest; no CLI field
 //     may overwrite the workspace, case id, current input, prior context,
 //     candidate pool or budget;
-//   * the approval binds run-card version, frozen manifest SHA-256 and the
-//     12-request cap, and is claimed exactly once with an exclusive create;
+//   * an independent approval record binds run-card version, the FULL manifest
+//     SHA-256, the 12-request cap and the approval reference. The record is
+//     validated against the ACTUAL manifest before the claim, so re-freezing the
+//     case file and its manifest hash without a new approval is refused;
+//   * the approval is then claimed exactly once with an exclusive create;
 //   * every opportunity may send at most one request, the cap is cumulative and
 //     a failed request still counts (write-ahead persist before fetch).
 import crypto from 'node:crypto';
@@ -25,6 +28,8 @@ export const MANIFEST_FILE = 'docs/specs/PD-AA-PRI-1122-SINGLE-MODEL-RUN-MANIFES
 export const MANIFEST_SCHEMA = 'pd-aa-pri1122-single-model-run-manifest/v0.1';
 export const RUN_CARD_VERSION = 'v0.2';
 export const MAX_TOTAL_REQUESTS = 12;
+export const APPROVAL_FILE = 'docs/specs/APPROVAL-PRI-1122-SINGLE-MODEL-v0.2.json';
+export const APPROVAL_SCHEMA = 'pd-pri1122-single-model-approval/v1';
 export const CLAIM_FILE = 'APPROVAL-PRI-1122-SINGLE-MODEL-v0.2-CLAIM.json';
 export const MAX_TRANSPORT_FAILURES = 2;
 
@@ -104,15 +109,62 @@ export function resolveBudget({ spec, costs, candidateOrder }) {
   return fail('BUDGET_SPEC_INVALID');
 }
 
+// The approval record reuses the repository's existing approval-file format and
+// vocabulary (`pd-*-approval/v1`: schemaVersion, approvedBy, approvedAt,
+// approvalEvidence, cardVersion, manifestSha256) as implemented by
+// scripts/dev/aa-controlled-admission/presence-run.mjs#validateApproval. Only the
+// cap field is added, because this experiment is bounded by request count.
+export function validateApprovalRecord({ approval, plan }) {
+  const violations = [];
+  if (approval?.schemaVersion !== APPROVAL_SCHEMA) violations.push('approval schemaVersion mismatch');
+  if (typeof approval?.approvedBy !== 'string' || !approval.approvedBy.trim()) violations.push('approvedBy is required');
+  if (typeof approval?.approvedAt !== 'string' || !Number.isFinite(Date.parse(approval.approvedAt))) violations.push('approvedAt must be an ISO timestamp');
+  if (typeof approval?.approvalEvidence !== 'string' || !approval.approvalEvidence.trim()) violations.push('approvalEvidence (where the Owner approved this exact card) is required');
+  if (approval?.manifestSha256 !== plan.manifestSha256) violations.push('approval is not bound to this manifest sha256');
+  if (approval?.cardVersion !== plan.runCardVersion) violations.push('approval is not bound to this card version');
+  if (approval?.maxTotalRequests !== plan.maxTotalRequests) violations.push('approval request cap differs from the manifest cap');
+  return violations;
+}
+
+export function readApprovalRecord({ approvalPath, root = process.cwd() } = {}) {
+  const approvalFile = approvalPath ?? path.join(root, APPROVAL_FILE);
+  let bytes;
+  try {
+    bytes = fs.readFileSync(approvalFile);
+  } catch (error) {
+    if (error?.code === 'ENOENT') fail('APPROVAL_RECORD_MISSING');
+    throw error;
+  }
+  let approval;
+  try {
+    approval = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    fail('APPROVAL_RECORD_INVALID_JSON');
+  }
+  return { approval, approvalSha256: sha256(bytes), approvalFile };
+}
+
+// Runs after the actual manifest has been hashed and before the claim.
+export function assertApprovalRecord({ approval, plan }) {
+  const violations = validateApprovalRecord({ approval, plan });
+  if (violations.length === 0) return;
+  const error = new Error(`APPROVAL_RECORD_INVALID: ${violations.join('; ')}`);
+  error.code = 'APPROVAL_RECORD_INVALID';
+  error.violations = violations;
+  throw error;
+}
+
 // One-shot claim. `wx` is the mutex: a repeated or concurrent invocation finds
 // the file and is refused before any request leaves the process.
-export function claimApproval({ claimPath, plan, now = Date.now }) {
+export function claimApproval({ claimPath, plan, approval, approvalSha256, now = Date.now }) {
   const record = {
     schema: 'pd-pri1122-single-model-claim/v1',
     runCardVersion: plan.runCardVersion,
     manifestSha256: plan.manifestSha256,
     frozenCasesSha256: plan.frozenCasesSha256,
     maxTotalRequests: plan.maxTotalRequests,
+    approvalFileSha256: approvalSha256,
+    approvalReference: approval.approvalEvidence,
     caseIds: plan.cases.map((entry) => entry.id),
     claimedAt: new Date(now()).toISOString(),
   };
@@ -194,13 +246,19 @@ export function summarizeSplits({ plan, ledger }) {
 }
 
 export async function runApprovedBatch({
-  plan, reportsRoot, fetch, adapter, now = Date.now,
+  plan, approvalPath, reportsRoot, fetch, adapter, now = Date.now,
 }) {
   if (typeof fetch !== 'function') fail('TRANSPORT_REQUIRED');
   if (typeof adapter !== 'function') fail('ADAPTER_REQUIRED');
+  // Order is the boundary: actual manifest vs approval record, then the claim,
+  // then (and only then) the first request.
+  const { approval, approvalSha256 } = readApprovalRecord({ approvalPath });
+  assertApprovalRecord({ approval, plan });
   fs.mkdirSync(reportsRoot, { recursive: true });
   // Claim first: nothing in this batch may send before the exclusive claim lands.
-  const claim = claimApproval({ claimPath: path.join(reportsRoot, CLAIM_FILE), plan, now });
+  const claim = claimApproval({
+    claimPath: path.join(reportsRoot, CLAIM_FILE), plan, approval, approvalSha256, now,
+  });
   const runDir = path.join(reportsRoot, new Date(now()).toISOString().replace(/[:.]/g, '-'));
   fs.mkdirSync(runDir); // exclusive: a colliding run directory is a hard failure
   const ledger = {
@@ -211,6 +269,8 @@ export async function runApprovedBatch({
     frozenCasesSha256: plan.frozenCasesSha256,
     maxTotalRequests: plan.maxTotalRequests,
     timeoutMs: plan.timeoutMs,
+    approvalFileSha256: approvalSha256,
+    approvalReference: approval.approvalEvidence,
     claim,
     counts: { total: 0 },
     requests: [],

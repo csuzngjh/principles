@@ -13,11 +13,14 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  APPROVAL_FILE,
+  APPROVAL_SCHEMA,
   CLAIM_FILE,
   MANIFEST_FILE,
   createApprovalBoundary,
   loadApprovedPlan,
   resolveBudget,
+  sha256,
 } from './approved-run.mjs';
 import { APPROVAL_FLAG, run } from './orchestrate.mjs';
 import { SELECTOR_MODEL, LIMITS } from './orchestrator.mjs';
@@ -30,20 +33,47 @@ function tempRoot() {
   return fs.mkdtempSync(path.join(process.env.TEMP ?? '/tmp', 'pri1122-approved-'));
 }
 
-function copySpecs({ mutateFrozen = false } = {}) {
+function approvalRecordFor(root) {
+  return {
+    schemaVersion: APPROVAL_SCHEMA,
+    approvedBy: 'owner-test',
+    approvedAt: '2026-11-10T00:00:00.000Z',
+    approvalEvidence: 'test fixture: Owner approval of budget card v0.2',
+    cardVersion: 'v0.2',
+    manifestSha256: sha256(fs.readFileSync(path.join(root, MANIFEST_FILE))),
+    maxTotalRequests: 12,
+  };
+}
+
+function copySpecs({ mutateFrozen = false, resyncFrozenHash = false, omitApproval = false } = {}) {
   const root = tempRoot();
   for (const relative of [MANIFEST_FILE, FROZEN_FILE]) {
     const target = path.join(root, relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(repoRoot, relative), target);
   }
+  // The approval binds the ORIGINAL manifest, before any test mutation.
+  const approval = approvalRecordFor(root);
   if (mutateFrozen) {
     const frozenPath = path.join(root, FROZEN_FILE);
     const frozen = JSON.parse(fs.readFileSync(frozenPath, 'utf8'));
     frozen.amendments.push({ at: '2026-11-10', change: 'drift injected by test' });
     fs.writeFileSync(frozenPath, `${JSON.stringify(frozen, null, 2)}\n`, 'utf8');
+    if (resyncFrozenHash) {
+      // Re-freeze the manifest hash too: internal drift checks now pass, so only
+      // the approval record can still refuse the batch.
+      const manifestPath = path.join(root, MANIFEST_FILE);
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      manifest.frozenCases.sha256 = sha256(fs.readFileSync(frozenPath));
+      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    }
   }
-  return { root, reportsRoot: path.join(root, 'reports') };
+  if (!omitApproval) {
+    const target = path.join(root, APPROVAL_FILE);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify(approval, null, 2)}\n`, 'utf8');
+  }
+  return { root, reportsRoot: path.join(root, 'reports'), approval };
 }
 
 function sseFetch(payload, state = { count: 0 }, onRequest = null) {
@@ -86,6 +116,29 @@ test('frozen manifest drift is refused before the claim and before any request',
   assert.equal(fs.existsSync(path.join(reportsRoot, CLAIM_FILE)), false);
 });
 
+test('the explicit flag without an approval record is refused before the claim', async () => {
+  const { root, reportsRoot } = copySpecs({ omitApproval: true });
+  const { fetch, state } = sseFetch({ status: 'none_applicable', id: null, digest: null });
+  await assert.rejects(run(['--mode', 'approved', APPROVAL_FLAG], { root, reportsRoot, fetch }), /APPROVAL_RECORD_MISSING/);
+  assert.equal(state.count, 0);
+  assert.equal(fs.existsSync(path.join(reportsRoot, CLAIM_FILE)), false);
+});
+
+// The key counterexample: both the case file and the manifest's recorded hash are
+// re-frozen, so every internal drift check passes. Only the retained approval
+// still binds the original manifest, and it must refuse before the claim.
+test('re-freezing the case file and its manifest hash still fails the retained approval, before the claim', async () => {
+  const { root, reportsRoot } = copySpecs({ mutateFrozen: true, resyncFrozenHash: true });
+  const { fetch, state } = sseFetch({ status: 'none_applicable', id: null, digest: null });
+  await assert.rejects(run(['--mode', 'approved', APPROVAL_FLAG], { root, reportsRoot, fetch }), (error) => {
+    assert.match(error.message, /APPROVAL_RECORD_INVALID/);
+    assert.ok(error.violations.includes('approval is not bound to this manifest sha256'));
+    return true;
+  });
+  assert.equal(state.count, 0);
+  assert.equal(fs.existsSync(path.join(reportsRoot, CLAIM_FILE)), false);
+});
+
 test('every frozen field is closed to command-line overrides in the real branch', async () => {
   const { root, reportsRoot } = copySpecs();
   const { fetch, state } = sseFetch({ status: 'none_applicable', id: null, digest: null });
@@ -96,6 +149,7 @@ test('every frozen field is closed to command-line overrides in the real branch'
     ['--round-key', '2'],
     ['--budget-chars', '999999'],
     ['--fixture-response', '{"status":"none_applicable"}'],
+    ['--approval', path.join(root, APPROVAL_FILE)],
   ];
   for (const [flag, value] of overrides) {
     await assert.rejects(
@@ -128,6 +182,10 @@ test('a second execution of the same approval sends nothing, and splits stay sep
   assert.match(claim.manifestSha256, /^[0-9a-f]{64}$/);
   assert.equal(claim.manifestSha256, first.manifestSha256);
   assert.equal(claim.caseIds.length, 12);
+  // The claim keeps the approval evidence binding, so the batch cannot be
+  // replayed under a different record.
+  assert.equal(claim.approvalFileSha256, sha256(fs.readFileSync(path.join(root, APPROVAL_FILE))));
+  assert.equal(claim.approvalReference, 'test fixture: Owner approval of budget card v0.2');
 
   // The frozen plan must reproduce the intended Native shapes end to end: the
   // appendable case stops at the oversized control, the blocked case fills both
@@ -218,4 +276,12 @@ test('the approved budget card names the exact artifacts it was written against'
   assert.equal(hashes.includes(plan.frozenCasesSha256), true, 'card must record the current frozen cases sha256');
   assert.match(card, /请求总数硬上限 \| \*\*12\*\*/);
   assert.match(card, /未批准 \/ NOT RUN/);
+  // The card must name the approval record and the corrected rollback semantics,
+  // so an operator cannot read "delete the claim file" as a way to regain quota.
+  assert.match(card, /docs\/specs\/APPROVAL-PRI-1122-SINGLE-MODEL-v0\.2\.json/);
+  assert.match(card, /不得截断/);
+  assert.match(card, /代码回滚用 `git revert`/);
+  assert.match(card, /保留作证据，不要清理/);
+  assert.match(card, /按\*\*实际台账\*\*收口/);
+  assert.match(card, /删除认领文件\*\*不是\*\*恢复额度的方式/);
 });
