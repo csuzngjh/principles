@@ -76,6 +76,30 @@ describe('replay/production input parity (SPEC §12 Phase 2)', () => {
     });
   }
 
+  it('B2: a coarse host-Set hint must not override the registry kind', () => {
+    const built = buildToolSemanticRegistry([{ rawToolName: 'exec', canonicalKind: 'write' }]);
+    if (!built.ok) throw new Error(built.errors.join('; '));
+    const canonicalKind = built.registry.resolve('exec');
+
+    // Pre-B2 production shape: the host Set still classified `exec` as bash
+    // (isBashTool=true) while the registry declared 'write'. The builder used
+    // to keep the explicit hint, so production extracted the bash mutation
+    // target while replay (registry only) produced the synthetic write path.
+    const productionAction = buildRuleHostAction('exec', { command: 'echo hi > out.txt' }, PROJECT_DIR, {
+      isBashTool: true,
+      isWriteTool: false,
+      canonicalKind,
+    });
+    const replayInput = createSyntheticRuleHostInput(
+      { toolName: 'exec', params: { command: 'echo hi > out.txt' } },
+      {},
+      { projectDir: PROJECT_DIR, toolSemantics: built.registry },
+    );
+
+    expect(productionAction.normalizedPath).toBe('<tool:exec>');
+    expect(replayInput.action.normalizedPath).toBe(productionAction.normalizedPath);
+  });
+
   it('registry-driven replay now extracts bash command paths (baseline defect pinned)', () => {
     const toolSemantics = registry();
     const input = createSyntheticRuleHostInput(
