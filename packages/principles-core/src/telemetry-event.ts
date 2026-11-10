@@ -335,6 +335,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_lineage_echo_corrected'),
   Type.Literal('dreamer_lineage_partial'),
   Type.Literal('dreamer_lineage_resolve_failed'),
+  // PRI-675: the model self-declared `valid: false` and the runner overrode it
+  // with the runtime truth. Kept observable so a model that persistently
+  // disagrees with its own schema-valid output stays measurable.
+  Type.Literal('dreamer_self_attested_valid_overridden'),
   Type.Literal('dreamer_wrong_task_kind'),
   // Philosopher runner (expanded surface)
   Type.Literal('philosopher_agent_draft_insert_failed'),

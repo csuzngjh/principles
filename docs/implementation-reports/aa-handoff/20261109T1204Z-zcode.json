@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261109T1204Z-zcode",
+  "previousCheckpoint": "20261109T0222Z-zcode",
+  "generatedAt": "2026-11-09T12:04:00Z",
+  "agent": "zcode",
+  "task": "PRI-1119 A线单工作区试用准备：正常入口复核（只读核查+离线复现+文档）",
+  "overallStatus": "PREP_READY_FOR_REVIEW_NORMAL_ENTRY_BLOCKED_TWO_BLOCKERS",
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1119-aa-trial-prep",
+    "branch": "ai/PRI-1119-aa-trial-prep",
+    "base": "8a791cfcfb34ec1a70dcdf392f4afc86c1a278c8 (origin/main, includes #2436 = 517e33885735edbe776a2a84438dde33135d6f0c)"
+  },
+  "versionTiers": {
+    "mainPlugin": "3.1.2 (unreleased, includes #2436)",
+    "npmPublished": "3.1.1 (tag v3.1.1 = 1dd3b8e87, does NOT include #2436)",
+    "installedPlugin": "3.0.2 (2026-11-08, does NOT include #2436)",
+    "installedOpenClaw": "2026.11.1 (4ffdd20)"
+  },
+  "verdict": "正常入口（生产 embedded 路径）对 principleId 交付映射 BLOCKED：(1) 宿主 before_prompt_build 事件结构上不带消息身份（已安装 2026.11.1 bundle 实证：context-engine-maintenance chunk 只发 {prompt,messages}），#2436 fail-closed 拒绝 principle_mapping_has_no_admission_identity；(2) manifest configSchema 缺 principleId 且 additionalProperties:false，配置该映射会导致 PD 插件整体加载失败（宿主 validatePluginConfig→load error，源码+bundle 双重核实）。标记本身可写进普通请求首行且可读——缺口是身份，不是标记。",
+  "reproduction": {
+    "script": ".tmp/pri-1119/counterexample.mjs (worktree, offline, real built dist)",
+    "arms": {
+      "A_minimal_counterexample": "embedded-shaped event + principleId mapping -> undefined + warn principle_mapping_has_no_admission_identity",
+      "B_pinned_no_admission": "embedded-shaped event + pinned mapping, controlled admission absent -> undefined (silent Native)",
+      "C_positive_identity_currentUserMessageId": "same mapping + currentUserMessage(first-line marker) + currentUserMessageId -> priority resolved from real snapshot store, additiveOnly:true, hookInvocationId present",
+      "C2_positive_requestId": "same via requestId -> priority"
+    },
+    "zeroCost": "0 host starts, 0 model calls, 0 paid calls, 0 production writes (state.db/config.yaml snapshot copies under .tmp/pri-1119/ws-snapshot)"
+  },
+  "verifiedTargetPrinciple": {
+    "principleId": "产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+    "artifactId": "pi-art-scribe-21bc6e76-ed9c-45a9-afef-eeeae6c30831-prompt-run_scribe-21bc6e76-ed9c-45a9-afef-eeeae6c30831-prompt_2",
+    "activationId": "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+    "authority": "owner (approvedBy operator)",
+    "uniqueness": "exactly 1 of 18 active prompt activations; real PromptActivationReader on snapshot, warnings: []",
+    "note": "核对值，不构成冻结；试用冻结仍走 Owner 决策"
+  },
+  "metaTools": "dispatch_action/tool_describe/tool_search：暴露已证实（PRI-1152 实证+静态一致）；真实模型下的调用执行/拒绝路径未确认 -> 真实模型步骤保持阻断（与 PRI-1152 followUps 一致）",
+  "minimalFixes": {
+    "fix2_pdRepo": "openclaw.plugin.json configSchema.properties.adaptiveActivation.properties 补 principleId + manifest↔读取器 parity 测试 + changeset patch；建议 PRI-1140 收尾小 PR；未编码（本轮仅文档授权）",
+    "fix1_upstreamHost": "embedded 生产者从 turn recorder/admission 透出 currentUserMessage+currentUserMessageId（与 harness 路径同构），须在匹配版本的 OpenClaw 源码上做并走官方发版；修复后第一验证步=实测 Object.keys(event)"
+  },
+  "cards": "正常入口验收卡与 G2 试用卡当前不可申请（前提与骨架见阻断报告 §10）；PRI-1118 维持 Todo 与 PRI-1119 依赖；G1/C04/G2 状态未更新（无证据与批准）",
+  "deliverables": [
+    "docs/implementation-reports/PD-AA-PRI-1119-NORMAL-ENTRY-BLOCKER-20261109.md",
+    "docs/implementation-reports/PD-AA-PRI-1119-A-LINE-OPERATIONS-PAGE-20261109.md"
+  ],
+  "budget": { "hostStarts": 0, "providerHttp": 0, "toolCalls": 0, "paidCalls": 0 },
+  "latestPointer": "LATEST.json not modified",
+  "followUps": [
+    "PRI-1140 收尾小 PR（修复 2）待 Owner 批准后编码",
+    "上游宿主身份变更（修复 1）立项与否待 Owner 决策",
+    "阻断修复后：第一验证步实测事件键集合 -> 才能起草可申请的验收卡/试用卡"
+  ]
+}

@@ -41,12 +41,16 @@ describe('DefaultDreamerValidator (PRI-87)', () => {
     expect(result.errors.some(e => e.includes('taskId mismatch'))).toBe(true);
   });
 
-  it('rejects output with valid=false', async () => {
+  // PRI-675: the model's own `valid` claim is not a validation input. Content
+  // that satisfies every field must pass even when the model self-declares
+  // failure — otherwise a single model quirk kills the chain (3/3 identical
+  // failures, 2026-09-05).
+  it('does not gate on the model self-assessed valid flag', async () => {
     const output = makeValidOutput();
     (output as unknown as Record<string, unknown>).valid = false;
     const result = await validator.validate(output, TASK_ID);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('valid must be true'))).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 
   it('rejects output with missing candidates array', async () => {
@@ -147,7 +151,7 @@ describe('DefaultDreamerValidator (PRI-87)', () => {
 
   it('returns errorCategory output_invalid on rejection', async () => {
     const output = makeValidOutput();
-    (output as unknown as Record<string, unknown>).valid = false;
+    (output as unknown as Record<string, unknown>).candidates = [];
     const result = await validator.validate(output, TASK_ID);
     expect(result.errorCategory).toBe('output_invalid');
   });

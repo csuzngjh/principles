@@ -6,7 +6,7 @@
 |---|---|
 | SPEC ID | GFI-COMPLETE-REMOVAL-001 |
 | Version | 1.3（代码实施已合并；DC-01 方案 A 已批准并完成 SPEC 对齐；见 §15 Post-Implementation Closure） |
-| Status | **Partially Implemented** — 生产逻辑/DB/CLI/Console 已移除（PR #2332）；纯防御性 `gone` 墓碑经 Owner 批准保留；GFI-1 历史 JSON 迁移未实施（PRI-1149） |
+| Status | **Implemented** — 生产逻辑/DB/CLI/Console 已移除（PR #2332）；纯防御性 `gone` 墓碑经 Owner 批准保留；GFI-1 历史 JSON 迁移已完成（PRI-1149；169/170 文件已清，1 文件待 WorkBuddy 重启后补清） |
 | Priority | P1 |
 | Target | Principles Disciple |
 | Strategy | Complete Removal + Behavior-Preserving Simplification |
@@ -1472,15 +1472,26 @@ PD 应当直接使用真实行为证据，而不是依靠一个综合摩擦分�
 
 ## 15.3 未完成 / 例外（PARTIALLY_IMPLEMENTED）
 
-### GFI-1 — 历史 workspace JSON 数据清理（NOT_IMPLEMENTED）
+### GFI-1 — 历史 workspace JSON 数据清理（IMPLEMENTED）
 
 - §6.2 `.state/sessions/*.json` 与 §6.3 `.state/logs/daily-stats.json` 的 GFI 字段
-  **未执行迁移**。
-- 现状：`session-tracker.ts` / `event-log.ts` 读取原始对象后原样写回，会保留未知历史键
-  （GFI 字段可能仍留在 Owner 工作区文件中）。
-- 本轮**不触碰真实 Owner 数据**；没有可靠迁移方案前不实施。
-- 独立跟踪：**Linear PRI-1149**（备份 / 原子写入 / 完整性校验 / 回滚策略）。
-  该事项**不归入** PRI-1104（V1/V2 架构任务）。
+  **已完成迁移**（2026-11-10，Owner 授权后执行）。
+- 工具：`scripts/gfi-workspace-json-migration.mjs`（`npm run gfi:migrate`），
+  含 dry-run / 备份 / 原子写入 / 回读校验 / 自动回滚 / 幂等；
+  测试 `scripts/__tests__/gfi-workspace-json-migration.test.ts` 18/18 通过。
+  工具随 **PR #2456**（commit `4775f3bc5`）合并。
+- **真实 Owner 工作区数据迁移已于 2026-11-10 执行**：覆盖 6 处 PD 状态目录
+  （`D:\.openclaw\workspace\.state`、`D:\.openclaw\workspace\.pd`、
+  `D:\.openclaw\workspace\_archive\local-scheduler\.state`、`~\.openclaw`、
+  `~\.openclaw\workspace\.state`、`~\.codex\pd-workspace\.pd`），
+  共 **170 个唯一 JSON 文件 / 1283 个唯一键**，回读校验全通过、0 失败、0 回滚。
+  全量备份位于 `D:\pd-gfi-migration-backups-20261110\<slug>\`。
+- **唯一剩余**：`D:\.openclaw\workspace\.state\logs\daily-stats.json` 含 92 个 `gfi` 子对象，
+  被运行中的 WorkBuddy 会话宿主内常驻旧 `EventLog` 内存对象每 ~30s 写回，
+  同会话内无法持久清除。**重启 WorkBuddy（或重载 PD 插件）后**再跑一次
+  `npm run gfi:migrate -- --state-dir "D:/.openclaw/workspace/.state" --apply --confirm-owner-authorization`
+  即可 0 残留（脚本幂等，已验证）。
+- 独立跟踪：**Linear PRI-1149**；该事项**不归入** PRI-1104（V1/V2 架构任务）。
 
 ### GFI-2 — `gone` tombstone（**OWNER_APPROVED / SPEC_ALIGNMENT_REQUIRED → 已对齐**）
 
