@@ -161,7 +161,17 @@ export interface SignalHealthEntry {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Resolve OpenClaw's state directory with the same `OPENCLAW_STATE_DIR`
+ * precedence OpenClaw uses (PRI-1165): an absolute value wins over the
+ * historical `<OS home>/.openclaw` derivation. Keeps `pd config doctor` from
+ * reporting a different directory than the running instance. `OPENCLAW_HOME` is
+ * intentionally not reinterpreted here — its meaning is ambiguous (OpenClaw
+ * treats it as a HOME substitute), so operators should set `OPENCLAW_STATE_DIR`.
+ */
 export function getOpenClawHome(): string {
+  const explicitStateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (explicitStateDir && path.isAbsolute(explicitStateDir)) return path.resolve(explicitStateDir);
   const home = process.env.HOME
     || process.env.USERPROFILE
     || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : '');
@@ -169,7 +179,10 @@ export function getOpenClawHome(): string {
   return path.join(home, '.openclaw');
 }
 
+/** The OpenClaw config file, honouring an explicit `OPENCLAW_CONFIG_PATH`. */
 export function getOpenClawConfigPath(): string {
+  const explicitConfigPath = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  if (explicitConfigPath && path.isAbsolute(explicitConfigPath)) return path.resolve(explicitConfigPath);
   return path.join(getOpenClawHome(), 'openclaw.json');
 }
 

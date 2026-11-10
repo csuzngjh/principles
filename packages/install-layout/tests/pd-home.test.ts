@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   PD_OPENCLAW_HOME_ENV,
+  PD_OPENCLAW_STATE_DIR_ENV,
   isPathWithinRoot,
   resolvePdHome,
 } from '../src/index.js';
@@ -59,6 +60,39 @@ describe('resolvePdHome — production mode', () => {
     if (!resolution.ok) return;
     expect(resolution.openclawHome).toBe(path.resolve(openclaw));
   });
+
+  it('honours OPENCLAW_STATE_DIR when set (PRI-1165)', () => {
+    const home = tempDir('prod-state');
+    const state = tempDir('prod-state-dir');
+    const resolution = resolvePdHome({ env: { [PD_OPENCLAW_STATE_DIR_ENV]: state }, homeDir: home });
+
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) return;
+    expect(resolution.openclawHome).toBe(path.resolve(state));
+  });
+
+  it('prefers OPENCLAW_STATE_DIR over OPENCLAW_HOME', () => {
+    const home = tempDir('prod-both');
+    const state = tempDir('prod-both-state');
+    const openclaw = tempDir('prod-both-oc');
+    const resolution = resolvePdHome({
+      env: { [PD_OPENCLAW_STATE_DIR_ENV]: state, [PD_OPENCLAW_HOME_ENV]: openclaw },
+      homeDir: home,
+    });
+
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) return;
+    expect(resolution.openclawHome).toBe(path.resolve(state));
+  });
+
+  it('refuses a relative OPENCLAW_STATE_DIR (fail-closed)', () => {
+    const home = tempDir('prod-state-rel');
+    const resolution = resolvePdHome({ env: { [PD_OPENCLAW_STATE_DIR_ENV]: 'state' }, homeDir: home });
+
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toBe('openclaw_state_dir_not_absolute');
+  });
 });
 
 describe('resolvePdHome — experiment mode', () => {
@@ -95,6 +129,49 @@ describe('resolvePdHome — experiment mode', () => {
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
     expect(resolution.openclawHome).toBe(path.resolve(openclaw));
+  });
+
+  it('accepts OPENCLAW_STATE_DIR inside the root (what the launcher passes)', () => {
+    const home = tempDir('exp-state-home');
+    const root = tempDir('exp-state-root');
+    const state = path.join(root, '.openclaw');
+    fs.mkdirSync(state);
+
+    const resolution = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_OPENCLAW_STATE_DIR_ENV]: state },
+      homeDir: home,
+    });
+
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) return;
+    expect(resolution.openclawHome).toBe(path.resolve(state));
+  });
+
+  it('rejects OPENCLAW_STATE_DIR outside the root', () => {
+    const home = tempDir('exp-state-out-home');
+    const root = tempDir('exp-state-out-root');
+    const outside = tempDir('exp-state-out');
+    const resolution = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_OPENCLAW_STATE_DIR_ENV]: outside },
+      homeDir: home,
+    });
+
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toBe('openclaw_state_dir_outside_experiment');
+  });
+
+  it('rejects a relative OPENCLAW_STATE_DIR in experiment mode', () => {
+    const home = tempDir('exp-state-rel-home');
+    const root = tempDir('exp-state-rel-root');
+    const resolution = resolvePdHome({
+      env: { PD_EXPERIMENT_ROOT: root, [PD_OPENCLAW_STATE_DIR_ENV]: 'state' },
+      homeDir: home,
+    });
+
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toBe('openclaw_state_dir_not_absolute');
   });
 });
 

@@ -121,7 +121,11 @@ if (!resolved.ok) {
 }
 
 const workspace = path.resolve(options.workspace ?? path.join(resolved.homeDir, 'workspace'));
-for (const dir of [resolved.pdHome, resolved.consoleConfigDir, resolved.openclawHome, resolved.codexHome, workspace]) {
+// PRI-1165: OpenClaw's private SQLite snapshot staging root and rolling logs
+// resolve through XDG_CACHE_HOME (then LOCALAPPDATA) on Windows. Pointing it at
+// the experiment root keeps them out of `%LOCALAPPDATA%\openclaw`.
+const cacheHome = path.join(resolved.homeDir, '.cache');
+for (const dir of [resolved.pdHome, resolved.consoleConfigDir, resolved.openclawHome, resolved.codexHome, cacheHome, workspace]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
@@ -168,6 +172,10 @@ const childEnv = {
   OPENCLAW_CONFIG_PATH: path.join(resolved.openclawHome, 'openclaw.json'),
   OPENCLAW_WORKSPACE_DIR: workspace,
   CODEX_HOME: resolved.codexHome,
+  // PRI-1165: keep OpenClaw's cache/logs inside the root, and namespace the
+  // rolling log filename so it never collides with the production instance.
+  XDG_CACHE_HOME: cacheHome,
+  OPENCLAW_PROFILE: 'experiment',
 };
 // A stale value inherited from the parent shell would win over the state dir.
 delete childEnv.OPENCLAW_HOME;
@@ -213,5 +221,8 @@ console.log('[experiment-console] Experiment instance — production state is ou
 console.log(`[experiment-console] Root:      ${resolved.homeDir}`);
 console.log(`[experiment-console] PD home:   ${resolved.pdHome}`);
 console.log(`[experiment-console] Registry:  ${resolved.consoleConfigDir}`);
+console.log(`[experiment-console] Cache:     ${cacheHome} (XDG_CACHE_HOME)`);
 console.log(`[experiment-console] Workspace: ${workspace}`);
 console.log(`[experiment-console] Console:   http://127.0.0.1:${options.port}`);
+console.log('[experiment-console] Profile:   experiment (log namespace)');
+console.log('[experiment-console] Shared:    %LOCALAPPDATA%\\OpenClaw\\locks — lock files are keyed by state-db path, so prod/experiment never share one.');
