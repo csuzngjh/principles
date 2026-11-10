@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "pd-aa-handoff/v1",
+  "checkpointId": "20261110T0321Z-zcode-pri1163",
+  "ticket": "PRI-1163",
+  "task": "发布包轮次接线核查：OpenClaw 已装 PD 3.1.3 仍走 legacy_fifo_prefix_v1 的证据化归因（静态/行为/重建三臂 + 生产只读取证）",
+  "generatedAt": "2026-11-10T03:21:00Z",
+  "agent": "zcode",
+  "overallStatus": "READY_FOR_OWNER_DECISION__NO_DEFECT__RELEASE_ARTIFACT_VERIFIED_CORRECT__PRODUCTION_FIFO_IS_BY_DESIGN",
+  "worktree": {
+    "branch": "ai/PRI-1163-release-round-key-audit",
+    "dir": "D:/Code/_worktrees/principles/PRI-1163-release-round-key-audit",
+    "base": "4775f3bc5 (origin/main, fetched at creation)"
+  },
+  "verdict": {
+    "branch": "2-of-3 (发布包有接线)",
+    "publishedBundleContainsWiring": true,
+    "releasePipelineReproducibleByteIdentical": true,
+    "productionFifoExplanation": "所有被观察注入轮均为非用户交互轮（~60min 自动节奏；该会话 user_turns 停于 2026-11-02T13:16Z，工作区全局真实用户轮停于 2026-11-07T01:07Z）；P1-3 门槛按设计拒发轮次键并诚实回退 legacy_fifo_prefix_v1。3.1.3 安装（11-09 22:53 +0800）以来该工作区尚无真实用户轮。",
+    "fixOwnership": "无缺陷、无修复卡、无发布流程变更",
+    "pri1162StaleClaim": "被否证——函数名 0 命中是 esbuild --production minify:true 的预期符号改写；其 'fresh build 含全部符号' 应为非 production 构建（minify:false），二者不可比"
+  },
+  "artifacts": {
+    "npmTarball": {
+      "package": "principles-disciple@3.1.3",
+      "tarballSha256": "213da943aad92ead53b6470b7a5667eb1114bee61bc882e10ed35c63fb155525",
+      "bundleJsSha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d",
+      "declaredRuntimeEntry": "package.json openclaw.setupEntry/extensions = ./dist/bundle.js (唯一运行入口；main=./dist/index.js 为再导出 shim)"
+    },
+    "installedExtension": {
+      "path": "~/.openclaw/extensions/principles-disciple",
+      "version": "3.1.3",
+      "bundleJsSha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d (与 npm 发布物逐字节一致)",
+      "betterSqlite3": "13.0.3 prebuilds/win32-x64.node 在位"
+    },
+    "releaseBaseline": {
+      "tag": "v3.1.3 = e7c7e6bba35aa7d691496cf126b195ea3a70fef9 (#2453 version-packages)",
+      "lockfile": "package-lock.json v3, esbuild 0.28.2",
+      "officialBuildSequence": "npm run build (root) -> npm run build:production --workspace=principles-disciple (.github/workflows/release-reproducibility-full.yml:58-59)",
+      "rebuiltBundleJsSha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d (与发布物逐字节一致——零分叉)"
+    }
+  },
+  "evidenceArms": {
+    "static": {
+      "method": "压缩不敏感字面量（字符串/属性键）+ 函数名对照",
+      "hits": {
+        "round key resolved: round=": 1, "roundKeyProvider": 3, "user_turn_persisted": 1,
+        "round key replayed for claimed run": 1, "legacy_fifo_prefix_v1": 3, "fair_rotation_v1": 2,
+        "functionNames(prepareOpenClawPromptRound 等)": "0——minify 预期改写"
+      }
+    },
+    "behavior": {
+      "method": "从 dist/bundle.js 声明入口导入发布物 plugin.register(fakeApi)，捕获 before_prompt_build，事件形态忠实已装 2026.11.1 embedded ({prompt,messages}；hookCtx 含 runId/sessionKey/sessionId/agentId/workspaceDir/trigger)；候选=PRI-1162 冻结沙箱 state.db 830fbd24 (18 条)",
+      "results": {
+        "A1-A4 trigger=user 连续四轮": "user_turns 逐轮+1 (maxIdx 2→5)；[PD:Prompt] round key resolved: round=3/4/5/6；注入结果完整(injectedExpectations)——序数传入共享装配",
+        "B1 trigger=heartbeat": "零写入；non-interactive trigger (heartbeat) records no round → legacy_fifo_prefix_v1",
+        "C1 sessionId 缺失": "零写入、无 round key"
+      }
+    },
+    "production": {
+      "method": "只读（DB 先复制再查询；零生产写入）",
+      "facts": [
+        ".state/logs/events_*.jsonl: 11-09 15 轮 + 11-10 3 轮注入，全部 legacy_fifo_prefix_v1、无 selectionRoundOrdinal、eligibleCount=18",
+        ".state/trajectory.db: user_turns 末行 2026-11-07T01:07:36Z (gate4-p3 测试会话)；会话 8e64912c user_turns 停于 2026-11-02T13:16Z (57 行)，assistant_turns 以 ~60±1 分钟节奏持续至 11-10T02:46Z (717 行)",
+        "已装 OpenClaw 2026.11.1 dist 只读核对: embedded 事件恰为 {prompt,messages} (attempt-prompt-helpers 编译体)；hookCtx 透传 run.trigger (transcript-policy 编译体)"
+      ],
+      "residualUnknown": "自动化轮驱动者未命名（cron jobs.json 为 6 月遗留 daily 3am isolated 不匹配；该会话不在 agents/main）——不阻断裁决"
+    }
+  },
+  "lowestCostVerification": "下一次真实用户轮后: grep -h selectionPolicy D:/.openclaw/workspace/.state/logs/events_*.jsonl | tail —— 应现 fair_rotation_v1 + selectionRoundOrdinal；若该轮确为真实用户轮仍 legacy_fifo，凭 §4 A1-A4 反例立即立案",
+  "ownerDecision": "无行动项建议（关闭本票）；PRI-1162 '发布版本尚待验证' 由本检查点闭合为已验证正确；其 stale 表述建议随 PR #2460 评审更正",
+  "unchanged": ["生产配置与生产库（零写入）", "LATEST.json 与历史检查点", "PRI-1162 工作树/分支/文件（仅只读复用其冻结沙箱与检查点）", "canonical runtime 各目录", "PRI-1119 A 线结论（轮次序数≠请求身份）"],
+  "budget": { "hostStarts": 0, "modelCalls": 0, "installs": 0, "releaseActions": 0, "productionWrites": 0, "upstreamCodeOrPRs": 0, "merges": 0 },
+  "latestPointer": "LATEST.json not modified (convention: append-only checkpoints)",
+  "evidenceDir": "D:/Code/.pd-tmp/principles/20261110/task-pri1162-release-audit-104223-769862/ (probe 脚本+结果、tarball、重建树与日志、生产 DB 副本)"
+}
