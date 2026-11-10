@@ -173,5 +173,22 @@ export function validateRuleHostResult(value: unknown): RuleHostResultValidation
     }
   }
 
+  // degraded — optional, produced only by normalizeRuleHostResult(). Validated
+  // like every other untrusted field so a malformed marker cannot travel as a
+  // claim of enforcement degradation (rc-2/rc-4).
+  if (Object.hasOwn(value, 'degraded') && value.degraded !== undefined) {
+    const { degraded } = value;
+    if (!isRecordLike(degraded)) {
+      errors.push('degraded must be a plain object if present');
+    } else {
+      if (!Object.hasOwn(degraded, 'reasonCode') || degraded.reasonCode !== 'invalid_result') {
+        errors.push('degraded.reasonCode must be "invalid_result"');
+      }
+      if (Object.hasOwn(degraded, 'notes') && degraded.notes !== undefined && typeof degraded.notes !== 'string') {
+        errors.push(`degraded.notes must be a string if present, got ${typeof degraded.notes}`);
+      }
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }

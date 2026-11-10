@@ -334,6 +334,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // contract, output whitelist, HostAdapter decode/encode for all 4 events).
   // Roll back = set host.codex.enabled: false in .pd/config.yaml.
   { id: 'host.codex', category: 'core', enabled: true, since: '2026-08-11', description: 'ADR-0020: Codex CLI host adapter. Default ON (flipped 2026-08-12 after PRI-282 E2E). Flag-off = pd-hook.js outputs {} + exit 0 + SystemLogger records skip (rc-9). Disable via .pd/config.yaml: host.codex: { enabled: false }.' },
+  // PRI-1170 Adaptive Activation: model-assisted incremental principle selection
+  // on the Codex UserPromptSubmit hook. INDEPENDENT of host.codex (that flag is
+  // the whole PD hook). Default OFF; enabling also requires a complete pi-ai
+  // runtime profile + API key, otherwise the hook stays on Native. Flag-off =
+  // byte-identical Native output and zero model requests.
+  { id: 'host.codex.adaptive_activation', category: 'quiet', enabled: false, since: '2026-11-10', description: 'PRI-1170 Adaptive Activation (Codex UserPromptSubmit). Independent quiet flag, default OFF. Enable via .pd/config.yaml: host.codex.adaptive_activation: { enabled: true } plus a configured internalAgents.defaultRuntime pi-ai profile. Flag-off = native output unchanged, zero model requests.' },
   // WorkBuddy host adapter (SPEC workbuddy-host-adapter v0.3.0, OD-03). Third
   // ADR-0020 host. Quiet, default OFF: install does NOT enable; the user
   // opts in explicitly. Flag-off = the WorkBuddy hook entry emits neutral JSON

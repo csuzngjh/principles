@@ -37,6 +37,8 @@ export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
 export * from './governance-signal-admission.js';
 export * from './signal-classifier.js';
+export * from './adaptive-selection.js';
+export * from './adaptive-priority-provider.js';
 export * from './signal-stage2-cycle.js';
 export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw

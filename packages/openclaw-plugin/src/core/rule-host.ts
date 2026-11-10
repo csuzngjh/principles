@@ -28,7 +28,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRuleHostHelpers } from '@principles/core/runtime';
 import { mergeDecisions } from '@principles/core/runtime';
-import { validateRuleHostResult } from '@principles/core/runtime';
+import { normalizeRuleHostResult } from '@principles/core/runtime';
 import { SqliteConnection } from '@principles/core/runtime';
 import { scanLegacyRuleContractDependencies } from '@principles/core/runtime';
 import { verifyPiArtifactRowDigest } from '@principles/core/runtime';
@@ -217,6 +217,18 @@ export class RuleHost {
       for (const impl of shadowImpls) {
         try {
           const result = impl.evaluate(input);
+          // B1: a degraded result is a failed observation, not a shadow
+          // decision. Recording it would fabricate a rule opinion in telemetry.
+          if (result.degraded !== undefined) {
+            const reason = `invalid RuleHostResult: ${result.degraded.notes ?? 'unknown invalid result'}`;
+            this.logger.warn?.(`[RuleHost] Shadow implementation ${impl.implId} returned ${reason}`);
+            const source = this.implementationSources.get(impl.implId);
+            if (source) {
+              this._recordUnhealthy(source.activationId, source.artifactId, source.ruleId, reason,
+                'Fix the RuleCode runtime error or return shape, then re-activate the rule');
+            }
+            continue;
+          }
           shadowDecisions.push({ ...result, activationId: impl.activationId });
         } catch (evalError: unknown) {
           const reason = `evaluation failed: ${String(evalError)}`;
@@ -818,13 +830,11 @@ export class RuleHost {
               const frozenHelpers = createRuleHostHelpers(input);
               // PRI-437: Execute inside vm context with timeout boundary.
               const rawResult = boundedCallEvaluate(input, frozenHelpers);
-              const validation = validateRuleHostResult(rawResult);
-              if (!validation.valid) {
-                throw new Error(
-                  `[RuleHost] Activation ${activationId} returned invalid RuleHostResult: ${validation.errors.join('; ')}`
-                );
-              }
-              const result = rawResult as RuleHostResult;
+              // B1: the same normalizer the shared production gate uses — one
+              // meaning for "this rule's output is unusable" (fail-closed
+              // requireApproval marked `degraded`), instead of throwing here
+              // while the gate silently dropped the rule.
+              const result = normalizeRuleHostResult(rawResult);
               if (result.matched && (result.decision === 'block' || result.decision === 'requireApproval')) {
                 result.ruleId = ruleId;
                 // R2-RH-004: principleId precedence — contentJson.principleId

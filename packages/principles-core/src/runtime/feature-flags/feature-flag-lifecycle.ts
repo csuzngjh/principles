@@ -286,4 +286,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Real-host governance loop E2E green on the installed path (injection/gate/evidence/approval/withdrawal) + regression of OpenClaw/Codex + explicit Owner default-on decision',
     retirementCriteria: 'WorkBuddy host descoped, or graduated to core (mirrors host.codex contract after default-on decision)',
   },
+  'host.codex.adaptive_activation': {
+    decision: 'KEEP_QUIET',
+    consumers: ['codex-adapter/src/pd-hook.ts', 'host-runtime/src/adaptive-priority-provider.ts'],
+    evidence: 'PRI-1170 (parent PRI-1105): independent quiet flag for the Codex UserPromptSubmit Adaptive Activation. Default OFF and independent of host.codex — flag-off is byte-identical Native output with ZERO selection requests (proven through the real hook entry in packages/codex-adapter/tests/pd-hook-adaptive.test.ts). PRI-1122 live batch: rollback passed; selection value undetermined.',
+    decided: '2026-11-10',
+    graduationCriteria: 'An approved small-batch run card shows the frozen protocol completes inside 10 s with the right assembly outcome, then an explicit Owner default-on decision',
+    retirementCriteria: 'Adaptive Activation descoped for Codex, or graduated into the host.codex contract (flag collapses into the existing host flag)',
+  },
 };
