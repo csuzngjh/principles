@@ -181,16 +181,20 @@ export function buildBoundedSelectionInput(input: {
   };
 }
 
+/** rc-1/rc-2: parsed payloads are unknown until this guard passes. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function parseSelectionShape(value: unknown):
   | {readonly ok: true; readonly selection: SelectionShape}
   | {readonly ok: false; readonly reason: string} {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
   }
-  const record = value as Record<string, unknown>;
-  const {status} = record;
-  const {id} = record;
-  const {digest} = record;
+  const {status} = value;
+  const {id} = value;
+  const {digest} = value;
   if (status === 'selected') {
     if (typeof id !== 'string' || !id) return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
     if (typeof digest !== 'string' || !digest) return {ok: false, reason: 'SELECTION_DIGEST_INVALID'};
@@ -287,11 +291,6 @@ function emptyDiagnostics(admissionDeadlineAt: number): AdaptiveSelectionDiagnos
     usage: null,
     failures: [],
   };
-}
-
-/** rc-1/rc-2: parsed payloads are unknown until this guard passes. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseFinishMetadata(raw: string): FinishMetadata {
