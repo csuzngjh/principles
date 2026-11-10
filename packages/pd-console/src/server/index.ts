@@ -1,7 +1,6 @@
 
 import * as http from 'http';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveApplyFullTimeoutMs, resolveCheckTimeoutMs } from './update-timeout.js';
@@ -17,6 +16,8 @@ import { createProductTelemetryService, scheduleProductTelemetryExport } from '@
 import { AuthConfig } from './config/AuthConfig.js';
 import { assertLoopbackBindForUnauthenticatedServer } from './bind-guard.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
+import { getPdHome, PdHomeConfigurationError } from './utils/pd-home.js';
+import { EXPERIMENT_CONSOLE_PORT, defaultConsolePort } from './console-ports.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
 import {
   handleFeedbackReportsRoute,
@@ -122,10 +123,12 @@ function resolveWorkspaceDir(argv: string[]): string {
   return process.cwd();
 }
 
-function parseArgs(argv: string[]): ServerOptions {
+function parseArgs(argv: string[], mode: 'production' | 'experiment' = 'production'): ServerOptions {
   const args = argv.slice(2);
   let workspace = resolveWorkspaceDir(argv);
-  let port = 3100;
+  // PRI-872 §3: production keeps 3100; an experiment instance defaults to
+  // 13100 so a bare dev start cannot grab the production port. --port wins.
+  let port = defaultConsolePort(mode);
   let host = '127.0.0.1';
   let noAuth = false;
   let token: string | undefined = undefined;
@@ -328,7 +331,7 @@ export async function initServices(workspaceDir: string, authConfig: AuthConfig)
   // missing Owner-facing history entries from the transaction journal. Best
   // effort only: history reconciliation never blocks console startup.
   try {
-    reconcileUpdateHistoryFromJournals(workspaceDir, path.join(os.homedir(), '.pd'));
+    reconcileUpdateHistoryFromJournals(workspaceDir, getPdHome().pdHome);
   } catch (error) {
     console.warn('[pd-console] update history reconciliation skipped:', error instanceof Error ? error.message : error);
   }
@@ -703,7 +706,36 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
 // ── Server startup ───────────────────────────────────────────────────────────
 
 export async function main(): Promise<void> {
-  const { workspace, port, host, noAuth, token } = parseArgs(process.argv);
+  // PRI-872: resolve the PD home BEFORE anything else. Everything below
+  // (registry, update history, backups, gateway probes) derives from it, and a
+  // broken experiment configuration must stop the process here instead of
+  // silently serving the production install.
+  let pdHome: ReturnType<typeof getPdHome>;
+  try {
+    pdHome = getPdHome();
+  } catch (error) {
+    if (error instanceof PdHomeConfigurationError) {
+      console.error(`[pd-console] Refusing to start: ${error.reason}`);
+      console.error(`[pd-console] ${error.message}`);
+      console.error(`[pd-console] Next: ${error.nextAction}`);
+      for (const [key, value] of Object.entries(error.details)) {
+        console.error(`[pd-console]   ${key}=${value}`);
+      }
+      process.exit(1);
+    }
+    throw error;
+  }
+
+  const { workspace, port, host, noAuth, token } = parseArgs(process.argv, pdHome.mode);
+
+  if (pdHome.mode === 'experiment') {
+    console.log(`[pd-console] Environment: experiment (PD_EXPERIMENT_ROOT=${pdHome.experimentRoot ?? ''})`);
+    console.log(`[pd-console] PD home: ${pdHome.pdHome}`);
+    console.log(`[pd-console] Workspace registry: ${pdHome.consoleConfigDir}`);
+    console.log(`[pd-console] OpenClaw home: ${pdHome.openclawHome}`);
+  } else {
+    console.log(`[pd-console] Environment: production (PD home: ${pdHome.pdHome})`);
+  }
 
   const authConfig = new AuthConfig({
     cliToken: token,
@@ -760,6 +792,21 @@ export async function main(): Promise<void> {
 
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
+
+  // PRI-872: a second instance on an occupied port must fail with an
+  // actionable message, not an unhandled 'error' stack. The usual cause is the
+  // production console already listening on 3100.
+  server.on('error', (error: Error & { code?: string }) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`[pd-console] Port ${port} is already in use on ${host}.`);
+      console.error(pdHome.mode === 'production'
+        ? `[pd-console] Another console is probably serving this installation. Stop it, or pick another port with --port.`
+        : `[pd-console] Stop the process holding the port, or pass a different --port (the experiment default is ${EXPERIMENT_CONSOLE_PORT}).`);
+      process.exit(1);
+    }
+    console.error('[pd-console] Server error:', error);
+    process.exit(1);
+  });
 
   server.listen(port, host, () => {
     console.log('[pd-console] Listening on http://' + host + ':' + port);

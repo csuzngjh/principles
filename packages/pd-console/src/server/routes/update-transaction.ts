@@ -9,8 +9,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { sendSuccess, sendMethodNotAllowed, sendNotFound, errorMessage } from '../utils/response.js';
+import { getPdHome } from '../utils/pd-home.js';
 import type * as updateSurfaceModule from 'create-principles-disciple/update-console';
 
 type JournalModule = typeof updateSurfaceModule;
@@ -83,7 +83,7 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
   }
   const journal: JournalModule = await import('create-principles-disciple/update-console');
   const layout: LayoutModule = journal;
-  const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const paths = layout.resolvePdHomePaths(getPdHome().pdHome);
   const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
   if (!fs.existsSync(journalPath)) {
     sendSuccess(res, { transactionId, exists: false });
@@ -112,7 +112,7 @@ async function transactionStatus(res: ServerResponse, transactionId: string): Pr
 async function recoveryStatus(res: ServerResponse): Promise<void> {
   const journal: JournalModule = await import('create-principles-disciple/update-console');
   const layout: LayoutModule = journal;
-  const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const paths = layout.resolvePdHomePaths(getPdHome().pdHome);
   const entries = (() => {
     try {
       return fs.readdirSync(paths.transactionsDir, { withFileTypes: true })
@@ -250,7 +250,7 @@ async function recoveryResolve(res: ServerResponse, req: IncomingMessage): Promi
   }
   const journal: JournalModule = await import('create-principles-disciple/update-console');
   const layout: LayoutModule = journal;
-  const paths = layout.resolvePdHomePaths(path.join(os.homedir(), '.pd'));
+  const paths = layout.resolvePdHomePaths(getPdHome().pdHome);
   const journalPath = path.join(paths.transactionsDir, `${transactionId}.jsonl`);
   if (!fs.existsSync(journalPath)) {
     sendSuccess(res, { ok: false, reason: 'unknown_transaction', message: `No journal exists for transaction ${transactionId}.` });

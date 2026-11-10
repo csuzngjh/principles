@@ -410,3 +410,25 @@ export function getPdCliEntry(paths: InstallLayoutPaths, mode: InstallLayoutMode
   const root = mode === 'canonical' ? paths.pdCliDir : path.join(paths.openClawExtensionDir, 'pd-cli');
   return path.join(root, 'dist', 'index.js');
 }
+
+/**
+ * PD home resolution (PRI-872): production keeps the historical `os.homedir()`
+ * derivation; `PD_EXPERIMENT_ROOT` opts into a fail-closed isolated root. This
+ * is the ONE authority for "which PD home does this process own" — components
+ * must not re-derive it locally.
+ */
+export {
+  PD_EXPERIMENT_ROOT_ENV,
+  PD_OPENCLAW_HOME_ENV,
+  PD_HOME_MODES,
+  PD_HOME_FAILURE_REASONS,
+  resolvePdHome,
+  isPathWithinRoot,
+  type PdHomeMode,
+  type PdHomePaths,
+  type PdHomeFailure,
+  type PdHomeFailureReason,
+  type PdHomeSuccess,
+  type PdHomeResolution,
+  type ResolvePdHomeOptions,
+} from './pd-home.js';
