@@ -19,6 +19,7 @@
 import { PainToPrincipleService, type PainToPrincipleServiceOptions } from './pain-to-principle-service.js';
 import { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
 import { disposePainSignalBridgesForWorkspace } from './pain-signal-runtime-factory.js';
+import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { readLedgerFileState } from '../principle-tree-ledger.js';
 import {
   createDiagnosticianTaskId,
@@ -264,14 +265,30 @@ interface RefusalInput {
   nextAction: string;
 }
 
-function refused(input: RefusalInput): PainSubmitReceipt {
+/** Deterministic task id for a handler-generated pain id (§5.5 step 5). The
+ * MCP handler calls this BEFORE the write so a timed-out submission can be
+ * reconciled by id (§5.7). */
+export function deriveSubmitTaskId(painId: string): string {
+  return createDiagnosticianTaskId(painId);
+}
+
+/** Receipt for a call rejected before any write (schema/anchor/admission).
+ * Identity is known because the handler generated it first. */
+export function buildRefusedSubmitReceipt(input: {
+  painId: string | null;
+  taskId: string | null;
+  workspaceDir: string;
+  code: string;
+  message: string;
+  nextAction: string;
+}): PainSubmitReceipt {
   return {
     schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
     capability: SUBMIT_PAIN_CAPABILITY_ID,
     status: 'refused',
-    painId: input.options.painId || null,
-    taskId: input.options.taskId ?? null,
-    workspaceDir: input.options.workspaceDir,
+    painId: input.painId,
+    taskId: input.taskId,
+    workspaceDir: input.workspaceDir,
     diagnosis: null,
     anchor: null,
     provenance: null,
@@ -280,6 +297,107 @@ function refused(input: RefusalInput): PainSubmitReceipt {
     nextAction: input.nextAction,
   };
 }
+
+function refused(input: RefusalInput): PainSubmitReceipt {
+  return buildRefusedSubmitReceipt({
+    painId: input.options.painId || null,
+    taskId: input.options.taskId ?? null,
+    workspaceDir: input.options.workspaceDir,
+    code: input.code,
+    message: input.message,
+    nextAction: input.nextAction,
+  });
+}
+
+/** Receipt for "the write began and its outcome is unknown" (§5.7). It never
+ * claims the task exists and never claims it does not. */
+export function buildUnconfirmedSubmitReceipt(input: {
+  painId: string;
+  taskId: string;
+  workspaceDir: string;
+  message: string;
+}): PainSubmitReceipt {
+  return {
+    schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
+    capability: SUBMIT_PAIN_CAPABILITY_ID,
+    status: 'submit_unconfirmed',
+    painId: input.painId,
+    taskId: input.taskId,
+    workspaceDir: input.workspaceDir,
+    diagnosis: { status: 'pending' },
+    anchor: null,
+    provenance: null,
+    warnings: [],
+    error: { code: 'submit_unconfirmed', message: input.message },
+    nextAction: `Run \`pd task show ${input.taskId}\` to reconcile; do not resubmit blindly.`,
+  };
+}
+
+export type SubmittedTaskRecheck = 'found' | 'not_found' | 'unreadable';
+
+/** Minimal `submitted` receipt for a write that outlived the deadline but was
+ * confirmed by the bounded read-back (§5.7). It reports only the task row. */
+export function buildReconciledSubmitReceipt(input: {
+  painId: string;
+  taskId: string;
+  workspaceDir: string;
+}): PainSubmitReceipt {
+  return {
+    schemaVersion: SUBMIT_PAIN_RECEIPT_SCHEMA_VERSION,
+    capability: SUBMIT_PAIN_CAPABILITY_ID,
+    status: 'submitted',
+    painId: input.painId,
+    taskId: input.taskId,
+    workspaceDir: input.workspaceDir,
+    diagnosis: { status: 'pending' },
+    anchor: null,
+    provenance: null,
+    warnings: [
+      'reconciled_after_timeout: the write outlived the deadline; the task row was confirmed by a bounded read-back (diagnosis not yet run).',
+    ],
+    error: null,
+    nextAction: `Run \`pd task show ${input.taskId}\` to follow the diagnosis.`,
+  };
+}
+
+/**
+ * §5.7 bounded read-back: does the task produced by THIS `painId` exist?
+ *
+ * Read-only, no bootstrap (a missing state.db must not be created by a
+ * recheck). Only an exact `input_ref === painId` hit counts as "found": a task
+ * under the same id but a different pain would be foreign state, and claiming
+ * it would be a false success. `unreadable` is "outcome unknown", never
+ * "not created" (rc-9).
+ */
+export async function recheckSubmittedTask(options: {
+  workspaceDir: string;
+  painId: string;
+  taskId: string;
+}): Promise<SubmittedTaskRecheck> {
+  let manager: RuntimeStateManager | undefined;
+  try {
+    manager = new RuntimeStateManager({
+      workspaceDir: options.workspaceDir,
+      readonly: true,
+      bootstrapIfMissing: false,
+    });
+    await manager.initialize();
+    const task = await manager.getTask(options.taskId);
+    if (task === null) return 'not_found';
+    return task.inputRef === options.painId ? 'found' : 'not_found';
+  } catch {
+    return 'unreadable';
+  } finally {
+    if (manager !== undefined) {
+      try {
+        await manager.close();
+      } catch {
+        /* best-effort: a close failure cannot change the observed outcome */
+      }
+    }
+  }
+}
+
 
 /**
  * Submit one pain. Never throws: every failure is a structured receipt so the

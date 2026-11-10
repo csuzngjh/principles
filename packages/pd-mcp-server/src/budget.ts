@@ -16,6 +16,6 @@ export function measureTextBytes(text: string): number {
   return Buffer.byteLength(text, 'utf8');
 }
 
-export function withinBudget(text: string): boolean {
-  return measureTextBytes(text) <= RESPONSE_BUDGET_BYTES;
+export function withinBudget(text: string, limit: number = RESPONSE_BUDGET_BYTES): boolean {
+  return measureTextBytes(text) <= limit;
 }

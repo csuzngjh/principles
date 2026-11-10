@@ -64,15 +64,23 @@ describe('G4-1: Core never depends on an MCP SDK', () => {
   });
 });
 
-describe('G4-2: pd-mcp-server reaches business data only via the capability subpath', () => {
-  it('every @principles/core import uses exactly the capability subpath', () => {
+describe('G4-2: pd-mcp-server reaches business data only via the capability subpaths', () => {
+  // The only public business subpaths this adapter may import: the read
+  // capability, and (OG-4 gated) the write capability. Anything else — read
+  // model, stores, CLI internals, broad `@principles/core/runtime` — is out.
+  const ALLOWED_CORE_SUBPATHS = new Set([
+    '@principles/core/runtime/pain-recall-capability',
+    '@principles/core/runtime/pain-submit-capability',
+  ]);
+
+  it('every @principles/core import uses an allowed capability subpath', () => {
     const files = listSourceFiles(path.join(PKG_ROOT, 'src'), true);
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8');
       const importMatches = [...text.matchAll(/from\s+'(@principles\/core[^']*)'/g)];
       for (const match of importMatches) {
-        expect(match[1], `${file} imports ${match[1]}`).toBe('@principles/core/runtime/pain-recall-capability');
+        expect(ALLOWED_CORE_SUBPATHS.has(match[1]), `${file} imports ${match[1]}`).toBe(true);
       }
     }
   });
