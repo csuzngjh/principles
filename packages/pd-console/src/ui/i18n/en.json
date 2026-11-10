@@ -1332,7 +1332,8 @@
       },
       "checkStatus": {
         "passed": "Passed",
-        "failed": "Failed"
+        "failed": "Failed",
+        "not_evaluated": "Not evaluated"
       },
       "reasonCodes": {
         "required_check_missing": "Required safety check result missing",
@@ -1369,6 +1370,14 @@
         "promotion_request_invalid": "Promotion request parameters are invalid"
       },
       "hardSafetyChecks": "Promotion Safety Checks",
+      "evidenceCriteriaTitle": "Evidence gaps",
+      "evidenceCriteria": {
+        "shadow_observed": "Shadow samples observed",
+        "shadow_matched": "Matched samples",
+        "shadow_neutral_control": "Neutral control samples",
+        "shadow_age": "Shadow observation age (ms)"
+      },
+      "evidenceCriteriaShortfall": "shortfall {{shortfall}}",
       "live24Hours": "Live monitoring · 24 hours",
       "live7Days": "Live monitoring · 7 days",
       "matched": "Matched",

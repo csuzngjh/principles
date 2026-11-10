@@ -1,5 +1,4 @@
 import * as path from 'path';
-import * as fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Command } from 'commander';
 import {
@@ -30,6 +29,7 @@ import {
 import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime';
 import {
   checkPromptArtifactDeliverabilityById,
+  collectRuleCodeEventEntries,
   linkAdaptiveBehaviorEvidence,
   RUNTIME_EVENT_LOG_CANDIDATE_DIRS,
   reconcileAdaptiveJournal,
@@ -76,7 +76,7 @@ import type {
   ApprovalDecisionResult,
   ApprovalCompletionResult,
 } from '@principles/core/runtime';
-import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime';
+import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot, PromotionReadinessResult } from '@principles/core/runtime';
 import { resolvePromotionHostLiveness } from '@principles/host-runtime';
 import { probeCliRecoveryReachability } from './recovery-reachability-probe.js';
 import { authorizeGovernanceAction, writeGovernanceAction } from 'principles-disciple/governance-audit';
@@ -114,48 +114,11 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
  */
 export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVENT_LOG_CANDIDATE_DIRS;
 
-export interface CollectedRuleCodeEventEntries {
-  entries: unknown[];
-  /** Number of candidate directories that actually exist on disk. */
-  sourceDirsFound: number;
-}
-
-/**
- * Collect rulehost telemetry entries from all candidate log directories.
- * Malformed lines are excluded individually. A directory counts as a source
- * only after it can be enumerated, so an unreadable path cannot be mistaken
- * for a healthy channel with zero events (ERR-002).
- *
- * Exact lines copied between candidate directories are deduplicated by
- * priority. Different events in same-named daily files are retained.
- */
-export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
-  const entries: unknown[] = [];
-  let sourceDirsFound = 0;
-  const higherPriorityLines = new Set<string>();
-  for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
-    const logsDir = path.join(workspaceDir, ...candidate.split('/'));
-    if (!fs.existsSync(logsDir)) continue;
-    try {
-      const files = fs.readdirSync(logsDir)
-        .filter(name => /^events_.*\.jsonl$/.test(name))
-        .sort()
-        .slice(-7);
-      sourceDirsFound += 1;
-      const currentSourceLines: string[] = [];
-      for (const file of files) {
-        const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
-        for (const line of lines) {
-          currentSourceLines.push(line);
-          if (higherPriorityLines.has(line)) continue;
-          try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
-        }
-      }
-      for (const line of currentSourceLines) higherPriorityLines.add(line);
-    } catch { /* unreadable directory contributes no entries */ }
-  }
-  return { entries, sourceDirsFound };
-}
+// 5B: the scan itself lives in host-runtime so the CLI and the Console Owner
+// review cannot drift. Kept as a re-export because existing tests import it
+// from this module.
+export { collectRuleCodeEventEntries };
+export type { CollectedRuleCodeEventEntries } from '@principles/host-runtime';
 
 /** Exported for PRI-577 regression tests and reuse by promote evidence assembly. */
 export function readShadowSummaryForActivation(workspaceDir: string, activationId: string, targetHostKind?: string): PromotionEvidenceSnapshot['shadowSummary'] {
@@ -607,18 +570,47 @@ export interface ActivationPromoteResult {
   summary?: string;
   failedChecks?: { checkId: string; reasonCode: string }[];
   nextAction?: string;
+  /** Explainable projection: every required hard check and every measured evidence dimension. */
+  criteria?: PromotionReadinessResult['criteria'];
+}
+
+type PromotionCriteriaEntry = NonNullable<PromotionReadinessResult['criteria']>[number];
+
+/**
+ * Render the explainable projection for the human-readable output. The JSON
+ * output keeps the structured entries; this text is the same information in
+ * one line per criterion so an operator can see which check failed and how far
+ * the evidence still is without opening the readiness code.
+ */
+function formatPromotionCriteria(criteria: readonly PromotionCriteriaEntry[]): string[] {
+  return criteria.map(entry => {
+    const marker = entry.status === 'passed' ? '[PASS]' : entry.status === 'failed' ? '[FAIL]' : '[----]';
+    const head = `  ${marker} ${entry.criterionId}`;
+    if (entry.kind === 'evidence') {
+      const current = entry.current === null || entry.current === undefined ? 'no measurement' : String(entry.current);
+      const shortfall = entry.shortfall === undefined ? '' : ` (shortfall ${entry.shortfall})`;
+      return `${head}: ${current} / ${entry.threshold}${shortfall}`;
+    }
+    if (entry.reasonCode !== undefined) return `${head}: ${entry.reasonCode}`;
+    if (entry.status === 'not_evaluated') return `${head}: not evaluated`;
+    return head;
+  });
 }
 
 export async function handleRuntimeActivationPromote(opts: ActivationPromoteOptions): Promise<void> {
   const activationId = opts.activationId?.trim() ?? '';
-  const refuse = (reason: string, nextAction: string, details?: { summary?: string; failedChecks?: { checkId: string; reasonCode: string }[] }): void => {
+  const refuse = (reason: string, nextAction: string, details?: { summary?: string; failedChecks?: { checkId: string; reasonCode: string }[]; criteria?: PromotionReadinessResult['criteria'] }): void => {
     const result: ActivationPromoteResult = {
       ok: false, decision: 'refused', activationId, reason, reasonCode: reason, nextAction,
-      summary: details?.summary, failedChecks: details?.failedChecks,
+      summary: details?.summary, failedChecks: details?.failedChecks, criteria: details?.criteria,
     };
     if (opts.json) console.log(JSON.stringify(result));
     else {
       console.error(`Promotion refused: ${reason}`);
+      if (details?.criteria && details.criteria.length > 0) {
+        console.error('Criteria:');
+        for (const line of formatPromotionCriteria(details.criteria)) console.error(line);
+      }
       console.error(`Next action: ${nextAction}`);
     }
     process.exitCode = 1;
@@ -783,7 +775,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
       dryRun: opts.dryRun === true,
     }, actor);
     if (!result.ok) {
-      refuse(result.reasonCode, result.nextAction, { summary: result.summary, failedChecks: result.failedChecks });
+      refuse(result.reasonCode, result.nextAction, { summary: result.summary, failedChecks: result.failedChecks, criteria: result.criteria });
       return;
     }
     if (result.decision === 'would_promote') {
@@ -791,9 +783,16 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
         ok: true, decision: 'would_promote', activationId: result.activationId,
         summary: `Readiness ${result.readinessEvaluationId} passed without mutation.`,
         nextAction: `Re-run with --confirm using evidence snapshot ${result.evidenceSnapshotDigest}.`,
+        criteria: result.criteria,
       };
       if (opts.json) console.log(JSON.stringify(output));
-      else console.log(`Would promote: ${result.activationId}`);
+      else {
+        console.log(`Would promote: ${result.activationId}`);
+        if (output.criteria && output.criteria.length > 0) {
+          console.log('Criteria:');
+          for (const line of formatPromotionCriteria(output.criteria)) console.log(line);
+        }
+      }
       return;
     }
     const output: ActivationPromoteResult = { ok: true, decision: 'promoted', activationId: result.activationId, promotedAt: result.promotedAt };

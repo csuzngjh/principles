@@ -20,7 +20,7 @@ import {
 } from '@principles/core/runtime';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime';
 import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, productionRouteRotationState, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, productionRouteRotationState, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_EVENT_LOG_CANDIDATE_DIRS, collectRuleCodeEventEntries, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import { errorMessage } from '../utils/response.js';
@@ -196,48 +196,11 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
  */
 export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_EVENT_LOG_CANDIDATE_DIRS;
 
-export interface CollectedRuleCodeEventEntries {
-  entries: unknown[];
-  /** Number of candidate directories that actually exist on disk. */
-  sourceDirsFound: number;
-}
-
-/**
- * Collect rulehost telemetry entries from all candidate log directories.
- * Malformed lines are excluded individually. A directory counts as a source
- * only after it can be enumerated, so an unreadable path cannot be mistaken
- * for a healthy channel with zero events (ERR-002).
- *
- * Exact lines copied between candidate directories are deduplicated by
- * priority. Different events in same-named daily files are retained.
- */
-export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRuleCodeEventEntries {
-  const entries: unknown[] = [];
-  let sourceDirsFound = 0;
-  const higherPriorityLines = new Set<string>();
-  for (const candidate of RULECODE_EVENT_LOG_CANDIDATE_DIRS) {
-    const logsDir = path.join(workspaceDir, ...candidate.split('/'));
-    if (!fs.existsSync(logsDir)) continue;
-    try {
-      const files = fs.readdirSync(logsDir)
-        .filter(name => /^events_.*\.jsonl$/.test(name))
-        .sort()
-        .slice(-7);
-      sourceDirsFound += 1;
-      const currentSourceLines: string[] = [];
-      for (const file of files) {
-        const lines = fs.readFileSync(path.join(logsDir, file), 'utf8').split('\n').filter(Boolean);
-        for (const line of lines) {
-          currentSourceLines.push(line);
-          if (higherPriorityLines.has(line)) continue;
-          try { entries.push(JSON.parse(line) as unknown); } catch { /* exclude malformed telemetry */ }
-        }
-      }
-      for (const line of currentSourceLines) higherPriorityLines.add(line);
-    } catch { /* unreadable directory contributes no entries */ }
-  }
-  return { entries, sourceDirsFound };
-}
+// 5B: the scan itself lives in host-runtime so the Console Owner review and
+// the CLI promotion path cannot drift. Kept as a re-export because existing
+// tests import it from this module.
+export { collectRuleCodeEventEntries };
+export type { CollectedRuleCodeEventEntries } from '@principles/host-runtime';
 
 function readRuleCodeTelemetry(workspaceDir: string, activationId: string, options: { decisions: readonly ActivationDecisionRecord[]; promotionHostKind?: string }): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
   const { decisions } = options;

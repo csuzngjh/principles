@@ -1332,7 +1332,8 @@
       },
       "checkStatus": {
         "passed": "已通过",
-        "failed": "未通过"
+        "failed": "未通过",
+        "not_evaluated": "未评估"
       },
       "reasonCodes": {
         "required_check_missing": "缺少必要的安全检查结果",
@@ -1369,6 +1370,14 @@
         "promotion_request_invalid": "提升请求参数无效"
       },
       "hardSafetyChecks": "上线安全检查",
+      "evidenceCriteriaTitle": "证据差距",
+      "evidenceCriteria": {
+        "shadow_observed": "影子样本总量",
+        "shadow_matched": "命中样本数",
+        "shadow_neutral_control": "中性对照样本数",
+        "shadow_age": "影子观察时长（毫秒）"
+      },
+      "evidenceCriteriaShortfall": "还差 {{shortfall}}",
       "live24Hours": "Live 监控 · 24 小时",
       "live7Days": "Live 监控 · 7 天",
       "matched": "匹配",
