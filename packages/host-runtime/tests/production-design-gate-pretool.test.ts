@@ -179,6 +179,40 @@ describe('Codex PreToolUse production design-gate path', () => {
       metadata: { evaluatedLiveRules: 1 },
     });
   });
+
+  /**
+   * PRI-1044 live finding: the native Codex hook payload carries the patch
+   * body under `tool_input.command` (captured from a real `codex exec` run),
+   * not `input`/`patch`. Before this regression, target resolution returned
+   * no paths, the design-gate fact degraded to unknown, and the managed write
+   * was never evaluated (observed as `no_rules_armed` on a real host).
+   */
+  it('blocks a native Codex apply_patch payload whose patch body is under tool_input.command', async () => {
+    const input = setup();
+    const provider = createCodexRuleContextProvider({
+      workspaceDir: input.governance,
+      projectDir: input.project,
+      enabled: true,
+      cutoffAt: new Date('2026-10-22T00:00:00.000Z'),
+      currentToolUseId: toolUseId,
+      toolSemantics: CODEX_TOOL_SEMANTICS,
+    });
+    const runtime = createProductionHostRuntime({
+      hostKind: 'codex',
+      projectDir: input.project,
+      toolSemantics: CODEX_TOOL_SEMANTICS,
+      ruleContextProvider: provider,
+    });
+
+    await expect(runtime.dispatch(preToolEvent(input.governance, 'apply_patch', {
+      command: `*** Begin Patch\n*** Update File: src/file.ts\n@@\n-before\n+after\n*** End Patch`,
+    }))).resolves.toMatchObject({
+      decision: 'deny',
+      reason: 'DESIGN_GATE_OWNER_DENIED_1019',
+      metadata: { evaluatedLiveRules: 1 },
+    });
+    expect(fs.readFileSync(input.targetPath, 'utf8')).toBe('before');
+  });
 });
 
 describe('Codex PreToolUse design-gate enforcement without prior session history', () => {
