@@ -20,4 +20,4 @@
 
 ## CI
 
-以 PR 页面为准（检查点时点待回填）。
+28 SUCCESS + 3 SKIPPED，0 失败（2026-11-10T01:05Z 核对）；mergeable=MERGEABLE。

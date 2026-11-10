@@ -29,5 +29,9 @@
   },
   "tests": { "core": "534", "hostRuntime": "71 files, 802 passed, 1 pre-existing skip", "plugin": "targeted 79 + full 2354 passed (BDD EPERM + tar failures are local env, CI authoritative)", "pdCli": "3", "eslint": "0 errors on changed files" },
   "notRun": ["CI (pending at checkpoint time)", "tokens (no reliable tokenizer)", "host startup / model calls / governance writes (out of scope, 0)"],
-  "notOverwritten": ["docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json", "docs/implementation-reports/pri-1105-b-baseline-report-20261109.json", "docs/implementation-reports/aa-handoff/LATEST.json"]
+  "notOverwritten": ["docs/implementation-reports/pri-1160-retest-baseline-pre-20261109.json", "docs/implementation-reports/pri-1105-b-baseline-report-20261109.json", "docs/implementation-reports/aa-handoff/LATEST.json"],
+  "ci": {
+    "checkedAt": "2026-11-10T01:05Z",
+    "result": "28 SUCCESS + 3 SKIPPED, 0 failures; mergeable=MERGEABLE"
+  }
 }
