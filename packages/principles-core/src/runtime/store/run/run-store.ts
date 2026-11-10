@@ -76,6 +76,19 @@ export interface RunStore {
    */
   listValidRunsByTaskTolerant(taskId: string): Promise<TolerantRunListResult>;
 
+  /**
+   * Latest `startedAt` across all runs of tasks with the given taskKind.
+   *
+   * Read-only activity signal for the L2b diagnostician backlog read model
+   * (SPEC v0.8 §9.4). It answers "did a run of this kind actually start
+   * recently?", which task `updated_at` cannot answer honestly (updating a
+   * task row is not evidence that anything executed — T35).
+   *
+   * Returns null when no run exists, or when no run can be attributed to
+   * this taskKind.
+   */
+  getLatestRunStartedAtForTaskKind(taskKind: string): Promise<string | null>;
+
   /** Delete a run by ID. Returns true if a row was deleted. */
   deleteRun(runId: string): Promise<boolean>;
 }

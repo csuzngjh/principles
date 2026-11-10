@@ -84,6 +84,87 @@ interface DiagnoseRunOptions {
   maxRetries?: number;
   timeoutMs?: number;
   intake?: boolean;
+  preflight?: boolean;
+}
+
+/**
+ * Read-only preflight verdict for `pd diagnose run --preflight`
+ * (SPEC v0.8 §9.2 check 7 snapshot).
+ *
+ * It answers only "would a run be accepted right now?" from configuration.
+ * It deliberately opens no state store, takes no lease, resolves no test
+ * double, contacts no provider, and writes nothing — the Console L2 route
+ * calls this before spawning the real run so a refusal never leaves a trace.
+ */
+export interface DiagnosePreflightResult {
+  readonly ok: boolean;
+  readonly taskId: string;
+  readonly workspaceDir: string;
+  readonly reason?: 'capability_disabled' | 'config_malformed' | 'runtime_unbound';
+  readonly message?: string;
+  readonly nextAction?: string;
+  readonly runtimeKind?: string;
+  readonly runtimeProfileId?: string | null;
+  readonly runtimeProfileLabel?: string | null;
+  readonly provider?: string;
+  readonly model?: string;
+}
+
+/**
+ * Resolve the preflight verdict from configuration alone.
+ *
+ * The capability kill switch is checked before runtime binding so an Owner
+ * disable is never mislabelled as a missing runtime (PRI-638 semantics).
+ */
+export function resolveDiagnosePreflight(taskId: string, workspaceDir: string): DiagnosePreflightResult {
+  const resolved = resolveRuntimeFromPdConfig(workspaceDir);
+  const { configLoadResult } = resolved;
+
+  if (!configLoadResult.ok) {
+    const [firstError] = configLoadResult.errors;
+    return {
+      ok: false,
+      taskId,
+      workspaceDir,
+      reason: 'config_malformed',
+      message: firstError?.reason ?? '.pd/config.yaml is malformed',
+      nextAction: firstError?.nextAction ?? 'Fix .pd/config.yaml syntax and retry',
+    };
+  }
+
+  const capability = resolveDiagnosticianCapability(configLoadResult.effective);
+  if (!capability.available) {
+    return {
+      ok: false,
+      taskId,
+      workspaceDir,
+      reason: 'capability_disabled',
+      message: capability.message,
+      nextAction: capability.nextAction,
+    };
+  }
+
+  if (isRuntimeConfigError(resolved.result)) {
+    return {
+      ok: false,
+      taskId,
+      workspaceDir,
+      reason: 'runtime_unbound',
+      message: resolved.result.message,
+      nextAction: resolved.result.nextAction,
+    };
+  }
+
+  return {
+    ok: true,
+    taskId,
+    workspaceDir,
+    runtimeKind: resolved.result.runtimeKind,
+    runtimeProfileId: resolved.runtimeProfileId,
+    runtimeProfileLabel: resolved.runtimeProfileLabel,
+    provider: resolved.result.provider,
+    model: resolved.result.model,
+  };
 }
 
 /**
@@ -199,6 +280,29 @@ function buildDiagnosticianTestDouble(taskId: string): PDRuntimeAdapter {
  */
 export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+
+  // SPEC v0.8 §9.2: `--preflight` is a strict no-op probe. It runs BEFORE any
+  // state store, lease, adapter or telemetry construction, so a verdict can
+  // never leave a mutation behind (T32: 403/415/404/409 must not change state).
+  if (opts.preflight === true) {
+    const preflight = resolveDiagnosePreflight(opts.taskId, workspaceDir);
+    if (opts.json) {
+      console.log(JSON.stringify(preflight, null, 2));
+    } else if (preflight.ok) {
+      console.log(`Preflight OK for task: ${preflight.taskId}`);
+      console.log(`Workspace:    ${preflight.workspaceDir}`);
+      console.log(`Runtime:      ${preflight.runtimeKind}${preflight.runtimeProfileLabel ? ` (${preflight.runtimeProfileLabel})` : ''}`);
+    } else {
+      console.error(`error: ${preflight.message}`);
+      console.error(`reason: ${preflight.reason}`);
+      console.error(`nextAction: ${preflight.nextAction}`);
+    }
+    if (!preflight.ok) {
+      process.exit(1);
+    }
+    return;
+  }
+
   // PRI-720: resolve the full-chain override once per invocation.
   const seedPipelineMode = resolvePromptFullPipelineSeedMode(workspaceDir);
 

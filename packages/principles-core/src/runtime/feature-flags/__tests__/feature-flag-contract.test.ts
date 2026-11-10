@@ -247,6 +247,10 @@ describe('computeEffectiveFlags', () => {
       // Governance Experience Snapshot v1.5.1 (2026-08-29 graduation): validated
       // on live workspace (endpoint 200 + real snapshot), flipped default-on
       if (flag.id === 'governance_experience_v1') continue;
+      // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §8.4 / v0.5 changelog: L3
+      // automatic diagnosis ships default-on (there was no automatic
+      // diagnosis before it); flag-off leaves tasks pending for L2.
+      if (flag.id === 'openclaw_diagnostician_consumer') continue;
       // PRI-571 graduation (2026-08-24): validated capabilities promoted to
       // the default experience; see PRI_571_DEFAULT_ON_FLAGS below.
       if (PRI_571_DEFAULT_ON_FLAGS.includes(flag.id)) continue;

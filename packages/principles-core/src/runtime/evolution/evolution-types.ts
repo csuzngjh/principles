@@ -60,7 +60,7 @@ export interface EvolutionPrinciple {
   text: string;
   source: {
     painId: string;
-    painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
+    painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
     timestamp: string;
   };
   trigger: string;
@@ -115,7 +115,7 @@ export type EvolutionLoopEventType =
 
 export interface EvolutionPainDetectedData {
   painId: string;
-  painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
+  painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
   source: string;
   reason: string;
   score?: number;
@@ -140,7 +140,7 @@ export interface CandidateCreatedData {
   trigger: string;
   action: string;
   status: 'candidate';
-  painType?: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
+  painType?: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
   evaluability?: PrincipleEvaluatorLevel;
   detectorMetadata?: PrincipleDetectorSpec;
   abstractedPrinciple?: string;
@@ -266,6 +266,7 @@ export const EvolutionPrincipleSchema = Type.Object({
       Type.Literal('dispatch_error'),
       Type.Literal('subagent_error'),
       Type.Literal('user_frustration'),
+      Type.Literal('principle_deviation'),
     ]),
     timestamp: Type.String(),
   }),

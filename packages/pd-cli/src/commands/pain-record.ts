@@ -34,6 +34,7 @@ import {
   isFeatureEnabled,
   isBuiltinPiAiProvider,
   evaluatePainIngress,
+  DEFAULT_PAIN_SCORE,
 } from '@principles/core/runtime';
 import type { PainIngressDecision, IngressEvidenceEntry, PainEvidenceEntry, PainCorrelation, PainEvidenceBundle } from '@principles/core/runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -122,7 +123,7 @@ function resolveIngressDecision(
   input: { opts: RecordOptions; stateDir: string; workspaceDir: string; painId: string },
 ): { decision: PainIngressDecision; acquisitionDetail: string | null; acquisitionReason: string | null } {
   const { opts, stateDir, workspaceDir, painId } = input;
-  const score = opts.score ?? 80;
+  const score = opts.score ?? DEFAULT_PAIN_SCORE;
   const base = {
     identity: { kind: 'manual_pain_id' as const, painId },
     painType: 'user_frustration' as const,
@@ -466,7 +467,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     painType: 'user_frustration',
     source: opts.source ?? 'manual',
     reason: opts.reason,
-    score: opts.score ?? 80,
+    score: opts.score ?? DEFAULT_PAIN_SCORE,
     sessionId: binding.sessionId,
     agentId: 'pd-cli',
     provenance: binding.provenance,
@@ -477,6 +478,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       : {}),
     recordObservability,
     painIngress: binding.painIngress,
+    ...(binding.deviationAnchor ? { deviationAnchor: binding.deviationAnchor } : {}),
   });
 
   // Show diagnostic info for config failures
@@ -632,7 +634,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
         console.log(`   Seeded Task IDs: ${result.progress.seededTaskIds.join(', ')}`);
       }
       console.log(`   Reason: ${opts.reason}`);
-      console.log(`   Score: ${opts.score ?? 80}`);
+      console.log(`   Score: ${opts.score ?? DEFAULT_PAIN_SCORE}`);
       console.log(`   Source: ${opts.source ?? 'manual'}`);
       console.log(`   Workspace: ${workspaceDir}`);
       if (binding.sessionId) {

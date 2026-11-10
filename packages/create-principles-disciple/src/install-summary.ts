@@ -35,6 +35,13 @@ export interface HostStateSummaryResult {
   readonly hostId: string;
   readonly pluginState?: HostPluginStateSummary;
   readonly governance?: HostGovernanceSummary;
+  /**
+   * Non-fatal facts the host install produced (e.g. a retired skill that was
+   * preserved because it could not be proven to be an unmodified published
+   * payload). Printed here so the Owner sees them on the summary screen, not
+   * only in a log (rc-9).
+   */
+  readonly warnings?: readonly string[];
 }
 
 const MANUAL_PAIN_PREFIX = 'PD记录痛苦：';
@@ -134,6 +141,9 @@ export function formatHostStateSummary(
   for (const host of results ?? []) {
     // A host whose own install failed must not contribute state claims.
     if (!host.success) continue;
+    // Warnings describe the host install itself, so they are printed even when
+    // the host has no plugin/governance block to render.
+    for (const warning of host.warnings ?? []) lines.push(`  ${warning}`);
     const { pluginState, governance } = host;
     if (host.hostId === 'workbuddy' && pluginState !== undefined) {
       lines.push(...workbuddyLines(host, pluginState));

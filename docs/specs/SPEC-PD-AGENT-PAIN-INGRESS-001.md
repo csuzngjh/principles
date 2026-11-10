@@ -361,7 +361,7 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 
 **分发落点**：WorkBuddy 插件根下的 `skills/pd-pain-signal/SKILL.md`。
 
-**旧文件识别与废弃**（目标行为，待落地）：
+**旧文件识别与废弃**（v0.8 已落地）：
 
 1. 识别对象：`~/.workbuddy/skills/pd-record-pain/SKILL.md`（旧用户级 Skill）。
 2. 识别依据：路径 + frontmatter 名称 `pd-record-pain`；不按内容模糊匹配。
@@ -370,7 +370,9 @@ state.db tasks 1 行（task_kind='diagnostician', status='pending', input_ref=pa
 5. 每次安装/升级执行一次，幂等；已废弃文件不再参与 Skill 发现。
 6. **不得**为了废弃而在 `~/.workbuddy/skills/` 新建 `pd-pain-signal` 副本——那会与"不创建第二份全局副本"的既有约束冲突。
 
-**当前代码事实**：安装器已校验插件根必需 Skill（含 `pd-pain-signal`），并有测试断言其**不**在 `~/.workbuddy/skills` 下创建第二份副本；但仓库**没有**新 Skill 文本源，也**没有**旧文件识别/废弃逻辑。上述 1–6 是目标行为，本轮只落文档。
+**实现状态（v0.8，2026-11-11 更新）**：上述 1–6 已由安装器落地，原措辞"本轮只落文档"不再成立。实现位置：`packages/create-principles-disciple/src/installers/legacy-workbuddy-skill.ts`，由 `workbuddy-host-installer.ts` 在安装成功返回前调用，告警经 `HostInstallResult.warnings` 输出到安装摘要。
+
+**超出原措辞的原因**：本 SPEC 起草时把旧 Skill 废弃限定为"只落文档"；Owner 后续明确要求本轮完成落地，因此实现按 1–6 的合同语义执行。实现只补了可证明性约束：识别同时接受仓库中两个已发布历史载荷的 sha256（`0.1.1-openclaw` 与 `0.1.0-workbuddy`），只有字节完全命中其一才重命名；重命名失败或目标已存在时保留原文件并输出 `legacy_skill_rename_failed` 告警。合同 1–6 本身未修改。
 
 ---
 

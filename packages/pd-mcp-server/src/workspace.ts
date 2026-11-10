@@ -19,11 +19,17 @@ import * as path from 'path';
 export const WORKSPACE_DIR_ENV = 'PD_MCP_WORKSPACE_DIR' as const;
 export const HOST_ENV = 'PD_MCP_HOST' as const;
 
-export const KNOWN_HOSTS: readonly string[] = ['codex', 'openclaw', 'workbuddy'];
+export type PdMcpHost = 'codex' | 'openclaw' | 'workbuddy';
+
+export const KNOWN_HOSTS: readonly PdMcpHost[] = ['codex', 'openclaw', 'workbuddy'];
+
+export function isKnownHost(value: unknown): value is PdMcpHost {
+  return typeof value === 'string' && (KNOWN_HOSTS as readonly string[]).includes(value);
+}
 
 export interface WorkspaceBinding {
   readonly workspaceDir: string;
-  readonly host: string | null;
+  readonly host: PdMcpHost | null;
 }
 
 export type WorkspaceBindingFailureCode =
@@ -93,7 +99,7 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
   }
   const host = env[HOST_ENV];
   if (host !== undefined) {
-    if (typeof host !== 'string' || !KNOWN_HOSTS.includes(host)) {
+    if (!isKnownHost(host)) {
       return {
         ok: false,
         reason: 'host marker is not one of the known PD hosts',
@@ -103,5 +109,5 @@ export function resolveWorkspaceBinding(env: Record<string, unknown>): Workspace
       };
     }
   }
-  return { ok: true, binding: { workspaceDir: path.resolve(raw), host: typeof host === 'string' ? host : null } };
+  return { ok: true, binding: { workspaceDir: path.resolve(raw), host: isKnownHost(host) ? host : null } };
 }

@@ -27,7 +27,7 @@ import {
   deriveProvenanceFromIngressFacts,
   isRecord,
 } from './pain-ingress-payload.js';
-import type { PainIngressV1Payload } from './pain-ingress-payload.js';
+import type { PainIngressV1Payload, PainDeviationAnchor } from './pain-ingress-payload.js';
 import { sanitizeStringUnbounded } from './evidence-sanitizer.js';
 import type { PainCorrectionEvidence } from './context-payload.js';
 
@@ -89,7 +89,7 @@ export type GovernanceHostKind = 'openclaw' | 'codex' | 'workbuddy';
 
 export interface PainDetectedData {
   painId: string;
-  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType: 'tool_failure' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
   source: string;
   reason: string;
   score?: number;
@@ -101,6 +101,13 @@ export interface PainDetectedData {
   /** Codex Governance Closure SPEC §12: provenance `host_context_bound` names the host. */
   hostKind?: GovernanceHostKind;
   evidence?: PainEvidenceEntry[];
+  /**
+   * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §5.6: the principle a
+   * `principle_deviation` deviated from. Persisted into diagnosticJson so the
+   * diagnosis names the principle the Owner's rule actually is, instead of
+   * letting the LLM re-infer which principle was meant.
+   */
+  deviationAnchor?: PainDeviationAnchor;
   /**
    * PRI-844: the Owner's verbatim correction, when this pain's context
    * contains one. Producers with no correction context leave it absent —
@@ -402,6 +409,10 @@ function provenanceReason(provenance: PainProvenance): string {
       return 'No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable';
     case 'automatic_hook':
       return 'Pain detected by automatic hook (after_tool_call)';
+    // SPEC v0.8 §6.6.3: never phrased as an Owner report — the Owner
+    // authorized the submission, the agent observed the behaviour.
+    case 'agent_reported_owner_approved':
+      return 'Agent-observed behaviour submitted through MCP with Owner authorization; no host session trace available';
   }
 }
 
@@ -417,6 +428,7 @@ function buildDiagnosticJson(data: PainDetectedData, workspaceDir?: string): str
     provenance,
     provenanceReason: provenanceReason(provenance),
     ...(data.hostKind ? { hostKind: data.hostKind } : {}),
+    ...(data.deviationAnchor ? { deviationAnchor: data.deviationAnchor } : {}),
     evidence: data.evidence ?? [],
     workspaceDir: workspaceDir ?? null,
     // PRI-844: the Owner's verbatim correction rides as its own top-level

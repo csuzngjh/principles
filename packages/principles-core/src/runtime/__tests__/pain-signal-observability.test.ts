@@ -97,6 +97,71 @@ describe('recordPainSignalObservability', () => {
     }
   });
 
+  it('defaults an omitted score to DEFAULT_PAIN_SCORE (40 / moderate), never 80 / severe (T07)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    const result = recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'manual_default_score_001',
+        taskId: 'diagnosis_manual_default_score_001',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'default score read-back',
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+    });
+
+    expect(result.warnings).toEqual([]);
+
+    const eventLogLine = JSON.parse(readFileSync(String(result.eventLogPath), 'utf8').trim()) as {
+      data: { score: number; severity: string };
+    };
+    expect(eventLogLine.data.score).toBe(40);
+    expect(eventLogLine.data.severity).toBe('moderate');
+
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT score, severity FROM pain_events').get() as {
+        score: number;
+        severity: string;
+      };
+      expect(row).toEqual({ score: 40, severity: 'moderate' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps an explicit score authoritative (80 still maps to severe)', () => {
+    const { workspaceDir, stateDir } = makeWorkspace();
+    recordPainSignalObservability({
+      workspaceDir,
+      stateDir,
+      data: {
+        painId: 'manual_explicit_score_001',
+        taskId: 'diagnosis_manual_explicit_score_001',
+        painType: 'user_frustration',
+        source: 'manual',
+        reason: 'explicit score read-back',
+        score: 80,
+        sessionId: 'cli',
+        agentId: 'pd-cli',
+      },
+    });
+
+    const db = new Database(join(stateDir, 'trajectory.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT score, severity FROM pain_events').get() as {
+        score: number;
+        severity: string;
+      };
+      expect(row).toEqual({ score: 80, severity: 'severe' });
+    } finally {
+      db.close();
+    }
+  });
+
   it('records pain_events into an existing sessions table WITHOUT metadata_json column', () => {
     // Simulate an old workspace with legacy sessions schema (no metadata_json)
     const { workspaceDir, stateDir } = makeWorkspace();

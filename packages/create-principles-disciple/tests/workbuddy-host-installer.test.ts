@@ -300,6 +300,29 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(created.installer.detectDetails().governanceInitialized).toBe(true);
   });
 
+  it('surfaces a preserved legacy pd-record-pain skill in the install result (T39)', async () => {
+    const created = lab();
+    const legacyDir = path.join(created.configDir, 'skills', 'pd-record-pain');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    const legacyFile = path.join(legacyDir, 'SKILL.md');
+    const customised = '---\nname: pd-record-pain\n---\n\nowner edit\n';
+    fs.writeFileSync(legacyFile, customised);
+
+    const result = await created.installer.install(installCtx(created));
+
+    expect(result.success).toBe(true);
+    expect(result.warnings?.join('\n')).toContain('deprecated_skill_modified');
+    // Preservation-first: an unverifiable copy is reported, never touched.
+    expect(fs.readFileSync(legacyFile, 'utf8')).toBe(customised);
+  });
+
+  it('stays silent when no legacy skill is present', async () => {
+    const created = lab();
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
   it('writes the pd-recall MCP binding into the marketplace payload when the server component is deployed (Gate 4)', async () => {
     const created = lab();
     // Simulate installBundledMcpServer having deployed the shared component.
