@@ -25,6 +25,7 @@ import {
   disposeFeedbackReportModels,
 } from './routes/feedback-reports.js';
 import { handleFailedTasksRoute, disposeFailedTasksModels } from './routes/failed-tasks.js';
+import { handleDiagnosticianRoute } from './routes/diagnostician.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, handleCorePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
@@ -310,12 +311,17 @@ export async function initServices(workspaceDir: string, authConfig: AuthConfig)
   // Governance Experience Snapshot v1.5.1 (PRI-584~587): default off; flag-off
   // keeps the legacy Focus experience and 403s the endpoint before any DB access.
   const governanceExperienceEnabled = pdFlags.flags.governance_experience_v1?.enabled ?? false;
+  // SPEC v0.8 §9.4 (L3): OpenClaw auto-execution flag, reported as a
+  // configuration fact on the backlog page. Default on; the console never
+  // executes it (L3 runs inside the OpenClaw service).
+  const openclawDiagnosticianConsumerEnabled = pdFlags.flags.openclaw_diagnostician_consumer?.enabled ?? true;
   const feedbackFlags: Record<string, { enabled: boolean }> = {
     feedback_channel: { enabled: feedbackChannelEnabled },
     failed_tasks_observability: { enabled: failedTasksObservabilityEnabled },
     principle_governance_projection_v2: { enabled: governanceProjectionEnabled },
     failed_task_recovery_console: { enabled: failedTaskRecoveryEnabled },
     governance_experience_v1: { enabled: governanceExperienceEnabled },
+    openclaw_diagnostician_consumer: { enabled: openclawDiagnosticianConsumerEnabled },
   };
   if (!configResult.ok) {
     console.warn('[pd-console] PD config loading failed (using defaults for feedback channel):', configResult.errors.map(e => e.reason).join('; '));
@@ -430,6 +436,15 @@ export function handleRequest(services: AppServices): (req: http.IncomingMessage
       if (routePath === '/api/feedback/reports' || routePath.startsWith('/api/feedback/reports/')) {
         const subPath = routePath.slice('/api/feedback/reports'.length);
         asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags, maintainerEmail: services.maintainerEmail, channelConfig: services.feedbackChannelConfig }))(req, res);
+        return;
+      }
+
+      // SPEC v0.8 §9.2/§9.4: POST /api/diagnostician/:taskId/run (L2) and
+      // GET /api/diagnostician/backlog (L2b). The route never executes the
+      // diagnosis in-process; see routes/diagnostician.ts.
+      if (routePath === '/api/diagnostician' || routePath.startsWith('/api/diagnostician/')) {
+        const subPath = routePath.slice('/api/diagnostician'.length);
+        asyncHandler(() => handleDiagnosticianRoute(req, res, { workspaceDir: services.workspaceDir, subPath, featureFlags: services.feedbackFlags }))(req, res);
         return;
       }
 

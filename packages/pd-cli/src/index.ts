@@ -394,6 +394,7 @@ diagnoseCmd
   .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
   .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
   .option('--no-intake', 'Skip candidate intake after successful diagnosis')
+  .option('--preflight', 'Read-only check that a run would be accepted (no lease, no state write, no model call)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
