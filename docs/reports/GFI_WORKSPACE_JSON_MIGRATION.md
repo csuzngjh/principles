@@ -1,6 +1,6 @@
 # GFI 历史 workspace JSON 迁移工具（PRI-1149）
 
-> 状态：**工具就绪 / 真实数据迁移待 Owner 授权**（2026-11-10）
+> 状态：**已完成（工具随 PR #2456 合并；真实数据迁移已于 2026-11-10 执行；1 文件待 WorkBuddy 重启后补清）**
 > 关联：Linear PRI-1149 · PR #2332 · `docs/specs/GFI_COMPLETE_REMOVAL_SPEC.md` §6.2 / §6.3 / §15.3
 
 ## 1. 解决什么问题
@@ -111,13 +111,27 @@ __tests__/gfi-workspace-json-migration.test.ts` → **18 / 18 passed**。
 门禁：`check:runtime-writers` PASS（9 处 allowlist，无新增 trip）、
 `check:repo-hygiene` PASS。
 
-## 8. 仍未完成 / 需 Owner 决策
+## 8. 执行记录（2026-11-10，Owner 授权后）
 
-1. **真实 Owner 工作区数据迁移尚未执行**，本工具及其测试全程只使用隔离临时工作区，
-   未读取也未修改任何真实 `.state` 数据。
-2. 实际执行需要 Owner 单独授权（对应 `--confirm-owner-authorization`）。
-3. 执行后建议再跑一次 dry-run 确认 0 变更，并把前后摘要归档；
-   之后 GFI-1 才可从 `NOT_IMPLEMENTED` 改为已完成。
+1. **真实 Owner 工作区数据迁移已于 2026-11-10 执行**（Owner 授权 `--confirm-owner-authorization`）。
+2. 覆盖 6 处 PD 状态目录，共 **170 个唯一 JSON 文件 / 1283 个唯一键**，
+   回读校验全通过、**0 writeFailures / 0 rollbackErrors**：
+   - `D:\.openclaw\workspace\.state`：108 文件 / 841 键（当前活跃主工作区）
+   - `D:\.openclaw\workspace\.pd`：1 / 6
+   - `D:\.openclaw\workspace\_archive\local-scheduler\.state`：58 / 400
+   - `C:\Users\Administrator\.openclaw`：1 / 33
+   - `C:\Users\Administrator\.openclaw\workspace\.state`：1 / 2
+   - `C:\Users\Administrator\.codex\pd-workspace\.pd`：1 / 1
+3. **全量备份**位于 `D:\pd-gfi-migration-backups-20261110\<slug>\`（含重复 pass 备份，共 172 文件）；
+   回滚方式见 §6。
+4. **唯一剩余**：`D:\.openclaw\workspace\.state\logs\daily-stats.json` 含 92 个 `gfi` 子对象，
+   被运行中的 WorkBuddy 会话宿主内常驻旧 `EventLog` 内存对象每 ~30s 写回，
+   同会话内无法持久清除。
+5. **重启后补清**（脚本幂等，已验证）：重启 WorkBuddy 后执行
+   `npm run gfi:migrate -- --state-dir "D:/.openclaw/workspace/.state" --apply --confirm-owner-authorization`，
+   应得 0 变更。
+6. 执行前曾因匹配条件过宽误停 2 个 PRI-1044 验收 console 实例与 1 个会话内 pwsh；
+   3100 / 3199 服务已恢复监听。注意：**停 console 服务对本题无效**——写回者并非 console server。
 
 ## 9. 关联
 
