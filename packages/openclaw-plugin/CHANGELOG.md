@@ -1,5 +1,22 @@
 # principles-disciple
 
+## 3.2.0
+
+### Minor Changes
+
+- 0afc6b3: SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8：Agent 痛点入口四阶段落地。
+  
+  - 阶段 1：Core Pain Submit Capability、anchor 校验、统一 Origin/Provenance；`evaluatePainIngress()` 增加 MCP 专用分支并排在通用 Unbound 分支之前。
+  - 阶段 2：MCP `pd_submit_pain` 契约面；超时返回 `submit_unconfirmed`，并以 `taskId = diagnosis_<painId>` 做限时只读回查（found/not_found/read_error），不取消写入、不自动重投。
+  - 阶段 3：四类写入点统一 `DEFAULT_PAIN_SCORE = 40`（`moderate`）；MCP 路径恢复 Observability，`pain_events` 可见。
+  - 阶段 4：Console L2/L2b；OpenClaw tick 增加 L3 自动诊断（每轮最多 1 个，失败保留 pending，flag `openclaw_diagnostician_consumer` 可关）；安装器废弃旧 `pd-record-pain` skill（仅重命名字节命中已发布载荷的副本，用户修改副本保留并告警）。
+  
+  MCP 写能力仍受 OG-4 门禁约束：生产入口不开启，`tools/list` 不含 `pd_submit_pain`。
+
+### Patch Changes
+
+- 09a1205: B1：非法的 RuleHostResult 统一 fail-closed 归一化。新增可选 `degraded` 标记与 `normalizeRuleHostResult()`：无法读取的规则输出不再被静默丢弃（此前 production gate 记 warning 后 continue，可能被其它规则的 allow 覆盖），而是归一化为带 `degraded.reasonCode='invalid_result'` 的 `requireApproval`，继续保持脱敏可见（warning / unhealthy 证据）。`matched=false` 仍表示“无意见”，由归一化函数单点应用既有 PRI-439 语义。合法结果原样透传，默认行为与阈值不变。注意：本次只到共享门 / legacy 评估器的裁决契约层；宿主是否会因此拦截调用仍取决于宿主能力（OpenClaw 目前只记录 `requireApproval` 事件，Codex 只读取 `metadata.ruleDecision`），本变更不新增宿主拦截。
+
 ## 3.1.5
 
 ### Patch Changes
