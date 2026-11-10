@@ -24,6 +24,23 @@ import {
   type LegacyRuleContractRuleSource,
 } from './internalization/legacy-rule-contract-scanner.js';
 
+/** Why an ACTIVE activation row could not be scanned (incremental counter, 2B-a). */
+export type ActivationCompatibilitySkipReason =
+  | 'row_not_record'
+  | 'missing_artifact_id'
+  | 'missing_content_json'
+  | 'invalid_content_json'
+  | 'content_not_object'
+  | 'missing_implementation_code';
+
+/** One aggregated skip reason. `count` is always > 0. */
+export interface ActivationCompatibilitySkipped {
+  reason: ActivationCompatibilitySkipReason;
+  count: number;
+  /** Up to 5 attributable activation ids; empty when the row had no readable id. */
+  sampleActivationIds: string[];
+}
+
 export interface ActivationCompatibilityScanResult {
   ok: boolean;
   workspaceDir: string;
@@ -31,9 +48,18 @@ export interface ActivationCompatibilityScanResult {
   status: 'clean' | 'legacy_dependency' | 'no_state_db' | 'scan_failed';
   findings: LegacyRuleContractFinding[];
   scannedActivations: number;
+  /**
+   * ACTIVE rows that were NOT scanned, aggregated by reason. Empty = every
+   * row was scanned. This is additive observability only: `status` and `ok`
+   * keep their pre-2B-a meaning, so a skipped row never turns `clean` into a
+   * failure on its own.
+   */
+  skipped: ActivationCompatibilitySkipped[];
   reason?: string;
   nextAction?: string;
 }
+
+const SKIP_SAMPLE_LIMIT = 5;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -65,10 +91,24 @@ export class ActivationCompatibilityReadModel {
         status: 'no_state_db',
         findings: [],
         scannedActivations: 0,
+        skipped: [],
         reason: 'state.db not found — workspace has no persisted activations to scan',
         nextAction: 'Nothing to do; fresh workspaces have no legacy rule contracts.',
       };
     }
+
+    const skipTotals = new Map<ActivationCompatibilitySkipReason, { count: number; sampleActivationIds: string[] }>();
+    const recordSkip = (reason: ActivationCompatibilitySkipReason, row?: Record<string, unknown>): void => {
+      const entry = skipTotals.get(reason) ?? { count: 0, sampleActivationIds: [] };
+      entry.count += 1;
+      const activationId = row === undefined ? undefined : readStringField(row, 'activation_id');
+      if (activationId !== undefined && entry.sampleActivationIds.length < SKIP_SAMPLE_LIMIT) {
+        entry.sampleActivationIds.push(activationId);
+      }
+      skipTotals.set(reason, entry);
+    };
+    const skipped = (): ActivationCompatibilitySkipped[] =>
+      [...skipTotals.entries()].map(([reason, entry]) => ({ reason, count: entry.count, sampleActivationIds: entry.sampleActivationIds }));
 
     let conn: SqliteConnection | null = null;
     try {
@@ -90,19 +130,36 @@ export class ActivationCompatibilityReadModel {
       const sources: LegacyRuleContractRuleSource[] = [];
       if (Array.isArray(rows)) {
         for (const row of rows) {
-          if (!isRecord(row)) continue;
+          if (!isRecord(row)) {
+            recordSkip('row_not_record');
+            continue;
+          }
           const artifactId = readStringField(row, 'artifact_id');
+          if (!artifactId) {
+            recordSkip('missing_artifact_id', row);
+            continue;
+          }
           const contentJson = readStringField(row, 'content_json');
-          if (!artifactId || !contentJson) continue;
+          if (!contentJson) {
+            recordSkip('missing_content_json', row);
+            continue;
+          }
           let content: unknown;
           try {
             content = JSON.parse(contentJson);
           } catch {
+            recordSkip('invalid_content_json', row);
             continue;
           }
-          if (!isRecord(content)) continue;
+          if (!isRecord(content)) {
+            recordSkip('content_not_object', row);
+            continue;
+          }
           const {implementationCode} = content;
-          if (typeof implementationCode !== 'string' || implementationCode.length === 0) continue;
+          if (typeof implementationCode !== 'string' || implementationCode.length === 0) {
+            recordSkip('missing_implementation_code', row);
+            continue;
+          }
           sources.push({
             activationId: readStringField(row, 'activation_id'),
             artifactId,
@@ -120,6 +177,7 @@ export class ActivationCompatibilityReadModel {
         status: findings.length === 0 ? 'clean' : 'legacy_dependency',
         findings,
         scannedActivations: sources.length,
+        skipped: skipped(),
         ...(findings.length > 0
           ? {
               reason: 'legacy_rule_contract_dependency',
@@ -137,6 +195,7 @@ export class ActivationCompatibilityReadModel {
         status: 'scan_failed',
         findings: [],
         scannedActivations: 0,
+        skipped: skipped(),
         reason: `state.db scan failed: ${message}`,
         nextAction: 'Resolve the workspace database access issue, then retry the compatibility scan.',
       };

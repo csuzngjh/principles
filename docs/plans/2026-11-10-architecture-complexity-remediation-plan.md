@@ -45,6 +45,8 @@ if (!fs.existsSync(stateDbPath)) {
 
 **修正后的目标**：`clean` 必须携带"已扫描行数 / 跳过行数"，跳过 > 0 时不得返回 `clean`。这比"改 `clean` 的字面值"更小、更准。
 
+> **2026-11-10 Owner 裁定（supersedes 上面这句的落地方式）**：2B-a **只加增量计数器**（`skipped[]`），**不改 `clean` 语义**；`clean` 的重定义单列为一条决策，与 5B 一起排（见 §2B.5）。理由是计数器是纯增量、可独立回退，而改 `clean` 会让既有调用方把"可见性提升"读成"升级阻塞"。
+
 **(b) "Console 模型层已返回 degraded + reason，缺的是页面不渲染"——只对一半。**
 
 - 对 `state.db` 缺失 / 表缺失 / 悬挂引用三处，模型确实返回 `status:'degraded'` + `reason` + `nextAction`（`ActivationsConsoleModel.ts:307`、`:320`、`:566`）。
@@ -241,7 +243,7 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 
 | 编号 | 内容 | 契约 | 红测试 |
 |---|---|---|---|
-| **2B-a** | `activation-compatibility-read-model.ts`：`clean` 携带 `scannedRows` / `skippedRows`；`skippedRows > 0` 时不得返回 `clean`（新增 `partial_scan` 或等价状态） | **是**（公共结果类型 + CLI JSON） | 构造 3 行中 1 行缺 `content_json`：现在返回 `clean` + `scannedActivations: 2`（无跳过信息）；期望 `status !== 'clean'` 且 `skippedRows === 1` |
+| **2B-a** | `activation-compatibility-read-model.ts`：新增增量字段 `skipped: [{ reason, count, sampleActivationIds }]`（`status` / `ok` 语义**不动**）；CLI 文本输出补一行 `skipped: N active row(s) ...`，否则人类操作路径仍看不见 | **是**（公共结果类型 + CLI 文本/JSON），`.changeset` patch | 构造 1 行 `content_json` 非 JSON：现在 `clean` + `scannedActivations: 0` 且无任何跳过信息；期望 `status` 仍为 `clean`、`skipped === [{reason:'invalid_content_json',count:1,...}]`，且文本输出含 `skipped:` 行 |
 | **2B-b** | `OwnerDecisionConsoleModel.ts:339-342`：`catch { continue; }` 改为"计入 `unreadable` 计数并在列表响应里暴露"，不再让读取失败等价于"没有待决项" | 否（console 响应内部） | 让 `getOwnerReview` 抛错一条：现在该条静默消失、响应无任何计数；期望响应含 `unreadable: 1` + reason |
 | **2B-c** | 逐行 `warning`：加进 `validators.ts` 的激活条目白名单 + `ActivationPage` 渲染（或明确删除死字段，二选一） | 否 | 悬挂工件 fixture：现在 UI 无任何提示；期望该行出现可见告警 |
 
@@ -252,6 +254,19 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 ### 2B.4 为什么不现在做 O1（共享结论词汇）
 
 做完 2B 与 1A 之后，会存在 3 个"带原因的结论"的真实形状（readiness、scan、outcome）。**到那时再抽，才有 3 个真实实现可比对**；现在抽只能猜。这条与独立评审 O1 的差异是有意的，理由是 P7（不做投机抽象）。
+
+### 2B.5 未决决策：`clean` 是否应吸收跳过行（随 5B 排）
+
+**决定（Owner 2026-11-10）**：2B-a 不改 `clean` 语义，只加 `skipped[]`；"跳过 > 0 时不得返回 `clean`"作为**独立决策**，与 5B 一起排，不在 2B-a 里顺手改。
+
+待决策的问题与两种走向：
+
+| 走向 | 语义 | 风险 |
+| --- | --- | --- |
+| 保持 `clean`（今天） | `clean` = "已解析的行里没有遗留契约依赖" | 操作者可能把"部分行没解析"读成"确实干净"——计数器可见但不强制 |
+| 引入 `partial_scan`（或 `clean` 需 `skipped.length === 0`） | `clean` = "全部 ACTIVE 行都被检查过且通过" | 升级路径上可能把"数据库里有坏行"升级为阻塞；需要 CLI/Console 同步改文案与退出码 |
+
+评估该决策时必须同时看：`pd-cli` 的退出码、Console 的 `status` 渲染、以及 5B 的 `criteria` 文案。**在 5B 的 UI 文案定稿前不要单独改 `clean`**，否则会出现"CLI 说不干净、Console 说没问题"的分裂。
 
 ---
 
@@ -297,6 +312,10 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 | 3D-read | console 读委托 core | 可选 |
 | 3D-write | `writeWorkspaceConfig` + 3 个写入口收敛（保注释） | 可选，独立决策 |
 | 3E | installer 消费 core 校验 | **延后** |
+
+> **2026-11-10 Owner 裁定（窄化 3A）**：事故 #2 的修复按"方案 C + 编译期穷尽表"作为**独立 PR** 实施，只改 `pd-config-validate.ts`（穷尽表 + "输入字段 ⊆ 输出字段"自检 + 未知键 fail-loud）与 `pd-config-types.ts`（删 `splitPipelineTimeoutMs`），**不做** `readWorkspaceConfig()` / `fieldStatus`，**不动** `effective.ts` 与 20+ 处 profile 重建点。
+>
+> 因此 3.4 第 1、2 条验收（`fieldStatus` 覆盖率）**不适用于本次修复**；本次的验收是：完整字段夹具经 `validate` 后全部保留、未知键报错、非字符串 `systemPrompt` 报错、`splitPipelineTimeoutMs` 被拒绝。3A 剩余部分（`readWorkspaceConfig` + `fieldStatus`）仍待独立立项。
 
 ### 3.4 验收判据（3A）
 

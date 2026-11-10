@@ -268,7 +268,6 @@ function writeConfig(workspaceDir: string): void {
     '    model: anthropic/claude-sonnet-4',
     `    apiKeyEnv: ${API_KEY_ENV}`,
     '    timeoutMs: 30000',
-    '    outputPathStrategy: free_form_only',
     'internalAgents:',
     '  defaultRuntime: pi-ai.test',
     '  agents:',
