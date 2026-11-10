@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as net from 'net';
 import { errorMessage } from './response.js';
-import { getPdHome } from './pd-home.js';
+import { getPdHome, getPdHomeResolution } from './pd-home.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -140,7 +140,13 @@ function runGatewayServiceCommand(subcommand: 'stop' | 'start', extraArgs: reado
   // (launchd/systemd/schtasks), not a process this console owns. An experiment
   // instance must never stop the production gateway — its own gateway is a
   // foreground `openclaw gateway run` owned by the experiment launcher.
-  if (getPdHome().mode === 'experiment') {
+  // Resolution failure is reported, not thrown: this helper's contract is
+  // "never throws" (rc-9), so callers degrade on a structured result.
+  const pdHome = getPdHomeResolution();
+  if (!pdHome.ok) {
+    return { ok: false, error: `pd_home_invalid (${pdHome.reason}): ${pdHome.message}` };
+  }
+  if (pdHome.mode === 'experiment') {
     return {
       ok: false,
       error: 'experimental_instance: the machine-level OpenClaw service belongs to the production install; the experiment gateway runs in the foreground under the experiment launcher and must be restarted there.',

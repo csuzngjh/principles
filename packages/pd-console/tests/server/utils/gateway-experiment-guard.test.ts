@@ -46,6 +46,18 @@ describe('gateway service control under isolation', () => {
     }
   });
 
+  it('reports a broken experiment root instead of throwing', () => {
+    process.env.PD_EXPERIMENT_ROOT = 'relative/pd-labs';
+
+    const result = restartOpenClawGateway();
+
+    // The helper's contract is "never throws" (rc-9): a broken isolation
+    // configuration degrades to a structured refusal.
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('pd_home_invalid');
+    expect(mocks.execFileSync).not.toHaveBeenCalled();
+  });
+
   it('keeps using the machine-level service in production', () => {
     delete process.env.PD_EXPERIMENT_ROOT;
 

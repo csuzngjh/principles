@@ -20,7 +20,7 @@
  *   node scripts/dev/console-experiment.mjs --root D:/pd-labs/pri-872 \
  *     [--workspace D:/pd-labs/pri-872/workspace] [--port 13100] [--gateway] [--no-auth]
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -101,11 +101,18 @@ function ensureRoot(root) {
   console.log(`[experiment-console] Created experiment root: ${root}`);
 }
 
-ensureRoot(path.resolve(options.root));
+// Validate the SHAPE before touching the filesystem: `ensureRoot` would
+// otherwise create a directory relative to the cwd and only afterwards be
+// refused by the resolver for not being absolute.
+if (!path.isAbsolute(options.root)) {
+  fail(`--root must be an absolute path (got "${options.root}").`);
+}
+const rootDir = path.resolve(options.root);
+ensureRoot(rootDir);
 
 // The SAME resolver the console uses — the launcher must not invent a second
 // interpretation of the root.
-const resolved = resolvePdHome({ env: { PD_EXPERIMENT_ROOT: options.root } });
+const resolved = resolvePdHome({ env: { PD_EXPERIMENT_ROOT: rootDir } });
 if (!resolved.ok) {
   console.error(`[experiment-console] Refusing to start: ${resolved.reason}`);
   console.error(`[experiment-console] ${resolved.message}`);
@@ -124,18 +131,26 @@ if (options.gateway) await assertPortFree(EXPERIMENT_GATEWAY_PORT, 'Experiment g
 const children = [];
 let shuttingDown = false;
 
+function killTree(child) {
+  if (child.exitCode !== null || child.killed) return;
+  try {
+    if (process.platform === 'win32' && child.pid !== undefined) {
+      // `shell: true` makes the child `cmd.exe`; the real `openclaw gateway
+      // run` (or tsx) is its grandchild, so `child.kill()` alone would leave it
+      // holding its port after the launcher exits.
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    }
+    child.kill();
+  } catch {
+    // Process already gone.
+  }
+}
+
 function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const child of children) {
-    if (child.exitCode === null && !child.killed) {
-      try {
-        child.kill();
-      } catch {
-        // Process already gone.
-      }
-    }
-  }
+  for (const child of children) killTree(child);
   process.exit(code);
 }
 
@@ -145,11 +160,26 @@ process.on('SIGTERM', () => shutdown(0));
 const childEnv = {
   ...process.env,
   PD_EXPERIMENT_ROOT: resolved.homeDir,
-  OPENCLAW_HOME: resolved.openclawHome,
+  // OpenClaw's explicit profile/state knobs. Deliberately NOT OPENCLAW_HOME:
+  // for the OpenClaw CLI that variable is a HOME stand-in (it appends
+  // `.openclaw`), so passing `<root>/.openclaw` would nest the state one level
+  // deeper and split it from what the console reads.
+  OPENCLAW_STATE_DIR: resolved.openclawHome,
+  OPENCLAW_CONFIG_PATH: path.join(resolved.openclawHome, 'openclaw.json'),
+  OPENCLAW_WORKSPACE_DIR: workspace,
   CODEX_HOME: resolved.codexHome,
 };
+// A stale value inherited from the parent shell would win over the state dir.
+delete childEnv.OPENCLAW_HOME;
 
 if (options.gateway) {
+  // A fresh experiment root has no OpenClaw profile, and `gateway run` refuses
+  // to boot without one (exit 78, "Missing config"). Fail here with the exact
+  // path instead of letting the child die and take the console down with it.
+  const experimentConfig = path.join(resolved.openclawHome, 'openclaw.json');
+  if (!fs.existsSync(experimentConfig)) {
+    fail(`Experiment OpenClaw profile is not configured: ${experimentConfig} is missing. Run 'openclaw setup' with OPENCLAW_STATE_DIR=${resolved.openclawHome} and OPENCLAW_CONFIG_PATH=${experimentConfig}, then retry; or start without --gateway.`);
+  }
   // Foreground gateway owned by this launcher. `openclaw gateway start` would
   // drive the machine-level service that production is using.
   const gateway = spawn(
