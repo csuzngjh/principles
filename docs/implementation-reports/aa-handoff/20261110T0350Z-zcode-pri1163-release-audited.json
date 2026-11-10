@@ -29,6 +29,12 @@
     "aLineOrthogonality": "fixture events carried only {prompt, messages} (no identity) and rotation still worked: round key does not depend on PRI-1119 user-message identity"
   },
   "methodCorrection": "PRI-1162 symbol-search conclusion was a false positive: publish uses esbuild --production (minify:true) so function names are rewritten; minify-insensitive literals (roundKeyProvider x3, fair_rotation_v1 x2, legacy_fifo_prefix_v1 x3, selectionRoundOrdinal x3, user_turn_persisted, round key resolved) are all present in the published bundle",
+  "crossValidation": {
+    "siblingSession": "a stalled-then-resumed zcode session (task dir task-pri1162-release-audit-104223, started 10:42 local) independently completed the same audit and committed 7eef2fc8a (checkpoint 20261110T0321Z-zcode-pri1163, zero production writes) while this session was investigating; it also deleted this session's active lease on exit",
+    "agreement": "identical verdict on all axes: artifact==tag build byte-identical, wiring present and functional, production FIFO = designed non-user-round fallback, PRI-1162 suspect refuted",
+    "thisSessionAdditions": "SRI + publish-run provenance, fixture event-payload assertions, 2026-11-03 constant-ord-72 historical evidence, production-write incident disclosure (this session only)",
+    "siblingAdditions": "official build sequence citation (release-reproducibility-full.yml:58-59), assistant_turns hourly rhythm, installed host-dist readonly cross-check"
+  },
   "incidentDisclosure": {
     "what": "first fixture run wrote 3 synthetic user_turns rows into production trajectory.db (D:/.openclaw/workspace/.state/trajectory.db) because the plugin prefers the explicit declared workspace (~/.openclaw/principles-disciple.json -> D:/.openclaw/workspace) over hook ctx.workspaceDir",
     "rows": "id 1215/1216 session fixture-sess-0001 idx 2/3; id 1217 session dbg-sess idx 2; all 2026-11-10T03:35:12-41Z, fixture test texts; events JSONL zero contamination (buffer never flushed)",
