@@ -28,7 +28,7 @@ import { getDefaultPdConfig } from '@principles/core/runtime';
 import { endpointBaseUrl, MCP_SERVER_NAME, PLUGIN_ID } from './host-config.mjs';
 import { PRESENCE_API_PATHS } from './presence-endpoint.mjs';
 
-export const CARD_VERSION = 'pri1163-round-key-run-card-v1';
+export const CARD_VERSION = 'pri1163-round-key-run-card-v2';
 export const ROUNDKEY_MODEL_ID = 'isolated-roundkey-model';
 export const ROUNDKEY_PROVIDER = 'pdroundkey-completions';
 export const ROUNDKEY_API = 'openai-completions';
