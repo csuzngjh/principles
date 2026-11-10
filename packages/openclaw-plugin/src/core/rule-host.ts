@@ -155,6 +155,14 @@ export class RuleHost {
    * no live rules are loaded.
    */
   private emptyLoadWarnEmitted: boolean = false;
+  /**
+   * PRI-1044 step 3-1 (LOCKSTEP twin of the host-runtime gate): an ACTIVE
+   * activation whose pi_artifacts row is gone is dropped by the INNER JOIN in
+   * `_loadFromActivationsTable`, so the RuleHost silently enforces fewer rules
+   * than the Owner armed. Warn at most once per instance (the cached
+   * fingerprint would otherwise re-warn on every evaluation).
+   */
+  private danglingArtifactWarnEmitted: boolean = false;
 
   constructor(stateDir: string, logger: RuleHostLogger = console, options?: RuleHostOptions) {
     this.stateDir = stateDir;
@@ -195,6 +203,7 @@ export class RuleHost {
     this.activationFingerprint = null;
     this.implementationSources.clear();
     this.emptyLoadWarnEmitted = false;
+    this.danglingArtifactWarnEmitted = false;
   }
 
   evaluateDetailed(input: RuleHostInput): RuleHostEvaluationReport {
@@ -384,6 +393,39 @@ export class RuleHost {
           '[RuleHost] Activations table query returned non-array, skipping'
         );
         return { loaded: [], skipped: [] };
+      }
+
+      // PRI-1044 step 3-1 (LOCKSTEP twin of the host-runtime gate): the INNER
+      // JOIN above hides ACTIVE activations whose artifact row is gone, so the
+      // Owner-armed rule silently stops enforcing with no diagnostic. Detect
+      // the dangling reference and make it observable; the fail-open posture
+      // is unchanged.
+      const danglingRows = db.prepare(`
+        SELECT a.activation_id, a.artifact_id
+        FROM activations a
+        WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM pi_artifacts p WHERE p.artifact_id = a.artifact_id)
+        ORDER BY a.activated_at ASC
+      `).all() as unknown;
+      if (Array.isArray(danglingRows) && danglingRows.length > 0 && !this.danglingArtifactWarnEmitted) {
+        this.danglingArtifactWarnEmitted = true;
+        const descriptors: string[] = [];
+        for (const dangling of danglingRows) {
+          if (!dangling || typeof dangling !== 'object' || Array.isArray(dangling)) continue;
+          const record = dangling as Record<string, unknown>;
+          const activationId = typeof record['activation_id'] === 'string' ? record['activation_id'] : 'unknown';
+          const artifactId = typeof record['artifact_id'] === 'string' ? record['artifact_id'] : 'unknown';
+          descriptors.push(`${activationId}->${artifactId}`);
+        }
+        if (descriptors.length > 0) {
+          this.logger.warn?.(
+            `[RuleHost] activation_artifact_missing — ${descriptors.length} active activation(s) reference a missing pi_artifacts row: ${descriptors.join(', ')}. ` +
+            'nextAction=restore the referenced pi_artifacts row or deactivate the stale activation; the rule did not run'
+          );
+          try {
+            recordDegradedEnforcement(this.workspaceDir ?? workspaceDir, `activation_artifact_missing: ${descriptors.join(', ')}`.slice(0, 300));
+          } catch { /* observability only */ }
+        }
       }
 
       const fingerprintParts: string[] = [
