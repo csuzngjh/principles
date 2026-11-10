@@ -1,0 +1,37 @@
+{
+  "checkpoint": "20261110T0230Z-zcode-pri1162-investigated",
+  "ticket": "PRI-1162",
+  "decision": "INVESTIGATED_CARD_PENDING_OWNER_APPROVAL",
+  "branch": "ai/PRI-1162-fifo-round-key",
+  "base": "origin/main 698de3fb4",
+  "head": "144670238",
+  "card": "docs/specs/PD-AA-PRI-1162-ROUND-KEY-IMPLEMENTATION-CARD-v0.1.md",
+  "keyFindings": {
+    "wiringAlreadyExists": "PRI-1137 (PR #2398, merged 2026-11-07) delivers the full round-key chain on main; the task premise 'shared production path lacks roundKey' no longer holds at source level",
+    "chain": "openclaw-plugin/src/index.ts:475 (unconditional roundKeyProvider=prepareOpenClawPromptRound) -> openclaw-host-runtime.ts:143 -> host-runtime/src/index.ts:324 (pre-selection, runs before buildActivePrinciplePromptContext) -> fair_rotation_v1 | legacy_fifo_prefix_v1",
+    "roundFact": "trajectory.db user_turns.turn_index; nextSessionTurnOrdinal = MAX(turn_index)+1 per session_id; pre-selection half persists THIS turn before reading (current-round binding); claimSignalRun/claimedSignalRunOrdinal replays own ordinal on retry; isUserInteractionTrigger(user/api/undefined) + agent-to-agent/boot-check interception keeps non-user rounds from advancing",
+    "fifoCounterexample": {
+      "snapshot": "830fbd24 (same source as PRI-1160/1161 materials), 18 candidates, blocks 231-1219 chars, none oversized",
+      "budget4000": "FIFO: constant prefix 10 selected (3727 chars/round), 8/18 never appear in 12 rounds; ROTATION (roundKey 2..13): 17/18 covered",
+      "budget2500": "FIFO: constant 6 selected (2444 chars/round), 12/18 starved; ROTATION: 17/18 covered",
+      "rotationOnlyMiss": "index 1 (016647f08388) never leads within the 12-round window; N=18 needs N consecutive rounds for full lead coverage (strategy-independent math)"
+    },
+    "installedProductionGap": {
+      "finding": "installed 3.1.3 is FIFO forever because the PUBLISHED bundle is stale, not because source lacks the feature",
+      "evidence": "npm principles-disciple@3.1.3 dist/bundle.js (sha256-16 7301253d09d3c4a9, the openclaw.extensions sole entry) lacks prepareOpenClawPromptRound/nextSessionTurnOrdinal (0 hits) but has the host-runtime half; v3.1.3 git tag source contains the full implementation; a fresh esbuild build from this worktree contains all symbols (b19f0ec18f29598a)",
+      "scopeNote": "release/installer pipeline issue; out of PRI-1162 code scope, reported to Owner on Linear"
+    },
+    "testCoverage": {
+      "existing": "one-write-one-round, same-run retry replay, write-failure degradation, heartbeat/empty-message/resolution-failure/missing-sessionId, missing-DB observability, empty-candidate+roundKey no-NaN, injected event matches selection",
+      "gapsForStep2": "sequence-level coverage assertion (N consecutive rounds), short-session reopen, two-session/workspace isolation, agent-to-agent branch, consecutive-round end-to-end variant"
+    }
+  },
+  "proposal": {
+    "productionCodeChanges": 0,
+    "step2Plan": "additive gap tests + one same-input offline comparison (baseline = post-#2455 Native FIFO) + PR + checkpoint",
+    "frozenPassLine": "budget 4000 x 12 rounds: rotation selected >= FIFO+4 (floor 14); every FIFO-starved candidate appears >=1 time within 18 consecutive rounds; FIFO output byte-identical to #2455 baseline when roundKey absent; same-round retry stable; non-user/write-failure/isolation produce no key; strict additive budget arithmetic holds; new tests green + required CI green",
+    "conclusionScope": "single advancing OpenClaw session only; cross-host/cross-session remains PRI-930"
+  },
+  "boundaries": { "hostStarts": 0, "modelCalls": 0, "productionWrites": 0, "installedRuntimeTouched": false, "latestJsonTouched": false },
+  "mimosaNote": "scanner_enobufs recurred; no security conclusion claimed"
+}
