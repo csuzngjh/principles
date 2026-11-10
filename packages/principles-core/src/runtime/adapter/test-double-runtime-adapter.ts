@@ -22,6 +22,7 @@ import type {
   RuntimeArtifactRef,
   ContextItem,
 } from '../runtime-protocol.js';
+import { createHash } from 'node:crypto';
 import { MOCK_ROOT_CAUSE_OUTPUTS, MOCK_DISTILLER_OUTPUTS, MOCK_ROUTER_OUTPUTS } from './split-pipeline-fixtures.js';
 
 /** Optional callbacks to override default TestDoubleRuntimeAdapter behavior. */
@@ -97,6 +98,10 @@ export class TestDoubleRuntimeAdapter implements PDRuntimeAdapter {
       runId,
       runtimeKind: 'test-double',
       startedAt: new Date().toISOString(),
+      // Adapter contract: report the digest of the prompt actually handed to the
+      // provider. This double has no profile layer, so the effective prompt is
+      // the caller's systemPrompt.
+      systemPromptDigest: createHash('sha256').update(input.systemPrompt ?? '', 'utf8').digest('hex'),
     };
   }
 

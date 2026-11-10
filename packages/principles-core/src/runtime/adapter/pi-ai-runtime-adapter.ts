@@ -18,6 +18,7 @@
 // Values come from the /compat facade (getModel is the builtin-catalog read;
 // completeSimple unchanged); types come from the root — the root `types.ts`
 // remains the unified Model/Context/Message contract in 0.84.
+import { createHash } from 'node:crypto';
 import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
 import { builtinPiAiProviderIds } from './pi-ai-catalog.js';
 import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
@@ -693,6 +694,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     // the profile config (this.config.systemPrompt). When both are absent the
     // Context keeps its pre-PRI-633 shape (no systemPrompt field).
     const systemPrompt = mergeSystemPromptLayers(input.systemPrompt, this.config.systemPrompt);
+    // PRI-1146 P1-02: this merged string is exactly what the provider receives
+    // below (and on repair). Reporting its digest lets the receipt bind the
+    // REAL provider prompt instead of a base layer that was never sent.
+    const systemPromptDigest = systemPrompt === undefined
+      ? undefined
+      : createHash('sha256').update(systemPrompt, 'utf8').digest('hex');
     const context: Context = {
       messages: [userMessage],
       ...(systemPrompt ? { systemPrompt } : {}),
@@ -1115,7 +1122,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       );
     }
 
-    return { runId, runtimeKind: 'pi-ai', startedAt };
+    return { runId, runtimeKind: 'pi-ai', startedAt, ...(systemPromptDigest === undefined ? {} : { systemPromptDigest }) };
   }
 
   async pollRun(runId: string): Promise<RunStatus> {

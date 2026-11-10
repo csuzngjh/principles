@@ -26,6 +26,7 @@
  * stage files — see docs/testing/internalization-test-value-audit.md §Diag
  * Runner Recommendation (plan B).
  */
+import { createHash } from 'node:crypto';
 import { vi } from 'vitest';
 import { DiagRouterRunner } from '../../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../../diag-router-runner.js';
@@ -58,6 +59,12 @@ import {
 export type DiagRunnerRole = 'router' | 'rootcause' | 'distiller';
 
 type MockFn = ReturnType<typeof vi.fn>;
+/**
+ * A mocked dependency member: usually a single `vi.fn()`, but the state manager
+ * exposes one nested collaborator (`runStore.updateRun`) that the runner calls
+ * directly, so a nested record of mocks is also valid here.
+ */
+type MockField = MockFn | Record<string, MockFn>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -311,6 +318,9 @@ function makeStateManagerMock(
       degradedRuns: [],
     }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
+    // PRI-1146 P2-01: runners persist the exact submitted input payload so a
+    // new process can rebuild invocation evidence.
+    runStore: { updateRun: vi.fn().mockResolvedValue(undefined) },
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
@@ -325,7 +335,15 @@ function makeRuntimeAdapterMock(runId: string, output: unknown) {
     kind: vi.fn().mockReturnValue(RUNTIME_KIND),
     getCapabilities: vi.fn(),
     healthCheck: vi.fn(),
-    startRun: vi.fn().mockResolvedValue(runHandle),
+    // PRI-1146 P1-02: the router runner requires the adapter-attested digest of
+    // the effective system prompt. This double merges no layers, so the digest
+    // of the submitted prompt IS the effective one.
+    startRun: vi.fn().mockImplementation(async (input: { systemPrompt?: string }) => ({
+      ...runHandle,
+      ...(typeof input?.systemPrompt === 'string'
+        ? { systemPromptDigest: createHash('sha256').update(input.systemPrompt).digest('hex') }
+        : {}),
+    })),
     pollRun: vi.fn().mockResolvedValue(succeededStatus),
     fetchOutput: vi.fn().mockResolvedValue({ payload: output }),
     cancelRun: vi.fn().mockResolvedValue(undefined),
@@ -350,7 +368,7 @@ function makeOptions(owner: string): PeerRunnerOptions {
   };
 }
 
-function castStateManager(_sm: Record<string, MockFn>): RuntimeStateManager {
+function castStateManager(_sm: Record<string, MockField>): RuntimeStateManager {
   // runtime-contract-exempt: ERR-001 test-double DI wiring of a partial mock, not untrusted runtime data
   return _sm as unknown as RuntimeStateManager;
 }
@@ -369,7 +387,7 @@ export interface DiagRunnerUnderTest {
 }
 
 interface SharedMocks {
-  _stateManager: Record<string, MockFn>;
+  _stateManager: Record<string, MockField>;
   _runtimeAdapter: Record<string, MockFn>;
   _eventEmitter: Record<string, MockFn>;
 }

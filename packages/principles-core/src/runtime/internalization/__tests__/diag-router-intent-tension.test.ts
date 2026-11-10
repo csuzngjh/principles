@@ -13,6 +13,7 @@
  *   - EP-02 / ERR-009: fail-loud on missing required fields via schema validation
  *   - EP-03 / ERR-002: stripping hallucinated intentTension emits telemetry (observable)
  */
+import { createHash } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import { DiagRouterRunner } from '../diag-router-runner.js';
 import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
@@ -22,7 +23,6 @@ import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-o
 import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
-import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
@@ -158,12 +158,16 @@ function populatePredecessorArtifacts(store: MemoryPIArtifactStore, rootCauseOut
 
 // ── Mock factory ─────────────────────────────────────────────────────────────
 
+// A mocked dependency member is usually a single `vi.fn()`; the state manager
+// also exposes the nested `runStore.updateRun` collaborator the runner calls.
+type MockField = ReturnType<typeof vi.fn> | Record<string, ReturnType<typeof vi.fn>>;
+
 function createMockDeps(
   rootCauseOutput: DiagRootCauseOutputV1,
   routerOutput: DiagnosticianOutputV2,
   overrides: Partial<DiagRouterRunnerDeps> = {},
 ): DiagRouterRunnerDeps & {
-  _stateManager: Record<string, ReturnType<typeof vi.fn>>;
+  _stateManager: Record<string, MockField>;
   _runtimeAdapter: Record<string, ReturnType<typeof vi.fn>>;
   _committer: Record<string, ReturnType<typeof vi.fn>>;
   _eventEmitter: { emitTelemetry: ReturnType<typeof vi.fn> };
@@ -184,6 +188,8 @@ function createMockDeps(
       degradedRuns: [],
     }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
+    // PRI-1146 P2-01: exact input payload persisted for post-restart receipt verification.
+    runStore: { updateRun: vi.fn().mockResolvedValue(undefined) },
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
@@ -197,7 +203,12 @@ function createMockDeps(
     kind: vi.fn().mockReturnValue(RUNTIME_KIND),
     getCapabilities: vi.fn(),
     healthCheck: vi.fn(),
-    startRun: vi.fn().mockResolvedValue(runHandle),
+    // PRI-1146 P1-02: this double merges no prompt layers, so the submitted
+    // system prompt IS the effective one the provider would receive.
+    startRun: vi.fn().mockImplementation(async (input: { systemPrompt?: string }) => ({
+      ...runHandle,
+      ...(typeof input?.systemPrompt === 'string' ? { systemPromptDigest: createHash('sha256').update(input.systemPrompt).digest('hex') } : {}),
+    })),
     pollRun: vi.fn().mockResolvedValue(succeededStatus),
     fetchOutput: vi.fn().mockResolvedValue({ payload: routerOutput }),
     cancelRun: vi.fn().mockResolvedValue(undefined),
@@ -226,7 +237,7 @@ function createMockDeps(
   return {
     stateManager: _stateManager as unknown as RuntimeStateManager,
     runtimeAdapter: _runtimeAdapter,
-    eventEmitter: _eventEmitter as unknown as StoreEventEmitter,
+    eventEmitter: _eventEmitter,
     artifactStore,
     committer: _committer,
     // PRI-1146: proven-empty trusted exposure (harness default).

@@ -28,6 +28,7 @@ import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { SqliteContextAssembler } from '../store/context/sqlite-context-assembler.js';
 import { SqliteHistoryQuery } from '../store/history/sqlite-history-query.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
+import { createHash } from 'node:crypto';
 import { SplitDiagnosticianRunner } from '../internalization/split-diagnostician-runner.js';
 import { DiagRootCauseRunner } from '../internalization/diag-rootcause-runner.js';
 import { DiagDistillerRunner } from '../internalization/diag-distiller-runner.js';
@@ -180,7 +181,11 @@ class MockRuntimeAdapter implements PDRuntimeAdapter {
       ? { runId, payload }
       : null;
     this.runs.set(runId, { status, output });
-    return { runId, runtimeKind: 'pi-ai', startedAt: new Date().toISOString() };
+    // Adapter contract: report the digest of the prompt actually handed to the
+    // provider. This mock has no profile layer, so the effective prompt is the
+    // caller's systemPrompt.
+    const systemPromptDigest = createHash('sha256').update(input.systemPrompt ?? '', 'utf8').digest('hex');
+    return { runId, runtimeKind: 'pi-ai', startedAt: new Date().toISOString(), systemPromptDigest };
   }
 
   async pollRun(runId: string): Promise<RunStatus> {

@@ -18,6 +18,7 @@ import type { DiagDistillerOutputV1 } from '../../diagnostician/diag-distiller-o
 import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { DiagRootCauseOutputV1Schema, DefaultDiagRootCauseValidator } from '../../diagnostician/diag-rootcause-output.js';
 import { DiagDistillerOutputV1Schema, DefaultDiagDistillerValidator } from '../../diagnostician/diag-distiller-output.js';
+import { createHash } from 'node:crypto';
 import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { DiagRootCauseRunner } from '../diag-rootcause-runner.js';
@@ -29,7 +30,6 @@ import type { DiagRouterRunnerDeps } from '../diag-router-runner.js';
 import { SplitDiagnosticianRunner } from '../split-diagnostician-runner.js';
 import type { CommitResult } from '../../store/commit/diagnostician-committer.js';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { RunHandle, RunStatus } from '../../runtime-protocol.js';
 import { MemoryPIArtifactStore } from '../pi-artifact-store.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -90,8 +90,12 @@ function makeContextPayload() {
 
 // ── Shared mock helpers ────────────────────────────────────────────────────────
 
-function makeRunHandle(runId: string): RunHandle {
-  return { runId, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
+function makeRunHandle(runId: string, systemPrompt?: string): RunHandle {
+  return {
+    runId, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString(),
+    // PRI-1146 P1-02: attest the effective system prompt (this double merges none).
+    ...(systemPrompt === undefined ? {} : { systemPromptDigest: createHash('sha256').update(systemPrompt).digest('hex') }),
+  };
 }
 
 function makeSucceededStatus(runId: string): RunStatus {
@@ -115,6 +119,8 @@ function makeMockStateManager(taskOverrides: Record<string, TaskRecord>) {
       return Promise.resolve({ runs: [{ runId: `run-${taskId}`, taskId }], degradedRuns: [] });
     }),
     updateRunOutput: vi.fn().mockResolvedValue(undefined),
+    // PRI-1146 P2-01: exact input payload persisted for post-restart receipt verification.
+    runStore: { updateRun: vi.fn().mockResolvedValue(undefined) },
     markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
     markTaskFailed: vi.fn().mockResolvedValue(undefined),
     markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
@@ -136,7 +142,9 @@ function makeMockRuntimeAdapter() {
     kind: vi.fn().mockReturnValue(RUNTIME_KIND),
     getCapabilities: vi.fn(),
     healthCheck: vi.fn(),
-    startRun: vi.fn().mockResolvedValue(makeRunHandle('run-e2e')),
+    // PRI-1146 P1-02: the router requires the adapter-attested digest of the
+    // effective system prompt; this double merges no layers.
+    startRun: vi.fn().mockImplementation(async (input: { systemPrompt?: string }) => makeRunHandle('run-e2e', input?.systemPrompt)),
     pollRun: vi.fn().mockResolvedValue(makeSucceededStatus('run-e2e')),
     fetchOutput: vi.fn().mockResolvedValue({ payload: makeRootCauseOutput() }),
     cancelRun: vi.fn().mockResolvedValue(undefined),
@@ -286,7 +294,7 @@ describe('Diag chain e2e', () => {
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       validator: new DefaultDiagRootCauseValidator(),
       contextAssembler: contextAssembler,
@@ -319,7 +327,7 @@ describe('Diag chain e2e', () => {
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       validator: new DefaultDiagDistillerValidator(),
     };
@@ -341,7 +349,7 @@ describe('Diag chain e2e', () => {
 
     // ── Stage C: DiagRouterRunner ─────────────────────────────────────────────
     const routerRunId = 'run-router-e2e';
-    runtimeAdapter.startRun.mockResolvedValue(makeRunHandle(routerRunId));
+    runtimeAdapter.startRun.mockImplementation(async (input: { systemPrompt?: string }) => makeRunHandle(routerRunId, input?.systemPrompt));
     runtimeAdapter.pollRun.mockResolvedValue(makeSucceededStatus(routerRunId));
     runtimeAdapter.fetchOutput.mockResolvedValue({ payload: makeRouterOutput() });
 
@@ -356,7 +364,7 @@ describe('Diag chain e2e', () => {
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       committer: committer,
       trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },
@@ -673,7 +681,7 @@ describe('Diag chain e2e', () => {
 
     // Stage A runner setup
     const rootCauseRunId = 'run-split-rc';
-    runtimeAdapter.startRun.mockResolvedValue(makeRunHandle(rootCauseRunId));
+    runtimeAdapter.startRun.mockImplementation(async (input: { systemPrompt?: string }) => makeRunHandle(rootCauseRunId, input?.systemPrompt));
     runtimeAdapter.pollRun.mockResolvedValue(makeSucceededStatus(rootCauseRunId));
     // The store's run ID is 'run-${taskId}' per makeMockStateManager
     const storeRunIdA = `run-${STAGE_A_TASK_ID}`;
@@ -696,7 +704,7 @@ describe('Diag chain e2e', () => {
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       validator: new DefaultDiagRootCauseValidator(),
       contextAssembler: contextAssembler,
@@ -713,7 +721,7 @@ describe('Diag chain e2e', () => {
     const distillerDeps: DiagDistillerRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       validator: new DefaultDiagDistillerValidator(),
     };
@@ -736,7 +744,7 @@ describe('Diag chain e2e', () => {
     const routerDeps: DiagRouterRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       committer: committer,
       trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },
@@ -812,7 +820,7 @@ describe('Diag chain e2e', () => {
     const rootCauseDeps: DiagRootCauseRunnerDeps = {
       stateManager: stateManager as unknown as RuntimeStateManager,
       runtimeAdapter: runtimeAdapter,
-      eventEmitter: eventEmitter as unknown as StoreEventEmitter,
+      eventEmitter: eventEmitter,
       artifactStore,
       validator: new DefaultDiagRootCauseValidator(),
       contextAssembler: contextAssembler,
@@ -826,14 +834,14 @@ describe('Diag chain e2e', () => {
     });
 
     const distillerRunner = new DiagDistillerRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, validator: new DefaultDiagDistillerValidator() },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter, artifactStore, validator: new DefaultDiagDistillerValidator() },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
     const committer = { commit: vi.fn() };
 
     const routerRunner = new DiagRouterRunner(
-      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter as unknown as StoreEventEmitter, artifactStore, committer: committer, trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) } },
+      { stateManager: stateManager as unknown as RuntimeStateManager, runtimeAdapter: runtimeAdapter, eventEmitter: eventEmitter, artifactStore, committer: committer, trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) } },
       { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 10, timeoutMs: 1000 },
     );
 
@@ -895,9 +903,9 @@ describe('Diag chain e2e', () => {
 
       const runtimeAdapter = makeMockRuntimeAdapter();
       let runCount = 0;
-      runtimeAdapter.startRun.mockImplementation(async () => {
+      runtimeAdapter.startRun.mockImplementation(async (input: { systemPrompt?: string }) => {
         runCount++;
-        return { runId: `run-e2e-${runCount}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() };
+        return makeRunHandle(`run-e2e-${runCount}`, input?.systemPrompt);
       });
       runtimeAdapter.pollRun.mockImplementation(async (handle: Record<string, unknown>) => {
         return { status: 'succeeded', runId: handle.runId };
@@ -920,7 +928,7 @@ describe('Diag chain e2e', () => {
         {
           stateManager,
           runtimeAdapter: runtimeAdapter,
-          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          eventEmitter: makeMockEventEmitter(),
           artifactStore: stateManager.piArtifactStore,
           validator: new DefaultDiagRootCauseValidator(),
           contextAssembler,
@@ -931,7 +939,7 @@ describe('Diag chain e2e', () => {
         {
           stateManager,
           runtimeAdapter: runtimeAdapter,
-          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          eventEmitter: makeMockEventEmitter(),
           artifactStore: stateManager.piArtifactStore,
           validator: new DefaultDiagDistillerValidator(),
         },
@@ -941,7 +949,7 @@ describe('Diag chain e2e', () => {
         {
           stateManager,
           runtimeAdapter: runtimeAdapter,
-          eventEmitter: makeMockEventEmitter() as unknown as StoreEventEmitter,
+          eventEmitter: makeMockEventEmitter(),
           artifactStore: stateManager.piArtifactStore,
           committer,
           trustedPrincipleSource: { readTrustedPrinciples: () => ({ status: 'ok', principles: [] }) },

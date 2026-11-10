@@ -134,7 +134,12 @@ async function setupPipeline(seed: LedgerSeed, principleText?: string): Promise<
     kind: vi.fn().mockReturnValue(RUNTIME_KIND),
     getCapabilities: vi.fn(),
     healthCheck: vi.fn(),
-    startRun: vi.fn().mockImplementation(async () => ({ runId: `run-${Date.now()}-${Math.random()}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString() })),
+    startRun: vi.fn().mockImplementation(async (input: { systemPrompt?: string }) => ({
+      runId: `run-${Date.now()}-${Math.random()}`, runtimeKind: RUNTIME_KIND, startedAt: new Date().toISOString(),
+      // PRI-1146 P1-02: this double merges no prompt layers, so the submitted
+      // system prompt IS the effective one the provider would receive.
+      ...(typeof input?.systemPrompt === 'string' ? { systemPromptDigest: sha256(input.systemPrompt) } : {}),
+    })),
     pollRun: vi.fn().mockImplementation(async (handle: { runId: string }) => ({ status: 'succeeded', runId: handle.runId })),
     fetchOutput: vi.fn(),
     cancelRun: vi.fn().mockResolvedValue(undefined),
