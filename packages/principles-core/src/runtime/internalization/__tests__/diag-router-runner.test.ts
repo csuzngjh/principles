@@ -23,8 +23,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readRouterContextReceipt, verifyRouterContextReceipt } from '../router-context-evidence.js';
-import { Value } from '@sinclair/typebox/value';
-import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
+import { readDiagnosticianOutputFromEnvelope } from '../../diagnostician-output.js';
 import type { vi } from 'vitest';
 import { describe, it, expect } from 'vitest';
 import type { MemoryPIArtifactStore } from '../pi-artifact-store.js';
@@ -50,7 +49,11 @@ describe('DiagRouterRunner V-slice', () => {
     const [artifact] = await h.deps.artifactStore.listBySourceTaskId(ROUTER_TASK_ID);
     if (!artifact) throw new Error('missing persisted router artifact');
     const envelope: unknown = JSON.parse(artifact.contentJson);
-    expect(Value.Check(DiagnosticianOutputV1Schema, envelope)).toBe(true);
+    // PRI-1146: the persisted artifact is the router ENVELOPE (output +
+    // trustedContextReceipt/associationValidation keys) — read it through the
+    // envelope reader; the closed V2 root rejects a direct schema check.
+    expect(readDiagnosticianOutputFromEnvelope(envelope)).toBeDefined();
+    expect(readDiagnosticianOutputFromEnvelope(JSON.parse(JSON.stringify(envelope)))?.schemaVersion).toBe('diagnostician-output-v2');
     const restored = readRouterContextReceipt(envelope, { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID });
     expect(restored.status).toBe('available');
     if (restored.status !== 'available') throw new Error('receipt unavailable');
@@ -61,7 +64,9 @@ describe('DiagRouterRunner V-slice', () => {
     if (typeof message !== 'string' || typeof systemPrompt !== 'string') throw new Error('invalid actual prompt');
     expect(restored.receipt.messageDigest).toBe(createHash('sha256').update(message).digest('hex'));
     expect(restored.receipt.systemPromptDigest).toBe(createHash('sha256').update(systemPrompt).digest('hex'));
-    expect(restored.receipt.canonicalPrinciples.status).toBe('unavailable');
+    // Harness default = proven empty exposure (readable ledger, no eligible
+    // principles) → receipt records `available` with an empty allowlist.
+    expect(restored.receipt.canonicalPrinciples).toMatchObject({ status: 'available', principles: [] });
     const predecessors = [];
     for (const source of restored.receipt.predecessorDigests) {
       const sourceArtifact = await h.deps.artifactStore.getArtifactById(source.artifactId);

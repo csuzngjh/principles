@@ -24,7 +24,7 @@ import { PainSignalBridge } from '../pain-signal-bridge.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { RuntimeStateManager as RuntimeStateManagerClass } from '../store/runtime-state-manager.js';
 import { SqliteConnection } from '../store/sqlite-connection.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 import { buildRootCauseProtocolInstruction } from '../diagnostician/rootcause-prompt-builder.js';
 import { mapBridgeTelemetryToStoreEvent } from '../pain-signal-runtime-factory.js';
@@ -52,15 +52,16 @@ afterAll(async () => {
   }
 });
 
-function makeOutput(rootCause: string, over: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
+function makeOutput(rootCause: string, over: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-001',
     summary: 'test diagnosis summary',
     rootCause,
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'tool_calls:1', note: 'agent action evidence' }],
-    recommendations: [{ kind: 'defer', description: 'no actionable principle' }],
+    recommendations: [{ kind: 'defer', description: 'no actionable principle', recommendationRef: 'defer-1' }],
     confidence: 0.7,
     ...over,
   };
@@ -95,7 +96,7 @@ function makeBridge(stateManager: RuntimeStateManager, opts: { persistenceEnable
 
 async function completeDiagnosis(
   bridge: PainSignalBridge,
-  opts: { painId: string; taskId: string; output: DiagnosticianOutputV1 },
+  opts: { painId: string; taskId: string; output: DiagnosticianOutputV2 },
 ): Promise<ReturnType<PainSignalBridge['onDiagnosisComplete']>> {
   return bridge.onDiagnosisComplete({
     taskId: opts.taskId,

@@ -26,7 +26,8 @@ import type {
   RunStatus,
   RuntimeKind,
 } from '../runtime-protocol.js';
-import type { StoreEventEmitter } from '../store/event-emitter.js';
+import type { PeerRunnerTelemetryEmitter } from './peer-runner-types.js';
+import { hashContextRefs } from './context-hash.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { parseSeedSourcePainId } from '../internalization/pitask-metadata.js';
@@ -91,7 +92,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   // ── Shared dependencies (protected for subclass access) ──
   protected readonly stateManager: RuntimeStateManager;
   protected readonly runtimeAdapter: PDRuntimeAdapter;
-  protected readonly eventEmitter: StoreEventEmitter;
+  protected readonly eventEmitter: PeerRunnerTelemetryEmitter;
   protected readonly artifactStore: PIArtifactStore;
   protected readonly resolvedOptions: ResolvedPeerRunnerOptions;
   protected readonly config: PeerRunnerConfig;
@@ -148,6 +149,19 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
   /** Invoke the runtime with runner-specific prompt builder. */
   abstract invokeRuntime(taskId: string, context: TContext): Promise<RunHandle>;
+
+  /**
+   * The exact input payload submitted to the runtime when it must be persisted
+   * as post-restart verification evidence (PRI-1146 P2-01). The default is
+   * "nothing to persist"; runners whose receipts must be re-verifiable in a
+   * new process return the exact submitted message, which BasePeerRunner
+   * writes to the run row's `input_payload`. Persistence failure is loud — an
+   * unverifiable receipt must never be committed silently (rc-9).
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  protected getInvocationInputPayload(_context: TContext): string | undefined {
+    return undefined;
+  }
 
   /** Validate the LLM output. Receives untrusted data — must perform runtime validation. */
   abstract validateOutput(output: unknown, taskId: string, context: TContext): Promise<PeerRunnerValidationResult>;
@@ -286,6 +300,17 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       // 4. Invoke runtime
       this.phase = RunnerPhase.Invoking;
       const runHandle = await this.invokeRuntime(taskId, context);
+      const invocationInputPayload = this.getInvocationInputPayload(context);
+      if (invocationInputPayload !== undefined) {
+        try {
+          await this.stateManager.runStore.updateRun(storeRunId, { inputPayload: invocationInputPayload });
+        } catch (persistError) {
+          this.emitEvent('input_payload_persist_failed', taskId, {
+            errorMessage: persistError instanceof Error ? persistError.message : String(persistError),
+          });
+          throw persistError;
+        }
+      }
       this.emitEvent('run_started', taskId, {
         runtimeKind,
       });
@@ -513,15 +538,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     return latestRun.runId;
   }
 
-  /** Compute a deterministic hash from context references (observability only). */
-  protected static hashContextRefs(refs: readonly string[]): string {
-    if (refs.length === 0) return 'empty';
-    const str = refs.join('|');
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
-    }
-    return `ctx-${Math.abs(hash).toString(16)}`;
+  /**
+   * Compute a deterministic hash from context references (observability only).
+   * Public so post-restart evidence reconstruction re-derives the exact same
+   * `contextHash` the runner recorded (PRI-1146 P2-01) — one implementation,
+   * never a second copy.
+   */
+  static hashContextRefs(refs: readonly string[]): string {
+    return hashContextRefs(refs);
   }
 
   // ── Error handling ─────────────────────────────────────────────────────────

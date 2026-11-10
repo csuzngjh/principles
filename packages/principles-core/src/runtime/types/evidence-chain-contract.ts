@@ -870,7 +870,7 @@ export function assembleEvidenceChain(params: {
    * PRI-469: Diagnostician artifacts (rows from the `artifacts` table where
    * artifact_kind = 'diagnostician_output'). Each row is treated as untrusted
    * `unknown` and must have `task_id` (string) and `content_json` (string of
-   * JSON containing the DiagnosticianOutputV1 with optional `rootCause` and
+   * JSON containing the DiagnosticianOutputV2 (or its router envelope) with optional `rootCause` and
    * `intentTension`).
    *
    * Production architecture: DiagnosticianCommitter writes the full Stage C
@@ -906,7 +906,7 @@ export function assembleEvidenceChain(params: {
 
   // PRI-469: Build artifact lookup by task_id. Each artifact row has
   // { task_id: string, content_json: string }. content_json holds the
-  // DiagnosticianOutputV1 JSON (including rootCause and optional intentTension).
+  // DiagnosticianOutputV2 JSON (including rootCause and optional intentTension).
   // Artifact is the CANONICAL source; tasks.diagnostic_json is a fallback.
   const artifactByTaskId = new Map<string, Record<string, unknown>>();
   for (const artifact of diagnosticArtifacts) {
@@ -949,7 +949,7 @@ export function assembleEvidenceChain(params: {
           const parsed: unknown = JSON.parse(contentJson);
           if (isRecord(parsed)) {
             // rootCause from artifact (canonical, takes precedence).
-            // The artifact stores DiagnosticianOutputV1 where rootCause is an
+            // The artifact stores DiagnosticianOutputV2 (router envelope) where rootCause is an
             // object: { summary: string, confidence: number, ... }. Legacy
             // test fixtures may store rootCause as a plain string. Handle both.
             const artifactRootCause = getOwnValue(parsed, 'rootCause');

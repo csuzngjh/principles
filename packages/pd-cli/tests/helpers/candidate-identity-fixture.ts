@@ -11,9 +11,16 @@ export async function seedCandidateMaterial(sm: RuntimeStateManager, candidateId
   const [run] = await sm.getRunsByTask(taskId);
   if (!run) throw new Error('Fixture diagnosis run missing');
   await new SqliteDiagnosticianCommitter(sm.connection).commit({ taskId, runId: run.runId, idempotencyKey: `fixture-${candidateId}`, output: {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true, diagnosisId: `diag-${candidateId}`, summary: 'Test fixture diagnosis', rootCause: 'Test fixture behavior', violatedPrinciples: [],
     evidence: [{ sourceRef: 'test-fixture://trace', note: 'Isolated fixture, no Owner decision' }],
-    recommendations: [{ kind: recommendationKind, description: 'Block unsafe system writes', triggerPattern: 'unsafe write', action: 'block' }], confidence: 0.9,
+    // V2: every rec carries a unique recommendationRef; a rule rec must also
+    // declare its principleAssociation (this fixture has no linking evidence).
+    recommendations: [recommendationKind === 'rule'
+      ? { kind: 'rule', recommendationRef: 'x-1', description: 'Block unsafe system writes', triggerPattern: 'unsafe write', action: 'block',
+          principleAssociation: { status: 'unresolved', reason: 'no_supported_target' } }
+      : { kind: 'principle', recommendationRef: 'x-1', description: 'Block unsafe system writes', triggerPattern: 'unsafe write', action: 'block' }],
+    confidence: 0.9,
   } });
   const [candidate] = await sm.getCandidatesByTaskId(taskId);
   if (!candidate) throw new Error('Fixture candidate missing');

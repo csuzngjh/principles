@@ -75,6 +75,14 @@ export const RunHandleSchema = Type.Object({
   runId: Type.String({ minLength: 1 }),
   runtimeKind: RuntimeKindSchema,
   startedAt: Type.String(),
+  /**
+   * SHA-256 of the EXACT effective system prompt this run handed to the model
+   * provider, after every prompt layer was merged by the adapter's single
+   * merge path. Adapters that merge layers MUST report it; consumers that bind
+   * provenance to the provider prompt (PRI-1146 P1-02) fail loud when absent
+   * rather than falling back to a base-layer hash that was never sent.
+   */
+  systemPromptDigest: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
 });
 export type RunHandle = Static<typeof RunHandleSchema>;
 

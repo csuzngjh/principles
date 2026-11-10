@@ -1,4 +1,4 @@
-import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from './diagnostician-output.js';
 
 export type SyntheticBaselineStageName =
   | 'pain_intake'
@@ -92,8 +92,9 @@ export function boundedEvidence(evidence: Record<string, unknown>): Record<strin
   return truncated;
 }
 
-export function makeDeterministicDiagnosticianOutput(painId: string): DiagnosticianOutputV1 {
+export function makeDeterministicDiagnosticianOutput(painId: string): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: `synth-diag-${painId}`,
     summary: 'Synthetic baseline: deterministic diagnostician output',
@@ -109,6 +110,7 @@ export function makeDeterministicDiagnosticianOutput(painId: string): Diagnostic
       {
         kind: 'principle',
         description: 'Synthetic baseline: avoid repeating this tool failure pattern',
+        recommendationRef: 'principle-1',
         abstractedPrinciple: 'Synthetic baseline principle: handle tool failures gracefully',
       },
     ],

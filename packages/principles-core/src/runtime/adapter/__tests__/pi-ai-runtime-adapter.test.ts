@@ -2,7 +2,7 @@
  * PiAiRuntimeAdapter unit tests.
  *
  * Verifies all PDRuntimeAdapter interface methods, pi-ai API usage,
- * error mapping, DiagnosticianOutputV1 validation, retry logic,
+ * error mapping, DiagnosticianOutputV2 validation, retry logic,
  * and telemetry emission.
  *
  * All pi-ai calls are mocked — no real API keys needed.
@@ -34,13 +34,14 @@ const mockEmitTelemetry = storeEmitter.emitTelemetry as ReturnType<typeof vi.fn>
 // ── Fixtures ──
 
 const VALID_DIAGNOSIS = {
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'diag-test-1',
   summary: 'Test summary',
   rootCause: 'Test root cause',
   violatedPrinciples: [],
   evidence: [],
-  recommendations: [{ kind: 'defer', description: 'no actionable recommendation' }],
+  recommendations: [{ kind: 'defer', description: 'no actionable recommendation', recommendationRef: 'defer-1' }],
   confidence: 0.9,
 };
 
@@ -512,7 +513,7 @@ describe('PiAiRuntimeAdapter', () => {
       mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
       const adapter = makeAdapter();
       await expect(adapter.startRun(makeStartRunInput({
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
       }))).rejects.toMatchObject({ category: 'output_invalid' });
     });
 
@@ -618,7 +619,7 @@ describe('PiAiRuntimeAdapter', () => {
       const adapter = makeAdapter({ maxRetries: 3 });
 
       await expect(adapter.startRun(makeStartRunInput({
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
       }))).rejects.toThrow(PDRuntimeError);
       // 1 original + 3 repair attempts = 4 calls (not infinite retries)
       expect(mockComplete).toHaveBeenCalledTimes(4);
@@ -974,11 +975,15 @@ describe('PiAiRuntimeAdapter', () => {
   // ── startRun() output repair (PRI-71) ──
 
   describe('startRun() output repair (PRI-71)', () => {
-    /** Invalid output with string confidence and wrong-case kind. */
+    /**
+     * Invalid output with string confidence and wrong-case kind.
+     * PRI-1146: no taskId — the closed V2 root rejects it, and the repair loop's
+     * preserveLineageFields would re-inject it into every repair candidate,
+     * making the (repairable) semantic errors unrepairable.
+     */
     const INVALID_DIAGNOSIS = {
       valid: true,
       diagnosisId: 'diag-repair-1',
-      taskId: 'task-repair-1',
       summary: 'Test repair',
       rootCause: 'Test root cause',
       violatedPrinciples: [],
@@ -990,7 +995,7 @@ describe('PiAiRuntimeAdapter', () => {
     /** Make a startRunInput with diagnostician output schema ref. */
     function makeDiagnosticianInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
       return makeStartRunInput({
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         taskRef: { taskId: 'task-repair-1' },
         ...overrides,
       });
@@ -1074,7 +1079,7 @@ describe('PiAiRuntimeAdapter', () => {
       const extractionEvent = findTelemetryEvent('output_extraction_failed');
       expect(extractionEvent).toBeDefined();
       const payload = extractionEvent?.payload as Record<string, unknown>;
-      expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(payload.outputSchemaRef).toBe('diagnostician-output');
       expect(payload.provider).toBe('openrouter');
       expect(payload.model).toBe('anthropic/claude-sonnet-4');
       expect(payload.rawOutputPreview).toBe(proseOutput);
@@ -1292,17 +1297,33 @@ describe('PiAiRuntimeAdapter', () => {
       }))).rejects.toMatchObject({ category: 'output_invalid' });
     });
 
-    it('falls back to DiagnosticianOutputV1Schema for diagnostician-output-v1', async () => {
+    it('validates diagnostician-output against DiagnosticianOutputV2Schema (PRI-1146 V2-only)', async () => {
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
       const adapter = makeAdapter();
       const handle = await adapter.startRun(makeStartRunInput({
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         taskRef: { taskId: 'task-test-1' },
       }));
 
       const output = await adapter.fetchOutput(handle.runId);
       expect(output?.payload).toMatchObject({ valid: true, diagnosisId: 'diag-test-1' });
+    });
+
+    it('rejects retired diagnostician-output-v1 ref with output_invalid before any LLM call (PRI-1146 Clean Break)', async () => {
+      // PRI-1146: the versioned diagnostician ref was removed from the alias
+      // table — it must fail loud (Unknown outputSchemaRef) instead of
+      // silently aliasing, and no LLM call may be attempted.
+      // NOTE: no mockComplete setup — resolution fails BEFORE any LLM call.
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'diagnostician-output-v1',
+        taskRef: { taskId: 'task-test-1' },
+      }))).rejects.toMatchObject({
+        category: 'output_invalid',
+        message: expect.stringMatching(/Unknown outputSchemaRef: diagnostician-output-v1/i),
+      });
+      expect(mockComplete).toHaveBeenCalledTimes(0);
     });
 
     it('unknown outputSchemaRef fails loud with output_invalid (rc-3, was silent skip)', async () => {
@@ -1361,7 +1382,8 @@ describe('PiAiRuntimeAdapter', () => {
     const INVALID_DIAGNOSIS_SCHEMA = {
       valid: true,
       diagnosisId: 'diag-pri200-1',
-      taskId: 'task-pri200-1',
+      // PRI-1146: no taskId (closed V2 root rejects it; preserveLineageFields
+      // in the repair loop would re-inject it and doom every repair attempt).
       summary: 'Test PRI-200',
       rootCause: 'Test root cause',
       violatedPrinciples: [],
@@ -1372,7 +1394,7 @@ describe('PiAiRuntimeAdapter', () => {
 
     function makeDiagnosticianInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
       return makeStartRunInput({
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         taskRef: { taskId: 'task-pri200-1' },
         ...overrides,
       });
@@ -1423,7 +1445,7 @@ describe('PiAiRuntimeAdapter', () => {
       const extractionEvent = findTelemetryEvent('output_extraction_failed');
       expect(extractionEvent).toBeDefined();
       const payload = extractionEvent?.payload as Record<string, unknown>;
-      expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(payload.outputSchemaRef).toBe('diagnostician-output');
       expect(payload.provider).toBe('openrouter');
       expect(payload.model).toBe('anthropic/claude-sonnet-4');
       expect(typeof payload.rawOutputPreview).toBe('string');
@@ -1461,7 +1483,7 @@ describe('PiAiRuntimeAdapter', () => {
       const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
       expect(exhaustedEvent).toBeDefined();
       const exhaustedPayload = exhaustedEvent?.payload as Record<string, unknown>;
-      expect(exhaustedPayload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(exhaustedPayload.outputSchemaRef).toBe('diagnostician-output');
       expect(exhaustedPayload.provider).toBe('openrouter');
       expect(exhaustedPayload.model).toBe('anthropic/claude-sonnet-4');
       expect(typeof exhaustedPayload.rawOutputPreview).toBe('string');
@@ -1494,11 +1516,18 @@ describe('PiAiRuntimeAdapter', () => {
 
       const [, context] = mockComplete.mock.calls[1] as [unknown, { messages: { content: string }[] }];
       const repairMessage = context.messages[0]?.content ?? '';
-      expect(repairMessage).toContain('diagnostician-output-v1');
+      expect(repairMessage).toContain('diagnostician-output');
       expect(repairMessage).toContain('/confidence');
     });
 
-    it('8. repair attempt must not override lineage fields silently', async () => {
+    it('8. repair output carrying lineage fields is rejected by the closed V2 root (no silent lineage override)', async () => {
+      // PRI-1146: the V2 root is closed (additionalProperties: false), so a
+      // repair candidate that echoes or changes lineage fields (taskId et al.)
+      // can NEVER validate — preserveLineageFields re-injects the original's
+      // lineage into the candidate, and the schema rejects the extra property.
+      // The run fails loud (output_invalid) instead of silently accepting
+      // LLM-supplied lineage; downstream consumers keep getting taskId from
+      // RunnerContext/TaskRecord (PRI-272).
       resetMock();
       const originalWithLineage = {
         ...INVALID_DIAGNOSIS_SCHEMA,
@@ -1514,15 +1543,16 @@ describe('PiAiRuntimeAdapter', () => {
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(repairedWithChangedLineage)));
 
       const adapter = makeAdapter();
-      const handle = await adapter.startRun(makeDiagnosticianInput({
+      await expect(adapter.startRun(makeDiagnosticianInput({
         taskRef: { taskId: 'task-original-1' },
-      }));
+      }))).rejects.toMatchObject({ category: 'output_invalid' });
 
-      const output = await adapter.fetchOutput(handle.runId);
-      const payload = output?.payload as Record<string, unknown>;
-      // taskId is a lineage field — it must be stripped from output (PRI-272).
-      // Downstream consumers get taskId from RunnerContext/TaskRecord.
-      expect(payload.taskId).toBeUndefined();
+      // The smuggled lineage never produced a stored payload: every repair
+      // attempt (default budget 3) carried the re-injected taskId and was
+      // rejected by the closed root — 1 original + 3 repair calls.
+      expect(mockComplete).toHaveBeenCalledTimes(4);
+      const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
+      expect(exhaustedEvent).toBeDefined();
     });
 
     it('9. provider/model/rawOutputPreview are present in evidence pack', async () => {
@@ -1569,7 +1599,7 @@ describe('PiAiRuntimeAdapter', () => {
       const schemaInvalidEvent = findTelemetryEvent('output_schema_invalid');
       expect(schemaInvalidEvent).toBeDefined();
       const payload = schemaInvalidEvent?.payload as Record<string, unknown>;
-      expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(payload.outputSchemaRef).toBe('diagnostician-output');
       expect(payload.provider).toBe('openrouter');
       expect(payload.model).toBe('anthropic/claude-sonnet-4');
       expect(typeof (payload.rawOutputPreview as string)).toBe('string');
@@ -1589,7 +1619,7 @@ describe('PiAiRuntimeAdapter', () => {
       const payload = exhaustedEvent?.payload as Record<string, unknown>;
       const attempts = payload.repairAttempts as Record<string, unknown>[];
       expect(attempts.length).toBeGreaterThan(0);
-      expect(attempts[0]?.schemaRef).toBe('diagnostician-output-v1');
+      expect(attempts[0]?.schemaRef).toBe('diagnostician-output');
       expect(typeof attempts[0]?.attempt).toBe('number');
       expect(typeof attempts[0]?.repaired).toBe('boolean');
     });
@@ -2081,7 +2111,7 @@ describe('PiAiRuntimeAdapter', () => {
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(response));
 
       const adapter = makeAdapter({ outputPathStrategy: 'free_form_only' });
-      const handle = await adapter.startRun(makeStartRunInput({ outputSchemaRef: 'diagnostician-output-v1' }));
+      const handle = await adapter.startRun(makeStartRunInput({ outputSchemaRef: 'diagnostician-output' }));
       const output = await adapter.fetchOutput(handle.runId);
 
       expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
@@ -2256,7 +2286,7 @@ describe('PiAiRuntimeAdapter', () => {
   // ── PRI-284: tool_call_first / json_mode_first path tests ──
 
   describe('output path strategy: tool_call_first (PRI-284)', () => {
-    function makeToolCallResponse(args: Record<string, unknown>, toolName = 'record_diagnostician_output_v1') {
+    function makeToolCallResponse(args: Record<string, unknown>, toolName = 'record_diagnostician_output') {
       return {
         content: [
           { type: 'toolCall' as const, id: 'call-1', name: toolName, arguments: args },
@@ -2277,7 +2307,7 @@ describe('PiAiRuntimeAdapter', () => {
         inputPayload: 'Diagnose this pain signal',
         contextItems: [],
         timeoutMs: 60_000,
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         ...overrides,
       };
     }
@@ -2295,7 +2325,7 @@ describe('PiAiRuntimeAdapter', () => {
       const pathEvent = findTelemetryEvent('output_path_chosen');
       expect(pathEvent?.payload).toMatchObject({
         outputPath: 'tool_call',
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
       });
     });
 
@@ -2373,8 +2403,8 @@ describe('PiAiRuntimeAdapter', () => {
       expect(rawContext.tools.length).toBe(1);
       const [tool] = rawContext.tools;
       if (!tool) throw new Error('expected exactly one tool');
-      // Name derived from schemaRef 'diagnostician-output-v1'
-      expect(tool.name).toBe('record_diagnostician_output_v1');
+      // Name derived from schemaRef 'diagnostician-output'
+      expect(tool.name).toBe('record_diagnostician_output');
       // Not the old hardcoded name
       expect(tool.name).not.toBe('record_diagnosis_v1');
       // Parameters should be the schema from registry
@@ -2389,7 +2419,7 @@ describe('PiAiRuntimeAdapter', () => {
         inputPayload: 'Diagnose this pain signal',
         contextItems: [],
         timeoutMs: 60_000,
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         ...overrides,
       };
     }
@@ -2476,7 +2506,7 @@ describe('PiAiRuntimeAdapter', () => {
         inputPayload: 'Diagnose this pain signal',
         contextItems: [],
         timeoutMs: 60_000,
-        outputSchemaRef: 'diagnostician-output-v1',
+        outputSchemaRef: 'diagnostician-output',
         ...overrides,
       };
     }

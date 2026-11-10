@@ -32,7 +32,7 @@ import type { DiagRouterRunner } from './diag-router-runner.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 import type { PeerRunnerResult, PeerRunnerResultStatus } from '../runner/peer-runner-types.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 import type { DiagnosticianCommitter } from '../store/commit/diagnostician-committer.js';
 import type { RetryPolicy } from '../store/lifecycle/retry-policy.js';
 import { DefaultDiagnosticianValidator } from '../runner/default-validator.js';
@@ -180,7 +180,7 @@ export class SplitDiagnosticianRunner {
 
     // Stage C may already be succeeded from a previous partial run
     const stageCTask = await this.stateManager.getTask(stageCTaskId);
-    let resultC: PeerRunnerResult<DiagnosticianOutputV1>;
+    let resultC: PeerRunnerResult<DiagnosticianOutputV2>;
     if (stageCTask && stageCTask.status === 'succeeded') {
       const runs = await this.stateManager.getRunsByTask(stageCTaskId);
       // PRI-818 (R1 review 818-2): getRunsByTask returns runs in started_at
@@ -223,7 +223,7 @@ export class SplitDiagnosticianRunner {
       if (cacheUsable) {
         try {
           const cacheValidation = await this.cacheOutputValidator.validate(
-            parsedOutput as DiagnosticianOutputV1,
+            parsedOutput as DiagnosticianOutputV2,
             stageCTaskId,
           );
           if (!cacheValidation.valid) {
@@ -245,7 +245,7 @@ export class SplitDiagnosticianRunner {
           taskId: stageCTaskId,
           attemptCount: stageCTask.attemptCount,
           contextHash: '',
-          output: parsedOutput as DiagnosticianOutputV1,
+          output: parsedOutput as DiagnosticianOutputV2,
         };
       } else {
         // PRI-818 (R1 review 818-1): the Stage C task is `succeeded`, but

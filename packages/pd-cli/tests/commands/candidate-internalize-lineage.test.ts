@@ -19,7 +19,7 @@ import * as fs from 'node:fs';
 import {
   RuntimeStateManager,
   SqliteDiagnosticianCommitter,
-  type DiagnosticianOutputV1,
+  type DiagnosticianOutputV2,
 } from '@principles/core/runtime';
 import {
   handleCandidateInternalize,
@@ -50,7 +50,7 @@ function diagnosticianDiagnosticJson(painId: string): string {
   });
 }
 
-function diagnosticianOutput(painId: string): DiagnosticianOutputV1 {
+function diagnosticianOutput(painId: string): DiagnosticianOutputV2 {
   return {
     valid: true,
     diagnosisId: `diag-${painId}`,
@@ -62,8 +62,10 @@ function diagnosticianOutput(painId: string): DiagnosticianOutputV1 {
       kind: 'principle',
       description: 'Block writes to system paths without owner confirmation',
       abstractedPrinciple: 'Never write to OS system paths without explicit owner approval',
+      recommendationRef: 'principle-1',
     }],
     confidence: 0.9,
+    schemaVersion: 'diagnostician-output-v2',
   };
 }
 

@@ -135,14 +135,17 @@ export {
   DiagnosticianContextPayloadSchema,
 } from './runtime/index.js';
 
-// Diagnostician output schemas (Phase 2)
+// Diagnostician output schemas (V2 Only — PRI-1146)
 export {
   DiagnosticianViolatedPrincipleSchema,
   DiagnosticianEvidenceSchema,
   RecommendationKindSchema,
-  DiagnosticianRecommendationSchema,
-  DiagnosticianOutputV1Schema,
+  PrincipleAssociationSchema,
+  DiagnosticianRecommendationV2Schema,
+  DiagnosticianOutputV2Schema,
   DiagnosticianInvocationInputSchema,
+  DIAGNOSTICIAN_ENVELOPE_KEYS,
+  readDiagnosticianOutputFromEnvelope,
 } from './runtime/index.js';
 export type {
   PDErrorCategory,
@@ -176,11 +179,12 @@ export type {
   DiagnosisTarget,
   ContextPayload,
   DiagnosticianContextPayload,
-  DiagnosticianOutputV1,
+  DiagnosticianOutputV2,
+  DiagnosticianRecommendationV2,
   DiagnosticianViolatedPrinciple,
   DiagnosticianEvidence,
   RecommendationKind,
-  DiagnosticianRecommendation,
+  PrincipleAssociation,
   DiagnosticianInvocationInput,
 } from './runtime/index.js';
 

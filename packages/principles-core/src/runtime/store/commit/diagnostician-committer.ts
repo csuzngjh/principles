@@ -1,10 +1,16 @@
 /**
- * DiagnosticianCommitter — atomic commit interface for DiagnosticianOutputV1.
+ * DiagnosticianCommitter — atomic commit interface for DiagnosticianOutputV2.
  *
- * Persists a DiagnosticianOutputV1 to the artifact registry (artifacts +
+ * Persists a DiagnosticianOutputV2 to the artifact registry (artifacts +
  * commits + principle_candidates) inside a single SQLite transaction, with
  * idempotent re-commit support via UNIQUE constraints on run_id and
  * idempotency_key.
+ *
+ * PRI-1146 (V2 Only): only V2 output is accepted. Each candidate row keeps the
+ * original structured recommendation in `source_recommendation_json` —
+ * including `recommendationRef` and, for rules, `principleAssociation` — so
+ * the recommendationRef → candidateId mapping is deterministically
+ * reconstructible per artifact (same artifact_id + unique ref).
  *
  * COMT-01 through COMT-06
  */
@@ -13,17 +19,17 @@ import { randomUUID } from 'crypto';
 import type BetterSqlite3 from 'better-sqlite3';
 import type { SqliteConnection } from '../sqlite-connection.js';
 import { PDRuntimeError } from '../../error-categories.js';
-import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema, type DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 
 // ── Public Types ─────────────────────────────────────────────────────────────
 
 export interface DiagnosticianCommitter {
   /**
-   * Atomically commit a DiagnosticianOutputV1 to the artifact registry.
+   * Atomically commit a DiagnosticianOutputV2 to the artifact registry.
    *
    * @param input.runId - the run producing this output
    * @param input.taskId - the task being diagnosed
-   * @param input.output - the DiagnosticianOutputV1 to persist
+   * @param input.output - the DiagnosticianOutputV2 to persist
    * @param input.idempotencyKey - client-supplied key for deduplication
    *
    * @returns CommitResult with commitId, artifactId, candidateCount
@@ -40,7 +46,7 @@ export interface DiagnosticianCommitter {
 export interface CommitInput {
   runId: string;
   taskId: string;
-  output: DiagnosticianOutputV1;
+  output: DiagnosticianOutputV2;
   idempotencyKey: string;
   /**
    * Optional pre-built `contentJson` for the committed artifact. When omitted,
@@ -73,7 +79,7 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
   async commit(input: CommitInput): Promise<CommitResult> {
     const db = this.connection.getDb();
 
-    // 1. Validate input.output conforms to DiagnosticianOutputV1
+    // 1. Validate input.output conforms to DiagnosticianOutputV2
     // rc-1-treat-as-unknown / rc-3-fail-loud-missing: input.output is untrusted
     // runtime data. Validate it is a non-null object BEFORE dereferencing
     // .recommendations, so a null/undefined/malformed output yields a categorized
@@ -81,7 +87,7 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
     if (typeof input.output !== 'object' || input.output === null) {
       throw new PDRuntimeError(
         'input_invalid',
-        'DiagnosticianOutputV1 output must be a non-null object',
+        'DiagnosticianOutputV2 output must be a non-null object',
         { taskId: input.taskId, runId: input.runId },
       );
     }
@@ -91,16 +97,33 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
     if (!Array.isArray(input.output.recommendations) || input.output.recommendations.length === 0) {
       throw new PDRuntimeError(
         'input_invalid',
-        'DiagnosticianOutputV1.recommendations must be non-empty; an empty array would commit zero owner-reviewable candidates. Emit a { kind: "defer", ... } recommendation when no action is warranted.',
+        'DiagnosticianOutputV2.recommendations must be non-empty; an empty array would commit zero owner-reviewable candidates. Emit a { kind: "defer", ... } recommendation when no action is warranted.',
         { taskId: input.taskId, runId: input.runId },
       );
     }
-    if (!Value.Check(DiagnosticianOutputV1Schema, input.output)) {
+    if (!Value.Check(DiagnosticianOutputV2Schema, input.output)) {
       throw new PDRuntimeError(
         'input_invalid',
-        'DiagnosticianOutputV1 validation failed',
-        { errors: [...Value.Errors(DiagnosticianOutputV1Schema, input.output)].map((e) => e.message) },
+        'DiagnosticianOutputV2 validation failed (V1 output is not accepted — the schemaVersion literal "diagnostician-output-v2" and per-recommendation recommendationRef are required)',
+        { errors: [...Value.Errors(DiagnosticianOutputV2Schema, input.output)].map((e) => e.message) },
       );
+    }
+    // PRI-1146 / SPEC v0.6 §4: recommendationRef must be unique within the
+    // artifact — the ref→candidate mapping is only deterministic when refs do
+    // not collide. The validator checks this too; the committer is the write
+    // boundary and re-asserts it (fail-loud, never "keep the first").
+    {
+      const seen = new Set<string>();
+      for (const rec of input.output.recommendations) {
+        if (seen.has(rec.recommendationRef)) {
+          throw new PDRuntimeError(
+            'input_invalid',
+            `DiagnosticianOutputV2.recommendations contains duplicate recommendationRef "${rec.recommendationRef}"; refs must be unique within the artifact`,
+            { taskId: input.taskId, runId: input.runId },
+          );
+        }
+        seen.add(rec.recommendationRef);
+      }
     }
 
     // CodeRabbit PR #1273 #14 / rc-9: when a caller supplies a pre-built

@@ -11,6 +11,12 @@ function createMockStateManager(overrides = {}) {
   return {
     getCandidate: vi.fn(),
     getArtifact: vi.fn(),
+    // PRI-1146: intake classifies the source by the owning task kind. These
+    // legacy fixtures model a historical NON-Diagnostician source, so the
+    // original extraction semantics stay under test here; the Diagnostician
+    // V2 provenance gate is covered end-to-end by
+    // src/runtime/__tests__/candidate-intake-v2-provenance.integration.test.ts.
+    getTask: vi.fn().mockResolvedValue({ taskId: 'test-task-001', taskKind: 'legacy_manual_source' }),
     updateCandidateStatus: vi.fn(),
     ...overrides,
   } as unknown as RuntimeStateManager;

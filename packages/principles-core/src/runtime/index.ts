@@ -11,7 +11,7 @@
  *   runtime-protocol → PDRuntimeAdapter, RuntimeKind, run lifecycle types
  *   task-status     → PDTaskStatus, TaskRecord, DiagnosticianTaskRecord
  *   context-payload → ContextPayload, history/trajectory types
- *   diagnostician-output → DiagnosticianOutputV1
+ *   diagnostician-output → DiagnosticianOutputV2 (PRI-1146 V2 Only)
  */
 
 // Schema versioning (PRI-1139: schemaRef()/RUNTIME_SCHEMA_VERSION retired)
@@ -123,8 +123,8 @@ export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunH
 export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema, PD_TASK_STATUSES, isPDTaskStatus } from './task-status.js';
 // Context payload schemas (Phase 2)
 export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema, FullTracePayloadV2Schema, TraceSourceRefSchema, TraceTimelineEntrySchema, TraceEventKindSchema, SourceRefKindSchema, validateFullTracePayload, sanitizeFullTracePayload, buildFullTraceTimeline, buildSourceRefs, checkFullTracePayloadSchema, TRACE_EVENT_KINDS, SOURCE_REF_KINDS } from './context-payload.js';
-// Diagnostician output schemas (Phase 2)
-export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
+// Diagnostician output schemas (V2 Only — PRI-1146)
+export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, PrincipleAssociationSchema, DiagnosticianRecommendationV2Schema, DiagnosticianOutputV2Schema, DiagnosticianInvocationInputSchema, DIAGNOSTICIAN_ENVELOPE_KEYS, readDiagnosticianOutputFromEnvelope } from './diagnostician-output.js';
 // Principle tree types schemas
 export { PRINCIPLE_STATUSES, PrincipleStatusSchema, PrinciplePrioritySchema, PrincipleScopeSchema, PrincipleEvaluabilitySchema, RuleStatusSchema, RuleTypeSchema, ImplementationLifecycleStateSchema, ImplementationTypeSchema, SampleClassificationSchema, PrincipleSchema, RuleSchema, ImplementationSchema, PrincipleDependencySchema, PrincipleValueMetricsSchema, PrincipleEventTypeSchema, PrincipleLifecycleEventSchema, PrincipleTreeStoreSchema, EvidenceChainStateSchema, EvidenceChainRecordSchema, EvidenceChainResponseSchema } from './types/index.js';
 // Hygiene types schemas
@@ -204,13 +204,14 @@ export type {
   RunRecordLike,
 } from './context-payload.js';
 
-// Diagnostician output
+// Diagnostician output (V2 Only — PRI-1146; V1 types are retired)
 export type {
-  DiagnosticianOutputV1,
+  DiagnosticianOutputV2,
+  DiagnosticianRecommendationV2,
   DiagnosticianViolatedPrinciple,
   DiagnosticianEvidence,
   RecommendationKind,
-  DiagnosticianRecommendation,
+  PrincipleAssociation,
   DiagnosticianInvocationInput,
 } from './diagnostician-output.js';
 

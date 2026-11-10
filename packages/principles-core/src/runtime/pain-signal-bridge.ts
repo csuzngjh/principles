@@ -4,8 +4,8 @@ import type { LedgerAdapter } from './candidate-intake.js';
 import type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
-import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
-import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from './diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from './diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
 import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
@@ -452,7 +452,7 @@ export async function persistPainDiagnosis(deps: {
 }, opts: {
   painId: string;
   taskId: string;
-  diagnosticianOutput: DiagnosticianOutputV1;
+  diagnosticianOutput: DiagnosticianOutputV2;
   artifactId: string | null;
 }): Promise<void> {
   const { painId, taskId, diagnosticianOutput, artifactId } = opts;
@@ -495,7 +495,7 @@ export async function persistPainDiagnosis(deps: {
   }
 }
 type CandidateRunResolution =
-  | { ok: true; output: DiagnosticianOutputV1; sourceRunId: string }
+  | { ok: true; output: DiagnosticianOutputV2; sourceRunId: string }
   | { ok: false; reason: string };
 
 /** Resolve the persisted diagnosis material that actually minted one candidate. */
@@ -531,11 +531,11 @@ async function resolveCandidateRunOutput(
     }
   }
 
-  let output: DiagnosticianOutputV1 | undefined;
+  let output: DiagnosticianOutputV2 | undefined;
   if (typeof run.outputPayload === 'string' && run.outputPayload.length > 0) {
     try {
       const parsed: unknown = JSON.parse(run.outputPayload);
-      if (Value.Check(DiagnosticianOutputV1Schema, parsed)) output = parsed;
+      if (Value.Check(DiagnosticianOutputV2Schema, parsed)) output = parsed;
     } catch {
       // Refuse this candidate; never substitute a different run's output.
     }
@@ -803,12 +803,12 @@ export class PainSignalBridge {
       return { status: 'blocked', reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; repair or re-run the diagnosis via the supported CLI command (candidates recorded terminal manual_action_required states)' };
     }
     const runs = await this.stateManager.getRunsByTask(input.taskId);
-    let output: DiagnosticianOutputV1 | undefined;
-    const parseV1 = (payload: string | undefined | null): DiagnosticianOutputV1 | undefined => {
+    let output: DiagnosticianOutputV2 | undefined;
+    const parseV2 = (payload: string | undefined | null): DiagnosticianOutputV2 | undefined => {
       if (typeof payload !== 'string' || payload.length === 0) return undefined;
       try {
         const parsedOutput: unknown = JSON.parse(payload);
-        return Value.Check(DiagnosticianOutputV1Schema, parsedOutput) ? parsedOutput : undefined;
+        return Value.Check(DiagnosticianOutputV2Schema, parsedOutput) ? parsedOutput : undefined;
       } catch {
         return undefined;
       }
@@ -817,14 +817,15 @@ export class PainSignalBridge {
     // diag_router SUBTASK — the router's latest run output is the authoritative
     // diagnostician output for continuation. The parent task's own run output
     // is only a fallback for legacy flat pipelines (never a cache bypass: both
-    // sources are validated DiagnosticianOutputV1 persisted by the real run).
+    // sources are validated DiagnosticianOutputV2 persisted by the real run;
+    // a retired V1 payload fails the check and is never silently accepted).
     const routerRuns = await this.stateManager.getRunsByTask(`diag_router-${input.taskId}`);
     for (let i = routerRuns.length - 1; i >= 0 && output === undefined; i -= 1) {
-      output = parseV1(routerRuns[i]?.outputPayload);
+      output = parseV2(routerRuns[i]?.outputPayload);
     }
     if (output === undefined) {
       const latestRun = runs.at(-1);
-      output = parseV1(latestRun?.outputPayload);
+      output = parseV2(latestRun?.outputPayload);
     }
 
     // Skip candidates whose processing domain says the work is finished or
@@ -1187,7 +1188,7 @@ export class PainSignalBridge {
    */
   async onDiagnosisComplete(opts: {
     taskId: string;
-    diagnosticianOutput: DiagnosticianOutputV1 | undefined;
+    diagnosticianOutput: DiagnosticianOutputV2 | undefined;
     painId: string;
     provenance: PainProvenance;
     inputEvidenceCount?: number;
@@ -1700,8 +1701,32 @@ export class PainSignalBridge {
             if (ingress.errorCode !== null) continue;
             const sourceRun = await this.stateManager.getRun(candidate.sourceRunId);
             if (!sourceRun || sourceRun.taskId !== candidate.taskId || sourceRun.executionStatus !== 'succeeded' || !sourceRun.outputPayload) continue;
-            const output: unknown = JSON.parse(sourceRun.outputPayload);
-            if (!Value.Check(DiagnosticianOutputV1Schema, output) || !output.valid) continue;
+            let output: unknown;
+            try {
+              output = JSON.parse(sourceRun.outputPayload);
+            } catch {
+              // rc-9: a skip must be observable — record WHICH candidate was
+              // skipped and WHY instead of a bare continue (G6, PRI-1146).
+              this.eventEmitter?.emitTelemetry({
+                eventType: 'replay_review_source_invalid',
+                traceId: candidate.candidateId,
+                timestamp: new Date().toISOString(),
+                payload: { candidateId: candidate.candidateId, reason: 'owning_output_unparseable', nextAction: 'Re-run the diagnosis via the supported CLI command; the persisted run payload is not valid JSON.' },
+              });
+              continue;
+            }
+            if (!Value.Check(DiagnosticianOutputV2Schema, output)) {
+              // rc-9: includes retired V1 payloads — Clean Break means they are
+              // rejected here, observably, never silently processed.
+              this.eventEmitter?.emitTelemetry({
+                eventType: 'replay_review_source_invalid',
+                traceId: candidate.candidateId,
+                timestamp: new Date().toISOString(),
+                payload: { candidateId: candidate.candidateId, reason: 'owning_output_not_v2', nextAction: 'Re-run the diagnosis so the candidate is minted from a V2 artifact; V1 payloads are not readable (PRI-1146 Clean Break).' },
+              });
+              continue;
+            }
+            if (!output.valid) continue;
             const [admission] = evaluateCandidateAdmissions([candidate], output, {
               provenance: ingress.provenance,
               inputEvidenceCount: ingress.evidenceCount,

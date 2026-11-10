@@ -7,7 +7,7 @@ import {
   ADMISSION_CONFIDENCE_THRESHOLD,
 } from '../admission-gate.js';
 import type { AdmissionGateInput } from '../admission-gate.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 describe('normalizePainProvenance (SPEC §12 read-side normalization)', () => {
   it('accepts the current provenance values unchanged', () => {
@@ -38,14 +38,15 @@ const makeInput = (overrides: Partial<AdmissionGateInput> = {}): AdmissionGateIn
   ...overrides,
 });
 
-const makeDiagnosticianOutput = (overrides: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 => ({
+const makeDiagnosticianOutput = (overrides: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 => ({
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'diag-001',
   summary: 'Test diagnosis',
   rootCause: 'Test root cause',
   violatedPrinciples: [],
   evidence: [{ sourceRef: 'src-1', note: 'evidence note' }],
-  recommendations: [{ kind: 'principle', description: 'Test recommendation' }],
+  recommendations: [{ kind: 'principle', description: 'Test recommendation', recommendationRef: 'principle-1' }],
   confidence: 0.8,
   ...overrides,
 });

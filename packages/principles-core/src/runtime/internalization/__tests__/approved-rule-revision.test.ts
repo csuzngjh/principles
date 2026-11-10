@@ -29,9 +29,11 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     handle = await createRuntimeStateHandle({ workspaceDir });
     const manager = handle.stateManager;
     await manager.createTask({ taskId: 'diagnosis', taskKind: 'diagnostician', status: 'succeeded', attemptCount: 1, maxAttempts: 3 });
-    const output = { valid: true, diagnosisId: 'diagnosis', summary: 'Owner required approval.', rootCause: 'Skipped approved design.',
+    const output = { schemaVersion: 'diagnostician-output-v2' as const, valid: true, diagnosisId: 'diagnosis', summary: 'Owner required approval.', rootCause: 'Skipped approved design.',
       violatedPrinciples: [], evidence: [{ sourceRef: 'owner://original', note: 'Original Owner material' }], confidence: 0.9,
-      recommendations: [{ kind: 'rule' as const, description: 'Require approval before governed changes.' }] };
+      recommendations: [{ kind: 'rule' as const, description: 'Require approval before governed changes.', recommendationRef: 'rule-1',
+        triggerPattern: 'governed change', action: 'Require approval before proceeding.',
+        principleAssociation: { status: 'unresolved' as const, reason: 'insufficient_evidence' as const } }] };
     await manager.runStore.createRun({ runId: 'diagnosis-run', taskId: 'diagnosis', runtimeKind: 'test-double', startedAt: NOW,
       attemptNumber: 1, executionStatus: 'succeeded', outputPayload: JSON.stringify(output) });
     await new SqliteDiagnosticianCommitter(manager.connection).commit({ taskId: 'diagnosis', runId: 'diagnosis-run', output, idempotencyKey: 'commit' });

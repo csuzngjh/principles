@@ -22,6 +22,7 @@ import type { CandidatePrincipleIdentityResolution, RuleCandidateBindingSources,
 import { isRecord } from '../principle-tree/ledger-codec.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
 import type { ReuseEvidenceEntry } from '../types/principle-schema.js';
+import { computeTrustedPrincipleDigest, type RouterTrustedPrinciple, type RouterTrustedPrincipleSource } from '../internalization/router-context-evidence.js';
 
 const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;
 
@@ -236,6 +237,60 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
    */
   isAvailable(): boolean {
     return readLedgerFileState(this.#stateDir).availability.status !== 'unreadable';
+  }
+
+  /**
+   * PRI-1146 / SPEC v0.6 §5 — assemble the trusted canonical principle
+   * exposure for a diagnostician router run, BEFORE the model call.
+   *
+   * Eligibility matches the identity resolver's target rule
+   * (`candidate` | `probation` | `active`); ordering is deterministic
+   * (principleId ascending) so the exposure set is byte-stable for receipts.
+   * A readable ledger with zero eligible principles is a PROVEN empty
+   * exposure (`ok`, `principles: []`) — never silently substituted with the
+   * current Ledger at read-back time; consumers re-verify via the receipt's
+   * content digests.
+   */
+  readTrustedPrinciples(): ReturnType<RouterTrustedPrincipleSource['readTrustedPrinciples']> {
+    const state = readLedgerFileState(this.#stateDir);
+    if (state.availability.status === 'unreadable') {
+      return { status: 'unavailable', reason: state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable' };
+    }
+    const principles = Object.values(state.ledger.tree.principles)
+      .filter((p) => ['candidate', 'probation', 'active'].includes(p.status))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map((p): RouterTrustedPrinciple => ({
+        principleId: p.id,
+        status: p.status,
+        version: p.version,
+        text: p.text,
+        contentDigest: computeTrustedPrincipleDigest({ principleId: p.id, status: p.status, version: p.version, text: p.text }),
+      }));
+    return { status: 'ok', principles };
+  }
+
+  /**
+   * PRI-1146 / SPEC v0.6 §6.3 step 6 — current eligibility of a canonical
+   * principle target: exists AND is in an association-eligible lifecycle
+   * state (same rule the identity resolver applies to binding targets).
+   * Read-only; used by the shadow source-relation resolver.
+   *
+   * An unreadable ledger is NOT `missing` (which asserts the principle does
+   * not exist): it is `ledger_corrupt` / `ledger_unavailable`, mirroring the
+   * identity resolver's classification, so the caller can distinguish "target
+   * absent" from "cannot prove the target's state" (rc-9-no-silent-fallback).
+   */
+  getCanonicalPrincipleEligibility(principleId: string): { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' | 'ledger_unavailable' | 'ledger_corrupt' } {
+    const state = readLedgerFileState(this.#stateDir);
+    if (state.availability.status === 'unreadable') {
+      return { eligible: false, reason: state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable' };
+    }
+    const principle = Object.hasOwn(state.ledger.tree.principles, principleId)
+      ? state.ledger.tree.principles[principleId]
+      : undefined;
+    if (!principle) return { eligible: false, reason: 'missing' };
+    if (!['candidate', 'probation', 'active'].includes(principle.status)) return { eligible: false, reason: 'ineligible' };
+    return { eligible: true };
   }
 
   /**

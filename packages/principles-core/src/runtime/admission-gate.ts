@@ -1,4 +1,4 @@
-import type { DiagnosticianOutputV1, RecommendationKind } from './diagnostician-output.js';
+import type { DiagnosticianOutputV2, RecommendationKind } from './diagnostician-output.js';
 import { isOwnerExplicitManual } from './evidence-guards.js';
 
 export type PainProvenance =
@@ -99,7 +99,7 @@ export interface CandidateAdmissionResult {
 
 export function evaluateCandidateAdmissions(
   candidates: readonly { candidateId: string; recommendationKind: RecommendationKind }[],
-  output: DiagnosticianOutputV1,
+  output: DiagnosticianOutputV2,
   options: { provenance?: PainProvenance; inputEvidenceCount?: number; ownerStatementPresent?: boolean } = {},
 ): CandidateAdmissionResult[] {
   const { provenance, inputEvidenceCount = 0, ownerStatementPresent } = options;

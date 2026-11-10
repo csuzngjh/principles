@@ -24,7 +24,7 @@ import { storeEmitter } from '../store/event-emitter.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { PDRuntimeError } from '../error-categories.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 const workspaces: string[] = [];
 const managers: RuntimeStateManager[] = [];
@@ -117,15 +117,16 @@ describe('recoverFailedTask — single authority (PRI-934)', () => {
   });
 });
 
-function makeOutput(rootCause: string): DiagnosticianOutputV1 {
+function makeOutput(rootCause: string): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-935',
     summary: 'CLI-path diagnosis',
     rootCause,
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'tool_calls:1', note: 'evidence' }],
-    recommendations: [{ kind: 'defer', description: 'none actionable' }],
+    recommendations: [{ kind: 'defer', description: 'none actionable', recommendationRef: 'defer-1' }],
     confidence: 0.6,
   };
 }
