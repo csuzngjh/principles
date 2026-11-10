@@ -16,6 +16,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { SimpleStreamOptions, Model, Context } from '@earendil-works/pi-ai';
 
+// adapter-chain-mock-exempt: locks pdStreamSimple's per-API fetch binding, which faux cannot observe — it sits above the per-API HTTP adapters (README: wire-level assertions).
 vi.mock('@earendil-works/pi-ai/compat', async (importActual) => {
   const actual: Record<string, unknown> = await importActual();
   return {

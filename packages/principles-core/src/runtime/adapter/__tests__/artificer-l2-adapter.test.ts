@@ -39,6 +39,7 @@ const hoisted = vi.hoisted((): {
 });
 
 /* eslint-disable @typescript-eslint/max-params -- runAgentLoop mock mirrors the real 5-param signature */
+// adapter-chain-mock-exempt: drives loop-orchestration branches (submit_rulecode capture, maxTurns cap, beforeToolCall whitelist, timeout abort) that need a deterministic loop double, not a provider reply.
 vi.mock('@earendil-works/pi-agent-core', () => ({
   runAgentLoop: vi.fn(async (
     prompts: unknown,

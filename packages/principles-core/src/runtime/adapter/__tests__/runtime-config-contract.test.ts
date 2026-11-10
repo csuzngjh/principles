@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock @earendil-works/pi-ai/compat
+// adapter-chain-mock-exempt: asserts the provider/model/timeout precedence resolved before any model call; a scripted model never reaches these branches.
 vi.mock('@earendil-works/pi-ai/compat', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),
