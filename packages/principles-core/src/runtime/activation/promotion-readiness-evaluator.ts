@@ -1,4 +1,4 @@
-import type { PromotionEvidenceSnapshot, PromotionFailedCheck, PromotionReadinessResult } from './rulecode-owner-decision-service.js';
+import type { PromotionEvidenceSnapshot, PromotionFailedCheck, PromotionReadinessCriterion, PromotionReadinessResult } from './rulecode-owner-decision-service.js';
 
 export const REQUIRED_PROMOTION_CHECK_IDS = [
   'activation_eligibility', 'lineage_binding', 'bounded_scope', 'production_compile_load',
@@ -82,6 +82,68 @@ export function explainPromotionReadiness(
   return evaluatePromotionEvidenceCriteria(evidenceSnapshot);
 }
 
+export interface PromotionCriteriaProjectionInput {
+  /** The gate results the evaluator recorded on the snapshot. */
+  safetyGateResults: readonly { checkId: string; status: 'passed' | 'failed'; reasonCode?: string }[];
+  failedChecks: readonly PromotionFailedCheck[];
+  evidenceSnapshot: PromotionEvidenceSnapshot;
+}
+
+/**
+ * Project ONE explainable line per required hard check plus the measurable
+ * evidence dimensions (5B). Pure and derived: it never changes a status or a
+ * threshold, it only states what the evaluation already decided.
+ *
+ * - Every required check appears exactly once; a check the evaluation never
+ *   reached is `not_evaluated`, not a silent `passed`.
+ * - An extra failure the evaluator recorded (for example `evidence_binding`)
+ *   is appended so nothing is dropped from `failedChecks`.
+ * - Numeric evidence is only projected when the telemetry source actually
+ *   produced a measurement; an unavailable source is already explained by the
+ *   `runtime_shadow_evidence` hard check.
+ */
+export function projectPromotionReadinessCriteria(input: PromotionCriteriaProjectionInput): PromotionReadinessCriterion[] {
+  const gateById = new Map<string, PromotionCriteriaProjectionInput['safetyGateResults'][number]>();
+  for (const gate of input.safetyGateResults) gateById.set(gate.checkId, gate);
+  const failedReasonById = new Map<string, string>();
+  for (const failed of input.failedChecks) {
+    if (!failedReasonById.has(failed.checkId)) failedReasonById.set(failed.checkId, failed.reasonCode);
+  }
+
+  const criteria: PromotionReadinessCriterion[] = REQUIRED_PROMOTION_CHECK_IDS.map(checkId => {
+    const recordedFailure = failedReasonById.get(checkId);
+    if (recordedFailure !== undefined) {
+      return { criterionId: checkId, kind: 'hard_check', status: 'failed', reasonCode: recordedFailure };
+    }
+    const gate = gateById.get(checkId);
+    if (!gate) return { criterionId: checkId, kind: 'hard_check', status: 'not_evaluated' };
+    return {
+      criterionId: checkId, kind: 'hard_check', status: gate.status,
+      ...(gate.status === 'failed' ? { reasonCode: gate.reasonCode ?? 'hard_check_failed' } : {}),
+    };
+  });
+
+  const required = new Set<string>(REQUIRED_PROMOTION_CHECK_IDS);
+  for (const failed of input.failedChecks) {
+    if (required.has(failed.checkId)) continue;
+    criteria.push({ criterionId: failed.checkId, kind: 'hard_check', status: 'failed', reasonCode: failed.reasonCode });
+  }
+
+  if (input.evidenceSnapshot.shadowSummary.observed !== null) {
+    for (const evidence of evaluatePromotionEvidenceCriteria(input.evidenceSnapshot)) {
+      criteria.push({
+        criterionId: evidence.criterionId,
+        kind: 'evidence',
+        status: evidence.shortfall === undefined ? 'passed' : 'failed',
+        current: evidence.current,
+        threshold: evidence.threshold,
+        ...(evidence.shortfall === undefined ? {} : { shortfall: evidence.shortfall }),
+      });
+    }
+  }
+  return criteria;
+}
+
 export interface PromotionReadinessCheck {
   checkId: PromotionCheckId;
   status: 'passed' | 'failed';
@@ -127,7 +189,8 @@ export function evaluateRuleCodePromotionReadiness(input: PromotionReadinessEval
   const evidenceSnapshot = { ...input.evidenceSnapshot, safetyGateResults };
   if (unavailable.length > 0) {
     return { status: 'unavailable', evaluationId: input.evaluationId, artifactId: input.artifactId,
-      artifactDigest: input.artifactDigest, evidenceSnapshot, failedChecks: unavailable };
+      artifactDigest: input.artifactDigest, evidenceSnapshot, failedChecks: unavailable,
+      criteria: projectPromotionReadinessCriteria({ safetyGateResults, failedChecks: unavailable, evidenceSnapshot }) };
   }
 
   const failedChecks = safetyGateResults
@@ -138,5 +201,6 @@ export function evaluateRuleCodePromotionReadiness(input: PromotionReadinessEval
   return {
     status: failedChecks.length > 0 ? 'blocked' : insufficientEvidence ? 'evidence_insufficient' : 'ready', evaluationId: input.evaluationId,
     artifactId: input.artifactId, artifactDigest: input.artifactDigest, evidenceSnapshot, failedChecks,
+    criteria: projectPromotionReadinessCriteria({ safetyGateResults, failedChecks, evidenceSnapshot }),
   };
 }
