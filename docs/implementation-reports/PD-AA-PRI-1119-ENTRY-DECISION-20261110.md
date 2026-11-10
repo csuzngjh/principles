@@ -44,7 +44,7 @@
 
 | 档位 | 版本 | 含 #2436 读取器/fail-closed | 含 #2449 清单声明 | 证据 |
 |---|---|---|---|---|
-| npm 已发布 `principles-disciple` | **3.1.3（latest）** | 是 | 是 | `npm view`（dist-tags latest=3.1.3，#2453 version packages） |
+| npm 已发布 `principles-disciple` | **3.1.3（latest）** | 是：tarball 直检（shasum `3461c20c…`）`dist/bundle.js` 命中 fail-closed 串 | 是：tarball `openclaw.plugin.json:49` 声明 `principleId` | `npm view` + 下载 tarball 解包 rg |
 | 本机已装扩展 `~/.openclaw/extensions/principles-disciple` | **3.1.3**（package.json/manifest mtime 2026-11-09 22:53，dist 11-10 09:14） | 是：`dist/bundle.js` 命中 `principle_mapping_has_no_admission_identity` | 是：`openclaw.plugin.json:49` 声明 `principleId` | 文件读取 + rg |
 | canonical runtime `~/.pd/runtime` | core **6.0.0** / host-runtime **3.1.0** / plugin 目录 3.1.1 | host-runtime `dist/active-principle-prompt.js` 命中 `resolveCurrentAuthorizedActivationByPrincipleId` 与 `additiveOnly`/`would_displace_native_assembly`（2 命中） | —（清单随扩展壳） | rg |
 | 已装宿主 OpenClaw | **2026.11.1（不变）** | —（身份缺口未变） | — | 安装目录 package.json |
@@ -57,6 +57,7 @@
 2. **阻断 1 不变**：宿主仍为 #2451 逐行核对过的 2026.11.1（npm 2026.11.2 源提交未核对，维持未知）；上游接线不存在。
 3. **此时启用映射「安全但无效」**：每轮在 `hasNativeIdentity=false` 分支 fail-closed 回 Native（带结构化 warn `principle_mapping_has_no_admission_identity`）。**因此现在不要启用**——等宿主身份落地后按操作页流程启用。
 4. 观察项（不阻断本裁决）：canonical runtime 的 plugin 目录副本（3.1.1）落后于扩展壳（3.1.3），属不同发布面的同步时序现象；本裁决依赖的三项能力（清单声明 / 读取器+fail-closed / 解析器+additiveOnly 门）已逐项在装产物命中。验收运行时以实际日志为准。
+5. 并发调查提示：同日另一工单（PRI-1162 轮次键调查）报告 npm 3.1.3 bundle 对**轮次键接线（PRI-1137 插件半）**存在 stale 疑点（归因发版管线）。该内容与 A 线无关；A 线相关内容（#2436 读取器/fail-closed、#2449 清单声明）已由本轮 tarball 直检与已装产物核对**双确认在位**。
 
 ## 5. 推荐方案：上游立项卡（基于 #2451，按今日事实更新）
 
@@ -120,6 +121,6 @@ PD 侧已就绪清单（无需再动）：读取/解析/additive-only 装配（#
 | PD 自有入口零命中 | `packages/pd-console/src/server/routes/`（29 路由，含 `examiner-executor.ts:1-9` offline-stub 声明）；`packages/pd-cli/src/commands/` 清单；`packages/pd-cli/src/services/delivery-surfaces.ts:1-22`；`packages/pd-mcp-server/src/server.ts:132-136`；两包 `delivery-review` rg 0 命中 |
 | 受控准入 | `packages/openclaw-plugin/src/hooks/controlled-admission.ts:19,132`；SPEC v0.6 §7 L171/L179、G1 L190、C04 L203 |
 | PRI-1152 残留 | `gh pr view 2432`（MERGED 2026-11-09，docs）；`packages/openclaw-plugin/tests/hooks/isolated-host-presence-fixture.test.ts`（仅测试 fixture） |
-| 版本档位 | `npm view principles-disciple version` = 3.1.3；`~/.openclaw/extensions/principles-disciple/`（package.json 3.1.3、`openclaw.plugin.json:49`、`dist/bundle.js` 命中 fail-closed 串）；`~/.pd/runtime/{core,host-runtime,plugin}/package.json`（6.0.0 / 3.1.0 / 3.1.1）+ host-runtime `dist/active-principle-prompt.js` 命中解析器与 additiveOnly；已装 OpenClaw package.json = 2026.11.1；生产两配置 rg 0 命中 |
+| 版本档位 | `npm view principles-disciple version` = 3.1.3 + tarball 解包直检（`principles-disciple-3.1.3.tgz`，shasum `3461c20c8b0980a533185d368f6eba7f529c76cb`：`dist/bundle.js` 命中 fail-closed 串、`openclaw.plugin.json:49` principleId）；`~/.openclaw/extensions/principles-disciple/`（package.json 3.1.3、`openclaw.plugin.json:49`、`dist/bundle.js` 命中 fail-closed 串）；`~/.pd/runtime/{core,host-runtime,plugin}/package.json`（6.0.0 / 3.1.0 / 3.1.1）+ host-runtime `dist/active-principle-prompt.js` 命中解析器与 additiveOnly；已装 OpenClaw package.json = 2026.11.1；生产两配置 rg 0 命中 |
 | 前序文档 | #2448 阻断报告与操作页（`D:\Code\_worktrees\principles\PRI-1119-aa-trial-prep\docs\implementation-reports\`）；#2451 身份设计 v2（main `docs/implementation-reports/PD-AA-PRI-1119-HOST-IDENTITY-UPSTREAM-DESIGN-20261109.md`）；11-07 入口可行性（main 同目录）；`aa-handoff/20261109T1342Z-zcode.{json,md}` |
 | Linear | PRI-1119（In Progress→本轮 PR 后 In Review；blockedBy PRI-1118 维持）；附件 #2448/#2449/#2451/#2406/#2404 |

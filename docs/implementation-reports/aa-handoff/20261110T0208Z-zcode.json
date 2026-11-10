@@ -33,7 +33,7 @@
   },
   "versionTierUpdate": {
     "deltaVs20261109": "阻断 2（manifest 缺 principleId）已随发布+安装闭环；阻断 1（宿主身份）不变",
-    "npmPublished": "principles-disciple 3.1.3 (latest, #2453 version packages)——含 #2436+#2449",
+    "npmPublished": "principles-disciple 3.1.3 (latest, #2453 version packages)——含 #2436+#2449；tarball 直检（shasum 3461c20c8b0980a533185d368f6eba7f529c76cb）：dist/bundle.js 命中 principle_mapping_has_no_admission_identity、openclaw.plugin.json:49 principleId；注：同日 PRI-1162 调查对 npm 3.1.3 bundle 的轮次键内容（PRI-1137 插件半）另报 stale 疑点，与 A 线无关",
     "installedExtension": "~/.openclaw/extensions/principles-disciple = 3.1.3（openclaw.plugin.json:49 principleId；dist/bundle.js 命中 principle_mapping_has_no_admission_identity）",
     "canonicalRuntime": "~/.pd/runtime = core 6.0.0 / host-runtime 3.1.0（dist/active-principle-prompt.js 命中解析器+additiveOnly/would_displace_native_assembly）/ plugin 目录 3.1.1（落后于扩展壳 3.1.3，观察项不阻断）",
     "installedHost": "OpenClaw 2026.11.1（不变，身份缺口未变；npm 2026.11.2 源未核对维持未知）",
