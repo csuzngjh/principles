@@ -243,6 +243,21 @@ async function seedRepo(dir: string) {
   write('packages/create-principles-disciple/vendor/core-copy/package.json', pkg('@principles/core', '0.0.1-ghost'), dir);
   write('packages/pd-console/package.json', pkg('@principles/pd-console', '0.1.0', { private: true }), dir);
   write('packages/pd-console/index.js', "module.exports = 'console';\n", dir);
+  // Codex runtime pin: the four exact components plus the pin artifacts the
+  // Version PR now materializes. Reproduction composes the SAME values from
+  // the workspace manifests, so a hand-edited pin must still fail.
+  write('packages/codex-adapter/package.json', pkg('@principles/codex-adapter', '1.0.0'), dir);
+  write('packages/host-runtime/package.json', pkg('@principles/host-runtime', '1.0.0'), dir);
+  write(
+    'plugins/principles-disciple/runtime-version.json',
+    JSON.stringify({ codexAdapter: '1.0.0', hostRuntime: '1.0.0', core: '1.0.0', mcpServer: '1.0.0' }, null, 2) + '\n',
+    dir,
+  );
+  write(
+    'plugins/principles-disciple/.codex-plugin/plugin.json',
+    JSON.stringify({ name: 'principles-disciple', version: '0.1.0' }, null, 2) + '\n',
+    dir,
+  );
   await commitAll('base', dir);
 }
 
@@ -606,10 +621,20 @@ describe('version-pr: Version Packages PR contract', () => {
     expect(JSON.parse(read('packages/create-principles-disciple/vendor/core-copy/package.json')).version).toBe(
       '0.0.1-ghost',
     );
-    // T15: runtime pin artifact untouched.
+    // T15: the installer's OWN containment pin artifact is untouched.
     expect(read('packages/create-principles-disciple/release-locks/core.json')).toBe(
       JSON.stringify({ pin: '1.0.0' }, null, 2) + '\n',
     );
+    // T15a (Owner decision 2026-11-11): the Codex runtime pin IS Version PR
+    // material — it must equal this cohort's workspace versions and the Codex
+    // cache version must move with it, in the same PR.
+    expect(JSON.parse(read('plugins/principles-disciple/runtime-version.json'))).toMatchObject({
+      codexAdapter: '1.0.0',
+      hostRuntime: '1.0.0',
+      core: '1.0.1',
+      mcpServer: '1.0.0',
+    });
+    expect(JSON.parse(read('plugins/principles-disciple/.codex-plugin/plugin.json')).version).toBe('0.1.1');
 
     // T10 (negative): a "Version PR" that smuggles a source file fails.
     const materialized = await git(['rev-parse', 'HEAD']);
@@ -638,6 +663,20 @@ describe('version-pr: Version Packages PR contract', () => {
     await commitAll('chore: version packages plus runtime pin edit');
     const badPin = await runGuard(pre);
     expect(badPin.code).toBe(1);
+
+    // T15b (negative): the Codex pin is ALLOWED but must equal what
+    // materialization derives — a hand-edited value is still rejected.
+    await git(['reset', '--hard', pre]);
+    const m3 = await sh(process.execPath, [MATERIALIZE, '--repo-root', repo], repo, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(m3.code).toBe(0);
+    const pinPath = 'plugins/principles-disciple/runtime-version.json';
+    write(pinPath, JSON.stringify({ ...JSON.parse(read(pinPath)), core: '9.9.9' }, null, 2) + '\n');
+    await commitAll('chore: version packages plus hand-edited codex pin');
+    const badCodexPin = await runGuard(pre);
+    expect(badCodexPin.code).toBe(1);
+    expect(badCodexPin.stderr).toContain('differs from deterministic materialization');
     // restore the clean materialized state for the following tests
     await git(['reset', '--hard', materialized]);
   }, 300000);
@@ -656,7 +695,7 @@ describe('version-pr: Version Packages PR contract', () => {
 
     const pre = await git(['rev-parse', 'HEAD']);
     const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', repo], repo, { PD_RELEASE_RETRY_DELAY_MS: '1' });
-    expect(m.code).toBe(0);
+    expect(m.code, m.stderr).toBe(0);
     await commitAll('chore: version packages [version-packages]');
 
     expect(JSON.parse(read('packages/core/package.json')).version).toBe('2.0.0');
@@ -694,7 +733,7 @@ describe('cohort: release cohort resolution', () => {
     await commitAll('chore: pending changeset');
     await sh('git', ['checkout', '-b', 'vp-branch'], repo);
     const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', repo], repo, { PD_RELEASE_RETRY_DELAY_MS: '1' });
-    expect(m.code).toBe(0);
+    expect(m.code, m.stderr).toBe(0);
     await commitAll('chore: version packages [version-packages]');
     await sh('git', ['checkout', 'main'], repo);
     // A real main-only commit between the version plan and the merge (an

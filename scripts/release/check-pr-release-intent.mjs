@@ -8,8 +8,8 @@
  *   1. If the PR diff is reproducible from the base's pending changesets
  *      through the deterministic materialization pipeline, the PR IS a
  *      Version Packages PR — the reproduction itself proves the allowed
- *      diff, the Product Version and runtime pins are untouched, and only
- *      the C4 plan guard still applies.
+ *      diff, the Product Version is untouched, the Codex runtime pin matches
+ *      the cohort's manifests, and only the C4 plan guard still applies.
  *   2. Otherwise the PR is a normal PR and must DECLARE its own release
  *      intent (this PR's changesets — base/main pending changesets do not
  *      count, SPEC §11 intro):
@@ -189,7 +189,7 @@ if (repro.reproducible) {
   console.log(
     `RELEASE_INTENT_GUARD PASS mode=version-pr (${repro.releases
       .map((r) => `${r.name}@${r.newVersion}`)
-      .join(', ')}) — diff reproduced from base pending changesets; Product Version and runtime pins untouched.`,
+      .join(', ')}) — diff reproduced from base pending changesets; Product Version untouched and Codex runtime pin materialized from this cohort.`,
   );
   process.exit(0);
 }

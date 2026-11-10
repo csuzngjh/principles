@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import parseChangeset from '@changesets/parse';
+import { RUNTIME_PIN_TARGETS, composePinsFromWorkspace } from '../sync-codex-runtime-pins.mjs';
 
 const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -176,6 +177,7 @@ export const COMPONENT_MIRRORS = [
 ];
 
 const MIRROR_TARGETS = new Set(COMPONENT_MIRRORS.map((m) => m.target));
+const PIN_TARGETS = new Set(RUNTIME_PIN_TARGETS);
 
 /** Run every declared mirror sync; returns the targets that were rewritten. */
 export function syncComponentVersionMirrors(cwd) {
@@ -184,6 +186,17 @@ export function syncComponentVersionMirrors(cwd) {
     if (mirror.sync(cwd)) synced.push(mirror.target);
   }
   return synced;
+}
+
+/**
+ * Everything the Version PR materializes beyond `changeset version` and the
+ * lockfile: declared component mirrors plus the Codex runtime pin (pin file +
+ * the plugin cache version that must move with it). The bot and reproduction
+ * call THIS function, so the Version-PR allowlist and the byte-for-byte
+ * reproduction can never disagree about what the pin should be.
+ */
+export function materializeDerivedFiles(cwd) {
+  return { mirrors: syncComponentVersionMirrors(cwd), pin: composePinsFromWorkspace(cwd) };
 }
 
 function extractArchive(repoRoot, sha, dest) {
@@ -231,12 +244,13 @@ function normalizeChangelogText(text) {
 
 /**
  * Files a Version PR may touch (SPEC §12.2). Mirror targets come from the
- * COMPONENT_MIRRORS declarations above — never a second hand-written list.
+ * COMPONENT_MIRRORS declarations above, and the Codex pin from its single
+ * owner module — never a second hand-written list.
  */
 export function isAllowedVersionPrPath(relPath) {
   if (relPath === 'package-lock.json') return true;
   if (relPath.startsWith('.changeset/')) return true;
-  if (MIRROR_TARGETS.has(relPath)) return true;
+  if (MIRROR_TARGETS.has(relPath) || PIN_TARGETS.has(relPath)) return true;
   const m = /^packages\/([^/]+)\/(.+)$/.exec(relPath);
   if (!m) return false;
   return m[2] === 'package.json' || m[2] === 'CHANGELOG.md';
@@ -314,15 +328,16 @@ export async function reproduceVersionMaterialization({ repoRoot, baseSha, headS
     }
 
     // The same materialization the bot runs (SPEC §12.3): changeset version
-    // then EVERY declared component mirror sync — one declaration, so a new
-    // mirror cannot be missed here either. Lockfile materialization is
-    // validated structurally instead of regenerated (no network in guards).
+    // then EVERY declared component mirror sync plus the Codex runtime pin —
+    // one declaration, so a new mirror or pin cannot be missed here either.
+    // Lockfile materialization is validated structurally instead of
+    // regenerated (no network in guards).
     const versionRun = runChangesetVersion(tmp);
     if (versionRun.status !== 0) {
       reasons.push(`changeset version failed in reproduction: ${versionRun.stderr.slice(0, 300)}`);
       return { reproducible: false, identity: 'normal', reasons, releases: [] };
     }
-    syncComponentVersionMirrors(tmp);
+    materializeDerivedFiles(tmp);
 
     // 1) changed file set equality with what materialization produced
     for (const rel of changed) {
