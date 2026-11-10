@@ -30,6 +30,13 @@ import * as path from 'node:path';
 export const PD_EXPERIMENT_ROOT_ENV = 'PD_EXPERIMENT_ROOT';
 /** OpenClaw's own home override (pre-existing; honoured in production mode). */
 export const PD_OPENCLAW_HOME_ENV = 'OPENCLAW_HOME';
+/**
+ * OpenClaw's explicit state-dir override. Authoritative over `OPENCLAW_HOME`
+ * (OpenClaw resolves its state dir from this first), so PD's `openclawHome`
+ * must follow it — otherwise PD writes extensions/backups to one place while
+ * the host reads another.
+ */
+export const PD_OPENCLAW_STATE_DIR_ENV = 'OPENCLAW_STATE_DIR';
 
 export const PD_HOME_MODES = ['production', 'experiment'] as const;
 export type PdHomeMode = (typeof PD_HOME_MODES)[number];
@@ -44,7 +51,7 @@ export interface PdHomePaths {
   readonly homeDir: string;
   /** `<homeDir>/.pd` — active record, transactions, bootstrap executor. */
   readonly pdHome: string;
-  /** `<homeDir>/.openclaw` (or `OPENCLAW_HOME`). */
+  /** `<homeDir>/.openclaw` (or `OPENCLAW_STATE_DIR` > `OPENCLAW_HOME`). */
   readonly openclawHome: string;
   /** `<homeDir>/.pd-console` — the console's workspace registry. */
   readonly consoleConfigDir: string;
@@ -63,6 +70,8 @@ export const PD_HOME_FAILURE_REASONS = [
   'experiment_root_overlaps_production',
   'experiment_path_escapes_root',
   'openclaw_home_outside_experiment',
+  'openclaw_state_dir_not_absolute',
+  'openclaw_state_dir_outside_experiment',
 ] as const;
 export type PdHomeFailureReason = (typeof PD_HOME_FAILURE_REASONS)[number];
 
@@ -133,13 +142,39 @@ function canonicalizeDeepestExisting(target: string): string | null {
   }
 }
 
+/**
+ * Production PD home. `OPENCLAW_STATE_DIR` (absolute) wins over
+ * `OPENCLAW_HOME` — kept in its legacy meaning here, i.e. the `.openclaw`
+ * directory itself — which wins over `<realHome>/.openclaw`. A non-absolute
+ * `OPENCLAW_STATE_DIR` is refused instead of being resolved against the cwd.
+ */
 function productionPaths(realHome: string, env: Readonly<Record<string, string | undefined>>): PdHomeResolution {
+  // PRI-1165: OPENCLAW_STATE_DIR is OpenClaw's authoritative state dir, so PD's
+  // `openclawHome` follows it when set. OPENCLAW_HOME stays as the legacy
+  // fallback: OpenClaw itself treats it as a HOME substitute, but existing PD
+  // installs pass the `.openclaw` directory, and reinterpreting it would move
+  // their backups/extensions. Precedence:
+  //   OPENCLAW_STATE_DIR > OPENCLAW_HOME > <realHome>/.openclaw
+  const stateDirOverride = env[PD_OPENCLAW_STATE_DIR_ENV]?.trim();
+  if (stateDirOverride !== undefined && stateDirOverride.length > 0 && !path.isAbsolute(stateDirOverride)) {
+    return failure({
+      reason: 'openclaw_state_dir_not_absolute',
+      message: `${PD_OPENCLAW_STATE_DIR_ENV} must be an absolute path (got "${stateDirOverride}").`,
+      nextAction: `Use an absolute path, or unset ${PD_OPENCLAW_STATE_DIR_ENV} to derive <home>/.openclaw.`,
+      details: { [PD_OPENCLAW_STATE_DIR_ENV]: stateDirOverride },
+    });
+  }
+
   const openclawOverride = env[PD_OPENCLAW_HOME_ENV]?.trim();
-  // Preserved production behaviour: OPENCLAW_HOME wins when set, no realpath
-  // rewrite (existing installs rely on the literal resolved path).
-  const openclawHome = openclawOverride !== undefined && openclawOverride.length > 0
-    ? path.resolve(openclawOverride)
-    : path.join(realHome, '.openclaw');
+  // No realpath rewrite (existing installs rely on the literal resolved path).
+  let openclawHome: string;
+  if (stateDirOverride !== undefined && stateDirOverride.length > 0) {
+    openclawHome = path.resolve(stateDirOverride);
+  } else if (openclawOverride !== undefined && openclawOverride.length > 0) {
+    openclawHome = path.resolve(openclawOverride);
+  } else {
+    openclawHome = path.join(realHome, '.openclaw');
+  }
   return {
     ok: true,
     mode: 'production',
@@ -258,19 +293,45 @@ export function resolvePdHome(options: ResolvePdHomeOptions = {}): PdHomeResolut
     }
   }
 
-  const openclawOverride = env[PD_OPENCLAW_HOME_ENV]?.trim();
+  // PRI-1165: the launcher passes OPENCLAW_STATE_DIR = the derived
+  // `<root>/.openclaw`, so PD and OpenClaw agree on one state dir. It is
+  // authoritative over OPENCLAW_HOME (mirroring OpenClaw) and must stay inside
+  // the root; OPENCLAW_HOME is only consulted when no state dir is given.
   let openclawHome = path.join(rootReal, '.openclaw');
-  if (openclawOverride !== undefined && openclawOverride.length > 0) {
-    const overrideReal = canonicalizeDeepestExisting(openclawOverride) ?? path.resolve(openclawOverride);
-    if (!path.isAbsolute(openclawOverride) || !isPathWithinRoot(rootReal, overrideReal)) {
+  const stateDirOverride = env[PD_OPENCLAW_STATE_DIR_ENV]?.trim();
+  if (stateDirOverride !== undefined && stateDirOverride.length > 0) {
+    if (!path.isAbsolute(stateDirOverride)) {
       return failure({
-        reason: 'openclaw_home_outside_experiment',
-        message: `${PD_OPENCLAW_HOME_ENV} points outside the experiment root: ${openclawOverride} -> ${overrideReal}`,
-        nextAction: `Unset ${PD_OPENCLAW_HOME_ENV} (the experiment derives its own openclaw home) or point it inside ${rootReal}.`,
-        details: { experimentRoot: rootReal, [PD_OPENCLAW_HOME_ENV]: openclawOverride },
+        reason: 'openclaw_state_dir_not_absolute',
+        message: `${PD_OPENCLAW_STATE_DIR_ENV} must be an absolute path (got "${stateDirOverride}").`,
+        nextAction: `Use an absolute path inside ${rootReal}, or unset ${PD_OPENCLAW_STATE_DIR_ENV}.`,
+        details: { experimentRoot: rootReal, [PD_OPENCLAW_STATE_DIR_ENV]: stateDirOverride },
       });
     }
-    openclawHome = path.resolve(openclawOverride);
+    const stateReal = canonicalizeDeepestExisting(stateDirOverride) ?? path.resolve(stateDirOverride);
+    if (!isPathWithinRoot(rootReal, stateReal)) {
+      return failure({
+        reason: 'openclaw_state_dir_outside_experiment',
+        message: `${PD_OPENCLAW_STATE_DIR_ENV} points outside the experiment root: ${stateDirOverride} -> ${stateReal}`,
+        nextAction: `Unset ${PD_OPENCLAW_STATE_DIR_ENV} (the experiment derives its own openclaw state) or point it inside ${rootReal}.`,
+        details: { experimentRoot: rootReal, [PD_OPENCLAW_STATE_DIR_ENV]: stateDirOverride },
+      });
+    }
+    openclawHome = path.resolve(stateDirOverride);
+  } else {
+    const openclawOverride = env[PD_OPENCLAW_HOME_ENV]?.trim();
+    if (openclawOverride !== undefined && openclawOverride.length > 0) {
+      const overrideReal = canonicalizeDeepestExisting(openclawOverride) ?? path.resolve(openclawOverride);
+      if (!path.isAbsolute(openclawOverride) || !isPathWithinRoot(rootReal, overrideReal)) {
+        return failure({
+          reason: 'openclaw_home_outside_experiment',
+          message: `${PD_OPENCLAW_HOME_ENV} points outside the experiment root: ${openclawOverride} -> ${overrideReal}`,
+          nextAction: `Unset ${PD_OPENCLAW_HOME_ENV} (the experiment derives its own openclaw home) or point it inside ${rootReal}.`,
+          details: { experimentRoot: rootReal, [PD_OPENCLAW_HOME_ENV]: openclawOverride },
+        });
+      }
+      openclawHome = path.resolve(openclawOverride);
+    }
   }
 
   return {

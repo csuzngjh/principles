@@ -4,6 +4,7 @@ import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxD
 import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime/internalization/design-gate-facts";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import type { RuleBindingReviewView, RuleBindingQueueView } from '../shared/rule-candidate-binding-contract.js';
+import type { CompatibilityScanViewData } from '../shared/compatibility-scan-contract.js';
 import type { RuleCandidateBindingRequest } from '@principles/core/runtime';
 import { validateApprovedRuleRevisionPreview, validateApprovedRuleRevisionResult } from '../shared/approved-rule-revision-contract.js';
 import type { ApprovedRuleRevisionPreview, ApprovedRuleRevisionRequest, ApprovedRuleRevisionResult } from '../shared/approved-rule-revision-contract.js';
@@ -33,6 +34,7 @@ import {
   validateRecoveryResult,
   validateFailedTaskDetail,
   validateOwnerDecisionsData,
+  validateCompatibilityScanView,
   validateOwnerResolutionResult,
   validateActivations,
   validateDisableActivation,
@@ -551,6 +553,14 @@ async function fetchPrincipleReceipts(principleId: string): Promise<ApiResponse<
 
 async function fetchReceiptCounts(): Promise<ApiResponse<ReceiptCountsData>> {
   return request<ReceiptCountsData>("/api/receipts/counts", undefined, validateReceiptCounts);
+}
+
+/**
+ * 5B-F: read-only rule compatibility scan (reason-granular counts + samples).
+ * Same scan the installer preflight and `pd runtime compatibility-scan` use.
+ */
+async function fetchCompatibilityScan(): Promise<ApiResponse<CompatibilityScanViewData>> {
+  return request<CompatibilityScanViewData>("/api/runtime/compatibility-scan", undefined, validateCompatibilityScanView);
 }
 
 // ── Intervention Evidence Audit (PD v2 Phase 1, ADR-0027) ────────────────────
@@ -1604,6 +1614,7 @@ export {
   fetchPrincipleTrajectory,
   fetchPrincipleReceipts,
   fetchReceiptCounts,
+  fetchCompatibilityScan,
   fetchEvidenceAudit,
   archivePrinciple,
   unarchivePrinciple,

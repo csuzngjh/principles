@@ -420,6 +420,7 @@ export function getPdCliEntry(paths: InstallLayoutPaths, mode: InstallLayoutMode
 export {
   PD_EXPERIMENT_ROOT_ENV,
   PD_OPENCLAW_HOME_ENV,
+  PD_OPENCLAW_STATE_DIR_ENV,
   PD_HOME_MODES,
   PD_HOME_FAILURE_REASONS,
   resolvePdHome,
