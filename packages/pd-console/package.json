@@ -25,7 +25,7 @@
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@principles/core": "*",
     "@principles/host-runtime": "*",
-    "@principles/install-layout": "^0.6.0",
+    "@principles/install-layout": "^0.7.0",
     "@radix-ui/react-alert-dialog": "^1.2.1",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-select": "^2.4.1",
