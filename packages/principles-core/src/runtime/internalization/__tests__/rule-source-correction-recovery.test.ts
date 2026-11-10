@@ -8,7 +8,7 @@ import { reviseRuleSourceOnce, SOURCE_CORRECTION_STOP_REASON_CODES } from '../ru
 import { InternalizationOrchestrator } from '../internalization-orchestrator.js';
 import { createRuntimeStateHandle, type RuntimeStateHandle } from '../../runtime-state-handle.js';
 import { SqliteDiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { CandidatePrincipleIdentityResolution } from '../../adapter/principle-tree-ledger-adapter.js';
 
 /**
@@ -25,7 +25,8 @@ const MAX_ATTEMPTS = 3;
 
 const OWNER_SENTENCE = '非简单行为变更先调查现状，交付SPEC和技术方案，明确调用链、输入输出、成本、失败处理、验收及回滚，经Owner确认后再编码；方向认可和操作权限不得替代设计确认。';
 
-const diagnosis: DiagnosticianOutputV1 = {
+const diagnosis: DiagnosticianOutputV2 = {
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'pri1047-source-correction-diagnosis',
   summary: 'Implementation proceeded without the Owner design approval.',
@@ -33,7 +34,16 @@ const diagnosis: DiagnosticianOutputV1 = {
   violatedPrinciples: [],
   evidence: [{ sourceRef: 'trajectory://owner/turn-4', note: 'Owner原文引用：' + OWNER_SENTENCE }],
   confidence: 0.9,
-  recommendations: [{ kind: 'rule', description: 'Gate non-trivial changes on design approval.' }],
+  recommendations: [
+    {
+      kind: 'rule',
+      description: 'Gate non-trivial changes on design approval.',
+      recommendationRef: 'rule-1',
+      triggerPattern: 'non-trivial change',
+      action: 'Require Owner design approval before coding.',
+      principleAssociation: { status: 'unresolved', reason: 'insufficient_evidence' },
+    },
+  ],
 };
 
 function sha256Of(value: string): string {

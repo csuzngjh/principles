@@ -17,21 +17,22 @@ import type { CandidateIntakeService, ReuseRecommendationOutcome } from '../../c
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../../candidate-intake.js';
 import type { RuntimeStateManager, CandidateRecord } from '../../store/runtime-state-manager.js';
 import type { RunnerResult } from '../../runner/runner-result.js';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import type { CandidateAdmissionDocument } from '../../store/candidate/admission-document.js';
 
 const TASK_ID = 'diagnosis_pain_cr05';
 const PAIN_ID = 'pain_cr05';
 
-function makeOutput(): DiagnosticianOutputV1 {
+function makeOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-cr05',
     summary: 'summary',
     rootCause: 'root cause',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'trace-1', note: 'note' }],
-    recommendations: [{ kind: 'principle', description: 'Candidate principle' }],
+    recommendations: [{ kind: 'principle', description: 'Candidate principle', recommendationRef: 'principle-1' }],
     confidence: 0.9,
   };
 }

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticianOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
+import { DiagnosticianOutputV2Schema } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
 import { RuntimeStateManager } from '../packages/principles-core/src/runtime/store/runtime-state-manager.js';
 import { SqliteHistoryQuery } from '../packages/principles-core/src/runtime/store/history/sqlite-history-query.js';
 import { SqliteContextAssembler } from '../packages/principles-core/src/runtime/store/context/sqlite-context-assembler.js';
@@ -248,10 +248,10 @@ async function main() {
       if (succeededRun && succeededRun.outputPayload) {
         try {
           const parsed = JSON.parse(succeededRun.outputPayload);
-          if (Value.Check(DiagnosticianOutputV1Schema, parsed)) {
+          if (Value.Check(DiagnosticianOutputV2Schema, parsed)) {
             monolithOutput = parsed;
           } else {
-            const errors = [...Value.Errors(DiagnosticianOutputV1Schema, parsed)];
+            const errors = [...Value.Errors(DiagnosticianOutputV2Schema, parsed)];
             console.error(`ERROR: outputPayload validation failed for task ${taskId}:`, errors.map(e => `${e.path}: ${e.message}`).join('; '));
             process.exit(1);
           }

@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRuntimeStateHandle, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, hydratePITaskRecord, ScribeRunner, ArtificerRunner, DefaultScribeValidator, DefaultArtificerValidator, TestDoubleRuntimeAdapter, StoreEventEmitter, PrincipleTreeLedgerAdapter, type RuntimeStateHandle, type DiagnosticianOutputV1 } from '@principles/core/runtime';
+import { createRuntimeStateHandle, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, hydratePITaskRecord, ScribeRunner, ArtificerRunner, DefaultScribeValidator, DefaultArtificerValidator, TestDoubleRuntimeAdapter, StoreEventEmitter, PrincipleTreeLedgerAdapter, type RuntimeStateHandle, type DiagnosticianOutputV2 } from '@principles/core/runtime';
 import { addPrincipleToLedger, loadLedger } from '@principles/core/principle-tree-ledger';
 import { handleRuleCandidateBindingsRoute } from '../../../src/server/routes/rule-candidate-bindings.js';
 
@@ -21,7 +21,19 @@ describe('authenticated binding route, real Ledger + real SQLite revision', () =
   let base: string;
   let candidateId: string;
   let authorized: boolean;
-  const output: DiagnosticianOutputV1 = { valid: true, diagnosisId: 'diagnosis', summary: 'Scope violation', rootCause: 'Design: scope missing', violatedPrinciples: [], evidence: [], confidence: 0.9, recommendations: [{ kind: 'rule', description: 'Implement explicit scope checks.' }, { kind: 'principle', description: 'Protect the approved scope.' }] };
+  const output: DiagnosticianOutputV2 = {
+    valid: true, diagnosisId: 'diagnosis', summary: 'Scope violation', rootCause: 'Design: scope missing',
+    violatedPrinciples: [], evidence: [], confidence: 0.9, schemaVersion: 'diagnostician-output-v2',
+    recommendations: [
+      {
+        kind: 'rule', description: 'Implement explicit scope checks.', recommendationRef: 'rule-1',
+        triggerPattern: 'scope-affecting change', action: 'check the approved scope',
+        // No evidence entries in this fixture output → no linkable evidenceRefs.
+        principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+      },
+      { kind: 'principle', description: 'Protect the approved scope.', recommendationRef: 'principle-1' },
+    ],
+  };
   beforeEach(async () => {
     workspaceDir = mkdtempSync(join(tmpdir(), 'pd-binding-route-'));
     handle = await createRuntimeStateHandle({ workspaceDir });

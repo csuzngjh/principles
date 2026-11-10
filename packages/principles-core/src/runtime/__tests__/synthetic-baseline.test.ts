@@ -173,14 +173,16 @@ describe('Synthetic Baseline pure helpers (PRI-206)', () => {
   });
 
   describe('makeDeterministicDiagnosticianOutput', () => {
-    it('produces valid DiagnosticianOutputV1', () => {
+    it('produces valid DiagnosticianOutputV2 (PRI-1146)', () => {
       const output = makeDeterministicDiagnosticianOutput('test-pain-123');
       expect(output.valid).toBe(true);
+      expect(output.schemaVersion).toBe('diagnostician-output-v2');
       expect(output.confidence).toBe(0.95);
       expect(output.diagnosisId).toBe('synth-diag-test-pain-123');
       const firstRec = output.recommendations.find(() => true);
       expect(firstRec).toBeDefined();
       expect(firstRec?.kind).toBe('principle');
+      expect(firstRec?.recommendationRef).toBe('principle-1');
     });
   });
 });

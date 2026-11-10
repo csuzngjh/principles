@@ -15,12 +15,14 @@
  * - ERR-004 / ERR-008 / EP-07: lineage fields come from the same source rows
  */
 import { describe, it, expect } from 'vitest';
+import { validateTelemetryEvent } from '../../telemetry-event.js';
+import { mapBridgeTelemetryToStoreEvent } from '../pain-signal-runtime-factory.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
 import type { PainSignalBridgeResult } from '../pain-signal-bridge.js';
 import type { RuntimeStateManager, CandidateRecord } from '../store/runtime-state-manager.js';
 import type { CandidateIntakeService } from '../candidate-intake-service.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 import type { PainProvenance } from '../admission-gate.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 
@@ -66,28 +68,30 @@ function makeLedgerEntry(candidateId: string): LedgerPrincipleEntry {
   };
 }
 
-function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
+function makeHighConfidenceOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-high',
     summary: 'Valid diagnosis with sufficient evidence',
     rootCause: 'Identified root cause from session trace',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'session-trace-1', note: 'Owner confirmed behavior' }],
-    recommendations: [{ kind: 'principle', description: 'Valid principle from evidence' }],
+    recommendations: [{ kind: 'principle', description: 'Valid principle from evidence', recommendationRef: 'principle-1' }],
     confidence: 0.85,
   };
 }
 
-function makeLowConfidenceOutput(): DiagnosticianOutputV1 {
+function makeLowConfidenceOutput(): DiagnosticianOutputV2 {
   return {
+    schemaVersion: 'diagnostician-output-v2',
     valid: true,
     diagnosisId: 'diag-low',
     summary: 'Low confidence diagnosis',
     rootCause: 'Insufficient evidence',
     violatedPrinciples: [],
     evidence: [],
-    recommendations: [{ kind: 'principle', description: 'Low confidence principle' }],
+    recommendations: [{ kind: 'principle', description: 'Low confidence principle', recommendationRef: 'principle-1' }],
     confidence: 0.3,
   };
 }
@@ -104,7 +108,7 @@ interface MockDeps {
 
 function makeMockDeps(overrides: {
   candidates?: CandidateRecord[];
-  output?: DiagnosticianOutputV1;
+  output?: DiagnosticianOutputV2;
   runOutputPayload?: string;
   ledgerEntries?: Map<string, LedgerPrincipleEntry>;
   createTaskFn?: (input: Record<string, unknown>) => Promise<unknown>;
@@ -790,7 +794,8 @@ describe('PRI-456: shapeBridgeResult edge cases', () => {
       makeCandidate('c-gated', 'principle'),
     ];
     // High confidence for principle, defer always deferred, low confidence for gated
-    const output: DiagnosticianOutputV1 = {
+    const output: DiagnosticianOutputV2 = {
+      schemaVersion: 'diagnostician-output-v2',
       valid: true,
       diagnosisId: 'diag-mix',
       summary: 'Mixed admission',
@@ -798,9 +803,9 @@ describe('PRI-456: shapeBridgeResult edge cases', () => {
       violatedPrinciples: [],
       evidence: [{ sourceRef: 'test', note: 'Evidence' }],
       recommendations: [
-        { kind: 'principle', description: 'Principle 1' },
-        { kind: 'defer', description: 'Defer 1' },
-        { kind: 'principle', description: 'Principle 2' },
+        { kind: 'principle', description: 'Principle 1', recommendationRef: 'principle-1' },
+        { kind: 'defer', description: 'Defer 1', recommendationRef: 'defer-1' },
+        { kind: 'principle', description: 'Principle 2', recommendationRef: 'principle-2' },
       ],
       confidence: 0.85,
     };
@@ -817,5 +822,105 @@ describe('PRI-456: shapeBridgeResult edge cases', () => {
 
     expect(result.status).toBe('degraded');
     expect(result.message).toContain('partial_admission');
+  });
+});
+
+// ── PRI-1146 G6 / P1-01: replay-review skips are observable ─────────────────
+
+describe('PRI-1146 G6: replay review source-invalid skips are observable', () => {
+  function setupReplaySkip(candidates: CandidateRecord[]): { deps: MockDeps; reviewCalls: () => number } {
+    const deps = makeMockDeps({ candidates, ledgerEntries: new Map() });
+    enableReplayReview(deps, candidates);
+    let calls = 0;
+    deps.intakeService.reviewReuse = async (candidateId: string) => {
+      calls += 1;
+      return {
+        outcome: 'refused' as const,
+        reason: 'reuse_pending_owner' as const,
+        candidateId,
+        rawRecommendationKind: 'principle' as const,
+        message: 'confirmed reuse recommendation',
+      };
+    };
+    return { deps, reviewCalls: () => calls };
+  }
+
+  it('emits owning_output_unparseable under the registered event name, never degraded', async () => {
+    const candidates = [makeCandidate('c-bad-json', 'principle')];
+    const { deps, reviewCalls } = setupReplaySkip(candidates);
+    deps.stateManager = {
+      ...deps.stateManager,
+      // Not valid JSON: the owning run payload cannot be re-read.
+      getRun: async (runId: string) => ({ runId, taskId: TASK_ID, executionStatus: 'succeeded', outputPayload: '{"truncated":' }),
+    } as unknown as RuntimeStateManager;
+    const bridge = createBridge(deps);
+
+    const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+    });
+
+    expect(reviewCalls()).toBe(0);
+    // A skip is not a park: no candidateOutcomes are fabricated.
+    expect(result.candidateOutcomes).toBeUndefined();
+    const event = deps.telemetryEvents.find((e) => e.eventType === 'replay_review_source_invalid');
+    expect(event).toBeDefined();
+    if (!event) return;
+    expect(event.payload).toMatchObject({ candidateId: 'c-bad-json', reason: 'owning_output_unparseable' });
+    expect(typeof (event.payload as Record<string, unknown>).nextAction).toBe('string');
+    // Raw event name is preserved (no rewrite to degradation_triggered) and the
+    // production bridge→store mapping keeps it schema-valid end to end.
+    expect(deps.telemetryEvents.some((e) => e.eventType === 'degradation_triggered')).toBe(false);
+    const mapped = mapBridgeTelemetryToStoreEvent(event as {
+      eventType: string;
+      traceId: string;
+      timestamp: string;
+      payload: Record<string, unknown>;
+    });
+    expect(mapped).not.toBeNull();
+    expect(mapped?.eventType).toBe('replay_review_source_invalid');
+    if (mapped) expect(validateTelemetryEvent(mapped).valid).toBe(true);
+  });
+
+  it('emits owning_output_not_v2 for a retired V1 payload', async () => {
+    const candidates = [makeCandidate('c-v1', 'principle')];
+    const { deps, reviewCalls } = setupReplaySkip(candidates);
+    const v1Payload = JSON.stringify({
+      valid: true,
+      diagnosisId: 'diag-v1',
+      summary: 'Retired V1 diagnosis',
+      rootCause: 'Legacy root cause',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [{ kind: 'principle', text: 'Legacy principle text' }],
+      confidence: 0.9,
+    });
+    deps.stateManager = {
+      ...deps.stateManager,
+      getRun: async (runId: string) => ({ runId, taskId: TASK_ID, executionStatus: 'succeeded', outputPayload: v1Payload }),
+    } as unknown as RuntimeStateManager;
+    const bridge = createBridge(deps);
+
+    const result = await (bridge as unknown as BridgeWithPrivate).buildExistingResult({
+      painId: PAIN_ID,
+      taskId: TASK_ID,
+    });
+
+    expect(reviewCalls()).toBe(0);
+    expect(result.candidateOutcomes).toBeUndefined();
+    const event = deps.telemetryEvents.find((e) => e.eventType === 'replay_review_source_invalid');
+    expect(event).toBeDefined();
+    if (!event) return;
+    expect(event.payload).toMatchObject({ candidateId: 'c-v1', reason: 'owning_output_not_v2' });
+    expect(typeof (event.payload as Record<string, unknown>).nextAction).toBe('string');
+    expect(deps.telemetryEvents.some((e) => e.eventType === 'degradation_triggered')).toBe(false);
+    const mapped = mapBridgeTelemetryToStoreEvent(event as {
+      eventType: string;
+      traceId: string;
+      timestamp: string;
+      payload: Record<string, unknown>;
+    });
+    expect(mapped?.eventType).toBe('replay_review_source_invalid');
+    if (mapped) expect(validateTelemetryEvent(mapped).valid).toBe(true);
   });
 });

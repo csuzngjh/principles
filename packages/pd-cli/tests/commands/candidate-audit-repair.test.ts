@@ -40,7 +40,7 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{
       runId: 'run-underlying', status: 'succeeded',
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'd' }], confidence: 0.95 }),
     }]),
     // SPEC-CODEX-PAIN-CLOSURE-001 round-5: the write gate resolves each
     // candidate's own diagnostic round via getRun(candidate.sourceRunId).
@@ -49,7 +49,7 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
       taskId: 'task-underlying',
       status: 'succeeded',
       executionStatus: 'succeeded' as const,
-      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+      outputPayload: JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'd' }], confidence: 0.95 }),
     } : null)),
     getArtifact: vi.fn().mockResolvedValue(null),
     getCandidatesByTaskId: vi.fn(async () => {

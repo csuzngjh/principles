@@ -17,7 +17,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RuntimeStateManager, SqliteDiagnosticianCommitter } from '@principles/core/runtime';
 import { SqliteConnection } from '@principles/core/runtime';
-import type { DiagnosticianOutputV1 } from '@principles/core/runtime';
+import type { DiagnosticianOutputV2 } from '@principles/core/runtime';
 import { enforceFullAdmissionForWrite } from '../../src/services/admission-write-gate.js';
 
 const dirs: string[] = [];
@@ -27,7 +27,7 @@ const NOW = '2026-10-14T13:00:00.000Z';
 /** Real SQLite schema init under the suite's worker fan-out (Windows). */
 const REAL_SQLITE_TIMEOUT_MS = 30_000;
 
-function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV1 {
+function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV2 {
   return {
     valid: true,
     diagnosisId: `diag-${round}`,
@@ -35,8 +35,9 @@ function roundOutput(round: 'r1' | 'r2'): DiagnosticianOutputV1 {
     rootCause: `root cause ${round}`,
     violatedPrinciples: [],
     evidence: [{ sourceRef: `trace-${round}`, note: `evidence ${round}` }],
-    recommendations: [{ kind: 'principle', description: `Principle from ${round}` }],
+    recommendations: [{ kind: 'principle', description: `Principle from ${round}`, recommendationRef: 'principle-1' }],
     confidence: round === 'r1' ? 0.9 : 0.2,
+    schemaVersion: 'diagnostician-output-v2',
   };
 }
 

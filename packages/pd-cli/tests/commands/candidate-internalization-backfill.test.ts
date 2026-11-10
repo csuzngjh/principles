@@ -38,7 +38,7 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
         // + admitting underlying materials; tests may override per case).
         getRunsByTask: vi.fn(async (taskId: string) => ([{
           runId: 'run-underlying', taskId, status: 'succeeded',
-          outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+          outputPayload: JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'd' }], confidence: 0.95 }),
         }])),
         // SPEC-CODEX-PAIN-CLOSURE-001 round-5: the write gate resolves a
         // candidate's own round via getRun(candidate.sourceRunId). Fixtures set
@@ -46,7 +46,7 @@ vi.mock('@principles/core/runtime', async (importOriginal) => {
         // carries the executionStatus the gate validates.
         getRun: vi.fn(async (runId: string) => ({
           runId, taskId: runId, status: 'succeeded', executionStatus: 'succeeded' as const,
-          outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+          outputPayload: JSON.stringify({ schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', recommendationRef: 'x-1', description: 'd' }], confidence: 0.95 }),
         })),
         getArtifact: vi.fn().mockResolvedValue(null),
         getCandidatesByTaskId: vi.fn(async (taskId: string) => {

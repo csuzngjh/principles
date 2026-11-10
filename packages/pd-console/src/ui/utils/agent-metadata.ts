@@ -147,7 +147,7 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     impactEn: 'Pain signals cannot enter the internalization pipeline. Diagnosis is the entry point; disabling paralyzes the entire flow — no new principle candidates can be generated.',
     techDetailZh: {
       '输入': '`DiagnosticianContextPayload`（pain 信号上下文）',
-      '输出': '`DiagnosticianOutputV1` · rootCause / violatedPrinciples / recommendations[] / confidence',
+      '输出': '`DiagnosticianOutputV2` · schemaVersion / rootCause / violatedPrinciples / recommendations[]（含 recommendationRef + principleAssociation）/ confidence',
       // PRI-638: the split flag no longer selects an implementation nor
       // disables anything — the capability switch is the agent binding here.
       '编排': '由 `PainSignalBridge` 触发；开关 = 本页面的代理启用开关（`internalAgents.agents.diagnostician.enabled`）',
@@ -155,7 +155,7 @@ export const AGENT_METADATA: Record<InternalAgentName, AgentMeta> = {
     },
     techDetailEn: {
       'Input': '`DiagnosticianContextPayload` (pain signal context)',
-      'Output': '`DiagnosticianOutputV1` · rootCause / violatedPrinciples / recommendations[] / confidence',
+      'Output': '`DiagnosticianOutputV2` · schemaVersion / rootCause / violatedPrinciples / recommendations[] (with recommendationRef + principleAssociation) / confidence',
       // PRI-638: the split flag no longer selects an implementation nor
       // disables anything — the capability switch is the agent binding here.
       'Orchestration': 'Triggered by `PainSignalBridge`; switch = this agent\'s enable toggle (`internalAgents.agents.diagnostician.enabled`)',

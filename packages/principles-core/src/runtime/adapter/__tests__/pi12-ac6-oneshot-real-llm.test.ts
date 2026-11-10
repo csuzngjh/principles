@@ -31,7 +31,7 @@ vi.mock('../pi-ai-http-transport.js', async (importActual) => {
 
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
-import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../../diagnostician-output.js';
 import type { TelemetryEvent } from '../../../telemetry-event.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { getLlmE2eConfig } from '../../__tests__/fixtures/llm-e2e-config.js';
@@ -73,10 +73,11 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B3 — One-shot json_sche
         'Diagnose this pain signal: "an AI agent repeatedly skipped its verification step when running low on time, ' +
         'causing three escaped defects in one week". ' +
         'Use diagnosisId "ac6-diag-1", rootCause prefixed with "Assumption: ", ' +
-        'and exactly one recommendation { kind: "defer", description: "..." }. ' +
+        'schemaVersion "diagnostician-output-v2", and exactly one recommendation ' +
+        '{ kind: "defer", description: "...", recommendationRef: "defer-1" }. ' +
         'violatedPrinciples and evidence may be empty arrays. confidence between 0 and 1.',
       contextItems: [],
-      outputSchemaRef: 'diagnostician-output-v1',
+      outputSchemaRef: 'diagnostician-output',
       timeoutMs: cfg.timeoutMs,
     };
 
@@ -88,7 +89,7 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B3 — One-shot json_sche
 
       if (!output) throw new Error('ac6-b3: fetchOutput returned null');
       const { payload } = output;
-      expect(Value.Check(DiagnosticianOutputV1Schema, payload)).toBe(true);
+      expect(Value.Check(DiagnosticianOutputV2Schema, payload)).toBe(true);
 
       // The json_schema rewrite actually reached the real HTTP request.
       const { requests } = recorder;

@@ -2,16 +2,18 @@
  * DefaultDiagnosticianValidator comprehensive test suite.
  *
  * Tests all 7 requirement areas (REQ-2.3a through REQ-2.3g) plus
- * D-01 (fail-fast vs verbose), D-03 (error array format), D-04 (errorCategory).
+ * D-01 (fail-fast vs verbose), D-03 (error array format), D-04 (errorCategory),
+ * plus the V2 association-structure checks ASSC-1..4 (SPEC-PD-RULE-ASSOCIATION-005
+ * v0.6 §4, PRI-1146 V2 Only).
  */
 import { describe, it, expect } from 'vitest';
-import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../../diagnostician-output.js';
 import { DefaultDiagnosticianValidator } from '../default-validator.js';
 import type { DiagnosticianValidationResult } from '../diagnostician-validator.js';
 
 // ── Valid output fixture ────────────────────────────────────────────────────────
 
-function makeValidOutput(overrides: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
+function makeValidOutput(overrides: Partial<DiagnosticianOutputV2> = {}): DiagnosticianOutputV2 {
   return {
     valid: true,
     diagnosisId: 'diag-001',
@@ -19,8 +21,11 @@ function makeValidOutput(overrides: Partial<DiagnosticianOutputV1> = {}): Diagno
     rootCause: 'Missing error handling in X module',
     violatedPrinciples: [],
     evidence: [{ sourceRef: 'task-001', note: 'Stack trace shows unhandled promise' }],
-    recommendations: [{ kind: 'implementation', description: 'Add try-catch around async call' }],
+    recommendations: [
+      { kind: 'implementation', description: 'Add try-catch around async call', recommendationRef: 'impl-1' },
+    ],
     confidence: 0.85,
+    schemaVersion: 'diagnostician-output-v2',
     ...overrides,
   };
 }
@@ -31,6 +36,7 @@ function assertValid(result: DiagnosticianValidationResult): void {
   expect(result.valid).toBe(true);
   expect(result.errors).toHaveLength(0);
   expect(result.errorCategory).toBeUndefined();
+  expect(result.invalidAreas).toBeUndefined();
 }
 
 function assertInvalid(
@@ -57,7 +63,7 @@ describe('schema validation', () => {
   it('missing required field fails', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      { valid: true, diagnosisId: 'diag-001' } as unknown as DiagnosticianOutputV1,
+      { valid: true, diagnosisId: 'diag-001' } as unknown as DiagnosticianOutputV2,
       'task-001',
     );
     assertInvalid(result, 'output_invalid', 1);
@@ -67,19 +73,32 @@ describe('schema validation', () => {
   it('wrong field type fails', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      { ...makeValidOutput(), confidence: 'not-a-number' } as unknown as DiagnosticianOutputV1,
+      { ...makeValidOutput(), confidence: 'not-a-number' } as unknown as DiagnosticianOutputV2,
       'task-001',
     );
     assertInvalid(result, 'output_invalid', 1);
   });
 
-  it('additional unknown fields are ignored by TypeBox', async () => {
+  it('additional unknown fields are rejected by the closed V2 root', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      { ...makeValidOutput(), unknownField: 'should be ignored' } as unknown as DiagnosticianOutputV1,
+      { ...makeValidOutput(), unknownField: 'should be rejected' } as unknown as DiagnosticianOutputV2,
       'task-001',
     );
-    assertValid(result);
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('schema');
+    expect(result.errors.some((e) => e.includes('unknownField'))).toBe(true);
+  });
+
+  it('taskId on the output fails (closed root rejects lineage fields)', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      { ...makeValidOutput(), taskId: 'task-001' } as unknown as DiagnosticianOutputV2,
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('schema');
+    expect(result.errors.some((e) => e.includes('taskId'))).toBe(true);
   });
 
   it('null output fails with guard check', async () => {
@@ -216,7 +235,7 @@ describe('evidence array', () => {
     // it as execution_failed (retryable) and wastes quota, rather than
     // output_invalid (permanent).
     const validator = new DefaultDiagnosticianValidator();
-    const output = { ...makeValidOutput(), evidence: undefined } as unknown as DiagnosticianOutputV1;
+    const output = { ...makeValidOutput(), evidence: undefined } as unknown as DiagnosticianOutputV2;
     const result = await validator.validate(output, 'task-001');
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
@@ -224,7 +243,7 @@ describe('evidence array', () => {
 
   it('evidence is a non-array string fails in standard mode without throwing', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const output = { ...makeValidOutput(), evidence: 'none provided' } as unknown as DiagnosticianOutputV1;
+    const output = { ...makeValidOutput(), evidence: 'none provided' } as unknown as DiagnosticianOutputV2;
     const result = await validator.validate(output, 'task-001');
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
@@ -235,7 +254,7 @@ describe('evidence array', () => {
     // shape loop AND the 2g sourceRef existence loop) — otherwise either
     // `for (const ev of null)` or `for (const ev of undefined)` throws.
     const validator = new DefaultDiagnosticianValidator();
-    const output = { ...makeValidOutput(), evidence: null } as unknown as DiagnosticianOutputV1;
+    const output = { ...makeValidOutput(), evidence: null } as unknown as DiagnosticianOutputV2;
     const result = await validator.validate(output, 'task-001', { verbose: true, sourceRefs: ['task-001'] });
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
@@ -246,7 +265,7 @@ describe('evidence array', () => {
     // uses the same Array.isArray guard so a non-array evidence value cannot
     // trigger `for...of` TypeError even when sourceRefs are provided.
     const validator = new DefaultDiagnosticianValidator();
-    const output = { ...makeValidOutput(), evidence: { 0: 'fake' } } as unknown as DiagnosticianOutputV1;
+    const output = { ...makeValidOutput(), evidence: { 0: 'fake' } } as unknown as DiagnosticianOutputV2;
     const result = await validator.validate(output, 'task-001', { verbose: true, sourceRefs: ['ref-a'] });
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('evidence must be an array'))).toBe(true);
@@ -267,7 +286,7 @@ describe('recommendations shape', () => {
     const result = await validator.validate(
       makeValidOutput({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        recommendations: [{ kind: 'not-a-kind' as any, description: 'Fix X' }],
+        recommendations: [{ kind: 'not-a-kind' as any, description: 'Fix X', recommendationRef: 'rec-1' }],
       }),
       'task-001',
     );
@@ -279,7 +298,7 @@ describe('recommendations shape', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'implementation', description: '' }],
+        recommendations: [{ kind: 'implementation', description: '', recommendationRef: 'impl-1' }],
       }),
       'task-001',
     );
@@ -291,7 +310,7 @@ describe('recommendations shape', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'implementation', description: '  \n' }],
+        recommendations: [{ kind: 'implementation', description: '  \n', recommendationRef: 'impl-1' }],
       }),
       'task-001',
     );
@@ -314,7 +333,7 @@ describe('recommendations shape', () => {
     // an error but must NOT fall through to `for (const rec of output.recommendations)`
     // when recommendations is undefined — that would throw instead of collecting errors.
     const validator = new DefaultDiagnosticianValidator();
-    const output = { ...makeValidOutput(), recommendations: undefined } as unknown as DiagnosticianOutputV1;
+    const output = { ...makeValidOutput(), recommendations: undefined } as unknown as DiagnosticianOutputV2;
     const result = await validator.validate(output, 'task-001', { verbose: true });
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('recommendations must contain at least one entry'))).toBe(true);
@@ -322,7 +341,7 @@ describe('recommendations shape', () => {
 
   it('recommendations is a non-array value fails in verbose mode without throwing', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const output = { ...makeValidOutput(), recommendations: 'not-an-array' } as unknown as DiagnosticianOutputV1;
+    const output = { ...makeValidOutput(), recommendations: 'not-an-array' } as unknown as DiagnosticianOutputV2;
     const result = await validator.validate(output, 'task-001', { verbose: true });
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('recommendations must contain at least one entry'))).toBe(true);
@@ -334,16 +353,23 @@ describe('recommendations shape', () => {
     for (const kind of kinds) {
       const result = await validator.validate(
         makeValidOutput({
-          recommendations: [{ kind, description: 'Fix something' }],
+          recommendations: [{ kind, description: 'Fix something', recommendationRef: `${kind}-1` }],
         }),
         'task-001',
       );
       assertValid(result);
     }
-    // rule requires triggerPattern + action
+    // rule requires triggerPattern + action + principleAssociation
     const ruleResult = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', triggerPattern: '^\\.\\./', action: 'Reject path traversal' }],
+        recommendations: [{
+          kind: 'rule',
+          description: 'Block unsafe paths',
+          recommendationRef: 'rule-1',
+          triggerPattern: '^\\.\\./',
+          action: 'Reject path traversal',
+          principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+        }],
       }),
       'task-001',
     );
@@ -354,6 +380,7 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
+          recommendationRef: 'principle-1',
           abstractedPrinciple: 'Validate inputs before execution',
         }],
       }),
@@ -370,6 +397,7 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
+          recommendationRef: 'principle-1',
           abstractedPrinciple: longPrinciple,
         }],
       }),
@@ -386,6 +414,7 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
+          recommendationRef: 'principle-1',
           abstractedPrinciple: tooLongPrinciple,
         }],
       }),
@@ -403,6 +432,7 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
+          recommendationRef: 'principle-1',
           abstractedPrinciple: principle41,
         }],
       }),
@@ -420,7 +450,7 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Use immutable data' }],
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1' }],
       }),
       'task-001',
     );
@@ -432,7 +462,7 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Use immutable data', abstractedPrinciple: 'Prefer immutability' }],
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1', abstractedPrinciple: 'Prefer immutability' }],
       }),
       'task-001',
     );
@@ -443,7 +473,7 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Use immutable data', abstractedPrinciple: 'Prefer immutability' }],
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1', abstractedPrinciple: 'Prefer immutability' }],
       }),
       'task-001',
     );
@@ -454,19 +484,28 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Use immutable data', abstractedPrinciple: 'Prefer immutability' }],
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', recommendationRef: 'principle-1', abstractedPrinciple: 'Prefer immutability' }],
       }),
       'task-001',
     );
     assertValid(result);
   });
 
-  // rule: triggerPattern + action required
+  // rule: triggerPattern + action + principleAssociation required
   it('rule without triggerPattern fails', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', action: 'Reject path traversal' }],
+      // triggerPattern intentionally absent — cast because the V2 type requires it
+      recommendations: [
+        {
+          kind: 'rule',
+          description: 'Block unsafe paths',
+          recommendationRef: 'rule-1',
+          action: 'Reject path traversal',
+          principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+        },
+      ] as unknown as DiagnosticianOutputV2['recommendations'],
       }),
       'task-001',
     );
@@ -478,7 +517,16 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', triggerPattern: '^\\.\\./' }],
+      // action intentionally absent — cast because the V2 type requires it
+      recommendations: [
+        {
+          kind: 'rule',
+          description: 'Block unsafe paths',
+          recommendationRef: 'rule-1',
+          triggerPattern: '^\\.\\./',
+          principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+        },
+      ] as unknown as DiagnosticianOutputV2['recommendations'],
       }),
       'task-001',
     );
@@ -490,7 +538,14 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', triggerPattern: '^\\.\\./', action: 'Reject path traversal' }],
+        recommendations: [{
+          kind: 'rule',
+          description: 'Block unsafe paths',
+          recommendationRef: 'rule-1',
+          triggerPattern: '^\\.\\./',
+          action: 'Reject path traversal',
+          principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+        }],
       }),
       'task-001',
     );
@@ -498,33 +553,33 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
   });
 
   // implementation, prompt, defer: no additional required fields
-  it('implementation minimal (kind+description) passes', async () => {
+  it('implementation minimal (kind+description+ref) passes', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'implementation', description: 'Add try-catch around async call' }],
+        recommendations: [{ kind: 'implementation', description: 'Add try-catch around async call', recommendationRef: 'impl-1' }],
       }),
       'task-001',
     );
     assertValid(result);
   });
 
-  it('prompt minimal (kind+description) passes', async () => {
+  it('prompt minimal (kind+description+ref) passes', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'prompt', description: 'Inject SOP for file operations' }],
+        recommendations: [{ kind: 'prompt', description: 'Inject SOP for file operations', recommendationRef: 'prompt-1' }],
       }),
       'task-001',
     );
     assertValid(result);
   });
 
-  it('defer minimal (kind+description) passes', async () => {
+  it('defer minimal (kind+description+ref) passes', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'defer', description: 'Insufficient evidence to determine root cause' }],
+        recommendations: [{ kind: 'defer', description: 'Insufficient evidence to determine root cause', recommendationRef: 'defer-1' }],
       }),
       'task-001',
     );
@@ -535,12 +590,198 @@ describe('recommendation taxonomy calibration (PRI-31)', () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
       makeValidOutput({
-        recommendations: [{ kind: 'principle', description: 'Abstract', abstractedPrinciple: 'x'.repeat(201) }],
+        recommendations: [{ kind: 'principle', description: 'Abstract', recommendationRef: 'principle-1', abstractedPrinciple: 'x'.repeat(201) }],
       }),
       'task-001',
     );
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('abstractedPrinciple') && e.includes('200'))).toBe(true);
+  });
+});
+
+// ── ASSC-1..4: V2 association structure checks (SPEC v0.6 §4) ────────────────
+
+describe('association structure checks (V2, SPEC v0.6 §4)', () => {
+  it('duplicate recommendationRef fails with association invalidArea', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [
+          { kind: 'implementation', description: 'First fix', recommendationRef: 'ref-1' },
+          { kind: 'prompt', description: 'Second fix', recommendationRef: 'ref-1' },
+        ],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('association');
+    expect(result.errors.some((e) => e.includes('"ref-1"') && e.includes('duplicated'))).toBe(true);
+  });
+
+  it('rule targeting a missing recommendationRef fails with association error', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{
+          kind: 'rule',
+          description: 'Block unsafe paths',
+          recommendationRef: 'rule-1',
+          triggerPattern: '^\\.\\./',
+          action: 'Reject path traversal',
+          principleAssociation: {
+            status: 'linked',
+            relation: 'implements',
+            target: { type: 'recommendation_ref', recommendationRef: 'missing-principle' },
+            rationale: 'Rule operationalizes the missing principle',
+            evidenceRefs: ['task-001'],
+          },
+        }],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('association');
+    expect(result.errors.some((e) => e.includes('missing-principle') && e.includes('does not exist'))).toBe(true);
+  });
+
+  it('rule targeting a rule-kind recommendationRef fails with association error', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [
+          {
+            kind: 'rule',
+            description: 'Block unsafe paths',
+            recommendationRef: 'rule-1',
+            triggerPattern: '^\\.\\./',
+            action: 'Reject path traversal',
+            principleAssociation: {
+              status: 'linked',
+              relation: 'implements',
+              target: { type: 'recommendation_ref', recommendationRef: 'rule-2' },
+              rationale: 'Rule implements the other rule',
+              evidenceRefs: ['task-001'],
+            },
+          },
+          {
+            kind: 'rule',
+            description: 'Block unknown hosts',
+            recommendationRef: 'rule-2',
+            triggerPattern: '^https?://unknown',
+            action: 'Reject request',
+            principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+          },
+        ],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('association');
+    expect(result.errors.some((e) => e.includes('"rule-2"') && e.includes('must be kind "principle"'))).toBe(true);
+  });
+
+  it('rule association evidenceRef not present in evidence[] fails with association error', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [
+          {
+            kind: 'principle',
+            description: 'Validate tool arguments before execution',
+            recommendationRef: 'principle-1',
+            abstractedPrinciple: 'Validate inputs before execution',
+          },
+          {
+            kind: 'rule',
+            description: 'Block unsafe paths',
+            recommendationRef: 'rule-1',
+            triggerPattern: '^\\.\\./',
+            action: 'Reject path traversal',
+            principleAssociation: {
+              status: 'linked',
+              relation: 'implements',
+              target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+              rationale: 'Rule operationalizes the principle',
+              evidenceRefs: ['not-in-evidence'],
+            },
+          },
+        ],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('association');
+    expect(result.errors.some((e) => e.includes('"not-in-evidence"') && e.includes('evidence'))).toBe(true);
+  });
+
+  it('non-rule recommendation carrying principleAssociation fails with association error', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const output = makeValidOutput({
+      recommendations: [
+        {
+          kind: 'implementation',
+          description: 'Add try-catch around async call',
+          recommendationRef: 'impl-1',
+          principleAssociation: { status: 'unresolved', reason: 'no_supported_target' },
+        },
+      ] as unknown as DiagnosticianOutputV2['recommendations'],
+    });
+    const result = await validator.validate(output, 'task-001');
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('association');
+    expect(result.errors.some((e) => e.includes('must not carry principleAssociation'))).toBe(true);
+  });
+
+  it('rule missing principleAssociation fails with association error', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const output = makeValidOutput({
+      recommendations: [
+        {
+          kind: 'rule',
+          description: 'Block unsafe paths',
+          recommendationRef: 'rule-1',
+          triggerPattern: '^\\.\\./',
+          action: 'Reject path traversal',
+        },
+      ] as unknown as DiagnosticianOutputV2['recommendations'],
+    });
+    const result = await validator.validate(output, 'task-001');
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.invalidAreas).toContain('association');
+    expect(result.errors.some((e) => e.includes('missing principleAssociation'))).toBe(true);
+  });
+
+  it('valid linked rule (principle rec + evidence + association referencing both) passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [
+          {
+            kind: 'principle',
+            description: 'Validate tool arguments before execution',
+            recommendationRef: 'principle-1',
+            abstractedPrinciple: 'Validate inputs before execution',
+          },
+          {
+            kind: 'rule',
+            description: 'Block unsafe paths',
+            recommendationRef: 'rule-1',
+            triggerPattern: '^\\.\\./',
+            action: 'Reject path traversal',
+            principleAssociation: {
+              status: 'linked',
+              relation: 'implements',
+              target: { type: 'recommendation_ref', recommendationRef: 'principle-1' },
+              rationale: 'Rule operationalizes the principle',
+              evidenceRefs: ['task-001'],
+            },
+          },
+        ],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+    expect(result.invalidAreas).toBeUndefined();
   });
 });
 
@@ -777,12 +1018,12 @@ describe('error array format', () => {
 describe('errorCategory', () => {
   it('all failures have errorCategory=output_invalid', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const cases: DiagnosticianOutputV1[] = [
+    const cases: DiagnosticianOutputV2[] = [
       makeValidOutput({ confidence: -0.1 }),
       makeValidOutput({ summary: '' }),
       makeValidOutput({ evidence: [{ sourceRef: '', note: 'x' }] }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { ...makeValidOutput({ recommendations: [{ kind: 'bad' as any, description: 'x' }] }) },
+      { ...makeValidOutput({ recommendations: [{ kind: 'bad' as any, description: 'x', recommendationRef: 'rec-1' }] }) },
     ];
     for (const output of cases) {
       const result = await validator.validate(output, 'task-001');

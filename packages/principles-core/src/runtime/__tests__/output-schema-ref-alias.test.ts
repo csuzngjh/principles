@@ -4,18 +4,19 @@ import {
   OUTPUT_SCHEMA_REGISTRY,
   resolveOutputSchema,
 } from '../adapter/output-schema-registry.js';
+import { DiagnosticianOutputV2Schema } from '../diagnostician-output.js';
 
 /**
- * PRI-1104 Stage 0 (expand).
+ * PRI-1104 Stage 0 (expand) → PRI-1139 (PR-6 neutral keys) → PRI-1146
+ * (Diagnostician V2 Only / Clean Break).
  *
- * The single-version convergence switches `outputSchemaRef` values from
- * versioned names (`*-v1` / `*-v2`) to version-neutral names in PR-6. For that
- * PR to be independently revertible, the READ side must accept both shapes
- * BEFORE any writer changes. These assertions pin that contract against the
- * real registry (no mocks).
+ * The alias table historically carried every stage's neutral↔versioned pair.
+ * PRI-1146 removed ONLY Diagnostician's pair: `diagnostician-output` maps to
+ * the V2 schema and `diagnostician-output-v1` must NOT resolve (fail-loud).
+ * Every other stage keeps its bidirectional alias. These assertions pin that
+ * contract against the real registry (no mocks).
  */
 const CONTRACTS: readonly (readonly [string, string])[] = [
-  ['diagnostician-output', 'diagnostician-output-v1'],
   ['diag-rootcause-output', 'diag-rootcause-output-v1'],
   ['diag-distiller-output', 'diag-distiller-output-v1'],
   ['dreamer-output', 'dreamer-output-v1'],
@@ -31,14 +32,15 @@ const CONTRACTS: readonly (readonly [string, string])[] = [
 ];
 
 describe('PRI-1104 output schema ref aliases', () => {
-  it('PRI-1139 cutover: registry owns exactly the 13 version-neutral canonical keys', () => {
-    expect(OUTPUT_SCHEMA_REGISTRY.size).toBe(CONTRACTS.length);
+  it('PRI-1139/PRI-1146: registry owns exactly the 13 version-neutral canonical keys', () => {
+    expect(OUTPUT_SCHEMA_REGISTRY.size).toBe(CONTRACTS.length + 1);
     for (const [neutral, versioned] of CONTRACTS) {
       expect(OUTPUT_SCHEMA_REGISTRY.has(neutral), neutral).toBe(true);
       // The versioned spelling is compat-read-only: it resolves through the
       // alias table, never through an exact registry hit.
       expect(OUTPUT_SCHEMA_REGISTRY.has(versioned), versioned).toBe(false);
     }
+    expect(OUTPUT_SCHEMA_REGISTRY.has('diagnostician-output')).toBe(true);
   });
 
   it('the alias table has exactly one forward and one reverse entry per contract — no stray refs', () => {
@@ -62,6 +64,13 @@ describe('PRI-1104 output schema ref aliases', () => {
       expect(OUTPUT_SCHEMA_REF_ALIASES.get(versioned)).toBe(neutral);
     });
   }
+
+  it('PRI-1146 Clean Break: diagnostician-output resolves to the V2 schema, diagnostician-output-v1 does not resolve at all', () => {
+    expect(resolveOutputSchema('diagnostician-output')).toBe(DiagnosticianOutputV2Schema);
+    expect(OUTPUT_SCHEMA_REF_ALIASES.has('diagnostician-output-v1')).toBe(false);
+    expect(OUTPUT_SCHEMA_REF_ALIASES.get('diagnostician-output')).toBeUndefined();
+    expect(resolveOutputSchema('diagnostician-output-v1')).toBeUndefined();
+  });
 
   it('a retired v1 classification ref stays unresolvable (fail-loud contract preserved)', () => {
     expect(OUTPUT_SCHEMA_REF_ALIASES.has('signal-classification-output-v1')).toBe(false);

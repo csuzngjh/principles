@@ -12,7 +12,7 @@ import { isCorePrincipleId } from '../packages/principles-core/src/runtime/core-
 // Schemas for validation
 import { DiagRootCauseOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician/diag-rootcause-output.ts';
 import { DiagDistillerOutputV1Schema } from '../packages/principles-core/src/runtime/diagnostician/diag-distiller-output.ts';
-import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
+import { DiagnosticianOutputV2Schema, type DiagnosticianOutputV2 } from '../packages/principles-core/src/runtime/diagnostician-output.ts';
 
 const SENSENOVA_BASE_URL = 'https://token.sensenova.cn/v1/chat/completions';
 const API_KEY = process.env.SENSENOVA_API_KEY ?? '';
@@ -305,7 +305,7 @@ function checkRuleLikeLeakage(text: string): { score: number; leakageCount: numb
 
 function evaluateArmOutput(
   armName: string,
-  output: (DiagnosticianOutputV1 & { _stageBOutput?: any }) | null,
+  output: (DiagnosticianOutputV2 & { _stageBOutput?: any }) | null,
   contextPayload: unknown,
   expectedLanguage: 'zh-CN' | 'en'
 ): ArmResult['scores'] & { metrics: ArmResult['metrics'] } {
@@ -595,8 +595,8 @@ async function runArm3(model: ModelConfig, fixture: Fixture): Promise<ArmResult>
       throw new Error(`Stage C (Router) JSON parse failed: ${parsedC.error.message}`);
     }
     const outputC = parsedC.value;
-    if (!outputC || !Value.Check(DiagnosticianOutputV1Schema, outputC)) {
-      throw new Error('Stage C (Router) failed validation: ' + getValidationErrorString(DiagnosticianOutputV1Schema, outputC));
+    if (!outputC || !Value.Check(DiagnosticianOutputV2Schema, outputC)) {
+      throw new Error('Stage C (Router) failed validation: ' + getValidationErrorString(DiagnosticianOutputV2Schema, outputC));
     }
 
     // Attach stage B output for evaluateArmOutput to read grounding

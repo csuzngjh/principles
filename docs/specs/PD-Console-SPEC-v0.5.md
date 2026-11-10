@@ -1,5 +1,7 @@
 # SPEC-PD-RULE-ASSOCIATION-005 v0.5
 
+> **〔2026-11-09 部分废止标注〕** Owner 已于 2026-11-06 决策「Diagnostician Output V2 Only / Clean Break」（Linear PRI-1146）。本版 §5.1 的版本策略（V1 继续可读可提交、双版本兼容、V2 仅新路径）已被 `PD-Console-SPEC-v0.6.md` 明文废止；本版其余条款（§2/§3/§6/§7/§9/§12/§17-§23 等）在 v0.6 未修改范围内继续有效。本文件保留为历史设计记录。
+
 ## 规则归属源头关联、确定性身份解析与异常例外处理
 
 > 基于 `PD-Console-SPEC-v0.4.md` 修订，原文件保留。本项独立编号为 `SPEC-PD-RULE-ASSOCIATION-005`，不替代控制台融合 `SPEC-PD-CONSOLE-INTEGRATION-004 v0.2`。本版新增 §17～§23 为规范性补充；与前文存在表述冲突时，以这些节的明确限定为准。实施前应据此统一契约，不能任选宽松解释。

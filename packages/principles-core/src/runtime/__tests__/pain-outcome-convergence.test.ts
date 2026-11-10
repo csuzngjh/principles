@@ -12,17 +12,18 @@ import type { DiagnosticianRunnerLike } from '../pain-signal-bridge.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { CandidateRecord } from '../store/runtime-state-manager.js';
 import type { TaskRecord } from '../task-status.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 const TASK_ID = 'diagnosis_pain-mixed';
 
-const OUTPUT: DiagnosticianOutputV1 = {
+const OUTPUT: DiagnosticianOutputV2 = {
+  schemaVersion: 'diagnostician-output-v2',
   valid: true,
   diagnosisId: 'diag-1',
   summary: 'Mixed candidate outcomes remain individually observable',
   rootCause: 'Tooling: over-engineering',
   violatedPrinciples: [],
-  recommendations: [{ kind: 'prompt', description: 'Check the requested scope before changing code' }],
+  recommendations: [{ kind: 'prompt', description: 'Check the requested scope before changing code', recommendationRef: 'prompt-1' }],
   evidence: [
     { sourceRef: 'owner_message:t1', note: 'fix it' },
     { sourceRef: 'tool_call_failure:t2', note: 'Tool write failed' },

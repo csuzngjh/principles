@@ -1,5 +1,32 @@
 # @principles/host-runtime
 
+## 3.1.3
+
+### Patch Changes
+
+- dfa6736: fix(rulehost): surface ACTIVE activations whose `pi_artifacts` row is missing
+  
+  Both the host-runtime production gate and the OpenClaw `RuleHost` load candidates with `JOIN pi_artifacts`, so an armed activation whose artifact row was deleted vanished from the candidate set and enforcement degraded to `no_rules_armed` with no warning, marker or log (PRI-1044: 8+ hours of silent non-enforcement). The two load paths now detect the dangling reference and emit a structured `activation_artifact_missing` warning with a nextAction plus the existing `~/.pd/enforcement-health/` degraded marker. Decisions are unchanged (still fail-open, the orphaned rule does not run) and healthy sibling rules keep enforcing.
+  
+  RuleHost review follow-up: log suppression is keyed on the dangling descriptor set instead of a one-shot latch, so the marker keeps refreshing `occurrences`/`lastSeenAt` while the gap persists and a later recurrence warns again.
+- dfa6736: fix(rulehost): resolve native Codex `apply_patch` targets so managed writes are actually armed
+  
+  A real `codex exec` session sends the patch body under `tool_input.command`
+  (`{"command":"*** Begin Patch ... *** End Patch"}`), but the Codex rule-context
+  provider only read `params.patch` / `params.input`. Target resolution therefore
+  returned `undefined`, `targetPaths` stayed empty, the `design_approval` fact
+  degraded to `unknown`, no live candidate was produced and every managed file
+  write bypassed PD as `no_rules_armed` (`Bash` writes were still gated, which hid
+  the gap). `patchTargets` now accepts the `command` carrier as well; the three
+  carriers share the same `*** <op> File:` headers, so no header parsing changed.
+  
+  Verified on a real Codex host with `gpt-5.6-luna`: the same payload is blocked
+  (`decision=block`, file not created) while the declaration is `not_approved`,
+  and allowed (`decision=allow`, file written) once it is `approved`.
+  Regression: `packages/host-runtime/tests/production-design-gate-pretool.test.ts`
+  ("blocks a native Codex apply_patch payload whose patch body is under
+  tool_input.command").
+
 ## 3.1.2
 
 ### Patch Changes

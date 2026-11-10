@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticianOutputV1Schema, DiagnosticianRecommendationSchema } from '../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema, DiagnosticianRecommendationV2Schema, readDiagnosticianOutputFromEnvelope } from '../diagnostician-output.js';
 import type { RuleCandidateBinding, RuleCandidateBindingRevision, RuleCandidateMaterial, CandidatePrincipleIdentityResolution } from '../types/rule-candidate-binding.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -92,10 +92,14 @@ export function isRuleCandidateMaterial(material: unknown, candidateId: string, 
   try {
     const recommendation: unknown = JSON.parse(candidate.sourceRecommendationJson);
     const output: unknown = JSON.parse(run.outputPayload);
-    const committed: unknown = JSON.parse(artifact.contentJson);
-    if (!Value.Check(DiagnosticianRecommendationSchema, recommendation) || recommendation.kind !== kind
-      || !Value.Check(DiagnosticianOutputV1Schema, output) || !output.valid
-      || !Value.Check(DiagnosticianOutputV1Schema, committed) || !committed.valid) return false;
+    const committedEnvelope: unknown = JSON.parse(artifact.contentJson);
+    // PRI-1146 V2 Only: the artifact row is the router envelope (output +
+    // trustedContextReceipt/associationValidation keys) — read it through the
+    // envelope reader, never a direct schema check against the closed V2 root.
+    const committed = readDiagnosticianOutputFromEnvelope(committedEnvelope);
+    if (!Value.Check(DiagnosticianRecommendationV2Schema, recommendation) || recommendation.kind !== kind
+      || !Value.Check(DiagnosticianOutputV2Schema, output) || !output.valid
+      || committed === undefined || !committed.valid) return false;
     const expected = computeRuleCandidateReviewDigest(recommendation);
     return output.recommendations.some(rec => computeRuleCandidateReviewDigest(rec) === expected)
       && committed.recommendations.some(rec => computeRuleCandidateReviewDigest(rec) === expected);

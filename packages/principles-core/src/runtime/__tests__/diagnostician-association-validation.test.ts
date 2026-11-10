@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticianOutputV1Schema, DiagnosticianOutputV2Schema } from '../diagnostician-output.js';
+import { DiagnosticianOutputV2Schema } from '../diagnostician-output.js';
 import { validateDiagnosticianAssociations } from '../diagnostician-association-validation.js';
 import { proposeShadowAssociations } from '../diagnostician-association-shadow.js';
 
@@ -39,10 +39,9 @@ describe('opt-in V2 association reference checks', () => {
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: () => { throw new Error('unreadable'); } })).toMatchObject({ proposals: [{ reason: 'identity_source_unavailable' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: null, resolvePrincipleCandidate: resolve })).toMatchObject({ ok: false, reason: 'candidate_material_invalid' });
   });
-  it('keeps V1 readable while requiring explicit V2 opt-in', () => {
+  it('PRI-1146 Clean Break: a V1 payload is rejected outright (no V1 schema exists to accept it)', () => {
     const legacy = { valid: true, diagnosisId: 'd', summary: 's', rootCause: 'r', violatedPrinciples: [], evidence: [], confidence: 1,
       recommendations: [{ kind: 'defer', description: 'defer' }] };
-    expect(Value.Check(DiagnosticianOutputV1Schema, legacy)).toBe(true);
     expect(Value.Check(DiagnosticianOutputV2Schema, legacy)).toBe(false);
     expect(validateDiagnosticianAssociations(legacy, context)).toMatchObject({ ok: false, reason: 'output_invalid' });
   });

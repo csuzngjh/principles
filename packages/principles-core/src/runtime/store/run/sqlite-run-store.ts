@@ -136,7 +136,7 @@ export class SqliteRunStore implements RunStore {
   }
   async updateRun(
     runId: string,
-    patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputRef' | 'outputPayload' | 'errorCategory' | 'executionStatus'>>,
+    patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputRef' | 'inputPayload' | 'outputPayload' | 'errorCategory' | 'executionStatus'>>,
   ): Promise<RunRecord> {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
@@ -150,6 +150,10 @@ export class SqliteRunStore implements RunStore {
     if (patch.reason !== undefined) {
       sets.push('reason = ?');
       values.push(patch.reason ?? null);
+    }
+    if (patch.inputPayload !== undefined) {
+      sets.push('input_payload = ?');
+      values.push(patch.inputPayload ?? null);
     }
     if (patch.outputPayload !== undefined) {
       sets.push('output_payload = ?');
