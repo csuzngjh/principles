@@ -1,6 +1,7 @@
 ---
 '@principles/core': major
 '@principles/pd-cli': major
+'@principles/host-runtime': minor
 'create-principles-disciple': patch
 ---
 
@@ -22,6 +23,10 @@ Owner 决策（2026-11-06）：Diagnostician Output 采用 V2 Only / Clean Break
 
 - diagnose/pain-retry 构造注入 trustedPrincipleSource；诊断输出契约随 core 升级为 V2 Only（CLI 输出与落库工件均为 V2）。
 - synthetic baseline / flood simulation fixtures 输出 V2。
+
+## @principles/host-runtime (minor)
+
+- 遥测 allowlist 新增 `diag_router_trusted_context_unavailable` 与 `replay_review_source_invalid`（P1-01 / rc-9）：ledger 不可证明时 canonical association 保持 unresolved 的原因、以及 replay review skip 的唯一持久记录。
 
 ## create-principles-disciple (patch)
 
