@@ -202,11 +202,17 @@ describe('GET /api/governance/owner-decisions', () => {
     await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
     const body = parse(res);
     expect(body.success).toBe(true);
-    const data = body.data as { items: Array<{ kind: string; taskId: string; legacy: boolean }>; total: number };
+    const data = body.data as {
+      items: Array<{ kind: string; taskId: string; legacy: boolean }>;
+      total: number;
+      readIssues: unknown[];
+    };
     expect(data.total).toBe(1);
     expect(data.items[0].taskId).toBe(EVAL_ID);
     expect(data.items[0].kind).toBe('evaluator_review');
     expect(data.items[0].legacy).toBe(true);
+    // rc-9 噪声守卫：没有跳过/失败时不得凭空产生 issue。
+    expect(data.readIssues).toEqual([]);
   });
 
   it('returns empty list when state.db is absent (fresh workspace)', async () => {
@@ -354,6 +360,81 @@ describe('GET /api/governance/owner-decisions', () => {
       await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
       const data = parse(res).data as { items: Array<{ kind: string; taskId: string }>; total: number };
       expect(data.items.some(item => item.kind === 'rulecode_decision' && item.taskId === 'activation-readiness')).toBe(visible);
+    } finally {
+      getOwnerReview.mockRestore();
+    }
+  });
+
+  it('rc-9: a shadow decision whose owner-review read throws is counted and attributed, not silently dropped', async () => {
+    const conn = setupDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    conn.getDb().prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES ('rule-unreadable', 'rule', 'rule-task', '[]', 'validated', '{}', ?, ?)`,
+    ).run(now, now);
+    conn.getDb().prepare(
+      `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+       VALUES ('activation-unreadable', 'idem-unreadable', 'rule-unreadable', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://unreadable', ?, NULL, NULL)`,
+    ).run(now);
+    conn.close();
+
+    const getOwnerReview = vi.spyOn(ActivationsConsoleModel.prototype, 'getOwnerReview')
+      .mockRejectedValue(new Error('database is locked'));
+    try {
+      const res = makeRes();
+      await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+      const data = parse(res).data as {
+        items: Array<{ kind: string; taskId: string }>;
+        readIssues: Array<Record<string, unknown>>;
+      };
+      // 今天:该条目直接消失且没有任何信号 → 本断言会红(readIssues 不存在)。
+      expect(data.items.some(item => item.taskId === 'activation-unreadable')).toBe(false);
+      expect(data.readIssues).toEqual([
+        {
+          scope: 'rulecode_shadow',
+          reason: 'owner_review_read_failed',
+          count: 1,
+          sampleActivationIds: ['activation-unreadable'],
+          detail: 'database is locked',
+        },
+      ]);
+    } finally {
+      getOwnerReview.mockRestore();
+    }
+  });
+
+  it('rc-9: a shadow decision skipped for non-actionable readiness is counted with its readiness reason', async () => {
+    const conn = setupDb();
+    const now = '2026-08-30T00:00:00.000Z';
+    conn.getDb().prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+       VALUES ('rule-blocked', 'rule', 'rule-task', '[]', 'validated', '{}', ?, ?)`,
+    ).run(now, now);
+    conn.getDb().prepare(
+      `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+       VALUES ('activation-blocked', 'idem-blocked', 'rule-blocked', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://blocked', ?, NULL, NULL)`,
+    ).run(now);
+    conn.close();
+
+    const getOwnerReview = vi.spyOn(ActivationsConsoleModel.prototype, 'getOwnerReview')
+      .mockResolvedValue({ readiness: { status: 'blocked' } } as never);
+    try {
+      const res = makeRes();
+      await handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''));
+      const data = parse(res).data as {
+        items: Array<{ kind: string; taskId: string }>;
+        readIssues: Array<Record<string, unknown>>;
+      };
+      expect(data.items.some(item => item.taskId === 'activation-blocked')).toBe(false);
+      expect(data.readIssues).toEqual([
+        {
+          scope: 'rulecode_shadow',
+          reason: 'readiness_not_actionable',
+          count: 1,
+          sampleActivationIds: ['activation-blocked'],
+          detail: 'readiness=blocked',
+        },
+      ]);
     } finally {
       getOwnerReview.mockRestore();
     }
