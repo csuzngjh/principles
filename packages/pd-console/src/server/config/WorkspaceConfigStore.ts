@@ -1,9 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import type { WorkspaceEntry, WorkspaceConfig } from '../types/index.js';
+import { getPdHome } from '../utils/pd-home.js';
 
-const CONFIG_DIR_NAME = '.pd-console';
 const WORKSPACES_FILE = 'workspaces.json';
 
 export class WorkspaceConfigStore {
@@ -12,7 +11,9 @@ export class WorkspaceConfigStore {
   private readonly entries: WorkspaceEntry[];
 
   constructor(configDir?: string) {
-    this.configDir = configDir ?? path.join(os.homedir(), CONFIG_DIR_NAME);
+    // PRI-872: the registry lives in the console's PD home, never in a
+    // hard-coded `os.homedir()` — an experiment instance must own its own list.
+    this.configDir = configDir ?? getPdHome().consoleConfigDir;
     this.configPath = path.join(this.configDir, WORKSPACES_FILE);
     this.entries = this.load();
   }

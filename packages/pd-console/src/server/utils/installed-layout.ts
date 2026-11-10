@@ -12,9 +12,9 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { getInstallLayoutPaths, resolveInstallLayout, type InstallHost } from '@principles/install-layout';
 import { resolveOpenClawHome } from './pd-backups.js';
+import { getPdHome } from './pd-home.js';
 
 export function resolveExtensionsDir(): string {
   return path.join(resolveOpenClawHome(), 'extensions');
@@ -66,7 +66,9 @@ function resolveCanonicalCodexAdapterDir(paths: { runtimeDir: string; codexAdapt
 }
 
 export function resolveUpdateLayout(): UpdateLayout | undefined {
-  const homeDir = os.homedir();
+  // PRI-872: the home comes from the process-wide resolution, so an experiment
+  // console inspects the EXPERIMENT install instead of the production one.
+  const { homeDir } = getPdHome();
   const paths = getInstallLayoutPaths(homeDir);
   const legacyPluginDir = path.join(resolveExtensionsDir(), 'principles-disciple');
   let manifest: unknown;
@@ -123,7 +125,7 @@ export function resolvePluginDir(_workspaceDir: string): string {
  * guard allow-root even when the install resolves to legacy mode.
  */
 export function resolveCanonicalRuntimeRoot(): string {
-  return getInstallLayoutPaths(os.homedir()).runtimeDir;
+  return getInstallLayoutPaths(getPdHome().homeDir).runtimeDir;
 }
 
 // rc-2: type-guard the parsed JSON instead of an `as` cast (ERR-001).

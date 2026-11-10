@@ -16,8 +16,8 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { errorMessage } from './response.js';
+import { getPdHome } from './pd-home.js';
 
 export interface LegacyBackupMigrationResult {
   movedFrom: string[];
@@ -26,16 +26,16 @@ export interface LegacyBackupMigrationResult {
 
 /**
  * Resolve the OpenClaw install home.
- * Priority: OPENCLAW_HOME env var (explicit override) > ~/.openclaw
  *
- * Single authority for home resolution — backup placement
- * (`resolvePdBackupsRoot`) and installed-layout resolution
- * (`utils/installed-layout.ts`) both derive from it.
+ * PRI-872: delegated to the process-wide PD home resolution. In production it
+ * keeps the historical priority (OPENCLAW_HOME env var > ~/.openclaw); in an
+ * experiment instance it points at the experiment root, so backup placement
+ * and installed-layout resolution can never read the production host.
+ * Single authority for home resolution — `resolvePdBackupsRoot` and
+ * `utils/installed-layout.ts` both derive from it.
  */
 export function resolveOpenClawHome(): string {
-  const envHome = process.env.OPENCLAW_HOME;
-  if (envHome && envHome.trim().length > 0) return path.resolve(envHome);
-  return path.join(os.homedir(), '.openclaw');
+  return getPdHome().openclawHome;
 }
 
 /** Backups root — outside the extensions dir OpenClaw scans for plugins. */
