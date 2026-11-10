@@ -1,5 +1,42 @@
 # Changelog
 
+## 7.1.0
+
+### Minor Changes
+
+- e93d3ea: Config validation: a declared runtime-profile field can no longer disappear silently.
+  
+  - **Fixed:** `runtimeProfiles.*` pi-ai profiles now keep `systemPrompt`. It was declared on `PdLocalRuntimeProfile` and forwarded to the adapter by `createAdapterConfigFromProfile`, but `validatePdLocalProfile` never copied it — a configured system prompt was accepted with `ok: true`, then dropped with no warning. The same class of defect is now structurally blocked: `PROFILE_FIELDS` is a compile-time exhaustive table over `keyof PdLocalRuntimeProfile`, and the validator self-checks that every supplied field reached the validated result.
+  - **Behaviour change (fail loud):** an unknown key in a pi-ai profile, or in an `internalAgents.agents.<name>` binding, is now a validation error instead of being silently ignored. Previously a misspelled key (e.g. `systemPromt`) looked configured while nothing read it; it now reports `unknown field '<key>'`.
+    - Keys that belong to the *adapter* config rather than the profile were silently inert in `.pd/config.yaml` and must be removed: `outputPathStrategy`, `maxRepairAttempts`, `_testBackoffDelayMs` (and any other non-profile key). Note the failure mode is not local — a single unknown key invalidates the whole file, which then falls back to defaults with a warning.
+  - **Removed:** `InternalAgentBinding.splitPipelineTimeoutMs`. This field has never been read by any code since it was introduced — keeping it in the type advertised configuration that did nothing. A config that still sets it now fails with the unknown-field error above.
+
+### Patch Changes
+
+- e2f667d: Promotion readiness now derives its `status` from one explicit evidence-criteria list instead of four inline threshold comparisons, and exposes that explanation from the activation module (`PROMOTION_EVIDENCE_THRESHOLDS`, `evaluatePromotionEvidenceCriteria`, `explainPromotionReadiness`).
+  
+  - The four numeric thresholds (observed samples, matched samples, neutral-control samples, shadow age) live in exactly one frozen object, so an explanation can never describe a different number than the one that was judged.
+  - `ready` / `evidence_insufficient` / `blocked` / `unavailable` semantics are unchanged: the criteria are computed from the same snapshot the status is derived from, and a criterion is satisfied at `current === threshold` with no `shortfall` reported.
+  - No change to the package barrel surface, persisted contracts or CLI output.
+- ca055cf: `pd runtime compatibility-scan`: skipped activation rows are now counted and attributable (2B-a).
+  
+  The scan reads ACTIVE activations and derives their rule implementation from
+  `pi_artifacts.content_json`. Rows that could not be parsed were silently
+  `continue`d, so `status: clean` could be reported while some active rules were
+  never actually inspected.
+  
+  - `ActivationCompatibilityScanResult` gains `skipped: [{ reason, count, sampleActivationIds }]`
+    (`reason` ∈ `row_not_record | missing_artifact_id | missing_content_json |
+    invalid_content_json | content_not_object | missing_implementation_code`,
+    up to 5 attributable activation ids per reason). Empty array = every active
+    row was scanned.
+  - `pd runtime compatibility-scan` prints a one-line `skipped: N active row(s)
+    could not be scanned — <reason>=<count>` summary when anything was skipped,
+    and `--json` carries the full breakdown.
+  - `status` and `ok` semantics are deliberately unchanged: a skipped row does
+    not fail the scan. Redefining `clean` to account for skips is a separate
+    decision tracked with 5B.
+
 ## 7.0.0
 
 ### Major Changes
