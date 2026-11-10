@@ -161,7 +161,7 @@ PR [#2478](https://github.com/csuzngjh/principles/pull/2478)，分支 `ai/adhoc-
 | **5B** 🚧 | ① 10 个 `checkId` 的硬检查也进入可解释投影（当前只有 `failedChecks`，缺"为什么没过"）；② Console / CLI 渲染 criteria 与 remaining；③ 两份 `collectRuleCodeEventEntries` 收敛到 `@principles/host-runtime`（原计划写 core，实际按 AGENTS.md §8.1 seam 归属改为 host-runtime，见 §2.5）；④ 双语文案 `zh-CN.json` / `en.json`；⑤ 公共导出的 `.changeset` | 否（仍在包内） | 需 5A 存在；单独回退 5B 会回到"只有 status" |
 | **5C** | 把 `criteria` 提升为 `PromotionReadinessResult` 必填字段，删掉重复派生调用；更新 3 个构造夹具 + 5 个断言文件 + UI 校验器 | **是** | **不可独立回退**（5B 已按投影函数读取；回退 5C 必须同时回退 5B） |
 
-> **状态更正（2026-11-10）**：5B 此前被 #2491 的标题误标为"已合并"，实际代码未落地。当前在本 PR（分支 `ai/adhoc-20261110-5b-criteria-promotion`）实现，**未合并**；`criteria` 保持可选字段，5C 未做。
+> **状态更正（2026-11-10）**：5B 此前被 #2491 的标题误标为"已合并"，实际代码未落地。当前在 PR #2498（分支 `ai/adhoc-20261110-5b-criteria-promotion`）实现，**未合并**；`criteria` 保持可选字段，5C 未做。
 
 **结论**：5A → 5B → 5C 只保证**逆序回退**。这与前一版"每批可独立 revert"不同，见 §7。
 
