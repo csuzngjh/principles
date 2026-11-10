@@ -349,6 +349,76 @@ describe('timeout reconciliation (§5.7, T14/T14a/T14b)', () => {
     await h.close();
   }, 10000);
 
+  it('never resubmits after a timeout (T41 ⑩)', async () => {
+    let submitCalls = 0;
+    let recheckCalls = 0;
+    const h = await makeSubmitHarness({
+      deadlineMs: 30,
+      submit: () => {
+        submitCalls += 1;
+        return new Promise<PainSubmitReceipt>(() => undefined);
+      },
+      recheck: async () => {
+        recheckCalls += 1;
+        return 'not_found';
+      },
+    });
+    await h.client.callTool({ name: SUBMIT_TOOL_NAME, arguments: VALID_INPUT });
+    expect(submitCalls).toBe(1);
+    expect(recheckCalls).toBe(1);
+    await h.close();
+  });
+
+  it('keeps the unconfirmed identity usable for a later reconciliation (T41 ⑧)', async () => {
+    let written = false;
+    const recheck: SubmitRecheckCall = async (input) => {
+      expect(input.workspaceDir).toBe(WORKSPACE);
+      return written ? 'found' : 'not_found';
+    };
+    const h = await makeSubmitHarness({
+      deadlineMs: 30,
+      submit: (input) => new Promise<PainSubmitReceipt>((resolve) => {
+        // The underlying write finishes AFTER the deadline: the receipt must
+        // still be unconfirmed, and the task then becomes visible.
+        setTimeout(() => {
+          written = true;
+          resolve(receipt({ painId: input.painId, taskId: input.taskId }));
+        }, 200);
+      }),
+      recheck,
+    });
+    const result = await h.client.callTool({ name: SUBMIT_TOOL_NAME, arguments: VALID_INPUT });
+    const parsed = parseReceipt(result);
+    expect(parsed.status).toBe('submit_unconfirmed');
+    const { painId, taskId } = parsed;
+    if (painId === null || taskId === null) throw new Error('an unconfirmed receipt must still carry its identity');
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    // The exact ids the receipt carried now resolve: the write was late, not lost.
+    expect(await recheck({ workspaceDir: WORKSPACE, painId, taskId })).toBe('found');
+    await h.close();
+  });
+
+  it('gives concurrent submissions distinct identities (T41 ⑨, T15/T16)', async () => {
+    const seen: string[] = [];
+    const h = await makeSubmitHarness({
+      submit: (input) =>
+        new Promise<PainSubmitReceipt>((resolve) => {
+          seen.push(input.painId);
+          setTimeout(() => resolve(receipt({ painId: input.painId, taskId: input.taskId })), 20);
+        }),
+    });
+    const [a, b] = await Promise.all([
+      h.client.callTool({ name: SUBMIT_TOOL_NAME, arguments: VALID_INPUT }),
+      h.client.callTool({ name: SUBMIT_TOOL_NAME, arguments: VALID_INPUT }),
+    ]);
+    expect(parseReceipt(a).status).toBe('submitted');
+    expect(parseReceipt(b).status).toBe('submitted');
+    expect(new Set(seen).size).toBe(2);
+    expect(parseReceipt(a).painId).not.toBe(parseReceipt(b).painId);
+    await h.close();
+  });
+
   it('an unexpected throw after identity assignment is unknown, never failed', async () => {
     const h = await makeSubmitHarness({
       submit: async () => {
