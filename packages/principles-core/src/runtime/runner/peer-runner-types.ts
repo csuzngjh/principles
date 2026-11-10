@@ -13,7 +13,7 @@
 import type { PDErrorCategory } from '../error-categories.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter } from '../runtime-protocol.js';
-import type { StoreEventEmitter } from '../store/event-emitter.js';
+import type { TelemetryEvent } from '../../telemetry-event.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { RunnerKind } from '../internalization/peer-runner-contracts.js';
 import type { TaskRecord } from '../task-status.js';
@@ -63,6 +63,19 @@ export interface ResolvedPeerRunnerOptions {
 // ── Dependencies ─────────────────────────────────────────────────────────────
 
 /**
+ * Minimal telemetry port used by peer runners.
+ *
+ * Runners only ever call `emitTelemetry`. Accepting the narrow port (instead
+ * of the concrete StoreEventEmitter class) lets a workspace-scoped sink such
+ * as host-runtime's WorkspaceTelemetryEmitter be injected on the production
+ * path, so allowlisted runner events reach critical-events.jsonl while the
+ * sink's own upstream still receives every non-allowlisted event.
+ */
+export type PeerRunnerTelemetryEmitter = {
+  emitTelemetry: (event: TelemetryEvent) => unknown;
+};
+
+/**
  * Shared dependencies injected into all peer runners.
  *
  * Runners with additional dependencies (e.g. DiagnosticianRunner needs
@@ -71,7 +84,7 @@ export interface ResolvedPeerRunnerOptions {
 export interface PeerRunnerDeps {
   readonly stateManager: RuntimeStateManager;
   readonly runtimeAdapter: PDRuntimeAdapter;
-  readonly eventEmitter: StoreEventEmitter;
+  readonly eventEmitter: PeerRunnerTelemetryEmitter;
   readonly artifactStore: PIArtifactStore;
   /**
    * Optional store for agent-authored draft context attached to a permanently

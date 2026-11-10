@@ -80,8 +80,12 @@ interface DiagRouterContext {
   invocationEvidence?: {
     taskId: string;
     message: string;
-    systemPrompt: string;
     messageDigest: string;
+    /**
+     * SHA-256 of the EXACT effective system prompt the runtime adapter handed
+     * to the model provider — all prompt layers merged by the adapter's single
+     * merge path (PRI-1146 P1-02). Never derived from the base layer alone.
+     */
     systemPromptDigest: string;
     predecessorDigests: { artifactId: string; contentDigest: string }[];
   };
@@ -341,15 +345,16 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     context.invocationEvidence = {
       taskId,
       message,
-      systemPrompt,
       messageDigest: createHash('sha256').update(message).digest('hex'),
-      systemPromptDigest: createHash('sha256').update(systemPrompt).digest('hex'),
+      // Filled from the runtime handle below — the adapter merges profile
+      // layers, so only it can attest the system prompt the provider received.
+      systemPromptDigest: '',
       predecessorDigests: [
         { artifactId: context.rootCauseArtifactId, contentDigest: createHash('sha256').update(JSON.stringify(context.rootCauseOutput)).digest('hex') },
         { artifactId: context.distillerArtifactId, contentDigest: createHash('sha256').update(JSON.stringify(context.distillerOutput)).digest('hex') },
       ],
     };
-    return this.runtimeAdapter.startRun({
+    const runHandle = await this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: RUNTIME_CONTRACT_SCHEMA_VERSION },
       taskRef: { taskId },
       inputPayload: message,
@@ -358,6 +363,30 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,
     });
+
+    // PRI-1146 P1-02: bind the receipt to the provider-visible prompt. The
+    // adapter is the only component that knows every merged layer; when it
+    // cannot attest the effective prompt there is no honest digest to record,
+    // so fail loud instead of hashing the base layer and claiming provenance.
+    const providerPromptDigest = runHandle.systemPromptDigest;
+    if (typeof providerPromptDigest !== 'string' || !/^[a-f0-9]{64}$/.test(providerPromptDigest)) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `Runtime adapter did not report the effective system prompt digest for task ${taskId}; the router receipt cannot bind the prompt actually sent to the provider.`,
+      );
+    }
+    context.invocationEvidence.systemPromptDigest = providerPromptDigest;
+    return runHandle;
+  }
+
+  /**
+   * P2-01: persist the exact router message so a NEW process can rebuild the
+   * invocation evidence and run the full receipt verification (not just a
+   * structural read) from immutable persisted data.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  protected override getInvocationInputPayload(context: DiagRouterContext): string | undefined {
+    return context.invocationEvidence?.message;
   }
 
   async validateOutput(output: unknown, taskId: string, _context: DiagRouterContext): Promise<PeerRunnerValidationResult> {
@@ -443,7 +472,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     // Check the persisted shape at the real write boundary.
     const persistedEnvelope: unknown = JSON.parse(routerContentJson);
     const receiptCheck = verifyRouterContextReceipt(persistedEnvelope, {
-      taskId, runId, contextHash, message: evidence.message, systemPrompt: evidence.systemPrompt,
+      taskId, runId, contextHash, message: evidence.message, systemPromptDigest: evidence.systemPromptDigest,
       predecessors: [
         { artifactId: context.rootCauseArtifactId, content: context.rootCauseOutput },
         { artifactId: context.distillerArtifactId, content: context.distillerOutput },

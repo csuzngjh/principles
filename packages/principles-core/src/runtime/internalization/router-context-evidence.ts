@@ -153,6 +153,27 @@ export type RouterTrustedContext =
   | { status: 'available'; principles: readonly RouterTrustedPrinciple[] }
   | { status: 'unavailable'; reason: 'ledger_unavailable' | 'ledger_corrupt' | 'source_not_configured'; nextAction: string };
 
+/**
+ * Runtime guard schema for the trusted-context payload state. Used when
+ * REBUILDING evidence from persisted data (PRI-1146 P2-01) — the persisted
+ * message is untrusted input at that boundary (rc-1/rc-4).
+ */
+export const RouterTrustedContextSchema = Type.Union([
+  Type.Object({
+    status: Type.Literal('available'),
+    principles: Type.Array(RouterTrustedPrincipleSchema),
+  }, { additionalProperties: false }),
+  Type.Object({
+    status: Type.Literal('unavailable'),
+    reason: Type.Union([
+      Type.Literal('ledger_unavailable'),
+      Type.Literal('ledger_corrupt'),
+      Type.Literal('source_not_configured'),
+    ]),
+    nextAction: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+]);
+
 /** Read only a system-produced artifact envelope, never a model response. */
 export function readRouterContextReceipt(
   envelope: unknown,
@@ -182,7 +203,21 @@ export function readRouterContextReceipt(
 export function verifyRouterContextReceipt(
   envelope: unknown,
   expected: {
-    taskId: string; runId: string; contextHash: string; message: string; systemPrompt: string;
+    taskId: string; runId: string; contextHash: string; message: string;
+    /**
+     * Reconstructed effective system prompt (base layer + profile layers,
+     * merged through the adapter's single merge path). Used when a caller can
+     * rebuild the full prompt bytes.
+     */
+    systemPrompt?: string;
+    /**
+     * Adapter-attested SHA-256 of the EXACT effective system prompt sent to
+     * the provider. Used on the in-process commit path, where the adapter is
+     * the authority on the merged prompt. Exactly one of `systemPrompt` /
+     * `systemPromptDigest` must be supplied — an unverifiable receipt is never
+     * reported as verified.
+     */
+    systemPromptDigest?: string;
     predecessors: { artifactId: string; content: unknown }[];
     /**
      * What the caller can prove was actually exposed (runner replay); optional.
@@ -201,9 +236,13 @@ export function verifyRouterContextReceipt(
   if (result.status !== 'available') return result;
   const hash = (text: string) => createHash('sha256').update(text).digest('hex');
   const mismatch = () => ({ status: 'unavailable' as const, reason: 'context_receipt_source_mismatch', nextAction: 'Reload the original system input and predecessor artifacts; keep canonical association unavailable.' });
-  if (result.receipt.contextHash !== expected.contextHash
+  const providerPromptDigest = expected.systemPrompt !== undefined
+    ? hash(expected.systemPrompt)
+    : expected.systemPromptDigest;
+  if (providerPromptDigest === undefined
+    || result.receipt.contextHash !== expected.contextHash
     || result.receipt.messageDigest !== hash(expected.message)
-    || result.receipt.systemPromptDigest !== hash(expected.systemPrompt)
+    || result.receipt.systemPromptDigest !== providerPromptDigest
     || expected.predecessors.length !== result.receipt.predecessorDigests.length) return mismatch();
   const ids = new Set(expected.predecessors.map((source) => source.artifactId));
   if (ids.size !== expected.predecessors.length) return mismatch();
