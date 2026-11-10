@@ -1,0 +1,196 @@
+{
+  "checkpointId": "20261109T1230Z-zcode-pri1105b",
+  "issue": "PRI-1105",
+  "line": "B",
+  "issueTitle": "[AA v0.6] Principle Intervention Loop 总单 · B 线：首条注入精简策略",
+  "stage": "adjudicated-keep-native (was: card-awaiting-owner-approval-not-coded)",
+  "timestampUtc": "2026-11-09T12:30Z",
+  "worktree": {
+    "path": "D:\\Code\\_worktrees\\principles\\PRI-1105-aa-b-optional-trim",
+    "branch": "ai/PRI-1105-aa-b-optional-trim",
+    "base": "8a791cfcfb34ec1a70dcdf392f4afc86c1a278c8",
+    "baseIncludes": [
+      "517e33885 PRI-1140 #2436 merged"
+    ]
+  },
+  "deliverables": {
+    "implementationCard": {
+      "path": "docs/specs/PD-AA-PRI-1105-B-TRIM-IMPLEMENTATION-CARD-v0.1.md",
+      "status": "awaiting_owner_written_approval",
+      "revision": "2026-11-09T13:05Z pre-approval revision (manifest declaration + production reachability); approve this revision",
+      "sha256": "b3d7c4d00eb7132e7194273e95468a2e843176e2363ae45d0b042d8b2a7095c1",
+      "firstSubmission": {
+        "commit": "d6a8f8f9a",
+        "sha256": "99d52ff16320425d76c92725fc07868832d6371e3286ddd21e2398a606db7043",
+        "linearComment": "b627aede"
+      }
+    },
+    "frozenCases": {
+      "path": "docs/specs/PD-AA-PRI-1105-B-TRIM-FROZEN-CASES-v0.1.md",
+      "status": "frozen_before_candidate",
+      "sha256": "53c413e87d97628263264ba36e22b514ec6cde7f98478843dd25888ee9866862",
+      "revision": "T7 manifest parity added before any candidate run; R/FX/E annotations and pass lines unchanged"
+    },
+    "step1GapReport": {
+      "path": "docs/implementation-reports/pri-1105-b-step1-gap-20261109.md"
+    },
+    "step1GapData": {
+      "path": "docs/implementation-reports/pri-1105-b-step1-gap-20261109.json",
+      "desensitized": true
+    },
+    "baselineReport": {
+      "path": "docs/implementation-reports/pri-1105-b-baseline-report-20261109.json",
+      "sha256": "0ccd5abd5ddeea7a57be9c2c9e250533be43070ada7881a1f27d8eec586bbce3",
+      "desensitized": true
+    },
+    "baselineHarness": {
+      "path": "scripts/dev/aa-selector/pri1105b-trim-replay.mjs",
+      "sha256": "fff5d75bc1e994b76e14dfb228a4fc74732e3ef237eb398013940b8d31753561",
+      "arms": [
+        "native"
+      ]
+    }
+  },
+  "step1": {
+    "realSample": {
+      "source": "local read-only copy of the real OpenClaw workspace state.db + 8 days of injection event logs (gitignored .tmp)",
+      "sourceStateDbUnchanged": true,
+      "fidelity": {
+        "events": 208,
+        "reproducedCurrentDirectiveRoute": 20,
+        "reproducedRetiredListRoute": 188,
+        "unexplained": 0
+      },
+      "activations": {
+        "total": 18,
+        "owner": 14,
+        "system_policy": 4
+      }
+    },
+    "classes": [
+      {
+        "class": "same_principle_multiple_current_activations",
+        "realGroups": 0,
+        "decision": "not_selected",
+        "reason": "identity ambiguity must not be guessed (PRI-1140 A6); no real benefit"
+      },
+      {
+        "class": "exact_duplicate_text",
+        "realGroups": 0,
+        "decision": "not_selected",
+        "reason": "synthetic only"
+      },
+      {
+        "class": "authority_system_policy_ordinary",
+        "realCount": 4,
+        "realChars": 1532,
+        "decision": "selected_R-SP-1",
+        "share": {
+          "modelAwareBudget": "16.6%",
+          "fifo4000": "41.9%",
+          "rotation4000Median": "8.8%"
+        }
+      },
+      {
+        "class": "per_block_boilerplate",
+        "decision": "out_of_scope_follow_up",
+        "reason": "renderer format change, not an ordinary candidate class"
+      },
+      {
+        "class": "semantic_near_duplicates",
+        "decision": "counterexample_for_future_model_option",
+        "reason": "not deterministic; does not affect this decision"
+      }
+    ],
+    "existingDedup": "render does not dedupe; only evidence arrays dedupe by principleId; nothing handles authority/text/semantic classes"
+  },
+  "predictedBenefit": {
+    "basis": "per-block additive arithmetic over the Native baseline, NOT a candidate run",
+    "principlePath20DeliveryRounds": "-8.77%",
+    "perRoundRange": "-8.8% .. -41.9%",
+    "modelAwareRound": "-16.6% (9208 -> 7676)",
+    "pinnedPath20Rounds": "-14.03%",
+    "wouldDisplaceRoundsUnchanged": 11
+  },
+  "passLines": {
+    "hardFailures": [
+      "HF1 unauthorized injection",
+      "HF2 must-keep loss",
+      "HF3 key opportunity degradation",
+      "HF4 out-of-scope omission",
+      "HF5 nondeterminism",
+      "HF6 default-path byte change",
+      "HF7 state.db changed"
+    ],
+    "benefit": [
+      "B1 exact per-block subtraction",
+      "B2 >=5% over 20 real delivery rounds (principle path) and >=10% on the model-aware round",
+      "B3 production-chain test shows the hook output shorter"
+    ],
+    "cost": [
+      "C1 builder median delta <= 2 ms, zero additional SQLite reads",
+      "C2 non-delivery rounds zero added work, byte-identical"
+    ]
+  },
+  "ownerDecision": {
+    "question": "A: approve R-SP-1 as the first trim strategy (one offline acceptance round) / B: govern the 4 legacy system_policy activations via existing Console governance (no code; B-line becomes KEEP_NATIVE for this workspace)",
+    "recommendation": "A",
+    "timing": "B takes effect immediately on the installed host; A production effect waits on #2448 blockers"
+  },
+  "authorizationBoundary": {
+    "modelCalls": 0,
+    "realHostRuns": 0,
+    "productionEnablement": false,
+    "governanceStateWrites": 0,
+    "codeChangesToProduction": 0
+  },
+  "errorContextPass1": {
+    "selected": [
+      "EP-02",
+      "EP-03",
+      "EP-01",
+      "EP-07"
+    ],
+    "byConstruction": [
+      "EP-12 zero new host-path writes"
+    ],
+    "scope": [
+      "EP-10 diff limited to card §3 files"
+    ]
+  },
+  "unknowns": [
+    "tokens (no reliable tokenizer)",
+    "whole-hook text size for the real workspace (appendSystemContext sources not snapshotted)",
+    "D / delivery confirmation (unchanged, PRI-1152 boundary)",
+    "behavioral effect of omitting the 4 directives (not claimed)"
+  ],
+  "nextStep": "Owner written approval of the card (or choice B). After approval: implement per card §3, run tests T1-T6 + regression, add candidate arm to the harness, one comparison round, decide KEEP_CANDIDATE / KEEP_NATIVE / BLOCKED.",
+  "notOverwritten": [
+    "docs/implementation-reports/aa-handoff/LATEST.json"
+  ],
+  "productionReachability": {
+    "todayBenefit": 0,
+    "blockers": [
+      "A-line #2448 blocker 1: installed OpenClaw 2026.11.1 embedded path supplies no message identity -> sentinel branch unreachable",
+      "A-line #2448 blocker 2 (fix2, PRI-1140 follow-up): manifest lacks principleId -> principleId variant not configurable"
+    ],
+    "harnessEventShape": "identity-bearing (agentsapi-like), same as PRI-1140 harness",
+    "bLineBoundary": "offline assembly regression (unchanged)"
+  },
+  "adjudication": {
+    "date": "2026-11-09",
+    "ticket": "PRI-1160",
+    "decision": "R-SP-1 not approved; Owner governance option B",
+    "currentConclusion": "KEEP_NATIVE",
+    "predictedBenefitStatus": "estimate by per-block arithmetic over the Native baseline; candidate never ran; NOT a measured result",
+    "methodCorrections": [
+      "authority label cannot decide omissibility (missing approval row / closed legacy path / empty mandatory list are not omission evidence)",
+      "the frozen comparison baseline must be ordinary Native, not the prioritized assembly; additions/displacements by prioritized packing must be reported separately"
+    ],
+    "supersededBy": {
+      "document": "docs/implementation-reports/pri-1160-legacy-four-governance-20261109.md",
+      "checkpoint": "20261109T1440Z-zcode-pri1160"
+    },
+    "note": "appended; the fields above are kept as the historical record"
+  }
+}

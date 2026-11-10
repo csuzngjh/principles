@@ -1,5 +1,19 @@
 # principles-disciple
 
+## 3.1.4
+
+### Patch Changes
+
+- 698de3f: feat(principles-core): PRI-1161 hoist the per-block directive boilerplate into the shared header
+  
+  The shared directive renderer (`renderPrinciplesToDirectives`) no longer repeats "Apply this as an active behavior constraint. Do not treat this as background context." inside every directive block; the instruction is stated once in the shared header ("These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."). Per-principle body, directive id, authority attribute, escaping and the `<directive>` slice boundaries are unchanged; budget arithmetic stays exact because `measureSharedDirectiveBlockChars` / `sharedDirectiveBaseChars` derive from the same builders (header +53, each block −86). Selection/refill changes under tight budgets are explained by the unchanged packing rule. Goldens and tuned fixtures updated to the new renderer bytes.
+
+## 3.1.3
+
+### Patch Changes
+
+- 6b5a4cc: Adaptive Activation config compat: declare the `principleId` mapping identity in the plugin manifest `configSchema` (`adaptiveActivation.properties`, `additionalProperties: false` retained). The #2436 runtime reader already accepted this key, but the undeclared key made any principleId config fail the host's load-time plugin-config validation and take down the entire plugin (PRI-1119 PR #2448 blocker 2). Legacy pinned `(artifactId, activationId)` configs are unaffected: identical keywords, identity arbitration stays at the runtime reader (mixed/partial/blank-identity configs keep failing closed to Native at runtime, not at load). The installer bundles the plugin, so it ships the corrected manifest in the same release.
+
 ## 3.1.2
 
 ### Patch Changes

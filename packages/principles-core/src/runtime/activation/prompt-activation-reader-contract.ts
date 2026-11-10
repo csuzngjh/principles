@@ -300,7 +300,12 @@ function sharedDirectiveHeaderLines(): string[] {
     '## 【ACTIVE BEHAVIOR DIRECTIVES】',
     '',
     'Active behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority="owner" (approved in the owner approval queue) or authority="system_policy" (auto-activated by low-risk policy).',
-    'These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.',
+    // PRI-1161 (Owner-approved card v0.1): the per-block "Apply this as an
+    // active behavior constraint..." line was hoisted HERE, stated once in the
+    // shared position, instead of repeating verbatim inside every directive
+    // block (86 chars × N blocks; 85-char sentence + one newline).
+    // Same instruction, one copy.
+    'These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.',
     'For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.',
     '',
   ];
@@ -314,10 +319,12 @@ function sharedDirectiveBlockLines(
   const authorityAttr = p.authority === 'owner' || p.authority === 'system_policy'
     ? ` authority="${p.authority}"`
     : '';
+  // PRI-1161: the per-block boilerplate line was hoisted to the shared header
+  // (stated once); per-principle fields (id, authority, escaped text) and the
+  // `<directive>` boundaries forensics slices on are unchanged.
   return [
     `<directive id="${escapeFn(p.principleId)}" source="runtime_v2_activation"${authorityAttr}>`,
     `MANDATORY: ${escapeFn(p.text)}`,
-    'Apply this as an active behavior constraint. Do not treat this as background context.',
     '</directive>',
     '',
   ];

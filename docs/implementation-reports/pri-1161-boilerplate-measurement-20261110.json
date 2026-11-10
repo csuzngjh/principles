@@ -1,0 +1,93 @@
+{
+ "measuredAt": "2026-11-09T23:48:50.907Z",
+ "sandbox": {
+  "snapshot": "archived 2026-11-09T13:21:39Z state.db (sha256 830fbd24…)",
+  "activations": 18,
+  "ownerApproved": 14,
+  "selfReportEnabled": true
+ },
+ "anatomy": {
+  "baseChars": 949,
+  "perBlockCharsExample": 326,
+  "lines": [
+   {
+    "line": "<directive id=\"&lt;escaped principleId&gt;\" source=\"runtime_v2_activation\" authority=\"owner\">",
+    "kind": "per-principle (id escaped, authority varies)"
+   },
+   {
+    "line": "MANDATORY: &lt;escaped principle text&gt;",
+    "kind": "per-principle (text escaped); constant prefix MANDATORY: (10)"
+   },
+   {
+    "line": "Apply this as an active behavior constraint. Do not treat this as background context.",
+    "kind": "CONSTANT per block"
+   },
+   {
+    "line": "</directive>",
+    "kind": "CONSTANT per block (forensics slice boundary — must stay)"
+   },
+   {
+    "line": "",
+    "kind": "CONSTANT separator (1 newline)"
+   }
+  ]
+ },
+ "hoistCandidate": {
+  "fragment": "Apply this as an active behavior constraint. Do not treat this as background context.",
+  "charsPerBlock": 86,
+  "semantics": "duplicate of the header line \"These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.\" — same instruction, already public position",
+  "escapedContent": "none (no principle id/authority/text/version inside)"
+ },
+ "notHoistable": {
+  "closingTag": "presence-forensics slice boundary (indexOf </directive>) and targetBody verification depend on it",
+  "sourceAttr": "inside the per-principle open tag line; identity of the block depends on the surrounding per-principle fields",
+  "mandatoryPrefix": "prefix of the per-principle text line"
+ },
+ "rounds": [
+  {
+   "round": "15625-k1",
+   "injected": 18,
+   "finalChars": 9208,
+   "finalSha256": "c431960a64816e6d1ed762cd355507992e53417fc558a1a790dfc3ed8d74ad22",
+   "additivityIdentityHolds": true,
+   "counts": {
+    "applyLine": 18,
+    "closingTag": 18,
+    "sourceAttr": 18,
+    "mandatoryPrefix": 18
+   },
+   "applyLineChars": 1566,
+   "applyLineSharePct": 17
+  },
+  {
+   "round": "4000-FIFO",
+   "injected": 7,
+   "finalChars": 3652,
+   "finalSha256": "7d9e30106d0872cb592593b3b820c31026e5d19147a10828f56b218c112a112b",
+   "additivityIdentityHolds": true,
+   "counts": {
+    "applyLine": 7,
+    "closingTag": 7,
+    "sourceAttr": 7,
+    "mandatoryPrefix": 7
+   },
+   "applyLineChars": 609,
+   "applyLineSharePct": 16.7
+  },
+  {
+   "round": "4000-k1",
+   "injected": 7,
+   "finalChars": 3685,
+   "finalSha256": "c8aecd8e3edc9c5017880e59672e9ab8d5c70773c9929624303f0f0a9be48612",
+   "additivityIdentityHolds": true,
+   "counts": {
+    "applyLine": 7,
+    "closingTag": 7,
+    "sourceAttr": 7,
+    "mandatoryPrefix": 7
+   },
+   "applyLineChars": 609,
+   "applyLineSharePct": 16.5
+  }
+ ]
+}

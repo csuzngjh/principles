@@ -1,5 +1,31 @@
 # create-principles-disciple
 
+## 1.148.6
+
+### Patch Changes
+
+- 0c2d610: Refresh already-installed sibling host bindings when the shared runtime is replaced. `install()`/update previously ran only the target host's installers, so a default `--host openclaw` update replaced `~/.pd/runtime` (new MCP server) while WorkBuddy's marketplace and engine-cache `mcp-binding.json` stayed pinned to the previous version; WorkBuddy's launcher then failed closed with `binding_version_mismatch:0.2.1!=0.3.2`. OpenClaw self-heals at plugin registration (`ensureMcpBinding`), WorkBuddy has no such runtime path. The install transaction now snapshots the hosts already recorded in `~/.pd/install.json`, and before writing the manifest re-runs each uncovered host's own host installer (best-effort: failures are logged with reason + next action and never roll back a successful host). Codex's binding is unchanged by design: it is generated only by the manual `$pd-control setup` step after a plugin payload update.
+
+## 1.148.5
+
+### Patch Changes
+
+- 698de3f: feat(principles-core): PRI-1161 hoist the per-block directive boilerplate into the shared header
+  
+  The shared directive renderer (`renderPrinciplesToDirectives`) no longer repeats "Apply this as an active behavior constraint. Do not treat this as background context." inside every directive block; the instruction is stated once in the shared header ("These directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy."). Per-principle body, directive id, authority attribute, escaping and the `<directive>` slice boundaries are unchanged; budget arithmetic stays exact because `measureSharedDirectiveBlockChars` / `sharedDirectiveBaseChars` derive from the same builders (header +53, each block −86). Selection/refill changes under tight budgets are explained by the unchanged packing rule. Goldens and tuned fixtures updated to the new renderer bytes.
+
+## 1.148.4
+
+### Patch Changes
+
+- 6b5a4cc: Adaptive Activation config compat: declare the `principleId` mapping identity in the plugin manifest `configSchema` (`adaptiveActivation.properties`, `additionalProperties: false` retained). The #2436 runtime reader already accepted this key, but the undeclared key made any principleId config fail the host's load-time plugin-config validation and take down the entire plugin (PRI-1119 PR #2448 blocker 2). Legacy pinned `(artifactId, activationId)` configs are unaffected: identical keywords, identity arbitration stays at the runtime reader (mixed/partial/blank-identity configs keep failing closed to Native at runtime, not at load). The installer bundles the plugin, so it ships the corrected manifest in the same release.
+
+## 1.148.3
+
+### Patch Changes
+
+- 73c5ea7: Dependency bump: tuf-js from 6.0.1 to 6.0.2 (installer runtime dependency, shipped inside create-principles-disciple).
+
 ## 1.148.2
 
 ### Patch Changes
