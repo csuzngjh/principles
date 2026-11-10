@@ -141,8 +141,6 @@ export interface InternalAgentBinding {
   enabled: boolean;
   /** Runtime profile ID referencing a profile in runtimeProfiles */
   runtimeProfile?: string;
-  /** Optional total timeout for the split diagnostician pipeline (3 stages). Default: 3 × timeoutMs */
-  splitPipelineTimeoutMs?: number;
 }
 
 // ── Internal Agents Config ──────────────────────────────────────────────────

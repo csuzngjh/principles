@@ -74,6 +74,64 @@ function sleepSync(ms) {
 }
 
 /**
+ * No safe default exists for the ancestry question: answering "not an ancestor"
+ * from missing wiring would silently turn every supersession back into a red
+ * release run, and answering "ancestor" would turn every mismatch green. Refuse
+ * loudly instead; the CLI always wires `gitIsAncestor`.
+ */
+function unwiredAncestry() {
+  throw new Error('ancestry authority is not wired: refusing to decide whether the target cohort was superseded');
+}
+
+/**
+ * Relationship between the cohort this run must pin and the cohort main
+ * resolves to right now. The outcomes are deliberately distinct so a real
+ * failure cannot be softened into a deferral: only `superseded` may defer.
+ *
+ *   current    — the resolver reproduced exactly this cohort; wait for its
+ *                packages, then update the pins.
+ *   superseded — a PROVEN newer cohort exists and this target is its ancestor;
+ *                the newer cohort's run owns delivery.
+ *   unproven   — the resolver did not reproduce a Version Packages landing
+ *                commit, so nothing about it can be trusted.
+ *   unrelated  — a different cohort, but this target is not an ancestor of it
+ *                (target newer than main, unrelated history, shallow clone,
+ *                wrong dispatch SHA). Supersession is NOT proven.
+ */
+export function classifyCohort({ sha, latest, isAncestor = unwiredAncestry }) {
+  if (latest?.cohort !== true) {
+    return { outcome: 'unproven', reason: 'resolved value is not a proven Version Packages landing commit' };
+  }
+  if (latest.sha === sha) return { outcome: 'current' };
+  if (isAncestor(sha, latest.sha)) return { outcome: 'superseded', supersededBy: latest.sha };
+  return {
+    outcome: 'unrelated',
+    reason: 'target cohort is not an ancestor of the resolved cohort, so supersession is not proven',
+  };
+}
+
+/**
+ * The one place the deferral is rendered. Pure so all three visibility
+ * surfaces (stdout line, JSON payload, job summary) are testable without
+ * running the CLI.
+ */
+export function deferredReport({ target, supersededBy }) {
+  return {
+    line: `[codex-runtime-pins] deferred: cohort ${target} was superseded by ${supersededBy}; no pin update from this run`,
+    summary: [
+      '### Codex plugin runtime pins: deferred (no update from this run)',
+      '',
+      `- **Target cohort:** \`${target}\``,
+      `- **Superseded by:** \`${supersededBy}\` — a proven newer Version Packages landing commit on main.`,
+      '- **Pins changed:** none. This run did not touch `runtime-version.json` or `.codex-plugin/plugin.json`.',
+      "- **Why this is not a failure:** the newer cohort's own release run owns the pin update; its ordinary maintenance PR is the delivery path.",
+      '- **If that run also fails:** the daily publish reconciliation re-pins from the newest cohort.',
+    ].join('\n'),
+    payload: { ok: true, changed: false, deferred: true, cohort: target, supersededBy },
+  };
+}
+
+/**
  * Resolve the current cohort, waiting through npm's propagation window.
  *
  * A registry QUERY failure must not be retried as "not published": the resolver
@@ -87,10 +145,22 @@ function sleepSync(ms) {
  * configured budget) and names every package still missing. When the recheck
  * round rescues the cohort, the measured delay is logged, so the next train can
  * be sized from evidence instead of guesses.
+ *
+ * A cohort that a PROVEN newer cohort has superseded is not a failure of this
+ * run: it returns `{ outcome: 'deferred', supersededBy }` so the caller can
+ * report the hand-off instead of failing the release train. Supersession must
+ * be proven twice — `latest.cohort === true` (the resolver reproduced a Version
+ * Packages landing commit) and `isAncestor(target, latest.sha)` (the target
+ * really is an earlier point on the same spine). Every other mismatch (target
+ * newer than main, unrelated history, an unproven resolver result, no resolvable
+ * cohort) still throws. `isAncestor` has no safe default: a caller that forgets
+ * to wire it is refused loudly the first time the question is asked, instead of
+ * silently reading a supersession as an unrelated cohort (or the reverse).
  */
 export function waitForPublishedCohort({
   sha,
   resolve,
+  isAncestor = unwiredAncestry,
   timeoutMs = PUBLISH_WAIT_TIMEOUT_MS,
   recheckMs = PUBLISH_RECHECK_TIMEOUT_MS,
   intervalMs = PUBLISH_WAIT_INTERVAL_MS,
@@ -103,15 +173,22 @@ export function waitForPublishedCohort({
   const recheckDeadline = mainDeadline + Math.max(0, recheckMs);
   let latest = resolve();
   for (;;) {
-    if (latest?.cohort !== true || latest.sha !== sha) {
-      throw new Error(`target is not the current release cohort (expected ${sha}, got ${latest?.sha ?? 'none'})`);
+    const verdict = classifyCohort({ sha, latest, isAncestor });
+    if (verdict.outcome === 'superseded') {
+      return { ...latest, outcome: 'deferred', target: sha, supersededBy: verdict.supersededBy };
+    }
+    if (verdict.outcome !== 'current') {
+      throw new Error(
+        `target is not the current release cohort (expected ${sha}, got ${latest?.sha ?? 'none'})` +
+          (verdict.reason ? `: ${verdict.reason}` : ''),
+      );
     }
     if (latest.publishComplete === true) {
       const elapsed = now() - startedAt;
       if (elapsed > Math.max(0, timeoutMs)) {
         console.log(`published cohort became visible after ${elapsed}ms (main budget ${timeoutMs}ms exhausted; recovered by ${recheckMs}ms recheck)`);
       }
-      return latest;
+      return { ...latest, outcome: 'published' };
     }
     const missing = (Array.isArray(latest.packages) ? latest.packages : [])
       .filter(pkg => pkg?.published !== true)
@@ -126,6 +203,29 @@ export function waitForPublishedCohort({
     sleep(Math.min(intervalMs, phaseDeadline - nowMs));
     latest = resolve();
   }
+}
+
+/**
+ * True only when `ancestor` is a real ancestor of `descendant` in this clone.
+ * git exits 1 for "no"; any other failure is an unanswered question and must
+ * stay a hard failure instead of being read as either answer.
+ *
+ * Exported so tests can exercise the real git call instead of only a fake.
+ */
+export function gitIsAncestor(ancestor, descendant) {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch (error) {
+    if (error?.status === 1) return false;
+    throw new Error(`ancestry check failed (${ancestor} -> ${descendant}): ${error?.message ?? error}`);
+  }
+}
+
+function appendStepSummary(markdown) {
+  const file = process.env.GITHUB_STEP_SUMMARY;
+  if (!file) return;
+  fs.appendFileSync(file, markdown.endsWith('\n') ? markdown : `${markdown}\n`);
 }
 
 async function main() {
@@ -145,13 +245,23 @@ async function main() {
   const cohort = JSON.parse(execFileSync(process.execPath, [path.join(root, 'scripts/release/resolve-release-cohort.mjs'), '--explicit', value], { cwd: root, encoding: 'utf8' }));
   if (cohort.cohort !== true || cohort.sha !== value) throw new Error('unproven release cohort');
   // A delayed run must not overwrite a maintenance branch for a newer cohort.
+  // A proven supersession is a hand-off, not a failure: the wait returns
+  // outcome:'deferred' and this run reports it instead of writing pins.
   // Reuse the same main-spine authority as the daily publish reconciliation.
   // PRI-1067: npm publication returning is not registry visibility; wait a
   // bounded amount instead of treating the first packument read as final.
-  const latest = waitForPublishedCohort({
+  const outcome = waitForPublishedCohort({
     sha: value,
     resolve: () => JSON.parse(execFileSync(process.execPath, [path.join(root, 'scripts/release/resolve-release-cohort.mjs')], { cwd: root, encoding: 'utf8' })),
+    isAncestor: gitIsAncestor,
   });
+  if (outcome.outcome === 'deferred') {
+    const report = deferredReport({ target: value, supersededBy: outcome.supersededBy });
+    console.log(report.line);
+    appendStepSummary(report.summary);
+    console.log(JSON.stringify(report.payload));
+    return;
+  }
   const target = nextPins(cohort.versions);
   // All three exact packages must exist before any file mutation/PR creation.
   for (const [key, name] of Object.entries(packages)) {
