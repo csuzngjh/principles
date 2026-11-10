@@ -259,6 +259,45 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           metadata: { evaluatedLiveRules: 0 },
         };
       }
+      // PRI-1044 step 3-1: an ACTIVE activation whose pi_artifacts row is gone
+      // is invisible to the candidate query below (INNER JOIN), so the gate
+      // reported `no_rules_armed` and enforced nothing with no trace at all
+      // (observed: 8+ hours of silent non-enforcement). Detect the dangling
+      // reference explicitly: the fail-open availability posture is unchanged,
+      // but the gap becomes Owner-visible (rc-9) through a structured warning
+      // that names the activation AND the durable out-of-workspace marker, so
+      // it survives the host's per-call log buffer.
+      const danglingArtifacts: unknown = connection.getDb().prepare(`
+        SELECT a.activation_id, a.artifact_id
+        FROM activations a
+        WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM pi_artifacts p WHERE p.artifact_id = a.artifact_id)
+        ORDER BY a.activated_at ASC
+      `).all();
+      if (!Array.isArray(danglingArtifacts)) {
+        addWarning(warnings, 'activation_artifact_reference_query_invalid', 'inspect state.db schema and integrity');
+      } else {
+        const missingArtifacts: string[] = [];
+        for (const dangling of danglingArtifacts) {
+          if (!isRecord(dangling) || typeof dangling.activation_id !== 'string') {
+            addWarning(warnings, 'activation_artifact_reference_invalid', 'inspect state.db activation rows and integrity');
+            continue;
+          }
+          const artifactLabel = typeof dangling.artifact_id === 'string' ? dangling.artifact_id : 'unknown';
+          missingArtifacts.push(`${dangling.activation_id}->${artifactLabel}`);
+          addWarning(
+            warnings,
+            `activation_artifact_missing: activation=${dangling.activation_id} artifact=${artifactLabel}`,
+            'restore the referenced pi_artifacts row or deactivate the stale activation; the rule did not run',
+          );
+        }
+        if (missingArtifacts.length > 0) {
+          recordDegradedEnforcement(
+            event.context.workspaceDir,
+            `activation_artifact_missing: ${missingArtifacts.join(', ')}`.slice(0, 300),
+          );
+        }
+      }
       const rows: unknown = connection.getDb().prepare(`
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                c.enforcement, c.isolation_decision_id,

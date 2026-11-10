@@ -155,6 +155,16 @@ export class RuleHost {
    * no live rules are loaded.
    */
   private emptyLoadWarnEmitted: boolean = false;
+  /**
+   * PRI-1044 step 3-1 (LOCKSTEP twin of the host-runtime gate): an ACTIVE
+   * activation whose pi_artifacts row is gone is dropped by the INNER JOIN in
+   * `_loadFromActivationsTable`, so the RuleHost silently enforces fewer rules
+   * than the Owner armed. Suppression is keyed on the dangling descriptor SET
+   * (not a one-shot latch, which would never re-arm on this cached singleton
+   * instance): an unchanged set is not re-logged, a changed set is, and an
+   * empty set clears the signature so a later recurrence warns again.
+   */
+  private danglingArtifactSignature: string | null = null;
 
   constructor(stateDir: string, logger: RuleHostLogger = console, options?: RuleHostOptions) {
     this.stateDir = stateDir;
@@ -195,6 +205,7 @@ export class RuleHost {
     this.activationFingerprint = null;
     this.implementationSources.clear();
     this.emptyLoadWarnEmitted = false;
+    this.danglingArtifactSignature = null;
   }
 
   evaluateDetailed(input: RuleHostInput): RuleHostEvaluationReport {
@@ -384,6 +395,51 @@ export class RuleHost {
           '[RuleHost] Activations table query returned non-array, skipping'
         );
         return { loaded: [], skipped: [] };
+      }
+
+      // PRI-1044 step 3-1 (LOCKSTEP twin of the host-runtime gate): the INNER
+      // JOIN above hides ACTIVE activations whose artifact row is gone, so the
+      // Owner-armed rule silently stops enforcing with no diagnostic. Detect
+      // the dangling reference and make it observable; the fail-open posture
+      // is unchanged.
+      const danglingRows = db.prepare(`
+        SELECT a.activation_id, a.artifact_id
+        FROM activations a
+        WHERE a.channel = 'code_tool_hook' AND a.deactivated_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM pi_artifacts p WHERE p.artifact_id = a.artifact_id)
+        ORDER BY a.activated_at ASC
+      `).all() as unknown;
+      const danglingDescriptors: string[] = [];
+      if (Array.isArray(danglingRows)) {
+        for (const dangling of danglingRows) {
+          if (!dangling || typeof dangling !== 'object' || Array.isArray(dangling)) continue;
+          const record = dangling as Record<string, unknown>;
+          const activationId = typeof record['activation_id'] === 'string' ? record['activation_id'] : 'unknown';
+          const artifactId = typeof record['artifact_id'] === 'string' ? record['artifact_id'] : 'unknown';
+          danglingDescriptors.push(`${activationId}->${artifactId}`);
+        }
+      }
+      if (danglingDescriptors.length === 0) {
+        this.danglingArtifactSignature = null;
+      } else {
+        const signature = danglingDescriptors.join(',');
+        try {
+          // Freshness, not spam: the marker contract is "occurrences accumulate
+          // and lastSeenAt refreshes while the degradation persists"
+          // (degraded-enforcement-marker.ts), so it is bumped on every load
+          // exactly like the host-runtime gate does. Only the log line is
+          // suppressed for an unchanged set.
+          recordDegradedEnforcement(this.workspaceDir ?? workspaceDir, `activation_artifact_missing: ${signature}`.slice(0, 300));
+        } catch { /* observability only */ }
+        if (signature !== this.danglingArtifactSignature) {
+          this.logger.warn?.(
+            `[RuleHost] activation_artifact_missing — ${danglingDescriptors.length} active activation(s) reference a missing pi_artifacts row: ${danglingDescriptors.join(', ')}. ` +
+            'nextAction=restore the referenced pi_artifacts row or deactivate the stale activation; the rule did not run'
+          );
+          // Recorded after the warn so a throwing logger cannot suppress the
+          // next attempt.
+          this.danglingArtifactSignature = signature;
+        }
       }
 
       const fingerprintParts: string[] = [
