@@ -5,7 +5,7 @@
  * No React dependency, no I/O. All functions are pure.
  */
 
-import type { IntentTensionData, IntentDecisionRecordData } from '../../utils/validators.js';
+import type { IntentTensionData, IntentDecisionRecordData, EvidenceChainProvenanceData } from '../../utils/validators.js';
 import type { IntentDecisionInputPayload } from '../../api.js';
 
 // ── Confidence mapping ────────────────────────────────────────────────────────
@@ -20,6 +20,27 @@ export function mapConfidenceLabel(confidence: number): ConfidenceLabel {
   if (confidence >= 0.7) return 'high';
   if (confidence >= 0.4) return 'mid';
   return 'low';
+}
+
+// ── Provenance badge (SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4) ─────────────
+
+/**
+ * i18n key for the neutral wording used when a pain record was observed by an
+ * agent and authorized by the Owner (MCP submission path).
+ */
+export const AGENT_REPORTED_PROVENANCE_LABEL_KEY = 'pages.pain.provenanceAgentReportedOwnerApproved';
+
+/**
+ * Whether the card renders the neutral "agent reported, Owner authorized"
+ * badge instead of the raw source-kind badge.
+ *
+ * Only `agent_reported_owner_approved` changes the display: the three legacy
+ * provenance values keep their existing rendering and their raw provenance is
+ * never shown. The internal enum literal must never reach the Owner, and this
+ * record must never be presented as the Owner's own observation.
+ */
+export function isAgentReportedOwnerApproved(record: RecordData): boolean {
+  return record.provenance === 'agent_reported_owner_approved';
 }
 
 // ── Card layer data structures ────────────────────────────────────────────────
@@ -95,6 +116,8 @@ export interface RecordData {
   dreamerTaskStatus?: string;
   /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
   intentTension?: IntentTensionData;
+  /** SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: internal provenance discriminator. */
+  provenance?: EvidenceChainProvenanceData;
 }
 
 /**

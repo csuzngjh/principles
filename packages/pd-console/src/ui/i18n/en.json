@@ -693,6 +693,7 @@
         "codex": "Codex",
         "openclaw": "OpenClaw"
       },
+      "provenanceAgentReportedOwnerApproved": "Reported by an agent, authorized by the Owner",
       "fieldConclusion": "PD's Conclusion",
       "fieldApplicability": "Applicability",
       "fieldConfidence": "Confidence",

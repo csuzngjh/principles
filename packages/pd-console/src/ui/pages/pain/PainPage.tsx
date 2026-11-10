@@ -23,7 +23,7 @@ import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData
 import type { IntentTensionData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format-date.js';
 import i18n from '../../i18n/index.js';
-import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, type IntentDecisionContext } from './pain-card-helpers.js';
+import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, isAgentReportedOwnerApproved, AGENT_REPORTED_PROVENANCE_LABEL_KEY, type IntentDecisionContext } from './pain-card-helpers.js';
 import { enumLabel } from '../../utils/enum-labels.js';
 
 // utils/format.js was retired into the defensive single-owner formatter
@@ -348,6 +348,10 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
   const stateVariant = stateToVariant(record.state);
   const stateLabel = enumLabel('evidenceState', record.state, t);
   const sourceLabel = enumLabel('sourceKind', record.sourceKind, t);
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: agent-observed pain authorized
+  // by the Owner gets neutral wording instead of the raw source-kind badge.
+  // It must never read as the Owner's own observation.
+  const agentReported = isAgentReportedOwnerApproved(record);
 
   const layers = buildCardLayers(record);
 
@@ -363,7 +367,13 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={stateVariant}>{stateLabel}</Badge>
-            <Badge variant="outline">{sourceLabel}</Badge>
+            {agentReported ? (
+              <Badge variant="outline" data-testid={`pain-provenance-${record.id}`}>
+                {t(AGENT_REPORTED_PROVENANCE_LABEL_KEY)}
+              </Badge>
+            ) : (
+              <Badge variant="outline">{sourceLabel}</Badge>
+            )}
             {/* PRI-625 Slice D: evidence host attribution (SPEC §15). */}
             {record.hostKind && record.hostKind !== 'unknown' && (
               <Badge variant="secondary">{t(`pages.pain.hostKind.${record.hostKind}`)}</Badge>

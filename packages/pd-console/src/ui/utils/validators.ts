@@ -2412,7 +2412,19 @@ export interface EvidenceChainRecordData {
   intentTension?: IntentTensionData;
   /** PRI-625 Slice D: evidence host attribution — openclaw | codex | workbuddy | unknown. */
   hostKind?: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
+  /**
+   * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: how the pain was observed.
+   * Internal value only — the UI must translate it into neutral wording and
+   * must never render this literal to the Owner.
+   */
+  provenance?: EvidenceChainProvenanceData;
 }
+
+export type EvidenceChainProvenanceData =
+  | 'host_context_bound'
+  | 'owner_reported_no_host_trace'
+  | 'automatic_hook'
+  | 'agent_reported_owner_approved';
 
 // ── Intent Tension (PRI-469, SPEC §16) ───────────────────────────────────────
 //
@@ -2818,6 +2830,20 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
     if (!isString(v.hostKind)) return null;
     if (v.hostKind !== 'openclaw' && v.hostKind !== 'codex' && v.hostKind !== 'unknown') return null;
     result.hostKind = v.hostKind;
+  }
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance is an internal
+  // discriminator; reject unknown values instead of passing them to the UI.
+  if (Object.hasOwn(v, 'provenance')) {
+    if (!isString(v.provenance)) return null;
+    if (
+      v.provenance !== 'host_context_bound'
+      && v.provenance !== 'owner_reported_no_host_trace'
+      && v.provenance !== 'automatic_hook'
+      && v.provenance !== 'agent_reported_owner_approved'
+    ) {
+      return null;
+    }
+    result.provenance = v.provenance;
   }
   if (Object.hasOwn(v, 'admissionDecision')) {
     if (!isString(v.admissionDecision)) return null;
