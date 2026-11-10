@@ -37,6 +37,7 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { detectInstalledHosts, getHostInstallers, type DetectedHost, type HostTarget } from './installers/index.js';
+import { readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
@@ -4372,6 +4373,9 @@ export interface InstallResult {
   consoleUrl?: string;
   /** ADR-0020 §2.3: Host-side install results (one per HostInstaller). */
   hostResults?: HostInstallResult[];
+  /** UPDATE CHAIN (2026-11-11): one line per host this run actually touched,
+   *  naming the runtime it now resolves. Derived, never persisted. */
+  hostSummary?: string[];
   /**
    * Marketplace contract (2026-11-07): host results that ended in a manual
    * operator step (e.g. the Codex Marketplace install) — present ONLY when
@@ -4428,6 +4432,35 @@ export function partitionHostInstallResults(
     else failures.push(result);
   }
   return { failures, manualActions };
+}
+
+/**
+ * UPDATE CHAIN (2026-11-11): the Owner-visible install summary. Every host
+ * this run actually touched gets one line naming the runtime it now resolves,
+ * so covering an already-installed host can never happen silently.
+ *
+ * Derived from the existing host results plus the installed runtime dirs —
+ * never persisted, never a second install-state authority.
+ */
+export function summarizeTouchedHosts(
+  results: readonly HostInstallResult[],
+  deps: { canonicalRuntimeDir?: string; codexRuntimeDir?: string; codexRuntimeReadable?: boolean } = {},
+): string[] {
+  const canonical = readInstalledRuntimeCohort(deps.canonicalRuntimeDir ?? getPdRuntimeDir());
+  const codexHome = process.env.CODEX_HOME ?? path.join(getHomeDir(), '.codex');
+  const codex = deps.codexRuntimeReadable === false ? undefined : readInstalledRuntimeCohort(
+    deps.codexRuntimeDir ?? resolvePluginDataRoot(codexHome, 'principles') ?? '',
+  );
+  return results.map((host) => {
+    if (!host.success) {
+      return `Host "${host.hostId}" — not updated: ${host.reason ?? 'unknown failure'}`;
+    }
+    const cohort = host.hostId === 'codex' ? codex : canonical;
+    const version = cohort
+      ? `core@${cohort.core}, codex-adapter@${cohort.codexAdapter}, host-runtime@${cohort.hostRuntime}, mcp@${cohort.mcpServer}`
+      : 'runtime not verified';
+    return `Host "${host.hostId}" — ${version} (${host.configAction ?? 'updated'})`;
+  });
 }
 
 /**
@@ -5363,9 +5396,11 @@ export async function install(
     // host installers here — best effort only: the requested host succeeded,
     // and a sibling refresh failure must not roll back the working runtime.
     const { refreshTargets } = hostPlan;
+    const refreshedResults: HostInstallResult[] = [];
     for (const refreshTarget of refreshTargets) {
       if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
       const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx);
+      refreshedResults.push(...refreshResults);
       for (const hr of refreshResults) {
         if (hr.success) {
           logger.info(`Host "${hr.hostId}" refresh: ${hr.configAction === 'updated' ? 'updated' : 'no change needed'}${hr.reason ? ` — ${hr.reason}` : ''}.`);
@@ -5374,6 +5409,14 @@ export async function install(
           logger.warn(`Host "${hr.hostId}" refresh failed: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction ?? `npx create-principles-disciple install --host ${hr.hostId}`}`);
         }
       }
+    }
+    // UPDATE CHAIN (2026-11-11): one visible line per host this run touched.
+    // First installs and upgrades share it, so an already-installed host being
+    // brought forward can never be silent (Owner report).
+    const hostSummary = summarizeTouchedHosts([...hostResults, ...refreshedResults]);
+    if (hostSummary.length > 0) {
+      logger.info('Install summary:');
+      for (const line of hostSummary) logger.info(`  ${line}`);
     }
     // Manual-action hosts (e.g. Codex awaiting the Marketplace step) STAY in
     // the install manifest: the manifest records the hosts PD serves on this
@@ -5563,6 +5606,7 @@ export async function install(
       nextAction: nextActions.join(' | '),
       consoleUrl: launchResult.consoleUrl,
       hostResults,
+      hostSummary,
       ...(compatibilityVisibility.lines.length > 0 ? { compatibilityWarnings: compatibilityVisibility.lines } : {}),
       ...(manualActionReason !== undefined ? { reason: manualActionReason, manualActions: hostManualActions } : {}),
       journal: installerJournalRecord(journal),
