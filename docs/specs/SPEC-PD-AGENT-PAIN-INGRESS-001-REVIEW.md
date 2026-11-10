@@ -1,11 +1,11 @@
 # SPEC-PD-AGENT-PAIN-INGRESS-001 技术审查报告
 
-- **被审查对象**：`docs/specs/SPEC-PD-AGENT-PAIN-INGRESS-001.md` **V0.6**
-- **审查目标产物**：V0.7（本报告与 V0.7 SPEC、V0.7 技术方案同批产出）
+- **被审查对象**：`docs/specs/SPEC-PD-AGENT-PAIN-INGRESS-001.md` **V0.8**（含 `v0.8 post-review corrections`）
+- **审查目标产物**：V0.8 定点修订 + 本报告 §8 的七项复核
 - **审查日期**：2026-11-10
-- **审查性质**：只读代码核验 + 文档评审 + 锚点式定义重审
-- **未做**：未修改产品源码 / schema / 依赖 / 三宿主配置；未重启 Gateway；未 commit / push / PR；未改动任何真实 Pain 数据
-- **结论**：**PARTIALLY_VERIFIED**（理由见 §6）
+- **审查性质**：只读代码核验 + 文档评审 + 锚点式定义重审 + post-review 七项代码复核
+- **未做**：未修改产品源码 / schema / 依赖 / 三宿主配置；未重启 Gateway；本批修订未改代码，只改三份文档
+- **结论**：**PARTIALLY_VERIFIED**（理由见 §6；post-review 七项全部成立，见 §8）
 
 ---
 
@@ -120,7 +120,7 @@
 | V0.6 / 既有 CLI 默认 `score = 80`，等于每条都 `severe` | V0.6 §6；`pain-record.ts:469` | **需按裁定 C 取消** |
 | 现有枚举只有 mild/moderate/severe，无需扩展 | 同上 | E1 |
 
-**结论**：MCP 路径**不写 `score`** 即可得到"默认中等"，零新增常量、零迁移；提级只能由人工操作完成。
+**结论**：MCP 路径**不写 `score`** 即可得到"默认中等"；提级只能由人工操作完成。**post-review 更正**：CLI 路径不能"不写"（`pain_events.score REAL NOT NULL`，且 observability 本地 `severityFromScore` 对 `undefined` 返回 `mild`），因此 CLI 需要 `DEFAULT_PAIN_SCORE = 40` 这一常量，且四处默认值必须一起改（§8 P1-4）。
 
 ### 2.6 回执与 `diagnosis.mode`
 
@@ -268,10 +268,10 @@
 
 **结论：PARTIALLY_VERIFIED。**
 
-- 产品定义与合同层：V0.8 已把 13 个关注点全部收敛，且每条都有代码事实支撑；
-- 仍不能称 `READY_FOR_IMPLEMENTATION_REVIEW`（整体）的原因只有一件：**提交链路的三宿主真实落库 + 授权行为 + L3 自动执行尚未在真实宿主上取证**，这必须在实现并重新安装后完成。
+- 产品定义与合同层：V0.8 已把 13 个关注点与 post-review 七项全部收敛，且每条都有代码事实支撑（§8）；
+- 仍不能称 `READY_FOR_IMPLEMENTATION_REVIEW`（整体）的原因有两类：**提交链路的三宿主真实落库 + 授权行为 + L3 自动执行尚未在真实宿主上取证**；以及 **OG-4 系统层授权尚未由 Owner 给出**。
 
-文档范围结论：**READY_FOR_IMPLEMENTATION_REVIEW**（SPEC V0.8 / 本报告 / 技术方案三者自洽）。
+文档范围结论：**READY_FOR_IMPLEMENTATION_REVIEW**（SPEC V0.8 / 本报告 / 技术方案三者自洽）；但**实现范围**受 §8.3 两项外部前提约束——OG-4 未授权前写类 Tool 不得进入生产。
 
 ---
 
@@ -281,8 +281,100 @@
 
 | # | 裁定 | 当前代码事实 | 目标行为 | 落点 |
 |---|---|---|---|---|
-| 1 | `pd pain record` 默认严重度改为中等 | 两处默认 `80`：`pain-record.ts:469` 与 `pain-signal-observability.ts:221`（后者会让只改 CLI 的方案失效） | 两处一起移除；省略 `--score` 不写 `score` → `moderate`；`--score` 仅作人工提级 | SPEC §6.1/§6.4；TD §6.5 |
+| 1 | `pd pain record` 默认严重度改为中等 | **四处**默认 `80`：`pain-record.ts:125/469` 与 `pain-signal-observability.ts:159/161/221`；`pain_events.score` 为 `REAL NOT NULL`，且 observability 本地 `severityFromScore(number)` 对 `undefined` 返回 `mild` | 四处一起改为 `DEFAULT_PAIN_SCORE = 40` → `moderate`；`--score` 仅作人工提级且**无法验明操作者身份** | SPEC §6.1/§6.4；TD §6.4/§6.5 |
 | 2 | WorkBuddy 用户级 Skill 由安装器分发、旧文件废弃 | 安装器只校验插件根 Skill；无旧 `pd-record-pain` 处置逻辑；仓库无该 Skill 源 | 安装器分发 `pd-pain-signal` 到插件根；旧文件按路径+name 识别并重命名废弃；用户改过的副本不覆盖、只告警 | SPEC §5.5；TD §7.4 |
 | 3 | `diagnostician_async_cli` 保持默认关 | quiet、默认关；开启后提交即返回 | 不随 L3 交付翻转；等真实取证后再评估 | SPEC §6.4；TD §6.5 |
 
 **为何单列**：这三项是 Owner 对上一轮"仍需确认"的直接裁定，改变了 V0.7 的一处行为边界（CLI 默认严重度）与一处交付边界（Skill 分发方）。若混入旧结论，读者会误以为已经实现。
+
+---
+
+## 8. post-review 七项复核（v0.8 post-review corrections）
+
+> **原则**：本节的"是否成立"只由当前分支源码决定，不引用上一轮评审结论。经代码核验不成立的项必须标 `NOT_REPRODUCED` 并撤销；本轮七项**全部 `REPRODUCED`**，但其中 P2-2 的**原结论方向被推翻**（原以为 false 无影响，实际有可见性损失）。
+
+### 8.1 汇总
+
+| # | 问题 | 是否成立 | 修复决定 | SPEC 落点 | TD 落点 | 测试 | 状态 |
+|---|---|---|---|---|---|---|---|
+| P1-1 | `painType` 缺省走 legacy，形成第二套准入 | **REPRODUCED** | 单一路径 + 中性默认 `principle_deviation`；legacy 仅读取兼容 | §3.1、§6.3、§12 T09 | §6.3、§5.5、§10 T09 | T09 + A13 | **CLOSED（文档）** |
+| P1-2 | archived/deprecated 可作有效锚点 | **REPRODUCED** | 五要件 + 逐状态判定；archived/deprecated/candidate 不作当前违规依据 | §1.4.1、§12 T42 | §5.6、§5.6.1、§10 X03/T42 | T42 十例 | **CLOSED（文档）** |
+| P1-3 | 超时后无已知身份可回查 | **REPRODUCED** | Handler 写入前预生成 `painId`，`taskId` 确定性派生；超时返回 `submitted` / `submit_unconfirmed` | §7.4、§8、§12 T41 | §5.5、§5.7、§9、§10 T14b/T41 | T41 十例 | **CLOSED（文档）** |
+| P1-4 | 默认 `score=80` 传播路径不完整 | **REPRODUCED** | 四处统一 `DEFAULT_PAIN_SCORE = 40`；真实读回三处存储；`--score` 无鉴权须写明 | §6.1、§6.2、§6.4、§12 T07 | §6.4、§6.5、§10 A11/A16/T07 | T07 + A11 | **CLOSED（文档）** |
+| P1-5 | 写类 MCP 缺 OG-4 治理合同 | **REPRODUCED** | 两层授权分离；`readOnlyHint:false`；OG-4 未授权作为实施 Gate | §7.7、§12 T43 | §5.1.1、§11 第 0 步、§16.4 | T43 | **OPEN（待 Owner 授权）** |
+| P2-1 | Agent Observation 与 Owner Pain 来源混同 | **REPRODUCED** | 新增 `mcp_agent_assisted` channel + `agent_reported_owner_approved` provenance；不写 `owner_statement` | §7.5、§12 T44 | §6.6、§7.2、§10 T44 | T44 七例 | **CLOSED（文档，扩展待实现）** |
+| P2-2 | `recordObservability:false` 的真实影响 | **REPRODUCED（原结论被推翻）** | MCP 不再固定 false；保留默认 true；不新增表 | §7.6、§12 T45 | §6.7、§10 T45 | T45 A/B | **CLOSED（文档）** |
+
+### 8.2 逐项代码事实
+
+**P1-1 `painType`**
+
+- `PainIngressReport.painType` 必填（`pain-ingress-payload.ts:113-124`）；`PainToPrincipleInput.painType` 必填（`pain-to-principle-service.ts:72-73`）。
+- legacy 路径不构造 `painIngress.v1`，跳过 `evaluatePainIngress()` 与 v1 校验（`pain-signal-bridge.ts:349-394`）。
+- legacy 归一硬编码 `user_frustration`（`:389`）。
+- **补充事实（原草案也未写清）**：`painIngress.v1` 不含 `painType`，`diagnostic_json` 也不写它；`painType` 只进内存对象与 Observability 的 `evolution.jsonl`。因此"下游诊断信息丢失"的风险不成立，但"假分类 + 第二准入"的风险成立。
+- 结论：改单一路径 + `principle_deviation`；影响面见 TD §6.3.5。**未**伪造 `user_frustration`。
+
+**P1-2 有效锚点**
+
+- `readTrustedPrinciples()` 只返回 `candidate/probation/active`（`principle-tree-ledger-adapter.ts:254-260`）；绑定只允许这三态（`:95-102`）。
+- 无匹配时 `active-principle-prompt.ts:257-268` 返回 `principle_not_currently_authorized`。
+- 仓库没有按 `scope` 判适用的函数，也没有 `priority` 覆盖仲裁器（F59）。
+- 结论：archived/deprecated 不能作当前违规依据；candidate 只能作背景；scope/冲突由 Agent 披露，服务器不假装能裁决。
+
+**P1-3 超时身份**
+
+- `runWithDeadline()` 超时只停止等待，不取消底层任务（`deadline.ts:39-71`）。
+- CLI 已在调用前生成 `painId`（`pain-record.ts:394`）；`taskId = diagnosis_<painId>`（`pain-signal-bridge.ts:264-266`）。
+- `getTask(taskId)` 命中证明任务行存在（本次 painId 唯一），不证明诊断执行。
+- 结论：Handler 预生成身份 + 有界回查 + `submit_unconfirmed`；不新增幂等库/注册表。
+
+**P1-4 默认 score**
+
+- 功能默认四处：`pain-record.ts:125`、`:469`、`pain-signal-observability.ts:159/161`、`:221`；展示一处 `:635`。
+- `pain_events.score REAL NOT NULL`；observability 本地 `severityFromScore(number)` 对 `undefined` 返回 `mild`。
+- `severityFromScore` 映射为 `>=70 severe`、`>=40 moderate`、其余 `mild`（`pain-signal-bridge.ts:268-273`）。
+- 结论：四处统一 `DEFAULT_PAIN_SCORE = 40`；不改映射；`--score` 无鉴权，不宣称服务端验明身份。
+
+**P1-5 OG-4**
+
+- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 要求写类 MCP 工具治理走 OG-4；`:399` "设计位（未授权）"，`:436` "未启动"。
+- 仓库无授权记录；当前 MCP 只有只读 `pd_recall_principle_pains`（`server.ts:147`，`readOnlyHint:true`）；`pd_submit_pain` 不存在。
+- PreToolUse matcher 只匹配 `Bash|apply_patch`；tool-semantics 只登记宿主原生工具。
+- 结论：写类工具必须 `readOnlyHint:false`，OG-4 未授权前不得进入生产 `tools/list`；不自行宣布已授权。
+
+**P2-1 来源归属**
+
+- `PainProvenance` 是三值字符串枚举（`admission-gate.ts:4-7`）。
+- `parseOrigin()` 白名单 6 个 `owner_manual` channel + `automatic_hook`，**不含** `mcp_agent_assisted`（`pain-ingress-payload.ts:147-161`）。
+- 现有三值无法准确表达"Agent 观察 + Owner 授权"。
+- 结论：新增 channel `mcp_agent_assisted`（unbound）+ provenance `agent_reported_owner_approved`；完整影响面见 TD §6.6.4；不建第二套模型。
+
+**P2-2 Observability**
+
+- `recordPain` 观测默认开启（`pain-to-principle-service.ts:210`、`:255`）。
+- true 写 `pain_events` / `sessions` / events JSONL / `evolution.jsonl`；false 全跳过，仅剩 `tasks` + `diagnostic_json`。
+- Console 读 `trajectory.db`（`sqlite-context-assembler.ts:458-459`）；无 `pain_events` 时 Recall 降级为 `pain_event_only_in_state_db`（`pain-recall-capability.ts:233-239`）。
+- 结论：MCP 不得固定 false；保留默认 true，不新增表。
+
+### 8.3 明确未闭合 / 不计为已修复
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| OG-4 系统层授权 | **OPEN** | 这是 Owner 决策，不是文档能关闭的事项；未授权前实现只能停在测试替身 |
+| provenance 新值是否采纳 | **待 Owner 裁定** | 本报告倾向新增；若复用旧值，必须在文案中说明其技术含义 |
+| 真实宿主落库 / 授权行为 / L3 自动执行 | **NOT RUN** | 需要实现 + 重新安装后在真实宿主取证，本轮未执行 |
+| 四处默认值的代码修改 | **NOT RUN** | 本轮只改文档；代码仍是 80 |
+
+---
+
+## 9. 本轮证据构成
+
+| 等级 | 内容 |
+|---|---|
+| **E1** | §8 全部代码结论（文件 + 行号）；F55–F64（TD §2.8） |
+| **E2** | 三宿主 Instructions 路径、安装产物（沿用 §1 基线） |
+| **E3** | Node `spawn` 异步错误语义（沿用） |
+| **E4** | 无新增未证实事实 |
+
+**本轮结论**：七项均以当前源码复核成立；三份文档的定点修订已完成。整体仍为 **PARTIALLY_VERIFIED**，因为 OG-4 授权与真实宿主取证尚未发生。

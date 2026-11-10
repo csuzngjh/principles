@@ -5,9 +5,10 @@
 | 文档 | SPEC-PD-AGENT-PAIN-INGRESS-001 技术方案 |
 | Version | **0.8** |
 | 对应 SPEC | `SPEC-PD-AGENT-PAIN-INGRESS-001.md` **V0.8** |
-| 对应审查 | `SPEC-PD-AGENT-PAIN-INGRESS-001-REVIEW.md`（审查对象 V0.6） |
-| 状态 | `READY_FOR_IMPLEMENTATION_REVIEW`（文档范围）；整体仍 `PARTIALLY_VERIFIED` |
+| 对应审查 | `SPEC-PD-AGENT-PAIN-INGRESS-001-REVIEW.md`（审查对象 V0.6 + §8 post-review 七项） |
+| 状态 | `READY_FOR_IMPLEMENTATION_REVIEW`（文档范围）；整体仍 `PARTIALLY_VERIFIED`；写类 MCP 工具受 **OG-4** 治理 Gate 约束（§5.1.1） |
 | 日期 | 2026-11-10 |
+| 本轮修订 | `v0.8 post-review corrections`：P1-1 `painType` 单一路径、P1-2 有效锚点、P1-3 超时身份回查、P1-4 四处默认 `score`、P1-5 OG-4 治理、P2-1 来源语义、P2-2 Observability 可见性。版本号仍为 **0.8**。 |
 | 范围 | 只描述设计，不含已实现代码 |
 
 ---
@@ -42,7 +43,7 @@
 - 不做去重、限流、exactly-once 投递。
 - 不把 Codex "Bound" 当作交付目标（附录 A）。
 - 不改 CLI / Hook / Skill 的 500 字前端上限。
-- 不在本版扩展 `painType` 枚举。
+- 不新增第二套 `painType` 语义或第二条准入路径；只补一个中性默认值 `principle_deviation`（§6.3）。
 
 ---
 
@@ -90,9 +91,9 @@
 | # | 事实 | 证据 | 等级 |
 |---|---|---|---|
 | F23 | `severityFromScore(undefined)` 返回 `moderate`；`>=70` 为 `severe`，`>=40` 为 `moderate`，其余 `mild` | `pain-signal-bridge.ts:264-273` | E1 |
-| F24 | CLI 手动入口写死 `painType:'user_frustration'` 且 `score: opts.score ?? 80` | `packages/pd-cli/src/commands/pain-record.ts:464-479`（`score` 在 `:469`） | E1 |
-| F25 | `inferProvenance` 不读取 `painType`；`buildDiagnosticJson` 也不写 `painType` | `pain-signal-bridge.ts:291-299,405-455` | E1 |
-| F26 | 观测写盘 `recordPainSignalObservability` 默认 `score = 80`，并会把 `painType` 写入 `evolution.jsonl` | `runtime/pain-signal-observability.ts:216-245` | E1 |
+| F24 | CLI 手动入口写死 `painType:'user_frustration'`，并在**两处**使用 `score: opts.score ?? 80`（`:125` 构造报告、`:469` 持久化） | `packages/pd-cli/src/commands/pain-record.ts:121-132,464-479` | E1 |
+| F25 | `inferProvenance` 不读取 `painType`；`buildDiagnosticJson` 不写 `painType`（顶层无、`painIngress.v1` 也无）；它只出现在内存 `PainDetectedData` 与 Observability 的 `evolution.jsonl` | `pain-signal-bridge.ts:291-299,408-431`；`pain-ingress-payload.ts:355-360`；`pain-signal-observability.ts:253-267` | E1 |
+| F26 | 观测写盘 `recordPainSignalObservability` 在 `:159/161`（`pain_events`）与 `:221`（events JSONL）使用 `?? 80`，并会把 `painType` 写入 `evolution.jsonl`；`pain_events.score` 为 `REAL NOT NULL` | `runtime/pain-signal-observability.ts:146-243` | E1 |
 | F27 | CLI 在未绑定会话时 `recordObservability = false` | `pain-record.ts:427-430` | E1 |
 
 ## 2.5 Console 安全与执行
@@ -138,6 +139,24 @@
 | F52 | MCP 包有架构守卫 G4-2：只允许经由 `@principles/core/runtime/pain-recall-capability` 公开子路径导入 core，禁止私有读模型导入；并断言"恰好一个 Tool" | `pd-mcp-server/src/__tests__/architecture-guards.test.ts:5-14`；`server-contract.test.ts:71,82` | E1 |
 | F53 | 安装器要求 WorkBuddy **插件根**下四份必需 Skill（含 `pd-pain-signal`），逐个校验 `skills/<name>/SKILL.md` 可读 | `packages/create-principles-disciple/src/installers/workbuddy-host-installer.ts:75,104,1204-1208` | E1 |
 | F54 | 安装器测试断言**不**创建 `~/.workbuddy/skills` 第二份全局副本；仓库**没有**旧 `pd-record-pain` 识别/废弃逻辑 | `packages/create-principles-disciple/tests/workbuddy-skill-delivery.test.ts:412`；`workbuddy-host-installer.ts` 无 `legacy`/`deprecat` 处置命中 | E1 |
+
+## 2.8 post-review 复核事实（F55–F65）
+
+> 本节是 `v0.8 post-review corrections` 的证据基线。**每条均在当前分支源码上重新读取**，不使用上一轮评审结论。
+
+| # | 事实 | 证据 | 等级 |
+|---|---|---|---|
+| F55 | `PainIngressReport.painType` 与 `PainToPrincipleInput.painType` 都**必填**，不存在"省略即合法"的类型 | `runtime/pain-ingress-payload.ts:113-124`；`runtime/pain-to-principle-service.ts:72-73` | E1 |
+| F56 | 持久化重入校验的 legacy 归一分支在缺少类型时**硬编码** `painType: 'user_frustration'` | `pain-signal-bridge.ts:384-394`（`:389`） | E1 |
+| F57 | `readTrustedPrinciples()` 只返回 `candidate` / `probation` / `active`；archived / deprecated 不进入 trusted 集合 | `runtime/adapter/principle-tree-ledger-adapter.ts:254-260` | E1 |
+| F58 | 原则绑定只允许 `candidate` / `probation` / `active`；`active-principle-prompt` 无匹配时返回 `principle_not_currently_authorized` | `principle-tree-ledger-adapter.ts:95-102`；`packages/host-runtime/src/active-principle-prompt.ts:257-268` | E1 |
+| F59 | 仓库**没有**按 `scope` 判定"当前场景是否适用"的函数；`priority` 只参与 prompt 打包排序，**没有**覆盖仲裁器 | `active-principle-prompt.ts:129-215`；`principle-schema.ts` 字段定义 | E1（缺失） |
+| F60 | `runWithDeadline()` 超时返回 `{ok:false,timedOut:true}`，**不取消**底层 `fn()`；server 侧注册 orphan 并返回 `deadline_exceeded` | `packages/pd-mcp-server/src/deadline.ts:39-71`；`server.ts:186-218,274-288` | E1 |
+| F61 | `painId` 由调用方（CLI）在调用 `recordPain` **之前**生成；`taskId = input.taskId ?? createDiagnosticianTaskId(painId)`，即 `diagnosis_<painId>` | `pd-cli/src/commands/pain-record.ts:394`；`pain-to-principle-service.ts:160-164`；`pain-signal-bridge.ts:264-266` | E1 |
+| F62 | `parseOrigin()` 白名单含 6 个 `owner_manual` channel（`openclaw_command` / `cli_explicit_session` / `external_cli_unbound` / `codex_explicit_prefix` / `codex_explicit_agent` / `workbuddy_explicit_prefix`）与 `automatic_hook`；**不含** `mcp_agent_assisted` | `pain-ingress-payload.ts:37-50,147-161` | E1 |
+| F63 | `PainProvenance` 是三个字符串值的枚举（`host_context_bound` / `owner_reported_no_host_trace` / `automatic_hook`），不是对象 | `runtime/admission-gate.ts:4-7`；`deriveProvenanceFromIngressFacts`：`pain-ingress-payload.ts:412-419` | E1 |
+| F64 | `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` §10.2 规定写类 MCP 工具治理需 OG-4 单独授权；正文标注"设计位（未授权）""未启动"；仓库无授权记录，当前 MCP 只有只读 recall Tool | `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335,396-400,436`；`pd-mcp-server/src/server.ts:147` | E1 |
+| F65 | `recordObservability !== false` 才写 `pain_events` / events JSONL / `evolution.jsonl`；`false` 仅剩 `tasks` + `diagnostic_json`。Console 读 `trajectory.db`，无 `pain_events` 时看不到；Recall 降级为 `pain_event_only_in_state_db` | `pain-to-principle-service.ts:210,255`；`pain-signal-observability.ts:120-285`；`sqlite-context-assembler.ts:458-459`；`pain-recall-capability.ts:233-239` | E1 |
 
 ---
 
@@ -245,8 +264,8 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 | `packages/codex-adapter/src/worker/workspace-worker.ts` | 删除本地 `pickDiagnosticianCandidate`，改用 core 共享函数 |
 | `plugins/principles-disciple/skills/pd-pain-signal/SKILL.md` | 改为锚点式提交规范（OpenClaw + Codex 共用） |
 | `packages/workbuddy-adapter/plugin/skills/pd-pain-signal/SKILL.md` | 同上（WorkBuddy 独立副本） |
-| `packages/pd-cli/src/commands/pain-record.ts` | 省略 `--score` 时不再写 `score = 80`，改为一律不写 `score`（落 `moderate`）；`--score` 的显式语义不变（裁定 1） |
-| `packages/principles-core/src/runtime/pain-signal-observability.ts` | 移除 `score ?? 80` 默认（`:221`）；改为不写 `score` 并由 `severityFromScore(undefined)` 落 `moderate`。只改 CLI 一处无效：`recordPain` 会在 `:210/:255` 重新补 80（F26） |
+| `packages/pd-cli/src/commands/pain-record.ts` | 省略 `--score` 时不再用 `?? 80`（`:125`、`:469` 两处），改为写 `DEFAULT_PAIN_SCORE = 40`（落 `moderate`）；展示行 `:635` 同步；`--score` 的显式语义不变（裁定 1，§6.5） |
+| `packages/principles-core/src/runtime/pain-signal-observability.ts` | 移除 `data.score ?? 80`（`:159/161`）与 `opts.data.score ?? 80`（`:221`）三处默认，改为同一 `DEFAULT_PAIN_SCORE`；`pain_events.score REAL NOT NULL`，因此不能"不写"（§6.4） |
 | `packages/create-principles-disciple/src/installers/workbuddy-host-installer.ts` | 增加旧 `~/.workbuddy/skills/pd-record-pain` 的识别与废弃；不改写用户改过的副本（裁定 2，§7.4） |
 
 ## 4.3 只改测试
@@ -287,6 +306,33 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
 | 输入中的路径 | **禁止**；`workspaceDir` 只来自启动期绑定 |
 
 > `readOnlyHint:false` 必须显式声明。现有 recall Tool 的 `true` 不能被继承或默认。
+
+### 5.1.1 系统层治理合同：OG-4（写类 MCP 工具）
+
+`pd_submit_pain` 与既有 recall Tool 的**安全结论不能互相沿用**：recall 是只读查询，`pd_submit_pain` 会创建持久任务行。
+
+**两层授权必须分开记账，且不可互相替代**：
+
+| 层 | 授权内容 | 由谁给出 | 当前状态 |
+|---|---|---|---|
+| **业务层** | Owner 同意"记录这一条具体 Pain" | 宿主对话中的 Owner（推荐用 askme；没有就用普通对话） | 每次提交都需重新取得；不落在 PD 数据里 |
+| **系统层** | PD 允许**新增一个 MCP 写入能力**并交付到三宿主 | Owner 按 `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` §10.2 的 **OG-4** 流程单独授权 | **未授权**（F64） |
+
+**代码事实**（F64）：
+
+- `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md:332-335` 规定写类 MCP 工具的治理接入（PreToolUse matcher + tool-semantics 条目）属于 OG-4 单独授权；
+- 同文 `:396-400` 标注"设计位（未授权）"，`:436` 标注"未启动"；
+- 仓库内**没有**任何 OG-4 授权记录；
+- 当前 MCP 只有一个只读 Tool（`server.ts:147`，`readOnlyHint:true`），`pd_submit_pain` 不存在，也**没有**写类先例；
+- 既有 PreToolUse matcher 只匹配 `Bash|apply_patch`；tool-semantics registry 只登记宿主原生工具（`packages/workbuddy-adapter/src/tool-semantics.ts:23-37`）——两者**都不会**自动覆盖新 MCP Tool。
+
+**哪些既有安全证明仍适用**：`workspaceDir` 启动期绑定（F3）、JSON Schema + zod 严格校验（F2）、deadline/并发准入（F6）、单 text block 信封与预算（F5/F7）。这些覆盖**输入与传输**，不覆盖"是否允许新增写入能力"。
+
+**哪些不再适用**：recall 的 `readOnlyHint:true`、以及"只读工具无需写入治理"的结论。
+
+**实施门槛**：OG-4 未获授权前，本设计只能停留在文档与测试替身；**不得**把 `pd_submit_pain` 注册进生产 `server.ts`，也不得通过在宿主侧追加 matcher 来自行"补齐"治理。OG-4 的授权状态只能由 Owner 给出，本文件不自行宣布已授权。
+
+**不得为此新建**：独立审批服务、Owner 确认界面、审批 Token、审批库、三套宿主专用治理系统。现有机制不足的部分，列为实施前置问题（见 §16.4）。
 
 ## 5.2 Tool 描述（这是对 Agent 的行为指令，不是营销文案）
 
@@ -336,8 +382,8 @@ state.db tasks 1 行（pending, task_kind=diagnostician, input_ref=painId,
     },
     "painType": {
       "type": "string",
-      "enum": ["tool_failure", "subagent_error", "user_frustration"],
-      "description": "可选。只有你能明确归类时才填写；不要猜测。"
+      "enum": ["principle_deviation", "tool_failure", "subagent_error", "user_frustration"],
+      "description": "可选。锚点式 Pain 默认是 principle_deviation；只有你能明确归类时才填写其他值，不要猜测。"
     }
   }
 }
@@ -356,7 +402,7 @@ const submitInputSchema = z.strictObject({
   reason: z.string().min(1).max(2000),
   anchorType: z.enum(['owner_expectation', 'established_principle', 'agent_instruction']),
   anchorRef: z.string().min(1).max(300),
-  painType: z.enum(['tool_failure', 'subagent_error', 'user_frustration']).optional(),
+  painType: z.enum(['principle_deviation', 'tool_failure', 'subagent_error', 'user_frustration']).optional(),
 });
 ```
 
@@ -374,8 +420,9 @@ const submitInputSchema = z.strictObject({
 }
 ```
 
-- `taskId` 由既有 `createDiagnosticianTaskId(painId)` 生成（`diagnosis_<painId>`）。
-- `painId` 由 capability 生成，**不从 session / host 派生**；格式与 CLI 的 `manual_...` 并列。
+- `taskId` 由既有 `createDiagnosticianTaskId(painId)` 确定性生成（`diagnosis_<painId>`，F61）。
+- `painId` 由 **MCP Handler 在调用提交能力之前**生成，**不从 session / host 派生**；格式与 CLI 的 `manual_...` 并列（`mcp_<epoch_ms>_<8-hex>`）。
+- 预生成的理由：超时后 Handler 必须握有已知 `taskId` 才能有界回查（§5.7）。这不是新身份层——CLI 已经在调用 `recordPain` 前生成 `painId`（F61），MCP 只是对齐同一顺序。
 - `workspaceDir` 取自 F3 的启动绑定，不来自模型输入。
 
 ### 5.4.2 `mode` 的实际取值
@@ -404,7 +451,9 @@ V0.6 的"超 32 KiB → `failed`"被推翻。V0.7 的顺序是：
    ```jsonc
    { "status":"submitted", "painId":"...", "taskId":"...", "workspaceDir":"...", "diagnosis":{"status":"pending"} }
    ```
-3. 最小回执仍超预算（实际不可能，<1 KiB）→ `isError:true` + `response_budget_exceeded`，并在消息中说明"任务已创建，请用 `pd task show <taskId>` 对账"。
+3. 最小回执仍超预算（极端情况，**必须由测试构造**：例如超长 `workspaceDir` 叠加被调低的预算上限）→ **不得据此宣称写入失败**。此时返回最小可传输结构，并在消息中如实说明"任务已写入（`taskId` 已知），但完整回执超出传输预算；请用 `pd task show <taskId>` 对账"。
+   - 若连"已写入 + `taskId`"都无法在预算内表达，才允许 `isError:true` + `response_budget_exceeded`，且必须同时说明"写入状态未知，请对账"，不得写"未创建"。
+   - 本节不接受"实际不可能"这种未经测试的保证；T14b 用真实预算路径构造该分支。
 
 这里的"最小回执"与完整回执字段相同；差别只在**未来可能增加的观测字段**会被裁剪。裁剪不得删掉 `painId` / `taskId` / `workspaceDir` / `status`。
 
@@ -412,18 +461,25 @@ V0.6 的"超 32 KiB → `failed`"被推翻。V0.7 的顺序是：
 
 ```text
 1. shuttingDown? → shutting_down（无变更）
-2. admissions.tryAcquire()? → 饱和时 saturated（无变更；未尝试写入）
+2. admissions.tryAcquire()? → 饱和时 saturated（无变更；未尝试写入；复用既有 AdmissionLimiter，不新增限流器）
 3. zod 二次校验 → 失败则 invalid_input（无变更）
 4. 组装修正输入：
    - anchor = { type: anchorType, ref: anchorRef }
+   - painType 省略 → 归一为 principle_deviation（§6.3），不伪造 user_frustration
    - 不接受 score/severity/approved/sessionId/metadata
-5. 调用 submitPainCapability({ workspaceDir, input })
-   - 生成 painId
-   - 锚点校验（见 §5.6）
-   - 构造 recordPain 入参（asyncMode:true, recordObservability:false）
-6. 得到 { painId, taskId } 后组装回执
-7. 预算检查 → 完整 / 最小 / 失败
-8. 记录一条结构化日志（工具名、durationMs、status、errorCode、响应字节数）
+5. **生成身份（在任何写入之前）**：
+   - painId = `mcp_<epoch_ms>_<8-hex>`（Handler 生成）
+   - taskId = createDiagnosticianTaskId(painId)（确定性，F61）
+6. 锚点有效性校验（§5.6）→ 失败则结构化拒绝，零写入
+7. 调用 submitPainCapability({ workspaceDir, painId, taskId, input })
+   - 内部走既有 evaluatePainIngress()（唯一准入）→ PainToPrincipleService.recordPain()
+   - asyncMode:true；recordObservability 见 §6.7（不再固定 false）
+8. 正常返回 → 组装 submitted 回执（painId / taskId 来自第 5 步）
+9. 写入中超时（runWithDeadline timedOut，F60）→ 用第 5 步已知 taskId 做有界回查（§5.7）
+   - 命中 → 最小 submitted
+   - 未命中 / 回查失败 → submit_unconfirmed（不称"未创建"、不自动重试）
+10. 预算检查 → 完整 / 最小 / 如实说明
+11. 记录一条结构化日志（工具名、durationMs、status、errorCode、响应字节数）
 ```
 
 ## 5.6 校验分层：哪些是服务器强制，哪些只能靠行为
@@ -433,20 +489,54 @@ V0.6 的"超 32 KiB → `failed`"被推翻。V0.7 的顺序是：
 | `reason` 非空、≤2000 | 服务器 | JSON Schema + zod |
 | `anchorType` 合法、`anchorRef` 非空 | 服务器 | JSON Schema + zod |
 | `established_principle` 的 `anchorRef` 形如 `id@version` | 服务器 | 正则 |
-| 该原则在账本中**真实存在**且 version 匹配 | 服务器 | `loadLedger(stateDir).tree.principles` |
+| 该原则在账本中**真实存在**且 version 匹配 | 服务器 | `loadLedger(stateDir).tree.principles`（F16） |
+| 该原则**可用于当前违规依据**：仅 `active` / `probation`（且需在当前 activation candidates 中可解析）；`candidate` 拒绝作依据、只能作背景 | 服务器 | 复用 `readTrustedPrinciples()`（F57）、状态字段（F18）与 activation 解析（F58） |
 | `agent_instruction` 的 `anchorRef` 形如 `path#section` | 服务器 | 正则 |
 | `owner_expectation` 的 `anchorRef` 非空 | 服务器 | 长度 |
+| 该原则**在当前场景适用**（scope 匹配） | **服务器只能部分判定** | 仓库无按 scope 判定的现成函数（F59）；见 §5.6.1 的最小保守规则 |
+| 不被更高优先级的有效约束覆盖 | **服务器无法判定** | `priority` 只参与 prompt 打包排序，无仲裁器（F59）；只能由 Agent 披露冲突（§5.6.1） |
 | 引用等级不是 `inference` | **Agent 行为** | 只能写进 Tool 描述/Skill；服务器读不到自由文本的语义 |
 | 冲突锚点已披露 | **Agent 行为** | 同上 |
 | 低置信度先澄清 | **Agent 行为** | 同上 |
 | Owner 已授权 | **宿主对话 + 可选原生确认** | MCP 进程看不到聊天；不引入 `ownerApproved` 字段 |
 | 后台 Agent 不提交 | **运行时形态** | 后台 Agent 通常没有交互通道；不新增注册表 |
 
-### 5.6.1 账本读取失败时
+### 5.6.1 有效锚点判定（post-review 修订）
 
-- 账本不存在：视为"没有可验证的原则"，`anchorRef` 以 `established_principle` 提交 → 拒绝，`anchor_not_found`，附 nextAction "先用 `pd principle list` 确认 id/version"。
-- 账本存在但不可读/损坏：**失败关闭**，`anchor_unverifiable`，不得当作"原则不存在"（rc-9）。
-- 状态为 `archived` / `deprecated`：允许提交，但在回执的 `warnings` 中注明"锚点原则当前非 active"；不得静默当作 active。
+`established_principle` 要成为**当前违规依据**，必须同时满足五条：
+
+1. **真实存在**：能在 `loadLedger(stateDir).tree.principles` 中按 id 找到（F16）；
+2. **版本匹配**：`anchorRef` 的 `@version` 与该条目的 `version` 一致；
+3. **当前有效**：状态语义允许它约束当前行为（见下表）；
+4. **当前场景适用**：`scope` / `domain` 与本次任务场景相符；
+5. **不被更高优先级的有效约束覆盖**：存在冲突时，被覆盖的一方不能单独作为违规依据。
+
+#### 逐状态语义（按代码，不按名称推断）
+
+| 状态 | 是否进入 `readTrustedPrinciples()`（F57） | 能否作**当前违规依据** | 说明 |
+|---|---|---|---|
+| `active` | 是 | 可以，但必须同时能在当前 activation candidates 中解析（否则 `principle_not_currently_authorized`，F58），且需 scope 匹配、无更高优先级覆盖 | 已激活的正式原则 |
+| `probation` | 是 | 可以，条件同 `active`，且必须披露"试用期" | 已进入 trusted 集合；不因 probation 而降级为背景，但冲突时优先级最低 |
+| `candidate` | 是 | **不可以单独作为当前违规依据** | 仍是候选：可作诊断背景（"PD 正在形成这条原则"），不能声称"Agent 违反了已成立原则" |
+| `archived` | 否 | **不可以** | 已归档，不再进入 trusted 集合；只能作历史背景 |
+| `deprecated` | 否 | **不可以** | 已失效；只能作历史背景 |
+| 不存在 / 版本不匹配 | — | **不可以** | `anchor_not_found` |
+| 账本不可读 / 损坏 | — | **不可以**（失败关闭） | `anchor_unverifiable`，不得当作"原则不存在"（rc-9） |
+
+**关键边界**：`warnings: non_active` **不是**"有效锚点判定"的替代品。能用 `warnings` 表达的前提是"锚点已经成立、只是状态偏弱"；archived / deprecated / candidate 的问题不是 warning，而是**锚点不成立**，必须拒绝并把 Agent 引回 `owner_expectation` 或 `agent_instruction`。
+
+#### 当前代码能力边界（必须如实写明）
+
+- 仓库**没有**按 `scope` 判定"当前场景是否适用"的函数（F59）。因此服务器只能校验前三项（存在 / 版本 / 状态），第 4 项由 Agent 在 `reason` 中披露并由 C 类验收抽查。
+- 仓库**没有**约束优先级仲裁器；`priority` 只参与 prompt 打包排序（F59）。第 5 项只能由 Agent 显式披露冲突，服务器不声称能自动裁决。
+- **最小保守规则**：当 Agent 无法说明 scope 适用性，或无法排除更高优先级冲突时，只能把该原则当作**诊断背景**，不得作为"当前违规依据"提交；此时应改用 `owner_expectation`（若 Owner 在本次对话中确实表达过）或 `agent_instruction`（若宿主 Instructions/Skill 有明确要求）。
+- **不能保证的范围**：服务器无法自动发现"未被 Agent 披露的冲突"或"scope 语义不匹配"。这部分依赖 Skill 行为约束与 C 类验收，文档不把它伪装成服务器强制。
+
+#### Owner 当前要求与历史原则冲突
+
+- Owner 在**本次对话**重新提出的要求，一律按 `owner_expectation` 处理，`anchorRef` 指向本次对话出处；
+- **不得**把 Owner 的新要求伪装成"某条已废弃原则仍然有效"；
+- 若 Owner 的要求与某条 `active` 原则冲突，必须在 `reason` 中披露冲突双方；此时不能用该原则作为唯一依据。
 
 ### 5.6.2 为什么不在服务器侧校验 Instructions 文件是否存在
 
@@ -454,13 +544,40 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 
 ## 5.7 截止时间与"已写入但响应超时"
 
-这是一个**写工具**，不能直接复用 recall 的"超时即失败"：
+这是一个**写工具**，不能直接复用 recall 的"超时即失败"。前提是**身份必须在写入之前已知**（§5.5 第 5 步、F61）：
 
-- `runWithDeadline` 超时后，写入可能仍在 SQLite 中完成；如果直接返回 `tool_execution_failed`，回执就与持久事实矛盾。
-- 因此 submit 路径的超时处理是：超时 → 用 `taskId`（`diagnosis_<painId>`）做一次**有界读回**（`getTask`，≤1s）。
-  - 读到 → 返回最小 `submitted`；
-  - 读不到 → `isError:true` + `submit_unconfirmed`，消息明确"未能确认是否写入，请用 `pd task list --kind diagnostician` 对账"，不得声称"未创建"。
-- 读回本身也失败 → `submit_unconfirmed`（同上）。
+| 问题 | 答案 |
+|---|---|
+| 谁生成 `painId` | MCP Handler，在校验通过后、调用提交能力之前 |
+| `taskId` 怎么得到 | 确定性派生 `diagnosis_<painId>`（F61），不依赖写入结果 |
+| Handler 能否在开始写入前持有 | **能**；这是本修订的核心要求 |
+| 超时后底层写入是否继续 | **会继续**：`runWithDeadline()` 只停止等待，不取消 `fn()`（F60） |
+| 查到任务是否等于"本次提交成功" | **是**（本次 `painId` 唯一），但只证明**任务行已写入**；不证明诊断已执行 |
+| 查不到能否确定"未创建" | **不能**。可能有未提交/未可见的写入，也可能回查自身失败 |
+| 回查再次超时 | 视为"结果未知"，返回 `submit_unconfirmed`，不再无限重试 |
+| 进程退出时是否有未完成写入 | 可能有；SQLite 写入由底层任务完成，进程被宿主杀死时状态未知 → `submit_unconfirmed` |
+
+**超时处理流程**：
+
+```text
+写入中超时（timedOut）
+  → 用已知 taskId 做一次有界回查：getTask(taskId)，上限 1s
+     ├── 命中 → 返回最小 submitted（painId / taskId / workspaceDir / status:pending）
+     ├── 未命中 → submit_unconfirmed（不得称"未创建"、不得返回普通 failed）
+     └── 回查本身失败/再次超时 → submit_unconfirmed
+  → 不自动重试写入（会制造第二条任务）
+```
+
+**状态语义**：
+
+| 状态 | 含义 | 对账方式 |
+|---|---|---|
+| `submitted` | 任务行已确认存在 | `pd task show <taskId>` |
+| `submit_unconfirmed` | 写入结果未知 | `pd task show <taskId>` / `pd task list --kind diagnostician`；用预生成的 `painId` 在 `tasks.input_ref` 中查找 |
+
+**禁止**：新增幂等库、Session Registry、对结果未知的提交自动重试、超时直接宣称失败、已成功却返回普通失败、无法确定时宣称一定成功。
+
+**并发与容量**：继续复用既有 `AdmissionLimiter`（§5.5 第 2 步）与既有 orphan 跟踪（F60）；不新增超时任务注册表。
 
 ---
 
@@ -502,65 +619,220 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 
 > 与 SPEC §11 的对账：两份文档统一为 `anchor: {type, ref}`，不含 `citation`；引用等级、锚点原文、冲突披露只存在于 `reasonSummary`。
 
-## 6.3 `painType`
+## 6.3 `painType`：单一路径，不伪造分类
 
-### 6.3.1 提供时
+### 6.3.1 当前代码事实（实现前）
 
-- 传给 `recordPain({ painType })`；
-- 构造 `painIngress.v1` 并持久化，`painIngress.painType` 与输入一致；
-- 回执不显示 `painType`（回执只回答"是否登记"）。
+| 事实 | 证据 |
+|---|---|
+| `PainIngressReport.painType` 必填 | `pain-ingress-payload.ts:113-124`（F55） |
+| `PainToPrincipleInput.painType` 必填 | `pain-to-principle-service.ts:72-73`（F55） |
+| `evaluatePainIngress()` 是既有统一准入 | `pain-ingress.ts:159-240`（F48） |
+| legacy 顶层字段路径**不构造** `painIngress.v1`，因此跳过 v1 payload 校验 | `pain-signal-bridge.ts:349-394` |
+| legacy 归一在缺少类型时硬编码 `user_frustration` | `pain-signal-bridge.ts:389`（F56） |
+| `painIngress.v1` **不含** `painType`（只有 version / origin / correlation / evidenceClass），`diagnostic_json` 顶层也不写它 | `pain-ingress-payload.ts:355-360`；`pain-signal-bridge.ts:408-431`（F25） |
+| CLI 两处硬编码 `painType: 'user_frustration'` | `pain-record.ts:128`、`:466` |
 
-### 6.3.2 省略时（默认）
+### 6.3.2 V0.8 草案的错误
 
-- **不构造 `painIngress.v1`**（其 schema 要求 `painType`），只走 legacy 顶层字段；
-- `diagnostic_json` 中不出现 `painType`；
-- `recordObservability:false`，因此不会写 `evolution.jsonl`（F26/F27）；
-- 内存中的 `painType` 占位值只用于满足既有类型，**任何持久化路径都不写它**；
-- 增加一条测试：省略 `painType` 时，`diagnostic_json` / observability / 回执三处都不含 `painType`。
+草案规定"省略 `painType` → 不构造 `painIngress.v1` → 走 legacy 顶层字段"，并称这样"不新增路径"。**该说法不成立**：
 
-### 6.3.3 为什么不扩展枚举
+1. legacy 路径**绕过** `evaluatePainIngress()` 的统一准入与 v1 payload 校验，等于第二条准入路径；
+2. 持久化重入校验在 legacy 分支会把缺失类型归一成 `user_frustration`（F56），制造假分类；
+3. legacy 行缺少 `painIngress` 命名空间（origin / correlation / evidenceClass），重入校验只能走 legacy 归一，无法与 v1 行同等校验；且 `diagnostic_json` 本身不存 `painType`，所以"类型信息丢失"不是这里的论据。
 
-新增 `unspecified` 会改变 `painIngress.v1` 的既有合同与下游解析（F48 之外的消费者），并把"未知"变成一个可被统计的假类别。v1 用"缺省 + 不写"表达未知，比新增枚举更诚实。
+### 6.3.3 目标行为
+
+| 输入 | 行为 |
+|---|---|
+| 带 `painType` | 原值透传；构造 `painIngress.v1`（v1 payload 不含 `painType`，它作为独立入参传给 `recordPain`）；走 `evaluatePainIngress()` |
+| 省略 `painType` | Handler 归一为中性默认 **`principle_deviation`**；**仍然**构造 `painIngress.v1`；**仍然**走 `evaluatePainIngress()` |
+| 任何情况 | 只有一条准入路径；legacy 分支不再由本 Tool 触发 |
+
+`principle_deviation` 是本 SPEC 的锚点式 Pain 的**语义默认**：Agent 提交的是"相对锚点的行为背离"，不是工具故障、不是子 Agent 错误、也不是 Owner 情绪。它不是"未知"的假类别，而是准确描述。
+
+### 6.3.4 为什么必须扩展枚举而不是伪造
+
+- 把锚点式背离写成 `user_frustration`，等于把 Agent 的观察冒充 Owner 情绪，违反 §7.5 的作者归属；
+- 写成 `tool_failure` / `subagent_error` 会误导诊断器去查工具或子 Agent，而实际问题是原则背离；
+- 新增一个中性值比"缺省 + 不写"更诚实：内存对象与 Observability 流始终有确定类型，下游无需猜测。
+
+### 6.3.5 枚举扩展的影响面（实现时必须一起处理）
+
+| 位置 | 影响 |
+|---|---|
+| `runtime/pain-ingress-payload.ts:117`（`PainIngressReport.painType`） | 联合类型加 `principle_deviation` |
+| `runtime/pain-ingress-payload.ts:280-283`（`parsePainIngressReport` 白名单） | 枚举白名单同步，否则带新值的报告会被 `invalid_input` 拒绝 |
+| `runtime/pain-signal-bridge.ts:92`（`PainDetectedData.painType`） | 同上 |
+| `runtime/evolution-types.ts:63,118,143,264,311,340` | TypeBox 联合与映射；当前已含 `dispatch_error`，但不含 `principle_deviation`。**Observability 开启时会把 `painType` 写进 `evolution.jsonl`**，不同步会让下游 schema 拒绝新值 |
+| `pd-cli/src/commands/pain-record.ts:128,466` | 去掉硬编码 `user_frustration`，改由显式参数或默认值决定 |
+| `pain-signal-bridge.ts:389`（legacy 归一） | 不再把缺失类型塞成 `user_frustration`；legacy 行只做"读取既有字段"，不新增类型 |
+| 现有断言 `user_frustration` 的测试 | 逐条判断是"CLI 显式传值"还是"默认值假设"；后者改为 `principle_deviation` |
+| Parser / Validator（`parsePainIngressV1Payload`） | **无需改**：v1 payload 不含 `painType`，重入校验不会因新值失败 |
+| 持久化消费者（`buildDiagnosticJson`、Admission、Read Model、Console 展示） | `diagnostic_json` 不含 `painType`，因此这些路径**不受影响**；只有 Observability 的 evolution 流需要同步 |
+
+`PainProvenance` **不扩展**（它是来源，不是类型，见 §6.6）。
 
 ## 6.4 严重度
 
-- MCP 路径**不传 `score`**；
-- `buildDiagnosticJson` 调 `severityFromScore(undefined)` → `moderate`（F23）；
-- 不新增 severity 常量、不改阈值；
-- 提级只能由获得授权的人工操作（Console/CLI 显式调整）完成；
-- `painType` 的值不影响 severity（F25）。
+### 6.4.1 目标（不可协商）
+
+- Agent **不得**自评严重度，也不得通过任何参数把自己提交的 Pain 提升到 `severe`；
+- MCP 路径与 CLI 省略 score 的路径，最终都落 **`moderate`**；
+- 显式人工传入的 `score` 仍按既有 `severityFromScore` 阈值计算；
+- **不改** `severityFromScore` 的映射（`>=70 severe`、`>=40 moderate`、其余 mild）；
+- **不加**第二套评分、不加新枚举、不加 Agent 可用的提级参数。
+
+### 6.4.2 当前代码事实：四处功能默认 + 一处展示
+
+| # | 位置 | 触发条件 | 后果 |
+|---|---|---|---|
+| 1 | `pain-record.ts:125` | `resolveIngressDecision()` 构造报告时 `opts.score ?? 80` | 送入准入的报告已是 80 |
+| 2 | `pain-record.ts:469` | `recordPain({ score: opts.score ?? 80 })` | 持久化 severity 走 80 → `severe` |
+| 3 | `pain-signal-observability.ts:159/161` | `recordTrajectoryPainEvent()` 中 `data.score ?? 80`，并由 `:161` 的本地 `severityFromScore(score)` 转成 severe | `pain_events.score` 写 80 |
+| 4 | `pain-signal-observability.ts:221` | events JSONL 写入 `opts.data.score ?? 80` | 事件日志写 80 |
+| 5（展示） | `pain-record.ts:635` | 终端展示 `opts.score ?? 80` | 展示与真实值不一致（修默认值时必须同步） |
+
+**为什么不能"不写 score"**：
+
+- `pain_events.score` 是 `REAL NOT NULL`，不写会失败；
+- `pain-signal-observability.ts` 有**自己的** `severityFromScore(number)`，只接受 `number`，`undefined` 会落 `mild`（与 bridge 的 `severityFromScore(undefined)→moderate` 不同）。因此"省略即 moderate"在观测路径**不成立**。
+
+### 6.4.3 目标实现
+
+| 入口 | 省略时的行为 | 结果 |
+|---|---|---|
+| MCP `pd_submit_pain` | schema 无 `score`；`recordPain` 不传 score | bridge `severityFromScore(undefined)` → `moderate` |
+| CLI `pd pain record` | 写 `DEFAULT_PAIN_SCORE = 40`（单一定义，四处引用） | `severityFromScore(40)` → `moderate` |
+| Observability（两条写入） | 同样使用 `DEFAULT_PAIN_SCORE`，不再 `?? 80` | `pain_events` / JSONL 均为 40 → moderate |
+| 显式 `--score` / 显式 API 传值 | 原值 | 按既有阈值 |
+
+`DEFAULT_PAIN_SCORE = 40` 取 `moderate` 区间的**下限**，与"默认中等"一致，又不会侵入 `mild`。
+
+### 6.4.4 验证要求
+
+测试必须**读回真实写入记录**，不能只断言函数返回值：
+
+1. `tasks.diagnostic_json.severity`（CLI 路径与 MCP 路径各一次）；
+2. `trajectory.db` 的 `pain_events.score`；
+3. events JSONL 中的 `score`；
+4. `evolution.jsonl`（Observability 开启时）。
+
+任意分支都不得重新出现 80 或 `severe`（显式传入 `--score 80` 的旧行为除外，必须单独断言未被破坏）。
 
 ## 6.5 CLI 手动入口与 `diagnostician_async_cli`
 
 **当前代码事实**（实现前）：
 
-- `pain-record.ts:469` 写 `score: opts.score ?? 80`，省略时落 `severe`（F24）；
-- `pain-signal-observability.ts:221` 还有第二处 `score ?? 80`（F26）；`recordPain` 在 `:210/:255` 默认启用观测，所以**只改 CLI 一处仍会被补回 80**，两处必须一起改；
+- `pain-record.ts:125` 与 `:469` 两处 `opts.score ?? 80`，省略时落 `severe`（F24 已扩到两处）；
+- `pain-signal-observability.ts:159/161/221` 三处 `?? 80`（F26 已扩到三处）；
+- `recordPain` 在 `:210/:255` 默认启用观测，所以**只改 CLI 一处仍会被补回 80**，四处必须一起改；
 - `diagnostician_async_cli` 是 quiet、默认关的 flag（F45）；开启后提交即返回（F46）。
 
 **目标行为（本轮只落文档，代码未改）**：
 
 | 项 | 目标 | 理由 |
 |---|---|---|
-| 省略 `--score` | 不写 `score` → `severityFromScore(undefined)` → `moderate` | 与 MCP 入口同一把尺子，避免"同一个问题两个严重度" |
-| 显式 `--score` | 保留，作为人工提级通道 | 提级只能由获得授权的人做 |
-| `painType:'user_frustration'` 默认 | 不再作为"严重"的依据；它只影响 legacy 顶层字段 | 类型 ≠ 严重度（F25） |
+| 省略 `--score` | 写 `DEFAULT_PAIN_SCORE = 40` → `severityFromScore(40)` → `moderate`；**四处默认值一起改** | 与 MCP 入口同一把尺子，避免"同一个问题两个严重度" |
+| 显式 `--score` | 保留，作为人工提级通道 | 产品与操作权限要求；见下方边界 |
+| `painType` 默认 | 不再硬编码 `user_frustration`；省略时落 `principle_deviation`（§6.3） | 类型 ≠ 严重度（F25） |
 | `diagnostician_async_cli` | 保持默认关，不随 L3 毕业翻转 | 改变手动提交体感（提交即返回），等真实取证后再评估 |
+
+### 6.5.1 `--score` 的权限边界（必须如实写明）
+
+`pd pain record --score` **无法区分操作者是人还是 Agent**：CLI 没有鉴权、没有身份声明、也没有服务端可验证的操作者凭据。因此：
+
+- 产品规则：`--score` 是**人工提级通道**，Agent 不得使用；
+- 技术事实：服务器**没有**也**不能**仅凭该参数证明操作者身份；
+- 文档不得写"服务器已验明操作者身份""Agent 无法使用 `--score`"这类未经实现的保证；
+- 真正防止 Agent 自评的手段是：MCP schema 不提供 `score`（§5.3）+ Skill 行为约束 + C 类验收抽查。
 
 **记账口径**：`docs` 写目标，`code` 仍是 80。任何"已改为中等"的结论在实现并读回证据之前都不成立。
 
-## 6.6 provenance / ingress
+## 6.6 provenance / ingress：来源与作者归属
 
-| 字段 | MCP 路径取值 | 理由 |
+### 6.6.1 当前代码事实
+
+| 事实 | 证据 |
+|---|---|
+| `PainProvenance` 是**三个字符串值的枚举**，不是对象 | `admission-gate.ts:4-7`（F63） |
+| `PainIngressOriginV1` 是对象联合：`owner_manual` + 6 个 channel，或 `automatic_hook` + `source` | `pain-ingress-payload.ts:37-50` |
+| `parseOrigin()` 白名单**不接受** `mcp_agent_assisted` | `pain-ingress-payload.ts:147-161`（F62） |
+| `validateOriginCorrelationInvariant()`：`external_cli_unbound` 必须 unbound；其余显式 channel 必须 bound | `pain-ingress-payload.ts:328-344` |
+| `deriveProvenanceFromIngressFacts()`：automatic_hook → automatic_hook；bound → host_context_bound；否则 owner_reported_no_host_trace | `pain-ingress-payload.ts:412-419` |
+| `context-payload.ts` 的 `DiagnosisTargetSchema.provenance` 用 3 个 `Type.Literal` 锁死 | `context-payload.ts:171-175` |
+| `isOwnerExplicitManual()` 只认 `owner_reported_no_host_trace` | `evidence-guards.ts:18-20` |
+| `pd pain retry` 的白名单同样是 4 个字符串（含 legacy `openclaw_context_bound`） | `pd-cli/src/commands/pain-retry.ts:197` |
+
+### 6.6.2 语义原则
+
+- **Owner 同意提交 ≠ Owner 亲自报告**。授权（agent 有权提交）与事实作者（谁观察、谁陈述）是两个维度。
+- Agent 的观察**不得**写进 `owner_statement` / `correctionEvidence`。
+- Agent 观察**不得**归为 `user_frustration`（§6.3）。
+- 不得因为 Owner 同意，就声称"Owner 亲自观察到问题"。
+- 不得使用 Parser 不接受的 channel（例如直接写 `mcp_agent_assisted` 而不改白名单）。
+
+### 6.6.3 目标取值（最小扩展）
+
+| 字段 | 取值 | 理由 |
 |---|---|---|
-| `provenance.origin` | `owner_manual` + `channel: mcp_agent_assisted` | 授权来自 Owner 对话，不是系统自动产生 |
-| `provenance.correlation` | `unbound` + `reason: missing_host_session` | MCP 没有可信 session 身份 |
-| `provenance.evidence` | `unavailable` + `reason: not_applicable_unbound` | 不伪造会话证据 |
-| `hostKind` | 由 `PD_MCP_HOST` 映射（codex/openclaw/workbuddy） | 仅观测，不参与身份/准入 |
-| `sessionId` | 不传 | 禁止 Agent 填写 |
-| `evidence` | 不传 | 不伪造 |
+| `origin.kind` | `owner_manual` | 授权来自 Owner 对话；不是自动 hook |
+| `origin.channel` | **新增** `mcp_agent_assisted` | 必须与"Owner 亲自在 CLI/宿主输入"区分；复用现有 channel 会伪造来源 |
+| `correlation` | `unbound` + `missing_host_session` | MCP 没有可信 session 身份 |
+| `evidence` | `unavailable` + `not_applicable_unbound` | 不伪造会话证据 |
+| `provenance`（派生） | **新增** `agent_reported_owner_approved` | 现有三值没有一个能准确表达"Agent 观察、Owner 授权"；`owner_reported_no_host_trace` 会把作者说成 Owner |
+| `hostKind` | `PD_MCP_HOST` 映射 | 仅观测 |
+| `sessionId` / `agentId` | 不传 | 禁止 Agent 填写 |
 
-准入结果由 `evaluatePainIngress` 计算；MCP 路径的 `submit` 与 warning 是固定输入下的确定结果。
+### 6.6.4 影响面（最小扩展必须同步的位置）
+
+| 位置 | 改动 |
+|---|---|
+| `pain-ingress-payload.ts:37-50` | `owner_manual` channel 联合加 `mcp_agent_assisted` |
+| `pain-ingress-payload.ts:147-161`（`parseOrigin`） | 白名单加同名 channel；写时与重入共用 |
+| `pain-ingress-payload.ts:328-344`（invariant） | `mcp_agent_assisted` 要求 `correlation.status === 'unbound'`（与 `external_cli_unbound` 同组） |
+| `pain-ingress-payload.ts:412-419`（派生） | `mcp_agent_assisted` → `agent_reported_owner_approved` |
+| `admission-gate.ts:4-7`（`PainProvenance`） | 联合加 `agent_reported_owner_approved` |
+| `admission-gate.ts:15-21`（`normalizePainProvenance`） | 白名单加新值 |
+| `evidence-guards.ts:18-20`（`isOwnerExplicitManual`） | 接受新值：豁免依据是 **Owner 已授权**，不是 Owner 亲自观察；注释必须写明这一点 |
+| `context-payload.ts:171-175` | `Type.Literal` 加新值 |
+| `pd-cli/src/commands/pain-retry.ts:197` | 白名单加新值 |
+| Console / Read Model 的来源展示 | 新增一个可读标签；不得把它显示成 "Owner reported" |
+| 测试 | 断言旧三值行为不变；新增 MCP 路径的 provenance 断言 |
+
+**不扩展**：不新增第二套 Origin/Provenance 模型、不新增 `originChannel` 表、不新增 `reportedBy` 字段。
+
+**若 Owner 决定不扩展 provenance**：则必须显式接受"MCP 路径 provenance 仍为 `owner_reported_no_host_trace`，但这是技术含义（无宿主 trace），不是作者声明"这一事实，并在 Console 文案与 Skill 中说明；本文件不自行选择这条路径。
+
+## 6.7 Observability 与可见性
+
+### 6.7.1 当前代码事实
+
+`recordPain()` 的观测开关是 `input.recordObservability !== false`（`pain-to-principle-service.ts:210`、`:255`），即**默认开启**。
+
+| 开关 | 写入内容 |
+|---|---|
+| `true`（默认） | ① `trajectory.db` 的 `sessions` + `pain_events`（`:128-175`）；② `logs/events_<date>.jsonl`（`:228-243`）；③ `evolution.jsonl`（`recordPainSignalObservability` 其余部分）；④ `tasks` + `diagnostic_json`（由 bridge 写） |
+| `false` | 跳过 ①②③，**仅**写 `tasks` + `diagnostic_json` |
+
+**关闭后的真实后果**（F65）：
+
+- Console 的 Pain 视图读 `trajectory.db`（`sqlite-context-assembler.ts:458-459`）→ **看不到**该 Pain；
+- Pain Recall 会走 state.db 回退路径，并给出 `pain_event_only_in_state_db` 警告（`pain-recall-capability.ts:233-239`）——能找到，但降级；
+- 统计 / 历史回顾依赖 `pain_events` 的查询会**漏掉**该条；
+- CLI 在无 bound session 时本来就传 `recordObservability:false`（`pain-record.ts:430`），因此 CLI 无 session 路径**已经**存在同一可见性缺口——这不是 MCP 独有的新问题。
+
+### 6.7.2 目标行为
+
+| 项 | 目标 |
+|---|---|
+| MCP 路径 | **不得**固定 `false`；使用默认 `true`，与 CLI 有 session 时一致 |
+| 记录数量 | 每个 Pain 只写一份 `pain_events`（`canonical_pain_id` 唯一索引 + UPSERT，`pain-signal-observability.ts:146-205`），不制造重复 |
+| 无 session 时 | 沿用既有 `sessionId ?? 'cli'` 兜底（`:128`、`:222`），并写入 `host_kind`；不新增 session 伪造 |
+| 三宿主 | 同一套写入路径，不按宿主分叉 |
+| 不新增 | 不新增 Pain 表、不重设 Observability、不降低 Console/Recall 的既有可见性要求 |
+
+**判定依据**：只要 `tasks` + `diagnostic_json` 不足以让 Console 与 Recall 看到该 Pain，就**不能**用 `recordObservability:false` 换取"少写一行"。本设计选择保留既有三处观测写入。
 
 ---
 
@@ -580,15 +852,21 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 - Console / worker / MCP 必须指向**同一个 workspace**，否则回执的 `workspaceDir` 与任务行所在库不一致；
 - 回执只报 `workspaceDir`，不报 `stateDir`（避免把实现细节暴露给 Agent，也避免两个路径被混用）。
 
-## 7.2 三宿主绑定
+## 7.2 三宿主来源与绑定
 
-| 宿主 | workspace 来源 | 可证事实 |
-|---|---|---|
-| OpenClaw | `PD_MCP_WORKSPACE_DIR`（launcher 注入） | 绑定与 host 标记 |
-| Codex | 同上 | 同上 |
-| WorkBuddy | 同上 | 同上 |
+| 宿主 | workspace 来源 | `hostKind` 映射 | 来源字段 | 可证事实 |
+|---|---|---|---|---|
+| OpenClaw | `PD_MCP_WORKSPACE_DIR`（launcher 注入） | `openclaw` | `origin.kind=owner_manual` + `channel=mcp_agent_assisted` | 绑定与 host 标记 |
+| Codex | 同上 | `codex` | 同上 | 同上 |
+| WorkBuddy | 同上 | `workbuddy` | 同上 | 同上 |
 
-`PD_MCP_HOST` 只用于 `hostKind` 与日志，不用于 `mode`、不用于准入、不用于选择执行者。
+规则：
+
+- 三宿主共用**同一个** Tool 描述、同一份 JSON Schema、同一条 Handler 路径；不按宿主分叉准入、不按宿主分叉评分。
+- `PD_MCP_HOST` 只用于 `hostKind` 与日志，不用于 `mode`、不用于准入、不用于选择执行者（F11），也不用于更改来源语义。
+- 三宿主的来源都是 `mcp_agent_assisted`（§6.6）：Agent 观察 + Owner 在宿主对话授权；**不得**因为宿主不同而把某一宿主标成 `owner_reported_no_host_trace` 或复用 CLI channel。
+- 授权发生在**宿主对话**中：有 askme 优先用 askme；没有就用普通对话。回复不明确、拒绝或未回复 = 不提交；后台无人值守不得擅自提交；**不要求**打开 Companion 或 Web Console。
+- 原生确认（宿主自带的审批/确认 UI）是**推荐**而非强制：有则用，没有不得因此阻塞或改走审批服务。
 
 ## 7.3 Instructions 清单与必须改写的内容
 
@@ -847,7 +1125,10 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | 两次提交内容相同 | 两条独立任务；不与既有任务合并 | 同上 |
 | `createTask` 主键冲突 | 回执 `failed` + `task_duplicate`，不静默 | F10 |
 | 写入后进程崩溃 | 任务行仍在；下次启动可见 | SQLite |
-| 写入成功但响应超时 | 有界读回 → 最小 `submitted` / `submit_unconfirmed` | §5.7 |
+| 写入成功但响应超时 | 用预生成 `taskId` 有界回查 → 命中即最小 `submitted` | §5.7、F60/F61 |
+| 超时后回查未命中 | `submit_unconfirmed`；**不**称"未创建"、**不**自动重试 | §5.7 |
+| 回查本身失败/再次超时 | `submit_unconfirmed`，给对账方法 | §5.7 |
+| 后台写入迟到完成 | 回执仍是 `submit_unconfirmed`；对账时 `getTask` 命中即证明已写入 | §5.7 |
 | 并发提交 | SQLite 既有并发控制；失败即 `failed` | F10 |
 | 并发执行 | 租约；后到者 `lease_conflict`，不消耗 attempt | F36 |
 | 账本不可读 | `anchor_unverifiable`，失败关闭 | F16 |
@@ -867,13 +1148,19 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | A01 | `state.db` 路径 | `<ws>/.pd/state.db` | F14 |
 | A02 | 账本路径 | `<ws>/.state/principle_training_state.json` | F15 |
 | A03 | `createTask` 时间戳 | `created_at == updated_at` | F10 |
-| A04 | `severityFromScore(undefined)` | `moderate` | F23 |
-| A05 | `diagnostic_json` 是否含 `painType` | 否 | F13 |
+| A04 | `severityFromScore(undefined)` | bridge 为 `moderate`；observability 的**本地**版本只接受 `number`，`undefined` → `mild` | F23、F65 |
+| A05 | `diagnostic_json` 是否含 `painType` | 目标为**是**（单一路径始终写 v1），当前 legacy 行可能不含 | F55、F13 |
 | A06 | 既有公平游标 | `reconciliation_cursor`，Codex 已用 | F39 |
 | A07 | Console 是否有 CSRF/Origin 校验 | 否 | F30 |
 | A08 | `pd diagnose run` 缺 runtime | 失败 + nextAction | F33 |
 | A09 | 三宿主 Instructions 路径 | 仓库内两份 + 用户级一份 | F19-F21 |
 | A10 | `runs.started_at` 可用 | 是，且有索引 | F42 |
+| A11 | 默认 `score=80` 的位置 | 功能默认四处 + 展示一处 | F24、F26 |
+| A12 | `readTrustedPrinciples()` 返回哪些状态 | 仅 `candidate` / `probation` / `active` | F57 |
+| A13 | `parseOrigin()` 是否接受 `mcp_agent_assisted` | 否（需扩展白名单） | F62 |
+| A14 | OG-4 是否已授权 | 否；`pd_submit_pain` 尚不存在 | F64 |
+| A15 | `getTask(taskId)` 命中能证明什么 | 证明任务行存在（本次 `painId` 唯一），不证明诊断执行 | F61、§5.7 |
+| A16 | `pain_events.score` 是否可空 | `REAL NOT NULL`，不能"不写" | F26 |
 
 ## 10.2 B 类：开发阶段自动化
 
@@ -887,14 +1174,15 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | T04 | 同上 | 缺 `anchorType`/`anchorRef` → schema 拒绝，无新行 |
 | T05 | 行为验收（C 类） | `inference` 单独支撑的提交不发生；服务器不伪称能判断 |
 | T06 | 行为验收（C 类） | 冲突锚点双方都出现在 `reasonSummary` |
-| T07 | 提交能力测试 + CLI 测试 | MCP 不写 `score`、CLI 省略 `--score` 时也不写；两者最终 `severity='moderate'`，事件日志无 80；显式 `--score` 仍生效 |
+| T07 | 提交能力测试 + CLI 测试 + 观测测试 | MCP 不传 score；CLI 省略 `--score` 写 `DEFAULT_PAIN_SCORE = 40`；读回 `tasks.diagnostic_json.severity`、`pain_events.score`、events JSONL 三处均为 `moderate`（40），**任何一处都不得是 80/severe**；显式 `--score 80` 仍为 `severe` |
 | T08 | 提交能力测试 | schema 不含 `score`/`severity`；多余字段被 `additionalProperties:false` 拒绝 |
-| T09 | 提交能力测试 | 省略 `painType`：`diagnostic_json`、observability、回执均无该字段 |
+| T09 | 提交能力测试 + 持久化读取 | 省略 `painType` → 写入 `principle_deviation`，且仍构造 `painIngress.v1`、仍走 `evaluatePainIngress()`；**不得**出现 `user_frustration`；带/不带 `painType` 的重入校验与准入结果一致 |
 | T10 | 集成测试 | `tasks` 1 行，`task_kind='diagnostician'`，`status='pending'`，`input_ref=painId` |
 | T11 | 回执测试 | 含 `painId` / `taskId` / `workspaceDir` / `status` |
 | T12 | 回执测试 | 默认无 `mode`；伪造可证信号时才有 |
 | T13 | 失败测试 | 失败 `isError:true` + 结构化 reason |
 | T14 | 预算测试 | 构造超预算输入 → 仍 `submitted` + 最小字段 |
+| T14b | 预算测试（极端） | 构造"最小回执仍超预算"路径 → 如实说明已写入/状态未知 + `taskId`；不得写"实际不可能" |
 | T15 | 重复提交测试 | 两个不同 `painId`，两条任务 |
 | T16 | 并发测试 | 无半写；失败者结构化 |
 | T17 | 诊断材料测试 | 诊断 prompt 能读到 `anchor` 与六项 `reasonSummary` |
@@ -926,7 +1214,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 |---|---|---|
 | X01 | 账本损坏 | `anchor_unverifiable`，不创建任务 |
 | X02 | 原则不存在 | `anchor_not_found`，不创建任务 |
-| X03 | 原则已归档 | 可提交，但 `warnings` 注明非 active |
+| X03 | 原则已归档 / 已废弃 / 仍是 candidate | **拒绝**（`anchor_not_currently_valid`），不得只给 warning 就当作有效依据（§5.6.1） |
 | X04 | 超时读回命中 | 最小 `submitted`，不是 `failed` |
 | X05 | 超时读回未命中 | `submit_unconfirmed`，不声称未创建 |
 | X06 | 跨源 POST | 403，零变更 |
@@ -934,6 +1222,16 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | X08 | spawn error | 500，零变更 |
 | X09 | 健康投影未被污染 | `aggregatePipelineHealth` 结果不含 diagnostician |
 | X10 | 游标 key 改名 | 轮转重置一次，任务数据不变 |
+
+### 10.2.4 post-review 新增测试（T41–T45）
+
+| SPEC | 场景 | 断言 |
+|---|---|---|
+| T41 | 超时身份与对账（10 例） | ①写入前失败；②写入成功；③写入后回执超预算；④写入中超时；⑤超时后回查命中；⑥超时后回查未命中；⑦回查本身失败；⑧后台写入迟到完成；⑨两次并发写入；⑩结果未知时不自动重提交。每例都断言 `painId` 在写入前已存在、`taskId` 确定性派生 |
+| T42 | 有效锚点十例 | active+范围匹配（接受）、active+不适用（背景）、candidate（背景）、probation（接受但披露）、archived（拒绝）、deprecated（拒绝）、不存在（拒绝）、版本错误（拒绝）、Ledger 损坏（失败关闭）、Owner 当前要求与历史原则冲突（按 `owner_expectation` 且披露冲突） |
+| T43 | OG-4 门槛 | 无授权记录时 `pd_submit_pain` 不得出现在生产 `tools/list`；不得用宿主 matcher 自行补齐；`readOnlyHint:false` 在描述中声明 |
+| T44 | 来源归属（7 例） | Owner 直接报告、Agent 提议 Owner 同意、Agent 提议 Owner 拒绝、无 Session 的 Agent Observation、已保存记录重读、Admission 解释、Console 展示；断言不写 `owner_statement`、不标 `user_frustration`、`origin.channel=mcp_agent_assisted`、`parseOrigin` 接受、provenance 不显示成 Owner reported |
+| T45 | Observability A/B | A(true) 与 B(false) 各自写了哪些记录；B 下 Console 不可见、Recall 出现 `pain_event_only_in_state_db`；选定的 MCP 路径必须可见（`pain_events` 有行） |
 
 ## 10.3 C 类：开发后三宿主真实验收（10 个场景）
 
@@ -965,14 +1263,15 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 # 11. 实施顺序
 
-1. **A 类核验**复跑一次（10 条），确认本文件事实仍成立。
-2. core：`anchor` 字段 → `buildDiagnosticJson` → `pain-submit-capability`。
-3. MCP：schema + description + handler + 预算/超时读回。
-4. 单测：T01–T22（不含 T05 / T06 / T23 行为类）。
+0. **OG-4 Gate**：确认写类 MCP 工具的系统层授权（§5.1.1）。未授权时，只能做文档与测试替身，**不得**把 `pd_submit_pain` 注册进生产 `server.ts`。
+1. **A 类核验**复跑一次（16 条），确认本文件事实仍成立。
+2. core：`anchor` 字段 → `buildDiagnosticJson` → `pain-submit-capability`；`painType` 单一路径 + `principle_deviation`；四处 `DEFAULT_PAIN_SCORE`；来源 channel/provenance 扩展（§6.6）。
+3. MCP：schema + description + handler + **预生成 painId/taskId** + 预算/超时回查。
+4. 单测：T01–T22（不含 T05 / T06 / T23 行为类）+ T41–T45。
 5. Console L2：同源 + 预检 + spawn + 202/403/415/404/409；L2b：store 读取 + 路由。
 6. L3：共享 picker + service 一轮 + flag + lifecycle。
 7. Instructions：两份仓库内 Skill 改写 + 安装器旧 Skill 废弃（§7.4）。
-8. CLI：`pain-record.ts` 省略 `--score` 不再写 80；补 CLI 测试；`diagnostician_async_cli` 保持默认关。
+8. CLI：`pain-record.ts` 四处默认值改 `DEFAULT_PAIN_SCORE = 40`；补 CLI 测试；`diagnostician_async_cli` 保持默认关。
 9. B 类全量；C 类三宿主验收。
 10. 重新安装后再跑一次 C 类（安装产物与仓库可能不同，AGENTS §1.1）；T39 必须在这一步验证。
 
@@ -992,6 +1291,8 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | 新跨包依赖 | **NO** | `pd-mcp-server → core` 已存在 |
 | 新宿主特定行为 | **NO** | 一个 server，三宿主共用 |
 | 新外部/网络能力 | **NO** | — |
+
+> post-review 补充：`painType` 加一个中性值、来源加一个 channel / provenance 值、`DEFAULT_PAIN_SCORE` 加一个常量，都**不**新增持久真源、不新增表/列、不新增子系统；它们是对既有字符串联合与既有默认值的替换，属"最小字段扩展"，影响面见 §6.3.5 / §6.6.4。
 
 ## 12.2 执行链路
 
@@ -1029,7 +1330,11 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | 超时读回仍不确定 | 回执模糊 | `submit_unconfirmed` + 对账命令 | 人工查 `tasks` |
 | Instructions 与 Tool 描述不一致 | Agent 行为分裂 | 两份 Skill 与描述同源改写；C 类验收 | 回退 Skill |
 | 旧 Skill 识别误伤用户自定义内容 | 用户内容丢失 | 只认"路径 + frontmatter name"；哈希不匹配即保留并写安装摘要告警 | 从 `.deprecated-*` 恢复 |
-| CLI 默认值改动影响既有脚本预期 | 严重度口径变化 | 只改"省略 `--score`"路径；显式传值不变；T07 双入口断言 | 回退该提交 |
+| CLI 默认值改动影响既有脚本预期 | 严重度口径变化 | 只改"省略 `--score`"路径；四处一起改；显式传值不变；T07 双入口读回断言 | 回退该提交 |
+| OG-4 未授权即上线写类 Tool | 治理违规 | §5.1.1 Gate + T43；未授权不注册进生产 `server.ts` | 从 `tools/list` 移除该 Tool |
+| `painType` / provenance 扩展被下游漏接 | 解析失败或展示错误 | §6.3.5 / §6.6.4 逐一列出受影响文件；重入与写时共用 parser | 回退枚举值 + 迁移已写入行 |
+| `recordObservability:false` 让 Pain 在 Console 消失 | Owner 看不到该 Pain | §6.7 选择保留默认 true；T45 对比 A/B | 改用默认 true，重建 `pain_events` 行 |
+| 超时后误报"未创建" | Owner 对账混乱 | §5.7 只允许 `submitted` / `submit_unconfirmed`；T41 十例 | 以 `taskId` 对账修正回执 |
 
 ---
 
@@ -1038,8 +1343,12 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 | 能力 | 不能作为证据 | 必须提供的证据 |
 |---|---|---|
 | MCP 提交 | `tools/list` 里有名字、按钮存在、flag 注册 | 真实宿主对话提交后：`state.db` 行 + `diagnostic_json.anchor` + 回执 `painId` 对账 |
-| 默认中等 | 代码里写了 `moderate` | 真实提交后的 `diagnostic_json.severity='moderate'`，且无 `score` |
-| 授权 | Tool 有 description | C04/C05：拒绝/不回复=零任务；修改后再次确认 |
+| 默认中等 | 代码里写了 `moderate` | 真实提交后的 `tasks.diagnostic_json.severity='moderate'`、`pain_events.score=40`、events JSONL 三处一致，且本地回执不含 `score` |
+| 授权 | Tool 有 description | C04/C05：拒绝/不回复=零任务；修改后再次确认；另需 OG-4 系统层授权记录（§5.1.1） |
+| 有效锚点 | `warnings: non_active` 字样 | T42 十例：archived / deprecated / candidate 被拒绝，active 且 scope 匹配被接受；Owner 新要求走 `owner_expectation` |
+| 超时对账 | 回执写着 `submitted` | T41 十例：`painId` 写入前已存在、`taskId` 确定性派生；未命中只返回 `submit_unconfirmed` |
+| 来源归属 | `origin.kind=owner_manual` | T44：`channel=mcp_agent_assisted`、provenance 不显示成 Owner reported、`owner_statement` 为空 |
+| 可见性 | `tasks` 有行 | T45：`pain_events` 有行；Console 能读到；Recall 不降级为 `pain_event_only_in_state_db` |
 | L2 执行 | 202 响应、按钮变灰 | 子进程 PID/日志 + `runs.started_at` 新行 + 任务状态迁移 |
 | L2b 积压 | UI 有数字 | 同一 workspace 直接 SQL 对账：数量、最老 `created_at`、`lastRunStartedAt` |
 | L2b 不误报 | 页面显示"无活动" | 新建 pending 后仍为 `false`；真实 run 后才 `true` |
@@ -1052,7 +1361,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 | 等级 | 本文件中的内容 |
 |---|---|
-| E1 | F1–F54（除标注 E2/E3 的条目） |
+| E1 | F1–F65（除标注 E2/E3 的条目）；其中 F55–F65 为 post-review 复核事实（§2.8） |
 | E2 | 安装环境 `.state` / `.pd` 并存；三宿主 Instructions 实际路径；用户级 WorkBuddy Skill |
 | E3 | `spawn` 异步 error 语义 |
 | E4 | 无（本文件不依赖未证实事实） |
@@ -1087,7 +1396,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 | # | 裁定 | 当前代码事实 | 目标行为 | 文档落点 |
 |---|---|---|---|---|
-| 1 | `pd pain record` 默认严重度 | `pain-record.ts:469` 写 `score: opts.score ?? 80` → `severe`（F24）；`pain-signal-observability.ts:221` 另有 `?? 80`（F26） | 两处默认一起移除：省略 `--score` 不写 `score` → `moderate`；`--score` 仅作人工提级通道 | SPEC §6.1/§6.4；本文件 §4.2/§4.4/§6.5/§10 T07 |
+| 1 | `pd pain record` 默认严重度 | 功能默认四处：`pain-record.ts:125/469`、`pain-signal-observability.ts:159/161/221`，均 `?? 80` → `severe`（F24、F26） | 四处一起改为 `DEFAULT_PAIN_SCORE = 40` → `moderate`；`--score` 仅作人工提级通道且无法验明操作者身份 | SPEC §6.1/§6.4；本文件 §4.2/§4.4/§6.4/§6.5/§10 T07 |
 | 2 | WorkBuddy 用户级 Skill | 安装器只校验插件根 Skill（F53），无旧文件处置（F54）；仓库无旧 Skill 源（F21） | 安装器统一分发 `pd-pain-signal` 到插件根；识别并废弃旧 `pd-record-pain`；用户改过的副本不覆盖、只告警 | SPEC §5.5；本文件 §7.3/§7.4/§10 T39/§11 |
 | 3 | `diagnostician_async_cli` | quiet、默认关（F45）；开启后提交即返回（F46） | **保持默认关**，不随 L3 交付翻转；等真实取证后再评估 | SPEC §6.4/§10/T40；本文件 §4.4/§6.5/§10 T40 |
 
@@ -1095,7 +1404,24 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 ## 16.4 仍待确认
 
-无。此前三项待确认已由 Owner 全部裁定，见 §16.3。
+1. **OG-4 系统层授权**（§5.1.1）：Owner 必须明确授权"允许 PD 新增一个 MCP 写入能力并交付三宿主"。未授权前，`pd_submit_pain` 只能存在于设计与测试替身。
+2. **provenance 是否新增值**（§6.6.4）：本文件倾向新增 `agent_reported_owner_approved`；若 Owner 选择复用 `owner_reported_no_host_trace`，必须接受并说明其技术含义，不得把它展示成"Owner 亲自报告"。
+
+除上述两项外，此前三项已由 Owner 裁定，见 §16.3。
+
+## 16.5 post-review 七项修订对照
+
+> 详细代码事实与证据见 `SPEC-PD-AGENT-PAIN-INGRESS-001-REVIEW.md` §8。本节只记录落点。
+
+| # | 问题 | TD 落点 |
+|---|---|---|
+| P1-1 | `painType` 缺省走 legacy 导致准入分叉 | §6.3、§5.5、§10 T09 |
+| P1-2 | archived/deprecated 可作锚点 | §5.6、§5.6.1、§10 X03/T42 |
+| P1-3 | 超时后无已知身份回查 | §5.5、§5.7、§9、§10 T14b/T41 |
+| P1-4 | 四处默认 `score=80` | §6.4、§6.5、§10 A11/T07 |
+| P1-5 | 写类 MCP 缺 OG-4 合同 | §5.1.1、§11 第 0 步、§16.4 |
+| P2-1 | Agent Observation 来源语义 | §6.6、§7.2、§10 T44 |
+| P2-2 | `recordObservability:false` 的产品影响 | §6.7、§10 T45 |
 
 ---
 
@@ -1124,6 +1450,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| 0.8 post-review corrections | 2026-11-10 | 七项定点修订，版本号仍为 0.8：§5.1.1 OG-4 治理合同；§5.5 身份预生成；§5.6/§5.6.1 有效锚点；§5.7 `submit_unconfirmed` 与有界回查；§6.3 `painType` 单一路径 + `principle_deviation`；§6.4/§6.5 四处 `DEFAULT_PAIN_SCORE=40` 与 `--score` 权限边界；§6.6 来源 channel/provenance 扩展；§6.7 Observability 可见性；§7.2 三宿主来源；§9 失败与幂等；§10 A11–A16 / T14b / T41–T45；§16.4 两项待确认 |
 | 0.8 | 2026-11-10 | Owner 追加裁定 1–3：CLI 省略 `--score` 改落 moderate（代码未改，§6.5）；WorkBuddy Skill 由安装器分发并废弃旧 `pd-record-pain`（§7.4，目标行为）；`diagnostician_async_cli` 保持默认关；新增 F53–F54、T39–T40；三项待确认清零 |
 | 0.7 | 2026-11-10 | 按 Owner A–D 裁定重写；锚点三源与六项内容；`anchor` 落 `diagnostic_json`；默认中等；`mode` 可选且 v1 省略；授权模型；L2 同源+预检+spawn；L2b 扩展既有 `StalledDiagnosticianTaskReadModel` 并用 `runs.started_at`；L3 复用既有游标 authority 并删除 `cursorScope`；三宿主 Instructions 清单；A/B/C 测试矩阵；Complexity Delta 分链路；仍需确认 3 项 |
 | 0.6 | 2026-11-09 | 初版技术方案（被本版替代） |
