@@ -32,6 +32,14 @@ const CandidateRowsSchema = Type.Array(Type.Object({
 }, { additionalProperties: false }));
 const IdentitySchema = Type.Object({ status: Type.Literal('resolved'), candidateId: Type.String({ minLength: 1 }), principleId: Type.String() });
 
+/** Order-independent recommendationRef set comparison (P2-02). */
+function sameRefSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const a = [...left].sort();
+  const b = [...right].sort();
+  return a.every((value, index) => value === b[index]);
+}
+
 export interface ShadowAssociationProposal {
   mode: 'shadow';
   recommendationRef: string;
@@ -163,6 +171,12 @@ export interface ResolveSourceDeclaredRelationsInput {
   envelope: unknown;
   /** The same run's persisted output (run.outputPayload) — bare V2 output. */
   runOutput: unknown;
+  /**
+   * Identity of the persisted run row `runOutput` was loaded from. The
+   * resolver verifies it matches the receipt lineage; a bare output payload
+   * carries no lineage of its own, so the load path must attest it.
+   */
+  runLineage: { taskId: string; runId: string };
   /** The artifact's candidate rows as persisted (sourceRecommendation parsed). */
   candidates: readonly SourceRelationCandidateRow[];
   /** Lineage anchors for receipt verification. */
@@ -206,19 +220,37 @@ export interface ResolveSourceDeclaredRelationsInput {
 export function resolveSourceDeclaredRelations(
   input: ResolveSourceDeclaredRelationsInput,
 ): { ok: true; resolutions: SourceDeclaredRelationResolution[] } | { ok: false; reason: string; nextAction: string } {
-  const { envelope, runOutput, candidates, taskId, runId, artifactId } = input;
+  const { envelope, runOutput, candidates, taskId, runId, artifactId, runLineage } = input;
   if (artifactId.trim() === '') {
     return { ok: false, reason: 'candidate_material_invalid', nextAction: 'Load the candidate rows with their source artifact id.' };
+  }
+  if (runLineage.taskId !== taskId || runLineage.runId !== runId) {
+    return { ok: false, reason: 'run_lineage_mismatch', nextAction: 'Load the run output from the same persisted run as the artifact receipt; do not substitute another run.' };
   }
   const receiptRead = readRouterContextReceipt(envelope, { taskId, runId });
   if (receiptRead.status !== 'available') {
     return { ok: false, reason: receiptRead.reason, nextAction: receiptRead.nextAction };
   }
   const {receipt} = receiptRead;
-  const output = readDiagnosticianOutputFromEnvelope(envelope) ?? (Value.Check(DiagnosticianOutputV2Schema, runOutput) ? runOutput : undefined);
-  if (output === undefined) {
-    return { ok: false, reason: 'output_invalid', nextAction: 'The persisted artifact/run payload is not a valid DiagnosticianOutputV2; re-run the diagnosis.' };
+  // PRI-1146 P2-02: BOTH persisted sources must be independently valid and
+  // structurally identical. Never prefer one source over the other — two
+  // legal-but-different V2 outputs are NOT the same source.
+  const envelopeOutput = readDiagnosticianOutputFromEnvelope(envelope);
+  if (envelopeOutput === undefined) {
+    return { ok: false, reason: 'artifact_output_invalid', nextAction: 'The persisted artifact envelope does not contain a valid DiagnosticianOutputV2; re-run the diagnosis.' };
   }
+  if (!Value.Check(DiagnosticianOutputV2Schema, runOutput)) {
+    return { ok: false, reason: 'run_output_invalid', nextAction: 'The persisted run output is missing or not a valid DiagnosticianOutputV2; reload the same run.' };
+  }
+  const artifactRefs = envelopeOutput.recommendations.map((item) => item.recommendationRef);
+  const runRefs = runOutput.recommendations.map((item) => item.recommendationRef);
+  if (!sameRefSet(artifactRefs, runRefs)) {
+    return { ok: false, reason: 'run_output_recommendation_ref_mismatch', nextAction: 'The artifact and run output declare different recommendations; treat the association as unresolved and re-run the diagnosis.' };
+  }
+  if (!Value.Equal(envelopeOutput, runOutput)) {
+    return { ok: false, reason: 'run_output_content_mismatch', nextAction: 'The artifact and run output hold different V2 content for the same run; treat the association as unresolved and re-run the diagnosis.' };
+  }
+  const output = envelopeOutput;
   if (receipt.canonicalPrinciples.status !== 'available') {
     return { ok: false, reason: 'context_invalid', nextAction: 'The trusted context exposure is not provable for this artifact; canonical associations stay unresolved.' };
   }

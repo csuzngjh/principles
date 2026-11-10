@@ -110,13 +110,17 @@ const resolvePrincipleCandidateResolved = (candidateId: string) => ({
 function resolve(input: {
   envelope?: unknown;
   runOutput?: unknown;
+  runLineage?: { taskId: string; runId: string };
   candidates?: readonly SourceRelationCandidateRow[];
   resolvePrincipleCandidate?: (id: string) => unknown;
   resolveCanonicalEligibility?: (id: string) => { eligible: true } | { eligible: false; reason: 'missing' | 'ineligible' | 'ledger_unavailable' | 'ledger_corrupt' };
 }) {
   return resolveSourceDeclaredRelations({
     envelope: input.envelope ?? makeEnvelope(makeOutput()),
-    runOutput: input.runOutput ?? makeOutput(),
+    runOutput: 'runOutput' in input ? input.runOutput : makeOutput(),
+    // P2-02: the resolver now requires the persisted run lineage it loaded the
+    // output from, and verifies the artifact + run output are the same source.
+    runLineage: input.runLineage ?? { taskId: TASK_ID, runId: RUN_ID },
     candidates: input.candidates ?? makeRows([principleRec, ruleRec], ['principle', 'rule']),
     taskId: TASK_ID,
     runId: RUN_ID,
@@ -321,6 +325,70 @@ describe('resolveSourceDeclaredRelations (read-only shadow, SPEC v0.6 §6)', () 
         expect(resolution.semanticCorrectness).toBe('not_evaluated');
         expect(resolution.basis).toBe('source_declared_relation');
       }
+    }
+  });
+
+  // ── PRI-1146 P2-02: dual-source (artifact + run output) consistency ───────
+
+  it('A. accepts when artifact and run output are identical V2 (positive control)', () => {
+    const output = makeOutput();
+    const result = resolve({ envelope: makeEnvelope(output), runOutput: structuredClone(output) });
+    expect(result.ok).toBe(true);
+  });
+
+  it('B. rejects when the run output is V1 while the artifact is V2', () => {
+    const v1RunOutput = { ...makeOutput() } as Record<string, unknown>;
+    delete v1RunOutput.schemaVersion;
+    expect(resolve({ runOutput: v1RunOutput })).toMatchObject({ ok: false, reason: 'run_output_invalid' });
+  });
+
+  it('C. rejects two legal-but-different V2 outputs', () => {
+    const otherOutput = makeOutput([
+      principleRec,
+      { ...ruleRec, recommendationRef: 'rule-other' },
+    ] as DiagnosticianRecommendationV2[]);
+    expect(resolve({ runOutput: otherOutput })).toMatchObject({ ok: false, reason: 'run_output_recommendation_ref_mismatch' });
+    // Same refs, different content is still not the same source.
+    const driftedOutput = { ...makeOutput(), confidence: 0.5 };
+    expect(resolve({ runOutput: driftedOutput })).toMatchObject({ ok: false, reason: 'run_output_content_mismatch' });
+  });
+
+  it('D. rejects when the run output is missing', () => {
+    expect(resolve({ runOutput: undefined })).toMatchObject({ ok: false, reason: 'run_output_invalid' });
+    expect(resolve({ runOutput: null })).toMatchObject({ ok: false, reason: 'run_output_invalid' });
+  });
+
+  it('E. rejects when the artifact envelope is missing or corrupted', () => {
+    expect(resolve({ envelope: {} })).toMatchObject({ ok: false, reason: 'context_receipt_missing' });
+    const corrupted = makeEnvelope(makeOutput());
+    delete (corrupted).schemaVersion;
+    expect(resolve({ envelope: corrupted })).toMatchObject({ ok: false, reason: 'artifact_output_invalid' });
+  });
+
+  it('F. rejects when recommendationRefs differ (explicit set check)', () => {
+    const sameLengthDifferentRefs = makeOutput([
+      principleRec,
+      { ...ruleRec, recommendationRef: 'rule-renamed' },
+    ] as DiagnosticianRecommendationV2[]);
+    expect(resolve({ runOutput: sameLengthDifferentRefs })).toMatchObject({ ok: false, reason: 'run_output_recommendation_ref_mismatch' });
+  });
+
+  it('G. rejects when the run lineage does not match the artifact receipt', () => {
+    expect(resolve({ runLineage: { taskId: TASK_ID, runId: 'foreign-run' } })).toMatchObject({ ok: false, reason: 'run_lineage_mismatch' });
+    expect(resolve({ runLineage: { taskId: 'foreign-task', runId: RUN_ID } })).toMatchObject({ ok: false, reason: 'run_lineage_mismatch' });
+  });
+
+  it('all negative cases are side-effect free: no resolutions, no binding, no generation', () => {
+    const negativeInputs = [
+      { runOutput: null },
+      { runOutput: makeOutput([principleRec, { ...ruleRec, recommendationRef: 'rule-other' }] as DiagnosticianRecommendationV2[]) },
+      { runLineage: { taskId: 'foreign', runId: RUN_ID } },
+    ];
+    for (const input of negativeInputs) {
+      const result = resolve(input);
+      expect(result.ok).toBe(false);
+      expect(result).not.toHaveProperty('resolutions');
+      expect(result).not.toHaveProperty('authorizesGeneration');
     }
   });
 });
