@@ -1,0 +1,41 @@
+{
+  "checkpoint": "20261110T0350Z-zcode-pri1163-release-audited",
+  "ticket": "PRI-1163",
+  "decision": "RELEASE_PACKAGE_HAS_WIRING_NO_DEFECT",
+  "verdict": "branch 2 of 3: published package HAS the round-key wiring; production all-FIFO is the DESIGNED fallback because every post-install production round was an OpenClaw heartbeat (non-user) round; no fix needed; PRI-1162 suspect item (published-artifact/source mismatch) REFUTED and withdrawn",
+  "conclusionLayers": {
+    "releaseVerified": "published 3.1.3 artifact == tag v3.1.3 (e7c7e6bba) build byte-for-byte (dist/bundle.js sha256 7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d across npm tarball / installed extension / isolated rebuild); wiring present and functional via fake-host fixture 6/6 PASS exit 0",
+    "productionUserRoundRotationPendingObservation": "zero genuine user rounds since 3.1.3 install (user_turns last row 2026-11-07; observed session last user turn 2026-11-02); all post-install injected events are hourly heartbeat rounds -> legacy_fifo_prefix_v1 by design; cheapest verification: one real user message then read events_*.jsonl for fair_rotation_v1 with advancing ordinal",
+    "repoSharedEntryVerified": "unchanged from #2460 (frozen evidence preserved)"
+  },
+  "threeArtifacts": {
+    "npm": { "sri": "sha512-VqLoENc1gSkqGfGJAxGR5qnYPY2yR2GzUDRwtbnnSF70vCK6p+3lYg/6TssdagCbwisl2k6YmEckAwExXK/a9g==", "shasum": "3461c20c8b0980a533185d368f6eba7f529c76cb", "entry": "dist/bundle.js (openclaw.extensions sole item)", "entrySha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d", "gitHead": "e7c7e6bba35aa7d691496cf126b195ea3a70fef9" },
+    "installed": { "entry": "~/.openclaw/extensions/principles-disciple/dist/bundle.js", "entrySha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d (byte-identical to npm)", "pluginVersion": "3.1.3", "host": "OpenClaw 2026.11.1 (4ffdd20)", "loadedDeps": "better-sqlite3@13.0.3 (native, bundled node_modules) + node builtins; host-runtime half inlined" },
+    "rebuild": { "baseline": "git archive e7c7e6bba + npm ci + build core/install-layout/host-runtime workspaces + npm pack (prepack = build:production = esbuild --production + verify-build, then build:types)", "bundleSha256": "7301253d09d3c4a900bc3a44b4b3430b835b71d47161e6fdc94d8ff725f6546d", "status": "deterministic reproduction, NOT reference-only (publish inputs confirmed: gitHead + publish-npm run 42639299312 success on same SHA 2026-11-09T14:54:45Z)" }
+  },
+  "fixtureArms": {
+    "setup": "temp workspace, frozen candidate snapshot state.db 830fbd24 (18 candidates, same as #2460 comparison), minimal fake host api capturing before_prompt_build; PD_WORKSPACE_DIR pinned to temp dir",
+    "A1_consecutiveUserRounds": "PASS fair_rotation_v1 ord 3->4 rotStart 3->4 selected set rotates",
+    "A2_sameRunRetry": "PASS round=4 replayed; policy/ord/selection byte-identical; single user_turns write",
+    "A3_heartbeat": "PASS legacy_fifo_prefix_v1 ord undefined; zero user_turns write (matches production verbatim)",
+    "A4_implicitTrigger": "PASS trigger omitted treated as user interaction (ord=5) per isUserInteractionTrigger contract",
+    "exitCode": 0
+  },
+  "productionEvidence": {
+    "postInstallEvents": "all 4 injected events since install (11-09 15:11Z .. 11-10 02:45Z): legacy_fifo_prefix_v1, selectionRoundOrdinal undefined, session 8e64912c, hourly ~:45",
+    "heartbeatConfig": "~/.openclaw/openclaw.json heartbeat.every=1h; host source v2026.11.1 attempt-prompt-helpers.ts passes hookCtx.trigger='heartbeat'",
+    "userTurns": "zero rows since 2026-11-07; session 8e64912c last real user turn 2026-11-02T13:16Z",
+    "historicContrast": "2026-11-03 same heartbeat session got fair_rotation_v1 with CONSTANT ord=72 (selectionRoundSource=session_user_turn_ordinal), fixed selection n=9 chars=1953 — the write-free constant-ordinal pseudo-rotation #2398 explicitly fixed",
+    "aLineOrthogonality": "fixture events carried only {prompt, messages} (no identity) and rotation still worked: round key does not depend on PRI-1119 user-message identity"
+  },
+  "methodCorrection": "PRI-1162 symbol-search conclusion was a false positive: publish uses esbuild --production (minify:true) so function names are rewritten; minify-insensitive literals (roundKeyProvider x3, fair_rotation_v1 x2, legacy_fifo_prefix_v1 x3, selectionRoundOrdinal x3, user_turn_persisted, round key resolved) are all present in the published bundle",
+  "incidentDisclosure": {
+    "what": "first fixture run wrote 3 synthetic user_turns rows into production trajectory.db (D:/.openclaw/workspace/.state/trajectory.db) because the plugin prefers the explicit declared workspace (~/.openclaw/principles-disciple.json -> D:/.openclaw/workspace) over hook ctx.workspaceDir",
+    "rows": "id 1215/1216 session fixture-sess-0001 idx 2/3; id 1217 session dbg-sess idx 2; all 2026-11-10T03:35:12-41Z, fixture test texts; events JSONL zero contamination (buffer never flushed)",
+    "impact": "per-session isolation -> zero impact on real sessions/ordinals; governance noise only (1213->1216 rows)",
+    "containment": "PD_WORKSPACE_DIR pinned to temp dir on re-run; production re-verified untouched (still exactly 3 synthetic rows)",
+    "proposedCleanup": "DELETE FROM user_turns WHERE id IN (1215,1216,1217) — awaiting Owner approval; full backup copy and row contents archived in worktree .tmp/pri-1163/prod-evidence/"
+  },
+  "boundaries": { "hostStarts": 0, "modelCalls": 0, "installs": 0, "publishes": 0, "productionWrites": "3 synthetic rows (incident, disclosed above); all other reads via copies/readonly" },
+  "mimosaNote": "scanner_enobufs recurrence risk acknowledged; no security conclusion claimed"
+}
