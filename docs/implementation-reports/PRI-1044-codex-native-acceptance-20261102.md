@@ -128,3 +128,28 @@ shadow 汇总（core `summarizeRuleCodeShadowEvents`，hostKind=codex）：
 
 - 规则仍处 shadow，未晋升 live；影响可随时通过正式停用/暂停控制撤回。
 - 旧版已原子停用但历史保留；源码可回滚（revert PR #2275）；治理历史不删除。
+
+## 附录 A：隔离 `CODEX_HOME` 验收前必读 —— hook 信任绑定插件绝对路径
+
+2026-11-10 的隔离验收曾把「Codex 不派发 PD hook」误判为环境限制，实际原因是 hook 信任失效。
+做同类验收前先读本节，可省掉一整轮误判。
+
+**机制**：`$CODEX_HOME/config.toml` 的 `[hooks.state]` 以**解析后的插件绝对路径**参与哈希，
+键形如 `"principles-disciple@principles:hooks/hooks.json:pre_tool_use:0:0"`，值含
+`trusted_hash` / `trusted_content_hash`。把插件目录复制到另一个 HOME 后路径改变 → 哈希不匹配。
+
+**现象**：非交互 `codex exec` **静默跳过**插件 hook。没有报错、`logs_2.sqlite` 里 0 行、
+PD 侧 0 事件。看起来完全像「该宿主不支持插件 hook」。
+
+**正解**：隔离 HOME 的 `plugins/cache/principles` 用 **junction/symlink 指回原插件路径**，
+并让隔离 `config.toml` 与原 HOME **字节一致** → 哈希重新匹配 → hook 正常派发，无需任何 bypass。
+验证：跑一次真实会话，确认出现 `runtime_v2_prompt_activations_injected` 与 `rulehost_evaluated`。
+
+**禁忌**：`--dangerously-bypass-hook-trust` 只能用于**诊断**（确认「是不是信任门」），
+不能作为验收结论的依据；用它跑出的绿不能算宿主原生验证。
+
+**已排除的无效尝试**（不要重复）：复制 `state_5.sqlite`、`-c features.plugin_hooks=true`（死 flag）、
+把 plugins 从 junction 换成真实拷贝、`codex plugin list` / `codex doctor` 输出（这三个都显示正常）。
+
+**根因证据**：`.tmp/pri-1044-acceptance-20261110/e2e6-bypasstrust.jsonl`（带 bypass 立即派发）、
+`e2e7-junction.jsonl`（junction 修复后**不带** bypass 同样派发）。

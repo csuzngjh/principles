@@ -26,9 +26,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function patchTargets(params: Record<string, unknown> | null, projectDir: string): string[] | undefined {
   if (params === null) return undefined;
+  // Native Codex sends the patch body under `tool_input.command`
+  // (`{"command":"*** Begin Patch..."}`); older/embedded callers use
+  // `patch` or `input`. All three carry the same `*** <op> File:` headers.
   const patch = typeof params.patch === 'string'
     ? params.patch
-    : typeof params.input === 'string' ? params.input : null;
+    : typeof params.input === 'string'
+      ? params.input
+      : typeof params.command === 'string' ? params.command : null;
   if (patch === null || Buffer.byteLength(patch, 'utf8') > MAX_PATCH_BYTES) return undefined;
   const targets: string[] = [];
   for (const line of patch.split(/\r?\n/)) {
