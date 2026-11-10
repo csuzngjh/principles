@@ -231,6 +231,44 @@ function resolveInstallManifestHosts(host: HostTarget): string[] {
   return mergeInstallManifestHosts(current, host);
 }
 
+/** Hosts the install manifest already records BEFORE this run attaches its own. */
+function readPersistedInstallHosts(): string[] {
+  try {
+    const parsed = parseInstallManifest(JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown);
+    return parsed.manifest ? installManifestHostsForPersist(parsed.manifest) : [];
+  } catch {
+    // Malformed manifests are rejected later by resolveInstallManifestHosts;
+    // an unreadable record must never be treated as "this host was installed".
+    return [];
+  }
+}
+
+/**
+ * Hosts PD already serves whose artifacts this run does NOT touch.
+ *
+ * The runtime directory (`~/.pd/runtime`) is shared across hosts, but each
+ * host's `mcp-binding.json` pins the MCP server version it launches. An
+ * install/update scoped to ONE host (`--host openclaw` is the default) replaces
+ * that shared runtime and silently leaves every other installed host bound to
+ * the previous MCP server version — the host then fails closed at launch with
+ * `binding_version_mismatch`. Those previously installed hosts must be
+ * refreshed in the same run, otherwise a routine update breaks them until the
+ * operator happens to re-run the installer for each one.
+ *
+ * WorkBuddy stays opt-in (OD-03): 'all' never attaches it here, but a manifest
+ * that ALREADY records it must be refreshed like any other served host.
+ */
+export function resolveHostRefreshTargets(persistedHosts: readonly string[], host: HostTarget): HostTarget[] {
+  const covered = new Set<string>(host === 'all' ? ['openclaw', 'codex'] : [host]);
+  const targets: HostTarget[] = [];
+  for (const persisted of persistedHosts) {
+    if (persisted !== 'openclaw' && persisted !== 'codex' && persisted !== 'workbuddy') continue;
+    if (covered.has(persisted) || targets.includes(persisted)) continue;
+    targets.push(persisted);
+  }
+  return targets;
+}
+
 /**
  * PRI-624 Slice C: the install manifest records every Workspace this install
  * serves so the Companion can discover its per-Workspace workers (SPEC §13
@@ -4804,6 +4842,7 @@ export async function install(
     // Validate the existing host-ownership record before mutating runtime or
     // host config. A malformed manifest must not be discovered only after the
     // old installation has already been replaced (rc-3/rc-9).
+    const persistedHostsBeforeRun = readPersistedInstallHosts();
     installManifestHosts = resolveInstallManifestHosts(options.host);
     if (installsOpenClaw(options.host)) migrateLegacyPdBackups();
     const { backupDir: backupDirFromResult, runtimeBackupDir: runtimeBackupDirFromResult } = backupExistingInstall(options.host);
@@ -5069,7 +5108,7 @@ export async function install(
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Updating host config...');
-    const hostResults = await runHostInstallers(options.host, {
+    const hostInstallCtx: HostInstallContext = {
       workspaceDir: options.workspaceDir,
       pluginDir,
       language: options.language,
@@ -5082,7 +5121,8 @@ export async function install(
             baseUrl: options.runtimeProfile.baseUrl,
           }
         : undefined,
-    });
+    };
+    const hostResults = await runHostInstallers(options.host, hostInstallCtx);
 
     // Report host install results (rc-9: surface failures, don't silently swallow).
     // rc-9 propagation: if ANY host installer FAILED, the aggregate install
@@ -5112,6 +5152,26 @@ export async function install(
 
     if (hostFailures.length > 0) {
       throw new Error(`Host installation failed: ${hostFailureMessages.join(' | ')}`);
+    }
+
+    // Shared-runtime consistency: this run replaced `~/.pd/runtime`, so every
+    // OTHER host already recorded in the manifest still pins the previous MCP
+    // server version in its own mcp-binding.json and would fail closed at the
+    // next launch (binding_version_mismatch). Refresh them through their real
+    // host installers here — best effort only: the requested host succeeded,
+    // and a sibling refresh failure must not roll back the working runtime.
+    const refreshTargets = resolveHostRefreshTargets(persistedHostsBeforeRun, options.host);
+    for (const refreshTarget of refreshTargets) {
+      if (spinner) updateProgress(spinner, stepIndex, `Refreshing ${refreshTarget} host binding...`);
+      const refreshResults = await runHostInstallers(refreshTarget, hostInstallCtx);
+      for (const hr of refreshResults) {
+        if (hr.success) {
+          logger.info(`Host "${hr.hostId}" refreshed for the new runtime${hr.reason ? `: ${hr.reason}` : ''}.`);
+        } else {
+          // rc-9: never silent — state the reason and the exact recovery step.
+          logger.warn(`Host "${hr.hostId}" refresh failed: ${hr.reason ?? 'unknown failure'}. Next: ${hr.nextAction ?? `npx create-principles-disciple install --host ${hr.hostId}`}`);
+        }
+      }
     }
     // Manual-action hosts (e.g. Codex awaiting the Marketplace step) STAY in
     // the install manifest: the manifest records the hosts PD serves on this
