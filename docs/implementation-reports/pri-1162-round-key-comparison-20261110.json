@@ -1,0 +1,1860 @@
+{
+  "ticket": "PRI-1162",
+  "comparison": "one-round same-input FIFO vs fair rotation, current shared assembly entry (post-#2455)",
+  "frozenInputs": {
+    "stateDbSha256": "830fbd24b8abf502f22931a4fdbd2b1a321955e05713ace27863f589347796a5",
+    "candidates": 18,
+    "candidateOrder": "activated_at ASC (base order)",
+    "candidateHashes12": [
+      "77cce881e23b",
+      "016647f08388",
+      "98a62956a843",
+      "b039f2657194",
+      "b60e75145eda",
+      "1f819865af11",
+      "871d0283b206",
+      "769cea41ddb0",
+      "18febfd4d1cf",
+      "666cd9b116fb",
+      "1b258fd34eca",
+      "d6a64aba4d9e",
+      "887cb01e5a99",
+      "329a9650f664",
+      "94007117c207",
+      "88016712a787",
+      "fd3fc40e512d",
+      "ca5a080972d6"
+    ],
+    "budgets": [
+      4000,
+      2500
+    ],
+    "fifoRounds": 12,
+    "rotationRounds": 18,
+    "rotationDrive": "roundKey = k+1 (persisted-turn semantic)",
+    "fifoDrive": "roundKey absent (installed-production / degraded semantics)",
+    "boundaries": {
+      "hostStarts": 0,
+      "modelCalls": 0,
+      "productionWrites": 0,
+      "tokenEstimates": "unknown — no reliable tokenizer; chars are the unit"
+    }
+  },
+  "budgets": {
+    "2500": {
+      "fifo": {
+        "policy": "legacy_fifo_prefix_v1",
+        "rounds": [
+          {
+            "round": "fifo-1",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.853
+          },
+          {
+            "round": "fifo-2",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.747
+          },
+          {
+            "round": "fifo-3",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.939
+          },
+          {
+            "round": "fifo-4",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.705
+          },
+          {
+            "round": "fifo-5",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.491
+          },
+          {
+            "round": "fifo-6",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.582
+          },
+          {
+            "round": "fifo-7",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.525
+          },
+          {
+            "round": "fifo-8",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.48
+          },
+          {
+            "round": "fifo-9",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.702
+          },
+          {
+            "round": "fifo-10",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.617
+          },
+          {
+            "round": "fifo-11",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.579
+          },
+          {
+            "round": "fifo-12",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.601
+          }
+        ],
+        "perCandidate": [
+          {
+            "id": "77cce881e23b",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "016647f08388",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "98a62956a843",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "b039f2657194",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "b60e75145eda",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "1f819865af11",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "871d0283b206",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "769cea41ddb0",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "18febfd4d1cf",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "666cd9b116fb",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "1b258fd34eca",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "d6a64aba4d9e",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "887cb01e5a99",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "329a9650f664",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "94007117c207",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "88016712a787",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "fd3fc40e512d",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "ca5a080972d6",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          }
+        ],
+        "selectedCandidateCount": 6,
+        "starved": [
+          "871d0283b206",
+          "769cea41ddb0",
+          "18febfd4d1cf",
+          "666cd9b116fb",
+          "1b258fd34eca",
+          "d6a64aba4d9e",
+          "887cb01e5a99",
+          "329a9650f664",
+          "94007117c207",
+          "88016712a787",
+          "fd3fc40e512d",
+          "ca5a080972d6"
+        ],
+        "charsPerRound": [
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444,
+          2444
+        ],
+        "byteIdenticalAcrossRounds": true
+      },
+      "rotation": {
+        "policy": "fair_rotation_v1",
+        "rounds": [
+          {
+            "round": "k1",
+            "roundKey": 2,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 2,
+            "chars": 2462,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对"
+            ],
+            "ms": 2.659
+          },
+          {
+            "round": "k2",
+            "roundKey": 3,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 3,
+            "chars": 2438,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验"
+            ],
+            "ms": 2.674
+          },
+          {
+            "round": "k3",
+            "roundKey": 4,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 4,
+            "chars": 2481,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束"
+            ],
+            "ms": 2.473
+          },
+          {
+            "round": "k4",
+            "roundKey": 5,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 5,
+            "chars": 2308,
+            "selectedCount": 5,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更"
+            ],
+            "ms": 2.664
+          },
+          {
+            "round": "k5",
+            "roundKey": 6,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 6,
+            "chars": 2494,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁"
+            ],
+            "ms": 2.56
+          },
+          {
+            "round": "k6",
+            "roundKey": 7,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 7,
+            "chars": 2497,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.61
+          },
+          {
+            "round": "k7",
+            "roundKey": 8,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 8,
+            "chars": 2489,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁"
+            ],
+            "ms": 2.485
+          },
+          {
+            "round": "k8",
+            "roundKey": 9,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 9,
+            "chars": 2455,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称"
+            ],
+            "ms": 2.594
+          },
+          {
+            "round": "k9",
+            "roundKey": 10,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 10,
+            "chars": 2440,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆"
+            ],
+            "ms": 2.615
+          },
+          {
+            "round": "k10",
+            "roundKey": 11,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 11,
+            "chars": 2470,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.889
+          },
+          {
+            "round": "k11",
+            "roundKey": 12,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 12,
+            "chars": 2478,
+            "selectedCount": 5,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则"
+            ],
+            "ms": 2.75
+          },
+          {
+            "round": "k12",
+            "roundKey": 13,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 13,
+            "chars": 2459,
+            "selectedCount": 3,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断"
+            ],
+            "ms": 2.628
+          },
+          {
+            "round": "k13",
+            "roundKey": 14,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 14,
+            "chars": 2441,
+            "selectedCount": 3,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性"
+            ],
+            "ms": 2.8
+          },
+          {
+            "round": "k14",
+            "roundKey": 15,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 15,
+            "chars": 2464,
+            "selectedCount": 5,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062"
+            ],
+            "ms": 2.643
+          },
+          {
+            "round": "k15",
+            "roundKey": 16,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 16,
+            "chars": 2457,
+            "selectedCount": 5,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78"
+            ],
+            "ms": 2.552
+          },
+          {
+            "round": "k16",
+            "roundKey": 17,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 17,
+            "chars": 2442,
+            "selectedCount": 5,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e"
+            ],
+            "ms": 3.047
+          },
+          {
+            "round": "k17",
+            "roundKey": 18,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 0,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174"
+            ],
+            "ms": 2.571
+          },
+          {
+            "round": "k18",
+            "roundKey": 19,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 1,
+            "chars": 2444,
+            "selectedCount": 6,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证"
+            ],
+            "ms": 2.723
+          }
+        ],
+        "perCandidate": [
+          {
+            "id": "77cce881e23b",
+            "selections": 5,
+            "longestAbsenceStreak": 9,
+            "presentInRounds": 5
+          },
+          {
+            "id": "016647f08388",
+            "selections": 5,
+            "longestAbsenceStreak": 13,
+            "presentInRounds": 5
+          },
+          {
+            "id": "98a62956a843",
+            "selections": 5,
+            "longestAbsenceStreak": 13,
+            "presentInRounds": 5
+          },
+          {
+            "id": "b039f2657194",
+            "selections": 5,
+            "longestAbsenceStreak": 13,
+            "presentInRounds": 5
+          },
+          {
+            "id": "b60e75145eda",
+            "selections": 5,
+            "longestAbsenceStreak": 13,
+            "presentInRounds": 5
+          },
+          {
+            "id": "1f819865af11",
+            "selections": 6,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 6
+          },
+          {
+            "id": "871d0283b206",
+            "selections": 6,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 6
+          },
+          {
+            "id": "769cea41ddb0",
+            "selections": 6,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 6
+          },
+          {
+            "id": "18febfd4d1cf",
+            "selections": 6,
+            "longestAbsenceStreak": 11,
+            "presentInRounds": 6
+          },
+          {
+            "id": "666cd9b116fb",
+            "selections": 5,
+            "longestAbsenceStreak": 10,
+            "presentInRounds": 5
+          },
+          {
+            "id": "1b258fd34eca",
+            "selections": 6,
+            "longestAbsenceStreak": 9,
+            "presentInRounds": 6
+          },
+          {
+            "id": "d6a64aba4d9e",
+            "selections": 5,
+            "longestAbsenceStreak": 8,
+            "presentInRounds": 5
+          },
+          {
+            "id": "887cb01e5a99",
+            "selections": 7,
+            "longestAbsenceStreak": 7,
+            "presentInRounds": 7
+          },
+          {
+            "id": "329a9650f664",
+            "selections": 5,
+            "longestAbsenceStreak": 7,
+            "presentInRounds": 5
+          },
+          {
+            "id": "94007117c207",
+            "selections": 2,
+            "longestAbsenceStreak": 11,
+            "presentInRounds": 2
+          },
+          {
+            "id": "88016712a787",
+            "selections": 6,
+            "longestAbsenceStreak": 6,
+            "presentInRounds": 6
+          },
+          {
+            "id": "fd3fc40e512d",
+            "selections": 8,
+            "longestAbsenceStreak": 7,
+            "presentInRounds": 8
+          },
+          {
+            "id": "ca5a080972d6",
+            "selections": 4,
+            "longestAbsenceStreak": 10,
+            "presentInRounds": 4
+          }
+        ],
+        "selectedCandidateCount": 18,
+        "neverSeenNonOversized": [],
+        "charsPerRound": [
+          2462,
+          2438,
+          2481,
+          2308,
+          2494,
+          2497,
+          2489,
+          2455,
+          2440,
+          2470,
+          2478,
+          2459,
+          2441,
+          2464,
+          2457,
+          2442,
+          2444,
+          2444
+        ],
+        "totalChars": 44163
+      },
+      "oversized": {
+        "count": 0,
+        "ids": [],
+        "note": "kept separately with raw failure classification — not a strategy difference; raw per-round oversized lists preserved in both arms"
+      },
+      "passLine": {
+        "rotationWindow12SelectedCount": 17,
+        "minRequired": 14,
+        "pass_12roundWindow": true,
+        "fullCycle18SelectedCount": 18,
+        "everyFifoStarvedSeenIn18Rounds": true,
+        "fifoByteIdenticalAcrossRounds": true,
+        "passLineVersion": "card v0.1 §5 (frozen before this run)"
+      }
+    },
+    "4000": {
+      "fifo": {
+        "policy": "legacy_fifo_prefix_v1",
+        "rounds": [
+          {
+            "round": "fifo-1",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 4.911
+          },
+          {
+            "round": "fifo-2",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 3.14
+          },
+          {
+            "round": "fifo-3",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.882
+          },
+          {
+            "round": "fifo-4",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.866
+          },
+          {
+            "round": "fifo-5",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 3.464
+          },
+          {
+            "round": "fifo-6",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.844
+          },
+          {
+            "round": "fifo-7",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.925
+          },
+          {
+            "round": "fifo-8",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.94
+          },
+          {
+            "round": "fifo-9",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.715
+          },
+          {
+            "round": "fifo-10",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 3.174
+          },
+          {
+            "round": "fifo-11",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.995
+          },
+          {
+            "round": "fifo-12",
+            "policy": "legacy_fifo_prefix_v1",
+            "rotationStartIndex": null,
+            "chars": 3727,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 2.813
+          }
+        ],
+        "perCandidate": [
+          {
+            "id": "77cce881e23b",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "016647f08388",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "98a62956a843",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "b039f2657194",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "b60e75145eda",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "1f819865af11",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "871d0283b206",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "769cea41ddb0",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "18febfd4d1cf",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "666cd9b116fb",
+            "selections": 12,
+            "longestAbsenceStreak": 0,
+            "presentInRounds": 12
+          },
+          {
+            "id": "1b258fd34eca",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "d6a64aba4d9e",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "887cb01e5a99",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "329a9650f664",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "94007117c207",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "88016712a787",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "fd3fc40e512d",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          },
+          {
+            "id": "ca5a080972d6",
+            "selections": 0,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 0
+          }
+        ],
+        "selectedCandidateCount": 10,
+        "starved": [
+          "1b258fd34eca",
+          "d6a64aba4d9e",
+          "887cb01e5a99",
+          "329a9650f664",
+          "94007117c207",
+          "88016712a787",
+          "fd3fc40e512d",
+          "ca5a080972d6"
+        ],
+        "charsPerRound": [
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727,
+          3727
+        ],
+        "byteIdenticalAcrossRounds": true
+      },
+      "rotation": {
+        "policy": "fair_rotation_v1",
+        "rounds": [
+          {
+            "round": "k1",
+            "roundKey": 2,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 2,
+            "chars": 3975,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对"
+            ],
+            "ms": 5.315
+          },
+          {
+            "round": "k2",
+            "roundKey": 3,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 3,
+            "chars": 4000,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验"
+            ],
+            "ms": 2.882
+          },
+          {
+            "round": "k3",
+            "roundKey": 4,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 4,
+            "chars": 4000,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验"
+            ],
+            "ms": 3.069
+          },
+          {
+            "round": "k4",
+            "roundKey": 5,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 5,
+            "chars": 3855,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更"
+            ],
+            "ms": 2.871
+          },
+          {
+            "round": "k5",
+            "roundKey": 6,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 6,
+            "chars": 3954,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁"
+            ],
+            "ms": 2.884
+          },
+          {
+            "round": "k6",
+            "roundKey": 7,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 7,
+            "chars": 3954,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁"
+            ],
+            "ms": 2.633
+          },
+          {
+            "round": "k7",
+            "roundKey": 8,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 8,
+            "chars": 3972,
+            "selectedCount": 8,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁"
+            ],
+            "ms": 2.778
+          },
+          {
+            "round": "k8",
+            "roundKey": 9,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 9,
+            "chars": 3988,
+            "selectedCount": 8,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称"
+            ],
+            "ms": 2.528
+          },
+          {
+            "round": "k9",
+            "roundKey": 10,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 10,
+            "chars": 3963,
+            "selectedCount": 8,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_有后果的变更前，以全局引用证据探明关联面，耦合点原子统一变更并验证配对约束",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆"
+            ],
+            "ms": 2.804
+          },
+          {
+            "round": "k10",
+            "roundKey": 11,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 11,
+            "chars": 3920,
+            "selectedCount": 8,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆"
+            ],
+            "ms": 3.003
+          },
+          {
+            "round": "k11",
+            "roundKey": 12,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 12,
+            "chars": 3928,
+            "selectedCount": 7,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证",
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则"
+            ],
+            "ms": 2.552
+          },
+          {
+            "round": "k12",
+            "roundKey": 13,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 13,
+            "chars": 3942,
+            "selectedCount": 7,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_Owner 约定持久化并在阶段开工与生成类行动前强制召回比对",
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断"
+            ],
+            "ms": 2.721
+          },
+          {
+            "round": "k13",
+            "roundKey": 14,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 14,
+            "chars": 3914,
+            "selectedCount": 7,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_约定召回门：Owner 约定首次表达即持久化，阶段切换或敏感操作前强制召回校验",
+              "act_prompt_指令模糊时先确认意图边界，采用最保守的最小删减变更",
+              "act_prompt_以可校验的持久化状态为决策依据，保持工作空间可信与整洁",
+              "act_prompt_交付前以可观察证据自检：将验收基准显式化并固化为流程门禁",
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性"
+            ],
+            "ms": 2.541
+          },
+          {
+            "round": "k14",
+            "roundKey": 15,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 15,
+            "chars": 3942,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_生成式任务须实施全时程约束锁定与分段校验门禁",
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062"
+            ],
+            "ms": 2.826
+          },
+          {
+            "round": "k15",
+            "roundKey": 16,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 16,
+            "chars": 3950,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78"
+            ],
+            "ms": 2.785
+          },
+          {
+            "round": "k16",
+            "roundKey": 17,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 17,
+            "chars": 3978,
+            "selectedCount": 10,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_交付前强制重跑完整管线，以可版本追踪的证据核验宣称",
+              "act_prompt_以核验过的最新资产状态为产出依据，而非记忆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e"
+            ],
+            "ms": 3.194
+          },
+          {
+            "round": "k17",
+            "roundKey": 18,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 0,
+            "chars": 3973,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_覆盖性操作前先核实版本并保持可逆",
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174"
+            ],
+            "ms": 2.869
+          },
+          {
+            "round": "k18",
+            "roundKey": 19,
+            "policy": "fair_rotation_v1",
+            "rotationStartIndex": 1,
+            "chars": 3987,
+            "selectedCount": 11,
+            "eligibleCount": 18,
+            "truncated": true,
+            "oversized": [],
+            "dropped": [
+              "act_prompt_以接收者可理解为完成标准的沟通原则",
+              "act_prompt_产出闭环验证：交付前必须以可观察证据校验产物新鲜度与正确性",
+              "act_prompt_a819fc44-3307-4132-9f32-d386ed89b062",
+              "act_prompt_c58af13a-e42c-4763-a85e-432d39fb6e78",
+              "act_prompt_3b11b54d-4598-458f-86dd-73dd2be31e3e",
+              "act_prompt_151a9c0b-7078-4a86-8678-b015a2527174",
+              "act_prompt_意图缺口即风险信号：方向性产出前先澄清并以小样验证"
+            ],
+            "ms": 2.888
+          }
+        ],
+        "perCandidate": [
+          {
+            "id": "77cce881e23b",
+            "selections": 9,
+            "longestAbsenceStreak": 5,
+            "presentInRounds": 9
+          },
+          {
+            "id": "016647f08388",
+            "selections": 6,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 6
+          },
+          {
+            "id": "98a62956a843",
+            "selections": 6,
+            "longestAbsenceStreak": 12,
+            "presentInRounds": 6
+          },
+          {
+            "id": "b039f2657194",
+            "selections": 15,
+            "longestAbsenceStreak": 1,
+            "presentInRounds": 15
+          },
+          {
+            "id": "b60e75145eda",
+            "selections": 8,
+            "longestAbsenceStreak": 10,
+            "presentInRounds": 8
+          },
+          {
+            "id": "1f819865af11",
+            "selections": 9,
+            "longestAbsenceStreak": 9,
+            "presentInRounds": 9
+          },
+          {
+            "id": "871d0283b206",
+            "selections": 10,
+            "longestAbsenceStreak": 8,
+            "presentInRounds": 10
+          },
+          {
+            "id": "769cea41ddb0",
+            "selections": 10,
+            "longestAbsenceStreak": 8,
+            "presentInRounds": 10
+          },
+          {
+            "id": "18febfd4d1cf",
+            "selections": 9,
+            "longestAbsenceStreak": 9,
+            "presentInRounds": 9
+          },
+          {
+            "id": "666cd9b116fb",
+            "selections": 10,
+            "longestAbsenceStreak": 8,
+            "presentInRounds": 10
+          },
+          {
+            "id": "1b258fd34eca",
+            "selections": 11,
+            "longestAbsenceStreak": 6,
+            "presentInRounds": 11
+          },
+          {
+            "id": "d6a64aba4d9e",
+            "selections": 10,
+            "longestAbsenceStreak": 8,
+            "presentInRounds": 10
+          },
+          {
+            "id": "887cb01e5a99",
+            "selections": 12,
+            "longestAbsenceStreak": 6,
+            "presentInRounds": 12
+          },
+          {
+            "id": "329a9650f664",
+            "selections": 11,
+            "longestAbsenceStreak": 6,
+            "presentInRounds": 11
+          },
+          {
+            "id": "94007117c207",
+            "selections": 7,
+            "longestAbsenceStreak": 6,
+            "presentInRounds": 7
+          },
+          {
+            "id": "88016712a787",
+            "selections": 10,
+            "longestAbsenceStreak": 4,
+            "presentInRounds": 10
+          },
+          {
+            "id": "fd3fc40e512d",
+            "selections": 11,
+            "longestAbsenceStreak": 4,
+            "presentInRounds": 11
+          },
+          {
+            "id": "ca5a080972d6",
+            "selections": 6,
+            "longestAbsenceStreak": 10,
+            "presentInRounds": 6
+          }
+        ],
+        "selectedCandidateCount": 18,
+        "neverSeenNonOversized": [],
+        "charsPerRound": [
+          3975,
+          4000,
+          4000,
+          3855,
+          3954,
+          3954,
+          3972,
+          3988,
+          3963,
+          3920,
+          3928,
+          3942,
+          3914,
+          3942,
+          3950,
+          3978,
+          3973,
+          3987
+        ],
+        "totalChars": 71195
+      },
+      "oversized": {
+        "count": 0,
+        "ids": [],
+        "note": "kept separately with raw failure classification — not a strategy difference; raw per-round oversized lists preserved in both arms"
+      },
+      "passLine": {
+        "rotationWindow12SelectedCount": 17,
+        "minRequired": 14,
+        "pass_12roundWindow": true,
+        "fullCycle18SelectedCount": 18,
+        "everyFifoStarvedSeenIn18Rounds": true,
+        "fifoByteIdenticalAcrossRounds": true,
+        "passLineVersion": "card v0.1 §5 (frozen before this run)"
+      }
+    }
+  }
+}
