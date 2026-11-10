@@ -192,6 +192,8 @@ describe('delivery surfaces (PRI-1051)', () => {
     expect(codex.status).toBe('stale');
     expect(codex.reason).toBe('plugin_pin_behind_runtime');
     expect(codex.nextAction).toContain('codex plugin add');
+    // The update chain must never require an uninstall (Owner requirement 2026-11-11).
+    expect(codex.nextAction).not.toContain('plugin remove');
     expect(codex.expected).toMatchObject({ core: '1.297.2', codexAdapter: '0.5.13' });
     expect(codex.actual).toMatchObject({ core: '1.296.2', codexAdapter: '0.5.12' });
     expect(report.ok).toBe(false);
