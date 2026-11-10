@@ -152,7 +152,7 @@ function input(root: string, extra: Record<string, unknown> = {}): string {
 const envFor = (root: string): NodeJS.ProcessEnv => ({
   [API_KEY_ENV]: 'test-key',
   CODEX_HOME: path.join(root, 'codex-home'),
-}) as unknown as NodeJS.ProcessEnv;
+});
 
 function sse(payload: unknown): Response {
   const packets = [
@@ -188,6 +188,7 @@ function requestCandidates(init: RequestInit | undefined): CandidateOnWire[] {
 interface Transport {
   readonly fetchImpl: typeof fetch;
   readonly calls: () => number;
+  readonly requests: () => Array<RequestInit | undefined>;
 }
 
 /** Answers using reference + digest READ FROM THE REQUEST, never recomputed. */
@@ -202,7 +203,7 @@ function echoingTransport(marker: string): Transport {
     expect(candidate?.digest).toBe(sha256(candidate?.text ?? ''));
     return sse({ status: 'selected', id: candidate?.ref, digest: candidate?.digest });
   };
-  return { fetchImpl, calls: () => inits.length };
+  return { fetchImpl, calls: () => inits.length, requests: () => inits };
 }
 
 function answeringTransport(answer: unknown): Transport {
@@ -211,7 +212,7 @@ function answeringTransport(answer: unknown): Transport {
     inits.push(init);
     return sse(answer);
   };
-  return { fetchImpl, calls: () => inits.length };
+  return { fetchImpl, calls: () => inits.length, requests: () => inits };
 }
 
 const additionalContext = (result: { stdout: unknown }): string => {
@@ -248,6 +249,14 @@ describe('PRI-1170 Codex exec Adaptive wiring', () => {
     });
 
     expect(transport.calls()).toBe(1);
+    // The outbound contract carries a locally precomputed digest. Without it the
+    // model cannot answer validly (it cannot compute sha256), so a payload that
+    // drops the digest must make THIS test fail with an explicit message.
+    for (const sent of requestCandidates(transport.requests()[0])) {
+      expect(sent.digest, `outbound candidate ${sent.ref} must carry a locally precomputed digest`).toBe(
+        sha256(sent.text),
+      );
+    }
     const context = additionalContext(adaptive);
     expect(context).toContain(TEXT.DELIVERY);
     // The Native body is not displaced by the increment.

@@ -157,10 +157,13 @@ export function buildBoundedSelectionInput(input: {
   for (const principle of input.candidates) {
     if (!principle.artifactContentSha256) continue;
     if (!principle.text.trim()) continue;
+    const candidateText = boundText(principle.text, ADAPTIVE_SELECTION_LIMITS.maxCandidateChars);
     entries.push({
       ref: `c${entries.length + 1}`,
-      text: boundText(principle.text, ADAPTIVE_SELECTION_LIMITS.maxCandidateChars),
-      digest: hash(principle.text),
+      text: candidateText,
+      // Digest the body exactly as it goes on the wire, so the model can copy it
+      // and anyone can recompute it from the request it actually received.
+      digest: hash(candidateText),
       principle,
     });
     if (entries.length >= ADAPTIVE_SELECTION_LIMITS.maxCandidates) break;
@@ -233,7 +236,9 @@ export function validateSelectionResult(
   if (!entry) {
     return {ok: false, reason: 'SELECTION_REFERENCE_INVALID', refValid: false, digestValid: null};
   }
-  if (selection.digest !== entry.digest || selection.digest !== hash(entry.principle.text)) {
+  // Two independent computations of the wire-body digest must agree: the value
+  // frozen into the candidate table and a fresh hash of the frozen body.
+  if (selection.digest !== entry.digest || selection.digest !== hash(entry.text)) {
     return {ok: false, reason: 'SELECTION_DIGEST_INVALID', refValid: true, digestValid: false};
   }
   if (entries.some((candidate) => candidate !== entry && candidate.principle.principleId === entry.principle.principleId)) {
