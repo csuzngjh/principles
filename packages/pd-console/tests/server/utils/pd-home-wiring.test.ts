@@ -7,6 +7,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { WorkspaceConfigStore } from '../../../src/server/config/WorkspaceConfigStore.js';
 import { getPdHome, PdHomeConfigurationError } from '../../../src/server/utils/pd-home.js';
+import { resolveCanonicalRuntimeRoot, resolveUpdateLayout } from '../../../src/server/utils/installed-layout.js';
 import { defaultConsolePort } from '../../../src/server/console-ports.js';
 
 const created: string[] = [];
@@ -72,6 +73,17 @@ describe('console PD home wiring', () => {
       expect((error as PdHomeConfigurationError).reason).toBe('experiment_root_not_absolute');
       expect((error as PdHomeConfigurationError).nextAction.length).toBeGreaterThan(0);
     }
+  });
+
+  it('shows "no installation here" for an experiment root instead of the production layout', () => {
+    const root = tempDir('layout');
+    process.env.PD_EXPERIMENT_ROOT = root;
+
+    // The update page must report the EXPERIMENT install. An empty experiment
+    // root has no install, so the answer is "missing" — never a silent fall
+    // back to the production runtime.
+    expect(resolveUpdateLayout()).toBeUndefined();
+    expect(resolveCanonicalRuntimeRoot()).toBe(path.join(fs.realpathSync.native(root), '.pd', 'runtime'));
   });
 
   it('keeps 3100 for production and 13100 for an experiment instance', () => {
