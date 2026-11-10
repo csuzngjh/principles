@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   assertNoDowngrade,
   checkMetadata,
   classifyCohort,
   deferredReport,
+  gitIsAncestor,
   nextPins,
   PUBLISH_RECHECK_TIMEOUT_MS,
   PUBLISH_WAIT_TIMEOUT_MS,
@@ -238,7 +240,19 @@ describe('Codex runtime delivery authority and discoverability', () => {
         now: () => 0,
         sleep: () => undefined,
         resolve: () => ({ ...incomplete, sha: 'b'.repeat(40) }),
+        isAncestor: () => false,
       })).toThrow(/not the current release cohort/);
+    });
+
+    it('refuses to decide anything when the ancestry authority was never wired', () => {
+      expect(() => waitForPublishedCohort({
+        sha,
+        timeoutMs: 60_000,
+        intervalMs: 5_000,
+        now: () => 0,
+        sleep: () => undefined,
+        resolve: () => ({ ...incomplete, sha: 'b'.repeat(40) }),
+      })).toThrow(/ancestry authority is not wired/);
     });
 
     it('does not retry a registry query failure', () => {
@@ -390,8 +404,16 @@ describe('Codex runtime delivery authority and discoverability', () => {
       expect(classifyCohort({ sha: target, latest: null, isAncestor: () => true }).outcome).toBe('unproven');
     });
 
-    it('defaults to no ancestry evidence, so a caller that forgets to wire it fails closed', () => {
-      expect(classifyCohort({ sha: target, latest: { cohort: true, sha: newer } }).outcome).toBe('unrelated');
+    it('refuses to answer without a wired authority, instead of guessing either way', () => {
+      expect(() => classifyCohort({ sha: target, latest: { cohort: true, sha: newer } }))
+        .toThrow(/ancestry authority is not wired/);
+    });
+
+    it('the production authority answers real git ancestry, and an unanswerable question is an error', () => {
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+      expect(gitIsAncestor(head, head)).toBe(true);
+      // A SHA git cannot resolve is an unanswered question, never "no".
+      expect(() => gitIsAncestor('f'.repeat(40), head)).toThrow(/ancestry check failed/);
     });
   });
 

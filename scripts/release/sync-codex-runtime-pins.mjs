@@ -74,6 +74,16 @@ function sleepSync(ms) {
 }
 
 /**
+ * No safe default exists for the ancestry question: answering "not an ancestor"
+ * from missing wiring would silently turn every supersession back into a red
+ * release run, and answering "ancestor" would turn every mismatch green. Refuse
+ * loudly instead; the CLI always wires `gitIsAncestor`.
+ */
+function unwiredAncestry() {
+  throw new Error('ancestry authority is not wired: refusing to decide whether the target cohort was superseded');
+}
+
+/**
  * Relationship between the cohort this run must pin and the cohort main
  * resolves to right now. The outcomes are deliberately distinct so a real
  * failure cannot be softened into a deferral: only `superseded` may defer.
@@ -88,7 +98,7 @@ function sleepSync(ms) {
  *                (target newer than main, unrelated history, shallow clone,
  *                wrong dispatch SHA). Supersession is NOT proven.
  */
-export function classifyCohort({ sha, latest, isAncestor = () => false }) {
+export function classifyCohort({ sha, latest, isAncestor = unwiredAncestry }) {
   if (latest?.cohort !== true) {
     return { outcome: 'unproven', reason: 'resolved value is not a proven Version Packages landing commit' };
   }
@@ -143,13 +153,14 @@ export function deferredReport({ target, supersededBy }) {
  * Packages landing commit) and `isAncestor(target, latest.sha)` (the target
  * really is an earlier point on the same spine). Every other mismatch (target
  * newer than main, unrelated history, an unproven resolver result, no resolvable
- * cohort) still throws. `isAncestor` defaults to "no evidence" on purpose: a
- * caller that forgets to wire it keeps the previous fail-closed behaviour.
+ * cohort) still throws. `isAncestor` has no safe default: a caller that forgets
+ * to wire it is refused loudly the first time the question is asked, instead of
+ * silently reading a supersession as an unrelated cohort (or the reverse).
  */
 export function waitForPublishedCohort({
   sha,
   resolve,
-  isAncestor = () => false,
+  isAncestor = unwiredAncestry,
   timeoutMs = PUBLISH_WAIT_TIMEOUT_MS,
   recheckMs = PUBLISH_RECHECK_TIMEOUT_MS,
   intervalMs = PUBLISH_WAIT_INTERVAL_MS,
@@ -198,8 +209,10 @@ export function waitForPublishedCohort({
  * True only when `ancestor` is a real ancestor of `descendant` in this clone.
  * git exits 1 for "no"; any other failure is an unanswered question and must
  * stay a hard failure instead of being read as either answer.
+ *
+ * Exported so tests can exercise the real git call instead of only a fake.
  */
-function gitIsAncestor(ancestor, descendant) {
+export function gitIsAncestor(ancestor, descendant) {
   try {
     execFileSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, stdio: 'ignore' });
     return true;
