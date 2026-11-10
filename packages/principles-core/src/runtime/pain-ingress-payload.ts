@@ -45,7 +45,11 @@ export type PainIngressOriginV1 =
         // channel identity instead of being flattened into a generic one.
         | 'codex_explicit_prefix'
         | 'codex_explicit_agent'
-        | 'workbuddy_explicit_prefix';
+        | 'workbuddy_explicit_prefix'
+        // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6: the agent observed the
+        // behaviour, the Owner authorized this submission in the host
+        // conversation. Neither a CLI statement nor a fake host session.
+        | 'mcp_agent_assisted';
     }
   | { kind: 'automatic_hook'; source: string };
 
@@ -110,17 +114,31 @@ export type PainEvidenceBundle =
 export type PainOrigin = PainIngressOriginV1;
 export type PainCorrelation = PainIngressCorrelationV1;
 
+/**
+ * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §5.6: the principle a
+ * `principle_deviation` report says the behaviour deviated from. Both halves
+ * are required — an id alone cannot be checked against the active ledger, and
+ * a stale version is a fact the Owner must see rather than a silently updated
+ * reference.
+ */
+export interface PainDeviationAnchor {
+  principleId: string;
+  principleVersion: string;
+}
+
 export interface PainIngressReport {
   identity:
     | { kind: 'manual_pain_id'; painId: string }
     | { kind: 'host_observation'; observationId: string };
-  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType: 'tool_failure' | 'subagent_error' | 'user_frustration' | 'principle_deviation';
   source: string;
   reason: string;
   score?: number;
   origin: PainOrigin;
   correlation: PainCorrelation;
   evidence: PainEvidenceBundle;
+  /** Present iff painType === 'principle_deviation' (enforced in the parser). */
+  deviationAnchor?: PainDeviationAnchor;
 }
 
 // ── Shared invariants and parsers (ONE implementation for write time AND
@@ -149,7 +167,8 @@ export function parseOrigin(value: unknown): PainOrigin | null {
   if (value.kind === 'owner_manual') {
     const {channel} = value;
     if (channel === 'openclaw_command' || channel === 'cli_explicit_session' || channel === 'external_cli_unbound'
-      || channel === 'codex_explicit_prefix' || channel === 'codex_explicit_agent' || channel === 'workbuddy_explicit_prefix') {
+      || channel === 'codex_explicit_prefix' || channel === 'codex_explicit_agent' || channel === 'workbuddy_explicit_prefix'
+      || channel === 'mcp_agent_assisted') {
       return { kind: 'owner_manual', channel };
     }
     return null;
@@ -254,6 +273,20 @@ export function parseScore(value: unknown): { score: number | undefined; scoreIn
   return { score: value };
 }
 
+/**
+ * rc-3: both anchor halves must be present, non-empty strings. Shape only —
+ * whether the anchor still resolves to an active/probation principle is a
+ * ledger fact checked by the submit capability, not here.
+ */
+export function parseDeviationAnchor(
+  value: unknown,
+): { value: PainDeviationAnchor; error?: undefined } | { value?: undefined; error: string } {
+  if (!isRecord(value)) return { error: 'anchor_invalid' };
+  if (!hasOwnString(value, 'principleId')) return { error: 'anchor_invalid' };
+  if (!hasOwnString(value, 'principleVersion')) return { error: 'anchor_invalid' };
+  return { value: { principleId: value.principleId as string, principleVersion: value.principleVersion as string } };
+}
+
 export type PainIngressParseResult =
   | { ok: true; report: PainIngressReport }
   | { ok: false; reasonCode: string; message: string };
@@ -277,9 +310,9 @@ export function parsePainIngressReport(input: unknown): PainIngressParseResult {
     return { ok: false, reasonCode: 'identity_invalid', message: 'identity.kind must be manual_pain_id or host_observation' };
   }
 
-  const painTypes = ['tool_failure', 'subagent_error', 'user_frustration'] as const;
+  const painTypes = ['tool_failure', 'subagent_error', 'user_frustration', 'principle_deviation'] as const;
   if (!(painTypes as readonly unknown[]).includes(input.painType)) {
-    return { ok: false, reasonCode: 'pain_type_invalid', message: 'painType must be tool_failure | subagent_error | user_frustration' };
+    return { ok: false, reasonCode: 'pain_type_invalid', message: 'painType must be tool_failure | subagent_error | user_frustration | principle_deviation' };
   }
   if (!hasOwnString(input, 'source')) return { ok: false, reasonCode: 'source_invalid', message: 'source is required' };
   if (!hasOwnString(input, 'reason')) return { ok: false, reasonCode: 'reason_invalid', message: 'reason is required' };
@@ -303,6 +336,23 @@ export function parsePainIngressReport(input: unknown): PainIngressParseResult {
     return { ok: false, reasonCode: 'score_invalid', message: 'score must be a number between 0 and 100' };
   }
 
+  // SPEC v0.8 §5.6: the anchor is mandatory for a principle deviation and
+  // forbidden for every other pain type — a deviation with no checkable
+  // reference is not a reportable deviation.
+  let deviationAnchor: PainDeviationAnchor | undefined;
+  if (input.deviationAnchor !== undefined) {
+    if (input.painType !== 'principle_deviation') {
+      return { ok: false, reasonCode: 'anchor_invalid', message: 'deviationAnchor is only allowed when painType is principle_deviation' };
+    }
+    const anchor = parseDeviationAnchor(input.deviationAnchor);
+    if (anchor.error !== undefined) {
+      return { ok: false, reasonCode: 'anchor_invalid', message: 'deviationAnchor requires non-empty principleId and principleVersion' };
+    }
+    deviationAnchor = anchor.value;
+  } else if (input.painType === 'principle_deviation') {
+    return { ok: false, reasonCode: 'anchor_invalid', message: 'principle_deviation requires deviationAnchor{principleId, principleVersion}' };
+  }
+
   return {
     ok: true,
     report: {
@@ -314,6 +364,7 @@ export function parsePainIngressReport(input: unknown): PainIngressParseResult {
       origin,
       correlation: correlation.value,
       evidence: evidence.value,
+      ...(deviationAnchor ? { deviationAnchor } : {}),
     },
   };
 }
@@ -331,6 +382,10 @@ export function validateOriginCorrelationInvariant(
 ): string | null {
   if (origin.kind !== 'owner_manual') return null;
   if (origin.channel === 'external_cli_unbound' && correlation.status === 'bound') {
+    return 'origin_correlation_mismatch';
+  }
+  // MCP has no trustworthy host session identity (SPEC v0.8 §6.6.3).
+  if (origin.channel === 'mcp_agent_assisted' && correlation.status === 'bound') {
     return 'origin_correlation_mismatch';
   }
   const requiresBoundCorrelation = origin.channel === 'cli_explicit_session'
@@ -414,6 +469,10 @@ export function deriveProvenanceFromIngressFacts(
   correlation: PainIngressCorrelationV1,
 ): PainProvenance {
   if (origin.kind === 'automatic_hook') return 'automatic_hook';
+  // Agent observed the behaviour, Owner authorized the submission
+  // (SPEC v0.8 §6.6.3). This is NOT "Owner reported": the Owner did not
+  // observe the behaviour and must never be shown as its author.
+  if (origin.channel === 'mcp_agent_assisted') return 'agent_reported_owner_approved';
   if (correlation.status === 'bound') return 'host_context_bound';
   return 'owner_reported_no_host_trace';
 }

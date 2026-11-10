@@ -477,6 +477,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       : {}),
     recordObservability,
     painIngress: binding.painIngress,
+    ...(binding.deviationAnchor ? { deviationAnchor: binding.deviationAnchor } : {}),
   });
 
   // Show diagnostic info for config failures
