@@ -6,7 +6,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
-import { createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
+import { createAdaptivePriorityProviderForConfig, createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace, type AdaptivePriorityProvider, type AdaptiveSelectionDiagnosticLine } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { CodexHooksHostAdapter } from './host-adapter.js';
@@ -37,6 +37,20 @@ function diagnostic(reason: string, nextAction: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, MAX_DIAGNOSTIC) : 'unknown_error';
+}
+
+/**
+ * PRI-1170: one bounded line per Adaptive turn. Records the facts needed to
+ * tell first-byte expiry, generation expiry, transport failure and ref/digest
+ * rejection apart — never the prompt, the raw response, or credentials.
+ */
+function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): string {
+  const status = line.status === 'selected' ? 'adaptive' : 'degraded';
+  const failures = line.failures.length > 0 ? line.failures.join('|') : 'none';
+  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} failures=${failures}`
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC * 2);
 }
 
 function redactStringFields(data: object): Record<string, unknown> {
@@ -205,7 +219,18 @@ async function runConversationIngestion(args: { rawPayload: unknown; kind: HostE
   return diagnostics;
 }
 
-export async function processHookInvocation(rawStdin: string, _env: EnvMap = process.env, cwd = process.cwd()): Promise<PdHookResult> {
+export interface PdHookDeps {
+  /** Test seam: replace the outbound transport without bypassing the hook entry. */
+  readonly fetchImpl?: typeof fetch;
+  readonly now?: () => number;
+  readonly firstByteTimeoutMs?: number;
+  readonly generationTimeoutMs?: number;
+}
+
+// stdin, env and cwd are the host CLI contract; `deps` is the optional transport
+// seam that lets integration tests drive the real entry point without a network.
+// eslint-disable-next-line @typescript-eslint/max-params
+export async function processHookInvocation(rawStdin: string, _env: EnvMap = process.env, cwd = process.cwd(), deps: PdHookDeps = {}): Promise<PdHookResult> {
   let parsed: unknown;
   try { parsed = JSON.parse(rawStdin); }
   catch (error) { return { stdout: {}, exitCode: 0, stderr: [diagnostic(`stdin_json_invalid:${errorMessage(error)}`, 'Verify Codex invokes the PD hook with one JSON object.')] }; }
@@ -402,10 +427,38 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // event-JSONL writer (same events_*.jsonl format as the OpenClaw EventLog;
     // the Codex adapter stays independent of the OpenClaw plugin). The line
     // writer appends synchronously — no flush/dispose needed for the subprocess.
+    // PRI-1170: Adaptive Activation is an INDEPENDENT, default-off switch on
+    // top of the PD hook. `host.codex.enabled` remains the whole-hook gate.
+    const adaptiveDiagnostics: string[] = [];
+    let adaptivePriorityProvider: AdaptivePriorityProvider | undefined;
+    if (event.kind === 'before_prompt_build' && flags['host.codex.adaptive_activation']?.enabled === true) {
+      const adaptive = createAdaptivePriorityProviderForConfig(
+        config.effective.config,
+        resolution.workspaceDir,
+        {
+          env: _env,
+          ...(deps.fetchImpl ? {fetchImpl: deps.fetchImpl} : {}),
+          ...(deps.now ? {now: deps.now} : {}),
+          ...(deps.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: deps.firstByteTimeoutMs} : {}),
+          ...(deps.generationTimeoutMs !== undefined ? {generationTimeoutMs: deps.generationTimeoutMs} : {}),
+          onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
+        },
+      );
+      if (adaptive.ok) {
+        adaptivePriorityProvider = adaptive.provider;
+      } else {
+        // rc-9: an enabled-but-unusable switch is observable, never silent.
+        adaptiveDiagnostics.push(diagnostic(
+          `adaptive_activation_${adaptive.readiness}:${adaptive.reason}`,
+          adaptive.nextAction,
+        ));
+      }
+    }
     const result = await createProductionHostRuntime({
       projectDir: requestedCwd,
       hostKind: 'codex',
       toolSemantics: CODEX_TOOL_SEMANTICS,
+      ...(adaptivePriorityProvider ? {adaptivePriorityProvider} : {}),
       ruleContextProvider: createCodexRuleContextProvider({
         workspaceDir: resolution.workspaceDir,
         projectDir: requestedCwd,
@@ -482,7 +535,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics];
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics, ...adaptiveDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;
