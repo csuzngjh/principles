@@ -310,13 +310,16 @@ describe('validateTargetPaths 边界', () => {
   });
 
   it('仓库外的路径 → 明确报错', () => {
-    const outside = path.join(os.tmpdir(), 'test-for-outside.ts');
+    // 唯一目录而非固定文件名：固定名在共享 temp 目录里可被他人预置（CodeQL
+    // js/insecure-temporary-file），且并发测试会互相覆盖。
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-for-outside-'));
+    const outside = path.join(outsideDir, 'outside.ts');
     fs.writeFileSync(outside, 'export const a = 1;\n');
     try {
       const result = validateTargetPaths({ ...base(), inputs: [outside] });
       expect(result.errors[0].message).toContain('路径不在当前 git 仓库内');
     } finally {
-      fs.rmSync(outside, { force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
     }
   });
 
