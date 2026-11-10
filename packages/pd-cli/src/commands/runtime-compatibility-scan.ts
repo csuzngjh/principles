@@ -41,6 +41,14 @@ function formatTextOutput(output: ActivationCompatibilityScanResult): string {
   lines.push(`workspace: ${output.workspaceDir}`);
   lines.push(`status: ${output.status}`);
   lines.push(`scannedActivations: ${output.scannedActivations}`);
+  // Human path must see skips too — `--json`-only visibility would not fix
+  // the operator who reads the terminal (2B-a).
+  if (output.skipped.length > 0) {
+    const total = output.skipped.reduce((sum, entry) => sum + entry.count, 0);
+    lines.push(
+      `skipped: ${total} active row(s) could not be scanned — ${output.skipped.map((entry) => `${entry.reason}=${entry.count}`).join(', ')}`,
+    );
+  }
   lines.push('');
   if (output.findings.length > 0) {
     lines.push('Retired-contract dependencies (these rules will NOT execute on this runtime):');
