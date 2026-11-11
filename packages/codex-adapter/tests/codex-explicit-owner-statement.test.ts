@@ -303,7 +303,7 @@ describe('CR-07 promotion ordering, recovery, and version honesty', () => {
       workspaceDir: ws.root,
       statementText: '首次提升失败后要能恢复',
       env: { CODEX_HOME: ws.codexHome },
-      codexConversationIngestionEnabled: true,
+      conversationIngestionEnabled: true,
     });
     expect(receipt.status).toBe('received');
     if (receipt.status !== 'received') return;
