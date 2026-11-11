@@ -30,7 +30,7 @@ import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
-import { validateMcpBinding } from '@principles/install-layout';
+import { validateMcpBindingShape } from './mcp-binding-shape-mirror.js';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -559,13 +559,17 @@ function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexR
   } catch {
     return false;
   }
-  // Use the SAME shape gate as the launcher (single declaration in
-  // @principles/install-layout). A binding the launcher would refuse —
-  // workspaceDir/serverEntry missing, a relative path, or a non-canonical
-  // serverEntry — must never count as healthy, or setup is skipped and the
-  // launcher stays dead on binding_workspace_invalid /
+  // Use the SAME shape gate as the launcher. The declaration lives in
+  // @principles/install-layout, but the packaged installer must keep loading
+  // against the PUBLISHED install-layout (registry-parity smoke, PRI-669/RF-02)
+  // and a normal PR cannot raise the version floor — so this is the pinned
+  // mirror, kept identical to the shared validator by
+  // mcp-binding-shape-mirror-parity.test.ts. A binding the launcher would
+  // refuse — workspaceDir/serverEntry missing, a relative path, or a
+  // non-canonical serverEntry — must never count as healthy, or setup is
+  // skipped and the launcher stays dead on binding_workspace_invalid /
   // binding_server_entry_invalid / server_entry_not_canonical.
-  const verdict = validateMcpBinding(binding, 'codex');
+  const verdict = validateMcpBindingShape(binding, 'codex');
   if (!verdict.ok) return false;
   // Installer-only context the shape contract cannot know: the binding must
   // describe THIS payload's runtime at THIS payload's pin.

@@ -366,6 +366,11 @@ jobs:
       - name: Build dependency (principles-core)
         run: npm run build --workspace=@principles/core
 
+      # The binding-contract parity test imports the shared declaration from
+      # @principles/install-layout's built entry point.
+      - name: Build dependency (@principles/install-layout)
+        run: npm run build --workspace=@principles/install-layout
+
       - name: Test (unit + real-process stdio contract)
         run: npm test --workspace=@principles/pd-mcp-server
 

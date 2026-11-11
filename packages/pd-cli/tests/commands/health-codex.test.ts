@@ -138,7 +138,8 @@ vi.mock('../../src/commands/health-codex-install.js', () => ({
   },
 }));
 
-vi.mock('@principles/install-layout', () => ({
+vi.mock('@principles/install-layout', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@principles/install-layout')>()),
   getInstallLayoutPaths: mockGetInstallLayoutPaths,
   parseInstallManifest: mockParseInstallManifest,
 }));
