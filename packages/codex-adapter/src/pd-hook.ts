@@ -219,18 +219,36 @@ async function runConversationIngestion(args: { rawPayload: unknown; kind: HostE
   return diagnostics;
 }
 
+/**
+ * The host hook window is declared by the plugin manifest
+ * (`plugins/principles-disciple/hooks/hooks.json`, `UserPromptSubmit.timeout`,
+ * in seconds). Codex owns that timer and terminates the hook process when it
+ * fires; PD gets no in-band notification, so Adaptive must end BEFORE the
+ * window and leave the remainder to emit the Native body.
+ * `pd-hook-adaptive.test.ts` guards this constant against the manifest.
+ */
+export const CODEX_HOOK_TIMEOUT_MS = 5_000;
+/** Reserved for Native packing, encoding and stdout after Adaptive is cut off. */
+export const CODEX_NATIVE_RESERVE_MS = 800;
+export const CODEX_ADAPTIVE_BUDGET_MS = CODEX_HOOK_TIMEOUT_MS - CODEX_NATIVE_RESERVE_MS;
+
 export interface PdHookDeps {
   /** Test seam: replace the outbound transport without bypassing the hook entry. */
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
   readonly firstByteTimeoutMs?: number;
   readonly generationTimeoutMs?: number;
+  /** Test seam: effective adaptive budget inside the host hook window. */
+  readonly hookBudgetMs?: number;
 }
 
 // stdin, env and cwd are the host CLI contract; `deps` is the optional transport
 // seam that lets integration tests drive the real entry point without a network.
 // eslint-disable-next-line @typescript-eslint/max-params
 export async function processHookInvocation(rawStdin: string, _env: EnvMap = process.env, cwd = process.cwd(), deps: PdHookDeps = {}): Promise<PdHookResult> {
+  // The host owns this window and kills the process when it expires; anchor at
+  // entry so decode/ingestion time counts against the same budget.
+  const adaptiveDeadlineAt = Date.now() + (deps.hookBudgetMs ?? CODEX_ADAPTIVE_BUDGET_MS);
   let parsed: unknown;
   try { parsed = JSON.parse(rawStdin); }
   catch (error) { return { stdout: {}, exitCode: 0, stderr: [diagnostic(`stdin_json_invalid:${errorMessage(error)}`, 'Verify Codex invokes the PD hook with one JSON object.')] }; }
@@ -441,6 +459,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           ...(deps.now ? {now: deps.now} : {}),
           ...(deps.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: deps.firstByteTimeoutMs} : {}),
           ...(deps.generationTimeoutMs !== undefined ? {generationTimeoutMs: deps.generationTimeoutMs} : {}),
+          outerDeadlineAt: adaptiveDeadlineAt,
           onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
         },
       );

@@ -618,6 +618,9 @@ export async function buildActivePrinciplePromptContext(input: {
     || authorityRead.principles.filter((principle) => principle.principleId === authorizedTarget.principleId).length !== 1) {
     return withoutTarget('authority_unavailable');
   }
+  // The authority re-read is part of the same host window: never commit a
+  // prioritized target after the deadline has passed.
+  if (input.deadlineAt !== undefined && Date.now() >= input.deadlineAt) return withoutTarget('deadline');
   // PRI-1137 final review P1-5: the second read must prove the AUTHORIZATION
   // FACTS unchanged, not merely present. The packed directive carries the
   // first snapshot's authority annotation, so an approval-state change

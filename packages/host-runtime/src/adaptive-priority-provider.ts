@@ -114,6 +114,12 @@ export interface CreateAdaptivePriorityProviderOptions {
   readonly model: AdaptiveSelectionModel;
   readonly firstByteTimeoutMs?: number;
   readonly generationTimeoutMs?: number;
+  /**
+   * Absolute host deadline (Codex: the plugin hook window minus the Native
+   * reserve). Selection, revalidation and packing all share it: a selection
+   * that cannot finish inside the window is cancelled and never applied.
+   */
+  readonly outerDeadlineAt?: number;
   readonly maxTokens?: number;
   readonly now?: () => number;
   /** Test seam: production uses the global transport. */
@@ -137,13 +143,26 @@ export function createAdaptivePriorityProvider(
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
     if (!sessionId || !turnId || !promptContent?.trim()) return undefined;
 
-    const admissionDeadlineAt = now() + firstByteTimeoutMs;
+    const admissionDeadlineAt = options.outerDeadlineAt === undefined
+      ? now() + firstByteTimeoutMs
+      : Math.min(now() + firstByteTimeoutMs, options.outerDeadlineAt);
+    const remainingBudgetMs = options.outerDeadlineAt === undefined
+      ? firstByteTimeoutMs
+      : Math.max(1, options.outerDeadlineAt - now());
+    const effectiveGenerationTimeoutMs = options.outerDeadlineAt === undefined
+      ? generationTimeoutMs
+      : Math.min(generationTimeoutMs, remainingBudgetMs);
+    // Reuse the selector's AbortSignal seam instead of a second timer: it is
+    // combined with the first-byte and request signals inside the transport.
+    const signal = options.outerDeadlineAt === undefined ? undefined : AbortSignal.timeout(remainingBudgetMs);
     const outcome = await runAdaptiveSelection({
       workspaceDir: workspaceDir || options.workspaceDir,
       currentPrompt: promptContent,
       admissionDeadlineAt,
       model: options.model,
-      generationTimeoutMs,
+      generationTimeoutMs: effectiveGenerationTimeoutMs,
+      ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
+      ...(signal ? {signal} : {}),
       ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
       ...(options.now ? {now: options.now} : {}),
       ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
@@ -165,7 +184,8 @@ export function createAdaptivePriorityProvider(
       artifactId: outcome.target.artifactId,
       activationId: outcome.target.activationId,
       additiveOnly: true,
-      deadlineAt: admissionDeadlineAt + generationTimeoutMs,
+      deadlineAt: options.outerDeadlineAt ?? admissionDeadlineAt + generationTimeoutMs,
+      ...(signal ? {signal} : {}),
     };
   };
 }
@@ -207,6 +227,7 @@ export function createAdaptivePriorityProviderForConfig(
     model: resolved.model,
     ...(options.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: options.firstByteTimeoutMs} : {}),
     ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
+    ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),

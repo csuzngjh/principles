@@ -25,7 +25,12 @@ import {
 } from '@principles/core/runtime';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { readPromptActivationCandidates } from '@principles/host-runtime';
-import { processHookInvocation } from '../src/pd-hook.js';
+import {
+  CODEX_ADAPTIVE_BUDGET_MS,
+  CODEX_HOOK_TIMEOUT_MS,
+  CODEX_NATIVE_RESERVE_MS,
+  processHookInvocation,
+} from '../src/pd-hook.js';
 
 const TEXT = {
   SCOPE: '只修改与任务直接相关的文件，邻近改进记为后续事项。',
@@ -382,6 +387,138 @@ describe('PRI-1170 Codex exec Adaptive wiring', () => {
     expect(context).toContain(TEXT.DELIVERY);
     expect(context.split(TEXT.DELIVERY).length - 1).toBe(1);
     expect(result.stderr.join('')).toContain('reason=adaptive_selection_selected:selected');
+  });
+
+  it('the plugin hook window is the budget source and the PD self-deadline stays inside it', () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(new URL('../../../plugins/principles-disciple/hooks/hooks.json', import.meta.url), 'utf8'),
+    ) as { hooks: { UserPromptSubmit: Array<{ hooks: Array<{ timeout: number }> }> } };
+    const hookTimeoutMs = manifest.hooks.UserPromptSubmit[0]!.hooks[0]!.timeout * 1000;
+    expect(hookTimeoutMs).toBe(CODEX_HOOK_TIMEOUT_MS);
+    expect(CODEX_ADAPTIVE_BUDGET_MS + CODEX_NATIVE_RESERVE_MS).toBe(CODEX_HOOK_TIMEOUT_MS);
+    // The Native body still has to be packed, encoded and written after the
+    // Adaptive step is cancelled; the reserve is what that budget protects.
+    expect(CODEX_NATIVE_RESERVE_MS).toBeGreaterThanOrEqual(500);
+  });
+
+  it('an outer hook deadline cancels a response that already started and keeps Native', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const root = await fixture({ label: 'outer-deadline', adaptive: true, budgetChars });
+    const encoder = new TextEncoder();
+    let abortObserved = false;
+    let bodyTornDown = false;
+    const fetchImpl: typeof fetch = async (_resource, init) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id: 'fake', model: MODEL, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })}\n\n`));
+          init?.signal?.addEventListener('abort', () => {
+            abortObserved = true;
+            bodyTornDown = true;
+            try {
+              controller.error(new DOMException('aborted', 'AbortError'));
+            } catch {
+              // The stream is already closed; the abort still reached it.
+            }
+          }, { once: true });
+          setTimeout(() => {
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id: 'fake', model: MODEL, choices: [{ index: 0, delta: { content: '{}' }, finish_reason: null }] })}\n\n`));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            } catch {
+              // Aborted first; a late chunk must never be delivered.
+            }
+          }, 1500);
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    };
+    const startedAt = Date.now();
+    const result = await processHookInvocation(input(root), envFor(root), root, {
+      fetchImpl,
+      hookBudgetMs: 600,
+      firstByteTimeoutMs: 1000,
+      generationTimeoutMs: 5000,
+    });
+    const elapsed = Date.now() - startedAt;
+    expect(abortObserved, 'the outer deadline must reach the transport').toBe(true);
+    expect(bodyTornDown).toBe(true);
+    expect(elapsed).toBeLessThan(1500);
+    expect(additionalContext(result)).toContain(TEXT.SCOPE);
+    expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:TURN_DEADLINE_EXCEEDED');
+    expect(result.stderr.join('')).toContain('stage=generation');
+    // Distinguishable from a pure generation timeout (SELECTION_EXPIRED).
+    expect(result.stderr.join('')).not.toContain('SELECTION_EXPIRED');
+  });
+
+  it('a valid selection that arrives after the outer deadline cannot change the final body', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const nativeRoot = await fixture({ label: 'late-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'late-selection', adaptive: true, budgetChars });
+    const encoder = new TextEncoder();
+    let abortObserved = false;
+    const fetchImpl: typeof fetch = async (_resource, init) => {
+      const candidates = requestCandidates(init);
+      const candidate = candidates.find((item) => item.text.includes(TEXT.DELIVERY));
+      const body = JSON.stringify({ status: 'selected', id: candidate?.ref, digest: candidate?.digest });
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id: 'fake', model: MODEL, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] })}\n\n`));
+          init?.signal?.addEventListener('abort', () => {
+            abortObserved = true;
+            try {
+              controller.error(new DOMException('aborted', 'AbortError'));
+            } catch {
+              // already closed
+            }
+          }, { once: true });
+          // A protocol-valid answer, but only after the outer deadline.
+          setTimeout(() => {
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id: 'fake', model: MODEL, choices: [{ index: 0, delta: { content: body }, finish_reason: null }] })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id: 'fake', model: MODEL, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            } catch {
+              // Aborted first.
+            }
+          }, 1500);
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    };
+    const startedAt = Date.now();
+    const result = await processHookInvocation(input(root), envFor(root), root, {
+      fetchImpl,
+      hookBudgetMs: 600,
+      firstByteTimeoutMs: 1000,
+      generationTimeoutMs: 5000,
+    });
+    expect(abortObserved).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(1500);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    expect(result.stderr.join('')).toContain('TURN_DEADLINE_EXCEEDED');
+  });
+
+  it('a fast none_applicable answer returns normally under the hook budget', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const nativeRoot = await fixture({ label: 'none-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'none-fast', adaptive: true, budgetChars });
+    const transport = answeringTransport({ status: 'none_applicable', id: null, digest: null });
+    const result = await processHookInvocation(input(root), envFor(root), root, {
+      fetchImpl: transport.fetchImpl,
+      hookBudgetMs: 2000,
+    });
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:no_increment');
+    expect(result.stderr.join('')).toContain('stage=done');
+    expect(result.stderr.join('')).not.toContain('TURN_DEADLINE_EXCEEDED');
   });
 
   it('a selected target that cannot fit leaves Native untouched', async () => {
