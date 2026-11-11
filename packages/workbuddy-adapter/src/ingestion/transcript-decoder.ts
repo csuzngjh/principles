@@ -102,8 +102,13 @@ interface DecodeContext {
   observations: GovernanceObservationInput[];
   /** id → {parentId, role} for in-window reasoning attribution (§4.8). */
   seenRecords: Map<string, { parentId: string | null; role: string | null }>;
-  /** callId → observation index awaiting its function_call_result (FIFO by file order). */
-  pendingToolCalls: Map<string, number>;
+  /**
+   * callId → observation indexes awaiting their function_call_result, in file
+   * order. A QUEUE, not one slot: the host does not dedupe callIds, and a
+   * window can legitimately contain call1(c), call2(c), result1(c), result2(c).
+   * Keeping only the first call leaves call2 permanently unpaired (P2 review).
+   */
+  pendingToolCalls: Map<string, number[]>;
   /** Every callId seen in THIS window — duplicate ids keep record-scoped keys. */
   seenCallIds: Set<string>;
   warningCounts: Map<string, number>;
@@ -152,11 +157,37 @@ function projectUserText(context: DecodeContext, text: string | null): string | 
     const start = match.index ?? 0;
     return [start, start + match[0].length] as const;
   });
-  const queries = [...text.matchAll(USER_QUERY_BLOCK)]
-    .filter((match) => {
-      const start = match.index ?? 0;
-      return !hostContextRanges.some(([begin, end]) => start >= begin && start < end);
-    })
+  const queryMatches = [...text.matchAll(USER_QUERY_BLOCK)].filter((match) => {
+    const start = match.index ?? 0;
+    return !hostContextRanges.some(([begin, end]) => start >= begin && start < end);
+  });
+
+  // Structure check (P2 review): a `<system-reminder>` without its closing tag,
+  // or a nested reminder, makes "inside host context" undecidable — an
+  // unclosed host block leaves a crafted `<user_query>` outside every matched
+  // range and promotes host instructions to Owner text. Validate the ENVELOPE
+  // (the text with accepted query blocks blanked out), so an Owner who pasted
+  // a literal `<system-reminder>` inside their query keeps it verbatim.
+  const blanked = [...queryMatches].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).reduce((acc, match) => {
+    const start = match.index ?? 0;
+    return acc.slice(0, start) + ' '.repeat(match[0].length) + acc.slice(start + match[0].length);
+  }, text);
+  const envelopeRanges = [...blanked.matchAll(SYSTEM_REMINDER_BLOCK)].map((match) => {
+    const start = match.index ?? 0;
+    return [start, start + match[0].length] as const;
+  });
+  const openerCount = [...blanked.matchAll(/<system-reminder\b/g)].length;
+  const closerCount = [...blanked.matchAll(/<\/system-reminder>/g)].length;
+  const nestedReminder = [...blanked.matchAll(/<system-reminder\b/g)].some((match) => {
+    const start = match.index ?? 0;
+    return envelopeRanges.some(([begin, end]) => start > begin && start < end);
+  });
+  if (openerCount !== closerCount || nestedReminder) {
+    warnAggregated(context, 'wb_user_context_unconfirmed');
+    return null;
+  }
+
+  const queries = queryMatches
     .map((match) => match[1]?.trim() ?? '')
     .filter((part) => part.length > 0);
   if (queries.length > 0) return queries.join('\n');
@@ -295,6 +326,15 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
       warnAggregated(context, 'wb_skipped_message_role');
       return;
     }
+    // Compaction summaries are HOST-authored text that happens to reuse the
+    // user role. Projecting them as `user_turn` would file host content as
+    // Owner behavior evidence (the same failure mode the <user_query> boundary
+    // guards against). Keep the record observable via the warning, but never
+    // emit an Owner turn for it.
+    if (role === 'user' && providerData !== null && own(providerData, 'isSummary') === true) {
+      warnAggregated(context, 'wb_skipped:compaction_summary');
+      return;
+    }
     const joined = joinContentText(own(raw, 'content'));
     // Only user turns carry the host-context wrapper; assistant turns keep the
     // existing verbatim projection (no wrapper observed in forensic samples).
@@ -381,8 +421,10 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
       observedAt: record.timestampIso,
     };
     const index = context.observations.push(observation) - 1;
-    if (callId !== null && !context.pendingToolCalls.has(callId)) {
-      context.pendingToolCalls.set(callId, index);
+    if (callId !== null) {
+      const pending = context.pendingToolCalls.get(callId);
+      if (pending === undefined) context.pendingToolCalls.set(callId, [index]);
+      else pending.push(index);
     }
     return;
   }
@@ -392,12 +434,16 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
     const callId = nonEmptyString(own(raw, 'callId'));
     const status = nonEmptyString(own(raw, 'status'));
     const outputPreview = resultOutputPreview(own(raw, 'output'));
-    const pairedIndex = callId !== null ? context.pendingToolCalls.get(callId) : undefined;
+    // FIFO: the first still-unpaired call with this callId owns this result.
+    // Duplicate callIds therefore pair in file order instead of collapsing.
+    const pending = callId !== null ? context.pendingToolCalls.get(callId) : undefined;
+    const pairedIndex = pending !== undefined && pending.length > 0 ? pending[0] : undefined;
     const pairedCall = pairedIndex !== undefined ? context.observations[pairedIndex] : undefined;
-    if (callId !== null && pairedIndex !== undefined && pairedCall !== undefined) {
+    if (callId !== null && pending !== undefined && pairedIndex !== undefined && pairedCall !== undefined) {
       // Result side backfills its in-window call observation (anchored on the
       // call record id — replay converges on ONE logical key per execution).
-      context.pendingToolCalls.delete(callId);
+      pending.shift();
+      if (pending.length === 0) context.pendingToolCalls.delete(callId);
       context.observations[pairedIndex] = {
         ...pairedCall,
         completeness: 'complete',

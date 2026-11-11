@@ -118,6 +118,19 @@ export function createWorkbuddyTranscriptSource(context: WorkbuddyTranscriptSour
         return { status: 'degraded', reason: 'transcript_unavailable', nextAction: 'no WorkBuddy transcript exists yet for this session; nothing is read or fabricated.' };
       }
       if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction };
+      // Same session binding as the hinted branch (P2 review): the derived
+      // file name is shaped from the session id, but a symlinked
+      // <sessionId>.jsonl can resolve to ANOTHER session's transcript. Only the
+      // canonical identity is authoritative; never file another session's
+      // evidence under this session.
+      const derivedSessionId = session.sessionId.trim().toLowerCase();
+      if (derivedSessionId.length === 0 || validated.sessionIdentity !== derivedSessionId) {
+        return {
+          status: 'degraded',
+          reason: 'transcript_session_mismatch',
+          nextAction: `the derived transcript resolves to session ${validated.sessionIdentity}, not ${derivedSessionId}; PD refuses to read another session's evidence.`,
+        };
+      }
       return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
     },
 

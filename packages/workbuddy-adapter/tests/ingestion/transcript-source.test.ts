@@ -218,7 +218,10 @@ describe('decodeWindow assembly', () => {
     const delta = source().decodeWindow(located, { bytes, fileOffset: 0, byteBoundReached: false, fileSize: bytes.length }, null);
     expect(delta.compactionTimestamp).toBeNull();
     expect(delta.warnings).toContain('wb_compaction_marker:1');
-    expect(delta.observations.map((o) => o.kind)).toEqual(['assistant_turn', 'user_turn']);
+    // The summary record is host-authored: observable as a warning, never as an
+    // Owner turn (P2 review).
+    expect(delta.warnings).toContain('wb_skipped:compaction_summary:1');
+    expect(delta.observations.map((o) => o.kind)).toEqual(['assistant_turn']);
   });
 
   it('keeps no host guard and seeds ordinals from the checkpoint', () => {

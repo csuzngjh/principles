@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { listGovernanceCheckpoints } from '@principles/host-runtime';
+import { deferGovernanceCheckpoint, listGovernanceCheckpoints } from '@principles/host-runtime';
 import { ingestWorkbuddyConversation } from './ingestion.js';
 import { validateWorkbuddyTranscriptPath, workbuddyProjectsRoot } from './transcript-path.js';
 
@@ -109,15 +109,25 @@ export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): Wor
 
   let ingested = 0;
   const warnings: string[] = [];
+  const nowIso = (options.now ?? new Date()).toISOString();
+  // A failed session must not hold the oldest-first prefix forever (P2 review):
+  // bump ONLY its retry position so the next cycle can reach the rollouts
+  // behind it. Byte offset/ordinal stay untouched, so the work is still
+  // pending and retryable.
+  const defer = (rolloutIdentity: string, reason: string): void => {
+    deferGovernanceCheckpoint({ workspaceDir: options.workspaceDir, hostKind: 'workbuddy', rolloutIdentity, reason, now: nowIso });
+  };
   for (const checkpoint of checkpoints) {
     const located = locateCheckpointTranscript(projectsRoot, checkpoint.rolloutIdentity);
     if (located === null) {
       warnings.push(`transcript_unavailable:${checkpoint.rolloutIdentity}`);
+      defer(checkpoint.rolloutIdentity, 'transcript_unavailable');
       continue;
     }
     const validated = validateWorkbuddyTranscriptPath(located, projectsRoot);
     if (!validated.ok) {
       warnings.push(`${validated.reason}:${checkpoint.rolloutIdentity}`);
+      defer(checkpoint.rolloutIdentity, validated.reason);
       continue;
     }
     const outcome = ingestWorkbuddyConversation({
@@ -129,7 +139,10 @@ export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): Wor
       ...(options.home !== undefined ? { home: options.home } : {}),
     });
     if (outcome.status === 'ingested') ingested += outcome.inserted;
-    else if (outcome.status === 'degraded') warnings.push(`${outcome.reason}:${checkpoint.rolloutIdentity}`);
+    else if (outcome.status === 'degraded') {
+      warnings.push(`${outcome.reason}:${checkpoint.rolloutIdentity}`);
+      defer(checkpoint.rolloutIdentity, outcome.reason);
+    }
     // 'skipped' = consent revoked/absent: intentional, never a warning.
   }
   if (warnings.length > 0) {

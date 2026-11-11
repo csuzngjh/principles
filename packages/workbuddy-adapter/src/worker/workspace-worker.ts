@@ -81,6 +81,12 @@ export interface WorkbuddyWorkerCycleResult {
   readonly mode: WorkbuddyWorkerMode;
   readonly reason?: string;
   readonly nextAction?: string;
+  /**
+   * Degradations that did NOT decide the cycle mode. A `paused` cycle still
+   * runs catch-up, so its degradation must stay visible instead of being
+   * swallowed by the paused early return (P2 review).
+   */
+  readonly degradations?: readonly string[];
   readonly report?: WorkbuddyWorkerCycleStepReport;
 }
 
@@ -202,6 +208,12 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       mode: 'paused',
       reason: 'internalization_auto_consumer_disabled',
       nextAction: 'Automatic internalization execution is paused for this governance workspace; manual commands remain available: pd diagnose, pd runtime internalization run-once.',
+      // Catch-up ran BEFORE this early return. Keeping its degradation on the
+      // paused result means `pd workbuddy worker --once` can still report a
+      // broken transcript catch-up instead of exiting as a clean pause.
+      ...(catchUp.status === 'degraded'
+        ? { degradations: [`catch_up:${catchUp.reason ?? 'degraded'}`] }
+        : {}),
       report: { catchUp, reconcile, diagnostician: null, downstream: null },
     };
   } else {
