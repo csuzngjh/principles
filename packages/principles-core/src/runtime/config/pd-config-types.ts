@@ -355,6 +355,32 @@ export type PartialContextInjectionConfig = {
 
 // ── Top-Level Config ────────────────────────────────────────────────────────
 
+/**
+ * Adaptive Activation — dedicated Decisions endpoint configuration
+ * (PRI-1182). Deliberately its own named section rather than a generic
+ * "capability" registry: there is exactly one adaptive decision path, and it
+ * needs an exact endpoint + model + credential reference, not a profile
+ * abstraction (P7). The enable switch stays the existing
+ * `features['host.codex.adaptive_activation']` flag.
+ */
+export interface AdaptiveActivationConfig {
+  /** Exact Decisions endpoint; must be an https URL. */
+  endpoint: string;
+  /** Decision model id, for example respan/span-01-lite:free. */
+  model: string;
+  /** Environment variable holding the endpoint API key (never the value). */
+  apiKeyEnv: string;
+  /** Optional provider allowlist label; when set, fallbacks are forbidden. */
+  provider?: string;
+  /**
+   * Frozen EXACT response-model allowlist. When present, an answer whose
+   * `model` is not one of these strings is rejected — the alias rule (which
+   * accepts any `<base>-YYYYMMDD`) is bypassed, so an unregistered date is a
+   * mismatch.
+   */
+  responseModels?: string[];
+}
+
 export interface PdConfig {
   version: PdConfigVersion;
   /** Workspace path configuration (optional). */
@@ -371,6 +397,11 @@ export interface PdConfig {
    * configs; the effective layer resolves the defaults.
    */
   reuseEvaluation?: ReuseEvaluationConfig;
+  /**
+   * Adaptive Activation decision endpoint (PRI-1182) — optional; absent ⇒ the
+   * Adaptive path reports `needs_setup` and Native remains unchanged.
+   */
+  adaptiveActivation?: AdaptiveActivationConfig;
   /**
    * Owner-declared model capacity (PRI-1020) — optional; absent ⇒ the
    * injection budget chain is unchanged. Values validated at load with the

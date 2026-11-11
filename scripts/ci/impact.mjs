@@ -82,6 +82,18 @@ const RELEASE_PATHS = [
   /^\.github\/workflows\/(publish-npm|release-reproducibility|release-reproducibility-full|companion-release|release-metadata)\.yml$/,
 ];
 
+// PD built-in skill delivery surfaces (four directories: OpenClaw zh/en,
+// Codex marketplace plugin, WorkBuddy adapter plugin). These are mostly .md
+// files, so without this rule a skill-only change classifies as docs → zero
+// jobs run, and the cross-host parity assertion in the installer never fires.
+// They MUST activate `installer` (the current owner of that assertion), in
+// addition to whatever package scope their directory already implies.
+const SKILL_DELIVERY_PATHS = [
+  /^packages\/openclaw-plugin\/templates\/langs\/[^/]+\/skills\//,
+  /^packages\/workbuddy-adapter\/plugin\/skills\//,
+  /^plugins\/principles-disciple\/skills\//,
+];
+
 // Direct components of the self-contained release asset + the release
 // construction itself — from build-release-asset.mjs REQUIRED_COMPONENTS
 // ('plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'
@@ -190,11 +202,16 @@ function affectedClosure(changedDirs, graph) {
 }
 
 function classifyFile(file, changedDirs) {
+  const skillDelivery = SKILL_DELIVERY_PATHS.some((re) => re.test(file));
   const pkgMatch = file.match(/^packages\/([^/]+)\//);
-  if (pkgMatch && Object.hasOwn(SCOPE_BY_DIR, pkgMatch[1])) {
-    changedDirs.add(pkgMatch[1]);
-    return;
-  }
+  const scopedPackage = Boolean(pkgMatch && Object.hasOwn(SCOPE_BY_DIR, pkgMatch[1]));
+  // Keep the package scope of a skill path: a skill edit is still a change to
+  // the package that ships it.
+  if (scopedPackage) changedDirs.add(pkgMatch[1]);
+  // Skill delivery is neither docs nor "broad": it is a narrow surface with a
+  // dedicated guard, so it must not collapse into docs-only.
+  if (skillDelivery) return 'skills';
+  if (scopedPackage) return;
   // Remaining files are root-level; docs-surface files are narrow, everything
   // else broadens (conservative default — unknown never means "no impact").
   if (BDD_FEATURE_FILE.test(file)) return 'broad';
@@ -218,6 +235,7 @@ export async function computeImpact({ base, head, repo }) {
 
   const broadFiles = [...classifications.entries()].filter(([, cls]) => cls === 'broad').map(([f]) => f);
   const docsFiles = [...classifications.entries()].filter(([, cls]) => cls === 'docs').map(([f]) => f);
+  const skillFiles = [...classifications.entries()].filter(([, cls]) => cls === 'skills').map(([f]) => f);
   const broad = broadFiles.length > 0;
   const docsOnly = !broad && changedDirs.size === 0 && docsFiles.length === changedFiles.length;
 
@@ -229,6 +247,11 @@ export async function computeImpact({ base, head, repo }) {
     const scope = SCOPE_BY_DIR[dir];
     if (scope) scopes[scope] = true;
   }
+  // Skill delivery change → the cross-host parity guard must run. Deliberately
+  // does NOT mark the installer package "affected": only the job gate changes.
+  if (skillFiles.length > 0) {
+    scopes.installer = true;
+  }
   // Derived flag consumed by the lint job's gate: eslint runs across every
   // package, so any package scope (direct or transitive) means lint runs.
   scopes.anyPackage = ALL_PACKAGE_SCOPES.some((scope) => scopes[scope]);
@@ -237,6 +260,13 @@ export async function computeImpact({ base, head, repo }) {
   for (const dir of changedDirs) {
     const scope = SCOPE_BY_DIR[dir];
     if (scope) reasons[scope] = 'direct file change under packages/' + dir;
+  }
+  if (skillFiles.length > 0) {
+    reasons.installer =
+      'skill delivery surface changed (' +
+      skillFiles.slice(0, 3).join(', ') +
+      (skillFiles.length > 3 ? ', …' : '') +
+      ') — cross-host skill parity guard';
   }
   for (const scope of ALL_PACKAGE_SCOPES) {
     if (scopes[scope] && !Object.hasOwn(reasons, scope)) {
