@@ -481,18 +481,36 @@ function deriveMarketplaceName(versionDir: string): string | undefined {
 }
 
 /**
+ * True when `file` must be dispatched through the Windows command processor.
+ *
+ * Only a BARE command name needs it: `codex` on Windows is a `.cmd`/`.ps1`
+ * shim that CreateProcess cannot execute directly. An executable PATH —
+ * absolute, drive-qualified or containing a separator — must be spawned
+ * directly, because `shell: true` lets Node join the command line WITHOUT
+ * quoting the executable: `D:\Program Files\nodejs\node.exe` reaches cmd.exe as
+ * `D:\Program` and the child never starts (regression from #2505, which made
+ * `runRuntimeSetup` pass `process.execPath`).
+ */
+function shouldUseShell(file: string): boolean {
+  if (process.platform !== 'win32') return false;
+  if (path.win32.isAbsolute(file)) return false;
+  return !/[\\/]/.test(file);
+}
+
+/**
  * Default command runner. `codex` on Windows is a `.cmd`/`.ps1` shim that
- * CreateProcess cannot execute directly, so the Windows branch goes through
- * the command processor; every argument passed here is a validated literal
- * (marketplace name `/^[A-Za-z0-9._-]+$/`, absolute paths), never user input.
+ * CreateProcess cannot execute directly, so it goes through the command
+ * processor; every argument on that path is a validated literal
+ * (marketplace name `/^[A-Za-z0-9._-]+$/`, no whitespace), never user input.
+ * Executable paths are spawned directly so a space in the path cannot split
+ * the command line.
  */
 function defaultRunCommand(file: string, args: readonly string[], timeoutMs: number): CodexCommandResult {
-  const isWindows = process.platform === 'win32';
   const result = spawnSync(file, [...args], {
     encoding: 'utf-8',
     timeout: timeoutMs,
     windowsHide: true,
-    shell: isWindows,
+    shell: shouldUseShell(file),
   });
   const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : '';
   const error = result.error instanceof Error ? result.error.message : undefined;
