@@ -1,11 +1,15 @@
 /**
- * PRI-530/PRI-531 integration: the REAL gate hook path — RuleHost boundary
- * mocked (established pattern), everything else real (temp workspace, real
- * .pd/config.yaml flags, real state.db metadata + ledger rows).
+ * PRI-530/PRI-531 integration: the production shared rule-host path —
+ * WorkspaceContext mocked (established pattern), everything else real (temp
+ * workspace, real .pd/config.yaml flags, real state.db metadata + ledger rows).
  *
- * Closes the wiring-depth gap found in the BDD review gate: block-copy and
- * ledger scenarios entered at recordGateBlockAndReturn / recordInjectionPresence,
- * leaving gate.ts's ruleId/principleId threading untested through the hook.
+ * PRODUCTION REALITY: `handleBeforeToolCall` is no longer wired; the deny
+ * decision is produced by the shared production gate and handed to
+ * `handleSharedRuleHostResult`. The host blocks on that deny, so the plugin no
+ * longer builds the owner-facing block copy. These tests therefore pin the
+ * deny ACCOUNTING that survives on the shared path: the receipt-ledger effect
+ * row attribution (ruleId/principleId threading), the ledger flag gate, and
+ * the observable rc-9 skip when attribution is missing.
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -13,8 +17,8 @@ import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
-import type { PluginHookBeforeToolCallResult } from '../../src/openclaw-sdk.js';
+import type { HostEventResult } from '@principles/core/host';
+import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import {
   clearPrincipleApplicationLedgerCache,
 } from '../../src/core/principle-application-ledger.js';
@@ -40,22 +44,11 @@ const mockEventLogInstance = {
 vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: { get: vi.fn(() => mockEventLogInstance) },
 }));
-let _mockEvaluate = vi.fn().mockReturnValue(undefined);
-vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function(this: unknown, _stateDir: string, _logger: unknown) {
-    this.evaluate = _mockEvaluate;
-  }),
-  // P1 (2026-08-20): the gate now routes compatibility-guard blocks through
-  // this type guard; the mocked rule-host must export it so the mocked
-  // evaluate() results (no diagnostics.kind) are NOT misrouted.
-  isCompatibilityGuardBlock: vi.fn(() => false),
-}));
 vi.mock('../../src/core/workspace-context.js', () => ({
   WorkspaceContext: {
     fromHookContext: vi.fn((ctx: { workspaceDir?: string }) => ({
       workspaceDir: ctx.workspaceDir,
       stateDir: (ctx.workspaceDir ?? '') + '/.state',
-      getRuleHost: () => ({ evaluate: _mockEvaluate, dispose: vi.fn() }),
       eventLog: mockEventLogInstance,
       trajectory: { recordGateBlock: vi.fn(), getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
       config: { get: vi.fn().mockReturnValue(undefined) },
@@ -100,12 +93,35 @@ function seedMetadata(): void {
     .run(now);
 }
 
+function makeCtx(logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() }) {
+  return { workspaceDir, sessionId: 'sess-integ', logger };
+}
+
+/** The host-neutral deny result the shared production gate emits for a block. */
+function makeDenyResult(metadata: Record<string, unknown>): HostEventResult {
+  return {
+    decision: 'deny',
+    source: 'before_tool_call',
+    reason: '删除类操作必须先确认目标',
+    metadata: { evaluatedLiveRules: 1, ...metadata },
+  };
+}
+
+function blockEvents() {
+  return (mockEventLogInstance.recordGateBlock as { mock: { calls: unknown[][] } }).mock.calls;
+}
+
+function ledgerRows(): { principle_id: string; session_id: string; rule_id: string }[] {
+  return conn.getDb()
+    .prepare("SELECT principle_id, session_id, rule_id FROM principle_applications WHERE kind='rule_blocked'")
+    .all() as never;
+}
+
 beforeEach(() => {
   clearPrincipleApplicationLedgerCache();
   clearPrincipleReceiptMetadataCache();
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gate-integ-'));
   conn = new SqliteConnection(workspaceDir);
-  _mockEvaluate = vi.fn().mockReturnValue(undefined);
 });
 
 afterEach(() => {
@@ -115,83 +131,72 @@ afterEach(() => {
   fs.rmSync(workspaceDir, { recursive: true, force: true });
 });
 
-describe('PRI-530/PRI-531 gate-hook integration (real handleBeforeToolCall path)', () => {
-  it('block: blockReason carries principle attribution AND ledger effect row is written (flags on)', () => {
+describe('PRI-530/PRI-531 gate-hook integration (shared rule-host path)', () => {
+  it('block: deny accounting threads principle attribution into the ledger effect row (flags on)', () => {
     writeConfig({ blockCopy: true, ledger: true });
     seedMetadata();
-    _mockEvaluate = vi.fn().mockReturnValue({
-      decision: 'block',
-      matched: true,
-      reason: '删除类操作必须先确认目标',
-      ruleId: 'R-integ',
-      principleId: 'princ-integ',
-    });
 
-    const result = handleBeforeToolCall(
+    const result = handleSharedRuleHostResult(
       { toolName: 'exec', params: { command: 'rm -rf build/' } },
-      { workspaceDir, sessionId: 'sess-integ', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-    ) as PluginHookBeforeToolCallResult;
+      makeCtx() as never,
+      makeDenyResult({ ruleId: 'R-integ', principleId: 'princ-integ' }),
+    );
 
-    // Receipt copy (gate → gate-block-helper threading of ruleId/principleId)
-    expect(result.block).toBe(true);
-    expect(result.blockReason).toContain('「删除前确认目标」');
-    expect(result.blockReason).toContain('2026-07-30');
-    expect(result.blockReason).toContain('来源：');
+    // The host blocks on the gate's deny; the adapter returns no second block
+    // object (there is no plugin-side block copy on the shared path).
+    expect(result).toBeUndefined();
 
-    // Ledger row (gate write point)
-    const row = conn.getDb()
-      .prepare("SELECT * FROM principle_applications WHERE kind='rule_blocked'")
-      .get() as { principle_id: string; session_id: string; rule_id: string } | undefined;
-    expect(row).toBeDefined();
-    expect(row?.principle_id).toBe('princ-integ');
-    expect(row?.session_id).toBe('sess-integ');
-    expect(row?.rule_id).toBe('R-integ');
+    // Ledger row (shared deny accounting write point)
+    const rows = ledgerRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.principle_id).toBe('princ-integ');
+    expect(rows[0]?.session_id).toBe('sess-integ');
+    expect(rows[0]?.rule_id).toBe('R-integ');
+
+    // EventLog gate_block keeps the shared source tag.
+    expect(blockEvents()).toEqual([
+      ['sess-integ', expect.objectContaining({ blockSource: 'rule-host-shared', reason: '删除类操作必须先确认目标' })],
+    ]);
   });
 
-  it('block with flags off: generic copy AND no ledger row', () => {
+  it('block with flags off: no ledger row while the block itself is still accounted', () => {
     writeConfig({ blockCopy: false, ledger: false });
     seedMetadata();
-    _mockEvaluate = vi.fn().mockReturnValue({
-      decision: 'block',
-      matched: true,
-      reason: '删除类操作必须先确认目标',
-      ruleId: 'R-integ',
-      principleId: 'princ-integ',
-    });
 
-    const result = handleBeforeToolCall(
+    const result = handleSharedRuleHostResult(
       { toolName: 'exec', params: { command: 'rm -rf build/' } },
-      { workspaceDir, sessionId: 'sess-integ', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-    ) as PluginHookBeforeToolCallResult;
+      makeCtx() as never,
+      makeDenyResult({ ruleId: 'R-integ', principleId: 'princ-integ' }),
+    );
 
-    expect(result.blockReason).toContain('Security Gate Blocked');
-    expect(result.blockReason).not.toContain('PD 原则');
+    expect(result).toBeUndefined();
     const count = (conn.getDb()
       .prepare('SELECT COUNT(*) AS n FROM principle_applications')
       .get() as { n: number }).n;
     expect(count).toBe(0);
+    // Enforcement is never gated by the ledger flag.
+    expect(blockEvents()).toEqual([
+      ['sess-integ', expect.objectContaining({ blockSource: 'rule-host-shared' })],
+    ]);
   });
 
   it('PRI-573: block without ruleId/principleId skips the effect row with an observable rc-9 warn', () => {
     writeConfig({ blockCopy: false, ledger: true });
-    _mockEvaluate = vi.fn().mockReturnValue({
-      decision: 'block',
-      matched: true,
-      reason: 'attribution-less block',
-      // no ruleId, no principleId — RuleHostResult leaves both optional
-    });
 
     const warn = vi.fn();
-    const result = handleBeforeToolCall(
+    const result = handleSharedRuleHostResult(
       { toolName: 'exec', params: { command: 'rm -rf build/' } },
-      { workspaceDir, sessionId: 'sess-integ', logger: { warn, error: vi.fn(), info: vi.fn() } },
-    ) as PluginHookBeforeToolCallResult;
+      makeCtx({ warn, error: vi.fn(), info: vi.fn() }) as never,
+      // no ruleId, no principleId — the gate metadata carries no attribution
+      makeDenyResult({}),
+    );
 
-    // The block itself still stands (ledger never gates enforcement)…
-    expect(result.block).toBe(true);
+    // The deny itself still stands (ledger never gates enforcement)…
+    expect(result).toBeUndefined();
+    expect(blockEvents()).toHaveLength(1);
     // …but the skipped effect row must be observable, not silent (rc-9).
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('Receipt ledger row skipped (rule_blocked)'),
+      expect.stringContaining('Receipt ledger row skipped (rule_blocked, shared)'),
     );
     const count = (conn.getDb()
       .prepare('SELECT COUNT(*) AS n FROM principle_applications')

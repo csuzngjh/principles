@@ -1,20 +1,22 @@
 /**
- * PD v2 Phase 1 gate-hook evidence integration: the REAL handleBeforeToolCall
- * path (RuleHost boundary mocked — established pattern), everything else real
+ * PD v2 Phase 1 gate-hook evidence integration: the PRODUCTION shared rule-host
+ * path (WorkspaceContext mocked — established pattern), everything else real
  * (temp workspace, real config flags, real state.db + evidence ledger rows).
  *
- * Proves the wiring, not just the recorder: a live-rule block flows through
- * the hook into the normalized evidence ledger as delivery (runtime_loaded)
- * + runtime_verified application + episode + effect, and the block decision
- * itself is unchanged when evidence storage fails.
+ * The shared production gate owns the deny decision; `handleSharedRuleHostResult`
+ * owns the accounting. These tests prove the wiring, not just the recorder: a
+ * live-rule deny that reaches the adapter is mirrored into the normalized
+ * evidence ledger as delivery (runtime_loaded) + runtime_verified application +
+ * episode + effect, and that accounting degrades to a warning when evidence
+ * storage fails.
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SqliteConnection } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
-import type { PluginHookBeforeToolCallResult } from '../../src/openclaw-sdk.js';
+import type { HostEventResult } from '@principles/core/host';
+import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import { clearPrincipleApplicationLedgerCache } from '../../src/core/principle-application-ledger.js';
 import { clearPrincipleReceiptMetadataCache } from '../../src/core/principle-receipt-metadata.js';
 
@@ -36,23 +38,11 @@ const mockEventLogInstance = {
 vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: { get: vi.fn(() => mockEventLogInstance) },
 }));
-let _mockEvaluate = vi.fn().mockReturnValue(undefined);
-vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function(this: unknown, _stateDir: string, _logger: unknown) {
-    this.evaluate = _mockEvaluate;
-  }),
-  isCompatibilityGuardBlock: vi.fn(() => false),
-}));
 vi.mock('../../src/core/workspace-context.js', () => ({
   WorkspaceContext: {
     fromHookContext: vi.fn((ctx: { workspaceDir?: string }) => ({
       workspaceDir: ctx.workspaceDir,
       stateDir: (ctx.workspaceDir ?? '') + '/.state',
-      getRuleHost: () => ({
-        evaluate: _mockEvaluate,
-        evaluateDetailed: _mockEvaluate,
-        dispose: vi.fn(),
-      }),
       eventLog: mockEventLogInstance,
       trajectory: { recordGateBlock: vi.fn(), getRuleHostContextRows: vi.fn(() => ({ rows: [], truncated: false })) },
       config: { get: vi.fn().mockReturnValue(undefined) },
@@ -68,8 +58,8 @@ function seedLiveActivation(): void {
   const db = conn.getDb();
   const now = '2026-10-01T00:00:00Z';
   // affectedTools must cover the gated tool, otherwise the RuleCode safety
-  // circuit treats the live rule as out-of-approved-scope and isolates it
-  // (fail-open return) before any block path runs.
+  // circuit treats a live rule as out-of-approved-scope and isolates it
+  // (fail-open return) before any correction/approval path runs.
   db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id,
               content_json, created_at, updated_at)
               VALUES ('art-ev', 'principle', 'task-ev', 'princ-ev', ?, ?, ?)`)
@@ -88,12 +78,45 @@ function evidenceRows(): { record_kind: string; observation_key: string; payload
     .all() as never;
 }
 
+function makeCtx(logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() }) {
+  return { workspaceDir, sessionId: 'sess-ev', logger };
+}
+
+function makeEvent(extra: Record<string, unknown> = {}) {
+  return { toolName: 'exec', params: { command: 'rm -rf build/' }, ...extra };
+}
+
+/** The host-neutral deny result the shared production gate emits for a block. */
+function makeDenyResult(activationId?: string): HostEventResult {
+  return {
+    decision: 'deny',
+    source: 'before_tool_call',
+    reason: '删除类操作必须先确认目标',
+    metadata: {
+      evaluatedLiveRules: 1,
+      ruleId: 'R-ev',
+      principleId: 'princ-ev',
+      evaluations: [
+        {
+          toolName: 'exec',
+          filePath: 'build/',
+          matched: true,
+          decision: 'block',
+          ruleId: 'R-ev',
+          activationMode: 'live',
+          hostKind: 'openclaw',
+          ...(activationId !== undefined ? { activationId } : {}),
+        },
+      ],
+    },
+  };
+}
+
 beforeEach(() => {
   clearPrincipleApplicationLedgerCache();
   clearPrincipleReceiptMetadataCache();
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gate-ev-'));
   conn = new SqliteConnection(workspaceDir);
-  _mockEvaluate = vi.fn().mockReturnValue(undefined);
 });
 
 afterEach(() => {
@@ -103,27 +126,19 @@ afterEach(() => {
   fs.rmSync(workspaceDir, { recursive: true, force: true });
 });
 
-describe('PD v2 Phase 1: gate hook writes normalized enforcement evidence', () => {
+describe('PD v2 Phase 1: shared gate path writes normalized enforcement evidence', () => {
   it('block: delivery + runtime_verified application + episode + effect rows with cross-refs', () => {
     seedLiveActivation();
-    _mockEvaluate = vi.fn().mockReturnValue({
-      liveDecision: {
-        decision: 'block', matched: true,
-        reason: '删除类操作必须先确认目标', ruleId: 'R-ev', principleId: 'princ-ev',
-      },
-      shadowDecisions: [],
-      liveRulesLoaded: 1,
-      evaluationStatus: 'ok',
-      liveDecisionActivationId: 'act-ev',
-    });
 
-    const result = handleBeforeToolCall(
-      { toolName: 'exec', params: { command: 'rm -rf build/' }, toolUseId: 'toolu-1', runId: 'run-ev' },
-      { workspaceDir, sessionId: 'sess-ev', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-    ) as PluginHookBeforeToolCallResult;
+    const result = handleSharedRuleHostResult(
+      makeEvent({ toolUseId: 'toolu-1', runId: 'run-ev' }),
+      makeCtx() as never,
+      makeDenyResult('act-ev'),
+    );
 
-    // The block decision itself is untouched by evidence wiring.
-    expect(result.block).toBe(true);
+    // The deny decision itself is untouched by evidence wiring (the host
+    // blocks on the gate's deny; no second block object is returned).
+    expect(result).toBeUndefined();
 
     const rows = evidenceRows();
     expect(rows.map((r) => r.record_kind).sort()).toEqual(['application', 'behavior_episode', 'delivery', 'effect']);
@@ -147,62 +162,67 @@ describe('PD v2 Phase 1: gate hook writes normalized enforcement evidence', () =
   });
 
   it('block without activation attribution writes NO evidence rows (honest gap)', () => {
-    _mockEvaluate = vi.fn().mockReturnValue({
-      liveDecision: { decision: 'block', matched: true, reason: 'x', ruleId: 'R-ev', principleId: 'princ-ev' },
-      shadowDecisions: [],
-      liveRulesLoaded: 1,
-      evaluationStatus: 'ok',
-      // no liveDecisionActivationId
-    });
-    const result = handleBeforeToolCall(
-      { toolName: 'exec', params: { command: 'rm -rf build/' } },
-      { workspaceDir, sessionId: 'sess-ev', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
-    ) as PluginHookBeforeToolCallResult;
-    expect(result.block).toBe(true);
+    const result = handleSharedRuleHostResult(
+      makeEvent({ toolUseId: 'toolu-gap' }),
+      makeCtx() as never,
+      makeDenyResult(),
+    );
+
+    expect(result).toBeUndefined();
     expect(evidenceRows()).toHaveLength(0);
   });
 
   it('allow decisions write no enforcement evidence', () => {
     seedLiveActivation();
-    _mockEvaluate = vi.fn().mockReturnValue({
-      liveDecision: { decision: 'allow', matched: false },
-      shadowDecisions: [],
-      liveRulesLoaded: 1,
-      evaluationStatus: 'ok',
-      liveDecisionActivationId: 'act-ev',
-    });
-    const result = handleBeforeToolCall(
-      { toolName: 'exec', params: { command: 'ls build/' }, toolUseId: 'toolu-2' },
-      { workspaceDir, sessionId: 'sess-ev', logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } },
+
+    const result = handleSharedRuleHostResult(
+      makeEvent({ params: { command: 'ls build/' }, toolUseId: 'toolu-2' }),
+      makeCtx() as never,
+      {
+        decision: 'allow',
+        source: 'before_tool_call',
+        metadata: {
+          evaluatedLiveRules: 1,
+          ruleDecision: 'allow',
+          matched: false,
+          evaluations: [
+            {
+              toolName: 'exec',
+              filePath: 'build/',
+              matched: false,
+              decision: 'allow',
+              activationId: 'act-ev',
+              activationMode: 'live',
+              hostKind: 'openclaw',
+            },
+          ],
+        },
+      },
     );
+
     expect(result).toBeUndefined();
     expect(evidenceRows()).toHaveLength(0);
   });
 
   it('evidence storage failure never flips the block (SQLite write-failure injection)', () => {
     seedLiveActivation();
-    _mockEvaluate = vi.fn().mockReturnValue({
-      liveDecision: { decision: 'block', matched: true, reason: '删除类操作必须先确认目标', ruleId: 'R-ev', principleId: 'princ-ev' },
-      shadowDecisions: [],
-      liveRulesLoaded: 1,
-      evaluationStatus: 'ok',
-      liveDecisionActivationId: 'act-ev',
-    });
-    // Inject a real persistence failure at the database boundary. The
-    // evidence write must degrade to a warning while the computed block
-    // decision stands unchanged.
+    // Inject a real persistence failure at the database boundary. The evidence
+    // write must degrade to a warning; the deny decision and its accounting
+    // stand unchanged (the shared path cannot re-decide the gate's deny).
     conn.getDb().exec(`CREATE TRIGGER fail_intervention_evidence_insert
       BEFORE INSERT ON intervention_evidence_records
       BEGIN SELECT RAISE(ABORT, 'injected evidence write failure'); END;`);
 
     const warn = vi.fn();
-    const result = handleBeforeToolCall(
-      { toolName: 'exec', params: { command: 'rm -rf build/' }, toolUseId: 'toolu-3' },
-      { workspaceDir, sessionId: 'sess-ev', logger: { warn, error: vi.fn(), info: vi.fn() } },
-    ) as PluginHookBeforeToolCallResult;
+    const result = handleSharedRuleHostResult(
+      makeEvent({ toolUseId: 'toolu-3' }),
+      makeCtx({ warn, error: vi.fn(), info: vi.fn() }) as never,
+      makeDenyResult('act-ev'),
+    );
 
-    expect(result.block).toBe(true);
-    expect(warn).toHaveBeenCalled();
+    expect(result).toBeUndefined();
+    // The block itself is still accounted (event-log row retained).
+    expect(mockEventLogInstance.recordGateBlock).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls.flat().join(' ')).toContain('injected evidence write failure');
     expect(evidenceRows()).toHaveLength(0);
   });

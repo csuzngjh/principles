@@ -43,7 +43,7 @@ const dispatch = vi.fn<(event: HostEvent, next: (event: HostEvent) => Promise<Ho
 );
 const createProductionHostRuntime = vi.fn();
 const handleBeforePromptBuild = vi.fn();
-const handleBeforeToolCall = vi.fn();
+const handleSharedRuleHostResult = vi.fn();
 const handleAfterToolCall = vi.fn();
 const prepareOrdinaryAfterToolCallForSharedRuntime = vi.fn(() => ({ eventId: 'openclaw:registered-1' }));
 const sharedEnabled = vi.hoisted(() => ({ value: true }));
@@ -63,7 +63,7 @@ vi.mock('@principles/host-runtime', async (importOriginal) => {
   return { ...actual, createProductionHostRuntime };
 });
 vi.mock('../src/hooks/prompt.js', () => ({ handleBeforePromptBuild, beginAdaptivePromptInvocation: vi.fn(() => 'test-shared-invocation') }));
-vi.mock('../src/hooks/gate.js', () => ({ handleBeforeToolCall }));
+vi.mock('../src/hooks/gate.js', () => ({ handleSharedRuleHostResult }));
 vi.mock('../src/hooks/pain.js', () => ({ handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime }));
 vi.mock('../src/core/pd-config-loader.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/core/pd-config-loader.js')>();
@@ -118,7 +118,7 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     dispatch.mockImplementation((event, next) => next(event));
     createProductionHostRuntime.mockClear();
     handleBeforePromptBuild.mockReset();
-    handleBeforeToolCall.mockReset();
+    handleSharedRuleHostResult.mockReset();
     handleAfterToolCall.mockReset();
     prepareOrdinaryAfterToolCallForSharedRuntime.mockClear();
     sharedEnabled.value = true;
@@ -154,7 +154,6 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
     const hook = hooks.get(hookName);
     expect(hook).toBeDefined();
     if (hookName === 'before_prompt_build') handleBeforePromptBuild.mockResolvedValue(nativeResult);
-    if (hookName === 'before_tool_call') handleBeforeToolCall.mockReturnValue(nativeResult);
 
     // after_tool_call exercises the real production pain-evidence kernel, which
     // requires a schema-compatible trajectory.db to reach the enrichment provider
@@ -177,7 +176,12 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
       expect(prepareOrdinaryAfterToolCallForSharedRuntime).toHaveBeenCalledOnce();
       expect(handleAfterToolCall).not.toHaveBeenCalled();
     }
-    if (hookName === 'before_tool_call') expect(handleBeforeToolCall).not.toHaveBeenCalled();
+    // PR-1: `handleBeforeToolCall` is retired (no production wiring). The
+    // equivalent registration fact — moved one layer up, to the adapter the
+    // shared runtime actually calls — is that the assembled shared adapter
+    // received the gate result for this dispatch.
+    if (hookName === 'before_tool_call') expect(handleSharedRuleHostResult).toHaveBeenCalledOnce();
+
     expect(result).toEqual(nativeResult);
   });
 
@@ -197,7 +201,10 @@ describe('PRI-523 OpenClaw production registration uses shared host runtime', ()
       expect.objectContaining({ kind: 'before_tool_call', source: 'openclaw:before_tool_call' }),
       expect.any(Function),
     );
-    expect(handleBeforeToolCall).not.toHaveBeenCalled();
+    // The flag cannot revive the retired route: the dispatch went through the
+    // shared runtime and the shared adapter (not plugin-local legacy code)
+    // consumed the result.
+    expect(handleSharedRuleHostResult).toHaveBeenCalledOnce();
   });
 
   it('forwards an explicit scoped adaptive mapping through the shared prompt dispatch and leaves unconfigured Native unchanged', async () => {
