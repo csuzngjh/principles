@@ -3,6 +3,11 @@
 > 状态：**方案，待 Owner 评审**。本轮未改任何生产代码。
 > 基线：`origin/main` @ `fee93e1b0`（2026-11-10 拉取）。
 > 关联：评审报告 §4.2（B1–B5）、PR #2498（5B）、AGENTS.md P2.1 / P7 / P8。
+>
+> **状态更新（2026-11-11，评审期间追加）**：实施已先行于本方案的裁定——
+> - **B1 已按方案 B 实施并合入**：PR #2501（`09a12057f`）。新增可选 `degraded` + `normalizeRuleHostResult()`，非法结果统一 fail-closed 归一化（生产门 `production-rulehost-gate.ts` 现经 `normalizeRuleHostResult` 处理，不再是 `warning + continue`）。§8 问题 1 由行动回答：**采方案 B**。
+> - **B2 已实施为 PR #2508（OPEN）**：§3.2.2 的缺口（显式粗筛提示压过 `canonicalKind`，生产/回放 `normalizedPath` 分叉）经真实输出证实并修复——`canonicalKind` 成为提取提示唯一权威；§3.2.1（声明覆盖守卫）与 §3.2.3（双常量同源）**验证后取消**（理由见 #2506→#2508 PR 卡 §6；`validateRuleReliability` 已 fail-loud、`tool-semantics.ts` 与 `tools.ts` 已同源）。§8 问题 3 由行动回答：**保留缩窄后的 B2，两个子项取消**。
+> - **B3 / B4 / B5 未动**，仍待 Owner 裁定（§8 问题 2 亦未裁定）。
 
 ---
 
@@ -216,8 +221,11 @@
 ## 8. 需要 Owner 裁定的三件事
 
 1. **B1 采用方案 A 还是方案 B**？我推荐 B（不新增 `verdict/reasons/evidence`，只补 `degraded` 并统一 fail-closed）。理由是方案 A 会制造与 `decision/reason/diagnostics` 同义的第二套词汇。
+   【已裁定（由行动，2026-11-10）：采方案 B，PR #2501 已合入 `09a12057f`。】
 2. **B4 是否允许删除 legacy `core/rule-host.ts`**？需要先做调用方盘点；若仍有生产调用，本批只做显式契约，不删除。
+   【仍未裁定（2026-11-11）。】
 3. **B2 是否允许"验证后取消"**？如果 `withDerivedHints` 已让 `canonicalKind` 胜出，我建议直接取消该批，不为了计划完整性写代码。
+   【已裁定（由行动，2026-11-11）：`withDerivedHints` 实测是显式提示胜出（`options.isBashTool ?? derived`），缺口真实存在，故 B2 保留但缩窄为 §3.2.2 单项（PR #2508）；§3.2.1 / §3.2.3 验证后取消。】
 
 ---
 
