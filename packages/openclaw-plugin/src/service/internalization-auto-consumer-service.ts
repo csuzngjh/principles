@@ -12,7 +12,7 @@
 import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
 import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../constants/tool-semantics.js';
-import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, saveHostToolDeclaration } from '@principles/host-runtime';
+import { runInternalizationConsumerCycle, runPendingDiagnosticianOnce, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, saveHostToolDeclaration, HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
 import { BehaviorExamplePackAssembler } from '../core/behavior-example-pack-assembler.js';
 import path from 'node:path';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
@@ -66,7 +66,7 @@ export function persistOpenClawToolDeclaration(
   // plugin registration itself.
   try {
     const declared = saveHostToolDeclaration(workspaceDir, {
-      version: 1,
+      version: HOST_TOOL_DECLARATION_VERSION,
       hostKind: 'openclaw',
       mappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
       declaredAt: new Date().toISOString(),

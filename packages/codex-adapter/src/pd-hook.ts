@@ -518,7 +518,10 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       ? toolSemanticsResolution.registry
       : CODEX_TOOL_SEMANTICS;
     const toolSemanticsDiagnostics = toolSemanticsResolution.ok
-      ? []
+      // ADR-0030: a legacy persisted declaration still loads (degraded to
+      // defaults) and must be visible on stderr (rc-9).
+      ? toolSemanticsResolution.warnings.map((warning) =>
+          diagnostic(warning, 're-run this host so it refreshes its persisted tool declaration'))
       : [diagnostic(toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
     const result = await createProductionHostRuntime({
       projectDir: requestedCwd,

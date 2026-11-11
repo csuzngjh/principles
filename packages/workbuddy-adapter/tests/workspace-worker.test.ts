@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { runWorkbuddyWorkspaceWorkerCycle } from '../src/worker/workspace-worker.js';
+import { HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
 import { makeHome, makeGovernance, cleanupTempDirs } from './helpers/workbench.js';
 
 const TRAJECTORY_DDL = [
@@ -100,7 +101,7 @@ describe('WorkBuddy worker cycle — production ready path (empty queue, zero LL
     expect(fs.existsSync(declarationPath)).toBe(true);
     const declaration = JSON.parse(fs.readFileSync(declarationPath, 'utf8')) as { hostKind: string; version: number };
     expect(declaration.hostKind).toBe('workbuddy');
-    expect(declaration.version).toBe(1);
+    expect(declaration.version).toBe(HOST_TOOL_DECLARATION_VERSION);
   });
 
   it('declaration persist failure degrades and SKIPS the downstream cycle', async () => {

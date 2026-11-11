@@ -41,7 +41,13 @@ import {
 } from './host-tool-declaration.js';
 
 export type HostToolSemanticResolution =
-  | { readonly ok: true; readonly registry: ToolSemanticRegistry; readonly hostKinds: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly registry: ToolSemanticRegistry;
+      readonly hostKinds: readonly string[];
+      /** Non-blocking load diagnostics (legacy declaration version). */
+      readonly warnings: readonly string[];
+    }
   | { readonly ok: false; readonly reason: string; readonly nextAction: string };
 
 type MergedMappings =
@@ -65,6 +71,22 @@ function mergeDeclarations(declarations: readonly HostToolDeclaration[]): Merged
           ok: false,
           reason: `host_tool_declaration_invalid (conflicting canonicalKind for '${mapping.rawToolName}': ${existing.canonicalKind} vs ${mapping.canonicalKind})`,
           nextAction: 'each raw tool name must resolve to one canonical kind across all co-installed hosts — fix the conflicting host declaration',
+        };
+      }
+      // ADR-0030: the payload encoding is part of the same identity. Two hosts
+      // claiming the same write tool with different encodings cannot both be
+      // right, and picking by startup order would make parsing order-dependent.
+      //
+      // An ABSENT format is a claim of plain content, not "no opinion": with a
+      // single-value enum this is the only reading under which the guard can
+      // fire, so "host A omits / host B declares the patch envelope" is a real
+      // disagreement (fail loud) rather than silently resolved drift. The fix
+      // belongs in the host declaration, never here.
+      if (existing && existing.writePayloadFormat !== mapping.writePayloadFormat) {
+        return {
+          ok: false,
+          reason: `host_tool_declaration_invalid (conflicting writePayloadFormat for '${mapping.rawToolName}': ${existing.writePayloadFormat ?? 'unset'} vs ${mapping.writePayloadFormat ?? 'unset'})`,
+          nextAction: 'each raw tool name must resolve to one write payload format across all co-installed hosts — fix the conflicting host declaration',
         };
       }
       if (!existing) mappings.push(mapping);
@@ -98,6 +120,7 @@ export function resolveWorkspaceHostToolSemantics(workspaceDir: string): HostToo
     ok: true,
     registry: built.registry,
     hostKinds: loaded.declarations.map((d: HostToolDeclaration) => d.hostKind).sort(),
+    warnings: loaded.warnings,
   };
 }
 
@@ -105,7 +128,13 @@ export function resolveWorkspaceHostToolSemantics(workspaceDir: string): HostToo
 export type HookToolSemanticsSource = 'workspace-declaration' | 'host-static';
 
 export type HookToolSemanticsResolution =
-  | { readonly ok: true; readonly registry: ToolSemanticRegistry; readonly source: HookToolSemanticsSource }
+  | {
+      readonly ok: true;
+      readonly registry: ToolSemanticRegistry;
+      readonly source: HookToolSemanticsSource;
+      /** Non-blocking diagnostics the host must surface (legacy version). */
+      readonly warnings: readonly string[];
+    }
   | { readonly ok: false; readonly reason: string; readonly nextAction: string };
 
 export interface HookToolSemanticsOptions {
@@ -134,6 +163,9 @@ export interface HookToolSemanticsOptions {
  * - malformed / conflicting declaration → typed refusal, never a silent
  *   static fallback and never an empty registry. Consumers must surface the
  *   reason (rc-9) and may fall back to their static registry for availability.
+ * - legacy declaration version (v1 read by a v2 build) → NOT a refusal: the
+ *   file is read with v1 semantics (`writePayloadFormat` unset) and the
+ *   result carries `warnings`, which consumers must surface (rc-9).
  */
 export function resolveHostToolSemanticsForHook(
   options: HookToolSemanticsOptions,
@@ -149,7 +181,7 @@ export function resolveHostToolSemanticsForHook(
   const loaded = loadHostToolDeclarations(options.workspaceDir);
   if (!loaded.ok) {
     if (loaded.reason === 'host_tool_declaration_missing') {
-      return { ok: true, registry: builtStatic.registry, source: 'host-static' };
+      return { ok: true, registry: builtStatic.registry, source: 'host-static', warnings: [] };
     }
     return { ok: false, reason: loaded.reason, nextAction: loaded.nextAction };
   }
@@ -167,7 +199,7 @@ export function resolveHostToolSemanticsForHook(
       nextAction: `merged tool mappings invalid: ${built.errors.slice(0, 3).join('; ')}`,
     };
   }
-  return { ok: true, registry: built.registry, source: 'workspace-declaration' };
+  return { ok: true, registry: built.registry, source: 'workspace-declaration', warnings: loaded.warnings };
 }
 
 export { saveHostToolDeclaration };

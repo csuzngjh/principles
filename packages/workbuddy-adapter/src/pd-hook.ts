@@ -458,7 +458,10 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ? toolSemanticsResolution.registry
       : WORKBUDDY_TOOL_SEMANTICS;
     const toolSemanticsDiagnostics = toolSemanticsResolution.ok
-      ? []
+      // ADR-0030: a legacy persisted declaration still loads (degraded to
+      // defaults) and must be visible on stderr (rc-9).
+      ? toolSemanticsResolution.warnings.map((warning) =>
+          diagnostic('degraded', warning, 're-run this host so it refreshes its persisted tool declaration'))
       : [diagnostic('degraded', toolSemanticsResolution.reason, toolSemanticsResolution.nextAction)];
     const result: HostEventResult = await createProductionHostRuntime({
       ...(projectDir !== undefined ? { projectDir } : {}),

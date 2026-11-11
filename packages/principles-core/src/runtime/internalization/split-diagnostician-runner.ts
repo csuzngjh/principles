@@ -138,7 +138,13 @@ export class SplitDiagnosticianRunner {
       dependencyTaskIds: [],
     });
 
-    const resultA = await this.runStageWithRetry({
+    // Recovery resume: a previous partial run may have already completed Stage
+    // A. Re-running it would attempt to lease a `succeeded` task and dead-end
+    // the parent with lease_conflict (observed in PRI-983 E2E recovery). The
+    // stage artifact is committed before the task is marked succeeded, and
+    // Stage B reads that artifact itself — so skip the re-run.
+    const cachedA = await this.reuseSucceededStage(stageATaskId);
+    const resultA = cachedA ?? await this.runStageWithRetry({
       taskId: stageATaskId,
       runFn: (id) => this.rootCauseRunner.run(id),
       stageLabel: 'A (rootcause)',
@@ -158,7 +164,10 @@ export class SplitDiagnosticianRunner {
       dependencyTaskIds: [stageATaskId],
     });
 
-    const resultB = await this.runStageWithRetry({
+    // Same recovery-resume rule as Stage A: a succeeded B already committed
+    // its distiller artifact, which Stage C reads directly.
+    const cachedB = await this.reuseSucceededStage(stageBTaskId);
+    const resultB = cachedB ?? await this.runStageWithRetry({
       taskId: stageBTaskId,
       runFn: (id) => this.distillerRunner.run(id),
       stageLabel: 'B (distiller)',
@@ -369,6 +378,19 @@ export class SplitDiagnosticianRunner {
         lastError: null,
       });
     }
+  }
+
+  /**
+   * Recovery resume for Stages A/B: when a previous partial run already
+   * completed the stage, re-leasing it would fail (a `succeeded` task is not
+   * leasable) and dead-end the parent with `lease_conflict`. The stage's
+   * artifact is committed before the task is marked succeeded, and the next
+   * stage reads that artifact directly, so skipping the re-run is safe.
+   */
+  private async reuseSucceededStage(taskId: string): Promise<PeerRunnerResult<unknown> | null> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task || task.status !== 'succeeded') return null;
+    return { status: 'succeeded', taskId, attemptCount: task.attemptCount };
   }
 
   /**
