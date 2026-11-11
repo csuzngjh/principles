@@ -408,7 +408,7 @@ export async function handleErrorsList(opts: ErrorsListOptions): Promise<void> {
 
 /**
  * Register the `errors` command group with `list` subcommand on a Commander
- * program. Used by both production CLI (src/index.ts) and parser-level tests
+ * program. Used by both production CLI (src/program.ts) and parser-level tests
  * (cli-7-test-wiring).
  *
  * The `errors` command group is hidden from `pd --help` (operator diagnostic,
