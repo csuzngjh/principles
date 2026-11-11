@@ -46,7 +46,9 @@ export type PinnedMcpBindingVerdict =
   | {
       readonly ok: true;
       readonly binding: {
+        readonly workspaceDir: string;
         readonly runtimeDir: string;
+        readonly serverEntry: string;
         readonly versions: { readonly mcpServer: string; readonly core?: string };
       };
     }
@@ -70,6 +72,13 @@ function isSemverVersion(value: unknown): value is string {
   return typeof value === 'string' && SEMVER.test(value);
 }
 
+/** Mirrors the shared `isSameMcpBindingPath` — see the SAME-SOURCE POINTER above. */
+export function isSameMcpBindingPath(left: string, right: string, platform: string): boolean {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 function reject(reason: string): PinnedMcpBindingVerdict {
   return {ok: false, reason};
 }
@@ -78,7 +87,7 @@ function reject(reason: string): PinnedMcpBindingVerdict {
  * Validate the binding SHAPE (and the canonical-entry rule) exactly as the
  * launcher and `validateMcpBinding` do. Filesystem facts stay outside.
  */
-export function validateMcpBindingShape(raw: unknown, expectedHost: McpBindingHost): PinnedMcpBindingVerdict {
+export function validateMcpBindingShape(raw: unknown, expectedHost: McpBindingHost, platform: string): PinnedMcpBindingVerdict {
   if (!isRecord(raw)) return reject('binding_invalid');
   if (raw.schemaVersion !== MCP_BINDING_SCHEMA_VERSION) {
     // rc-8: untrusted value reaches host logs; keep the launcher's exact shape.
@@ -95,14 +104,16 @@ export function validateMcpBindingShape(raw: unknown, expectedHost: McpBindingHo
   const {versions} = raw;
   if (!isRecord(versions) || !isSemverVersion(versions.mcpServer)) return reject('binding_versions_invalid');
   const canonicalEntry = getCanonicalMcpServerEntry(expectedHost, raw.runtimeDir);
-  if (path.resolve(raw.serverEntry) !== path.resolve(canonicalEntry)) {
+  if (!isSameMcpBindingPath(raw.serverEntry, canonicalEntry, platform)) {
     return reject(`server_entry_not_canonical:${expectedHost}`);
   }
   const {mcpServer} = versions;
   return {
     ok: true,
     binding: {
+      workspaceDir: raw.workspaceDir,
       runtimeDir: raw.runtimeDir,
+      serverEntry: raw.serverEntry,
       versions: {
         mcpServer,
         ...(typeof versions.core === 'string' ? {core: versions.core} : {}),

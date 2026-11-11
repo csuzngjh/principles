@@ -1002,7 +1002,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   } else {
     // Shape is decided by the SAME declaration the Codex installer and the
     // fail-closed launcher use; only the printed code is pd-cli's own.
-    const shape = validateMcpBinding(bindingRecord, host);
+    const shape = validateMcpBinding(bindingRecord, host, process.platform);
     if (!shape.ok) {
       const mapped = MCP_BINDING_SHAPE_DEGRADES[shape.code];
       degrade(mapped.status, mapped.code, SETUP_NEXT_ACTION);

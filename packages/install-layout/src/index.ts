@@ -448,6 +448,7 @@ export {
   MCP_BINDING_LAUNCHER_ONLY_REASONS,
   MCP_BINDING_FIXTURES,
   getCanonicalMcpServerEntry,
+  isSameMcpBindingPath,
   validateMcpBinding,
   buildMcpBindingFixture,
   isMcpBindingHost,

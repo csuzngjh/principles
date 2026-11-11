@@ -41,7 +41,9 @@ describe('validateMcpBinding — shared fixture table', () => {
   for (const host of MCP_BINDING_HOSTS) {
     for (const fixture of MCP_BINDING_FIXTURES) {
       it(`${host} / ${fixture.id}`, () => {
-        const verdict = validateMcpBinding(buildMcpBindingFixture(fixture.id, context(host)), host);
+        // `posix` keeps the fixture expectations OS-independent: identical
+        // casing must be accepted on every platform. The win32 rule below.
+        const verdict = validateMcpBinding(buildMcpBindingFixture(fixture.id, context(host)), host, 'posix');
         if (fixture.expectedReasonPrefix === null) {
           expect(verdict.ok).toBe(true);
           return;
@@ -55,10 +57,33 @@ describe('validateMcpBinding — shared fixture table', () => {
   }
 
   it('accepts the exact schema version the writers emit', () => {
-    const verdict = validateMcpBinding(buildMcpBindingFixture('valid', context('codex')), 'codex');
+    const verdict = validateMcpBinding(buildMcpBindingFixture('valid', context('codex')), 'codex', 'posix');
     expect(verdict.ok).toBe(true);
     if (!verdict.ok) return;
     expect(verdict.binding.schemaVersion).toBe(MCP_BINDING_SCHEMA_VERSION);
+  });
+});
+
+describe('canonical entry comparison — launcher platform rule', () => {
+  it('accepts a case-only difference on win32 and rejects it on posix', () => {
+    // The launcher's samePath() lowercases both sides on win32. The shared
+    // declaration must agree, or the installer rewrites a binding the launcher
+    // accepts and `pd health` reports drift. The platform is injected, so this
+    // exercises win32 semantics on Linux CI.
+    const runtimeDir = path.join(RUNTIME, 'CaseSensitive');
+    const raw = buildMcpBindingFixture('valid', {
+      host: 'codex',
+      runtimeDir,
+      workspaceDir: WORKSPACE,
+      foreignServerEntry: ELSEWHERE,
+      versions: {mcpServer: '0.1.0'},
+    }) as Record<string, unknown>;
+    const caseOnly = {...raw, serverEntry: getCanonicalMcpServerEntry('codex', runtimeDir.toUpperCase())};
+
+    expect(validateMcpBinding(caseOnly, 'codex', 'win32').ok).toBe(true);
+    const strict = validateMcpBinding(caseOnly, 'codex', 'posix');
+    expect(strict.ok).toBe(false);
+    if (!strict.ok) expect(strict.reason).toBe('server_entry_not_canonical:codex');
   });
 });
 

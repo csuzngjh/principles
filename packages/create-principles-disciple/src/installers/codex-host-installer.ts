@@ -23,14 +23,14 @@
  * merge into it, never overwrite. The marker file is our own bookkeeping
  * for precise uninstall.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
-import { validateMcpBindingShape } from './mcp-binding-shape-mirror.js';
+import { isSameMcpBindingPath, validateMcpBindingShape } from './mcp-binding-shape-mirror.js';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -543,6 +543,22 @@ export function resolvePluginDataRoot(codexHome: string, marketplace: string): s
 
 const MCP_BINDING_FILE = 'mcp-binding.json';
 
+function isDirectoryOnDisk(target: string): boolean {
+  try {
+    return statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFileOnDisk(target: string): boolean {
+  try {
+    return statSync(target).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The Codex MCP launcher fails closed unless `<pluginRoot>/mcp-binding.json`
  * binds THIS payload's runtime and pin (`binding_missing`). pd-setup.cjs — the
@@ -565,16 +581,26 @@ function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexR
   // and a normal PR cannot raise the version floor — so this is the pinned
   // mirror, kept identical to the shared validator by
   // mcp-binding-shape-mirror-parity.test.ts. A binding the launcher would
-  // refuse — workspaceDir/serverEntry missing, a relative path, or a
+  // refuse ON SHAPE — workspaceDir/serverEntry missing, a relative path, or a
   // non-canonical serverEntry — must never count as healthy, or setup is
   // skipped and the launcher stays dead on binding_workspace_invalid /
   // binding_server_entry_invalid / server_entry_not_canonical.
-  const verdict = validateMcpBindingShape(binding, 'codex');
+  const verdict = validateMcpBindingShape(binding, 'codex', process.platform);
   if (!verdict.ok) return false;
   // Installer-only context the shape contract cannot know: the binding must
-  // describe THIS payload's runtime at THIS payload's pin.
-  if (path.resolve(verdict.binding.runtimeDir) !== path.resolve(runtimeDir)) return false;
-  return verdict.binding.versions.mcpServer === pin.mcpServer && verdict.binding.versions.core === pin.core;
+  // describe THIS payload's runtime at THIS payload's pin. The comparison uses
+  // the launcher's own rule (Windows paths are case-insensitive), so a binding
+  // the launcher accepts is never rewritten only because the case differs.
+  if (!isSameMcpBindingPath(verdict.binding.runtimeDir, runtimeDir, process.platform)) return false;
+  if (verdict.binding.versions.mcpServer !== pin.mcpServer || verdict.binding.versions.core !== pin.core) return false;
+  // Shape is NOT existence. The launcher re-checks the filesystem before it
+  // starts and refuses a binding whose recorded workspace, runtime or entry is
+  // gone (binding_workspace_missing / binding_workspace_not_directory /
+  // server_entry_missing). Counting that as healthy would skip pd-setup and
+  // report success+preserved while the launcher stays fail-closed.
+  return isDirectoryOnDisk(verdict.binding.workspaceDir)
+    && isDirectoryOnDisk(verdict.binding.runtimeDir)
+    && isFileOnDisk(verdict.binding.serverEntry);
 }
 
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────
@@ -765,7 +791,7 @@ export class CodexHostInstaller implements HostInstaller {
           hostId: this.hostId,
           configAction: 'skipped',
           manualActionRequired: true,
-          reason: `pd-setup completed but ${path.join(current.versionDir, MCP_BINDING_FILE)} is missing or does not bind this payload's runtime, so the Codex MCP launcher refuses to start (binding_missing).`,
+          reason: `pd-setup completed but ${path.join(current.versionDir, MCP_BINDING_FILE)} is missing, does not bind this payload's runtime, or records paths that no longer exist, so the Codex MCP launcher refuses to start (binding_missing / binding_workspace_missing / server_entry_missing).`,
           nextAction: `Run: $pd-control setup --plugin-root "${current.versionDir}" — it rewrites the binding beside the payload. If it still does not appear, read the setup output for worker_registration_failed.`,
         };
       }

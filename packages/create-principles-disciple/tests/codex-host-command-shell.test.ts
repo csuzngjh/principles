@@ -111,6 +111,10 @@ function writePayload(dir: string, version: string, cohort: Cohort): string {
     '  fs.mkdirSync(dir, { recursive: true });',
     "  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: packages[key], version: pin[key] }));",
     '}',
+    // The launcher binds the canonical entry, so the stand-in creates it.
+    "const entryDir = path.join(pluginData, 'runtime', 'node_modules', '@principles', 'pd-mcp-server', 'dist');",
+    'fs.mkdirSync(entryDir, { recursive: true });',
+    "fs.writeFileSync(path.join(entryDir, 'index.js'), 'exports.main = async () => 0;');",
     // The real setup script also writes the launcher binding beside the payload
     // root; the installer now verifies it, so the stand-in must mirror that.
     "const runtimeDir = path.join(pluginData, 'runtime');",
@@ -178,6 +182,9 @@ beforeEach(() => {
   // Legacy-registration detection reads CODEX_HOME directly (not deps.codexHome).
   process.env.CODEX_HOME = codexHome;
   process.env.PD_TEST_ARGV_LOG = argvLog;
+  // The binding must record an EXISTING workspace: the launcher refuses
+  // binding_workspace_missing, so a healthy post-setup check needs the dir.
+  fs.mkdirSync(ctx.workspaceDir, { recursive: true });
 });
 
 afterEach(() => {
@@ -187,6 +194,7 @@ afterEach(() => {
   else process.env.PD_TEST_ARGV_LOG = previousArgvLog;
   process.env.PATH = previousPath;
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  fs.rmSync(ctx.workspaceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe('CodexHostInstaller — PLUGIN_DATA runtime setup through the real default runner', () => {

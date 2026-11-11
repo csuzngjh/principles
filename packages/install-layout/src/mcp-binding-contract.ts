@@ -95,6 +95,18 @@ export function isSemverVersion(value: unknown): value is string {
   return typeof value === 'string' && SEMVER.test(value);
 }
 
+/**
+ * Compare two binding paths with the LAUNCHER's rule: Windows paths are
+ * case-insensitive (`samePath` in launcher.cjs lowercases both sides), every
+ * other platform is exact. `platform` is injected (Node's `process.platform`
+ * value) instead of read here so the win32 branch is exercised on Linux CI.
+ */
+export function isSameMcpBindingPath(left: string, right: string, platform: string): boolean {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 function reject(code: McpBindingShapeCode, reason: string, nextAction: string): McpBindingVerdict {
   return {ok: false, code, reason, nextAction};
 }
@@ -105,8 +117,12 @@ function reject(code: McpBindingShapeCode, reason: string, nextAction: string): 
  * entry existing, realpath escapes, installed package identity/version — are
  * deliberately NOT part of this function: each consumer observes those
  * separately (see MCP_BINDING_LAUNCHER_ONLY_REASONS).
+ *
+ * `platform` is Node's `process.platform` value, injected by the caller so the
+ * Windows case-insensitive path rule of the launcher's `samePath()` is
+ * exercised on Linux CI.
  */
-export function validateMcpBinding(raw: unknown, expectedHost: McpBindingHost): McpBindingVerdict {
+export function validateMcpBinding(raw: unknown, expectedHost: McpBindingHost, platform: string): McpBindingVerdict {
   if (!isRecord(raw)) {
     return reject('binding_invalid', 'binding_invalid', 'Re-run the PD host setup to regenerate a valid mcp-binding.json.');
   }
@@ -165,7 +181,7 @@ export function validateMcpBinding(raw: unknown, expectedHost: McpBindingHost): 
     );
   }
   const canonicalEntry = getCanonicalMcpServerEntry(expectedHost, raw.runtimeDir);
-  if (path.resolve(raw.serverEntry) !== path.resolve(canonicalEntry)) {
+  if (!isSameMcpBindingPath(raw.serverEntry, canonicalEntry, platform)) {
     return reject(
       'server_entry_not_canonical',
       `server_entry_not_canonical:${expectedHost}`,
@@ -222,7 +238,7 @@ export const MCP_BINDING_LAUNCHER_ONLY_REASONS: readonly { readonly code: string
   {code: 'binding_workspace_not_directory', why: 'The bound workspace must be a directory.'},
   {code: 'binding_workspace_not_declared', why: 'OpenClaw requires an explicit workspace declaration matching the binding.'},
   {code: 'workspace_declaration_missing', why: 'OpenClaw declaration sources produced no workspace (dynamic reason from the declaration resolver).'},
-  {code: 'workspace_declaration_ambiguous', why: 'OpenClaw declaration sources disagreed (dynamic reason from the declaration resolver).'},
+  {code: 'workspace_declaration_invalid', why: 'OpenClaw declaration sources produced a value that is not a usable absolute workspace directory (dynamic reason from the declaration resolver).'},
   {code: 'server_entry_invalid', why: 'The entry module must actually export main().'},
   {code: 'server_startup_failed', why: 'The server process itself failed to start.'},
 ];

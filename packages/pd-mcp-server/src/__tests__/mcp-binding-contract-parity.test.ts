@@ -126,7 +126,7 @@ describe('MCP binding contract parity — real launcher vs shared declaration', 
         });
         fs.writeFileSync(path.join(payload.root, 'mcp-binding.json'), JSON.stringify(binding), 'utf8');
 
-        const verdict = validateMcpBinding(binding, host);
+        const verdict = validateMcpBinding(binding, host, process.platform);
         const reason = launcherReason(runLauncher(payload, payload.workspaceDir));
 
         if (fixture.expectedReasonPrefix === null) {
@@ -149,31 +149,95 @@ describe('MCP binding contract parity — real launcher vs shared declaration', 
 describe('MCP binding reason vocabulary', () => {
   const source = fs.readFileSync(LAUNCHER, 'utf8');
 
-  /** Every literal reason passed to fail(...) in the launcher, including ternaries. */
-  function launcherReasonLiterals(): Set<string> {
-    const codes = new Set<string>();
-    for (const match of source.matchAll(/fail\(/g)) {
+  /**
+   * The `fail(...)` calls in the shipped launcher, with the FIRST argument
+   * isolated (that is where the reason lives). Scanning only literals inside
+   * `fail(...)` let `fail(declared.reason, ...)` hide every reason the
+   * declaration resolver computes.
+   */
+  function failCalls(): {call: string; firstArgument: string}[] {
+    const calls: {call: string; firstArgument: string}[] = [];
+    // The negative lookbehind drops the `function fail(reason, nextAction)`
+    // declaration; only call sites carry a reason to enumerate.
+    for (const match of source.matchAll(/(?<!function )\bfail\(/g)) {
       const start = (match.index ?? 0) + 'fail('.length;
-      let depth = 1;
-      let end = start;
-      for (; end < source.length && depth > 0; end += 1) {
-        const ch = source[end];
-        if (ch === '(') depth += 1;
-        else if (ch === ')') depth -= 1;
+      let depth = 0;
+      let quote: string | null = null;
+      let firstComma = -1;
+      let close = source.length;
+      for (let i = start; i < source.length; i += 1) {
+        const ch = source[i] as string;
+        if (quote !== null) {
+          if (ch === '\\') i += 1;
+          else if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === "'" || ch === '"' || ch === '`') {
+          quote = ch;
+          continue;
+        }
+        if (ch === '(' || ch === '[' || ch === '{') {
+          depth += 1;
+        } else if (ch === ')' || ch === ']' || ch === '}') {
+          if (ch === ')' && depth === 0) {
+            close = i;
+            break;
+          }
+          depth -= 1;
+        } else if (ch === ',' && depth === 0 && firstComma === -1) {
+          firstComma = i;
+        }
       }
-      const call = source.slice(start, end);
-      // Reason codes are snake_case; other literals inside a fail(...) call
-      // (field names, message fragments) are not part of the vocabulary.
-      for (const literal of call.matchAll(/(['"`])([a-z][a-z0-9]*_[a-z0-9_]*)(?::|['"`])/g)) {
-        codes.add(literal[2] as string);
-      }
+      calls.push({
+        call: source.slice(start, close),
+        firstArgument: source.slice(start, firstComma === -1 ? close : firstComma),
+      });
+    }
+    return calls;
+  }
+
+  /**
+   * Reasons built by the launcher's own resolvers (`reason: ...`) — e.g. the
+   * workspace declaration resolver emitted through `fail(declared.reason, ...)`.
+   */
+  function reasonResolverExpressions(): string[] {
+    return [...source.matchAll(/\breason\s*:\s*([^,\n}]+)/g)].map((match) => match[1] as string);
+  }
+
+  function reasonCodes(text: string): Set<string> {
+    const codes = new Set<string>();
+    for (const literal of text.matchAll(/(['"`])([a-z][a-z0-9]*_[a-z0-9_]*)(?::|['"`])/g)) {
+      codes.add(literal[2] as string);
     }
     return codes;
   }
 
+  /** Every reason the launcher can actually emit: literal or resolver value. */
+  function launcherReasonCodes(): Set<string> {
+    const codes = new Set<string>();
+    for (const {firstArgument} of failCalls()) {
+      for (const code of reasonCodes(firstArgument)) codes.add(code);
+    }
+    for (const expression of reasonResolverExpressions()) {
+      for (const code of reasonCodes(expression)) codes.add(code);
+    }
+    return codes;
+  }
+
+  it('every failure reason is enumerable (no unscanned dynamic pass-through)', () => {
+    const unscanned = failCalls()
+      .filter(({firstArgument}) => reasonCodes(firstArgument).size === 0)
+      // A dynamic reason is allowed ONLY through `<resolver>.reason`, whose
+      // literals the `reason:` scan above enumerates. Anything else could
+      // introduce a code neither the table nor this suite would ever see.
+      .filter(({firstArgument}) => !/^[A-Za-z_$][\w$]*\.reason$/.test(firstArgument.trim()))
+      .map(({call}) => 'fail(' + call.trim() + ')');
+    expect(unscanned, 'teach the vocabulary scan about this reason source').toEqual([]);
+  });
+
   it('every launcher failure code is declared (shape or explicit exemption)', () => {
     const declared = new Set<string>([...MCP_BINDING_SHAPE_CODES, ...MCP_BINDING_LAUNCHER_ONLY_REASONS.map((r) => r.code)]);
-    const undeclared = [...launcherReasonLiterals()].filter((code) => !declared.has(code));
+    const undeclared = [...launcherReasonCodes()].filter((code) => !declared.has(code));
     expect(undeclared, 'add the new code to the contract module (with a reason) before shipping it').toEqual([]);
   });
 
@@ -190,6 +254,7 @@ describe('MCP binding reason vocabulary', () => {
             versions: {mcpServer: PIN},
           }),
           host,
+          process.platform,
         );
         if (!verdict.ok) produced.add(verdict.code);
       }
@@ -197,11 +262,15 @@ describe('MCP binding reason vocabulary', () => {
     expect([...MCP_BINDING_SHAPE_CODES].filter((code) => !produced.has(code))).toEqual([]);
   });
 
-  it('every exemption is justified and still exists in the launcher', () => {
+  it('every launcher-only exemption is actually produced by the launcher', () => {
+    const produced = launcherReasonCodes();
+    const stale = MCP_BINDING_LAUNCHER_ONLY_REASONS.map((entry) => entry.code).filter((code) => !produced.has(code));
+    expect(stale, 'an exemption for a code the launcher never emits is stale').toEqual([]);
+  });
+
+  it('every exemption is justified', () => {
     for (const entry of MCP_BINDING_LAUNCHER_ONLY_REASONS) {
       expect(entry.why.length, `${entry.code} needs a reason`).toBeGreaterThan(20);
-      if (entry.code.startsWith('workspace_declaration_')) continue; // dynamic: declared.reason
-      expect(source.includes(entry.code), `${entry.code} is exempt but absent from the launcher`).toBe(true);
     }
   });
 

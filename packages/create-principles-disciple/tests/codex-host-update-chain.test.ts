@@ -73,6 +73,12 @@ function writeRuntime(runtimeDir: string, cohort: CodexRuntimeCohort): void {
   for (const key of Object.keys(packages) as (keyof typeof packages)[]) {
     writeJson(path.join(runtimeDir, 'node_modules', packages[key], 'package.json'), { name: packages[key], version: cohort[key] });
   }
+  // The launcher binds the canonical server entry, so an installed-runtime
+  // fixture must contain it: reporting success while the entry is missing is
+  // exactly the fail-open this file guards against.
+  const mcpEntryDir = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist');
+  fs.mkdirSync(mcpEntryDir, { recursive: true });
+  fs.writeFileSync(path.join(mcpEntryDir, 'index.js'), 'exports.main = async () => 0;\n', 'utf8');
   // A resolvable pd-hook entry, so the REAL hook wrapper can be spawned
   // against this fixture and its resolution asserted (not just package.json).
   const adapterDir = path.join(runtimeDir, 'node_modules', '@principles', 'codex-adapter');
@@ -211,6 +217,9 @@ beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-update-chain-'));
   codexHome = path.join(home, '.codex');
   canonicalRuntimeDir = path.join(home, '.pd', 'runtime');
+  // The binding must record an EXISTING workspace: the launcher refuses
+  // binding_workspace_missing, so a healthy-binding fixture needs the dir.
+  fs.mkdirSync(ctx.workspaceDir, { recursive: true });
   // Cached payload one cohort behind the PD release + a runtime that trails
   // its OWN pin — exactly the 2026-11-11 state.
   writePin(cacheRoot('0.3.19'), OLD_COHORT, '0.3.19');
@@ -221,6 +230,7 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  fs.rmSync(ctx.workspaceDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe('Codex marketplace update chain', () => {
@@ -435,6 +445,9 @@ describe('Codex marketplace update chain', () => {
     writePin(cacheRoot('0.3.22'), NEW_COHORT, '0.3.22');
     const runtimeDir = path.join(pluginDataRoot(), 'runtime');
     writeRuntime(runtimeDir, NEW_COHORT);
+    // The recorded workspace must EXIST (the launcher refuses
+    // binding_workspace_missing), but it need not be the install context.
+    fs.mkdirSync(path.join(home, 'workspace-A'), { recursive: true });
     writeBinding(cacheRoot('0.3.22'), runtimeDir, NEW_COHORT, path.join(home, 'workspace-A'));
 
     const host = fakeHost();
@@ -486,7 +499,7 @@ describe('Codex marketplace update chain', () => {
 
       // The rewritten binding is one the launcher's own gate accepts.
       const repaired: unknown = JSON.parse(fs.readFileSync(path.join(payload, 'mcp-binding.json'), 'utf8'));
-      const verdict = validateMcpBinding(repaired, 'codex');
+      const verdict = validateMcpBinding(repaired, 'codex', process.platform);
       expect(verdict.ok, verdict.ok ? '' : verdict.reason).toBe(true);
     });
   }
@@ -521,7 +534,9 @@ describe('Codex marketplace update chain', () => {
         : { ok: false, detail: String(result.stderr || result.error?.message || 'setup failed').slice(-400) };
     };
     const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: realSetup });
-    const result = await installer.install({ ...ctx, workspaceDir: path.join(home, 'ws') });
+    const installWorkspace = path.join(home, 'ws');
+    fs.mkdirSync(installWorkspace, { recursive: true });
+    const result = await installer.install({ ...ctx, workspaceDir: installWorkspace });
 
     expect(result.success, result.reason).toBe(true);
     const binding = JSON.parse(fs.readFileSync(path.join(payload, 'mcp-binding.json'), 'utf8')) as {
@@ -530,6 +545,54 @@ describe('Codex marketplace update chain', () => {
     expect(binding.schemaVersion).toBe('pd.mcp-binding.v1');
     expect(binding.host).toBe('codex');
     expect(binding.runtimeDir).toBe(runtimeDir);
+  });
+
+  it('repairs a binding whose recorded server entry no longer exists (shape is not existence)', async () => {
+    // Shape-valid, canonically named, at the pin — and dead: the entry the
+    // launcher resolves is gone. BEFORE: the shape-only health check called
+    // this healthy, skipped pd-setup and reported 'preserved', while the
+    // launcher exited server_entry_missing and pd-recall never appeared.
+    const payload = cacheRoot('0.3.22');
+    writePin(payload, NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    writeBinding(payload, runtimeDir, NEW_COHORT);
+    fs.rmSync(path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist'), {
+      recursive: true,
+      force: true,
+    });
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install(ctx);
+
+    expect(result.success, result.reason).toBe(true);
+    expect(result.configAction).toBe('updated');
+    expect(result.reason).toContain('mcp binding written beside the payload');
+    expect(host.calls.some((call) => call[0] !== 'codex')).toBe(true);
+    const entry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+    expect(fs.existsSync(entry)).toBe(true);
+  });
+
+  it('never reports success+preserved when the bound workspace is gone and setup cannot restore it', async () => {
+    // pd-setup runs with --skip-init, so it cannot recreate a workspace. The
+    // only honest outcome is a failure telling the operator to initialize it —
+    // NOT 'preserved', which is what the shape-only check used to return while
+    // the launcher exited binding_workspace_missing.
+    const payload = cacheRoot('0.3.22');
+    writePin(payload, NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    fs.rmSync(ctx.workspaceDir, { recursive: true, force: true });
+    writeBinding(payload, runtimeDir, NEW_COHORT);
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install(ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.manualActionRequired).toBe(true);
+    expect(host.calls.some((call) => call[0] !== 'codex')).toBe(true);
   });
 });
 
