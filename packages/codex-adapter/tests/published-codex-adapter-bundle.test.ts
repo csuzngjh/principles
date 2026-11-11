@@ -32,7 +32,23 @@ describe('published @principles/codex-adapter bundle safety', () => {
     expect(manifest.dependencies).not.toHaveProperty('principles-disciple');
     expect(manifest.dependencies).not.toHaveProperty('@principles/openclaw-plugin');
 
-    runNpm(['run', 'build'], { cwd: packageRoot, stdio: 'pipe' });
+    // Pack the CURRENT build output — deliberately WITHOUT re-running the
+    // build here. `tsc` truncates and rewrites `dist/` in place, while this
+    // `beforeAll` executes in a worker that runs in parallel with sibling
+    // workers spawning `node dist/pd-hook.js`. A child that imports a module
+    // truncated by a concurrent emit fails with
+    //   SyntaxError: The requested module './transcript-source.js' does not
+    //   provide an export named 'createCodexTranscriptSource'
+    // (observed on PR #2555; the same file passes when run alone). The
+    // supported entry point is `npm test`, whose script is
+    // `npm run build && vitest run`, so the build is already guaranteed.
+    const builtHookEntry = path.join(packageRoot, 'dist', 'pd-hook.js');
+    if (!fs.existsSync(builtHookEntry)) {
+      throw new Error(
+        `codex-adapter build output is missing: ${builtHookEntry}. ` +
+          'Run "npm run build" in packages/codex-adapter before invoking vitest directly.',
+      );
+    }
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pack-codex-adapter-'));
     // `--` before the package spec: the dynamic directory can never parse as
     // an npm option; the tarball lands in cwd (tempDir).
