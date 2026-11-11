@@ -92,11 +92,10 @@ export function handleBeforeToolCall(
   // the raw value here produced paths that disagreed with the normalized root
   // used downstream by the rule host / rule-context assembler.
   // PRI-634-F: canonicalKind resolves from the OpenClaw registry (derived
-  // from constants/tools.ts) and drives hint derivation inside the builder —
-  // replay resolves the identical kind/hints through the same registry.
+  // from constants/tools.ts) and is the SOLE hint authority inside the
+  // builder — replay resolves the identical kind/hints through the same
+  // registry. The Sets above stay a coarse "enter the gate" filter only (B2).
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
-    isBashTool: isBash,
-    isWriteTool,
     canonicalKind: OPENCLAW_TOOL_SEMANTICS.resolve(event.toolName),
   });
   const relPath = action.normalizedPath;
@@ -653,8 +652,6 @@ export function handleSharedRuleHostResult(
   }
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
-    isBashTool: BASH_TOOLS_SET.has(event.toolName),
-    isWriteTool: WRITE_TOOLS.has(event.toolName),
     canonicalKind: OPENCLAW_TOOL_SEMANTICS.resolve(event.toolName),
   });
   const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
