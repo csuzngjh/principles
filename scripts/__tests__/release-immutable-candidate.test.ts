@@ -66,6 +66,8 @@ const COMPONENTS = [
   { label: 'core', payloadPath: 'core/package.json', sourcePath: 'packages/principles-core/package.json', version: '7.3.1' },
   { label: 'host-runtime', payloadPath: 'host-runtime/package.json', sourcePath: 'packages/host-runtime/package.json', version: '3.3.1' },
   { label: 'codex-adapter', payloadPath: 'codex-adapter/package.json', sourcePath: 'packages/codex-adapter/package.json', version: '0.8.10' },
+  { label: 'install-layout', payloadPath: 'install-layout/package.json', sourcePath: 'packages/install-layout/package.json', version: '0.7.0' },
+  { label: 'workbuddy-adapter', payloadPath: 'workbuddy-adapter/package.json', sourcePath: 'packages/workbuddy-adapter/package.json', version: '0.5.11' },
   { label: 'plugin', payloadPath: 'plugin/package.json', sourcePath: 'packages/openclaw-plugin/package.json', version: '3.2.1' },
 ] as const;
 
@@ -455,19 +457,22 @@ describeWithGnuTools('immutable candidate production path', () => {
     }
   }, 120_000);
 
-  it('fails closed when a bundled component version differs from the cohort (the 1.150.1 downgrade)', () => {
+  it.each(COMPONENTS)('fails closed when the $label payload drifts from the cohort', ({ label, payloadPath, version }) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g31a-candidate-version-drift-'));
     try {
-      // The payload ships the registry's older `latest` (2.1.0) while the
-      // cohort commit says 2.2.0 — the exact 1.150.1 defect. The pack leg must
-      // refuse before emitting a publishable candidate.
-      const fixture = createFixture(root, { payloadComponentVersions: { 'pd-cli/package.json': '2.1.0' } });
+      // The payload ships a foreign version while the cohort commit keeps the
+      // committed one — the exact 1.150.1 defect, for EVERY version-synced
+      // component (P1-3: install-layout / workbuddy-adapter included). The pack
+      // leg must refuse before emitting a publishable candidate.
+      const [major, minor, patch] = version.split('.').map(Number);
+      const drifted = minor > 0 ? `${major}.${minor - 1}.${patch}` : `${major}.${minor}.${patch + 1}`;
+      const fixture = createFixture(root, { payloadComponentVersions: { [payloadPath]: drifted } });
       const result = runCandidateStep(root, fixture, 'drift', { productVersion: PRODUCT_VERSION });
 
       expect(result.result.status).not.toBe(0);
       const output = String(result.result.stderr) + String(result.result.stdout);
       expect(output).toContain('bundled component(s) do not match the release cohort commit');
-      expect(output).toContain('pd-cli (pd-cli/package.json): expected 2.2.0, got 2.1.0');
+      expect(output).toContain(`${label} (${payloadPath}): expected ${version}, got ${drifted}`);
       expect(result.output).not.toContain('tarball=');
       expect(listFilesRecursively(result.runnerTemp).filter((file) => file.endsWith('.tgz'))).toHaveLength(0);
     } finally {

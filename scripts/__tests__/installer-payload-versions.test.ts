@@ -102,12 +102,17 @@ describe('verifyInstallerPayloadVersions — packed installer must match the coh
   const exactPayload = () =>
     Object.fromEntries(committed.map((component) => [component.payloadPath, component.version]));
 
-  it('covers every runtime component the installer ships', () => {
+  it('covers every component the bundle syncs from a movable version source', () => {
+    // P1-3: install-layout and workbuddy-adapter are rewritten by
+    // bundle-plugin.mjs's registry sync. omitting them let a preserve-mode
+    // regression keep passing while either payload carried a foreign version.
     expect(INSTALLER_PAYLOAD_COMPONENTS.map((component) => component.label)).toEqual([
       'pd-cli',
       'core',
       'host-runtime',
       'codex-adapter',
+      'install-layout',
+      'workbuddy-adapter',
       'plugin',
     ]);
     expect(committed.map((component) => component.payloadPath)).toEqual([
@@ -115,6 +120,8 @@ describe('verifyInstallerPayloadVersions — packed installer must match the coh
       'core/package.json',
       'host-runtime/package.json',
       'codex-adapter/package.json',
+      'install-layout/package.json',
+      'workbuddy-adapter/package.json',
       'plugin/package.json',
     ]);
   });
@@ -132,16 +139,22 @@ describe('verifyInstallerPayloadVersions — packed installer must match the coh
     }
   });
 
-  it('FAILS when a component version differs from the cohort (the 2.1.0 payload)', () => {
-    const versions = exactPayload();
-    const pdCli = committed.find((component) => component.label === 'pd-cli')!;
-    const [major, minor] = pdCli.version.split('.');
-    versions['pd-cli/package.json'] = `${major}.${Math.max(0, Number(minor) - 1)}.0`;
+  it.each(INSTALLER_PAYLOAD_COMPONENTS.map((component) => [component.label, component.payloadPath]))(
+    'FAILS when %s drifts from the cohort (any component, not just pd-cli)',
+    (label, payloadPath) => {
+      const versions = exactPayload();
+      const expected = committed.find((component) => component.label === label)!.version;
+      const [major, minor, patch] = expected.split('.').map(Number);
+      // Prefer reproducing the 1.150.1 downgrade shape; fall back to a
+      // forward drift for a 0.y.z component so the two versions always differ.
+      const drifted = minor > 0 ? `${major}.${minor - 1}.${patch}` : `${major}.${minor}.${patch + 1}`;
+      versions[payloadPath] = drifted;
 
-    expect(() =>
-      verifyInstallerPayloadVersions({ committed, readPayloadManifest: payloadReaderFrom(versions) }),
-    ).toThrow(`pd-cli (pd-cli/package.json): expected ${pdCli.version}, got ${versions['pd-cli/package.json']}`);
-  });
+      expect(() =>
+        verifyInstallerPayloadVersions({ committed, readPayloadManifest: payloadReaderFrom(versions) }),
+      ).toThrow(`${label} (${payloadPath}): expected ${expected}, got ${drifted}`);
+    },
+  );
 
   it('FAILS closed when a required component manifest is missing (no silent skip)', () => {
     const versions = exactPayload();

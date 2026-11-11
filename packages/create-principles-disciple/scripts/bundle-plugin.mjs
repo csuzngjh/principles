@@ -9,7 +9,7 @@ import { promisify } from 'util';
 // check-dist-hygiene.mjs / check-workspace-artifacts.mjs — ERR-149 / EP-14).
 import { skipTestArtifacts, collectTestArtifacts } from '../../../scripts/build/test-artifacts.mjs';
 import { collectLabModuleClosure, LAB_ENTRY_MODULES } from '../../../scripts/build/lab-payload.mjs';
-import { resolveBundledComponentVersion } from '../../../scripts/release/lib/installer-payload-versions.mjs';
+import { INSTALLER_PAYLOAD_COMPONENTS, resolveBundledComponentVersion } from '../../../scripts/release/lib/installer-payload-versions.mjs';
 import {
   collectReleaseManagerPayload,
   RELEASE_MANAGER_ENTRY_MODULES,
@@ -1087,16 +1087,24 @@ if (npmPluginVersion) {
 // failure only degrades to the working-tree version (warn + continue) — same
 // rc-9 posture as the plugin stamp.
 log('\n🔢 Syncing bundled component versions to their npm registry latest...');
-for (const { npmName, destDir } of [
-  { npmName: '@principles/core', destDir: CORE_DEST },
-  { npmName: '@principles/pd-cli', destDir: PD_CLI_DEST },
-  { npmName: '@principles/host-runtime', destDir: HOST_RUNTIME_DEST },
-  { npmName: '@principles/codex-adapter', destDir: CODEX_ADAPTER_DEST },
-  { npmName: '@principles/install-layout', destDir: INSTALL_LAYOUT_DEST },
-  ...(WORKBUDDY_ADAPTER_PRESENT
-    ? [{ npmName: '@principles/workbuddy-adapter', destDir: WORKBUDDY_ADAPTER_DEST }]
-    : []),
-]) {
+// The list is DERIVED from the shared cohort manifest — never maintained here.
+// A component added to `INSTALLER_PAYLOAD_COMPONENTS` is synced automatically,
+// and the pack leg asserts the same manifest, so the two can never disagree
+// (review P1-3: install-layout / workbuddy-adapter were missing from the
+// assertion while this loop already rewrote them).
+const componentSyncTargets = INSTALLER_PAYLOAD_COMPONENTS
+  .filter(
+    (component) =>
+      // The plugin has its own block below (it also stamps
+      // openclaw.plugin.json and the installer's pd.bundledPluginVersion).
+      component.label !== 'plugin' &&
+      // The WorkBuddy adapter is only bundled when its package exists in the
+      // source tree; without it there is no payload manifest to stamp.
+      (component.label !== 'workbuddy-adapter' || WORKBUDDY_ADAPTER_PRESENT),
+  )
+  .map((component) => ({ npmName: component.npmName, destDir: join(OUTPUT_ROOT, component.payloadDir) }));
+
+for (const { npmName, destDir } of componentSyncTargets) {
   let npmVersion = null;
   try {
     npmVersion = execSync(`npm view ${npmName} version`, {

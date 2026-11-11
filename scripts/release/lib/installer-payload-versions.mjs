@@ -27,19 +27,33 @@
 import { execFileSync } from 'node:child_process';
 
 /**
- * The runtime components every installer payload ships, with the npm name
- * they are published under (documentation only — the source path is the
- * authority). Adding a component to the installer payload means adding it
- * here too; the assertion below fails closed on a missing manifest rather
- * than silently skipping it.
+ * The components the installer payload ships whose version is written by the
+ * bundle from a movable source (the npm registry `latest` in default mode, the
+ * committed tree in preserve mode). This array is the SINGLE source of truth:
+ * `bundle-plugin.mjs` derives its registry-sync loop from it, and the pack-leg
+ * assertion derives its expected list from it. Do not maintain a second list.
+ *
+ * `payloadPath` is the manifest path inside the packed `package/` root;
+ * `payloadDir` is its directory (the bundle's output subdirectory);
+ * `sourcePath` is the committed authority at the cohort SHA.
+ *
+ * Deliberately NOT in this contract (copied verbatim, never rewritten, so
+ * there is no version source to drift): `console`, `pd-mcp-server` and
+ * `release-manager`. The console is a private package with no registry line;
+ * the MCP server and the release manager are copied from the tree as-is.
  */
 export const INSTALLER_PAYLOAD_COMPONENTS = Object.freeze([
-  { label: 'pd-cli', payloadPath: 'pd-cli/package.json', sourcePath: 'packages/pd-cli/package.json' },
-  { label: 'core', payloadPath: 'core/package.json', sourcePath: 'packages/principles-core/package.json' },
-  { label: 'host-runtime', payloadPath: 'host-runtime/package.json', sourcePath: 'packages/host-runtime/package.json' },
-  { label: 'codex-adapter', payloadPath: 'codex-adapter/package.json', sourcePath: 'packages/codex-adapter/package.json' },
-  { label: 'plugin', payloadPath: 'plugin/package.json', sourcePath: 'packages/openclaw-plugin/package.json' },
-]);
+  { label: 'pd-cli', npmName: '@principles/pd-cli', payloadDir: 'pd-cli', sourcePath: 'packages/pd-cli/package.json' },
+  { label: 'core', npmName: '@principles/core', payloadDir: 'core', sourcePath: 'packages/principles-core/package.json' },
+  { label: 'host-runtime', npmName: '@principles/host-runtime', payloadDir: 'host-runtime', sourcePath: 'packages/host-runtime/package.json' },
+  { label: 'codex-adapter', npmName: '@principles/codex-adapter', payloadDir: 'codex-adapter', sourcePath: 'packages/codex-adapter/package.json' },
+  { label: 'install-layout', npmName: '@principles/install-layout', payloadDir: 'install-layout', sourcePath: 'packages/install-layout/package.json' },
+  { label: 'workbuddy-adapter', npmName: '@principles/workbuddy-adapter', payloadDir: 'workbuddy-adapter', sourcePath: 'packages/workbuddy-adapter/package.json' },
+  // The plugin is synced by its own bundle block (package.json +
+  // openclaw.plugin.json + the installer's pd.bundledPluginVersion), but its
+  // version contract is identical and belongs to the same manifest.
+  { label: 'plugin', npmName: 'principles-disciple', payloadDir: 'plugin', sourcePath: 'packages/openclaw-plugin/package.json' },
+].map((component) => Object.freeze({ ...component, payloadPath: `${component.payloadDir}/package.json` })));
 
 const STRICT_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 
