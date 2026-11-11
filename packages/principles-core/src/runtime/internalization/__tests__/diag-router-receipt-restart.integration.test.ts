@@ -131,7 +131,6 @@ describe('PRI-1146 P2-01 — receipt survives restart and fully re-verifies', ()
       provider: 'openrouter',
       model: 'anthropic/claude-sonnet-4',
       apiKeyEnv: 'TEST_API_KEY',
-      _testBackoffDelayMs: 0,
       outputPathStrategy: 'free_form_only',
       systemPrompt: PROFILE_LAYER,
     });

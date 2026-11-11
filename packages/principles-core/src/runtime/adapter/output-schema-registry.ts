@@ -31,6 +31,7 @@ import { CorrectionObserverOutputV1Schema } from '../observer/correction-observe
 import { SignalClassificationOutputV2Schema } from '../signal-collector/types.js';
 import { ReuseEvaluationOutputV1Schema } from '../principle-reuse/reuse-evaluation-output.js';
 import { LearningLabActorActionV1Schema } from '../learning-lab/actor-action-output.js';
+import { AdaptiveSelectionOutputV1Schema } from '../activation/adaptive-selection-output.js';
 
 /**
  * Map of `outputSchemaRef` string → TypeBox schema. Keys match the
@@ -64,6 +65,12 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
   // action per interactive round for the research actor. Production runners
   // never pass this ref; see learning-lab/actor-action-output.ts.
   ['learning-lab-actor-action', LearningLabActorActionV1Schema],
+  // Phase-1 stability S5: the host-runtime adaptive principle selector
+  // (`createSingleModelSelector`) passes this ref, so its answer is validated
+  // by the same schema-gated path every other runner already uses. The host
+  // still owns candidate lookup, digest re-verification and ambiguity checks;
+  // this schema only rejects structurally incomplete answers.
+  ['adaptive-selection-output', AdaptiveSelectionOutputV1Schema],
 ]);
 
 /**
