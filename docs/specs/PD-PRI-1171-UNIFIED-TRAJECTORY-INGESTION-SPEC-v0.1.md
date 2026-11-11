@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 编号 | SPEC-UNIFIED-HOST-TRAJECTORY-INGESTION-001 |
-| 版本 | v0.1（Owner 意图对齐后首稿） |
+| 版本 | v0.2（三路独立评审修订版：代码事实/生产数据/对抗架构） |
 | 状态 | DRAFT — 待 Owner 书面批准 |
 | Linear | PRI-1171 |
 | 日期 | 2026-11-11 |
@@ -15,7 +15,8 @@
 |---|---|
 | 2026-11-11 | Owner 指示：统一三宿主轨迹采集，采集主线走离线转录目录，不削弱 OpenClaw，WorkBuddy 必须实现并开通 |
 | 2026-11-11 | Owner 意图对齐三决策：reasoning 录入；保留策略推广 Codex 模式（7 天窗口+引用长期）；不加轨迹浏览页（消费面走现有诊断/证据流+采集健康状态） |
-| 待定 | Owner 批准本 SPEC（批准后状态置 APPROVED，方可进入实施） |
+| 2026-11-11 | 三路独立子代理评审后修订 v0.2：① Codex 全文升级**不复用旧 bounded 同意**——须新版本披露+同意台账新版记录；② OpenClaw 离线兜底源**降级为待证据跟进（默认裁剪）**——live ID 与宿主转录事件 ID 间无已验证桥、热库快照有已知坑；③ OpenClaw live 统一观察写入补独立开关与消费面权威规则；④ WorkBuddy 磁盘口径修正（jsonl 约 477MB，非 566MB）；⑤ 采集开关与宿主总开关（host.workbuddy）的层叠门控显式化 |
+| 待定 | Owner 批准本 SPEC（批准后状态置 APPROVED，方可进入实施；批准同时构成 Codex full 层的新版同意决定，落台账） |
 
 ---
 
@@ -73,7 +74,7 @@
 |---|---|---|---|
 | OpenClaw | `~/.openclaw/agents/<agent>/agent/openclaw-agent.sqlite`（transcript_events / session_transcript_* / FTS） | 内部 SQLite | 在盘（68483 条事件身份记录） |
 | Codex | `~/.codex/sessions/` rollout JSONL | 官方明示"非稳定接口" | 在盘，PD 已在读 |
-| WorkBuddy | `~/.workbuddy/projects/<encoded-cwd>/<sessionId>.jsonl` | 未文档化明文 JSONL（Beta） | 在盘，219 文件/566MB；取证报告：核心类型 2.5 个月稳定、callId 配对 100%、含 reasoning |
+| WorkBuddy | `~/.workbuddy/projects/<encoded-cwd>/<sessionId>.jsonl` | 未文档化明文 JSONL（Beta） | 在盘，219 个 jsonl/约 477MB（jsonl 口径；另含非转录文件全目录约 587MB SI）；取证报告：核心类型 2.5 个月稳定、callId 配对 100%、含 reasoning |
 
 ### 3.3 已存在的可复用资产（Connection Before Creation）
 
@@ -131,10 +132,10 @@
 - **默认开通**：`workbuddy_conversation_ingestion` quiet flag 默认 enabled=true（依据 Owner 指示与"重要功能默认开启"既有产品决策）；rollback=flag off，检查点保留、重开幂等补读；
 - 采集范围：`~/.workbuddy/projects` 下绑定 PD 工作区的 cwd 对应目录；**禁止**目录扫描猜 latest（SPEC §4.6 既有约束延续：只走 hook payload 显式提供的 `transcript_path` 与按 session_id 的确定性路径推导）。
 
-**OpenClaw（Phase 3 可选加固）**：
+**OpenClaw（live 统一写入 + 兜底源待证据）**：
 - 钩子采集原样保留（G5）；
-- 新增离线兜底源：WAL 安全快照读 `openclaw-agent.sqlite`（连 -wal/-shm 一起复制后只读打开，既有运维惯例），与钩子写入按 logical key 收敛，仅补钩子停机缺口；
-- 是否执行 Phase 3 的 OpenClaw 部分，由 Owner 验收 Phase 1/2 后决定（默认执行，可裁剪）。
+- live 统一观察写入（Phase 3）：钩子路径旁路向统一观察存储写全文观察，挂独立开关 `openclaw_unified_observation`（quiet，默认 on，依据=本统一指示；lifecycle 按 §16 规范）。消费规则：诊断/证据消费面以统一观察存储为准——基表与观察表不一致时，以观察表为准并留有界诊断；
+- 离线兜底源**降级为待证据跟进（默认裁剪）**：对抗评审发现 ① live `runId` 与 `openclaw-agent.sqlite` 事件 ID 之间无已验证桥（按 logical key 收敛的承诺不成立）；② 热库快照复制有已知坑（三文件非原子、readonly 无法做 WAL 恢复）；③ 37% 事件正文在 zstd 压缩列。重启条件：先量化钩子停机窗口频率并实证 ID 桥，再单独立项；技术要点见技术设计 §7.2 附录。
 
 ## 5. 保留与隐私
 
@@ -154,7 +155,7 @@
 |---|---|---|---|
 | P1 提取 | Codex 管线泛化入 seam，行为零变化 | 契约测试绿；Codex 现有 8748 行语义不变；CI | revert 单 PR；无数据迁移 |
 | P2 WorkBuddy | 解码器+同意+默认开通+健康 | WorkBuddy 工作区出现全文+reasoning 观察；健康页三宿主齐；停钩子→恢复后补读不缺 | flag off |
-| P3 Codex 升级+OpenClaw 兜底 | 全文+reasoning；openclaw-agent.sqlite 兜底源 | Codex 新观察为全文含 reasoning；OpenClaw 停钩窗口数据由兜底补齐 | 文本上限回有界；兜底源 flag off |
+| P3 Codex 升级+OpenClaw live 统一写入 | 全文+reasoning（须新版本披露+同意台账新版记录，见 §8）；OpenClaw 旁路观察写入 | Codex 新观察为全文含 reasoning；OpenClaw 统一观察存储出现全文行 | 文本策略回有界；openclaw_unified_observation off |
 
 **MVP 四问**：
 - `mvp-q-1-what-if-skip`：WorkBuddy 零对话采集持续，诊断证据三宿主不等；每新宿主继续各起一套方案，架构负债累积。
@@ -166,8 +167,9 @@
 
 | 文档 | 修订 |
 |---|---|
-| Codex Governance Closure SPEC（Slice A，有界姿态） | 文本上限由固定有界修订为同意分层（本工作区已 consent→全文）；retention/quarantine 机制不变 |
+| Codex Governance Closure SPEC（Slice A，有界姿态） | 文本上限由固定有界修订为同意分层。**旧 consent 针对旧版"有界"披露授予，不自动覆盖全文+reasoning**：full 层生效条件=新版本披露文本+同意台账新版记录（decidedVia=owner_directive；Owner 对本 SPEC 的批准即构成该决定，随 P3 落台账）；retention/quarantine 机制不变 |
 | workbuddy-host-adapter-spec v0.3.0「MVP 不读取 transcript」 | 解除；读取范围限定与同意依据以本 SPEC §4.4 为准（禁止目录扫描猜 latest 条款延续） |
+| `host.workbuddy` flag description（"no transcript reads"） | 随 P2 采集开通同步修订：该 flag 语义更新为宿主总开关（读取范围由 workbuddy_conversation_ingestion 单独门控），lifecycle evidence 同步更新 |
 | ADR-0020 | 引用性更新：Codex 摄取职责平移至 host-runtime seam（扩展模型结论不变） |
 
 ## 9. 风险与对策
@@ -177,7 +179,7 @@
 | 宿主转录格式漂移（三家均非契约接口） | 宽容解析+变体基线契约测试+schema 版本感知；漂移→显式降级（rc-9），不静默丢数据 |
 | 双存储（观察×治理）P4 张力 | §4.2 显式权威分层声明；治理写入仅 OpenClaw 钩子路径，观察写入仅 seam |
 | WorkBuddy jsonl 含高敏感 reasoning/工具输出 | 同意台账+既有脱敏/匿名化管道；导出面按高敏感字段处理 |
-| 磁盘增长（WorkBuddy 转录 566MB 且宿主自身无清理） | PD 侧遵守 7 天窗口；不清理宿主自己的文件（PD 不拥有宿主目录） |
+| 磁盘增长（WorkBuddy 转录 jsonl 约 477MB 且宿主自身无清理） | PD 侧遵守 7 天窗口；不清理宿主自己的文件（PD 不拥有宿主目录）；入库体积随 P2 验收实测后补量化基线 |
 | 主线读目录与 hooks 写入竞态 | 只读快照模式（WAL 安全复制）；append-only 文件按 byte-offset 增量；收敛按 logical key 幂等 |
 
 ## 10. 复杂度增量
@@ -195,7 +197,9 @@ New external/network capability: NO（全部本地文件读取）
 
 ## 11. 未决事项
 
-- 无阻塞项。Phase 3 的 OpenClaw 兜底源可在 P1/P2 验收后由 Owner 裁剪（§4.4）。
+- OpenClaw 离线兜底源默认裁剪（评审结论，§4.4）；重启条件=量化钩子停机窗口频率+实证 runId↔宿主事件 ID 桥；
+- Codex full 层生效依赖新版披露文本（P3 首个交付物；Owner 批准本 SPEC 即为同意决定，P3 落台账）；
+- WorkBuddy `isCompacted` 语义未定论（"本条是摘要"还是"此前历史已被宿主替换"）——P2 期间补取证；定论前**不**触发任何墓碑/回滚语义。
 
 ---
 
