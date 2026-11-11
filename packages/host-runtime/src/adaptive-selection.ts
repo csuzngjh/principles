@@ -493,8 +493,9 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
           // (principles-core), so the structural shape is validated by the
           // shared path instead of relying on the host guard alone.
           // Scope note: this is the ONLY change here. The admission/completion
-          // deadline semantics belong to PRI-1170 (PR #2513); they are
-          // intentionally untouched to avoid a second timing system in this file.
+          // deadline semantics are owned by PRI-1170 (merged as 030d0035,
+          // #2513); they are intentionally untouched to avoid a second timing
+          // system in this file.
           outputSchemaRef: 'adaptive-selection-output',
           timeoutMs: remainingAdmission + generationTimeoutMs,
           maxTokens,
