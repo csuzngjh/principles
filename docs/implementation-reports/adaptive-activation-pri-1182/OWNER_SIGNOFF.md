@@ -18,13 +18,14 @@
 - 真实 POST 上限 **4 次**；每例最多 1 次；`pure-ack` 为 0 请求对照。
 - 批件**只能认领一次**（`approval-claim.json` 以独占方式创建）；已有认领或已有结果即拒绝再发。
 - 每次发送前先做预算预留，fail-closed：达到上限不再生成任何可能发送的子进程。
-- **发请求之前**逐项校验：到期时间、head、tree、用例清单哈希、隔离配置哈希、端点/模型/provider/响应模型白名单、时限、判据版本、上限、凭证；任一不符即退出，**0 请求**。
+- **发请求之前**逐项校验：到期时间、head、tree、用例清单哈希、隔离配置哈希、实际构建文件哈希、工作树已跟踪文件状态、端点/模型/provider/响应模型白名单、时限、判据版本、上限、凭证；任一不符即退出，**0 请求**。
 
 ## 3. 模型与端点
 
 - 端点：`https://openrouter.ai/api/alpha/decisions`
 - 模型：`respan/span-01-lite:free`；provider **只允许 `Respan`**，`allow_fallbacks=false`
 - 响应模型白名单：`respan/span-01-lite:free`、`respan/span-01-lite-20260925`；其它一律判失败并回退原生
+- 响应未返回 provider 字段时记 `absent`。有该字段且与 Respan 不符时拒绝。
 - 凭证：只从 `OPENROUTER_API_KEY` 读取，不写入任何日志或产物
 
 ## 4. 时限
@@ -58,7 +59,7 @@
 
 - 真实请求：**0 次**。预检 5/5 PASS，4 次请求全部发给假端点；harness 对任何非 Decisions URL 直接抛错，这是结构性保证。
 - 已合入前需满足的工程证据：CI 全绿、`Verify Merge Gate` 通过。
-- 代码绑定（批件需照抄）：`codeHead`、`treeHash`、`manifestSha256=6f0bf1ee…2931b9`、`isolatedConfigSha256=1782e231…339413`。
+- 代码绑定（批件需照抄）：`codeHead`、`treeHash`、`manifestSha256=6f0bf1ee…2931b9`、`isolatedConfigSha256=1782e231…339413` 和 `buildArtifactsSha256`。完整值见同目录 `preflight-result.json`。
   以执行时校验的**最终 head/tree** 为准；本页之后若仅有运行卡/证据类提交，被执行代码不变。
 
 ## 9. 签字
