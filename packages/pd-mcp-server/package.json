@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
+    "@principles/install-layout": "file:../install-layout",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vite": "^8.3.6",

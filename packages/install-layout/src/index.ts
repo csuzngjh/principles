@@ -117,15 +117,28 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 /** Workspace entries must be non-empty absolute paths — the Companion spawns per-Workspace workers keyed by canonical path. */
-function parseWorkspaceList(value: unknown): { workspaces?: string[]; error?: string } {
+type WorkspacePathApi = Pick<typeof path, 'isAbsolute' | 'resolve'>;
+
+/**
+ * Path rules are selected by an injected platform rather than the ambient one,
+ * so the win32 rule can be exercised on POSIX CI (same pattern as
+ * `isSameMcpBindingPath` in the MCP binding contract). Production callers keep
+ * the default `process.platform` and therefore behave exactly as before.
+ */
+function workspacePathApi(platform: string): WorkspacePathApi {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
+function parseWorkspaceList(value: unknown, platform: string): { workspaces?: string[]; error?: string } {
   if (value === undefined) return { workspaces: [] };
   if (!Array.isArray(value)) return { error: 'install_manifest_malformed: workspaces must be non-empty absolute paths' };
+  const api = workspacePathApi(platform);
   const resolved: string[] = [];
   for (const entry of value) {
-    if (typeof entry !== 'string' || entry.length === 0 || !path.isAbsolute(entry)) {
+    if (typeof entry !== 'string' || entry.length === 0 || !api.isAbsolute(entry)) {
       return { error: 'install_manifest_malformed: workspaces must be non-empty absolute paths' };
     }
-    const canonical = path.resolve(entry);
+    const canonical = api.resolve(entry);
     if (!resolved.includes(canonical)) resolved.push(canonical);
   }
   return { workspaces: resolved };
@@ -133,11 +146,16 @@ function parseWorkspaceList(value: unknown): { workspaces?: string[]; error?: st
 
 /**
  * Merge one Workspace into a manifest's workspace list (installer write path). Idempotent by canonical path. */
-export function mergeInstallManifestWorkspaces(current: InstallManifest | undefined, workspaceDir: string): string[] {
-  const canonical = path.resolve(workspaceDir);
+export function mergeInstallManifestWorkspaces(
+  current: InstallManifest | undefined,
+  workspaceDir: string,
+  platform: string = process.platform,
+): string[] {
+  const api = workspacePathApi(platform);
+  const canonical = api.resolve(workspaceDir);
   const resolved: string[] = [];
   for (const entry of current?.workspaces ?? []) {
-    const normalized = path.resolve(entry);
+    const normalized = api.resolve(entry);
     if (!resolved.includes(normalized)) resolved.push(normalized);
   }
   if (!resolved.includes(canonical)) resolved.push(canonical);
@@ -161,7 +179,10 @@ export function installManifestHostsForPersist(manifest: InstallManifest | undef
  * a host string this reader version does not know is a `warnings` entry and
  * the manifest still parses (forward compatibility — see `InstallManifest.unknownHosts`).
  */
-export function parseInstallManifest(value: unknown): { manifest?: InstallManifest; warnings?: readonly InstallManifestWarning[]; error?: string } {
+export function parseInstallManifest(
+  value: unknown,
+  platform: string = process.platform,
+): { manifest?: InstallManifest; warnings?: readonly InstallManifestWarning[]; error?: string } {
   if (!isRecord(value)) return { error: 'install_manifest_malformed: expected an object' };
   if (value.layoutVersion !== INSTALL_LAYOUT_VERSION) {
     return { error: `install_manifest_unsupported_version: ${String(value.layoutVersion)}` };
@@ -204,7 +225,7 @@ export function parseInstallManifest(value: unknown): { manifest?: InstallManife
       warnings.push({ code: 'install_manifest_unknown_host', host });
     }
   }
-  const workspaces = parseWorkspaceList(value.workspaces);
+  const workspaces = parseWorkspaceList(value.workspaces, platform);
   if (workspaces.error) return { error: workspaces.error };
   return {
     manifest: {
@@ -433,3 +454,32 @@ export {
   type PdHomeResolution,
   type ResolvePdHomeOptions,
 } from './pd-home.js';
+
+/**
+ * MCP binding contract (schema `pd.mcp-binding.v1`). This is the single
+ * declaration of a valid binding; the launcher's payload copies are verified
+ * against it by the parity test, and the installer / `pd health` import it
+ * directly so neither can drift into a more permissive check.
+ */
+export {
+  MCP_BINDING_SCHEMA_VERSION,
+  MCP_BINDING_HOSTS,
+  MCP_BINDING_SERVER_ENTRY_SEGMENTS,
+  MCP_BINDING_SHAPE_CODES,
+  MCP_BINDING_LAUNCHER_ONLY_REASONS,
+  MCP_BINDING_FIXTURES,
+  getCanonicalMcpServerEntry,
+  isSameMcpBindingPath,
+  validateMcpBinding,
+  buildMcpBindingFixture,
+  isMcpBindingHost,
+  isSupportedBindingSchemaVersion,
+  isSemverVersion,
+  type McpBindingHost,
+  type McpBindingRecord,
+  type McpBindingVerdict,
+  type McpBindingShapeCode,
+  type McpBindingFixture,
+  type McpBindingFixtureId,
+  type McpBindingFixtureContext,
+} from './mcp-binding-contract.js';

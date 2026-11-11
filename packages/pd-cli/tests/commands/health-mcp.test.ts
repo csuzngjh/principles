@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { buildMcpBindingFixture, MCP_BINDING_FIXTURES } from '@principles/install-layout';
 import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine } from '../../src/commands/health-mcp.js';
 
 const SCHEMA = 'pd.mcp-binding.v1';
@@ -786,4 +787,54 @@ describe('formatMcpHostSelectionLine — every selection reason is disclosed', (
     expect(line).toContain('openclaw, codex');
     expect(line).toContain('--host');
   });
+});
+
+describe('assessMcpHealth — shared binding shape gate', () => {
+  /**
+   * pd-cli's OUTWARD vocabulary (characterization): these literals are the
+   * contract the Owner reads in `pd health`. The internal determination moved to
+   * @principles/install-layout's `validateMcpBinding`; only this mapping is
+   * pd-cli's. A changed/renamed code — or a new shared fixture without a
+   * decision here — makes this table red.
+   */
+  const BINDING_DEGRADE_CASES: readonly {
+    readonly id: (typeof MCP_BINDING_FIXTURES)[number]['id'];
+    readonly status: string;
+    readonly reason: string | undefined;
+  }[] = [
+    { id: 'valid', status: 'HEALTHY', reason: undefined },
+    { id: 'missing-workspace', status: 'CONFIG_DRIFT', reason: 'binding_workspace_invalid' },
+    { id: 'missing-server-entry', status: 'CONFIG_DRIFT', reason: 'binding_paths_not_absolute' },
+    { id: 'relative-workspace', status: 'CONFIG_DRIFT', reason: 'binding_workspace_invalid' },
+    { id: 'foreign-server-entry', status: 'CONFIG_DRIFT', reason: 'server_entry_not_canonical' },
+    { id: 'relative-runtime', status: 'CONFIG_DRIFT', reason: 'binding_paths_not_absolute' },
+    { id: 'foreign-host', status: 'CONFIG_DRIFT', reason: 'binding_host_mismatch' },
+    { id: 'unknown-host', status: 'CONFIG_DRIFT', reason: 'binding_host_mismatch' },
+    { id: 'unsupported-schema', status: 'CONFIG_DRIFT', reason: 'binding_schema_unsupported' },
+    { id: 'invalid-versions', status: 'VERSION_MISMATCH', reason: 'installed_mcp_server_version_mismatch' },
+    { id: 'not-an-object', status: 'CONFIG_DRIFT', reason: 'mcp_binding_unreadable' },
+  ];
+
+  it('decides every fixture the shared contract declares', () => {
+    expect(BINDING_DEGRADE_CASES.map((entry) => entry.id).sort())
+      .toEqual(MCP_BINDING_FIXTURES.map((fixture) => fixture.id).sort());
+  });
+
+  for (const expected of BINDING_DEGRADE_CASES) {
+    it(`classifies ${expected.id} as ${expected.reason ?? 'HEALTHY'}`, () => {
+      withHome((home) => {
+        const fixture = makeCodexFixture(home);
+        writeJson(fixture.bindingPath, buildMcpBindingFixture(expected.id, {
+          host: 'codex',
+          runtimeDir: fixture.runtimeDir,
+          workspaceDir: path.join(home, WORKSPACE_NAME),
+          foreignServerEntry: path.join(fixture.runtimeDir, 'other.js'),
+          versions: { mcpServer: '0.1.0', core: '1.0.0' },
+        }));
+        const section = assessCodex(fixture);
+        expect(section.status).toBe(expected.status);
+        expect(section.reason).toBe(expected.reason);
+      });
+    });
+  }
 });
