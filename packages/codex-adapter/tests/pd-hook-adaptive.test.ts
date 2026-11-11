@@ -320,7 +320,11 @@ describe('PRI-1170 Codex exec Adaptive wiring', () => {
     const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
     expect(transport.calls(), result.stderr.join('')).toBe(1);
     expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
-    expect(result.stderr.join('')).toMatch(/adaptive_selection_none:SELECTION_(DIGEST|REFERENCE)_INVALID/);
+    // Phase-1 S5: the registered `adaptive-selection-output` schema rejects
+    // `selected` without a digest inside the adapter, so the failure is
+    // labelled SELECTION_OUTPUT_INVALID instead of the host guard's finer
+    // DIGEST/REFERENCE split (which still applies to well-shaped answers).
+    expect(result.stderr.join('')).toContain('SELECTION_OUTPUT_INVALID');
   });
 
   it('first-byte admission expiry cancels the underlying request and keeps Native', async () => {

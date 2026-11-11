@@ -13,7 +13,7 @@
  * re-asserted here, so the two changes cannot drift into two timing systems.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PiAiRuntimeAdapter, type StartRunInput } from '@principles/core/runtime';
+import { PDRuntimeError, PiAiRuntimeAdapter, type StartRunInput } from '@principles/core/runtime';
 import {
   createSingleModelSelector,
   type BoundedSelectionInput,
@@ -65,5 +65,20 @@ describe('createSingleModelSelector — S5 output schema handoff', () => {
     // schema validation or repair.
     expect(captured).toHaveLength(1);
     expect(captured[0].outputSchemaRef).toBe('adaptive-selection-output');
+  });
+
+  it('labels an adapter schema rejection as SELECTION_OUTPUT_INVALID, not TRANSPORT_FAILED', async () => {
+    // With the schema registered, an incomplete answer (e.g. `selected`
+    // without digest) is rejected by the adapter before the host guard runs.
+    // The failure code must stay diagnosable instead of degrading to the
+    // generic transport code.
+    vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockRejectedValue(
+      new PDRuntimeError('output_invalid', 'LLM output does not match adaptive-selection-output schema'),
+    );
+
+    const s = selector();
+    await expect(s.select(boundedInput)).rejects.toThrow('SELECTION_OUTPUT_INVALID');
+    expect(s.report().failure).toBe('SELECTION_OUTPUT_INVALID');
+    expect(s.report().status).toBe('failed');
   });
 });

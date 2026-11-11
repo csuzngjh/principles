@@ -16,6 +16,7 @@
  */
 import crypto from 'node:crypto';
 import {
+  PDRuntimeError,
   PiAiRuntimeAdapter,
   StoreEventEmitter,
   type ActivatedPrinciple,
@@ -481,22 +482,36 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
         fetch: guardedFetch,
         eventEmitter: new StoreEventEmitter(),
       });
-      const run = await adapter.startRun({
-        agentSpec: {agentId: 'adaptive-principle-selector', schemaVersion: 'current'},
-        inputPayload: input.payload,
-        contextItems: [],
-        // S5: the last caller that reached the adapter without a schema ref.
-        // `adaptive-selection-output` is registered in OUTPUT_SCHEMA_REGISTRY
-        // (principles-core), so the structural shape is validated by the
-        // shared path instead of relying on the host guard alone.
-        // Scope note: this is the ONLY change here. The admission/completion
-        // deadline semantics belong to PRI-1170 (PR #2513); they are
-        // intentionally untouched to avoid a second timing system in this file.
-        outputSchemaRef: 'adaptive-selection-output',
-        timeoutMs: remainingAdmission + generationTimeoutMs,
-        maxTokens,
-        systemPrompt: ADAPTIVE_SELECTOR_SYSTEM,
-      });
+      let run: {readonly runId: string};
+      try {
+        run = await adapter.startRun({
+          agentSpec: {agentId: 'adaptive-principle-selector', schemaVersion: 'current'},
+          inputPayload: input.payload,
+          contextItems: [],
+          // S5: the last caller that reached the adapter without a schema ref.
+          // `adaptive-selection-output` is registered in OUTPUT_SCHEMA_REGISTRY
+          // (principles-core), so the structural shape is validated by the
+          // shared path instead of relying on the host guard alone.
+          // Scope note: this is the ONLY change here. The admission/completion
+          // deadline semantics belong to PRI-1170 (PR #2513); they are
+          // intentionally untouched to avoid a second timing system in this file.
+          outputSchemaRef: 'adaptive-selection-output',
+          timeoutMs: remainingAdmission + generationTimeoutMs,
+          maxTokens,
+          systemPrompt: ADAPTIVE_SELECTOR_SYSTEM,
+        });
+      } catch (error) {
+        // S5: now that the adapter validates the selection shape, a
+        // structurally incomplete answer (e.g. `selected` without a digest)
+        // is rejected there — before the host guard could label it
+        // SELECTION_DIGEST_INVALID / SELECTION_REFERENCE_INVALID. Map it to
+        // the host contract code so the reason stays diagnosable instead of
+        // degrading to TRANSPORT_FAILED in runAdaptiveSelection (rc-9).
+        if (error instanceof PDRuntimeError && error.category === 'output_invalid') {
+          fail('SELECTION_OUTPUT_INVALID');
+        }
+        throw error;
+      }
       const output = await adapter.fetchOutput(run.runId);
       const endedAt = now();
       diagnostics.generationEndedAt = endedAt;
