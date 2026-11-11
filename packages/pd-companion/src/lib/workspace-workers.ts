@@ -14,12 +14,18 @@
  *   - a manifest that cannot be read or parsed stops NOTHING (it is no
  *     evidence of de-authorization); the gap is logged and escalated
  *     Owner-visibly instead (syncFromManifest, 2026-10-16);
+ *   - a manifest-listed path the OS cannot confirm present is treated the
+ *     same way one level deeper (PRI-993): a transient stat failure
+ *     (network-drive blip, antivirus lock, ACL jitter) is undecidable and
+ *     never stops a worker; only ENOENT confirmed across consecutive sync
+ *     windows retires the entry, as workspace_path_missing_confirmed;
  *   - crashed children restart with the same backoff ladder as the console
  *     supervisor, up to MAX_RESTART_ATTEMPTS, then surface degraded.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { errnoCode } from './entry-verdict.js';
 import type { ActiveReleaseRead, ReleaseIdentity } from './release-watch.js';
 
 /** Minimal child interface so the registry is unit-testable without Electron. */
@@ -34,6 +40,11 @@ export interface WorkspaceWorkerRegistryDeps {
   /** Spawn one worker child for a canonical workspace path. */
   spawnWorker: (canonicalWorkspaceDir: string) => WorkerChild;
   readRelease?: () => ActiveReleaseRead;
+  /**
+   * Classify ONE manifest-listed workspace path before each reconciliation
+   * (PRI-993). Absent (legacy callers, tests) = every path counts as present.
+   */
+  statWorkspace?: (workspace: string) => WorkspacePathStat;
   drainTimeoutMs?: number;
   log?: (event: string, detail?: Record<string, unknown>) => void;
   /** Restart ladder (ms) — defaults mirror supervisor.ts. */
@@ -70,6 +81,24 @@ const DEFAULT_RESTART_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
 export const SYNC_UNAVAILABLE_ALERT_THRESHOLD = 10;
 
 /**
+ * Consecutive `missing` (ENOENT) verdicts required before a manifest-listed
+ * workspace is treated as REALLY deleted (PRI-993). A single stat failure is
+ * not deletion evidence: on Windows a disconnected mapped drive or a hung
+ * volume can surface as ENOENT too, so confirmation spans consecutive sync
+ * windows. At the default 60s cadence this is ~10 minutes — by then a
+ * genuinely deleted workspace has long shown its own crash evidence, so the
+ * delayed stop only retires the entry.
+ */
+export const WORKSPACE_PATH_MISSING_CONFIRM_TICKS = 10;
+
+/**
+ * Consecutive non-present verdicts after which an undecidable path episode
+ * escalates one-shot Owner-visibly (rc-9) — same rationale and cadence as
+ * SYNC_UNAVAILABLE_ALERT_THRESHOLD.
+ */
+export const WORKSPACE_PATH_UNDECIDABLE_ALERT_TICKS = 10;
+
+/**
  * The outcome of reading the install manifest for one host's workspaces.
  * A manifest that cannot be READ or PARSED says nothing about which
  * workspaces are authorized — it must never be conflated with "valid
@@ -80,6 +109,51 @@ export const SYNC_UNAVAILABLE_ALERT_THRESHOLD = 10;
 export type WorkspaceManifestSource =
   | { kind: 'ok'; workspaces: readonly string[] }
   | { kind: 'unavailable'; reason: string };
+
+/**
+ * Per-tick existence verdict for ONE manifest-listed workspace path
+ * (PRI-993). Manifest membership decides AUTHORIZATION; the stat decides
+ * whether the path can host a worker RIGHT NOW — the two must never be
+ * conflated: a transient stat failure is not deletion evidence.
+ */
+export type WorkspacePathStat =
+  | { kind: 'present' }
+  | { kind: 'missing' }
+  | { kind: 'undecidable'; reason: string };
+
+/**
+ * Classify one manifest-listed workspace path from the OS's actual answer.
+ * ENOENT is a deletion CANDIDATE (`missing` — the registry acts only after
+ * a multi-window confirmation); every other stat failure, and a stat that
+ * succeeds on a non-directory, is `undecidable` and never stops a worker
+ * on its own (it converges to Owner-visible crash evidence instead).
+ */
+export function classifyWorkspacePath(workspace: string): WorkspacePathStat {
+  try {
+    return fs.statSync(workspace).isDirectory()
+      ? { kind: 'present' }
+      : { kind: 'undecidable', reason: 'workspace_path_not_a_directory' };
+  } catch (err) {
+    if (errnoCode(err) === 'ENOENT') return { kind: 'missing' };
+    return { kind: 'undecidable', reason: `workspace_stat_failed: ${errnoCode(err)}` };
+  }
+}
+
+/**
+ * Cross-tick path-verdict episode for ONE canonical workspace (PRI-993).
+ * Kept independent of worker entries so entry-less workspaces also accrue
+ * evidence; cleared when a stat reports present, or the manifest delists
+ * the workspace (a stale streak must never instantly-confirm a re-add).
+ */
+interface WorkspacePathEpisode {
+  /** Consecutive non-present observations (missing or undecidable). */
+  nonPresentStreak: number;
+  /** Consecutive `missing` observations (reset by an undecidable tick — a
+   * deletion confirmation needs consecutive windows, not mixed evidence). */
+  missingStreak: number;
+  /** One-shot guard so the undecidable escalation fires once per episode. */
+  undecidableEscalated: boolean;
+}
 
 function defaultSchedule(callback: () => void, delayMs: number): { clear(): void } {
   const timer = setTimeout(callback, delayMs);
@@ -100,6 +174,7 @@ export function canonicalWorkspacePath(workspaceDir: string): string {
 export class WorkspaceWorkerRegistry {
   private readonly entries = new Map<string, WorkerEntry>();
   private readonly spawnWorker: WorkspaceWorkerRegistryDeps['spawnWorker'];
+  private readonly statWorkspace: WorkspaceWorkerRegistryDeps['statWorkspace'];
   private readonly log: NonNullable<WorkspaceWorkerRegistryDeps['log']>;
   private readonly restartDelaysMs: readonly number[];
   private readonly schedule: NonNullable<WorkspaceWorkerRegistryDeps['schedule']>;
@@ -108,9 +183,11 @@ export class WorkspaceWorkerRegistry {
   private manifestAvailable = true;
   private consecutiveUnavailableReads = 0;
   private lastUnavailableReason: string | undefined;
+  private readonly pathEpisodes = new Map<string, WorkspacePathEpisode>();
 
   constructor(deps: WorkspaceWorkerRegistryDeps) {
     this.spawnWorker = deps.spawnWorker;
+    this.statWorkspace = deps.statWorkspace;
     this.readRelease = deps.readRelease;
     this.drainTimeoutMs = deps.drainTimeoutMs ?? 600_000;
     this.log = deps.log ?? ((_event: string, _fields?: Record<string, unknown>) => undefined);
@@ -118,13 +195,16 @@ export class WorkspaceWorkerRegistry {
     this.schedule = deps.schedule ?? defaultSchedule;
   }
 
-  /** Reconcile running children to the desired workspace set (canonical-keyed). */
-  sync(desiredWorkspaces: readonly string[]): void {
+  /** Reconcile running children to the desired workspace set (canonical-keyed).
+   * `stopReasons` lets the caller name WHY an excluded entry stops (PRI-993:
+   * a confirmed-deleted path is not a manifest removal); unstopped entries
+   * default to removed_from_manifest. */
+  sync(desiredWorkspaces: readonly string[], stopReasons?: ReadonlyMap<string, string>): void {
     const desired = new Set(desiredWorkspaces.map(canonicalWorkspacePath));
     for (const [canonical, entry] of this.entries) {
       if (!desired.has(canonical)) {
         this.stopEntry(canonical, entry);
-        this.log('workspace_worker_stopped', { workspace: canonical, reason: 'removed_from_manifest' });
+        this.log('workspace_worker_stopped', { workspace: canonical, reason: stopReasons?.get(canonical) ?? 'removed_from_manifest' });
       }
     }
     for (const canonical of desired) {
@@ -166,7 +246,8 @@ export class WorkspaceWorkerRegistry {
           unavailableReads,
         });
       }
-      this.sync(source.workspaces);
+      const { desired, stopReasons } = this.decideWorkspaces(source.workspaces);
+      this.sync(desired, stopReasons);
       this.reconcileRelease();
       return;
     }
@@ -190,6 +271,63 @@ export class WorkspaceWorkerRegistry {
   syncUnavailable(): { reason: string; consecutiveUnavailableReads: number } | undefined {
     if (this.lastUnavailableReason === undefined) return undefined;
     return { reason: this.lastUnavailableReason, consecutiveUnavailableReads: this.consecutiveUnavailableReads };
+  }
+
+  /**
+   * PRI-993: classify every manifest-listed path and build the desired set.
+   * `present` passes. `undecidable` and sub-window `missing` KEEP a worker
+   * that already exists — an answer the OS could not give is not removal
+   * evidence — but never START one: the spawn gate stays "confirmably
+   * present", exactly what the old stat filter owned. `missing` (ENOENT) is
+   * a deletion candidate: after WORKSPACE_PATH_MISSING_CONFIRM_TICKS
+   * consecutive windows it is excluded, so sync() stops its worker as
+   * workspace_path_missing_confirmed instead of removed_from_manifest.
+   */
+  private decideWorkspaces(workspaces: readonly string[]): { desired: string[]; stopReasons: Map<string, string> } {
+    const desired: string[] = [];
+    const stopReasons = new Map<string, string>();
+    const listed = new Set(workspaces.map(canonicalWorkspacePath));
+    for (const canonical of [...this.pathEpisodes.keys()]) {
+      if (!listed.has(canonical)) this.pathEpisodes.delete(canonical);
+    }
+    for (const workspace of workspaces) {
+      const canonical = canonicalWorkspacePath(workspace);
+      const verdict = this.statWorkspace?.(workspace) ?? { kind: 'present' as const };
+      if (verdict.kind === 'present') {
+        this.clearPathEpisode(canonical);
+        desired.push(workspace);
+        continue;
+      }
+      const episode = this.pathEpisodes.get(canonical) ?? { nonPresentStreak: 0, missingStreak: 0, undecidableEscalated: false };
+      episode.nonPresentStreak += 1;
+      if (verdict.kind === 'missing') {
+        episode.missingStreak += 1;
+        this.log('workspace_path_missing_pending', { workspace, missingStreak: episode.missingStreak, threshold: WORKSPACE_PATH_MISSING_CONFIRM_TICKS });
+        if (episode.missingStreak >= WORKSPACE_PATH_MISSING_CONFIRM_TICKS) {
+          stopReasons.set(canonical, 'workspace_path_missing_confirmed');
+        } else if (this.entries.has(canonical)) {
+          desired.push(workspace); // keep the live/degraded worker until the window decides
+        }
+      } else {
+        episode.missingStreak = 0;
+        this.log('workspace_path_undecidable', { workspace, reason: verdict.reason, nonPresentStreak: episode.nonPresentStreak });
+        if (episode.nonPresentStreak >= WORKSPACE_PATH_UNDECIDABLE_ALERT_TICKS && !episode.undecidableEscalated) {
+          episode.undecidableEscalated = true;
+          this.log('workspace_path_undecidable_persistent', { workspace, reason: verdict.reason, nonPresentStreak: episode.nonPresentStreak });
+        }
+        if (this.entries.has(canonical)) desired.push(workspace); // same keep-don't-spawn gate as missing
+      }
+      this.pathEpisodes.set(canonical, episode);
+    }
+    return { desired, stopReasons };
+  }
+
+  /** A present stat ends the episode observably — one event per episode (RF-04 lesson). */
+  private clearPathEpisode(canonical: string): void {
+    const episode = this.pathEpisodes.get(canonical);
+    if (episode === undefined) return;
+    this.pathEpisodes.delete(canonical);
+    this.log('workspace_path_recovered', { workspace: canonical, nonPresentStreak: episode.nonPresentStreak });
   }
 
   stopAll(): void {
