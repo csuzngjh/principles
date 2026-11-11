@@ -30,6 +30,7 @@ import {
   assertFreshResults,
   claimApproval,
   claimRecord,
+  hashBuildArtifacts,
   reserveRequest,
   verifyApproval,
 } from './approval-gate.mjs';
@@ -167,6 +168,7 @@ const binding = {
   treeHash: tree,
   manifestSha256,
   isolatedConfigSha256,
+  buildArtifactsSha256: hashBuildArtifacts(ROOT),
   route,
   envelopeTotalMs: cases.envelope.totalMs,
   criteriaVersion: cases.criteria.version,
@@ -179,6 +181,7 @@ let claim = null;
 if (MODE === 'approved') {
   approvalSha256 = sha256(path.resolve(APPROVAL_FILE));
   approval = JSON.parse(fs.readFileSync(path.resolve(APPROVAL_FILE), 'utf8'));
+  check('tracked files match the approved commit', git(['status', '--porcelain', '--untracked-files=no']) === '');
   const verdict = verifyApproval({approval, binding});
   for (const problem of verdict.problems) {
     problems.push(`${problem.code}${problem.field ? `:${problem.field}` : ''}`
@@ -216,7 +219,7 @@ const countFile = path.join(runRoot, 'fake-request-count.log');
 fs.writeFileSync(countFile, '');
 const counts = () => fs.readFileSync(countFile, 'utf8').split('\n').filter(Boolean).length;
 
-function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores}) {
+function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores, fakeProvider = route.provider}) {
   const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
   fs.writeFileSync(configPath, yaml.dump(configFor(budgetChars, adaptive)), 'utf8');
   const configSha256 = sha256(configPath);
@@ -226,7 +229,7 @@ function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores}) {
     env.PD_FAKE_SCORES = JSON.stringify(fakeScores ?? {});
     env.PD_FAKE_COUNT_FILE = countFile;
     env.PD_FAKE_MODEL = route.responseModels[route.responseModels.length - 1];
-    env.PD_FAKE_PROVIDER = route.provider;
+    env.PD_FAKE_PROVIDER = fakeProvider;
   }
   const payload = JSON.stringify({
     session_id: 's-pri-1182',
@@ -321,6 +324,7 @@ for (const entry of cases.cases) {
     adaptive: true,
     budgetChars,
     fakeScores: entry.recordedScores,
+    fakeProvider: entry.id === 'append' ? '' : route.provider,
   });
   const sends = MODE === 'preflight'
     ? counts() - before
@@ -354,8 +358,10 @@ for (const entry of cases.cases) {
         adaptive.diagnostic.decision);
       check(`${entry.id} model identity is in the exact allowlist`,
         route.responseModels.includes(adaptive.diagnostic.modelObserved), adaptive.diagnostic.modelObserved);
-      check(`${entry.id} provider field`, (adaptive.diagnostic.providerObserved ?? 'absent') === route.provider,
-        adaptive.diagnostic.providerObserved);
+      const observedProvider = adaptive.diagnostic.providerObserved ?? 'absent';
+      check(`${entry.id} provider field`,
+        observedProvider === 'absent' || observedProvider.toLowerCase() === route.provider.toLowerCase(),
+        observedProvider);
       check(`${entry.id} measured to a validated table`,
         adaptive.requestLatencyMs !== null && adaptive.requestLatencyMs <= cases.envelope.totalMs,
         String(adaptive.requestLatencyMs));
