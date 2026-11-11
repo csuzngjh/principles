@@ -294,6 +294,20 @@ export function deriveToolHintsFromCanonicalKind(
   };
 }
 
+/**
+ * PRI-1184 / F3': the RuleHost gate evaluates only the write, execute and
+ * agent families. Read/search and every other canonical kind are allowed
+ * without touching the RuleCode engine.
+ *
+ * This predicate is the single semantic authority for that routing contract.
+ * It mirrors the OpenClaw host declaration (`OPENCLAW_TOOL_SEMANTIC_MAPPINGS`)
+ * and `validateRuleReliability`, both of which already treat read/search names
+ * as non-dispatchable. Do not replace it with a tool-name allowlist.
+ */
+export function isRuleHostEvaluableKind(canonicalKind: CanonicalKind): boolean {
+  return canonicalKind === 'write' || canonicalKind === 'execute' || canonicalKind === 'agent';
+}
+
 function withDerivedHints(options: ExtractFilePathOptions): ExtractFilePathOptions {
   if (options.canonicalKind === undefined) return options;
   // B2: the registry kind is the single authority. An explicit hint is the
