@@ -1,0 +1,158 @@
+{
+  "mode": "preflight",
+  "ranAt": "2026-11-11T06:25:08.693Z",
+  "codeHead": "a7a09a1caaebab92d41967a302d997d8a07fa505",
+  "treeHash": "8c689bbb87f9fe28d03fc19449acc6f2e3d92092",
+  "manifestSha256": "6f0bf1ee4eb13bc89eaaac073ba3fdda04937898e29b57108173977e602931b9",
+  "isolatedConfigSha256": "1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413",
+  "route": {
+    "endpoint": "https://openrouter.ai/api/alpha/decisions",
+    "model": "respan/span-01-lite:free",
+    "provider": "Respan",
+    "allowFallbacks": false,
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "responseModels": [
+      "respan/span-01-lite:free",
+      "respan/span-01-lite-20260925"
+    ]
+  },
+  "envelope": {
+    "firstByteTimeoutMs": 500,
+    "generationTimeoutMs": 500,
+    "totalMs": 1000,
+    "measuredFrom": "actual send of the single Decisions request",
+    "measuredTo": "the WHOLE answer table passed validation",
+    "earlierOf": "send + 1000 ms, or the host window minus the assembly/output reserve"
+  },
+  "criteria": {
+    "version": "v1-20261111",
+    "selectThreshold": 0.7,
+    "leadMargin": 0.25,
+    "insufficientThreshold": 0.6,
+    "note": "Preset for this batch, not derived from the old GLM samples. Do not tune while a batch runs."
+  },
+  "requestBudget": {
+    "perCase": 1,
+    "total": 4,
+    "zeroRequestControl": "pure-ack",
+    "note": "The native (Adaptive OFF) comparison run never sends a request."
+  },
+  "expiresAt": "2026-11-14T23:59:59+08:00",
+  "fakeRequests": 4,
+  "cases": [
+    {
+      "id": "append",
+      "kind": "decision",
+      "purpose": "可追加：Native 漏掉 DELIVERY，快速评分在短窗口内选中并补入",
+      "sends": 1,
+      "decision": "selected:selected:c3",
+      "scores": {
+        "candidate_c1": 0.06,
+        "candidate_c2": 0.04,
+        "candidate_c3": 0.95,
+        "candidate_c4": 0.11,
+        "insufficient_context": 0.04
+      },
+      "modelObserved": "respan/span-01-lite-20260925",
+      "providerObserved": "Respan",
+      "requestSentAt": "1794378300006",
+      "validatedAt": "1794378300008",
+      "cancelledAt": "unknown",
+      "requestLatencyMs": 2,
+      "wallClockMs": 1037,
+      "finalBody": "delivery_added",
+      "nativeIdentical": false,
+      "additionalContext": "\n## 【ACTIVE BEHAVIOR DIRECTIVES】\n\nActive behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority=\"owner\" (approved in the owner approval queue) or authority=\"system_policy\" (auto-activated by low-risk policy).\nThese directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.\nFor ambiguous coding or file-changing tasks, follow these directives before using mutating tools.\n\n<directive id=\"DELIVERY\" source=\"runtime_v2_activation\" authority=\"owner\">\nMANDATORY: 交付验收前以可观察证据自检：先列出验收基准与已有证据；缺证据时如实限定结论。\n</directive>\n\n<directive id=\"SCOPE\" source=\"runtime_v2_activation\" authority=\"owner\">\nMANDATORY: 只修改与任务直接相关的文件，邻近改进记为后续事项。\n</directive>\n\nNote: These directives do not override safety, security, or core system policy."
+    },
+    {
+      "id": "abstain",
+      "kind": "decision",
+      "purpose": "应弃选：与任务无关的输入，全部条件分数低于门槛",
+      "sends": 1,
+      "decision": "none_applicable:below_selection_threshold:none",
+      "scores": {
+        "candidate_c1": 0.05,
+        "candidate_c2": 0.03,
+        "candidate_c3": 0.12,
+        "candidate_c4": 0.07,
+        "insufficient_context": 0.09
+      },
+      "modelObserved": "respan/span-01-lite-20260925",
+      "providerObserved": "Respan",
+      "requestSentAt": "1794378302073",
+      "validatedAt": "1794378302076",
+      "cancelledAt": "unknown",
+      "requestLatencyMs": 3,
+      "wallClockMs": 1012,
+      "finalBody": "native_identical",
+      "nativeIdentical": true,
+      "additionalContext": "\n## 【ACTIVE BEHAVIOR DIRECTIVES】\n\nActive behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority=\"owner\" (approved in the owner approval queue) or authority=\"system_policy\" (auto-activated by low-risk policy).\nThese directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.\nFor ambiguous coding or file-changing tasks, follow these directives before using mutating tools.\n\n<directive id=\"SCOPE\" source=\"runtime_v2_activation\" authority=\"owner\">\nMANDATORY: 只修改与任务直接相关的文件，邻近改进记为后续事项。\n</directive>\n\nNote: These directives do not override safety, security, or core system policy."
+    },
+    {
+      "id": "selected-but-does-not-fit",
+      "kind": "decision",
+      "purpose": "选对但装不下：协议选中 DELIVERY，预算只够 BIG，最终正文不得改变",
+      "sends": 1,
+      "decision": "selected:selected:c3",
+      "scores": {
+        "candidate_c1": 0.04,
+        "candidate_c2": 0.06,
+        "candidate_c3": 0.93,
+        "candidate_c4": 0.08,
+        "insufficient_context": 0.05
+      },
+      "modelObserved": "respan/span-01-lite-20260925",
+      "providerObserved": "Respan",
+      "requestSentAt": "1794378304321",
+      "validatedAt": "1794378304324",
+      "cancelledAt": "unknown",
+      "requestLatencyMs": 3,
+      "wallClockMs": 1102,
+      "finalBody": "native_keeps_big",
+      "nativeIdentical": true,
+      "additionalContext": "\n## 【ACTIVE BEHAVIOR DIRECTIVES】\n\nActive behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority=\"owner\" (approved in the owner approval queue) or authority=\"system_policy\" (auto-activated by low-risk policy).\nThese directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.\nFor ambiguous coding or file-changing tasks, follow these directives before using mutating tools.\n\n<directive id=\"BIG\" source=\"runtime_v2_activation\" authority=\"owner\">\nMANDATORY: 避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。避免为假设的未来需求预建抽象和额外服务。\n</directive>\n\nNote: These directives do not override safety, security, or core system policy."
+    },
+    {
+      "id": "short-confirmation",
+      "kind": "decision",
+      "purpose": "短确认进入评估：没有可见任务上下文，允许保守弃选",
+      "sends": 1,
+      "decision": "none_applicable:below_selection_threshold:none",
+      "scores": {
+        "candidate_c1": 0.1,
+        "candidate_c2": 0.08,
+        "candidate_c3": 0.14,
+        "candidate_c4": 0.06,
+        "insufficient_context": 0.55
+      },
+      "modelObserved": "respan/span-01-lite-20260925",
+      "providerObserved": "Respan",
+      "requestSentAt": "1794378306504",
+      "validatedAt": "1794378306507",
+      "cancelledAt": "unknown",
+      "requestLatencyMs": 3,
+      "wallClockMs": 1065,
+      "finalBody": "native_identical",
+      "nativeIdentical": true,
+      "additionalContext": "\n## 【ACTIVE BEHAVIOR DIRECTIVES】\n\nActive behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority=\"owner\" (approved in the owner approval queue) or authority=\"system_policy\" (auto-activated by low-risk policy).\nThese directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.\nFor ambiguous coding or file-changing tasks, follow these directives before using mutating tools.\n\n<directive id=\"SCOPE\" source=\"runtime_v2_activation\" authority=\"owner\">\nMANDATORY: 只修改与任务直接相关的文件，邻近改进记为后续事项。\n</directive>\n\nNote: These directives do not override safety, security, or core system policy."
+    },
+    {
+      "id": "pure-ack",
+      "kind": "skip",
+      "purpose": "零请求对照：明确致谢不进入评估，零发送、Native 逐字节一致",
+      "sends": 0,
+      "decision": "unknown",
+      "scores": {},
+      "modelObserved": "unknown",
+      "providerObserved": "absent",
+      "requestSentAt": "unknown",
+      "validatedAt": "unknown",
+      "cancelledAt": "unknown",
+      "requestLatencyMs": null,
+      "wallClockMs": 1018,
+      "finalBody": "native_identical",
+      "nativeIdentical": true,
+      "additionalContext": "\n## 【ACTIVE BEHAVIOR DIRECTIVES】\n\nActive behavior directives are operating constraints learned from prior owner corrections. Each directive carries its authorization: authority=\"owner\" (approved in the owner approval queue) or authority=\"system_policy\" (auto-activated by low-risk policy).\nThese directives are mandatory active behavior constraints for this session, not background context, unless they conflict with safety, security, or higher-priority system policy.\nFor ambiguous coding or file-changing tasks, follow these directives before using mutating tools.\n\n<directive id=\"SCOPE\" source=\"runtime_v2_activation\" authority=\"owner\">\nMANDATORY: 只修改与任务直接相关的文件，邻近改进记为后续事项。\n</directive>\n\nNote: These directives do not override safety, security, or core system policy."
+    }
+  ]
+}
