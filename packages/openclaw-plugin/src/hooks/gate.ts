@@ -10,7 +10,7 @@
  */
 
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
+import { buildGateBlockReason, persistGateBlock, recordGateBlockAndReturn, SHARED_RULE_HOST_BLOCK_SOURCE } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, isRuleHostEvaluatedEventData } from '@principles/core/runtime';
 import type { CorrectionProposal } from '@principles/core/runtime';
@@ -746,7 +746,7 @@ export function handleSharedRuleHostResult(
     if (result.decision === 'deny') {
       // PRI-569 round 3: a deny is ALWAYS accounted — trajectory.db accepts
       // a null file_path, so record with null instead of dropping the count.
-      accountSharedDeny(wctx, {
+      return accountSharedDeny(wctx, {
         sessionId: ctx.sessionId,
         toolName: event.toolName,
         filePath: null,
@@ -812,7 +812,7 @@ export function handleSharedRuleHostResult(
     logger.warn?.(`[PD_GATE] Failed to record shared RuleHost result: ${String(error)}`);
   }
   if (result.decision === 'deny') {
-    accountSharedDeny(wctx, {
+    return accountSharedDeny(wctx, {
       sessionId: ctx.sessionId,
       toolName: event.toolName,
       filePath: action.normalizedPath,
@@ -822,7 +822,6 @@ export function handleSharedRuleHostResult(
       activationId: liveActivationId,
       ...evidenceToolIds(event),
     }, logger);
-    return;
   }
 
   if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
@@ -883,6 +882,11 @@ export function handleSharedRuleHostResult(
  * filePath is accounted with a null trajectory file_path; the EventLog copy
  * carries an '<unresolved>' placeholder. Never throws into the caller;
  * every skip/failure warns with a reasonCode (rc-9).
+ *
+ * Returns the block result so the host adapter can surface the SAME
+ * owner-facing copy the legacy hook path returned (PRI-1184 / F4). Before
+ * this, the shared path only persisted the deny, so
+ * `principle_receipt_block_copy` had no producer on the production path.
  */
 export function accountSharedDeny(
   wctx: WorkspaceContext,
@@ -905,7 +909,7 @@ export function accountSharedDeny(
     runId?: string;
   },
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void },
-): void {
+): PluginHookBeforeToolCallResult {
   if (accounting.filePath === null) {
     logger.warn?.('[PD_GATE] Shared-path deny accounted with unresolved target path (reasonCode=shared_deny_path_unresolved)');
   }
@@ -962,8 +966,19 @@ export function accountSharedDeny(
     reason: accounting.reason,
     toolName: accounting.toolName,
     sessionId: accounting.sessionId,
-    blockSource: 'rule-host-shared',
+    blockSource: SHARED_RULE_HOST_BLOCK_SOURCE,
     ruleId: accounting.ruleId,
     principleId: accounting.principleId,
   }, logger);
+  return {
+    block: true,
+    blockReason: buildGateBlockReason(wctx, {
+      filePath: accounting.filePath,
+      reason: accounting.reason,
+      toolName: accounting.toolName,
+      blockSource: SHARED_RULE_HOST_BLOCK_SOURCE,
+      ruleId: accounting.ruleId,
+      principleId: accounting.principleId,
+    }, logger),
+  };
 }

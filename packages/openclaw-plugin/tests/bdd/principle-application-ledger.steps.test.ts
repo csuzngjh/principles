@@ -22,6 +22,7 @@ import {
   recordInjectionPresence,
   clearPrincipleApplicationLedgerCache,
 } from '../../src/core/principle-application-ledger.js';
+import { clearPrincipleReceiptMetadataCache } from '../../src/core/principle-receipt-metadata.js';
 import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../../principles-core/tests/bdd/support/repo-root.js';
 
@@ -241,6 +242,9 @@ afterEach(() => {
   readerConn?.close();
   readerConn = undefined;
   clearPrincipleApplicationLedgerCache();
+  // The shared deny path now builds the owner-facing block copy, which opens a
+  // cached readonly metadata connection to this workspace (PRI-1184 / F4).
+  clearPrincipleReceiptMetadataCache();
   fs.rmSync(workspaceDir, { recursive: true, force: true });
 });
 

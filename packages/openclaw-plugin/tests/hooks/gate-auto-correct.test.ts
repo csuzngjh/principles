@@ -56,7 +56,8 @@ vi.mock('../../src/core/event-log.js', () => ({
 }));
 
 const mockPersistGateBlock = vi.fn();
-vi.mock('../../src/hooks/gate-block-helper.js', () => ({
+vi.mock('../../src/hooks/gate-block-helper.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/hooks/gate-block-helper.js')>()),
   persistGateBlock: (...args: unknown[]) => mockPersistGateBlock(...args),
 }));
 
@@ -464,9 +465,9 @@ describe('PRI-174: Gate auto_correct live mode', () => {
       makeSharedResult(metadata, { decision: 'deny', reason: 'dangerous operation' }),
     );
 
-    // 差异：共享路径下 host 已阻断本次调用，本 handler 只做 deny 记账，
-    // 不再返回 block 对象（legacy 断言 result 为定义的 block）。
-    expect(result).toBeUndefined();
+    // 共享路径下 host 已阻断本次调用；本 handler 返回同一个 owner-facing
+    // block 结果（PRI-1184 / F4），deny 记账不受影响。
+    expect(result?.block).toBe(true);
     expect(mockEventLogInstance.recordRuleHostBlocked).toHaveBeenCalled();
     expect(mockEventLogInstance.recordRuleEnforced).toHaveBeenCalled();
     expect(mockRecordGateEnforcementEvidence).toHaveBeenCalledWith(

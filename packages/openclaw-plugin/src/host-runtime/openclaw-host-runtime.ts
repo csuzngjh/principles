@@ -218,9 +218,18 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
     const native = results.get(result);
     if (payload.kind === 'before_tool_call' && !native) {
       const enrichedValue = options.onBeforeToolResult?.(payload.event, payload.context, result);
-      return { kind: payload.kind, value: result.decision === 'deny'
-        ? { block: true, blockReason: result.reason }
-        : enrichedValue };
+      if (result.decision === 'deny') {
+        // PRI-1184 / F4: a deny must never be downgraded to allow, but the
+        // plugin DOES own the owner-facing copy (PRI-530 receipt). Before this,
+        // the enriched value was discarded here, so the shared production path
+        // had no producer for `principle_receipt_block_copy` and every shared
+        // deny surfaced the raw gate reason only. Honour a returned block
+        // result; anything else keeps the gate's reason verbatim.
+        return { kind: payload.kind, value: enrichedValue && typeof enrichedValue === 'object' && enrichedValue.block === true
+          ? enrichedValue
+          : { block: true, blockReason: result.reason } };
+      }
+      return { kind: payload.kind, value: enrichedValue };
     }
     if (payload.kind === 'after_tool_call' && !native) {
       // Phase A: the shared after-tool kernel only records technical evidence
