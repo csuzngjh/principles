@@ -934,6 +934,8 @@
         "modifyWordingNote": "原则修改将在后续版本开放",
         "channel": "生效通道",
         "channelPromptReversible": "将通过提示词通道激活 · 可回滚",
+        "examinerEntry": "评估此原则的行为效果",
+        "examinerEntryBlocked": "仅 active 原则可进入评估（当前状态：{{status}}）。请先在下方完成治理决策。",
         "whyExists": "为什么存在",
         "applicableScenarios": "适用场景",
         "expectedBehavior": "预期行为",
@@ -2111,6 +2113,10 @@
         "openReport": "打开报告",
         "runDry": "宿主演练",
         "requestF2": "请求 F2 真实宿主运行",
+        "f2ClosedTitle": "未开放",
+        "f2ClosedBody": "控制台不会自动批准或自动执行真实运行。真实运行要求 Study 内存在由拥有者签发的 APPROVED Stage R 授权（绑定冻结的套件哈希），并且 Gate 1 独立人工 Gold 审核目前仍未通过。",
+        "f2ClosedNext": "下一步：先完成 Gate 1 独立人工 Gold 审核与 Stage R 授权。在此之前请使用 Host Dry-run 或离线对照。",
+        "actionErrorNext": "可以先重试；若持续失败，请查看下方的运行记录与预检结果，必要时返回上一页重新创建 Study。",
         "modesNote": "离线 Stub 同步执行并验证契约管线；宿主演练异步执行且零模型调用；F2 真实宿主运行需要本 Study 内存在已批准（APPROVED）的 Stage R 授权。",
         "accepted": {
           "dryRun": "宿主演练已受理——正在轮询检查清单。",
@@ -2134,8 +2140,47 @@
       "preflight": {
         "status": "预检状态"
       },
+      "ownerSummary": {
+        "title": "结论与下一步",
+        "rationale": "依据",
+        "next": "下一步",
+        "conclusionUnverified": "这份报告没有通过重放校验，结论不能作为治理决策依据。",
+        "conclusionNoControlled": "这份报告没有受控对照结果，无法判断该原则是否有效。",
+        "conclusionInsufficient": "证据不足：计划 {{planned}} 个配对，只有 {{determined}} 个能确定结果，目前无法判断该原则是否有效。",
+        "conclusionNoDifference": "在离线对照中，启用该原则后没有观察到可见差异。",
+        "conclusionPositive": "在离线对照中，启用该原则后指标提升约 {{value}}。",
+        "conclusionNegative": "在离线对照中，启用该原则后指标下降约 {{value}}，需要警惕副作用。",
+        "rationaleMode": "执行方式：{{mode}}",
+        "rationalePairs": "配对：计划 {{planned}}，可判定 {{determined}}，不可判定 {{unknown}}，不适用 {{na}}",
+        "rationaleFidelity": "处理保真：上下文注入 {{present}}/{{planned}}，对照污染 {{contamination}}，容量驱逐 {{evictions}}",
+        "rationaleReplay": "重放校验：{{status}}",
+        "rationaleLimitations": "报告记录了 {{count}} 条限制，见下方「适用范围与限制」",
+        "cannotProveTitle": "尚不能证明什么",
+        "cannotProveOffline": "离线对照不能证明真实宿主环境中的行为改变。",
+        "cannotProveCausal": "在独立 Gold 审核与配对隔离证据齐备之前，观察到的差异不能作为因果结论。",
+        "cannotProveVerdict": "当前证据不足以形成正式效果裁定。",
+        "nextFixEvidence": "先补齐证据：修复未确定配对或重放校验失败，再重新运行。证据不足时不要修改原则状态。",
+        "nextGovernance": "带着这份报告进入原则治理，在保留、调整、归档之间做决策。"
+      },
+      "executionMode": {
+        "title": "这份报告来自哪种执行方式",
+        "current": "当前报告来源：{{mode}}",
+        "modeOffline": "离线对照（offline-stub）",
+        "modeReal": "真实宿主运行",
+        "modeUnknown": "未知执行方式",
+        "offlineNote": "离线对照只验证控制流与统计管线，不代表真实宿主行为。",
+        "realNote": "真实宿主运行反映真实宿主行为，但仍需结合限制条件解读。",
+        "unknownNote": "报告没有记录执行方式，请不要据此推断真实宿主行为。",
+        "offlineLine": "离线对照：{{state}}",
+        "dryRunLine": "Host Dry-run：{{count}} 次（零模型调用，不产生行为结论）",
+        "f2Line": "F2 真实宿主：{{count}} 次（当前未开放，需拥有者批准 Stage R 授权）",
+        "ran": "已运行",
+        "notRun": "未运行"
+      },
       "report": {
         "title": "Report V2",
+        "limitationsSection": "适用范围与限制",
+        "technicalTitle": "技术明细",
         "target": "目标",
         "endpoint": "主要终点",
         "fidelity": "Treatment Fidelity（注入忠实度）",
@@ -2166,8 +2211,12 @@
       "evaluation": {
         "title": "原则评估",
         "configureCta": "配置 Study",
-        "noActive": "此工作区没有 active 原则——请先激活一条原则再评估。",
+        "noActive": "当前没有可评估的原则",
+        "noActiveHint": "只有处于 active 状态的原则才能进入评估。请先在原则治理中激活一条原则，再回到这里。",
         "loadingEvidence": "正在加载生产证据…",
+        "loadingEvidenceFor": "正在加载 {{principleId}} 的生产证据…",
+        "evidenceError": "生产证据加载失败（目标：{{principleId}}）。",
+        "evidenceRetry": "重新加载证据",
         "refresh": "刷新证据",
         "openGovernance": "打开原则治理",
         "selectPrinciple": "选择一条原则查看其生产证据。",
@@ -2223,7 +2272,10 @@
           "title": "Challenge 套件"
         },
         "readiness": {
-          "title": "宿主执行就绪"
+          "title": "宿主执行就绪",
+          "loading": "正在检查宿主执行条件…",
+          "unavailable": "宿主执行条件暂不可用（不影响离线 Study 的创建与执行）。",
+          "f2Note": "F2 真实运行未开放：需要拥有者批准 Stage R 授权。当前可用的执行方式是离线对照与 Host Dry-run。"
         },
         "difference": {
           "title": "实验与生产配置差异",
@@ -2238,7 +2290,69 @@
         "run": "离线执行失败。",
         "report": "报告生成失败。",
         "evidence": "加载生产证据失败。",
-        "status": "加载 Study 状态失败。"
+        "status": "加载 Study 状态失败。",
+        "principles": "加载原则列表失败。",
+        "retry": "重试"
+      },
+      "eligibility": {
+        "title": "资格预检",
+        "checking": "正在检查…",
+        "error": "资格预检失败，暂时无法确认这条原则能否评估。",
+        "status": {
+          "ELIGIBLE": "可以评估",
+          "DEGRADED": "可以评估（有注意事项）",
+          "BLOCKED": "无法评估"
+        },
+        "summaryEligible": "预检通过：这条原则当前可以被评估。",
+        "summaryDegraded": "可以创建评估，但下面的注意事项会影响结论如何解读。",
+        "summaryBlocked": "无法创建评估：{{reason}}",
+        "nextStep": "下一步",
+        "createBlocked": "预检未通过，创建按钮已停用",
+        "check": {
+          "principle_exists": "目标原则",
+          "principle_status": "原则状态",
+          "production_snapshot": "生产证据快照",
+          "activation_evidence": "运行激活证据",
+          "rulecode_identifiability": "干预可识别性",
+          "experiment_configuration": "实验与生产配置差异",
+          "suite_available": "研究套件",
+          "study_root_writable": "研究存储位置",
+          "experiment_mode": "评估模式"
+        },
+        "reason": {
+          "principle_not_found": "工作区里找不到这条原则。",
+          "principle_not_active": "这条原则当前不是 active 状态，评估接口不接受它。",
+          "snapshot_unreadable": "无法读取生产证据快照，评估会缺少真实基线。",
+          "activation_data_degraded": "运行时激活数据不完整（ACTIVATION_DATA_DEGRADED），部分结论可能偏弱。",
+          "runtime_prompt_inactive": "原则在账本中是 active，但运行时没有生效的注入记录。",
+          "experiment_config_differs": "实验配置与生产注入路径存在差异。",
+          "intervention_not_identifiable": "目标原则的 RuleCode 与其它原则耦合，无法单独归因。",
+          "suite_unavailable": "研究套件不可用或编译失败。",
+          "study_root_not_writable": "研究存储位置不可写。",
+          "experiment_mode_unsupported": "评估模式不受支持。",
+          "unknown": "未知原因"
+        }
+      },
+      "guide": {
+        "title": "Examiner 能帮你判断什么",
+        "what": "在原则已经生效的前提下，做一次受控的小规模对照实验，看它是否真的改变了行为。",
+        "target": "评估对象：一条原则，以及它在当前工作区里的真实证据（触发记录、注入状态、运行时激活）。",
+        "difference": "原则详情页说明「这条原则是什么」；Examiner 回答「它到底有没有起作用、有没有副作用」。",
+        "flowLabel": "使用流程",
+        "flowEvidence": "查看生产证据",
+        "flowSelect": "选择原则",
+        "flowCreate": "创建评估",
+        "flowReport": "阅读报告",
+        "flowDecide": "治理决策",
+        "canTitle": "现在可以验证",
+        "canBody": "离线对照下启用与停用该原则时的行为差异，以及可复现的报告。",
+        "cannotTitle": "现在还不能证明",
+        "cannotBody": "它不代表真实宿主行为，也不做自动裁决；Gate 1 未通过前，结论只作决策参考。",
+        "whenTitle": "适合什么时候用",
+        "when1": "新原则需要评估",
+        "when2": "已激活原则没有产生预期效果",
+        "when3": "怀疑原则引入了副作用",
+        "when4": "修改原则后需要重新评估"
       }
     },
     "debt": {

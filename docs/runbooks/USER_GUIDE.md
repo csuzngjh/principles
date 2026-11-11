@@ -1,6 +1,6 @@
 # Principles Disciple User Guide
 
-This guide focuses on the commands and workflows that are actually useful in the current `v1.9.0` milestone.
+This guide focuses on the commands and workflows that are actually useful in the current release. The version is defined by the installer's `package.json`; this guide does not pin a milestone number.
 
 ## What The System Does
 
@@ -242,6 +242,111 @@ calls made with your own provider account; when `provider`, `model` or `apiKeyEn
 agents report `needs_setup` and stay off. Run `pd config doctor --workspace "<path>"` — it names the
 missing field — then see
 [Before You Start: Give PD an LLM](#before-you-start-give-pd-an-llm).
+
+## Evaluating A Principle With Examiner
+
+### What Examiner Does
+
+Examiner is where the console evaluates whether a **single principle** actually changes behavior. It places that principle in a fixed set of comparison cases, runs the research pipeline, and produces a report.
+
+The evaluated object is always one specific Principle (selected by principle id) — never the whole library, and never a single task run.
+
+### How It Differs From Viewing Principle Details
+
+| | Principle detail | Examiner |
+|---|---|---|
+| Question answered | What this principle says and what state it is in | Whether injecting it actually changed behavior |
+| Data source | Ledger and activation records | Frozen experiment inputs + comparison runs + statistics |
+| Output | Facts and status | Conclusion, evidence boundary, and next step |
+
+Examiner never makes an automatic decision and never changes a principle's status.
+
+### When To Use It
+
+- A new principle is about to be promoted and you want to see its effect first.
+- An active principle went live but did not produce the expected effect.
+- You suspect the principle introduced a side effect.
+- You changed the principle text or its rules and need to re-evaluate.
+
+### First Run: Enter From Principle Detail
+
+1. Open Controls → Principles.
+2. Choose an `active` principle.
+3. Click "Evaluate this principle's behavioral effect".
+4. The console opens Examiner with that principle already selected.
+
+Non-`active` principles do not show an executable entry, because the current research contract only accepts active principles. Finish the governance decision first, then come back.
+
+### How To Read Production Evidence
+
+The Examiner home page shows the selected principle's production evidence: ledger status, runtime activation, the production prompt-injection projection, and RuleCode attribution.
+
+When evidence cannot be read, the page shows an explicit failure with a retry action — it never renders as "there is no evidence". Those are different facts: one is unavailable data, the other is confirmed absence.
+
+### How To Tell Whether A Principle Can Be Evaluated (Eligibility)
+
+Once a principle is selected, the configure page runs a read-only **eligibility pre-check**. There are three outcomes:
+
+| Status | Meaning | What you can do |
+|---|---|---|
+| `ELIGIBLE` | The study can be created | Create it |
+| `DEGRADED` | Creation is allowed, but some production data is unavailable | Create it, and keep the affected conclusions qualified |
+| `BLOCKED` | It cannot be evaluated right now | Follow the reason and next step shown in the panel |
+
+Common blockers:
+
+- **Unsupported principle status**: only active principles can be evaluated.
+- **Intervention not identifiable**: the workspace attributes a RuleCode to this principle but cannot show the two are independently controllable, so a bundled result cannot be attributed to the principle alone.
+- **Research suite unavailable**: the selected suite does not compile.
+- **Study root not writable**: the workspace research output directory failed its isolation check.
+
+The pre-check writes nothing. When it says "creatable", creation re-runs the same checks on the server; when it says BLOCKED, creation is refused.
+
+### How To Create A Study
+
+1. Choose a principle.
+2. Choose an experiment mode: `isolated_principle` (compare the single principle) or `full_library_incremental` (keep the library baseline).
+3. Choose a server-fixed Challenge Suite (`didactic-pair` or `calibration-core`).
+4. Create it.
+
+After creation the page shows the Study ID, the production-snapshot difference markers, and the frozen inputs. Once frozen, later runs never re-read production data.
+
+### How To Run Preflight
+
+Preflight checks the study's integrity before execution and lists every blocker and warning:
+
+- blocker: must be fixed; execution is refused until it is.
+- warning: execution may proceed, but the result must be read with that limitation.
+
+### How To Run An Offline Study
+
+The offline run uses a deterministic offline simulator with **zero model calls**. It validates the research pipeline itself: input freezing, arm assignment, execution, statistics and report generation.
+
+It **does not** prove that a real agent improved, and it does not prove a causal effect in production.
+
+### How To Read Report V2
+
+The first screen of a study report is the Owner Summary:
+
+- **Conclusion**: one sentence plus a status tag.
+- **What this confirmed**: three to five facts that actually matter.
+- **What this cannot prove yet**: the current evidence boundary.
+- **Evidence integrity**: coverage, as-of time, unresolved items, treatment fidelity, runtime loaded, control contamination, limitations.
+- **Suggested next step**: gather more production evidence, repair identifiability, complete human Gold review, continue Host Readiness checks, wait for F2 authorization, or return to Principle Governance.
+
+The report always states which execution mode produced it: offline contract validation (offline-stub), host readiness check (host-dry-run), or real host execution (f2-real-host).
+
+### Owner Decision Handoff
+
+The report page ends with a link back to principle governance. It only navigates: the target principle is unchanged, the report id maps to its study id, no principle status is modified, and no second decision system is created.
+
+### Current Capability Limits And Safety Boundaries
+
+- Every offline evaluation in this release is **offline contract validation**, not a real behavior experiment.
+- **Host Dry-run** checks host run conditions (CLI, isolation, authorization file) with zero model calls; passing it is not evidence that behavior was validated.
+- **F2 real-host execution is not enabled in the console.** The button is disabled and explains why; even if you call the API directly, the server still runs the Stage R and Owner authorization checks.
+- **Independent human Gold review (Gate 1) is not complete.** Passing automated tests does not mean the challenge suite has independent human Gold review, so no formally trustworthy effect verdict is issued before Gate 1 clears.
+- Evaluation results only support the Owner's next governance decision. They never auto-promote, auto-archive, or modify a principle.
 
 ## Console
 
