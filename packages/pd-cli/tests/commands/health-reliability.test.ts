@@ -16,6 +16,8 @@ import { saveHostToolDeclaration } from '@principles/host-runtime';
 vi.mock('../../src/commands/health-mcp.js', () => ({
   assessMcpHealth: () => ({ host: 'openclaw', status: 'HEALTHY' }),
   formatMcpHealthLines: () => [],
+  selectMcpHostForWorkspace: () => ({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] }),
+  formatMcpHostSelectionLine: () => 'mcp.hostSelection: openclaw (default-no-match)',
 }));
 
 import { handleHealth } from '../../src/commands/health.js';
