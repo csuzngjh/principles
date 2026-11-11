@@ -807,13 +807,13 @@ insertPainEvent.run(
 insertPainEvent.run(
   'session-e2e-provenance-authorized', 'mcp_agent_assisted', 0.8,
   '智能体通过 MCP 提交了拥有者已授权的痛点', 'medium', 'mcp', 0.9,
-  'Agent submitted an Owner-authorized pain signal through MCP', threeDaysAgo,
+  '智能体通过 MCP 提交了拥有者已授权的痛点信号', threeDaysAgo,
   'pain-e2e-mcp-authorized', 'task-mcp-authorized',
 );
 insertPainEvent.run(
   'session-e2e-provenance-unverified', 'mcp_agent_assisted', 0.8,
   '智能体通过 MCP 提交了授权信息不可验证的痛点', 'medium', 'mcp', 0.9,
-  'Agent submitted a pain signal through MCP without verifiable authorization', threeDaysAgo,
+  '智能体通过 MCP 提交了授权信息不可验证的痛点信号', threeDaysAgo,
   'pain-e2e-mcp-unverified', 'task-mcp-unverified',
 );
 

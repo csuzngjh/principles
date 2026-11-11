@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
+import { StatePanel } from "../../components/ui/state-panel.js";
+import { humanizeRuntimeText } from "../../utils/technical-detail.js";
 import {
   fetchConfigSummary,
   fetchConfigCatalog,
@@ -820,13 +822,15 @@ export function ControlCenterPage() {
         <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
           {t("pages.controlCenter.title")}
         </h1>
-        <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
-          <p>{t("pages.controlCenter.loadError")}</p>
-          {errorMessage && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">
-              {errorMessage}
-            </p>
-          )}
+        <div className="mt-6">
+          <StatePanel
+            kind="unreachable"
+            title={t("components.statePanel.unreachableTitle")}
+            body={errorMessage ? humanizeRuntimeText(errorMessage).text : t("components.statePanel.unreachableBody")}
+            technical={errorMessage ?? undefined}
+            action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+            testId="control-center-error-state"
+          />
         </div>
       </PageShell>
     );

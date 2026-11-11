@@ -125,7 +125,7 @@ export function DesignSystemPage() {
       <Card className="mb-8">
         <CardContent className="py-12 text-center">
           <p className="text-ink-3 text-sm mb-2">
-            还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。
+            还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待您审查。
           </p>
           <Button variant="outline" size="sm">了解更多</Button>
         </CardContent>
@@ -136,7 +136,7 @@ export function DesignSystemPage() {
       <Card className="mb-8">
         <CardContent className="py-8">
           <p className="text-ink-3 text-sm mb-2">
-            无法加载这条原则的证据来源。原则本身未受影响。你可以稍后重试，或暂时保留在待审查状态。
+            无法加载这条原则的证据来源。原则本身未受影响。您可以稍后重试，或暂时保留在待审查状态。
           </p>
           <Button variant="outline" size="sm">重试</Button>
         </CardContent>

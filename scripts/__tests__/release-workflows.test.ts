@@ -594,9 +594,25 @@ describe('bundle-plugin — cohort version source (SPEC §21)', () => {
     expect(t).toContain("process.env.PD_BUNDLE_PRESERVE_SOURCE_VERSIONS === '1'");
   });
 
-  it('the train sets the preserve-source env before building the installer', () => {
-    const t = fs.readFileSync(path.join(REPO_ROOT, '.github/actions/publish-npm-package/action.yml'), 'utf8');
-    expect(t).toContain('export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1');
+  it('the train sets the preserve-source env on the step that actually runs pack/prepack', () => {
+    type Step = { name?: string; run?: string; env?: Record<string, unknown> };
+    const doc = loadWorkflow('.github/actions/publish-npm-package/action.yml') as { runs?: { steps?: Step[] } };
+    const packStep = doc.runs?.steps?.find((step) => step.run?.includes('prepare-npm-candidate.mjs'));
+    expect(packStep?.name).toBe('Pack and verify immutable candidate');
+    // The bundle runs from pack's prepack lifecycle — a separate `run:` shell.
+    // Step env is the only channel that reaches it (release 1.150.1 defect:
+    // the export lived on the build step and the bundle silently stamped
+    // pd-cli 2.1.0 over the cohort's 2.2.0).
+    expect(packStep?.env?.PD_BUNDLE_PRESERVE_SOURCE_VERSIONS).toBe('1');
+
+    const buildStep = doc.runs?.steps?.find((step) => step.name === 'Build target package');
+    expect(buildStep?.run ?? '').not.toMatch(/^\s*export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1/m);
+  });
+
+  it('verifies the packed installer payload against the cohort commit before publish', () => {
+    const t = fs.readFileSync(path.join(REPO_ROOT, 'scripts/release/prepare-npm-candidate.mjs'), 'utf8');
+    expect(t).toContain('readCommittedComponentVersions');
+    expect(t).toContain('verifyInstallerPayloadVersions');
   });
 });
 

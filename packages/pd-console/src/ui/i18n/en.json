@@ -1,6 +1,7 @@
 {
   "common": {
     "loading": "Loading",
+    "retry": "Retry",
     "refresh": "Refresh",
     "settings": "Settings",
     "login": "Login",
@@ -53,6 +54,7 @@
   },
   "pages": {
     "focus": {
+      "loadingHint": "Reading what needs your attention, the evidence, and the governance state. This usually takes a few seconds.",
       "workbench": {
         "textPreview": "Text preview",
         "codePreview": "Rule implementation preview",
@@ -78,6 +80,32 @@
         "approvedRuntimeUnknown": "Approval was recorded. Activation is incomplete or unconfirmed. Check runtime status.",
         "replaced": "The pending revision was replaced. Review the current text before deciding.",
 
+        "whyNow": "Why this needs attention now",
+        "impact": "Who is affected, and what happens if nothing is done",
+        "recommendationTitle": "Recommended action",
+        "recommendation": {
+          "approve": "Approve recommended",
+          "reject": "Reject recommended",
+          "none": "No decision recommended yet",
+          "approveReason": "Materials are complete, the impact is stated, and everything matches the current version.",
+          "rejectReason": "This material does not match the current version or its source is unlinked; approving could activate a version you have not reviewed.",
+          "noneReason": "Some materials are still missing. Completing them first is safer."
+        },
+        "missingTitle": "Still missing",
+        "missingHint": "This page re-evaluates whether approval is possible once the gaps are closed.",
+        "viewMissing": "See what is missing",
+        "approveBlocked": "Approval is unavailable until the materials are complete.",
+        "gap": {
+          "subject": "It is not yet clear which decision this material belongs to",
+          "artifact": "The pending version does not exist or has changed",
+          "body": "No full text matching this approval could be read",
+          "material": "Only part of the material could be read",
+          "revision": "The approval record does not match the current version",
+          "revisionReview": "The version comparison is unavailable",
+          "sourceUnlinked": "This material is not linked to a source that can be checked",
+          "gate": "Some approval conditions are not met"
+        },
+
         "versionNeedsReview": "Revision {{index}} to review",
         "title": "Needs your attention",
         "subtitle": "Choose one item, understand the proposal and its consequences, then continue.",
@@ -88,6 +116,7 @@
         "back": "Back to work items",
         "next": "View next item",
         "readingEnd": "This is the end of this item. Return to the list or review the next one.",
+        "shortcutHint": "Press J for the next item, K for the previous one.",
         "completed": "Review outcome",
         "notCurrent": "This item is no longer in the current list",
         "startTitle": "Start with one item",
@@ -646,6 +675,8 @@
         "empty": "No blocked or recovery items need individual attention.",
         "unmatchedTitle": "These objects have decision updates but no available action surface yet (missing association or incomplete data — not merged away):",
         "blockedAggregate": "{{count}} blocked object(s) need no individual attention and are not counted in the total above.",
+        "repeatedTitle": "{{count}} items cannot be handled yet for the same reason",
+        "repeatedOpen": "Item {{index}}: fix this",
         "unmatchedItemNote": "No action surface available for this entry yet; open the principle page for its current state."
       }
     },
@@ -657,7 +688,8 @@
       "loadError": "Failed to load behavior evidence",
       "validationError": "Data format validation failed, please refresh and retry",
       "emptyTitle": "No behavior evidence captured yet",
-      "emptyDescription": "When PD detects behavior deviations worth governing, evidence will appear here. You can create feedback signals manually via /pd-pain command or pd pain record.",
+      "emptyAction": "See what needs your decision",
+      "emptyDescription": "When PD detects behavior deviations worth governing, evidence will appear here. You can also simply tell me what felt wrong and I will record it as evidence.",
       "generatedAt": "Generated at",
       "group_active_chain": "Active Chain",
       "group_evidence_only": "Evidence Only (not admitted)",
@@ -909,7 +941,8 @@
           "recovery_needed": "Needs recovery",
           "decided": "Decided",
           "no_action": "No action needed"
-        }
+        },
+        "dominantNotice": "{{count}} principles on this page are all “{{state}}”; the repeated badge has been removed from each card."
       },
       "languageHintEn": "Generated in English",
       "languageHintZh": "Generated in Chinese",
@@ -927,6 +960,12 @@
         "backToList": "← Back to list",
         "formationDisclosure": "How this principle formed",
         "fullRule": "Read the complete principle",
+        "applicable": "Applicable scenario (original trigger config)",
+        "notSpecified": "Not specified",
+        "adherenceRate": "Adherence rate",
+        "lifecycleLoadFailed": "Unable to load lifecycle metrics. You can retry later.",
+        "editNewArtifactLabel": "New verified artifact ID",
+        "rejectReasonLabel": "Rejection reason",
         "extraContext": "Other source notes and reflection questions",
         "conclusion": "Conclusion",
         "policyNote": "This is a behavioral policy for future similar scenarios. You can approve, modify, reject, or park it.",
@@ -1279,6 +1318,8 @@
       "injectionWindowRotationUnknown": "Out of window this turn: fits alone ({{cost}}/{{budget}} chars); this workspace binds several hosts and rotation cannot be attributed — OpenClaw rotates it in by turn, Codex/WorkBuddy need capacity to free up",
       "injectionOversized": "Oversized, not injectable: {{cost}} chars alone > {{budget}} cap — rotation cannot help; shorten the statement",
       "injectionResolutionFailed": "Cannot determine: {{reason}}",
+      "fitModelDependent": "Depends on the model",
+      "injectionModelDependent": "Depends on model context: a single {{cost}}-char statement does not fit the minimum budget but is within the supported ceiling — smaller-context models exclude it, larger models can inject it",
       "injectionRouteUnconfirmed": "Host capacity unconfirmed: OpenClaw {{oc}} / Codex {{cx}} / WorkBuddy {{wb}}",
       "revisionOpen": "Modify to injectable version",
       "revisionPlaceholder": "Enter the new principle statement (keep trigger, required action, and necessary exception; be concise)",
@@ -1512,7 +1553,7 @@
         "excluded": "Excluded by default",
         "notes": "Redaction notes",
         "submitFirst": "Save a draft to see exactly which sections are included.",
-        "guarantee": "No automatic upload. Drafts are stored at <workspace>/.pd/feedback/drafts/. You decide what to do with them."
+        "guarantee": "No automatic upload. Drafts are stored in the workspace feedback draft folder. You decide what to do with them."
       },
       "draft": {
         "title": "Draft saved locally",
@@ -1821,6 +1862,7 @@
       "enterAccessToken": "Enter the access token to connect",
       "connect": "Connect",
       "errorInvalid": "Invalid access credential or service not ready. Check and retry.",
+      "errorUnreachable": "Cannot reach the console: the service did not respond. Confirm it is running and retry.",
       "errorExpired": "Session expired or token invalid. Please re-enter.",
       "recoveryTitle": "Cannot connect to PD Workspace",
       "recoveryReason": "Reason: the stored Owner credential has expired or does not match the local Console.",
@@ -1837,6 +1879,7 @@
     },
     "update": {
       "eyebrow": "Updates",
+      "slowHint": "Checking the installed version, available updates, and runtime state. This usually takes up to a minute.",
       "title": "Updates",
       "subtitle": "Check for PD updates and view update history. Updates keep your governance workspace current.",
       "currentVersion": "Current Version",
@@ -2364,6 +2407,7 @@
       "reasonNeverActivated": "This principle has been approved but never deployed to any active channel (e.g. prompt, RuleHost).",
       "reasonStagnant": "This principle approval request has been stagnant/pending for more than 7 days.",
       "suggestedAction": "Suggested Action",
+      "triggerLabel": "Trigger:",
       "actionArchive": "Archive",
       "actionDeactivate": "Deactivate",
       "actionKeep": "Keep and Observe",
@@ -2516,6 +2560,11 @@
     }
   },
   "components": {
+    "statePanel": {
+      "technical": "Technical details",
+      "unreachableTitle": "Cannot reach the console",
+      "unreachableBody": "The service did not respond. The console may not be running."
+    },
     "errorBoundary": {
       "title": "An Error Occurred",
       "description": "An error occurred while loading the page",
@@ -2562,6 +2611,8 @@
     "sidebar": {
       "collapse": "Collapse Sidebar",
       "expand": "Expand Sidebar",
+      "tools": "Tools",
+      "technical": "Technical",
       "focus": "Governance Focus",
       "pain": "Behavior Evidence",
       "principles": "Principles Review",
@@ -2649,9 +2700,9 @@
       "loadFailed": "Failed to load onboarding flag state"
     },
     "fullPipelineFlag": {
-      "title": "Pipeline Mode (PRI-720)",
-      "label": "Force full pipeline for prompt principles",
-      "description": "Default OFF: prompt/defer principles take the short semantic path (no code generation, no sandbox). ON: newly seeded prompt chains run the complete legacy pipeline including Artificer code generation, Evaluator review and adversarial replay — for test scenarios or when you explicitly want the full pipeline. Does not affect chains already in progress.",
+      "title": "Pipeline Mode",
+      "label": "Force full pipeline for prompt-type principles",
+      "description": "Default OFF: prompt and deferred-archive principles take the short semantic path (no code generation, no sandbox). ON: newly seeded prompt chains run the complete legacy pipeline including Artificer code generation, Evaluator review and adversarial replay — for test scenarios or when you explicitly want the full pipeline. Does not affect chains already in progress.",
       "toggleAriaLabel": "Toggle force-full-pipeline mode for prompt internalization",
       "enabled": "Full pipeline forced for new prompt chains",
       "disabled": "Prompt chains use the short semantic path",
