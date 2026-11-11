@@ -34,6 +34,10 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import {
+  readCommittedComponentVersions,
+  verifyInstallerPayloadVersions,
+} from './lib/installer-payload-versions.mjs';
 
 function argValue(flag) {
   const index = process.argv.indexOf(flag);
@@ -191,6 +195,25 @@ try {
     if (stamp.schemaVersion !== 1 || stamp.productVersion !== productVersion || stamp.sourceCommit !== cohort) {
       fail('product identity stamp does not match the resolved product version and cohort');
     }
+
+    // Fail closed on the packed payload, before the deterministic repack and
+    // publish. Release 1.150.1 shipped pd-cli 2.1.0 here while the cohort
+    // committed 2.2.0 because the bundle stamped the movable registry latest;
+    // a payload version that differs from the cohort is never publishable.
+    const committed = readCommittedComponentVersions({
+      repoRoot: resolve(packageDir, '..', '..'),
+      cohort,
+    });
+    const verified = verifyInstallerPayloadVersions({
+      committed,
+      readPayloadManifest: (payloadPath) => readFileSync(join(packageRoot, payloadPath), 'utf8'),
+    });
+    console.log(
+      'Installer payload component versions match cohort ' +
+        cohort.slice(0, 10) +
+        ': ' +
+        verified.components.map((component) => component.label + '=' + component.version).join(', '),
+    );
   }
 
   const expectedManifest = { ...manifest };
