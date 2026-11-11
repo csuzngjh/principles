@@ -28,7 +28,7 @@ import {
   buildFullTraceTimeline,
   buildSourceRefs,
 } from '../../context-payload.js';
-import type { HistoryQueryEntry } from '../../context-payload.js';
+import { parsePainAnchor, type HistoryQueryEntry } from '../../context-payload.js';
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
@@ -118,6 +118,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       source: dt.source || undefined,
       severity: dt.severity || undefined,
       painId: dt.sourcePainId || undefined,
+      anchor: dt.anchor,
       sessionIdHint: dt.sessionIdHint || undefined,
       provenance: normalizedProvenance(dt) || undefined,
       hostKind: dt.hostKind,
@@ -447,6 +448,15 @@ export class SqliteContextAssembler implements ContextAssembler {
       try {
         const parsed: unknown = JSON.parse(base.diagnosticJson);
         if (isRecord(parsed)) {
+          // SPEC §11 / TD §6.2: the anchor is only usable when it is a
+          // well-formed {type, ref}; anything else is UNKNOWN, never coerced.
+          const rawAnchor = Object.hasOwn(parsed, 'anchor') ? parsed.anchor : undefined;
+          const anchor = parsePainAnchor(rawAnchor);
+          if (rawAnchor !== undefined && rawAnchor !== null && anchor === undefined) {
+            ambiguityNotes.push(
+              `diagnosticJson for task ${task.taskId} carries an unreadable anchor; the anchor is treated as unknown`,
+            );
+          }
           extra = {
             sourcePainId: SqliteContextAssembler.extractStringField(parsed, 'sourcePainId'),
             reasonSummary: SqliteContextAssembler.extractStringField(parsed, 'reasonSummary'),
@@ -455,6 +465,7 @@ export class SqliteContextAssembler implements ContextAssembler {
             sessionIdHint: SqliteContextAssembler.extractStringField(parsed, 'sessionIdHint'),
             agentIdHint: SqliteContextAssembler.extractStringField(parsed, 'agentIdHint'),
             workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
+            anchor,
             provenance: Object.hasOwn(parsed, 'provenance') && (isPainProvenance(parsed.provenance) || parsed.provenance === 'openclaw_context_bound')
               ? (isPainProvenance(parsed.provenance) ? parsed.provenance : 'host_context_bound')
               : undefined,
@@ -483,6 +494,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       source: extra.source ?? (base as DiagnosticianTaskRecord).source,
       severity: extra.severity ?? (base as DiagnosticianTaskRecord).severity,
       sourcePainId: extra.sourcePainId ?? (base as DiagnosticianTaskRecord).sourcePainId,
+      anchor: extra.anchor,
       sessionIdHint: extra.sessionIdHint ?? (base as DiagnosticianTaskRecord).sessionIdHint,
       agentIdHint: extra.agentIdHint ?? (base as DiagnosticianTaskRecord).agentIdHint,
       provenance: extra.provenance,

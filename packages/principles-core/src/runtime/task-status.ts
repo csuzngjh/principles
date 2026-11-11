@@ -15,7 +15,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 import { PDErrorCategorySchema } from './error-categories.js';
-import { PainCorrectionEvidenceSchema } from './context-payload.js';
+import { PainCorrectionEvidenceSchema, PainAnchorSchema } from './context-payload.js';
 
 // ── Task Status ──
 
@@ -88,6 +88,12 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
   Type.Object({
     taskKind: Type.Literal('diagnostician'),
     sourcePainId: Type.Optional(Type.String()),
+    /**
+     * SPEC §11 / TD §6.2: the structured anchor the behaviour deviated from.
+     * Optional because records written before the anchor was structured do not
+     * carry one.
+     */
+    anchor: Type.Optional(PainAnchorSchema),
     workspaceDir: Type.String(),
     severity: Type.Optional(Type.String()),
     source: Type.Optional(Type.String()),

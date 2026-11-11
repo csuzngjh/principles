@@ -162,11 +162,52 @@ export const PainCorrectionEvidenceSchema = Type.Object({
 
 export type PainCorrectionEvidence = Static<typeof PainCorrectionEvidenceSchema>;
 
+/**
+ * SPEC §11 / TD §6.2: an agent submission carries a structured anchor
+ * `{type, ref}` into `diagnostic_json` for every anchor source — not only the
+ * `established_principle` deviation anchor. One schema serves the write path
+ * and the diagnosis read path; a second hand-written shape would drift.
+ */
+export const PAIN_ANCHOR_TYPES = [
+  'owner_expectation',
+  'established_principle',
+  'agent_instruction',
+] as const;
+
+export const PainAnchorSchema = Type.Object({
+  type: Type.Union(PAIN_ANCHOR_TYPES.map((value) => Type.Literal(value))),
+  ref: Type.String({ minLength: 1, maxLength: 300 }),
+});
+
+export type PainAnchorType = Static<typeof PainAnchorSchema>['type'];
+export type PainAnchor = Static<typeof PainAnchorSchema>;
+
+/**
+ * Read-side parser for untrusted `diagnostic_json` (rc-1 / rc-2): anything that
+ * is not a well-formed anchor is rejected, never coerced.
+ */
+export function parsePainAnchor(value: unknown): PainAnchor | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const { type, ref } = record;
+  if (typeof type !== 'string' || !(PAIN_ANCHOR_TYPES as readonly string[]).includes(type)) {
+    return undefined;
+  }
+  if (typeof ref !== 'string' || ref.length === 0 || ref.length > 300) return undefined;
+  return { type: type as PainAnchorType, ref };
+}
+
 export const DiagnosisTargetSchema = Type.Object({
   reasonSummary: Type.Optional(Type.String()),
   source: Type.Optional(Type.String()),
   severity: Type.Optional(Type.String()),
   painId: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * SPEC §11 / TD §6.2: the anchor the reported behaviour is measured against,
+   * carried for every anchor source. Absent on records written before the
+   * anchor was structured — absent means "unknown", never "no anchor".
+   */
+  anchor: Type.Optional(PainAnchorSchema),
   sessionIdHint: Type.Optional(Type.String({ minLength: 1 })),
   provenance: Type.Optional(Type.Union([
     Type.Literal('host_context_bound'),

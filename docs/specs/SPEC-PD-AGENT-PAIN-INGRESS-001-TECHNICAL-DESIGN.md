@@ -760,7 +760,7 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 - `recordPain` 在 `:210/:255` 默认启用观测，所以**只改 CLI 一处仍会被补回 80**，四处必须一起改；
 - `diagnostician_async_cli` 是 quiet、默认关的 flag（F45）；开启后提交即返回（F46）。
 
-**目标行为（本轮只落文档，代码未改）**：
+**目标行为（已实现，PR #2507；`pain-record.ts` 已改用 `DEFAULT_PAIN_SCORE`；下表保留为设计与验收依据）**：
 
 | 项 | 目标 | 理由 |
 |---|---|---|
@@ -942,9 +942,9 @@ Instructions 的根目录是宿主特定的（仓库内 Skill、`~/.codex/AGENTS
 
 Codex 的分发路径是插件清单：`plugins/principles-disciple/.codex-plugin/plugin.json:19` 指向 `./skills/`，所以 Codex 读到的就是仓库内那份共用 Skill；不需要另建 `~/.codex/skills/pd-*`（E2 实测不存在）。
 
-## 7.4 WorkBuddy Skill 分发与旧文件废弃（裁定 2，目标行为）
+## 7.4 WorkBuddy Skill 分发与旧文件废弃（裁定 2，已实现）
 
-> **当前代码事实**：安装器只做插件根必需 Skill 校验（F53），**没有**旧文件识别/废弃逻辑；仓库也**没有**旧 Skill 的文本源（F21）。下表全部是目标行为，代码未实现，本轮只落文档。
+> **实现状态**：旧文件识别/废弃逻辑已实现（`installers/legacy-workbuddy-skill.ts`，重命名为 `SKILL.md.deprecated-<label>`，用户改过的副本只告警不覆盖），插件根 `pd-pain-signal` 由安装器强制校验（T39）。下表保留为目标行为与验收依据。
 
 | 问题 | 目标答案 | 依据 |
 |---|---|---|
@@ -1456,7 +1456,7 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 
 ## 16.3 三项追加裁定：当前代码事实 vs 目标行为
 
-> **记账口径**：下表"当前代码事实"是改文档时的真实实现；"目标行为"是 Owner 已拍板、但**代码尚未修改**的行为。本轮只改 `docs/specs/` 下三份文档，不碰产品源码、安装器、宿主配置。
+> **记账口径**：下表"当前代码事实"是改文档时的真实实现（历史）；"目标行为"是 Owner 已拍板、且已在阶段 1–4 落地的行为。真实环境验收状态见 §10 T01–T45。
 
 | # | 裁定 | 当前代码事实 | 目标行为 | 文档落点 |
 |---|---|---|---|---|
@@ -1515,6 +1515,6 @@ WorkBuddy 的简化选取器（F40）**本版不动**，避免扩散；它已能
 |---|---|---|
 | 0.8 finalization | 2026-11-10 | 四项修订，版本号仍为 0.8：§5.2 Tool Description 取消"未来任务会改变判断"前置，改为替代表达 + 四项"不要求"；§5.1.1/§11.0/§16.4 OG-4 改为"未授权允许开发与测试 / 禁止生产注册与交付"；新增 §6.6.5 `evaluatePainIngress()` MCP 专用分支（先于通用 Unbound 分支、统一 submit、无 `--session` 提示、provenance 走既有派生）并更新 §6.6.4 影响面与 T44（5 项断言）；SPEC §2 Origin 表达统一为 `origin.kind` + `origin.channel` |
 | 0.8 post-review corrections | 2026-11-10 | 七项定点修订，版本号仍为 0.8：§5.1.1 OG-4 治理合同；§5.5 身份预生成；§5.6/§5.6.1 有效锚点；§5.7 `submit_unconfirmed` 与有界回查；§6.3 `painType` 单一路径 + `principle_deviation`；§6.4/§6.5 四处 `DEFAULT_PAIN_SCORE=40` 与 `--score` 权限边界；§6.6 来源 channel/provenance 扩展；§6.7 Observability 可见性；§7.2 三宿主来源；§9 失败与幂等；§10 A11–A16 / T14b / T41–T45；§16.4 两项待确认 |
-| 0.8 | 2026-11-10 | Owner 追加裁定 1–3：CLI 省略 `--score` 改落 moderate（代码未改，§6.5）；WorkBuddy Skill 由安装器分发并废弃旧 `pd-record-pain`（§7.4，目标行为）；`diagnostician_async_cli` 保持默认关；新增 F53–F54、T39–T40；三项待确认清零 |
+| 0.8 | 2026-11-10 | Owner 追加裁定 1–3：CLI 省略 `--score` 改落 moderate（已于阶段 1–4 落地，§6.5）；WorkBuddy Skill 由安装器分发并废弃旧 `pd-record-pain`（§7.4，已实现）；`diagnostician_async_cli` 保持默认关；新增 F53–F54、T39–T40；三项待确认清零 |
 | 0.7 | 2026-11-10 | 按 Owner A–D 裁定重写；锚点三源与六项内容；`anchor` 落 `diagnostic_json`；默认中等；`mode` 可选且 v1 省略；授权模型；L2 同源+预检+spawn；L2b 扩展既有 `StalledDiagnosticianTaskReadModel` 并用 `runs.started_at`；L3 复用既有游标 authority 并删除 `cursorScope`；三宿主 Instructions 清单；A/B/C 测试矩阵；Complexity Delta 分链路；仍需确认 3 项 |
 | 0.6 | 2026-11-09 | 初版技术方案（被本版替代） |
