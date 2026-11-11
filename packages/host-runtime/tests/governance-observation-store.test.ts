@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import {
   GOVERNANCE_RETENTION_MAX_TURNS,
   ingestGovernanceObservations,
@@ -565,5 +566,76 @@ describe('transcript source order (PR #1455 review P1 regression)', () => {
     const listedAgain = listGovernanceObservations({ workspaceDir });
     if (!listedAgain.ok) throw new Error('list failed');
     expect(listedAgain.observations.filter((row) => row.promotionRef === 'pain-order-2').length).toBe(2); // trigger + its own answer
+  });
+});
+
+describe('schema v4 (PRI-1171): host widening + MAX-monotonic checkpoint', () => {
+  it('bumps a legacy v3 version row to 4 on open, idempotently, without rewriting stored rows', () => {
+    expect(ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: 'keep me' })],
+    })).toMatchObject({ ok: true, inserted: 1 });
+    const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+    const db = new Database(dbPath);
+    try {
+      expect(db.prepare('SELECT version FROM governance_observation_schema_version').get()).toMatchObject({ version: 4 });
+      // Simulate a store last opened by a pre-v4 build, then reopen via the store API.
+      db.prepare('UPDATE governance_observation_schema_version SET version = 3').run();
+    } finally {
+      db.close();
+    }
+    expect(ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't2', logicalObservationKey: 'codex|rollout-uuid-1|t2|user', visibleText: 'second' })],
+    })).toMatchObject({ ok: true });
+    const db2 = new Database(dbPath);
+    try {
+      expect(db2.prepare('SELECT version FROM governance_observation_schema_version').get()).toMatchObject({ version: 4 });
+    } finally {
+      db2.close();
+    }
+    const listed = listGovernanceObservations({ workspaceDir });
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.observations).toHaveLength(2);
+    expect(listed.observations.find((row) => row.logicalKey === 'codex|rollout-uuid-1|t1|user')?.visibleText).toBe('keep me');
+  });
+
+  it('accepts workbuddy host observations with checkpoints keyed per host kind', () => {
+    const wb: GovernanceObservationInput = {
+      hostKind: 'workbuddy',
+      rolloutIdentity: 'wb-session-1',
+      rootSessionId: 'wb-session-1',
+      hostTurnId: 'r1',
+      kind: 'user_turn',
+      logicalObservationKey: 'wb|wb-session-1|r1|user',
+      transcriptRecordKey: 'wb|wb-session-1|42',
+      recordByteStart: 42,
+      recordOrdinal: 1,
+      visibleText: 'wb prompt',
+      source: 'transcript',
+      completeness: 'complete',
+      observedAt: NOW.toISOString(),
+    };
+    expect(ingest({
+      observations: [wb],
+      checkpoint: { hostKind: 'workbuddy', rolloutIdentity: 'wb-session-1', byteOffset: 42, lastOrdinal: 1, rootSessionId: 'wb-session-1', incompleteTail: false },
+    })).toMatchObject({ ok: true, inserted: 1 });
+    const cp = readGovernanceCheckpoint({ workspaceDir, hostKind: 'workbuddy', rolloutIdentity: 'wb-session-1' });
+    expect(cp && 'byteOffset' in cp ? cp.byteOffset : null).toBe(42);
+    // host_kind is part of the checkpoint key: no cross-host leakage.
+    expect(readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'wb-session-1' })).toBeNull();
+  });
+
+  it('checkpoint upsert is MAX-monotonic: a late lower commit cannot drag the water mark back', () => {
+    const cp = (byteOffset: number, lastOrdinal: number) => ({ hostKind: 'codex' as const, rolloutIdentity: 'rollout-uuid-1', byteOffset, lastOrdinal, rootSessionId: 'root-session-1', incompleteTail: false });
+    expect(ingest({ observations: [], checkpoint: cp(1000, 10) })).toMatchObject({ ok: true, checkpointCommitted: true });
+    // Concurrent stale writer (Stop × worker catch-up race): lower offset arrives last.
+    expect(ingest({ observations: [], checkpoint: cp(500, 3) })).toMatchObject({ ok: true });
+    const held = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1' });
+    expect(held && 'byteOffset' in held ? held.byteOffset : null).toBe(1000);
+    expect(held && 'byteOffset' in held ? held.lastOrdinal : null).toBe(10);
+    // A higher offset still advances.
+    expect(ingest({ observations: [], checkpoint: cp(2000, 20) })).toMatchObject({ ok: true });
+    const advanced = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1' });
+    expect(advanced && 'byteOffset' in advanced ? advanced.byteOffset : null).toBe(2000);
+    expect(advanced && 'byteOffset' in advanced ? advanced.lastOrdinal : null).toBe(20);
   });
 });
