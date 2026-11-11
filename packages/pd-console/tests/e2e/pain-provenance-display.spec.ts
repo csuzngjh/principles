@@ -221,12 +221,9 @@ test.describe('PainPage — provenance / source display tiers', () => {
 
     await openPainPage(page, 'zh-CN');
 
-    const expectedByRecordId: Array<[EvidenceRecordShape, string]> = [
-      [authorized, '智能体报告，拥有者已授权'],
-      [unverified, '智能体报告（授权信息不可验证）'],
-    ];
+    const copiedRecords = [authorized, unverified];
 
-    for (const [record, expectedLabel] of expectedByRecordId) {
+    for (const record of copiedRecords) {
       // The copy button is the first button in the Layer 3 action row.
       const copyButton = page
         .locator(`[data-testid="pain-expand-${record.id}"]`)
