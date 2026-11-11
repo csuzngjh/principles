@@ -47,7 +47,6 @@ const mainNavItems = [
   { id: "principles", labelKey: "components.sidebar.principles", href: "/principles", icon: BookOpen },
   { id: "activation", labelKey: "components.sidebar.activation", href: "/activation", icon: Zap },
   { id: "debt", labelKey: "components.sidebar.debt", href: "/debt", icon: Archive },
-  { id: "examiner", labelKey: "components.sidebar.examiner", href: "/examiner", icon: FlaskConical },
   { id: "intent", labelKey: "components.sidebar.intent", href: "/intent", icon: Compass },
 ];
 
@@ -62,10 +61,24 @@ export function visibleMainNavItems() {
 const toolNavItems = [
   { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings },
   { id: "report-problem", labelKey: "components.sidebar.reportProblem", href: "/report-problem", icon: MessageSquare },
-  { id: "failed-tasks", labelKey: "components.sidebar.failedTasks", href: "/failed-tasks", icon: AlertCircle },
   { id: "settings", labelKey: "components.sidebar.settings", href: "/settings", icon: Settings },
+];
+
+/**
+ * Owner decision 2026-11-11 (SPEC-PD-UIUX-002): Examiner, 失败任务 and 更新 are
+ * engineering-facing surfaces. They stay reachable, but they no longer sit next
+ * to the Owner's daily work — the first screen is quiet by default.
+ */
+const technicalNavItems = [
+  { id: "examiner", labelKey: "components.sidebar.examiner", href: "/examiner", icon: FlaskConical },
+  { id: "failed-tasks", labelKey: "components.sidebar.failedTasks", href: "/failed-tasks", icon: AlertCircle },
   { id: "update", labelKey: "components.sidebar.update", href: "/update", icon: RefreshCw },
 ];
+
+/** Engineering-facing entries stay reachable, in their own group. */
+export function visibleTechnicalNavItems() {
+  return technicalNavItems;
+}
 
 /**
  * Shared sidebar body — rendered by the desktop aside and by the narrow-screen
@@ -143,17 +156,10 @@ function SidebarContent({
         {/* Secondary tools */}
         <div className="mt-4 pt-3 border-t border-line mx-4">
           <div className="px-1 pb-1 text-[10px] font-mono tracking-[0.1em] uppercase text-ink-4">
-            Tools
+            {t("components.sidebar.tools", { defaultValue: "Tools" })}
           </div>
           <div className="px-0">
             {toolNavItems.map((item) => {
-              // Feature-flag gate: failed-tasks entry only shows when
-              // failed_tasks_observability is enabled. When featureFlags is
-              // undefined (still loading) or the flag is missing, hide the
-              // entry to avoid surfacing a page the backend will 403.
-              if (item.id === "failed-tasks" && featureFlags?.failed_tasks_observability?.enabled !== true) {
-                return null;
-              }
               const Icon = item.icon;
               const active = isActive(item.href);
               return (
@@ -180,6 +186,45 @@ function SidebarContent({
                       aria-label={t("components.sidebar.degradedSignalsAria", { count: degradedCount })}
                     />
                   ) : null}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Technical tools — engineering-facing pages, kept out of the daily path */}
+        <div className="mt-4 pt-3 border-t border-line mx-4" data-testid="nav-group-technical">
+          <div className="px-1 pb-1 text-[10px] font-mono tracking-[0.1em] uppercase text-ink-4">
+            {t("components.sidebar.technical", { defaultValue: "Technical" })}
+          </div>
+          <div className="px-0">
+            {technicalNavItems.map((item) => {
+              // Feature-flag gate: failed-tasks entry only shows when
+              // failed_tasks_observability is enabled. When featureFlags is
+              // undefined (still loading) or the flag is missing, hide the
+              // entry to avoid surfacing a page the backend will 403.
+              if (item.id === "failed-tasks" && featureFlags?.failed_tasks_observability?.enabled !== true) {
+                return null;
+              }
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.id}
+                  to={item.href}
+                  data-testid={`nav-${item.id}`}
+                  aria-current={active ? "page" : undefined}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[12px] transition-all duration-150",
+                    touchTargets ? "min-h-[44px] py-2" : "py-1.5",
+                    active
+                      ? "border-l-2 border-l-gov bg-paper-2 text-ink"
+                      : "border-l-2 border-l-transparent text-ink-4 hover:text-ink-3 hover:bg-paper-2"
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                  <span className="flex-1">{t(item.labelKey)}</span>
                 </Link>
               );
             })}

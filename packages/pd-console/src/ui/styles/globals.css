@@ -524,4 +524,8 @@
   .owner-workbench:has(.owner-work-list-selected) .owner-work-list { display: block; }
   .owner-work-list { max-height: 72dvh; }
   .owner-work-reading { border-top: 0; border-left: 1px solid var(--color-line); padding-top: 0; padding-left: 28px; }
+  /* §6.3 固定吸底决策条: the bar is `position: fixed`, so both columns keep
+     their natural height and nothing is clipped. The extra bottom padding in
+     the list keeps its last rows reachable above the bar. */
+  .owner-workbench:has(.owner-work-approval) .owner-work-list { padding-bottom: 9rem; }
 }

@@ -69,9 +69,29 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
   const completedHere = completed?.key === selectedKey ? completed : null;
   const selectedIndex = items.findIndex(item => item.key === selectedKey);
   const nextItem = selectedIndex >= 0 ? items[selectedIndex + 1] : undefined;
+  // 1C (F-09): J/K move through the queue without returning to the list.
+  // Ignored while typing so the approval-note fields keep their own keys.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key !== 'j' && key !== 'k') return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (items.length === 0) return;
+      const index = selectedIndex;
+      const nextIndex = key === 'j' ? (index < 0 ? 0 : index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
+      const candidate = items[nextIndex];
+      if (!candidate || candidate.key === selectedKey) return;
+      event.preventDefault();
+      choose(candidate.key);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  });
   return <section className="owner-workbench" data-testid="owner-workbench">
     <nav ref={list} tabIndex={-1} className={`owner-work-list ${selected ? 'owner-work-list-selected' : ''}`} aria-label={t('pages.focus.workbench.list')}>
-      <div className="mb-3 flex items-baseline justify-between gap-3"><h2 className="text-[15px] font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>
+      <div className="mb-2 flex items-baseline justify-between gap-3"><h2 className="text-[15px] font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>
       {items.length === 0 && <p className="text-sm leading-relaxed text-ink-3">{t(uncertain ? 'pages.focus.workbench.uncertain' : 'pages.focus.workbench.empty')}</p>}
       <ol className="space-y-2">{items.map(item => <li key={item.key}><button type="button" onClick={() => choose(item.key)} aria-current={selected?.key === item.key ? 'true' : undefined}
         data-testid="owner-work-item" data-item-key={item.key} className={`w-full rounded-[6px] border px-4 py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-gov ${selected?.key === item.key ? 'border-gov bg-gov/5' : 'border-line bg-panel hover:border-gov/50'}`}>
@@ -88,6 +108,7 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
         <div key={selected.key}>{selected.content}</div>
         <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-[12.5px] text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
           {nextItem && <button type="button" className="text-[13px] text-gov underline underline-offset-4" onClick={() => choose(nextItem.key)}>{t('pages.focus.workbench.next')}</button>}
+          <p className="mt-2 text-[11.5px] text-ink-4">{t('pages.focus.workbench.shortcutHint')}</p>
         </footer>
       </> : <div className="py-10 text-ink-3">
         <h2 ref={heading} tabIndex={-1} className="mb-3 text-[22px] font-medium text-ink">{t(completedHere ? 'pages.focus.workbench.completed' : selectedKey ? 'pages.focus.workbench.notCurrent' : 'pages.focus.workbench.startTitle')}</h2>
