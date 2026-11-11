@@ -61,15 +61,16 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
 
 | 例 | 发送 | 本地裁决 | 发送→校验 | 进程→输出墙钟 | 正文 |
 | --- | --- | --- | --- | --- | --- |
-| append | 1 | `selected:selected:c3` | 2 ms | 1037 ms | 已追加 DELIVERY |
-| abstain | 1 | `none_applicable:below_selection_threshold` | 3 ms | 1012 ms | Native 一致 |
-| selected-but-does-not-fit | 1 | `selected:selected:c3` | 3 ms | 1102 ms | Native 一致 |
-| short-confirmation | 1 | `none_applicable:below_selection_threshold` | 3 ms | 1065 ms | Native 一致 |
-| pure-ack | 0 | 未进入评估 | — | 1018 ms | Native 一致 |
+| append | 1 | `selected:selected:c3` | 2–3 ms | 1037–1457 ms | 已追加 DELIVERY |
+| abstain | 1 | `none_applicable:below_selection_threshold` | 2–3 ms | 1012–1489 ms | Native 一致 |
+| selected-but-does-not-fit | 1 | `selected:selected:c3` | 3 ms | 998–1714 ms | Native 一致 |
+| short-confirmation | 1 | `none_applicable:below_selection_threshold` | 3 ms | 1065–2564 ms | Native 一致 |
+| pure-ack | 0 | 未进入评估 | — | 1018–1359 ms | Native 一致 |
 
-- **假端点请求数 = 4，真实请求数 = 0。**
-- 墙钟约 1.0–1.1 s，其中 **hook 模块冷启动约 1.0 s**（纯致谢例同样 1018 ms，且 Adaptive OFF 时的
-  Native 路径同样存在），决策本身只用 2–3 ms；整轮仍远低于 5000 ms 宿主窗口。
+- **假端点请求数 = 4，真实请求数 = 0。**（两次重复预检结果一致，表中为区间）
+- 墙钟约 1.0–1.7 s，单次出现 2.56 s 的 I/O 抖动；其中 **hook 模块冷启动约 1.0 s**
+  （纯致谢例同样 1.0–1.4 s，且 Adaptive OFF 的 Native 路径同样存在），决策本身只用 2–3 ms；
+  整轮仍低于 5000 ms 宿主窗口，但**余量只有约 2.4–4.0 s**，这一项由真实请求继续观察。
 - 两个假端点截止测试（同一声明入口、无测试专用时间参数）：
   - 及时返回完整评分 → 完成装配并补入；
   - 响应头及时、正文跨过 1000 ms → 底层收到取消，最终输出 Native。
