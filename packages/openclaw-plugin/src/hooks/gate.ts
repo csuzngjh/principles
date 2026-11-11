@@ -13,6 +13,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, isRuleHostEvaluatedEventData } from '@principles/core/runtime';
+import type { CorrectionProposal } from '@principles/core/runtime';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
@@ -64,6 +65,292 @@ function extractLiveActivationId(metadata: HostEventResult['metadata']): string 
     if (typeof activationId === 'string' && activationId.trim().length > 0) return activationId;
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Shared decision application (legacy fallback convergence, Task 1)
+//
+// The legacy hook and the shared-gate handler must record/apply the same
+// non-block decisions. These helpers are the ONE implementation of that
+// behaviour; both call sites use them, so equivalence is by construction.
+// ---------------------------------------------------------------------------
+
+interface CorrectionFacts {
+  ruleId: string;
+  principleId?: string;
+  confidence: number;
+  correctedFieldNames: string[];
+  applicationMode: 'live' | 'shadow';
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function safeValidateCorrectionProposal(value: unknown): { valid: boolean; errors: string[] } {
+  try {
+    return validateCorrectionProposal(value);
+  } catch (validationError: unknown) {
+    return { valid: false, errors: [`Validator threw: ${String(validationError)}`] };
+  }
+}
+
+/**
+ * Runtime narrowing for an untrusted proposal (rc-1/rc-2): the canonical
+ * validator decides, and the predicate only reflects its verdict.
+ */
+function isValidCorrectionProposal(value: unknown): value is CorrectionProposal {
+  return safeValidateCorrectionProposal(value).valid;
+}
+
+function readCorrectionFacts(proposal: unknown): CorrectionFacts {
+  const record = isRecordLike(proposal) ? proposal : {};
+  const correctedFields = Array.isArray(record['correctedFields']) ? record['correctedFields'] : [];
+  const rawRuleId = record['ruleId'];
+  const rawPrincipleId = record['principleId'];
+  const rawConfidence = record['confidence'];
+  return {
+    ruleId: rawRuleId !== undefined && rawRuleId !== null ? String(rawRuleId) : 'unknown',
+    principleId: rawPrincipleId !== undefined && rawPrincipleId !== null ? String(rawPrincipleId) : undefined,
+    confidence: typeof rawConfidence === 'number' ? rawConfidence : 0,
+    correctedFieldNames: correctedFields.map((f) => isRecordLike(f) ? String(f['field']) : String(f)),
+    applicationMode: record['applicationMode'] === 'live' ? 'live' : 'shadow',
+  };
+}
+
+function recordRequireApprovalDecision(
+  wctx: WorkspaceContext,
+  event: PluginHookBeforeToolCallEvent,
+  filePath: string,
+  decision: { ruleId?: string; principleId?: string; reason?: string },
+  logger: Partial<PluginLogger>,
+): void {
+  try {
+    const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+    eventLog.recordRuleEnforced({
+      ruleId: decision.ruleId || 'unknown',
+      principleId: decision.principleId || 'unknown',
+      enforcement: 'requireApproval',
+      toolName: event.toolName,
+      filePath,
+    });
+    eventLog.recordRuleHostRequireApproval({
+      toolName: event.toolName,
+      filePath,
+      // The shared gate always carries ruleReason for a requireApproval
+      // verdict; the fallback only guards against malformed metadata and
+      // keeps the event schema honest instead of writing an empty reason.
+      reason: decision.reason ?? 'requireApproval without reason',
+      ruleId: decision.ruleId,
+    });
+  } catch (evErr) {
+    logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_requireApproval: ${String(evErr)}`);
+  }
+}
+
+function recordAutoCorrectProposed(
+  wctx: WorkspaceContext,
+  event: PluginHookBeforeToolCallEvent,
+  filePath: string,
+  proposal: unknown,
+  reason: string | undefined,
+  validationValid: boolean,
+  logger: Partial<PluginLogger>,
+  overrides?: { reason?: string; applicationMode?: 'live' | 'shadow'; failureLabel?: string },
+): void {
+  try {
+    const facts = readCorrectionFacts(proposal);
+    const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+    eventLog.recordRuleHostAutoCorrectProposed({
+      toolName: event.toolName,
+      filePath,
+      ruleId: facts.ruleId,
+      principleId: facts.principleId,
+      confidence: facts.confidence,
+      // Same contract as requireApproval: ruleReason is always present on the
+      // shared path; the fallback keeps the event schema honest on malformed
+      // metadata.
+      reason: overrides?.reason ?? reason ?? 'auto_correct without reason',
+      applicationMode: overrides?.applicationMode ?? facts.applicationMode,
+      correctedFields: facts.correctedFieldNames,
+      validationValid,
+    });
+  } catch (evErr) {
+    logger?.warn?.(`[PD_GATE] ${overrides?.failureLabel ?? 'Failed to record rulehost_auto_correct_proposed'}: ${String(evErr)}`);
+  }
+}
+
+function applyAutoCorrectionDecision(args: {
+  wctx: WorkspaceContext;
+  event: PluginHookBeforeToolCallEvent;
+  sessionId?: string;
+  workspaceDir?: string;
+  filePath: string;
+  activationId?: string;
+  reason?: string;
+  proposal: CorrectionProposal;
+  logger: Partial<PluginLogger>;
+}): PluginHookBeforeToolCallResult | void {
+  const { wctx, event, sessionId, workspaceDir, filePath, activationId, reason, proposal, logger } = args;
+  if (!event.params) {
+    return;
+  }
+  const originalParams = { ...event.params };
+  const nextParams: Record<string, unknown> = {};
+  const appliedFields: Array<{ field: string; original: unknown; applied: unknown }> = [];
+
+  try {
+    if (!Array.isArray(proposal.correctedFields)) {
+      throw new Error('proposal.correctedFields is not an array');
+    }
+
+    if (!proposal.proposedParams || typeof proposal.proposedParams !== 'object' || Array.isArray(proposal.proposedParams)) {
+      throw new Error('proposal.proposedParams must be an object');
+    }
+
+    const trustedWorkspaceDir = workspaceDir;
+    if (typeof trustedWorkspaceDir === 'string' && trustedWorkspaceDir.trim().length > 0) {
+      const pathBoundsResult = validateProposedPathBounds(proposal.proposedParams, trustedWorkspaceDir);
+      if (!pathBoundsResult.valid) {
+        throw new Error(`Path boundary violation: ${pathBoundsResult.reason}`);
+      }
+    } else {
+      const hasPathField = Object.keys(proposal.proposedParams).some(k => typeof proposal.proposedParams[k] === 'string' && (k === 'file_path' || k === 'path' || k === 'filePath'));
+      if (hasPathField) {
+        throw new Error('Cannot apply live auto-correction with path fields: no trusted workspace directory available');
+      }
+    }
+
+    for (const cf of proposal.correctedFields) {
+      if (typeof cf !== 'object' || cf === null || typeof cf.field !== 'string') {
+        throw new Error('correctedFields entry must be an object with a string field');
+      }
+      const field = cf.field;
+      if (!Object.hasOwn(event.params, field)) {
+        throw new Error(`Field '${field}' not found in event.params`);
+      }
+      if (!Object.hasOwn(proposal.proposedParams, field)) {
+        throw new Error(`Field '${field}' not found in proposal.proposedParams`);
+      }
+    }
+
+    for (const cf of proposal.correctedFields) {
+      if (typeof cf === 'object' && cf !== null && typeof cf.field === 'string') {
+        const field = cf.field;
+        const originalValue = event.params[field];
+        const appliedValue = proposal.proposedParams[field];
+        nextParams[field] = appliedValue;
+        appliedFields.push({
+          field,
+          original: originalValue,
+          applied: appliedValue,
+        });
+      }
+    }
+
+    Object.assign(event.params, nextParams);
+
+    try {
+      const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+      eventLog.recordRuleHostAutoCorrectApplied({
+        toolName: event.toolName,
+        filePath,
+        ruleId: String(proposal.ruleId ?? 'unknown'),
+        principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+        confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
+        reason: reason || proposal.correctedFields?.[0]?.reason || 'auto-correct applied',
+        correctedFields: appliedFields,
+      });
+    } catch (evErr) {
+      logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_applied: ${String(evErr)}`);
+    }
+
+    if (appliedFields.length > 0) {
+      // PRI-531: durable receipt ledger row — only after the correction
+      // verifiably applied (SPEC honesty rule: no applied row before D2).
+      try {
+        // PRI-534: session receipt counter (independent of the ledger flag).
+        trackReceiptAutoCorrect(sessionId, wctx.workspaceDir);
+        if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
+          const ledgerPrincipleId = proposal.principleId != null
+            ? String(proposal.principleId)
+            : String(proposal.ruleId ?? 'unknown');
+          const written = recordPrincipleApplication(wctx.workspaceDir, {
+            principleId: ledgerPrincipleId,
+            // PRI-899: same activation lineage as the block path.
+            activationId,
+            ruleId: String(proposal.ruleId ?? 'unknown'),
+            channel: 'code_tool_hook',
+            level: 'effect',
+            kind: 'auto_correct_applied',
+            sessionId,
+            toolName: event.toolName,
+            filePath,
+            // rc-8: corrected values (e.g. file content) can be huge —
+            // bound the digest preview.
+            digest: appliedFields
+              .map(f => `${f.field}: ${JSON.stringify(f.original)} -> ${JSON.stringify(f.applied)}`)
+              .join(', ')
+              .slice(0, 200),
+          });
+          if (!written) {
+            logger?.warn?.('[PD_GATE] Receipt ledger write failed (auto_correct_applied) — history degraded, correction unaffected (rc-9)');
+          }
+        }
+      } catch (ledgerErr) {
+        logger?.warn?.(`[PD_GATE] Receipt ledger write threw (auto_correct_applied): ${String(ledgerErr)}`);
+      }
+      // PD v2 Phase 1: normalized enforcement evidence for the applied
+      // correction (delivery/application/episode/effect batch).
+      // Call-site guarded: a throw here would otherwise land in the
+      // applyError branch below and REVERT the already-applied correction.
+      try {
+        recordGateEnforcementEvidence({
+          workspaceDir: wctx.workspaceDir,
+          sessionId,
+          ...evidenceToolIds(event),
+          toolName: event.toolName,
+          filePath,
+          activationId,
+          principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+          ruleId: String(proposal.ruleId ?? 'unknown'),
+          reason,
+          decision: 'auto_correct',
+          logger,
+        });
+      } catch (evidenceErr) {
+        logger?.warn?.(`[PD_GATE] Evidence recording threw (correction unaffected): ${String(evidenceErr)}`);
+      }
+      // PRI-529 (SPEC §6-D2): the host merges ONLY `params` from the hook
+      // result (hook-before-tool-call-result.ts). The previous return shape
+      // (`toolArgs`/`skipToolCall`/`_pdAutoCorrectWarning`) was ignored by
+      // the host and `_pdAutoCorrectWarning` had zero consumers. In-place
+      // mutation of event.params is kept as a secondary channel but the
+      // contract field is the propagation mechanism.
+      return { params: { ...event.params } };
+    }
+  } catch (applyError: unknown) {
+    if (event.params) {
+      Object.assign(event.params, originalParams);
+    }
+    const errorMsg = String(applyError);
+    const isPathViolation = errorMsg.includes('Path boundary violation') || errorMsg.includes('no trusted workspace directory');
+    if (isPathViolation) {
+      logger?.warn?.(`[PD_GATE] Live auto-correction rejected — path out of bounds: ${errorMsg}`);
+      recordAutoCorrectProposed(
+        wctx,
+        event,
+        filePath,
+        proposal,
+        reason,
+        false,
+        logger,
+        { reason: `Path boundary rejected: ${errorMsg}`, applicationMode: 'shadow', failureLabel: 'Failed to record path rejection telemetry' },
+      );
+    } else {
+      logger?.warn?.(`[PD_GATE] Failed to apply auto-correction, using original params: ${errorMsg}`);
+    }
+  }
 }
 
 export function handleBeforeToolCall(
@@ -280,243 +567,42 @@ export function handleBeforeToolCall(
     }
 
     if (hostResult?.decision === 'requireApproval') {
-      try {
-        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-        eventLog.recordRuleEnforced({
-          ruleId: hostResult.ruleId || 'unknown',
-          principleId: hostResult.principleId || 'unknown',
-          enforcement: 'requireApproval',
-          toolName: event.toolName,
-          filePath: relPath,
-        });
-        eventLog.recordRuleHostRequireApproval({
-          toolName: event.toolName,
-          filePath: relPath,
-          reason: hostResult.reason,
-          ruleId: hostResult.ruleId,
-        });
-      } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_requireApproval: ${String(evErr)}`);
-      }
+      recordRequireApprovalDecision(wctx, event, relPath, {
+        ruleId: hostResult.ruleId,
+        principleId: hostResult.principleId,
+        reason: hostResult.reason,
+      }, logger);
     }
 
     if (hostResult?.decision === 'auto_correct' && hostResult.correctionProposal) {
       const proposal = hostResult.correctionProposal;
-      let validation: { valid: boolean; errors: string[] };
-      try {
-        validation = validateCorrectionProposal(proposal);
-      } catch (validationError: unknown) {
-        validation = { valid: false, errors: [`Validator threw: ${String(validationError)}`] };
-      }
-
-      try {
-        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-        const correctedFields = Array.isArray(proposal.correctedFields)
-          ? proposal.correctedFields.map((f: unknown) => typeof f === 'object' && f !== null ? String((f as { field?: string }).field) : String(f))
-          : [];
-        eventLog.recordRuleHostAutoCorrectProposed({
-          toolName: event.toolName,
-          filePath: relPath,
-          ruleId: String(proposal.ruleId ?? 'unknown'),
-          principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
-          confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
-          reason: hostResult.reason,
-          applicationMode: proposal.applicationMode === 'live' ? 'live' : 'shadow',
-          correctedFields,
-          validationValid: validation.valid,
-        });
-      } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_proposed: ${String(evErr)}`);
-      }
-
+      const validation = safeValidateCorrectionProposal(proposal);
+      recordAutoCorrectProposed(wctx, event, relPath, proposal, hostResult.reason, validation.valid, logger);
       if (proposal.applicationMode === 'live' && validation.valid) {
-        if (!event.params) {
-          return;
-        }
-        const originalParams = { ...event.params };
-        const nextParams: Record<string, unknown> = {};
-        const appliedFields: Array<{ field: string; original: unknown; applied: unknown }> = [];
-
-        try {
-          if (!Array.isArray(proposal.correctedFields)) {
-            throw new Error('proposal.correctedFields is not an array');
-          }
-
-          if (!proposal.proposedParams || typeof proposal.proposedParams !== 'object' || Array.isArray(proposal.proposedParams)) {
-            throw new Error('proposal.proposedParams must be an object');
-          }
-
-          const trustedWorkspaceDir = ctx.workspaceDir;
-          if (typeof trustedWorkspaceDir === 'string' && trustedWorkspaceDir.trim().length > 0) {
-            const pathBoundsResult = validateProposedPathBounds(proposal.proposedParams, trustedWorkspaceDir);
-            if (!pathBoundsResult.valid) {
-              throw new Error(`Path boundary violation: ${pathBoundsResult.reason}`);
-            }
-          } else {
-            const hasPathField = Object.keys(proposal.proposedParams).some(k => typeof proposal.proposedParams[k] === 'string' && (k === 'file_path' || k === 'path' || k === 'filePath'));
-            if (hasPathField) {
-              throw new Error('Cannot apply live auto-correction with path fields: no trusted workspace directory available');
-            }
-          }
-
-          for (const cf of proposal.correctedFields) {
-            if (typeof cf !== 'object' || cf === null || typeof cf.field !== 'string') {
-              throw new Error('correctedFields entry must be an object with a string field');
-            }
-            const field = cf.field;
-            if (!Object.hasOwn(event.params, field)) {
-              throw new Error(`Field '${field}' not found in event.params`);
-            }
-            if (!Object.hasOwn(proposal.proposedParams, field)) {
-              throw new Error(`Field '${field}' not found in proposal.proposedParams`);
-            }
-          }
-
-          for (const cf of proposal.correctedFields) {
-            if (typeof cf === 'object' && cf !== null && typeof cf.field === 'string') {
-              const field = cf.field;
-              const originalValue = event.params[field];
-              const appliedValue = proposal.proposedParams[field];
-              nextParams[field] = appliedValue;
-              appliedFields.push({
-                field,
-                original: originalValue,
-                applied: appliedValue,
-              });
-            }
-          }
-
-          Object.assign(event.params, nextParams);
-
-          try {
-            const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-            eventLog.recordRuleHostAutoCorrectApplied({
-              toolName: event.toolName,
-              filePath: relPath,
-              ruleId: String(proposal.ruleId ?? 'unknown'),
-              principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
-              confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
-              reason: hostResult.reason || proposal.correctedFields?.[0]?.reason || 'auto-correct applied',
-              correctedFields: appliedFields,
-            });
-          } catch (evErr) {
-            logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_applied: ${String(evErr)}`);
-          }
-
-          if (appliedFields.length > 0) {
-            // PRI-531: durable receipt ledger row — only after the correction
-            // verifiably applied (SPEC honesty rule: no applied row before D2).
-            try {
-              // PRI-534: session receipt counter (independent of the ledger flag).
-              trackReceiptAutoCorrect(ctx.sessionId, wctx.workspaceDir);
-              if (loadFeatureFlagFromConfig(wctx.workspaceDir, 'principle_receipt_ledger').enabled) {
-                const ledgerPrincipleId = proposal.principleId != null
-                  ? String(proposal.principleId)
-                  : String(proposal.ruleId ?? 'unknown');
-                const written = recordPrincipleApplication(wctx.workspaceDir, {
-                  principleId: ledgerPrincipleId,
-                  // PRI-899: same activation lineage as the block path — the
-                  // winning live decision's activation is already resolved in
-                  // this scope (report.liveDecisionActivationId).
-                  activationId: report.liveDecisionActivationId,
-                  ruleId: String(proposal.ruleId ?? 'unknown'),
-                  channel: 'code_tool_hook',
-                  level: 'effect',
-                  kind: 'auto_correct_applied',
-                  sessionId: ctx.sessionId,
-                  toolName: event.toolName,
-                  filePath: relPath,
-                  // rc-8: corrected values (e.g. file content) can be huge —
-                  // bound the digest preview.
-                  digest: appliedFields
-                    .map(f => `${f.field}: ${JSON.stringify(f.original)} -> ${JSON.stringify(f.applied)}`)
-                    .join(', ')
-                    .slice(0, 200),
-                });
-                if (!written) {
-                  logger?.warn?.('[PD_GATE] Receipt ledger write failed (auto_correct_applied) — history degraded, correction unaffected (rc-9)');
-                }
-              }
-            } catch (ledgerErr) {
-              logger?.warn?.(`[PD_GATE] Receipt ledger write threw (auto_correct_applied): ${String(ledgerErr)}`);
-            }
-            // PD v2 Phase 1: normalized enforcement evidence for the applied
-            // correction (delivery/application/episode/effect batch).
-            // Call-site guarded: a throw here would otherwise land in the
-            // applyError branch below and REVERT the already-applied correction.
-            try {
-              recordGateEnforcementEvidence({
-                workspaceDir: wctx.workspaceDir,
-                sessionId: ctx.sessionId,
-                ...evidenceToolIds(event),
-                toolName: event.toolName,
-                filePath: relPath,
-                activationId: report.liveDecisionActivationId,
-                principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
-                ruleId: String(proposal.ruleId ?? 'unknown'),
-                reason: hostResult.reason,
-                decision: 'auto_correct',
-                logger,
-              });
-            } catch (evidenceErr) {
-              logger?.warn?.(`[PD_GATE] Evidence recording threw (correction unaffected): ${String(evidenceErr)}`);
-            }
-            // PRI-529 (SPEC §6-D2): the host merges ONLY `params` from the hook
-            // result (hook-before-tool-call-result.ts). The previous return shape
-            // (`toolArgs`/`skipToolCall`/`_pdAutoCorrectWarning`) was ignored by
-            // the host and `_pdAutoCorrectWarning` had zero consumers. In-place
-            // mutation of event.params is kept as a secondary channel but the
-            // contract field is the propagation mechanism.
-            return { params: { ...event.params } };
-          }
-        } catch (applyError: unknown) {
-          if (event.params) {
-            Object.assign(event.params, originalParams);
-          }
-          const errorMsg = String(applyError);
-          const isPathViolation = errorMsg.includes('Path boundary violation') || errorMsg.includes('no trusted workspace directory');
-          if (isPathViolation) {
-            logger?.warn?.(`[PD_GATE] Live auto-correction rejected — path out of bounds: ${errorMsg}`);
-            try {
-              const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-              eventLog.recordRuleHostAutoCorrectProposed({
-                toolName: event.toolName,
-                filePath: relPath,
-                ruleId: String(proposal.ruleId ?? 'unknown'),
-                principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
-                confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
-                reason: `Path boundary rejected: ${errorMsg}`,
-                applicationMode: 'shadow',
-                correctedFields: Array.isArray(proposal.correctedFields)
-                  ? proposal.correctedFields.map((f: unknown) => typeof f === 'object' && f !== null ? String((f as { field?: string }).field) : String(f))
-                  : [],
-                validationValid: false,
-              });
-            } catch (evErr) {
-              logger?.warn?.(`[PD_GATE] Failed to record path rejection telemetry: ${String(evErr)}`);
-            }
-          } else {
-            logger?.warn?.(`[PD_GATE] Failed to apply auto-correction, using original params: ${errorMsg}`);
-          }
-        }
+        return applyAutoCorrectionDecision({
+          wctx,
+          event,
+          sessionId: ctx.sessionId,
+          workspaceDir: ctx.workspaceDir,
+          filePath: relPath,
+          activationId: report.liveDecisionActivationId,
+          reason: hostResult.reason,
+          proposal,
+          logger,
+        });
       }
     } else if (hostResult?.decision === 'auto_correct') {
       // auto_correct without correctionProposal — emit telemetry for observability
-      try {
-        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-        eventLog.recordRuleHostAutoCorrectProposed({
-          toolName: event.toolName,
-          filePath: relPath,
-          ruleId: hostResult.ruleId ?? 'unknown',
-          confidence: 0,
-          reason: hostResult.reason ?? 'auto_correct without correctionProposal',
-          applicationMode: 'shadow',
-          correctedFields: [],
-          validationValid: false,
-        });
-      } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_proposed (no proposal): ${String(evErr)}`);
-      }
+      recordAutoCorrectProposed(
+        wctx,
+        event,
+        relPath,
+        { ruleId: hostResult.ruleId ?? 'unknown' },
+        hostResult.reason ?? 'auto_correct without correctionProposal',
+        false,
+        logger,
+        { failureLabel: 'Failed to record rulehost_auto_correct_proposed (no proposal)' },
+      );
     }
   } catch (hostError: unknown) {
     logger.warn?.(`[PD_GATE:RULE_HOST] Host evaluation failed, allowing conservatively: ${String(hostError)}`);
@@ -635,22 +721,17 @@ export function handleSharedRuleHostResult(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir: string; logger?: Partial<PluginLogger> },
   result: HostEventResult,
-): void {
+): PluginHookBeforeToolCallResult | void {
   const logger = ctx.logger ?? console;
   for (const warning of result.warnings ?? []) logger.warn?.(`[PD_GATE:RULE_HOST] ${warning}`);
   const evaluatedLiveRules = result.metadata?.['evaluatedLiveRules'];
   logger.info?.(`[PD_GATE:RULE_HOST] shared production gate evaluated; liveRules=${typeof evaluatedLiveRules === 'number' ? evaluatedLiveRules : 'unknown'} decision=${result.decision}`);
   const metadata = result.metadata;
   const ruleDecision = metadata?.['ruleDecision'];
-  if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
-    // These decision kinds are OpenClaw-owned (approval UX / auto-correct):
-    // onBeforeToolResult falls back to the legacy handleBeforeToolCall, which
-    // re-evaluates and records the actual decision events. Recording an
-    // 'allow' evaluation here too would emit a duplicate, inconsistent
-    // rulehost_evaluated row for the same tool call.
-    logger.info?.(`[PD_GATE:RULE_HOST] shared result carries ruleDecision=${String(ruleDecision)}; the legacy handler records the decision events`);
-    return;
-  }
+  // Task 1: auto_correct / requireApproval are now recorded and applied HERE.
+  // The shared gate carries the winning rule identity, matched flag, reason and
+  // (already merged) correction proposal, so this handler no longer delegates
+  // to the legacy hook (which re-evaluated the same activations from SQLite).
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
     canonicalKind: resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger).resolve(event.toolName),
@@ -741,6 +822,54 @@ export function handleSharedRuleHostResult(
       activationId: liveActivationId,
       ...evidenceToolIds(event),
     }, logger);
+    return;
+  }
+
+  if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
+    // The legacy fallback performed this safety observation before acting on
+    // the decision; preserve it verbatim so a self-blocking / protected-command
+    // matching RuleCode is still isolated on these two paths.
+    const circuitTripped = observeRuleCodeSafety({
+      workspaceDir: wctx.workspaceDir,
+      activationId: liveActivationId,
+      toolName: event.toolName,
+      params: event.params ?? {},
+      decision: ruleDecision,
+      matched: metadata?.['matched'] === true,
+      logger,
+    });
+    if (circuitTripped) {
+      logger.warn?.(`[PD_GATE] RuleCode ${liveActivationId ?? 'unknown'} safety-isolated; allowing current host call.`);
+      return;
+    }
+
+    const ruleReason = typeof metadata?.['ruleReason'] === 'string' ? metadata['ruleReason'] : undefined;
+
+    if (ruleDecision === 'requireApproval') {
+      recordRequireApprovalDecision(wctx, event, action.normalizedPath, {
+        ruleId,
+        principleId,
+        reason: ruleReason,
+      }, logger);
+      return;
+    }
+
+    const rawProposal = metadata?.['correctionProposal'];
+    const validProposal = isValidCorrectionProposal(rawProposal);
+    recordAutoCorrectProposed(wctx, event, action.normalizedPath, rawProposal, ruleReason, validProposal, logger);
+    if (validProposal && rawProposal.applicationMode === 'live') {
+      return applyAutoCorrectionDecision({
+        wctx,
+        event,
+        sessionId: ctx.sessionId,
+        workspaceDir: ctx.workspaceDir,
+        filePath: action.normalizedPath,
+        activationId: liveActivationId,
+        reason: ruleReason,
+        proposal: rawProposal,
+        logger,
+      });
+    }
   }
 }
 
