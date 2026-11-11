@@ -4,7 +4,6 @@ import {
   buildRuleHostAction,
   buildToolSemanticRegistry,
   deriveToolHintsFromCanonicalKind,
-  isRuleHostEvaluableKind,
   estimateLineChanges,
   mergeDecisions,
   normalizeRuleHostResult,
@@ -22,7 +21,7 @@ import {
   type ToolSemanticRegistry,
   type GovernanceHostKind,
 } from '@principles/core/runtime';
-import { isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
+import { isRuleHostEvaluableKind, isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
