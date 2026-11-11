@@ -5,6 +5,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 test.describe('RuleCode Owner live-decision safety journey', () => {
+  // Isolation: Playwright retries re-run this test against the SAME server and
+  // workspace (workers=1, one seeded webServer per run). This journey performs
+  // irreversible break-glass mutations:
+  //   - "Pause all Live RuleCode" flips the seeded shadow activation to
+  //     readiness=blocked and removes its rulecode_decision from
+  //     /api/governance/owner-decisions. The default no-auth e2e server cannot
+  //     release the pause (release requires a configured Owner identity and
+  //     answers 403 owner_authentication_required), so no cleanup can restore
+  //     the precondition.
+  //   - "Emergency deactivate" on a live activation is terminal; there is no
+  //     reactivation route.
+  // A retry therefore can never observe the seeded preconditions again — CI
+  // retry #1/#2 deterministically failed at "Seeded RuleCode owner decision is
+  // missing" after attempt 1 paused RuleCode. Retries would only mask the real
+  // first failure, so this spec opts out instead of inheriting mutated state.
+  test.describe.configure({ retries: 0 });
+
   test('shows bounded evidence and performs break-glass containment without CLI or host restart', async ({ page, request }) => {
     const decisionsResponse = await request.get('/api/governance/owner-decisions');
     expect(decisionsResponse.status()).toBe(200);
