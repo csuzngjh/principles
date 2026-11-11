@@ -51,10 +51,10 @@ function writePin(pluginRoot: string, cohort: CodexRuntimeCohort, version: strin
   writeJson(path.join(pluginRoot, 'runtime-version.json'), cohort);
 }
 
-function writeCanonical(cohort: CodexRuntimeCohort): void {
+function writeCanonical(cohort: CodexRuntimeCohort, dir: string = canonicalRuntimeDir): void {
   const dirs = { codexAdapter: 'codex-adapter', hostRuntime: 'host-runtime', core: 'core', mcpServer: 'pd-mcp-server' } as const;
   for (const key of Object.keys(dirs) as (keyof typeof dirs)[]) {
-    writeJson(path.join(canonicalRuntimeDir, dirs[key], 'package.json'), { name: `@principles/${dirs[key]}`, version: cohort[key] });
+    writeJson(path.join(dir, dirs[key], 'package.json'), { name: `@principles/${dirs[key]}`, version: cohort[key] });
   }
 }
 
@@ -98,9 +98,33 @@ function runRealHook(): string {
   return result.stdout;
 }
 
-function cacheRoot(version: string): string {
-  return path.join(codexHome, 'plugins', 'cache', CACHE_MARKETPLACE, 'principles-disciple', version);
+function cacheRoot(version: string, homeDir: string = codexHome): string {
+  return path.join(homeDir, 'plugins', 'cache', CACHE_MARKETPLACE, 'principles-disciple', version);
 }
+
+/**
+ * A REAL scripts/pd-setup.cjs stand-in for exercising the production default
+ * command runner (no injected fake): materializes the payload pin into
+ * --plugin-data/runtime and records the argv it received, so a test can prove
+ * the arguments were not split by a command-processor command line.
+ */
+const PD_SETUP_STANDIN = [
+  "'use strict';",
+  "const fs = require('fs');",
+  "const path = require('path');",
+  "function val(flag) { const i = process.argv.indexOf(flag); return i === -1 ? undefined : process.argv[i + 1]; }",
+  "const pluginRoot = val('--plugin-root');",
+  "const dataRoot = val('--plugin-data');",
+  "const pin = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'runtime-version.json'), 'utf8'));",
+  "const names = { codexAdapter: '@principles/codex-adapter', hostRuntime: '@principles/host-runtime', core: '@principles/core', mcpServer: '@principles/pd-mcp-server' };",
+  "for (const key of Object.keys(names)) {",
+  "  const dir = path.join(dataRoot, 'runtime', 'node_modules', names[key]);",
+  "  fs.mkdirSync(dir, { recursive: true });",
+  "  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: names[key], version: pin[key] }));",
+  "}",
+  "fs.mkdirSync(dataRoot, { recursive: true });",
+  "fs.writeFileSync(path.join(dataRoot, 'argv-received.json'), JSON.stringify(process.argv.slice(2)));",
+].join('\n');
 
 function pluginDataRoot(): string {
   return path.join(codexHome, 'plugins', 'data', `principles-disciple-${CACHE_MARKETPLACE}`);
@@ -252,6 +276,71 @@ describe('Codex marketplace update chain', () => {
     expect(result.reason).toContain('freshness is unverifiable');
     expect(result.reason).not.toContain('already installed');
   });
+
+  it('fails loudly when the Marketplace source itself is behind (refresh succeeds but cannot help)', async () => {
+    // The source serves exactly the stale payload the cache already has, so
+    // `codex plugin add` "succeeds" without moving anything forward. BEFORE
+    // the post-refresh check this returned success + "payload refreshed
+    // 0.3.19 → 0.3.19" while the host stayed behind the release.
+    seedSourcePayload('0.3.19', OLD_COHORT);
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+
+    const result = await installer.install(ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.manualActionRequired).toBe(true);
+    expect(result.configAction).toBe('skipped');
+    expect(result.reason).toContain('still behind the PD release being installed');
+    expect(result.reason).toContain(`core@${OLD_COHORT.core}`);
+    expect(result.reason).toContain(`core@${NEW_COHORT.core}`);
+    expect(result.reason).toContain('source it serves is itself behind');
+    expect(result.nextAction).toContain('git pull');
+    expect(result.nextAction).not.toContain('plugin remove');
+    // The refused path did not align PLUGIN_DATA: it still holds the old cohort.
+    const runtimeCore = JSON.parse(fs.readFileSync(
+      path.join(pluginDataRoot(), 'runtime', 'node_modules', '@principles', 'core', 'package.json'), 'utf8',
+    )) as { version: string };
+    expect(runtimeCore.version).toBe(OLD_COHORT.core);
+  });
+
+  it('runs pd-setup with REAL argv that survive spaces in paths (no command processor)', async () => {
+    // Payload already current (pin == canonical) so no `codex` call happens;
+    // only the runtime alignment runs — through the REAL default command
+    // runner (no injected fake). Every path involved contains a space, which a
+    // command-processor command line (args joined without quoting) would split
+    // apart (2026-11-11 review P2).
+    const spacedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd spaced home-'));
+    try {
+      const spacedCodexHome = path.join(spacedHome, '.co dex');
+      const spacedCanonical = path.join(spacedHome, 'canon ical');
+      const spacedData = path.join(spacedCodexHome, 'plugins', 'data', `principles-disciple-${CACHE_MARKETPLACE}`);
+      const spacedCache = cacheRoot('0.3.19', spacedCodexHome);
+      writePin(spacedCache, NEW_COHORT, '0.3.19');
+      writeCanonical(NEW_COHORT, spacedCanonical);
+      writeRuntime(path.join(spacedData, 'runtime'), OLD_COHORT);
+      fs.mkdirSync(path.dirname(path.join(spacedCache, 'scripts', 'pd-setup.cjs')), { recursive: true });
+      fs.writeFileSync(path.join(spacedCache, 'scripts', 'pd-setup.cjs'), PD_SETUP_STANDIN, 'utf8');
+
+      const installer = new CodexHostInstaller({ codexHome: spacedCodexHome, canonicalRuntimeDir: spacedCanonical });
+      const result = await installer.install(ctx);
+
+      expect(result.success, result.reason).toBe(true);
+      expect(result.configAction).toBe('updated');
+      // The setup received the exact paths — proof there was no shell split.
+      const argv = JSON.parse(fs.readFileSync(path.join(spacedData, 'argv-received.json'), 'utf8')) as string[];
+      const dataIdx = argv.indexOf('--plugin-data');
+      expect(dataIdx).toBeGreaterThan(-1);
+      expect(argv[dataIdx + 1]).toBe(spacedData);
+      // And the runtime really moved to the payload pin.
+      const runtimeCore = JSON.parse(fs.readFileSync(
+        path.join(spacedData, 'runtime', 'node_modules', '@principles', 'core', 'package.json'), 'utf8',
+      )) as { version: string };
+      expect(runtimeCore.version).toBe(NEW_COHORT.core);
+    } finally {
+      fs.rmSync(spacedHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }, 120_000);
 });
 
 describe('installed-host detection (upgrade coverage)', () => {

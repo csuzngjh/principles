@@ -40,7 +40,7 @@ function pdFile(root: string, name: string): string | null {
   return target;
 }
 
-const FILENAME_ALLOWLIST = ['config.yaml', 'codex-ingestion-consent.json'];
+const FILENAME_ALLOWLIST = ['config.yaml', 'codex-ingestion-consent.json', 'conversation-ingestion-consent.json'];
 
 function makeWorkspace(options: { handEnableIngestion?: boolean } = {}): string {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-bdd-consent-'));
@@ -60,6 +60,13 @@ function makeWorkspace(options: { handEnableIngestion?: boolean } = {}): string 
 /** Snapshot the fixed, allowlisted file set a consent run may touch. */
 function snapshot(root: string): Map<string, string> {
   const files = new Map<string, string>();
+  // PRI-1171: the consent authority is the v3 ledger under .state.
+  const ledger = path.join(root, '.state', 'conversation-ingestion-consent.json');
+  try {
+    files.set(ledger, fs.readFileSync(ledger, 'utf8'));
+  } catch {
+    // absent file — snapshot stays empty for it
+  }
   for (const name of FILENAME_ALLOWLIST) {
     const full = pdFile(root, name);
     if (full === null) continue;
@@ -176,7 +183,7 @@ registry.then('no config outside the workspace consent flow was modified', () =>
     if (file.endsWith('config.yaml')) continue; // the flag flip is the point
     expect(after.get(file) ?? '', `unexpected change: ${file}`).toBe(content);
   }
-  const consentPath = path.join(ws, '.pd', 'codex-ingestion-consent.json');
+  const consentPath = path.join(ws, '.state', 'conversation-ingestion-consent.json');
   expect(after.has(consentPath), 'the consent record must be the only new file').toBe(true);
 });
 

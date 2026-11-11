@@ -45,7 +45,13 @@ function errorMessage(error: unknown): string {
  * rejection apart — never the prompt, the raw response, or credentials.
  */
 function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): string {
-  const status = line.status === 'selected' ? 'adaptive' : 'degraded';
+  // PRI-1181: a deterministic pre-selection skip is normal behaviour (zero
+  // reads, zero sends) — it must not be reported as a degraded selection.
+  const status = line.status === 'selected'
+    ? 'adaptive'
+    : line.status === 'skipped'
+      ? 'skipped'
+      : 'degraded';
   const failures = line.failures.length > 0 ? line.failures.join('|') : 'none';
   return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} failures=${failures}`
     .replace(/\s+/g, ' ')
@@ -240,6 +246,11 @@ export interface PdHookDeps {
   readonly generationTimeoutMs?: number;
   /** Test seam: effective adaptive budget inside the host hook window. */
   readonly hookBudgetMs?: number;
+  /**
+   * PRI-1181: remaining-budget floor for the pre-selection skip gate. Defaults
+   * to the measured minimum; 0 keeps a cancellation scenario sending.
+   */
+  readonly minRemainingBudgetMs?: number;
 }
 
 // stdin, env and cwd are the host CLI contract; `deps` is the optional transport
@@ -459,6 +470,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           ...(deps.now ? {now: deps.now} : {}),
           ...(deps.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: deps.firstByteTimeoutMs} : {}),
           ...(deps.generationTimeoutMs !== undefined ? {generationTimeoutMs: deps.generationTimeoutMs} : {}),
+          ...(deps.minRemainingBudgetMs !== undefined ? {minRemainingBudgetMs: deps.minRemainingBudgetMs} : {}),
           outerDeadlineAt: adaptiveDeadlineAt,
           onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
         },

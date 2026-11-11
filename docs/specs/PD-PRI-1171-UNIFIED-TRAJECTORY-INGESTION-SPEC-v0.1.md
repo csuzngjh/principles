@@ -17,6 +17,7 @@
 | 2026-11-11 | Owner 意图对齐三决策：reasoning 录入；保留策略推广 Codex 模式（7 天窗口+引用长期）；不加轨迹浏览页（消费面走现有诊断/证据流+采集健康状态） |
 | 2026-11-11 | 三路独立子代理评审后修订 v0.2：① Codex 全文升级**不复用旧 bounded 同意**——须新版本披露+同意台账新版记录；② OpenClaw 离线兜底源**降级为待证据跟进（默认裁剪）**——live ID 与宿主转录事件 ID 间无已验证桥、热库快照有已知坑；③ OpenClaw live 统一观察写入补独立开关与消费面权威规则；④ WorkBuddy 磁盘口径修正（jsonl 约 477MB，非 566MB）；⑤ 采集开关与宿主总开关（host.workbuddy）的层叠门控显式化 |
 | 2026-11-11 | **Owner 批准开工（"批准开工"）**：状态置 APPROVED，进入实施（按技术设计 §11 九项工单：P1 提取 → P2 WorkBuddy 开通 → P3 深度对齐）。本批准同时构成 Codex full 层新版同意决定（decidedVia=owner_directive，随 P3 工单 ⑧ 落台账，须配新版披露文本） |
+| 2026-11-11 | PR #2523 评审修订（一致性勘误，不改意图）：§7 `mvp-q-3` 与 §10 复杂度增量的开关计数与 §4.4 对齐——`openclaw_unified_observation`（live 统一观察写入，默认 on）显式计入，新运行时 flag 数 1→2 |
 
 ---
 
@@ -161,6 +162,7 @@
 - `mvp-q-1-what-if-skip`：WorkBuddy 零对话采集持续，诊断证据三宿主不等；每新宿主继续各起一套方案，架构负债累积。
 - `mvp-q-2-how-observed`：见上表"验收"列（健康页/工作区数据/补读测试）。
 - `mvp-q-3-how-disabled`：`workbuddy_conversation_ingestion`（默认 on，可 off）；Codex 沿用现有 flag；OpenClaw 兜底源独立 flag；均不新增开关类别。
+- `mvp-q-3-how-disabled`：`workbuddy_conversation_ingestion`（默认 on，可 off）；Codex 沿用现有 flag；OpenClaw live 统一观察写入使用独立 flag `openclaw_unified_observation`（默认 on，可 off，见 §4.4）；均不新增开关类别。
 - `mvp-q-4-emotional-value`：降低"宿主越多系统越不可理解"的不确定感；Owner 在一个健康页看到全部采集状态，消除"到底采没采"的反复排查成本。
 
 ## 8. 对既有文档的修订声明（批准本 SPEC 即生效）
@@ -190,6 +192,7 @@ New persisted schema/state: 小（governance_observations v4 additive + consent 
 New subsystem/service: NO（泛化提取既有 Codex 管线）
 New public abstraction: 1（conversation-ingestion seam —— 即消灭 N 套方案的那个接口，包内公开非跨包）
 New runtime feature flag: 1（workbuddy_conversation_ingestion，Owner 指示默认 on）
+New runtime feature flag: 2（workbuddy_conversation_ingestion、openclaw_unified_observation，均 Owner 指示默认 on）
 New cross-package dependency: NO（seam 在 host-runtime；适配器既有依赖方向不变）
 New host/platform-specific behavior: 预期内（每宿主一个解码器，这是统一模型的既定形态）
 New external/network capability: NO（全部本地文件读取）

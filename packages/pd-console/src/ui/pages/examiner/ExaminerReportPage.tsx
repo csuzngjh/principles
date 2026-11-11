@@ -12,6 +12,7 @@ import {
   fetchExaminerStudyStatus,
   fetchExaminerPrincipleEvidence,
   type ExaminerReportData,
+  type ExaminerStudyStatusData,
   type ExaminerEvidenceData,
 } from '../../api.js';
 import { ExaminerEvidencePanel } from './examiner-evidence-panel.js';
@@ -31,6 +32,7 @@ export function ExaminerReportPage(): React.ReactElement {
   const [report, setReport] = useState<ExaminerReportData | null>(null);
   const [evidence, setEvidence] = useState<ExaminerEvidenceData | null>(null);
   const [readOnly, setReadOnly] = useState(false);
+  const [studyStatus, setStudyStatus] = useState<ExaminerStudyStatusData | null>(null);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +45,10 @@ export function ExaminerReportPage(): React.ReactElement {
         fetchExaminerStudyStatus(studyId),
       ]);
       if (cancelled) return;
-      if (statusResponse.success) setReadOnly(statusResponse.data.readOnly === true);
+      if (statusResponse.success) {
+        setReadOnly(statusResponse.data.readOnly === true);
+        setStudyStatus(statusResponse.data);
+      }
       // Commit the REPORT state first: the production-evidence aggregate is a
       // separate, optional lane and must never hold the report behind its own
       // slow request.
@@ -86,6 +91,59 @@ export function ExaminerReportPage(): React.ReactElement {
   const verificationOk = report ? report.verification.checks.every((check) => check.ok) : false;
   const targetId = examiner?.targetPrincipleId ?? null;
 
+  const executionMode = report?.report.scope?.executionMode ?? null;
+  const modeKey = executionMode === 'real' ? 'modeReal' : executionMode === 'offline-stub' ? 'modeOffline' : 'modeUnknown';
+  const modeLabel = t(`pages.examiner.executionMode.${modeKey}`);
+  const modeNoteKey = executionMode === 'real' ? 'realNote' : executionMode === 'offline-stub' ? 'offlineNote' : 'unknownNote';
+  const dryRunCount = studyStatus?.consoleRuns?.runs.filter((run) => run.mode === 'host-dry-run').length ?? 0;
+  const realRunCount = studyStatus?.consoleRuns?.runs.filter((run) => run.mode === 'f2-real-host').length ?? 0;
+  const offlineRan = examiner !== null;
+  const estimateStatus = examiner?.itt.pointEstimate.status ?? null;
+  const estimateValue = typeof examiner?.itt.pointEstimate.value === 'number' ? examiner.itt.pointEstimate.value : null;
+  const estimateText = estimateValue === null ? null : `${(Math.abs(estimateValue) * 100).toFixed(1)}%`;
+
+  let conclusion: string;
+  if (!verificationOk) conclusion = t('pages.examiner.ownerSummary.conclusionUnverified');
+  else if (examiner === null) conclusion = t('pages.examiner.ownerSummary.conclusionNoControlled');
+  else if (estimateStatus !== 'ESTIMABLE' || estimateValue === null) {
+    conclusion = t('pages.examiner.ownerSummary.conclusionInsufficient', {
+      planned: examiner.itt.plannedApplicablePairs,
+      determined: examiner.itt.determinedPairs,
+    });
+  } else if (estimateValue === 0) conclusion = t('pages.examiner.ownerSummary.conclusionNoDifference');
+  else if (estimateValue > 0) conclusion = t('pages.examiner.ownerSummary.conclusionPositive', { value: estimateText });
+  else conclusion = t('pages.examiner.ownerSummary.conclusionNegative', { value: estimateText });
+
+  const rationale: string[] = [t('pages.examiner.ownerSummary.rationaleMode', { mode: modeLabel })];
+  if (examiner !== null) {
+    rationale.push(t('pages.examiner.ownerSummary.rationalePairs', {
+      planned: examiner.itt.plannedApplicablePairs,
+      determined: examiner.itt.determinedPairs,
+      unknown: examiner.itt.unknownPairs,
+      na: examiner.applicability.notApplicablePairs,
+    }));
+    rationale.push(t('pages.examiner.ownerSummary.rationaleFidelity', {
+      present: examiner.treatmentFidelity.contextPresent,
+      planned: examiner.treatmentFidelity.plannedTreatmentUnits,
+      contamination: examiner.treatmentFidelity.controlContamination.units,
+      evictions: examiner.treatmentFidelity.capacityEvictions.units,
+    }));
+  }
+  rationale.push(t('pages.examiner.ownerSummary.rationaleReplay', { status: verificationOk ? 'OK' : 'FAILED' }));
+  if (Array.isArray(report?.report.limitations) && report.report.limitations.length > 0) {
+    rationale.push(t('pages.examiner.ownerSummary.rationaleLimitations', { count: report.report.limitations.length }));
+  }
+  const evidenceSufficient = verificationOk && examiner !== null && estimateStatus === 'ESTIMABLE' && estimateValue !== null;
+  // Phase E1: "what this cannot prove yet" is stated explicitly, not left to
+  // the Owner to infer from missing sections.
+  const cannotProve: string[] = [];
+  if (executionMode !== 'real') cannotProve.push(t('pages.examiner.ownerSummary.cannotProveOffline'));
+  cannotProve.push(t('pages.examiner.ownerSummary.cannotProveCausal'));
+  if (!evidenceSufficient) cannotProve.push(t('pages.examiner.ownerSummary.cannotProveVerdict'));
+  const nextStep = evidenceSufficient
+    ? t('pages.examiner.ownerSummary.nextGovernance')
+    : t('pages.examiner.ownerSummary.nextFixEvidence');
+
   return (
     <PageShell>
       <header className="mb-6">
@@ -111,6 +169,69 @@ export function ExaminerReportPage(): React.ReactElement {
 
       {report && (
         <>
+          {/* Phase E2: Owner Summary — conclusion and next step first, in plain
+              language; technical detail is pushed below. Rendered even when no
+              controlled result exists: "we cannot conclude yet" is itself the
+              answer the Owner needs, never a missing section. */}
+          <div className="mb-4 grid gap-3 rounded-lg border bg-card p-4 text-sm" data-testid="examiner-owner-summary">
+              <div>
+                <div className="text-xs font-medium text-ink-3">{t('pages.examiner.ownerSummary.title')}</div>
+                <p className="mt-1 text-[15px] font-medium text-ink" data-testid="examiner-owner-summary-conclusion">{conclusion}</p>
+              </div>
+              <div data-testid="examiner-owner-summary-rationale">
+                <div className="text-xs font-medium text-ink-3">{t('pages.examiner.ownerSummary.rationale')}</div>
+                <ul className="mt-1 grid gap-0.5 text-xs text-muted-foreground">
+                  {rationale.map((line) => <li key={line}>· {line}</li>)}
+                </ul>
+              </div>
+              <div data-testid="examiner-owner-summary-cannot-prove">
+                <div className="text-xs font-medium text-ink-3">{t('pages.examiner.ownerSummary.cannotProveTitle')}</div>
+                <ul className="mt-1 grid gap-0.5 text-xs text-muted-foreground">
+                  {cannotProve.map((line) => <li key={line}>· {line}</li>)}
+                </ul>
+              </div>
+              <div data-testid="examiner-owner-summary-next">
+                <div className="text-xs font-medium text-ink-3">{t('pages.examiner.ownerSummary.next')}</div>
+                <p className="mt-1 text-xs text-muted-foreground">{nextStep}</p>
+              </div>
+          </div>
+
+          {/* Phase E3: which execution mode produced this report, and what each
+              mode can / cannot support. */}
+          <div className="mb-4 grid gap-2 rounded-lg border bg-card p-4 text-xs" data-testid="examiner-execution-mode" data-mode={executionMode ?? 'unknown'}>
+            <div className="font-medium text-ink-3">{t('pages.examiner.executionMode.title')}</div>
+            <div className="font-medium text-ink" data-testid="examiner-execution-mode-current">
+              {t('pages.examiner.executionMode.current', { mode: modeLabel })}
+            </div>
+            <p className="text-muted-foreground">{t(`pages.examiner.executionMode.${modeNoteKey}`)}</p>
+            <div className="grid gap-0.5 text-muted-foreground">
+              <span data-testid="examiner-execution-mode-offline">
+                {t('pages.examiner.executionMode.offlineLine', { state: offlineRan ? t('pages.examiner.executionMode.ran') : t('pages.examiner.executionMode.notRun') })}
+              </span>
+              <span data-testid="examiner-execution-mode-dryrun">
+                {t('pages.examiner.executionMode.dryRunLine', { count: dryRunCount })}
+              </span>
+              <span data-testid="examiner-execution-mode-f2">
+                {t('pages.examiner.executionMode.f2Line', { count: realRunCount })}
+              </span>
+            </div>
+          </div>
+
+          {/* Phase E1: scope and limitations collected in ONE place. */}
+          <div className="mb-4 grid gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-400" data-testid="examiner-report-scope-limits">
+            <div className="font-medium">{t('pages.examiner.report.limitationsSection')}</div>
+            <p data-testid="examiner-report-offline-note">{t('pages.examiner.report.offlineNote')}</p>
+            {Array.isArray(report.report.limitations) && report.report.limitations.length > 0 && (
+              <div data-testid="examiner-report-limitations">
+                {report.report.limitations.map((limitation) => (
+                  <div key={limitation}>· {limitation}</div>
+                ))}
+              </div>
+            )}
+            {examiner === null && <p>{t('pages.examiner.report.noExaminerBlock')}</p>}
+          </div>
+
+          <SectionTitle>{t('pages.examiner.report.technicalTitle')}</SectionTitle>
           <div className="grid gap-3 rounded-lg border bg-card p-4 text-sm" data-testid="examiner-report">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs">{report.report.status}</span>
@@ -150,19 +271,8 @@ export function ExaminerReportPage(): React.ReactElement {
                     CONTEXT_PRESENT+ {examiner.treatmentFidelity.contextPresent}/{examiner.treatmentFidelity.plannedTreatmentUnits} · RUNTIME_LOADED {examiner.treatmentFidelity.runtimeLoaded} · {t('pages.examiner.report.contamination')} {examiner.treatmentFidelity.controlContamination.units} · {t('pages.examiner.report.evictions')} {examiner.treatmentFidelity.capacityEvictions.units}
                   </div>
                 </div>
-                {Array.isArray(report.report.limitations) && report.report.limitations.length > 0 && (
-                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400" data-testid="examiner-report-limitations">
-                    <div className="font-medium">{t('pages.examiner.report.limitations')}</div>
-                    {report.report.limitations.map((limitation) => (
-                      <div key={limitation}>· {limitation}</div>
-                    ))}
-                  </div>
-                )}
               </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t('pages.examiner.report.noExaminerBlock')}</p>
-            )}
-            <p className="text-xs text-muted-foreground" data-testid="examiner-report-offline-note">{t('pages.examiner.report.offlineNote')}</p>
+            ) : null}
           </div>
 
           {/* Owner Decision handoff — existing governance, no new decision system */}
