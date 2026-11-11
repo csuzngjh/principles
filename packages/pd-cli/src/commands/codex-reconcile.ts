@@ -39,6 +39,13 @@ export interface CodexReconcileReport {
   degradations: string[];
 }
 
+/**
+ * `pd codex-reconcile` entry point: repair Codex governance task/link state.
+ *
+ * Resolves the workspace and consent config first; an invalid config degrades
+ * with a structured reason/nextAction and performs no mutation (cli-5). Emits
+ * exactly one JSON object under `--json` (cli-1).
+ */
 export async function handleCodexReconcile(options: CodexReconcileOptions): Promise<void> {
   const generatedAt = new Date().toISOString();
   const workspace = resolveWorkspaceDir(options.workspace);

@@ -219,6 +219,14 @@ export function normalizeWorkbuddyToolResponse(toolResponse: unknown, eventForDi
   return { result: toolResponse, error: explicitError };
 }
 
+/**
+ * Decode one raw WorkBuddy stdin payload into the host-neutral HostEvent.
+ *
+ * Validates the event name against the frozen capability matrix, requires the
+ * fields that event really carries (Stop: transcript path variants), and
+ * throws {@link WorkBuddyDecoderError} with a reason + nextAction on any
+ * contract violation. Absent optional identity is never fabricated (rc-6).
+ */
 export function decodeWorkbuddyInput(raw: unknown): HostEvent {
   if (!isRecord(raw)) throw new WorkBuddyDecoderError('stdin payload is not a JSON object', 'Run this executable only as a WorkBuddy command hook.');
   const eventName = requiredString(raw, 'hook_event_name');

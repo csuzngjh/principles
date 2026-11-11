@@ -50,6 +50,11 @@ export interface WorkbuddyCatchUpResult {
   readonly warnings: readonly string[];
 }
 
+/**
+ * Find the ONE transcript file whose name equals an already checkpointed
+ * session identity inside the projects root. Returns null for a non-contract
+ * identity, an unreadable root, or zero/multiple matches — never a guess.
+ */
 function locateCheckpointTranscript(projectsRoot: string, rolloutIdentity: string): string | null {
   if (!SESSION_ID_PATTERN.test(rolloutIdentity)) return null;
   let entries: fs.Dirent[];
@@ -72,6 +77,14 @@ function locateCheckpointTranscript(projectsRoot: string, rolloutIdentity: strin
   return matches.length === 1 ? (matches[0] ?? null) : null;
 }
 
+/**
+ * Re-enter the gated ingestion pipeline for every durable WorkBuddy
+ * checkpoint, at most `maxRollouts` sessions per cycle.
+ *
+ * Flag-off and unreadable checkpoints return before any transcript scan.
+ * Per-session locate/validate/ingest failures become bounded warnings and the
+ * cycle reports `degraded`; a revoked consent is an intentional skip.
+ */
 export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): WorkbuddyCatchUpResult {
   // Flag gate FIRST — before checkpoint listing or any filesystem scan.
   if (!options.ingestionEnabled) {

@@ -37,6 +37,7 @@ const HOST_CONTEXT = [
   '<system-reminder data-role="additional-data"><current_time>2026-11-11</current_time></system-reminder>',
 ].join('\n');
 
+/** Runtime-contract guard for parsed fixture JSON (rc-1). */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -53,6 +54,10 @@ interface Fixture {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Build one REAL on-disk fixture: WorkBuddy home + transcript, PD workspace
+ * config, optional consent ledger and a Stop payload pointing at all three.
+ */
 function makeFixture(options: FixtureOptions): Fixture {
   const home = makeHome();
   const workspaceDir = makeGovernance(home, { workbuddyFlag: true });
@@ -100,6 +105,7 @@ function makeFixture(options: FixtureOptions): Fixture {
   return { home, workspaceDir, transcriptPath, payload };
 }
 
+/** List the rollout's persisted observations, failing the test if the store degrades. */
 function rowsOf(workspaceDir: string) {
   const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: SESSION_ID });
   expect(listed.ok).toBe(true);

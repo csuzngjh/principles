@@ -106,6 +106,7 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   if (report.mode === 'degraded') process.exitCode = 1;
 }
 
+/** Print one worker-cycle result: exactly one JSON object under `--json`, else a human summary. */
 function printCycleReport(result: WorkbuddyWorkerCycleResult, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(result));

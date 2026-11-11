@@ -45,10 +45,12 @@ export interface WorkbuddyTranscriptSourceContext {
   readonly home?: string | undefined;
 }
 
+/** Keep a hint only when it carries content (InstructionsLoaded sends `""`, forensics §6.2). */
 function nonEmptyHint(value: string | undefined): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/** True only for an existing regular file; any stat failure is "absent", never a throw. */
 function existsFile(target: string): boolean {
   try {
     return fs.statSync(target).isFile();
@@ -57,10 +59,21 @@ function existsFile(target: string): boolean {
   }
 }
 
+/**
+ * Build the WorkBuddy {@link TranscriptSourceAdapter} for the host-neutral
+ * conversation-ingestion seam. Locating is deterministic (hint first, then the
+ * encoded-cwd derivation); decoding is the flat-record projection below.
+ */
 export function createWorkbuddyTranscriptSource(context: WorkbuddyTranscriptSourceContext): TranscriptSourceAdapter {
   return {
     hostKind: 'workbuddy',
 
+    /**
+     * Resolve the session transcript, in priority order: a non-empty hook
+     * hint (validated AND identity-bound to this hook's session), then the
+     * deterministic `<projects>/<encodeCwd(cwd)>/<sessionId>.jsonl` path.
+     * Never scans directories; every refusal carries a reason + nextAction.
+     */
     locate(session: SessionRef, hints: HookHints, env: { home?: string }): TranscriptLocator {
       const home = env.home ?? context.home ?? os.homedir();
       const projectsRoot = workbuddyProjectsRoot(home);
@@ -108,6 +121,11 @@ export function createWorkbuddyTranscriptSource(context: WorkbuddyTranscriptSour
       return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
     },
 
+    /**
+     * Project one byte window into observations. No host contract guard
+     * (records are tolerated, not version-pinned), ordinals are seeded from
+     * the checkpoint, and `compactionTimestamp` is ALWAYS null (§5.4).
+     */
     decodeWindow(
       locator: TranscriptLocator & { status: 'ok' },
       window: TranscriptWindow,

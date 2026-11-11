@@ -98,21 +98,18 @@ const FEATURES_LINE = /^features:\s*(?:#.*)?$/;
 const KEY_LINE = /^ {2}workbuddy_conversation_ingestion:\s*(?:#.*)?$/;
 const ENABLED_LINE = /^ {4}enabled:\s*(?:true|false)\s*(?:#.*)?$/;
 
+/** Drop an inline `#` comment and surrounding whitespace from one YAML line. */
 function stripComment(line: string): string {
   const hash = line.indexOf('#');
   return (hash === -1 ? line : line.slice(0, hash)).trim();
 }
 
+/** Runtime-contract guard (rc-1): a non-null, non-array object is the only trusted shape. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Line-targeted, atomic, round-trip-verified edit of
- * `features.workbuddy_conversation_ingestion.enabled`. Same shape as the
- * Codex setup's config edit (kept separate so the frozen Codex consent flow
- * is untouched); comments and every other key are preserved.
- */
+/** Options for {@link setWorkbuddyIngestionFlag}. */
 export interface SetWorkbuddyIngestionFlagOptions {
   /**
    * Exact bytes captured BEFORE this command's first mutation. Used when the
@@ -123,6 +120,12 @@ export interface SetWorkbuddyIngestionFlagOptions {
   restoreBytes?: string;
 }
 
+/**
+ * Line-targeted, atomic, round-trip-verified edit of
+ * `features.workbuddy_conversation_ingestion.enabled`. Same shape as the
+ * Codex setup's config edit (kept separate so the frozen Codex consent flow
+ * is untouched); comments and every other key are preserved.
+ */
 export function setWorkbuddyIngestionFlag(workspaceDir: string, enabled: boolean, options: SetWorkbuddyIngestionFlagOptions = {}): FlagWriteResult {
   const configPath = getPdConfigPath(workspaceDir);
   let raw: string;
@@ -142,7 +145,7 @@ export function setWorkbuddyIngestionFlag(workspaceDir: string, enabled: boolean
    * Every mutation — forward write AND restore — goes through tmp+rename.
    * An in-place `writeFileSync(configPath, ...)` can leave a truncated
    * config.yaml if the process dies mid-write, which is exactly the state the
-   * restore path exists to prevent.
+   * restore path exists to prevent. Returns the failure message, or null.
    */
   const atomicWrite = (content: string): string | null => {
     tmpSequence += 1;
@@ -158,8 +161,11 @@ export function setWorkbuddyIngestionFlag(workspaceDir: string, enabled: boolean
     }
   };
 
-  // Shared commit: atomic write, production-loader round-trip verification and
-  // an atomic restore of the pre-mutation bytes on any mismatch.
+  /**
+   * Shared commit: atomic write, production-loader round-trip verification and
+   * an atomic restore of the pre-mutation bytes on any mismatch, so a failed
+   * run leaves the file as the Owner last saw it.
+   */
   const commit = (nextContent: string): FlagWriteResult => {
     const writeFailure = atomicWrite(nextContent);
     if (writeFailure !== null) {
@@ -253,9 +259,17 @@ function consentInput(decision: 'granted' | 'revoked', evidenceRef: string) {
   };
 }
 
+/**
+ * `pd workbuddy setup` entry point: read the current consent/flag state, then
+ * grant or revoke WorkBuddy ingestion and report what changed.
+ *
+ * Emits exactly one machine-readable JSON object under `--json` (cli-1) and
+ * sets exit code 1 only for a degraded outcome.
+ */
 export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Promise<void> {
   const generatedAt = new Date().toISOString();
   const workspace = resolveWorkspaceDir(options.workspace);
+  /** Print the final report (JSON or human) and set the process exit code. */
   const finish = (report: WorkbuddySetupReport): void => {
     if (options.json === true) {
       console.log(JSON.stringify(report));

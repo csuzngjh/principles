@@ -62,14 +62,17 @@ const MAX_PARENT_CHAIN_HOPS = 8;
 const USER_QUERY_BLOCK = /<user_query>([\s\S]*?)<\/user_query>/g;
 const SYSTEM_REMINDER_BLOCK = /<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/g;
 
+/** Runtime-contract guard (rc-1): a non-null, non-array object is the only trusted record shape. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Read an OWN property only (rc-5): inherited names must never look like record fields. */
 function own(value: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(value, key) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
 }
 
+/** Accept a string only when it carries content; empty strings are treated as absent. */
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -106,6 +109,12 @@ interface DecodeContext {
   warningCounts: Map<string, number>;
 }
 
+/**
+ * Count one occurrence of an aggregated warning token, bounded to
+ * MAX_WARNING_TOKENS distinct tokens so a hostile transcript cannot inflate
+ * diagnostics without bound. Overflow tokens are dropped — the cap itself is
+ * visible through the tokens already recorded.
+ */
 function warnAggregated(context: DecodeContext, token: string): void {
   if (context.warningCounts.size >= MAX_WARNING_TOKENS && !context.warningCounts.has(token)) return;
   context.warningCounts.set(token, (context.warningCounts.get(token) ?? 0) + 1);
@@ -163,17 +172,23 @@ function projectUserText(context: DecodeContext, text: string | null): string | 
   return null;
 }
 
+/** Convert an epoch-millisecond host stamp to ISO, falling back when absent or invalid. */
 function epochMsToIso(value: unknown, fallbackIso: string): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return fallbackIso;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? fallbackIso : date.toISOString();
 }
 
+/** Extract the record's `providerData` object, or null when absent/malformed. */
 function providerDataOf(record: Record<string, unknown>): Record<string, unknown> | null {
   const providerData = own(record, 'providerData');
   return isRecord(providerData) ? providerData : null;
 }
 
+/**
+ * Resolve the host turn container: provider messageId, then record id, then
+ * the session identity (always non-empty, so the observation stays keyable).
+ */
 function hostTurnIdOf(record: Record<string, unknown>, id: string | null, sessionIdentity: string): string {
   const providerData = providerDataOf(record);
   const messageId = providerData !== null ? nonEmptyString(own(providerData, 'messageId')) : null;
@@ -219,6 +234,7 @@ function resolveAssistantAncestor(context: DecodeContext, parentId: unknown): st
   return null;
 }
 
+/** Remember id → {parentId, role} for in-window reasoning attribution; id-less records are not indexable. */
 function noteRecordIdentity(context: DecodeContext, record: Record<string, unknown>): void {
   const id = nonEmptyString(own(record, 'id'));
   if (id === null) return;
@@ -229,6 +245,7 @@ function noteRecordIdentity(context: DecodeContext, record: Record<string, unkno
   });
 }
 
+/** Flag (aggregated) a record whose sessionId contradicts the locator's durable identity. */
 function noteSessionIdMismatch(context: DecodeContext, record: Record<string, unknown>): void {
   const recordSessionId = nonEmptyString(own(record, 'sessionId'));
   if (recordSessionId !== null && recordSessionId !== context.sessionIdentity) {
@@ -236,6 +253,14 @@ function noteSessionIdMismatch(context: DecodeContext, record: Record<string, un
   }
 }
 
+/**
+ * Project one validated record into governance observations (the type switch).
+ *
+ * Every branch either produces observations or records an explicit aggregated
+ * warning: known skips, compaction markers, unpaired results and unknown types
+ * all stay observable (rc-9). Keys are always built from the durable session
+ * identity, never from a record-supplied sessionId.
+ */
 function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
   const raw = record.record;
   const { type } = record;
@@ -425,6 +450,7 @@ type DecodedLine =
   | { ok: true; record: Record<string, unknown>; type: string; id: string | null; timestamp: unknown }
   | { ok: false };
 
+/** Parse one newline-delimited line into the flat envelope contract, or reject it as malformed. */
 function decodeLine(lineBytes: Buffer): DecodedLine {
   let parsed: unknown;
   try {
@@ -467,6 +493,15 @@ export interface DecodeWorkbuddyWindowInput {
   readonly nowIso: string;
 }
 
+/**
+ * Decode one byte window of a WorkBuddy transcript into governance
+ * observations plus a byte-exact resume cursor.
+ *
+ * Newline-terminated lines advance the ordinal/offset; an incomplete EOF tail
+ * holds the checkpoint (transient append boundary); a malformed terminated
+ * line stops BEFORE itself; unknown types advance with a warning. The batch
+ * cap applies to both terminated lines and the EOF tail.
+ */
 export function decodeWorkbuddyTranscriptWindow(input: DecodeWorkbuddyWindowInput): DecodedWorkbuddyDelta {
   const context: DecodeContext = {
     sessionIdentity: input.sessionIdentity,

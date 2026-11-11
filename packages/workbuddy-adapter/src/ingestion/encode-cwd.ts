@@ -24,6 +24,11 @@
  */
 const SEPARATOR_RUN = /[\\/:]+/g;
 
+/**
+ * Encode a host cwd into the single project-directory segment WorkBuddy uses:
+ * lowercase the drive letter, collapse each run of `:`/`\`/`/` into one `-`,
+ * and keep every other character byte-for-byte (fixtures in encode-cwd.test.ts).
+ */
 export function encodeWorkbuddyCwd(cwd: string): string {
   if (cwd.length === 0) return '';
   // Drive-letter prefix: lowercase it before separator collapsing so `D:\x`

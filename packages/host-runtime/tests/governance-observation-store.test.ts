@@ -79,6 +79,11 @@ describe('governance observation store — schema and idempotency', () => {
   it('reports journal_mode_switch_deferred instead of failing when the WAL switch loses a concurrent race (rc-9)', () => {
     const result = ingest({
       observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: 'hello' })],
+      /**
+       * Open the real SQLite file but make `journal_mode = WAL` fail, which is
+       * how the losing opener of two concurrent hooks behaves (SQLITE_BUSY is
+       * not covered by busy_timeout).
+       */
       databaseFactory: (databasePath: string) => {
         const opened = new Database(databasePath);
         const originalPragma = opened.pragma.bind(opened);

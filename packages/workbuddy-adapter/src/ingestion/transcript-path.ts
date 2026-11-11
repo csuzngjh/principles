@@ -59,6 +59,14 @@ export function workbuddyProjectsRoot(home: string): string {
   return path.join(home, '.workbuddy', 'projects');
 }
 
+/**
+ * Authorize one transcript path against the WorkBuddy projects root.
+ *
+ * Rejects non-absolute input, `..` segments, non-`<uuid>.jsonl` names, paths
+ * whose native canonical form escapes the root, non-regular files and
+ * subagent-nested files. On success returns the native canonical path, the
+ * parsed session identity and the pre-open file identity.
+ */
 export function validateWorkbuddyTranscriptPath(transcriptPath: string, projectsRoot: string): WorkbuddyTranscriptPathValidation {
   if (!path.isAbsolute(transcriptPath) || hasParentTraversal(transcriptPath)) {
     return { ok: false, reason: 'transcript_path_invalid', nextAction: 'WorkBuddy must supply an absolute transcript path without traversal segments.' };
@@ -103,6 +111,7 @@ export function validateWorkbuddyTranscriptPath(transcriptPath: string, projects
   };
 }
 
+/** Encode a cwd into ONE safe path segment; null when the result is empty or NUL-bearing. */
 function encodeCwdSafe(cwd: string): string | null {
   const encoded = encodeWorkbuddyCwd(cwd);
   // An encoded cwd becomes ONE path segment; separators were collapsed, so

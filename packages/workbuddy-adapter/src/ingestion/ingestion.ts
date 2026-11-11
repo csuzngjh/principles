@@ -46,14 +46,17 @@ export type WorkbuddyIngestionOutcome =
   | { status: 'skipped'; reason: string; nextAction: string }
   | { status: 'degraded'; reason: string; nextAction: string; warnings: readonly string[] };
 
+/** Runtime-contract guard (rc-1): a non-null, non-array object is the only trusted payload shape. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Read an OWN property only (rc-5): inherited names must never look like payload fields. */
 function own(value: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(value, key) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
 }
 
+/** Accept a non-blank string only; empty/whitespace values are treated as absent. */
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
@@ -77,6 +80,14 @@ export function workbuddyIngestionHints(rawPayload: unknown): HookHints {
   };
 }
 
+/**
+ * Run the gated WorkBuddy ingestion pipeline for one hook invocation.
+ *
+ * Order is the privacy invariant: resolved flag → real consent ledger →
+ * transcript read. A flag-off or non-granted state returns before the port is
+ * ever touched, and a Stop re-entry is skipped to avoid a recursive read loop.
+ * Unexpected failures degrade with a bounded reason instead of throwing.
+ */
 export function ingestWorkbuddyConversation(options: WorkbuddyIngestionOptions): WorkbuddyIngestionOutcome {
   // 1. Flag gate FIRST — before the consent read and before any port call.
   // A flag-off host behaves exactly as before this capability existed.

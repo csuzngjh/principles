@@ -213,6 +213,14 @@ function channelFailure(channelEventName: string | undefined, reason: string, ne
   return neutralWithDiagnostics([line]);
 }
 
+/**
+ * Handle one WorkBuddy hook invocation end-to-end: parse stdin, decode the
+ * host event, run the PD host adapter, and shape the channel-specific result.
+ *
+ * Pre-decode failures route through {@link channelFailure} so a blocking
+ * channel exits 2 while UserPromptSubmit never clears the user's prompt.
+ * A rejected Owner statement never grants authority or bypasses decoding.
+ */
 export async function processWorkbuddyHookInvocation(rawStdin: string, channelEventName: string | undefined, _env: EnvMap = process.env): Promise<WorkBuddyPdHookResult> {
   let parsed: unknown;
   try { parsed = JSON.parse(rawStdin); }

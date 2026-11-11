@@ -56,6 +56,7 @@ function renderConfig(ws: string, template: string): string {
   return template.replaceAll('%WS%', ws.replace(/\\/g, '/'));
 }
 
+/** Create a throwaway workspace, optionally with a real .pd/config.yaml built from the template. */
 function makeWorkspace(configYaml: string | null): string {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-wb-setup-'));
   if (configYaml !== null) {
@@ -80,6 +81,7 @@ function readConfig(ws: string): string {
   return fs.readFileSync(path.join(ws, '.pd', 'config.yaml'), 'utf8');
 }
 
+/** Read the WorkBuddy entry from the real consent ledger, or null when the ledger/host is absent. */
 function readConsent(ws: string): Record<string, unknown> | null {
   const p = path.join(ws, '.state', 'conversation-ingestion-consent.json');
   if (!fs.existsSync(p)) return null;
@@ -87,12 +89,14 @@ function readConsent(ws: string): Record<string, unknown> | null {
   return ledger.hosts?.workbuddy ?? null;
 }
 
+/** List leftover `.tmp-wbsetup-*` files, proving an atomic write cleaned up after itself. */
 function tempArtifacts(ws: string): string[] {
   const dir = path.join(ws, '.pd');
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter((name) => name.includes('.tmp-wbsetup-'));
 }
 
+/** Invoke the real command handler and split captured stdout into JSON objects and human lines. */
 async function run(options: Record<string, unknown>): Promise<{ reports: string[]; json: unknown[] }> {
   const { handleWorkbuddySetup } = await import('../../src/commands/workbuddy-setup.js');
   await handleWorkbuddySetup(options as never);

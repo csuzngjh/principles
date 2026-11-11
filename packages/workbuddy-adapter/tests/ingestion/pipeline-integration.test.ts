@@ -85,6 +85,7 @@ function run(fixture: Fixture, overrides: Partial<Parameters<typeof runConversat
   });
 }
 
+/** Read the persisted checkpoint, mapping a degradation to null so callers can assert absence. */
 function checkpointOf(fixture: Fixture): GovernanceCheckpointRecord | null {
   const read = readGovernanceCheckpoint({ workspaceDir: fixture.workspaceDir, hostKind: 'workbuddy', rolloutIdentity: SESSION_ID });
   return read !== null && 'byteOffset' in read ? read : null;

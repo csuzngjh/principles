@@ -51,7 +51,13 @@ describe('locate (deterministic, never scans)', () => {
     const located = source().locate({ sessionId: SESSION_ID, cwd: 'D:\\Other' }, { transcriptPath: file }, { home });
     expect(located).toMatchObject({ status: 'ok', sessionIdentity: SESSION_ID });
     if (located.status === 'ok') {
-      expect(located.filePath).toBe(path.resolve(file));
+      // The locator's contract is the NATIVE canonical path (transcript-path.ts
+      // canonicalizePath), not path.resolve: on Windows the OS temp root is
+      // often the 8.3 short form (C:\Users\ADMINI~1\...) and path.resolve keeps
+      // it, while realpathSync.native expands it to the long form. Asserting
+      // path.resolve here only passed because the vitest temp harness redirects
+      // TMPDIR to a short-name-free directory.
+      expect(located.filePath).toBe(fs.realpathSync.native(file));
       expect(located.expectedIdentity.size).toBe(fs.statSync(file).size);
     }
   });
@@ -156,7 +162,9 @@ describe('locate (deterministic, never scans)', () => {
     const located = source().locate({ sessionId: SESSION_ID, cwd: '/home/user/proj' }, {}, { home });
     expect(located).toMatchObject({ status: 'ok', sessionIdentity: SESSION_ID });
     if (located.status === 'ok') {
-      expect(path.relative(path.resolve(root), located.filePath).startsWith('..')).toBe(false);
+      // Compare native-to-native: the locator canonicalizes both the root and
+      // the file, so path.resolve(root) would mismatch under an 8.3 temp path.
+      expect(path.relative(fs.realpathSync.native(root), located.filePath).startsWith('..')).toBe(false);
     }
   });
 
@@ -194,6 +202,7 @@ describe('decodeWindow assembly', () => {
     '',
   ].join('\n');
 
+  /** Locate the deterministic session file, throwing with the degradation reason on refusal. */
   function locatedOk(home: string): Extract<ReturnType<ReturnType<typeof source>['locate']>, { status: 'ok' }> {
     makeProjectsRoot(home);
     writeSessionFile(home, BODY);

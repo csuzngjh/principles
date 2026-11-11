@@ -378,6 +378,13 @@ interface OpenStoreResult {
 
 type Degradation = { ok: false; reason: string; nextAction: string };
 
+/**
+ * Open the workspace trajectory database for governance observations.
+ *
+ * Returns a {@link Degradation} when the database file is absent or cannot be
+ * opened. Non-fatal degradations (journal_mode switch losing a race) are
+ * reported through `warnings` instead of failing the write (rc-9).
+ */
 function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): OpenStoreResult | Degradation {
   const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
   if (!fs.existsSync(dbPath)) {
@@ -408,7 +415,9 @@ function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): 
       warnings.push('journal_mode_switch_deferred');
     }
     ensureGovernanceObservationSchema(db);
-    return { db, close: () => { try { db.close(); } catch { /* write result already determined */ } }, warnings };
+    /** Close the connection; a close failure must not mask the already-determined write result. */
+    const close = (): void => { try { db.close(); } catch { /* write result already determined */ } };
+    return { db, close, warnings };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `trajectory_database_unavailable:${detail}`, nextAction: 'inspect or repair the selected PD trajectory database' };
@@ -441,6 +450,16 @@ interface ApplyObservationArgs {
   workspaceDir: string;
 }
 
+/**
+ * Apply one observation against its logical key and report what happened.
+ *
+ * - `inserted`: new key (a duplicate physical record is reported separately);
+ * - `enriched`: the existing row gained identity/ordering/completion facts;
+ * - `duplicate`: replay produced nothing new;
+ * - `conflict`: a user utterance disagrees for the same key — keep the first
+ *   committed content, mark partial, and report where the checkpoint must stop.
+ * Never overwrites committed content silently (source precedence, SPEC §10).
+ */
 function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObservationArgs): ObservationOutcome {
   const existing = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(input.logicalObservationKey);
   if (!isRecord(existing)) {
@@ -482,6 +501,7 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
 
   const updates: string[] = [];
   const values: unknown[] = [];
+  /** Queue a column only when the stored value is still absent (never overwrite committed content). */
   const fill = (column: string, value: unknown) => {
     const current = rowField(existing, column);
     if ((current === null || current === undefined) && value !== null && value !== undefined) {
@@ -645,6 +665,15 @@ export interface IngestGovernanceObservationsInput {
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
+/**
+ * Persist one decoded delta (observations + rollout lineage + checkpoint) in a
+ * single IMMEDIATE transaction.
+ *
+ * The up-front write lock is required: with a deferred BEGIN two concurrent
+ * hooks both read and then race the upgrade, and SQLite fails that upgrade
+ * with SQLITE_BUSY. A failure rolls everything back (checkpoint not advanced)
+ * and returns a structured reason/nextAction; warnings stay observable.
+ */
 export function ingestGovernanceObservations(input: IngestGovernanceObservationsInput): IngestGovernanceObservationsResult {
   const opened = openStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) return { ok: false, reason: opened.reason, nextAction: opened.nextAction, inserted: 0, enriched: 0, duplicates: 0, checkpointCommitted: false, warnings: [] };
