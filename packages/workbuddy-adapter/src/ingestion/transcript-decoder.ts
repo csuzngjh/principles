@@ -109,8 +109,6 @@ interface DecodeContext {
    * Keeping only the first call leaves call2 permanently unpaired (P2 review).
    */
   pendingToolCalls: Map<string, number[]>;
-  /** Every callId seen in THIS window — duplicate ids keep record-scoped keys. */
-  seenCallIds: Set<string>;
   warningCounts: Map<string, number>;
 }
 
@@ -168,10 +166,19 @@ function projectUserText(context: DecodeContext, text: string | null): string | 
   // range and promotes host instructions to Owner text. Validate the ENVELOPE
   // (the text with accepted query blocks blanked out), so an Owner who pasted
   // a literal `<system-reminder>` inside their query keeps it verbatim.
-  const blanked = [...queryMatches].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).reduce((acc, match) => {
+  // Single pass over the original offsets (P2 review): rebuilding the whole
+  // payload per query block is O(blocks × length) and can time out the
+  // synchronous Stop hook on a large transcript.
+  const sortedQueries = [...queryMatches].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const blankedParts: string[] = [];
+  let cursor = 0;
+  for (const match of sortedQueries) {
     const start = match.index ?? 0;
-    return acc.slice(0, start) + ' '.repeat(match[0].length) + acc.slice(start + match[0].length);
-  }, text);
+    blankedParts.push(text.slice(cursor, start), ' '.repeat(match[0].length));
+    cursor = start + match[0].length;
+  }
+  blankedParts.push(text.slice(cursor));
+  const blanked = blankedParts.join('');
   const envelopeRanges = [...blanked.matchAll(SYSTEM_REMINDER_BLOCK)].map((match) => {
     const start = match.index ?? 0;
     return [start, start + match[0].length] as const;
@@ -389,21 +396,17 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
     const providerData = providerDataOf(raw);
     const callId = nonEmptyString(own(raw, 'callId'));
     if (callId === null) warnAggregated(context, 'wb_missing_call_id');
-    // Cross-window pairing (P1 review): the call and its result can land in
-    // two byte-bounded windows, so both sides must derive the SAME logical key.
-    // callId is the host's pairing identity (forensics: 99 calls / 98 matched
-    // results), and a later window's result therefore enriches this committed
-    // partial row instead of creating a second permanent partial. Duplicate
-    // callIds INSIDE one window (the contract notes the host does not dedupe)
-    // keep a record-scoped key so both executions stay visible.
-    const duplicateInWindow = callId !== null && context.seenCallIds.has(callId);
-    if (callId !== null) context.seenCallIds.add(callId);
+    // Execution identity is the transcript RECORD, never the window (P2
+    // review). `seenCallIds` was window-scoped, so two executions reusing one
+    // callId in different windows both derived `call:<callId>` and the second
+    // was absorbed into the first. The host does not dedupe callIds, so the
+    // record id is the only identity that is stable across windows AND unique
+    // per execution. The store reconnects a later window's result to the one
+    // unambiguous partial row via `tool_use_id`; results stay `callId`-tagged.
     const observation: GovernanceObservationInput = {
       ...observationBase(context, record),
       kind: 'tool_call',
-      logicalObservationKey: callId !== null && !duplicateInWindow
-        ? `wb|${context.sessionIdentity}|call:${callId}`
-        : `wb|${context.sessionIdentity}|${record.id}`,
+      logicalObservationKey: `wb|${context.sessionIdentity}|${record.id}`,
       transcriptRecordKey: `wb|${context.sessionIdentity}|${record.recordByteStart}`,
       recordOrdinal: record.ordinal,
       recordByteStart: record.recordByteStart,
@@ -460,17 +463,15 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
       return;
     }
     // Out-of-window result: the call record lives in an already-committed
-    // earlier batch (or is genuinely missing). The logical key is the SAME
-    // callId-derived key the call used, so the store upgrades that partial row
-    // to complete instead of creating a second permanent partial; the warning
-    // stays because the pairing happened outside this decode window.
+    // earlier batch (or is genuinely missing). Key it by ITS OWN record id so
+    // it can never collide with another execution's call row; the store then
+    // reconnects it to the single unambiguous partial row via `tool_use_id`.
+    // The warning stays because the pairing happened outside this window.
     warnAggregated(context, 'wb_unpaired_tool_result');
     context.observations.push({
       ...observationBase(context, record),
       kind: 'tool_call',
-      logicalObservationKey: callId !== null
-        ? `wb|${context.sessionIdentity}|call:${callId}`
-        : `wb|${context.sessionIdentity}|${record.id}`,
+      logicalObservationKey: `wb|${context.sessionIdentity}|${record.id}`,
       transcriptRecordKey: `wb|${context.sessionIdentity}|${record.recordByteStart}`,
       recordOrdinal: record.ordinal,
       recordByteStart: record.recordByteStart,
@@ -555,7 +556,6 @@ export function decodeWorkbuddyTranscriptWindow(input: DecodeWorkbuddyWindowInpu
     observations: [],
     seenRecords: new Map(),
     pendingToolCalls: new Map(),
-    seenCallIds: new Set(),
     warningCounts: new Map(),
   };
 

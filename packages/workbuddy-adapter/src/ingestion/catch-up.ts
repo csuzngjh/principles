@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { deferGovernanceCheckpoint, listGovernanceCheckpoints } from '@principles/host-runtime';
+import { deferGovernanceCheckpoint, listGovernanceCheckpoints, readConversationIngestionConsent } from '@principles/host-runtime';
 import { ingestWorkbuddyConversation } from './ingestion.js';
 import { validateWorkbuddyTranscriptPath, workbuddyProjectsRoot } from './transcript-path.js';
 
@@ -96,6 +96,25 @@ export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): Wor
     };
   }
 
+  // Consent gate BEFORE any transcript I/O (P2 review): a revoked or absent
+  // consent must not locate transcripts, stat them, or defer checkpoints. The
+  // flag alone is not authority to touch the host's files.
+  const consent = readConversationIngestionConsent(options.workspaceDir, 'workbuddy');
+  if (!consent.ok) {
+    return {
+      status: 'degraded', reason: `consent_unreadable:${consent.reason}`, nextAction: consent.nextAction,
+      examined: 0, ingested: 0, warnings: [],
+    };
+  }
+  const consentDecision = consent.record?.decision ?? 'not_present';
+  if (consentDecision !== 'granted') {
+    return {
+      status: 'skipped', reason: `consent_not_granted:${consentDecision}`,
+      nextAction: 'Record consent with `pd workbuddy setup --accept` to start transcript catch-up. Nothing was read.',
+      examined: 0, ingested: 0, warnings: [],
+    };
+  }
+
   const listed = listGovernanceCheckpoints({ workspaceDir: options.workspaceDir, hostKind: 'workbuddy' });
   if (!listed.ok) {
     return {
@@ -115,7 +134,10 @@ export function catchUpWorkbuddyIngestion(options: WorkbuddyCatchUpOptions): Wor
   // behind it. Byte offset/ordinal stay untouched, so the work is still
   // pending and retryable.
   const defer = (rolloutIdentity: string, reason: string): void => {
-    deferGovernanceCheckpoint({ workspaceDir: options.workspaceDir, hostKind: 'workbuddy', rolloutIdentity, reason, now: nowIso });
+    // A failed defer leaves the checkpoint at the head of the queue; report it
+    // instead of silently promising a retry-slot rotation (P2 review).
+    const deferred = deferGovernanceCheckpoint({ workspaceDir: options.workspaceDir, hostKind: 'workbuddy', rolloutIdentity, reason, now: nowIso });
+    if (!deferred.ok) warnings.push(`checkpoint_defer_failed:${rolloutIdentity}:${deferred.reason}`);
   };
   for (const checkpoint of checkpoints) {
     const located = locateCheckpointTranscript(projectsRoot, checkpoint.rolloutIdentity);

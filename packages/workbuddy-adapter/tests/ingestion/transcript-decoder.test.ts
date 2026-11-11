@@ -97,7 +97,9 @@ describe('variant baseline fixture (§8.1 census + session-meta)', () => {
     expect(tools.filter((o) => o.completeness === 'partial').map((o) => o.toolUseId).sort()).toEqual(
       ['chatcmpl-tool-0010', 'chatcmpl-tool-0009'].sort(),
     );
-    const orphan = tools.find((o) => o.logicalObservationKey === `wb|${SESSION}|call:chatcmpl-tool-9999`);
+    // Execution identity is the transcript record, not the callId: an
+    // out-of-window result carries its own record-scoped key (P2 review).
+    const orphan = tools.find((o) => o.toolUseId === 'chatcmpl-tool-9999');
     expect(orphan).toMatchObject({ toolUseId: 'chatcmpl-tool-9999', completeness: 'complete', toolFacts: { toolName: 'Grep', resultStatus: 'failed', output: 'synthetic orphan result' } });
   });
 
