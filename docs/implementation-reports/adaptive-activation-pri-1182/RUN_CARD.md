@@ -61,25 +61,25 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
 
 | 例 | 发送 | 本地裁决 | 发送→校验 | 进程→输出墙钟 | 正文 |
 | --- | --- | --- | --- | --- | --- |
-| append | 1 | `selected:selected:c3` | 2–3 ms | 1037–1457 ms | 已追加 DELIVERY |
-| abstain | 1 | `none_applicable:below_selection_threshold` | 2–3 ms | 1012–1489 ms | Native 一致 |
-| selected-but-does-not-fit | 1 | `selected:selected:c3` | 3 ms | 998–1714 ms | Native 一致 |
-| short-confirmation | 1 | `none_applicable:below_selection_threshold` | 3 ms | 1065–2564 ms | Native 一致 |
-| pure-ack | 0 | 未进入评估 | — | 1018–1359 ms | Native 一致 |
+| append | 1 | `selected:selected:c3` | 2 ms | 992 ms | 已追加 DELIVERY |
+| abstain | 1 | `none_applicable:below_selection_threshold` | 2 ms | 1007 ms | Native 一致 |
+| selected-but-does-not-fit | 1 | `selected:selected:c3` | 2 ms | 994 ms | Native 一致 |
+| short-confirmation | 1 | `none_applicable:below_selection_threshold` | 2 ms | 1036 ms | Native 一致 |
+| pure-ack | 0 | 未进入评估 | — | 1040 ms | Native 一致 |
 
-- **假端点请求数 = 4，真实请求数 = 0。**（两次重复预检结果一致，表中为区间）
-- 墙钟约 1.0–1.7 s，单次出现 2.56 s 的 I/O 抖动；其中 **hook 模块冷启动约 1.0 s**
-  （纯致谢例同样 1.0–1.4 s，且 Adaptive OFF 的 Native 路径同样存在），决策本身只用 2–3 ms；
-  整轮仍低于 5000 ms 宿主窗口，但**余量只有约 2.4–4.0 s**，这一项由真实请求继续观察。
+- **假端点请求数 = 4，真实请求数 = 0。**（本表为最新一轮；多轮预检墙钟在 965–2564 ms 之间波动）
+- 墙钟约 1.0 s，首轮曾出现 2.56 s 的 I/O 抖动；其中 **hook 模块冷启动约 1.0 s**
+  （纯致谢例同样 1.0 s 级，且 Adaptive OFF 的 Native 路径同样存在），决策本身只用 2 ms；
+  整轮仍低于 5000 ms 宿主窗口，但**余量只有约 4.0 s**，这一项由真实请求继续观察。
 - 两个假端点截止测试（同一声明入口、无测试专用时间参数）：
   - 及时返回完整评分 → 完成装配并补入；
   - 响应头及时、正文跨过 1000 ms → 底层收到取消，最终输出 Native。
   见 `packages/codex-adapter/tests/pd-hook-adaptive.test.ts`（`frozen 1 s envelope` 两条）。
 - 证据文件：[preflight-result.json](file:///D:/Code/_worktrees/principles/PRI-1182-adaptive-decision-endpoint/docs/implementation-reports/adaptive-activation-pri-1182/preflight-result.json)。
 
-预检快照绑定的版本：`codeHead=9eb5ba0c2158a7710ab13830b1ae05cdbf375108`（代码树 `6e692601…`），
-`tree=6e6926014f48e75407c2ff614f5dcad08eee464b`，清单 `sha256=6f0bf1ee…2931b9`，
-隔离配置 `sha256=1782e231…339413`。该快照之后的提交只涉及运行卡/变更集，**被执行代码未变**，
+预检快照绑定的版本：`codeHead=1fdd9404f25a273be42c892e77f32b57dc68132f`（代码树 `0a2aae6a…`），
+`tree=0a2aae6a473d287f5841ac4031a6bc261791c478`，清单 `sha256=6f0bf1ee…2931b9`，
+隔离配置 `sha256=1782e231…339413`。该快照之后的提交只涉及运行卡/证据，**被执行代码未变**，
 清单与隔离配置哈希复算后与上方一致；批准时仍以**最终 head/tree** 为准，
 由 `--approved` 在发请求前逐项校验，不一致即拒绝。
 
@@ -117,6 +117,15 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
   "codeHead": "<最终 head>",
   "treeHash": "<最终 tree>",
   "manifestSha256": "<cases.json sha256>",
+  "isolatedConfigSha256": "1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413",
+  "route": {
+    "endpoint": "https://openrouter.ai/api/alpha/decisions",
+    "model": "respan/span-01-lite:free",
+    "provider": "Respan",
+    "responseModels": ["respan/span-01-lite:free", "respan/span-01-lite-20260925"]
+  },
+  "envelopeTotalMs": 1000,
+  "criteriaVersion": "v1-20261111",
   "maxRequests": 4
 }
 ```
@@ -128,12 +137,20 @@ $env:OPENROUTER_API_KEY = "<key>"
 node scripts/dev/adaptive-activation/run-cases.mjs --approved <approval.json>
 ```
 
-3. 脚本在**发出任何请求之前**校验：到期时间、head、tree、清单哈希、请求上限、API key；
-   任一不符直接退出且不发请求。执行后写 `results.json`：逐例最终正文、有效评分、
-   本地裁决与理由、`model`/`provider` 观测值（缺失写 `absent`）、发送→校验耗时与整轮墙钟。
+3. 脚本在**发出任何请求之前**校验：到期时间、head、tree、清单哈希、隔离配置哈希、
+   端点/模型/provider/响应模型允许集合、时限、判据版本、请求上限、API key；
+   任一不符直接退出且不发请求。
+4. 通过后先以独占方式创建 `approval-claim.json`（`wx`）：**同一批件不可重跑**，
+   已有认领或已有 `results.json` 都会拒绝再发请求；认领失败即退出。
+5. 每例发送前先做预算预留（fail-closed）：整批达到 4 次后不再生成任何可能发送的子进程；
+   单例一旦超过 1 次立即中止，不再继续后续用例。
+6. 执行后写 `results.json`：批件与认领哈希、逐例最终正文、有效评分、本地裁决与理由、
+   `model`/`provider` 观测值（缺失写 `absent`）、该例实际执行的配置哈希、
+   发送→校验耗时与整轮墙钟。
 
 ## 8. 关闭与回滚
 
 - Adaptive 维持**默认关闭**；关掉 `host.codex.adaptive_activation` 即回到 Native，正文逐字节一致、零发送。
+- 真实请求只跑一次；批件过期即作废，需重新出卡。`approval-claim.json` 是单次批件的认领凭证，
+  出现即表示该批件已用；重新申请需新批件与新卡。
 - 本卡不改 Native 回退逻辑；失败、超时、身份不符一律 Native。
-- 真实请求只跑一次；批件过期即作废，需重新出卡。
