@@ -2367,6 +2367,12 @@ export interface EnsureGovernanceContinuationInput {
   readonly canonicalPainId: string;
   /** Current Owner consent for Codex conversation evidence. Required to prevent reconciliation from promoting old observations after opt-out. */
   readonly codexConversationIngestionEnabled: boolean;
+  /**
+   * Legacy alias from before the host-scoped rename. A runtime that requires
+   * only the new name would silently skip promotion when paired with an older
+   * caller (P2 review), so either `true` counts as consent.
+   */
+  readonly conversationIngestionEnabled?: boolean;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
@@ -2400,7 +2406,8 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
     // continuation cannot begin diagnosis before the eligible evidence window
     // has been promoted. A promotion failure is retained as a degradation,
     // but never prevents the task from being durably ensured.
-    const promoted = input.codexConversationIngestionEnabled
+    const codexConsent = input.codexConversationIngestionEnabled === true || input.conversationIngestionEnabled === true;
+    const promoted = codexConsent
       ? promoteAdmittedGovernanceEvidence({
         workspaceDir,
         rolloutIdentity,
@@ -2427,6 +2434,8 @@ export interface ReconcileGovernanceContinuationInput {
   readonly workspaceDir: string;
   /** Current Owner consent for CODEX conversation evidence; false means reconcile may ensure tasks/links but must not read or promote Codex session evidence. A WorkBuddy worker must pass false — its own flag is not consent for Codex evidence. */
   readonly codexConversationIngestionEnabled: boolean;
+  /** Legacy alias (pre-rename); either field being `true` means consent (P2 review). */
+  readonly conversationIngestionEnabled?: boolean;
   /** Bounded work per pass (default 50 admitted pains). */
   readonly limit?: number;
   readonly databaseFactory?: ObservationDatabaseFactory;
@@ -2460,6 +2469,9 @@ export interface ReconcileGovernanceContinuationResult {
  */
 export async function reconcileGovernanceContinuation(input: ReconcileGovernanceContinuationInput): Promise<ReconcileGovernanceContinuationResult> {
   const workspaceDir = path.resolve(input.workspaceDir);
+  // Accept the pre-rename field too: an older caller paired with this runtime
+  // must not silently lose Codex evidence promotion (P2 review).
+  const codexConsent = input.codexConversationIngestionEnabled === true || input.conversationIngestionEnabled === true;
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) {
     return { ok: false, reason: opened.reason, nextAction: opened.nextAction, tasksEnsured: 0, linksRepaired: 0, pendingTails: 0, completedTails: 0, staleTails: 0, degradations: [opened.reason] };
@@ -2499,7 +2511,7 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
     // not retry pending tails, so pending-tail markers do not block later
     // markers. Stale tails are NOT auto-recoverable (substrate refuses to
     // re-arm them): they are counted separately below and reported.
-    const promotionRecoveryClause = input.codexConversationIngestionEnabled
+    const promotionRecoveryClause = codexConsent
       ? `OR (a.host_kind = 'codex'
               AND NOT EXISTS (SELECT 1 FROM governance_observations o
                   WHERE o.promotion_ref = a.canonical_pain_id))`
@@ -2530,7 +2542,7 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
         }
         continue;
       }
-      const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId, codexConversationIngestionEnabled: input.codexConversationIngestionEnabled });
+      const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId, codexConversationIngestionEnabled: codexConsent });
       if (cont.ok) {
         // Only count REAL actions: a task actually created, a link actually
         // repaired (task existed but the marker link was missing). Healthy
@@ -2547,7 +2559,7 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
       }
     }
     // Also report stale tails scoped to governance admissions.
-    const stale = input.codexConversationIngestionEnabled
+    const stale = codexConsent
       ? db.prepare(`SELECT COUNT(*) AS n FROM governance_pending_promotion_tails t
           WHERE t.state = 'stale'
             AND EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = t.pain_ref)`).get()

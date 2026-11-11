@@ -499,6 +499,23 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     return { disposition: 'conflict', stopByteStart: input.recordByteStart };
   }
 
+  // Two DISTINCT executions reusing one callId in DIFFERENT decode windows
+  // share the `call:<callId>` logical key. Without this guard the second
+  // call's partial observation is silently absorbed into the first (fill and
+  // fact-merge never overwrite committed fields), so an execution disappears.
+  // A different transcript record is a lineage conflict: keep the first, mark
+  // it partial, and stop at the offending record (P2 review).
+  const existingRecordKey = rowField(existing, 'transcript_record_key');
+  if (input.kind === 'tool_call'
+    && input.completeness === 'partial'
+    && typeof existingRecordKey === 'string'
+    && existingRecordKey.length > 0
+    && input.transcriptRecordKey !== undefined
+    && existingRecordKey !== input.transcriptRecordKey) {
+    db.prepare("UPDATE governance_observations SET completeness = 'partial' WHERE id = ?").run(existingId);
+    return { disposition: 'conflict', stopByteStart: input.recordByteStart };
+  }
+
   const updates: string[] = [];
   const values: unknown[] = [];
   /** Queue a column only when the stored value is still absent (never overwrite committed content). */
@@ -529,9 +546,13 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     && rowField(existing, 'completeness') === 'partial';
   if (crossWindowToolCompletion) {
     const mergedFacts = mergeToolFactsJson(rowField(existing, 'sanitized_tool_facts_json'), incomingFacts);
-    if (mergedFacts !== null && mergedFacts !== rowField(existing, 'sanitized_tool_facts_json')) {
+    // A partial call committed WITHOUT toolFacts has no JSON to merge against;
+    // falling back to the incoming facts is what keeps a complete result from
+    // landing on a row that silently lost its tool facts (P2 review).
+    const nextFacts = mergedFacts ?? incomingFacts;
+    if (nextFacts !== null && nextFacts !== rowField(existing, 'sanitized_tool_facts_json')) {
       updates.push('sanitized_tool_facts_json = ?');
-      values.push(mergedFacts);
+      values.push(nextFacts);
     }
   } else {
     fill('sanitized_tool_facts_json', incomingFacts);
@@ -822,6 +843,46 @@ export function readGovernanceCheckpoint(args: ReadGovernanceCheckpointArgs): Go
       lastDegradationOrdinal: typeof rowField(row, 'last_degradation_ordinal') === 'number' ? (rowField(row, 'last_degradation_ordinal') as number) : null,
       updatedAt: String(rowField(row, 'updated_at')),
     };
+  } finally {
+    close();
+  }
+}
+
+export interface DeferGovernanceCheckpointArgs {
+  readonly workspaceDir: string;
+  readonly hostKind: GovernanceObservationHostKind;
+  readonly rolloutIdentity: string;
+  readonly reason: string;
+  readonly now: string;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+/**
+ * Move a checkpoint to the BACK of the oldest-first retry queue without
+ * touching its water mark (P2 review).
+ *
+ * `listGovernanceCheckpoints` returns the oldest-updated rows first and the
+ * catch-up worker processes a bounded prefix. A rollout whose transcript is
+ * missing/unreadable never advances its checkpoint, so it would occupy the
+ * prefix forever and starve every rollout behind it. Bumping ONLY
+ * `updated_at` + the degradation reason lets the failed session yield its slot
+ * on the next cycle while keeping its byte offset, ordinal and retryability
+ * exactly as they were.
+ */
+export function deferGovernanceCheckpoint(args: DeferGovernanceCheckpointArgs): { ok: true } | Degradation {
+  const { workspaceDir, hostKind, rolloutIdentity, reason, now, databaseFactory } = args;
+  const opened = openStore(workspaceDir, databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    db.prepare(`UPDATE governance_transcript_checkpoints
+        SET updated_at = ?, last_degradation_reason = ?
+        WHERE host_kind = ? AND rollout_identity = ?`)
+      .run(now, reason.slice(0, 200), hostKind, rolloutIdentity);
+    return { ok: true };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `governance_write_failed:${detail}`, nextAction: 'inspect the workspace trajectory database and retry; nothing was partially committed' };
   } finally {
     close();
   }
