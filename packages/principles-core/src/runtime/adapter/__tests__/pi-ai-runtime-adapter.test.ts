@@ -535,11 +535,30 @@ describe('PiAiRuntimeAdapter', () => {
       });
     });
 
-    it('throws PDRuntimeError("execution_failed") when complete resolves with stopReason:error + 401 Unauthorized', async () => {
-      await expectStartRunError('execution_failed', () => {
+    it('classifies a resolved 401 as input_invalid (configuration), not execution_failed', async () => {
+      // S3: the status code in pi-ai's composed message is authoritative.
+      await expectStartRunError('input_invalid', () => {
         mockComplete.mockReset();
         mockComplete.mockResolvedValue(makeErrorResponse('401 Unauthorized'));
       });
+    });
+
+    it('marks status_unknown and falls back to text rules when no HTTP status is recoverable', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeErrorResponse('quota exceeded'));
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      let caught: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caught = err;
+      }
+
+      expect(caught?.category).toBe('rate_limit');
+      expect(caught?.details?.statusUnknown).toBe(true);
+      expect(caught?.details?.errorClassificationSource).toBe('text_fallback');
+      expect(caught?.details?.httpStatus).toBeUndefined();
     });
 
     it('throws PDRuntimeError("timeout") when complete resolves with stopReason:aborted', async () => {
@@ -580,7 +599,8 @@ describe('PiAiRuntimeAdapter', () => {
       const failedEvent = findTelemetryEvent('runtime_invocation_failed');
       expect(failedEvent).toBeDefined();
       const payload = failedEvent?.payload as Record<string, unknown>;
-      expect(payload.errorCategory).toBe('execution_failed');
+      expect(payload.errorCategory).toBe('input_invalid');
+      expect(payload.httpStatus).toBe(401);
       expect(typeof payload.errorMessage).toBe('string');
       expect((payload.errorMessage as string).includes('401')).toBe(true);
     });
@@ -706,7 +726,8 @@ describe('PiAiRuntimeAdapter', () => {
       // S2: transport failures belong to pi-ai. PD sends exactly one request and
       // surfaces whatever pi-ai handed back after its own retry budget.
       await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
-        category: 'execution_failed',
+        // S3: the 400 status is authoritative — a request-parameter error.
+        category: 'input_invalid',
         details: expect.objectContaining({ retryOwnership: 'pi-ai' }),
       });
 
@@ -757,7 +778,8 @@ describe('PiAiRuntimeAdapter', () => {
       const adapter = makeAdapter({ maxTokens: 8192, maxRetries: 3 });
 
       await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
-        category: 'execution_failed',
+        // S3: the exhausted ladder still reports the underlying 400 status.
+        category: 'input_invalid',
       });
       // 8192 → 4096 → floor: the third attempt cannot go below 4096, so the
       // ladder stops instead of resending a value the provider already rejects.
@@ -771,7 +793,10 @@ describe('PiAiRuntimeAdapter', () => {
         .find(e => e.eventType === 'runtime_invocation_failed'
           && (e.payload as Record<string, unknown>)?.finalFailure === true);
       const payload = failed?.payload as Record<string, unknown>;
-      expect(payload.errorCategory).toBe('execution_failed');
+      // S3: a 400 is a request-parameter error; the status outranks the old
+      // generic `execution_failed` bucket.
+      expect(payload.errorCategory).toBe('input_invalid');
+      expect(payload.httpStatus).toBe(400);
       expect(String(payload.providerEvidence)).toContain('exceeds the maximum output tokens');
     });
 

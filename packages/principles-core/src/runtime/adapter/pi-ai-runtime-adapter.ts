@@ -343,6 +343,58 @@ function isCancelledSignal(signal?: AbortSignal): boolean {
   return signal?.aborted === true && signal.reason === CANCEL_ABORT_REASON;
 }
 
+interface ProviderStatusClassification {
+  category: 'input_invalid' | 'rate_limit' | 'timeout' | 'execution_failed';
+  /** Machine-readable sub-class recorded in error details. */
+  label: 'provider_auth' | 'provider_request' | 'provider_rate_limit' | 'provider_timeout' | 'provider_upstream';
+}
+
+/**
+ * S3: recover the HTTP status from pi-ai's composed provider error message.
+ *
+ * pi-ai stops carrying the structured status once a failure becomes
+ * `AssistantMessage{stopReason:'error'}`, but `formatProviderError` builds the
+ * message as `<status>: <body>` (or `<prefix> (<status>): <body>`), so the
+ * status is still available without wrapping `fetch` and without inventing a
+ * second HTTP observation channel.
+ */
+function extractProviderHttpStatus(rawMessage: string): number | undefined {
+  const leading = /^\s*(\d{3})(?:\s|:|$)/.exec(rawMessage);
+  const parenthesized = /\((\d{3})\)/.exec(rawMessage);
+  const status = Number(leading?.[1] ?? parenthesized?.[1]);
+  if (!Number.isInteger(status) || status < 100 || status > 599) return undefined;
+  return status;
+}
+
+/**
+ * S3: status-code-first classification. Returns `undefined` for codes PD has no
+ * specific meaning for (404, 409, …) so the caller keeps the text fallback and
+ * can mark the evidence `status_unknown`/`text_fallback` instead of guessing.
+ */
+function classifyProviderHttpStatus(status: number): ProviderStatusClassification | undefined {
+  if (status === 401 || status === 403) return { category: 'input_invalid', label: 'provider_auth' };
+  if (status === 400 || status === 422) return { category: 'input_invalid', label: 'provider_request' };
+  if (status === 408) return { category: 'timeout', label: 'provider_timeout' };
+  if (status === 429) return { category: 'rate_limit', label: 'provider_rate_limit' };
+  if (status >= 500 && status <= 599) return { category: 'execution_failed', label: 'provider_upstream' };
+  return undefined;
+}
+
+/** S3: evidence attached to every provider failure so the classification is auditable. */
+function providerStatusEvidence(rawMessage: string): Record<string, unknown> {
+  const httpStatus = extractProviderHttpStatus(rawMessage);
+  const classification = httpStatus === undefined ? undefined : classifyProviderHttpStatus(httpStatus);
+  if (httpStatus === undefined) {
+    return { errorClassificationSource: 'text_fallback', statusUnknown: true };
+  }
+  return {
+    httpStatus,
+    errorClassificationSource: classification ? 'status_code' : 'text_fallback',
+    ...(classification ? { providerErrorClass: classification.label } : {}),
+  };
+}
+
+
 interface TimeoutClassificationResult {
   category: 'timeout' | 'execution_failed';
   classification: 'provider_transient_timeout' | 'client_timeout_budget_exhausted' | 'timeout_unclassified' | 'not_applicable';
@@ -407,11 +459,12 @@ function classifyFailure(
  * so downstream code never sees a "successful" response that is actually broken.
  *
  * Error classification:
- *   stopReason:'aborted'                              → timeout
- *   stopReason:'error' + timeout/abort in errorMessage → timeout
- *   stopReason:'error' + other                        → execution_failed
- *   stopReason:'length' + no extractable content      → output_invalid (truncated)
- *   no text or thinking content block                  → output_invalid
+ *   recovered HTTP status                          → S3 status-code mapping
+ *   stopReason:'aborted'                           → timeout
+ *   stopReason:'error' + timeout/abort in message  → timeout
+ *   stopReason:'error' + other                     → execution_failed
+ *   stopReason:'length' + no extractable content   → output_invalid (truncated)
+ *   no text or thinking content block              → output_invalid
  *
  * Reasoning-model fallback (BUG-007a):
  *   When all content blocks have empty text (common with reasoning models that
@@ -429,16 +482,31 @@ function extractAssistantTextOrThrow(
     // Truncate to 300 chars to avoid leaking huge payloads into logs/telemetry
     const boundedMessage = rawMessage.length > 300 ? rawMessage.substring(0, 300) + '...' : rawMessage;
 
-    const isTimeout = response.stopReason === 'aborted'
-      || signal?.aborted
-      || /timeout|timed\s*out/i.test(rawMessage)
-      || /abort/i.test(rawMessage);
+    // S3: status code first; text heuristics only when no status is recoverable.
+    const statusClassification = classifyProviderHttpStatus(
+      extractProviderHttpStatus(rawMessage) ?? -1,
+    );
+    const isTimeout = statusClassification
+      ? statusClassification.category === 'timeout'
+      : response.stopReason === 'aborted'
+        || signal?.aborted
+        || /timeout|timed\s*out/i.test(rawMessage)
+        || /abort/i.test(rawMessage);
+    const category = statusClassification && statusClassification.category !== 'timeout'
+      ? statusClassification.category
+      : isTimeout
+        ? 'timeout'
+        : 'execution_failed';
 
     throw new PDRuntimeError(
-      isTimeout ? 'timeout' : 'execution_failed',
+      category,
       isTimeout
         ? `LLM request timed out: ${boundedMessage}`
         : `LLM execution failed: ${boundedMessage}`,
+      {
+        ...(isTimeout ? { timeoutClassification: 'provider_transient_timeout' } : {}),
+        ...providerStatusEvidence(rawMessage),
+      },
     );
   }
 
@@ -1130,6 +1198,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       let timeoutClassification = 'not_applicable';
       let providerEvidence = '';
       let retryAttempt = 0;
+      // S3: carry the status-code evidence into the terminal failure event so
+      // "why was this classified this way" stays auditable.
+      let httpStatus: number | undefined;
+      let errorClassificationSource: string | undefined;
 
       if (err instanceof PDRuntimeError && err.details) {
         const { details } = err;
@@ -1144,6 +1216,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         if (isObjectWithKey(details, 'retryAttempt')) {
           const { retryAttempt: ra } = details;
           if (typeof ra === 'number') retryAttempt = ra;
+        }
+        if (isObjectWithKey(details, 'httpStatus')) {
+          const { httpStatus: hs } = details;
+          if (typeof hs === 'number') httpStatus = hs;
+        }
+        if (isObjectWithKey(details, 'errorClassificationSource')) {
+          const { errorClassificationSource: ecs } = details;
+          if (typeof ecs === 'string') errorClassificationSource = ecs;
         }
       }
 
@@ -1208,6 +1288,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           errorMessage: runState.reason,
           errorCategory,
           finalFailure: true,
+          ...(httpStatus !== undefined ? { httpStatus } : {}),
+          ...(errorClassificationSource ? { errorClassificationSource } : {}),
         },
       });
 
@@ -1678,11 +1760,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         if (response.stopReason === 'error' || response.stopReason === 'aborted') {
           const rawMessage = response.errorMessage ?? 'unknown provider error';
           const elapsedMsAfter = Date.now() - overallStartTime;
+          // S3: a recovered HTTP status is authoritative; only the codes PD has
+          // no specific meaning for fall back to the legacy text heuristics.
+          const statusClassification = classifyProviderHttpStatus(
+            extractProviderHttpStatus(rawMessage) ?? -1,
+          );
+          const statusEvidence = providerStatusEvidence(rawMessage);
 
-          const isTimeout = response.stopReason === 'aborted'
-            || options.signal?.aborted
-            || /timeout|timed\s*out/i.test(rawMessage)
-            || /abort/i.test(rawMessage);
+          const isTimeout = statusClassification
+            ? statusClassification.category === 'timeout'
+            : response.stopReason === 'aborted'
+              || options.signal?.aborted
+              || /timeout|timed\s*out/i.test(rawMessage)
+              || /abort/i.test(rawMessage);
 
           const classification = (options.signal?.aborted || elapsedMsAfter >= effectiveTimeoutMs)
             ? 'client_timeout_budget_exhausted'
@@ -1703,13 +1793,16 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 transportMaxRetries,
                 retryOwnership: 'pi-ai',
                 providerEvidence: safeStringifyPreview(rawMessage, 300),
+                ...statusEvidence,
               },
             );
           }
 
           // ADR-0019: rate-limit signatures stay a distinct category so
           // downstream degradation can recognise them.
-          const isRateLimit = /rate.?limit|429|quota|too many requests/i.test(rawMessage);
+          const isRateLimit = statusClassification
+            ? statusClassification.category === 'rate_limit'
+            : /rate.?limit|429|quota|too many requests/i.test(rawMessage);
           // PRI-1011: a rejected output budget is a parameter problem, not a
           // transport one — resending the identical rejected value can only fail
           // the same way, so the next attempt goes out with a smaller budget.
@@ -1744,7 +1837,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             }
           }
 
-          const errorCategory = isRateLimit ? 'rate_limit' : 'execution_failed';
+          const errorCategory = statusClassification && statusClassification.category !== 'rate_limit'
+            ? statusClassification.category
+            : isRateLimit
+              ? 'rate_limit'
+              : 'execution_failed';
           throw new PDRuntimeError(
             errorCategory,
             `${isRateLimit ? 'LLM rate limit hit' : 'LLM execution failed'}: ${rawMessage.substring(0, 300)}`,
@@ -1755,6 +1852,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               elapsedMs: elapsedMsAfter,
               providerEvidence: safeStringifyPreview(rawMessage, 300),
               finalFailureReason: 'pi_ai_retries_exhausted',
+              ...statusEvidence,
             },
           );
         }
@@ -1762,7 +1860,18 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return response;
       } catch (err) {
         const elapsedMsAfter = Date.now() - overallStartTime;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        // S3: a recovered HTTP status is authoritative; text heuristics only
+        // apply when the status is absent or has no PD-specific meaning.
+        const statusClassification = classifyProviderHttpStatus(
+          extractProviderHttpStatus(errMsg) ?? -1,
+        );
+        const statusEvidence = providerStatusEvidence(errMsg);
         let classificationResult = classifyFailure(err, options.signal);
+
+        if (statusClassification?.category === 'timeout') {
+          classificationResult = { category: 'timeout', classification: 'provider_transient_timeout' };
+        }
 
         if (options.signal?.aborted || elapsedMsAfter >= effectiveTimeoutMs) {
           classificationResult = {
@@ -1782,6 +1891,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             transportMaxRetries,
             retryOwnership: 'pi-ai',
             providerEvidence: safeStringifyPreview(err, 300),
+            ...statusEvidence,
           });
         }
 
@@ -1798,6 +1908,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             retryOwnership: 'pi-ai',
             providerEvidence: safeStringifyPreview(err, 300),
             finalFailureReason: 'pi_ai_retries_exhausted',
+            ...statusEvidence,
           });
         }
 
@@ -1805,9 +1916,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           throw err; // already classified by a lower layer
         }
 
-        const errMsg = err instanceof Error ? err.message : String(err);
         // ADR-0019: keep rate-limit signatures a distinct category.
-        const isRateLimitCatch = /rate.?limit|429|quota|too many requests/i.test(errMsg);
+        const isRateLimitCatch = statusClassification
+          ? statusClassification.category === 'rate_limit'
+          : /rate.?limit|429|quota|too many requests/i.test(errMsg);
         // PRI-1011: SDKs may throw the budget rejection instead of resolving it.
         const isBudgetRejectionCatch = !isRateLimitCatch && MAX_TOKENS_REJECTED_PATTERN.test(errMsg);
 
@@ -1840,7 +1952,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           }
         }
 
-        const catchCategory = isRateLimitCatch ? 'rate_limit' : 'execution_failed';
+        const catchCategory = statusClassification && statusClassification.category !== 'rate_limit'
+          ? statusClassification.category
+          : isRateLimitCatch
+            ? 'rate_limit'
+            : 'execution_failed';
         throw new PDRuntimeError(
           catchCategory,
           `${isRateLimitCatch ? 'LLM rate limit hit' : 'LLM completion failed'}: ${errMsg.substring(0, 300)}`,
@@ -1851,6 +1967,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             elapsedMs: elapsedMsAfter,
             providerEvidence: safeStringifyPreview(err, 300),
             finalFailureReason: 'pi_ai_retries_exhausted',
+            ...statusEvidence,
           },
         );
       }
