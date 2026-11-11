@@ -33,7 +33,14 @@ export function resolveOpenClawHookToolSemantics(
     hostKind: 'openclaw',
     staticMappings: OPENCLAW_TOOL_SEMANTIC_MAPPINGS,
   });
-  if (resolution.ok) return resolution.registry;
+  if (resolution.ok) {
+    // ADR-0030: a legacy persisted declaration loads with default semantics;
+    // the degradation is observable, never silent (rc-9).
+    for (const warning of resolution.warnings) {
+      logger.warn?.(`[PD:Gate] ${warning}`);
+    }
+    return resolution.registry;
+  }
   // rc-9: the degradation is observable, and an unusable declaration must not
   // block the Owner's tool call — the compiled-in declaration keeps the gate
   // running (replay still refuses to validate against a partial view).

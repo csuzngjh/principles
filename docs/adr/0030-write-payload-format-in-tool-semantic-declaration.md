@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Proposed**（草案，待 Owner 裁决） |
+| Status | **Accepted**（Owner 2026-11-11 批准；v1 → v2 以“降级 + 可见诊断”实现） |
 | Date | 2026-11-11 |
 | Supersedes | 无 |
 | Superseded by | 无 |
@@ -76,12 +76,20 @@ options.toolSemantics.resolveWritePayloadFormat(request.toolName) === 'file-head
 
 ### 2.4 持久化兼容（PRI-673 边界）
 
-只加可选字段会让**旧的 v1 Codex 声明文件**缺少该字段；而工作区声明优先于静态声明，合并后 `writePayloadFormat` 仍会缺失 → design-gate 目标解析静默退化。这不是可接受的默认行为。
+只加可选字段会让**旧的 v1 Codex 声明文件**缺少该字段；而工作区声明优先于静态声明，合并后 `writePayloadFormat` 仍会缺失 → design-gate 目标解析静默退化。
 
-因此：**`HOST_TOOL_DECLARATION_VERSION` 升到 2**。
+Owner 裁决的安全前提（2026-11-11）：**旧声明被新版本读到，必须是“降级到缺省 + 可见诊断”，不能拒绝启动或抛错中断宿主加载**。因此把 `HOST_TOOL_DECLARATION_VERSION` 升到 2 时，读取语义定义为：
 
-- v1 文件在读取时 fail loud（`host_tool_declaration_invalid`），沿用既有策略：hook 侧回退到编译进二进制的静态声明以保证可用性，并输出结构化 warn（rc-9）；宿主下次启动时重写自己的文件。
-- 不采用“用静态声明补齐缺失的可选字段”的软化方案：它改变合并语义，并让陈旧文件看起来是新的。
+| 输入 | 行为 |
+| --- | --- |
+| `version === 2` | 正常读取；`writePayloadFormat` 参与校验与合并 |
+| `version === 1` | **降级读取**：按 v1 语义剥离 `writePayloadFormat`（视为未声明），映射与 `declaredAt` 仍完整校验；返回结构化 warning（含 hostKind、声明版本、支持版本、被降级字段与刷新动作）。宿主加载不中断 |
+| `version > 2` | fail loud：未来版本可能携带本构建无法解释的字段，猜读比拒绝更危险（这是降级方向的反向，不在兼容承诺内） |
+| 缺失/非正整数 `version`、非法 JSON、非法映射、缺失 `declaredAt` | fail loud（与 v1 一致） |
+
+- warning 经 `loadHostToolDeclarations → resolveWorkspaceHostToolSemantics / resolveHostToolSemanticsForHook` 透传；Codex/WorkBuddy 写入 hook stderr 诊断，OpenClaw 走 `logger.warn`（rc-9：降级必须可观察）。
+- 不采用“用静态声明补齐缺失的可选字段”的软化方案：它改变合并语义，并让陈旧文件看起来是新的。降级只在**读取 v1 文件**时发生，且明确告知该文件应被宿主重写。
+- Owner 要求的三条证据（见 §5）已落地为测试；“降级”与“损坏仍 fail loud”在实现上可同时成立，无需二选一。
 
 ---
 
@@ -106,21 +114,24 @@ options.toolSemantics.resolveWritePayloadFormat(request.toolName) === 'file-head
 
 ---
 
-## 5. 实施与验证计划（获批后）
+## 5. 实施与验证计划（已获批，已实施）
 
-1. **改前红**：注册一个 `apply_patch_v2 → write + file-header-patch` 的声明，prove Codex provider 在旧实现下 `targetPaths` 为空（字面量不匹配）；测试写到 `host-runtime/tests/`。
-2. **改后绿**：provider 走 `resolveWritePayloadFormat`；同一输入解析出目标；既有 `apply_patch` 路径结果逐字节一致。
-3. **负控**：未声明格式的 `write`（普通 `content`，即使以 `***` 开头）不解析；超 1MB、NUL、范围外路径仍返回 `undefined`（保留既有测试）。
-4. **兼容**：v1 声明文件 → 类型化拒绝 + 静态回退 + warn；v2 → 正常。
-5. 门禁：`check-tool-semantics-authority` 通过且该字面量例外消失；host-runtime / codex-adapter 全量测试与构建；`npm run error:context` 复核。
+1. **改前红**：旧实现下不存在 `resolveWritePayloadFormat`、`HOST_TOOL_DECLARATION_VERSION === 1`，新测试无法编译/断言失败；`apply_patch_v2 + file-header-patch` 在旧 provider 中不会解析目标。
+2. **改后绿**：provider 走 `resolveWritePayloadFormat`；`host-runtime/tests/production-design-gate-pretool.test.ts` 证明**新别名声明 `file-header-patch` 后自动解析 targetPaths 并触发 design-gate deny**（反例自动跟进）。
+3. **负控**：同一别名只声明 `write`、不声明格式时，`targetPaths` 不解析，design gate 不得声称 Owner 拒绝（`decision: 'allow'`）；普通 `content` 即使以 `***` 开头也不会被误判。既有 1MB / NUL / 范围外测试保留。
+4. **兼容三条证据**（Owner 安全前提，`host-runtime/tests/host-tool-declaration.test.ts`）：
+   - 证据 1：构造 v1 文件 → v2 加载路径**不抛错**、语义等价于缺省（无 `writePayloadFormat`）、warning 含 hostKind / 声明版本 / 支持版本 / 被降级字段 / 刷新路径。
+   - 证据 2：同一份 v1 文件与等价 v2 文件（同 mappings、无格式）解析出的**语义快照完全一致**；唯一差异是 v1 有 warning、v2 无。
+   - 证据 3：真正损坏的声明（非法 JSON、缺失/非整数/超前版本、v1 中损坏映射、非 write 带格式、未知格式、缺失 `declaredAt`）**仍逐一 fail loud**。
+   - 生产路径：`codex-adapter/tests/pd-hook.production.test.ts` 证明 v1 文件下 hook 仍 exit 0、输出合法决策，且 stderr 可见 `host_tool_declaration_version_legacy`。
+5. 门禁：`check-tool-semantics-authority` 通过且该字面量例外消失；core / host-runtime / codex-adapter / openclaw / workbuddy 相关测试与构建；`npm run error:context` 复核。
 
-**回退**：单 commit revert；v2 文件对旧代码会 fail loud 并回退静态声明，不产生静默错误。
+**回退**：整体 revert。降级读路径使“旧代码 + 新 v2 文件”不会静默：`version > 1` 在旧加载器中 fail loud 并回退静态声明，不产生错误语义。
 
 ---
 
-## 6. 需要 Owner 裁决的问题
+## 6. Owner 裁决记录（2026-11-11）
 
-1. 是否批准该契约扩展（`writePayloadFormat` + 声明版本 v2）？
-2. OpenClaw 的 `apply_patch` 是否本轮一并声明 `file-header-patch`？
-   - 建议：**不**。没有消费方（design gate 目前只接 Codex），且这是声明语义而非行为；等接入时再声明，避免“为完整性”提前铺字段。
-3. 若批准，是否接受 v1 → v2 的 fail-loud 迁移（宿主首次启动自动重写），而不是做静默补齐？
+1. **契约扩展：批准**。`writePayloadFormat` 仅对 `canonicalKind: 'write'` 合法；`resolveWritePayloadFormat()`、冲突合并、fail-loud 校验按 §2 实施。
+2. **OpenClaw：本轮不声明**。同意 §3，等出现 design-gate 消费方再按证据声明。
+3. **迁移方式：v1 → v2 必须“降级到缺省 + 可见诊断”**，不得拒绝启动或抛错中断宿主加载；同时真正损坏的声明仍须 fail loud。若两者无法同时成立，必须停下并上报 Owner。实施结论：**可以同时成立**，证据见 §2.4 与 §5.4。

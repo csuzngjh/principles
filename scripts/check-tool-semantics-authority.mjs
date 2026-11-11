@@ -78,11 +78,6 @@ export const CORE_PREFIX = 'packages/principles-core/src/';
  */
 export const ALLOWED_TOOL_NAME_LITERALS = [
   {
-    file: 'packages/host-runtime/src/codex-rule-context-provider.ts',
-    literal: 'apply_patch',
-    reason: 'Codex-only refinement: only a Codex apply_patch payload carries "*** Add/Update/Delete File:" headers, so patchTargets() is gated on it AFTER the registry already decided targetKind === write. The classification itself still comes from the declaration registry; this literal only selects the payload parser.',
-  },
-  {
     file: 'packages/principles-core/src/runtime/evidence-triage/observation-resolver.ts',
     literal: 'pain',
     reason: 'Observation-source routing sentinel for the manual pain tool, not tool semantics: it decides whether an observation was agent-reported vs owner-reported. No registry mapping is involved.',
