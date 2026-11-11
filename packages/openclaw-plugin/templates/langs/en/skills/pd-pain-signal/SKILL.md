@@ -1,45 +1,156 @@
 ---
 name: pd-pain-signal
-description: Use when the Owner explicitly asks to record an agent behavior problem, register a pain signal, or trace whether feedback entered the diagnostic pipeline. Automatic pain detection remains the responsibility of existing hooks, host entrypoints, and Runtime.
+description: Register an anchored behavior deviation (Pain) from the current OpenClaw conversation. Use when the Owner explicitly asks to record a concrete behavior problem and you can name the anchor. The anchored write goes through the PD MCP tool pd_submit_pain; never submit in the background and never invent an anchor.
 disable-model-invocation: false
 ---
 
-# PD Pain Signal
+# PD Pain Signal (OpenClaw)
 
-## Purpose
+Pain = a concrete behavior deviation relative to a named anchor. Three elements must hold together:
 
-Send the Owner's real behavior feedback through the existing PD pain-registration and diagnosis pipeline while preserving the original statement, source, and available session evidence. This skill does not reimplement detection, deduplication, admission, or diagnosis.
+1. **Anchor** — an Owner expectation, an established principle, or an in-force Agent Instruction / Skill requirement.
+2. **Concrete behavior** — what you actually did or failed to do.
+3. **Significant deviation** — a describable gap against that anchor.
 
-## Steps
+No proven impact, no repetition and no prior Owner correction are NOT reasons to withhold a submission. They only help the Owner decide attention priority.
 
-1. **Check whether it was already recorded.** The current message may already have been handled by a hook or host entrypoint. If a real receipt exists, reuse its pain/task IDs. Do not submit a duplicate. If registration is not observable, do not claim success or blindly retry.
-2. **Preserve the Owner's words.** Use only a statement the Owner explicitly provided. Do not add a technical root cause, score, or tool-failure fact. Quoted text, tool output, and model paraphrases must not be presented as a new Owner submission.
-3. **Use the trusted host entrypoint.**
-   - In the OpenClaw session where the issue occurred, when the Owner explicitly requests registration, use the host command `/pd-pain <issue description>`. OpenClaw binds the authenticated current session.
-   - Outside the session, use the CLI only with a known, validated session: `pd pain record --reason "<reason>" --workspace "<workspace>" --session "<session-id>" --json`.
-4. **Do not guess session IDs.** Never scan the database, pick the "latest" session, or substitute another host's ID. If the required session identity is missing, stop that CLI path and explain why.
-5. **Verify the receipt.** Report registration only when the actual receipt confirms it. Without a receipt, say registration is unconfirmed.
+## Entry 1 — native host entry: `/pd-pain` (Owner-initiated, not yours)
 
-## Evidence and success criteria
+The Owner runs:
 
-- A real pain ID proves only that registration returned a receipt, not that diagnosis completed.
-- Generated candidates are not necessarily admitted.
-- Check the actual `admissionResults` / `candidateOutcomes` for an `admitted` decision and its non-empty `ledgerEntryIds`. A non-empty `candidateIds` alone is not success.
-- Report `needs_evidence`, `deferred`, and explicit admission rejection honestly. Never bypass the admission gate or fabricate trajectory evidence to increase confidence.
-- The Owner's statement, host trajectory, model diagnosis, admission result, Owner approval, and activation state are distinct evidence types.
+    /pd-pain <description>
 
-## Failure handling
+OpenClaw dispatches the plugin command with the authenticated current session and writes the signal itself. Rules:
 
-- Registration failure: preserve the real error and the host-provided next action.
-- Duplicate risk: check existing receipts and idempotency first.
-- Missing or untrusted session: stop; never guess.
-- CLI/hook unavailable: ask `pd-cli-operator` to inspect status; route installation repair to `pd-control`.
-- If the Owner wants to inspect resulting candidates, use `pd-review` to open the Console; do not re-register the same feedback.
+- Do not simulate the command, do not call it on the Owner's behalf, and do not register the same message a second time.
+- If you can see a real receipt, report only the identifiers and status it actually returned.
+- If the Owner asks you to register a signal but did not run the command, use Entry 2 (when the tool is available) or explain why you cannot.
+
+## Entry 2 — anchored submission: MCP tool `pd_submit_pain`
+
+Check your tool list first.
+
+- If `pd_submit_pain` is available, call it with the four possible arguments below.
+- If it is not in your tool list, the anchored write capability is NOT enabled in this deployment. Stop: do not call a look-alike tool, do not compose a CLI write with guessed lineage, do not claim a submission happened. Tell the Owner the capability is unavailable, and point them at Entry 1 if they still want the signal recorded.
+
+| argument | required | contract |
+|---|---|---|
+| `reason` | yes | 1–2000 characters, organized as the six parts below |
+| `anchorType` | yes | `owner_expectation` / `established_principle` / `agent_instruction` |
+| `anchorRef` | yes | 1–300 characters, format depends on anchor type |
+| `painType` | no | `principle_deviation` / `tool_failure` / `subagent_error` / `user_frustration` |
+
+The schema is strict. `score`, `severity`, `priority`, `sessionId`, `approved`, file paths and metadata are rejected before anything is written.
+
+## Anchors
+
+Pick exactly one type. `anchorRef` must let another reader find the requirement.
+
+### `owner_expectation`
+
+The Owner stated it — in this conversation, in an Owner document, or in an approved decision. `anchorRef` names where, e.g. `本次对话 14:02 Owner: "..."` or `docs/xxx.md §2`.
+
+- Never submit an Owner expectation you can only recall. If there is no citable location, ask the Owner or do not submit.
+
+### `established_principle`
+
+`anchorRef` MUST be `<principleId>@<version>` (e.g. `P-42@1`). Get both from `pd principle list`; never guess or infer the version.
+
+The server verifies existence, version and status:
+
+- `active` or `probation` → usable as the basis of a deviation.
+  `probation` returns an `anchor_probation` warning: the deviation is valid, the principle is still being validated.
+- `candidate`, `archived`, `deprecated` → not usable as a basis; background only.
+
+The server checks existence/version/status only. **Scope applicability and priority conflicts are not machine-checkable here.** If you cannot establish that the principle applies to this situation, say "适用性待确认" in `reason` instead of presenting it as settled.
+
+### `agent_instruction`
+
+`anchorRef` MUST be `<path>#<section>` and MUST NOT contain spaces, e.g. `AGENTS.md#verification`. It must point at a requirement in force for the current host (AGENTS.md, PRINCIPLES.md, SKILL.md, tool guide).
+
+### No anchor
+
+If you cannot classify the anchor into one of the three types, do not submit. Clarify with the Owner first.
+
+## `reason` — six parts, in this order
+
+1. **Anchor** — quote or name it (principle id@version, instruction path#section, Owner statement + location).
+2. **Anchor source and citation grade** — `verbatim` / `paraphrase` / `recollection` / `inference`. Do not upgrade the grade. A `recollection` or `inference` alone is not enough: confirm the wording with the Owner first.
+3. **Observed behavior** — specific actions, order, skipped steps, overreach. Not "the quality was poor".
+4. **Deviation** — the gap against the anchor: not done / done backwards / done but bypassed.
+5. **Why worth recording** (auxiliary) — helps the Owner prioritize. It is NOT an admission condition and must never be used to reject an otherwise valid Pain.
+6. **Context** — where and when it happened, bounded.
+
+Never hide a conflicting anchor. Never inflate the deviation to make it easier to accept. Never turn part 5 into a threshold.
+
+## Authorization — one submission only
+
+Before calling the tool, state to the Owner:
+
+1. the anchor and where it comes from;
+2. the concrete behavior you observed;
+3. the deviation between them;
+4. optionally, why it may matter.
+
+Then obtain the Owner's explicit consent **in the current conversation**.
+
+- No reply, an ambiguous answer, or a bare "whatever" is NOT authorization.
+- If the Owner edits the content, re-confirm the final version before submitting.
+- The authorization covers this one submission only. Never reuse it for another Pain, another session, or a retry with changed content.
+- Background, scheduled, hook-driven and unattended runs MUST NOT submit on their own.
+
+## Severity and `painType`
+
+- Never send a score or severity. The tool has no such parameter, and the system records an omitted severity as **moderate**. You cannot self-elevate; if you think the case is severe, say so inside `reason` for the Owner to judge.
+- Omit `painType` unless you can classify it with confidence. The default is `principle_deviation`.
+- The default is only valid with an `established_principle` anchor: a `principle_deviation` submission without a principle reference is refused (`anchor_invalid`, "principle_deviation requires deviationAnchor{...}"). With `owner_expectation` or `agent_instruction`, pass an explicit and honest pain type (e.g. `tool_failure`); if none fits, say so to the Owner instead of guessing.
+- Never backfill `user_frustration` (or any other type) to make a submission look more urgent.
+
+## Reading the receipt
+
+The tool returns one JSON receipt (`pd.pain-submit-receipt.v1`):
+
+```
+status, painId, taskId, workspaceDir, diagnosis, anchor, provenance, warnings, error, nextAction
+```
+
+| status | meaning | what you do |
+|---|---|---|
+| `submitted` | the pain and its diagnosis task were written | report `painId` / `taskId`. `diagnosis.status` is `pending`: diagnosis has NOT run |
+| `refused` | nothing was written (for `task_duplicate`, an equivalent task already existed) | report `error.code` + `nextAction`; do not retry blindly |
+| `failed` | the write failed; this is the only status with `isError: true` | report `error.code` / `error.message` / `nextAction`; a task may or may not exist |
+| `submit_unconfirmed` | the write began and its outcome is unknown (deadline or exception) | never resubmit; run `pd task show <taskId>` and reconcile first |
+
+`refused` codes you may see: `invalid_input`, `anchor_invalid`, `anchor_unverifiable` (ledger unreadable), `anchor_not_found` (unknown id/version or empty ledger), `anchor_not_currently_valid`, `task_duplicate`, `ingress_*`.
+
+Degraded transports:
+
+- `minimal` — the receipt was reduced to `status / painId / taskId / workspaceDir / diagnosis`.
+- `untransportable` — a plain-text statement, or an `isError: true` envelope. An unknown outcome is always reported as UNKNOWN, never as "nothing was written".
+
+Report only the identifiers and status the receipt actually returned. Registration is not diagnosis, not candidate admission, not approval, not activation.
+
+## Operator recovery (post-hoc, never the Agent default)
+
+When the Owner's turn is already over and a trusted OpenClaw session identity is available, an operator may run:
+
+    pd pain record --reason "<summary>" --host openclaw --session "<verified session-id>" --workspace "<workspace>" --json
+
+- Every CLI record invocation MUST bind `--session`. A record without `--session` carries no trajectory evidence and will be gated by admission (`needs_evidence`).
+- Never guess, scan for, or substitute a session ID, and never pick the "latest" session. If the identity is unverified, stop and say so.
+- Do not present this path as the anchored contract: it carries no `anchorType` / `anchorRef`.
+
+## Verify downstream state
+
+Use `pd-cli-operator` to inspect the actual task and evidence chain. If diagnosis produced candidates, verify admission using the actual `admissionResults` / `admitted` decision and the corresponding non-empty `ledgerEntryIds`; a non-empty `candidateIds` alone is not success. Report `needs_evidence` or a rejection honestly. Use `pd-review` to open the Owner Console.
 
 ## Never
 
+- Submit without an explicit Owner request and consent in the current message.
+- Submit from a background, scheduled, hook or unattended run.
+- Invent an anchor, a principle id@version, an Instructions path, or an Owner quote.
+- Send score, severity, priority, session ids or approval tokens.
+- Bypass an unavailable `pd_submit_pain` with a CLI write using guessed lineage, a local switch, or a host matcher.
+- Resubmit after `submit_unconfirmed` without reconciling via `pd task show <taskId>`.
 - Write `.state/.pain_flag` or call legacy `write_pain_flag`.
-- Fabricate the Owner's words, session ID, turn ID, or tool failure.
-- Re-submit an event whose registration is confirmed.
-- Modify the pain database, candidate ledger, or admission state directly.
-- Approve, activate, or edit a principle.
+- Approve, activate or modify a principle.

@@ -4,6 +4,12 @@ on:
   issues:
     types: [opened, labeled, unlabeled]
 
+# Rapid label edits on one issue queue redundant labeler runs; the newest
+# event already reflects the current label set.
+concurrency:
+  group: issue-management-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 jobs:
   label:
     name: Auto Label Issues

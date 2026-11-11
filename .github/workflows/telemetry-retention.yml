@@ -16,6 +16,12 @@ on:
     - cron: '30 3 * * *'
   workflow_dispatch:
 
+# Deletion runs must complete, never be cancelled: a half-applied retention
+# pass is state we would have to reason about. Same group = serialized.
+concurrency:
+  group: telemetry-retention
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:

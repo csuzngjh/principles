@@ -29,6 +29,13 @@ on:
     workflows: [CI]
     types: [completed]
 
+# PR lifecycle facts: one run per PR event, so a faster follow-up event
+# supersedes a stale one. CI completions are grouped per branch — only the
+# latest CI outcome for a branch is worth a reminder comment.
+concurrency:
+  group: linear-sync-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

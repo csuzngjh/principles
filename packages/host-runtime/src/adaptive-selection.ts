@@ -4,25 +4,34 @@
  * ONE implementation of the bounded "current turn → pick at most one candidate"
  * protocol, shared by the selector lab and the production host runtimes.
  *
- * Contract highlights (PRI-1122 measurement findings):
- * - Candidates are sent with a LOCALLY PRECOMPUTED digest. The model can only
- *   copy it; it is never asked to compute a hash. A payload without digests
- *   makes every `selected` answer invalid by construction.
+ * PRI-1182 replaced the free-form chat-completions selector with the verified
+ * Decisions scoring protocol (`scripts/dev/adaptive-selector-lab/diagnostic.mjs`):
+ * one POST carries every candidate's applicability condition plus one
+ * "insufficient context" condition; the model returns an INDEPENDENT score per
+ * question; PD validates and adjudicates locally
+ * (`adaptive-decision-protocol.ts`). The model is never asked to emit a
+ * decision, a ref, or a digest.
+ *
+ * Contract highlights, unchanged from PRI-1122:
  * - The incremental deadline is a FIRST-BYTE deadline, not a whole-generation
  *   wall clock. Once the endpoint has started answering, generation is bounded
  *   by its own window; late completions are still discarded.
  * - One real send per turn, zero retries, zero repair, zero provider fallback.
+ * - The host deadline can only shorten the request's own short limit.
  * - Diagnostics never carry the raw prompt, the raw response, or credentials.
  */
 import crypto from 'node:crypto';
-import {
-  PDRuntimeError,
-  PiAiRuntimeAdapter,
-  StoreEventEmitter,
-  type ActivatedPrinciple,
-} from '@principles/core/runtime';
+import type {ActivatedPrinciple} from '@principles/core/runtime';
 import {readPromptActivationCandidates} from './active-principle-prompt.js';
 import {revalidateAdaptivePrinciple} from './adaptive-principle-revalidation.js';
+import {
+  adjudicateDecision,
+  buildDecisionRequest,
+  validateDecisionResponse,
+  type DecisionOutcome,
+  type DecisionProtocolError,
+  type DecisionRequestEnvelope,
+} from './adaptive-decision-protocol.js';
 
 export const ADAPTIVE_SELECTION_LIMITS = {
   maxCandidates: 12,
@@ -34,17 +43,26 @@ export const ADAPTIVE_SELECTION_LIMITS = {
   firstByteTimeoutMs: 10_000,
   /** Bounded completion window once the endpoint has started answering. */
   generationTimeoutMs: 10_000,
-  maxOutputTokens: 512,
+  /** Bounded outbound payload (current instruction + candidate snapshot + conditions). */
+  maxPayloadChars: 20_000,
+  /** Bounded response body; a Decisions answer table is a few KB at most. */
+  maxResponseBytes: 65_536,
+  /** Bounded provider usage projection is unnecessary: only token counts are kept. */
 } as const;
 
 export type AdaptiveSelectionModel = {
-  readonly provider: string;
+  /** Exact Decisions endpoint (for example https://openrouter.ai/api/alpha/decisions). */
+  readonly endpoint: string;
   readonly model: string;
   readonly apiKeyEnv: string;
-  /** Exact request URL when the caller already knows it (lab). */
-  readonly url?: string;
-  /** Outbound allowlist prefix when only a base URL is known (production). */
-  readonly baseUrl?: string;
+  /** Optional provider allowlist label (for example Respan). */
+  readonly provider?: string;
+  /**
+   * Frozen exact response-model allowlist for the acceptance batch. When set,
+   * a response whose `model` is not one of these strings is rejected — a
+   * same-prefix slug with an unregistered date does not pass.
+   */
+  readonly allowedResponseModels?: readonly string[];
 };
 
 export type AdaptiveCandidateSource = ActivatedPrinciple;
@@ -60,7 +78,6 @@ export interface BoundedSelectionInput {
   readonly payload: {
     readonly currentInstruction: string;
     readonly priorMessages: readonly {readonly text: string; readonly source: string; readonly index: number}[];
-    /** `digest` is precomputed locally and only copied by the model. */
     readonly candidates: readonly {readonly ref: string; readonly text: string; readonly digest: string}[];
   };
   readonly entries: readonly AdaptiveCandidate[];
@@ -71,31 +88,22 @@ export type BuildBoundedInputResult =
   | {readonly ok: true; readonly input: BoundedSelectionInput}
   | {readonly ok: false; readonly reason: string};
 
-export type SelectionShape =
-  | {readonly status: 'selected'; readonly id: string; readonly digest: string}
-  | {readonly status: 'none_applicable' | 'uncertain'; readonly id: null; readonly digest: null};
-
-export type ValidateSelectionResult =
-  | {
-      readonly ok: true;
-      readonly selected: AdaptiveCandidate | null;
-      readonly outcome: 'selected' | 'no_increment' | 'uncertain';
-    }
-  | {readonly ok: false; readonly reason: string; readonly refValid: boolean | null; readonly digestValid: boolean | null};
-
 export type AdaptiveFailureCode =
-  | 'SELECTION_REFERENCE_INVALID'
-  | 'SELECTION_DIGEST_INVALID'
   | 'SELECTION_OUTPUT_INVALID'
-  /** The selector's schema ref is not in the adapter registry (configuration fault). */
-  | 'SELECTION_SCHEMA_UNAVAILABLE'
-  | 'SELECTION_AMBIGUOUS'
-  | 'SELECTION_EXPIRED'
+  | DecisionProtocolError
   /** The host's outer hook window ended Adaptive; distinct from the model's own timeout. */
   | 'TURN_DEADLINE_EXCEEDED'
+  /** The request's own short admission/completion window ended. */
+  | 'SELECTION_EXPIRED'
+  /**
+   * Configuration fault: the credential named by `apiKeyEnv` is absent at send
+   * time. Deliberately NOT in the TRANSPORT_* family — an operator must be able
+   * to tell "we never had a key" apart from "the network broke".
+   */
+  | 'DECISION_CREDENTIAL_MISSING'
   | 'TRANSPORT_NOT_SENT'
   | 'TRANSPORT_FAILED'
-  | 'INPUT_REFUSED';
+  | 'TRANSPORT_HTTP_ERROR';
 
 export type AdaptiveSelectionStage =
   | 'idle'
@@ -108,32 +116,38 @@ export type AdaptiveSelectionStage =
 export interface AdaptiveSelectionDiagnostics {
   stage: AdaptiveSelectionStage;
   readonly admissionDeadlineAt: number;
+  /** Epoch ms at which the single POST was actually issued (null = never sent). */
+  requestSentAt: number | null;
   completionDeadlineAt: number | null;
   firstByteAt: number | null;
   generationEndedAt: number | null;
+  /** Epoch ms at which the WHOLE answer table passed validation (null = never). */
+  validatedAt: number | null;
   cancelledAt: number | null;
   httpStatus: number | null;
-  /** Server-reported finish reason, or 'unknown' when the transport does not expose one. */
+  /** `decisions` once a valid answer table was read; `unknown` otherwise. */
   finishReason: string;
+  /** Exact response model observed (null until a body was parsed). */
+  modelObserved: string | null;
+  /** Response provider label observed; null both before parsing and when absent. */
+  providerObserved: string | null;
   usage: {inputTokens: number | null; outputTokens: number | null} | null;
+  /**
+   * Local adjudication of the independent condition scores. Bounded: question
+   * ids are `c1..cN` plus `insufficient_context`, never prompt text.
+   */
+  decision: {
+    status: string;
+    ref: string | null;
+    reason: string;
+    scores: Readonly<Record<string, number>>;
+  } | null;
   failures: AdaptiveFailureCode[];
 }
 
 export function hash(value: string): string {
   return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }
-
-export const ADAPTIVE_SELECTOR_SYSTEM = [
-  '你是 Principles Disciple 的原则选择器。只判断：当前用户输入是否需要追加一条已批准原则。',
-  '候选只在「当前输入明确要求交付、实现、修复、审查或验证，且这条原则会改变你这一步的做法」时才算适用。',
-  '通用礼貌、闲聊、元问题、与当前任务无关的原则一律不选。',
-  '只能返回下面三种 JSON 之一，不要 Markdown、不要解释：',
-  '{"status":"selected","id":"候选引用（例如 c1）","digest":"该候选随附的 digest 原样复制；不要计算或改写","reason":"一句话理由"}',
-  '{"status":"none_applicable","id":null,"digest":null,"reason":"一句话理由"}',
-  '{"status":"uncertain","id":null,"digest":null,"reason":"一句话理由"}',
-  'digest 由本地预计算并随候选下发；必须逐字符原样返回所选候选的 digest。',
-  '最多只能选一条。',
-].join('\n');
 
 function boundText(value: string, max: number): string {
   const text = value.replace(/\s+/gu, ' ').trim();
@@ -166,8 +180,9 @@ export function buildBoundedSelectionInput(input: {
     entries.push({
       ref: `c${entries.length + 1}`,
       text: candidateText,
-      // Digest the body exactly as it goes on the wire, so the model can copy it
-      // and anyone can recompute it from the request it actually received.
+      // The digest stays part of the frozen candidate snapshot even though the
+      // Decisions protocol scores question ids instead of asking for a ref: it
+      // lets a later reader recompute exactly what was sent.
       digest: hash(candidateText),
       principle,
     });
@@ -180,7 +195,6 @@ export function buildBoundedSelectionInput(input: {
       payload: {
         currentInstruction,
         priorMessages: boundedPrior,
-        // The digest is part of the outbound contract: the model copies it.
         candidates: entries.map((entry) => ({ref: entry.ref, text: entry.text, digest: entry.digest})),
       },
       entries,
@@ -194,102 +208,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function parseSelectionShape(value: unknown):
-  | {readonly ok: true; readonly selection: SelectionShape}
-  | {readonly ok: false; readonly reason: string} {
-  if (!isRecord(value)) {
-    return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
-  }
-  const {status} = value;
-  const {id} = value;
-  const {digest} = value;
-  if (status === 'selected') {
-    if (typeof id !== 'string' || !id) return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
-    if (typeof digest !== 'string' || !digest) return {ok: false, reason: 'SELECTION_DIGEST_INVALID'};
-    return {ok: true, selection: {status: 'selected', id, digest}};
-  }
-  if (status === 'none_applicable' || status === 'uncertain') {
-    if (id !== null && id !== undefined) return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
-    if (digest !== null && digest !== undefined) return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
-    return {ok: true, selection: {status, id: null, digest: null}};
-  }
-  return {ok: false, reason: 'SELECTION_OUTPUT_INVALID'};
-}
-
-export function validateSelectionResult(
-  value: unknown,
-  entries: readonly AdaptiveCandidate[],
-): ValidateSelectionResult {
-  const parsed = parseSelectionShape(value);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      reason: parsed.reason,
-      refValid: null,
-      digestValid: null,
-    };
-  }
-  const {selection} = parsed;
-  if (selection.status !== 'selected') {
-    return {
-      ok: true,
-      selected: null,
-      outcome: selection.status === 'uncertain' ? 'uncertain' : 'no_increment',
-    };
-  }
-  const entry = entries.find((candidate) => candidate.ref === selection.id);
-  if (!entry) {
-    return {ok: false, reason: 'SELECTION_REFERENCE_INVALID', refValid: false, digestValid: null};
-  }
-  // Two independent computations of the wire-body digest must agree: the value
-  // frozen into the candidate table and a fresh hash of the frozen body.
-  if (selection.digest !== entry.digest || selection.digest !== hash(entry.text)) {
-    return {ok: false, reason: 'SELECTION_DIGEST_INVALID', refValid: true, digestValid: false};
-  }
-  if (entries.some((candidate) => candidate !== entry && candidate.principle.principleId === entry.principle.principleId)) {
-    return {ok: false, reason: 'SELECTION_AMBIGUOUS', refValid: true, digestValid: true};
-  }
-  return {ok: true, selected: entry, outcome: 'selected'};
-}
-
-export function localFailureCode(reason: string): AdaptiveFailureCode {
-  if (reason === 'SELECTION_OUTPUT_INVALID') return 'SELECTION_OUTPUT_INVALID';
-  if (reason === 'SELECTION_DIGEST_INVALID') return 'SELECTION_DIGEST_INVALID';
-  if (reason === 'SELECTION_REFERENCE_INVALID') return 'SELECTION_REFERENCE_INVALID';
-  if (reason === 'SELECTION_AMBIGUOUS') return 'SELECTION_AMBIGUOUS';
-  if (reason === 'SELECTION_EXPIRED') return 'SELECTION_EXPIRED';
-  return 'SELECTION_OUTPUT_INVALID';
-}
-
-export interface SingleModelSelectorOptions {
-  readonly PiAiRuntimeAdapterImpl?: typeof PiAiRuntimeAdapter;
-  readonly fetchImpl?: typeof fetch;
-  readonly now?: () => number;
-  /** Absolute deadline for the first byte of the model response. */
-  readonly admissionDeadlineAt: number;
-  readonly generationTimeoutMs?: number;
-  readonly model: AdaptiveSelectionModel;
-  readonly maxTokens?: number;
-  readonly signal?: AbortSignal;
-  /** Absolute host deadline. Reaching it is NOT the model's generation timeout. */
-  readonly outerDeadlineAt?: number;
-}
-
-export interface SingleModelSelector {
-  readonly select: (input: BoundedSelectionInput) => Promise<unknown>;
-  readonly report: () => {
-    readonly sends: number;
-    readonly status: 'not_sent' | 'sent' | 'failed';
-    readonly failure: AdaptiveFailureCode | null;
-    readonly diagnostics: AdaptiveSelectionDiagnostics;
-  };
-}
-
-interface FinishMetadata {
-  finishReason: string;
-  usage: {inputTokens: number | null; outputTokens: number | null} | null;
-}
-
 function outerDeadlineReached(
   now: () => number,
   outerDeadlineAt: number | undefined,
@@ -300,84 +218,142 @@ function outerDeadlineReached(
   return outerDeadlineAt !== undefined && (signal?.aborted === true || now() >= outerDeadlineAt);
 }
 
-function emptyDiagnostics(admissionDeadlineAt: number): AdaptiveSelectionDiagnostics {
+interface EmptyDiagnostics {
+  stage: AdaptiveSelectionStage;
+  admissionDeadlineAt: number;
+  /** Epoch ms at which the single POST was actually issued (null = never sent). */
+  requestSentAt: number | null;
+  completionDeadlineAt: number | null;
+  firstByteAt: number | null;
+  generationEndedAt: number | null;
+  /** Epoch ms at which the WHOLE answer table passed validation (null = never). */
+  validatedAt: number | null;
+  cancelledAt: number | null;
+  httpStatus: number | null;
+  finishReason: string;
+  modelObserved: string | null;
+  providerObserved: string | null;
+  usage: {inputTokens: number | null; outputTokens: number | null} | null;
+  /**
+   * Local adjudication of the independent condition scores. Bounded: question
+   * ids are `c1..cN` plus `insufficient_context`, never prompt text.
+   */
+  decision: {
+    status: string;
+    ref: string | null;
+    reason: string;
+    scores: Readonly<Record<string, number>>;
+  } | null;
+  failures: AdaptiveFailureCode[];
+}
+
+function emptyDiagnostics(admissionDeadlineAt: number): EmptyDiagnostics {
   return {
     stage: 'idle',
     admissionDeadlineAt,
+    requestSentAt: null,
     completionDeadlineAt: null,
     firstByteAt: null,
     generationEndedAt: null,
+    validatedAt: null,
     cancelledAt: null,
     httpStatus: null,
     finishReason: 'unknown',
+    modelObserved: null,
+    providerObserved: null,
     usage: null,
+    decision: null,
     failures: [],
   };
 }
 
-function parseFinishMetadata(raw: string): FinishMetadata {
-  const result: FinishMetadata = {finishReason: 'unknown', usage: null};
-  const absorb = (parsed: unknown): void => {
-    if (!isRecord(parsed)) return;
-    const {choices} = parsed;
-    if (Array.isArray(choices) && choices.length > 0) {
-      const [first] = choices;
-      if (isRecord(first)) {
-        const finish = first.finish_reason;
-        if (typeof finish === 'string' && finish) result.finishReason = finish;
-      }
-    }
-    const {usage} = parsed;
-    if (isRecord(usage)) {
-      const input = usage.prompt_tokens ?? usage.input_tokens;
-      const output = usage.completion_tokens ?? usage.output_tokens;
-      result.usage = {
-        inputTokens: typeof input === 'number' ? input : null,
-        outputTokens: typeof output === 'number' ? output : null,
-      };
-    }
+function projectUsage(value: unknown): {inputTokens: number | null; outputTokens: number | null} | null {
+  if (!isRecord(value)) return null;
+  const input = value.input_tokens ?? value.prompt_tokens;
+  const output = value.output_tokens ?? value.completion_tokens;
+  return {
+    inputTokens: typeof input === 'number' && Number.isFinite(input) ? input : null,
+    outputTokens: typeof output === 'number' && Number.isFinite(output) ? output : null,
   };
-  const trimmed = raw.trim();
-  if (!trimmed) return result;
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      absorb(JSON.parse(trimmed));
-      return result;
-    } catch {
-      return result;
-    }
-  }
-  for (const line of trimmed.split(/\r?\n/u)) {
-    const payload = line.startsWith('data:') ? line.slice(5).trim() : '';
-    if (!payload || payload === '[DONE]') continue;
-    try {
-      absorb(JSON.parse(payload));
-    } catch {
-      // Ignore non-JSON keep-alives; diagnostics stay 'unknown' rather than guessing.
-    }
-  }
-  return result;
 }
 
-export function createSingleModelSelector(options: SingleModelSelectorOptions): SingleModelSelector {
+async function readBoundedBody(response: Response, maxBytes: number, controller: AbortController): Promise<string> {
+  if (!response.body) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+      controller.abort(new Error('RESPONSE_TOO_LARGE'));
+      throw new Error('SELECTION_OUTPUT_INVALID');
+    }
+    return text;
+  }
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      bytes += part.value.byteLength;
+      if (bytes > maxBytes) {
+        controller.abort(new Error('RESPONSE_TOO_LARGE'));
+        throw new Error('SELECTION_OUTPUT_INVALID');
+      }
+      chunks.push(Buffer.from(part.value));
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export interface DecisionSelectorOptions {
+  readonly fetchImpl?: typeof fetch;
+  readonly now?: () => number;
+  /** Absolute deadline for the first byte of the model response. */
+  readonly admissionDeadlineAt: number;
+  readonly generationTimeoutMs?: number;
+  readonly model: AdaptiveSelectionModel;
+  readonly signal?: AbortSignal;
+  /** Absolute host deadline. Reaching it is NOT the model's generation timeout. */
+  readonly outerDeadlineAt?: number;
+}
+
+export interface DecisionSelectorInput {
+  readonly body: DecisionRequestEnvelope;
+  readonly questionIds: readonly string[];
+  readonly candidates: readonly AdaptiveCandidate[];
+}
+
+export interface DecisionSelector {
+  readonly select: (input: DecisionSelectorInput) => Promise<DecisionOutcome>;
+  readonly report: () => {
+    readonly sends: number;
+    readonly status: 'not_sent' | 'sent' | 'failed';
+    readonly failure: AdaptiveFailureCode | null;
+    readonly diagnostics: AdaptiveSelectionDiagnostics;
+  };
+}
+
+/**
+ * One Decisions POST per turn. Every failure is classified at the transport
+ * edge; the caller never sees provider text, headers or credentials.
+ */
+export function createDecisionSelector(options: DecisionSelectorOptions): DecisionSelector {
   const now = options.now ?? Date.now;
-  const Adapter = options.PiAiRuntimeAdapterImpl ?? PiAiRuntimeAdapter;
   const generationTimeoutMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
-  const maxTokens = options.maxTokens ?? ADAPTIVE_SELECTION_LIMITS.maxOutputTokens;
   const diagnostics = emptyDiagnostics(options.admissionDeadlineAt);
   let sends = 0;
   let status: 'not_sent' | 'sent' | 'failed' = 'not_sent';
   let failure: AdaptiveFailureCode | null = null;
-  let finishMetadata: Promise<FinishMetadata> = Promise.resolve({finishReason: 'unknown', usage: null});
 
-  const fail: (code: AdaptiveFailureCode) => never = (code) => {
+  const fail = (code: AdaptiveFailureCode): never => {
     failure = code;
     status = 'failed';
     diagnostics.failures.push(code);
     throw new Error(code);
   };
 
-  const selector = async (input: BoundedSelectionInput): Promise<unknown> => {
+  const selector = async (input: DecisionSelectorInput): Promise<DecisionOutcome> => {
     if (sends > 0) fail('TRANSPORT_NOT_SENT');
     if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
       diagnostics.cancelledAt = now();
@@ -387,168 +363,151 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
       diagnostics.cancelledAt = now();
       fail('SELECTION_EXPIRED');
     }
+    const apiKey = process.env[options.model.apiKeyEnv];
+    if (!apiKey) fail('DECISION_CREDENTIAL_MISSING');
+
     const remainingAdmission = Math.max(1, options.admissionDeadlineAt - now());
-    const ttfbController = new AbortController();
-    const ttfbTimer = setTimeout(() => ttfbController.abort(new Error('ADMISSION_DEADLINE')), remainingAdmission);
-    ttfbTimer.unref?.();
-    let firstByteAt: number | null = null;
-    let completionDeadlineAt: number | null = null;
+    const admissionController = new AbortController();
+    const admissionTimer = setTimeout(
+      () => admissionController.abort(new Error('ADMISSION_DEADLINE')),
+      remainingAdmission,
+    );
+    admissionTimer.unref?.();
+    // The completion window is a REAL cancellation, not a post-hoc comparison:
+    // a response that starts but never finishes must stop at its own deadline.
+    const completionController = new AbortController();
+    let completionTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const guardedFetch: typeof fetch = async (resource, init) => {
-      const url = resource instanceof Request ? resource.url : String(resource);
-      const requestInit = init ?? {};
-      if (options.model.url) {
-        if (url !== options.model.url) fail('TRANSPORT_NOT_SENT');
-      } else if (options.model.baseUrl) {
-        if (!url.startsWith(options.model.baseUrl)) fail('TRANSPORT_NOT_SENT');
-      } else if (!url.startsWith('https://')) {
-        fail('TRANSPORT_NOT_SENT');
-      }
-      let body: Record<string, unknown> | null;
+    sends += 1;
+    status = 'sent';
+    diagnostics.stage = 'admission';
+
+    const sendRequest = async (): Promise<Response> => {
       try {
-        const parsed: unknown = typeof requestInit.body === 'string' ? JSON.parse(requestInit.body) : null;
-        body = isRecord(parsed) ? parsed : null;
+        const signal = AbortSignal.any([
+          ...(options.signal ? [options.signal] : []),
+          admissionController.signal,
+          completionController.signal,
+        ]);
+        diagnostics.requestSentAt = now();
+        return await (options.fetchImpl ?? fetch)(options.model.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(input.body),
+          signal,
+          redirect: 'error',
+        });
       } catch {
-        body = null;
-      }
-      if (!body || body.model !== options.model.model) fail('TRANSPORT_NOT_SENT');
-      if (body.max_tokens !== maxTokens) fail('TRANSPORT_NOT_SENT');
-      const apiKey = process.env[options.model.apiKeyEnv];
-      if (!apiKey) fail('TRANSPORT_NOT_SENT');
-
-      sends += 1;
-      status = 'sent';
-      diagnostics.stage = 'admission';
-      const combined = AbortSignal.any([
-        ...(requestInit.signal ? [requestInit.signal] : []),
-        ttfbController.signal,
-        ...(options.signal ? [options.signal] : []),
-      ]);
-      let response: Response;
-      try {
-        response = await (options.fetchImpl ?? fetch)(url, {...requestInit, signal: combined, redirect: 'error'});
-      } catch (error) {
         diagnostics.cancelledAt = now();
         diagnostics.stage = 'admission';
-        fail(
+        return fail(
           outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
             ? 'TURN_DEADLINE_EXCEEDED'
-            : ttfbController.signal.aborted ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED',
+            : admissionController.signal.aborted ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED',
         );
-        throw error;
+      } finally {
+        clearTimeout(admissionTimer);
       }
-      // First byte is here: stop the admission clock, start the completion window.
-      firstByteAt = now();
-      diagnostics.firstByteAt = firstByteAt;
-      diagnostics.httpStatus = response.status;
-      clearTimeout(ttfbTimer);
-      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
-        diagnostics.cancelledAt = firstByteAt;
-        fail('TURN_DEADLINE_EXCEEDED');
-      }
-      if (firstByteAt >= options.admissionDeadlineAt) {
-        diagnostics.cancelledAt = firstByteAt;
-        fail('SELECTION_EXPIRED');
-      }
-      // Headers arriving is not completion: the generation window may never
-      // extend past the host deadline.
-      completionDeadlineAt = options.outerDeadlineAt === undefined
-        ? firstByteAt + generationTimeoutMs
-        : Math.min(firstByteAt + generationTimeoutMs, options.outerDeadlineAt);
-      diagnostics.completionDeadlineAt = completionDeadlineAt;
-      diagnostics.stage = 'generation';
-      try {
-        const clone = response.clone();
-        finishMetadata = clone
-          .text()
-          .then((raw) => parseFinishMetadata(raw))
-          .catch(() => ({finishReason: 'unknown', usage: null}));
-      } catch {
-        finishMetadata = Promise.resolve({finishReason: 'unknown', usage: null});
-      }
-      return response;
     };
 
+    const response = await sendRequest();
+
+    const firstByteAt = now();
+    diagnostics.firstByteAt = firstByteAt;
+    diagnostics.httpStatus = response.status;
+    if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
+      diagnostics.cancelledAt = firstByteAt;
+      fail('TURN_DEADLINE_EXCEEDED');
+    }
+    if (firstByteAt >= options.admissionDeadlineAt) {
+      diagnostics.cancelledAt = firstByteAt;
+      fail('SELECTION_EXPIRED');
+    }
+    const completionDeadlineAt = options.outerDeadlineAt === undefined
+      ? firstByteAt + generationTimeoutMs
+      : Math.min(firstByteAt + generationTimeoutMs, options.outerDeadlineAt);
+    diagnostics.completionDeadlineAt = completionDeadlineAt;
+    diagnostics.stage = 'generation';
+    completionTimer = setTimeout(
+      () => completionController.abort(new Error('GENERATION_DEADLINE')),
+      Math.max(1, completionDeadlineAt - now()),
+    );
+    completionTimer.unref?.();
+
     try {
-      const adapter = new Adapter({
-        provider: options.model.provider,
-        model: options.model.model,
-        ...(options.model.baseUrl ? {baseUrl: options.model.baseUrl} : {}),
-        apiKeyEnv: options.model.apiKeyEnv,
-        maxRetries: 0,
-        maxRepairAttempts: 0,
-        outputPathStrategy: 'free_form_only',
-        reasoning: 'low',
-        timeoutMs: remainingAdmission + generationTimeoutMs,
-        maxTokens,
-        fetch: guardedFetch,
-        eventEmitter: new StoreEventEmitter(),
-      });
-      let run: {readonly runId: string};
-      try {
-        run = await adapter.startRun({
-          agentSpec: {agentId: 'adaptive-principle-selector', schemaVersion: 'current'},
-          inputPayload: input.payload,
-          contextItems: [],
-          // S5: the last caller that reached the adapter without a schema ref.
-          // `adaptive-selection-output` is registered in OUTPUT_SCHEMA_REGISTRY
-          // (principles-core), so the structural shape is validated by the
-          // shared path instead of relying on the host guard alone.
-          // Scope note: this is the ONLY change here. The admission/completion
-          // deadline semantics are owned by PRI-1170 (merged as 030d0035,
-          // #2513); they are intentionally untouched to avoid a second timing
-          // system in this file.
-          outputSchemaRef: 'adaptive-selection-output',
-          timeoutMs: remainingAdmission + generationTimeoutMs,
-          maxTokens,
-          systemPrompt: ADAPTIVE_SELECTOR_SYSTEM,
-        });
-      } catch (error) {
-        // S5: now that the adapter validates the selection shape, a
-        // structurally incomplete answer (e.g. `selected` without a digest)
-        // is rejected there — before the host guard could label it
-        // SELECTION_DIGEST_INVALID / SELECTION_REFERENCE_INVALID. Map it to
-        // the host contract code so the reason stays diagnosable instead of
-        // degrading to TRANSPORT_FAILED in runAdaptiveSelection (rc-9).
-        if (error instanceof PDRuntimeError && error.category === 'output_invalid') {
-          // An unregistered schema ref is a deployment fault, not a malformed
-          // answer. Keeping the codes distinct stops operators from debugging
-          // the model when the registry is the actual problem.
-          fail(
-            error.details?.parseFailureReason === 'unknown_output_schema_ref'
-              ? 'SELECTION_SCHEMA_UNAVAILABLE'
-              : 'SELECTION_OUTPUT_INVALID',
+      if (!response.ok) {
+        diagnostics.cancelledAt = now();
+        fail('TRANSPORT_HTTP_ERROR');
+      }
+      const readBody = async (): Promise<string> => {
+        try {
+          return await readBoundedBody(response, ADAPTIVE_SELECTION_LIMITS.maxResponseBytes, completionController);
+        } catch {
+          diagnostics.cancelledAt = now();
+          return fail(
+            outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
+              ? 'TURN_DEADLINE_EXCEEDED'
+              : completionController.signal.aborted ? 'SELECTION_EXPIRED' : 'SELECTION_OUTPUT_INVALID',
           );
         }
-        throw error;
+      };
+      const raw = await readBody();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return fail('SELECTION_OUTPUT_INVALID');
       }
-      const output = await adapter.fetchOutput(run.runId);
       const endedAt = now();
       diagnostics.generationEndedAt = endedAt;
       if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
         diagnostics.cancelledAt = endedAt;
-        fail('TURN_DEADLINE_EXCEEDED');
+        return fail('TURN_DEADLINE_EXCEEDED');
       }
-      if (!output) fail('SELECTION_OUTPUT_INVALID');
-      if (completionDeadlineAt !== null && endedAt > completionDeadlineAt) {
+      if (endedAt > completionDeadlineAt) {
         diagnostics.cancelledAt = endedAt;
-        fail('SELECTION_EXPIRED');
+        return fail('SELECTION_EXPIRED');
       }
-      const metadata = await finishMetadata;
-      diagnostics.finishReason = metadata.finishReason;
-      diagnostics.usage = metadata.usage;
+      diagnostics.usage = projectUsage(isRecord(parsed) ? parsed.usage : undefined);
+      // Record what the endpoint actually claimed BEFORE validating it, so the
+      // acceptance report can state observed model/provider instead of
+      // inferring a route from the request.
+      if (isRecord(parsed)) {
+        diagnostics.modelObserved = typeof parsed.model === 'string' ? parsed.model : null;
+        diagnostics.providerObserved = typeof parsed.provider === 'string' ? parsed.provider : null;
+      }
       diagnostics.stage = 'validate';
-      return output.payload;
-    } catch (error) {
-      // An abort can surface while the adapter reads the body (the fetch call
-      // itself already resolved), so classify it here, at the transport edge.
-      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
-        diagnostics.cancelledAt = now();
-        fail('TURN_DEADLINE_EXCEEDED');
+      const validated = validateDecisionResponse(parsed, {
+        model: options.model.model,
+        questionIds: input.questionIds,
+        ...(options.model.provider !== undefined ? {provider: options.model.provider} : {}),
+        ...(options.model.allowedResponseModels !== undefined
+          ? {allowedResponseModels: options.model.allowedResponseModels}
+          : {}),
+      });
+      if (!validated.ok) return fail(validated.reason);
+      // The envelope is measured to a VALIDATED table, not to the last byte:
+      // a table that only parses after the completion deadline is expired even
+      // though the body arrived, so the caller never applies a late decision.
+      diagnostics.validatedAt = now();
+      if (diagnostics.validatedAt > completionDeadlineAt) {
+        diagnostics.cancelledAt = diagnostics.validatedAt;
+        return fail('SELECTION_EXPIRED');
       }
-      throw error;
+      diagnostics.finishReason = 'decisions';
+      const outcome = adjudicateDecision(validated.scores, input.candidates);
+      diagnostics.decision = {
+        status: outcome.status,
+        ref: outcome.ref,
+        reason: outcome.reason,
+        scores: validated.scores,
+      };
+      return outcome;
     } finally {
-      clearTimeout(ttfbTimer);
+      if (completionTimer) clearTimeout(completionTimer);
     }
   };
 
@@ -565,13 +524,11 @@ export interface RunAdaptiveSelectionOptions {
   readonly admissionDeadlineAt: number;
   readonly model: AdaptiveSelectionModel;
   readonly generationTimeoutMs?: number;
-  readonly maxTokens?: number;
   readonly signal?: AbortSignal;
   /** Absolute host deadline shared by selection, revalidation and packing. */
   readonly outerDeadlineAt?: number;
   readonly now?: () => number;
   readonly fetchImpl?: typeof fetch;
-  readonly PiAiRuntimeAdapterImpl?: typeof PiAiRuntimeAdapter;
 }
 
 export interface AdaptiveSelectionOutcome {
@@ -585,8 +542,8 @@ export interface AdaptiveSelectionOutcome {
 
 /**
  * Minimal host-facing selection step: read the current frozen candidates,
- * make at most one bounded model call, verify ref+digest, then independently
- * revalidate the chosen principle's content/revision/authorization.
+ * make at most one bounded Decisions request, adjudicate locally, then
+ * independently revalidate the chosen principle's content/revision/authorization.
  */
 export async function runAdaptiveSelection(
   options: RunAdaptiveSelectionOptions,
@@ -609,24 +566,33 @@ export async function runAdaptiveSelection(
     candidates: read.principles,
   });
   if (!built.ok) return unavailable(built.reason, 'idle');
+  const request = buildDecisionRequest({
+    model: options.model.model,
+    ...(options.model.provider !== undefined ? {provider: options.model.provider} : {}),
+    currentInstruction: built.input.payload.currentInstruction,
+    priorMessages: built.input.payload.priorMessages,
+    candidates: built.input.payload.candidates,
+    maxPayloadChars: ADAPTIVE_SELECTION_LIMITS.maxPayloadChars,
+  });
+  if (!request.ok) return unavailable(request.reason, 'idle');
 
-  const selector = createSingleModelSelector({
+  const selector = createDecisionSelector({
     admissionDeadlineAt: options.admissionDeadlineAt,
     model: options.model,
     ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
-    ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
     ...(options.signal ? {signal: options.signal} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
-    ...(options.PiAiRuntimeAdapterImpl
-      ? {PiAiRuntimeAdapterImpl: options.PiAiRuntimeAdapterImpl}
-      : {}),
   });
 
-  let payload: unknown;
+  let decision: DecisionOutcome;
   try {
-    payload = await selector.select(built.input);
+    decision = await selector.select({
+      body: request.body,
+      questionIds: request.questionIds,
+      candidates: built.input.entries,
+    });
   } catch {
     const report = selector.report();
     // The selector owns the failing stage and the failure code; do not
@@ -641,18 +607,24 @@ export async function runAdaptiveSelection(
   const {diagnostics} = report;
   const {sends} = report;
 
-  const validated = validateSelectionResult(payload, built.input.entries);
-  if (!validated.ok) {
-    diagnostics.stage = 'validate';
-    diagnostics.failures.push(localFailureCode(validated.reason));
-    return {status: 'none', target: null, reason: validated.reason, sends, diagnostics};
-  }
-  if (!validated.selected) {
+  if (decision.status !== 'selected') {
     diagnostics.stage = 'done';
-    return {status: 'none', target: null, reason: validated.outcome, sends, diagnostics};
+    return {
+      status: 'none',
+      target: null,
+      reason: decision.status === 'uncertain' ? 'uncertain' : 'no_increment',
+      sends,
+      diagnostics,
+    };
+  }
+  const selected = built.input.entries.find((entry) => entry.ref === decision.ref);
+  if (!selected) {
+    diagnostics.stage = 'validate';
+    diagnostics.failures.push('SELECTION_OUTPUT_INVALID');
+    return {status: 'none', target: null, reason: 'SELECTION_OUTPUT_INVALID', sends, diagnostics};
   }
 
-  const target = validated.selected.principle;
+  const target = selected.principle;
   diagnostics.stage = 'revalidate';
   const now = options.now ?? Date.now;
   const revalidationBudgetMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
@@ -680,4 +652,3 @@ export async function runAdaptiveSelection(
   diagnostics.stage = 'done';
   return {status: 'selected', target, reason: 'selected', sends, diagnostics};
 }
-
