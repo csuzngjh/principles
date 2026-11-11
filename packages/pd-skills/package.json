@@ -1,6 +1,5 @@
 {
   "name": "@principles/pd-skills",
-  "version": "0.1.0",
   "description": "PD 内置技能单一源与宿主渲染器",
   "private": true,
   "type": "module",
