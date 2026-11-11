@@ -332,7 +332,14 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
       { fetchImpl: transport.fetchImpl },
     );
     expect(transport.calls()).toBe(0);
-    expect(result.stderr.join('')).toContain('adaptive_activation_needs_setup');
+    // The operator-visible sentence for a configuration fault names the missing
+    // credential and never borrows transport vocabulary.
+    const stderr = result.stderr.join('');
+    expect(stderr).toContain(
+      `[PD] status=degraded reason=adaptive_activation_needs_setup:Environment variable '${API_KEY_ENV}' is not set or empty`,
+    );
+    expect(stderr).not.toContain('TRANSPORT_FAILED');
+    expect(stderr).not.toContain('TRANSPORT_NOT_SENT');
     expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
   });
 

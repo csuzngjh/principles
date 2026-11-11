@@ -95,6 +95,12 @@ export type AdaptiveFailureCode =
   | 'TURN_DEADLINE_EXCEEDED'
   /** The request's own short admission/completion window ended. */
   | 'SELECTION_EXPIRED'
+  /**
+   * Configuration fault: the credential named by `apiKeyEnv` is absent at send
+   * time. Deliberately NOT in the TRANSPORT_* family — an operator must be able
+   * to tell "we never had a key" apart from "the network broke".
+   */
+  | 'DECISION_CREDENTIAL_MISSING'
   | 'TRANSPORT_NOT_SENT'
   | 'TRANSPORT_FAILED'
   | 'TRANSPORT_HTTP_ERROR';
@@ -358,7 +364,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       fail('SELECTION_EXPIRED');
     }
     const apiKey = process.env[options.model.apiKeyEnv];
-    if (!apiKey) fail('TRANSPORT_NOT_SENT');
+    if (!apiKey) fail('DECISION_CREDENTIAL_MISSING');
 
     const remainingAdmission = Math.max(1, options.admissionDeadlineAt - now());
     const admissionController = new AbortController();

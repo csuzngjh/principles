@@ -203,4 +203,41 @@ describe('configuration faults stay distinguishable from transport failure', () 
     expect(offline.report().failure).toBe('TRANSPORT_FAILED');
     expect(offline.report().sends).toBe(1);
   });
+
+  it('reports a credential that vanished before send as a configuration code, with zero requests', async () => {
+    // The provider factory normally refuses earlier with `needs_setup`. This
+    // guards the narrower race: the key disappears between resolution and send.
+    // A missing credential is a configuration fault, so it must NOT be filed
+    // under the TRANSPORT_* family.
+    const send = vi.fn(respondWith({model, provider: 'Respan', answers: {}}));
+    const s = selector(send as unknown as typeof fetch);
+
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('DECISION_CREDENTIAL_MISSING');
+    const report = s.report();
+    expect(report.failure).toBe('DECISION_CREDENTIAL_MISSING');
+    expect(report.status).toBe('failed');
+    expect(report.sends).toBe(0);
+    expect(report.diagnostics.failures).toEqual(['DECISION_CREDENTIAL_MISSING']);
+    expect(send).not.toHaveBeenCalled();
+    expect(report.failure).not.toBe('TRANSPORT_FAILED');
+    expect(report.failure).not.toBe('TRANSPORT_NOT_SENT');
+  });
+
+  it('keeps TRANSPORT_NOT_SENT for the repeat-call guard, so neither code can absorb the other', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const s = selector(respondWith({
+      model,
+      provider: 'Respan',
+      answers: {
+        candidate_c1: {type: 'noul', noul: 0.95},
+        insufficient_context: {type: 'noul', noul: 0.1},
+      },
+    }));
+
+    await s.select({body, questionIds, candidates});
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('TRANSPORT_NOT_SENT');
+    expect(s.report().failure).toBe('TRANSPORT_NOT_SENT');
+    expect(s.report().sends).toBe(1);
+    expect(s.report().failure).not.toBe('DECISION_CREDENTIAL_MISSING');
+  });
 });
