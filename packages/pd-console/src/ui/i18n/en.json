@@ -934,6 +934,8 @@
         "modifyWordingNote": "Principle modification will be available in a future version",
         "channel": "Activation Channel",
         "channelPromptReversible": "Will activate via prompt channel · Reversible",
+        "examinerEntry": "Evaluate this principle's behavioral effect",
+        "examinerEntryBlocked": "Only active principles can be evaluated (current status: {{status}}). Complete the governance decision below first.",
         "whyExists": "Why It Exists",
         "applicableScenarios": "Applicable Scenarios",
         "expectedBehavior": "Expected Behavior",
@@ -2111,6 +2113,10 @@
         "openReport": "Open report",
         "runDry": "Host dry-run",
         "requestF2": "Request F2 real-host run",
+        "f2ClosedTitle": "Not open",
+        "f2ClosedBody": "The console never auto-approves or auto-executes a real run. A real run requires an Owner-issued APPROVED Stage R authorization inside the study (bound to the frozen suite hash), and Gate 1 independent human Gold review has not passed yet.",
+        "f2ClosedNext": "Next step: complete Gate 1 independent human Gold review and the Stage R authorization first. Until then, use Host Dry-run or the offline comparison.",
+        "actionErrorNext": "Retry first. If it keeps failing, check the run ledger and preflight result below, and recreate the study from the previous page if needed.",
         "modesNote": "Offline-stub runs synchronously and validates the contract pipeline; Host dry-run executes asynchronously with ZERO model calls; F2 real-host runs require an APPROVED Stage R authorization inside this study.",
         "accepted": {
           "dryRun": "Host dry-run accepted — polling for the checklist.",
@@ -2134,8 +2140,47 @@
       "preflight": {
         "status": "Preflight status"
       },
+      "ownerSummary": {
+        "title": "Conclusion and next step",
+        "rationale": "Why",
+        "next": "Next step",
+        "conclusionUnverified": "This report failed replay verification, so its conclusion cannot justify a governance decision.",
+        "conclusionNoControlled": "This report has no controlled comparison, so it cannot tell whether the principle works.",
+        "conclusionInsufficient": "Evidence is insufficient: only {{determined}} of {{planned}} planned pairs determined a result, so the principle's effect cannot be judged yet.",
+        "conclusionNoDifference": "In the offline comparison, enabling the principle produced no visible difference.",
+        "conclusionPositive": "In the offline comparison, enabling the principle improved the endpoint by about {{value}}.",
+        "conclusionNegative": "In the offline comparison, enabling the principle reduced the endpoint by about {{value}}; check for side effects.",
+        "rationaleMode": "Execution mode: {{mode}}",
+        "rationalePairs": "Pairs: planned {{planned}}, determined {{determined}}, undetermined {{unknown}}, not applicable {{na}}",
+        "rationaleFidelity": "Treatment fidelity: context present {{present}}/{{planned}}, control contamination {{contamination}}, capacity evictions {{evictions}}",
+        "rationaleReplay": "Replay verification: {{status}}",
+        "rationaleLimitations": "The report records {{count}} limitation(s); see \u201cScope and limitations\u201d below",
+        "cannotProveTitle": "What This Cannot Prove Yet",
+        "cannotProveOffline": "Offline comparison cannot prove a behavior change in a real host environment.",
+        "cannotProveCausal": "Until independent Gold review and paired isolation evidence exist, an observed difference is not a causal conclusion.",
+        "cannotProveVerdict": "The current evidence is not sufficient for a formal effect verdict.",
+        "nextFixEvidence": "Fix the evidence first: repair undetermined pairs or the replay failure, then rerun. Do not change the principle's status while evidence is insufficient.",
+        "nextGovernance": "Take this report into Principle Governance and decide between keep, adjust, and archive."
+      },
+      "executionMode": {
+        "title": "Which execution mode produced this report",
+        "current": "This report came from: {{mode}}",
+        "modeOffline": "Offline comparison (offline-stub)",
+        "modeReal": "Real host run",
+        "modeUnknown": "Unknown execution mode",
+        "offlineNote": "The offline comparison only validates control flow and the statistics pipeline; it is not real host behavior.",
+        "realNote": "A real host run reflects real host behavior, but still has to be read together with its limitations.",
+        "unknownNote": "The report did not record an execution mode; do not infer real host behavior from it.",
+        "offlineLine": "Offline comparison: {{state}}",
+        "dryRunLine": "Host Dry-run: {{count}} run(s) (zero model calls, no behavioral conclusion)",
+        "f2Line": "F2 real host: {{count}} run(s) (not open; requires Owner approval of the Stage R authorization)",
+        "ran": "ran",
+        "notRun": "did not run"
+      },
       "report": {
         "title": "Report V2",
+        "limitationsSection": "Scope and limitations",
+        "technicalTitle": "Technical detail",
         "target": "Target",
         "endpoint": "Primary endpoint",
         "fidelity": "Treatment Fidelity",
@@ -2166,8 +2211,12 @@
       "evaluation": {
         "title": "Principle Evaluation",
         "configureCta": "Configure a study",
-        "noActive": "No active principles in this workspace — activate a principle before evaluating it.",
+        "noActive": "No principle is currently evaluable",
+        "noActiveHint": "Only principles in the active state can be evaluated. Activate a principle in Principle Governance first, then return here.",
         "loadingEvidence": "Loading production evidence…",
+        "loadingEvidenceFor": "Loading production evidence for {{principleId}}…",
+        "evidenceError": "Failed to load production evidence (target: {{principleId}}).",
+        "evidenceRetry": "Reload evidence",
         "refresh": "Refresh evidence",
         "openGovernance": "Open principle governance",
         "selectPrinciple": "Select a principle to see its production evidence.",
@@ -2223,7 +2272,10 @@
           "title": "Challenge suite"
         },
         "readiness": {
-          "title": "Host execution readiness"
+          "title": "Host execution readiness",
+          "loading": "Checking host execution requirements…",
+          "unavailable": "Host execution requirements are unavailable (this does not block creating or running an offline study).",
+          "f2Note": "F2 real runs are not open: they require Owner approval of the Stage R authorization. Available execution modes are offline comparison and Host Dry-run."
         },
         "difference": {
           "title": "Experiment vs production configuration",
@@ -2238,7 +2290,69 @@
         "run": "Offline execution failed.",
         "report": "Report generation failed.",
         "evidence": "Failed to load production evidence.",
-        "status": "Failed to load the study status."
+        "status": "Failed to load the study status.",
+        "principles": "Failed to load the principle list.",
+        "retry": "Retry"
+      },
+      "eligibility": {
+        "title": "Eligibility pre-check",
+        "checking": "Checking…",
+        "error": "The eligibility pre-check failed, so it cannot confirm whether this principle can be evaluated.",
+        "status": {
+          "ELIGIBLE": "Can be evaluated",
+          "DEGRADED": "Can be evaluated (with caveats)",
+          "BLOCKED": "Cannot be evaluated"
+        },
+        "summaryEligible": "Pre-check passed: this principle can be evaluated right now.",
+        "summaryDegraded": "A study can be created, but the caveats below affect how the result should be read.",
+        "summaryBlocked": "A study cannot be created: {{reason}}",
+        "nextStep": "Next step",
+        "createBlocked": "Pre-check did not pass; creating a study is disabled",
+        "check": {
+          "principle_exists": "Target principle",
+          "principle_status": "Principle status",
+          "production_snapshot": "Production evidence snapshot",
+          "activation_evidence": "Runtime activation evidence",
+          "rulecode_identifiability": "Intervention identifiability",
+          "experiment_configuration": "Experiment vs production configuration",
+          "suite_available": "Research suite",
+          "study_root_writable": "Study storage",
+          "experiment_mode": "Evaluation mode"
+        },
+        "reason": {
+          "principle_not_found": "This principle does not exist in the workspace.",
+          "principle_not_active": "This principle is not active, so the evaluation API does not accept it.",
+          "snapshot_unreadable": "The production evidence snapshot cannot be read, so the evaluation would have no real baseline.",
+          "activation_data_degraded": "Runtime activation data is incomplete (ACTIVATION_DATA_DEGRADED); some conclusions will be weaker.",
+          "runtime_prompt_inactive": "The principle is ledger-active but has no effective runtime injection record.",
+          "experiment_config_differs": "The experiment configuration differs from the production injection path.",
+          "intervention_not_identifiable": "The target principle's RuleCode is coupled with other principles, so it cannot be attributed on its own.",
+          "suite_unavailable": "The research suite is unavailable or failed to compile.",
+          "study_root_not_writable": "The study storage location is not writable.",
+          "experiment_mode_unsupported": "The evaluation mode is not supported.",
+          "unknown": "Unknown reason"
+        }
+      },
+      "guide": {
+        "title": "What Examiner helps you decide",
+        "what": "Given a principle that is already in effect, Examiner runs one small controlled comparison to see whether it really changes behavior.",
+        "target": "What it evaluates: one principle, plus its real evidence in this workspace (trigger records, injection status, runtime activation).",
+        "difference": "The principle page explains what the principle is; Examiner answers whether it actually works and whether it has side effects.",
+        "flowLabel": "How it works",
+        "flowEvidence": "Review production evidence",
+        "flowSelect": "Pick a principle",
+        "flowCreate": "Create a study",
+        "flowReport": "Read the report",
+        "flowDecide": "Make a governance decision",
+        "canTitle": "What it can verify",
+        "canBody": "The behavior difference between enabling and disabling the principle in an offline comparison, with a reproducible report.",
+        "cannotTitle": "What it cannot prove",
+        "cannotBody": "It is not real host behavior and does not decide for you; until Gate 1 passes, treat conclusions as decision input only.",
+        "whenTitle": "When to use it",
+        "when1": "A new principle needs evaluation",
+        "when2": "An active principle is not producing the expected effect",
+        "when3": "You suspect the principle introduces side effects",
+        "when4": "A principle was changed and needs re-evaluation"
       }
     },
     "debt": {
