@@ -51,7 +51,6 @@ function makeAdapter(profileSystemPrompt?: string) {
     provider: 'openrouter',
     model: 'anthropic/claude-sonnet-4',
     apiKeyEnv: 'TEST_API_KEY',
-    _testBackoffDelayMs: 0,
     outputPathStrategy: 'free_form_only',
     ...(profileSystemPrompt === undefined ? {} : { systemPrompt: profileSystemPrompt }),
   });

@@ -1,11 +1,17 @@
 /**
  * PRI-494 — Full-hook performance budget with ERR-088 execution proof
  *
- * PURPOSE: Verify that the complete `handleBeforeToolCall` hook path
- * (real SQLite activation → RuleHost load → VM compile/evaluate → gate
- * decision) meets the seed-MVP perf budget:
- *   - p95 < 50ms
- *   - p99 < 200ms
+ * PURPOSE: Verify that the complete PRODUCTION before_tool_call path
+ * (real SQLite activation read → RuleContext v2 assembly → VM evaluate →
+ * shared gate decision → shared-result handler) meets the perf budget:
+ *   - p95 < 500ms
+ *   - p99 < 1000ms
+ *
+ * PR-1 (RuleHost retirement): the entry point was `handleBeforeToolCall`, which
+ * has no production wiring. The measurement now drives the SAME runtime object
+ * src/index.ts assembles (`createOpenClawHostRuntime` → `dispatchBeforeToolCall`
+ * → `createProductionRuleHostGate` + `handleSharedRuleHostResult`), so the
+ * numbers reflect what the host actually pays.
  *
  * ERR-088 fix: Unlike a timing-only assertion, this test proves the rule
  * actually executed by asserting a UNIQUE block marker (`PERF_BUDGET_BLOCK`)
@@ -14,24 +20,17 @@
  * mismatch). The unique marker guarantees the rule loaded + compiled +
  * evaluated + returned a block decision.
  *
- * Test path (matches production gate.ts):
- *   handleBeforeToolCall
- *     → WorkspaceContext.getRuleHost(logger)
- *     → RuleHost.evaluateDetailed(input)
- *       → _loadActiveCodeImplementations (SQLite query + fingerprint cache)
- *       → loadRuleImplementationModule (node:vm compile)
- *       → impl.evaluate(input) (vm-bounded execution)
- *     → mergeDecisions
- *     → recordGateBlockAndReturn
- *
- * Cache behavior: after the first (cold) call, the fingerprint cache is
- * populated, so subsequent calls skip the SQLite query + VM compile and
- * only pay the evaluate cost. This reflects the steady-state production
- * hot path.
+ * Test path (matches production wiring):
+ *   createOpenClawHostRuntime().dispatchBeforeToolCall
+ *     → createProductionRuleHostGate
+ *       → buildRuleContextIfEnabled (production v2 provider)
+ *       → pi_artifacts + activation LEFT JOIN (real SQLite read)
+ *       → evaluateBatch (real node:vm child process compile + evaluate)
+ *     → handleSharedRuleHostResult
  *
  * Spec: PRI-494 acceptance criteria
  *   - "perf test must prove rules actually executed, not just timing"
- *   - "p95 < 50ms, p99 < 200ms"
+ *   - "p95 < 500ms, p99 < 1000ms" (enforced contract threshold, PRI-496)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -39,7 +38,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { buildRuleContextIfEnabled, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
+import { createOpenClawHostRuntime } from '../../src/host-runtime/openclaw-host-runtime.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 // ── Mocks (non-DB services only, matching rule-context-v2.perf.test.ts) ────
@@ -47,10 +47,21 @@ import { WorkspaceContext } from '../../src/core/workspace-context.js';
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
   trackBlock: vi.fn(),
+  trackReceiptAutoCorrect: vi.fn(),
+  setInjectedPrincipleIds: vi.fn(),
 }));
 
+const mockEventLogInstance = {
+  recordRuleHostEvaluated: vi.fn(),
+  recordRuleEnforced: vi.fn(),
+  recordRuleHostBlocked: vi.fn(),
+  recordRuleHostRequireApproval: vi.fn(),
+  recordRuleHostAutoCorrectProposed: vi.fn(),
+  recordRuleHostAutoCorrectApplied: vi.fn(),
+  recordRuleHostSkipped: vi.fn(),
+};
 vi.mock('../../src/core/event-log.js', () => ({
-  EventLogService: { get: vi.fn(() => ({})) },
+  EventLogService: { get: vi.fn(() => mockEventLogInstance) },
 }));
 
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
@@ -174,7 +185,7 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('PRI-494 — Full-hook perf budget with ERR-088 execution proof', () => {
-  it('handleBeforeToolCall steady-state meets p95<50ms p99<200ms AND rule actually blocks (ERR-088)', async () => {
+  it('production before_tool_call steady-state meets p95<500ms p99<1000ms AND rule actually blocks (ERR-088)', async () => {
     const connection = new SqliteConnection(tempWorkspaceDir);
     insertPerfRuleArtifact(connection);
     await insertPerfActivation(connection);
@@ -190,26 +201,42 @@ describe('PRI-494 — Full-hook perf budget with ERR-088 execution proof', () =>
       logger: { warn: () => {}, info: () => {}, error: () => {} },
     };
 
+    // Same runtime object src/index.ts assembles: production v2 provider +
+    // shared-result handler + shared gate + real VM evaluator.
+    const runtime = createOpenClawHostRuntime({
+      ruleContextProvider: (_event, context, request) => buildRuleContextIfEnabled(
+        WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }),
+        request.targetPath,
+        context.sessionId,
+        context.logger,
+      ),
+      onBeforeToolResult: (eventArg, context, result) => handleSharedRuleHostResult(
+        eventArg,
+        { ...context, workspaceDir: context.workspaceDir, logger: context.logger },
+        result,
+      ),
+    });
+
     // ERR-088 execution proof — assert the rule ACTUALLY blocked with the
     // unique marker BEFORE measuring timing. This is the regression guard:
     // if a future change silently skips the rule (stale cache, flag off,
     // action mismatch), this assertion fails even if timing is fast.
-    const proofResult = handleBeforeToolCall(event, hookContext);
+    const proofResult = await runtime.dispatchBeforeToolCall(event, hookContext);
     expect(proofResult).toBeDefined();
     expect(proofResult?.block).toBe(true);
     expect(proofResult?.blockReason).toContain(BLOCK_MARKER);
 
-    // Warm up: second call populates the fingerprint cache (the first
-    // call above was a cold load). Steady-state calls from here on hit
-    // the cache and only pay VM evaluate cost.
-    handleBeforeToolCall(event, hookContext);
+    // Warm up: the first call also pays lazy workspace/service initialisation
+    // (config load, trajectory schema, VM subprocess start). Steady-state
+    // measurements below exclude that one-time cost.
+    await runtime.dispatchBeforeToolCall(event, hookContext);
 
-    // Measure 100 steady-state iterations (all cache hits)
+    // Measure 100 steady-state iterations
     const timings: number[] = [];
     const ITERATIONS = 100;
     for (let i = 0; i < ITERATIONS; i++) {
       const start = performance.now();
-      const result = handleBeforeToolCall(event, hookContext);
+      const result = await runtime.dispatchBeforeToolCall(event, hookContext);
       const end = performance.now();
       timings.push(end - start);
 
@@ -227,13 +254,13 @@ describe('PRI-494 — Full-hook perf budget with ERR-088 execution proof', () =>
     const min = timings[0];
     const max = timings[timings.length - 1];
 
-    console.log(`[PRI-494 perf] full-hook steady-state (${ITERATIONS} iterations, cache hot, v2 flag on):
+    console.log(`[PRI-494 perf] full-hook steady-state (${ITERATIONS} iterations, shared gate + handler, v2 flag on):
   min=${formatMs(min)} p50=${formatMs(p50)} p95=${formatMs(p95)} p99=${formatMs(p99)} mean=${formatMs(mean)} max=${formatMs(max)}
-  spec budget: p95<50ms p99<200ms (Linux CI target)
+  spec budget: p95<500ms p99<1000ms (CI contract threshold)
   Windows note: SQLite FS overhead + RuleContext v2 trajectory query per call
-    can push p95 past 50ms on Windows dev machines; sanity bounds below
-    prevent flaky failures while still catching regressions. Actual numbers
-    above are the authoritative baseline — include in PR body.`);
+    can push p95 past 50ms on Windows dev machines; the 500ms/1000ms bounds
+    below prevent flaky failures while still catching regressions. Actual
+    numbers above are the authoritative baseline — include in PR body.`);
 
     // Spec budgets (PRI-494 acceptance criteria):
     //   p95 < 50ms, p99 < 200ms (aspirational target, NOT enforced in CI)

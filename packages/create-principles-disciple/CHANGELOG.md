@@ -1,5 +1,26 @@
 # create-principles-disciple
 
+## 1.150.3
+
+### Patch Changes
+
+- 96d8a69: 收敛 OpenClaw 对同一 tool call 的二次评估，行为对齐共享门。
+  
+  - `@principles/host-runtime`（patch）：共享门对非阻断判决（`auto_correct` / `requireApproval` / 普通放行）在 `metadata` 中补齐 `matched` / `ruleId` / `principleId` / `ruleReason` / `correctionProposal`。适配器据此可直接记录并应用共享门已经得出的判决，无需为同一 tool call 再评估一次。全部为新增可选字段，未消费这些键的适配器行为不变；`allow` / `deny` 的最终判定口径未改。
+  - `principles-disciple`（patch）：OpenClaw 适配层在共享门给出 `auto_correct` / `requireApproval` 后不再回落到 legacy `handleBeforeToolCall` 重新评估同一 tool call，非阻断判决的记录与应用改由共享 handler 使用上述元数据完成。这是同一输入的内部一致性修正（消除重复评估及其潜在的观测差异），不新增对外接口，也不改变阻断/放行的判定语义。
+  - `create-principles-disciple`（patch）：安装器打包 OpenClaw 插件载荷（C4 装配边），插件行为修正需要随安装器一起发布；无安装器侧逻辑改动，仅随载荷刷新版本。
+  
+  级别判定理由：三处改动都不新增宿主可见能力、不改变 `HostEventResult.decision` 的语义、不新增配置或开关；只消除同一 tool call 的第二次评估并把既有判决事实透出给适配器。`create-principles-disciple` 的 patch 由仓库 C4 装配规则要求（`principles-disciple` release 必须同时 release 安装器），不是额外功能。按仓库 changeset 约定均属内部行为修正，故为 patch。若评审认为 `host-runtime` 的 metadata 增量应被视为对外契约扩展，可上调为 minor——本次按 patch 记录，理由如上。
+
+## 1.150.2
+
+### Patch Changes
+
+- 85cfaed: 修复 Codex 更新链的合并后评审发现（#2505 后续加固）：
+  
+  - `reconcileInstalledPlugin` 在 `codex plugin add` 刷新成功后，复核载荷 pin 是否真的追上本次发布的 canonical 运行时。当 Marketplace 源 checkout 自身落后时（刷新"成功"但载荷原地不动），不再返回 success/updated（旧语义会打出 "payload refreshed 0.3.19 → 0.3.19" 的误导性成功），而是 fail-loud 报 `manualActionRequired`，下一步指向"先更新源 checkout（git pull），再重跑安装器"。
+- 9037557: Examiner evaluation loop: study eligibility is now one server-side authority, so the pre-check and study creation cannot disagree; the configure and report pages surface guidance, retryable error states and an Owner summary. The eligibility payload also no longer exposes server-side absolute paths to the browser.
+
 ## 1.150.1
 
 ### Patch Changes

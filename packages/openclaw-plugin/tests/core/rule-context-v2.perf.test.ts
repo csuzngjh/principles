@@ -20,7 +20,8 @@ import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { buildProductionRuleContext } from '../../src/core/rule-context-assembler.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { buildRuleContextIfEnabled, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
+import { createOpenClawHostRuntime } from '../../src/host-runtime/openclaw-host-runtime.js';
 import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
 
 // ── Mocks (non-DB services only) ───────────────────────────────────────────
@@ -28,10 +29,21 @@ import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/r
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
   trackBlock: vi.fn(),
+  trackReceiptAutoCorrect: vi.fn(),
+  setInjectedPrincipleIds: vi.fn(),
 }));
 
+const mockEventLogInstance = {
+  recordRuleHostEvaluated: vi.fn(),
+  recordRuleEnforced: vi.fn(),
+  recordRuleHostBlocked: vi.fn(),
+  recordRuleHostRequireApproval: vi.fn(),
+  recordRuleHostAutoCorrectProposed: vi.fn(),
+  recordRuleHostAutoCorrectApplied: vi.fn(),
+  recordRuleHostSkipped: vi.fn(),
+};
 vi.mock('../../src/core/event-log.js', () => ({
-  EventLogService: { get: vi.fn(() => ({})) },
+  EventLogService: { get: vi.fn(() => mockEventLogInstance) },
 }));
 
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
@@ -127,17 +139,34 @@ describe('PRI-486 Phase 7 — RuleContext v2 performance baseline (spec §10.3)'
     const event = { toolName: 'write', params: { file_path: '/etc/passwd', content: 'x' } };
     const hookContext = { workspaceDir: tempWorkspaceDir, sessionId: 'perf-hook-session', logger: { warn: () => {}, info: () => {}, error: () => {} } };
 
+    // Production path (PR-1 RuleHost retirement): the SAME runtime object
+    // src/index.ts assembles — shared gate (createProductionRuleHostGate) plus
+    // shared-result handler, with the production v2 context provider.
+    const runtime = createOpenClawHostRuntime({
+      ruleContextProvider: (_event, context, request) => buildRuleContextIfEnabled(
+        WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }),
+        request.targetPath,
+        context.sessionId,
+        context.logger,
+      ),
+      onBeforeToolResult: (eventArg, context, result) => handleSharedRuleHostResult(
+        eventArg,
+        { ...context, workspaceDir: context.workspaceDir, logger: context.logger },
+        result,
+      ),
+    });
+
     // ERR-088: assert the rule ACTUALLY blocked before measuring timing.
     // This is the regression guard — if a future change silently skips the
     // rule, this assertion fails even if timing is fast.
-    const proofResult = handleBeforeToolCall(event, hookContext);
+    const proofResult = await runtime.dispatchBeforeToolCall(event, hookContext);
     expect(proofResult?.block).toBe(true);
     expect(proofResult?.blockReason).toContain(PERF_BASELINE_BLOCK);
 
     const timings: number[] = [];
     for (let i = 0; i < 100; i++) {
       const start = performance.now();
-      const result = handleBeforeToolCall(event, hookContext);
+      const result = await runtime.dispatchBeforeToolCall(event, hookContext);
       timings.push(performance.now() - start);
       // ERR-088: every iteration must prove the rule executed
       expect(result?.block).toBe(true);

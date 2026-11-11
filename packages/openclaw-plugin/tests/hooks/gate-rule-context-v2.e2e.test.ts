@@ -2,12 +2,19 @@
  * PRI-483 Phase 4 — RuleContext v2 gate E2E test (ERR-025)
  *
  * PURPOSE: Verify the full production chain:
- *   recordToolCall → handleBeforeToolCall → TrajectoryDatabase query
- *   → buildProductionRuleContext → RuleHostInput.context → RuleHost.evaluate
+ *   recordToolCall → production shared gate (createProductionRuleHostGate)
+ *   → TrajectoryDatabase query → buildProductionRuleContext
+ *   → RuleHostInput.context → implementationRuntime.evaluateBatch
+ *
+ * PR-1 (RuleHost retirement): the entry point was `handleBeforeToolCall`, which
+ * has no production wiring. The test now drives the SAME gate object that
+ * src/index.ts assembles (`createProductionRuleHostGate` + the production
+ * `buildRuleContextIfEnabled` provider) and captures the input handed to the
+ * rule engine instead of RuleHost.evaluate.
  *
  * Uses REAL TrajectoryDatabase (production schema), REAL loadPdConfigForPlugin
  * (reads .pd/config.yaml from temp workspace), REAL buildProductionRuleContext.
- * Only RuleHost is mocked (to capture hostInput.context).
+ * Only the engine (`evaluateBatch`) is faked, to capture the engine input.
  *
  * ERR-025: at least one test must cover recordToolCall → before_tool_call
  * with a production-schema-initialized workspace.
@@ -20,15 +27,16 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { createProductionRuleHostGate } from '@principles/host-runtime';
+import type { RuleImplementationRuntime } from '@principles/host-runtime';
+import type { HostEvent } from '@principles/core/host';
+import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
+import type { RuleHostInput } from '@principles/core/runtime';
+import { buildRuleContextIfEnabled } from '../../src/hooks/gate.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { OPENCLAW_TOOL_SEMANTICS } from '../../src/constants/tool-semantics.js';
 
-// Type aliases for test fixture construction (avoids `any` per project convention).
-type GateEvent = Parameters<typeof handleBeforeToolCall>[0];
-type GateCtx = Parameters<typeof handleBeforeToolCall>[1];
-type HookContextParam = Parameters<typeof WorkspaceContext.fromHookContext>[0];
-
-// ── Mocks (only RuleHost and non-DB services) ──────────────────────────────
+// ── Mocks (only non-DB services) ───────────────────────────────────────────
 
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
@@ -49,21 +57,6 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: { get: vi.fn(() => mockEventLogInstance) },
 }));
 
-let _mockEvaluate = vi.fn().mockReturnValue(undefined);
-vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function (this: { evaluate: typeof _mockEvaluate; dispose: () => void }, _stateDir: string, _logger: unknown) {
-    this.evaluate = _mockEvaluate;
-    // PR1: WorkspaceContext.invalidate() calls this._ruleHost?.dispose() during
-    // clearCache(). Without this, afterEach teardown crashes with
-    // "this._ruleHost?.dispose is not a function".
-    this.dispose = () => {};
-  }),
-  // P1 (2026-08-20): gate.ts routes compatibility-guard blocks through this type
-  // guard; the mocked rule-host must export it so mocked evaluate() results are
-  // not misrouted.
-  isCompatibilityGuardBlock: vi.fn(() => false),
-}));
-
 vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   loadLedger: vi.fn(),
 }));
@@ -71,6 +64,7 @@ vi.mock('../../src/core/principle-tree-ledger.js', () => ({
 // ── Test setup ─────────────────────────────────────────────────────────────
 
 let tempWorkspaceDir: string;
+let sqliteConn: SqliteConnection;
 const sessionId = 'e2e-ctx-v2-session';
 
 function setupTempWorkspace(): void {
@@ -97,7 +91,48 @@ function setupTempWorkspace(): void {
   );
 }
 
+/**
+ * The shared gate only reaches the engine when `.pd/state.db` exists AND at
+ * least one live activation is seeded, so each test arms one benign live rule.
+ */
+async function seedLiveActivation(): Promise<void> {
+  sqliteConn = new SqliteConnection(tempWorkspaceDir);
+  const db = sqliteConn.getDb();
+  const now = new Date().toISOString();
+  const artifactId = 'artifact-e2e-ctx-v2';
+  db.prepare(`
+    INSERT INTO pi_artifacts (
+      artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id,
+      lineage_artifact_ids, validation_status, content_json, created_at, updated_at
+    ) VALUES (?, 'rule', 'task-e2e-ctx-v2', 'P_E2E_CTX', 'R_E2E_CTX', '[]', 'validated', ?, ?, ?)
+  `).run(artifactId, JSON.stringify({
+    principleId: 'P_E2E_CTX',
+    ruleId: 'R_E2E_CTX',
+    implementationCode: [
+      'function evaluate(input) {',
+      "  return { decision: 'allow', matched: false, reason: 'e2e context probe allow' };",
+      '}',
+      "var meta = { name: 'e2e-ctx-probe', version: '1', ruleId: 'R_E2E_CTX', coversCondition: 'all' };",
+    ].join('\n'),
+    goldenTrace: { traceId: 'trace-e2e-ctx', cases: [], createdAt: now, version: 1 },
+    ruleHostGateDecision: 'accepted_shadow',
+    affectedTools: ['write'],
+    painReasonSummary: 'rule context v2 e2e probe',
+  }), now, now);
+  await new SqliteActivationStateStore(sqliteConn).recordActivation({
+    activationId: 'act_code_R_E2E_CTX',
+    idempotencyKey: `${artifactId}::code_tool_hook`,
+    artifactId,
+    channel: 'code_tool_hook',
+    action: 'code_tool_hook_live_activate',
+    targetRef: 'impl://R_E2E_CTX',
+    activatedAt: now,
+    deactivatedAt: null,
+  });
+}
+
 function teardownTempWorkspace(): void {
+  sqliteConn?.close();
   WorkspaceContext.clearCache();
   try {
     fs.rmSync(tempWorkspaceDir, { recursive: true, force: true });
@@ -106,25 +141,68 @@ function teardownTempWorkspace(): void {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  _mockEvaluate = vi.fn().mockReturnValue(undefined);
   setupTempWorkspace();
+  await seedLiveActivation();
 });
 
 afterEach(() => {
   teardownTempWorkspace();
 });
 
+function makeHostEvent(targetPath: string): HostEvent {
+  return {
+    kind: 'before_tool_call',
+    context: { workspaceDir: tempWorkspaceDir, sessionId, toolName: 'write' },
+    rawPayload: {
+      toolInput: {
+        toolName: 'write',
+        params: { file_path: targetPath, content: 'modified' },
+      },
+    },
+    source: 'openclaw:before_tool_call',
+  } as HostEvent;
+}
+
+/** Runs the production gate and returns the exact input the engine received. */
+async function runProductionGate(targetPath: string): Promise<RuleHostInput[]> {
+  const inputs: RuleHostInput[] = [];
+  const implementationRuntime: RuleImplementationRuntime = {
+    evaluateBatch(rules, input) {
+      inputs.push(input as RuleHostInput);
+      return {
+        ok: true,
+        results: rules.map(() => ({ ok: true as const, result: { decision: 'allow', matched: false, reason: 'e2e context probe allow' } })),
+      };
+    },
+  };
+  const gate = createProductionRuleHostGate({
+    hostKind: 'openclaw',
+    toolSemantics: OPENCLAW_TOOL_SEMANTICS,
+    implementationRuntime,
+    // SAME provider function as src/index.ts (the OpenClaw adapter only rebinds
+    // its first two arguments to the native hook payload).
+    ruleContextProvider: (request) => buildRuleContextIfEnabled(
+      WorkspaceContext.fromHookContext({ workspaceDir: request.workspaceDir, sessionId: request.sessionId }),
+      request.targetPath,
+      request.sessionId,
+      undefined,
+    ),
+  });
+  await gate(makeHostEvent(targetPath));
+  return inputs;
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-025)', () => {
-  it('Test G: read recorded → write to same path → context.facts.priorReadOfTarget === "yes"', () => {
+  it('Test G: read recorded → write to same path → context.facts.priorReadOfTarget === "yes"', async () => {
     // 1. Get real WorkspaceContext for the temp workspace
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
       logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as unknown as HookContextParam);
+    });
 
     // 2. Record a read tool call on the real trajectory DB
     wctx.trajectory.recordToolCall({
@@ -134,44 +212,34 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
       paramsJson: { file_path: 'src/auth.ts' },
     });
 
-    // 3. Call handleBeforeToolCall with a write to the SAME path
-    const event = {
-      toolName: 'write',
-      params: { file_path: 'src/auth.ts', content: 'modified' },
-    };
-    const ctx = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
-    };
+    // 3. Run the production gate for a write to the SAME path
+    const inputs = await runProductionGate('src/auth.ts');
 
-    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
-
-    // 4. Assert RuleHost.evaluate received context with the read in history
-    expect(_mockEvaluate).toHaveBeenCalledTimes(1);
-    const hostInput = _mockEvaluate.mock.calls[0][0];
+    // 4. Assert the engine received context with the read in history
+    expect(inputs).toHaveLength(1);
+    const hostInput = inputs[0];
 
     expect(hostInput.context).toBeDefined();
-    expect(hostInput.context.version).toBe(2);
-    expect(hostInput.context.history.status).toBe('available');
-    expect(hostInput.context.history.calls).toHaveLength(1);
+    expect(hostInput.context?.version).toBe(2);
+    expect(hostInput.context?.history.status).toBe('available');
+    expect(hostInput.context?.history.calls).toHaveLength(1);
 
-    const call = hostInput.context.history.calls[0];
-    expect(call.toolName).toBe('read_file');
-    expect(call.canonicalKind).toBe('read');
-    expect(call.outcome).toBe('success');
+    const call = hostInput.context?.history.calls[0];
+    expect(call?.toolName).toBe('read_file');
+    expect(call?.canonicalKind).toBe('read');
+    expect(call?.outcome).toBe('success');
 
     // The read path must match the write target → priorReadOfTarget = 'yes'
-    expect(hostInput.context.facts.priorReadOfTarget).toBe('yes');
-    expect(hostInput.context.facts.readCount).toBe(1);
-    expect(hostInput.context.facts.writeCount).toBe(0);
+    expect(hostInput.context?.facts.priorReadOfTarget).toBe('yes');
+    expect(hostInput.context?.facts.readCount).toBe(1);
+    expect(hostInput.context?.facts.writeCount).toBe(0);
   });
 
-  it('Test H: read recorded → write to DIFFERENT path → context.facts.priorReadOfTarget === "no"', () => {
+  it('Test H: read recorded → write to DIFFERENT path → context.facts.priorReadOfTarget === "no"', async () => {
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
       logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as unknown as HookContextParam);
+    });
 
     // Record a read for src/auth.ts
     wctx.trajectory.recordToolCall({
@@ -182,63 +250,43 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
     });
 
     // Write to a DIFFERENT path
-    const event = {
-      toolName: 'write',
-      params: { file_path: 'src/other.ts', content: 'new file' },
-    };
-    const ctx = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
-    };
+    const inputs = await runProductionGate('src/other.ts');
 
-    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
-
-    expect(_mockEvaluate).toHaveBeenCalledTimes(1);
-    const hostInput = _mockEvaluate.mock.calls[0][0];
+    expect(inputs).toHaveLength(1);
+    const hostInput = inputs[0];
 
     expect(hostInput.context).toBeDefined();
-    expect(hostInput.context.history.status).toBe('available');
-    expect(hostInput.context.history.calls).toHaveLength(1);
-    expect(hostInput.context.history.calls[0].canonicalKind).toBe('read');
+    expect(hostInput.context?.history.status).toBe('available');
+    expect(hostInput.context?.history.calls).toHaveLength(1);
+    expect(hostInput.context?.history.calls[0].canonicalKind).toBe('read');
 
     // Different path → priorReadOfTarget = 'no'
-    expect(hostInput.context.facts.priorReadOfTarget).toBe('no');
-    expect(hostInput.context.facts.readCount).toBe(1);
+    expect(hostInput.context?.facts.priorReadOfTarget).toBe('no');
+    expect(hostInput.context?.facts.readCount).toBe(1);
   });
 
-  it('Test I: no prior tool calls → context.history.calls is empty, priorReadOfTarget === "no"', () => {
-    // Don't record any tool calls — just call handleBeforeToolCall directly.
+  it('Test I: no prior tool calls → context.history.calls is empty, priorReadOfTarget === "no"', async () => {
+    // Don't record any tool calls — just run the gate directly.
     // NOTE: priorReadOfTarget is 'no' (not 'unknown') because targetPath is non-null
     // and history is available — we checked the (empty) history and the target was
     // not read. 'unknown' only applies when targetPath is null or history is unavailable.
-    const event = {
-      toolName: 'write',
-      params: { file_path: 'src/new.ts', content: 'new' },
-    };
-    const ctx = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
-    };
+    const inputs = await runProductionGate('src/new.ts');
 
-    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
-
-    expect(_mockEvaluate).toHaveBeenCalledTimes(1);
-    const hostInput = _mockEvaluate.mock.calls[0][0];
+    expect(inputs).toHaveLength(1);
+    const hostInput = inputs[0];
 
     expect(hostInput.context).toBeDefined();
-    expect(hostInput.context.history.status).toBe('available');
-    expect(hostInput.context.history.calls).toHaveLength(0);
-    expect(hostInput.context.facts.priorReadOfTarget).toBe('no');
-    expect(hostInput.context.facts.readCount).toBe(0);
+    expect(hostInput.context?.history.status).toBe('available');
+    expect(hostInput.context?.history.calls).toHaveLength(0);
+    expect(hostInput.context?.facts.priorReadOfTarget).toBe('no');
+    expect(hostInput.context?.facts.readCount).toBe(0);
   });
 
-  it('Test J: sessionId isolation — read in different session does not affect current', () => {
+  it('Test J: sessionId isolation — read in different session does not affect current', async () => {
     const wctx = WorkspaceContext.fromHookContext({
       workspaceDir: tempWorkspaceDir,
       logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as unknown as HookContextParam);
+    });
 
     // Record a read in a DIFFERENT session
     wctx.trajectory.recordToolCall({
@@ -249,23 +297,16 @@ describe('Gate RuleContext v2 E2E — recordToolCall → before_tool_call (ERR-0
     });
 
     // Write in the current session
-    const event = {
-      toolName: 'write',
-      params: { file_path: 'src/auth.ts', content: 'modified' },
-    };
-    const ctx = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
-    };
+    const inputs = await runProductionGate('src/auth.ts');
 
-    handleBeforeToolCall(event as unknown as GateEvent, ctx as unknown as GateCtx);
-
-    const hostInput = _mockEvaluate.mock.calls[0][0];
+    expect(inputs).toHaveLength(1);
+    const hostInput = inputs[0];
+    // Session identity crosses the production boundary unchanged.
+    expect(hostInput.session.sessionId).toBe(sessionId);
     // Session isolation: the other-session read is NOT in current session's history.
     // priorReadOfTarget is 'no' (not 'unknown') because targetPath is non-null and
     // history is available — we checked the (empty for this session) history.
-    expect(hostInput.context.history.calls).toHaveLength(0);
-    expect(hostInput.context.facts.priorReadOfTarget).toBe('no');
+    expect(hostInput.context?.history.calls).toHaveLength(0);
+    expect(hostInput.context?.facts.priorReadOfTarget).toBe('no');
   });
 });

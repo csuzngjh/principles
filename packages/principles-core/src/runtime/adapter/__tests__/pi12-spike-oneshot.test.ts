@@ -49,7 +49,6 @@ function makeAdapter(overrides: Record<string, unknown> = {}): PiAiRuntimeAdapte
     provider: 'faux',
     model: 'faux-1',
     apiKeyEnv: 'TEST_API_KEY',
-    _testBackoffDelayMs: 1,
     ...overrides,
   });
 }
@@ -92,17 +91,25 @@ describe('SPEC-PD-PI12-COMPAT-001 E04 — one-shot PiAiRuntimeAdapter on real Pi
     expect(events).toContain('runtime_invocation_succeeded');
   });
 
-  it('PD-owned retry: a rate-limit error response is retried and the second call succeeds (no double output)', async () => {
+  it('transport retry ownership moved to pi-ai: a resolved rate-limit error surfaces once (no double output)', async () => {
     faux().setResponses([
       fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'rate limit exceeded: 429 quota' }),
       fauxAssistantMessage(VALID_DIAGNOSIS_JSON),
     ]);
     const adapter = makeAdapter({ maxRetries: 2 });
 
-    const handle = await adapter.startRun(makeStartRunInput());
-    const output = await adapter.fetchOutput(handle.runId);
-    expect(output?.payload).toEqual(JSON.parse(VALID_DIAGNOSIS_JSON));
-    expect(faux().state.callCount).toBe(2);
+    // The faux provider bypasses the HTTP layer, so pi-ai's own retry loop is
+    // not exercised here — S2's retry handoff is proven in
+    // pi-ai-runtime-adapter-retry-handoff.test.ts. What this test pins is that
+    // PD no longer issues a second request on top of pi-ai's budget.
+    await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+      category: 'rate_limit',
+      details: expect.objectContaining({
+        retryOwnership: 'pi-ai',
+        transportMaxRetries: 2,
+      }),
+    });
+    expect(faux().state.callCount).toBe(1);
   });
 
   it('hard provider error maps to a loud PDRuntimeError (no silent empty output)', async () => {
@@ -114,8 +121,8 @@ describe('SPEC-PD-PI12-COMPAT-001 E04 — one-shot PiAiRuntimeAdapter on real Pi
     const adapter = makeAdapter({ maxRetries: 2 });
 
     await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({ category: 'execution_failed' });
-    // 1 initial + 2 retries — bounded by PD's own retry budget.
-    expect(faux().state.callCount).toBe(3);
+    // One PD request — pi-ai owns the transport retry budget.
+    expect(faux().state.callCount).toBe(1);
   });
 
   it('timeout: an input timeoutMs aborts a slow model call and classifies as timeout', async () => {
