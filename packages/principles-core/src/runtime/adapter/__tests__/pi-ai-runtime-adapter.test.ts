@@ -94,7 +94,6 @@ function makeAdapter(overrides: Record<string, unknown> = {}) {
     provider: 'openrouter',
     model: 'anthropic/claude-sonnet-4',
     apiKeyEnv: 'TEST_API_KEY',
-    _testBackoffDelayMs: 0,
     outputPathStrategy: 'free_form_only', // Default to free_form for existing tests
     ...overrides,
   });
@@ -334,13 +333,17 @@ describe('PiAiRuntimeAdapter', () => {
       }
     });
 
-    it('passes apiKey, effectiveTimeoutMs (input > config > default), and maxRetries: 0 to complete options', async () => {
+    it('passes apiKey, effectiveTimeoutMs (input > config > default), and the pi-ai retry budget to complete options', async () => {
       const adapter = makeAdapter({ maxRetries: 3, timeoutMs: 120_000 });
       await adapter.startRun(makeStartRunInput({ timeoutMs: 90_000 }));
 
       const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
       expect(options.apiKey).toBe('test-key-123');
-      expect(options.maxRetries).toBe(0);
+      // S2: PD stopped looping itself — the configured retry budget is handed
+      // to pi-ai, which knows which failures are retryable. `maxRetries: 0`
+      // here would silently disable every transient retry.
+      expect(options.maxRetries).toBe(3);
+      expect(options.maxRetryDelayMs).toBe(30_000);
       // Effective timeout is computed against an absolute deadline, so a few
       // milliseconds can elapse before completeSimple receives the option.
       // Keep the assertion on input-over-config precedence without assuming a
@@ -532,11 +535,30 @@ describe('PiAiRuntimeAdapter', () => {
       });
     });
 
-    it('throws PDRuntimeError("execution_failed") when complete resolves with stopReason:error + 401 Unauthorized', async () => {
-      await expectStartRunError('execution_failed', () => {
+    it('classifies a resolved 401 as input_invalid (configuration), not execution_failed', async () => {
+      // S3: the status code in pi-ai's composed message is authoritative.
+      await expectStartRunError('input_invalid', () => {
         mockComplete.mockReset();
         mockComplete.mockResolvedValue(makeErrorResponse('401 Unauthorized'));
       });
+    });
+
+    it('marks status_unknown and falls back to text rules when no HTTP status is recoverable', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeErrorResponse('quota exceeded'));
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      let caught: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caught = err;
+      }
+
+      expect(caught?.category).toBe('rate_limit');
+      expect(caught?.details?.statusUnknown).toBe(true);
+      expect(caught?.details?.errorClassificationSource).toBe('text_fallback');
+      expect(caught?.details?.httpStatus).toBeUndefined();
     });
 
     it('throws PDRuntimeError("timeout") when complete resolves with stopReason:aborted', async () => {
@@ -546,17 +568,20 @@ describe('PiAiRuntimeAdapter', () => {
       });
     });
 
-    it('retries resolved stopReason:error (execution_failed) before giving up', async () => {
-      // First call: resolves with error, second call: succeeds
+    it('does not retry a resolved stopReason:error itself (retries belong to pi-ai)', async () => {
+      // S2: PD used to loop here on top of pi-ai. A 503 is retryable *by
+      // pi-ai*; the PD layer must send one request and let the handed-over
+      // budget do the rest, otherwise one failure costs two retry storms.
       mockComplete
         .mockResolvedValueOnce(makeErrorResponse('503 Service Unavailable'))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
       const adapter = makeAdapter({ maxRetries: 2 });
-      const handle = await adapter.startRun(makeStartRunInput());
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toBeInstanceOf(PDRuntimeError);
 
-      expect(mockComplete).toHaveBeenCalledTimes(2);
-      expect(handle.runId).toBeTruthy();
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      expect(options.maxRetries).toBe(2);
     });
 
     it('RunStatus.reason includes bounded errorMessage from resolved-error response', async () => {
@@ -574,7 +599,8 @@ describe('PiAiRuntimeAdapter', () => {
       const failedEvent = findTelemetryEvent('runtime_invocation_failed');
       expect(failedEvent).toBeDefined();
       const payload = failedEvent?.payload as Record<string, unknown>;
-      expect(payload.errorCategory).toBe('execution_failed');
+      expect(payload.errorCategory).toBe('input_invalid');
+      expect(payload.httpStatus).toBe(401);
       expect(typeof payload.errorMessage).toBe('string');
       expect((payload.errorMessage as string).includes('401')).toBe(true);
     });
@@ -583,30 +609,40 @@ describe('PiAiRuntimeAdapter', () => {
   // ── startRun() retry logic ──
 
   describe('startRun() retry logic', () => {
-    it('retries transient failures up to maxRetries times', async () => {
-      // Fail twice, succeed on third
-      mockComplete
-        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
-        .mockRejectedValueOnce(new Error('ETIMEDOUT'))
-        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+    it('hands the configured retry budget to pi-ai instead of looping', async () => {
+      // S2: the PD-owned transport loop is gone. The invariant that matters is
+      // that the configured budget reaches pi-ai, and that PD itself sends one
+      // request per attempt it owns.
+      mockComplete.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
       const adapter = makeAdapter({ maxRetries: 2 });
-      const handle = await adapter.startRun(makeStartRunInput());
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toBeInstanceOf(PDRuntimeError);
 
-      expect(mockComplete).toHaveBeenCalledTimes(3);
-      expect(handle.runtimeKind).toBe('pi-ai');
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      expect(options.maxRetries).toBe(2);
+      expect(options.maxRetryDelayMs).toBe(30_000);
     });
 
-    it('succeeds on second attempt after first transient failure', async () => {
+    it('surfaces the first transient failure — no second PD request', async () => {
       mockComplete
         .mockRejectedValueOnce(new Error('socket hang up'))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
       const adapter = makeAdapter({ maxRetries: 2 });
-      const handle = await adapter.startRun(makeStartRunInput());
+      let caught: PDRuntimeError | undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caught = err;
+      }
 
-      expect(mockComplete).toHaveBeenCalledTimes(2);
-      expect(handle.runId).toBeTruthy();
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      expect(caught).toBeDefined();
+      // The failure record must say who owned the retries (observability kept).
+      expect(caught?.details?.retryOwnership).toBe('pi-ai');
+      expect(caught?.details?.transportMaxRetries).toBe(2);
+      expect(caught?.details?.finalFailureReason).toBe('pi_ai_retries_exhausted');
     });
 
     it('does not retry on PDRuntimeError (output_invalid)', async () => {
@@ -678,35 +714,41 @@ describe('PiAiRuntimeAdapter', () => {
       expect(String(payload.providerEvidence)).toContain('exceeds the maximum output tokens');
     });
 
-    it('applies no downshift for an unrelated provider 400', async () => {
+    it('applies no downshift for an unrelated provider 400 and sends only one PD request', async () => {
       const budgets: number[] = [];
       mockComplete.mockReset();
       mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
         budgets.push(opts.maxTokens as number);
-        if (budgets.length === 1) return makeErrorResponse('400 {"message":"internal server error"}');
-        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+        return makeErrorResponse('400 {"message":"internal server error"}');
       });
 
       const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
-      await adapter.startRun(makeStartRunInput());
+      // S2: transport failures belong to pi-ai. PD sends exactly one request and
+      // surfaces whatever pi-ai handed back after its own retry budget.
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+        // S3: the 400 status is authoritative — a request-parameter error.
+        category: 'input_invalid',
+        details: expect.objectContaining({ retryOwnership: 'pi-ai' }),
+      });
 
-      expect(budgets).toEqual([32000, 32000]);
+      expect(budgets).toEqual([32000]);
       expect(findTelemetryEvent('llm_max_tokens_downshift')).toBeUndefined();
     });
 
-    it('applies no downshift for a rate-limit rejection', async () => {
+    it('applies no downshift for a rate-limit rejection and sends only one PD request', async () => {
       const budgets: number[] = [];
       mockComplete.mockReset();
       mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
         budgets.push(opts.maxTokens as number);
-        if (budgets.length === 1) return makeErrorResponse('429 Too Many Requests');
-        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+        return makeErrorResponse('429 Too Many Requests');
       });
 
       const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
-      await adapter.startRun(makeStartRunInput());
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+        category: 'rate_limit',
+      });
 
-      expect(budgets).toEqual([32000, 32000]);
+      expect(budgets).toEqual([32000]);
       expect(findTelemetryEvent('llm_max_tokens_downshift')).toBeUndefined();
     });
 
@@ -736,10 +778,12 @@ describe('PiAiRuntimeAdapter', () => {
       const adapter = makeAdapter({ maxTokens: 8192, maxRetries: 3 });
 
       await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
-        category: 'execution_failed',
+        // S3: the exhausted ladder still reports the underlying 400 status.
+        category: 'input_invalid',
       });
-      // 8192 → 4096 → floor: the fourth attempt cannot go below 4096.
-      expect(budgets).toEqual([8192, 4096, 4096, 4096]);
+      // 8192 → 4096 → floor: the third attempt cannot go below 4096, so the
+      // ladder stops instead of resending a value the provider already rejects.
+      expect(budgets).toEqual([8192, 4096]);
 
       // A rejection is never reported as success, and the evidence travels with
       // the terminal failure so the Owner can see what was actually tried (rc-9).
@@ -749,7 +793,10 @@ describe('PiAiRuntimeAdapter', () => {
         .find(e => e.eventType === 'runtime_invocation_failed'
           && (e.payload as Record<string, unknown>)?.finalFailure === true);
       const payload = failed?.payload as Record<string, unknown>;
-      expect(payload.errorCategory).toBe('execution_failed');
+      // S3: a 400 is a request-parameter error; the status outranks the old
+      // generic `execution_failed` bucket.
+      expect(payload.errorCategory).toBe('input_invalid');
+      expect(payload.httpStatus).toBe(400);
       expect(String(payload.providerEvidence)).toContain('exceeds the maximum output tokens');
     });
 
@@ -1707,25 +1754,23 @@ describe('PiAiRuntimeAdapter', () => {
       expect(caughtErr?.details?.timeoutClassification).toBeUndefined();
     });
 
-    it('5. provider_transient_timeout retries and then succeeds within max limits', async () => {
+    it('5. provider_transient_timeout is handed to pi-ai and surfaces once it gives up', async () => {
       mockComplete.mockReset();
-      // First attempt: transient timeout, Second attempt: success
-      mockComplete
-        .mockRejectedValueOnce(new Error('socket timeout'))
-        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+      mockComplete.mockRejectedValue(new Error('socket timeout'));
 
       const adapter = makeAdapter({ maxRetries: 2 });
-      const handle = await adapter.startRun(makeStartRunInput());
-
-      expect(mockComplete).toHaveBeenCalledTimes(2);
-      expect(handle.runId).toBeDefined();
-
-      // Check telemetry has retry attempt
-      const retryEvent = findTelemetryEvent('runtime_invocation_failed');
-      expect(retryEvent).toBeDefined();
-      const payload = retryEvent?.payload as Record<string, unknown>;
-      expect(payload?.isRetryAttempt).toBe(true);
-      expect(payload?.retryAttempt).toBe(0);
+      // S2: PD no longer loops over transient timeouts itself — pi-ai already
+      // consumed its retry budget before this surfaced.
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+        category: 'timeout',
+        details: expect.objectContaining({
+          timeoutClassification: 'provider_transient_timeout',
+          retryOwnership: 'pi-ai',
+          transportMaxRetries: 2,
+          finalFailureReason: 'pi_ai_retries_exhausted',
+        }),
+      });
+      expect(mockComplete).toHaveBeenCalledTimes(1);
     });
 
     it('6. provider_transient_timeout exhausted maxRetries and fails permanently', async () => {
@@ -1740,10 +1785,13 @@ describe('PiAiRuntimeAdapter', () => {
         if (err instanceof PDRuntimeError) caughtErr = err;
       }
 
-      expect(mockComplete).toHaveBeenCalledTimes(2); // attempt 0 and attempt 1
+      // One PD request: pi-ai owns the retry budget (maxRetries=1 forwarded).
+      expect(mockComplete).toHaveBeenCalledTimes(1);
       expect(caughtErr).toBeDefined();
       expect(caughtErr?.category).toBe('timeout');
-      expect(caughtErr?.details?.retryAttempt).toBe(1);
+      expect(caughtErr?.details?.retryAttempt).toBe(0);
+      expect(caughtErr?.details?.transportMaxRetries).toBe(1);
+      expect(caughtErr?.details?.finalFailureReason).toBe('pi_ai_retries_exhausted');
     });
 
     it('7. client_timeout_budget_exhausted is never retried', async () => {
@@ -1818,15 +1866,17 @@ describe('PiAiRuntimeAdapter', () => {
       expect(payload.retryAttempt).toBe(0);
     });
 
-    it('13. caps subsequent retry attempt timeoutMs to remaining overall budget', async () => {
+    it('13. caps the next downshift attempt timeoutMs to the remaining overall budget', async () => {
       mockComplete.mockReset();
       mockComplete.mockImplementationOnce(async (_model, _ctx, _options) => {
         await new Promise(resolve => setTimeout(resolve, 40));
-        throw new Error('transient timeout');
+        return makeErrorResponse(
+          '400 {"message":"The requested max_tokens (32000) exceeds the maximum output tokens allowed for model DeepSeek-V4-Flash-Vision-Exp (null)"}',
+        );
       });
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
 
-      const adapter = makeAdapter({ maxRetries: 2 });
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
       await adapter.startRun(makeStartRunInput({ timeoutMs: 100 }));
 
       expect(mockComplete).toHaveBeenCalledTimes(2);
