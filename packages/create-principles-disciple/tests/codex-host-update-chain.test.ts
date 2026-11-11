@@ -142,11 +142,16 @@ function pluginDataRoot(): string {
 }
 
 /** The binding shape pd-setup.cjs writes beside the payload (Gate 4). */
-function writeBinding(pluginRoot: string, runtimeDir: string, cohort: CodexRuntimeCohort): void {
+function writeBinding(
+  pluginRoot: string,
+  runtimeDir: string,
+  cohort: CodexRuntimeCohort,
+  workspaceDir: string = ctx.workspaceDir,
+): void {
   writeJson(path.join(pluginRoot, 'mcp-binding.json'), {
     schemaVersion: 'pd.mcp-binding.v1',
     host: 'codex',
-    workspaceDir: ctx.workspaceDir,
+    workspaceDir,
     runtimeDir,
     serverEntry: path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'),
     versions: { mcpServer: cohort.mcpServer, core: cohort.core },
@@ -415,6 +420,32 @@ describe('Codex marketplace update chain', () => {
     expect(result.reason).toContain('runtime matches the payload pin');
     // Neither a host refresh nor pd-setup is warranted.
     expect(host.calls).toEqual([]);
+  });
+
+  it('keeps a binding that points at ANOTHER workspace (workspaceDir is not a repair trigger)', async () => {
+    // The binding records the workspace setup ran in; the install context is
+    // whatever directory the upgrade happens to run from. Comparing them would
+    // never converge (every workspace would look like a mismatch) and pd-setup
+    // is the only writer — so a healthy runtime+binding must be left alone.
+    writePin(cacheRoot('0.3.22'), NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    writeBinding(cacheRoot('0.3.22'), runtimeDir, NEW_COHORT, path.join(home, 'workspace-A'));
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install({ ...ctx, workspaceDir: path.join(home, 'workspace-B') });
+
+    expect(result.success, result.reason).toBe(true);
+    expect(result.configAction).toBe('preserved');
+    expect(result.reason).toContain('runtime matches the payload pin');
+    expect(result.reason).not.toContain('mcp binding written beside the payload');
+    expect(host.calls).toEqual([]);
+    // The binding was not rewritten to the install context's workspace.
+    const binding = JSON.parse(fs.readFileSync(path.join(cacheRoot('0.3.22'), 'mcp-binding.json'), 'utf8')) as {
+      workspaceDir: string;
+    };
+    expect(binding.workspaceDir).toBe(path.join(home, 'workspace-A'));
   });
 
   it('runs the REAL pd-setup and writes the binding the launcher requires', async () => {
