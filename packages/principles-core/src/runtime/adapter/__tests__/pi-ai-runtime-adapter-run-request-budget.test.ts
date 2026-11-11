@@ -241,6 +241,53 @@ describe('S6 shared budgeting — worst case is capped for the whole run', () =>
       attemptsUsed: 0,
       repairSkipped: true,
       repairSkipReason: 'request_budget_exhausted',
+      repairAttemptsSkippedByRequestBudget: 3,
     });
+  });
+
+  it('records the attempts skipped mid-repair by the request budget (configured 3, only 2 affordable)', async () => {
+    // Budget 3, spent 1 on the free-form path → 2 left. Configured repair
+    // attempts: 3. The loop can only start 2, so the 3rd is skipped for lack
+    // of a request, not because repair was disabled.
+    wire.handler = () => sseTextResponse('{}');
+    const { adapter, events } = makeAdapter({ outputPathStrategy: 'free_form_only', maxRepairAttempts: 3 });
+
+    const error = await adapter.startRun(makeInput()).catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ category: 'output_invalid' });
+    expect(wire.requests).toHaveLength(3); // 1 original + 2 repair
+
+    const repairEvent = events.find((event) => event.eventType === 'output_repair_attempted');
+    expect(repairEvent?.payload).toMatchObject({
+      repaired: false,
+      attemptsUsed: 2,
+      repairSkipReason: 'request_budget_exhausted',
+      repairAttemptsSkippedByRequestBudget: 1,
+    });
+    // The loop did run, so "repair was skipped" stays false/absent.
+    expect(repairEvent?.payload).not.toHaveProperty('repairSkipped');
+
+    const exhaustedEvent = events.find((event) => event.eventType === 'output_repair_exhausted');
+    expect(exhaustedEvent?.payload).toMatchObject({
+      repairSkipReason: 'request_budget_exhausted',
+      repairAttemptsSkippedByRequestBudget: 1,
+    });
+  });
+
+  it('records no budget skip when repair completes inside the remaining budget', async () => {
+    let call = 0;
+    wire.handler = () => {
+      call += 1;
+      return call === 1 ? sseTextResponse('{}') : sseTextResponse(VALID_ACTION_JSON);
+    };
+    const { adapter, events } = makeAdapter({ outputPathStrategy: 'free_form_only', maxRepairAttempts: 3 });
+
+    await adapter.startRun(makeInput());
+
+    const repairEvent = events.find((event) => event.eventType === 'output_repair_attempted');
+    expect(repairEvent?.payload).toMatchObject({ repaired: true, attemptsUsed: 1 });
+    expect(repairEvent?.payload).not.toHaveProperty('repairSkipReason');
+    expect(repairEvent?.payload).not.toHaveProperty('repairAttemptsSkippedByRequestBudget');
+    expect(events.some((event) => event.eventType === 'output_repair_exhausted')).toBe(false);
   });
 });

@@ -756,6 +756,31 @@ describe('PiAiRuntimeAdapter', () => {
       expect(findTelemetryEvent('llm_max_tokens_downshift')).toBeUndefined();
     });
 
+    it('bounds the downshift ladder with the run request budget (S6)', async () => {
+      const budgets: number[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens as number);
+        return makeErrorResponse(BUDGET_REJECTED);
+      });
+
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 0 });
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+        category: 'execution_failed',
+        details: expect.objectContaining({
+          finalFailureReason: 'request_budget_exhausted',
+          requestBudget: 3,
+          requestsSent: 3,
+          retryOwnership: 'pi-ai',
+          providerEvidence: expect.stringContaining('exceeds the maximum output tokens'),
+        }),
+      });
+
+      // The ladder would keep halving, but the run's shared budget stops it
+      // after three PD requests (32000 → 16000 → 8000).
+      expect(budgets).toEqual([32000, 16000, 8000]);
+    });
+
     it('downshifts thrown budget rejections too, not only resolved error responses', async () => {
       const budgets: number[] = [];
       mockComplete.mockReset();
