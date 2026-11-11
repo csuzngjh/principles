@@ -1,5 +1,6 @@
 ---
 "principles-disciple": patch
+"create-principles-disciple": patch
 ---
 
 OpenClaw 的 `pd-pain-signal` Skill 与另两个宿主对齐到 Pain Ingress v0.8：
