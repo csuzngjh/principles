@@ -333,7 +333,7 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     const steps = doc.jobs?.version?.steps ?? [];
     const check = steps.find((s) => s.name === 'Check Version PR token');
     expect(check).toBeDefined();
-    const gate = steps.find((s) => s.name === 'Materialize version plan (changeset version + mirror + lockfile)');
+    const gate = steps.find((s) => s.name === 'Materialize version plan (changeset version + mirrors + pins + lockfile)');
     expect(gate?.if).toContain("steps.token-check.outputs.armed == 'true'");
     const t = text();
     expect(t).toContain('PD_VERSION_PR_TOKEN is not configured');
@@ -398,6 +398,105 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     // operator's current branch by accident.
     expect(t).toContain('push-with-git-cli: true');
     expect(t).toContain('pr-base-branch: main');
+  });
+});
+
+describe('publish-npm.yml — Codex pin is verified, never re-issued', () => {
+  const rel = '.github/workflows/publish-npm.yml';
+
+  it('verifies the shipped pin after publication from a read-only job', () => {
+    // Owner decision 2026-11-11: the pin ships inside the Version Packages PR.
+    // The publish train therefore has NO write path for it — only a
+    // post-publication verification that must fail red on a mismatch.
+    const doc = loadWorkflow(rel) as {
+      jobs?: Record<
+        string,
+        {
+          needs?: string[];
+          permissions?: Record<string, string>;
+          steps?: Array<{ uses?: string; run?: string; with?: Record<string, unknown> }>;
+        }
+      >;
+    };
+    const jobs = doc.jobs ?? {};
+    const verify = jobs['codex-plugin-delivery-verify'];
+    expect(verify).toBeDefined();
+    expect(verify?.needs).toEqual(expect.arrayContaining(['publish-full-product']));
+    expect(verify?.permissions).toEqual({ contents: 'read' });
+
+    const steps = verify?.steps ?? [];
+    expect(steps.some((s) => (s.run ?? '').includes('sync-codex-runtime-pins.mjs --verify --root .'))).toBe(true);
+    expect(steps.some((s) => s.run === 'npm run check:runtime-pin')).toBe(true);
+    // Product comes from the cohort SHA; tooling from the trusted SHA.
+    const checkouts = steps.filter((s) => String(s.uses ?? '').startsWith('actions/checkout'));
+    expect(checkouts.some((s) => s.with?.ref === '${{ needs.resolve-cohort.outputs.cohort_sha }}')).toBe(true);
+    expect(checkouts.every((s) => s.with?.['persist-credentials'] === false)).toBe(true);
+
+    const serialized = JSON.stringify(steps);
+    for (const forbidden of ['git push', 'git commit', 'gh pr create', 'gh pr edit', 'git checkout -B']) {
+      expect(serialized).not.toContain(forbidden);
+    }
+
+    // The old maintenance job (write token + branch + PR) is gone entirely.
+    expect(jobs).not.toHaveProperty('codex-plugin-maintenance');
+    const text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    expect(text).not.toContain('codex/runtime-pins-maintenance');
+    expect(text).not.toContain('PD_VERSION_PR_TOKEN');
+  });
+
+  it('publish-finalize is hard-gated on the pin verification result', () => {
+    // `!cancelled()` defeats Actions' default "needs succeeded" check, so the
+    // closing job must assert the verify result explicitly. Any terminal
+    // outcome other than success must never reach tag / GitHub Release /
+    // ClawHub — that is the difference between a visible red job and a
+    // release shipped over a pin that does not match published bytes.
+    type Job = { needs?: string[]; if?: string; permissions?: Record<string, string>; steps?: Array<{ uses?: string }> };
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, Job> };
+    const jobs = doc.jobs ?? {};
+    const verify = jobs['codex-plugin-delivery-verify'];
+    const finalize = jobs['publish-finalize'];
+
+    expect(verify).toBeDefined();
+    expect(verify?.needs).toEqual(expect.arrayContaining(['publish-full-product']));
+    expect(verify?.permissions).toEqual({ contents: 'read' });
+
+    expect(finalize).toBeDefined();
+    expect(finalize?.needs).toEqual(
+      expect.arrayContaining(['resolve-cohort', 'publish-full-product', 'codex-plugin-delivery-verify']),
+    );
+
+    const gate = String(finalize?.if ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    expect(gate).toContain('!cancelled()');
+    expect(gate).toContain("needs.resolve-cohort.outputs.has_cohort == 'true'");
+    expect(gate).toContain("needs.publish-full-product.result == 'success'");
+    expect(gate).toContain("needs.codex-plugin-delivery-verify.result == 'success'");
+    // No escape hatches: the gate is a pure conjunction of explicit results.
+    expect(gate).not.toContain('always()');
+    expect(gate).not.toContain('||');
+
+    // Evaluate the ACTUAL parsed gate for each terminal verify outcome.
+    const verifyOutcomes = ['success', 'failure', 'skipped', 'cancelled'] as const;
+    const evaluate = (verifyResult: (typeof verifyOutcomes)[number]): boolean => {
+      if (!gate.includes('!cancelled()')) return false;
+      if (!gate.includes("needs.resolve-cohort.outputs.has_cohort == 'true'")) return false;
+      const required = [...gate.matchAll(/needs\.([a-z0-9-]+)\.result == 'success'/g)].map((m) => m[1]);
+      if (!required.includes('publish-full-product')) return false;
+      if (!required.includes('codex-plugin-delivery-verify')) return false;
+      const results: Record<string, string> = {
+        'publish-full-product': 'success',
+        'codex-plugin-delivery-verify': verifyResult,
+      };
+      return required.every((job) => results[job] === 'success');
+    };
+    expect(evaluate('success')).toBe(true);
+    for (const outcome of verifyOutcomes.filter((outcome) => outcome !== 'success')) {
+      expect(evaluate(outcome), `verify=${outcome} must not reach finalize`).toBe(false);
+    }
+
+    // The closing steps remain the idempotent release finalizer.
+    expect((finalize?.steps ?? []).some((s) => String(s.uses ?? '').includes('finalize-npm-release'))).toBe(true);
   });
 });
 

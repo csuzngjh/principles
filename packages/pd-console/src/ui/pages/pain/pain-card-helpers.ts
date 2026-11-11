@@ -5,8 +5,9 @@
  * No React dependency, no I/O. All functions are pure.
  */
 
-import type { IntentTensionData, IntentDecisionRecordData } from '../../utils/validators.js';
+import type { IntentTensionData, IntentDecisionRecordData, EvidenceChainProvenanceData } from '../../utils/validators.js';
 import type { IntentDecisionInputPayload } from '../../api.js';
+import { enumLabel } from '../../utils/enum-labels.js';
 
 // ── Confidence mapping ────────────────────────────────────────────────────────
 
@@ -20,6 +21,114 @@ export function mapConfidenceLabel(confidence: number): ConfidenceLabel {
   if (confidence >= 0.7) return 'high';
   if (confidence >= 0.4) return 'mid';
   return 'low';
+}
+
+// ── Provenance badge (SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4) ─────────────
+
+/** Raw source kind used by the MCP agent-assisted submission channel. */
+export const MCP_AGENT_ASSISTED_SOURCE_KIND = 'mcp_agent_assisted';
+
+/**
+ * i18n key for the neutral wording used when a pain record was observed by an
+ * agent and authorized by the Owner (MCP submission path).
+ */
+export const AGENT_REPORTED_PROVENANCE_LABEL_KEY = 'pages.pain.provenanceAgentReportedOwnerApproved';
+
+/**
+ * i18n key used when the record came through the MCP agent-assisted channel but
+ * the authorization could not be verified (missing / unknown provenance, or an
+ * unparseable `diagnostic_json`).
+ */
+export const AGENT_REPORTED_AUTHORIZATION_UNVERIFIED_KEY = 'pages.pain.provenanceAgentReportedAuthorizationUnverified';
+
+/** i18n key for the generic neutral source-kind label of `mcp_agent_assisted`. */
+export const MCP_AGENT_ASSISTED_SOURCE_LABEL_KEY = 'common.enums.sourceKind.mcp_agent_assisted';
+
+/**
+ * Which of the three display tiers a record falls into.
+ *
+ * - `authorized_agent_report` — verified Owner authorization.
+ * - `unverified_agent_report` — agent-assisted submission whose authorization
+ *   cannot be verified. Must never be presented as Owner authorization.
+ * - `source_kind` — every other record keeps its existing source-kind label.
+ */
+export type ProvenanceBadgeKind =
+  | 'authorized_agent_report'
+  | 'unverified_agent_report'
+  | 'source_kind';
+
+export interface ProvenanceBadge {
+  kind: ProvenanceBadgeKind;
+  /**
+   * i18n key for tiers 1 and 2. `undefined` means the caller resolves the label
+   * through `enumLabel('sourceKind', ...)` (tier 3).
+   */
+  labelKey?: string;
+}
+
+/**
+ * Resolve the display tier for a record's source/provenance.
+ *
+ * Priority:
+ * 1. `provenance === 'agent_reported_owner_approved'` → authorized agent report;
+ * 2. `sourceKind === 'mcp_agent_assisted'` with NO provenance → agent report
+ *    whose authorization cannot be verified;
+ * 3. everything else → the existing source-kind path.
+ *
+ * Tier 2 is deliberately narrow: missing provenance must never be read as Owner
+ * authorization, and legacy provenance values stay on their existing path.
+ */
+export function resolveProvenanceBadge(record: RecordData): ProvenanceBadge {
+  if (record.provenance === 'agent_reported_owner_approved') {
+    return { kind: 'authorized_agent_report', labelKey: AGENT_REPORTED_PROVENANCE_LABEL_KEY };
+  }
+  if (record.sourceKind === MCP_AGENT_ASSISTED_SOURCE_KIND && record.provenance === undefined) {
+    return { kind: 'unverified_agent_report', labelKey: AGENT_REPORTED_AUTHORIZATION_UNVERIFIED_KEY };
+  }
+  return { kind: 'source_kind' };
+}
+
+/**
+ * Whether the card renders the neutral "agent reported, Owner authorized"
+ * badge instead of the raw source-kind badge.
+ *
+ * Only `agent_reported_owner_approved` changes to the authorized wording: the
+ * three legacy provenance values keep their existing rendering and their raw
+ * provenance is never shown. The internal enum literal must never reach the
+ * Owner, and this record must never be presented as the Owner's own observation.
+ */
+export function isAgentReportedOwnerApproved(record: RecordData): boolean {
+  return resolveProvenanceBadge(record).kind === 'authorized_agent_report';
+}
+
+/**
+ * zh-CN mirror of the two provenance i18n keys, used only when no translator is
+ * supplied (pure tests). The React page always passes `t`, so the real UI reads
+ * the i18n catalog; this keeps the helper total without leaking an enum.
+ */
+const SAFE_SOURCE_DISPLAY_FALLBACK: Readonly<Record<'authorized_agent_report' | 'unverified_agent_report', string>> = {
+  authorized_agent_report: '智能体报告，拥有者已授权',
+  unverified_agent_report: '智能体报告（授权信息不可验证）',
+};
+
+/**
+ * Single Owner-facing source label resolver for Layer 1, Layer 3 (technical
+ * details) and the copied debug summary.
+ *
+ * Every Owner-facing path must go through this function so no internal enum
+ * literal (`mcp_agent_assisted`, `agent_reported_owner_approved`, …) can leak.
+ * Records without verifiable provenance degrade to neutral wording; they are
+ * never presented as Owner authorization.
+ */
+export function resolveSourceDisplayLabel(
+  record: RecordData,
+  t?: (key: string) => string,
+): string {
+  const badge = resolveProvenanceBadge(record);
+  if (badge.kind !== 'source_kind') {
+    return t && badge.labelKey ? t(badge.labelKey) : SAFE_SOURCE_DISPLAY_FALLBACK[badge.kind];
+  }
+  return enumLabel('sourceKind', record.sourceKind, t);
 }
 
 // ── Card layer data structures ────────────────────────────────────────────────
@@ -59,7 +168,8 @@ export interface Layer3Data {
   linkedTaskStatus: string | null;
   linkedCandidateId: string | null;
   linkedPrincipleId: string | null;
-  sourceKind: string;
+  /** Safe Owner-facing source label — never the raw source kind enum. */
+  sourceLabel: string;
   state: string;
   /** PRI-380: internalization task linkage */
   internalizationTaskId: string | null;
@@ -95,6 +205,8 @@ export interface RecordData {
   dreamerTaskStatus?: string;
   /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
   intentTension?: IntentTensionData;
+  /** SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: internal provenance discriminator. */
+  provenance?: EvidenceChainProvenanceData;
 }
 
 /**
@@ -103,10 +215,13 @@ export interface RecordData {
  * - Layer 2: human-readable content (trigger, conclusion, applicability, confidence)
  * - Layer 3: technical IDs (collapsed by default)
  */
-export function buildCardLayers(record: RecordData): CardLayers {
+export function buildCardLayers(record: RecordData, t?: (key: string) => string): CardLayers {
+  // All Owner-facing layers share one safe resolver (SPEC §6.6.4).
+  const sourceLabel = resolveSourceDisplayLabel(record, t);
+
   const layer1: Layer1Data = {
     stateLabel: record.state,
-    sourceLabel: record.sourceKind,
+    sourceLabel,
     observedAt: record.observedAt,
   };
 
@@ -130,7 +245,7 @@ export function buildCardLayers(record: RecordData): CardLayers {
     linkedTaskStatus: record.linkedTaskStatus ?? null,
     linkedCandidateId: record.linkedCandidateId ?? null,
     linkedPrincipleId: record.linkedPrincipleId ?? null,
-    sourceKind: record.sourceKind,
+    sourceLabel,
     state: record.state,
     internalizationTaskId: record.internalizationTaskId ?? null,
     dreamerTaskStatus: record.dreamerTaskStatus ?? null,
@@ -149,7 +264,7 @@ export function buildCardLayers(record: RecordData): CardLayers {
  * so Owners never need to read raw IDs in the UI — they copy this string
  * only when reporting an issue to a developer.
  */
-export function buildDebugIdSummary(record: RecordData): string {
+export function buildDebugIdSummary(record: RecordData, t?: (key: string) => string): string {
   const lines: string[] = [];
   lines.push(`pain_id: ${record.id}`);
   if (record.linkedTaskId) lines.push(`task_id: ${record.linkedTaskId}`);
@@ -158,7 +273,8 @@ export function buildDebugIdSummary(record: RecordData): string {
   if (record.linkedPrincipleId) lines.push(`principle_id: ${record.linkedPrincipleId}`);
   if (record.internalizationTaskId) lines.push(`internalization_task_id: ${record.internalizationTaskId}`);
   if (record.dreamerTaskStatus) lines.push(`dreamer_status: ${record.dreamerTaskStatus}`);
-  lines.push(`source_kind: ${record.sourceKind}`);
+  // Owner-facing clipboard text: the safe label, never the raw source enum.
+  lines.push(`source_kind: ${resolveSourceDisplayLabel(record, t)}`);
   lines.push(`state: ${record.state}`);
   return lines.join('\n');
 }

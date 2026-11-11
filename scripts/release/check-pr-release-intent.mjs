@@ -8,8 +8,8 @@
  *   1. If the PR diff is reproducible from the base's pending changesets
  *      through the deterministic materialization pipeline, the PR IS a
  *      Version Packages PR — the reproduction itself proves the allowed
- *      diff, the Product Version and runtime pins are untouched, and only
- *      the C4 plan guard still applies.
+ *      diff, the Product Version is untouched, the Codex runtime pin matches
+ *      the cohort's manifests, and only the C4 plan guard still applies.
  *   2. Otherwise the PR is a normal PR and must DECLARE its own release
  *      intent (this PR's changesets — base/main pending changesets do not
  *      count, SPEC §11 intro):
@@ -18,6 +18,7 @@
  *        N-3 release-affecting change, no intent -> FAIL
  *        N-4 bump type not major/minor/patch     -> FAIL
  *        N-5 direct C4 (plugin/console -> installer) via the final plan
+ *        N-runtime-pin normal PR edits the Codex runtime pin -> FAIL
  *      plus: a normal PR may not edit any package `version` field —
  *      versions materialize only through the Version Packages PR.
  *
@@ -46,6 +47,7 @@ import {
   computeFinalPlan,
   reproduceVersionMaterialization,
 } from './lib/version-plan.mjs';
+import { CODEX_RUNTIME_PIN_PATH } from './sync-codex-runtime-pins.mjs';
 import {
   ASSEMBLY_PAYLOAD_SOURCES,
   PRODUCT_ASSEMBLY_RULES,
@@ -189,7 +191,7 @@ if (repro.reproducible) {
   console.log(
     `RELEASE_INTENT_GUARD PASS mode=version-pr (${repro.releases
       .map((r) => `${r.name}@${r.newVersion}`)
-      .join(', ')}) — diff reproduced from base pending changesets; Product Version and runtime pins untouched.`,
+      .join(', ')}) — diff reproduced from base pending changesets; Product Version untouched and Codex runtime pin materialized from this cohort.`,
   );
   process.exit(0);
 }
@@ -199,6 +201,19 @@ if (repro.reproducible) {
 // ---------------------------------------------------------------------------
 const failures = [];
 const ws = loadWorkspace(repoRoot);
+
+// The Codex runtime pin has exactly ONE writer: the Version Packages PR's
+// deterministic materialization. A normal PR editing it — even with a
+// changeset or a plugin.json bump to disguise the change — would be a second
+// materialization authority, so it fails unconditionally (no changeset or
+// empty-changeset waiver). Only the pin file is forbidden here: plugin.json
+// stays editable for ordinary payload updates; its own bump discipline is
+// enforced by `--check-base`, not by this guard.
+if (changedPaths.includes(CODEX_RUNTIME_PIN_PATH)) {
+  failures.push(
+    `N-runtime-pin: ${CODEX_RUNTIME_PIN_PATH} can only be modified by a deterministically reproduced Version Packages PR. Revert this change and let the Version Packages materializer generate the pin.`,
+  );
+}
 
 // Baseline-alignment window (SPEC §9.3): the ONE migration PR that carries a
 // fresh registry baseline snapshot may move package versions onto that

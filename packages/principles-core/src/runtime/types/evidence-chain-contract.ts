@@ -16,6 +16,7 @@ import {
   type IntentRelatedField,
   type SuggestedOwnerAction,
 } from '../diagnostician/diag-rootcause-output.js';
+import { normalizePainProvenance, type PainProvenance } from '../admission-gate.js';
 
 // PRI-469: re-export IntentTension so consumers can import it from the
 // evidence-chain module without reaching into the diagnostician package.
@@ -96,6 +97,16 @@ export interface EvidenceChainRecord {
    */
   hostKind?: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
   /**
+   * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: how this pain observation was
+   * obtained. Read-only pass-through of the provenance already persisted in the
+   * diagnostician task's diagnostic_json (the observability payload) — this
+   * module reads it, it never writes or re-derives a second truth.
+   *
+   * Owner-facing surfaces must translate this internal value into neutral
+   * wording; the raw enum literal must never be shown to the Owner.
+   */
+  provenance?: PainProvenance;
+  /**
    * PRI-469: Optional intent tension surfaced from the diagnostician artifact
    * (Stage A output, SPEC §16). Present only when:
    *   1. The `intent_engineering` flag was on at diagnosis time, AND
@@ -134,6 +145,13 @@ export const EvidenceChainRecordSchema = Type.Object({
   canonicalPainId: Type.Optional(Type.String()),
   runtimeTaskId: Type.Optional(Type.String()),
   linkMode: Type.Optional(Type.Union([Type.Literal('canonical'), Type.Literal('legacy')])),
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: read-only provenance passthrough.
+  provenance: Type.Optional(Type.Union([
+    Type.Literal('host_context_bound'),
+    Type.Literal('owner_reported_no_host_trace'),
+    Type.Literal('automatic_hook'),
+    Type.Literal('agent_reported_owner_approved'),
+  ])),
   // PRI-469: optional intent tension from diagnostician artifact (SPEC §16).
   // `confidence` is forbidden on this object (SPEC §16.3); enforced by
   // IntentTensionSchema's additionalProperties:false and by validateIntentTension.
@@ -570,6 +588,11 @@ export interface TaskMapEntry {
   rootCauseSummary?: string;
   diagnosticJsonDegraded?: boolean;
   inputRef?: string;
+  /**
+   * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance as persisted in the
+   * diagnostician task's diagnostic_json. Read-only — never re-derived here.
+   */
+  provenance?: PainProvenance;
   /** PRI-469: intent tension extracted from the diagnostician artifact (Stage A output). */
   intentTension?: IntentTension;
   /** PRI-469: set when the artifact content_json could not be parsed or intentTension was malformed. */
@@ -989,17 +1012,27 @@ export function assembleEvidenceChain(params: {
       }
     }
 
+    // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance is read from the
+    // SAME persisted observability payload that already carries it
+    // (tasks.diagnostic_json). No new column, no migration, no second truth.
+    let provenance: PainProvenance | undefined;
+
     // Fallback: tasks.diagnostic_json (test-fixture compat). Only used when
     // the artifact did not provide a rootCause.
-    if (rootCauseSummary === undefined) {
-      const dj = getOwnValue(task, 'diagnostic_json');
-      if (isString(dj)) {
-        try {
-          const parsed = JSON.parse(dj);
-          if (isRecord(parsed) && Object.hasOwn(parsed, 'rootCause') && isString(parsed.rootCause)) {
+    const dj = getOwnValue(task, 'diagnostic_json');
+    if (isString(dj)) {
+      try {
+        const parsed: unknown = JSON.parse(dj);
+        if (isRecord(parsed)) {
+          provenance = normalizePainProvenance(getOwnValue(parsed, 'provenance'));
+          if (rootCauseSummary === undefined && Object.hasOwn(parsed, 'rootCause') && isString(parsed.rootCause)) {
             rootCauseSummary = parsed.rootCause;
           }
-        } catch {
+        }
+      } catch {
+        // Preserve the pre-existing degrade semantics: an unparseable
+        // diagnostic_json only degrades when it was the rootCause source.
+        if (rootCauseSummary === undefined) {
           diagnosticJsonDegraded = true;
         }
       }
@@ -1013,6 +1046,7 @@ export function assembleEvidenceChain(params: {
       rootCauseSummary,
       diagnosticJsonDegraded,
       inputRef,
+      provenance,
       intentTension,
       artifactDegraded,
     });
@@ -1212,6 +1246,10 @@ export function assembleEvidenceChain(params: {
     if (linkedTask) {
       record.linkedTaskId = linkedTask.taskId;
       record.linkedTaskStatus = linkedTask.status;
+      // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance passthrough.
+      if (linkedTask.provenance) {
+        record.provenance = linkedTask.provenance;
+      }
       if (linkedTask.rootCauseSummary) {
         record.rootCauseSummary = linkedTask.rootCauseSummary;
       }
@@ -1418,6 +1456,10 @@ export function assembleEvidenceChain(params: {
     if (crossRefTask.rootCauseSummary) {
       record.rootCauseSummary = crossRefTask.rootCauseSummary;
     }
+    // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance passthrough.
+    if (crossRefTask.provenance) {
+      record.provenance = crossRefTask.provenance;
+    }
     // PRI-469: surface intentTension from the cross-referenced task's artifact.
     if (crossRefTask.intentTension) {
       record.intentTension = crossRefTask.intentTension;
@@ -1515,6 +1557,10 @@ export function assembleEvidenceChain(params: {
 
     if (task.rootCauseSummary) {
       record.rootCauseSummary = task.rootCauseSummary;
+    }
+    // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance passthrough.
+    if (task.provenance) {
+      record.provenance = task.provenance;
     }
     // PRI-469: surface intentTension from the task's diagnostician artifact.
     if (task.intentTension) {

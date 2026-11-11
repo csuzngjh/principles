@@ -44,7 +44,12 @@
     "time": "Time",
     "actions": "Actions",
     "copied": "Copied",
-    "skipToMain": "Skip to main content"
+    "skipToMain": "Skip to main content",
+    "enums": {
+      "sourceKind": {
+        "mcp_agent_assisted": "Agent-assisted submission"
+      }
+    }
   },
   "pages": {
     "focus": {
@@ -693,6 +698,8 @@
         "codex": "Codex",
         "openclaw": "OpenClaw"
       },
+      "provenanceAgentReportedOwnerApproved": "Reported by an agent, authorized by the Owner",
+      "provenanceAgentReportedAuthorizationUnverified": "Agent-reported (authorization unverified)",
       "fieldConclusion": "PD's Conclusion",
       "fieldApplicability": "Applicability",
       "fieldConfidence": "Confidence",
