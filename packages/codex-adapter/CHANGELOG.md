@@ -1,5 +1,31 @@
 # @principles/codex-adapter
 
+## 0.8.9
+
+### Patch Changes
+
+- 0afc6b3: SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8：Agent 痛点入口四阶段落地。
+  
+  - 阶段 1：Core Pain Submit Capability、anchor 校验、统一 Origin/Provenance；`evaluatePainIngress()` 增加 MCP 专用分支并排在通用 Unbound 分支之前。
+  - 阶段 2：MCP `pd_submit_pain` 契约面；超时返回 `submit_unconfirmed`，并以 `taskId = diagnosis_<painId>` 做限时只读回查（found/not_found/read_error），不取消写入、不自动重投。
+  - 阶段 3：四类写入点统一 `DEFAULT_PAIN_SCORE = 40`（`moderate`）；MCP 路径恢复 Observability，`pain_events` 可见。
+  - 阶段 4：Console L2/L2b；OpenClaw tick 增加 L3 自动诊断（每轮最多 1 个，失败保留 pending，flag `openclaw_diagnostician_consumer` 可关）；安装器废弃旧 `pd-record-pain` skill（仅重命名字节命中已发布载荷的副本，用户修改副本保留并告警）。
+  
+  MCP 写能力仍受 OG-4 门禁约束：生产入口不开启，`tools/list` 不含 `pd_submit_pain`。
+- 9ae1936: PRI-1170: 修复 Adaptive Activation 的选择协议并接入真实 Codex `exec` hook（默认关闭）。
+  
+  - 候选负载改为 `{ref, text, digest}`，`digest = sha256(实际下发正文)`，模型只原样复制引用与摘要；PD 用本轮冻结候选表核对，并独立重验正文、修订与授权。
+  - 截止拆成「首字节 10 秒 + 生成阶段独立 10 秒」；保持每轮最多一次实际发送、零重试、零 repair、零 provider fallback，迟到结果不应用。
+  - 新增 `@principles/host-runtime` 的选择协议与 priority provider 模块；`codex-adapter` 在 `before_prompt_build` 分支按 `host.codex.adaptive_activation`（quiet，默认 `false`）装配，关闭时 Native 输出逐字节一致且零模型请求。
+  - 每次请求输出一行有界结构化诊断（阶段、首字节/生成结束/取消时点、引用与摘要校验结果、`finish_reason`），不保存原始会话、完整响应或凭据。
+- Updated dependencies [0afc6b3]
+- Updated dependencies [9ae1936]
+- Updated dependencies [f1cf77b]
+- Updated dependencies [f1cf77b]
+- Updated dependencies [09a1205]
+  - @principles/core@7.3.0
+  - @principles/host-runtime@3.3.0
+
 ## 0.8.8
 
 ### Patch Changes
