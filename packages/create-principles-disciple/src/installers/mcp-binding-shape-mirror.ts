@@ -15,6 +15,13 @@
  * `MCP_BINDING_HOSTS × MCP_BINDING_FIXTURES`. A new reason code, a reordered
  * check or a relaxed comparison on either side turns that test red.
  *
+ * SAME-SOURCE POINTER — the authoritative declaration is
+ *   packages/install-layout/src/mcp-binding-contract.ts
+ * The two files MUST change together, in the same commit. Retiring this mirror
+ * (restoring the single implementation) is tracked by PRI-1191 and is blocked
+ * until the export is published to the registry AND the installer's
+ * install-layout dependency floor reaches that version.
+ *
  * Same discipline as the WorkBuddy plugin-state mirror (2026-11-08).
  */
 import * as path from 'node:path';

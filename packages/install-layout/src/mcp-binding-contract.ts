@@ -9,8 +9,19 @@
  *   - the launcher's binding gate and this declaration must produce the SAME
  *     verdict for the SAME input — `mcp-binding-contract-parity.test.ts` runs
  *     the real launcher over the fixtures below and fails on any divergence;
- *   - the installer and `pd health` consume this module directly, so they can
- *     never be more permissive than the launcher.
+ *   - `pd health` consumes this module directly, so it can never be more
+ *     permissive than the launcher; the packaged installer consumes the pinned
+ *     mirror noted below instead of importing this module at runtime.
+ *
+ * SAME-SOURCE POINTER — a pinned mirror of this declaration lives at
+ *   packages/create-principles-disciple/src/installers/mcp-binding-shape-mirror.ts
+ * The packaged installer cannot import this module at runtime (it must load
+ * against the PUBLISHED install-layout, PRI-669/RF-02, and a normal PR may not
+ * raise the dependency floor), so it mirrors these rules verbatim. The two
+ * files MUST change together, in the same commit; the 33-cell parity test
+ * (`mcp-binding-shape-mirror-parity.test.ts`) pins identical verdicts. The
+ * mirror is retired by PRI-1191 once the export is published and the installer
+ * floor is raised.
  *
  * Adding a reason code on either side without a fixture/exemption makes that
  * parity test red — divergence is a defect, not something to remember.
