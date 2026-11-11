@@ -27,6 +27,7 @@ import {
   type WorkspaceEnvironment,
   type PrinciplesConfig,
   type ReuseEvaluationConfig,
+  type AdaptiveActivationConfig,
   WORKSPACE_ENVIRONMENTS,
   type ProfileConfig,
   type ContextInjectionConfig,
@@ -61,6 +62,12 @@ const REUSE_EVALUATION_KEYS: ReadonlySet<string> = new Set(['enabled', 'runtimeP
  * configuration.
  */
 const PROMPT_BUDGET_KEYS: ReadonlySet<string> = new Set(['declaredContextWindowTokens', 'hosts']);
+
+/**
+ * Closed-world key set for the Adaptive Activation decision endpoint
+ * (PRI-1182). Ghost configuration fails loud, like every other section.
+ */
+const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider']);
 
 /**
  * Closed-world key set for `runtimeProfiles.*` pi-ai profiles.
@@ -150,6 +157,15 @@ function isValidDeclaredWindowValue(value: unknown): value is number {
 }
 
 // ── Safe Preview ────────────────────────────────────────────────────────────
+
+/** True only for an absolute https URL (the Decisions endpoint allowlist). */
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 function safePreview(value: unknown): string {
   if (value === null) return 'null';
@@ -1014,6 +1030,54 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     }
   }
 
+  // adaptiveActivation (optional — PRI-1182). Absent keeps the Adaptive path
+  // at `needs_setup` and Native unchanged. A present but malformed section is
+  // a hard error (rc-3), never a silent Native fallback with a misleading
+  // "ready" config.
+  const adaptiveRaw = readOwn(raw, 'adaptiveActivation');
+  let adaptiveActivation: AdaptiveActivationConfig | undefined;
+  if (adaptiveRaw !== undefined) {
+    if (!isRecord(adaptiveRaw)) {
+      errors.push(err('adaptiveActivation', `adaptiveActivation must be an object, got ${safePreview(adaptiveRaw)}`, 'Set adaptiveActivation to a mapping (e.g. adaptiveActivation: { endpoint: https://…, model: …, apiKeyEnv: … })'));
+    } else {
+      for (const key of Object.keys(adaptiveRaw)) {
+        if (!ADAPTIVE_ACTIVATION_KEYS.has(key)) {
+          errors.push(err(`adaptiveActivation.${key}`, `unknown key '${key}' in adaptiveActivation`, `Remove '${key}'; only ${[...ADAPTIVE_ACTIVATION_KEYS].join(', ')} are supported`));
+        }
+      }
+      const endpointRaw = readOwn(adaptiveRaw, 'endpoint');
+      const endpointValid = typeof endpointRaw === 'string' && isHttpsUrl(endpointRaw);
+      if (!endpointValid) {
+        errors.push(err('adaptiveActivation.endpoint', `endpoint must be an https URL, got ${safePreview(endpointRaw)}`, 'Set adaptiveActivation.endpoint to the Decisions endpoint URL (https://…)'));
+      }
+      const modelRaw = readOwn(adaptiveRaw, 'model');
+      const modelValid = typeof modelRaw === 'string' && modelRaw.trim() !== '';
+      if (!modelValid) {
+        errors.push(err('adaptiveActivation.model', `model must be a non-empty string, got ${safePreview(modelRaw)}`, 'Set adaptiveActivation.model to the decision model id'));
+      }
+      const apiKeyEnvRaw = readOwn(adaptiveRaw, 'apiKeyEnv');
+      const apiKeyEnvValid = typeof apiKeyEnvRaw === 'string' && apiKeyEnvRaw.trim() !== '';
+      if (!apiKeyEnvValid) {
+        errors.push(err('adaptiveActivation.apiKeyEnv', `apiKeyEnv must be a non-empty string, got ${safePreview(apiKeyEnvRaw)}`, 'Set adaptiveActivation.apiKeyEnv to the environment VARIABLE NAME holding the key'));
+      }
+      const providerRaw = readOwn(adaptiveRaw, 'provider');
+      const providerValid = providerRaw === undefined
+        || (typeof providerRaw === 'string' && providerRaw.trim() !== '');
+      if (!providerValid) {
+        errors.push(err('adaptiveActivation.provider', `provider must be a non-empty string when present, got ${safePreview(providerRaw)}`, 'Remove adaptiveActivation.provider or set it to the provider label (e.g. Respan)'));
+      }
+      if (endpointValid && modelValid && apiKeyEnvValid && providerValid
+        && errors.every((e) => !e.path.startsWith('adaptiveActivation'))) {
+        adaptiveActivation = {
+          endpoint: endpointRaw.trim(),
+          model: modelRaw.trim(),
+          apiKeyEnv: apiKeyEnvRaw.trim(),
+          ...(typeof providerRaw === 'string' ? { provider: providerRaw.trim() } : {}),
+        };
+      }
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -1031,6 +1095,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     ui: ui ?? { diagnostics: { mode: 'simple' } },
     ...(principles ? { principles } : {}),
     ...(reuseEvaluation ? { reuseEvaluation } : {}),
+    ...(adaptiveActivation ? { adaptiveActivation } : {}),
     ...(promptBudget ? { promptBudget } : {}),
     ...(profile ? { profile } : {}),
     ...(contextInjection ? { contextInjection } : {}),

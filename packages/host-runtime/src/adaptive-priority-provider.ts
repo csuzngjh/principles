@@ -21,6 +21,12 @@ import {decideAdaptiveSkip} from './adaptive-skip-decision.js';
 /** Independent switch. `features.host.codex.enabled` remains the whole-hook gate. */
 export const ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
 
+/**
+ * PRI-1182 §2: time kept back from the host window for the principle assembly
+ * and the hook's own output. Selection never spends the reserve.
+ */
+export const ADAPTIVE_OUTPUT_RESERVE_MS = 200;
+
 export interface AdaptivePrioritySelection {
   readonly artifactId: string;
   readonly activationId: string;
@@ -40,8 +46,13 @@ export interface AdaptiveActivationReadiness {
 }
 
 export type AdaptiveModelResolution =
-  | {readonly ok: true; readonly model: AdaptiveSelectionModel; readonly profileId: string}
-  | {readonly ok: false; readonly reason: string; readonly nextAction: string};
+  | {readonly ok: true; readonly model: AdaptiveSelectionModel}
+  | {
+      readonly ok: false;
+      readonly readiness: 'disabled' | 'needs_setup';
+      readonly reason: string;
+      readonly nextAction: string;
+    };
 
 export function resolveAdaptiveSelectionModel(
   config: PdConfig,
@@ -51,48 +62,46 @@ export function resolveAdaptiveSelectionModel(
   if (feature?.enabled !== true) {
     return {
       ok: false,
+      readiness: 'disabled',
       reason: `${ADAPTIVE_ACTIVATION_FLAG} is disabled in .pd/config.yaml`,
       nextAction: `Enable it explicitly with ${ADAPTIVE_ACTIVATION_FLAG}: {enabled: true}`,
     };
   }
-  const profileId = config.internalAgents.defaultRuntime;
-  const profile = config.runtimeProfiles[profileId];
-  if (!profile) {
+  // PRI-1182: the Adaptive path has its OWN endpoint + model + credential
+  // reference. It no longer borrows a pi-ai runtime profile, because the
+  // Decisions protocol is a single scoring endpoint, not a chat completion.
+  const section = config.adaptiveActivation;
+  if (!section) {
     return {
       ok: false,
-      reason: `Runtime profile '${profileId}' not found`,
-      nextAction: `Add runtime profile '${profileId}' to runtimeProfiles`,
+      readiness: 'needs_setup',
+      reason: 'adaptiveActivation is not configured in .pd/config.yaml',
+      nextAction: 'Add adaptiveActivation: {endpoint, model, apiKeyEnv} to .pd/config.yaml',
     };
   }
-  if (profile.type !== 'pi-ai') {
+  if (!section.endpoint || !section.model || !section.apiKeyEnv) {
     return {
       ok: false,
-      reason: `Runtime profile '${profileId}' is '${profile.type}', not pi-ai`,
-      nextAction: 'ADR-0029 requires a pi-ai runtime profile for adaptive selection',
+      readiness: 'needs_setup',
+      reason: 'adaptiveActivation is missing endpoint/model/apiKeyEnv',
+      nextAction: 'Set endpoint (https URL), model and apiKeyEnv on adaptiveActivation',
     };
   }
-  if (!profile.provider || !profile.model || !profile.apiKeyEnv) {
+  if (!Object.hasOwn(env, section.apiKeyEnv) || !env[section.apiKeyEnv]) {
     return {
       ok: false,
-      reason: `pi-ai profile '${profileId}' missing provider/model/apiKeyEnv`,
-      nextAction: `Set provider, model and apiKeyEnv on runtime profile '${profileId}'`,
-    };
-  }
-  if (!Object.hasOwn(env, profile.apiKeyEnv) || !env[profile.apiKeyEnv]) {
-    return {
-      ok: false,
-      reason: `Environment variable '${profile.apiKeyEnv}' is not set or empty`,
-      nextAction: `Set the environment variable '${profile.apiKeyEnv}' with a valid API key`,
+      readiness: 'needs_setup',
+      reason: `Environment variable '${section.apiKeyEnv}' is not set or empty`,
+      nextAction: `Set the environment variable '${section.apiKeyEnv}' with a valid API key`,
     };
   }
   return {
     ok: true,
-    profileId,
     model: {
-      provider: profile.provider,
-      model: profile.model,
-      apiKeyEnv: profile.apiKeyEnv,
-      ...(profile.baseUrl ? {baseUrl: profile.baseUrl} : {}),
+      endpoint: section.endpoint,
+      model: section.model,
+      apiKeyEnv: section.apiKeyEnv,
+      ...(section.provider ? {provider: section.provider} : {}),
     },
   };
 }
@@ -122,13 +131,19 @@ export interface CreateAdaptivePriorityProviderOptions {
    */
   readonly outerDeadlineAt?: number;
   /**
-   * PRI-1181: below this remaining budget the turn is skipped before the
-   * candidate read — no model request is sent at all. Defaults to the measured
-   * minimum (`ADAPTIVE_SKIP_LIMITS.minRemainingBudgetMs`); 0 disables the gate
-   * for scenarios that isolate transport cancellation.
+   * PRI-1182 §2: reserved for assembly and output after the decision. The
+   * effective deadline is the earlier of the host's remaining window (minus
+   * this reserve) and the request's own short limit.
    */
-  readonly minRemainingBudgetMs?: number;
-  readonly maxTokens?: number;
+  readonly outputReserveMs?: number;
+  /**
+   * PRI-1181/PRI-1182: below this remaining budget the turn is skipped before
+   * the candidate read — no model request is sent at all. Defaults to the
+   * request's minimum executable envelope
+   * (`ADAPTIVE_SKIP_LIMITS.minExecutableBudgetMs`); 0 disables the gate for
+   * scenarios that isolate transport cancellation.
+   */
+  readonly minExecutableBudgetMs?: number;
   readonly now?: () => number;
   /** Test seam: production uses the global transport. */
   readonly fetchImpl?: typeof fetch;
@@ -145,10 +160,23 @@ export function createAdaptivePriorityProvider(
   const now = options.now ?? Date.now;
   const firstByteTimeoutMs = options.firstByteTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.firstByteTimeoutMs;
   const generationTimeoutMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
+  const outputReserveMs = options.outputReserveMs ?? ADAPTIVE_OUTPUT_RESERVE_MS;
 
   return async (event) => {
     if (event.kind !== 'before_prompt_build') return undefined;
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
+    // The earlier of two independent limits: the host's remaining window
+    // (minus the assembly/output reserve) and the request's own short
+    // first-byte + generation envelope. A huge host window never extends the
+    // request, and a tiny host window never lets the request overrun it.
+    const nowMs = now();
+    const hostDeadlineAt = options.outerDeadlineAt === undefined
+      ? undefined
+      : options.outerDeadlineAt - outputReserveMs;
+    const requestDeadlineAt = nowMs + firstByteTimeoutMs + generationTimeoutMs;
+    const effectiveDeadlineAt = hostDeadlineAt === undefined
+      ? requestDeadlineAt
+      : Math.min(hostDeadlineAt, requestDeadlineAt);
     // PRI-1181: deterministic gate BEFORE the candidate read. A skipped turn
     // costs zero reads and zero sends; the Native body is untouched.
     const skip = decideAdaptiveSkip({
@@ -156,11 +184,9 @@ export function createAdaptivePriorityProvider(
       sessionId,
       turnId,
       prompt: promptContent ?? '',
-      ...(options.outerDeadlineAt === undefined
-        ? {}
-        : {remainingBudgetMs: options.outerDeadlineAt - now()}),
-      ...(options.minRemainingBudgetMs !== undefined
-        ? {minRemainingBudgetMs: options.minRemainingBudgetMs}
+      remainingBudgetMs: Math.max(0, effectiveDeadlineAt - nowMs),
+      ...(options.minExecutableBudgetMs !== undefined
+        ? {minExecutableBudgetMs: options.minExecutableBudgetMs}
         : {}),
     });
     if (skip.skip) {
@@ -182,27 +208,20 @@ export function createAdaptivePriorityProvider(
     // selector only needs the prompt body from here on.
     const prompt = promptContent ?? '';
 
-    const admissionDeadlineAt = options.outerDeadlineAt === undefined
-      ? now() + firstByteTimeoutMs
-      : Math.min(now() + firstByteTimeoutMs, options.outerDeadlineAt);
-    const remainingBudgetMs = options.outerDeadlineAt === undefined
-      ? firstByteTimeoutMs
-      : Math.max(1, options.outerDeadlineAt - now());
-    const effectiveGenerationTimeoutMs = options.outerDeadlineAt === undefined
-      ? generationTimeoutMs
-      : Math.min(generationTimeoutMs, remainingBudgetMs);
+    const admissionDeadlineAt = Math.min(nowMs + firstByteTimeoutMs, effectiveDeadlineAt);
+    const effectiveGenerationTimeoutMs = Math.max(1, Math.min(generationTimeoutMs, effectiveDeadlineAt - nowMs));
     // Reuse the selector's AbortSignal seam instead of a second timer: it is
-    // combined with the first-byte and request signals inside the transport.
-    const signal = options.outerDeadlineAt === undefined ? undefined : AbortSignal.timeout(remainingBudgetMs);
+    // combined with the first-byte and completion signals inside the transport.
+    // This is the underlying cancellation for the effective deadline.
+    const signal = AbortSignal.timeout(Math.max(1, effectiveDeadlineAt - nowMs));
     const outcome = await runAdaptiveSelection({
       workspaceDir: workspaceDir || options.workspaceDir,
       currentPrompt: prompt,
       admissionDeadlineAt,
       model: options.model,
       generationTimeoutMs: effectiveGenerationTimeoutMs,
-      ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
-      ...(signal ? {signal} : {}),
-      ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
+      outerDeadlineAt: effectiveDeadlineAt,
+      signal,
       ...(options.now ? {now: options.now} : {}),
       ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
     });
@@ -223,8 +242,8 @@ export function createAdaptivePriorityProvider(
       artifactId: outcome.target.artifactId,
       activationId: outcome.target.activationId,
       additiveOnly: true,
-      deadlineAt: options.outerDeadlineAt ?? admissionDeadlineAt + generationTimeoutMs,
-      ...(signal ? {signal} : {}),
+      deadlineAt: effectiveDeadlineAt,
+      signal,
     };
   };
 }
@@ -234,7 +253,6 @@ export type AdaptivePriorityProviderResolution =
       readonly ok: true;
       readonly readiness: 'ready';
       readonly provider: AdaptivePriorityProvider;
-      readonly profileId: string;
     })
   | (AdaptiveActivationReadiness & {readonly ok: false});
 
@@ -256,7 +274,7 @@ export function createAdaptivePriorityProviderForConfig(
   if (!resolved.ok) {
     return {
       ok: false,
-      readiness: 'disabled',
+      readiness: resolved.readiness,
       reason: resolved.reason,
       nextAction: resolved.nextAction,
     };
@@ -267,8 +285,8 @@ export function createAdaptivePriorityProviderForConfig(
     ...(options.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: options.firstByteTimeoutMs} : {}),
     ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
-    ...(options.minRemainingBudgetMs !== undefined ? {minRemainingBudgetMs: options.minRemainingBudgetMs} : {}),
-    ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
+    ...(options.outputReserveMs !== undefined ? {outputReserveMs: options.outputReserveMs} : {}),
+    ...(options.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: options.minExecutableBudgetMs} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
     ...(options.onDiagnostic ? {onDiagnostic: options.onDiagnostic} : {}),
@@ -276,10 +294,9 @@ export function createAdaptivePriorityProviderForConfig(
   return {
     ok: true,
     readiness: 'ready',
-    reason: `adaptive selection ready via runtime profile '${resolved.profileId}'`,
+    reason: `adaptive decision ready at '${resolved.model.endpoint}' (model '${resolved.model.model}')`,
     nextAction: 'none',
     provider,
-    profileId: resolved.profileId,
   };
 }
 

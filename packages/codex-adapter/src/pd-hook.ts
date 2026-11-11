@@ -247,10 +247,11 @@ export interface PdHookDeps {
   /** Test seam: effective adaptive budget inside the host hook window. */
   readonly hookBudgetMs?: number;
   /**
-   * PRI-1181: remaining-budget floor for the pre-selection skip gate. Defaults
-   * to the measured minimum; 0 keeps a cancellation scenario sending.
+   * PRI-1182: remaining-budget floor for the pre-selection skip gate. Defaults
+   * to the request's minimum executable envelope; 0 keeps a cancellation
+   * scenario sending.
    */
-  readonly minRemainingBudgetMs?: number;
+  readonly minExecutableBudgetMs?: number;
 }
 
 // stdin, env and cwd are the host CLI contract; `deps` is the optional transport
@@ -470,7 +471,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           ...(deps.now ? {now: deps.now} : {}),
           ...(deps.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: deps.firstByteTimeoutMs} : {}),
           ...(deps.generationTimeoutMs !== undefined ? {generationTimeoutMs: deps.generationTimeoutMs} : {}),
-          ...(deps.minRemainingBudgetMs !== undefined ? {minRemainingBudgetMs: deps.minRemainingBudgetMs} : {}),
+          ...(deps.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: deps.minExecutableBudgetMs} : {}),
           outerDeadlineAt: adaptiveDeadlineAt,
           onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
         },
