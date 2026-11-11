@@ -258,10 +258,13 @@ runs:
           # --emitDeclarationOnly. codex-adapter must be built before the
           # installer (bundle-plugin.mjs bundles it); the installer before
           # pd_console (console typechecks against its dist types).
-          # PD_BUNDLE_PRESERVE_SOURCE_VERSIONS: the bundle is built at the
-          # release cohort SHA — bundled payloads must carry the committed
-          # versions, NOT the movable registry latest (SPEC v1.2 §21).
-          export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1
+          #
+          # PD_BUNDLE_PRESERVE_SOURCE_VERSIONS is NOT exported here: this step
+          # does not run `bundle`. The bundle runs from prepack inside the
+          # "Pack and verify immutable candidate" step, a separate shell that
+          # cannot see this step's environment (release 1.150.1 shipped
+          # pd-cli 2.1.0 over the cohort's 2.2.0 exactly because of that).
+          # The preserve contract is set as `env:` on the pack step.
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
           build_once @principles/codex-adapter build packages/codex-adapter
@@ -335,6 +338,12 @@ runs:
         COHORT: ${{ inputs.cohort_sha }}
         PACKAGE_VERSION: ${{ steps.exact.outputs.version }}
         PRODUCT_VERSION: ${{ inputs.product_identity_version }}
+        # Step env is the ONLY channel that reaches prepack: the installer
+        # bundle must carry the versions committed at the cohort SHA, never
+        # the movable registry latest (SPEC v1.2 §21). prepare-npm-candidate
+        # additionally fails closed if any payload component disagrees with
+        # the cohort commit.
+        PD_BUNDLE_PRESERVE_SOURCE_VERSIONS: '1'
       run: |
         set -euo pipefail
         if [[ ! "$PACKAGE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
