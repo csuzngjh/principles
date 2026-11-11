@@ -449,33 +449,28 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
   });
 
   it('non-write/bash/agent tool does not trigger auto_correct evaluation', async () => {
-    // 差异：入口过滤收敛（读工具参与评估）
-    //
-    // The legacy hook returned early for non-write/bash/agent tools, so a
-    // `read` tool never reached the RuleHost. The shared gate has NO tool-kind
-    // filter: a `read` tool with a resolvable path IS evaluated (and can only
-    // ever produce an allow here — enforcement semantics are unchanged).
+    // PR-A F3': the shared gate restores the legacy routing contract through
+    // the existing ToolSemanticRegistry authority. `read` is not in the
+    // write/execute/agent families, so the RuleCode engine is never invoked —
+    // even though this workspace has a live rule and the stub would propose an
+    // auto_correct for any input it receives.
     const dir = await seedLiveRuleWorkspace();
-    const gate = createProductionRuleHostGate({
-      implementationRuntime: makeStubRuntime({
-        decision: 'auto_correct',
-        matched: true,
-        reason: 'fix',
-        correctionProposal: makeValidProposal({ applicationMode: 'live' }),
-      }),
+    const stub = makeStubRuntime({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: makeValidProposal({ applicationMode: 'live' }),
     });
+    const evaluateBatch = vi.fn(stub.evaluateBatch);
+    const gate = createProductionRuleHostGate({ implementationRuntime: { evaluateBatch } });
     const gateResult = await gate(makeHostEvent(dir, 'read', {
       file_path: `${dir}/src/foo.ts`,
       content: 'broken',
     }));
 
-    // Surviving intent: the read is NOT blocked.
     expect(gateResult.decision).toBe('allow');
-    // DIFF (entry filter converged): the read tool now reaches the engine.
-    const liveEntry = (gateResult.metadata?.['evaluations'] as Array<Record<string, unknown>>)
-      .find((entry) => entry['activationMode'] === 'live');
-    expect(liveEntry?.['toolName']).toBe('read');
-    expect(liveEntry?.['filePath']).toBe('src/foo.ts');
+    expect(evaluateBatch).not.toHaveBeenCalled();
+    expect(gateResult.metadata?.['evaluations'] ?? []).toHaveLength(0);
   });
 
 });

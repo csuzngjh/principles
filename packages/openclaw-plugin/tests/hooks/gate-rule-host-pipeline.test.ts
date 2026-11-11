@@ -405,65 +405,60 @@ describe('Gate Rule Host Only Pipeline', () => {
     });
   });
 
-  describe('Tool-specific entry filtering (collapsed into the shared gate)', () => {
-    it('should allow a read tool through the shared path without blocking', () => {
-      // DIFF-WEAKENED (PR-A checklist F3'): the shared gate evaluates every tool
-      // with a resolvable target path, so the legacy read-tool early return no
-      // longer exists and "the engine was never called" is not observable here.
-      // Strength asserted today: a read call is never blocked by an allow verdict.
-      // PR-A restores the original strength by expressing the entry filter
-      // through the existing tool-semantics authority (ToolSemanticRegistry /
-      // canonicalKind) and asserting that read/agent tools never reach the
-      // production gate at all.
-      const event = {
-        toolName: 'read',
-        params: { file_path: 'src/readonly.ts' },
-      };
+  describe('Tool-specific entry filtering (canonicalKind gate contract)', () => {
+    it('should allow read tool without calling Rule Host', async () => {
+      // PR-A F3': restored to the legacy strength. The shared gate derives the
+      // canonical kind from the same ToolSemanticRegistry the host declares;
+      // read is not write/execute/agent, so the RuleCode engine is never
+      // called — even with a live rule armed in this workspace.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gate-entry-'));
+      const conn = await seedLiveRuleWorkspace(dir);
+      try {
+        const evaluateBatch = vi.fn(() => ({
+          ok: true as const,
+          results: [{ ok: true, result: { decision: 'block', matched: true, reason: 'must not run' } }],
+        }));
+        const gate = createProductionRuleHostGate({ implementationRuntime: { evaluateBatch } });
 
-      const result = handleSharedRuleHostResult(
-        event as never,
-        makeCtx() as never,
-        makeAllowResult({
-          evaluatedLiveRules: 1,
-          ruleDecision: 'allow',
-          evaluations: [
-            {
-              toolName: 'read',
-              filePath: 'src/readonly.ts',
-              matched: false,
-              decision: 'allow',
-              activationMode: 'live',
-              hostKind: 'openclaw',
-            },
-          ],
-        }),
-      );
+        const gateResult = await gate({
+          kind: 'before_tool_call',
+          context: { workspaceDir: dir, sessionId, toolName: 'read' },
+          rawPayload: { toolInput: { toolName: 'read', params: { file_path: 'src/readonly.ts' } } },
+          source: 'openclaw:before_tool_call',
+        });
 
-      expect(result).toBeUndefined();
-      expect(mockEventLogInstance.recordRuleHostBlocked).not.toHaveBeenCalled();
+        expect(gateResult.decision).toBe('allow');
+        expect(evaluateBatch).not.toHaveBeenCalled();
+        expect(gateResult.metadata?.['evaluations'] ?? []).toHaveLength(0);
+      } finally {
+        conn.close();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
 
-    it('should allow an agent tool that carries no resolvable target path', () => {
-      // DIFF-WEAKENED (PR-A checklist F3'): the missing-workspace guard now
-      // lives in the OpenClaw adapter wiring (index.ts skips the result
-      // mapping). The shared gate still evaluates this call with an empty
-      // target path, so the strength asserted here is only "no block".
-      // PR-A restores the original strength: assert on the adapter/gate entry
-      // filter that agent tools are skipped entirely (no engine call), using the
-      // same ToolSemanticRegistry authority as the read-tool case.
-      const event = {
-        toolName: 'agent',
-        params: { task: 'do something' },
-      };
+    it('should allow an agent tool that carries no resolvable target path', async () => {
+      // PR-A F3': agent remains an evaluable family, but this call carries no
+      // path-like param, so the action snapshot has no target and the engine is
+      // not called (the old `=== null` guard could not see the empty string).
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gate-entry-'));
+      const conn = await seedLiveRuleWorkspace(dir);
+      try {
+        const evaluateBatch = vi.fn(() => ({ ok: true as const, results: [] }));
+        const gate = createProductionRuleHostGate({ implementationRuntime: { evaluateBatch } });
 
-      const result = handleSharedRuleHostResult(
-        event as never,
-        { sessionId } as never,
-        makeAllowResult({ evaluatedLiveRules: 0, ruleDecision: 'allow' }),
-      );
+        const gateResult = await gate({
+          kind: 'before_tool_call',
+          context: { workspaceDir: dir, sessionId, toolName: 'sessions_spawn' },
+          rawPayload: { toolInput: { toolName: 'sessions_spawn', params: { task: 'do something' } } },
+          source: 'openclaw:before_tool_call',
+        });
 
-      expect(result).toBeUndefined();
-      expect(mockEventLogInstance.recordRuleHostBlocked).not.toHaveBeenCalled();
+        expect(gateResult.decision).toBe('allow');
+        expect(evaluateBatch).not.toHaveBeenCalled();
+      } finally {
+        conn.close();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
