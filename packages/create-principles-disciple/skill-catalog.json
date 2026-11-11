@@ -1,0 +1,9 @@
+{
+  "$comment": "PD 内置技能的全局清单（唯一事实源）。禁止按宿主维护第二份名单。status=active 的技能必须在每个宿主各交付一份；status=retired 的技能不得出现在任何宿主。retirable=false 的技能永远不得改为 retired。",
+  "skills": [
+    { "name": "pd-cli-operator", "status": "active", "retirable": false },
+    { "name": "pd-control", "status": "active", "retirable": true },
+    { "name": "pd-pain-signal", "status": "active", "retirable": true },
+    { "name": "pd-review", "status": "active", "retirable": true }
+  ]
+}
