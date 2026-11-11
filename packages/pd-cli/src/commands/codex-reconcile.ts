@@ -66,11 +66,11 @@ export async function handleCodexReconcile(options: CodexReconcileOptions): Prom
     process.exitCode = 1;
     return;
   }
-  const conversationIngestionEnabled = computeFeatureFlagsFromConfig(config.effective).flags.codex_conversation_ingestion?.enabled === true;
+  const codexConversationIngestionEnabled = computeFeatureFlagsFromConfig(config.effective).flags.codex_conversation_ingestion?.enabled === true;
 
   const result = await reconcileGovernanceContinuation({
     workspaceDir: workspace,
-    conversationIngestionEnabled,
+    codexConversationIngestionEnabled,
     ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
   });
 

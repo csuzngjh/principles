@@ -180,7 +180,12 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   });
 
   // Step 3 — Idempotent reconciliation (always runs; creates no LLM work).
-  const reconcile = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: ingestionEnabled });
+  // `codexConversationIngestionEnabled` gates the CODEX-only promotion
+  // recovery (it promotes Codex transcript evidence). The WorkBuddy worker has
+  // no authority over that consent, so it never passes its own flag: doing so
+  // would let opting into WorkBuddy ingestion unlock promotion of Codex
+  // session evidence after a Codex opt-out.
+  const reconcile = await reconcileGovernanceContinuation({ workspaceDir, codexConversationIngestionEnabled: false });
 
   // Steps 3–5 — execution authority: internalization_auto_consumer.
   let diagnostician: WorkbuddyWorkerCycleStepReport['diagnostician'] = null;

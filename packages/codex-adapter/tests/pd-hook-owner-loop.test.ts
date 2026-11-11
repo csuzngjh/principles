@@ -374,7 +374,7 @@ registry.when('recovery reconciliation runs twice over one admitted correction',
   const correction = await invokeHook(ws, promptPayload(ws, CORRECTION));
   expect(correction.status).toBe(0);
   for (let i = 0; i < 2; i += 1) {
-    const pass = await reconcileGovernanceContinuation({ workspaceDir: ws.root, conversationIngestionEnabled: true });
+    const pass = await reconcileGovernanceContinuation({ workspaceDir: ws.root, codexConversationIngestionEnabled: true });
     expect(pass.ok).toBe(true);
   }
 });
