@@ -167,4 +167,33 @@ describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
       expect(line).not.toContain('runtime not verified');
     }
   });
+
+  it('finds the PLUGIN_DATA runtime through CODEX_HOME when no runtime dir is injected', () => {
+    // REGRESSION (#2505, found on-device 2026-11-11): the summary defaulted to
+    // the PLUGIN DATA ROOT and appended `node_modules` to it instead of
+    // `<root>/runtime`, so a Codex runtime that had just been installed at the
+    // payload pin still printed "runtime not verified" in the Install summary.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-summary-'));
+    const codexHome = path.join(root, 'codex-home');
+    writeCanonicalCohort(path.join(root, 'canonical'), '7.3.0');
+    writePluginDataCohort(
+      path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime'),
+      '7.2.0',
+    );
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = codexHome;
+    try {
+      const summary = summarizeTouchedHosts(
+        [{ success: true, hostId: 'codex', configAction: 'updated', nextAction: '' }],
+        { canonicalRuntimeDir: path.join(root, 'canonical') },
+      );
+      expect(summary[0]).toContain('Host "codex"');
+      expect(summary[0]).toContain('core@7.2.0');
+      expect(summary[0]).not.toContain('runtime not verified');
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previous;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

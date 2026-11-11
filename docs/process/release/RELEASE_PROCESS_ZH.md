@@ -130,13 +130,48 @@ pull-requests:write）。未配置时工作流会**跳过 Version PR 创建**并
    （火车产品版本 + cohort SHA）。
 3. **安装时**——安装器在目标机任何变更之前校验 payload 身份。
 
-### 组件镜像（Version PR 范围）
+### 组件镜像与 Codex 运行时 pin（Version PR 范围）
 
 - `packages/openclaw-plugin/openclaw.plugin.json`——由 Version PR 物化同步到
   插件版本（唯一批准的镜像）。
+- `plugins/principles-disciple/runtime-version.json` +
+  `plugins/principles-disciple/.codex-plugin/plugin.json`——Codex 运行时 pin，
+  由同一个 Version PR 从四个工作区版本物化（`@principles/codex-adapter`、
+  `@principles/host-runtime`、`@principles/core`、`@principles/pd-mcp-server`）。
+  pin 只接受精确三段版本（不允许范围或 `latest`）、禁止降级、四个组件必须齐全。
+  pin 一旦变化，`.codex-plugin/plugin.json` 的 Codex 缓存版本必须在**同一个
+  提交**里递增一个 patch——Codex 以该版本号作为已安装插件缓存的键，payload 变了
+  却不升版本，已有安装永远收不到更新。
 - `README.md` / `README_ZH.md` 徽章——不再由任何流程自动同步；需要时在发布
   说明 PR 里手动更新（外观项，非权威）。
-- 根 `package.json` / runtime pins——永远不碰（包含性）。
+- 根 `package.json`——永远不碰（包含性；产品版本面不是发布物料）。
+
+#### 为什么把 Codex pin 移进 Version PR（Owner 决策，2026-11-11）
+
+pin 以前由发布流水线完成后的独立“runtime pins 维护 PR”写入。这样能工作，但
+代价是每次发版多一个 PR（评审 + CI + cohort 可见性等待），并且在发布完成到维护
+PR 合并之间，`main` 与已发布插件对“插件 pin 的是哪个运行时”存在不一致窗口——
+“插件已发布、却仍指向上一版运行时”恰好能藏在这个窗口里。
+
+现在 pin 是 Version PR 的又一个确定性产物，与 `changeset version`、组件镜像并列。
+`materialize-version-plan.mjs` 从它正在 bump 的同一个提交合成 pin，发布意图守卫
+逐字节复现这次合成，因此手改 pin 与手改版本号一样会被 CI 拒绝。
+
+**风险：pin 先落到 `main`，包稍后才在 npm 上出现。** 这是“pin 随 cohort 一起
+发布”的固有风险，靠发布**顺序**而不是第二个 PR 控制：流水线先发布四个运行时包
+与 `pd-mcp-server`，最后才发布内嵌 pin 的插件，因此可下载的插件版本永远不会
+带着未发布的 pin。若流水线在插件腿之前失败，用户还拿不到这个 pin。
+
+**失败兜底（绝不静默通过）：**
+
+1. `codex-plugin-delivery-verify` 在 `publish-full-product` 之后运行，用该 cohort
+   的 manifest 与 registry 双重核对已发布 pin（逐包精确身份，使用相同的传播
+   预算，超时即硬失败），并重跑 `npm run check:runtime-pin`——按 pin 的精确版本
+   安装已发布字节并做能力探针。
+2. 不一致会让发布流水线变红，并指出具体包与实测等待时间，绝不降级为告警。
+3. 修复方式是开一个正常的 Version Packages PR（pin 由工作区 manifest 重新生成）。
+   `sync-codex-runtime-pins.mjs --cohort <sha>` 仍作为人工恢复路径保留，但它
+   只写文件、不开 PR。
 
 ---
 

@@ -243,6 +243,21 @@ async function seedRepo(dir: string) {
   write('packages/create-principles-disciple/vendor/core-copy/package.json', pkg('@principles/core', '0.0.1-ghost'), dir);
   write('packages/pd-console/package.json', pkg('@principles/pd-console', '0.1.0', { private: true }), dir);
   write('packages/pd-console/index.js', "module.exports = 'console';\n", dir);
+  // Codex runtime pin: the four exact components plus the pin artifacts the
+  // Version PR now materializes. Reproduction composes the SAME values from
+  // the workspace manifests, so a hand-edited pin must still fail.
+  write('packages/codex-adapter/package.json', pkg('@principles/codex-adapter', '1.0.0'), dir);
+  write('packages/host-runtime/package.json', pkg('@principles/host-runtime', '1.0.0'), dir);
+  write(
+    'plugins/principles-disciple/runtime-version.json',
+    JSON.stringify({ codexAdapter: '1.0.0', hostRuntime: '1.0.0', core: '1.0.0', mcpServer: '1.0.0' }, null, 2) + '\n',
+    dir,
+  );
+  write(
+    'plugins/principles-disciple/.codex-plugin/plugin.json',
+    JSON.stringify({ name: 'principles-disciple', version: '0.1.0' }, null, 2) + '\n',
+    dir,
+  );
   await commitAll('base', dir);
 }
 
@@ -543,6 +558,62 @@ describe('guard: normal PR release-intent contract', () => {
     expect(pass.code).toBe(0);
     await git(['reset', '--hard', base]);
   });
+
+  // Owner decision 2026-11-11 (follow-up): the pin has exactly one writer —
+  // the Version Packages PR's deterministic materialization. A normal PR
+  // editing it is a second materialization authority, so the guard fails
+  // unconditionally. plugin.json stays editable: ordinary payload updates
+  // need its patch bump, and `--check-base` owns the bump discipline.
+  const PIN_PATH = 'plugins/principles-disciple/runtime-version.json';
+  const PLUGIN_JSON_PATH = 'plugins/principles-disciple/.codex-plugin/plugin.json';
+
+  it('N-runtime-pin 1: a normal PR editing only the runtime pin fails', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write(PIN_PATH, JSON.stringify({ ...JSON.parse(read(PIN_PATH)), core: '9.9.9' }, null, 2) + '\n');
+    await commitAll('chore: hand-edit runtime pin');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-runtime-pin');
+    await git(['reset', '--hard', base]);
+  });
+
+  it('N-runtime-pin 2: bumping the plugin cache version does not disguise a pin edit', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write(PIN_PATH, JSON.stringify({ ...JSON.parse(read(PIN_PATH)), core: '9.9.9' }, null, 2) + '\n');
+    const meta = JSON.parse(read(PLUGIN_JSON_PATH)) as { version: string };
+    write(PLUGIN_JSON_PATH, JSON.stringify({ ...meta, version: '0.1.99' }, null, 2) + '\n');
+    await commitAll('chore: hand-edit runtime pin + bump plugin cache version');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-runtime-pin');
+    await git(['reset', '--hard', base]);
+  });
+
+  it('N-runtime-pin 3: a valid changeset does not waive a normal-PR pin edit', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write(PIN_PATH, JSON.stringify({ ...JSON.parse(read(PIN_PATH)), core: '9.9.9' }, null, 2) + '\n');
+    write('.changeset/pin-bypass.md', changeset("'@principles/core': patch"));
+    await commitAll('chore: hand-edit runtime pin with intent');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-runtime-pin');
+    await git(['reset', '--hard', base]);
+  });
+
+  it('N-runtime-pin 4: ordinary plugin payload + cache bump stays allowed; other rules still apply', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write('plugins/principles-disciple/payload-marker.js', 'module.exports = {};\n');
+    const meta = JSON.parse(read(PLUGIN_JSON_PATH)) as { version: string };
+    write(PLUGIN_JSON_PATH, JSON.stringify({ ...meta, version: '0.1.99' }, null, 2) + '\n');
+    // No changeset for the release-affecting core source: N-3 must still fire.
+    write('packages/core/src-marker.js', 'export {};\n');
+    await commitAll('feat(plugin): payload update + core change without intent');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-3');
+    expect(r.stderr).not.toContain('N-runtime-pin');
+    await git(['reset', '--hard', base]);
+  });
 });
 
 describe('version-pr: Version Packages PR contract', () => {
@@ -606,10 +677,20 @@ describe('version-pr: Version Packages PR contract', () => {
     expect(JSON.parse(read('packages/create-principles-disciple/vendor/core-copy/package.json')).version).toBe(
       '0.0.1-ghost',
     );
-    // T15: runtime pin artifact untouched.
+    // T15: the installer's OWN containment pin artifact is untouched.
     expect(read('packages/create-principles-disciple/release-locks/core.json')).toBe(
       JSON.stringify({ pin: '1.0.0' }, null, 2) + '\n',
     );
+    // T15a (Owner decision 2026-11-11): the Codex runtime pin IS Version PR
+    // material — it must equal this cohort's workspace versions and the Codex
+    // cache version must move with it, in the same PR.
+    expect(JSON.parse(read('plugins/principles-disciple/runtime-version.json'))).toMatchObject({
+      codexAdapter: '1.0.0',
+      hostRuntime: '1.0.0',
+      core: '1.0.1',
+      mcpServer: '1.0.0',
+    });
+    expect(JSON.parse(read('plugins/principles-disciple/.codex-plugin/plugin.json')).version).toBe('0.1.1');
 
     // T10 (negative): a "Version PR" that smuggles a source file fails.
     const materialized = await git(['rev-parse', 'HEAD']);
@@ -638,8 +719,53 @@ describe('version-pr: Version Packages PR contract', () => {
     await commitAll('chore: version packages plus runtime pin edit');
     const badPin = await runGuard(pre);
     expect(badPin.code).toBe(1);
+
+    // T15b (negative): the Codex pin is ALLOWED but must equal what
+    // materialization derives — a hand-edited value is still rejected.
+    await git(['reset', '--hard', pre]);
+    const m3 = await sh(process.execPath, [MATERIALIZE, '--repo-root', repo], repo, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(m3.code).toBe(0);
+    const pinPath = 'plugins/principles-disciple/runtime-version.json';
+    write(pinPath, JSON.stringify({ ...JSON.parse(read(pinPath)), core: '9.9.9' }, null, 2) + '\n');
+    await commitAll('chore: version packages plus hand-edited codex pin');
+    const badCodexPin = await runGuard(pre);
+    expect(badCodexPin.code).toBe(1);
+    expect(badCodexPin.stderr).toContain('differs from deterministic materialization');
     // restore the clean materialized state for the following tests
     await git(['reset', '--hard', materialized]);
+  }, 300000);
+
+  // N-runtime-pin 5/6: the Version PR is the ONE writer the rule permits.
+  // Deterministic materialization passes; a hand edit on top of it does not.
+  it('N-runtime-pin 5/6: Version PR materialization stays allowed; hand edits stay rejected', async () => {
+    const dir = path.join(root, 'pin-scope-repo');
+    await seedRepo(dir);
+    await writeIn(dir, '.changeset/core.md', changeset("'@principles/core': patch"));
+    await commitAll('chore: pending core changeset', dir);
+    const pre = await git(['rev-parse', 'HEAD'], dir);
+
+    const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', dir], dir, { PD_RELEASE_RETRY_DELAY_MS: '1' });
+    expect(m.code, m.stderr).toBe(0);
+    await commitAll('chore: version packages [version-packages]', dir);
+    const materialized = await git(['rev-parse', 'HEAD'], dir);
+
+    // 5: the Version PR materialized the pin deterministically — allowed.
+    const ok = await sh(process.execPath, [GUARD, '--repo-root', dir], dir, { PR_BASE_SHA: pre });
+    expect(ok.code, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('mode=version-pr');
+
+    // 6: a hand edit on top of the materialized pin is not reproducible.
+    const pinPath = 'plugins/principles-disciple/runtime-version.json';
+    const pin = JSON.parse(fs.readFileSync(path.join(dir, pinPath), 'utf8'));
+    fs.writeFileSync(path.join(dir, pinPath), JSON.stringify({ ...pin, core: '9.9.9' }, null, 2) + '\n');
+    await commitAll('chore: version packages plus hand-edited pin', dir);
+    const bad = await sh(process.execPath, [GUARD, '--repo-root', dir], dir, { PR_BASE_SHA: pre });
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toContain('differs from deterministic materialization');
+
+    await git(['reset', '--hard', materialized], dir);
   }, 300000);
 
   it('T4: internal dependency major + manual range update + lockfile materialization + fresh npm ci', async () => {
@@ -656,7 +782,7 @@ describe('version-pr: Version Packages PR contract', () => {
 
     const pre = await git(['rev-parse', 'HEAD']);
     const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', repo], repo, { PD_RELEASE_RETRY_DELAY_MS: '1' });
-    expect(m.code).toBe(0);
+    expect(m.code, m.stderr).toBe(0);
     await commitAll('chore: version packages [version-packages]');
 
     expect(JSON.parse(read('packages/core/package.json')).version).toBe('2.0.0');
@@ -694,7 +820,7 @@ describe('cohort: release cohort resolution', () => {
     await commitAll('chore: pending changeset');
     await sh('git', ['checkout', '-b', 'vp-branch'], repo);
     const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', repo], repo, { PD_RELEASE_RETRY_DELAY_MS: '1' });
-    expect(m.code).toBe(0);
+    expect(m.code, m.stderr).toBe(0);
     await commitAll('chore: version packages [version-packages]');
     await sh('git', ['checkout', 'main'], repo);
     // A real main-only commit between the version plan and the merge (an

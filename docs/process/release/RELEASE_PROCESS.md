@@ -100,8 +100,8 @@ e.g. pd-console → `create-principles-disciple` patch.)
 - A plugin release requires an installer changeset in the same PR (C4).
 
 Never: edit all package versions, derive the product version from a tag or
-component version, touch runtime pins for cosmetic alignment, or make
-versions equal "because they ship together".
+component version, hand-edit Codex runtime pins (the Version PR generates
+them), or make versions equal "because they ship together".
 
 ### Release Triggers
 
@@ -202,13 +202,59 @@ and even where permitted its PRs would not trigger the required
 3. **Install-time** — the installer validates the payload identity before
    any mutation on the target machine.
 
-### Component Mirrors (Version PR scope)
+### Component Mirrors and the Codex Runtime Pin (Version PR scope)
 
 - `packages/openclaw-plugin/openclaw.plugin.json` — synced to the plugin
   version by the Version PR materialization (the one approved mirror).
+- `plugins/principles-disciple/runtime-version.json` +
+  `plugins/principles-disciple/.codex-plugin/plugin.json` — the Codex runtime
+  pin, materialized by the same Version PR from the four workspace versions
+  (`@principles/codex-adapter`, `@principles/host-runtime`,
+  `@principles/core`, `@principles/pd-mcp-server`). The pin is exact-only
+  (three-part versions, never a range or `latest`), never downgrades, and
+  requires all four components. Whenever the pin changes, the Codex cache
+  version in `.codex-plugin/plugin.json` increases by one patch in the SAME
+  commit — Codex keys its installed plugin cache by that number, so a payload
+  change without a bump would never reach an existing install.
 - `README.md` / `README_ZH.md` badges — no longer auto-synced by anything;
   update them in the release-notes PR if desired (cosmetic, non-authority).
-- Root `package.json` / runtime pins — NEVER (containment).
+- Root `package.json` — NEVER (containment; the product version plane is not
+  release material).
+
+#### Why the Codex pin moved into the Version PR (Owner decision, 2026-11-11)
+
+The pin used to be written by a separate "runtime pins maintenance PR" opened
+AFTER the publish train finished. It worked, but it cost a second PR per
+release (review + CI + a cohort-visibility reconcile wait), and it left a
+window where `main` and the shipped plugin disagreed about which runtime the
+plugin pins — exactly where "the plugin is published but still pins the
+previous runtime" could hide.
+
+Now the pin is one more deterministic output of the Version PR, next to
+`changeset version` and the component mirrors. `materialize-version-plan.mjs`
+composes it from the same commit it bumps, and the release-intent guard
+reproduces that composition byte for byte, so a hand-edited pin fails CI the
+same way a hand-edited version does.
+
+**Risk: the pin lands on `main` before the packages exist on npm.** That is
+inherent to shipping the pin with the cohort, and it is contained by publish
+ORDER rather than by a second PR: the train publishes the four runtime
+packages and `pd-mcp-server` BEFORE the plugin that embeds the pin, so a
+downloadable plugin version never carries unpublished pins. If the train fails
+before the plugin leg, no user has the pin yet.
+
+**Failure fallback (never a silent pass):**
+
+1. `codex-plugin-delivery-verify` runs after `publish-full-product` and
+   re-checks the shipped pin against that cohort's manifests AND the registry
+   (exact identity per package, with the same propagation budget, then a hard
+   failure). It also re-runs `npm run check:runtime-pin`, which installs the
+   published bytes at the pinned versions and probes them.
+2. A mismatch turns the publish run RED, naming the offending package and the
+   measured wait time. It is never downgraded to a warning.
+3. The repair is a normal Version Packages PR (the pin is regenerated from the
+   workspace manifests). `sync-codex-runtime-pins.mjs --cohort <sha>` remains
+   as a manual recovery path, but it only writes files and opens no PR.
 
 ---
 

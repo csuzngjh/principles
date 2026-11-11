@@ -7,9 +7,11 @@
  *
  *   changeset version          (consume pending changesets, bump versions,
  *                               internal dependency ranges, CHANGELOGs)
- *   component mirror sync      (COMPONENT_MIRRORS declarations: plugin
+ *   derived file materialization (COMPONENT_MIRRORS declarations: plugin
  *                               manifest <- plugin version, pd-mcp-server
- *                               SERVER_VERSION <- package version)
+ *                               SERVER_VERSION <- package version; plus the
+ *                               Codex runtime pin <- the four workspace
+ *                               versions, with its paired plugin cache bump)
  *   lockfile materialization   (npm install --package-lock-only)
  *
  * PRI-879 verified `changeset version` performs no install, no lifecycle,
@@ -26,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readPendingChangesets,
   runChangesetVersion,
-  syncComponentVersionMirrors,
+  materializeDerivedFiles,
 } from './lib/version-plan.mjs';
 
 function argValue(flag) {
@@ -55,11 +57,18 @@ if (versionRun.status !== 0) {
   process.exit(versionRun.status ?? 1);
 }
 
-// Component mirror sync — driven by the COMPONENT_MIRRORS declarations, so
-// the Version-PR allowlist and the reproduction read the same authority.
-for (const target of syncComponentVersionMirrors(repoRoot)) {
+// Derived files — driven by the COMPONENT_MIRRORS declarations and the Codex
+// pin owner, so the Version-PR allowlist and the reproduction read the same
+// authority.
+const derived = materializeDerivedFiles(repoRoot);
+for (const target of derived.mirrors) {
   console.log(`Synced component mirror: ${target}`);
 }
+console.log(
+  derived.pin.changed
+    ? `Materialized Codex runtime pin: ${JSON.stringify(derived.pin.pins)} (plugin ${derived.pin.pluginVersion})`
+    : `Codex runtime pin already matches the workspace versions: ${JSON.stringify(derived.pin.pins)}`,
+);
 
 // Lockfile materialization (SPEC §13). npm is npm.cmd on Windows, and
 // spawning .cmd requires a shell there; args are fixed strings with no
