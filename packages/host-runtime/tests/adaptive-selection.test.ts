@@ -241,3 +241,45 @@ describe('configuration faults stay distinguishable from transport failure', () 
     expect(s.report().failure).not.toBe('DECISION_CREDENTIAL_MISSING');
   });
 });
+
+/**
+ * The host deadline can also be the generation deadline: the provider caps the
+ * generation window at the outer deadline. Two timers then end at the SAME
+ * instant, so which one aborts first (and whether `Date.now()` has already
+ * reached the deadline) is a race, not a cause. The expired window's own
+ * deadline is the only authoritative signal.
+ */
+describe('an expiry is classified by the window that expired, not by which timer won', () => {
+  it('reports TURN_DEADLINE_EXCEEDED when the host window caps the generation window', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    // Frozen clock: the wall clock never reaches the deadline, so only the
+    // expired window's identity can decide the cause. This is the CI shape —
+    // `firstByteAt` was in time, the body never arrived, and the host window
+    // (also the generation window) fired at the shared instant.
+    const t0 = 1_000_000;
+    const deadline = t0 + 40;
+    const fetchImpl = (async (_url: string, init?: RequestInit) =>
+      new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => {
+            controller.error(new DOMException('aborted', 'AbortError'));
+          }, {once: true});
+        },
+      }), {status: 200})) as typeof fetch;
+    const s = createDecisionSelector({
+      endpoint,
+      model: {endpoint, model, provider: 'Respan', apiKeyEnv},
+      admissionDeadlineAt: deadline,
+      generationTimeoutMs: 5_000,
+      outerDeadlineAt: deadline,
+      fetchImpl,
+      now: () => t0,
+    });
+
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('TURN_DEADLINE_EXCEEDED');
+    const report = s.report();
+    expect(report.failure).toBe('TURN_DEADLINE_EXCEEDED');
+    expect(report.diagnostics.stage).toBe('generation');
+    expect(report.diagnostics.failures).toEqual(['TURN_DEADLINE_EXCEEDED']);
+  });
+});

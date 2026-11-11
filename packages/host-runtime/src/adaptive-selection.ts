@@ -218,6 +218,18 @@ function outerDeadlineReached(
   return outerDeadlineAt !== undefined && (signal?.aborted === true || now() >= outerDeadlineAt);
 }
 
+/**
+ * The provider caps every model window at the host deadline, so the host
+ * deadline can ALSO be the admission/generation deadline. Two timers then end
+ * at the same instant: either may run first, and `Date.now()` can still read
+ * one millisecond short of the deadline, which made "which controller
+ * aborted" decide the diagnostic. The expired window's own deadline is the
+ * authority (P4): when it is the host window, the host window is the cause.
+ */
+function deadlineIsHostWindow(outerDeadlineAt: number | undefined, expiredAt: number | null): boolean {
+  return outerDeadlineAt !== undefined && expiredAt !== null && expiredAt >= outerDeadlineAt;
+}
+
 interface EmptyDiagnostics {
   stage: AdaptiveSelectionStage;
   admissionDeadlineAt: number;
@@ -403,10 +415,12 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       } catch {
         diagnostics.cancelledAt = now();
         diagnostics.stage = 'admission';
+        const admissionExpired = admissionController.signal.aborted;
         return fail(
           outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
+            || (admissionExpired && deadlineIsHostWindow(options.outerDeadlineAt, options.admissionDeadlineAt))
             ? 'TURN_DEADLINE_EXCEEDED'
-            : admissionController.signal.aborted ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED',
+            : admissionExpired ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED',
         );
       } finally {
         clearTimeout(admissionTimer);
@@ -447,10 +461,12 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
           return await readBoundedBody(response, ADAPTIVE_SELECTION_LIMITS.maxResponseBytes, completionController);
         } catch {
           diagnostics.cancelledAt = now();
+          const completionExpired = completionController.signal.aborted;
           return fail(
             outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
+              || (completionExpired && deadlineIsHostWindow(options.outerDeadlineAt, completionDeadlineAt))
               ? 'TURN_DEADLINE_EXCEEDED'
-              : completionController.signal.aborted ? 'SELECTION_EXPIRED' : 'SELECTION_OUTPUT_INVALID',
+              : completionExpired ? 'SELECTION_EXPIRED' : 'SELECTION_OUTPUT_INVALID',
           );
         }
       };
@@ -495,7 +511,11 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
       diagnostics.validatedAt = now();
       if (diagnostics.validatedAt > completionDeadlineAt) {
         diagnostics.cancelledAt = diagnostics.validatedAt;
-        return fail('SELECTION_EXPIRED');
+        return fail(
+          deadlineIsHostWindow(options.outerDeadlineAt, completionDeadlineAt)
+            ? 'TURN_DEADLINE_EXCEEDED'
+            : 'SELECTION_EXPIRED',
+        );
       }
       diagnostics.finishReason = 'decisions';
       const outcome = adjudicateDecision(validated.scores, input.candidates);
