@@ -119,6 +119,7 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
   "treeHash": "<最终 tree>",
   "manifestSha256": "<cases.json sha256>",
   "isolatedConfigSha256": "1782e2310313385d6ff9ae65519abfebb9c4de1d367cfff4703c9d5032339413",
+  "buildArtifactsSha256": "<preflight buildArtifactsSha256>",
   "route": {
     "endpoint": "https://openrouter.ai/api/alpha/decisions",
     "model": "respan/span-01-lite:free",
@@ -139,7 +140,7 @@ node scripts/dev/adaptive-activation/run-cases.mjs --approved <approval.json>
 ```
 
 3. 脚本在**发出任何请求之前**校验：到期时间、head、tree、清单哈希、隔离配置哈希、
-   端点/模型/provider/响应模型允许集合、时限、判据版本、请求上限、API key；
+   工作树的已跟踪文件必须匹配提交，Codex adapter、host-runtime、core 和 install-layout 的实际构建文件哈希必须匹配批件；同时核对端点/模型/provider/响应模型允许集合、时限、判据版本、请求上限和 API key；
    任一不符直接退出且不发请求。
 4. 通过后先以独占方式创建 `approval-claim.json`（`wx`）：**同一批件不可重跑**，
    已有认领或已有 `results.json` 都会拒绝再发请求；认领失败即退出。
