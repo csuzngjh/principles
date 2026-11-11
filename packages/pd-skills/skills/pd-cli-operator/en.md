@@ -1,0 +1,76 @@
+---
+name: pd-cli-operator
+description: Use for read-only PD health checks, querying pains/tasks/runs/candidates/artifacts, checking governance switches and worker liveness, tracing pain-to-principle evidence, or diagnosing PD CLI and Runtime issues. Do not use for pain registration, Owner governance review, or host setup/control.
+---
+
+# PD CLI Operator
+
+Use the existing PD CLI to inspect facts and locate pipeline breaks. This skill routes operations; it does not implement a second business logic path.
+
+## Workspace
+
+{{capability workspace.resolve}}
+
+## Workflow
+
+1. **Resolve the workspace.** Follow the host rule in the Workspace section above. If the workspace is unknown, report the blocker instead of guessing from the current directory or another host.
+2. **Discover actual commands.** Start with `pd --help`, then inspect the target command's `--help`. The installed CLI is authoritative.
+3. **Prefer read-only inspection.** Choose the smallest set of queries that answers the question; do not scan unrelated workspaces.
+4. **Trace each stage.** Verify pain registration, diagnostic task, run result, candidate, admission, and Owner governance separately. Never infer that the whole chain completed from one status field.
+5. **Report evidence.** Separate confirmed facts, unknowns, the blocked stage, and next steps. Distinguish command success from business success.
+
+## Host integration self-check
+
+{{capability cli.hostProbe}}
+
+## Common read-only commands
+
+Confirm that the installed CLI supports a command before running it:
+
+- Health: `pd health{{host.optional.healthHostFlag}}{{host.optional.workspaceArg}} --json`
+- Runtime probe: `pd runtime probe --runtime pi-ai{{host.optional.workspaceArg}} --json`
+- Flow policy: `pd runtime flow show{{host.optional.workspaceArg}} --json`
+- Pain list and admission evidence: `pd pain list{{host.optional.workspaceArg}} --json`, `pd pain evidence{{host.optional.workspaceArg}} --json`
+- Pain-to-principle trace: `pd runtime trace show --pain-id "<painId>"{{host.optional.workspaceArg}} --json`
+- Task and run: `pd task show "<taskId>"{{host.optional.workspaceArg}} --json`, `pd run show "<runId>"{{host.optional.workspaceArg}}`
+- Candidates and artifacts: `pd candidate list --task-id "<taskId>"{{host.optional.workspaceArg}} --json`, `pd candidate show "<candidateId>"{{host.optional.workspaceArg}} --json`, `pd artifact show "<artifactId>"{{host.optional.workspaceArg}} --json`
+
+## Recall a principle's historical pains
+
+Use `pd pain recall` when the principle text alone is not enough: you are unsure why the principle exists, what its trigger boundary is, or whether the current situation matches the original failure. Do not call it when the principle is already clear or the task is unrelated to its history — it only adds latency.
+
+- Recall with a question: `pd pain recall --principle-id "<canonical principle id>" --context "<your current question>" --limit 3{{host.optional.workspaceArg}} --json`
+- One specific pain: `pd pain recall --principle-id "<canonical principle id>" --pain-id "<painId>"{{host.optional.workspaceArg}} --json`
+
+Reading the result:
+
+- Pass the canonical ledger principle id (a UUID); display titles and prompt-rendered ids never resolve.
+- Check the top-level `status` first. `ok` / `no_matches` / `partial` are successful reads (exit 0). `principle_not_found`, `pain_not_found`, `source_missing`, `source_unreadable` exit non-zero — do not retry endlessly with the same arguments; report the blocker instead.
+- Each result separates three kinds of information: the pain record (`pain.reason`, `pain.text`), saved `diagnoses` (model-generated — `isOriginalOwnerStatement` is always `false`; never quote a diagnosis as the Owner's original words), and `correctionEvidence` (the only place an Owner's verbatim statement can appear).
+- `--pain-id` filters within this principle's verified associations only; a candidate/task/artifact id is never a pain id.
+- Per-result `availability` distinguishes `not_recorded` (genuinely absent) from `unreadable` (cannot be read); a `partial` top-level status means some sources were unavailable — state the gap, do not guess.
+- Recalled history is context, not authority: it must not override the direct evidence of the current task.
+
+## Interpret results correctly
+
+- A `painId` proves only that pain registration returned a receipt.
+- Task creation does not prove diagnosis completed.
+- Candidate generation does not prove admission; inspect the actual admission decision and corresponding ledger evidence.
+- Admission does not prove Owner approval or activation; opening the Console does not prove a governance decision was made.
+- A registered worker is not a running worker; an installed plugin is not a loaded skill; a passing health check does not prove that a particular pain was diagnosed.
+
+## Writes and failures
+
+This skill is read-only by default. Before any retry, recovery, repair, or other side effect, confirm user intent, command help, eligibility, and impact. Use dry-run first when supported and read back the resulting state afterward. Do not blindly retry commands that may have side effects.
+
+When the CLI is unavailable, preserve the actual error and distinguish missing installation, uninitialized workspace, insufficient permissions, and Runtime failure. Route host installation, initialization, disablement, or recovery to `pd-control`; candidate review to `pd-review`; and Owner feedback registration to `pd-pain-signal`.
+
+## Never
+
+- Edit the database, ledger, configuration, or internal artifacts directly.
+- Write `.state/.pain_flag` or call legacy `write_pain_flag`.
+- Fabricate runtime evidence or present a hypothesis as a confirmed root cause.
+- Approve, reject, or activate a principle through CLI, scripts, or another skill.
+- Treat exit code 0 as automatic proof of business success.
+- Initialize a project directory or switch to another host's governance store.
+- Describe worker registration or plugin presence as real execution or effective behavior.

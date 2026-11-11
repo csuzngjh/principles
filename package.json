@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "preinstall": "node scripts/dev/check-package-manager.mjs",
-    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=@principles/workbuddy-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=@principles/pd-mcp-server && npm run build --workspace=@principles/pd-cli && npm run build --workspace=create-principles-disciple && npm run build --workspace=@principles/pd-console",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=@principles/workbuddy-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=@principles/pd-mcp-server && npm run build --workspace=@principles/pd-cli && npm run build --workspace=create-principles-disciple && npm run build --workspace=@principles/pd-console && npm run build --workspace=@principles/pd-skills",
     "postinstall": "node scripts/dev/install-git-hooks.mjs --quiet",
     "test:host-adapters": "npm run build && npm test --workspace=@principles/codex-adapter && npm test --workspace=@principles/workbuddy-adapter",
     "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs",
