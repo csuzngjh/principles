@@ -46,6 +46,17 @@ describe('shipped skill catalog', () => {
     const catalog = parseSkillCatalog(readCatalog());
     expect(catalog.skills.some((skill) => skill.retirable === false)).toBe(true);
   });
+
+  it('records the written retirement gate for pd-pain-signal', () => {
+    // Owner 2026-11-11：退场改为条件退场。条件必须写在清单里，
+    // 不能只留在对话里；MCP 未在三个宿主完成真实入账 + recall 读回前保持 active。
+    const catalog = parseSkillCatalog(readCatalog());
+    const entry = catalog.skills.find((skill) => skill.name === 'pd-pain-signal');
+    expect(entry?.status).toBe('active');
+    expect(entry?.retirementCondition).toBeTruthy();
+    expect(entry?.retirementCondition).toMatch(/MCP/);
+    expect(entry?.retirementCondition).toMatch(/recall/);
+  });
 });
 
 describe('parseSkillCatalog rejects malformed catalogs', () => {
@@ -87,6 +98,13 @@ describe('parseSkillCatalog rejects malformed catalogs', () => {
   it('rejects retiring a skill marked retirable=false', () => {
     const problems = problemsOf({ skills: [{ name: 'pd-cli-operator', status: 'retired', retirable: false }] });
     expect(problems).toContain('pd-cli-operator is marked retirable=false but status=retired');
+  });
+
+  it('rejects an empty retirementCondition', () => {
+    const problems = problemsOf({
+      skills: [{ name: 'pd-x', status: 'active', retirable: true, retirementCondition: '   ' }],
+    });
+    expect(problems).toContain('skills[0].retirementCondition must be a non-empty string when present');
   });
 
   it('reports every problem at once instead of the first one', () => {

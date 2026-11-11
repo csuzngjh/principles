@@ -55,7 +55,7 @@ import {
   parseUpdateCheckResponse,
   shouldNotifyUpdate,
 } from '../lib/poller.js';
-import { WorkspaceWorkerRegistry, type WorkerChild, type WorkspaceManifestSource } from '../lib/workspace-workers.js';
+import { WorkspaceWorkerRegistry, classifyWorkspacePath, type WorkerChild, type WorkspaceManifestSource } from '../lib/workspace-workers.js';
 import { parseInstallManifest } from '@principles/install-layout';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -398,6 +398,13 @@ let workbuddyWorkspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
  * { kind: 'unavailable' } — NEVER an empty workspace list. Conflating the two
  * mass-stopped every running worker as removed_from_manifest when the bundled
  * parser could not understand a newer manifest.
+ *
+ * PRI-993: an `ok` manifest passes its workspace list through UNFILTERED.
+ * The manifest list is authorization evidence; whether a listed path can
+ * actually host a worker is judged by the registry per tick with a
+ * confirmation window (classifyWorkspacePath → statWorkspace). Folding a
+ * transient stat failure into "not in the desired set" here is exactly the
+ * mass-stop bug class one level deeper: undecidable ≠ deleted.
  */
 function readManifestWorkspacesForHost(host: 'codex' | 'workbuddy'): WorkspaceManifestSource {
   const paths = getInstallLayoutPaths(app.getPath('home'));
@@ -419,16 +426,7 @@ function readManifestWorkspacesForHost(host: 'codex' | 'workbuddy'): WorkspaceMa
   }
   logManifestWarnings(result.warnings);
   if (!result.manifest.hosts.includes(host)) return { kind: 'ok', workspaces: [] };
-  return {
-    kind: 'ok',
-    workspaces: (result.manifest.workspaces ?? []).filter((workspace) => {
-      try {
-        return fs.statSync(workspace).isDirectory();
-      } catch {
-        return false;
-      }
-    }),
-  };
+  return { kind: 'ok', workspaces: [...(result.manifest.workspaces ?? [])] };
 }
 
 function manifestCodexWorkspacesSource(): WorkspaceManifestSource {
@@ -489,6 +487,9 @@ function startWorkspaceWorkerSupervision(): void {
   workspaceWorkers = new WorkspaceWorkerRegistry({
     spawnWorker: spawnWorkspaceWorker,
     readRelease: readActiveRecord,
+    // PRI-993: path existence is judged here per tick — a transient stat
+    // failure keeps the worker running instead of stopping it as removed.
+    statWorkspace: classifyWorkspacePath,
     // The degraded fact already exists in the registry (PRI-624); PRI-715 only
     // connects it to the Owner-visible surfaces — one-shot notification on the
     // degradation transition plus the persistent tray section (rebuilt below).
@@ -542,6 +543,8 @@ function startWorkspaceWorkerSupervision(): void {
   workbuddyWorkspaceWorkers = new WorkspaceWorkerRegistry({
     spawnWorker: spawnWorkspaceWorkerFor('workbuddy'),
     readRelease: readActiveRecord,
+    // PRI-993: same path-verdict discipline as the codex registry above.
+    statWorkspace: classifyWorkspacePath,
     log: (event, fields) => {
       log(event, fields ?? {});
       if (event === 'workspace_worker_handover_degraded' || event === 'workspace_worker_handover_recovered') {

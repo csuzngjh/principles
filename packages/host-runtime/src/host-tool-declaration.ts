@@ -25,13 +25,24 @@ import {
 } from '@principles/core/runtime';
 
 export const HOST_TOOL_DECLARATION_DIRNAME = 'host-tool-semantics';
-export const HOST_TOOL_DECLARATION_VERSION = 1 as const;
+/**
+ * ADR-0030: version 2 adds `writePayloadFormat` to the mapping contract.
+ *
+ * The read path is deliberately FORWARD-COMPATIBLE with version 1: an older
+ * persisted file must never block host loading. A legacy declaration is read
+ * with v1 semantics (`writePayloadFormat` treated as unset) and reported as a
+ * structured warning, so the degradation is observable (rc-9). Only a
+ * genuinely malformed file still fails loud (rc-3).
+ */
+export const HOST_TOOL_DECLARATION_VERSION = 2 as const;
+export type HostToolDeclarationVersion = 1 | typeof HOST_TOOL_DECLARATION_VERSION;
 const MAX_DECLARATION_BYTES = 256 * 1024;
 /** hostKind doubles as a filename — code-controlled but validated anyway. */
 const HOST_KIND_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 export interface HostToolDeclaration {
-  readonly version: 1;
+  /** The version literally read from/written to the file. */
+  readonly version: HostToolDeclarationVersion;
   /** Host identity label ('openclaw' | 'codex' | …). */
   readonly hostKind: string;
   readonly mappings: readonly ToolSemanticMappingV1[];
@@ -41,7 +52,12 @@ export interface HostToolDeclaration {
 export type HostToolDeclarationSaveResult = { ok: boolean; reason?: string };
 
 export type HostToolDeclarationLoadResult =
-  | { readonly ok: true; readonly declarations: readonly HostToolDeclaration[] }
+  | {
+      readonly ok: true;
+      readonly declarations: readonly HostToolDeclaration[];
+      /** Non-blocking diagnostics (legacy version degraded to defaults). */
+      readonly warnings: readonly string[];
+    }
   | { readonly ok: false; readonly reason: string; readonly nextAction: string };
 
 function declarationsDir(workspaceDir: string): string {
@@ -56,7 +72,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseDeclaration(hostKind: string, raw: string): HostToolDeclaration | { invalidReason: string } {
+/**
+ * v1 never carried `writePayloadFormat`: applying v1 semantics means reading
+ * the mapping exactly as v1 did (rawToolName + canonicalKind only). An
+ * unexpected field in a legacy file is ignored, never interpreted — the same
+ * bytes read by the old loader would have produced this projection.
+ */
+function stripWritePayloadFormat(mappings: unknown): unknown {
+  if (!Array.isArray(mappings)) return mappings;
+  return mappings.map((entry: unknown) => {
+    if (!isRecord(entry) || !Object.hasOwn(entry, 'writePayloadFormat')) return entry;
+    const projected: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(entry)) {
+      if (key === 'writePayloadFormat') continue;
+      projected[key] = value;
+    }
+    return projected;
+  });
+}
+
+function legacyVersionWarning(hostKind: string, declaredVersion: number): string {
+  return `host_tool_declaration_version_legacy (${hostKind}: declared version ${declaredVersion}, supported ${HOST_TOOL_DECLARATION_VERSION}) — writePayloadFormat is treated as unset (default) for this legacy declaration; re-run host '${hostKind}' to refresh .pd/${HOST_TOOL_DECLARATION_DIRNAME}/${hostKind}.json`;
+}
+
+function parseDeclaration(
+  hostKind: string,
+  raw: string,
+): { declaration: HostToolDeclaration; warnings: readonly string[] } | { invalidReason: string } {
   if (Buffer.byteLength(raw, 'utf8') > MAX_DECLARATION_BYTES) {
     return { invalidReason: `declaration exceeds ${MAX_DECLARATION_BYTES} bytes` };
   }
@@ -66,25 +108,44 @@ function parseDeclaration(hostKind: string, raw: string): HostToolDeclaration | 
   } catch {
     return { invalidReason: 'not valid JSON' };
   }
-  if (!isRecord(parsed) || parsed.version !== HOST_TOOL_DECLARATION_VERSION) {
-    return { invalidReason: `version must be ${HOST_TOOL_DECLARATION_VERSION}` };
+  if (!isRecord(parsed)) {
+    return { invalidReason: 'declaration must be a JSON object' };
   }
+  const declaredVersion: unknown = parsed.version;
+  if (typeof declaredVersion !== 'number' || !Number.isInteger(declaredVersion) || declaredVersion < 1) {
+    return { invalidReason: `version must be a positive integer, got ${String(declaredVersion)}` };
+  }
+  // A file from a NEWER runtime carries fields this build cannot interpret —
+  // refuse rather than guess (the forward direction is not the compatibility
+  // promise; ADR-0030 only blesses reading OLDER declarations).
+  if (declaredVersion > HOST_TOOL_DECLARATION_VERSION) {
+    return {
+      invalidReason: `version ${declaredVersion} is newer than supported version ${HOST_TOOL_DECLARATION_VERSION}`,
+    };
+  }
+  const legacy = declaredVersion < HOST_TOOL_DECLARATION_VERSION;
   const { mappings, declaredAt } = parsed;
   if (typeof declaredAt !== 'string' || declaredAt.trim() === '') {
     return { invalidReason: 'declaredAt must be a non-empty string' };
   }
-  const validation = validateToolSemanticMappings(mappings);
+  const effectiveMappings = legacy ? stripWritePayloadFormat(mappings) : mappings;
+  const validation = validateToolSemanticMappings(effectiveMappings);
   if (!validation.valid) {
     return { invalidReason: `mappings invalid: ${validation.errors.slice(0, 3).join('; ')}` };
   }
-  if (!Array.isArray(mappings) || mappings.length === 0) {
+  if (!Array.isArray(effectiveMappings) || effectiveMappings.length === 0) {
     return { invalidReason: 'declaration must contain at least one mapping' };
   }
+  const normalizedVersion: HostToolDeclarationVersion =
+    declaredVersion === 1 ? 1 : HOST_TOOL_DECLARATION_VERSION;
   return {
-    version: HOST_TOOL_DECLARATION_VERSION,
-    hostKind,
-    mappings,
-    declaredAt,
+    declaration: {
+      version: normalizedVersion,
+      hostKind,
+      mappings: effectiveMappings,
+      declaredAt,
+    },
+    warnings: legacy ? [legacyVersionWarning(hostKind, declaredVersion)] : [],
   };
 }
 
@@ -130,6 +191,9 @@ export function saveHostToolDeclaration(
 
 /**
  * Load ALL host declarations for the workspace. Typed result —
+ *   ok:true warnings=[...] : an OLDER (legacy) declaration was read with the
+ *     current semantics minus the fields that version never had
+ *     (`writePayloadFormat` treated as unset). Loading is not blocked (rc-9).
  *   ok:false reason=host_tool_declaration_missing : no declarations persisted
  *   ok:false reason=host_tool_declaration_invalid : at least one persisted
  *     file is malformed (named by hostKind — a broken host declaration is a
@@ -149,6 +213,7 @@ export function loadHostToolDeclarations(workspaceDir: string): HostToolDeclarat
     };
   }
   const declarations: HostToolDeclaration[] = [];
+  const warnings: string[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith('.json')) continue;
     const hostKind = entry.slice(0, -'.json'.length);
@@ -170,7 +235,8 @@ export function loadHostToolDeclarations(workspaceDir: string): HostToolDeclarat
         nextAction: `re-run host '${hostKind}' to refresh ${declarationsDir(workspaceDir)}/${entry}`,
       };
     }
-    declarations.push(parsed);
+    declarations.push(parsed.declaration);
+    warnings.push(...parsed.warnings);
   }
   if (declarations.length === 0) {
     return {
@@ -179,5 +245,5 @@ export function loadHostToolDeclarations(workspaceDir: string): HostToolDeclarat
       nextAction: 'start each workspace host once (OpenClaw plugin / Codex worker) so it persists its tool declaration',
     };
   }
-  return { ok: true, declarations };
+  return { ok: true, declarations, warnings };
 }

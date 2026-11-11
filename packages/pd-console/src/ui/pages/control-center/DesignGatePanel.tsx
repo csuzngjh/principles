@@ -42,11 +42,11 @@ function errorFromResponse(response: { success: false; error: string; nextAction
 }
 
 function fieldClass(): string {
-  return "mt-1 w-full rounded-[4px] border border-line bg-surface px-3 py-2 text-[13px] text-ink focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2";
+  return "mt-1 w-full rounded-[4px] border border-line bg-surface px-3 py-2 text-body text-ink focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2";
 }
 
 function actionButtonClass(): string {
-  return "rounded-[4px] border border-line px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+  return "rounded-[4px] border border-line px-3 py-2 text-caption font-medium text-ink transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 }
 
 export function DesignGatePanel() {
@@ -163,12 +163,12 @@ export function DesignGatePanel() {
   return (
     <section className="mt-8" aria-labelledby="section-design-gate">
       <SectionTitle id="section-design-gate">{t("pages.controlCenter.designGate.title")}</SectionTitle>
-      <p className="mb-4 max-w-[68ch] text-[13px] leading-relaxed text-ink-3">
+      <p className="mb-4 max-w-[68ch] text-body leading-relaxed text-ink-3">
         {t("pages.controlCenter.designGate.description")}
       </p>
 
       {error && (
-        <div role="alert" className="mb-4 rounded-[4px] border border-amber/30 border-l-2 border-l-amber bg-amber/10 p-3 text-[12.5px] text-ink-2">
+        <div role="alert" className="mb-4 rounded-[4px] border border-amber/30 border-l-2 border-l-amber bg-amber/10 p-3 text-caption text-ink-2">
           <p>{error.error}</p>
           {error.nextAction && <p className="mt-1 text-ink-3">{error.nextAction}</p>}
           {error.status === 409 && selectedSession && (
@@ -180,9 +180,9 @@ export function DesignGatePanel() {
       )}
 
       {sessionsLoading ? (
-        <p className="text-[13px] text-ink-3">{t("pages.controlCenter.designGate.loadingSessions")}</p>
+        <p className="text-body text-ink-3">{t("pages.controlCenter.designGate.loadingSessions")}</p>
       ) : sessions.length === 0 ? (
-        <div className="rounded-[4px] border border-line bg-panel p-4 text-[13px] text-ink-3">
+        <div className="rounded-[4px] border border-line bg-panel p-4 text-body text-ink-3">
           <p>{t("pages.controlCenter.designGate.noSessions")}</p>
           <button type="button" className={`${actionButtonClass()} mt-3`} disabled={disabled} onClick={() => void loadSessions()}>
             {t("pages.controlCenter.designGate.refresh")}
@@ -190,7 +190,7 @@ export function DesignGatePanel() {
         </div>
       ) : (
         <div className="space-y-4 rounded-[4px] border border-line bg-panel p-4">
-          <label className="block text-[12.5px] font-medium text-ink">
+          <label className="block text-caption font-medium text-ink">
             {t("pages.controlCenter.designGate.nativeSession")}
             <select className={fieldClass()} value={selectedKey} disabled={disabled} onChange={(event) => setSelectedKey(event.currentTarget.value)}>
               {sessions.map((session) => (
@@ -202,10 +202,10 @@ export function DesignGatePanel() {
           </label>
 
           {declarationLoading ? (
-            <p className="text-[13px] text-ink-3">{t("pages.controlCenter.designGate.loadingDeclaration")}</p>
+            <p className="text-body text-ink-3">{t("pages.controlCenter.designGate.loadingDeclaration")}</p>
           ) : declaration && !declaration.revoked ? (
             <div className="space-y-3" aria-live="polite">
-              <div className="grid gap-2 rounded-[4px] border border-line-2 bg-surface p-3 text-[12.5px]">
+              <div className="grid gap-2 rounded-[4px] border border-line-2 bg-surface p-3 text-caption">
                 <p><strong>{t("pages.controlCenter.designGate.decision")}</strong> {t(`pages.controlCenter.designGate.decisions.${decisionTranslationKey[declaration.decision]}`)}{declaration.revoked ? ` · ${t("pages.controlCenter.designGate.revoked")}` : ""}</p>
                 <p><strong>{t("pages.controlCenter.designGate.revision")}</strong> {declaration.revision}</p>
                 <p><strong>{t("pages.controlCenter.designGate.spec")}</strong> <span className="break-all font-mono">{declaration.specPath}</span></p>
@@ -215,7 +215,7 @@ export function DesignGatePanel() {
                 <p><strong>{t("pages.controlCenter.designGate.owner")}</strong> <span className="font-mono">{declaration.actor.ownerId}</span></p>
                 <p><strong>{t("pages.controlCenter.designGate.decidedAt")}</strong> {declaration.decidedAt}</p>
               </div>
-              <p className="border-l-2 border-amber pl-3 text-[12.5px] leading-relaxed text-ink-3">
+              <p className="border-l-2 border-amber pl-3 text-caption leading-relaxed text-ink-3">
                 {t("pages.controlCenter.designGate.semanticLimit")}
               </p>
               {!declaration.revoked && (
@@ -235,33 +235,33 @@ export function DesignGatePanel() {
           ) : (
             <div className="space-y-3 border-t border-line pt-4">
               {declaration?.revoked && (
-                <div className="rounded-[4px] border border-line-2 bg-surface p-3 text-[12.5px] text-ink-3">
+                <div className="rounded-[4px] border border-line-2 bg-surface p-3 text-caption text-ink-3">
                   <p>{t("pages.controlCenter.designGate.revokedLatest", { revision: declaration.revision })}</p>
                   <p className="mt-1 break-all font-mono">{declaration.specPath} · {declaration.scope.paths.join(", ")}</p>
                 </div>
               )}
-              <p className="text-[12.5px] text-ink-3">{t("pages.controlCenter.designGate.noDeclaration")}</p>
-              <label className="block text-[12.5px] font-medium text-ink">
+              <p className="text-caption text-ink-3">{t("pages.controlCenter.designGate.noDeclaration")}</p>
+              <label className="block text-caption font-medium text-ink">
                 {t("pages.controlCenter.designGate.specPath")}
                 <input className={fieldClass()} value={specPath} onChange={(event) => setSpecPath(event.currentTarget.value)} placeholder={t("pages.controlCenter.designGate.specPathHint")} disabled={disabled} />
               </label>
-              <label className="block text-[12.5px] font-medium text-ink">
+              <label className="block text-caption font-medium text-ink">
                 {t("pages.controlCenter.designGate.scopePathsInput")}
                 <textarea className={fieldClass()} rows={3} value={scopePaths} onChange={(event) => setScopePaths(event.currentTarget.value)} placeholder={t("pages.controlCenter.designGate.scopePathsHint")} disabled={disabled} />
               </label>
               <p className="-mt-2 text-[12px] leading-relaxed text-ink-4">{t("pages.controlCenter.designGate.scopePathsHelp")}</p>
               <fieldset disabled={disabled}>
-                <legend className="text-[12.5px] font-medium text-ink">{t("pages.controlCenter.designGate.scopeActionsInput")}</legend>
+                <legend className="text-caption font-medium text-ink">{t("pages.controlCenter.designGate.scopeActionsInput")}</legend>
                 <div className="mt-2 flex flex-wrap gap-4">
                   {(["read", "write", "execute"] as const).map((action) => (
-                    <label key={action} className="flex items-center gap-2 text-[12.5px] text-ink-2">
+                    <label key={action} className="flex items-center gap-2 text-caption text-ink-2">
                       <input type="checkbox" checked={scopeActions.includes(action)} onChange={(event) => setScopeActions((current) => event.currentTarget.checked ? [...current, action] : current.filter((entry) => entry !== action))} />
                       {t(`pages.controlCenter.designGate.actions.${actionTranslationKey[action]}`)}
                     </label>
                   ))}
                 </div>
               </fieldset>
-              <label className="block text-[12.5px] font-medium text-ink">
+              <label className="block text-caption font-medium text-ink">
                 {t("pages.controlCenter.designGate.initialDecision")}
                 <select className={fieldClass()} value={newDecision} onChange={(event) => {
                   const value = event.currentTarget.value;

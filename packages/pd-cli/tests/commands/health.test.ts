@@ -92,13 +92,22 @@ vi.mock('fs', () => ({
 // PRI-1130: the exit-code contract is command-level wiring, so this file
 // controls the MCP section directly (real assessment is covered by
 // health-mcp.test.ts).
-const { mockAssessMcpHealth, mockFormatMcpHealthLines } = vi.hoisted(() => ({
+const {
+  mockAssessMcpHealth,
+  mockFormatMcpHealthLines,
+  mockSelectMcpHostForWorkspace,
+  mockFormatMcpHostSelectionLine,
+} = vi.hoisted(() => ({
   mockAssessMcpHealth: vi.fn(),
   mockFormatMcpHealthLines: vi.fn(),
+  mockSelectMcpHostForWorkspace: vi.fn(),
+  mockFormatMcpHostSelectionLine: vi.fn(),
 }));
 vi.mock('../../src/commands/health-mcp.js', () => ({
   assessMcpHealth: mockAssessMcpHealth,
   formatMcpHealthLines: mockFormatMcpHealthLines,
+  selectMcpHostForWorkspace: mockSelectMcpHostForWorkspace,
+  formatMcpHostSelectionLine: mockFormatMcpHostSelectionLine,
 }));
 
 vi.mock('better-sqlite3', () => {
@@ -159,6 +168,8 @@ describe('handleHealth', () => {
     mockExistsSync.mockReturnValue(false);
     mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
     mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
+    mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
+    mockFormatMcpHostSelectionLine.mockImplementation((selection: { host: string; selectedBy: string }) => `mcp.hostSelection: ${selection.host} (${selection.selectedBy})`);
   });
 
   afterEach(() => {
@@ -518,5 +529,69 @@ describe('reuseEvaluation telemetry section (PRI-939 Option A review fix)', () =
       candidateId: 'c-good',
       reason: '404 no endpoints',
     });
+  });
+});
+
+describe('MCP host selection (PRI-1186)', () => {
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.exitCode = undefined;
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockExistsSync.mockReturnValue(false);
+    mockAssessMcpHealth.mockReturnValue({ host: 'openclaw', status: 'HEALTHY', reason: undefined, nextAction: undefined });
+    mockFormatMcpHealthLines.mockImplementation((section: { status: string }) => [`mcp.status: ${section.status}`]);
+    mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
+    mockFormatMcpHostSelectionLine.mockImplementation((selection: { host: string; selectedBy: string }) => `mcp.hostSelection: ${selection.host} (${selection.selectedBy})`);
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+  });
+
+  it('selects the host serving the workspace when --host is omitted', async () => {
+    mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+    mockSelectMcpHostForWorkspace.mockReturnValue({ host: 'codex', selectedBy: 'binding-workspace-match', matchedHosts: ['codex'] });
+    mockAssessMcpHealth.mockReturnValue({ host: 'codex', status: 'HEALTHY', reason: undefined, nextAction: undefined });
+
+    await handleHealth({ workspace: WS, json: true });
+
+    expect(mockSelectMcpHostForWorkspace).toHaveBeenCalledWith(path.resolve(WS));
+    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'codex' });
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.mcpHostSelection).toEqual({
+      host: 'codex',
+      selectedBy: 'binding-workspace-match',
+      matchedHosts: ['codex'],
+    });
+    expect(jsonOutput.mcp.host).toBe('codex');
+  });
+
+  it('keeps an explicit --host authoritative and skips workspace selection', async () => {
+    mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+
+    await handleHealth({ workspace: WS, json: true, host: 'openclaw' });
+
+    expect(mockSelectMcpHostForWorkspace).not.toHaveBeenCalled();
+    expect(mockAssessMcpHealth).toHaveBeenCalledWith({ host: 'openclaw' });
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.mcpHostSelection).toEqual({
+      host: 'openclaw',
+      selectedBy: 'explicit-flag',
+      matchedHosts: [],
+    });
+  });
+
+  it('discloses the selection reason in text output', async () => {
+    mockPruningGetHealthSummary.mockReturnValue(healthyPruningSummary());
+    mockAuditCandidateLedgerConsistency.mockResolvedValue({ missingLedgerCount: 0 });
+
+    await handleHealth({ workspace: WS, json: false });
+
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(allOutput).toContain('mcp.hostSelection: openclaw (default-no-match)');
   });
 });

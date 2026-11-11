@@ -44,7 +44,7 @@ import {
 import type { PIArtifactSnapshot, PIArtifactRecord } from '@principles/core/runtime';
 import { runRuleHostPipeline } from '../src/services/rulehost-pipeline-runner.js';
 import { compileDemoRule } from '../src/services/demo-rule-compiler.js';
-import { resolveWorkspaceHostToolSemantics, saveHostToolDeclaration } from '@principles/host-runtime';
+import { resolveWorkspaceHostToolSemantics, saveHostToolDeclaration, HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
 import type { CodeRuleCapability } from '../src/services/rulehost-pipeline-runner.js';
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   const dogfoodRegistry = buildToolSemanticRegistry(dogfoodMappings);
   if (!dogfoodRegistry.ok) throw new Error(dogfoodRegistry.errors.join('; '));
   const declarationSave = saveHostToolDeclaration(tmpDir, {
-    version: 1,
+    version: HOST_TOOL_DECLARATION_VERSION,
     hostKind: 'llm-dogfood',
     mappings: dogfoodMappings,
     declaredAt: new Date().toISOString(),

@@ -118,19 +118,19 @@ export function OwnerDecisionCard({
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <h3 className="text-ink text-[14px] font-medium leading-snug">{item.title}</h3>
-          <div className="mt-1 text-ink-4 text-[11px] font-mono uppercase tracking-[0.08em]">{kindLabel}</div>
+          <div className="mt-1 text-ink-4 text-eyebrow font-mono uppercase tracking-[0.08em]">{kindLabel}</div>
         </div>
         {item.legacy && (
-          <span className="shrink-0 text-ink-4 border border-line rounded-[2px] px-[7px] py-[3px] text-[10.5px] font-mono">
+          <span className="shrink-0 text-ink-4 border border-line rounded-[2px] px-[7px] py-[3px] text-caption font-mono">
             {t("pages.focus.ownerDecision.legacyBadge")}
           </span>
         )}
       </div>
 
-      <p className="text-ink-2 text-[13px] leading-relaxed mb-2">{item.summary}</p>
+      <p className="text-ink-2 text-body leading-relaxed mb-2">{item.summary}</p>
 
       {item.review?.brief.kind === "evaluator" && (
-        <div className="mb-3 grid gap-2 text-[12.5px] leading-relaxed">
+        <div className="mb-3 grid gap-2 text-caption leading-relaxed">
           {item.review.brief.principle?.statement && (
             <p><span className="font-medium text-ink">{t("pages.focus.ownerDecision.principleLabel")}</span>{" "}{item.review.brief.principle.statement}</p>
           )}
@@ -142,7 +142,7 @@ export function OwnerDecisionCard({
           )}
           {(item.review.brief.qualityChecklist?.items?.length ?? 0) > 0 && (
             <div className="mt-1 rounded-[3px] border border-line bg-surface-2 p-2" data-testid={`owner-quality-checklist-${item.taskId}`}>
-              <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-ink-3 mb-1">
+              <div className="font-mono text-caption uppercase tracking-[0.06em] text-ink-3 mb-1">
                 {t("pages.focus.ownerDecision.qualityChecklistLabel")}
               </div>
               <ul className="grid gap-0.5">
@@ -160,13 +160,13 @@ export function OwnerDecisionCard({
               allowedActions / acceptRequirement）。 */}
           {item.review.brief.formationEvidence && (
             <div className="mt-1 rounded-[3px] border border-line bg-surface-2 p-2" data-testid={`owner-formation-evidence-${item.taskId}`}>
-              <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-ink-3 mb-1">
+              <div className="font-mono text-caption uppercase tracking-[0.06em] text-ink-3 mb-1">
                 {t("pages.focus.ownerDecision.formationLabel")}
               </div>
               {item.review.brief.formationEvidence.sourcePainId ? (
                 <p className="text-ink-2">
                   <span className="font-medium">{t("pages.focus.ownerDecision.formationPainLabel")}</span>{" "}
-                  <span className="font-mono text-[11.5px]">{item.review.brief.formationEvidence.sourcePainId}</span>
+                  <span className="font-mono text-caption">{item.review.brief.formationEvidence.sourcePainId}</span>
                 </p>
               ) : null}
               {item.review.brief.formationEvidence.diagnosis?.summary && (
@@ -187,7 +187,7 @@ export function OwnerDecisionCard({
                   <ul className="mt-0.5 grid gap-0.5 text-[12px] text-ink-3">
                     {item.review.brief.formationEvidence.diagnosis?.evidence.slice(0, 3).map((row, index) => (
                       <li key={`${row.sourceRef}-${index}`}>
-                        <span className="font-mono text-[11px]">{row.sourceRef}</span>{" "}{row.note}
+                        <span className="font-mono text-caption">{row.sourceRef}</span>{" "}{row.note}
                       </li>
                     ))}
                   </ul>
@@ -204,7 +204,7 @@ export function OwnerDecisionCard({
           不再复用它）— 这里不再重复渲染同一段评审原文（PRI-787）。 */}
 
       {item.review && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-[10.5px] font-mono uppercase tracking-[0.06em]">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-caption font-mono uppercase tracking-[0.06em]">
           <span className="rounded-[2px] border border-line px-2 py-1 text-ink-3">
             {t(`pages.focus.ownerDecision.evidence.${item.review.evidence.completeness}`)}
           </span>
@@ -226,7 +226,7 @@ export function OwnerDecisionCard({
       )}
 
       {item.machineRecommendation && (
-        <p className="text-ink-3 text-[12.5px] mb-1">
+        <p className="text-ink-3 text-caption mb-1">
           <span className="font-medium">{t("pages.focus.ownerDecision.machineRecommendationLabel")}</span>{" "}
           {item.machineRecommendation}
           {item.score !== undefined && <span className="font-mono ml-1">{item.score.toFixed(2)}</span>}
@@ -238,13 +238,13 @@ export function OwnerDecisionCard({
 
       {evidenceUnavailable ? (
         <div className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3">
-          <p className="text-ink-2 text-[12.5px] leading-relaxed">
+          <p className="text-ink-2 text-caption leading-relaxed">
             {t("pages.focus.ownerDecision.evidenceUnavailable")}
           </p>
           <Link
             to={`/failed-tasks?taskId=${encodeURIComponent(item.taskId)}`}
             data-testid={`owner-evidence-recover-${item.taskId}`}
-            className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+            className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors"
           >
             {t("pages.focus.ownerDecision.goRecoverCta")}
           </Link>
@@ -253,7 +253,7 @@ export function OwnerDecisionCard({
         <>
           {showInstruction && (
             <div className="mt-2 mb-2">
-              <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+              <label className="block font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
                 {t("pages.focus.ownerDecision.instructionLabel")}
               </label>
               <textarea
@@ -261,7 +261,7 @@ export function OwnerDecisionCard({
                 onChange={(e) => setInstruction(e.target.value.slice(0, 500))}
                 data-testid={`owner-instruction-${item.taskId}`}
                 placeholder={t("pages.focus.ownerDecision.instructionPlaceholder")}
-                className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[64px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-body min-h-[64px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
               />
             </div>
           )}
@@ -282,11 +282,11 @@ export function OwnerDecisionCard({
               className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3"
               data-testid={`owner-actions-locked-${item.taskId}`}
             >
-              <p className="text-ink-2 text-[12.5px] leading-relaxed">{actionsLockedReason}</p>
+              <p className="text-ink-2 text-caption leading-relaxed">{actionsLockedReason}</p>
               <Link
                 to="/settings"
                 data-testid={`owner-actions-locked-settings-${item.taskId}`}
-                className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
+                className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors"
               >
                 {t("pages.focus.ownerDecision.goSettingsCta")}
               </Link>
@@ -299,7 +299,7 @@ export function OwnerDecisionCard({
                 onClick={() => handleAction("accept_current")}
                 disabled={!governanceReady || actionLoading !== null || (requiresPartialAcknowledgement && !partialEvidenceAcknowledged)}
                 data-testid={`owner-accept-${item.taskId}`}
-                className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionLoading === "accept_current" ? t("common.loading") : t("pages.focus.ownerDecision.acceptCurrent")}
               </button>
@@ -316,7 +316,7 @@ export function OwnerDecisionCard({
                 }}
                 disabled={!governanceReady || actionLoading !== null}
                 data-testid={`owner-revise-${item.taskId}`}
-                className="inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionLoading === "revise_once" ? t("common.loading") : t("pages.focus.ownerDecision.reviseOnce")}
               </button>
@@ -327,13 +327,13 @@ export function OwnerDecisionCard({
                 onClick={() => handleAction("reject_current")}
                 disabled={!governanceReady || actionLoading !== null}
                 data-testid={`owner-reject-${item.taskId}`}
-                className="inline-flex items-center border border-danger text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center border border-danger text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-danger/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionLoading === "reject_current" ? t("common.loading") : t("pages.focus.ownerDecision.rejectCurrent")}
               </button>
             )}
           </div>
-          <div className="mt-2 text-ink-4 text-[11.5px] leading-relaxed">
+          <div className="mt-2 text-ink-4 text-caption leading-relaxed">
             {canAccept
               ? t("pages.focus.ownerDecision.actionConsequence")
               : acceptBlockedCopy}
@@ -341,13 +341,13 @@ export function OwnerDecisionCard({
           <button
             type="button"
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="mt-2 text-ink-4 text-[11px] font-mono uppercase tracking-[0.08em] hover:text-ink-3"
+            className="mt-2 text-ink-4 text-eyebrow font-mono uppercase tracking-[0.08em] hover:text-ink-3"
             data-testid={`owner-advanced-toggle-${item.taskId}`}
           >
             {showAdvanced ? "▾" : "▸"} {t("pages.focus.ownerDecision.advanced")}
           </button>
           {showAdvanced && (
-            <dl className="mt-2 grid gap-1 text-[11.5px] font-mono text-ink-4">
+            <dl className="mt-2 grid gap-1 text-caption font-mono text-ink-4">
               <div>taskId: {item.taskId}</div>
               <div>reasonCode: {item.reasonCode}</div>
               <div>reviewKey: {item.reviewKey.slice(0, 24)}…</div>
@@ -388,7 +388,7 @@ export function OwnerDecisionCard({
                 ? `/principles/${encodeURIComponent(item.principleId)}`
                 : "/principles"}
               data-testid={`go-approvals-${item.taskId}`}
-              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
+              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-gov/5 transition-colors"
             >
               {t("pages.focus.ownerDecision.goApprovalsCta")}
             </Link>
@@ -396,7 +396,7 @@ export function OwnerDecisionCard({
             <Link
               to={`/activation?activationId=${encodeURIComponent(item.taskId)}`}
               data-testid={`go-activation-${item.taskId}`}
-              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors"
+              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-gov/5 transition-colors"
             >
               {t("pages.focus.ownerDecision.goActivationCta")}
             </Link>

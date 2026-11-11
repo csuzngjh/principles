@@ -269,6 +269,44 @@ describe('ERR-067: SplitDiagnosticianRunner retry chain', () => {
     expect(result.status).toBe('failed');
     expect(rootCauseRunner.run).toHaveBeenCalledTimes(1);
   });
+
+  // PRI-983 E2E recovery: a partial run can leave Stage A succeeded while a
+  // later stage failed. Recovery must reuse Stage A instead of re-leasing a
+  // `succeeded` task, which dead-ends the parent with lease_conflict.
+  it('should reuse an already-succeeded Stage A instead of re-leasing it', async () => {
+    const tasks: Record<string, TaskRecord> = {
+      [PARENT_TASK_ID]: makeTask(PARENT_TASK_ID, { taskKind: 'diagnostician', status: 'pending' }),
+      [STAGE_A_TASK_ID]: makeTask(STAGE_A_TASK_ID, { status: 'succeeded', attemptCount: 1 }),
+      [STAGE_B_TASK_ID]: makeTask(STAGE_B_TASK_ID, {
+        taskKind: 'diag_distiller',
+        status: 'retry_wait',
+        attemptCount: 1,
+      }),
+      [STAGE_C_TASK_ID]: makeTask(STAGE_C_TASK_ID, { taskKind: 'diag_router', status: 'pending' }),
+    };
+    const stateManager = makeMockStateManager(tasks);
+    const rootCauseRunner = makeMockRunner<DiagRootCauseOutputV1>();
+    const distillerRunner = makeMockRunner<DiagDistillerOutputV1>();
+    const routerRunner = makeMockRunner<DiagnosticianOutputV2>();
+    distillerRunner.run.mockResolvedValue(makeSucceededResult<DiagDistillerOutputV1>(STAGE_B_TASK_ID));
+    routerRunner.run.mockResolvedValue(makeSucceededResult<DiagnosticianOutputV2>(STAGE_C_TASK_ID));
+
+    const runner = new SplitDiagnosticianRunner({
+      rootCauseRunner: rootCauseRunner as never,
+      distillerRunner: distillerRunner as never,
+      routerRunner: routerRunner as never,
+      stateManager: stateManager as never,
+      committer: makeMockCommitter(),
+      perStageTimeoutMs: 30_000,
+    });
+
+    const result = await runner.run(PARENT_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    expect(rootCauseRunner.run).not.toHaveBeenCalled();
+    expect(distillerRunner.run).toHaveBeenCalledTimes(1);
+    expect(routerRunner.run).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── Bug-N fix: parent task lease acquisition ─────────────────────────────────

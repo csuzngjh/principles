@@ -16,9 +16,23 @@ export const READ_ONLY_TOOL_NAMES = [
  * mutation family is exactly write/edit/apply_patch). Generic LLM vocabulary
  * names (write_file/edit_file/replace/insert/patch) are NOT OpenClaw tools;
  * declaring them made `hasHostTool` pass for rules that can never fire.
+ *
+ * ADR-0030 (revised 2026-11-11): `apply_patch` does not carry a plain content
+ * payload — it writes the `*** Begin Patch` envelope. The write family is
+ * therefore split by payload encoding so the host declaration can state it;
+ * `LOW_RISK_WRITE_TOOL_NAMES` keeps the union the rest of this package uses.
  */
+export const PLAIN_CONTENT_WRITE_TOOL_NAMES = [
+  'write', 'edit',
+] as const;
+
+export const PATCH_WRITE_TOOL_NAMES = [
+  'apply_patch',
+] as const;
+
 export const LOW_RISK_WRITE_TOOL_NAMES = [
-  'write', 'edit', 'apply_patch',
+  ...PLAIN_CONTENT_WRITE_TOOL_NAMES,
+  ...PATCH_WRITE_TOOL_NAMES,
 ] as const;
 
 // OpenClaw's shell tool is `exec` (hook-face canonical id); `bash`,

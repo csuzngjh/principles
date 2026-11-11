@@ -176,7 +176,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
             {t('pages.examiner.configure.back')}
           </Link>
         </div>
-        <h1 className="mt-1 text-[22px] font-semibold text-ink" data-testid="examiner-configure-title">
+        <h1 className="mt-1 text-title font-semibold text-ink" data-testid="examiner-configure-title">
           {t('pages.examiner.configure.title')}
         </h1>
         <p className="mt-1 text-[14px] text-ink-3">{t('pages.examiner.configure.subtitle')}</p>
@@ -187,7 +187,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <span>
               {t('pages.examiner.errors.principles')}
-              <span className="mt-1 block font-mono text-[11px] opacity-80">{principlesError}</span>
+              <span className="mt-1 block font-mono text-caption opacity-80">{principlesError}</span>
             </span>
           </span>
           <Button variant="outline" size="sm" onClick={() => setReloadToken((token) => token + 1)} data-testid="examiner-principles-retry">
@@ -263,7 +263,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
           <div className="grid min-w-0 grid-cols-1 content-start gap-3 rounded-lg border bg-card p-4 text-sm break-words" data-testid="examiner-configure-suite">
             <div className="font-medium">{t('pages.examiner.configure.suite.title')}</div>
             {suiteError !== null && (
-              <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive" data-testid="examiner-suite-error">
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-caption text-destructive" data-testid="examiner-suite-error">
                 {suiteError}
               </p>
             )}
@@ -276,18 +276,18 @@ export function ExaminerConfigurePage(): React.ReactElement {
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{suite.title}</span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{suite.caseCount} cases</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-caption">{suite.caseCount} cases</span>
                 </div>
                 <div className="mt-1 text-muted-foreground">{suite.description}</div>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {suite.variantLabels.map((label) => (
-                    <span key={label} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">{label}</span>
+                    <span key={label} className="rounded bg-muted px-1.5 py-0.5 font-mono text-caption">{label}</span>
                   ))}
                 </div>
               </button>
             ))}
             {selectedSuite && (
-              <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-400" data-testid="examiner-suite-gold-gate">
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-caption text-amber-700 dark:text-amber-400" data-testid="examiner-suite-gold-gate">
                 <Info className="mr-1 inline size-3.5" />
                 {selectedSuite.goldGate}
               </p>
@@ -336,7 +336,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
             {eligibilityStatus === 'error' && (
               <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive" data-testid="examiner-eligibility-error">
                 {t('pages.examiner.eligibility.error')}
-                <span className="mt-1 block font-mono text-[11px] opacity-80">{eligibilityError}</span>
+                <span className="mt-1 block font-mono text-caption opacity-80">{eligibilityError}</span>
               </p>
             )}
             {eligibilityStatus === 'ready' && eligibility && (
@@ -357,7 +357,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
                           {t(`pages.examiner.eligibility.reason.${check.reasonCode}`, { defaultValue: check.reasonCode })}
                         </div>
                         {check.detail !== null && (
-                          <div className="mt-1 font-mono text-[11px] text-muted-foreground" title={check.detail}>
+                          <div className="mt-1 font-mono text-caption text-muted-foreground" title={check.detail}>
                             {truncateByCodePoints(check.detail, 240)}
                           </div>
                         )}
@@ -395,7 +395,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
             {readinessError !== null ? (
               <p className="text-xs text-destructive" data-testid="examiner-readiness-error">
                 {t('pages.examiner.configure.readiness.unavailable')}
-                <span className="mt-1 block font-mono text-[11px] opacity-80">{readinessError}</span>
+                <span className="mt-1 block font-mono text-caption opacity-80">{readinessError}</span>
               </p>
             ) : readiness === null ? (
               <p className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -409,10 +409,10 @@ export function ExaminerConfigurePage(): React.ReactElement {
                     <span className="font-mono">{requirement.id}</span>: {requirement.detail}
                   </div>
                 ))}
-                <p className="text-[11px]">{readiness.note}</p>
+                <p className="text-caption">{readiness.note}</p>
               </div>
             )}
-            <p className="text-[11px] text-muted-foreground" data-testid="examiner-f2-unavailable-note">
+            <p className="text-caption text-muted-foreground" data-testid="examiner-f2-unavailable-note">
               {t('pages.examiner.configure.readiness.f2Note')}
             </p>
           </div>
@@ -445,7 +445,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
                 <ArrowRight className="size-4" />
               </Button>
               {eligibilityBlocked && (
-                <span className="text-[11px] text-destructive" data-testid="examiner-create-blocked-hint">
+                <span className="text-caption text-destructive" data-testid="examiner-create-blocked-hint">
                   {t('pages.examiner.eligibility.createBlocked')}
                 </span>
               )}

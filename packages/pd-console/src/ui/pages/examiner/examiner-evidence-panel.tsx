@@ -54,13 +54,13 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           <div className="mt-2 grid gap-1 text-xs">
             <div>{t('pages.examiner.evidence.activation.promptRows')}: <span className="font-mono">{activation.prompt.length}</span></div>
             {activation.prompt.filter((_, index) => index < 4).map((row) => (
-              <div key={row.activationId} className="font-mono text-[11px] text-muted-foreground">
+              <div key={row.activationId} className="font-mono text-caption text-muted-foreground">
                 {row.status} · {row.action}{row.enforcement ? ` · ${row.enforcement}` : ''}
               </div>
             ))}
             <div className="mt-1">{t('pages.examiner.evidence.activation.ruleCodeRows')}: <span className="font-mono">{activation.ruleCode.length}</span></div>
             {activation.ruleCode.filter((_, index) => index < 4).map((row) => (
-              <div key={row.activationId} className="font-mono text-[11px] text-muted-foreground">
+              <div key={row.activationId} className="font-mono text-caption text-muted-foreground">
                 {row.mode ?? 'mode?'} · {row.status} · {row.enforcement ?? '—'}
               </div>
             ))}
@@ -82,7 +82,7 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
               <div className="text-muted-foreground">{t('pages.examiner.evidence.injection.noRows')}</div>
             )}
             {injection.statuses.filter((_, index) => index < 4).map((row) => (
-              <div key={row.activationId} className="font-mono text-[11px]">
+              <div key={row.activationId} className="font-mono text-caption">
                 {row.status}
                 {row.inCurrentWindow !== undefined ? ` · window:${String(row.inCurrentWindow)}` : ''}
                 {row.costChars !== undefined ? ` · ${row.costChars}c` : ''}
@@ -90,12 +90,12 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
               </div>
             ))}
             {injection.budgetProvenance && (
-              <div className="mt-1 text-[11px] text-muted-foreground" data-testid="examiner-evidence-budget-provenance">
+              <div className="mt-1 text-caption text-muted-foreground" data-testid="examiner-evidence-budget-provenance">
                 {t('pages.examiner.evidence.injection.budget')}: {injection.budgetProvenance.capacitySource ?? '—'} / {injection.budgetProvenance.capacityStatus ?? '—'} / {injection.budgetProvenance.policyVersion ?? '—'}
               </div>
             )}
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">{t('pages.examiner.evidence.injection.projectionNote')}</p>
+          <p className="mt-2 text-caption text-muted-foreground">{t('pages.examiner.evidence.injection.projectionNote')}</p>
         </div>
       </div>
 
@@ -134,11 +134,11 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
             <div>{t('pages.examiner.evidence.audit.unresolved')}: <span className="font-mono">{evidenceAudit.unresolvedReferences}</span></div>
           </div>
           {evidenceAudit.anyHasMore && (
-            <p className="mt-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-[11px] text-sky-700 dark:text-sky-400" data-testid="examiner-evidence-hasmore">
+            <p className="mt-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-caption text-sky-700 dark:text-sky-400" data-testid="examiner-evidence-hasmore">
               {t('pages.examiner.evidence.audit.hasMoreNote')}
             </p>
           )}
-          <div className="mt-2 rounded-md border p-2 text-[11px]" data-testid="examiner-evidence-ladder">
+          <div className="mt-2 rounded-md border p-2 text-caption" data-testid="examiner-evidence-ladder">
             <div className="font-medium">{t('pages.examiner.evidence.audit.ladder')}</div>
             <div className="mt-1 grid grid-cols-2 gap-x-3 text-muted-foreground sm:grid-cols-3">
               <div>submitted: <span className="font-mono">{evidenceAudit.deliveryConfirmations.submitted}</span></div>
@@ -150,7 +150,7 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
             </div>
           </div>
           {evidenceAudit.asOf && (
-            <div className="mt-2 text-[11px] text-muted-foreground" data-testid="examiner-evidence-asof">
+            <div className="mt-2 text-caption text-muted-foreground" data-testid="examiner-evidence-asof">
               {t('pages.examiner.evidence.audit.asOf')}: {evidenceAudit.asOf} · {t('pages.examiner.evidence.asOf')}: {evidence.asOf}
             </div>
           )}

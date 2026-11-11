@@ -132,7 +132,7 @@ function SidebarContent({
                 aria-current={active ? "page" : undefined}
                 onClick={onNavigate}
                 className={cn(
-                  "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-[13px] transition-all duration-150",
+                  "flex items-center gap-3 px-3 rounded-[var(--radius-sm)] text-body transition-all duration-150",
                   touchTargets ? "min-h-[44px] py-2" : "py-2",
                   active
                     ? "border-l-2 border-l-gov bg-paper-2 text-ink"
@@ -155,7 +155,7 @@ function SidebarContent({
 
         {/* Secondary tools */}
         <div className="mt-4 pt-3 border-t border-line mx-4">
-          <div className="px-1 pb-1 text-[10px] font-mono tracking-[0.1em] uppercase text-ink-4">
+          <div className="px-1 pb-1 text-caption font-mono tracking-[0.1em] uppercase text-ink-4">
             {t("components.sidebar.tools", { defaultValue: "Tools" })}
           </div>
           <div className="px-0">
@@ -194,7 +194,7 @@ function SidebarContent({
 
         {/* Technical tools — engineering-facing pages, kept out of the daily path */}
         <div className="mt-4 pt-3 border-t border-line mx-4" data-testid="nav-group-technical">
-          <div className="px-1 pb-1 text-[10px] font-mono tracking-[0.1em] uppercase text-ink-4">
+          <div className="px-1 pb-1 text-caption font-mono tracking-[0.1em] uppercase text-ink-4">
             {t("components.sidebar.technical", { defaultValue: "Technical" })}
           </div>
           <div className="px-0">
@@ -294,7 +294,7 @@ export function AppSidebar({ featureFlags }: { featureFlags?: Record<string, { e
             <div className="font-mono text-[14px] tracking-[0.16em] font-bold text-ink">
               PD
             </div>
-            <div className="font-mono text-[10px] tracking-[0.14em] text-ink-3">
+            <div className="font-mono text-caption tracking-[0.14em] text-ink-3">
               GOVERNANCE WORKSPACE
             </div>
           </div>
@@ -375,7 +375,7 @@ export function MobileNav({ featureFlags }: { featureFlags?: Record<string, { en
               <ThresholdMark className="w-6 h-6 text-gov" />
               <div>
                 <div className="font-mono text-[14px] tracking-[0.16em] font-bold text-ink">PD</div>
-                <div className="font-mono text-[10px] tracking-[0.14em] text-ink-3">GOVERNANCE WORKSPACE</div>
+                <div className="font-mono text-caption tracking-[0.14em] text-ink-3">GOVERNANCE WORKSPACE</div>
               </div>
             </div>
           </div>

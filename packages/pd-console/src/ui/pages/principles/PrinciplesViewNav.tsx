@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 export function PrinciplesViewNav({ view }: { view: "workspace" | "core" }) {
   const { t } = useTranslation("pages");
   const base =
-    "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov ";
+    "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov ";
   const active = "bg-gov text-paper border-gov";
   const inactive = "bg-surface text-ink-3 border-line hover:border-line-2";
   return (

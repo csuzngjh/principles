@@ -22,7 +22,7 @@ const KIND_PRESENTATION: Record<OwnerWorkItemKind, { icon: LucideIcon; label: st
 function WorkItemType({ kind }: { kind: OwnerWorkItemKind }) {
   const { t } = useTranslation();
   const { icon: Icon, label, style } = KIND_PRESENTATION[kind];
-  return <span data-testid="owner-work-type" data-kind={kind} className={`inline-flex max-w-full items-center gap-1.5 rounded-[4px] border px-2 py-1 text-[11px] font-medium leading-relaxed ${style}`}>
+  return <span data-testid="owner-work-type" data-kind={kind} className={`inline-flex max-w-full items-center gap-1.5 rounded-[4px] border px-2 py-1 text-caption font-medium leading-relaxed ${style}`}>
     <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
     {t(`pages.focus.workbench.${label}`)}
   </span>;
@@ -91,27 +91,27 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
   });
   return <section className="owner-workbench" data-testid="owner-workbench">
     <nav ref={list} tabIndex={-1} className={`owner-work-list ${selected ? 'owner-work-list-selected' : ''}`} aria-label={t('pages.focus.workbench.list')}>
-      <div className="mb-2 flex items-baseline justify-between gap-3"><h2 className="text-[15px] font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>
+      <div className="mb-2 flex items-baseline justify-between gap-3"><h2 className="text-reading font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>
       {items.length === 0 && <p className="text-sm leading-relaxed text-ink-3">{t(uncertain ? 'pages.focus.workbench.uncertain' : 'pages.focus.workbench.empty')}</p>}
       <ol className="space-y-2">{items.map(item => <li key={item.key}><button type="button" onClick={() => choose(item.key)} aria-current={selected?.key === item.key ? 'true' : undefined}
         data-testid="owner-work-item" data-item-key={item.key} className={`w-full rounded-[6px] border px-4 py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-gov ${selected?.key === item.key ? 'border-gov bg-gov/5' : 'border-line bg-panel hover:border-gov/50'}`}>
         <span className="mb-3 block"><WorkItemType kind={item.kind} /></span><span className="block text-[14px] font-medium leading-relaxed text-ink break-words">{item.title}</span>
-        <span className="mt-2 block text-[12.5px] leading-relaxed text-ink-3 line-clamp-2">{item.summary}</span>
-        {item.reference && items.some(other => other.key !== item.key && other.title === item.title && other.summary === item.summary) && <span className="mt-2 block break-all font-mono text-[11px] text-ink-4">{item.reference}</span>}
+        <span className="mt-2 block text-caption leading-relaxed text-ink-3 line-clamp-2">{item.summary}</span>
+        {item.reference && items.some(other => other.key !== item.key && other.title === item.title && other.summary === item.summary) && <span className="mt-2 block break-all font-mono text-caption text-ink-4">{item.reference}</span>}
       </button></li>)}</ol>
     </nav>
     <div className="owner-work-reading min-w-0" data-testid="owner-work-reading">
       {selected ? <>
-        <button type="button" className="mb-5 text-[13px] text-gov underline underline-offset-4" onClick={() => choose('')}>{t('pages.focus.workbench.back')}</button>
+        <button type="button" className="mb-5 text-body text-gov underline underline-offset-4" onClick={() => choose('')}>{t('pages.focus.workbench.back')}</button>
         <div className="mb-3"><WorkItemType kind={selected.kind} /></div>
-        <h2 ref={heading} tabIndex={-1} className="mb-6 text-[22px] font-semibold leading-snug text-ink break-words">{selected.title}</h2>
+        <h2 ref={heading} tabIndex={-1} className="mb-6 text-title font-semibold leading-snug text-ink break-words">{selected.title}</h2>
         <div key={selected.key}>{selected.content}</div>
-        <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-[12.5px] text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
-          {nextItem && <button type="button" className="text-[13px] text-gov underline underline-offset-4" onClick={() => choose(nextItem.key)}>{t('pages.focus.workbench.next')}</button>}
-          <p className="mt-2 text-[11.5px] text-ink-4">{t('pages.focus.workbench.shortcutHint')}</p>
+        <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-caption text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
+          {nextItem && <button type="button" className="text-body text-gov underline underline-offset-4" onClick={() => choose(nextItem.key)}>{t('pages.focus.workbench.next')}</button>}
+          <p className="mt-2 text-caption text-ink-4">{t('pages.focus.workbench.shortcutHint')}</p>
         </footer>
       </> : <div className="py-10 text-ink-3">
-        <h2 ref={heading} tabIndex={-1} className="mb-3 text-[22px] font-medium text-ink">{t(completedHere ? 'pages.focus.workbench.completed' : selectedKey ? 'pages.focus.workbench.notCurrent' : 'pages.focus.workbench.startTitle')}</h2>
+        <h2 ref={heading} tabIndex={-1} className="mb-3 text-title font-medium text-ink">{t(completedHere ? 'pages.focus.workbench.completed' : selectedKey ? 'pages.focus.workbench.notCurrent' : 'pages.focus.workbench.startTitle')}</h2>
         <p role={completedHere ? 'status' : undefined} className="max-w-[440px] text-[14px] leading-relaxed">{completedHere?.message ?? t(selectedKey ? 'pages.focus.workbench.notCurrentBody' : 'pages.focus.workbench.startBody')}</p>
         {items[0] && <button type="button" className="mt-6 rounded-[4px] border border-gov bg-gov px-4 py-2.5 text-sm text-paper" onClick={() => choose(items[0]!.key)}>{t(completedHere ? 'pages.focus.workbench.next' : 'pages.focus.workbench.start')}</button>}
       </div>}

@@ -24,10 +24,10 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
     <div className={cn("relative group rounded-md border border-border overflow-hidden", className)}>
       {language && (
         <div className="flex items-center justify-between px-3 py-1 bg-muted/50 border-b border-border">
-          <span className="text-[10px] text-muted-foreground uppercase">{language}</span>
+          <span className="text-caption text-muted-foreground uppercase">{language}</span>
           <button
             onClick={handleCopy}
-            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+            className="text-caption text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
           >
             {copied ? "✓" : "Copy"}
           </button>
@@ -36,7 +36,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
       {!language && (
         <button
           onClick={handleCopy}
-          className="absolute top-1 right-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded bg-muted/80"
+          className="absolute top-1 right-1 text-caption text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded bg-muted/80"
         >
           {copied ? "✓" : "Copy"}
         </button>

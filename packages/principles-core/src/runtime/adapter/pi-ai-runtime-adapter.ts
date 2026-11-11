@@ -30,7 +30,7 @@ import { extractJsonObject, extractJsonObjectForSchema, extractJsonObjects, sele
 import { resolveOutputSchema } from './output-schema-registry.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
-import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
+import { attemptStructuredOutputRepair, DEFAULT_REPAIR_CONFIG, deriveSchemaSummary } from './structured-output-repair.js';
 import { typeboxToOpenAIJsonSchema, sanitizeSchemaName } from './schema-json-converter.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
 import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
@@ -100,6 +100,31 @@ const REPAIR_TIMEOUT_MS_CEILING = 60_000;
  * already-obtained schema error instead of turning it into a timeout.
  */
 const MIN_REPAIR_BUDGET_MS = 1_000;
+
+/**
+ * S6: one request budget per logical run. A run may attempt at most this many
+ * provider requests in total, across the three output paths, the PRI-1011
+ * downshift retries and the schema repair loop. pi-ai's own transport retries
+ * (S2) happen inside a single PD request and are deliberately not counted —
+ * they are not requests PD decided to send.
+ *
+ * The budget lives in startRun's local scope: no adapter config key, no new
+ * public interface. Reverting the change restores the previous unbounded
+ * worst case.
+ */
+const RUN_REQUEST_BUDGET = 3;
+
+/** S6: mutable counter shared by every request a single run sends. */
+interface RunRequestBudget {
+  requestsLeft: number;
+}
+
+/** S6: claim one request from the run budget, or report exhaustion. */
+function consumeRunRequest(budget: RunRequestBudget): boolean {
+  if (budget.requestsLeft <= 0) return false;
+  budget.requestsLeft -= 1;
+  return true;
+}
 
 /**
  * S2: cap on the wait pi-ai may take between its own transport retries.
@@ -786,6 +811,9 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     };
     this.runs.set(runId, runState);
 
+    // S6: every provider request this run sends draws from one local budget.
+    const requestBudget: RunRequestBudget = { requestsLeft: RUN_REQUEST_BUDGET };
+
     // AbortSignal.timeout for clean timeout control
     // Priority: input.timeoutMs (runner) > config.timeoutMs (workflows.yaml) > 300_000 (default)
     const effectiveTimeoutMs = input.timeoutMs ?? this.config.timeoutMs ?? 300_000;
@@ -929,7 +957,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
       // ── Path 1: Tool calling (PRI-271 B2) ──
       if (strategy === 'tool_call_first' && schema && schemaRef) {
-        const toolResult = await this.tryToolCallPath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId });
+        const toolResult = await this.tryToolCallPath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId, requestBudget });
         if (toolResult.success && toolResult.output !== undefined) {
           validatedOutput = toolResult.output;
           responseUsage = toolResult.usage ?? null;
@@ -941,7 +969,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
       // ── Path 2: JSON mode (PRI-271 B1) ──
       if (!validatedOutput && (strategy === 'tool_call_first' || strategy === 'json_mode_first') && schema && schemaRef) {
-        const jsonResult = await this.tryJsonModePath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId });
+        const jsonResult = await this.tryJsonModePath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId, requestBudget });
         if (jsonResult.success && jsonResult.output !== undefined) {
           validatedOutput = jsonResult.output;
           responseUsage = jsonResult.usage ?? null;
@@ -953,7 +981,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
       // ── Path 3: Free-form + repair (current behavior, enhanced) ──
       if (!validatedOutput) {
-        const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId });
+        const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId, requestBudget });
         const text = extractAssistantTextOrThrow(response, signal);
         // PRI-707: preserve what the provider actually told us about how the
         // response ended. Before this, finish metadata (stopReason/usage) was
@@ -1056,12 +1084,28 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           // the schema error we already have. attemptsUsed=0 in the telemetry
           // below is the observable record of the skip.
           const repairBudgetExhausted = runDeadlineAt - Date.now() < MIN_REPAIR_BUDGET_MS;
+          // S6: repair attempts are provider requests too, so they draw from the
+          // same run budget. When the three output paths already spent it, the
+          // schema error we have is returned instead of starting a repair loop
+          // that cannot send anything.
+          const configuredRepairAttempts = this.config.maxRepairAttempts ?? DEFAULT_REPAIR_CONFIG.maxRepairAttempts;
+          const repairAttemptsAllowed = Math.min(configuredRepairAttempts, Math.max(0, requestBudget.requestsLeft));
+          // S1: time-budget skip is decided before the loop (a repair that
+          // cannot finish inside the deadline is not started at all).
+          const repairTimeBudgetSkipEvidence = repairBudgetExhausted
+            ? { repairSkipped: true, repairSkipReason: 'budget_exhausted' as const, remainingBudgetMs: Math.max(0, runDeadlineAt - Date.now()) }
+            : {};
 
           const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
             parsedOutput,
             schemaErrors,
             {
-              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input, runDeadlineAt }),
+              llmCaller: (prompt: string) => {
+                // S6: maxRepairAttempts is already capped by the remaining run
+                // budget, so every repair attempt is guaranteed one request.
+                consumeRunRequest(requestBudget);
+                return this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input, runDeadlineAt });
+              },
               schemaCheck: (value: unknown) => Value.Check(schema, value),
               schemaErrors: (value: unknown) =>
                 [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
@@ -1072,7 +1116,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               schemaSummary,
               schemaJson,
               requiredKeys,
-              maxRepairAttempts: repairBudgetExhausted ? 0 : this.config.maxRepairAttempts,
+              maxRepairAttempts: repairBudgetExhausted ? 0 : repairAttemptsAllowed,
 
               // PRI-707: when finish metadata proves the output was cut by the
               // token limit, the repair LLM must know — repairing a truncated
@@ -1082,6 +1126,31 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 : undefined,
             },
           );
+
+          // S6: the run budget can run out *during* the repair loop, not only
+          // before it. The loop can start at most `repairAttemptsAllowed`
+          // attempts, so every configured attempt above that cap had no request
+          // left. Report them by count — otherwise a partially truncated repair
+          // (configured 3, budget 3, 1 path spent → only 2 repair attempts) looks
+          // identical to a loop that simply used everything it was given.
+          // A successful repair ended the loop deliberately and skipped nothing.
+          const repairAttemptsSkippedByRequestBudget =
+            !repairBudgetExhausted && !repairResult.repaired
+              ? Math.max(0, configuredRepairAttempts - repairAttemptsAllowed)
+              : 0;
+          const repairRequestBudgetSkipEvidence = repairAttemptsSkippedByRequestBudget > 0
+            ? {
+                // `repairSkipped` keeps its S1 meaning: the loop never ran.
+                ...(repairAttemptsAllowed === 0 ? { repairSkipped: true } : {}),
+                repairSkipReason: 'request_budget_exhausted' as const,
+                repairAttemptsConfigured: configuredRepairAttempts,
+                repairAttemptsSkippedByRequestBudget,
+              }
+            : {};
+          const repairSkipEvidence = {
+            ...repairTimeBudgetSkipEvidence,
+            ...repairRequestBudgetSkipEvidence,
+          };
 
           this.eventEmitter.emitTelemetry({
             eventType: 'output_repair_attempted',
@@ -1098,15 +1167,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               repairSummary: repairResult.repairSummary,
               repairAttempts: repairResult.repairAttempts,
               outputPath: 'free_form_with_repair',
-              // S1: never truncate silently — when repair was skipped because
-              // the run budget was nearly spent, say so in the event.
-              ...(repairBudgetExhausted
-                ? {
-                    repairSkipped: true,
-                    repairSkipReason: 'budget_exhausted',
-                    remainingBudgetMs: Math.max(0, runDeadlineAt - Date.now()),
-                  }
-                : {}),
+              // S1/S6: never truncate silently — when repair was skipped
+              // because the time budget or the run's request budget was spent,
+              // say which one in the event.
+              ...repairSkipEvidence,
             },
           });
 
@@ -1164,9 +1228,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 validationErrors: validationErrorEntries,
                 repairAttempts: evidencePack.repairAttempts,
                 finalFailureReason: evidencePack.finalFailureReason,
-                ...(repairBudgetExhausted
-                  ? { repairSkipped: true, repairSkipReason: 'budget_exhausted' }
-                  : {}),
+                ...repairSkipEvidence,
                 // PRI-707: keep the terminal repair-exhausted event able to
                 // distinguish a token-limit cut from an ordinary schema
                 // failure — mirror the evidencePack finish metadata (PR #1574
@@ -1441,6 +1503,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       effectiveTimeoutMs: number;
       input: StartRunInput;
       runId: string;
+      requestBudget: RunRequestBudget;
     },
   ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string; usage?: { inputTokens: number | null; outputTokens: number | null; source: string } | null }> {
     try {
@@ -1448,6 +1511,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         ...params.baseContext,
         tools: [buildSchemaToolDefinition(params.schemaRef, params.schema, new DefaultSchemaPromptAdapter())],
       };
+
+      // S6: spend from the run's shared budget. The tool path is always the
+      // first of the three budgeted output paths, so with the budget set to
+      // the path count it cannot find itself exhausted; the checks that can
+      // actually fire live in completeWithRetry's downshift loop and in the
+      // repair loop.
+      consumeRunRequest(params.requestBudget);
 
       const completeOptions: SimpleStreamOptions = {
         signal: params.signal,
@@ -1528,9 +1598,16 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       effectiveTimeoutMs: number;
       input: StartRunInput;
       runId: string;
+      requestBudget: RunRequestBudget;
     },
   ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string; usage?: { inputTokens: number | null; outputTokens: number | null; source: string } | null }> {
     try {
+      // S6: spend from the run's shared budget. The JSON path is at most the
+      // second of the three budgeted output paths, so it cannot find itself
+      // exhausted; the checks that can fire live in completeWithRetry's
+      // downshift loop and in the repair loop.
+      consumeRunRequest(params.requestBudget);
+
       const completeOptions: SimpleStreamOptions = {
         signal: params.signal,
         apiKey: params.apiKey,
@@ -1713,6 +1790,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       timeoutSource?: string;
       input?: StartRunInput;
       runId?: string;
+      /** S6: the run's shared request budget (paths 1/2 and repair draw from it too). */
+      requestBudget: RunRequestBudget;
     },
   ): Promise<AssistantMessage> {
     const {
@@ -1720,6 +1799,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       timeoutSource = 'default',
       input,
       runId = crypto.randomUUID(),
+      requestBudget,
     } = options;
     // S2: the retry budget handed to pi-ai. It is recorded on every failure so
     // the final reason is auditable ("who retried, how many times").
@@ -1736,6 +1816,9 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     // Number of requests PD itself sent for this logical call. Transport
     // retries inside pi-ai are invisible here by design (they are pi-ai's).
     let attemptsSent = 0;
+    // S6: evidence from the previous attempt, carried into the error raised
+    // when the run's shared budget cannot fund another attempt.
+    let lastFailureEvidence: string | undefined;
 
     while (true) {
       attemptsSent += 1;
@@ -1785,6 +1868,28 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;
+        }
+        // S6: no attempt may exceed the run's shared request budget. This also
+        // bounds the PRI-1011 downshift ladder, which is the only reason this
+        // loop can iterate after S2 moved transport retries into pi-ai.
+        if (!consumeRunRequest(requestBudget)) {
+          const requestsSent = RUN_REQUEST_BUDGET - requestBudget.requestsLeft;
+          throw new PDRuntimeError(
+            'execution_failed',
+            `LLM request budget exhausted after ${requestsSent}/${RUN_REQUEST_BUDGET} requests for this run`,
+            {
+              finalFailureReason: 'request_budget_exhausted',
+              requestBudget: RUN_REQUEST_BUDGET,
+              requestsSent,
+              retryAttempt: attempt,
+              transportMaxRetries,
+              retryOwnership: 'pi-ai',
+              ...(lastFailureEvidence !== undefined
+                ? { providerEvidence: lastFailureEvidence }
+                : {}),
+              nextAction: 'The run already spent its request budget on other output paths; inspect the earlier output_path_fallback events before increasing it.',
+            },
+          );
         }
         const response = await completeSimple(model, context, completeOptions);
 
@@ -1890,6 +1995,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 });
               }
               maxTokensBudget = next;
+              lastFailureEvidence = safeStringifyPreview(rawMessage, 300);
               continue;
             }
           }
@@ -2009,6 +2115,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               });
             }
             maxTokensBudget = next;
+            lastFailureEvidence = safeStringifyPreview(errMsg, 300);
             continue;
           }
         }
