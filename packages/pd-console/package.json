@@ -19,6 +19,8 @@
     "test:e2e:headed": "npm run build:ui && npx playwright test --headed",
     "test:ai-user": "npm run build:ui && tsx tests/ai-user/run.ts",
     "typecheck": "npx tsc --noEmit",
+    "check:console-i18n": "node scripts/check-console-i18n.mjs",
+    "check:ui-tokens": "node scripts/check-ui-tokens.mjs",
     "verify:build": "node scripts/verify-build.mjs"
   },
   "dependencies": {

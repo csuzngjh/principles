@@ -323,11 +323,11 @@ describe('non-regression: normal RuleHost block behavior is unchanged', () => {
 
     const { gateResult, handled } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-normal');
 
-    // The host blocks on the shared gate's deny; the adapter does not return a
-    // second block object — it accounts for the block instead.
+    // The deny is returned as a block result carrying the owner-facing copy
+    // (PRI-1184 / F4); accounting is unchanged.
     expect(gateResult.decision).toBe('deny');
     expect(gateResult.reason).toContain('NORMAL_PRINCIPLE_BLOCK');
-    expect(handled).toBeUndefined();
+    expect(handled?.block).toBe(true);
 
     // Behavioral path entered: rule_enforced + gate_block events.
     const types = bufferedEvents().map((e) => e.type);

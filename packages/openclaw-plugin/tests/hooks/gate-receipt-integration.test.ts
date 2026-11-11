@@ -5,11 +5,11 @@
  *
  * PRODUCTION REALITY: `handleBeforeToolCall` is no longer wired; the deny
  * decision is produced by the shared production gate and handed to
- * `handleSharedRuleHostResult`. The host blocks on that deny, so the plugin no
- * longer builds the owner-facing block copy. These tests therefore pin the
- * deny ACCOUNTING that survives on the shared path: the receipt-ledger effect
- * row attribution (ruleId/principleId threading), the ledger flag gate, and
- * the observable rc-9 skip when attribution is missing.
+ * `handleSharedRuleHostResult`. That handler is now the shared path's producer
+ * of the owner-facing block copy (PRI-1184 / F4), so these tests pin BOTH the
+ * deny accounting (receipt-ledger effect row attribution, ledger flag gate,
+ * observable rc-9 skip) AND the receipt copy the OpenClaw adapter surfaces
+ * (`principle_receipt_block_copy` on/off).
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -142,9 +142,13 @@ describe('PRI-530/PRI-531 gate-hook integration (shared rule-host path)', () => 
       makeDenyResult({ ruleId: 'R-integ', principleId: 'princ-integ' }),
     );
 
-    // The host blocks on the gate's deny; the adapter returns no second block
-    // object (there is no plugin-side block copy on the shared path).
-    expect(result).toBeUndefined();
+    // Receipt copy (shared path → gate-block-helper threading of
+    // ruleId/principleId). PRI-1184 / F4: this is the owner-facing block copy
+    // the OpenClaw adapter now returns for a shared deny.
+    expect(result?.block).toBe(true);
+    expect(result?.blockReason).toContain('「删除前确认目标」');
+    expect(result?.blockReason).toContain('2026-07-30');
+    expect(result?.blockReason).toContain('来源：');
 
     // Ledger row (shared deny accounting write point)
     const rows = ledgerRows();
@@ -169,7 +173,11 @@ describe('PRI-530/PRI-531 gate-hook integration (shared rule-host path)', () => 
       makeDenyResult({ ruleId: 'R-integ', principleId: 'princ-integ' }),
     );
 
-    expect(result).toBeUndefined();
+    // Switch OFF → generic copy, no principle attribution (contrast case for
+    // the receipt-copy assertions above).
+    expect(result?.block).toBe(true);
+    expect(result?.blockReason).toContain('Security Gate Blocked');
+    expect(result?.blockReason).not.toContain('PD 原则');
     const count = (conn.getDb()
       .prepare('SELECT COUNT(*) AS n FROM principle_applications')
       .get() as { n: number }).n;
@@ -192,7 +200,7 @@ describe('PRI-530/PRI-531 gate-hook integration (shared rule-host path)', () => 
     );
 
     // The deny itself still stands (ledger never gates enforcement)…
-    expect(result).toBeUndefined();
+    expect(result?.block).toBe(true);
     expect(blockEvents()).toHaveLength(1);
     // …but the skipped effect row must be observable, not silent (rc-9).
     expect(warn).toHaveBeenCalledWith(

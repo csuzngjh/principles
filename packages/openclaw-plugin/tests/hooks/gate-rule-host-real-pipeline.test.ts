@@ -176,9 +176,9 @@ describe('PRI-437 Slice 2: Valid decisions work through the production rule-host
       gateResult,
     );
 
-    // The host blocks on the deny decision; the adapter does not return a
-    // second block object — it accounts for the block instead.
-    expect(handled).toBeUndefined();
+    // The host blocks on the deny decision; the adapter returns the SAME
+    // owner-facing block copy (PRI-1184 / F4) while accounting for the block.
+    expect(handled?.block).toBe(true);
     expect(workspaceEvents()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'gate_block',
