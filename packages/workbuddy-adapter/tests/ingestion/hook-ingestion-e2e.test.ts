@@ -20,7 +20,7 @@ import {
   recordConversationIngestionConsent,
   type TranscriptPort,
 } from '@principles/host-runtime';
-import { runEntry } from '../helpers/hook-runner.js';
+import { createSpawnStartBarrier, runEntry, runEntryAsync } from '../helpers/hook-runner.js';
 import { cleanupTempDirs, makeGovernance, makeHome } from '../helpers/workbench.js';
 import { ingestWorkbuddyConversation, workbuddyIngestionHints } from '../../src/ingestion/ingestion.js';
 import { catchUpWorkbuddyIngestion } from '../../src/ingestion/catch-up.js';
@@ -129,6 +129,25 @@ describe('real Stop hook → trajectory.db', () => {
     expect(checkpoint !== null && 'byteOffset' in checkpoint ? checkpoint.byteOffset : 0).toBeGreaterThan(0);
   });
 
+  it('a successful ingestion that only SKIPPED routine records reports `skipped`, never `degraded` (review P2-9)', () => {
+    const fixture = makeFixture({ ingestionFlag: true, consent: 'granted' });
+    fs.appendFileSync(fixture.transcriptPath, JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000003',
+      timestamp: Date.now() + 2,
+      type: 'session-meta',
+      sessionId: SESSION_ID,
+    }) + '\n');
+
+    const result = runEntry(fixture.home, JSON.stringify(fixture.payload), 'Stop');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    // rc-9: the skip stays observable, but it is routine — not a degradation.
+    expect(result.stderr).toContain('status=skipped');
+    expect(result.stderr).toContain('wb_skipped:session-meta');
+    expect(result.stderr).not.toContain('status=degraded');
+    expect(rowsOf(fixture.workspaceDir).length).toBeGreaterThanOrEqual(2);
+  });
+
   it('writes ZERO rows and stays neutral when the ingestion flag is off', () => {
     const fixture = makeFixture({ ingestionFlag: false, consent: 'granted' });
     const result = runEntry(fixture.home, JSON.stringify(fixture.payload), 'Stop');
@@ -144,6 +163,10 @@ describe('real Stop hook → trajectory.db', () => {
     const fixture = makeFixture({ ingestionFlag: true });
     const result = runEntry(fixture.home, JSON.stringify(fixture.payload), 'Stop');
     expect(result.status).toBe(0);
+    // Without these two assertions a decode/config failure (which ALSO writes
+    // zero rows) would be indistinguishable from a correctly gated skip.
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
     expect(rowsOf(fixture.workspaceDir)).toHaveLength(0);
   });
 
@@ -151,7 +174,95 @@ describe('real Stop hook → trajectory.db', () => {
     const fixture = makeFixture({ ingestionFlag: true, consent: 'revoked' });
     const result = runEntry(fixture.home, JSON.stringify(fixture.payload), 'Stop');
     expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
     expect(rowsOf(fixture.workspaceDir)).toHaveLength(0);
+  });
+
+  it('positive control: with every gate OPEN a decode failure still yields status 0 + zero rows, but a NON-empty stderr', () => {
+    // This is the assertion-discrimination proof for the negative cases above:
+    // the same observable "status 0 / zero rows" can come from a real failure,
+    // and only the stderr/stdout assertions tell the two apart.
+    const fixture = makeFixture({ ingestionFlag: true, consent: 'granted' });
+    const brokenPayload = {
+      hook_event_name: 'Stop',
+      session_id: SESSION_ID,
+      stop_hook_active: false,
+      // Neither transcript_path nor agent_transcript_path: the decoder must
+      // fail loud even though all consent gates are open.
+    };
+    const result = runEntry(fixture.home, JSON.stringify(brokenPayload), 'Stop');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).not.toBe('');
+    expect(result.stderr).toContain('transcript_path');
+    expect(rowsOf(fixture.workspaceDir)).toHaveLength(0);
+  });
+});
+
+describe('concurrency and revocation ordering (review P2-11)', () => {
+  it('two concurrent Stop hooks for the same session stay clean and write no duplicate logical keys', { timeout: 60_000 }, async () => {
+    const fixture = makeFixture({ ingestionFlag: true, consent: 'granted' });
+    const barrier = createSpawnStartBarrier(2);
+    const payload = JSON.stringify(fixture.payload);
+    const [first, second] = await Promise.all([
+      runEntryAsync(fixture.home, payload, 'Stop', { startBarrier: barrier }),
+      runEntryAsync(fixture.home, payload, 'Stop', { startBarrier: barrier }),
+    ]);
+    for (const result of [first, second]) {
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('');
+      expect(result.startedAt).toBeDefined();
+      expect(result.endedAt).toBeDefined();
+    }
+    // Real interval overlap, not serialization (the start barrier is the reason).
+    expect(first.startedAt ?? 0).toBeLessThan(second.endedAt ?? 0);
+    expect(second.startedAt ?? 0).toBeLessThan(first.endedAt ?? 0);
+
+    const rows = rowsOf(fixture.workspaceDir);
+    const keys = rows.map((row) => row.logicalKey);
+    expect(keys.every((key) => typeof key === 'string' && key.length > 0)).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(rows.find((row) => row.kind === 'user_turn')?.visibleText).toBe(OWNER_TEXT);
+  });
+
+  it('revocation takes effect between two Stop runs: later turns are NOT ingested', () => {
+    const fixture = makeFixture({ ingestionFlag: true, consent: 'granted' });
+    const firstRun = runEntry(fixture.home, JSON.stringify(fixture.payload), 'Stop');
+    expect(firstRun.stderr).toBe('');
+    const before = rowsOf(fixture.workspaceDir);
+    expect(before.length).toBeGreaterThanOrEqual(2);
+    const checkpointBefore = readGovernanceCheckpoint({ workspaceDir: fixture.workspaceDir, hostKind: 'workbuddy', rolloutIdentity: SESSION_ID });
+
+    fs.appendFileSync(fixture.transcriptPath, JSON.stringify({
+      id: '00000000-0000-4000-8000-000000000009',
+      timestamp: Date.now() + 5,
+      type: 'message',
+      role: 'user',
+      sessionId: SESSION_ID,
+      content: [{ type: 'input_text', text: '<user_query>撤销之后新增的一轮</user_query>' }],
+    }) + '\n');
+
+    const revoked = recordConversationIngestionConsent(fixture.workspaceDir, 'workbuddy', {
+      decision: 'revoked',
+      decidedVia: 'owner_directive',
+      disclosureVersion: 'wb-2026-11-11',
+      evidenceRef: 'test: Owner revoked between runs',
+    });
+    expect(revoked.ok).toBe(true);
+
+    const secondRun = runEntry(fixture.home, JSON.stringify(fixture.payload), 'Stop');
+    expect(secondRun.status).toBe(0);
+    expect(secondRun.stdout).toBe('');
+    expect(secondRun.stderr).toBe('');
+
+    const after = rowsOf(fixture.workspaceDir);
+    expect(after).toHaveLength(before.length);
+    expect(after.some((row) => row.visibleText === '撤销之后新增的一轮')).toBe(false);
+    const checkpointAfter = readGovernanceCheckpoint({ workspaceDir: fixture.workspaceDir, hostKind: 'workbuddy', rolloutIdentity: SESSION_ID });
+    expect(checkpointAfter !== null && 'byteOffset' in checkpointAfter ? checkpointAfter.byteOffset : 0)
+      .toBe(checkpointBefore !== null && 'byteOffset' in checkpointBefore ? checkpointBefore.byteOffset : 0);
   });
 });
 

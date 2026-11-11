@@ -70,6 +70,26 @@ export function createWorkbuddyTranscriptSource(context: WorkbuddyTranscriptSour
       if (hinted !== null) {
         const validated = validateWorkbuddyTranscriptPath(hinted, projectsRoot);
         if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction };
+        // Session binding (P2 review): a contract-shaped path inside the
+        // projects root can still belong to ANOTHER session. Reading it would
+        // file that session's evidence under this hook's rollout identity, so
+        // the path's identity must equal the host session identity. The check
+        // compares the PARSED identity, never just the file name shape.
+        const hookSessionId = session.sessionId.trim().toLowerCase();
+        if (hookSessionId.length === 0) {
+          return {
+            status: 'degraded',
+            reason: 'transcript_session_unverified',
+            nextAction: 'the hook payload has no session_id, so the transcript path cannot be bound to this session; nothing is read.',
+          };
+        }
+        if (validated.sessionIdentity !== hookSessionId) {
+          return {
+            status: 'degraded',
+            reason: 'transcript_session_mismatch',
+            nextAction: `the hinted transcript belongs to session ${validated.sessionIdentity}, not ${hookSessionId}; PD refuses to read another session's evidence.`,
+          };
+        }
         return { status: 'ok', filePath: validated.canonicalPath, expectedIdentity: validated.identity, sessionIdentity: validated.sessionIdentity };
       }
 

@@ -4,10 +4,16 @@
  * The Stop hook is the primary ingestion trigger, but a hook can time out or
  * a single 1 MiB bounded window can leave lag behind. The worker calls this
  * once per cycle: it walks the DURABLE workbuddy checkpoints (the exact set of
- * sessions the authenticated hook already delivered — never session
- * discovery), locates each transcript by its exact session id, and re-enters
- * the SAME gated pipeline through `ingestWorkbuddyConversation` (so consent is
- * re-read and revocation takes effect immediately).
+ * sessions the authenticated hook already delivered), locates each transcript
+ * by its exact session id, and re-enters the SAME gated pipeline through
+ * `ingestWorkbuddyConversation` (so consent is re-read and revocation takes
+ * effect immediately).
+ *
+ * "No session discovery" means it never INVENTS an identity: it does not pick
+ * a "latest" or "most interesting" session. It does enumerate the projects
+ * directory (`readdirSync`) to find the one file whose name equals an already
+ * checkpointed session id, because the host stores each project in a separate
+ * directory and the checkpoint does not record which one.
  *
  * Locating is deterministic, not a "latest file" guess: only
  * `<projectsRoot>/<any-project>/<sessionId>.jsonl` with EXACTLY one match is

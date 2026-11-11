@@ -46,7 +46,7 @@ function record(id: string, type: string, extra: Record<string, unknown> = {}): 
 
 const BODY_HEAD = [
   record('cccccccc-0000-4000-8000-000000000001', 'session-meta', { meta: {} }),
-  record('cccccccc-0000-4000-8000-000000000002', 'message', { role: 'user', content: [{ type: 'input_text', text: 'integration user turn' }] }),
+  record('cccccccc-0000-4000-8000-000000000002', 'message', { role: 'user', content: [{ type: 'input_text', text: '<system-reminder data-role="user-context">integration host context</system-reminder>\n<user_query>integration user turn</user_query>' }] }),
   record('cccccccc-0000-4000-8000-000000000003', 'message', { role: 'assistant', content: [{ type: 'output_text', text: 'integration assistant turn' }], providerData: { messageId: 'msg-3', model: 'synth-model-9' } }),
   record('cccccccc-0000-4000-8000-000000000004', 'reasoning', { parentId: 'cccccccc-0000-4000-8000-000000000003', content: [{ type: 'reasoning_text', text: 'integration reasoning' }] }),
   record('cccccccc-0000-4000-8000-000000000005', 'function_call', { callId: 'chatcmpl-tool-901', name: 'Bash', arguments: '{"command":"synth"}' }),
@@ -156,7 +156,9 @@ describe('pipeline × WorkBuddy source (production boundary)', () => {
     if (first.status !== 'ok') return;
     expect(first.lagBytes).toBeGreaterThan(0);
     const second = run(fixture, { maxBatchBytes: Buffer.byteLength(BODY_HEAD, 'utf8') - 10 });
-    expect(second).toMatchObject({ status: 'ok', inserted: 2, lagBytes: 0 }); // orphan result + the big record
+    // The result is a LATER window than its call: the shared callId logical key
+    // enriches the committed partial row instead of inserting a second partial.
+    expect(second).toMatchObject({ status: 'ok', inserted: 1, enriched: 1, lagBytes: 0 });
   });
 
   it('persists the real Owner utterance — never the host system-reminder context', () => {

@@ -101,6 +101,8 @@ interface DecodeContext {
   seenRecords: Map<string, { parentId: string | null; role: string | null }>;
   /** callId → observation index awaiting its function_call_result (FIFO by file order). */
   pendingToolCalls: Map<string, number>;
+  /** Every callId seen in THIS window — duplicate ids keep record-scoped keys. */
+  seenCallIds: Set<string>;
   warningCounts: Map<string, number>;
 }
 
@@ -123,36 +125,42 @@ function warningList(context: DecodeContext): string[] {
  * `sanitizeString` keeps a 200-char head-only preview, which in 24/24 sampled
  * real records contained none of the Owner's words.
  *
- * `null` means "no Owner text to store": the observation still lands as
- * `partial`, but host context never reaches the governance store. Every such
- * degradation carries an aggregated warning (rc-9).
+ * FAIL-CLOSED (P1 review): only the structured `<user_query>` boundary is
+ * trusted. Anything else — a renamed wrapper, a bare legacy record, an
+ * unclosed block — yields `null` (observation `partial`, warning, no
+ * visibleText). Never guess Owner intent from text shape.
  */
 function projectUserText(context: DecodeContext, text: string | null): string | null {
   if (text === null) return null;
 
-  // Preferred contract: the host marks the Owner's own words explicitly. An
-  // Owner who literally pasted `<system-reminder>` inside their query keeps
-  // it verbatim — we never strip inside the query block.
+  // The ONLY accepted Owner boundary is the host's explicit <user_query>
+  // wrapper. A match INSIDE a <system-reminder> block belongs to host context
+  // (tool declarations or quoted transcripts can carry the token), never to
+  // the Owner, so those matches are ignored. An Owner who literally pasted
+  // `<system-reminder>` inside their query keeps it verbatim — we never strip
+  // inside the query block.
+  const hostContextRanges = [...text.matchAll(SYSTEM_REMINDER_BLOCK)].map((match) => {
+    const start = match.index ?? 0;
+    return [start, start + match[0].length] as const;
+  });
   const queries = [...text.matchAll(USER_QUERY_BLOCK)]
+    .filter((match) => {
+      const start = match.index ?? 0;
+      return !hostContextRanges.some(([begin, end]) => start >= begin && start < end);
+    })
     .map((match) => match[1]?.trim() ?? '')
     .filter((part) => part.length > 0);
   if (queries.length > 0) return queries.join('\n');
 
-  // Legacy/plain records carry no wrapper at all — preserve them unchanged.
-  if (!text.includes('<system-reminder')) return text;
-
-  const remainder = text.replace(SYSTEM_REMINDER_BLOCK, '').trim();
-  if (remainder.includes('<system-reminder')) {
-    // Unclosed or nested marker: never persist a half-parsed host prompt.
-    warnAggregated(context, 'wb_user_context_unparsed');
-    return null;
-  }
-  if (remainder.length === 0) {
-    warnAggregated(context, 'wb_user_context_only');
-    return null;
-  }
-  warnAggregated(context, 'wb_user_context_stripped');
-  return remainder;
+  // Fail-closed default: without the structured boundary a legacy plain
+  // utterance and an UNRECOGNISED host wrapper (e.g. <system-prompt>, a
+  // renamed reminder) are indistinguishable from here. Projecting the blob is
+  // the observed P1 failure mode: host prompts enter the governance store as
+  // Owner evidence AND the real utterance is lost behind the store's 200-char
+  // preview. The observation still lands as `partial` with this warning and
+  // NO visibleText, so the degradation is visible instead of silent (rc-9).
+  warnAggregated(context, 'wb_user_context_unconfirmed');
+  return null;
 }
 
 function epochMsToIso(value: unknown, fallbackIso: string): string {
@@ -316,10 +324,21 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
     const providerData = providerDataOf(raw);
     const callId = nonEmptyString(own(raw, 'callId'));
     if (callId === null) warnAggregated(context, 'wb_missing_call_id');
+    // Cross-window pairing (P1 review): the call and its result can land in
+    // two byte-bounded windows, so both sides must derive the SAME logical key.
+    // callId is the host's pairing identity (forensics: 99 calls / 98 matched
+    // results), and a later window's result therefore enriches this committed
+    // partial row instead of creating a second permanent partial. Duplicate
+    // callIds INSIDE one window (the contract notes the host does not dedupe)
+    // keep a record-scoped key so both executions stay visible.
+    const duplicateInWindow = callId !== null && context.seenCallIds.has(callId);
+    if (callId !== null) context.seenCallIds.add(callId);
     const observation: GovernanceObservationInput = {
       ...observationBase(context, record),
       kind: 'tool_call',
-      logicalObservationKey: `wb|${context.sessionIdentity}|${record.id}`,
+      logicalObservationKey: callId !== null && !duplicateInWindow
+        ? `wb|${context.sessionIdentity}|call:${callId}`
+        : `wb|${context.sessionIdentity}|${record.id}`,
       transcriptRecordKey: `wb|${context.sessionIdentity}|${record.recordByteStart}`,
       recordOrdinal: record.ordinal,
       recordByteStart: record.recordByteStart,
@@ -330,7 +349,9 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
         model: providerData !== null ? nonEmptyString(own(providerData, 'model')) : null,
       },
       source: 'transcript',
-      // 'partial' until the matching function_call_result lands in-window (§5.3).
+      // 'partial' until the matching function_call_result lands — in this
+      // window (in-memory backfill) or a LATER one (same logical key, the
+      // store upgrades the committed row to complete).
       completeness: 'partial',
       observedAt: record.timestampIso,
     };
@@ -367,13 +388,18 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
       warnAggregated(context, 'wb_observation_skipped_missing_identity');
       return;
     }
-    // Orphan/lead result: the call record is outside this window (earlier
-    // batch already committed) or genuinely missing — partial, never guessed.
+    // Out-of-window result: the call record lives in an already-committed
+    // earlier batch (or is genuinely missing). The logical key is the SAME
+    // callId-derived key the call used, so the store upgrades that partial row
+    // to complete instead of creating a second permanent partial; the warning
+    // stays because the pairing happened outside this decode window.
     warnAggregated(context, 'wb_unpaired_tool_result');
     context.observations.push({
       ...observationBase(context, record),
       kind: 'tool_call',
-      logicalObservationKey: `wb|${context.sessionIdentity}|${record.id}`,
+      logicalObservationKey: callId !== null
+        ? `wb|${context.sessionIdentity}|call:${callId}`
+        : `wb|${context.sessionIdentity}|${record.id}`,
       transcriptRecordKey: `wb|${context.sessionIdentity}|${record.recordByteStart}`,
       recordOrdinal: record.ordinal,
       recordByteStart: record.recordByteStart,
@@ -384,7 +410,7 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
         ...(outputPreview !== null ? { output: outputPreview } : {}),
       },
       source: 'transcript',
-      completeness: 'partial',
+      completeness: 'complete',
       observedAt: record.timestampIso,
     });
     return;
@@ -448,6 +474,7 @@ export function decodeWorkbuddyTranscriptWindow(input: DecodeWorkbuddyWindowInpu
     observations: [],
     seenRecords: new Map(),
     pendingToolCalls: new Map(),
+    seenCallIds: new Set(),
     warningCounts: new Map(),
   };
 
@@ -503,6 +530,14 @@ export function decodeWorkbuddyTranscriptWindow(input: DecodeWorkbuddyWindowInpu
     }
     const line = decodeLine(plan.tail.bytes);
     if (line.ok) {
+      // The hard batch cap also applies to the EOF tail (P2 review): a
+      // parseable final line without a trailing newline used to bypass
+      // MAX_BATCH_RECORDS, so 128 newline-terminated records + 1 EOF record
+      // consumed 129. Stop BEFORE the tail; the next read starts there and the
+      // cap resets, so the record is never lost — only deferred.
+      if (recordsConsumed >= CONVERSATION_INGESTION_MAX_BATCH_RECORDS) {
+        return finish(context, { nextByteOffset: tailStart, lastOrdinal }, { kind: 'byte_bound' });
+      }
       // Parseable final line without a trailing newline: complete record at EOF.
       consume(line, tailStart);
       return finish(context, { nextByteOffset: tailStart + plan.tail.bytes.length, lastOrdinal }, { kind: 'eof' });

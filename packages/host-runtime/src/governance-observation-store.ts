@@ -216,6 +216,34 @@ function safeJson(value: unknown): string | null {
   }
 }
 
+/**
+ * Merge a LATER window's tool facts onto an already-committed PARTIAL tool_call
+ * row. A host may split one execution across windows (WorkBuddy keys call and
+ * result by callId, each decode window is byte-bounded), so the result arrives
+ * as a second observation with the same logical key. `fill` alone would drop
+ * the result preview because the call's facts column is already non-null.
+ * Only two well-formed `facts` envelopes are merged; anything else returns
+ * null so the caller can keep the existing `fill` behaviour.
+ */
+function mergeToolFactsJson(existingJson: unknown, incomingJson: string | null): string | null {
+  if (typeof existingJson !== 'string' || incomingJson === null) return null;
+  try {
+    const existing: unknown = JSON.parse(existingJson);
+    const incoming: unknown = JSON.parse(incomingJson);
+    if (!isRecord(existing) || !isRecord(incoming)) return null;
+    const existingFacts = existing.facts;
+    const incomingFacts = incoming.facts;
+    if (!isRecord(existingFacts) || !isRecord(incomingFacts)) return null;
+    const merged: Record<string, unknown> = { ...existingFacts };
+    for (const [key, value] of Object.entries(incomingFacts)) {
+      if (value !== null && value !== undefined) merged[key] = value;
+    }
+    return safeJson({ facts: merged });
+  } catch {
+    return null;
+  }
+}
+
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS governance_observation_schema_version (version INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS governance_rollouts (
@@ -356,7 +384,17 @@ function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): 
   try {
     const db = factory ? factory(dbPath) : new Database(dbPath);
     db.pragma('busy_timeout = 5000');
-    db.pragma('journal_mode = WAL');
+    // Switching journal_mode takes an exclusive lock, and SQLITE_BUSY on this
+    // pragma is NOT covered by busy_timeout. Two hooks that start at the same
+    // moment can collide here; neither the mode nor the data is corrupted, and
+    // whoever wins performs the switch. Read the mode first (lock-free) and
+    // never fail ingestion just because this optimization lost the race.
+    try {
+      const journalMode = db.pragma('journal_mode', { simple: true });
+      if (typeof journalMode !== 'string' || journalMode.toLowerCase() !== 'wal') {
+        db.pragma('journal_mode = WAL');
+      }
+    } catch { /* concurrent opener holds the switch; keep the current journal mode */ }
     ensureGovernanceObservationSchema(db);
     return { db, close: () => { try { db.close(); } catch { /* write result already determined */ } } };
   } catch (error) {
@@ -450,7 +488,22 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
   fill('tool_use_id', boundedString(input.toolUseId, MAX_TEXT_BOUND));
   fill('transcript_tool_call_id', boundedString(input.transcriptToolCallId, MAX_TEXT_BOUND));
   fill('visible_text', input.visibleText !== undefined ? sanitizeString(input.visibleText, workspaceDir) : null);
-  fill('sanitized_tool_facts_json', input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null);
+  const incomingFacts = input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null;
+  // Cross-window tool completion (P1): the call row is partial and the result
+  // arrives under the same logical key from a later decode window. Merge the
+  // result facts instead of dropping them through `fill`'s null-only rule.
+  const crossWindowToolCompletion = input.kind === 'tool_call'
+    && input.completeness === 'complete'
+    && rowField(existing, 'completeness') === 'partial';
+  if (crossWindowToolCompletion) {
+    const mergedFacts = mergeToolFactsJson(rowField(existing, 'sanitized_tool_facts_json'), incomingFacts);
+    if (mergedFacts !== null && mergedFacts !== rowField(existing, 'sanitized_tool_facts_json')) {
+      updates.push('sanitized_tool_facts_json = ?');
+      values.push(mergedFacts);
+    }
+  } else {
+    fill('sanitized_tool_facts_json', incomingFacts);
+  }
   const existingCompleteness = rowField(existing, 'completeness');
   if (existingCompleteness === 'partial' && input.completeness === 'complete') {
     updates.push('completeness = ?');
@@ -594,6 +647,11 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
     let conflictStop: number | undefined;
     let conflictKey = '';
 
+    // `.immediate()` takes the write lock up front. With the default deferred
+    // BEGIN, two concurrent Stop hooks for the same session both read first
+    // and then try to upgrade; SQLite fails that upgrade with SQLITE_BUSY
+    // immediately (busy_timeout does not cover upgrade deadlocks), which the
+    // hook surfaces as `governance_write_failed:database is locked`.
     const result = db.transaction(() => {
       let rolloutRowId: number | null = null;
       if (input.rollout !== undefined) {
@@ -679,7 +737,7 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
       expireStalePendingTails(db, new Date(now));
       pruneRetention(db, rolloutRowId, new Date(now));
       return 'committed';
-    })();
+    }).immediate();
 
     if (result === 'conflict') {
       return {

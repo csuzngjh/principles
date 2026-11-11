@@ -48,12 +48,32 @@ describe('locate (deterministic, never scans)', () => {
     const home = makeHome();
     makeProjectsRoot(home);
     const file = writeSessionFile(home, '{"type":"ai-title","aiTitle":"t"}\n');
-    const located = source().locate({ sessionId: 'anything', cwd: 'D:\\Other' }, { transcriptPath: file }, { home });
+    const located = source().locate({ sessionId: SESSION_ID, cwd: 'D:\\Other' }, { transcriptPath: file }, { home });
     expect(located).toMatchObject({ status: 'ok', sessionIdentity: SESSION_ID });
     if (located.status === 'ok') {
       expect(located.filePath).toBe(path.resolve(file));
       expect(located.expectedIdentity.size).toBe(fs.statSync(file).size);
     }
+  });
+
+  it('rejects a hinted transcript that belongs to a DIFFERENT session (identity binding)', () => {
+    const home = makeHome();
+    makeProjectsRoot(home);
+    const otherSessionFile = '33333333-4444-4555-8666-777777777777.jsonl';
+    const otherFile = underHome(home, '.workbuddy', 'projects', 'd-Code-principles', otherSessionFile);
+    fs.writeFileSync(otherFile, '{"type":"ai-title","aiTitle":"other"}\n', 'utf8');
+    // Same root, contract-shaped name, real file — only the identity differs.
+    const located = source().locate({ sessionId: SESSION_ID, cwd: 'd:\\Code\\principles' }, { transcriptPath: otherFile }, { home });
+    expect(located).toMatchObject({ status: 'degraded', reason: 'transcript_session_mismatch' });
+    if (located.status === 'degraded') expect(located.nextAction).toContain('33333333-4444-4555-8666-777777777777');
+  });
+
+  it('rejects a hinted transcript when the hook carries no session id (cannot bind)', () => {
+    const home = makeHome();
+    makeProjectsRoot(home);
+    const file = writeSessionFile(home, '{"type":"ai-title","aiTitle":"t"}\n');
+    const located = source().locate({ sessionId: '  ', cwd: 'd:\\Code\\principles' }, { transcriptPath: file }, { home });
+    expect(located).toMatchObject({ status: 'degraded', reason: 'transcript_session_unverified' });
   });
 
   it('skips an empty transcript_path (InstructionsLoaded) and falls through', () => {
@@ -125,6 +145,35 @@ describe('locate (deterministic, never scans)', () => {
     fs.writeFileSync(agentFile, '{}', 'utf8');
     const located = source().locate({ sessionId: SESSION_ID }, { transcriptPath: agentFile }, { home });
     expect(located).toMatchObject({ status: 'degraded', reason: 'transcript_path_not_main_session' });
+  });
+
+  it('derives a POSIX-cwd transcript inside the projects root (review P2-11)', () => {
+    const home = makeHome();
+    const root = underHome(home, '.workbuddy', 'projects');
+    const posixDir = underHome(root, '-home-user-proj');
+    fs.mkdirSync(posixDir, { recursive: true });
+    fs.writeFileSync(underHome(posixDir, SESSION_FILE), '{"type":"ai-title","aiTitle":"t"}\n', 'utf8');
+    const located = source().locate({ sessionId: SESSION_ID, cwd: '/home/user/proj' }, {}, { home });
+    expect(located).toMatchObject({ status: 'ok', sessionIdentity: SESSION_ID });
+    if (located.status === 'ok') {
+      expect(path.relative(path.resolve(root), located.filePath).startsWith('..')).toBe(false);
+    }
+  });
+
+  it('rejects a POSIX-style hint that does not resolve inside this host projects root (review P2-11)', () => {
+    const home = makeHome();
+    makeProjectsRoot(home);
+    // Deliberately foreign POSIX path: it must never be read just because the
+    // file name is contract-shaped.
+    const located = source().locate(
+      { sessionId: SESSION_ID, cwd: '/home/user/proj' },
+      { transcriptPath: `/home/user/.workbuddy/projects/-home-user-proj/${SESSION_FILE}` },
+      { home },
+    );
+    expect(located.status).toBe('degraded');
+    if (located.status === 'degraded') {
+      expect(['transcript_path_invalid', 'transcript_path_outside_projects_root']).toContain(located.reason);
+    }
   });
 
   it('rejects file names outside the <sessionId>.jsonl contract', () => {

@@ -97,6 +97,32 @@ function requiredNullableString(value: Record<string, unknown>, key: string): st
   return candidate;
 }
 
+/**
+ * Transcript-path presence for Stop — TWO documented spellings, no capture.
+ *
+ * The official WorkBuddy hooks reference (§"Stop & SubagentStop Input") shows
+ * `transcript_path`; the capability-matrix Table A cited by
+ * ingestion/transcript-path.ts names `agent_transcript_path`. Neither Stop
+ * payload has been captured from a real host run (NOT_RUN), so requiring
+ * either spelling ALONE would fail-closed on the other and drop the whole
+ * turn (the ingestion orchestrator already accepts both hints). The union is
+ * therefore the only contract this codec can honestly enforce: at least one
+ * key must be PRESENT, and every present key must be string|null. Absence of
+ * both still fails loud (rc-3).
+ */
+function requireStopTranscriptPath(value: Record<string, unknown>): void {
+  const hasTranscriptPath = Object.hasOwn(value, 'transcript_path');
+  const hasAgentTranscriptPath = Object.hasOwn(value, 'agent_transcript_path');
+  if (!hasTranscriptPath && !hasAgentTranscriptPath) {
+    throw new WorkBuddyDecoderError(
+      'missing required field "transcript_path"',
+      'A WorkBuddy Stop payload must carry transcript_path or agent_transcript_path (both spellings are documented; the union is accepted until a real Stop payload is captured).',
+    );
+  }
+  if (hasTranscriptPath) requiredNullableString(value, 'transcript_path');
+  if (hasAgentTranscriptPath) requiredNullableString(value, 'agent_transcript_path');
+}
+
 function requiredRecord(value: Record<string, unknown>, key: string): Record<string, unknown> {
   if (!Object.hasOwn(value, key)) throw new WorkBuddyDecoderError(`missing required field "${key}"`, `Use the exact ${HOST_CONTRACT_BASELINE} ${key} field.`);
   const candidate = own(value, key);
@@ -201,7 +227,8 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
     throw new WorkBuddyDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, SessionStart, or Stop.');
   }
   const sessionId = requiredString(raw, 'session_id');
-  requiredNullableString(raw, 'transcript_path');
+  if (eventName === WORKBUDDY_EVENT_STOP) requireStopTranscriptPath(raw);
+  else requiredNullableString(raw, 'transcript_path');
   // ID mapping (frozen contract §ids): generation_id → turnId on every event
   // where the host provides it; call_id (= tool_use_id) → toolCallId. Neither
   // is ever fabricated when missing (rc-6).
@@ -236,7 +263,8 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
       throw new WorkBuddyDecoderError('invalid field "stop_hook_active"', 'The WorkBuddy Stop hook must supply stop_hook_active as a boolean.');
     }
     validateOptionalStringType(raw, 'permission_mode');
-    validateOptionalStringType(raw, 'agent_transcript_path');
+    // agent_transcript_path is type-validated by requireStopTranscriptPath,
+    // which (unlike validateOptionalStringType) also accepts an explicit null.
     context = { ...baseWithContext, workspaceDir: '' };
   } else if (kind === 'session_start') {
     // SessionStart has NO cwd (probe P00): source/permission_mode/client/version

@@ -34,4 +34,13 @@ describe('encodeWorkbuddyCwd (forensic baseline)', () => {
   it('degrades on empty input without throwing', () => {
     expect(encodeWorkbuddyCwd('')).toBe('');
   });
+
+  it('encodes a POSIX cwd into exactly ONE safe path segment (review P2-11)', () => {
+    const encoded = encodeWorkbuddyCwd('/home/user/proj');
+    expect(encoded).toBe('-home-user-proj');
+    expect(encoded).not.toContain('/');
+    expect(encoded).not.toContain('\\');
+    expect(encoded.split(/[\\/]+/)).toHaveLength(1);
+    expect(encoded).not.toContain('..');
+  });
 });

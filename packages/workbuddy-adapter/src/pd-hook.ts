@@ -414,8 +414,17 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
         now: hookEpoch,
       });
       if (ingestion.status === 'ingested') {
+        // A successful ingestion that skipped routine records is NOT degraded:
+        // `wb_skipped:*` is the decoder's normal "this record is not Owner
+        // evidence" channel. Only the remaining warnings describe something
+        // that needs investigation, so they keep the degraded status (rc-9:
+        // every skip stays observable, but the severity must be honest).
         return neutralWithDiagnostics(ingestion.warnings.slice(0, 2).map((warning) =>
-          diagnostic('degraded', warning, 'Inspect the WorkBuddy transcript and the governance trajectory checkpoint; ingestion warnings are bounded and non-blocking.')));
+          diagnostic(
+            warning.startsWith('wb_skipped') ? 'skipped' : 'degraded',
+            warning,
+            'Inspect the WorkBuddy transcript and the governance trajectory checkpoint; ingestion warnings are bounded and non-blocking.',
+          )));
       }
       if (ingestion.status === 'skipped') return neutralWithDiagnostics([]);
       return neutralWithDiagnostics([diagnostic('degraded', ingestion.reason, ingestion.nextAction)]);
