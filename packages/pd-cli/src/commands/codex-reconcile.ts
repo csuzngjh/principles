@@ -78,6 +78,8 @@ export async function handleCodexReconcile(options: CodexReconcileOptions): Prom
   const result = await reconcileGovernanceContinuation({
     workspaceDir: workspace,
     codexConversationIngestionEnabled,
+    // Legacy alias for an older installed host-runtime (P2 review).
+    conversationIngestionEnabled: codexConversationIngestionEnabled,
     ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
   });
 

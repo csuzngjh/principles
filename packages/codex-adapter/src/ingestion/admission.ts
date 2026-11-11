@@ -108,6 +108,8 @@ export async function runGovernanceAdmission(args: {
       logicalObservationKey: outcome.logicalObservationKey,
       canonicalPainId: outcome.canonicalPainId,
       codexConversationIngestionEnabled: true,
+      // Legacy alias: an older installed host-runtime reads only this name.
+      conversationIngestionEnabled: true,
     });
     if (!cont.ok) {
       push(cont.reason, cont.nextAction);

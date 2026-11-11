@@ -565,12 +565,15 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
   if (crossWindowToolCompletion) {
     const existingFactsJson = rowField(existing, 'sanitized_tool_facts_json');
     const mergedFacts = mergeToolFactsJson(existingFactsJson, incomingFacts);
-    // Fall back to the incoming facts ONLY when the row has none. An existing
-    // but unmergeable value is a bounded truncation preview that is still
-    // committed evidence; replacing it would destroy what the advanced
-    // checkpoint can no longer recover (P2 review).
+    // Fall back to the incoming facts ONLY when the row has none AND is still
+    // active. An existing but unmergeable value is a bounded truncation
+    // preview that is still committed evidence; replacing it would destroy
+    // what the advanced checkpoint can no longer recover. A terminal retention
+    // class (expired / quarantined) must not regain a body either (P2 review).
     const hasExistingFacts = typeof existingFactsJson === 'string' && existingFactsJson.length > 0;
-    const nextFacts = mergedFacts ?? (hasExistingFacts ? null : incomingFacts);
+    const retentionClass = rowField(existing, 'retention_class');
+    const activeRow = retentionClass === 'operational' || retentionClass === 'promoted';
+    const nextFacts = mergedFacts ?? (hasExistingFacts || !activeRow ? null : incomingFacts);
     if (nextFacts !== null && nextFacts !== rowField(existing, 'sanitized_tool_facts_json')) {
       updates.push('sanitized_tool_facts_json = ?');
       values.push(nextFacts);

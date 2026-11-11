@@ -2368,9 +2368,12 @@ export interface EnsureGovernanceContinuationInput {
   /** Current Owner consent for Codex conversation evidence. Required to prevent reconciliation from promoting old observations after opt-out. */
   readonly codexConversationIngestionEnabled: boolean;
   /**
-   * Legacy alias from before the host-scoped rename. A runtime that requires
-   * only the new name would silently skip promotion when paired with an older
-   * caller (P2 review), so either `true` counts as consent.
+   * Legacy alias from before the host-scoped rename. It means the SAME thing as
+   * the field above — Codex conversation-evidence consent only, never consent
+   * for WorkBuddy evidence. Kept so an older caller paired with this runtime
+   * still promotes, and callers pass both names so an older runtime still sees
+   * consent (P2 review). When the new field is present it wins: an explicit
+   * `false` must never be overridden by a stale `true` here.
    */
   readonly conversationIngestionEnabled?: boolean;
   readonly databaseFactory?: ObservationDatabaseFactory;
@@ -2436,7 +2439,12 @@ export interface ReconcileGovernanceContinuationInput {
   readonly workspaceDir: string;
   /** Current Owner consent for CODEX conversation evidence; false means reconcile may ensure tasks/links but must not read or promote Codex session evidence. A WorkBuddy worker must pass false — its own flag is not consent for Codex evidence. */
   readonly codexConversationIngestionEnabled: boolean;
-  /** Legacy alias (pre-rename); either field being `true` means consent (P2 review). */
+  /**
+   * Legacy alias (pre-rename) for the Codex-only consent above; never consent
+   * for WorkBuddy evidence. Kept for cross-version compatibility (P2 review);
+   * the new field wins when present, so an explicit `false` cannot be
+   * overridden by a stale `true`.
+   */
   readonly conversationIngestionEnabled?: boolean;
   /** Bounded work per pass (default 50 admitted pains). */
   readonly limit?: number;

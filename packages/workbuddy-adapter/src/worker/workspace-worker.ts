@@ -191,7 +191,12 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   // no authority over that consent, so it never passes its own flag: doing so
   // would let opting into WorkBuddy ingestion unlock promotion of Codex
   // session evidence after a Codex opt-out.
-  const reconcile = await reconcileGovernanceContinuation({ workspaceDir, codexConversationIngestionEnabled: false });
+  const reconcile = await reconcileGovernanceContinuation({
+    workspaceDir,
+    codexConversationIngestionEnabled: false,
+    // Legacy alias: both names must stay false for an older host-runtime.
+    conversationIngestionEnabled: false,
+  });
 
   // Steps 3–5 — execution authority: internalization_auto_consumer.
   let diagnostician: WorkbuddyWorkerCycleStepReport['diagnostician'] = null;

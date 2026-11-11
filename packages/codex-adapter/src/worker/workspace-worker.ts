@@ -276,6 +276,8 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   const reconcile = await reconcileGovernanceContinuation({
     workspaceDir,
     codexConversationIngestionEnabled: flags.codex_conversation_ingestion?.enabled === true,
+    // Legacy alias for an older installed host-runtime (P2 review).
+    conversationIngestionEnabled: flags.codex_conversation_ingestion?.enabled === true,
   });
 
   // Steps 4–6 — execution authority: internalization_auto_consumer.
