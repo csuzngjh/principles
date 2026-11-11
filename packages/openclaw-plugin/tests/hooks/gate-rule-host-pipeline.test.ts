@@ -215,14 +215,15 @@ describe('Gate Rule Host Only Pipeline', () => {
   });
 
   describe('Rule Host blocks', () => {
-    it('should record the shared deny decision without returning a second block object', () => {
+    it('should return the shared deny decision with its owner-facing block copy', () => {
       const event = makeEvent({ toolUseId: 'toolu-rh-1' });
       const ctx = makeCtx();
 
-      // The host already blocks on this result; the adapter only accounts for it.
+      // The host already blocks on this result; the adapter returns the same
+      // block result so the owner-facing copy is not dropped (PRI-1184 / F4).
       const result = handleSharedRuleHostResult(event as never, ctx as never, makeDenyResult());
 
-      expect(result).toBeUndefined();
+      expect(result?.block).toBe(true);
       expect(mockEventLogInstance.recordRuleHostBlocked).toHaveBeenCalledWith(
         expect.objectContaining({
           toolName: 'write',
