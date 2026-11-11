@@ -93,7 +93,8 @@ trajectoryRetention:
 ### 3.2 过期判定
 
 - 统一使用 `created_at`（ISO-8601 UTC 字符串，字典序 = 时间序）；`governance_observations` 用 `expired_at`。
-- 判定：`created_at < now - retentionDays × 24h`，**严格小于**。恰好等于边界的行保留，直到下一次运行。
+- 判定：`created_at < cutoff`，**严格小于**；`cutoff` 由 §3.3 计算（`computedCutoff = now - retentionDays × 24h`，
+  且受 `lastCutoff + 7d` 与 F1 窗口校验约束）。恰好等于边界的行保留，直到下一次运行。
 - 保留窗口语义："最近 90 天内产生的行一定还在"；第 91 天起进入删除候选，不承诺具体删除时刻（取决于 worker 是否在跑）。
 
 ### 3.3 时钟异常
@@ -112,10 +113,16 @@ trajectoryRetention:
   期间文件大小是**逐步下降**的，不是装上就瘦。
 - 系统时间后跳（`now < lastRunAt - 1h`）⇒ 本次跳过，记录 `clock_backwards`，不动数据。
 - 系统时间前跳超过 `intervalHours × 2 + 7d`（相对 `lastRunAt`）⇒ 本次跳过，记录 `clock_forward_anomaly`，不动数据。
-- 任何**时钟类跳过**都要把 `lastRunAt` 推进到 `now`（`lastCutoff` 不动）：
+- 任何**时钟类跳过**都要把 `lastRunAt` 推进到 `now`（`lastCutoff` 除下一条的 F1 归一化外不动）：
   否则关机/休假超过 7.5 天后每轮都会跳过，只能人工删 marker 才恢复。
 - marker 中不可解析的时间字段在读取时归一化为 `null`（不保留坏字符串），保证下一轮可恢复。
-- `effectiveCutoff` 取 `max(lastCutoff, ...)`：截止线单调不回退。
+- **存活的 `lastCutoff` 必须同时满足 `lastCutoff <= computedCutoff` 与 `lastCutoff <= now`。**
+  不满足（未来时间，或比当前窗口更靠近 now）就**归一化为 `null`**，回到"库内最早记录"的保守基线；
+  **不允许 clamp 后继续使用**——把未来值夹到今天仍会留下一个窗口内的截止线，从而删掉
+  保留窗口内的数据，且不可逆。时钟走快后校正的第一个轮次会立即归一化 marker
+  （`reason=marker_cutoff_discarded`），因此第二次运行同样不会删到窗口内。
+- 因为窗口规则已经保证 `lastCutoff <= computedCutoff`，截止线天然单调不回退，
+  不需要额外的 `max()` 夹取。
 
 ---
 
@@ -140,35 +147,50 @@ trajectoryRetention:
 
 ### 4.2 单次运行流程
 
+实际顺序（与 `host-runtime/src/trajectory-retention.ts` 一致）：**配置最先、fail closed**。
+
 ```
+读 config（校验失败 → skipped: config_invalid，不删）
+  ↓ 解析 policy（不可用 → skipped: degraded:<reason>，不删）
+trajectory.db 不存在 → skipped: trajectory_db_missing
+  ↓
+读 marker，坏时间字段归一化为 null
+  ↓
+worker 触发：未到期 / backoff → exit 0（不拿锁、不开库）
+  ↓
 acquire maintenance lock  (失败 → exit 0, skipped:locked)
   ↓
-读 marker（lastRunAt / lastCutoff / backoffUntil）
-  ↓ 未到期 → exit 0, skipped:not_due
-读 config（校验失败 → exit 0, degraded:config_invalid，不删）
+打开 DB：`busy_timeout=100`（A8 要求 ≤300 ms 让路；SQLite busy handler 会多睡一个步长，
+  250 ms 实测约 355 ms）。只读校验 journal_mode 必须已是 wal，绝不执行 journal_mode=WAL
   ↓
-打开 DB：删除写路径 `busy_timeout=100`（A8 要求 ≤300 ms 让路；SQLite busy handler 会多睡一个步长，250 ms 实测约 355 ms）；索引 DDL 单独用 `busy_timeout=5000`（不是热路径）。只读校验 journal_mode 必须已是 wal，绝不执行 journal_mode=WAL
+F1 归一化 lastCutoff（不在窗口 → null）；null → 基线取库内 MIN(时间列)
   ↓
-preCount = COUNT(*) WHERE <cutoff>          （只读快照）
+只读检查保留索引是否存在（见 §5.2；本流程绝不执行 DDL）
   ↓
 loop（受 runBudgetMs 与 batchSize 约束）:
+    只读选批  SELECT id, <时间列> FROM t WHERE <cutoff> ORDER BY id LIMIT batchSize
+    写删除清单（锁外；失败 → 本批不删，audit_failed 并停止）
     BEGIN IMMEDIATE
-      DELETE ... WHERE id IN (SELECT id FROM t WHERE <cutoff> ORDER BY id LIMIT batchSize)
+      preCount  = COUNT(*) <同一谓词>
+      DELETE ... WHERE id IN (?,…) AND <同一谓词>
+      postCount = COUNT(*) <同一谓词>
+      preCount - postCount != changes() → ROLLBACK + 不变量违例，停止，不继续删
     COMMIT                                     ← 每批独立提交
-    累计 changes()
   ↓
-postCount = COUNT(*) WHERE <cutoff>
-校验 preCount - postCount == Σ changes() ；不等 → 记录不变量违例，停止，不继续删
-  ↓
-写 marker（lastRunAt / lastCutoff=effectiveCutoff / 统计 / partial 标志）
+写 marker（lastRunAt / lastCutoff / 统计 / partial 标志）
 释放 lock
 ```
 
 要点：
 
+- **不变量是"批内"的，不是"运行级"的**：`preCount` / `postCount` 与 `DELETE` 在**同一个**
+  `BEGIN IMMEDIATE` 事务里执行，因此第三方写入无法插进两次计数之间；运行级的前后计数
+  会把并发插入误判成违例。
 - **`BEGIN IMMEDIATE`**：一开始就拿写锁，避免读完再升级写锁时立刻 `SQLITE_BUSY`（这正是今天踩到的锁升级失败形态）。不使用 `BEGIN DEFERRED`。
 - **不切换 `journal_mode`**：`PRAGMA journal_mode = WAL` 是一个需要独占锁的模式切换点（[trajectory.ts#L302](file:///d:/Code/principles/packages/openclaw-plugin/src/core/trajectory.ts#L302) 目前每次构造都执行它）。维护进程只读该值做 assert；不是 `wal` 就跳过本次并记录 `journal_mode_not_wal`，绝不替用户切模式。
 - **不改 `synchronous` / 不跑 `PRAGMA optimize` / 不跑 `VACUUM`**。
+- **本流程不建索引**：只做只读存在性检查；缺失时记录 `index_missing:<names>` 并继续清扫，
+  创建只发生在显式的 `pd trajectory vacuum --yes`（§5.2）。
 - 维护连接**不参与**写业务数据；它只删行。
 
 ### 4.3 分批与时间预算
@@ -184,7 +206,7 @@ postCount = COUNT(*) WHERE <cutoff>
 
 ### 4.4 并发安全与 `SQLITE_BUSY`
 
-背景：本仓库 2026-11-11 已实际出现 `journal_mode` 切换 / 写事务并发下的 `SQLITE_BUSY` 锁升级失败；`host-runtime` 打开轨迹库的写入路径甚至没有设置 `busy_timeout`（[production-pain-evidence.ts](file:///d:/Code/principles/packages/host-runtime/src/production-pain-evidence.ts)）。因此维护进程必须"最礼貌"：
+背景：本仓库 2026-11-11 已实际出现 `journal_mode` 切换 / 写事务并发下的 `SQLITE_BUSY` 锁升级失败；`host-runtime` 打开轨迹库的写入路径使用 `busy_timeout = 5000`（[production-pain-evidence.ts](file:///d:/Code/principles/packages/host-runtime/src/production-pain-evidence.ts)），即**用户写入会等满 5 秒**。因此维护进程必须"最礼貌"：短等、让路、退避，而不是和用户写入抢锁。
 
 | 场景 | 行为 |
 |---|---|
@@ -198,15 +220,27 @@ postCount = COUNT(*) WHERE <cutoff>
 
 - 每批独立 `COMMIT` ⇒ 进程被杀只丢失"当前批"，已提交批次不丢。
 - 因为没有游标，重跑时判据不变：已删的行不再匹配；未过期行永远不匹配 ⇒ **不重复删、不误删**。
-- marker 只在 `postCount` 校验通过后写；进程在"删完但没写 marker"时被杀 ⇒ 下次重跑 `preCount` 已为 0，直接写 marker 结束（可解释状态）。
-- 若 `preCount - postCount != Σ changes()` ⇒ 视为不变量违例：停止本次运行、保留 marker 的 `lastRunAt` 不变（即下一轮仍会尝试）、写结构化错误 `retention_invariant_violation`，不静默继续。
+- marker 只在本次运行结束后写；进程在"删完但没写 marker"时被杀 ⇒ 下次重跑 `preCount` 已为 0，
+  直接写 marker 结束（可解释状态）。
+- **批内不变量**：在同一个 `BEGIN IMMEDIATE` 事务里 `preCount` → `DELETE`（带同一谓词）→
+  `postCount`；若 `preCount - postCount != changes()` ⇒ `ROLLBACK`，停止本次运行，
+  保留 marker 的 `lastCutoff` **与 `lastRunAt`** 都不变（下一轮立即重试，不额外等待一个
+  `intervalHours`），并写结构化错误 `retention_invariant_violation`，不静默继续。
+  运行级前后计数会把并发插入误判成违例，因此不作为判据。
+- 说明：不变量只证明"计数自洽"，**不是"删对了行"的证明**；真正的防线是
+  `DELETE ... WHERE id IN (…) AND <同一谓词>` —— 选批后条件变化（例如
+  `governance_observations` 的 `retention_class` 被改写）的行不会被删。
 
 ### 4.6 单实例保证
 
-- 锁文件：`<workspace>/.state/trajectory-retention.lock`，内容 `{ runId, host, pid, startedAt }`。
-- 获取方式复用仓库既有锁文件契约（`fs.openSync(path, 'wx')` 独占创建 + 过期接管，见 [file-lock.ts#L239-L317](file:///d:/Code/principles/packages/openclaw-plugin/src/utils/file-lock.ts#L239-L317)），**stale TTL = 10 分钟**（远大于 3 s 预算）。
+- 锁文件：`<workspace>/.state/trajectory-retention.lock`，内容为仓库既有控制状态锁的格式
+  `"<pid> <token> <ISO 时间>"`（纯文本一行），**不是** JSON。
+- 获取方式复用 `host-runtime` 的既有控制状态锁契约
+  （`tryAcquireExclusiveLockSync`，见 [control-state-lock.ts](file:///d:/Code/principles/packages/host-runtime/src/product-telemetry/control-state-lock.ts)：
+  `fs.openSync(path, 'wx')` 独占创建 + 过期后同目录 sidecar rename-claim 接管），
+  **stale TTL = 10 分钟**（远大于 3 s 预算）。
 - 已有未过期锁 ⇒ 直接退出 `skipped:locked`，不等待、不删除别人的锁。
-- 锁文件损坏/不可解析 ⇒ 视为"已被占用"（fail closed），记录 `lock_corrupt`，本轮不删。
+- 锁文件损坏/不可解析 ⇒ 不接管（fail closed），本轮不删，退出原因仍是 `skipped:locked`。
 - 这是协作式信号，不是权限系统：人类可以随时删除该文件，与仓库既有 lease 语义一致。
 - 说明：Codex/WorkBuddy 的 worker 本身通常只有一个实例，但用户可能同时跑手动 CLI、或两个宿主指向同一工作区，所以锁必须存在，不能只依赖"worker 唯一"。
 
@@ -216,8 +250,8 @@ postCount = COUNT(*) WHERE <cutoff>
 
 - marker：`<workspace>/.state/trajectory-retention.json`
   `{ lastRunAt, lastCutoff, lastOutcome, deletedByTable, durationMs, totalDurationMs, partial, backoffUntil, consecutiveBusy, reason }`
-  （`durationMs` 只是批引擎耗时；`totalDurationMs` 覆盖打开 DB、WAL 断言、索引 DDL 与 marker 写入，A1 用它度量）
-- 一行结构化日志（复用现有 logger）：`trajectory_retention { outcome, deleted, durationMs, cutoff }`
+  （`durationMs` 只是批引擎耗时；`totalDurationMs` 覆盖打开 DB、WAL 断言、索引存在性检查与 marker 写入，A1 用它度量）
+- 一行结构化日志（复用现有 logger）：`trajectory_retention { outcome, deleted, totalDurationMs, cutoff }`
 - CLI：`pd trajectory retention status [--json]` 只读输出上述内容 + 当前各表过期行数。
 
 ---
@@ -236,8 +270,16 @@ postCount = COUNT(*) WHERE <cutoff>
 
 ### 5.2 索引创建不能发生在 hook 热路径
 
-- DDL 仍集中定义在 [trajectory-schema.ts](file:///d:/Code/principles/packages/principles-core/src/runtime/trajectory-schema.ts)（保持单一 schema 源），但**由维护入口显式调用** `ensureRetentionIndexes(db)`，不塞进每次构造都跑的 `initSchema`。
-- 首次创建索引在 3.2 万行库上预计 < 300 ms；在百万行历史库上可能数秒 —— 正是不能放在 hook 打开路径的原因。若用户从未跑过维护，查询退化为现状（扫表），不会更慢，只是不会变快。
+- 保留索引 DDL 定义在 core 的 [trajectory-retention.ts](file:///d:/Code/principles/packages/principles-core/src/runtime/trajectory-retention.ts)
+  （`TRAJECTORY_RETENTION_INDEXES` + `ensureTrajectoryRetentionIndexes`），**只在显式的
+  `pd trajectory vacuum --yes` 里调用**（该命令本来就要求独占锁，`busy_timeout=5000`）。
+  常规清扫轮次只做**只读存在性检查**（`missingTrajectoryRetentionIndexes`），**绝不执行 DDL**，
+  也绝不把它塞进每次构造都跑的 `initSchema`。
+- 为什么不能放在清扫热路径：`CREATE INDEX` 在有并发写者时可能阻塞数秒。实测：索引缺失 +
+  并发写 → 单轮 5.7 s 且仍然建不出来，与 A8（让路 ≤300 ms）、A1（单轮 ≤3 s）直接冲突。
+  常规轮次遇到缺失索引只记录 `index_missing:<names>`（去重告警）并照常清扫；
+  查询退化为扫表，不会更慢，只是不会变快。
+- 首次创建索引在 3.2 万行库上预计 < 300 ms；在百万行历史库上可能数秒 —— 正是不能放在 hook 打开路径的原因。
 - 索引全部 `CREATE INDEX IF NOT EXISTS`，可重复执行；回滚 = `DROP INDEX`。
 
 ### 5.3 瘦身之后查询还随历史增长吗？
@@ -288,11 +330,11 @@ postCount = COUNT(*) WHERE <cutoff>
 
 | ID | 断言 | 阈值 | 方法 |
 |---|---|---|---|
-| A1 | 单次维护墙钟 | p95 ≤ **3,000 ms**；最坏 ≤ 3,500 ms | 20 次运行，记录 marker `durationMs` |
+| A1 | 单次维护墙钟 | p95 ≤ **3,000 ms**；最坏 ≤ 3,500 ms | 20 次运行，记录 marker `totalDurationMs`（含开库/WAL 校验/marker 写入） |
 | A2 | 单批墙钟 | p95 ≤ **250 ms**；最坏 ≤ 400 ms | 每批埋点 |
 | A3 | hook 路径额外延迟 | `before_prompt_build` p95 增加 ≤ **15 ms**，且**打开轨迹库次数 = 0** | 对 200 次 hook 调用计时；spy `new Database` / `new TrajectoryDatabase` |
 | A4 | 三个关键查询不劣化 | 同数据集、同机器，100 个样本/查询；p95 劣化 ≤ **+5%** 且绝对值 ≤ **+10 ms** | 瘦身前/后各跑一次；`EXPLAIN QUERY PLAN` 必须显示 `USING INDEX` |
-| A5 | 删除行数一致 | `preCount − postCount == Σ changes()`，误差 **0 行** | 运行内断言；不一致即失败并保留现场 |
+| A5 | 删除行数一致 | 单批 `preCount − postCount == changes()`（同一 `BEGIN IMMEDIATE` 事务内计数），误差 **0 行** | 批内断言；不一致即 `ROLLBACK`、保留现场并停止 |
 | A6 | 中断重跑 | 注入式在第 1 批后 kill -9；重跑后：未过期行 **0 删除**、过期行 **恰好删完**、总删除数 == 预置过期数 | 预置 10,000 过期 + 1,000 未过期；3 组重复 |
 | A7 | 文件缩小 | 删除 2/3 行 + VACUUM 后，`size_after ≤ 0.40 × size_before`；`freelist_count` 回到 ≤ 1% 页数 | 300 MB 夹具 |
 | A8 | busy 让路 | 另一连接持有写事务 3 s 时，维护在 ≤ **300 ms** 内退出 `deferred:busy`，该批 0 行删除；其后第 1 次重试成功 | 双连接测试 |
@@ -395,9 +437,12 @@ postCount = COUNT(*) WHERE <cutoff>
 ## 13. 实施顺序建议（供评审，不含代码）
 
 1. 先做**查询修复 + 索引**（§5）：零删除风险，单独可验收 A3/A4。
-2. 再做**保留清扫**（§3/§4），默认 `enabled: false` 灰度一个版本，仅 CLI 可跑，验收 A1/A2/A5/A6/A8。
-3. 打开 worker 定时（`enabled: true`），验收 A11。
-4. 最后提供显式 `vacuum`（§6），验收 A7。
+2. 再做**保留清扫**（§3/§4），随 `trajectoryRetention` 默认值交付：
+   `enabled: true`，90 天 / 6 h / 2000 行 / 3000 ms，验收 A1/A2/A5/A6/A8。
+   灰度开关是既有配置（`enabled: false` 或 `retentionDays: 0`），**不新增 feature flag**。
+3. worker 定时与第 2 步一起生效（`intervalHours=6`；首个 tick 延迟 1 分钟，
+   不在 hook 内执行），验收 A11。
+4. 最后提供显式 `vacuum`（§6，同时是唯一创建索引的入口），验收 A7。
 5. `status` / 日志 / 删除清单随第 2 步一起交付。
 
 任何一步不达标都停在该步，不向下叠加。

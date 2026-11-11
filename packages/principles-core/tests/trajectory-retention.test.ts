@@ -150,7 +150,50 @@ describe('computeRetentionCutoff', () => {
       cutoff: iso(nowMs - 90 * DAY_MS),
       computedCutoff: iso(nowMs - 90 * DAY_MS),
       advanceCapped: false,
+      discardedMarkerCutoff: false,
     });
+  });
+
+  it('discards a future lastCutoff instead of trusting it as a lower bound (F1)', () => {
+    const marker: TrajectoryRetentionMarker = {
+      ...fresh,
+      lastRunAt: iso(nowMs - 30 * 60 * 1000),
+      lastCutoff: iso(nowMs + 3650 * DAY_MS),
+    };
+    const decision = computeRetentionCutoff({ nowMs, retentionDays: 90, intervalHours: 6, marker });
+    expect(decision.kind).toBe('run');
+    if (decision.kind !== 'run') return;
+    expect(decision.discardedMarkerCutoff).toBe(true);
+    // NOT clamped to the future value: the run falls back to "delete less".
+    expect(decision.cutoff).toBe(iso(nowMs - 90 * DAY_MS));
+  });
+
+  it('discards a lastCutoff that is ahead of the current window (fast clock history, F1)', () => {
+    const marker: TrajectoryRetentionMarker = {
+      ...fresh,
+      lastRunAt: iso(nowMs - 30 * 60 * 1000),
+      // Inside the past, but newer than now - retentionDays: it would skip
+      // rows the corrected window still contains.
+      lastCutoff: iso(nowMs - 70 * DAY_MS),
+    };
+    const decision = computeRetentionCutoff({ nowMs, retentionDays: 90, intervalHours: 6, marker });
+    expect(decision.kind).toBe('run');
+    if (decision.kind !== 'run') return;
+    expect(decision.discardedMarkerCutoff).toBe(true);
+    expect(decision.cutoff).toBe(iso(nowMs - 90 * DAY_MS));
+  });
+
+  it('keeps an in-window lastCutoff (no false discard)', () => {
+    const marker: TrajectoryRetentionMarker = {
+      ...fresh,
+      lastRunAt: iso(nowMs - 30 * 60 * 1000),
+      lastCutoff: iso(nowMs - 100 * DAY_MS),
+    };
+    const decision = computeRetentionCutoff({ nowMs, retentionDays: 90, intervalHours: 6, marker });
+    expect(decision.kind).toBe('run');
+    if (decision.kind !== 'run') return;
+    expect(decision.discardedMarkerCutoff).toBe(false);
+    expect(decision.cutoff).toBe(iso(nowMs - 93 * DAY_MS));
   });
 
   it('advances the cutoff at most 7 days per run', () => {
@@ -167,16 +210,20 @@ describe('computeRetentionCutoff', () => {
     expect(decision.cutoff).toBe(iso(Date.parse(marker.lastCutoff as string) + RETENTION_MAX_CUTOFF_ADVANCE_MS));
   });
 
-  it('never moves the cutoff backwards', () => {
+  it('F1: a stored cutoff newer than the window is discarded, not clamped', () => {
     const marker: TrajectoryRetentionMarker = {
       ...fresh,
       lastRunAt: iso(nowMs - 30 * 60 * 1000),
+      // Inside the past but newer than the 90-day window. The previous
+      // "never move backwards" rule trusted this value and kept a 10-day
+      // cutoff — a 90-day policy would then delete 80 days of history.
       lastCutoff: iso(nowMs - 10 * DAY_MS),
     };
     const decision = computeRetentionCutoff({ nowMs, retentionDays: 90, intervalHours: 6, marker });
     expect(decision.kind).toBe('run');
     if (decision.kind !== 'run') return;
-    expect(decision.cutoff).toBe(marker.lastCutoff);
+    expect(decision.discardedMarkerCutoff).toBe(true);
+    expect(decision.cutoff).toBe(iso(nowMs - 90 * DAY_MS));
   });
 
   it('skips a backwards clock jump instead of deleting with a wrong cutoff', () => {

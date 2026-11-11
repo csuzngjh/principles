@@ -1821,8 +1821,10 @@ export {
   isRetentionMarker,
   normalizeRetentionMarker,
   computeRetentionCutoff,
+  isRetentionCutoffInWindow,
   nextBackoffUntil,
   ensureTrajectoryRetentionIndexes,
+  missingTrajectoryRetentionIndexes,
   runTrajectoryRetentionBatches,
 } from './trajectory-retention.js';
 

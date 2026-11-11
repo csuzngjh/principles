@@ -22,6 +22,7 @@ import {
   TRAJECTORY_RETENTION_MARKER_FILENAME,
   TRAJECTORY_RETENTION_WRITE_LOCK_WAIT_MS,
   readTrajectoryRetentionStatus,
+  retentionWarning,
   runTrajectoryRetention,
   scheduleTrajectoryRetention,
   trajectoryRetentionPaths,
@@ -151,6 +152,16 @@ function toolCallCount(dir: string): number {
   return typeof count === 'number' ? count : -1;
 }
 
+/** Rows at or after `fromMs` — i.e. rows inside the retention window. */
+function toolCallsNewerThan(dir: string, fromMs: number): number {
+  const db = openDb(path.join(dir, '.state', 'trajectory.db'));
+  const row = db.prepare('SELECT COUNT(*) AS c FROM tool_calls WHERE created_at >= ?').get(iso(fromMs));
+  db.close();
+  if (typeof row !== 'object' || row === null) throw new Error('count_row_invalid');
+  const count = (row as Record<string, unknown>).c;
+  return typeof count === 'number' ? count : -1;
+}
+
 describe('runTrajectoryRetention — fail closed', () => {
   it('deletes nothing when the config section is invalid (config_invalid)', () => {
     const dir = makeWorkspace({
@@ -221,7 +232,7 @@ describe('runTrajectoryRetention — fail closed', () => {
 });
 
 describe('runTrajectoryRetention — successful sweep', () => {
-  it('deletes expired rows, writes the marker, the export list and the indexes', () => {
+  it('deletes expired rows, writes the marker and the export list', () => {
     const dir = makeWorkspace({ governance: true });
     seedExpiredToolCalls(dir, 2, 200);
     seedExpiredToolCalls(dir, 1, 10); // inside the 90-day window — must survive
@@ -230,7 +241,9 @@ describe('runTrajectoryRetention — successful sweep', () => {
 
     expect(report.outcome).toBe('completed');
     expect(report.deletedByTable.tool_calls).toBe(2);
-    expect(report.indexes?.skipped).toEqual([]);
+    // F2: a regular sweep never creates indexes; it reports them missing.
+    expect(report.indexes).toBeNull();
+    expect(report.indexesError).toMatch(/^index_missing:/);
     expect(toolCallCount(dir)).toBe(1);
 
     const marker = readMarker(dir);
@@ -269,34 +282,54 @@ describe('runTrajectoryRetention — successful sweep', () => {
       iso(NOW - 200 * DAY_MS),
     ]);
 
-    // Indexes exist only because the maintenance entry point ran.
+    // F2: a sweep only checks for the indexes; it never runs DDL. Creation
+    // belongs to the explicit maintenance entry (covered below).
     const db = openDb(path.join(dir, '.state', 'trajectory.db'));
     const names = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name")
       .pluck()
       .all()
       .map((name) => String(name));
-    for (const expected of [
+    for (const absent of [
       'idx_assistant_turns_blob_ref',
-      'idx_governance_observations_expired_at',
       'idx_pain_events_created_at',
       'idx_user_turns_blob_ref',
       'idx_user_turns_created_at',
     ]) {
-      expect(names).toContain(expected);
+      expect(names).not.toContain(absent);
     }
   });
 
   it('reports the expired backlog read-only through status', () => {
     const dir = makeWorkspace();
     seedExpiredToolCalls(dir, 2, 200);
+    seedExpiredToolCalls(dir, 1, 120); // older than 90 d but inside the 7-day cap
     seedExpiredToolCalls(dir, 1, 10);
 
-    const status = readTrajectoryRetentionStatus(dir);
+    const status = readTrajectoryRetentionStatus(dir, () => NOW);
 
     expect(status.dbExists).toBe(true);
     expect(status.markerError).toBeNull();
+    // F4: "next delete" is the cutoff the NEXT run will use (oldest stored row
+    // + the 7-day cap). `now - retentionDays` would say 3 here while the run
+    // deletes 2 — the exact inconsistency the review measured.
+    expect(status.nextCutoff).toBe(iso(NOW - 194 * DAY_MS));
     expect(status.expiredByTable?.tool_calls).toBe(2);
+    expect(status.indexesMissing).toContain('idx_user_turns_created_at');
+  });
+
+  it('F4: the status projection matches what the next run actually deletes', () => {
+    const dir = makeWorkspace();
+    seedExpiredToolCalls(dir, 2, 200);
+    seedExpiredToolCalls(dir, 1, 120);
+    seedExpiredToolCalls(dir, 1, 10);
+
+    const status = readTrajectoryRetentionStatus(dir, () => NOW);
+    const report = runTrajectoryRetention({ workspaceDir: dir, trigger: 'manual', now: () => NOW });
+
+    expect(status.expiredByTable?.tool_calls).toBe(2);
+    expect(report.cutoff).toBe(status.nextCutoff);
+    expect(report.deletedByTable.tool_calls).toBe(status.expiredByTable?.tool_calls);
   });
 });
 
@@ -316,6 +349,72 @@ describe('runTrajectoryRetention — safety edges', () => {
     expect(report.cutoff).toBe(iso(NOW - 193 * DAY_MS));
     expect(report.deletedByTable.tool_calls).toBe(1);
     expect(toolCallCount(dir)).toBe(2);
+  });
+
+  /**
+   * F1 regression ①: a future `lastCutoff` must never be honoured.
+   *
+   * Before the fix, `computeRetentionCutoff` accepted any parseable value and
+   * took `max(lastCutoff, ...)`, so `lastCutoff = now + 3650d` deleted every
+   * row — including rows inside the retention window.
+   */
+  it('F1: discards a future marker cutoff and deletes nothing inside the window', () => {
+    const dir = makeWorkspace();
+    seedExpiredToolCalls(dir, 1, 200);
+    seedExpiredToolCalls(dir, 1, 100);
+    seedExpiredToolCalls(dir, 1, 1); // inside the 90-day window
+    writeMarker(dir, retentionMarker({
+      lastRunAt: iso(NOW - 60 * 60 * 1000),
+      lastCutoff: iso(NOW + 3650 * DAY_MS),
+    }));
+
+    const report = runTrajectoryRetention({ workspaceDir: dir, trigger: 'manual', now: () => NOW });
+
+    expect(report.outcome).toBe('completed');
+    // Discarded ⇒ conservative baseline = oldest stored row + the 7-day cap.
+    expect(report.cutoff).toBe(iso(NOW - 193 * DAY_MS));
+    expect(report.deletedByTable.tool_calls).toBe(1);
+    expect(toolCallCount(dir)).toBe(2);
+    // The row inside the window survives.
+    expect(toolCallsNewerThan(dir, NOW - 90 * DAY_MS)).toBe(1);
+
+    const marker = readMarker(dir);
+    expect(marker.reason).toBe('marker_cutoff_discarded');
+    expect(Date.parse(String(marker.lastCutoff))).toBeLessThan(NOW);
+  });
+
+  /**
+   * F1 regression ②: the real-world path. A clock that ran fast advanced the
+   * cutoff; after the clock is corrected the first run only repairs
+   * `lastRunAt`, so the NEXT run must not delete the window either.
+   */
+  it('F1: a corrected clock does not let the future marker cutoff delete the window', () => {
+    const dir = makeWorkspace();
+    seedExpiredToolCalls(dir, 1, 200);
+    seedExpiredToolCalls(dir, 1, 1); // inside the window
+    writeMarker(dir, retentionMarker({
+      lastRunAt: iso(NOW + 100 * DAY_MS - 6 * 60 * 60 * 1000),
+      lastCutoff: iso(NOW + 10 * DAY_MS),
+    }));
+
+    const corrected = runTrajectoryRetention({ workspaceDir: dir, trigger: 'manual', now: () => NOW });
+
+    expect(corrected.outcome).toBe('skipped');
+    expect(corrected.reason).toBe('clock_backwards');
+    // The untrusted cutoff is normalised away immediately, not carried forward.
+    expect(Date.parse(String(readMarker(dir).lastCutoff))).toBeLessThan(NOW);
+    expect(toolCallCount(dir)).toBe(2);
+
+    const second = runTrajectoryRetention({
+      workspaceDir: dir,
+      trigger: 'manual',
+      now: () => NOW + 6 * 60 * 60 * 1000 + 1,
+    });
+
+    expect(second.outcome).toBe('completed');
+    expect(second.deletedByTable.tool_calls).toBe(1); // only the 200-day row
+    expect(toolCallCount(dir)).toBe(1);
+    expect(toolCallsNewerThan(dir, NOW - 90 * DAY_MS)).toBe(1);
   });
 
   it('recovers from a long clock gap without advancing the cutoff', () => {
@@ -385,7 +484,11 @@ describe('runTrajectoryRetention — safety edges', () => {
     expect(first.outcome).toBe('invariant_violation');
     // A false positive must never move the cutoff, or the un-deleted rows
     // would silently fall out of the next run's window (review finding 8).
-    expect(readMarker(dir).lastCutoff).toBe(staleCutoff);
+    const afterInvariant = readMarker(dir);
+    expect(afterInvariant.lastCutoff).toBe(staleCutoff);
+    // SPEC §4.5: the run did not complete, so the clock baseline must NOT move
+    // either — otherwise the retry waits a whole intervalHours (F5).
+    expect(afterInvariant.lastRunAt).toBe(iso(NOW - 7 * 60 * 60 * 1000));
     expect(toolCallCount(dir)).toBe(2);
 
     const fault = openDb(trajectoryRetentionPaths(dir).dbPath);
@@ -398,20 +501,42 @@ describe('runTrajectoryRetention — safety edges', () => {
     expect(second.deletedByTable.tool_calls).toBe(2);
   });
 
-  it('keeps sweeping when index creation fails, and surfaces the failure', () => {
+  /**
+   * F2 regression: missing indexes + a concurrent writer.
+   *
+   * Before the fix every run executed `CREATE INDEX` with `busy_timeout = 5000`
+   * before doing any work, so a busy database stalled the host ~5.7 s and still
+   * created nothing. A regular sweep now performs a read-only existence check
+   * and yields on the 100 ms write wait.
+   */
+  it('F2: a sweep with missing indexes does not stall behind a concurrent writer', () => {
     const dir = makeWorkspace();
     seedExpiredToolCalls(dir, 2, 200);
-    const db = openDb(trajectoryRetentionPaths(dir).dbPath);
-    // A table squatting on the index name makes CREATE INDEX throw.
-    db.exec('CREATE TABLE idx_user_turns_created_at (x)');
-    db.close();
+    const blocker = openDb(trajectoryRetentionPaths(dir).dbPath);
+    blocker.exec('BEGIN IMMEDIATE');
+    try {
+      const startedAt = Date.now();
+      const report = runTrajectoryRetention({ workspaceDir: dir, trigger: 'manual', now: () => NOW });
+      const wallMs = Date.now() - startedAt;
 
-    const report = runTrajectoryRetention({ workspaceDir: dir, trigger: 'manual', now: () => NOW });
-
-    expect(report.outcome).toBe('completed');
-    expect(report.deletedByTable.tool_calls).toBe(2);
-    expect(report.indexesError).not.toBeNull();
-    expect(readMarker(dir).reason).toContain('index_failed:');
+      // A8's ceiling is 300 ms; this keeps headroom for a slow CI filesystem
+      // while still excluding the 5 s DDL wait the test exists to prevent.
+      expect(wallMs).toBeLessThan(1500);
+      expect(report.outcome).toBe('deferred:busy');
+      expect(report.indexes).toBeNull();
+      expect(report.indexesError).toMatch(/^index_missing:/);
+      expect(report.deletedByTable.tool_calls).toBe(0);
+      // The sweep must not have run DDL while the writer held the lock.
+      const names = blocker
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'")
+        .pluck()
+        .all()
+        .map((name) => String(name));
+      expect(names).not.toContain('idx_user_turns_created_at');
+    } finally {
+      blocker.exec('ROLLBACK');
+      blocker.close();
+    }
   });
 
   it('reports rows already committed when a later batch throws', () => {
@@ -507,6 +632,24 @@ describe('vacuumTrajectoryDatabase', () => {
     expect(report.refusedReason).toBeNull();
     expect(report.nextAction).toContain('--yes');
     expect(report.sizeBeforeBytes).toBeGreaterThan(0);
+    // A dry run mutates nothing — not even the indexes (F2).
+    expect(report.indexes).toBeNull();
+    expect(readTrajectoryRetentionStatus(dir, () => NOW).indexesMissing)
+      .toContain('idx_user_turns_created_at');
+  });
+
+  it('creates the retention indexes only in this explicit maintenance entry (F2)', () => {
+    const dir = makeWorkspace();
+    expect(readTrajectoryRetentionStatus(dir, () => NOW).indexesMissing)
+      .toContain('idx_user_turns_created_at');
+
+    const report = vacuumTrajectoryDatabase({ workspaceDir: dir, apply: true, now: () => NOW });
+
+    expect(report.applied).toBe(true);
+    expect(report.indexes).not.toBeNull();
+    expect(report.indexes?.applied.some((sql) => sql.includes('idx_user_turns_created_at'))).toBe(true);
+    expect(readTrajectoryRetentionStatus(dir, () => NOW).indexesMissing)
+      .not.toContain('idx_user_turns_created_at');
   });
 
   it('refuses when the trajectory database does not exist', () => {
@@ -592,6 +735,53 @@ describe('runTrajectoryRetention — hook blocking envelope', () => {
 
     await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
     expect(hookFired).toBe(true);
+  });
+});
+
+describe('retentionWarning — persistent failures are surfaced (F3)', () => {
+  it('warns once for config_invalid instead of silently stopping forever', () => {
+    const dir = makeWorkspace({ config: configWithTrajectoryRetention({ retentionDays: 'ninety' }) });
+
+    // Both the worker and the gateway loop go through `retentionWarning`, so
+    // this is the decision point that used to return null for a config error
+    // and leave retention permanently off with no signal.
+    const first = runTrajectoryRetention({ workspaceDir: dir, trigger: 'worker', now: () => NOW });
+    const second = runTrajectoryRetention({ workspaceDir: dir, trigger: 'worker', now: () => NOW });
+
+    expect(first.reason).toContain('config_invalid');
+    expect(retentionWarning(first)).toContain('config_invalid');
+    // Deduped: the identical failure on the next 120 s cycle stays quiet.
+    expect(retentionWarning(second)).toBeNull();
+  });
+
+  it('warns once for a degraded policy and re-warns when the reason changes', () => {
+    const dir = makeWorkspace({ config: configWithTrajectoryRetention({ retentionDays: 3 }) });
+
+    const degraded = runTrajectoryRetention({ workspaceDir: dir, trigger: 'worker', now: () => NOW });
+    expect(degraded.reason).toBe('degraded:retention_days_out_of_range:3');
+    expect(retentionWarning(degraded)).toContain('degraded:');
+
+    const repeated = runTrajectoryRetention({ workspaceDir: dir, trigger: 'worker', now: () => NOW });
+    expect(retentionWarning(repeated)).toBeNull();
+  });
+
+  it('surfaces a discarded marker cutoff as a distinct warning', () => {
+    const dir = makeWorkspace();
+    seedExpiredToolCalls(dir, 1, 200);
+    // Create the indexes first so the standing `index_missing` state does not
+    // mask the one-off F1 signal (both share the marker's single reason slot).
+    vacuumTrajectoryDatabase({ workspaceDir: dir, apply: true, now: () => NOW });
+
+    writeMarker(dir, retentionMarker({
+      lastRunAt: iso(NOW - 60 * 60 * 1000),
+      lastCutoff: iso(NOW + 3650 * DAY_MS),
+    }));
+    const discarded = runTrajectoryRetention({ workspaceDir: dir, trigger: 'manual', now: () => NOW });
+
+    expect(discarded.reason).toBe('marker_cutoff_discarded');
+    expect(retentionWarning(discarded)).toContain('marker_cutoff_discarded');
+    // Deduped while the state persists.
+    expect(retentionWarning(discarded)).toBeNull();
   });
 });
 

@@ -25,6 +25,8 @@ import {
   EMPTY_RETENTION_MARKER,
   computeRetentionCutoff,
   ensureTrajectoryRetentionIndexes,
+  isRetentionCutoffInWindow,
+  missingTrajectoryRetentionIndexes,
   normalizeRetentionMarker,
   nextBackoffUntil,
   resolveTrajectoryRetentionPolicy,
@@ -63,9 +65,9 @@ export const TRAJECTORY_RETENTION_LOCK_STALE_MS = 10 * 60 * 1000;
  */
 export const TRAJECTORY_RETENTION_WRITE_LOCK_WAIT_MS = 100;
 /**
- * Index DDL is NOT the hot path: it runs once per table and must be allowed to
- * win the write lock against a continuously writing host. It therefore uses
- * its own, longer wait instead of the 100 ms delete budget (review finding 7).
+ * Index DDL is NOT the hot path and is NEVER attempted by a regular sweep
+ * (F2: a 5 s wait at the start of every run stalled the host). Creation only
+ * happens in the explicit maintenance entry, which may use this longer wait.
  */
 export const TRAJECTORY_RETENTION_DDL_BUSY_TIMEOUT_MS = 5000;
 /** VACUUM is a foreground, explicit action; it may wait properly. */
@@ -265,6 +267,61 @@ function oldestStoredTimestamp(db: DatabaseHandle): string | null {
     if (oldest === null || at < oldest) oldest = at;
   }
   return oldest;
+}
+
+/**
+ * Shared by the sweep and the read-only status, so "what will the next run
+ * delete" is answered by the same rules that run it (F4).
+ */
+interface PreparedRetentionPlan {
+  marker: TrajectoryRetentionMarker;
+  decision: ReturnType<typeof computeRetentionCutoff>;
+  discardedMarkerCutoff: boolean;
+}
+
+function prepareRetentionPlan(args: {
+  db: DatabaseHandle;
+  marker: TrajectoryRetentionMarker;
+  policy: TrajectoryRetentionPolicy;
+  nowMs: number;
+}): PreparedRetentionPlan {
+  const { db, policy, nowMs } = args;
+  let { marker } = args;
+  let discardedMarkerCutoff = false;
+
+  // F1: a stored lastCutoff is only a usable lower bound while it lies inside
+  // the CURRENT window. A fast clock (or a hand-edited marker) can leave a
+  // future value behind; clamping it would still delete rows inside the
+  // window, so it is discarded BEFORE the conservative baseline is applied.
+  if (marker.lastCutoff !== null
+    && !isRetentionCutoffInWindow({
+      lastCutoff: marker.lastCutoff,
+      nowMs,
+      retentionDays: policy.retentionDays,
+    })) {
+    marker = { ...marker, lastCutoff: null };
+    discardedMarkerCutoff = true;
+  }
+
+  // Marker loss must not bypass the 7-day cutoff cap. A missing `lastCutoff`
+  // covers both "first run" and "marker deleted/corrupted"; the oldest stored
+  // row is a durable observation point, so use it as the conservative
+  // baseline instead of jumping straight to `now - retentionDays`.
+  if (marker.lastCutoff === null) {
+    const oldest = oldestStoredTimestamp(db);
+    if (oldest !== null) marker = { ...marker, lastCutoff: oldest };
+  }
+
+  return {
+    marker,
+    decision: computeRetentionCutoff({
+      nowMs,
+      retentionDays: policy.retentionDays,
+      intervalHours: policy.intervalHours,
+      marker,
+    }),
+    discardedMarkerCutoff,
+  };
 }
 
 /**
@@ -471,7 +528,7 @@ export function runTrajectoryRetention(
   // instead of zeroing it (review finding 4).
   const deletedByTable: Record<string, number> = {};
   let batches = 0;
-  let indexes: RetentionIndexReport | null = null;
+  const indexes: RetentionIndexReport | null = null;
   let indexesError: string | null = null;
   try {
     db = new Database(paths.dbPath);
@@ -496,21 +553,9 @@ export function runTrajectoryRetention(
       });
     }
 
-    // Marker loss must not bypass the 7-day cutoff cap. A missing `lastCutoff`
-    // covers both "first run" and "marker deleted/corrupted"; the oldest stored
-    // row is a durable observation point, so use it as the conservative
-    // baseline instead of jumping straight to `now - retentionDays`.
-    if (marker.lastCutoff === null) {
-      const oldest = oldestStoredTimestamp(db);
-      if (oldest !== null) marker = { ...marker, lastCutoff: oldest };
-    }
-
-    const decision = computeRetentionCutoff({
-      nowMs,
-      retentionDays: policy.retentionDays,
-      intervalHours: policy.intervalHours,
-      marker,
-    });
+    const plan = prepareRetentionPlan({ db, marker, policy, nowMs });
+    ({ marker } = plan);
+    const { decision, discardedMarkerCutoff } = plan;
     if (decision.kind === 'skip') {
       // Advancing the clock baseline is what makes the skip recoverable: with
       // `intervalHours=6` the forward limit is 7.5 days, so a laptop that was
@@ -538,21 +583,16 @@ export function runTrajectoryRetention(
       });
     }
 
-    let retentionIndexes: RetentionIndexReport | null = null;
-    try {
-      // DDL is not the hot path: give it the DDL budget, then restore the
-      // short delete budget (A8) before any batch runs.
-      db.pragma(`busy_timeout = ${TRAJECTORY_RETENTION_DDL_BUSY_TIMEOUT_MS}`);
-      retentionIndexes = ensureRetentionIndexes(db);
-    } catch (error) {
-      // Indexes are a performance concern, not a precondition for deleting.
-      // A failed DDL degrades the plan but must not stop the sweep, and it is
-      // surfaced in the report/marker instead of silently disappearing.
-      indexesError = error instanceof Error ? error.message : String(error);
-    } finally {
-      db.pragma(`busy_timeout = ${TRAJECTORY_RETENTION_WRITE_LOCK_WAIT_MS}`);
+    // F2: index creation is NOT part of the regular sweep. `CREATE INDEX` on a
+    // database with a concurrent writer can wait for seconds; doing it at the
+    // start of every run made a 5.7 s host stall. This run only performs a
+    // read-only existence check; creation belongs to the explicit maintenance
+    // entry (`pd trajectory vacuum --yes`). Missing indexes degrade the plan,
+    // which is surfaced and warned instead of silently blocking the sweep.
+    const missingIndexes = missingTrajectoryRetentionIndexes(db);
+    if (missingIndexes.length > 0) {
+      indexesError = `index_missing:${missingIndexes.join(',')}`;
     }
-    indexes = retentionIndexes;
 
     const runDate = new Date(nowMs).toISOString().slice(0, 10);
     const appendExport = createExportWriter(paths.exportsDir, runDate);
@@ -587,12 +627,21 @@ export function runTrajectoryRetention(
       if (deletedByTable[table] === undefined) deletedByTable[table] = count;
     }
     const busyOutcome = run.outcome === 'deferred_busy';
+    const invariantViolation = run.outcome === 'invariant_violation';
+    // A discarded marker cutoff is a one-off, alarming event; `index_missing`
+    // is a standing state that every fresh workspace reports, so the event
+    // wins the ledger slot and the standing state stays in `indexesError`.
     const outcomeReason = run.reason
-      ?? (indexesError === null ? null : `index_failed:${indexesError}`);
+      ?? (discardedMarkerCutoff ? 'marker_cutoff_discarded' : null)
+      ?? indexesError;
     const markerNext: TrajectoryRetentionMarker = {
       // Busy is not a completed attempt: keep lastRunAt so the backoff window
-      // is what gates the retry, not a fresh intervalHours wait.
-      lastRunAt: busyOutcome ? marker.lastRunAt : new Date(nowMs).toISOString(),
+      // is what gates the retry, not a fresh intervalHours wait. An invariant
+      // violation also keeps the clock baseline (SPEC §4.5) so the next run
+      // re-evaluates the same state instead of waiting a full interval (F5).
+      lastRunAt: busyOutcome || invariantViolation
+        ? marker.lastRunAt
+        : new Date(nowMs).toISOString(),
       // Only a complete sweep may advance the cutoff; a partial run resumes
       // against the SAME predicate (it is naturally idempotent).
       lastCutoff: run.outcome === 'completed' ? decision.cutoff : marker.lastCutoff,
@@ -708,10 +757,14 @@ export function retentionWarning(report: TrajectoryRetentionReport): string | nu
   const persistent = report.outcome === 'invariant_violation'
     || reason.startsWith('journal_mode_not_wal')
     || reason.startsWith('index_failed')
+    || reason.startsWith('index_missing')
+    || reason.startsWith('config_invalid')
+    || reason.startsWith('degraded:')
     || reason.startsWith('clock_')
     || reason.startsWith('failed:')
     || reason.startsWith('audit_failed:')
-    || reason === 'marker_damaged';
+    || reason === 'marker_damaged'
+    || reason === 'marker_cutoff_discarded';
   if (!persistent) {
     if (report.outcome === 'completed' || report.outcome === 'partial') {
       warnedRetention.delete(report.workspaceDir);
@@ -793,15 +846,26 @@ export interface TrajectoryRetentionStatus {
   marker: TrajectoryRetentionMarker;
   markerError: string | null;
   policy: TrajectoryRetentionPolicy;
+  /** Cutoff the NEXT run will use; null when no sweep can run. */
+  nextCutoff: string | null;
+  /** Rows the NEXT run's cutoff would select (same rule, same predicate). */
   expiredByTable: Record<string, number> | null;
+  /** Retention indexes absent from the database (created by `vacuum --yes`). */
+  indexesMissing: string[];
   dbError: string | null;
 }
 
 /**
  * Read-only status: never creates the marker, never opens the database for
  * writing, never creates an index.
+ *
+ * `now` is injectable so the projected next cutoff can be asserted exactly
+ * against the run that follows it (F4: one definition of "expired").
  */
-export function readTrajectoryRetentionStatus(workspaceDirInput: string): TrajectoryRetentionStatus {
+export function readTrajectoryRetentionStatus(
+  workspaceDirInput: string,
+  now: () => number = () => Date.now(),
+): TrajectoryRetentionStatus {
   const workspaceDir = path.resolve(workspaceDirInput);
   const paths = trajectoryRetentionPaths(workspaceDir);
   const configResult = loadPdConfigForPlugin(workspaceDir);
@@ -818,34 +882,53 @@ export function readTrajectoryRetentionStatus(workspaceDirInput: string): Trajec
       marker: read.marker,
       markerError: read.reason ?? null,
       policy,
+      nextCutoff: null,
       expiredByTable: null,
+      indexesMissing: [],
       dbError: null,
     };
   }
 
   let db: DatabaseHandle | undefined;
   let expiredByTable: Record<string, number> | null = null;
+  let nextCutoff: string | null = null;
+  let indexesMissing: string[] = [];
   let dbError: string | null = null;
   try {
     db = new Database(paths.dbPath, { readonly: true });
-    const counts: Record<string, number> = {};
-    for (const [table, column, extra] of [
-      ['tool_calls', 'created_at', null],
-      ['assistant_turns', 'created_at', null],
-      ['user_turns', 'created_at', null],
-      ['governance_observations', 'expired_at', "retention_class IN ('expired','rolled_back')"],
-    ] as const) {
-      if (!tableExists(db, table)) {
-        counts[table] = 0;
-        continue;
+    indexesMissing = missingTrajectoryRetentionIndexes(db);
+    const plan = prepareRetentionPlan({
+      db,
+      marker: read.marker,
+      policy,
+      nowMs: now(),
+    });
+    const sweepable = policy.enabled && policy.retentionDays > 0;
+    nextCutoff = sweepable && plan.decision.kind === 'run' ? plan.decision.cutoff : null;
+    if (nextCutoff === null) {
+      // A skipped run deletes nothing; reporting counts would promise work the
+      // next run will not do (F4).
+      dbError = plan.decision.kind === 'skip' ? plan.decision.reason : null;
+    } else {
+      const counts: Record<string, number> = {};
+      for (const [table, column, extra] of [
+        ['tool_calls', 'created_at', null],
+        ['assistant_turns', 'created_at', null],
+        ['user_turns', 'created_at', null],
+        ['governance_observations', 'expired_at', "retention_class IN ('expired','rolled_back')"],
+      ] as const) {
+        if (!tableExists(db, table)) {
+          counts[table] = 0;
+          continue;
+        }
+        const predicate = `${column} IS NOT NULL AND ${column} < ?${extra === null ? '' : ` AND ${extra}`}`;
+        const row: unknown = db
+          .prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${predicate}`)
+          .get(nextCutoff);
+        counts[table] = readCountField(row);
       }
-      const predicate = `${column} IS NOT NULL AND ${column} < ?${extra === null ? '' : ` AND ${extra}`}`;
-      const row: unknown = db
-        .prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${predicate}`)
-        .get(new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000).toISOString());
-      counts[table] = readCountField(row);
+      expiredByTable = counts;
     }
-    expiredByTable = counts;
   } catch (error) {
     dbError = error instanceof Error ? error.message : String(error);
   } finally {
@@ -865,7 +948,9 @@ export function readTrajectoryRetentionStatus(workspaceDirInput: string): Trajec
     marker: read.marker,
     markerError: read.reason ?? null,
     policy,
+    nextCutoff,
     expiredByTable,
+    indexesMissing,
     dbError,
   };
 }
@@ -884,6 +969,8 @@ export interface TrajectoryVacuumReport {
   requiredBytes: number | null;
   freelistBefore: number | null;
   freelistAfter: number | null;
+  /** Retention indexes created here — the ONLY place DDL may run (F2). */
+  indexes: RetentionIndexReport | null;
   durationMs: number;
 }
 
@@ -914,6 +1001,7 @@ export function vacuumTrajectoryDatabase(args: {
     requiredBytes: null,
     freelistBefore: null,
     freelistAfter: null,
+    indexes: null,
     durationMs: 0,
   };
 
@@ -976,6 +1064,10 @@ export function vacuumTrajectoryDatabase(args: {
       };
     }
 
+    // F2: the ONLY place retention indexes may be created. This command is
+    // explicit (--yes), already expects an exclusive lock, and is allowed to
+    // hold it; the regular sweep only performs a read-only existence check.
+    report.indexes = ensureRetentionIndexes(db);
     db.exec('VACUUM');
     const afterPages = db.pragma('freelist_count', { simple: true });
     report.freelistAfter = typeof afterPages === 'number' ? afterPages : null;

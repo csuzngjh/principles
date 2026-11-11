@@ -339,11 +339,40 @@ export function isRetentionMarker(value: unknown): value is TrajectoryRetentionM
 // ── Cutoff ───────────────────────────────────────────────────────────────────
 
 export type RetentionCutoffDecision =
-  | { kind: 'run'; cutoff: string; computedCutoff: string; advanceCapped: boolean }
+  | {
+    kind: 'run';
+    cutoff: string;
+    computedCutoff: string;
+    advanceCapped: boolean;
+    /** A stored lastCutoff was outside the window and was discarded (F1). */
+    discardedMarkerCutoff: boolean;
+  }
   | {
     kind: 'skip';
     reason: 'clock_backwards' | 'clock_forward_anomaly' | 'marker_timestamp_invalid';
   };
+
+/**
+ * Whether a stored `lastCutoff` may be used as a lower bound.
+ *
+ * A surviving cutoff is only meaningful while it lies inside the current
+ * retention window. A future value can arrive from a clock that ran fast (the
+ * cutoff advanced while the clock was wrong) or from a hand-edited marker.
+ * Such a value must be DISCARDED, not clamped: clamping still leaves a cutoff
+ * inside the window and deletes rows that should be kept (F1).
+ */
+export function isRetentionCutoffInWindow(args: {
+  lastCutoff: string | null;
+  nowMs: number;
+  retentionDays: number;
+}): boolean {
+  const { lastCutoff, nowMs, retentionDays } = args;
+  if (lastCutoff === null) return true;
+  const parsed = Date.parse(lastCutoff);
+  if (!Number.isFinite(parsed)) return false;
+  const computedCutoffMs = nowMs - retentionDays * DAY_MS;
+  return parsed <= computedCutoffMs && parsed <= nowMs;
+}
 
 function parseTimestamp(value: string | null): number | 'invalid' | null {
   if (value === null) return null;
@@ -386,16 +415,24 @@ export function computeRetentionCutoff(args: {
   }
 
   const computedCutoffMs = nowMs - retentionDays * DAY_MS;
+  // Never trust a cutoff that is not inside the current window (F1). An
+  // in-window cutoff is by definition <= `computedCutoffMs`, so the cutoff is
+  // inherently monotonic: it can never end up earlier than the stored value.
+  const trustedLastCutoffMs = isRetentionCutoffInWindow({
+    lastCutoff: marker.lastCutoff,
+    nowMs,
+    retentionDays,
+  })
+    ? lastCutoffMs
+    : null;
   let effectiveCutoffMs = computedCutoffMs;
   let advanceCapped = false;
-  if (lastCutoffMs !== null) {
-    const capped = lastCutoffMs + RETENTION_MAX_CUTOFF_ADVANCE_MS;
+  if (trustedLastCutoffMs !== null) {
+    const capped = trustedLastCutoffMs + RETENTION_MAX_CUTOFF_ADVANCE_MS;
     if (computedCutoffMs > capped) {
       effectiveCutoffMs = capped;
       advanceCapped = true;
     }
-    // Monotonic: the cutoff must never move backwards.
-    if (effectiveCutoffMs < lastCutoffMs) effectiveCutoffMs = lastCutoffMs;
   }
 
   return {
@@ -403,6 +440,7 @@ export function computeRetentionCutoff(args: {
     cutoff: new Date(effectiveCutoffMs).toISOString(),
     computedCutoff: new Date(computedCutoffMs).toISOString(),
     advanceCapped,
+    discardedMarkerCutoff: lastCutoffMs !== null && trustedLastCutoffMs === null,
   };
 }
 
@@ -489,6 +527,33 @@ export function ensureTrajectoryRetentionIndexes(db: Database): RetentionIndexRe
     applied.push(statement);
   }
   return { applied, skipped };
+}
+
+function tableExists(db: Database, table: string): boolean {
+  return db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(table) !== undefined;
+}
+
+/**
+ * Read-only existence check for the retention indexes. The regular sweep must
+ * never create them: `CREATE INDEX` on a busy database can block for seconds,
+ * which is exactly the host stall F2 forbids. Index creation is an explicit
+ * maintenance action (`pd trajectory vacuum --yes`).
+ */
+export function missingTrajectoryRetentionIndexes(db: Database): string[] {
+  const missing: string[] = [];
+  for (const statement of TRAJECTORY_RETENTION_INDEXES) {
+    const name = /CREATE INDEX IF NOT EXISTS ([a-z_]+)/.exec(statement)?.[1];
+    const table = / ON ([a-z_]+)\(/.exec(statement)?.[1];
+    if (name === undefined) continue;
+    if (table !== undefined && !tableExists(db, table)) continue;
+    const row = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
+      .get(name);
+    if (row === undefined) missing.push(name);
+  }
+  return missing;
 }
 
 // ── Batch engine ─────────────────────────────────────────────────────────────

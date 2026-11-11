@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime/index.ts",
-  "count": 2030,
+  "count": 2032,
   "names": [
     "ADAPTIVE_DELIVERY_RECORD_ENUMS",
     "ADMISSION_CONFIDENCE_THRESHOLD",
@@ -1824,6 +1824,7 @@
     "isPrincipleLedgerEligibleKind",
     "isRecord",
     "isResultRefImmutable",
+    "isRetentionCutoffInWindow",
     "isRetentionMarker",
     "isRetryWaitBackoffElapsed",
     "isRuleHostEvaluatedEventData",
@@ -1876,6 +1877,7 @@
     "mergePITaskMetadata",
     "migrateLegacyGfiSchema",
     "mintObservationKey",
+    "missingTrajectoryRetentionIndexes",
     "nextBackoffUntil",
     "normalizeDiagnosticianTaskId",
     "normalizeFeatureFlagOverrides",

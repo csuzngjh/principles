@@ -133,14 +133,20 @@ export async function handleTrajectoryRetentionStatus(opts: TrajectoryStatusOpti
   );
   console.log(`Last run:  ${status.marker.lastRunAt ?? 'never'} (${status.marker.lastOutcome ?? 'n/a'})`);
   console.log(`Cutoff:    ${status.marker.lastCutoff ?? 'n/a'}`);
+  console.log(`Next run:  cutoff ${status.nextCutoff ?? 'n/a (no sweep scheduled)'}`);
   if (status.marker.backoffUntil !== null) console.log(`Backoff:   ${status.marker.backoffUntil}`);
   if (status.markerError !== null) console.log(`Marker:    unreadable (${status.markerError})`);
   if (status.dbError !== null) console.log(`Database:  unreadable (${status.dbError})`);
+  if (status.indexesMissing.length > 0) {
+    console.log(`Indexes:   missing ${status.indexesMissing.join(', ')} — run \`pd trajectory vacuum --yes\``);
+  }
   if (status.expiredByTable !== null) {
     const counts = Object.entries(status.expiredByTable)
       .map(([table, count]) => `${table}=${count}`)
       .join(' ');
-    console.log(`Expired now: ${counts}`);
+    // Same cutoff the next run will use, so this is a projection, not a
+    // different definition of "expired" (F4).
+    console.log(`Next delete: ${counts}`);
   }
 }
 
@@ -166,6 +172,11 @@ function printVacuum(report: TrajectoryVacuumReport): void {
     `VACUUM done in ${report.durationMs} ms: ${report.sizeBeforeBytes} -> ${report.sizeAfterBytes ?? 'unknown'} bytes, `
     + `freelist ${report.freelistBefore ?? 'unknown'} -> ${report.freelistAfter ?? 'unknown'} pages`,
   );
+  if (report.indexes !== null) {
+    console.log(
+      `Indexes:   ${report.indexes.applied.length} applied, ${report.indexes.skipped.length} skipped`,
+    );
+  }
 }
 
 export async function handleTrajectoryVacuum(opts: TrajectoryVacuumOptions): Promise<void> {
