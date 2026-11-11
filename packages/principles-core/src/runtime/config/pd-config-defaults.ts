@@ -122,15 +122,34 @@ export const DEFAULT_REUSE_EVALUATION: ReuseEvaluationConfig = {
   enabled: true,
 };
 
+/**
+ * Copies the default flag map one level deeper than the section itself.
+ *
+ * Callers may mutate the config they receive (test fixtures, console overlays).
+ * Sharing the `features.<flag>` entry objects would let one caller's write leak
+ * into every later `getDefaultPdConfig()` call in the process — ERR P-ERR-124:
+ * a kill-switch fixture mutated the shared `host.codex` entry and later tests in
+ * the same worker read `enabled=false`.
+ */
+function cloneDefaultFeatureFlags(): Record<string, FeatureFlagEntry> {
+  const entries: Record<string, FeatureFlagEntry> = {};
+  for (const [id, entry] of Object.entries(DEFAULT_FEATURE_FLAGS)) {
+    entries[id] = { ...entry };
+  }
+  return entries;
+}
+
 export function getDefaultPdConfig(): PdConfig {
   return {
     version: PD_CONFIG_VERSION,
-    features: { ...DEFAULT_FEATURE_FLAGS },
+    features: cloneDefaultFeatureFlags(),
     runtimeProfiles: {
       [PI_AI_DEFAULT_PROFILE_ID]: { ...PI_AI_DEFAULT_PROFILE },
     },
     internalAgents: getDefaultInternalAgents(),
-    ui: { ...DEFAULT_UI },
+    // `ui.diagnostics` is a nested object; copy it too, or a caller's mode
+    // change would rewrite DEFAULT_UI for the rest of the process.
+    ui: { diagnostics: { mode: DEFAULT_UI.diagnostics.mode } },
     principles: { outputLanguage: undefined },
     // PRI-917 v0.3.2 §8: default ON (PRI-797 precedent); runtimeProfile
     // resolved against internalAgents.defaultRuntime by the effective layer.

@@ -226,6 +226,40 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
+  it('maps the persisted structured anchor into diagnosisTarget (T03/T17)', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_anchor',
+      diagnosticJson: JSON.stringify({
+        sourcePainId: 'pain-anchor',
+        anchor: { type: 'agent_instruction', ref: 'AGENTS.md#verification' },
+      }),
+    });
+    const f = createFixture(new Map([[task.taskId, task]]));
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+      expect(payload.diagnosisTarget.anchor).toEqual({
+        type: 'agent_instruction',
+        ref: 'AGENTS.md#verification',
+      });
+    } finally { cleanupFixture(f); }
+  });
+
+  it('drops an invalid persisted anchor and says why instead of guessing (rc-1/rc-9)', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_bad_anchor',
+      diagnosticJson: JSON.stringify({
+        sourcePainId: 'pain-bad-anchor',
+        anchor: { type: 'guessed_anchor', ref: '' },
+      }),
+    });
+    const f = createFixture(new Map([[task.taskId, task]]));
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+      expect(payload.diagnosisTarget.anchor).toBeUndefined();
+      expect(notesInclude(payload.ambiguityNotes, 'anchor')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
   it('throws storage_unavailable when task not found', async () => {
     const f = createFixture();
     try {
