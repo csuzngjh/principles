@@ -117,6 +117,7 @@ export interface AdaptiveSelectionDiagnosticLine {
   readonly requestSentAt: number | null;
   readonly firstByteAt: number | null;
   readonly generationEndedAt: number | null;
+  readonly validatedAt: number | null;
   readonly cancelledAt: number | null;
   readonly httpStatus: number | null;
   readonly finishReason: string;
@@ -206,6 +207,7 @@ export function createAdaptivePriorityProvider(
         requestSentAt: null,
         firstByteAt: null,
         generationEndedAt: null,
+        validatedAt: null,
         cancelledAt: null,
         httpStatus: null,
         finishReason: 'skipped',
@@ -244,6 +246,7 @@ export function createAdaptivePriorityProvider(
       requestSentAt: outcome.diagnostics.requestSentAt,
       firstByteAt: outcome.diagnostics.firstByteAt,
       generationEndedAt: outcome.diagnostics.generationEndedAt,
+      validatedAt: outcome.diagnostics.validatedAt,
       cancelledAt: outcome.diagnostics.cancelledAt,
       httpStatus: outcome.diagnostics.httpStatus,
       finishReason: outcome.diagnostics.finishReason,

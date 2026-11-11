@@ -118,6 +118,8 @@ export interface AdaptiveSelectionDiagnostics {
   completionDeadlineAt: number | null;
   firstByteAt: number | null;
   generationEndedAt: number | null;
+  /** Epoch ms at which the WHOLE answer table passed validation (null = never). */
+  validatedAt: number | null;
   cancelledAt: number | null;
   httpStatus: number | null;
   /** `decisions` once a valid answer table was read; `unknown` otherwise. */
@@ -211,6 +213,8 @@ interface EmptyDiagnostics {
   completionDeadlineAt: number | null;
   firstByteAt: number | null;
   generationEndedAt: number | null;
+  /** Epoch ms at which the WHOLE answer table passed validation (null = never). */
+  validatedAt: number | null;
   cancelledAt: number | null;
   httpStatus: number | null;
   finishReason: string;
@@ -228,6 +232,7 @@ function emptyDiagnostics(admissionDeadlineAt: number): EmptyDiagnostics {
     completionDeadlineAt: null,
     firstByteAt: null,
     generationEndedAt: null,
+    validatedAt: null,
     cancelledAt: null,
     httpStatus: null,
     finishReason: 'unknown',
@@ -460,6 +465,14 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
           : {}),
       });
       if (!validated.ok) return fail(validated.reason);
+      // The envelope is measured to a VALIDATED table, not to the last byte:
+      // a table that only parses after the completion deadline is expired even
+      // though the body arrived, so the caller never applies a late decision.
+      diagnostics.validatedAt = now();
+      if (diagnostics.validatedAt > completionDeadlineAt) {
+        diagnostics.cancelledAt = diagnostics.validatedAt;
+        return fail('SELECTION_EXPIRED');
+      }
       diagnostics.finishReason = 'decisions';
       return adjudicateDecision(validated.scores, input.candidates);
     } finally {

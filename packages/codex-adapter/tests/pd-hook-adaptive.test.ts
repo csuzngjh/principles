@@ -29,6 +29,7 @@ import { escapeXml } from '@principles/core/prompt-builder';
 import { readPromptActivationCandidates } from '@principles/host-runtime';
 import {
   CODEX_ADAPTIVE_BUDGET_MS,
+  CODEX_ADAPTIVE_DECISION_MS,
   CODEX_HOOK_TIMEOUT_MS,
   CODEX_NATIVE_RESERVE_MS,
   processHookInvocation,
@@ -503,6 +504,87 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
     expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:SELECTION_EXPIRED');
     expect(result.stderr.join('')).toContain('stage=generation');
+  });
+
+  // ── PRI-1182 §1: the frozen 1 s envelope is an execution constraint ─────────
+  // Both cases run through the SAME production entry with NO timing seams, so
+  // they prove the compiled-in envelope rather than a test-only arrangement.
+
+  it('the frozen 1 s envelope completes an in-time answer table and assembly', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const root = await fixture({ label: 'frozen-envelope-ok', adaptive: true, budgetChars });
+    const transport = echoingTransport(TEXT.DELIVERY);
+    const startedAt = Date.now();
+    const result = await processHookInvocation(input(root), envFor(root), root, {
+      fetchImpl: transport.fetchImpl,
+    });
+    const wallClockMs = Date.now() - startedAt;
+
+    expect(transport.calls(), result.stderr.join('')).toBe(1);
+    expect(additionalContext(result)).toContain(TEXT.DELIVERY);
+    const stderr = result.stderr.join('');
+    expect(stderr).toContain('reason=adaptive_selection_selected:selected');
+    expect(stderr).toContain('modelObserved=' + DECISION_MODEL);
+    // Measured from the actual send to a VALIDATED table.
+    const sentAt = Number(/requestSentAt=(\d+)/u.exec(stderr)?.[1]);
+    const validatedAt = Number(/validatedAt=(\d+)/u.exec(stderr)?.[1]);
+    expect(Number.isFinite(sentAt) && Number.isFinite(validatedAt), stderr).toBe(true);
+    expect(validatedAt - sentAt).toBeLessThanOrEqual(CODEX_ADAPTIVE_DECISION_MS);
+    // Process entry → final stdout stays inside the host's hook window.
+    expect(wallClockMs).toBeLessThan(CODEX_HOOK_TIMEOUT_MS);
+  });
+
+  it('a body that crosses the frozen 1 s envelope is cancelled and the turn stays Native', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const nativeRoot = await fixture({ label: 'frozen-envelope-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'frozen-envelope-late', adaptive: true, budgetChars });
+    let bodyTornDown = false;
+    const fetchImpl: typeof fetch = async (_resource, init) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => {
+            bodyTornDown = true;
+            try {
+              controller.error(new DOMException('aborted', 'AbortError'));
+            } catch {
+              // already closed
+            }
+          }, { once: true });
+          // Headers are immediate; the table would only cross the limit later.
+          setTimeout(() => {
+            try {
+              controller.enqueue(new TextEncoder().encode(JSON.stringify({
+                model: DECISION_MODEL,
+                provider: DECISION_PROVIDER,
+                answers: { insufficient_context: { type: 'noul', noul: 0.01 } },
+              })));
+              controller.close();
+            } catch {
+              // aborted first
+            }
+          }, CODEX_ADAPTIVE_DECISION_MS + 400);
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const startedAt = Date.now();
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl });
+    const wallClockMs = Date.now() - startedAt;
+
+    expect(bodyTornDown, 'the completion window must cancel the body').toBe(true);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    const stderr = result.stderr.join('');
+    expect(stderr).toContain('reason=adaptive_selection_none:SELECTION_EXPIRED');
+    expect(stderr).toContain('stage=generation');
+    expect(stderr).toContain('generationEndedAt=unknown');
+    const sentAt = Number(/requestSentAt=(\d+)/u.exec(stderr)?.[1]);
+    const cancelledAt = Number(/cancelledAt=(\d+)/u.exec(stderr)?.[1]);
+    expect(Number.isFinite(sentAt) && Number.isFinite(cancelledAt), stderr).toBe(true);
+    // Only the generation window can elapse: the first byte was in time.
+    expect(cancelledAt - sentAt).toBeLessThanOrEqual(CODEX_ADAPTIVE_DECISION_MS);
+    expect(wallClockMs).toBeLessThan(CODEX_HOOK_TIMEOUT_MS);
   });
 
   it('a target Native already injects stays byte-identical (no duplicate directive)', async () => {

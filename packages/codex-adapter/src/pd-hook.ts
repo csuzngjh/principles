@@ -53,7 +53,7 @@ function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): str
       ? 'skipped'
       : 'degraded';
   const failures = line.failures.length > 0 ? line.failures.join('|') : 'none';
-  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} failures=${failures}`
+  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} failures=${failures}`
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_DIAGNOSTIC * 2);
@@ -237,6 +237,17 @@ export const CODEX_HOOK_TIMEOUT_MS = 5_000;
 /** Reserved for Native packing, encoding and stdout after Adaptive is cut off. */
 export const CODEX_NATIVE_RESERVE_MS = 800;
 export const CODEX_ADAPTIVE_BUDGET_MS = CODEX_HOOK_TIMEOUT_MS - CODEX_NATIVE_RESERVE_MS;
+/**
+ * PRI-1182 acceptance card: the frozen fast-decision envelope, measured from
+ * the actual send to the moment the whole answer table passed validation. The
+ * transport enforces both windows, so the request is cancelled at
+ * `send + CODEX_ADAPTIVE_DECISION_MS` even when the host window is larger; the
+ * effective deadline is the earlier of that envelope and the host window minus
+ * the assembly/output reserve.
+ */
+export const CODEX_ADAPTIVE_FIRST_BYTE_MS = 500;
+export const CODEX_ADAPTIVE_GENERATION_MS = 500;
+export const CODEX_ADAPTIVE_DECISION_MS = CODEX_ADAPTIVE_FIRST_BYTE_MS + CODEX_ADAPTIVE_GENERATION_MS;
 
 export interface PdHookDeps {
   /** Test seam: replace the outbound transport without bypassing the hook entry. */
@@ -469,8 +480,8 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           env: _env,
           ...(deps.fetchImpl ? {fetchImpl: deps.fetchImpl} : {}),
           ...(deps.now ? {now: deps.now} : {}),
-          ...(deps.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: deps.firstByteTimeoutMs} : {}),
-          ...(deps.generationTimeoutMs !== undefined ? {generationTimeoutMs: deps.generationTimeoutMs} : {}),
+          firstByteTimeoutMs: deps.firstByteTimeoutMs ?? CODEX_ADAPTIVE_FIRST_BYTE_MS,
+          generationTimeoutMs: deps.generationTimeoutMs ?? CODEX_ADAPTIVE_GENERATION_MS,
           ...(deps.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: deps.minExecutableBudgetMs} : {}),
           outerDeadlineAt: adaptiveDeadlineAt,
           onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
