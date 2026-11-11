@@ -9,6 +9,7 @@ import { promisify } from 'util';
 // check-dist-hygiene.mjs / check-workspace-artifacts.mjs — ERR-149 / EP-14).
 import { skipTestArtifacts, collectTestArtifacts } from '../../../scripts/build/test-artifacts.mjs';
 import { collectLabModuleClosure, LAB_ENTRY_MODULES } from '../../../scripts/build/lab-payload.mjs';
+import { resolveBundledComponentVersion } from '../../../scripts/release/lib/installer-payload-versions.mjs';
 import {
   collectReleaseManagerPayload,
   RELEASE_MANAGER_ENTRY_MODULES,
@@ -1008,7 +1009,12 @@ try {
   console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
 }
 
-if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
+if (npmPluginVersion && !/^\d+\.\d+\.\d+$/.test(npmPluginVersion)) {
+  console.warn(`  ⚠️  Registry returned a non-semver version for principles-disciple (${JSON.stringify(npmPluginVersion)}) — using working-tree version.`);
+  npmPluginVersion = null;
+}
+
+if (npmPluginVersion) {
   // Stamp plugin/package.json
   // CodeQL: TOCTOU here is a false positive — this is a single-threaded build
   // script; the file was just written by the copy step above with no concurrency.
@@ -1016,9 +1022,21 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
   const pkgRaw = readFileSync(bundledPluginPkgPath, 'utf-8');
   const pkg = JSON.parse(pkgRaw);
   const oldVersion = pkg.version;
-  pkg.version = npmPluginVersion;
+  const pluginStamp = resolveBundledComponentVersion({
+    label: 'plugin (principles-disciple)',
+    sourceVersion: oldVersion,
+    registryVersion: npmPluginVersion,
+    preserveSourceVersions: false,
+  });
+  if (pluginStamp.refusedDowngrade) {
+    console.warn(
+      `  ⚠️  principles-disciple@${npmPluginVersion} on npm is older than the source ${oldVersion} — keeping the source version (a bundle must never downgrade).`,
+    );
+  }
+  const bundledPluginVersion = pluginStamp.version;
+  pkg.version = bundledPluginVersion;
   writeFileSync(bundledPluginPkgPath, JSON.stringify(pkg, null, 2) + '\n');
-  log(`  ✅ plugin/package.json: ${oldVersion} → ${npmPluginVersion}`);
+  log(`  ✅ plugin/package.json: ${oldVersion} → ${bundledPluginVersion}`);
 
   // Record the bundled plugin version on the INSTALLER's own package.json so
   // the registry metadata (`create-principles-disciple/latest`) exposes which
@@ -1033,9 +1051,9 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
     const installerRaw = readFileSync(installerPkgPath, 'utf-8');
     const installerPkg = JSON.parse(installerRaw);
     installerPkg.pd = installerPkg.pd && typeof installerPkg.pd === 'object' ? installerPkg.pd : {};
-    installerPkg.pd.bundledPluginVersion = npmPluginVersion;
+    installerPkg.pd.bundledPluginVersion = bundledPluginVersion;
     writeFileSync(installerPkgPath, JSON.stringify(installerPkg, null, 2) + '\n');
-    log(`  ✅ create-principles-disciple/package.json pd.bundledPluginVersion → ${npmPluginVersion}`);
+    log(`  ✅ create-principles-disciple/package.json pd.bundledPluginVersion → ${bundledPluginVersion}`);
   } catch (e) {
     console.warn('  ⚠️  Could not stamp pd.bundledPluginVersion on installer package.json.');
     console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
@@ -1049,9 +1067,9 @@ if (npmPluginVersion && /^\d+\.\d+\.\d+/.test(npmPluginVersion)) {
     const manifest = JSON.parse(manifestRaw);
     if (manifest.version) {
       const oldManifestVersion = manifest.version;
-      manifest.version = npmPluginVersion;
+      manifest.version = bundledPluginVersion;
       writeFileSync(bundledManifestPath, JSON.stringify(manifest, null, 2) + '\n');
-      log(`  ✅ openclaw.plugin.json: ${oldManifestVersion} → ${npmPluginVersion}`);
+      log(`  ✅ openclaw.plugin.json: ${oldManifestVersion} → ${bundledPluginVersion}`);
     }
   } catch {
     log('  ⚠️  openclaw.plugin.json not found or unreadable — skipping version stamp');
@@ -1091,7 +1109,7 @@ for (const { npmName, destDir } of [
     console.warn(`      (${e instanceof Error ? e.message : String(e)})`);
     continue;
   }
-  if (!/^\d+\.\d+\.\d+/.test(npmVersion)) {
+  if (!/^\d+\.\d+\.\d+$/.test(npmVersion)) {
     console.warn(`  ⚠️  Registry returned a non-semver version for ${npmName} — using working-tree version.`);
     continue;
   }
@@ -1102,9 +1120,23 @@ const componentPkgPath = join(destDir, 'package.json');
 	    // safe pattern (which would trigger a separate CodeQL TOCTOU rule).
 	    const componentPkg = JSON.parse(readFileSync(componentPkgPath, 'utf-8'));
 	    const oldComponentVersion = componentPkg.version;
-	    componentPkg.version = npmVersion;
+	    // Never move a payload component BACKWARDS: a registry `latest` that
+	    // lags the source tree (release 1.150.1: pd-cli 2.2.0 → 2.1.0) must
+	    // not define artifact content.
+	    const componentStamp = resolveBundledComponentVersion({
+	      label: npmName,
+	      sourceVersion: oldComponentVersion,
+	      registryVersion: npmVersion,
+	      preserveSourceVersions: false,
+	    });
+	    if (componentStamp.refusedDowngrade) {
+	      console.warn(
+	        `  ⚠️  ${npmName}@${npmVersion} on npm is older than the source ${oldComponentVersion} — keeping the source version (a bundle must never downgrade).`,
+	      );
+	    }
+	    componentPkg.version = componentStamp.version;
 	    writeFileSync(componentPkgPath, JSON.stringify(componentPkg, null, 2) + '\n');
-	    log(`  ✅ ${relative(OUTPUT_ROOT, componentPkgPath)} (${npmName}): ${oldComponentVersion} → ${npmVersion}`);
+	    log(`  ✅ ${relative(OUTPUT_ROOT, componentPkgPath)} (${npmName}): ${oldComponentVersion} → ${componentStamp.version}`);
 	  } catch (e) {
 	    console.warn(`  ⚠️  Could not stamp ${npmName} version at ${relative(OUTPUT_ROOT, componentPkgPath)} — using working-tree version.`);
 	    console.warn(`      (${e instanceof Error ? e.message : String(e)})`);

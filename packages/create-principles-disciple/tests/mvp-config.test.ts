@@ -98,7 +98,9 @@ describe('Bundle source path contract', () => {
     const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
     const script = fs.readFileSync(scriptPath, 'utf-8');
     expect(script).toContain('pd.bundledPluginVersion');
-    expect(script).toContain('installerPkg.pd.bundledPluginVersion = npmPluginVersion');
+    // The stamp carries the resolved version, which never moves a component
+    // backwards from the source tree (release 1.150.1: pd-cli 2.1.0 bug).
+    expect(script).toContain('installerPkg.pd.bundledPluginVersion = bundledPluginVersion');
 
     const installerPkgPath = path.resolve(__dirname, '..', 'package.json');
     const installerPkg = JSON.parse(fs.readFileSync(installerPkgPath, 'utf-8'));
