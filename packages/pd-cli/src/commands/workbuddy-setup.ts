@@ -23,7 +23,9 @@
  * mutate nothing), cli-6 (every refusal carries reason + nextAction).
  */
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import {
   deriveConversationIngestionConsentState,
@@ -268,7 +270,13 @@ function consentInput(decision: 'granted' | 'revoked', evidenceRef: string) {
  */
 export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Promise<void> {
   const generatedAt = new Date().toISOString();
-  const workspace = resolveWorkspaceDir(options.workspace);
+  // OD-07 / SPEC §4.1: the WorkBuddy runtime (Stop hook AND worker) reads a
+  // single user-level governance workspace. Defaulting to the generic CLI
+  // workspace here would write consent somewhere the hook never reads, so the
+  // default must use the SAME resolution; an explicit --workspace still wins.
+  const workspace = options.workspace !== undefined && options.workspace.trim().length > 0
+    ? resolveWorkspaceDir(options.workspace)
+    : getWorkbuddyWorkspaceDir(os.homedir());
   /** Print the final report (JSON or human) and set the process exit code. */
   const finish = (report: WorkbuddySetupReport): void => {
     if (options.json === true) {
@@ -290,16 +298,39 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
     }
     if (report.status === 'degraded') process.exitCode = 1;
   };
-  const refuse = (reason: string, nextAction: string, consentStateBefore: ConversationIngestionConsentState = 'not_present'): void => {
+  const refuse = (
+    reason: string,
+    nextAction: string,
+    detail: {
+      consentStateBefore?: ConversationIngestionConsentState;
+      actualFlags?: { ingestionFlagEnabled: boolean; hostWorkbuddyFlagEnabled: boolean };
+    } = {},
+  ): void => {
+    const { consentStateBefore: before, actualFlags } = detail;
+    const consentStateBefore = before ?? 'not_present';
     finish({
       generatedAt, host: 'workbuddy', workspace, status: 'degraded',
       consentStateBefore, consentState: consentStateBefore,
       disclosureVersion: WORKBUDDY_INGESTION_DISCLOSURE_VERSION,
-      ingestionFlag: { name: FLAG_ID, enabled: false }, hostWorkbuddyFlagEnabled: false,
+      // A rolled-back failure can leave the flag ON (rollback itself failed).
+      // Report the state we actually know, never a comforting `false`.
+      ingestionFlag: { name: FLAG_ID, enabled: actualFlags?.ingestionFlagEnabled ?? false },
+      hostWorkbuddyFlagEnabled: actualFlags?.hostWorkbuddyFlagEnabled ?? false,
       warnings: [], reason, nextAction,
     });
   };
 
+  // cli-1/cli-5 (P2 review): `--show-disclosure` is a read-only early exit and
+  // cannot honour a decision or the JSON contract. Silently printing text made
+  // `--show-disclosure --accept` exit 0 without recording consent, and made
+  // `--show-disclosure --json` emit non-JSON. Reject the combinations instead.
+  if (options.showDisclosure === true && (options.accept === true || options.decline === true || options.json === true)) {
+    refuse(
+      'show_disclosure_conflicts_with_decision',
+      '--show-disclosure only prints the disclosure. Drop --accept/--decline/--json, or run `pd workbuddy setup --accept|--decline [--json]` to record a decision.',
+    );
+    return;
+  }
   if (options.showDisclosure === true) {
     console.log(getWorkbuddyIngestionDisclosureText());
     return;
@@ -360,7 +391,7 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
   let originalConfigBytes: string | undefined;
   try { originalConfigBytes = fs.readFileSync(configPath, 'utf8'); } catch { /* pre-checked above; leave undefined */ }
   const flagWrite = setWorkbuddyIngestionFlag(workspace, targetFlag);
-  if (!flagWrite.ok) { refuse(flagWrite.reason, flagWrite.nextAction, stateBefore); return; }
+  if (!flagWrite.ok) { refuse(flagWrite.reason, flagWrite.nextAction, { consentStateBefore: stateBefore }); return; }
 
   const recorded = recordConversationIngestionConsent(
     workspace,
@@ -375,12 +406,16 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
       flagEnabledBefore,
       originalConfigBytes !== undefined ? { restoreBytes: originalConfigBytes } : {},
     );
+    const rollbackOk = rollback.ok || rollback.restored === true;
     refuse(
       'consent_write_failed:' + recorded.reason,
-      recorded.nextAction + (rollback.ok || rollback.restored === true
+      recorded.nextAction + (rollbackOk
         ? ' The ingestion flag was rolled back.'
         : ' WARNING: the ingestion flag could NOT be rolled back; disable it manually.'),
-      stateBefore,
+      {
+        consentStateBefore: stateBefore,
+        actualFlags: { ingestionFlagEnabled: rollbackOk ? flagEnabledBefore : targetFlag, hostWorkbuddyFlagEnabled: hostEnabled },
+      },
     );
     return;
   }
