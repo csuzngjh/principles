@@ -1,13 +1,18 @@
 /**
- * pd workbuddy setup — the ONE authority for WorkBuddy conversation ingestion
- * (PRI-1171 P2, tickets ⑤/⑥).
+ * pd workbuddy setup — the SUPPORTED entry point for WorkBuddy conversation
+ * ingestion consent (PRI-1171 P2, tickets ⑤/⑥).
  *
- * Presents the disclosure, records the Owner's explicit decision in the
- * host-neutral v3 consent ledger (`<workspace>/.state/
- * conversation-ingestion-consent.json`, hostKind='workbuddy'), and flips
- * `workbuddy_conversation_ingestion` in the workspace config. Both writes are
- * ordered so a granted record can never precede a successfully enabled flag,
- * and a failed consent write rolls the flag back.
+ * "Supported" is a convention, not an enforced boundary: the consent ledger
+ * (`<workspace>/.state/conversation-ingestion-consent.json`) and the workspace
+ * config are ordinary files, and `recordConversationIngestionConsent` is a
+ * public export — another tool could write the same durable facts. What this
+ * command owns is the intended UX: present the disclosure, record the explicit
+ * decision, and flip the flag in the order below.
+ *
+ * The two writes are ordered so a granted record can never precede a
+ * successfully enabled flag, and a failed consent write rolls the flag back to
+ * the exact bytes captured before this command's first mutation (atomic
+ * tmp+rename, never an in-place truncate).
  *
  * The runtime (workbuddy-adapter/src/ingestion/ingestion.ts) READS this ledger
  * on every Stop hook — unlike the Codex path, which still hard-codes a grant
@@ -68,7 +73,8 @@ export function getWorkbuddyIngestionDisclosureText(): string {
     '  - 您本人输入的话语（仅 <user_query> 内的文本）',
     '  - 助手的可见回复、推理记录、工具调用名称与结果状态',
     '不会采集：宿主注入的 system-reminder 上下文（系统提示、身份文件、工具声明、',
-    '连接器状态等）——解码器会先剥离它们，只投影 Owner 原话。',
+    '连接器状态等）。解码器只从 <user_query> 结构化边界投影 Owner 原话；',
+    '无法确认该边界时，该条记录标记为 partial 且不写入原文（fail-closed，宁缺毋滥）。',
     '',
     '采集受三道门约束：host.workbuddy + workbuddy_conversation_ingestion + 本同意记录',
     '(decision=granted)。默认关闭；任一门关闭时 PD 不会打开任何转录文件（零读取）。',
@@ -78,7 +84,15 @@ export function getWorkbuddyIngestionDisclosureText(): string {
   ].join('\n');
 }
 
-type FlagWriteResult = { ok: true } | { ok: false; reason: string; nextAction: string };
+/**
+ * `restored` is only meaningful on failure: it says whether the pre-mutation
+ * bytes were successfully put back. A rollback whose calibration check fails
+ * can still have restored the file, and the operator message must not claim
+ * otherwise.
+ */
+type FlagWriteResult =
+  | { ok: true }
+  | { ok: false; reason: string; nextAction: string; restored?: boolean };
 
 const FEATURES_LINE = /^features:\s*(?:#.*)?$/;
 const KEY_LINE = /^ {2}workbuddy_conversation_ingestion:\s*(?:#.*)?$/;
@@ -99,7 +113,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Codex setup's config edit (kept separate so the frozen Codex consent flow
  * is untouched); comments and every other key are preserved.
  */
-export function setWorkbuddyIngestionFlag(workspaceDir: string, enabled: boolean): FlagWriteResult {
+export interface SetWorkbuddyIngestionFlagOptions {
+  /**
+   * Exact bytes captured BEFORE this command's first mutation. Used when the
+   * round-trip verification fails: a restore must return the file to the last
+   * state the Owner actually saw, not to whatever the current call just read
+   * (a rollback call would otherwise "restore" the intermediate enabled bytes).
+   */
+  restoreBytes?: string;
+}
+
+export function setWorkbuddyIngestionFlag(workspaceDir: string, enabled: boolean, options: SetWorkbuddyIngestionFlagOptions = {}): FlagWriteResult {
   const configPath = getPdConfigPath(workspaceDir);
   let raw: string;
   try {
@@ -112,27 +136,46 @@ export function setWorkbuddyIngestionFlag(workspaceDir: string, enabled: boolean
   const registry = computeFeatureFlagsFromConfig(computeEffectivePdConfig(null)).flags as Record<string, { category?: string }>;
   const category = registry[FLAG_ID]?.category ?? 'quiet';
 
-  // Shared commit: atomic write, production-loader round-trip verification and
-  // a rollback that restores the exact original bytes on any mismatch.
-  const commit = (nextContent: string): FlagWriteResult => {
-    const tmpPath = configPath + '.tmp-wbsetup-' + String(process.pid) + '-' + String(Date.now());
+  const restoreBytes = options.restoreBytes ?? raw;
+  let tmpSequence = 0;
+  /**
+   * Every mutation — forward write AND restore — goes through tmp+rename.
+   * An in-place `writeFileSync(configPath, ...)` can leave a truncated
+   * config.yaml if the process dies mid-write, which is exactly the state the
+   * restore path exists to prevent.
+   */
+  const atomicWrite = (content: string): string | null => {
+    tmpSequence += 1;
+    const tmpPath = configPath + '.tmp-wbsetup-' + String(process.pid) + '-' + String(Date.now()) + '-' + String(tmpSequence);
     try {
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.writeFileSync(tmpPath, nextContent, { encoding: 'utf8' });
+      fs.writeFileSync(tmpPath, content, { encoding: 'utf8' });
       fs.renameSync(tmpPath, configPath);
+      return null;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       try { fs.rmSync(tmpPath, { force: true }); } catch { /* best effort */ }
-      return { ok: false, reason: 'config_write_failed:' + message.slice(0, 160), nextAction: 'Check permissions on ' + path.dirname(configPath) + '; config.yaml was left unchanged.' };
+      return error instanceof Error ? error.message : String(error);
+    }
+  };
+
+  // Shared commit: atomic write, production-loader round-trip verification and
+  // an atomic restore of the pre-mutation bytes on any mismatch.
+  const commit = (nextContent: string): FlagWriteResult => {
+    const writeFailure = atomicWrite(nextContent);
+    if (writeFailure !== null) {
+      return { ok: false, reason: 'config_write_failed:' + writeFailure.slice(0, 160), nextAction: 'Check permissions on ' + path.dirname(configPath) + '; config.yaml was left unchanged.' };
     }
     const verification = loadPdConfigForPlugin(workspaceDir);
     const verified = verification.ok ? isFeatureEnabled(computeFeatureFlagsFromConfig(verification.effective), FLAG_ID) : undefined;
     if (!verification.ok || verified !== enabled) {
-      try { fs.writeFileSync(configPath, raw, { encoding: 'utf8' }); } catch { /* restoration must not mask primary failure */ }
+      const restoreFailure = atomicWrite(restoreBytes);
       return {
         ok: false,
         reason: verification.ok ? 'config_roundtrip_mismatch' : 'config_roundtrip_invalid:' + (verification.errors[0]?.reason ?? 'unknown'),
-        nextAction: 'config.yaml was restored. Fix the features block in ' + configPath + ' and re-run `' + SETUP_COMMAND + '`.',
+        restored: restoreFailure === null,
+        nextAction: restoreFailure === null
+          ? 'config.yaml was restored to its pre-command bytes. Fix the features block in ' + configPath + ' and re-run `' + SETUP_COMMAND + '`.'
+          : 'WARNING: config.yaml could not be restored (' + restoreFailure.slice(0, 120) + '); repair ' + configPath + ' manually before re-running `' + SETUP_COMMAND + '`.',
       };
     }
     return { ok: true };
@@ -255,6 +298,14 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
     refuse('decision_not_explicit', 'With --json a decision must be explicit: pass --accept or --decline.');
     return;
   }
+  if (options.accept === true) {
+    // Accepting must never skip the disclosure: print it before any mutation.
+    // `--json` keeps stdout machine-readable (cli-1), so there it goes to
+    // stderr — the same split the Codex setup uses for its human channel.
+    const disclosure = getWorkbuddyIngestionDisclosureText();
+    if (options.json === true) console.error(disclosure);
+    else console.log(disclosure);
+  }
 
   const configPath = getPdConfigPath(workspace);
   if (!fs.existsSync(configPath)) {
@@ -289,6 +340,11 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
 
   const decision: 'granted' | 'revoked' = options.accept === true ? 'granted' : 'revoked';
   const targetFlag = decision === 'granted';
+  // Capture the pre-mutation bytes BEFORE the first write: if the consent
+  // write fails, the rollback restores this exact state, not the intermediate
+  // flag flip this command just made.
+  let originalConfigBytes: string | undefined;
+  try { originalConfigBytes = fs.readFileSync(configPath, 'utf8'); } catch { /* pre-checked above; leave undefined */ }
   const flagWrite = setWorkbuddyIngestionFlag(workspace, targetFlag);
   if (!flagWrite.ok) { refuse(flagWrite.reason, flagWrite.nextAction, stateBefore); return; }
 
@@ -300,10 +356,16 @@ export async function handleWorkbuddySetup(options: WorkbuddySetupOptions): Prom
   if (!recorded.ok) {
     // Never leave a flag enabled without its grant (or a revocation without
     // its flag off): roll the config back to the previous value.
-    const rollback = setWorkbuddyIngestionFlag(workspace, flagEnabledBefore);
+    const rollback = setWorkbuddyIngestionFlag(
+      workspace,
+      flagEnabledBefore,
+      originalConfigBytes !== undefined ? { restoreBytes: originalConfigBytes } : {},
+    );
     refuse(
       'consent_write_failed:' + recorded.reason,
-      recorded.nextAction + (rollback.ok ? ' The ingestion flag was rolled back.' : ' WARNING: the ingestion flag could NOT be rolled back; disable it manually.'),
+      recorded.nextAction + (rollback.ok || rollback.restored === true
+        ? ' The ingestion flag was rolled back.'
+        : ' WARNING: the ingestion flag could NOT be rolled back; disable it manually.'),
       stateBefore,
     );
     return;

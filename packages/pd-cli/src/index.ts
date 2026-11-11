@@ -759,9 +759,10 @@ codexCmd
 
 // ── pd workbuddy — WorkBuddy host governance operations ──────────────────────
 // SPEC workbuddy-host-adapter §5 Part 5 (ADR-0020 third host): reconciliation,
-// diagnostician and downstream reuse the shared authorities. PRI-1171 P2
-// tickets ⑤/⑥ add transcript ingestion, so the setup command below is the ONE
-// authority for its consent record and feature flag (default off).
+// transcript catch-up, diagnostician and downstream reuse the shared
+// authorities. PRI-1171 P2 tickets ⑤/⑥ add transcript ingestion, so the setup
+// command below is the SUPPORTED entry point for its consent record and
+// feature flag (default off) — a convention, not an enforced boundary.
 const workbuddyCmd = program
   .command('workbuddy')
   .description('WorkBuddy host governance operations');
@@ -787,7 +788,7 @@ workbuddyCmd
 
 workbuddyCmd
   .command('worker')
-  .description('Run the WorkBuddy governance worker (reconciliation, diagnostician, downstream — no transcript ingestion)')
+  .description('Run the WorkBuddy governance worker (transcript catch-up, reconciliation, diagnostician, downstream)')
   .option('-w, --workspace <path>', 'Governance workspace directory (default: the WorkBuddy governance workspace)')
   .option('--once', 'Run exactly one bounded cycle and exit')
   .option('--interval <ms>', 'Cycle interval for continuous mode (default 120000, minimum 1000)')
