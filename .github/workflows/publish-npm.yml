@@ -500,15 +500,21 @@ jobs:
 
   publish-finalize:
     name: Finalize release (tag, GitHub Release, ClawHub)
-    needs: [resolve-cohort, publish-full-product]
+    needs: [resolve-cohort, publish-full-product, codex-plugin-delivery-verify]
     # Runs only after ALL NINE npm legs uploaded or verified-skip. Its own
     # failures are visible (red job) and independently retriable by
     # re-dispatching the train (uploads skip; closing steps reconcile) —
     # but they can no longer block an npm package that never uploaded.
+    # The Codex pin verification is a HARD gate: !cancelled() defeats the
+    # default success-of-needs check, so the verify result is asserted
+    # explicitly. failure / skipped / cancelled never reach the closing
+    # steps — a tag or GitHub Release must never be published over a pin
+    # that does not match the published bytes.
     if: >-
       !cancelled() &&
       needs.resolve-cohort.outputs.has_cohort == 'true' &&
-      needs.publish-full-product.result == 'success'
+      needs.publish-full-product.result == 'success' &&
+      needs.codex-plugin-delivery-verify.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

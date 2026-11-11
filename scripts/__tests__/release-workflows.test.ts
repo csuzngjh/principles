@@ -443,6 +443,61 @@ describe('publish-npm.yml — Codex pin is verified, never re-issued', () => {
     expect(text).not.toContain('codex/runtime-pins-maintenance');
     expect(text).not.toContain('PD_VERSION_PR_TOKEN');
   });
+
+  it('publish-finalize is hard-gated on the pin verification result', () => {
+    // `!cancelled()` defeats Actions' default "needs succeeded" check, so the
+    // closing job must assert the verify result explicitly. Any terminal
+    // outcome other than success must never reach tag / GitHub Release /
+    // ClawHub — that is the difference between a visible red job and a
+    // release shipped over a pin that does not match published bytes.
+    type Job = { needs?: string[]; if?: string; permissions?: Record<string, string>; steps?: Array<{ uses?: string }> };
+    const doc = loadWorkflow(rel) as { jobs?: Record<string, Job> };
+    const jobs = doc.jobs ?? {};
+    const verify = jobs['codex-plugin-delivery-verify'];
+    const finalize = jobs['publish-finalize'];
+
+    expect(verify).toBeDefined();
+    expect(verify?.needs).toEqual(expect.arrayContaining(['publish-full-product']));
+    expect(verify?.permissions).toEqual({ contents: 'read' });
+
+    expect(finalize).toBeDefined();
+    expect(finalize?.needs).toEqual(
+      expect.arrayContaining(['resolve-cohort', 'publish-full-product', 'codex-plugin-delivery-verify']),
+    );
+
+    const gate = String(finalize?.if ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    expect(gate).toContain('!cancelled()');
+    expect(gate).toContain("needs.resolve-cohort.outputs.has_cohort == 'true'");
+    expect(gate).toContain("needs.publish-full-product.result == 'success'");
+    expect(gate).toContain("needs.codex-plugin-delivery-verify.result == 'success'");
+    // No escape hatches: the gate is a pure conjunction of explicit results.
+    expect(gate).not.toContain('always()');
+    expect(gate).not.toContain('||');
+
+    // Evaluate the ACTUAL parsed gate for each terminal verify outcome.
+    const verifyOutcomes = ['success', 'failure', 'skipped', 'cancelled'] as const;
+    const evaluate = (verifyResult: (typeof verifyOutcomes)[number]): boolean => {
+      if (!gate.includes('!cancelled()')) return false;
+      if (!gate.includes("needs.resolve-cohort.outputs.has_cohort == 'true'")) return false;
+      const required = [...gate.matchAll(/needs\.([a-z0-9-]+)\.result == 'success'/g)].map((m) => m[1]);
+      if (!required.includes('publish-full-product')) return false;
+      if (!required.includes('codex-plugin-delivery-verify')) return false;
+      const results: Record<string, string> = {
+        'publish-full-product': 'success',
+        'codex-plugin-delivery-verify': verifyResult,
+      };
+      return required.every((job) => results[job] === 'success');
+    };
+    expect(evaluate('success')).toBe(true);
+    for (const outcome of verifyOutcomes.filter((outcome) => outcome !== 'success')) {
+      expect(evaluate(outcome), `verify=${outcome} must not reach finalize`).toBe(false);
+    }
+
+    // The closing steps remain the idempotent release finalizer.
+    expect((finalize?.steps ?? []).some((s) => String(s.uses ?? '').includes('finalize-npm-release'))).toBe(true);
+  });
 });
 
 describe('ci.yml — release intent guard is inside the required gate', () => {

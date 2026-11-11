@@ -52,8 +52,11 @@ export function assertNoDowngrade(current, target) {
 
 const PIN_KEYS = Object.keys(packages);
 
+/** The pin file itself — the ONLY artifact normal PRs are forbidden to edit. */
+export const CODEX_RUNTIME_PIN_PATH = pinsFile;
+
 /** The two Version-PR artifacts this module owns (pin + Codex cache version). */
-export const RUNTIME_PIN_TARGETS = [pinsFile, metadataFile];
+export const RUNTIME_PIN_TARGETS = [CODEX_RUNTIME_PIN_PATH, metadataFile];
 
 /** Exact three-part versions for all four components — the pin contract. */
 export function assertExactPins(pins, label = 'pin') {
