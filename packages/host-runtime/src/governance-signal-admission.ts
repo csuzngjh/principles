@@ -2406,7 +2406,9 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
     // continuation cannot begin diagnosis before the eligible evidence window
     // has been promoted. A promotion failure is retained as a degradation,
     // but never prevents the task from being durably ensured.
-    const codexConsent = input.codexConversationIngestionEnabled === true || input.conversationIngestionEnabled === true;
+    const codexConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
+      ? input.codexConversationIngestionEnabled
+      : input.conversationIngestionEnabled === true;
     const promoted = codexConsent
       ? promoteAdmittedGovernanceEvidence({
         workspaceDir,
@@ -2471,7 +2473,9 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
   const workspaceDir = path.resolve(input.workspaceDir);
   // Accept the pre-rename field too: an older caller paired with this runtime
   // must not silently lose Codex evidence promotion (P2 review).
-  const codexConsent = input.codexConversationIngestionEnabled === true || input.conversationIngestionEnabled === true;
+  const codexConsent = typeof input.codexConversationIngestionEnabled === 'boolean'
+    ? input.codexConversationIngestionEnabled
+    : input.conversationIngestionEnabled === true;
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) {
     return { ok: false, reason: opened.reason, nextAction: opened.nextAction, tasksEnsured: 0, linksRepaired: 0, pendingTails: 0, completedTails: 0, staleTails: 0, degradations: [opened.reason] };

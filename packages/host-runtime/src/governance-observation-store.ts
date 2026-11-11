@@ -461,7 +461,25 @@ interface ApplyObservationArgs {
  * Never overwrites committed content silently (source precedence, SPEC §10).
  */
 function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObservationArgs): ObservationOutcome {
-  const existing = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(input.logicalObservationKey);
+  const byKey = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(input.logicalObservationKey);
+  let existing: unknown = byKey;
+  // Cross-window tool completion by STABLE identity (P2 review): the call row
+  // is keyed by its transcript record, so a later window's result cannot derive
+  // the same logical key. Reconnect it to the single still-partial call row
+  // that carries the same `tool_use_id`. `LIMIT 2` makes ambiguity explicit:
+  // duplicate callIds across windows yield two candidates and are NOT merged.
+  if (!isRecord(byKey)
+    && input.kind === 'tool_call'
+    && input.completeness === 'complete'
+    && typeof input.toolUseId === 'string'
+    && input.toolUseId.length > 0) {
+    const partials = db.prepare(
+      `SELECT * FROM governance_observations
+        WHERE rollout_row_id = ? AND kind = 'tool_call' AND completeness = 'partial' AND tool_use_id = ?
+        LIMIT 2`,
+    ).all(rolloutRowId, input.toolUseId);
+    if (partials.length === 1) [existing] = partials;
+  }
   if (!isRecord(existing)) {
     // Physical replay guard: the same transcript record decoded twice (crash
     // before checkpoint, or a re-invoked hook) must not contribute twice.
@@ -545,11 +563,14 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     && input.completeness === 'complete'
     && rowField(existing, 'completeness') === 'partial';
   if (crossWindowToolCompletion) {
-    const mergedFacts = mergeToolFactsJson(rowField(existing, 'sanitized_tool_facts_json'), incomingFacts);
-    // A partial call committed WITHOUT toolFacts has no JSON to merge against;
-    // falling back to the incoming facts is what keeps a complete result from
-    // landing on a row that silently lost its tool facts (P2 review).
-    const nextFacts = mergedFacts ?? incomingFacts;
+    const existingFactsJson = rowField(existing, 'sanitized_tool_facts_json');
+    const mergedFacts = mergeToolFactsJson(existingFactsJson, incomingFacts);
+    // Fall back to the incoming facts ONLY when the row has none. An existing
+    // but unmergeable value is a bounded truncation preview that is still
+    // committed evidence; replacing it would destroy what the advanced
+    // checkpoint can no longer recover (P2 review).
+    const hasExistingFacts = typeof existingFactsJson === 'string' && existingFactsJson.length > 0;
+    const nextFacts = mergedFacts ?? (hasExistingFacts ? null : incomingFacts);
     if (nextFacts !== null && nextFacts !== rowField(existing, 'sanitized_tool_facts_json')) {
       updates.push('sanitized_tool_facts_json = ?');
       values.push(nextFacts);
