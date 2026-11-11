@@ -248,6 +248,82 @@ describe('validateEvidenceChainRecord', () => {
     expect(validateEvidenceChain(input)).toBeNull();
   });
 
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance reaches the UI as an
+  // internal discriminator only. It is optional and display-only, so a malformed
+  // value is DROPPED rather than rejecting the record (and with it the whole
+  // response) — the same failure class as the missing `workbuddy` hostKind.
+  it('carries the four provenance values and drops unknown/malformed ones', () => {
+    for (const provenance of [
+      'host_context_bound',
+      'owner_reported_no_host_trace',
+      'automatic_hook',
+      'agent_reported_owner_approved',
+    ] as const) {
+      const accepted = validateEvidenceChain(validResponse({ records: [validRecord({ provenance })] }));
+      expect(accepted?.records[0].provenance).toBe(provenance);
+    }
+
+    const unknownValue = validateEvidenceChain({
+      ...validResponse(),
+      records: [{ ...validRecord(), provenance: 'owner_observed_directly' }],
+    });
+    expect(unknownValue).not.toBeNull();
+    expect(unknownValue!.records[0].id).toBe('pain_1');
+    expect(unknownValue!.records[0].provenance).toBeUndefined();
+
+    const malformed = validateEvidenceChain({
+      ...validResponse(),
+      records: [{ ...validRecord(), provenance: 42 }],
+    });
+    expect(malformed).not.toBeNull();
+    expect(malformed!.records[0].id).toBe('pain_1');
+    expect(malformed!.records[0].provenance).toBeUndefined();
+  });
+
+  // PRI-625 / SPEC §6.6.4: the console validator is the trust boundary for
+  // `hostKind`. Core's `EvidenceChainRecord.hostKind` accepts
+  // openclaw | codex | workbuddy | unknown; the console must accept the exact
+  // same set or one valid record nulls the entire API response.
+  it('accepts every hostKind in the core evidence-chain contract', () => {
+    for (const hostKind of ['openclaw', 'codex', 'workbuddy', 'unknown'] as const) {
+      const result = validateEvidenceChain(validResponse({ records: [validRecord({ hostKind })] }));
+      expect(result).not.toBeNull();
+      expect(result!.records[0].hostKind).toBe(hostKind);
+    }
+  });
+
+  it('accepts a response mixing openclaw, codex and workbuddy records', () => {
+    const input = validResponse({
+      records: [
+        validRecord({ id: 'pain_openclaw', hostKind: 'openclaw' }),
+        validRecord({ id: 'pain_codex', hostKind: 'codex' }),
+        validRecord({ id: 'pain_workbuddy', hostKind: 'workbuddy' }),
+      ],
+    });
+    const result = validateEvidenceChain(input);
+    expect(result).not.toBeNull();
+    expect(result!.records.map((record) => record.hostKind)).toEqual([
+      'openclaw',
+      'codex',
+      'workbuddy',
+    ]);
+  });
+
+  it('keeps legacy records without hostKind valid', () => {
+    const legacy = validRecord();
+    expect(legacy.hostKind).toBeUndefined();
+    const result = validateEvidenceChain(validResponse({ records: [legacy] }));
+    expect(result).not.toBeNull();
+    expect(result!.records[0].hostKind).toBeUndefined();
+  });
+
+  it('rejects an unknown hostKind', () => {
+    const input = validResponse({
+      records: [{ ...validRecord(), hostKind: 'cursor' }],
+    });
+    expect(validateEvidenceChain(input)).toBeNull();
+  });
+
   // Evidence-only must be a distinct state from recorded-only (PRI-385 P1-2).
   // The previous assertion claimed to "distinguish" the two but gave both the same
   // `recorded-only` state — a vacuous test. evidence_only observations now carry their

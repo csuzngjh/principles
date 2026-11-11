@@ -679,6 +679,29 @@ const E2E_RULE_BINDING_LEDGER = {
 const E2E_RULE_BINDING_PRINCIPLE_DERIVED_FROM = parentPrincipleCandidate.candidateId;
 console.log('[e2e-seed] rule-binding queue fixtures: split parent+router, 52d-like bound chain, unlinked reply rule');
 
+// SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: source-display tier fixtures.
+// These tasks are joined to the pain events below through `input_ref` =
+// canonical pain id, so the read model can attach `diagnostic_json` provenance
+// exactly like production does.
+const insertProvenanceTask = stateDb.prepare(`
+  INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json, input_ref)
+  VALUES (?, 'diagnostician', 'pending', ?, ?, 1, ?, ?)`);
+insertProvenanceTask.run(
+  'task-mcp-authorized', threeDaysAgo, threeDaysAgo,
+  JSON.stringify({
+    provenance: 'agent_reported_owner_approved',
+    provenanceReason: 'Agent-observed behaviour submitted through MCP with Owner authorization; no host session trace available',
+  }),
+  'pain-e2e-mcp-authorized',
+);
+// Linked task exists but its diagnostic payload carries no provenance: the
+// record must degrade to "authorization unverified".
+insertProvenanceTask.run(
+  'task-mcp-unverified', threeDaysAgo, threeDaysAgo,
+  JSON.stringify({ painId: 'pain-e2e-mcp-unverified' }),
+  'pain-e2e-mcp-unverified',
+);
+
 stateConn.close();
 console.log('[e2e-seed] state.db seeded with approvals plus shadow/live RuleCode Owner review fixtures');
 
@@ -778,6 +801,20 @@ insertPainEvent.run(
   'session-e2e-rule-binding-b', 'manual', 0.8, '结论不前置', 'severe', 'gate',
   0.85, '你发过来的分析我看不懂，结论不知道在哪，以后先说结论。', threeDaysAgo,
   'pain-e2e-reply', 'diagnosis-reply-frontload',
+);
+
+// SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: one record per display tier.
+insertPainEvent.run(
+  'session-e2e-provenance-authorized', 'mcp_agent_assisted', 0.8,
+  '智能体通过 MCP 提交了拥有者已授权的痛点', 'medium', 'mcp', 0.9,
+  'Agent submitted an Owner-authorized pain signal through MCP', threeDaysAgo,
+  'pain-e2e-mcp-authorized', 'task-mcp-authorized',
+);
+insertPainEvent.run(
+  'session-e2e-provenance-unverified', 'mcp_agent_assisted', 0.8,
+  '智能体通过 MCP 提交了授权信息不可验证的痛点', 'medium', 'mcp', 0.9,
+  'Agent submitted a pain signal through MCP without verifiable authorization', threeDaysAgo,
+  'pain-e2e-mcp-unverified', 'task-mcp-unverified',
 );
 
 trajDb.close();

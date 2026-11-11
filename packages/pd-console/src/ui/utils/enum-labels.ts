@@ -66,6 +66,9 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'empathy_inferred': '共情推断',
     'review': '审查发现',
     'unknown': '未知来源',
+    // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: neutral label so the raw
+    // `mcp_agent_assisted` enum never reaches the Owner.
+    'mcp_agent_assisted': '智能体辅助提交',
   },
   channel: {
     'prompt': '提示词 / 可撤销',

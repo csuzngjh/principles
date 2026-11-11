@@ -20,6 +20,7 @@ import * as path from 'path';
 import * as os from 'os';
 import Database from 'better-sqlite3';
 import { EvidenceChainConsoleModel } from '../../src/server/models/EvidenceChainConsoleModel.js';
+import { resolveProvenanceBadge } from '../../src/ui/pages/pain/pain-card-helpers.js';
 import { crossReferenceByTimestamp } from '@principles/core/runtime';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
@@ -2211,5 +2212,86 @@ describe('PRI-469: EvidenceChainConsoleModel — artifacts table reading', () =>
     // Free-text fields should be sanitized — workspace paths removed
     expect(record.intentTension!.explanation).not.toContain(workspacePath);
     expect(record.intentTension!.evidence[0]).not.toContain(workspacePath);
+  });
+});
+
+// ── SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance in the read model ──
+
+describe('v0.8 §6.6.4: EvidenceChainConsoleModel — provenance passthrough', () => {
+  it('carries agent_reported_owner_approved from the persisted task payload', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'mcp_agent_assisted',
+      text: 'Agent modified config without approval',
+      createdAt: '2026-11-10T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'pending',
+      inputRef: String(rowId),
+      diagnosticJson: JSON.stringify({
+        provenance: 'agent_reported_owner_approved',
+        provenanceReason: 'Agent-observed behaviour submitted through MCP with Owner authorization; no host session trace available',
+      }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].provenance).toBe('agent_reported_owner_approved');
+  });
+
+  it('keeps the three legacy provenance values unchanged', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'manual',
+      text: 'Manual pain signal',
+      createdAt: '2026-06-07T10:00:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'pending',
+      inputRef: String(rowId),
+      diagnosticJson: JSON.stringify({ provenance: 'owner_reported_no_host_trace' }),
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    expect(result.records[0].provenance).toBe('owner_reported_no_host_trace');
+  });
+
+  it('degrades to "authorization unverified" when diagnostic_json cannot be parsed', async () => {
+    const trajDb = createTrajectoryDb();
+    const rowId = insertPainEvent(trajDb, {
+      source: 'mcp_agent_assisted',
+      text: 'Agent submitted pain with unreadable diagnostic payload',
+      createdAt: '2026-11-10T10:05:00.000Z',
+    });
+    trajDb.close();
+
+    const stateDb = createStateDb();
+    insertTask(stateDb, {
+      taskId: `diagnosis_pain_${rowId}`,
+      status: 'pending',
+      inputRef: String(rowId),
+      diagnosticJson: '{not-valid-json',
+    });
+    stateDb.close();
+
+    const result = await model.getEvidenceChain();
+    expect(result.records).toHaveLength(1);
+    const record = result.records[0];
+    // The read model keeps the real source kind but has no provenance to offer.
+    expect(record.sourceKind).toBe('mcp_agent_assisted');
+    expect(record.provenance).toBeUndefined();
+    expect(record.degradedReason).toBe('Diagnostic data for this record could not be parsed');
+    // The card must NOT expose the raw enum and must NOT claim authorization.
+    expect(resolveProvenanceBadge(record).kind).toBe('unverified_agent_report');
   });
 });
