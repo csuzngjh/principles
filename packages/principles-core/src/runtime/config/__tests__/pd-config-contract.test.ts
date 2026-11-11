@@ -158,6 +158,21 @@ describe('Scenario 1: Missing config → deterministic defaults', () => {
     const b = getDefaultPdConfig();
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
+
+  it('mutating one returned default config never contaminates later callers', () => {
+    const first = getDefaultPdConfig();
+    const promptEntry = first.features.prompt;
+    expect(promptEntry).toBeDefined();
+    if (!promptEntry) return;
+    expect(promptEntry.enabled).toBe(true);
+
+    promptEntry.enabled = false;
+    first.ui.diagnostics.mode = 'advanced';
+
+    const second = getDefaultPdConfig();
+    expect(second.features.prompt?.enabled).toBe(true);
+    expect(second.ui.diagnostics.mode).toBe('simple');
+  });
 });
 
 // ── Scenario 2: Valid MVP config → effective config correct ────────────────
