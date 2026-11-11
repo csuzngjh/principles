@@ -1,13 +1,16 @@
 # B 系列拆分方案：工具语义与执行结果契约单一化
 
-> 状态：**方案，待 Owner 评审**。本轮未改任何生产代码。
-> 基线：`origin/main` @ `fee93e1b0`（2026-11-10 拉取）。
-> 关联：评审报告 §4.2（B1–B5）、PR #2498（5B）、AGENTS.md P2.1 / P7 / P8。
+> 状态：**执行中**。方案分析保持 v2 原样；本块只记录真实落地状态。
+> 版本：v3（2026-11-11）。v3 只更新执行状态、基线与顺序，不重写架构分析。
+> 基线：`origin/main` @ `389477ad1`（2026-11-11 拉取；B2 合并后的主干）。
+> 关联：评审报告 §4.2（B1–B5）、PR #2498（5B）、PR #2501（B1）、PR #2508（B2）、AGENTS.md P2.1 / P7 / P8。
 >
-> **状态更新（2026-11-11，评审期间追加）**：实施已先行于本方案的裁定——
-> - **B1 已按方案 B 实施并合入**：PR #2501（`09a12057f`）。新增可选 `degraded` + `normalizeRuleHostResult()`，非法结果统一 fail-closed 归一化（生产门 `production-rulehost-gate.ts` 现经 `normalizeRuleHostResult` 处理，不再是 `warning + continue`）。§8 问题 1 由行动回答：**采方案 B**。
-> - **B2 已实施为 PR #2508（OPEN）**：§3.2.2 的缺口（显式粗筛提示压过 `canonicalKind`，生产/回放 `normalizedPath` 分叉）经真实输出证实并修复——`canonicalKind` 成为提取提示唯一权威；§3.2.1（声明覆盖守卫）与 §3.2.3（双常量同源）**验证后取消**（理由见 #2506→#2508 PR 卡 §6；`validateRuleReliability` 已 fail-loud、`tool-semantics.ts` 与 `tools.ts` 已同源）。§8 问题 3 由行动回答：**保留缩窄后的 B2，两个子项取消**。
-> - **B3 / B4 / B5 未动**，仍待 Owner 裁定（§8 问题 2 亦未裁定）。
+> **状态更新（2026-11-11，以 GitHub 实际合并状态为准）**：
+> - **5B 已合入**：PR #2498 → `f1cf77b13`（merged 2026-11-10T23:31:23Z）。B3 的文件级前置条件已满足。
+> - **B1 已按方案 B 实施并合入**：PR #2501 → `09a12057f`（merged 2026-11-10T17:15:35Z）。新增可选 `degraded` + `normalizeRuleHostResult()`，非法结果统一 fail-closed 归一化；生产门 `production-rulehost-gate.ts` 不再 `warning + continue`。§8 问题 1 由行动回答：**采方案 B**。
+> - **B2 已实施并合入**：PR #2508 → `389477ad1`（merged 2026-11-11T00:24:51Z，head `39d5eba54`）。§3.2.2 的缺口经真实输出证实并修复——`canonicalKind` 成为提取提示唯一权威；§3.2.1（声明覆盖守卫）与 §3.2.3（双常量同源）**验证后取消**。§8 问题 3 由行动回答：**保留缩窄后的 B2，两个子项取消**。
+> - **B3 / B4 / B5 未开工**。B4 的调用方盘点已完成（结论见 §8 第 2 条）：仍有生产调用，本批不得删除 legacy `core/rule-host.ts`。
+> - 执行顺序已按实际落地重排，见 §7。
 
 ---
 
@@ -210,11 +213,13 @@
 | `pd-cli/src/commands/runtime-activation.ts` | criteria 输出 | B1 可能改 demo-rule-compiler（不同文件） | 无冲突 |
 | `packages/host-runtime/src/rulecode-event-collection.ts` | 新建 | 无 | 无冲突 |
 
-**顺序建议**：
+**实际顺序（2026-11-11 更新，以上表冲突判断为前提）**：
 
-1. 5B（#2498）先合。
-2. B1 →（若 §3.2 验证成立）B2 → B3 → B4 → B5。
-3. 若 5B 因评审延后，B1 可立即开工（不碰 `host-runtime/src/index.ts` 与 `ActivationsConsoleModel.ts`）；B3 必须等 5B 合入后再动这两个文件。
+1. 5B（#2498）已合入 `f1cf77b13`。
+2. B1（#2501）已合入 `09a12057f`。
+3. B2（#2508，缩窄为 §3.2.2 单项）已合入 `389477ad1`。
+4. 下一步：**B3 → B4 → B5**。B3 的文件级前置（5B 已合）已满足；B4 的盘点已完成，结论为"仍有生产调用，不删除"，因此 B4 收敛为"记录调用方清单"，不再有删除动作；B5 在 B3/B4 之后收口（其结构守卫需要 B3 的入口先落地）。
+5. 原"5B 未合入时 B1 可先开工"的分支建议已失效，保留仅作历史推理。
 
 ---
 
@@ -223,18 +228,23 @@
 1. **B1 采用方案 A 还是方案 B**？我推荐 B（不新增 `verdict/reasons/evidence`，只补 `degraded` 并统一 fail-closed）。理由是方案 A 会制造与 `decision/reason/diagnostics` 同义的第二套词汇。
    【已裁定（由行动，2026-11-10）：采方案 B，PR #2501 已合入 `09a12057f`。】
 2. **B4 是否允许删除 legacy `core/rule-host.ts`**？需要先做调用方盘点；若仍有生产调用，本批只做显式契约，不删除。
-   【仍未裁定（2026-11-11）。】
+   【已盘点（2026-11-11）：**仍有生产调用，本批不删除**。调用链：`openclaw-plugin/src/core/workspace-context.ts:160-167`（`getRuleHost()` 构造 `RuleHost`）→ `openclaw-plugin/src/hooks/gate.ts:109`（`handleBeforeToolCall`）← `openclaw-plugin/src/index.ts:507`（`onBeforeToolResult` 在共享结果 `auto_correct` / `requireApproval` 时回退 legacy 路径）。因此 B4 的交付物是这份调用方清单，不是删除提交。】
 3. **B2 是否允许"验证后取消"**？如果 `withDerivedHints` 已让 `canonicalKind` 胜出，我建议直接取消该批，不为了计划完整性写代码。
    【已裁定（由行动，2026-11-11）：`withDerivedHints` 实测是显式提示胜出（`options.isBashTool ?? derived`），缺口真实存在，故 B2 保留但缩窄为 §3.2.2 单项（PR #2508）；§3.2.1 / §3.2.3 验证后取消。】
 
 ---
 
-## 9. 本轮 NOT RUN
+## 9. 本轮 NOT RUN（方案评审轮，2026-11-10）
 
 - 未改任何生产代码、未建业务分支之外的提交。
 - 未跑测试（方案阶段无代码改动）。
 - 未验证 §1 的三条"待实施前验证"假设（`withDerivedHints` 优先级、invalid→allow 完整路径、legacy 调用图）。
 - 未创建 PR（等方案评审通过后，与实施一起提交）。
+
+> 后续执行轮已补齐（2026-11-11）：
+> - `withDerivedHints` 优先级已实测（显式提示胜出，故 §3.2.2 成立）；
+> - B1 / B2 均有真实反例输出与定向测试，证据见 PR #2501 / #2508 的 Verification Evidence；
+> - legacy 调用图已盘点，结论见 §8 第 2 条。
 
 ---
 
