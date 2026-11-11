@@ -42,8 +42,16 @@ jobs:
       - name: Build pd-console UI
         run: cd packages/pd-console && npm run build:ui
 
+      # ubuntu-latest already ships every Chromium runtime library the suite
+      # needs. `--with-deps` additionally apt-installs font/xfont packages from
+      # archive.ubuntu.com + security.ubuntu.com, which has been the sole cause
+      # of E2E red on unrelated PRs and on main (DNS: "Temporary failure
+      # resolving 'security.ubuntu.com'", apt exit 100) — the test steps never
+      # ran. This suite has no screenshot assertions, so those fonts are not
+      # needed for correctness. Install only the browser: same real tests, one
+      # less unreachable network dependency.
       - name: Install Playwright browsers
-        run: cd packages/pd-console && npx playwright install --with-deps chromium
+        run: cd packages/pd-console && npx playwright install chromium
 
       - name: Run E2E tests
         run: cd packages/pd-console && npx playwright test
