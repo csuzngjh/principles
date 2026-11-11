@@ -77,6 +77,27 @@ const MIN_MAX_TOKENS_BUDGET = 4_096;
 const MAX_TOKENS_REJECTED_PATTERN =
   /max[_ ]?tokens\b[^\n]{0,120}exceed|[Ee]xceeds the maximum output tokens/;
 
+/**
+ * S1: abort reason set by cancelRun(). Node surfaces it through
+ * `AbortSignal.reason`, which lets every classification site tell a caller
+ * cancellation apart from the run's own time budget expiring — both leave
+ * `signal.aborted === true`, so `aborted` alone cannot distinguish them.
+ */
+const CANCEL_ABORT_REASON = 'pd_cancelled_by_caller';
+
+/**
+ * S1: upper bound for one repair call. The repair call now inherits the run's
+ * remaining budget (see repairLLMCall) instead of always getting this much.
+ */
+const REPAIR_TIMEOUT_MS_CEILING = 60_000;
+
+/**
+ * S1: a repair call is pointless when less than this remains in the run's
+ * budget — the attempt would be aborted mid-flight. Skipping it keeps the
+ * already-obtained schema error instead of turning it into a timeout.
+ */
+const MIN_REPAIR_BUDGET_MS = 1_000;
+
 /** PRI-966 G2 P1-03: bounded usage summary from an AssistantMessage. Fields
  * stay null when the provider did not surface a count — never guessed. An
  * all-zero usage object is pi-ai's "provider surfaced nothing" placeholder
@@ -307,6 +328,15 @@ function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   return false;
 }
 
+/**
+ * S1: true only when the run was aborted by an explicit caller cancel, never
+ * when the run's own time budget expired. Both leave `signal.aborted === true`,
+ * so the abort reason is the only reliable discriminator.
+ */
+function isCancelledSignal(signal?: AbortSignal): boolean {
+  return signal?.aborted === true && signal.reason === CANCEL_ABORT_REASON;
+}
+
 interface TimeoutClassificationResult {
   category: 'timeout' | 'execution_failed';
   classification: 'provider_transient_timeout' | 'client_timeout_budget_exhausted' | 'timeout_unclassified' | 'not_applicable';
@@ -451,7 +481,7 @@ interface RunState {
   runId: string;
   startedAt: string;
   endedAt: string;
-  status: 'succeeded' | 'failed' | 'timed_out';
+  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled';
   reason?: string;
   output?: StructuredRunOutput;
 }
@@ -459,6 +489,11 @@ interface RunState {
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private readonly config: PiAiRuntimeAdapterConfig;
   private readonly runs = new Map<string, RunState>();
+  /**
+   * S1: one controller per in-flight run. cancelRun() aborts it; startRun()
+   * clears it in `finally` so a finished run can never be aborted afterwards.
+   */
+  private readonly abortControllers = new Map<string, AbortController>();
   private readonly eventEmitter: StoreEventEmitter;
   private readonly runtimeKind: RuntimeKind = 'pi-ai';
   private readonly defaultCapabilities: RuntimeCapabilities = {
@@ -678,9 +713,34 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       input.timeoutMs !== undefined ? 'runner_input'
         : this.config.timeoutMs !== undefined ? 'adapter_config'
         : 'default';
-    const signal = AbortSignal.timeout(effectiveTimeoutMs);
+    // PRI-633: layered system prompt — base layer from the run's prompt
+    // builder (input.systemPrompt: agent role + protocol) + append layer from
+    // the profile config (this.config.systemPrompt). When both are absent the
+    // Context keeps its pre-PRI-633 shape (no systemPrompt field).
+    // Declared outside the try because the run handle returned afterwards
+    // reports its digest (PRI-1146 P1-02).
+    const systemPrompt = mergeSystemPromptLayers(input.systemPrompt, this.config.systemPrompt);
+    const systemPromptDigest = systemPrompt === undefined
+      ? undefined
+      : createHash('sha256').update(systemPrompt, 'utf8').digest('hex');
 
-    // Build pi-ai Context from inputPayload
+    // S1: one AbortController per run, owning BOTH stop paths:
+    //   - cancelRun() aborts it with CANCEL_ABORT_REASON;
+    //   - the timer below aborts it when the run's time budget expires.
+    // A single controller means every request in the run (all three output
+    // paths + repair calls) shares one deadline, and a real cancel propagates
+    // to the in-flight HTTP request instead of being a documented no-op.
+    // Registered immediately before the first await so the cleanup in `finally`
+    // always pairs with it.
+    const abortController = new AbortController();
+    this.abortControllers.set(runId, abortController);
+    const { signal } = abortController;
+    const runDeadlineAt = Date.now() + effectiveTimeoutMs;
+    const budgetTimer = setTimeout(() => {
+      if (!signal.aborted) abortController.abort();
+    }, effectiveTimeoutMs);
+
+    try {
     const messageContent = typeof input.inputPayload === 'string'
       ? input.inputPayload
       : JSON.stringify(input.inputPayload);
@@ -693,13 +753,6 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     // builder (input.systemPrompt: agent role + protocol) + append layer from
     // the profile config (this.config.systemPrompt). When both are absent the
     // Context keeps its pre-PRI-633 shape (no systemPrompt field).
-    const systemPrompt = mergeSystemPromptLayers(input.systemPrompt, this.config.systemPrompt);
-    // PRI-1146 P1-02: this merged string is exactly what the provider receives
-    // below (and on repair). Reporting its digest lets the receipt bind the
-    // REAL provider prompt instead of a base layer that was never sent.
-    const systemPromptDigest = systemPrompt === undefined
-      ? undefined
-      : createHash('sha256').update(systemPrompt, 'utf8').digest('hex');
     const context: Context = {
       messages: [userMessage],
       ...(systemPrompt ? { systemPrompt } : {}),
@@ -731,7 +784,6 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       },
     });
 
-    try {
       // PRI-271 B3: Three-path fallback chain for structured output
       const schemaRef = input.outputSchemaRef;
       const schema = resolveOutputSchema(schemaRef);
@@ -890,11 +942,18 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             ? parsedOutput as Record<string, unknown>
             : undefined;
 
+          // S1: a repair attempt costs another round trip. When the run budget
+          // is almost gone it can only be aborted mid-flight, replacing a
+          // precise schema error with a vague timeout — so skip it and report
+          // the schema error we already have. attemptsUsed=0 in the telemetry
+          // below is the observable record of the skip.
+          const repairBudgetExhausted = runDeadlineAt - Date.now() < MIN_REPAIR_BUDGET_MS;
+
           const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
             parsedOutput,
             schemaErrors,
             {
-              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input }),
+              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input, runDeadlineAt }),
               schemaCheck: (value: unknown) => Value.Check(schema, value),
               schemaErrors: (value: unknown) =>
                 [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
@@ -905,7 +964,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               schemaSummary,
               schemaJson,
               requiredKeys,
-              maxRepairAttempts: this.config.maxRepairAttempts,
+              maxRepairAttempts: repairBudgetExhausted ? 0 : this.config.maxRepairAttempts,
+
               // PRI-707: when finish metadata proves the output was cut by the
               // token limit, the repair LLM must know — repairing a truncated
               // fragment like a schema misunderstanding produced blind fixes.
@@ -930,8 +990,32 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               repairSummary: repairResult.repairSummary,
               repairAttempts: repairResult.repairAttempts,
               outputPath: 'free_form_with_repair',
+              // S1: never truncate silently — when repair was skipped because
+              // the run budget was nearly spent, say so in the event.
+              ...(repairBudgetExhausted
+                ? {
+                    repairSkipped: true,
+                    repairSkipReason: 'budget_exhausted',
+                    remainingBudgetMs: Math.max(0, runDeadlineAt - Date.now()),
+                  }
+                : {}),
             },
           });
+
+          // S1: an abort during repair must surface as the real stop reason
+          // (caller cancel or budget expiry). The repair loop treats a throwing
+          // llmCaller as "attempt failed", which would otherwise disguise a
+          // stopped run as a schema mismatch.
+          if (isCancelledSignal(signal)) {
+            throw new PDRuntimeError('cancelled', 'LLM run cancelled by caller during output repair', {
+              cancelled: true,
+            });
+          }
+          if (signal.aborted) {
+            throw new PDRuntimeError('timeout', 'LLM run budget exhausted during output repair', {
+              timeoutClassification: 'client_timeout_budget_exhausted',
+            });
+          }
 
           if (repairResult.repaired && repairResult.output) {
             parsedOutput = repairResult.output;
@@ -972,6 +1056,9 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 validationErrors: validationErrorEntries,
                 repairAttempts: evidencePack.repairAttempts,
                 finalFailureReason: evidencePack.finalFailureReason,
+                ...(repairBudgetExhausted
+                  ? { repairSkipped: true, repairSkipReason: 'budget_exhausted' }
+                  : {}),
                 // PRI-707: keep the terminal repair-exhausted event able to
                 // distinguish a token-limit cut from an ordinary schema
                 // failure — mirror the evidencePack finish metadata (PR #1574
@@ -1054,7 +1141,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         }
       }
 
-      if (isAbortError(err, signal)) {
+      if (isCancelledSignal(signal)) {
+        // S1: a caller cancel is terminal and must never be retried, wrapped
+        // as a generic failure, or reported as a timeout — the run did not run
+        // out of time, the Owner withdrew it.
+        runState.status = 'cancelled';
+        runState.reason = 'cancelled: run stopped by caller';
+        timeoutClassification = 'cancelled';
+        if (!providerEvidence) {
+          providerEvidence = safeStringifyPreview(err, 300);
+        }
+      } else if (isAbortError(err, signal)) {
         runState.status = 'timed_out';
         runState.reason = `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=${timeoutSource})`;
         if (timeoutClassification === 'not_applicable') {
@@ -1108,6 +1205,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         },
       });
 
+      // S1: cancellation wins over the generic wrapping below — the category
+      // must be `cancelled` whether the abort surfaced as a thrown AbortError,
+      // a PDRuntimeError from a lower layer, or a provider "aborted" result.
+      if (isCancelledSignal(signal)) {
+        throw new PDRuntimeError('cancelled', 'LLM run cancelled by caller', {
+          elapsedMs,
+          cancelled: true,
+          providerEvidence,
+        });
+      }
+
       // Re-throw PDRuntimeError as-is, wrap others
       if (err instanceof PDRuntimeError) {
         throw err;
@@ -1120,6 +1228,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           providerEvidence,
         }
       );
+    } finally {
+      // S1: the run is terminal — release the abort handle and the budget timer
+      // so a finished run can never be aborted and the timer cannot keep the
+      // process alive.
+      clearTimeout(budgetTimer);
+      this.abortControllers.delete(runId);
     }
 
     return { runId, runtimeKind: 'pi-ai', startedAt, ...(systemPromptDigest === undefined ? {} : { systemPromptDigest }) };
@@ -1141,11 +1255,22 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    // One-shot mode: startRun() blocks until LLM responds, so cancel is always a no-op.
-    // The run is already terminal by the time cancelRun could be called.
-    const state = this.runs.get(runId);
-    if (state && state.status === 'succeeded') {
+    // S1: abort the in-flight request. The abort reason is what lets the run
+    // be classified as `cancelled` instead of `timeout` downstream.
+    const controller = this.abortControllers.get(runId);
+    if (!controller) {
+      // Terminal or unknown run: nothing is in flight to stop.
       return;
+    }
+    if (!controller.signal.aborted) {
+      controller.abort(CANCEL_ABORT_REASON);
+    }
+    // The run's catch block performs the authoritative status transition; this
+    // keeps pollRun() truthful even if the provider ignores the abort.
+    const state = this.runs.get(runId);
+    if (state && state.status !== 'succeeded') {
+      state.status = 'cancelled';
+      state.reason = 'cancelled: run stopped by caller';
     }
   }
 
@@ -1381,18 +1506,23 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * Returns extracted text response or null if no content.
    * Reuses same provider/model/apiKey as the original call.
    *
-   * Uses an independent AbortSignal (fixed 60s timeout) to avoid the repair
-   * call immediately timing out when the original call consumed most of the
-   * original timeout budget (e.g., 5min original → 4m50s elapsed → 10s left).
+   * S1: the repair call inherits the run's REMAINING time budget instead of a
+   * fresh fixed 60s allowance. Before this, a repair request could outlive the
+   * run's own deadline by up to a minute, so the run "timed out" long after the
+   * caller stopped waiting for it.
    */
    
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
-    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string; input: StartRunInput },
+    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string; input: StartRunInput; runDeadlineAt: number },
   ): Promise<string | null> {
-    const REPAIR_TIMEOUT_MS = 60_000;
-    const repairSignal = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
+    const remainingMs = options.runDeadlineAt - Date.now();
+    // Defensive: the call site already skips repair when the budget is nearly
+    // spent. If it still happens (clock skew between the two checks), do not
+    // send a request that cannot finish.
+    if (remainingMs < MIN_REPAIR_BUDGET_MS) return null;
+    const repairTimeoutMs = Math.min(REPAIR_TIMEOUT_MS_CEILING, remainingMs);
 
     const repairMessage: UserMessage = {
       role: 'user',
@@ -1407,9 +1537,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     };
 
     const response = await completeSimple(model, repairContext, {
-      signal: repairSignal,
+      // The run signal already carries the shared deadline (and any caller
+      // cancel); the per-attempt timeout mirrors what is left of it.
+      signal: options.signal,
       apiKey: options.apiKey,
-      timeoutMs: REPAIR_TIMEOUT_MS,
+      timeoutMs: repairTimeoutMs,
       maxRetries: 0,
       maxTokens: this.resolveEffectiveMaxTokens(options.input, model),
       // PRI-683 transport ownership: repair calls ride the same dedicated PD
