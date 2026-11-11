@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "../../../lib/utils.js";
+import { FieldLabel } from "../../components/ui/field-label.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import {
   createRuntimeProfile,
@@ -246,23 +247,23 @@ export function RuntimeProfileManager({
   };
 
   const inputClass =
-    "bg-surface border border-line-2 rounded-[3px] px-[10px] py-[6px] text-[12.5px] text-ink focus:outline-none focus:border-gov disabled:opacity-50 disabled:cursor-not-allowed w-full";
+    "bg-surface border border-line-2 rounded-[3px] px-[10px] py-[6px] text-caption text-ink focus:outline-none focus:border-gov disabled:opacity-50 disabled:cursor-not-allowed w-full";
   const labelClass =
-    "block font-mono text-[10.5px] uppercase tracking-[0.04em] text-ink-4 mb-[4px]";
-  const hintClass = "mt-[3px] text-[11px] text-ink-4 leading-[1.4]";
+    "block font-mono text-caption uppercase tracking-[0.04em] text-ink-4 mb-[4px]";
+  const hintClass = "mt-[3px] text-caption text-ink-4 leading-[1.4]";
 
   return (
     <div id="runtime-profile-manager" className="scroll-mt-4">
       {/* Header row: title + create button */}
       <div className="flex items-center justify-between gap-[12px] mb-3">
-        <p className="text-ink-3 text-[13px] leading-relaxed">
+        <p className="text-ink-3 text-body leading-relaxed">
           {t("pages.controlCenter.profiles.sectionDescription")}
         </p>
         {mode === "closed" && (
           <button
             type="button"
             onClick={openCreate}
-            className="shrink-0 border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            className="shrink-0 border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           >
             {t("pages.controlCenter.profiles.createButton")}
           </button>
@@ -276,7 +277,7 @@ export function RuntimeProfileManager({
           className="mb-[10px] bg-panel border border-line rounded-[6px] px-[16px] py-[14px]"
         >
           <div className="flex items-center justify-between mb-3">
-            <h4 className="text-[13px] font-semibold text-ink">
+            <h4 className="text-body font-semibold text-ink">
               {mode === "create"
                 ? t("pages.controlCenter.profiles.formTitleCreate")
                 : t("pages.controlCenter.profiles.formTitleEdit", {
@@ -412,7 +413,7 @@ export function RuntimeProfileManager({
             <button
               type="submit"
               disabled={submitting}
-              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {submitting
                 ? mode === "create"
@@ -424,7 +425,7 @@ export function RuntimeProfileManager({
               type="button"
               onClick={closeForm}
               disabled={submitting}
-              className="border border-line bg-surface text-ink-3 rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-line-2 hover:text-ink transition-colors disabled:opacity-50"
+              className="border border-line bg-surface text-ink-3 rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-line-2 hover:text-ink transition-colors disabled:opacity-50"
             >
               {t("pages.controlCenter.profiles.cancelButton")}
             </button>
@@ -434,13 +435,13 @@ export function RuntimeProfileManager({
 
       {/* Profile table */}
       {profiles.length === 0 ? (
-        <div className="bg-surface border border-line-2 rounded-[4px] px-[16px] py-[14px] text-[12.5px] text-ink-4 italic">
+        <div className="bg-surface border border-line-2 rounded-[4px] px-[16px] py-[14px] text-caption text-ink-4 italic">
           {t("pages.controlCenter.profiles.empty")}
         </div>
       ) : (
         <div className="bg-surface border border-line-2 rounded-[4px] overflow-hidden">
-          {/* Header row */}
-          <div className="grid grid-cols-[12px_1fr_84px_1fr_1fr_1fr_auto] gap-[10px] items-center px-[16px] py-[9px] bg-paper-2 border-b border-line-2 font-mono text-[10.5px] uppercase tracking-[0.04em] text-ink-4">
+          {/* Header row — desktop only; the narrow layout labels each field inline. */}
+          <div className="hidden md:grid grid-cols-[12px_minmax(150px,1fr)_84px_1fr_1fr_1fr_auto] gap-[10px] items-center px-[16px] py-[9px] bg-paper-2 border-b border-line-2 font-mono text-caption uppercase tracking-[0.04em] text-ink-4">
             <span />
             <span>{t("pages.controlCenter.profiles.columnId")}</span>
             <span>{t("pages.controlCenter.profiles.columnType")}</span>
@@ -461,7 +462,7 @@ export function RuntimeProfileManager({
                 key={p.id}
                 className="border-b border-line-2 last:border-b-0"
               >
-                <div className="grid grid-cols-[12px_1fr_84px_1fr_1fr_1fr_auto] gap-[10px] items-center px-[16px] py-[10px] text-[12.5px]">
+                <div className="grid grid-cols-[12px_minmax(0,1fr)] gap-x-[8px] gap-y-[6px] px-[14px] py-[10px] text-caption md:grid-cols-[12px_minmax(150px,1fr)_84px_1fr_1fr_1fr_auto] md:items-center md:gap-[10px] md:px-[16px]">
                   {/* readiness dot */}
                   <div
                     className={readinessDotClasses(p.readiness)}
@@ -470,38 +471,50 @@ export function RuntimeProfileManager({
                   />
                   {/* id */}
                   <div className="min-w-0 flex items-center gap-[6px]">
-                    <span className="font-mono text-[12px] text-ink truncate">
+                    <span className="min-w-0 font-mono text-[12px] text-ink truncate" title={p.id}>
                       {p.id}
                     </span>
                     {isDefault && (
-                      <span className="shrink-0 text-[9.5px] font-mono px-[5px] py-[1px] rounded-[2px] bg-gov/10 text-gov border border-gov/22 tracking-[0.02em]">
+                      <span className="shrink-0 text-caption font-mono px-[5px] py-[1px] rounded-[2px] bg-gov/10 text-gov border border-gov/22 tracking-[0.02em]">
                         default
                       </span>
                     )}
                   </div>
                   {/* type */}
-                  <span className="font-mono text-[11.5px] text-ink-3 flex items-center gap-[5px]">
-                    {p.type}
-                    {p.type === "openclaw" && (
-                      <span className="text-[9.5px] font-mono px-[5px] py-[1px] rounded-[2px] bg-amber/10 text-amber border border-amber/22 tracking-[0.02em]">
-                        {t("pages.controlCenter.profiles.retiredBadge")}
-                      </span>
-                    )}
-                  </span>
+                  <div className="col-span-2 flex items-center gap-[6px] md:col-span-1 md:block">
+                    <FieldLabel>{t("pages.controlCenter.profiles.columnType")}</FieldLabel>
+                    <span className="font-mono text-caption text-ink-3 flex items-center gap-[5px]">
+                      {p.type}
+                      {p.type === "openclaw" && (
+                        <span className="text-caption font-mono px-[5px] py-[1px] rounded-[2px] bg-amber/10 text-amber border border-amber/22 tracking-[0.02em]">
+                          {t("pages.controlCenter.profiles.retiredBadge")}
+                        </span>
+                      )}
+                    </span>
+                  </div>
                   {/* provider */}
-                  <span className="text-ink-3 truncate">
-                    {p.provider ?? "—"}
-                  </span>
+                  <div className="col-span-2 flex min-w-0 items-baseline gap-[6px] md:col-span-1 md:block">
+                    <FieldLabel>{t("pages.controlCenter.profiles.columnProvider")}</FieldLabel>
+                    <span className="min-w-0 break-words text-ink-3 md:truncate">
+                      {p.provider ?? "—"}
+                    </span>
+                  </div>
                   {/* model */}
-                  <span className="text-ink-3 truncate">
-                    {p.model ?? "—"}
-                  </span>
+                  <div className="col-span-2 flex min-w-0 items-baseline gap-[6px] md:col-span-1 md:block">
+                    <FieldLabel>{t("pages.controlCenter.profiles.columnModel")}</FieldLabel>
+                    <span className="min-w-0 break-words text-ink-3 md:truncate">
+                      {p.model ?? "—"}
+                    </span>
+                  </div>
                   {/* apiKeyEnv */}
-                  <span className="font-mono text-[11.5px] text-ink-3 truncate">
-                    {p.apiKeyEnv ?? "—"}
-                  </span>
+                  <div className="col-span-2 flex min-w-0 items-baseline gap-[6px] md:col-span-1 md:block">
+                    <FieldLabel>{t("pages.controlCenter.profiles.columnApiKeyEnv")}</FieldLabel>
+                    <span className="min-w-0 break-words font-mono text-caption text-ink-3 md:truncate">
+                      {p.apiKeyEnv ?? "—"}
+                    </span>
+                  </div>
                   {/* actions */}
-                  <div className="flex items-center justify-end gap-[6px]">
+                  <div className="col-span-2 flex items-center gap-[6px] md:col-span-1 md:justify-end">
                     {/* ADR-0029: legacy openclaw profiles are read-only — no Edit,
                         only Delete (so the Owner can migrate to pi-ai). */}
                     {p.type !== "openclaw" && (
@@ -509,7 +522,7 @@ export function RuntimeProfileManager({
                         type="button"
                         onClick={() => openEdit(p)}
                         disabled={mode !== "closed" || deleting}
-                        className="text-[11.5px] px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-line-2 hover:text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="text-caption px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-line-2 hover:text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {t("pages.controlCenter.profiles.editButton")}
                       </button>
@@ -525,7 +538,7 @@ export function RuntimeProfileManager({
                         deleting ||
                         deleteTarget !== null
                       }
-                      className="text-[11.5px] px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-danger/40 hover:text-danger transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="text-caption px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-danger/40 hover:text-danger transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {t("pages.controlCenter.profiles.deleteButton")}
                     </button>
@@ -547,7 +560,7 @@ export function RuntimeProfileManager({
                         </div>
                       )}
                       {deleteError !== null && (
-                        <div className="mt-2 font-mono text-[11.5px] text-danger">
+                        <div className="mt-2 font-mono text-caption text-danger">
                           {deleteError}
                         </div>
                       )}
@@ -556,7 +569,7 @@ export function RuntimeProfileManager({
                           type="button"
                           onClick={handleDeleteConfirm}
                           disabled={deleting}
-                          className="text-[11.5px] px-[12px] py-[4px] rounded-[3px] border border-transparent bg-danger text-paper font-medium hover:opacity-90 transition-opacity disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                          className="text-caption px-[12px] py-[4px] rounded-[3px] border border-transparent bg-danger text-paper font-medium hover:opacity-90 transition-opacity disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                         >
                           {deleting
                             ? t("pages.controlCenter.profiles.deleting")
@@ -566,7 +579,7 @@ export function RuntimeProfileManager({
                           type="button"
                           onClick={handleDeleteCancel}
                           disabled={deleting}
-                          className="text-[11.5px] px-[12px] py-[4px] rounded-[3px] border border-line bg-transparent text-ink-3 hover:border-line-2 transition-colors disabled:opacity-50"
+                          className="text-caption px-[12px] py-[4px] rounded-[3px] border border-line bg-transparent text-ink-3 hover:border-line-2 transition-colors disabled:opacity-50"
                         >
                           {t("pages.controlCenter.profiles.deleteConfirmCancel")}
                         </button>

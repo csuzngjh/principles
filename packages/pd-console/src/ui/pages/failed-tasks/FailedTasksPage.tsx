@@ -38,6 +38,7 @@ import { PageLoading } from "../../components/layout/page-loading.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card.js";
 import { Button } from "../../components/ui/button.js";
+import { FieldLabel } from "../../components/ui/field-label.js";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -355,12 +356,12 @@ export function FailedTasksPage() {
     <PageShell>
       {/* Page header */}
       <div className="mb-8">
-        <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
           {t("pages.failedTasks.title")}
         </div>
         <ShinyText
           as="h1"
-          className="text-[29px] font-semibold tracking-tight text-ink mt-3 mb-2"
+          className="text-display font-semibold tracking-tight text-ink mt-3 mb-2"
           duration={4.5}
           brightness={0.5}
           disabled={state.status !== "loaded" || state.data.tasks.length === 0}
@@ -379,7 +380,7 @@ export function FailedTasksPage() {
 
       {state.status === "disabled" && (
         <div className="py-8">
-          <div className="p-5 bg-panel border border-amber/20 rounded-[var(--radius-md)] text-amber text-[13px] leading-relaxed">
+          <div className="p-5 bg-panel border border-amber/20 rounded-[var(--radius-md)] text-amber text-body leading-relaxed">
             {t("pages.failedTasks.disabled")}
           </div>
           <div className="mt-4">
@@ -396,7 +397,7 @@ export function FailedTasksPage() {
             {t("pages.failedTasks.error")}: {state.message}
           </div>
           {state.nextAction && (
-            <div className="text-ink-3 text-[13px] mb-3">{state.nextAction}</div>
+            <div className="text-ink-3 text-body mb-3">{state.nextAction}</div>
           )}
           <Button variant="outline" size="sm" onClick={loadData}>
             {t("common.refresh")}
@@ -430,7 +431,7 @@ export function FailedTasksPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("pages.failedTasks.recoverConfirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-2 text-[13px] leading-relaxed">
+              <div className="space-y-2 text-body leading-relaxed">
                 <div>
                   <span className="font-medium">{t("pages.failedTasks.recoverConfirmStatus")}:</span>{" "}
                   <span className="font-mono">{recoverTarget?.status ?? "—"}</span>
@@ -514,7 +515,7 @@ function PipelineHealthCard({ pipeline, t }: { pipeline: PipelineHealthInfo; t: 
   return (
     <div className="p-5 bg-panel border border-line rounded-[var(--radius-md)] mb-4">
       <div className="flex items-center gap-3 mb-2">
-        <span className="text-[15px] font-semibold text-ink">{t("pages.failedTasks.pipeline.title")}</span>
+        <span className="text-reading font-semibold text-ink">{t("pages.failedTasks.pipeline.title")}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full border ${
           variant === "destructive" ? "border-red-300 text-red-700 bg-red-50"
           : variant === "amber" ? "border-amber-300 text-amber-700 bg-amber-50"
@@ -539,7 +540,7 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
     return (
       <div className="py-8">
         <div className="p-5 bg-panel border border-line rounded-[var(--radius-md)]">
-          <h3 className="text-[17px] font-semibold text-ink mb-2">
+          <h3 className="text-subtitle font-semibold text-ink mb-2">
             {t("pages.failedTasks.empty")}
           </h3>
           {data.nextAction && (
@@ -566,7 +567,7 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">{t("pages.failedTasks.kind")}</Badge>
-                  <CardTitle className="text-[15px] font-mono">
+                  <CardTitle className="text-reading font-mono">
                     {kind} ({tasks.length})
                   </CardTitle>
                 </div>
@@ -586,7 +587,7 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
       </div>
 
       {/* Footer: total count + partial-results hint */}
-      <div className="mt-8 font-mono text-[11px] text-ink-4 space-y-1">
+      <div className="mt-8 font-mono text-caption text-ink-4 space-y-1">
         <div>{t("common.total")}: {data.total}</div>
         {data.total > data.tasks.length && (
           <div className="text-amber/80 leading-relaxed">
@@ -673,8 +674,8 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
 
   return (
     <div className="space-y-2">
-      {/* Column headers */}
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] gap-3 pb-2 border-b border-line font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4">
+      {/* Column headers — desktop only; the narrow layout uses inline labels. */}
+      <div className="hidden grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] gap-3 pb-2 border-b border-line font-mono text-caption uppercase tracking-[0.08em] text-ink-4 md:grid">
         <span aria-hidden="true" />
         <span>{t("pages.failedTasks.taskId")}</span>
         <span>{t("pages.failedTasks.painId")}</span>
@@ -691,7 +692,7 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
         const isExpanded = expandedId === task.taskId;
         return (
           <Fragment key={task.taskId}>
-            <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] gap-3 py-2 items-center text-[13px] border-b border-line/50 last:border-b-0">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 py-3 items-start text-body border-b border-line/50 last:border-b-0 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-3 md:py-2">
               <Button
                 variant="quiet"
                 size="icon"
@@ -703,45 +704,67 @@ function TaskTable({ tasks, onCreateDraft, onRecover, initialExpandedTaskId, t }
               >
                 {isExpanded ? "▾" : "▸"}
               </Button>
-              <span className="font-mono text-ink-2 truncate" title={task.taskId}>
-                {truncateId(task.taskId)}
-              </span>
-              <span className="font-mono text-ink-3 truncate" title={task.painId ?? ""}>
-                {task.painId ? truncateId(task.painId) : t("pages.failedTasks.noPainId")}
-              </span>
-              <Badge variant={statusToVariant(task.status)}>{task.status}</Badge>
-              <span className="text-ink-3 truncate" title={task.lastError ?? ""}>
-                {task.lastError ?? "—"}
-              </span>
-              <span className="font-mono text-ink-2 text-center">{task.attemptCount}</span>
-              <span className="font-mono text-ink-3 text-[12px]">
-                {task.lastAttemptAt ? formatDateTime(task.lastAttemptAt) : "—"}
-              </span>
-              {task.ownerDecisionRequired === true ? (
-                <span className="whitespace-nowrap text-[12px]">
-                  <span className="text-amber">{t("pages.failedTasks.awaitingOwnerDecision")}</span>{" "}
-                  <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
-                    {t("pages.failedTasks.goGovernanceFocus")}
-                  </a>
+              <div className="flex min-w-0 items-baseline gap-2 md:block">
+                <FieldLabel>{t("pages.failedTasks.taskId")}</FieldLabel>
+                <span className="min-w-0 font-mono text-ink-2 truncate" title={task.taskId}>
+                  {truncateId(task.taskId)}
                 </span>
-              ) : onRecover ? (
+              </div>
+              <div className="col-span-2 flex min-w-0 items-baseline gap-2 md:col-span-1 md:block">
+                <FieldLabel>{t("pages.failedTasks.painId")}</FieldLabel>
+                <span className="min-w-0 font-mono text-ink-3 truncate" title={task.painId ?? ""}>
+                  {task.painId ? truncateId(task.painId) : t("pages.failedTasks.noPainId")}
+                </span>
+              </div>
+              <div className="col-span-2 flex items-center gap-2 md:col-span-1 md:block">
+                <FieldLabel>{t("pages.failedTasks.status")}</FieldLabel>
+                <Badge variant={statusToVariant(task.status)}>{task.status}</Badge>
+              </div>
+              <div className="col-span-2 flex min-w-0 items-baseline gap-2 md:col-span-1 md:block">
+                <FieldLabel>{t("pages.failedTasks.lastError")}</FieldLabel>
+                <span className="min-w-0 break-words text-ink-3 md:truncate" title={task.lastError ?? ""}>
+                  {task.lastError ?? "—"}
+                </span>
+              </div>
+              <div className="col-span-2 flex items-baseline gap-2 md:col-span-1 md:block md:text-center">
+                <FieldLabel>{t("pages.failedTasks.attempts")}</FieldLabel>
+                <span className="font-mono text-ink-2">{task.attemptCount}</span>
+              </div>
+              <div className="col-span-2 flex items-baseline gap-2 md:col-span-1 md:block">
+                <FieldLabel>{t("pages.failedTasks.lastAttempt")}</FieldLabel>
+                <span className="font-mono text-ink-3 text-[12px]">
+                  {task.lastAttemptAt ? formatDateTime(task.lastAttemptAt) : "—"}
+                </span>
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                {task.ownerDecisionRequired === true ? (
+                  <span className="text-[12px] md:whitespace-nowrap">
+                    <span className="text-amber">{t("pages.failedTasks.awaitingOwnerDecision")}</span>{" "}
+                    <a href="#/focus" className="text-gov underline underline-offset-2 hover:text-gov/80" data-testid={`go-focus-${task.taskId}`}>
+                      {t("pages.failedTasks.goGovernanceFocus")}
+                    </a>
+                  </span>
+                ) : onRecover ? (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => onRecover(task)}
+                    className="whitespace-nowrap"
+                  >
+                    {t("pages.failedTasks.recover")}
+                  </Button>
+                ) : null}
+              </div>
+              <div className="col-span-2 md:col-span-1">
                 <Button
-                  variant="default"
+                  variant="outline"
                   size="sm"
-                  onClick={() => onRecover(task)}
+                  onClick={() => onCreateDraft(task)}
                   className="whitespace-nowrap"
                 >
-                  {t("pages.failedTasks.recover")}
+                  {t("pages.failedTasks.createDraft")}
                 </Button>
-              ) : null}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onCreateDraft(task)}
-                className="whitespace-nowrap"
-              >
-                {t("pages.failedTasks.createDraft")}
-              </Button>
+              </div>
             </div>
             {isExpanded && (
               <div className="border border-line/60 rounded-[var(--radius-md)] bg-panel/60 p-4 mb-2" data-testid={`detail-panel-${task.taskId}`}>
@@ -778,7 +801,7 @@ interface TaskDetailPanelProps {
 function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
   if (state.status === "loading") {
     return (
-      <div className="text-ink-3 text-[13px]" data-testid="detail-loading">
+      <div className="text-ink-3 text-body" data-testid="detail-loading">
         {t("common.loading")}
       </div>
     );
@@ -787,7 +810,7 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
   if (state.status === "error") {
     // rc-9: reason + next action + an explicit retry affordance
     return (
-      <div className="text-[13px] space-y-2" data-testid="detail-error">
+      <div className="text-body space-y-2" data-testid="detail-error">
         <div className="text-danger">
           {t("pages.failedTasks.detailError")}: {state.message}
         </div>
@@ -805,7 +828,7 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
   // superseded mid-flight; treat it as loading for the row just expanded.
   if (state.status === "idle" || state.taskId !== taskId) {
     return (
-      <div className="text-ink-3 text-[13px]" data-testid="detail-loading">
+      <div className="text-ink-3 text-body" data-testid="detail-loading">
         {t("common.loading")}
       </div>
     );
@@ -814,7 +837,7 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
   const { data } = state;
 
   return (
-    <div className="space-y-4 text-[13px]">
+    <div className="space-y-4 text-body">
       {/* Full task record (the list truncates ids and error category) */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-[12px]">
         <span className="text-ink-4 uppercase tracking-[0.08em] self-center">{t("pages.failedTasks.taskId")}</span>
@@ -842,14 +865,14 @@ function TaskDetailPanel({ state, taskId, onRetry, t }: TaskDetailPanelProps) {
       {/* Run history — the per-attempt free-text reason is the part the list
           view cannot show and the reason this endpoint was built. */}
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4 mb-2">
+        <div className="font-mono text-caption uppercase tracking-[0.08em] text-ink-4 mb-2">
           {t("pages.failedTasks.runsTitle")} ({data.runs.length})
         </div>
         {data.runs.length === 0 ? (
           <div className="text-ink-3">{t("pages.failedTasks.noRuns")}</div>
         ) : (
           <div className="space-y-1">
-            <div className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)] gap-3 pb-1 border-b border-line/50 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-4">
+            <div className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)] gap-3 pb-1 border-b border-line/50 font-mono text-caption uppercase tracking-[0.08em] text-ink-4">
               <span>{t("pages.failedTasks.runAttempt")}</span>
               <span>{t("pages.failedTasks.status")}</span>
               <span>{t("pages.failedTasks.runStarted")}</span>

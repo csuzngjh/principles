@@ -140,7 +140,7 @@ export function ExaminerStudyPage(): React.ReactElement {
             {t('pages.examiner.study.back')}
           </Link>
         </div>
-        <h1 className="mt-1 break-all font-mono text-[18px] font-semibold text-ink" data-testid="examiner-study-title">
+        <h1 className="mt-1 break-all font-mono text-subtitle font-semibold text-ink" data-testid="examiner-study-title">
           {studyId}
         </h1>
       </header>
@@ -186,7 +186,7 @@ export function ExaminerStudyPage(): React.ReactElement {
               {/* Phase D1/D2: F2 is NOT an executable action. It is shown as a
                   stated, non-clickable limitation with the reason and next step,
                   so nobody can mistake it for an available run mode. */}
-              <div className="w-full rounded-md border border-dashed p-2 text-[11px] text-muted-foreground" data-testid="examiner-f2-unavailable">
+              <div className="w-full rounded-md border border-dashed p-2 text-caption text-muted-foreground" data-testid="examiner-f2-unavailable">
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="outline" size="sm" disabled data-testid="examiner-f2-button">
                     <Radio className="size-4" />
@@ -210,7 +210,7 @@ export function ExaminerStudyPage(): React.ReactElement {
                 </Button>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">{t('pages.examiner.study.modesNote')}</p>
+            <p className="text-caption text-muted-foreground">{t('pages.examiner.study.modesNote')}</p>
 
             {actionError !== null && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive" data-testid="examiner-action-error">
@@ -263,10 +263,10 @@ export function ExaminerStudyPage(): React.ReactElement {
                 )}
                 <div className="flex flex-wrap gap-1" data-testid="examiner-study-snapshot-markers">
                   {snapshot.experimentVsProduction.markers.map((marker) => (
-                    <span key={marker} className="rounded bg-amber-500/15 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-400">{marker}</span>
+                    <span key={marker} className="rounded bg-amber-500/15 px-2 py-0.5 font-mono text-caption text-amber-700 dark:text-amber-400">{marker}</span>
                   ))}
                   {snapshot.experimentVsProduction.markers.length === 0 && (
-                    <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">
+                    <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-caption text-emerald-700 dark:text-emerald-400">
                       {t('pages.examiner.study.snapshot.matchesProduction')}
                     </span>
                   )}
@@ -287,16 +287,16 @@ export function ExaminerStudyPage(): React.ReactElement {
             {runs.map((run) => (
               <div key={run.runId} className="rounded-md border p-2" data-testid={`examiner-console-run-${run.status}`}>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${run.status === 'FINISHED' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : run.status === 'RUNNING' ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'}`}>
+                  <span className={`rounded px-1.5 py-0.5 font-mono text-caption ${run.status === 'FINISHED' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : run.status === 'RUNNING' ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400'}`}>
                     {run.status}
                   </span>
                   <span className="font-mono">{run.mode}</span>
                   <span className="text-muted-foreground">{new Date(run.acceptedAt).toLocaleString()}</span>
-                  {run.outcome !== null && <span className="font-mono text-[10px]">{run.outcome}</span>}
+                  {run.outcome !== null && <span className="font-mono text-caption">{run.outcome}</span>}
                 </div>
                 {run.reason !== null && <div className="mt-1 text-muted-foreground">{run.reason}</div>}
                 {run.checks !== undefined && run.checks.length > 0 && (
-                  <ul className="mt-1 grid gap-0.5 font-mono text-[10px]" data-testid={`examiner-console-run-checks-${run.runId}`}>
+                  <ul className="mt-1 grid gap-0.5 font-mono text-caption" data-testid={`examiner-console-run-checks-${run.runId}`}>
                     {run.checks.map((check) => (
                       <li key={check.id} className={check.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive'}>
                         {check.ok ? 'PASS' : 'FAIL'} · {check.id}: {check.detail}

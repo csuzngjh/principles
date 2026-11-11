@@ -131,38 +131,38 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
   return <div className="owner-work-approval space-y-7 pb-40">
     {/* ① 是什么 — the object itself, before any judgement */}
     <section id="approval-section-what" data-testid="approval-section-what">
-      <h3 className="mb-3 text-[15px] font-medium text-ink">{t('pages.focus.workbench.proposal')}</h3>
+      <h3 className="mb-3 text-reading font-medium text-ink">{t('pages.focus.workbench.proposal')}</h3>
       {loading ? <p role="status" className="text-sm text-ink-3">{t('pages.focus.workbench.loading')}</p> : <>
         {bodyText ? <>
           <p className="mb-2 text-[12px] text-ink-4">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.codePreview' : 'pages.focus.workbench.textPreview')}</p>
-          <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink">{truncateByCodePoints(bodyText, 240)}</p>
-          <details className="mt-4 rounded-[4px] border border-line px-4 py-3 text-[13px]"><summary className="cursor-pointer text-gov">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.fullCode' : 'pages.focus.workbench.fullText')}</summary>
-            <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink-2">{bodyText}</div>
+          <p className="whitespace-pre-wrap break-words text-reading leading-[1.85] text-ink">{truncateByCodePoints(bodyText, 240)}</p>
+          <details className="mt-4 rounded-[4px] border border-line px-4 py-3 text-body"><summary className="cursor-pointer text-gov">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.fullCode' : 'pages.focus.workbench.fullText')}</summary>
+            <div className="mt-4 whitespace-pre-wrap break-words text-reading leading-[1.85] text-ink-2">{bodyText}</div>
           </details>
         </> : <p className="text-sm text-amber">{t('pages.focus.workbench.exactMaterialMissing')}</p>}
-        {review?.material.scope.length ? <div className="mt-4"><h4 className="text-sm font-medium text-ink">{t('pages.focus.workbench.scope')}</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-[13px] leading-relaxed text-ink-2">{review.material.scope.map((scope, index) => <li key={index}>{scope}</li>)}</ul></div> : null}
-        {review?.material.rationale && <details className="mt-4 text-[13px] text-ink-3"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.reasonAndScope')}</summary><p className="mt-3 whitespace-pre-wrap leading-relaxed">{review.material.rationale}</p></details>}
-        {revisionReview && <details className="mt-4 text-[13px] leading-relaxed text-ink-2"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.compare')}</summary>
+        {review?.material.scope.length ? <div className="mt-4"><h4 className="text-sm font-medium text-ink">{t('pages.focus.workbench.scope')}</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-body leading-relaxed text-ink-2">{review.material.scope.map((scope, index) => <li key={index}>{scope}</li>)}</ul></div> : null}
+        {review?.material.rationale && <details className="mt-4 text-body text-ink-3"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.reasonAndScope')}</summary><p className="mt-3 whitespace-pre-wrap leading-relaxed">{review.material.rationale}</p></details>}
+        {revisionReview && <details className="mt-4 text-body leading-relaxed text-ink-2"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.compare')}</summary>
           <p className="mt-3 whitespace-pre-wrap">{revisionReview.oldStatement}</p><p className="mt-3 whitespace-pre-wrap">{revisionReview.newStatement}</p>
           <dl className="mt-3">{Object.entries(revisionReview.intentFields).map(([key, value]) => <div key={key}><dt className="font-medium">{t(`pages.focus.intentField.${key}`, { defaultValue: key })}</dt><dd>{value}</dd></div>)}</dl>
         </details>}
         <details className="mt-4 text-[12px] text-ink-4"><summary className="cursor-pointer">{t('pages.focus.workbench.subjectDetails')}</summary>
           <dl className="mt-2 break-all font-mono"><div>approval: {approvalId}</div><div>artifact: {review?.expectedReview.artifactId ?? artifactId}</div><div>channel: {review?.expectedReview.channel ?? channel}</div></dl>
         </details>
-        {showPrincipleLink && <Link className="mt-3 inline-block text-[13px] text-gov underline underline-offset-4" state={{ returnTo: `/focus${location.search}` }} to={`/principles/${encodeURIComponent(principleId)}`}>{t('pages.focus.workbench.openPrinciple')}</Link>}
+        {showPrincipleLink && <Link className="mt-3 inline-block text-body text-gov underline underline-offset-4" state={{ returnTo: `/focus${location.search}` }} to={`/principles/${encodeURIComponent(principleId)}`}>{t('pages.focus.workbench.openPrinciple')}</Link>}
       </>}
     </section>
 
     {/* ② 为什么现在 — the triggering event, never the proposal restated */}
     <section id="approval-section-why" data-testid="approval-section-why" className="border-t border-line pt-5">
-      <h3 className="mb-3 text-[15px] font-medium text-ink">{t('pages.focus.workbench.whyNow')}</h3>
+      <h3 className="mb-3 text-reading font-medium text-ink">{t('pages.focus.workbench.whyNow')}</h3>
       {sourceUnlinked && <p role="alert" className="mb-3 text-sm leading-relaxed text-amber">{t('pages.focus.workbench.sourceUnlinked')}</p>}
       <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-ink-2">{view ? narrative(view.incidentSummary) : t('pages.focus.workbench.materialUnavailable')}</p>
     </section>
 
     {/* ③ 影响谁与不处理会怎样 — the consequences, then the known limits */}
     <section id="approval-section-impact" data-testid="approval-section-impact" className="border-t border-line pt-5">
-      <h3 className="mb-3 text-[15px] font-medium text-ink">{t('pages.focus.workbench.impact')}</h3>
+      <h3 className="mb-3 text-reading font-medium text-ink">{t('pages.focus.workbench.impact')}</h3>
       {subject ? <p className="text-sm leading-relaxed text-ink-2">{narrative(subject.decisionMaterial.consequence)}</p>
         : viewSettled && <p className="text-sm leading-relaxed text-amber">{t('pages.focus.workbench.subjectUnconfirmed')}</p>}
       {review?.material.targetBehavior && <div className="mt-3 text-[14px] leading-relaxed text-ink-2" data-testid="approval-exact-target-behavior"><h4 className="mb-1 font-medium">{t('pages.focus.workbench.proposedBehavior')}</h4><p className="whitespace-pre-wrap break-words">{review.material.targetBehavior}</p></div>}
@@ -181,9 +181,9 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
           : promptInjection.budgetObservedAt !== undefined ? t('pages.focus.promptBudgetFallbackObservedNote', { reason: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, { defaultValue: promptInjection.budgetFallbackReason ?? 'unknown' }), observedAt: promptInjection.budgetObservedAt })
             : t('pages.focus.promptBudgetFallbackNote', { reason: promptInjection.budgetFallbackReason ? t('pages.focus.promptBudgetFallbackReasonSuffix', { code: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, { defaultValue: promptInjection.budgetFallbackReason }) }) : '' })}</p>
       </details>}
-      <p className="mt-3 text-[13px] leading-relaxed text-ink-3">{t('pages.focus.workbench.scopeUnknown')}</p>
-      <p className="mt-2 text-[12.5px] leading-relaxed text-ink-3">{t(channel === 'code_tool_hook' ? 'pages.focus.workbench.ruleConsequence' : channel === 'defer_archive' ? 'pages.focus.workbench.archiveConsequence' : 'pages.focus.workbench.promptConsequence')}</p>
-      {view && <details className="mt-3 text-[13px] leading-relaxed text-ink-3"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.principleLimits')}</summary>
+      <p className="mt-3 text-body leading-relaxed text-ink-3">{t('pages.focus.workbench.scopeUnknown')}</p>
+      <p className="mt-2 text-caption leading-relaxed text-ink-3">{t(channel === 'code_tool_hook' ? 'pages.focus.workbench.ruleConsequence' : channel === 'defer_archive' ? 'pages.focus.workbench.archiveConsequence' : 'pages.focus.workbench.promptConsequence')}</p>
+      {view && <details className="mt-3 text-body leading-relaxed text-ink-3"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.principleLimits')}</summary>
         <p className="mt-3">{view.nonApplicabilityOrUnknown.status === 'known' ? view.nonApplicabilityOrUnknown.value.map(item => item.text).join(' ') : view.nonApplicabilityOrUnknown.reason.ownerText}</p>
         <p className="mt-2">{view.risk.status === 'known' ? view.risk.value?.items.map(item => item.text).join(' ') || t('pages.principles.detail.ownerDecision.riskNotAssessed') : view.risk.reason?.ownerText}</p>
         <p className="mt-2">{view.uncertainty.status === 'known' ? view.uncertainty.value.map(item => item.text).join(' ') : view.uncertainty.reason.ownerText}</p>
@@ -192,17 +192,17 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
 
     {/* ④ 推荐动作 — the system's advice and, when it says "not yet", exactly what is missing */}
     <section id="approval-section-recommendation" data-testid="approval-section-recommendation" className="border-t border-line pt-5">
-      <h3 className="mb-3 text-[15px] font-medium text-ink">{t('pages.focus.workbench.recommendationTitle')}</h3>
+      <h3 className="mb-3 text-reading font-medium text-ink">{t('pages.focus.workbench.recommendationTitle')}</h3>
       <div data-testid="approval-recommendation" data-recommendation={readiness.recommendation} className="rounded-[6px] border border-line bg-surface px-4 py-3">
         <p className="text-[14px] font-medium text-ink">{recommendationText}</p>
-        <p className="mt-1 text-[13px] leading-relaxed text-ink-3">{t(readiness.recommendationReasonKey)}</p>
+        <p className="mt-1 text-body leading-relaxed text-ink-3">{t(readiness.recommendationReasonKey)}</p>
       </div>
       {readiness.missing.length > 0 && (
         <div id="approval-gaps" tabIndex={-1} data-testid="approval-gaps" className="mt-4 rounded-[6px] border border-amber/30 bg-amber/5 px-4 py-3 focus-visible:outline-2 focus-visible:outline-gov">
           <p className="text-[14px] font-medium text-ink">{t('pages.focus.workbench.missingTitle')}</p>
           <ul className="mt-2 space-y-1.5">
             {readiness.missing.map(item => (
-              <li key={item.key} id={gapAnchorId(item.key)} data-gap-key={item.key} className="text-[13px] leading-relaxed text-ink-2">
+              <li key={item.key} id={gapAnchorId(item.key)} data-gap-key={item.key} className="text-body leading-relaxed text-ink-2">
                 {item.key === 'gate' && materialBlocks.length > 0
                   ? materialBlocks.map(block => block.ownerText).join('；')
                   : t(item.labelKey)}
@@ -219,19 +219,19 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
         approval regardless of material length. */}
     <section id="approval-section-decision" data-testid="approval-decision-bar" data-primary-action={readiness.primary} className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper/95 px-6 pb-3 pt-4 backdrop-blur lg:left-[256px]">
       <div className="mx-auto max-w-[1120px]">
-      <h3 className="mb-3 text-[15px] font-medium text-ink">{t('pages.focus.workbench.decision')}</h3>
-      {lockedReason && <p role="alert" className="mb-3 text-[13px] leading-relaxed text-amber">{lockedReason}</p>}
-      {error && <p role="alert" className="mb-3 text-[13px] leading-relaxed text-amber">{error}</p>}
+      <h3 className="mb-3 text-reading font-medium text-ink">{t('pages.focus.workbench.decision')}</h3>
+      {lockedReason && <p role="alert" className="mb-3 text-body leading-relaxed text-amber">{lockedReason}</p>}
+      {error && <p role="alert" className="mb-3 text-body leading-relaxed text-amber">{error}</p>}
       {resultText && <p role="status" className="mb-3 text-sm leading-relaxed text-ink">{resultText}</p>}
       {!review && !loading && <button type="button" className="text-sm text-gov underline" onClick={() => { void read(); }}>{t('pages.focus.workbench.retry')}</button>}
       {review?.approval.status === 'pending' && <>
         {revisionReview && <label className="mb-2 block text-sm text-ink-2"><input type="checkbox" checked={intentReviewed} onChange={event => setIntentReviewed(event.target.checked)} className="mr-2" />{t('pages.focus.workbench.intentReviewed')}</label>}
         <div className="flex flex-wrap items-center gap-3">
-          {readiness.primary === 'look_at_gaps' && <button type="button" onClick={revealGaps} data-testid={`view-missing-btn-${principleId}`} className="rounded-[4px] border border-gov bg-gov px-4 py-2.5 text-[13px] text-paper hover:bg-gov-2">{t('pages.focus.workbench.viewMissing')}</button>}
-          {readiness.primary === 'reject' && <button type="button" disabled={primaryDisabled || !readiness.canReject} data-testid={`reject-btn-${principleId}`} onClick={startReject} className="rounded-[4px] border border-danger bg-danger px-4 py-2.5 text-[13px] text-paper disabled:opacity-50">{t('pages.focus.workbench.rejectOne')}</button>}
-          <button type="button" disabled={!readiness.canApprove || busy || Boolean(lockedReason) || Boolean(revisionReview && !intentReviewed)} data-testid={`approve-btn-${principleId}`} onClick={() => { void submit('approve'); }} className={`rounded-[4px] px-4 py-2.5 text-[13px] ${readiness.primary === 'approve' ? 'border border-gov bg-gov text-paper' : 'border border-line text-ink'} disabled:opacity-50`}>{t(channel === 'defer_archive' ? 'pages.focus.workbench.approveArchive' : 'pages.focus.workbench.approveOne')}</button>
-          {readiness.primary !== 'reject' && <button type="button" disabled={busy || Boolean(lockedReason) || !readiness.canReject} data-testid={`reject-btn-${principleId}`} onClick={startReject} className="rounded-[4px] border border-line px-4 py-2.5 text-[13px] text-ink disabled:opacity-50">{t('pages.focus.workbench.rejectOne')}</button>}
-          <button type="button" data-testid={`edit-btn-${principleId}`} disabled={busy || Boolean(lockedReason) || !readiness.canEdit || review.expectedReview.artifactState === 'missing'} onClick={() => setMode('edit')} className="text-[13px] text-gov underline disabled:opacity-50">{t('pages.focus.workbench.replaceOne')}</button>
+          {readiness.primary === 'look_at_gaps' && <button type="button" onClick={revealGaps} data-testid={`view-missing-btn-${principleId}`} className="rounded-[4px] border border-gov bg-gov px-4 py-2.5 text-body text-paper hover:bg-gov-2">{t('pages.focus.workbench.viewMissing')}</button>}
+          {readiness.primary === 'reject' && <button type="button" disabled={primaryDisabled || !readiness.canReject} data-testid={`reject-btn-${principleId}`} onClick={startReject} className="rounded-[4px] border border-danger bg-danger px-4 py-2.5 text-body text-paper disabled:opacity-50">{t('pages.focus.workbench.rejectOne')}</button>}
+          <button type="button" disabled={!readiness.canApprove || busy || Boolean(lockedReason) || Boolean(revisionReview && !intentReviewed)} data-testid={`approve-btn-${principleId}`} onClick={() => { void submit('approve'); }} className={`rounded-[4px] px-4 py-2.5 text-body ${readiness.primary === 'approve' ? 'border border-gov bg-gov text-paper' : 'border border-line text-ink'} disabled:opacity-50`}>{t(channel === 'defer_archive' ? 'pages.focus.workbench.approveArchive' : 'pages.focus.workbench.approveOne')}</button>
+          {readiness.primary !== 'reject' && <button type="button" disabled={busy || Boolean(lockedReason) || !readiness.canReject} data-testid={`reject-btn-${principleId}`} onClick={startReject} className="rounded-[4px] border border-line px-4 py-2.5 text-body text-ink disabled:opacity-50">{t('pages.focus.workbench.rejectOne')}</button>}
+          <button type="button" data-testid={`edit-btn-${principleId}`} disabled={busy || Boolean(lockedReason) || !readiness.canEdit || review.expectedReview.artifactState === 'missing'} onClick={() => setMode('edit')} className="text-body text-gov underline disabled:opacity-50">{t('pages.focus.workbench.replaceOne')}</button>
         </div>
         {!readiness.approveReady && <p className="mt-2 text-[12px] leading-relaxed text-ink-3" data-testid={`approve-blocked-${principleId}`}>{t('pages.focus.workbench.approveBlocked')}</p>}
         {mode && <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void submit(mode); }}>

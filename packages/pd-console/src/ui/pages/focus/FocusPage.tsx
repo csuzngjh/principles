@@ -304,34 +304,34 @@ function FeedbackStratification({
   }
   return (
     <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
-      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-3">
+      <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-3">
         {t("pages.focus.stratLabel")}
       </div>
       <div className="flex items-stretch gap-3 flex-wrap">
         {/* Layer 1: seconds-level — auto-blocked, sink down */}
         <div className="flex-1 min-w-[140px] px-3 py-2 bg-surface/60 border border-line rounded-[4px]">
           <div className="flex items-baseline gap-1.5">
-            <span className="font-mono font-semibold text-[18px] text-ink-4 tabular-nums">{gateBlocksToday}</span>
+            <span className="font-mono font-semibold text-subtitle text-ink-4 tabular-nums">{gateBlocksToday}</span>
             <span className="text-[12px] text-ink-3">{t("pages.focus.stratGateBlocks")}</span>
           </div>
-          <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratGateBlocksHint")}</div>
+          <div className="text-caption text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratGateBlocksHint")}</div>
         </div>
         {/* Layer 2: minutes/hours — system processing, neutral */}
         <div className="flex-1 min-w-[140px] px-3 py-2 bg-surface/60 border border-line rounded-[4px]">
           <div className="flex items-baseline gap-1.5">
-            <span className="font-mono font-semibold text-[18px] text-teal-600 tabular-nums">{inProgressCount}</span>
+            <span className="font-mono font-semibold text-subtitle text-teal-600 tabular-nums">{inProgressCount}</span>
             <span className="text-[12px] text-ink-3">{t("pages.focus.stratInProgress")}</span>
           </div>
-          <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratInProgressHint")}</div>
+          <div className="text-caption text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratInProgressHint")}</div>
         </div>
         {/* Layer 3: hours/days — needs Owner judgment, lift up */}
         <div className="flex-1 min-w-[140px] px-3 py-2 bg-gov/5 border border-gov/30 rounded-[4px] relative">
           <div className="flex items-baseline gap-1.5">
-            <span className="font-mono font-semibold text-[18px] text-gov tabular-nums">{pendingCount}</span>
+            <span className="font-mono font-semibold text-subtitle text-gov tabular-nums">{pendingCount}</span>
             <span className="text-[12px] text-gov">{t("pages.focus.stratPendingReview")}</span>
           </div>
-          <div className="text-[11px] text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratPendingReviewHint")}</div>
-          <span className="absolute -top-2 right-2 inline-flex items-center border border-gov/40 text-gov bg-panel rounded-[2px] px-[6px] py-0.5 font-mono text-[9px] uppercase tracking-wider">
+          <div className="text-caption text-ink-4 mt-0.5 leading-snug">{t("pages.focus.stratPendingReviewHint")}</div>
+          <span className="absolute -top-2 right-2 inline-flex items-center border border-gov/40 text-gov bg-panel rounded-[2px] px-[6px] py-0.5 font-mono text-caption uppercase tracking-wider">
             {t("pages.focus.stratYouAreHere")}
           </span>
         </div>
@@ -356,7 +356,7 @@ function StagnationSignalCard({ signal }: { signal: StagnationSignal }) {
       </div>
       <Link
         to={`/activation`}
-        className="inline-flex items-center mt-2 text-gov text-[13px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        className="inline-flex items-center mt-2 text-gov text-body hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
       >
         {t("pages.focus.viewFullChain")} →
       </Link>
@@ -382,7 +382,7 @@ function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
     <article className="relative pl-[22px] py-[14px] pr-[18px] bg-panel border border-amber/20 border-l-[3px] border-l-amber rounded-[6px]">
       {/* Source label */}
       <div className="flex items-center gap-2 mb-2">
-        <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+        <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
           {sourceLabel}
         </span>
       </div>
@@ -393,7 +393,7 @@ function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
       {/* Raw debug detail — collapsed by default to avoid unsanitized last_error in main view */}
       {signal.reason && (
         <details className="mt-1">
-          <summary className="text-ink-4 text-[11px] font-mono cursor-pointer hover:underline">
+          <summary className="text-ink-4 text-caption font-mono cursor-pointer hover:underline">
             {t("pages.focus.advancedDiagnostics")}
           </summary>
           <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
@@ -402,7 +402,7 @@ function DegradedSignalCard({ signal }: { signal: DegradedSignal }) {
         </details>
       )}
       {/* Next action (i18n) */}
-      <div className="mt-2 text-ink-4 text-[13px] leading-snug">
+      <div className="mt-2 text-ink-4 text-body leading-snug">
         <span className="font-medium">{t("pages.focus.degradedNextActionLabel")}</span>{" "}
         {nextActionText}
       </div>
@@ -426,7 +426,7 @@ function OnboardingGuide() {
       <ol className="space-y-3">
         {steps.map((step, i) => (
           <li key={i} className="flex gap-3 text-ink-2 text-sm leading-relaxed">
-            <span className="font-mono text-ink-4 text-[11px] mt-0.5 shrink-0">
+            <span className="font-mono text-ink-4 text-caption mt-0.5 shrink-0">
               {String(i + 1).padStart(2, "0")}
             </span>
             <span>{step}</span>
@@ -462,7 +462,7 @@ function ZeroStateDbMissing() {
       <p className="text-ink-2 text-sm leading-relaxed">
         {t("pages.focus.zeroStateDbMissing")}
       </p>
-      <div className="mt-3 text-ink-4 text-[13px]">
+      <div className="mt-3 text-ink-4 text-body">
         <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}
         {getNextActionText("run_config_doctor", t)}
       </div>
@@ -478,7 +478,7 @@ function InProgressGuide({ summary }: { summary: string }) {
       <p className="text-ink-2 text-sm leading-relaxed mt-2">
         {summary}
       </p>
-      <p className="text-ink-4 text-[13px] leading-relaxed mt-3">
+      <p className="text-ink-4 text-body leading-relaxed mt-3">
         {t("pages.focus.inProgressDetail")}
       </p>
     </div>
@@ -572,19 +572,19 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
   return (
     <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]" data-testid="experience-summary">
       <div className="flex items-center gap-2 mb-1">
-        <span className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${attention.badgeClass}`} role="status">
+        <span className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${attention.badgeClass}`} role="status">
           {t(attention.labelKey)}
         </span>
       </div>
-      <div className="text-ink-2 text-[13px] leading-relaxed mt-1" data-testid="experience-reason">
+      <div className="text-ink-2 text-body leading-relaxed mt-1" data-testid="experience-reason">
         {t(EXPERIENCE_REASON[snapshot.summary.reasonCode])}
       </div>
-      <div className="text-ink-4 text-[13px] leading-relaxed mt-1">
+      <div className="text-ink-4 text-body leading-relaxed mt-1">
         <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}
         {t(EXPERIENCE_NEXT_ACTION[snapshot.summary.nextActionCode])}
       </div>
       {(decision !== undefined || recovery !== undefined || blocked !== undefined || processing !== undefined) && (
-        <div className="text-[13px] text-ink-3 mt-2 leading-relaxed" data-testid="experience-activity">
+        <div className="text-body text-ink-3 mt-2 leading-relaxed" data-testid="experience-activity">
           {decision !== undefined && (
             <span className="mr-4">{t("pages.focus.experience.activity.needsDecision", { count: decision.count })}</span>
           )}
@@ -794,10 +794,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   if (loadingState === "error") {
     return (
       <PageShell>
-        <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
           {t("pages.focus.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.focus.title")}
         </h1>
         <div className="mt-6">
@@ -935,7 +935,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       </div>
       <ShinyText
         as="h1"
-        className="text-[29px] font-semibold tracking-tight text-ink mb-1"
+        className="text-display font-semibold tracking-tight text-ink mb-1"
         duration={4.5}
         brightness={0.5}
         disabled={pendingCount === 0}
@@ -959,7 +959,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span
-            className={`inline-flex items-center rounded-[3px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+            className={`inline-flex items-center rounded-[3px] px-[7px] py-1 font-mono text-eyebrow uppercase ${
               experienceMode && experienceData !== null
                 ? EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].badgeClass
                 : governanceState === "owner_review_ready"
@@ -977,12 +977,12 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               ? t(EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].labelKey)
               : t(`pages.focus.stateLabel.${governanceState}`)}
           </span>
-          <div className="text-ink-2 text-[13px] leading-relaxed" data-testid="focus-conclusion-counts">
+          <div className="text-ink-2 text-body leading-relaxed" data-testid="focus-conclusion-counts">
             <span className="font-medium">{t('pages.focus.workbench.count', { count: workItems.length })}</span>
           </div>
         </div>
         {(sourcesUncertain || (conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded) || ownerActionsLockedReason !== null || errorMessage || bindingError || groupedErrorReason) && (
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] leading-relaxed text-ink-3" data-testid="focus-conclusion-note">
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption leading-relaxed text-ink-3" data-testid="focus-conclusion-note">
             {sourcesUncertain && <span data-testid="focus-conclusion-uncertain" className="text-amber">{t('pages.focus.workbench.uncertain')}</span>}
             {conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded && (
               <span data-testid="focus-conclusion-degraded">
@@ -1007,7 +1007,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             )}
           </p>
         )}
-        <details className="mt-0.5 text-ink-4 text-[11.5px] leading-relaxed"><summary className="cursor-pointer">{t('pages.focus.workbench.countExplanation')}</summary>
+        <details className="mt-0.5 text-ink-4 text-caption leading-relaxed"><summary className="cursor-pointer">{t('pages.focus.workbench.countExplanation')}</summary>
           <p className="mt-2" data-testid="focus-conclusion-scope-note">{t("pages.focus.conclusion.countsNote")}</p>
         </details>
       </section>
@@ -1021,7 +1021,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
-        {ownerDecisionError !== null && <p role="alert" className="text-amber text-[13px]">{t('pages.focus.ownerDecision.loadError')}</p>}
+        {ownerDecisionError !== null && <p role="alert" className="text-amber text-body">{t('pages.focus.ownerDecision.loadError')}</p>}
         {/* 5B-E: the server reports decision rows it could not read. Before 5B
             the browser parser dropped this array, so "nothing to decide" and
             "could not read" rendered identically. */}
@@ -1029,7 +1029,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           <div
             role="status"
             data-testid="owner-decisions-read-issues"
-            className="mb-4 border-l-2 border-amber pl-3 text-[13px] text-amber"
+            className="mb-4 border-l-2 border-amber pl-3 text-body text-amber"
           >
             <p>{t('pages.focus.ownerDecision.readIssuesTitle')}</p>
             <ul className="mt-1 space-y-0.5 font-mono text-[12px]">
@@ -1073,14 +1073,14 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           )}
         </div>
         {ownerInboxError !== null && (
-          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerInbox.loadError")}</p>
+          <p className="text-ink-4 text-caption">{t("pages.focus.ownerInbox.loadError")}</p>
         )}
         {ownerInbox !== null && ownerInboxError === null && (
           <>
             {ownerInbox.groups.blocked.length === 0
               && inboxRecovery.length === 0
               && unmatchedInboxDecisions.length === 0 && (
-              <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerAttention.empty")}</p>
+              <p className="text-ink-4 text-body">{t("pages.focus.ownerAttention.empty")}</p>
             )}
             {unmatchedInboxDecisions.length > 0 && (
               <p className="mb-2 text-ink-4 text-[12px] leading-relaxed" data-testid="owner-attention-unmatched-note">
@@ -1097,7 +1097,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               <InboxItem key={item.principleId} item={item} t={t} />
             ))}
             {inboxBlockedAggregate.length > 0 && (
-              <p className="mt-2 text-ink-4 text-[12.5px] leading-relaxed" data-testid="owner-attention-aggregate-notice">
+              <p className="mt-2 text-ink-4 text-caption leading-relaxed" data-testid="owner-attention-aggregate-notice">
                 {t("pages.focus.ownerAttention.blockedAggregate", { count: inboxBlockedAggregate.length })}
                 {" "}
                 <Link to="/principles" className="text-gov hover:underline">
@@ -1106,7 +1106,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               </p>
             )}
             {ownerInbox.historicalUnknown.count > 0 && (
-              <p className="text-ink-4 text-[12.5px] leading-relaxed mt-2" data-testid="owner-inbox-aggregate-notice">
+              <p className="text-ink-4 text-caption leading-relaxed mt-2" data-testid="owner-inbox-aggregate-notice">
                 {ownerInbox.historicalUnknown.reasonText}
                 {" "}
                 <Link to="/principles" className="text-gov hover:underline">
@@ -1129,7 +1129,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       ) : !experienceMode ? (
         <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+            <span className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${
               governanceState === "owner_review_ready" ? "bg-gov/10 text-gov border border-gov/20"
                 : governanceState === "degraded" ? "bg-amber/10 text-amber border border-amber/20"
                   : governanceState === "in_progress" ? "bg-green/10 text-green border border-green/20"
@@ -1138,8 +1138,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               {t(`pages.focus.stateLabel.${governanceState}`)}
             </span>
           </div>
-          <div className="text-ink-2 text-[13px] leading-relaxed mt-1">{stateReason}</div>
-          <div className="text-ink-4 text-[13px] leading-relaxed mt-1">
+          <div className="text-ink-2 text-body leading-relaxed mt-1">{stateReason}</div>
+          <div className="text-ink-4 text-body leading-relaxed mt-1">
             <span className="font-medium">{t("pages.focus.nextActionLabel")}</span>{" "}{nextAction}
           </div>
         </div>
@@ -1214,25 +1214,25 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               {t("pages.focus.deviationCount", { count: deviationCount })}
             </div>
             {/* Deviation disclaimer (F.2: no fake aggregation) */}
-            <div className="text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2 mb-4">
+            <div className="text-ink-4 text-body bg-surface/60 border-l-2 border-amber px-3 py-2 mb-4">
               {t("pages.focus.deviationDisclaimer")}
             </div>
             {/* Layer 3: Full trajectory — collapsed by default */}
             <details className="group">
-              <summary className="text-gov text-[13px] cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
+              <summary className="text-gov text-body cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
                 {t("pages.focus.viewFullChain")}
               </summary>
-              <div className="mt-2 pl-4 border-l-2 border-line text-ink-3 text-[13px]">
+              <div className="mt-2 pl-4 border-l-2 border-line text-ink-3 text-body">
                 {t("pages.focus.deviationDetailPending")}
               </div>
             </details>
           </>
         ) : evidenceCount > 0 ? (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+          <div className="text-ink-3 text-body leading-relaxed py-3">
             {t("pages.focus.evidenceInProgress", { count: evidenceCount })}
           </div>
         ) : (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+          <div className="text-ink-3 text-body leading-relaxed py-3">
             {t("pages.focus.emptyDeviation")}
           </div>
         )}
@@ -1253,7 +1253,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             ))}
           </div>
         ) : (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+          <div className="text-ink-3 text-body leading-relaxed py-3">
             {t("pages.focus.emptySignals")}
           </div>
         )}
@@ -1267,7 +1267,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       <div className="mt-8"><DailyThoughtCard /></div>
 
       {/* Footer — one line (US-1.7) */}
-      <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">
+      <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-body">
         {t("pages.focus.footer")}
       </footer>
       </div>
@@ -1286,15 +1286,15 @@ function RepeatedInboxGroup({ items, t }: { items: OwnerDecisionInboxData['group
   const reason = first.learnedPrinciple.status === 'known' ? null : first.learnedPrinciple.reasonText;
   return (
     <details className="mb-2 rounded-[var(--radius-md)] border border-line p-3" data-testid="owner-inbox-repeated-group">
-      <summary className="cursor-pointer text-[13px] leading-relaxed text-ink-2">
+      <summary className="cursor-pointer text-body leading-relaxed text-ink-2">
         {t('pages.focus.ownerAttention.repeatedTitle', { count: items.length })}
         {reason && <span className="text-ink-3"> · {reason}</span>}
       </summary>
-      <p className="mt-2 text-[12.5px] leading-relaxed text-ink-3">{first.nextAction.ownerText}</p>
+      <p className="mt-2 text-caption leading-relaxed text-ink-3">{first.nextAction.ownerText}</p>
       <ul className="mt-2 space-y-1">
         {items.map((item, index) => (
           <li key={item.principleId}>
-            <Link to={`/principles/${encodeURIComponent(item.principleId)}`} className="text-[12.5px] text-gov hover:underline">
+            <Link to={`/principles/${encodeURIComponent(item.principleId)}`} className="text-caption text-gov hover:underline">
               {t('pages.focus.ownerAttention.repeatedOpen', { index: index + 1 })}
             </Link>
           </li>
@@ -1314,14 +1314,14 @@ function InboxItem({ item, t, note }: { item: OwnerDecisionInboxData['groups']['
             ? item.learnedPrinciple.text
             : item.learnedPrinciple.reasonText}
         </Link>
-        <span className="font-mono text-[11px] text-ink-4 border border-line rounded-[2px] px-1.5 py-0.5">
+        <span className="font-mono text-caption text-ink-4 border border-line rounded-[2px] px-1.5 py-0.5">
           {t(`pages.focus.ownerInbox.group.${item.inbox.group}`)}
         </span>
       </div>
       {/* Review round (P3): unmatched entries have NO action surface, so the
           inbox's review-flavored ownerText ("choose approve or reject") would
           promise actions that do not exist here — use the neutral note. */}
-      <p className="mt-1 text-ink-3 text-[12.5px] leading-relaxed">{note ?? item.nextAction.ownerText}</p>
+      <p className="mt-1 text-ink-3 text-caption leading-relaxed">{note ?? item.nextAction.ownerText}</p>
     </div>
   );
 }

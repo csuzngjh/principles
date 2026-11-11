@@ -125,8 +125,8 @@ const BLOCK_IMPACT_KEY: Record<ReviewStatus, string> = {
 function Metric({ num, label }: { num: string; label: string }) {
   return (
     <div className="flex-1 min-w-[120px] px-4 py-3 border-r border-line last:border-r-0">
-      <div className="font-mono text-[22px] font-semibold text-gov leading-none">{num}</div>
-      <div className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-3 mt-1.5">{label}</div>
+      <div className="font-mono text-title font-semibold text-gov leading-none">{num}</div>
+      <div className="font-mono text-eyebrow uppercase tracking-[0.02em] text-ink-3 mt-1.5">{label}</div>
     </div>
   );
 }
@@ -135,8 +135,8 @@ function Metric({ num, label }: { num: string; label: string }) {
 function EvolutionBlock({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="mt-3 pt-3 border-t border-line/60">
-      <div className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4 mb-1">{label}</div>
-      <div className="text-ink-3 text-[13px] leading-relaxed">{children}</div>
+      <div className="font-mono text-eyebrow uppercase tracking-[0.02em] text-ink-4 mb-1">{label}</div>
+      <div className="text-ink-3 text-body leading-relaxed">{children}</div>
     </div>
   );
 }
@@ -387,7 +387,7 @@ export function PrinciplesPage() {
       <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
       <ShinyText
         as="h1"
-        className="text-[29px] font-semibold tracking-tight text-ink mb-2"
+        className="text-display font-semibold tracking-tight text-ink mb-2"
         duration={4.5}
         brightness={0.5}
         disabled={!(filterMode === 'actionable' && (categories?.owner_actionable ?? 0) > 0)}
@@ -408,7 +408,7 @@ export function PrinciplesPage() {
           <button
             onClick={() => setFilterMode('actionable')}
             className={
-              "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
+              "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
               (filterMode === 'actionable'
                 ? "bg-gov text-paper border-gov"
                 : "bg-surface text-ink-3 border-line hover:border-line-2")
@@ -420,7 +420,7 @@ export function PrinciplesPage() {
           <button
             onClick={() => setFilterMode('all')}
             className={
-              "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
+              "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
               (filterMode === 'all'
                 ? "bg-gov text-paper border-gov"
                 : "bg-surface text-ink-3 border-line hover:border-line-2")
@@ -437,7 +437,7 @@ export function PrinciplesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("principles.searchPlaceholder")}
-          className="flex-1 min-w-[200px] border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+          className="flex-1 min-w-[200px] border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-body focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
           aria-label={t("principles.searchPlaceholder")}
         />
 
@@ -448,7 +448,7 @@ export function PrinciplesPage() {
               key={sf.value}
               onClick={() => setStatusFilter(sf.value)}
               className={
-                "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
+                "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov " +
                 (statusFilter === sf.value
                   ? "bg-gov text-paper border-gov"
                   : "bg-surface text-ink-3 border-line hover:border-line-2")
@@ -533,7 +533,7 @@ export function PrinciplesPage() {
               {Object.entries(categories).map(([cat, count]) => (
                 <span
                   key={cat}
-                  className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4"
+                  className="font-mono text-eyebrow uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4"
                 >
                   {cat}: {count}
                 </span>
@@ -548,7 +548,7 @@ export function PrinciplesPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && suppressedDecisionState && (
-        <p className="text-[12.5px] leading-relaxed text-ink-3" data-testid="principles-dominant-state">
+        <p className="text-caption leading-relaxed text-ink-3" data-testid="principles-dominant-state">
           {t("principles.ownerDecision.dominantNotice", {
             count: suppressedDecisionState.count,
             state: t(`principles.ownerDecision.state.${suppressedDecisionState.state}`, { defaultValue: suppressedDecisionState.state }),
@@ -587,10 +587,10 @@ export function PrinciplesPage() {
                   aria-hidden="true"
                 />
                 <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
-                  <h3 className="min-w-0 flex-1 text-[15px] font-semibold leading-relaxed text-ink"><Link className="rounded-sm hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link></h3>
+                  <h3 className="min-w-0 flex-1 text-reading font-semibold leading-relaxed text-ink"><Link className="rounded-sm hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link></h3>
                   {card.decisionState === suppressedDecisionState?.state
                     ? null
-                    : <span className={`rounded-[3px] border px-2 py-1 text-[11px] ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
+                    : <span className={`rounded-[3px] border px-2 py-1 text-caption ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
                 </div>
                 {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
                 {card.readabilityWarningCode && (
@@ -599,7 +599,7 @@ export function PrinciplesPage() {
                   </div>
                 )}
 
-                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-[13px] line-clamp-2 leading-relaxed">{card.text}</p>}
+                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-body line-clamp-2 leading-relaxed">{card.text}</p>}
                 {card.runtimeDeactivated === true && <p className="mt-3 text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
                 <details className="mt-4 border-t border-line/60 pt-3" data-testid="principle-context-disclosure">
                   <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
@@ -608,7 +608,7 @@ export function PrinciplesPage() {
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span
                     className={
-                      "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
+                      "font-mono text-eyebrow uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
                       STATUS_TEXT[card.status] +
                       " border-current/20"
                     }
@@ -618,7 +618,7 @@ export function PrinciplesPage() {
                   {card.channels.map((ch) => (
                     <span
                       key={ch}
-                      className="font-mono text-[11px] uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
+                      className="font-mono text-eyebrow uppercase tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3"
                     >
                       {/* Channel label via global enum resolver — never raw i18n key */}
                       {enumLabel('channel', ch, t)}
@@ -626,17 +626,17 @@ export function PrinciplesPage() {
                   ))}
                   {/* PRI-332: Language hint badge when principle language differs from UI language */}
                   {card.detectedLanguage && card.detectedLanguage !== 'unknown' && (
-                    <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
+                    <span className="font-mono text-caption tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
                       {card.detectedLanguage === 'zh'
                         ? t("principles.languageHintZh")
                         : t("principles.languageHintEn")}
                     </span>
                   )}
-                  <span className="font-mono text-[11px] text-ink-4">
+                  <span className="font-mono text-caption text-ink-4">
                     {t("principles.evaluabilityLabel", { defaultValue: "可评价性" })}: {enumLabel('evaluability', card.evaluability, t)}
                   </span>
                   {card.decisionState !== undefined && (
-                    <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
+                    <span className="font-mono text-caption tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-4">
                       {t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState })}
                     </span>
                   )}
@@ -652,7 +652,7 @@ export function PrinciplesPage() {
                 {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
                 {card.titleUsedFallback && card.originalTitle && (
                   <details className="mb-1">
-                    <summary className="text-ink-4 text-[11px] font-mono cursor-pointer hover:underline">
+                    <summary className="text-ink-4 text-caption font-mono cursor-pointer hover:underline">
                       {t("principles.readabilityOriginalLabel")}
                     </summary>
                     <div className="text-ink-4 text-[12px] leading-snug mt-1 font-mono bg-surface/40 px-2 py-1 rounded-[3px] break-all">
@@ -662,7 +662,7 @@ export function PrinciplesPage() {
                 )}
 
                 {/* Timestamp */}
-                <p className="font-mono text-[11px] text-ink-4 mt-2">
+                <p className="font-mono text-caption text-ink-4 mt-2">
                   {t("principles.updatedAt")}: {formatDate(card.updatedAt, i18n.language)}
                 </p>
 
@@ -688,7 +688,7 @@ export function PrinciplesPage() {
                 <EvolutionBlock label={t("principles.blockBehavior")}>
                   {card.action ? card.action : t("principles.blockBehaviorFallback")}
                 </EvolutionBlock>
-                    {decisionDate && <p className="text-[11px] text-ink-4">{t('principles.govDecision')}: {formatDate(decisionDate, i18n.language)}</p>}
+                    {decisionDate && <p className="text-caption text-ink-4">{t('principles.govDecision')}: {formatDate(decisionDate, i18n.language)}</p>}
                   </div>
                 </details>
                 <Link className="mt-3 inline-block text-[12px] text-gov underline underline-offset-4" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{t('principles.openDetails')}</Link>

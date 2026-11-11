@@ -112,11 +112,11 @@ function DebtCard({
         {/* Left Section: Details */}
         <div className="flex-1 space-y-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] uppercase px-2 py-0.5 bg-line rounded text-ink-3">
+            <span className="font-mono text-eyebrow uppercase px-2 py-0.5 bg-line rounded text-ink-3">
               {item.id}
             </span>
             <span
-              className={`font-mono text-[11px] uppercase px-2 py-0.5 rounded ${
+              className={`font-mono text-eyebrow uppercase px-2 py-0.5 rounded ${
                 isStagnant
                   ? "bg-amber/10 text-amber"
                   : "bg-danger/10 text-danger"
@@ -128,11 +128,11 @@ function DebtCard({
 
           {/* Principle content */}
           <div className="space-y-1">
-            <p className="text-ink text-[15px] font-medium leading-relaxed">
+            <p className="text-ink text-reading font-medium leading-relaxed">
               {item.text}
             </p>
             {item.triggerPattern && (
-              <p className="text-ink-3 text-[13px] leading-relaxed">
+              <p className="text-ink-3 text-body leading-relaxed">
                 {t("pages.debt.triggerLabel", { defaultValue: "触发条件：" })} {item.triggerPattern}
               </p>
             )}
@@ -141,7 +141,7 @@ function DebtCard({
           {/* Natural language debt reason */}
           <div className="flex items-start gap-2 pt-1">
             <AlertTriangle className="w-4 h-4 text-amber shrink-0 mt-0.5" aria-hidden="true" />
-            <div className="text-[13px] leading-relaxed">
+            <div className="text-body leading-relaxed">
               <span className="font-semibold text-ink-3">{t("pages.debt.suggestedAction")}: </span>
               {renderReason()}
             </div>
@@ -156,7 +156,7 @@ function DebtCard({
               <button
                 onClick={handleArchiveClick}
                 disabled={isProcessing}
-                className="w-full inline-flex items-center justify-center gap-1.5 border border-line bg-surface text-ink hover:border-line-2 transition-colors rounded-[3px] px-[14px] py-[6px] text-[12.5px] focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="w-full inline-flex items-center justify-center gap-1.5 border border-line bg-surface text-ink hover:border-line-2 transition-colors rounded-[3px] px-[14px] py-[6px] text-caption focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 data-testid={`archive-btn-${item.id}`}
               >
                 <Archive className="w-4 h-4 text-ink-3" aria-hidden="true" />
@@ -170,7 +170,7 @@ function DebtCard({
                     key={ar.activationId}
                     onClick={() => handleDeactivateClick(ar.activationId)}
                     disabled={isProcessing}
-                    className="w-full inline-flex items-center justify-center gap-1.5 border border-danger/20 bg-surface text-danger hover:bg-danger/5 transition-colors rounded-[3px] px-[14px] py-[6px] text-[12.5px] focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                    className="w-full inline-flex items-center justify-center gap-1.5 border border-danger/20 bg-surface text-danger hover:bg-danger/5 transition-colors rounded-[3px] px-[14px] py-[6px] text-caption focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                     data-testid={`deactivate-btn-${ar.activationId}`}
                   >
                     <Trash2 className="w-4 h-4 text-danger/80" aria-hidden="true" />
@@ -181,7 +181,7 @@ function DebtCard({
                 /* Demote action: disabled placeholder since no API route exists yet */
                 <button
                   disabled
-                  className="w-full inline-flex items-center justify-center gap-1.5 border border-line bg-surface/50 text-ink-4 cursor-not-allowed rounded-[3px] px-[14px] py-[6px] text-[12.5px]"
+                  className="w-full inline-flex items-center justify-center gap-1.5 border border-line bg-surface/50 text-ink-4 cursor-not-allowed rounded-[3px] px-[14px] py-[6px] text-caption"
                   title={t("pages.debt.demoteTooltip")}
                 >
                   {t("pages.debt.actionKeep")}
@@ -419,13 +419,13 @@ export function DebtPage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.debt.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.debt.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
           <p>{t("pages.debt.loadError")}</p>
           {errorMessage && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">{errorMessage}</p>
+            <p className="mt-2 text-ink-4 text-body font-mono">{errorMessage}</p>
           )}
         </div>
       </PageShell>
@@ -443,7 +443,7 @@ export function DebtPage() {
           </div>
           <ShinyText
             as="h1"
-            className="text-[29px] font-semibold tracking-tight text-ink mb-2"
+            className="text-display font-semibold tracking-tight text-ink mb-2"
             duration={4.5}
             brightness={0.5}
             disabled={debtItems.length === 0}
@@ -480,10 +480,10 @@ export function DebtPage() {
               className="p-8 text-center bg-panel border border-line border-dashed rounded-[6px] space-y-3"
               role="status"
             >
-              <p className="text-ink-2 font-medium text-[16px]">
+              <p className="text-ink-2 font-medium text-subtitle">
                 {t("pages.debt.emptyTitle")}
               </p>
-              <p className="text-ink-3 text-[13px] max-w-[500px] mx-auto leading-relaxed">
+              <p className="text-ink-3 text-body max-w-[500px] mx-auto leading-relaxed">
                 {t("pages.debt.emptyDescription")}
               </p>
             </div>
