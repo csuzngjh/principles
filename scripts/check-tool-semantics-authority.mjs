@@ -83,41 +83,6 @@ export const ALLOWED_TOOL_NAME_LITERALS = [
     reason: 'Codex-only refinement: only a Codex apply_patch payload carries "*** Add/Update/Delete File:" headers, so patchTargets() is gated on it AFTER the registry already decided targetKind === write. The classification itself still comes from the declaration registry; this literal only selects the payload parser.',
   },
   {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'write_file',
-    reason: 'Legacy cross-host line-change estimate (write/edit/patch/delete families) predating the registry. It estimates size, it does not decide tool semantics or enforcement. Follow-up candidate: derive this family list from ToolSemanticRegistry.',
-  },
-  {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'write',
-    reason: 'Same legacy estimate: recognises the generic vocabulary write_file/write/replace/edit/apply_patch/patch/delete_file. Not an enforcement authority; follow-up candidate as above.',
-  },
-  {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'replace',
-    reason: 'Same legacy estimate: recognises the generic vocabulary write_file/write/replace/edit/apply_patch/patch/delete_file. Not an enforcement authority; follow-up candidate as above.',
-  },
-  {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'edit',
-    reason: 'Same legacy estimate: recognises the generic vocabulary write_file/write/replace/edit/apply_patch/patch/delete_file. Not an enforcement authority; follow-up candidate as above.',
-  },
-  {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'apply_patch',
-    reason: 'Same legacy estimate: recognises the generic vocabulary write_file/write/replace/edit/apply_patch/patch/delete_file. Not an enforcement authority; follow-up candidate as above.',
-  },
-  {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'patch',
-    reason: 'Same legacy estimate: recognises the generic vocabulary write_file/write/replace/edit/apply_patch/patch/delete_file. Not an enforcement authority; follow-up candidate as above.',
-  },
-  {
-    file: 'packages/principles-core/src/runtime/risk/risk-calculator-policy.ts',
-    literal: 'delete_file',
-    reason: 'Same legacy estimate: recognises the generic vocabulary write_file/write/replace/edit/apply_patch/patch/delete_file. Not an enforcement authority; follow-up candidate as above.',
-  },
-  {
     file: 'packages/principles-core/src/runtime/evidence-triage/observation-resolver.ts',
     literal: 'pain',
     reason: 'Observation-source routing sentinel for the manual pain tool, not tool semantics: it decides whether an observation was agent-reported vs owner-reported. No registry mapping is involved.',

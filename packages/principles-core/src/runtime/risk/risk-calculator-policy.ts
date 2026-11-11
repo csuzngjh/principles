@@ -7,10 +7,15 @@
  * calculatePercentageThreshold) were dead code and removed during Stage 2/3.
  */
 
+import type { ToolSemanticRegistry } from '../internalization/tool-semantic-registry.js';
+
 export interface FileModification {
   toolName: string;
   params: Record<string, unknown>;
 }
+
+/** A deletion-sized change: real but of unknown size (legacy delete_file rule). */
+const DELETION_LINE_ESTIMATE = 50;
 
 /**
  * Read a string-typed param safely, returning '' for non-string values.
@@ -21,38 +26,51 @@ function readStringParam(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function countLines(content: string): number {
+  return content.split('\n').length;
+}
+
+function countPatchLines(patch: string): number {
+  // Rough estimate for patch files.
+  // Exclude unified-diff file headers (--- / +++) which are not actual changes.
+  return patch
+    .split('\n')
+    .filter((l: string) => (l.startsWith('+') || l.startsWith('-')) && !l.startsWith('+++') && !l.startsWith('---'))
+    .length;
+}
+
 /**
  * Estimate the number of lines changed by a tool call.
- * Returns 0 for unknown tools, 50 for file deletions.
+ *
+ * The write family is decided by the ONE tool semantic authority
+ * (`ToolSemanticRegistry`), not by a second raw-name list: any host tool the
+ * declarations map to `write` is estimated automatically, including aliases
+ * added later. Which payload shape the call carries is read from the params,
+ * because the canonical kind deliberately does not encode payload variants.
+ *
+ * A write-family call with no recognizable payload (a deletion, or a malformed
+ * write) is treated as a deletion-sized change — its size is unknown but
+ * significant. Non-write families return 0.
  */
-export function estimateLineChanges(modification: FileModification): number {
+export function estimateLineChanges(
+  modification: FileModification,
+  registry: ToolSemanticRegistry,
+): number {
   const { toolName, params } = modification;
 
-  if (toolName === 'write_file' || toolName === 'write') {
-    const content = readStringParam(params.content);
-    return content.split('\n').length;
+  if (registry.resolve(toolName) !== 'write') return 0;
+
+  if (Object.hasOwn(params, 'content')) {
+    return countLines(readStringParam(params.content));
   }
 
-  if (toolName === 'replace' || toolName === 'edit') {
-    const newContent = readStringParam(params.new_string) || readStringParam(params.newText);
-    return newContent.split('\n').length;
+  if (Object.hasOwn(params, 'new_string') || Object.hasOwn(params, 'newText')) {
+    return countLines(readStringParam(params.new_string) || readStringParam(params.newText));
   }
 
-  if (toolName === 'apply_patch' || toolName === 'patch') {
-    const patch = readStringParam(params.patch);
-    // Rough estimate for patch files.
-    // Exclude unified-diff file headers (--- / +++) which are not actual changes.
-    return patch
-      .split('\n')
-      .filter((l: string) => (l.startsWith('+') || l.startsWith('-')) && !l.startsWith('+++') && !l.startsWith('---'))
-      .length;
+  if (Object.hasOwn(params, 'patch')) {
+    return countPatchLines(readStringParam(params.patch));
   }
 
-  if (toolName === 'delete_file') {
-    // Deleting a file is considered a significant change, but we don't know the size.
-    // We'll treat it as a medium-to-large size change.
-    return 50;
-  }
-
-  return 0;
+  return DELETION_LINE_ESTIMATE;
 }
