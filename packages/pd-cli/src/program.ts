@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * pd CLI — Principles Disciple command-line interface.
  *
@@ -7,8 +6,6 @@
  */
 
 import { Command, Option } from 'commander';
-import { pathToFileURL } from 'node:url';
-import path from 'node:path';
 import { handlePainRecord } from './commands/pain-record.js';
 import { handlePainExplicit } from './commands/pain-explicit.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
@@ -90,13 +87,13 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
 
-const program = new Command();
+export const program = new Command();
 
 // SPEC §12: `pd --version` prints the canonical product version when a
 // supported installation exists; a development checkout falls back to the
 // CLI package version with an explicit marker instead of impersonating an
 // installed release.
-function handleVersionFlag(args: readonly string[]): boolean {
+export function handleVersionFlag(args: readonly string[]): boolean {
   if (!args.includes('--version') && !args.includes('-V')) return false;
   try {
     console.log(formatShortVersion(buildVersionReport()));
@@ -1430,11 +1427,4 @@ mcpLogsCmd
  */
 export function buildPdProgram(): Command {
   return program;
-}
-
-const invokedDirectly = process.argv[1] !== undefined
-  && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
-
-if (invokedDirectly && !handleVersionFlag(process.argv.slice(2))) {
-  program.parse();
 }
