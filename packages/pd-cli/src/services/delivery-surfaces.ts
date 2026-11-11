@@ -100,16 +100,18 @@ function judgeCanonicalRuntime(report: VersionReport): DeliverySurface {
       nextAction: 'Run the official installer recovery, or re-run the official installer to repair the installation record.',
     };
   }
-  // health === 'degraded' means the release manifest for the active generation
-  // is unreadable, so the bytes on disk cannot be tied to a release. Returning
-  // ok here printed "Delivery: complete" with exit 0 while `pd version` called
-  // the same install degraded — the opposite of "never a silent ok".
+  // health === 'degraded' means a CHANNEL install lost the release manifest for
+  // the active generation, so the bytes on disk cannot be tied to a release.
+  // Bundled installs never carry that manifest — they verify their own identity
+  // inside buildVersionReport — so this branch is unreachable for them. The
+  // former "re-run the installer to restore the release metadata" advice was a
+  // dead loop for exactly those installs: no installer run can create the file.
   if (report.health === 'degraded') {
     return {
       ...base,
       status: 'unknown',
       reason: 'canonical_health_degraded',
-      nextAction: 'Run the official installer (npx create-principles-disciple) to restore the release metadata, then re-run this check.',
+      nextAction: 'The signed release metadata for this release is missing from ~/.pd/releases. Re-install PD with the official installer to move onto a release that carries its own identity, then re-run this check.',
     };
   }
   if (report.componentsSource !== 'runtime') {
