@@ -362,6 +362,15 @@ C-R4（"4 个 loader 行为等价矩阵"）**降级**：既然 3B/3C 不排期�
 | 3E | 0.5–1.0 | 延后 | |
 | **排期合计** | 4.0–7.0 | **1.0–2.0** | 只做 3A |
 
+### 3.8 Follow-up：默认配置共享污染（已完成）
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| `getDefaultPdConfig()` 的 `features` 只做浅拷贝（P-ERR-124：kill-switch 夹具改写共享 `host.codex` 条目，同 worker 后续测试读到 `enabled=false`） | **已完成**，PR **#2519**（merge `c8b984ffb`） | `pd-config-defaults.ts:134-158` 逐层拷贝：`features` 每条 clone、`runtimeProfiles` 每条 spread、`ui.diagnostics` 显式重建、`reuseEvaluation` spread |
+| 残留：effective 层的 UI 默认值回退 `{ ...DEFAULT_UI }` 仍共享嵌套 `diagnostics`，调用方一次 mode 写入会改写进程级 `DEFAULT_UI` | **已完成**，PR **#2527**（本批独立小批） | 改为 `{ diagnostics: { mode: DEFAULT_UI.diagnostics.mode } }`；新增反例测试（改前红：`expected 'advanced' to be 'simple'`；改后绿：配置测试 303/303） |
+
+扫描结论：其余默认值取用点（`DEFAULT_FEATURE_FLAGS`、`DEFAULT_RUNTIME_PROFILE`、`DEFAULT_REUSE_EVALUATION`、`DEFAULT_CONTEXT_INJECTION`）均为扁平结构或已逐层拷贝，无其他浅拷贝残留。
+
 ---
 
 ## 4. Phase 1 —— 存储收口（**建议只做读侧**）
