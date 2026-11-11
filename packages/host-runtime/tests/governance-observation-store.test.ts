@@ -652,3 +652,46 @@ describe('schema v4 (PRI-1171): host widening + MAX-monotonic checkpoint', () =>
     expect(refreshed && 'byteOffset' in refreshed ? refreshed : null).toMatchObject({ byteOffset: 1000, incompleteTail: true, lastDegradationReason: 'fresh_reason' });
   });
 });
+
+describe('PRI-1171 P2: reasoning kind (first producer = WorkBuddy decoder)', () => {
+  it('round-trips a reasoning observation with text, attribution and facts', () => {
+    const input = observation({
+      hostKind: 'workbuddy',
+      rolloutIdentity: 'wb-session-1',
+      rootSessionId: 'wb-session-1',
+      hostTurnId: 'msg-container-1',
+      kind: 'reasoning',
+      logicalObservationKey: 'wb|wb-session-1|reasoning-record-1',
+      assistantItemId: 'assistant-record-1',
+      visibleText: 'synthetic reasoning body',
+      completeness: 'complete',
+    });
+    expect(ingest({ observations: [input] })).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'wb-session-1' });
+    expect(listed.ok && listed.observations).toHaveLength(1);
+    expect(listed.ok ? listed.observations[0] : null).toMatchObject({
+      kind: 'reasoning',
+      hostTurnId: 'msg-container-1',
+      assistantItemId: 'assistant-record-1',
+      completeness: 'complete',
+    });
+  });
+
+  it('round-trips an unattributed reasoning observation (partial + phase)', () => {
+    const input = observation({
+      hostKind: 'workbuddy',
+      rolloutIdentity: 'wb-session-2',
+      rootSessionId: 'wb-session-2',
+      hostTurnId: 'msg-container-2',
+      kind: 'reasoning',
+      logicalObservationKey: 'wb|wb-session-2|reasoning-record-2',
+      phase: 'unattributed',
+      visibleText: 'synthetic orphan reasoning',
+      completeness: 'partial',
+    });
+    expect(ingest({ observations: [input] })).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'wb-session-2' });
+    expect(listed.ok && listed.observations).toHaveLength(1);
+    expect(listed.ok ? listed.observations[0] : null).toMatchObject({ kind: 'reasoning', phase: 'unattributed', completeness: 'partial' });
+  });
+});

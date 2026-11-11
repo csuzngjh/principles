@@ -48,3 +48,17 @@ export {
   type WorkbuddyWorkerCycleStepReport,
   type WorkbuddyWorkerMode,
 } from './worker/workspace-worker.js';
+export {
+  encodeWorkbuddyCwd,
+  deriveWorkbuddyTranscriptPath,
+  validateWorkbuddyTranscriptPath,
+  workbuddyProjectsRoot,
+  decodeWorkbuddyTranscriptWindow,
+  createWorkbuddyTranscriptSource,
+  WORKBUDDY_SINGLE_SESSION_ALERT_BYTES,
+  type WorkbuddyTranscriptFileIdentity,
+  type WorkbuddyTranscriptPathValidation,
+  type DecodedWorkbuddyDelta,
+  type DecodeWorkbuddyWindowInput,
+  type WorkbuddyTranscriptSourceContext,
+} from './ingestion/index.js';

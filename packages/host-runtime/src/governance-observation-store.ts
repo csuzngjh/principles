@@ -47,7 +47,14 @@ const MAX_JSON_COLUMN = 8_000;
 
 /** Host taxonomy for governance observations (schema v4; PRI-1171 unification). */
 export type GovernanceObservationHostKind = 'codex' | 'workbuddy' | 'openclaw';
-export type GovernanceObservationKind = 'user_turn' | 'assistant_turn' | 'tool_call';
+/**
+ * PRI-1171 P2: `reasoning` joins the kind union with the WorkBuddy decoder
+ * (tech design §5.2) — the first producer. The Codex decoder keeps its
+ * explicit reasoning discard until P3 ticket ⑧ wires the new disclosure +
+ * consent records for the Codex full tier (tech design §11.8), so no
+ * existing Codex path starts emitting it.
+ */
+export type GovernanceObservationKind = 'user_turn' | 'assistant_turn' | 'tool_call' | 'reasoning';
 export type GovernanceObservationSource = 'live_hook' | 'transcript';
 export type GovernanceObservationCompleteness = 'complete' | 'partial';
 /** `quarantined` (Slice D §15): audited, permanently-invalid row; bodies dropped, metadata kept. */
