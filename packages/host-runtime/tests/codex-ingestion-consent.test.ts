@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CODEX_INGESTION_CONSENT_FILENAME,
   CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
   deriveCodexIngestionConsentState,
   getCodexIngestionConsentPath,
@@ -41,30 +40,35 @@ describe('readCodexIngestionConsent', () => {
   });
 
   it('fails loud on malformed JSON instead of degrading to never-asked (rc-3/rc-9)', () => {
-    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    fs.mkdirSync(path.dirname(getCodexIngestionConsentPath(workspaceDir)), { recursive: true });
     fs.writeFileSync(getCodexIngestionConsentPath(workspaceDir), '{not json', 'utf8');
     const read = readCodexIngestionConsent(workspaceDir);
     expect(read.ok).toBe(false);
     if (read.ok) return;
-    expect(read.reason).toBe('codex_ingestion_consent_malformed_json');
-    expect(read.nextAction).toContain(CODEX_INGESTION_CONSENT_FILENAME);
+    expect(read.reason).toMatch(/^conversation_ingestion_consent_malformed/);
+    expect(read.nextAction).toContain('conversation-ingestion-consent.json');
   });
 
   it('fails loud on unknown fields, bad decision, bad timestamp, and bad schemaVersion', () => {
-    const cases: Record<string, unknown>[] = [
-      { decision: 'granted', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION, extra: true },
-      { decision: 'maybe', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION },
-      { decision: 'granted', disclosureVersion: 'g2a-2026-08-28', decidedAt: 'not-a-date', decidedVia: 'pd_codex_setup', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION },
-      { decision: 'granted', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: '999' },
-      { decision: 'granted', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'hand_edit', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION },
+    const slot = (overrides: Record<string, unknown>) => ({
+      decision: 'granted', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION, ...overrides,
+    });
+    const cases: unknown[] = [
+      // Flat v2-shaped body at the v3 authority path — rejected (hosts wrapper missing).
+      slot({ extra: true }),
+      { schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION, hosts: { codex: slot({ decision: 'maybe' }) } },
+      { schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION, hosts: { codex: slot({ decidedAt: 'not-a-date' }) } },
+      { schemaVersion: '999', hosts: { codex: slot({}) } },
+      { schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION, hosts: { codex: slot({ decidedVia: 'hand_edit' }) } },
+      { schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION, hosts: { unknownhost: slot({}) } },
     ];
     for (const invalid of cases) {
-      fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+      fs.mkdirSync(path.dirname(getCodexIngestionConsentPath(workspaceDir)), { recursive: true });
       fs.writeFileSync(getCodexIngestionConsentPath(workspaceDir), JSON.stringify(invalid), 'utf8');
       const read = readCodexIngestionConsent(workspaceDir);
       expect(read.ok).toBe(false);
       if (!read.ok) {
-        expect(read.reason).toMatch(/^codex_ingestion_consent_malformed/);
+        expect(read.reason).toMatch(/^conversation_ingestion_consent_malformed/);
         expect(read.nextAction.length).toBeGreaterThan(0);
       }
       fs.rmSync(getCodexIngestionConsentPath(workspaceDir), { force: true });
@@ -72,26 +76,31 @@ describe('readCodexIngestionConsent', () => {
   });
 
   it('rejects decision=failed without a failureReason at the read boundary too', () => {
-    // The writer enforces this before persisting; the reader rejects a
-    // hand-edited file that carries the same defect (fail-loud, rc-3).
-    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    // The writer enforces this before persisting; the reader accepts the shape
+    // (failureReason is optional on read for forward-compat) — the write-side
+    // guard is the enforcement point, verified in recordCodexIngestionConsent.
+    fs.mkdirSync(path.dirname(getCodexIngestionConsentPath(workspaceDir)), { recursive: true });
     fs.writeFileSync(getCodexIngestionConsentPath(workspaceDir), JSON.stringify({
-      decision: 'failed', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
+      schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
+      hosts: {
+        codex: {
+          decision: 'failed', disclosureVersion: 'g2a-2026-08-28', decidedAt: '2026-09-06T00:00:00Z', decidedVia: 'pd_codex_setup', schemaVersion: CODEX_INGESTION_CONSENT_SCHEMA_VERSION,
+        },
+      },
     }), 'utf8');
-    // Note: the reader accepts the shape (failureReason is optional on read
-    // for forward-compat) — the write-side guard is the enforcement point,
-    // verified in the recordCodexIngestionConsent describe below.
     const read = readCodexIngestionConsent(workspaceDir);
     expect(read.ok).toBe(true);
   });
 });
 
 describe('recordCodexIngestionConsent', () => {
-  it('creates the .pd directory if missing and writes atomically (no tmp litter)', () => {
+  it('creates the .state authority directory if missing and writes atomically (no tmp litter)', () => {
     const written = recordCodexIngestionConsent(workspaceDir, { decision: 'revoked', decidedVia: 'codex_plugin_setup' });
     expect(written.ok).toBe(true);
-    const dirContents = fs.readdirSync(path.join(workspaceDir, '.pd'));
-    expect(dirContents).toEqual([CODEX_INGESTION_CONSENT_FILENAME]);
+    // PRI-1171: authority moved .pd → .state (v3 ledger); no legacy file is created.
+    const dirContents = fs.readdirSync(path.dirname(getCodexIngestionConsentPath(workspaceDir)));
+    expect(dirContents).toEqual(['conversation-ingestion-consent.json']);
+    expect(fs.existsSync(path.join(workspaceDir, '.pd'))).toBe(false);
   });
 
   it('overwrites a previous decision (re-consent after revoke)', () => {
@@ -105,11 +114,11 @@ describe('recordCodexIngestionConsent', () => {
   it('returns a structured failure when the workspace root is not writable', () => {
     const blocked = path.join(workspaceDir, 'file-blocks-dir');
     fs.writeFileSync(blocked, 'x', 'utf8');
-    // <blocked>/.pd cannot be created: consent write must fail with reason+nextAction, not throw.
+    // <blocked>/.state cannot be created: consent write must fail with reason+nextAction, not throw.
     const written = recordCodexIngestionConsent(blocked, { decision: 'granted', decidedVia: 'pd_codex_setup' });
     expect(written.ok).toBe(false);
     if (!written.ok) {
-      expect(written.reason).toMatch(/^codex_ingestion_consent_write_failed/);
+      expect(written.reason).toMatch(/^conversation_ingestion_consent_write_failed/);
       expect(written.nextAction).toContain('permissions');
     }
   });

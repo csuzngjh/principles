@@ -38,6 +38,12 @@ export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
+// PRI-1171: unified conversation-ingestion seam — the ONE host-neutral entry
+// for transcript trajectory ingestion (source contract + shared pipeline +
+// consent ledger v3 + text policy). Host decoders stay in their adapter
+// packages; a new host implements TranscriptSourceAdapter with zero changes
+// here.
+export * from './conversation-ingestion/index.js';
 export * from './governance-signal-admission.js';
 export * from './signal-classifier.js';
 export * from './adaptive-selection.js';

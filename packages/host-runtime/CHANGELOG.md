@@ -1,5 +1,29 @@
 # @principles/host-runtime
 
+## 3.3.1
+
+### Patch Changes
+
+- 030d003: 把 Codex `UserPromptSubmit` 宿主的 5 秒 hook 窗口接到 Adaptive 有效截止上。
+  
+  此前 Codex hook 只按 `10s 首字节 + 10s 生成` 计时，宿主会在 5 秒到点时直接终止子进程并丢弃输出；
+  实测中自适应选择跨过宿主截止（5060 ms），Native 正文与诊断一起被截断，传输也没有收到中止。
+  
+  现在 hook 按 `5000 − 800 ms` 从进程启动起算建立绝对截止，并复用既有 `AbortSignal` 贯通准入、生成、
+  授权重验与装配：截止到达即取消传输、忽略迟到结果、保留 Native 正文；诊断新增
+  `TURN_DEADLINE_EXCEEDED`，与生成超时 `SELECTION_EXPIRED`、正常弃选 `no_increment` 区分。
+  未提供外层截止的既有调用方（OpenClaw）行为不变。
+- 746e55d: B3：hook 与 replay 共用同一个工具语义解析入口。`resolveHostToolSemanticsForHook()` 以“workspace 持久化声明 → 宿主静态声明 → baseline”为优先级解析 `canonicalKind`：声明中出现的原始工具名以声明为准（与 replay/证据/Console 读取的是同一份 `.pd/host-tool-semantics/*.json`），声明未覆盖的静态名继续补齐，避免陈旧声明截断宿主当前工具面。声明损坏或跨宿主冲突时返回带 reason/nextAction 的类型化失败，绝不静默回退成空 registry；消费方（OpenClaw gate、Codex/WorkBuddy pd-hook）保留可用性——退回宿主静态声明并在 stderr / logger 留下可观察诊断（rc-9）。
+  
+  修复前：同一 workspace 中若持久化声明把 `exec` 记为 `write`（或声明了静态表没有的工具名），OpenClaw gate 仍按静态表判为 `execute`，生产侧提取出 `out.txt`，而 replay 得到 `<tool:exec>`，同一条路径规则在回放命中、在生产不命中。现在两端一致。
+  
+  OpenClaw 的接入模块刻意放在 `hooks/hook-tool-semantics.ts` 而非 `constants/tool-semantics.ts`：后者位于 `rulehost-evidence` 卫星包路径上，引入 host-runtime barrel 会把整条 LLM 依赖图拉进卫星包（satellite-purity / OPT-002）。
+- Updated dependencies [c8b984f]
+- Updated dependencies [030e0cf]
+- Updated dependencies [2efe4a0]
+- Updated dependencies [389477a]
+  - @principles/core@7.3.1
+
 ## 3.3.0
 
 ### Minor Changes

@@ -22,6 +22,7 @@ import {
   isFeatureEnabled,
   getDefaultPdConfig,
   DEFAULT_RUNTIME_PROFILE_ID,
+  DEFAULT_UI,
   checkAgentRuntimeReadiness,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
@@ -172,6 +173,24 @@ describe('Scenario 1: Missing config → deterministic defaults', () => {
     const second = getDefaultPdConfig();
     expect(second.features.prompt?.enabled).toBe(true);
     expect(second.ui.diagnostics.mode).toBe('simple');
+  });
+
+  it('a config without a ui section never aliases the shared DEFAULT_UI object', () => {
+    // Same contamination class as P-ERR-124: the effective layer used to fall
+    // back to `{ ...DEFAULT_UI }`, which shares the nested `diagnostics`
+    // object. A caller mutating the returned effective config would then
+    // rewrite DEFAULT_UI for the rest of the process.
+    const withoutUi = { ...makeValidConfig() };
+    delete (withoutUi as Partial<PdConfig>).ui;
+
+    const originalMode = DEFAULT_UI.diagnostics.mode;
+    try {
+      const effective = computeEffectivePdConfig(withoutUi);
+      effective.config.ui.diagnostics.mode = 'advanced';
+      expect(DEFAULT_UI.diagnostics.mode).toBe(originalMode);
+    } finally {
+      DEFAULT_UI.diagnostics.mode = originalMode;
+    }
   });
 });
 

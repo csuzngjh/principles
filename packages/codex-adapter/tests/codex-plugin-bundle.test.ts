@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -56,6 +57,75 @@ afterAll(() => {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// First-run install fixtures use LOCAL packed tarballs of this worktree's
+// runtime cohort, never the public registry's copy of the pins. A Version
+// Packages PR materializes pins for versions that are not published until the
+// release itself runs (#2510: installing the pins from public npm made the PR
+// permanently red with ETARGET, blocking the release that would publish them).
+// Exact-version resolution against the real registry is a POST-publish
+// responsibility: publish-npm.yml's codex-plugin-delivery-verify job runs
+// sync-codex-runtime-pins.mjs --verify (identity per pin) and check:runtime-pin
+// (installs all four pins from the registry), and publish-finalize is hard-gated
+// on that job.
+type RuntimeSampleKey = 'codexAdapter' | 'hostRuntime' | 'core' | 'mcpServer';
+type RuntimeVersions = Record<RuntimeSampleKey, string>;
+type RuntimeSamples = { versions: RuntimeVersions; sources: Record<RuntimeSampleKey, string> };
+
+const localRuntimeSamples = [
+  { key: 'codexAdapter', dir: path.join(repoRoot, 'packages', 'codex-adapter'), flag: '--adapter-source' },
+  { key: 'hostRuntime', dir: path.join(repoRoot, 'packages', 'host-runtime'), flag: '--host-runtime-source' },
+  { key: 'core', dir: path.join(repoRoot, 'packages', 'principles-core'), flag: '--core-source' },
+  { key: 'mcpServer', dir: path.join(repoRoot, 'packages', 'pd-mcp-server'), flag: '--mcp-server-source' },
+] as const;
+
+const nodeRequireForNpm = createRequire(import.meta.url);
+const { packTarballPath, runNpm } = nodeRequireForNpm('./helpers/run-npm.cjs') as {
+  packTarballPath: (packDir: string, filename: unknown) => string;
+  runNpm: (args: string[], options: { cwd: string; encoding: 'utf8'; stdio: ['ignore', 'pipe', 'pipe'] }) => string;
+};
+
+/** npm-pack each runtime package from this worktree, then unpack the tarball
+ *  with the system tar so `--*-source` receives exactly the artifact npm would
+ *  publish (package.json + files whitelist), not the raw workspace directory. */
+function packLocalRuntimeSamples(): RuntimeSamples {
+  const packRoot = tempDir('pd-local-runtime-samples-');
+  const versions = {} as RuntimeVersions;
+  const sources = {} as Record<RuntimeSampleKey, string>;
+  for (const entry of localRuntimeSamples) {
+    const packDir = path.join(packRoot, `${entry.key}-pack`);
+    fs.mkdirSync(packDir);
+    // --ignore-scripts: dist is already built by the suite's build step; packing
+    // must not rebuild (or produce bytes that differ from what the tests read).
+    const output = runNpm(['pack', '--ignore-scripts', '--json', '--', entry.dir], { cwd: packDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const packed: unknown = JSON.parse(output);
+    if (!Array.isArray(packed) || !isRecord(packed[0]) || typeof packed[0].filename !== 'string') {
+      throw new Error(`npm pack returned an unexpected result for ${entry.dir}: ${String(output).slice(0, 400)}`);
+    }
+    const tarball = packTarballPath(packDir, packed[0].filename);
+    const extractDir = path.join(packRoot, `${entry.key}-src`);
+    fs.mkdirSync(extractDir);
+    const extracted = spawnSync('tar', ['-xzf', tarball, '-C', extractDir], { encoding: 'utf8' });
+    if (extracted.status !== 0) {
+      throw new Error(`failed to extract ${tarball}: ${String(extracted.stderr).slice(0, 400)}`);
+    }
+    const source = path.join(extractDir, 'package');
+    const manifest: unknown = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
+    if (!isRecord(manifest) || typeof manifest.version !== 'string') {
+      throw new Error(`${tarball} carries no package version`);
+    }
+    sources[entry.key] = source;
+    versions[entry.key] = manifest.version;
+  }
+  return { versions, sources };
+}
+
+/** ensurePluginData derives the canonical data dir from the cache layout:
+ *  ~/.codex/plugins/cache/<marketplace>/principles-disciple/<version> →
+ *  ~/.codex/plugins/data/principles-disciple-<marketplace>. */
+function firstRunRuntimeDir(fakeHome: string): string {
+  return path.join(fakeHome, '.codex', 'plugins', 'data', 'principles-disciple-principles', 'runtime');
 }
 
 function readJson(file: string): unknown {
@@ -1036,7 +1106,12 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
 });
 
 describe('first-run $pd-control setup (real user flow)', () => {
-  it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', async () => {
+  let samples: RuntimeSamples;
+  beforeAll(() => { samples = packLocalRuntimeSamples(); }, 600_000);
+
+  /** Build the Codex cache first-run fixture: a copy of the shipped plugin
+   *  payload whose pin names THIS worktree's locally packed cohort. */
+  function firstRunSetup(options: { pinOverrides?: Partial<RuntimeVersions>; omitSources?: RuntimeSampleKey[]; env?: Record<string, string> } = {}) {
     // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —
     // $pd-control setup must own first-run creation (derive marketplace from the
     // installed cache path) or every fresh install dead-ends.
@@ -1048,15 +1123,32 @@ describe('first-run $pd-control setup (real user flow)', () => {
     const cachePlugin = path.join(fakeHome, '.codex', 'plugins', 'cache', 'principles', 'principles-disciple', pluginManifest.version);
     fs.mkdirSync(cachePlugin, { recursive: true });
     fs.cpSync(pluginDir, cachePlugin, { recursive: true });
+    const shippedPin: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8'));
+    if (!isRecord(shippedPin) || typeof shippedPin.codexAdapter !== 'string' || typeof shippedPin.hostRuntime !== 'string' || typeof shippedPin.core !== 'string' || typeof shippedPin.mcpServer !== 'string') {
+      throw new Error('runtime pin file is missing a package version');
+    }
+    // Keep the shipped file's shape/note but point it at the local cohort: the
+    // published values only become true AFTER the release publishes them.
+    const pins = { ...shippedPin, ...samples.versions, ...(options.pinOverrides ?? {}) };
+    fs.writeFileSync(path.join(cachePlugin, 'runtime-version.json'), `${JSON.stringify(pins, null, 2)}\n`);
     const workspace = tempDir('pd-firstrun-ws-');
     fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
-    const result = spawnSync(process.execPath, [path.join(cachePlugin, 'scripts', 'pd-setup.cjs'), '--workspace', workspace, '--skip-init', '--json'], {
+    const omitted = new Set(options.omitSources ?? []);
+    const sourceArgs = localRuntimeSamples
+      .filter((entry) => !omitted.has(entry.key))
+      .flatMap((entry) => [entry.flag, samples.sources[entry.key]]);
+    const result = spawnSync(process.execPath, [path.join(cachePlugin, 'scripts', 'pd-setup.cjs'), '--workspace', workspace, '--skip-init', '--json', ...sourceArgs], {
       cwd: workspace,
       encoding: 'utf8',
       timeout: 240_000,
       // Redirect the home dir cross-platform: os.homedir() reads HOME on POSIX and USERPROFILE/HOMEDRIVE+HOMEPATH on Windows.
-      env: { ...process.env, CODEX_HOME: path.join(fakeHome, '.codex'), HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined },
+      env: { ...process.env, CODEX_HOME: path.join(fakeHome, '.codex'), HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined, ...options.env },
     });
+    return { fakeHome, cachePlugin, workspace, pins, result };
+  }
+
+  it('creates the plugin data dir Codex never creates, and npm-installs exactly the pinned runtime', async () => {
+    const { fakeHome, cachePlugin, workspace, pins, result } = firstRunSetup();
     expect(result.status, result.stderr.slice(0, 400)).toBe(0);
     const report: unknown = JSON.parse(result.stdout);
     if (!isRecord(report)) {
@@ -1072,13 +1164,13 @@ describe('first-run $pd-control setup (real user flow)', () => {
     expect(pluginRoot).toBe(cachePlugin);
     // The data dir was derived + created under the fake home, not the real one.
     expect(pluginData.startsWith(fakeHome)).toBe(true);
+    // The install was served by the local samples, never by the public registry:
+    // this is the assertion that keeps the case independent of "is the pin
+    // published yet" without weakening what it proves.
+    expect(report.runtimeSource).toBe('local_adapter_build');
     expect(fs.existsSync(path.join(pluginData, 'runtime', 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js'))).toBe(true);
     // PRI-810: assert against the pin SOURCE OF TRUTH, not a hardcoded copy —
     // the previous hardcoded '0.1.0' expectations locked the drift in place.
-    const pins: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8'));
-    if (!isRecord(pins) || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string' || typeof pins.core !== 'string' || typeof pins.mcpServer !== 'string') {
-      throw new Error('runtime pin file is missing a package version');
-    }
     expect(runtime.codexAdapter).toBe(pins.codexAdapter);
     expect(runtime.hostRuntime).toBe(pins.hostRuntime);
     expect(runtime.core).toBe(pins.core);
@@ -1112,12 +1204,19 @@ describe('first-run $pd-control setup (real user flow)', () => {
       core: pins.core,
       mcpServer: pins.mcpServer,
     });
-    // The marker that short-circuits every later run must attest those bytes.
+    // The marker that short-circuits every later run must attest those bytes AND
+    // the local samples that produced them — a marker written from the pins
+    // alone (without proving which bytes were installed) would let a wrong
+    // version short-circuit every later run.
     expect(JSON.parse(fs.readFileSync(path.join(pluginData, 'runtime', '.pd-runtime.json'), 'utf8'))).toMatchObject({
       codexAdapter: pins.codexAdapter,
       hostRuntime: pins.hostRuntime,
       core: pins.core,
       mcpServer: pins.mcpServer,
+      adapterSource: samples.sources.codexAdapter,
+      hostRuntimeSource: samples.sources.hostRuntime,
+      coreSource: samples.sources.core,
+      mcpServerSource: samples.sources.mcpServer,
     });
 
     // CodeRabbit (PR #2304): a first-run fixture that ships a comment-only
@@ -1155,6 +1254,34 @@ describe('first-run $pd-control setup (real user flow)', () => {
     expect(probeReport.ok, JSON.stringify(probeReport.scenarioResults)).toBe(true);
     expect(probeReport.scenarioResults.every((s) => s.pass)).toBe(true);
   }, 420_000);
+
+  it('refuses a pin that is not the exact local cohort version, including a floating "latest" token', () => {
+    // The pin must name a version the sample actually IS. A floating token is
+    // not "any available version": the local sample is the exact cohort build,
+    // so accepting `latest` would silently install whatever happens to be there.
+    const { fakeHome, result } = firstRunSetup({ pinOverrides: { codexAdapter: 'latest' } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('adapter_source_invalid');
+    expect(result.stdout).not.toContain('"ok": true');
+    expect(fs.existsSync(path.join(firstRunRuntimeDir(fakeHome), '.pd-runtime.json'))).toBe(false);
+  }, 120_000);
+
+  it('fails loud with runtime_install_failed when a pinned version cannot be resolved, never installing another version', () => {
+    // Deterministic stand-in for the ETARGET the release line observed on
+    // #2510: the pin names a version no sample provides and the registry cannot
+    // resolve it. Port 9 refuses TCP, so no network/registry state is involved.
+    // The contract under test is setup's own: fail loud, write no marker, never
+    // fall back to a different/latest version.
+    const { fakeHome, result } = firstRunSetup({
+      pinOverrides: { codexAdapter: '0.0.0' },
+      omitSources: ['codexAdapter'],
+      env: { npm_config_registry: 'http://127.0.0.1:9/' },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('runtime_install_failed');
+    expect(result.stdout).not.toContain('"ok": true');
+    expect(fs.existsSync(path.join(firstRunRuntimeDir(fakeHome), '.pd-runtime.json'))).toBe(false);
+  }, 180_000);
 });
 
 describe('pd-disable.cjs kill switch', () => {
