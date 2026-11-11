@@ -126,7 +126,7 @@ export function ExaminerPage(): React.ReactElement {
     <PageShell>
       <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-semibold text-ink" data-testid="examiner-page-title">
+          <h1 className="text-title font-semibold text-ink" data-testid="examiner-page-title">
             {t('pages.examiner.title')}
           </h1>
           <p className="mt-1 text-[14px] text-ink-3">{t('pages.examiner.subtitle')}</p>
@@ -227,7 +227,7 @@ export function ExaminerPage(): React.ReactElement {
                     <span>
                       {t('pages.examiner.errors.principles')}
                       {principlesError !== null && (
-                        <span className="mt-1 block font-mono text-[11px] opacity-80">{principlesError}</span>
+                        <span className="mt-1 block font-mono text-caption opacity-80">{principlesError}</span>
                       )}
                     </span>
                   </span>
@@ -275,7 +275,7 @@ export function ExaminerPage(): React.ReactElement {
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <span>
                       {t('pages.examiner.evaluation.evidenceError', { principleId: selected })}
-                      <span className="mt-1 block font-mono text-[11px] opacity-80">{evidenceError}</span>
+                      <span className="mt-1 block font-mono text-caption opacity-80">{evidenceError}</span>
                     </span>
                   </span>
                   <Button

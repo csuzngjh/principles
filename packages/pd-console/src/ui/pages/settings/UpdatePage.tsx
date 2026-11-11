@@ -237,13 +237,13 @@ export function UpdatePage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.update.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.update.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
           <p>{t("pages.update.loadError")}</p>
           {errorMessage && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">{errorMessage}</p>
+            <p className="mt-2 text-ink-4 text-body font-mono">{errorMessage}</p>
           )}
         </div>
       </PageShell>
@@ -273,7 +273,7 @@ export function UpdatePage() {
           transaction is shown with its phase and next step; the Owner attaches
           to it instead of silently starting a duplicate update. */}
       {recoveryData?.needsRecovery && recoveryData.unfinished.length > 0 && (
-        <div className="mb-6 p-4 bg-amber/5 border border-amber/35 rounded-[6px] text-[13px] leading-relaxed text-ink-2" role="alert">
+        <div className="mb-6 p-4 bg-amber/5 border border-amber/35 rounded-[6px] text-body leading-relaxed text-ink-2" role="alert">
           <p className="font-medium text-amber">{t("pages.update.recoveryBanner")}</p>
           {recoveryData.unfinished.slice(0, 3).map((item) => (
             <p key={item.transactionId} className="mt-1 font-mono text-[12px] text-ink-3">
@@ -294,7 +294,7 @@ export function UpdatePage() {
           ones — a banner only keyed on `unfinished` is how the PRI-1069
           half-restored runtime stayed invisible (review 2026-11-02). */}
       {recoveryData?.needsRecovery && recoveryData.recoveryRequired.length > 0 && (
-        <div className="mb-6 p-4 bg-amber/5 border border-amber/35 rounded-[6px] text-[13px] leading-relaxed text-ink-2" role="alert">
+        <div className="mb-6 p-4 bg-amber/5 border border-amber/35 rounded-[6px] text-body leading-relaxed text-ink-2" role="alert">
           <p className="font-medium text-amber">{t("pages.update.recoveryRequiredBanner")}</p>
           {recoveryData.recoveryRequired.slice(0, 3).map((item) => (
             <p key={item.transactionId} className="mt-1 font-mono text-[12px] text-ink-3">
@@ -311,7 +311,7 @@ export function UpdatePage() {
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.update.eyebrow")}
       </div>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         {t("pages.update.title")}
       </h1>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
@@ -329,36 +329,36 @@ export function UpdatePage() {
           <div className="space-y-4">
             {/* Current version */}
             <div className="flex items-center justify-between">
-              <span className="text-ink-3 text-[13px]">{t("pages.update.currentVersion")}</span>
-              <span className="font-mono text-[13px] text-ink">
+              <span className="text-ink-3 text-body">{t("pages.update.currentVersion")}</span>
+              <span className="font-mono text-body text-ink">
                 {statusData?.currentVersion ?? "—"}
               </span>
             </div>
 
             {/* Latest version */}
             <div className="flex items-center justify-between">
-              <span className="text-ink-3 text-[13px]">{t("pages.update.latestVersion")}</span>
+              <span className="text-ink-3 text-body">{t("pages.update.latestVersion")}</span>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[13px] text-ink">
+                <span className="font-mono text-body text-ink">
                   {updateState === 'check_failed' ? "—" : (statusData?.latestVersion || "—")}
                 </span>
                 {updateState === 'check_failed' && (
-                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
                     {t("pages.update.checkFailed")}
                   </span>
                 )}
                 {updateState === 'update_blocked' && (
-                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
                     {t("pages.update.blockedBadge")}
                   </span>
                 )}
                 {updateState === 'up_to_date' && (
-                  <span className="inline-flex items-center border border-green/35 text-green rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                  <span className="inline-flex items-center border border-green/35 text-green rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
                     {t("pages.update.upToDate")}
                   </span>
                 )}
                 {updateState === 'update_available' && (
-                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                  <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
                     {t("pages.update.updateAvailable")}
                   </span>
                 )}
@@ -392,7 +392,7 @@ export function UpdatePage() {
           {/* PRI-853: in-progress panel — the accepted detached transaction is
               the live state; phases stream from the transaction endpoint. */}
           {inProgress && (
-            <div className="mt-4 p-4 rounded-[6px] border border-gov/30 bg-surface text-[13px] leading-relaxed" role="status">
+            <div className="mt-4 p-4 rounded-[6px] border border-gov/30 bg-surface text-body leading-relaxed" role="status">
               <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin text-gov" />
                 <span className="font-medium text-ink">{t("pages.update.inProgressPanel")}</span>
@@ -410,7 +410,7 @@ export function UpdatePage() {
               type="button"
               onClick={handleCheckForUpdates}
               disabled={checking || fullUpdating || inProgress !== null}
-              className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {checking ? t("pages.update.checking") : t("pages.update.checkForUpdates")}
             </button>
@@ -419,7 +419,7 @@ export function UpdatePage() {
                 type="button"
                 onClick={() => setShowFullUpdateDialog(true)}
                 disabled={checking || fullUpdating || inProgress !== null}
-                className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="bg-gov text-white rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-gov/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {fullUpdating ? (
                   <span className="flex items-center gap-1.5">
@@ -454,13 +454,13 @@ export function UpdatePage() {
                   {/* Version comparison (success only) */}
                   {updateResult.success && updateResult.fromVersion && updateResult.newVersion && (
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="font-mono text-[13px] text-ink-3 line-through">{updateResult.fromVersion}</span>
+                      <span className="font-mono text-body text-ink-3 line-through">{updateResult.fromVersion}</span>
                       <ArrowRight className="h-3.5 w-3.5 text-green" />
-                      <span className="font-mono text-[13px] text-green font-medium">{updateResult.newVersion}</span>
+                      <span className="font-mono text-body text-green font-medium">{updateResult.newVersion}</span>
                     </div>
                   )}
                   {/* Message */}
-                  <p className={`text-[13px] ${updateResult.success ? 'text-green' : updateResult.refusal ? 'text-ink-2' : 'text-danger'}`}>
+                  <p className={`text-body ${updateResult.success ? 'text-green' : updateResult.refusal ? 'text-ink-2' : 'text-danger'}`}>
                     {updateResult.message}
                   </p>
                   {/* Full update restart prompt (requires console restart) */}
@@ -513,7 +513,7 @@ export function UpdatePage() {
         </SectionTitle>
 
         {historyErrorReason ? (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+          <div className="text-ink-3 text-body leading-relaxed py-3">
             {t("pages.update.loadError")} ({historyErrorReason})
           </div>
         ) : historyData && historyData.updates.length > 0 ? (
@@ -525,28 +525,28 @@ export function UpdatePage() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
+                    <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-eyebrow text-ink-3 bg-surface/80 uppercase">
                       {t("pages.update.version")}
                     </span>
-                    <span className="font-mono text-[13px] text-ink">
+                    <span className="font-mono text-body text-ink">
                       {/* Failure entries persist toVersion as the literal
                           "failed" (routes/update.ts) — not a version; show a
                           dash and let the red badge carry the failure signal. */}
                       {entry.fromVersion} → {entry.toVersion === "failed" ? "—" : entry.toVersion}
                     </span>
                     {entry.kind !== "failure" && (
-                      <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
+                      <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-eyebrow text-ink-3 bg-surface/80 uppercase">
                         {t(`pages.update.historyKind.${entry.kind}`)}
                       </span>
                     )}
                     {!entry.success && entry.kind !== 'refusal' && (
-                      <span className="inline-flex items-center border border-danger/35 text-danger rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+                      <span className="inline-flex items-center border border-danger/35 text-danger rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
                         {t("pages.update.failed")}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-ink-3 text-[13px]">
+                    <span className="text-ink-3 text-body">
                       {formatDate(entry.timestamp, i18n.language, {
                         year: "numeric",
                         month: "short",
@@ -567,7 +567,7 @@ export function UpdatePage() {
             ))}
           </div>
         ) : (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+          <div className="text-ink-3 text-body leading-relaxed py-3">
             {t("pages.update.noHistory")}
           </div>
         )}

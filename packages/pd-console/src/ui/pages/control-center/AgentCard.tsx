@@ -111,7 +111,7 @@ function renderTextWithCode(text: string): ReactNode[] {
       nodes.push(
         <code
           key={`code-${i}`}
-          className="font-mono text-[11px] text-ink-2 bg-paper-2 px-[5px] py-[1px] rounded-[2px]"
+          className="font-mono text-caption text-ink-2 bg-paper-2 px-[5px] py-[1px] rounded-[2px]"
         >
           {part}
         </code>,
@@ -283,11 +283,11 @@ export function AgentCard({
             )}
           >
             <span>{displayName}</span>
-            <span className="font-mono text-[11.5px] text-ink-4 font-normal">
+            <span className="font-mono text-caption text-ink-4 font-normal">
               {agent.name}
             </span>
           </div>
-          <div className="text-[12.5px] text-ink-3 mt-[2px] leading-[1.5]">
+          <div className="text-caption text-ink-3 mt-[2px] leading-[1.5]">
             {role}
           </div>
         </div>
@@ -304,7 +304,7 @@ export function AgentCard({
               : t("pages.controlCenter.agentEnabled")
           }
           className={cn(
-            "rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium transition-colors disabled:opacity-50",
+            "rounded-[3px] px-[14px] py-[6px] text-caption font-medium transition-colors disabled:opacity-50",
             agent.enabled
               ? "border border-gov bg-gov text-paper hover:bg-gov-2"
               : "border border-line bg-surface text-ink hover:border-line-2",
@@ -331,7 +331,7 @@ export function AgentCard({
       {isOpen && (
         <div className="px-[16px] pb-[14px] border-t border-line-2 bg-panel">
           {/* 详细说明段落 */}
-          <div className="pt-[14px] text-[13px] text-ink-3 leading-[1.62]">
+          <div className="pt-[14px] text-body text-ink-3 leading-[1.62]">
             {detailParagraphs.map((para, i) => (
               <p key={i} className={i > 0 ? "mt-2" : undefined}>
                 {renderTextWithCode(para)}
@@ -349,13 +349,13 @@ export function AgentCard({
           {/* impact-box */}
           <div
             className={cn(
-              "mt-[12px] px-[12px] py-[10px] border border-line-2 border-l-[2.5px] rounded-[4px] bg-paper-2 text-[12.5px] text-ink-3 leading-[1.55]",
+              "mt-[12px] px-[12px] py-[10px] border border-line-2 border-l-[2.5px] rounded-[4px] bg-paper-2 text-caption text-ink-3 leading-[1.55]",
               impactBorderClass(meta.impactLevel),
             )}
           >
             <span
               className={cn(
-                "block mb-[3px] text-[10px] font-mono uppercase tracking-[0.08em] font-medium",
+                "block mb-[3px] text-caption font-mono uppercase tracking-[0.08em] font-medium",
                 impactLabelClass(meta.impactLevel),
               )}
             >
@@ -389,7 +389,7 @@ export function AgentCard({
             <>
               <div
                 data-tech-toggle
-                className="mt-[12px] pt-[12px] border-t border-line-2 flex items-center gap-[6px] cursor-pointer text-[11px] text-ink-4 font-mono uppercase tracking-[0.04em] hover:text-ink-2 transition-colors"
+                className="mt-[12px] pt-[12px] border-t border-line-2 flex items-center gap-[6px] cursor-pointer text-eyebrow text-ink-4 font-mono uppercase tracking-[0.04em] hover:text-ink-2 transition-colors"
                 onClick={handleTechToggleClick}
                 role="button"
                 tabIndex={0}
@@ -415,7 +415,7 @@ export function AgentCard({
                 <div className="mt-2 grid grid-cols-[72px_1fr] gap-x-[14px] gap-y-[6px] text-[12px] leading-[1.55]">
                   {Object.entries(techDetail).map(([k, v]) => (
                     <div key={k} className="contents">
-                      <div className="text-ink-4 font-mono text-[10.5px] uppercase tracking-[0.04em] pt-px">
+                      <div className="text-ink-4 font-mono text-caption uppercase tracking-[0.04em] pt-px">
                         {k}
                       </div>
                       <div className="text-ink-3">
@@ -430,14 +430,14 @@ export function AgentCard({
 
           {/* profile-row */}
           <div className="mt-[12px] pt-[12px] border-t border-line-2 flex items-center gap-[10px] text-[12px] flex-wrap">
-            <span className="text-ink-4 font-mono text-[10.5px] uppercase tracking-[0.04em]">
+            <span className="text-ink-4 font-mono text-caption uppercase tracking-[0.04em]">
               {t("pages.controlCenter.profileLabelShort")}
             </span>
             <select
               value={agent.runtimeProfileId}
               onChange={handleProfileChange}
               disabled={isSaving}
-              className="font-mono text-[11px] text-ink-2 bg-surface border border-line-2 rounded-[3px] px-2 py-1 cursor-pointer focus:outline-none focus:border-gov disabled:opacity-50"
+              className="font-mono text-caption text-ink-2 bg-surface border border-line-2 rounded-[3px] px-2 py-1 cursor-pointer focus:outline-none focus:border-gov disabled:opacity-50"
               aria-label={t("pages.controlCenter.profileLabel")}
             >
               {profiles.map((p) => (
@@ -448,7 +448,7 @@ export function AgentCard({
             </select>
             {/* 动态 readiness loading 指示器（仅探测中显示）*/}
             {readinessLoading && (
-              <span className="text-[10.5px] text-ink-4 font-mono animate-pulse">
+              <span className="text-caption text-ink-4 font-mono animate-pulse">
                 {t("pages.controlCenter.readinessChecking")}
               </span>
             )}
@@ -463,7 +463,7 @@ export function AgentCard({
                   el.scrollIntoView({ behavior: "smooth", block: "start" });
                 }
               }}
-              className="ml-auto text-[11px] text-ink-4 hover:text-ink-2 transition-colors px-[8px] py-[3px] border border-line-2 rounded-[3px] focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              className="ml-auto text-caption text-ink-4 hover:text-ink-2 transition-colors px-[8px] py-[3px] border border-line-2 rounded-[3px] focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               aria-label={t("pages.controlCenter.manageProfiles")}
             >
               {t("pages.controlCenter.manageProfiles")}
@@ -481,14 +481,14 @@ export function AgentCard({
                 <button
                   type="button"
                   onClick={handleConfirmOff}
-                  className="text-[11.5px] px-[12px] py-[4px] rounded-[3px] border border-transparent bg-danger text-paper font-medium hover:opacity-90 transition-opacity focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  className="text-caption px-[12px] py-[4px] rounded-[3px] border border-transparent bg-danger text-paper font-medium hover:opacity-90 transition-opacity focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 >
                   {t("pages.controlCenter.impact.confirmAck")}
                 </button>
                 <button
                   type="button"
                   onClick={handleCancelConfirm}
-                  className="text-[11.5px] px-[12px] py-[4px] rounded-[3px] border border-line bg-transparent text-ink-3 hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  className="text-caption px-[12px] py-[4px] rounded-[3px] border border-line bg-transparent text-ink-3 hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 >
                   {t("pages.controlCenter.impact.confirmCancel")}
                 </button>

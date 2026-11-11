@@ -32,7 +32,7 @@ export function DesignSystemPage() {
   return (
     <PageShell>
       <SectionTitle>Design System Preview</SectionTitle>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         Warm Paper + Blueprint
       </h1>
       <p className="text-ink-3 text-sm mb-8">
@@ -48,8 +48,8 @@ export function DesignSystemPage() {
               className="w-full h-12 rounded-[var(--radius-md)] border border-line"
               style={{ backgroundColor: value }}
             />
-            <span className="font-mono text-[10px] text-ink-3">{name}</span>
-            <span className="font-mono text-[10px] text-ink-4">{value}</span>
+            <span className="font-mono text-caption text-ink-3">{name}</span>
+            <span className="font-mono text-caption text-ink-4">{value}</span>
           </div>
         ))}
       </div>
@@ -79,7 +79,7 @@ export function DesignSystemPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-ink-3">
-              Cards use <code className="font-mono text-[11px] bg-paper-2 px-1 rounded-[2px]">--shadow-card</code> and
+              Cards use <code className="font-mono text-caption bg-paper-2 px-1 rounded-[2px]">--shadow-card</code> and
               hover with deeper shadow. No translateY or scale on hover (B.4.4).
             </p>
           </CardContent>
@@ -145,14 +145,14 @@ export function DesignSystemPage() {
       {/* Typography */}
       <SectionTitle>Typography</SectionTitle>
       <div className="space-y-3 mb-8">
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink">Page Title — 29px</h1>
-        <h2 className="text-[17px] font-semibold tracking-tight text-ink">Card Title — 17px</h2>
-        <h3 className="text-[13px] font-semibold text-ink-2">Section Title — 13px</h3>
-        <p className="text-[15px] text-ink leading-relaxed">Body text — 15px. The quick brown fox jumps over the lazy dog. 数字使用 tabular-nums: 1,234,567.</p>
+        <h1 className="text-display font-semibold tracking-tight text-ink">Page Title — 29px</h1>
+        <h2 className="text-subtitle font-semibold tracking-tight text-ink">Card Title — 17px</h2>
+        <h3 className="text-body font-semibold text-ink-2">Section Title — 13px</h3>
+        <p className="text-reading text-ink leading-relaxed">Body text — 15px. The quick brown fox jumps over the lazy dog. 数字使用 tabular-nums: 1,234,567.</p>
         <p className="text-[14px] text-ink-2">Card body — 14px</p>
-        <p className="text-[13px] text-ink-3">Auxiliary text — 13px</p>
-        <p className="font-mono text-[11px] tracking-[0.1em] uppercase text-ink-3">EYEBROW / LABEL — 11PX MONO</p>
-        <p className="font-mono text-[11px] text-ink-4">Metadata / timestamp — 11px mono</p>
+        <p className="text-body text-ink-3">Auxiliary text — 13px</p>
+        <p className="font-mono text-eyebrow tracking-[0.1em] uppercase text-ink-3">EYEBROW / LABEL — 11PX MONO</p>
+        <p className="font-mono text-caption text-ink-4">Metadata / timestamp — 11px mono</p>
       </div>
 
       {/* 712px Container */}

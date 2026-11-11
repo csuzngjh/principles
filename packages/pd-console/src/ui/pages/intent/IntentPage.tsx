@@ -25,7 +25,7 @@ function FlagStatusBadge({ enabled }: { enabled: boolean }) {
     : t("pages.intent.flagStatus.disabled");
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[3px] text-[11px] font-mono border ${
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[3px] text-caption font-mono border ${
         enabled
           ? "border-emerald/40 text-emerald bg-emerald/5"
           : "border-line text-ink-3 bg-surface"
@@ -49,10 +49,10 @@ function EditEntry({ filePath }: { filePath: string }) {
   // surfaces the file path so the Owner can edit it in their own editor.
   return (
     <div className="bg-panel border border-line rounded-[6px] p-4">
-      <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+      <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
         {t("pages.intent.editEntry.title")}
       </h3>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-2">
+      <p className="text-ink-3 text-body leading-relaxed mb-2">
         {t("pages.intent.editEntry.description")}
       </p>
       <div className="flex items-center gap-2">
@@ -65,7 +65,7 @@ function EditEntry({ filePath }: { filePath: string }) {
             // Copy to clipboard — Owner pastes into their editor.
             void navigator.clipboard?.writeText(filePath);
           }}
-          className="shrink-0 border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-[11px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          className="shrink-0 border border-line bg-surface text-ink-2 rounded-[3px] px-2 py-1 text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           aria-label={t("pages.intent.editEntry.copyAriaLabel")}
         >
           {t("pages.intent.editEntry.copy")}
@@ -107,10 +107,10 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
 
   return (
     <div className="bg-panel border border-amber/20 border-l-2 border-l-amber rounded-[6px] p-4 mb-5">
-      <h2 className="text-ink text-[15px] font-semibold mb-2">
+      <h2 className="text-ink text-reading font-semibold mb-2">
         {t("pages.intent.flagDisabled.title")}
       </h2>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+      <p className="text-ink-3 text-body leading-relaxed mb-3">
         {t("pages.intent.flagDisabled.description")}
       </p>
       <button
@@ -130,7 +130,7 @@ function FlagToggleCard({ flagEnabled, onAfterEnable }: FlagToggleCardProps) {
             setBusy(false);
           }
         }}
-        className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+        className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         aria-label={t("pages.intent.flagStatus.enable")}
       >
         {busy ? t("pages.intent.flagStatus.enabling") : t("pages.intent.flagStatus.enable")}
@@ -143,10 +143,10 @@ function NotFoundBanner({ onCreated, lang }: { onCreated: (openEditor: boolean) 
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-line rounded-[6px] p-5">
-      <h2 className="text-ink text-[15px] font-semibold mb-2">
+      <h2 className="text-ink text-reading font-semibold mb-2">
         {t("pages.intent.notFound.title")}
       </h2>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+      <p className="text-ink-3 text-body leading-relaxed mb-3">
         {t("pages.intent.notFound.description")}
       </p>
       <div className="flex items-center gap-3">
@@ -163,10 +163,10 @@ function OversizedBanner() {
   const { t } = useTranslation();
   return (
     <div className="bg-panel border border-amber/30 rounded-[6px] p-5">
-      <h2 className="text-ink text-[15px] font-semibold mb-2">
+      <h2 className="text-ink text-reading font-semibold mb-2">
         {t("pages.intent.oversized.title")}
       </h2>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+      <p className="text-ink-3 text-body leading-relaxed mb-3">
         {t("pages.intent.oversized.description")}
       </p>
       <div className="font-mono text-[12px] text-ink-2 bg-surface border border-line rounded-[3px] px-3 py-2">
@@ -182,7 +182,7 @@ function WarningItem({ warning }: { warning: IntentDocWarningData }) {
   // not raw server-side English message text (P2 i18n fix).
   const labelKey = `pages.intent.warnings.${warning.code}`;
   return (
-    <li className="flex items-start gap-2 text-ink-2 text-[13px]">
+    <li className="flex items-start gap-2 text-ink-2 text-body">
       <span className="text-amber shrink-0 mt-0.5" aria-hidden="true">!</span>
       <span>
         <span className="font-medium">{t(labelKey)}</span>
@@ -198,10 +198,10 @@ function SectionContent({ label, content }: { label: string; content: string | u
   if (content === undefined || content.trim() === "") return null;
   return (
     <div>
-      <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-1.5">
+      <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-1.5">
         {label}
       </h3>
-      <p className="text-ink-2 text-[13px] leading-relaxed whitespace-pre-wrap">{content}</p>
+      <p className="text-ink-2 text-body leading-relaxed whitespace-pre-wrap">{content}</p>
     </div>
   );
 }
@@ -209,7 +209,7 @@ function SectionContent({ label, content }: { label: string; content: string | u
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline gap-3">
-      <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 w-32 shrink-0">
+      <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 w-32 shrink-0">
         {label}
       </span>
       <span className="text-ink-2 text-[12px] font-mono break-all">{value}</span>
@@ -261,7 +261,7 @@ function VersionEntry({ version, previousContent, reasonLabel, defaultExpanded =
         <span className="px-1.5 py-0.5 rounded-[2px] bg-surface-2 text-ink-3 shrink-0">
           {reasonLabel}
         </span>
-        <span className="text-ink-4 text-[11px] ml-auto shrink-0 hidden sm:inline">
+        <span className="text-ink-4 text-caption ml-auto shrink-0 hidden sm:inline">
           {expanded ? t("pages.intent.versionDiff.collapseHint") : t("pages.intent.versionDiff.expandHint")}
         </span>
       </button>
@@ -275,7 +275,7 @@ function VersionEntry({ version, previousContent, reasonLabel, defaultExpanded =
               return (
                 <span
                   key={d.section}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono border ${
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[2px] text-caption font-mono border ${
                     d.changed
                       ? "border-amber/40 text-amber bg-amber/5"
                       : "border-line text-ink-3 bg-surface"
@@ -346,16 +346,16 @@ function DecisionSummarySection() {
       <SectionTitle id="section-decisions">
         {t("pages.intent.decisions.sectionTitle")}
       </SectionTitle>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+      <p className="text-ink-3 text-body leading-relaxed mb-3">
         {t("pages.intent.decisions.sectionSubtitle")}
       </p>
       {state === "loading" && (
-        <div className="bg-panel border border-line rounded-[6px] p-4 text-ink-3 text-[13px]">
+        <div className="bg-panel border border-line rounded-[6px] p-4 text-ink-3 text-body">
           {t("common.loading")}
         </div>
       )}
       {state === "error" && (
-        <div className="bg-panel border border-line rounded-[6px] p-4 text-ink-3 text-[13px]">
+        <div className="bg-panel border border-line rounded-[6px] p-4 text-ink-3 text-body">
           {t("pages.intent.decisions.loadError")}
         </div>
       )}
@@ -368,7 +368,7 @@ function DecisionSummarySection() {
               return (
                 <div key={action} className="flex items-baseline gap-2">
                   <dt className="text-ink-3 text-[12px]">{t(labelKey)}</dt>
-                  <dd className="text-ink font-mono text-[13px]">{count}</dd>
+                  <dd className="text-ink font-mono text-body">{count}</dd>
                 </div>
               );
             })}
@@ -379,7 +379,7 @@ function DecisionSummarySection() {
               <p className="text-ink-4 text-[12px]">{t("pages.intent.decisions.noDecisions")}</p>
             ) : (
               <div className="flex items-baseline gap-2">
-                <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+                <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
                   {t("pages.intent.decisions.lastDecisionAtLabel")}
                 </span>
                 <span className="text-ink-2 text-[12px] font-mono break-all">{summary.lastDecisionAt}</span>
@@ -513,20 +513,20 @@ export function IntentPage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.intent.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.intent.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
           <p>{t("pages.intent.loadError")}</p>
           {errorMsg && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">{errorMsg}</p>
+            <p className="mt-2 text-ink-4 text-body font-mono">{errorMsg}</p>
           )}
         </div>
         <div className="mt-4">
           <button
             type="button"
             onClick={loadData}
-            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           >
             {t("common.refresh")}
           </button>
@@ -546,7 +546,7 @@ export function IntentPage() {
           {t("pages.intent.eyebrow")}
         </div>
         <div className="flex items-center gap-3 mb-2">
-          <h1 className="text-[29px] font-semibold tracking-tight text-ink">
+          <h1 className="text-display font-semibold tracking-tight text-ink">
             {t("pages.intent.title")}
           </h1>
           {summary && (
@@ -638,7 +638,7 @@ export function IntentPage() {
                     {t("pages.intent.warnings.title")}
                   </SectionTitle>
                   {summary.warnings.length === 0 ? (
-                    <p className="text-ink-3 text-[13px] leading-relaxed">
+                    <p className="text-ink-3 text-body leading-relaxed">
                       {t("pages.intent.warnings.empty")}
                     </p>
                   ) : (
@@ -685,14 +685,14 @@ export function IntentPage() {
         {/* Flag-on but other error (read_error / parse_error) */}
         {summary && summary.flagEnabled && !summary.ok && summary.reason && summary.reason !== "not_found" && summary.reason !== "oversized" && (
           <div className="bg-panel border border-red-200 rounded-[6px] p-5">
-            <h2 className="text-ink text-[15px] font-semibold mb-2">
+            <h2 className="text-ink text-reading font-semibold mb-2">
               {t("pages.intent.loadError")}
             </h2>
-            <p className="text-ink-3 text-[13px] leading-relaxed mb-3 font-mono">
+            <p className="text-ink-3 text-body leading-relaxed mb-3 font-mono">
               {summary.reason}
             </p>
             {summary.nextAction && (
-              <p className="text-ink-2 text-[13px] leading-relaxed">
+              <p className="text-ink-2 text-body leading-relaxed">
                 {summary.nextAction}
               </p>
             )}
@@ -710,7 +710,7 @@ export function IntentPage() {
             Each entry is expandable to show section-level diff (Task 5). */}
         {versions.length > 0 && (
           <details className="border border-line rounded-[3px] mt-6">
-            <summary className="cursor-pointer px-4 py-2 text-[13px] font-medium text-ink-2 select-none">
+            <summary className="cursor-pointer px-4 py-2 text-body font-medium text-ink-2 select-none">
               {t("pages.intent.versionHistory.title")} ({versions.length})
             </summary>
             <div className="px-4 py-2 border-t border-line">
