@@ -7,6 +7,7 @@
 
 import type { IntentTensionData, IntentDecisionRecordData, EvidenceChainProvenanceData } from '../../utils/validators.js';
 import type { IntentDecisionInputPayload } from '../../api.js';
+import { enumLabel } from '../../utils/enum-labels.js';
 
 // ── Confidence mapping ────────────────────────────────────────────────────────
 
@@ -100,6 +101,36 @@ export function isAgentReportedOwnerApproved(record: RecordData): boolean {
   return resolveProvenanceBadge(record).kind === 'authorized_agent_report';
 }
 
+/**
+ * zh-CN mirror of the two provenance i18n keys, used only when no translator is
+ * supplied (pure tests). The React page always passes `t`, so the real UI reads
+ * the i18n catalog; this keeps the helper total without leaking an enum.
+ */
+const SAFE_SOURCE_DISPLAY_FALLBACK: Readonly<Record<'authorized_agent_report' | 'unverified_agent_report', string>> = {
+  authorized_agent_report: '智能体报告，拥有者已授权',
+  unverified_agent_report: '智能体报告（授权信息不可验证）',
+};
+
+/**
+ * Single Owner-facing source label resolver for Layer 1, Layer 3 (technical
+ * details) and the copied debug summary.
+ *
+ * Every Owner-facing path must go through this function so no internal enum
+ * literal (`mcp_agent_assisted`, `agent_reported_owner_approved`, …) can leak.
+ * Records without verifiable provenance degrade to neutral wording; they are
+ * never presented as Owner authorization.
+ */
+export function resolveSourceDisplayLabel(
+  record: RecordData,
+  t?: (key: string) => string,
+): string {
+  const badge = resolveProvenanceBadge(record);
+  if (badge.kind !== 'source_kind') {
+    return t && badge.labelKey ? t(badge.labelKey) : SAFE_SOURCE_DISPLAY_FALLBACK[badge.kind];
+  }
+  return enumLabel('sourceKind', record.sourceKind, t);
+}
+
 // ── Card layer data structures ────────────────────────────────────────────────
 
 export interface Layer1Data {
@@ -137,7 +168,8 @@ export interface Layer3Data {
   linkedTaskStatus: string | null;
   linkedCandidateId: string | null;
   linkedPrincipleId: string | null;
-  sourceKind: string;
+  /** Safe Owner-facing source label — never the raw source kind enum. */
+  sourceLabel: string;
   state: string;
   /** PRI-380: internalization task linkage */
   internalizationTaskId: string | null;
@@ -183,10 +215,13 @@ export interface RecordData {
  * - Layer 2: human-readable content (trigger, conclusion, applicability, confidence)
  * - Layer 3: technical IDs (collapsed by default)
  */
-export function buildCardLayers(record: RecordData): CardLayers {
+export function buildCardLayers(record: RecordData, t?: (key: string) => string): CardLayers {
+  // All Owner-facing layers share one safe resolver (SPEC §6.6.4).
+  const sourceLabel = resolveSourceDisplayLabel(record, t);
+
   const layer1: Layer1Data = {
     stateLabel: record.state,
-    sourceLabel: record.sourceKind,
+    sourceLabel,
     observedAt: record.observedAt,
   };
 
@@ -210,7 +245,7 @@ export function buildCardLayers(record: RecordData): CardLayers {
     linkedTaskStatus: record.linkedTaskStatus ?? null,
     linkedCandidateId: record.linkedCandidateId ?? null,
     linkedPrincipleId: record.linkedPrincipleId ?? null,
-    sourceKind: record.sourceKind,
+    sourceLabel,
     state: record.state,
     internalizationTaskId: record.internalizationTaskId ?? null,
     dreamerTaskStatus: record.dreamerTaskStatus ?? null,
@@ -229,7 +264,7 @@ export function buildCardLayers(record: RecordData): CardLayers {
  * so Owners never need to read raw IDs in the UI — they copy this string
  * only when reporting an issue to a developer.
  */
-export function buildDebugIdSummary(record: RecordData): string {
+export function buildDebugIdSummary(record: RecordData, t?: (key: string) => string): string {
   const lines: string[] = [];
   lines.push(`pain_id: ${record.id}`);
   if (record.linkedTaskId) lines.push(`task_id: ${record.linkedTaskId}`);
@@ -238,7 +273,8 @@ export function buildDebugIdSummary(record: RecordData): string {
   if (record.linkedPrincipleId) lines.push(`principle_id: ${record.linkedPrincipleId}`);
   if (record.internalizationTaskId) lines.push(`internalization_task_id: ${record.internalizationTaskId}`);
   if (record.dreamerTaskStatus) lines.push(`dreamer_status: ${record.dreamerTaskStatus}`);
-  lines.push(`source_kind: ${record.sourceKind}`);
+  // Owner-facing clipboard text: the safe label, never the raw source enum.
+  lines.push(`source_kind: ${resolveSourceDisplayLabel(record, t)}`);
   lines.push(`state: ${record.state}`);
   return lines.join('\n');
 }

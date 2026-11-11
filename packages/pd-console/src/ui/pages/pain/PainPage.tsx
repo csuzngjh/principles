@@ -23,7 +23,7 @@ import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData
 import type { IntentTensionData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format-date.js';
 import i18n from '../../i18n/index.js';
-import { buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, resolveProvenanceBadge, type IntentDecisionContext } from './pain-card-helpers.js';
+import { buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, resolveProvenanceBadge, resolveSourceDisplayLabel, type IntentDecisionContext } from './pain-card-helpers.js';
 import { enumLabel } from '../../utils/enum-labels.js';
 
 // utils/format.js was retired into the defensive single-owner formatter
@@ -354,11 +354,9 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
   // Missing provenance is never read as Owner authorization, and the raw enum
   // literal must never reach the Owner.
   const provenanceBadge = resolveProvenanceBadge(record);
-  const sourceLabel = provenanceBadge.labelKey
-    ? t(provenanceBadge.labelKey)
-    : enumLabel('sourceKind', record.sourceKind, t);
+  const sourceLabel = resolveSourceDisplayLabel(record, t);
 
-  const layers = buildCardLayers(record);
+  const layers = buildCardLayers(record, t);
 
   // Confidence label — resolve via enumLabel for consistent i18n
   const confidenceDisplay = layers.layer2.confidence
@@ -510,7 +508,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               size="sm"
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(buildDebugIdSummary(record));
+                  await navigator.clipboard.writeText(buildDebugIdSummary(record, t));
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 } catch (error) {
@@ -584,7 +582,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
                 )}
 
                 <span className="font-mono text-ink-4">{t('pages.pain.chainSourceKind')}</span>
-                <span className="font-mono text-ink-2">{layers.layer3.sourceKind}</span>
+                <span className="font-mono text-ink-2">{layers.layer3.sourceLabel}</span>
 
                 <span className="font-mono text-ink-4">{t('pages.pain.chainState')}</span>
                 <span className="font-mono text-ink-2">{layers.layer3.state}</span>

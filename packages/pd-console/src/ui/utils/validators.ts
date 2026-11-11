@@ -2411,7 +2411,7 @@ export interface EvidenceChainRecordData {
   /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
   intentTension?: IntentTensionData;
   /** PRI-625 Slice D: evidence host attribution — openclaw | codex | workbuddy | unknown. */
-  hostKind?: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
+  hostKind?: EvidenceChainHostKindData;
   /**
    * SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: how the pain was observed.
    * Internal value only — the UI must translate it into neutral wording and
@@ -2420,11 +2420,37 @@ export interface EvidenceChainRecordData {
   provenance?: EvidenceChainProvenanceData;
 }
 
+/**
+ * PRI-625: hosts that may attribute evidence. Single console-side source for
+ * BOTH the structural type and the runtime validator, so a new host cannot be
+ * accepted by one and rejected by the other. Must stay in sync with the Core
+ * evidence-chain contract (`EvidenceChainRecord.hostKind`); `workbuddy` was
+ * missing from the validator and rejected whole API responses (SPEC §6.6.4).
+ */
+export const EVIDENCE_CHAIN_HOST_KINDS = ['openclaw', 'codex', 'workbuddy', 'unknown'] as const;
+export type EvidenceChainHostKindData = (typeof EVIDENCE_CHAIN_HOST_KINDS)[number];
+const EVIDENCE_CHAIN_HOST_KIND_SET: ReadonlySet<string> = new Set(EVIDENCE_CHAIN_HOST_KINDS);
+
+function isEvidenceChainHostKind(value: unknown): value is EvidenceChainHostKindData {
+  return typeof value === 'string' && EVIDENCE_CHAIN_HOST_KIND_SET.has(value);
+}
+
 export type EvidenceChainProvenanceData =
   | 'host_context_bound'
   | 'owner_reported_no_host_trace'
   | 'automatic_hook'
   | 'agent_reported_owner_approved';
+
+const EVIDENCE_CHAIN_PROVENANCE_VALUES: ReadonlySet<string> = new Set<EvidenceChainProvenanceData>([
+  'host_context_bound',
+  'owner_reported_no_host_trace',
+  'automatic_hook',
+  'agent_reported_owner_approved',
+]);
+
+function isEvidenceChainProvenance(value: unknown): value is EvidenceChainProvenanceData {
+  return typeof value === 'string' && EVIDENCE_CHAIN_PROVENANCE_VALUES.has(value);
+}
 
 // ── Intent Tension (PRI-469, SPEC §16) ───────────────────────────────────────
 //
@@ -2827,22 +2853,16 @@ function validateEvidenceChainRecord(v: unknown): EvidenceChainRecordData | null
 
   // Optional fields — fail loud when present but wrong type (ERR-009)
   if (Object.hasOwn(v, 'hostKind')) {
-    if (!isString(v.hostKind)) return null;
-    if (v.hostKind !== 'openclaw' && v.hostKind !== 'codex' && v.hostKind !== 'unknown') return null;
+    if (!isEvidenceChainHostKind(v.hostKind)) return null;
     result.hostKind = v.hostKind;
   }
-  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance is an internal
-  // discriminator; reject unknown values instead of passing them to the UI.
-  if (Object.hasOwn(v, 'provenance')) {
-    if (!isString(v.provenance)) return null;
-    if (
-      v.provenance !== 'host_context_bound'
-      && v.provenance !== 'owner_reported_no_host_trace'
-      && v.provenance !== 'automatic_hook'
-      && v.provenance !== 'agent_reported_owner_approved'
-    ) {
-      return null;
-    }
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance is an internal,
+  // display-only discriminator. Core already normalizes unknown values to
+  // `undefined`; if a malformed one still arrives we DROP it instead of
+  // rejecting the record. Rejecting here would let one optional field null out
+  // the whole response (the same failure class as the missing `workbuddy`
+  // hostKind), and the card then degrades to "authorization unverified".
+  if (Object.hasOwn(v, 'provenance') && isEvidenceChainProvenance(v.provenance)) {
     result.provenance = v.provenance;
   }
   if (Object.hasOwn(v, 'admissionDecision')) {

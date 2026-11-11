@@ -165,7 +165,7 @@ test.describe('PainPage — provenance / source display tiers', () => {
     expect(bodyText.toLowerCase()).not.toContain('owner observed');
   });
 
-  test('expanding the cards still shows technical details (no regression)', async ({ page }) => {
+  test('expanding technical details shows the safe source label, never the raw enum', async ({ page }) => {
     const records = await fetchRecordsByCanonicalPainId();
     const authorized = requireRecord(records, 'pain-e2e-mcp-authorized');
     const historical = requireRecord(records, 'pain-e2e-1');
@@ -175,15 +175,79 @@ test.describe('PainPage — provenance / source display tiers', () => {
 
     await openPainPage(page, 'zh-CN');
 
-    for (const record of [authorized, historical]) {
+    const expandedLabels: Array<[EvidenceRecordShape, string]> = [
+      [authorized, '智能体报告，拥有者已授权'],
+      [historical, '手动触发'],
+    ];
+
+    for (const [record, expectedLabel] of expandedLabels) {
       const details = page.locator(`[data-testid="pain-tech-details-${record.id}"]`);
       await expect(details).toHaveCount(0);
       await page.locator(`[data-testid="pain-expand-${record.id}"]`).click();
       await expect(details).toBeVisible();
       await expect(details).toContainText('来源类型');
-      await expect(details).toContainText(record.sourceKind ?? '');
+      // Layer 3 is Owner-facing too (SPEC §6.6.4): it must show the same safe
+      // label as Layer 1, not the internal source kind enum.
+      await expect(details).toContainText(expectedLabel);
+      const detailsText = await details.innerText();
+      for (const literal of INTERNAL_ENUM_LITERALS) {
+        expect(detailsText, `internal enum leaked into technical details: ${literal}`).not.toContain(literal);
+      }
+      await page.locator(`[data-testid="pain-expand-${record.id}"]`).click();
+      await expect(details).toHaveCount(0);
     }
 
     expect(pageErrors, `page errors:\n${pageErrors.join('\n')}`).toEqual([]);
+  });
+
+  test('copying the debug summary never leaks the raw source kind', async ({ page }) => {
+    const records = await fetchRecordsByCanonicalPainId();
+    const authorized = requireRecord(records, 'pain-e2e-mcp-authorized');
+    const unverified = requireRecord(records, 'pain-e2e-mcp-unverified');
+
+    // Capture clipboard writes instead of touching the real clipboard.
+    await page.addInitScript(() => {
+      const captured: string[] = [];
+      Object.defineProperty(window, '__pdCopied', { value: captured });
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            captured.push(text);
+          },
+        },
+      });
+    });
+
+    await openPainPage(page, 'zh-CN');
+
+    const expectedByRecordId: Array<[EvidenceRecordShape, string]> = [
+      [authorized, '智能体报告，拥有者已授权'],
+      [unverified, '智能体报告（授权信息不可验证）'],
+    ];
+
+    for (const [record, expectedLabel] of expectedByRecordId) {
+      // The copy button is the first button in the Layer 3 action row.
+      const copyButton = page
+        .locator(`[data-testid="pain-expand-${record.id}"]`)
+        .locator('xpath=..')
+        .getByRole('button')
+        .first();
+      await copyButton.click();
+    }
+
+    const copied = await page.evaluate(
+      () => (window as unknown as { __pdCopied: string[] }).__pdCopied,
+    );
+    expect(copied).toHaveLength(2);
+
+    const [authorizedCopy, unverifiedCopy] = copied;
+    expect(authorizedCopy).toContain('source_kind: 智能体报告，拥有者已授权');
+    expect(unverifiedCopy).toContain('source_kind: 智能体报告（授权信息不可验证）');
+    for (const text of copied) {
+      for (const literal of INTERNAL_ENUM_LITERALS) {
+        expect(text, `internal enum leaked into the copied debug summary: ${literal}`).not.toContain(literal);
+      }
+    }
   });
 });
