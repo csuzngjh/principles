@@ -103,6 +103,7 @@ Then obtain the Owner's explicit consent **in the current conversation**.
 
 - Never send a score or severity. The tool has no such parameter, and the system records an omitted severity as **moderate**. You cannot self-elevate; if you think the case is severe, say so inside `reason` for the Owner to judge.
 - Omit `painType` unless you can classify it with confidence. The default is `principle_deviation`.
+- The default is only valid with an `established_principle` anchor: a `principle_deviation` submission without a principle reference is refused (`anchor_invalid`, "principle_deviation requires deviationAnchor{...}"). With `owner_expectation` or `agent_instruction`, pass an explicit and honest pain type (e.g. `tool_failure`); if none fits, say so to the Owner instead of guessing.
 - Never backfill `user_frustration` (or any other type) to make a submission look more urgent.
 
 ## Reading the receipt

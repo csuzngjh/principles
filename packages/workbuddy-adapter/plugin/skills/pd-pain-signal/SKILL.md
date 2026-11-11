@@ -101,6 +101,7 @@ Owner 在本次对话、Owner 文档或已批准决定中明确表达过。`anch
 
 - 不要提交分数或严重度：工具没有该参数；系统对省略严重度的记录按**中等**（moderate）落库。你不得自行提级；认为严重时写在 `reason` 里，由 Owner 判断。
 - 只有在你能明确归类时才填 `painType`，省略时默认 `principle_deviation`。
+- 默认值只对 `established_principle` 锚点成立：没有原则引用的 `principle_deviation` 会被拒绝（`anchor_invalid`，"principle_deviation requires deviationAnchor{...}"）。锚点是 `owner_expectation` / `agent_instruction` 时必须显式给出如实匹配的类型（如 `tool_failure`）；没有合适的类型就向 Owner 说明，不要硬填。
 - 不得为了显得紧急而回填 `user_frustration` 等类型。
 
 ## 如何阅读回执
