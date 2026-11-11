@@ -19,6 +19,8 @@
  * - Local map keyed by the RAW value (with hyphens) for exact lookup
  */
 
+import { IS_DEV } from "./runtime-mode.js";
+
 // Type for the translation function (compatible with react-i18next's t)
 type TFunc = (key: string) => string;
 
@@ -34,7 +36,8 @@ export type EnumCategory =
   | 'confidence'
   | 'feedbackType'
   | 'admission'
-  | 'evaluability';
+  | 'evaluability'
+  | 'approvalReadiness';
 
 // ── Local fallback maps ──────────────────────────────────────────────────────
 // Used when the i18n key `common.enums.<category>.<snake_value>` is missing.
@@ -128,6 +131,15 @@ const LOCAL_LABELS: Record<EnumCategory, Record<string, string>> = {
     'weak_heuristic': '弱启发式',
     'manual_only': '仅人工',
   },
+  // ── SPEC-PD-UIUX-002 Stage 1 (1A 语言层收口) ───────────────────────────────
+  // Promotion readiness is rendered raw on the activation page (validated union:
+  // ready | evidence_insufficient | blocked | unavailable).
+  approvalReadiness: {
+    'ready': '可以推进',
+    'evidence_insufficient': '证据不足',
+    'blocked': '存在阻断项',
+    'unavailable': '暂时无法判定',
+  },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -145,18 +157,32 @@ function toSnakeCase(value: string): string {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
+ * Neutral label used when an enum value has no mapping.
+ *
+ * SPEC-PD-UIUX-002 §4.1: returning the RAW value is what leaked
+ * `internalization-missing` / `needs_human_review` into the Owner-facing UI.
+ * Unknown values must never reach the screen; they degrade to a neutral,
+ * honest phrase and are reported once in development.
+ */
+export const UNKNOWN_ENUM_LABEL = '状态待确认';
+
+/** Report a missing label once per (category, value) — noisy logs hide the signal. */
+const reportedMissing = new Set<string>();
+
+/**
  * Resolve an enum value to a human-readable label.
  *
  * Resolution order:
  * 1. i18n key `common.enums.<category>.<snake_value>` (if the t function
  *    returns something other than the key itself)
  * 2. Local fallback map `LOCAL_LABELS[category][rawValue]`
- * 3. Raw value (last resort — guarantees a non-empty string)
+ * 3. Neutral fallback (`UNKNOWN_ENUM_LABEL`) — NEVER the raw value
  *
  * @param category - The enum category (e.g. 'evidenceState', 'channel')
  * @param value - The raw enum value (e.g. 'internalization-succeeded')
  * @param t - i18n translation function (from useTranslation). Optional;
  *            if omitted, skips straight to the local map.
+ * @param fallback - Optional context-specific neutral label
  * @returns Human-readable label
  *
  * @example
@@ -189,8 +215,15 @@ export function enumLabel(
     }
   }
 
-  // 3. Last resort: raw value
-  return value;
+  // 3. Neutral fallback — the raw value must never reach the screen (1A).
+  if (IS_DEV) {
+    const reportKey = `${category}:${value}`;
+    if (!reportedMissing.has(reportKey)) {
+      reportedMissing.add(reportKey);
+      console.warn(`[enum-labels] missing label for ${reportKey} — add it to LOCAL_LABELS.${category}`);
+    }
+  }
+  return UNKNOWN_ENUM_LABEL;
 }
 
 /**

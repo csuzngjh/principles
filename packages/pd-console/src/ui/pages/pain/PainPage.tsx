@@ -16,6 +16,8 @@ import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
+import { StatePanel } from '../../components/ui/state-panel.js';
+import { humanizeRuntimeText } from '../../utils/technical-detail.js';
 import { Button } from '../../components/ui/button.js';
 import { ShinyText } from '../../components/ui/shiny-text.js';
 import { fetchEvidenceChain, recordIntentDecision, listIntentDecisionsByPainId, listIntentDecisionsByTaskId, dispatchFollowUp } from '../../api.js';
@@ -199,15 +201,23 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
 
   const hasRecords = data.records.length > 0;
 
+  const degraded = data.degradedReason ? humanizeRuntimeText(data.degradedReason) : null;
+  const nextAction = data.nextAction ? humanizeRuntimeText(data.nextAction) : null;
+
   return (
     <>
-      {/* Degraded banner (ERR-002: never silent fallback) */}
-      {hasDegraded && (
-        <div className="mb-4 p-3 bg-panel border border-amber/20 rounded-[var(--radius-md)] text-amber text-[13px]">
-          <div className="mb-1">{data.degradedReason}</div>
-          {data.nextAction && (
-            <div className="text-ink-3 text-[12px]">{data.nextAction}</div>
-          )}
+      {/* 1D 三态统一 (F-37/B-4): partially-unreadable data is a "degraded" state,
+          not an error. The reason and the next step go through the runtime-text
+          translator so the Owner never reads an English database message. */}
+      {hasDegraded && degraded && (
+        <div className="mb-4">
+          <StatePanel
+            kind="degraded"
+            title={degraded.text}
+            body={nextAction?.text}
+            technical={degraded.technical ?? nextAction?.technical ?? undefined}
+            testId="pain-degraded-banner"
+          />
         </div>
       )}
 
@@ -318,16 +328,17 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
 // ── Empty state (E section: guide next step, not "暂无数据") ──────────────────
 
 function EmptyState({ t }: { t: (key: string) => string }) {
+  // 1D (F-37): an empty list is a normal first-run state — neutral colour, one
+  // next step, no alarm. It previously read like a warning box.
   return (
-    <div className="py-8">
-      <div className="p-5 bg-panel border border-line rounded-[var(--radius-md)]">
-        <h3 className="text-[17px] font-semibold text-ink mb-2">
-          {t('pages.pain.emptyTitle')}
-        </h3>
-        <p className="text-ink-3 text-sm leading-relaxed">
-          {t('pages.pain.emptyDescription')}
-        </p>
-      </div>
+    <div className="py-6">
+      <StatePanel
+        kind="first-run"
+        title={t('pages.pain.emptyTitle')}
+        body={t('pages.pain.emptyDescription')}
+        action={{ label: t('pages.pain.emptyAction'), to: '/focus' }}
+        testId="pain-empty-state"
+      />
     </div>
   );
 }
@@ -469,7 +480,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldDegradedReason')}
               </div>
-              <p className="text-amber text-sm leading-relaxed">{layers.layer2.degradedReason}</p>
+              <p className="text-amber text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.degradedReason).text}</p>
             </div>
           )}
 
@@ -479,7 +490,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldNextAction')}
               </div>
-              <p className="text-ink-2 text-sm leading-relaxed">{layers.layer2.nextAction}</p>
+              <p className="text-ink-2 text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.nextAction).text}</p>
             </div>
           )}
         </div>

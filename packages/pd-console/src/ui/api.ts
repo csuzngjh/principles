@@ -287,9 +287,19 @@ async function request<T = unknown>(
   }
 }
 
-async function checkAuth(): Promise<boolean> {
+/**
+ * Probe the console session.
+ *
+ * Three outcomes, and the middle one matters: `null` means the server did not
+ * answer (network failure, 5xx, aborted request). Treating that as "not
+ * authenticated" sent the Owner to a token form that cannot possibly work and
+ * hid the real problem. Callers must keep `null` distinct so the page can show
+ * its own unreachable state instead (SPEC §7 空/错/慢).
+ */
+async function checkAuth(): Promise<boolean | null> {
   const result = await request("/api/health");
-  return result.success;
+  if (result.success) return true;
+  return result.status === 401 ? false : null;
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────

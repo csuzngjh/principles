@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
+import { StatePanel } from "../../components/ui/state-panel.js";
 import { DailyThoughtCard } from "../../components/focus/daily-thought-card.js";
 import { ShinyText } from "../../components/ui/shiny-text.js";
 import {
@@ -23,6 +24,7 @@ import type {
 import type { OwnerDecisionItemData, OwnerDecisionReadIssueData } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
+import { humanizeRuntimeText } from "../../utils/technical-detail.js";
 import { OwnerWorkbench, type OwnerWorkItem, type OwnerWorkItemKind } from "./OwnerWorkbench.js";
 import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
 import type { RuleBindingQueueView } from "../../../shared/rule-candidate-binding-contract.js";
@@ -697,12 +699,23 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
     // Each source publishes independently. A stalled history/inbox request must
     // not hide already available decisions; old request epochs cannot publish.
-    async function settle<T>(source: FocusSource, request: Promise<T>, apply: (value: T) => void, fail: (message: string) => void) {
+    let sourceCount = 0;
+    const transportFailures: string[] = [];
+    async function settle<T extends { success: boolean; error?: string; status?: number }>(source: FocusSource, request: Promise<T>, apply: (value: T) => void, fail: (message: string) => void) {
+      sourceCount += 1;
       try {
         const result = await request;
+        // No HTTP status + a network-shaped message means the console process
+        // itself did not answer — that is page-level, not per-section.
+        if (result.success === false && result.status === undefined
+          && /failed to fetch|network|aborted|econn|load failed/i.test(result.error ?? '')) {
+          transportFailures.push(result.error ?? '');
+        }
         if (epoch === requestEpoch.current) apply(result);
       } catch (error) {
-        if (epoch === requestEpoch.current) fail(error instanceof Error ? error.message : t('pages.focus.loadError'));
+        const message = error instanceof Error ? error.message : t('pages.focus.loadError');
+        transportFailures.push(message);
+        if (epoch === requestEpoch.current) fail(message);
       } finally {
         if (epoch === requestEpoch.current) setPendingSources(current => current.filter(item => item !== source));
       }
@@ -741,6 +754,13 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         else if (result.reason !== 'feature_disabled') setOwnerInboxError(result.error);
       }, setOwnerInboxError),
     ]);
+    // Every source failed at the transport layer: the console is unreachable,
+    // not an empty workspace. Without this the page showed "0 项 + 资料待确认"
+    // plus a raw "Failed to fetch", which reads as "nothing to do" (SPEC §7).
+    if (epoch === requestEpoch.current && sourceCount > 0 && transportFailures.length === sourceCount) {
+      setErrorMessage(transportFailures[0] ?? null);
+      setLoadingState('error');
+    }
   }, [experienceMode, t, promptTargetHost]);
 
   function changePromptTargetHost(host: typeof promptTargetHost) {
@@ -761,7 +781,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   if (loadingState === "loading") {
     return (
       <PageShell>
-        <PageLoading cardCount={3} label={t("common.loading")} />
+        <PageLoading
+          cardCount={3}
+          label={t("common.loading")}
+          slowLabel={t("pages.focus.loadingHint")}
+        />
       </PageShell>
     );
   }
@@ -776,11 +800,15 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
           {t("pages.focus.title")}
         </h1>
-        <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
-          <p>{t("pages.focus.loadError")}</p>
-          {errorMessage && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">{errorMessage}</p>
-          )}
+        <div className="mt-6">
+          <StatePanel
+            kind="unreachable"
+            title={t("components.statePanel.unreachableTitle")}
+            body={errorMessage ? humanizeRuntimeText(errorMessage).text : t("components.statePanel.unreachableBody")}
+            technical={errorMessage ?? undefined}
+            action={{ label: t("common.retry"), onClick: () => { void loadData(); } }}
+            testId="focus-error-state"
+          />
         </div>
       </PageShell>
     );
@@ -833,6 +861,22 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const inboxBlockedAggregate = inboxPartition?.blockedAggregate ?? [];
   const inboxRecovery = inboxPartition?.recovery ?? [];
   const unmatchedInboxDecisions = inboxPartition?.unmatchedDecisions ?? [];
+  // 1B 注意力减法 (F-12): blocked items that all share the same owner-facing
+  // reason were rendered one card each — the same sentence seven times. Group
+  // them for presentation only; each item keeps its own link and stays reachable.
+  // This is a display grouping, NOT a state/classification change (B-3 remains
+  // out of scope for this stage).
+  const inboxBlockedGroups: (typeof inboxBlockedIndividual)[] = (() => {
+    const buckets = new Map<string, typeof inboxBlockedIndividual>();
+    for (const item of inboxBlockedIndividual) {
+      const key = item.learnedPrinciple.status === 'known'
+        ? `principle:${item.principleId}`
+        : item.learnedPrinciple.reasonText;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(item); else buckets.set(key, [item]);
+    }
+    return [...buckets.values()];
+  })();
   // 待处理口径 (INV-01 lineage): decision + blocked-individual + recovery —
   // same three groups the inbox renders; historical unknowns stay explanatory.
   // Review round 2 (P2): the headline never claims allClear from the inbox
@@ -881,38 +925,41 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   ];
 
   return (
-    <PageShell className="max-w-[1120px] owner-workbench-container">
+    <PageShell className="max-w-[1120px] owner-workbench-container py-6">
       <div className="animate-[pdFadeIn_400ms_ease-out]">
-      {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
-      <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
+      {/* Layer 1: Conclusion — eyebrow + title + subtitle.
+          R1-3: the first work item must sit ≤320px from the top at 1440, so this
+          header block is deliberately compact (no decorative whitespace). */}
+      <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-2">
         {t("pages.focus.eyebrow")}
       </div>
       <ShinyText
         as="h1"
-        className="text-[29px] font-semibold tracking-tight text-ink mb-2"
+        className="text-[29px] font-semibold tracking-tight text-ink mb-1"
         duration={4.5}
         brightness={0.5}
         disabled={pendingCount === 0}
       >
         {t('pages.focus.workbench.title')}
       </ShinyText>
-      <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
+      <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-3">
         {t('pages.focus.workbench.subtitle')}
       </p>
 
-      {/* SPEC-PD-UIUX-001 R2 Layer 1: 当前结论 — readiness, one lock reason,
-          and 待处理/可操作 counts FIRST, before any object lists. The
-          per-object lock notices and the secondary status cards below keep
-          their own explanations; this strip never re-derives permissions —
-          it displays existing server state (readiness + inbox + action cards). */}
+      {/* 1B 注意力减法 (SPEC-PD-UIUX-002 §5): ONE status banner on the first
+          screen. Readiness, caveats, connectivity and the action lock used to be
+          three separately-boxed messages repeating the same conclusion; they now
+          read as one line with one next step. Nothing is hidden — the counts
+          explanation stays in its disclosure. */}
       <section
         aria-label={t("pages.focus.conclusion.sectionTitle")}
         data-testid="focus-conclusion"
-        className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]"
+        data-status-banner="focus"
+        className="mb-3 px-4 py-2.5 bg-panel border border-line rounded-[6px]"
       >
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span
-            className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+            className={`inline-flex items-center rounded-[3px] px-[7px] py-1 font-mono text-[11px] uppercase ${
               experienceMode && experienceData !== null
                 ? EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].badgeClass
                 : governanceState === "owner_review_ready"
@@ -932,46 +979,43 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           </span>
           <div className="text-ink-2 text-[13px] leading-relaxed" data-testid="focus-conclusion-counts">
             <span className="font-medium">{t('pages.focus.workbench.count', { count: workItems.length })}</span>
-            {sourcesUncertain && <span className="ml-2 text-amber" data-testid="focus-conclusion-uncertain">{t('pages.focus.workbench.uncertain')}</span>}
           </div>
         </div>
-        {conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded && (
-          <div
-            className="mt-3 border border-amber/30 rounded-[6px] bg-surface px-3 py-2.5"
-            data-testid="focus-conclusion-degraded"
-          >
-            <p className="text-[12px] text-ink-3 leading-relaxed">
-              {t("pages.focus.conclusion.degradedLabel")} {conclusionDisplay.degraded.reason}
-            </p>
-            <p className="mt-1 text-[12px] text-ink-3 leading-relaxed">{conclusionDisplay.degraded.nextAction}</p>
-          </div>
+        {(sourcesUncertain || (conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded) || ownerActionsLockedReason !== null || errorMessage || bindingError || groupedErrorReason) && (
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] leading-relaxed text-ink-3" data-testid="focus-conclusion-note">
+            {sourcesUncertain && <span data-testid="focus-conclusion-uncertain" className="text-amber">{t('pages.focus.workbench.uncertain')}</span>}
+            {conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded && (
+              <span data-testid="focus-conclusion-degraded">
+                · {t("pages.focus.conclusion.degradedLabel")} {humanizeRuntimeText(conclusionDisplay.degraded.reason).text} · {humanizeRuntimeText(conclusionDisplay.degraded.nextAction).text}
+              </span>
+            )}
+            {ownerActionsLockedReason !== null && (
+              <span id="focus-global-lock-notice" data-testid="focus-conclusion-lock">· {ownerActionsLockedReason}</span>
+            )}
+            {/* R1-2: one conclusion per page. The不确定性 wording already appears
+                above (focus-conclusion-uncertain); repeating it here would state
+                the same conclusion twice. The concrete error text stays. */}
+            {(errorMessage || bindingError) && (
+              <span>· {humanizeRuntimeText(errorMessage ?? bindingError ?? '').text}</span>
+            )}
+            {groupedErrorReason && <span>· {t('pages.focus.workbench.approvalsUnavailable')}</span>}
+            {(errorMessage || bindingError) && (
+              <button type="button" onClick={() => { void loadData(); }} className="text-gov underline">{t('pages.focus.workbench.retry')}</button>
+            )}
+            {ownerActionsLockedReason !== null && (
+              <Link to="/settings" className="text-gov underline hover:text-gov-2">{t("pages.focus.ownerDecision.goSettingsCta")}</Link>
+            )}
+          </p>
         )}
-        {ownerActionsLockedReason !== null && (
-          <div
-            id="focus-global-lock-notice"
-            className="mt-3 flex items-start justify-between gap-3 border border-amber/30 rounded-[6px] bg-surface px-3 py-2.5"
-            data-testid="focus-conclusion-lock"
-          >
-            <p className="text-[12px] text-ink-3 leading-relaxed">{ownerActionsLockedReason}</p>
-            <Link to="/settings" className="shrink-0 text-[12px] text-gov underline hover:text-gov-2">
-              {t("pages.focus.ownerDecision.goSettingsCta")}
-            </Link>
-          </div>
-        )}
-        <details className="mt-2 text-ink-4 text-[11.5px] leading-relaxed"><summary className="cursor-pointer">{t('pages.focus.workbench.countExplanation')}</summary>
+        <details className="mt-0.5 text-ink-4 text-[11.5px] leading-relaxed"><summary className="cursor-pointer">{t('pages.focus.workbench.countExplanation')}</summary>
           <p className="mt-2" data-testid="focus-conclusion-scope-note">{t("pages.focus.conclusion.countsNote")}</p>
         </details>
       </section>
 
-      {(errorMessage || bindingError) && <div role="alert" className="mb-5 border-l-2 border-amber pl-3 text-sm leading-relaxed text-ink-3">
-        <p>{t('pages.focus.workbench.uncertain')}</p><p className="mt-1 text-[12px]">{errorMessage ?? bindingError}</p>
-        <button type="button" onClick={() => { void loadData(); }} className="mt-2 text-gov underline">{t('pages.focus.workbench.retry')}</button>
-      </div>}
-      {ruleCodeAlerts.length > 0 && <section role="alert" className="mb-5 border-l-2 border-danger pl-3 text-sm text-ink">
+      {ruleCodeAlerts.length > 0 && <section role="alert" className="mb-5 border-l-2 border-danger pl-3 text-sm text-ink" data-testid="focus-safety-alert">
         <p>{t('pages.focus.workbench.safetyAlert', { count: ruleCodeAlerts.length })}</p>
         <Link to="/activation" className="mt-2 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link>
       </section>}
-      {groupedErrorReason && <p role="alert" className="mb-4 text-[13px] text-amber">{t('pages.focus.workbench.approvalsUnavailable')}</p>}
       <OwnerWorkbench items={workItems} completed={completedMessage} uncertain={sourcesUncertain} />
 
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
@@ -1046,9 +1090,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             {unmatchedInboxDecisions.map((item) => (
               <InboxItem key={item.principleId} item={item} t={t} note={t("pages.focus.ownerAttention.unmatchedItemNote")} />
             ))}
-            {inboxBlockedIndividual.map((item) => (
-              <InboxItem key={item.principleId} item={item} t={t} />
-            ))}
+            {inboxBlockedGroups.map((group) => group.length === 1
+              ? <InboxItem key={group[0]!.principleId} item={group[0]!} t={t} />
+              : <RepeatedInboxGroup key={group[0]!.principleId} items={group} t={t} />)}
             {inboxRecovery.map((item) => (
               <InboxItem key={item.principleId} item={item} t={t} />
             ))}
@@ -1228,6 +1272,35 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       </footer>
       </div>
     </PageShell>
+  );
+}
+
+/**
+ * 1B (F-12): blocked entries that share one owner-facing reason collapse into a
+ * single line. The reason is stated once; every affected principle stays one
+ * click away inside the disclosure. No item is dropped and no state is re-derived.
+ */
+function RepeatedInboxGroup({ items, t }: { items: OwnerDecisionInboxData['groups']['decision']; t: (key: string, opts?: Record<string, unknown>) => string }) {
+  const first = items[0];
+  if (!first) return null;
+  const reason = first.learnedPrinciple.status === 'known' ? null : first.learnedPrinciple.reasonText;
+  return (
+    <details className="mb-2 rounded-[var(--radius-md)] border border-line p-3" data-testid="owner-inbox-repeated-group">
+      <summary className="cursor-pointer text-[13px] leading-relaxed text-ink-2">
+        {t('pages.focus.ownerAttention.repeatedTitle', { count: items.length })}
+        {reason && <span className="text-ink-3"> · {reason}</span>}
+      </summary>
+      <p className="mt-2 text-[12.5px] leading-relaxed text-ink-3">{first.nextAction.ownerText}</p>
+      <ul className="mt-2 space-y-1">
+        {items.map((item, index) => (
+          <li key={item.principleId}>
+            <Link to={`/principles/${encodeURIComponent(item.principleId)}`} className="text-[12.5px] text-gov hover:underline">
+              {t('pages.focus.ownerAttention.repeatedOpen', { index: index + 1 })}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
