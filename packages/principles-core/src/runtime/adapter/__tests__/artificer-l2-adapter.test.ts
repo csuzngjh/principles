@@ -537,6 +537,41 @@ describe('PRI-439 ArtificerL2Adapter — input serialization', () => {
     expect(String(payload?.droppedDigest)).toMatch(/^[0-9a-f]{16}$/);
     expect(Number(payload?.contextWindowTokens)).toBe(128_000);
   });
+
+  it('fails loud instead of sending an untrimmable payload when the payload budget is zero', async () => {
+    hoisted.impl = async () => [];
+    // Unknown model: 128k window with a 32k output ceiling leaves an 86_400
+    // token input budget. ~310k chars of system prompt consume it, so the
+    // payload has no room left — fitting it would have to drop everything.
+    const adapter = makeAdapter({ maxTokens: 32_000, systemPrompt: 'y'.repeat(310_000) });
+
+    let caught: unknown;
+    try {
+      await adapter.startRun(makeStartRun({ inputPayload: 'the actual work payload' }));
+    } catch (err) {
+      caught = err;
+    }
+
+    // RED (before the fix): the full payload reached the loop with
+    // `truncated: false` and no `context_budget_trimmed` event.
+    expect(caught).toBeInstanceOf(PDRuntimeError);
+    expect((caught as PDRuntimeError).category).toBe('input_invalid');
+    expect((caught as PDRuntimeError).details?.contextOverflow).toBe(true);
+    expect((caught as PDRuntimeError).details?.nextAction).toBe('reduce_input_payload');
+    expect(hoisted.lastLoopConfig).toEqual({});
+  }, 20_000);
+
+  it('does not treat an empty payload as over budget when the payload budget is zero', async () => {
+    hoisted.impl = async () => [];
+    const adapter = makeAdapter({ maxTokens: 32_000, systemPrompt: 'y'.repeat(310_000) });
+
+    // The loop still runs (and then exhausts without submit_rulecode); the
+    // zero payload budget must not be reported as a payload overflow.
+    await expect(adapter.startRun(makeStartRun({ inputPayload: '' }))).rejects.toThrow(
+      /without a submit_rulecode call/,
+    );
+    expect(hoisted.lastLoopConfig).not.toEqual({});
+  }, 20_000);
 });
 
 // ── PRI-633 — layered systemPrompt placement ─────────────────────────────────

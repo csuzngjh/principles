@@ -60,7 +60,11 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { safeStringifyPreview } from './output-repair-contract.js';
 import { resolveL2Model, pdStreamSimple } from './l2-agent-loop-adapter.js';
-import { estimateRequestTokens, fitTextToTokenBudget, resolveContextBudget } from './context-budget.js';
+import {
+  estimateRequestTokens,
+  fitTextToTokenBudget,
+  resolveContextBudget,
+} from './context-budget.js';
 import { mergeSystemPromptLayers } from '../system-prompt-merge.js';
 import {
   buildArtificerL2Tools,
@@ -464,10 +468,29 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       // S4: fit the payload into what the system prompt + output reservation
       // leave of the model window. This replaces the old silent 50_000-char cut
       // and records every actual truncation below.
-      const payloadBudgetTokens = Math.max(
-        0,
-        contextBudget.budgetTokens - estimateRequestTokens({ systemPrompt, texts: [] }),
-      );
+      const estimatedSystemTokens = estimateRequestTokens({ systemPrompt, texts: [] });
+      const payloadBudgetTokens = Math.max(0, contextBudget.budgetTokens - estimatedSystemTokens);
+      // A zero payload budget with a non-empty payload can only be "solved" by
+      // dropping everything. Sending it anyway would hand the provider a request
+      // it must reject and would report `truncated: false`, i.e. a silent pass
+      // through a budget that was already exhausted.
+      if (payloadBudgetTokens <= 0 && serialized.length > 0) {
+        throw new PDRuntimeError(
+          'input_invalid',
+          `Artificer L2 has no context budget left for inputPayload after the system prompt and output reservation (window=${contextBudget.contextWindowTokens}, reserve=${contextBudget.reserveOutputTokens}, system≈${estimatedSystemTokens}).`,
+          {
+            contextOverflow: true,
+            nextAction: 'reduce_input_payload',
+            finalFailureReason: 'context_overflow',
+            budgetTokens: contextBudget.budgetTokens,
+            payloadBudgetTokens,
+            contextWindowTokens: contextBudget.contextWindowTokens,
+            reserveOutputTokens: contextBudget.reserveOutputTokens,
+            estimatedSystemTokens,
+            estimatedPayloadTokens: estimateRequestTokens({ texts: [serialized] }),
+          },
+        );
+      }
       const fit = fitTextToTokenBudget(serialized, payloadBudgetTokens);
       messageContent = fit.text;
 
@@ -503,6 +526,11 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       clearTimeout(budgetTimer);
       this.abortControllers.delete(runId);
       this.abortOwners.delete(runId);
+      // The budget refusal above is already a complete, typed failure. Do not
+      // relabel it as "inputPayload not serializable" (rc-9).
+      if (err instanceof PDRuntimeError) {
+        throw err;
+      }
       const reason = err instanceof Error ? err.message : String(err);
       runState.status = 'failed';
       runState.reason = `inputPayload not serializable: ${reason}`;
