@@ -140,11 +140,7 @@ describe('verifyInstallerPayloadVersions — packed installer must match the coh
 
     expect(() =>
       verifyInstallerPayloadVersions({ committed, readPayloadManifest: payloadReaderFrom(versions) }),
-    ).toThrow(
-      new RegExp(
-        `pd-cli \\(pd-cli/package\\.json\\): expected ${pdCli.version.replace(/\./g, '\\.')}, got ${versions['pd-cli/package.json'].replace(/\./g, '\\.')}`,
-      ),
-    );
+    ).toThrow(`pd-cli (pd-cli/package.json): expected ${pdCli.version}, got ${versions['pd-cli/package.json']}`);
   });
 
   it('FAILS closed when a required component manifest is missing (no silent skip)', () => {
