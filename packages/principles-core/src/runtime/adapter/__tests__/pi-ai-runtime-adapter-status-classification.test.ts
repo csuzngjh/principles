@@ -40,7 +40,7 @@ vi.mock('../pi-ai-http-transport.js', async (importActual) => {
   return { ...actual, getPiAiFetchForApi: () => plannedFetch };
 });
 
-import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
+import { PiAiRuntimeAdapter, extractProviderHttpStatus } from '../pi-ai-runtime-adapter.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 
@@ -142,6 +142,40 @@ describe('PiAiRuntimeAdapter — S3 status-code error classification', () => {
     // RED (before S3): misreported as rate_limit.
     expect(caught.category).toBe('execution_failed');
     expect(caught.details?.httpStatus).toBe(503);
+    expect(caught.details?.errorClassificationSource).toBe('status_code');
+    expect(wire.requests.length).toBe(1);
+  }, 20_000);
+
+  it('does not treat a parenthesized number in free-form error text as an HTTP status', () => {
+    // pi-ai normally prefixes the composed message with the status
+    // (`"<status>: <body>"`), which the leading rule handles. The bug is only
+    // reachable when a message arrives without that prefix — Anthropic-style
+    // SDK errors return `message` verbatim — and the text happens to contain
+    // something like "(500)". That number is not a provider status, so the
+    // evidence must stay `status_unknown`/`text_fallback`.
+    //
+    // The wire-level suite above cannot construct this: every response path
+    // through pi-ai carries the status prefix. The recovery function is
+    // therefore exercised directly rather than pretending a reachable HTTP
+    // fixture proves it.
+    expect(extractProviderHttpStatus('socket closed (500) unexpectedly')).toBeUndefined();
+    expect(extractProviderHttpStatus('API error (400): invalid field')).toBe(400);
+    expect(extractProviderHttpStatus('429: rate limited')).toBe(429);
+  });
+
+  it('keeps the status-code category when the provider body also contains "timeout"', async () => {
+    // The status-code path already classified this 400 as input_invalid. The
+    // outer catch used to re-run the text heuristic on the composed message,
+    // see "timeout", and overwrite the category.
+    wire.plan = [errorEntry(400, 'invalid parameter: timeout')];
+
+    const adapter = makeAdapter({ maxRetries: 0 });
+    const caught = await startAndCatch(adapter);
+
+    // RED (before reordering the catch): reported timeout, losing both the
+    // status-code classification and the original details.
+    expect(caught.category).toBe('input_invalid');
+    expect(caught.details?.httpStatus).toBe(400);
     expect(caught.details?.errorClassificationSource).toBe('status_code');
     expect(wire.requests.length).toBe(1);
   }, 20_000);

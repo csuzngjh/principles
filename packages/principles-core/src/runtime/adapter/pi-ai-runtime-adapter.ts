@@ -361,9 +361,12 @@ interface ProviderStatusClassification {
  * status is still available without wrapping `fetch` and without inventing a
  * second HTTP observation channel.
  */
-function extractProviderHttpStatus(rawMessage: string): number | undefined {
+export function extractProviderHttpStatus(rawMessage: string): number | undefined {
   const leading = /^\s*(\d{3})(?:\s|:|$)/.exec(rawMessage);
-  const parenthesized = /\((\d{3})\)/.exec(rawMessage);
+  // Only `<prefix> (<status>): <body>` carries a status in parentheses; an
+  // arbitrary `(123)` in a message with no such shape is free-form text, not a
+  // provider status (rc-2: do not present a guess as authoritative evidence).
+  const parenthesized = /^[^:]*?\((\d{3})\)\s*:/.exec(rawMessage);
   const status = Number(leading?.[1] ?? parenthesized?.[1]);
   if (!Number.isInteger(status) || status < 100 || status > 599) return undefined;
   return status;
@@ -1915,6 +1918,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       } catch (err) {
         const elapsedMsAfter = Date.now() - overallStartTime;
         const errMsg = err instanceof Error ? err.message : String(err);
+        // An error that left this function's try block as a PDRuntimeError has
+        // already been classified (status code, context overflow, timeout
+        // budget). Re-running `classifyFailure`'s text heuristics over its
+        // composed message would overwrite that category — e.g. a 400 whose
+        // body says "invalid parameter: timeout" would become `timeout`.
+        if (err instanceof PDRuntimeError) {
+          throw err;
+        }
         // S3: a recovered HTTP status is authoritative; text heuristics only
         // apply when the status is absent or has no PD-specific meaning.
         const statusClassification = classifyProviderHttpStatus(
@@ -1964,10 +1975,6 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             finalFailureReason: 'pi_ai_retries_exhausted',
             ...statusEvidence,
           });
-        }
-
-        if (err instanceof PDRuntimeError) {
-          throw err; // already classified by a lower layer
         }
 
         // ADR-0019: keep rate-limit signatures a distinct category.
