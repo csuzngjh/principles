@@ -255,10 +255,10 @@ describe('decoder fail-loud matrix (rc-1/rc-2/rc-3)', () => {
 describe('WorkBuddyHooksHostAdapter (HostAdapter implementation)', () => {
   const adapter = new WorkBuddyHooksHostAdapter();
 
-  it('declares hostId workbuddy, subprocess model, and the four-event v1 subscription', () => {
+  it('declares hostId workbuddy, subprocess model, and the five-kind subscription (PRI-1171 P2 adds Stop/turn_complete)', () => {
     expect(adapter.hostId).toBe('workbuddy');
     expect(adapter.hostKind).toBe('subprocess');
-    expect(adapter.subscribedEvents()).toEqual(['before_tool_call', 'after_tool_call', 'before_prompt_build', 'session_start']);
+    expect(adapter.subscribedEvents()).toEqual(['before_tool_call', 'after_tool_call', 'before_prompt_build', 'session_start', 'turn_complete']);
   });
 
   it('decodeEvent/encodeOutput delegate to the codec', () => {

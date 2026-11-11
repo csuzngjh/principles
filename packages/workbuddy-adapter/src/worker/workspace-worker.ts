@@ -2,13 +2,12 @@
  * WorkBuddy Workspace worker cycle (SPEC workbuddy-host-adapter §5 Part 5;
  * ADR-0020 §11.1 shape, third host instance).
  *
- * ONE Workspace-scoped worker cycle with exactly two background
- * responsibilities — the Codex catch-up step is DELIBERATELY ABSENT as of
- * PRI-1171 P2 ticket ④: the WorkBuddy transcript decoder exists but is NOT
- * wired, so `conversationIngestionEnabled` stays false and the hook is still
- * the only evidence producer. Ticket ⑤ adds the Stop hook / worker catch-up
- * and ticket ⑥ adds the flag + consent record. Do not infer from the decoder's
- * presence that transcript ingestion is live at runtime.
+ * ONE Workspace-scoped worker cycle with three bounded background
+ * responsibilities (PRI-1171 P2 tickets ⑤/⑥): transcript catch-up (gated by
+ * workbuddy_conversation_ingestion AND the v3 consent ledger), idempotent
+ * reconciliation, and one diagnostician/consumer pass. Catch-up runs BEFORE
+ * the paused early-return so hook lag keeps draining even while execution is
+ * off. Flag-off performs zero transcript I/O.
  *
  *   1. run the idempotent reconciliation pass (shared host-runtime authority)
  *   2. lease + run one Diagnostician execution, then ONE bounded downstream
@@ -56,10 +55,13 @@ import {
   type Stage2CorrectionCycleReport,
 } from '@principles/host-runtime';
 import { WORKBUDDY_TOOL_SEMANTICS, WORKBUDDY_TOOL_SEMANTIC_MAPPINGS } from '../tool-semantics.js';
+import { catchUpWorkbuddyIngestion, type WorkbuddyCatchUpResult } from '../ingestion/catch-up.js';
 
 export type WorkbuddyWorkerMode = 'ready' | 'manual_action_required' | 'paused' | 'degraded';
 
 export interface WorkbuddyWorkerCycleStepReport {
+  /** PRI-1171 P2 ticket ⑤: bounded transcript catch-up, before reconciliation. */
+  readonly catchUp: WorkbuddyCatchUpResult;
   readonly reconcile: ReconcileGovernanceContinuationResult;
   /** At most ONE diagnostician execution per cycle (bounded work). */
   readonly diagnostician: {
@@ -167,8 +169,18 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   const capability = resolveDiagnosticianCapability(config.effective);
   const diagnosticianDisabled = !capability.available;
 
-  // Step 2 — Idempotent reconciliation (always runs; creates no LLM work).
-  const reconcile = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
+  // Step 2 — Bounded transcript catch-up (PRI-1171 P2 ⑤). Runs BEFORE the
+  // consumer paused early-return, and performs ZERO transcript I/O when the
+  // flag or the consent record is off (both gates live in the orchestrator).
+  const ingestionEnabled = flags.workbuddy_conversation_ingestion?.enabled === true;
+  const catchUp = catchUpWorkbuddyIngestion({
+    workspaceDir,
+    ingestionEnabled,
+    ...(options.now !== undefined ? { now: options.now } : {}),
+  });
+
+  // Step 3 — Idempotent reconciliation (always runs; creates no LLM work).
+  const reconcile = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: ingestionEnabled });
 
   // Steps 3–5 — execution authority: internalization_auto_consumer.
   let diagnostician: WorkbuddyWorkerCycleStepReport['diagnostician'] = null;
@@ -185,7 +197,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       mode: 'paused',
       reason: 'internalization_auto_consumer_disabled',
       nextAction: 'Automatic internalization execution is paused for this governance workspace; manual commands remain available: pd diagnose, pd runtime internalization run-once.',
-      report: { reconcile, diagnostician: null, downstream: null },
+      report: { catchUp, reconcile, diagnostician: null, downstream: null },
     };
   } else {
     try {
@@ -230,7 +242,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
         mode: 'degraded',
         reason: `diagnostician_execution_failed:${detail}`,
         nextAction: 'Inspect the governance workspace runtime profile and provider configuration; the task keeps its pending/retry state and no evidence was mutated.',
-        report: { reconcile, diagnostician: null, downstream: null },
+        report: { catchUp, reconcile, diagnostician: null, downstream: null },
       };
     }
   }
@@ -251,7 +263,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
       mode: 'degraded',
       reason: `host_tool_declaration_persist_failed:${declared.reason}`,
       nextAction: 'Repair WorkBuddy host declaration persistence (.pd/host-tool-semantics/workbuddy.json) before running the downstream internalization cycle; the worker retries automatically on the next cycle.',
-      report: { reconcile, diagnostician, downstream: null },
+      report: { catchUp, reconcile, diagnostician, downstream: null },
     };
   }
   const downstream = await runInternalizationConsumerCycle(workspaceDir, {
@@ -286,6 +298,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
 
   const degradedReason: string | undefined
     = !reconcile.ok ? `reconcile:${reconcile.reason ?? 'failed'}`
+    : catchUp.status === 'degraded' ? `catch_up:${catchUp.reason ?? 'degraded'}`
     : diagnostician?.status === 'failed' && diagnostician.errorCategory !== 'lease_conflict' ? `diagnostician_failed:${diagnostician.message ?? 'max_attempts_exceeded'}`
     : diagnostician?.status === 'degraded' ? `diagnostician_degraded:${diagnostician.message ?? 'unknown'}`
     : downstream.skipReason === 'runtime_config_error' || downstream.skipReason === 'cycle_error' || downstream.skipReason === 'config_malformed' ? `downstream:${downstream.skipReason}`
@@ -295,6 +308,6 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     ...base,
     mode: degradedReason !== undefined ? 'degraded' : 'ready',
     ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the governance workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
-    report: { reconcile, diagnostician, downstream, stage2 },
+    report: { catchUp, reconcile, diagnostician, downstream, stage2 },
   };
 }

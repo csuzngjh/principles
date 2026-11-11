@@ -45,8 +45,8 @@ describe('plugin manifest (probe P01 manifest facts)', () => {
 });
 
 describe('hooks.json (frozen registration shape)', () => {
-  it('registers the five-event baseline including PostToolUseFailure (OD-02 evidence-driven: thrown Write failures emit ONLY PostToolUseFailure — probe P03 + 2026-10-13 re-verification, engine 2.161.0)', () => {
-    expect(Object.keys(HOOKS.hooks).sort()).toEqual(['PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'SessionStart', 'UserPromptSubmit']);
+  it('registers the six-event baseline: five v1 events + Stop (PRI-1171 P2 ticket ⑤ conversation-ingestion trigger)', () => {
+    expect(Object.keys(HOOKS.hooks).sort()).toEqual(['PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
   });
 
   it('PostToolUseFailure uses the same matcher/wrapper/timeout pattern as PostToolUse', () => {
@@ -71,6 +71,7 @@ describe('hooks.json (frozen registration shape)', () => {
       PostToolUse: 30,
       PostToolUseFailure: 30,
       SessionStart: 30,
+      Stop: 30,
       UserPromptSubmit: 15,
     };
     for (const [event, entries] of Object.entries(HOOKS.hooks)) {

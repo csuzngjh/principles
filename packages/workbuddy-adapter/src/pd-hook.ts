@@ -46,6 +46,7 @@ import { resolveWorkbuddyWorkspace } from './workspace-resolution.js';
 import { WorkBuddyDecoderError, WorkBuddyEncoderError, isWorkBuddyHookOutput, WORKBUDDY_EVENT_PRE_TOOL_USE, type WorkBuddyHookOutput } from './codec/index.js';
 import { recordWorkbuddyOwnerStatement } from './explicit-owner-statement.js';
 import { recordWorkbuddyPromptDeliveryEvidence, recordWorkbuddyDenyEvidence } from './workbuddy-evidence-recorder.js';
+import { ingestWorkbuddyConversation } from './ingestion/ingestion.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface WorkBuddyPdHookResult { stdout: WorkBuddyHookOutput | null; exitCode: number; stderr: string[] }
@@ -393,6 +394,31 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       const health = await createProductionHostRuntime({ hostKind: 'workbuddy' }).health(resolution.workspaceDir);
       if (!health.ok) return neutralWithDiagnostics([diagnostic('degraded', health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the governance workspace runtime.')]);
       return neutralWithDiagnostics([]);
+    }
+
+    if (event.kind === 'turn_complete') {
+      // PRI-1171 P2 ticket ⑤: the authenticated Stop hook is the ingestion
+      // trigger. Neutral output is MANDATORY — WorkBuddy injects any stdout
+      // into model-visible context (P04). Flag-off stays completely silent so
+      // the pre-wiring behavior is unchanged; the consent gate and the
+      // transcript port are both inside ingestWorkbuddyConversation.
+      if (flags.workbuddy_conversation_ingestion?.enabled !== true) {
+        return neutralWithDiagnostics([]);
+      }
+      const ingestion = ingestWorkbuddyConversation({
+        workspaceDir: resolution.workspaceDir,
+        rawPayload: event.rawPayload,
+        sessionId: event.context.sessionId,
+        ...(projectDir !== undefined ? { cwd: projectDir } : {}),
+        ingestionEnabled: true,
+        now: hookEpoch,
+      });
+      if (ingestion.status === 'ingested') {
+        return neutralWithDiagnostics(ingestion.warnings.slice(0, 2).map((warning) =>
+          diagnostic('degraded', warning, 'Inspect the WorkBuddy transcript and the governance trajectory checkpoint; ingestion warnings are bounded and non-blocking.')));
+      }
+      if (ingestion.status === 'skipped') return neutralWithDiagnostics([]);
+      return neutralWithDiagnostics([diagnostic('degraded', ingestion.reason, ingestion.nextAction)]);
     }
 
     const evidenceDiagnostics: string[] = [];

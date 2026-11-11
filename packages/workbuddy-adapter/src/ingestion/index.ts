@@ -23,3 +23,14 @@ export {
   WORKBUDDY_SINGLE_SESSION_ALERT_BYTES,
   type WorkbuddyTranscriptSourceContext,
 } from './transcript-source.js';
+export {
+  ingestWorkbuddyConversation,
+  workbuddyIngestionHints,
+  type WorkbuddyIngestionOptions,
+  type WorkbuddyIngestionOutcome,
+} from './ingestion.js';
+export {
+  catchUpWorkbuddyIngestion,
+  type WorkbuddyCatchUpOptions,
+  type WorkbuddyCatchUpResult,
+} from './catch-up.js';

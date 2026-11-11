@@ -52,6 +52,8 @@ export const WORKBUDDY_EVENT_POST_TOOL_USE = 'PostToolUse';
 export const WORKBUDDY_EVENT_POST_TOOL_USE_FAILURE = 'PostToolUseFailure';
 export const WORKBUDDY_EVENT_USER_PROMPT_SUBMIT = 'UserPromptSubmit';
 export const WORKBUDDY_EVENT_SESSION_START = 'SessionStart';
+/** PRI-1171 P2 ticket ⑤: turn-complete trigger for conversation ingestion. */
+export const WORKBUDDY_EVENT_STOP = 'Stop';
 
 const EVENT_KINDS = new Map<string, HostEventKind>([
   [WORKBUDDY_EVENT_PRE_TOOL_USE, 'before_tool_call'],
@@ -59,6 +61,7 @@ const EVENT_KINDS = new Map<string, HostEventKind>([
   [WORKBUDDY_EVENT_POST_TOOL_USE_FAILURE, 'after_tool_call'],
   [WORKBUDDY_EVENT_USER_PROMPT_SUBMIT, 'before_prompt_build'],
   [WORKBUDDY_EVENT_SESSION_START, 'session_start'],
+  [WORKBUDDY_EVENT_STOP, 'turn_complete'],
 ]);
 
 export class WorkBuddyDecoderError extends Error {
@@ -195,7 +198,7 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
   const eventName = requiredString(raw, 'hook_event_name');
   const kind = EVENT_KINDS.get(eventName);
   if (!kind) {
-    throw new WorkBuddyDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, or SessionStart.');
+    throw new WorkBuddyDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, SessionStart, or Stop.');
   }
   const sessionId = requiredString(raw, 'session_id');
   requiredNullableString(raw, 'transcript_path');
@@ -222,7 +225,20 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
 
   let context: HostEventContext;
   let rawPayload: unknown = raw;
-  if (kind === 'session_start') {
+  if (kind === 'turn_complete') {
+    // WorkBuddy Stop carries NO cwd and NO tool tuple (official hooks
+    // reference §Stop). The ingestion orchestrator locates the transcript
+    // from the payload's transcript_path / agent_transcript_path hints; a
+    // fabricated cwd here would silently point at the wrong project.
+    // rawPayload stays the ORIGINAL payload so those hints survive.
+    const stopActive = own(raw, 'stop_hook_active');
+    if (stopActive !== undefined && typeof stopActive !== 'boolean') {
+      throw new WorkBuddyDecoderError('invalid field "stop_hook_active"', 'The WorkBuddy Stop hook must supply stop_hook_active as a boolean.');
+    }
+    validateOptionalStringType(raw, 'permission_mode');
+    validateOptionalStringType(raw, 'agent_transcript_path');
+    context = { ...baseWithContext, workspaceDir: '' };
+  } else if (kind === 'session_start') {
     // SessionStart has NO cwd (probe P00): source/permission_mode/client/version
     // are the frozen required set. workspaceDir stays empty here — the process
     // entry replaces it with the resolved governance workspace before dispatch.

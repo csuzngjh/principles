@@ -36,6 +36,7 @@ const SUBSCRIBED_EVENTS: readonly HostEventKind[] = [
   'after_tool_call',
   'before_prompt_build',
   'session_start',
+  'turn_complete',
 ];
 
 export class WorkBuddyHooksHostAdapter implements HostAdapter {

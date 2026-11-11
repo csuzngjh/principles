@@ -61,4 +61,11 @@ export {
   type DecodedWorkbuddyDelta,
   type DecodeWorkbuddyWindowInput,
   type WorkbuddyTranscriptSourceContext,
+  ingestWorkbuddyConversation,
+  workbuddyIngestionHints,
+  catchUpWorkbuddyIngestion,
+  type WorkbuddyIngestionOptions,
+  type WorkbuddyIngestionOutcome,
+  type WorkbuddyCatchUpOptions,
+  type WorkbuddyCatchUpResult,
 } from './ingestion/index.js';
