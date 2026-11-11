@@ -30,6 +30,12 @@
 //   scheduler exits non-zero naming the failures. Spawn errors, signal-killed
 //   children and Ctrl-C are failures, never successes; Ctrl-C also terminates
 //   the running child before exiting.
+// - Scheduling: serial by default (the OOM-safe mode above). `PD_LINT_CONCURRENCY`
+//   opts into a small parallel pool for CI wall-clock. A package that fails
+//   under the pool is ALWAYS retried once serially before it is reported as a
+//   failure, so a parallel-only memory abort (exit 134 / SIGKILL) cannot turn
+//   the gate red on its own. Concurrency changes scheduling only: the same
+//   ESLint binary, config, globs and per-package isolation are used.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -38,6 +44,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const IGNORE_PATTERNS = ['**/*.test.ts', '**/*.spec.ts', '**/*.d.ts'];
 const UNMATCHED_PATTERN_FLAG = '--no-error-on-unmatched-pattern';
+const DEFAULT_CONCURRENCY = 1;
+const MAX_CONCURRENCY = 8;
+const CONCURRENCY_ENV = 'PD_LINT_CONCURRENCY';
+
+/** Parallel pool size: serial unless PD_LINT_CONCURRENCY opts in (clamped to 8). */
+export function resolveConcurrency(raw = process.env[CONCURRENCY_ENV]) {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_CONCURRENCY;
+  return Math.min(parsed, MAX_CONCURRENCY);
+}
 
 export function repoRootFromModuleUrl(moduleUrl) {
   return path.resolve(path.dirname(fileURLToPath(moduleUrl)), '..');
@@ -107,7 +123,7 @@ function resolveEslintBin(root) {
  * Run one child ESLint process for one package. Resolves after the child
  * exits with { code, signal, error? }; never rejects.
  */
-function runEslintForPackage({ root, eslintBin, packageRelDir, extraArgs, spawnChild, onSpawn }) {
+function runEslintForPackage({ root, eslintBin, packageRelDir, extraArgs, spawnChild, onSpawn, onExit }) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -121,13 +137,21 @@ function runEslintForPackage({ root, eslintBin, packageRelDir, extraArgs, spawnC
       return;
     }
     onSpawn?.(child);
-    child.on('error', (error) => resolve({ code: null, signal: null, error }));
-    child.on('close', (code, signal) => resolve({ code, signal, error: null }));
+    child.on('error', (error) => {
+      onExit?.(child);
+      resolve({ code: null, signal: null, error });
+    });
+    child.on('close', (code, signal) => {
+      onExit?.(child);
+      resolve({ code, signal, error: null });
+    });
   });
 }
 
 /**
- * Lint every workspace package serially, one child process per package.
+ * Lint every workspace package, one child process per package.
+ * Serial by default; `concurrency > 1` runs a bounded pool. A package that
+ * fails in the pool is retried once serially before being reported as failed.
  * Returns { ok, interrupted, results }; never throws for per-package lint
  * failures — only discovery/config problems (thrown before any child runs).
  */
@@ -137,16 +161,19 @@ export async function runLintByPackage({
   spawnChild = spawn,
   log = (message) => process.stdout.write(`${message}\n`),
   signalTarget = null,
+  concurrency = resolveConcurrency(),
+  retryFailedSerially = true,
 } = {}) {
   const eslintBin = resolveEslintBin(root);
   const packageRelDirs = discoverPackageRelDirs(root);
-  const results = [];
+  const results = new Array(packageRelDirs.length);
+  const activeChildren = new Set();
+  const workerCount = Math.max(1, Math.min(concurrency, packageRelDirs.length));
 
-  let activeChild = null;
   let interrupted = false;
   const interruptWith = (signal) => {
     interrupted = true;
-    activeChild?.kill(signal);
+    for (const child of activeChildren) child.kill(signal);
   };
   // Real `process` invokes signal listeners with NO arguments, so each signal
   // gets its own closure forwarding the explicit name (a shared
@@ -160,38 +187,63 @@ export async function runLintByPackage({
     signalTarget.on('SIGTERM', onSigterm);
   }
 
+  const runOne = async (index) => {
+    const packageRelDir = packageRelDirs[index];
+    log(`[lint-by-package] (${index + 1}/${packageRelDirs.length}) eslint ${packageRelDir} ...`);
+    const startedAtMs = Date.now();
+    const outcome = await runEslintForPackage({
+      root,
+      eslintBin,
+      packageRelDir,
+      extraArgs: args,
+      spawnChild,
+      onSpawn: (child) => activeChildren.add(child),
+      onExit: (child) => activeChildren.delete(child),
+    });
+    const seconds = Number(((Date.now() - startedAtMs) / 1000).toFixed(1));
+    const failedBecause =
+      outcome.error?.message ??
+      (outcome.signal ? `killed by ${outcome.signal}` : undefined);
+    const ok = !outcome.error && outcome.code === 0 && !outcome.signal;
+    const result = {
+      package: packageRelDir,
+      ok,
+      code: outcome.code,
+      signal: outcome.signal,
+      error: outcome.error?.message ?? null,
+      seconds,
+    };
+    log(
+      `[lint-by-package] ${packageRelDir} -> ${ok ? 'ok' : `FAILED${failedBecause ? ` (${failedBecause})` : ` exit=${outcome.code}`}`} in ${seconds}s`,
+    );
+    results[index] = result;
+    return result;
+  };
+
   try {
-    for (const [index, packageRelDir] of packageRelDirs.entries()) {
-      if (interrupted) break;
-      log(`[lint-by-package] (${index + 1}/${packageRelDirs.length}) eslint ${packageRelDir} ...`);
-      const startedAtMs = Date.now();
-      const outcome = await runEslintForPackage({
-        root,
-        eslintBin,
-        packageRelDir,
-        extraArgs: args,
-        spawnChild,
-        onSpawn: (child) => {
-          activeChild = child;
-        },
-      });
-      activeChild = null;
-      const seconds = ((Date.now() - startedAtMs) / 1000).toFixed(1);
-      const failedBecause =
-        outcome.error?.message ??
-        (outcome.signal ? `killed by ${outcome.signal}` : undefined);
-      const ok = !outcome.error && outcome.code === 0 && !outcome.signal;
-      results.push({
-        package: packageRelDir,
-        ok,
-        code: outcome.code,
-        signal: outcome.signal,
-        error: outcome.error?.message ?? null,
-        seconds: Number(seconds),
-      });
-      log(
-        `[lint-by-package] ${packageRelDir} -> ${ok ? 'ok' : `FAILED${failedBecause ? ` (${failedBecause})` : ` exit=${outcome.code}`}`} in ${seconds}s`,
-      );
+    let cursor = 0;
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (!interrupted) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= packageRelDirs.length) return;
+        await runOne(index);
+      }
+    });
+    await Promise.all(workers);
+
+    if (retryFailedSerially && workerCount > 1 && !interrupted) {
+      for (let index = 0; index < results.length; index += 1) {
+        const failed = results[index];
+        if (!failed || failed.ok) continue;
+        log(
+          `[lint-by-package] retrying ${failed.package} serially (a parallel failure may be memory pressure) ...`,
+        );
+        const retry = await runOne(index);
+        retry.seconds = Number((failed.seconds + retry.seconds).toFixed(1));
+        retry.retriedSerially = true;
+        results[index] = retry;
+      }
     }
   } finally {
     if (signalTarget) {
@@ -200,13 +252,14 @@ export async function runLintByPackage({
     }
   }
 
-  const failures = results.filter((result) => !result.ok);
+  const completed = results.filter(Boolean);
+  const failures = completed.filter((result) => !result.ok);
   log(
-    `[lint-by-package] summary: ${results.length - failures.length}/${packageRelDirs.length} packages ok` +
+    `[lint-by-package] summary: ${completed.length - failures.length}/${packageRelDirs.length} packages ok` +
       (failures.length ? `, FAILED: ${failures.map((r) => r.package).join(', ')}` : ''),
   );
   if (interrupted) log('[lint-by-package] interrupted — remaining packages were not linted');
-  return { ok: failures.length === 0 && !interrupted, interrupted, results };
+  return { ok: failures.length === 0 && !interrupted, interrupted, results: completed };
 }
 
 export async function main(argv = process.argv.slice(2)) {
