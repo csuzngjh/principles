@@ -43,6 +43,38 @@ function writeDualSlotHome(home: string): void {
   ].join('\n') + '\n');
 }
 
+/**
+ * A bundled install exactly as the official installer writes it: a
+ * self-describing release id and NO ~/.pd/releases/<id>/metadata.json (that
+ * file is only produced by the signed-channel update path).
+ */
+function writeBundledHome(
+  home: string,
+  options: { readonly digest?: string; readonly releaseId?: string } = {},
+): void {
+  const digest = options.digest ?? '3'.repeat(64);
+  const pdHome = path.join(home, '.pd');
+  fs.mkdirSync(path.join(pdHome, 'bootstrap'), { recursive: true });
+  fs.mkdirSync(path.join(pdHome, 'runtime', 'plugin'), { recursive: true });
+  fs.writeFileSync(path.join(pdHome, 'runtime', 'plugin', 'package.json'), JSON.stringify({ version: '3.2.1' }));
+  const releaseId = options.releaseId ?? `bundled-2.8.6-${digest.slice(0, 12)}`;
+  fs.writeFileSync(path.join(pdHome, 'active.json'), JSON.stringify({
+    schemaVersion: 1,
+    generation: 78,
+    releaseId,
+    releaseMetadataDigest: digest,
+    previousReleaseId: releaseId,
+    transactionId: 'install-fixture',
+    productVersion: '2.8.6',
+    sourceCommit: 'a'.repeat(40),
+  }));
+  fs.writeFileSync(path.join(pdHome, 'bootstrap', 'bootstrap.json'), JSON.stringify({
+    bootstrapVersion: '1.150.1',
+    installedAt: '2026-11-11T07:19:40Z',
+  }));
+  fs.writeFileSync(path.join(pdHome, 'install.json'), JSON.stringify({ channel: 'stable', autoCheck: true }));
+}
+
 afterEach(() => {
   while (temporaryDirectories.length > 0) {
     const directory = temporaryDirectories.pop();
@@ -118,6 +150,29 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
     expect(report.health).toBe('degraded');
   });
 
+  it('reports a self-consistent bundled install healthy without any release metadata', () => {
+    const home = tempHome();
+    writeBundledHome(home);
+    const report = buildVersionReport(home);
+    expect(report.productVersion).toBe('2.8.6');
+    expect(report.releaseId).toBe(`bundled-2.8.6-${'3'.repeat(12)}`);
+    // The file this report used to require is absent BY DESIGN for bundled installs.
+    expect(fs.existsSync(path.join(home, '.pd', 'releases', report.releaseId))).toBe(false);
+    expect(report.health).toBe('healthy');
+  });
+
+  it('reports corrupt health when a bundled release id does not embed the active version and digest', () => {
+    const home = tempHome();
+    writeBundledHome(home, { releaseId: `bundled-2.8.6-${'4'.repeat(12)}` });
+    expect(buildVersionReport(home).health).toBe('corrupt');
+  });
+
+  it('reports corrupt health when a bundled release digest is not a 64-hex sha256', () => {
+    const home = tempHome();
+    writeBundledHome(home, { digest: 'nope', releaseId: 'bundled-2.8.6-nope' });
+    expect(buildVersionReport(home).health).toBe('corrupt');
+  });
+
   it('reports corrupt health when release metadata exists but disagrees with active.json', () => {
     const home = tempHome();
     writeDualSlotHome(home);
@@ -190,10 +245,9 @@ describe('runtime layout version report (SPEC 12, installed ~/.pd/runtime layout
     expect(report.components['pd-cli']).toBe('1.74.1');
     expect(report.components['release-manager']).toBe('1.74.1');
     expect(report.componentsSource).toBe('runtime');
-    // No release metadata exists to verify the active identity against, and
-    // independently versioned components are not corruption: the report stays
-    // honestly degraded instead of claiming health from package versions.
-    expect(report.health).toBe('degraded');
+    // Bundled installs carry no release metadata by design; their identity is
+    // the self-describing releaseId + digest, which agrees here.
+    expect(report.health).toBe('healthy');
     expect(report.lastTransaction).toBeNull();
   });
 
@@ -209,7 +263,8 @@ describe('runtime layout version report (SPEC 12, installed ~/.pd/runtime layout
     expect(report.components.plugin).toBeUndefined();
     expect(report.components.core).toBe('1.74.1');
     expect(report.componentsSource).toBe('runtime');
-    expect(report.health).toBe('degraded');
+    // Health is bound to the bundled identity, not to component manifests.
+    expect(report.health).toBe('healthy');
   });
 
   it('falls back to the release cache per component when the runtime copy is missing (PRI-833 review P2)', () => {
