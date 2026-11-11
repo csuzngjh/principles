@@ -61,28 +61,27 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
 
 | 例 | 发送 | 本地裁决 | 发送→校验 | 进程→输出墙钟 | 正文 |
 | --- | --- | --- | --- | --- | --- |
-| append | 1 | `selected:selected:c3` | 3 ms | 934 ms | 已追加 DELIVERY |
-| abstain | 1 | `none_applicable:below_selection_threshold:none` | 3 ms | 1010 ms | Native 一致 |
-| selected-but-does-not-fit | 1 | `selected:selected:c3` | 3 ms | 921 ms | Native 一致 |
-| short-confirmation | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 893 ms | Native 一致 |
-| pure-ack | 0 | `unknown` | — | 848 ms | Native 一致 |
+| append | 1 | `selected:selected:c3` | 2 ms | 980 ms | 已追加 DELIVERY |
+| abstain | 1 | `none_applicable:below_selection_threshold:none` | 3 ms | 981 ms | Native 一致 |
+| selected-but-does-not-fit | 1 | `selected:selected:c3` | 3 ms | 1150 ms | Native 一致 |
+| short-confirmation | 1 | `none_applicable:below_selection_threshold:none` | 2 ms | 904 ms | Native 一致 |
+| pure-ack | 0 | `unknown` | — | 980 ms | Native 一致 |
 
 - **假端点请求数 = 4，真实请求数 = 0。**（本表为最终 head 上的一轮；历史多轮预检墙钟在 828–2564 ms 之间波动）
-- 墙钟约 0.85–1.01 s，此前轮次曾出现 2.56 s 的 I/O 抖动；其中 **hook 模块冷启动约 0.9 s**
+- 墙钟约 0.90–1.15 s，此前轮次曾出现 2.56 s 的 I/O 抖动；其中 **hook 模块冷启动约 0.9 s**
   （纯致谢例同样处于该区间，且 Adaptive OFF 的 Native 路径同样存在），决策本身只用 2–3 ms；
-  整轮仍低于 5000 ms 宿主窗口，**本轮最差余量约 4.0 s**，这一项由真实请求继续观察。
+  整轮仍低于 5000 ms 宿主窗口，**本轮最差余量约 3.85 s**，这一项由真实请求继续观察。
 - 两个假端点截止测试（同一声明入口、无测试专用时间参数）：
   - 及时返回完整评分 → 完成装配并补入；
   - 响应头及时、正文跨过 1000 ms → 底层收到取消，最终输出 Native。
   见 `packages/codex-adapter/tests/pd-hook-adaptive.test.ts`（`frozen 1 s envelope` 两条）。
 - 证据文件：[preflight-result.json](file:///D:/Code/_worktrees/principles/PRI-1182-adaptive-decision-endpoint/docs/implementation-reports/adaptive-activation-pri-1182/preflight-result.json)。
 
-预检快照绑定的版本：`codeHead=f0ab56a83d2344608343b58b046936742b8102d9`，
-`tree=870afb8f31ad040753957f64cf66e668292b6d27`，清单 `sha256=6f0bf1ee…2931b9`，
-隔离配置 `sha256=1782e231…339413`。该快照基于 Owner 批准的固定点
-`da576f11b7bf241666a6887452fb425d4c6c64ee`，不再追随后续 main 前进；
-清单与隔离配置哈希复算后与上方一致。快照之后的提交只涉及运行卡与证据文件，
-**被执行代码未变**；批准时仍以**最终 head/tree** 为准，
+预检快照绑定的版本：`codeHead=791659ad4257a04c50db18b18ef32165f790e094`，
+`tree=ddbe1d2c0319f63fd1faaf4e7fcb316685479b0c`，清单 `sha256=6f0bf1ee…2931b9`，
+隔离配置 `sha256=1782e231…339413`。该快照基于 `main@55cc027f0`（Owner 授权的
+一次性前移固定点，之后不再追 main）；清单与隔离配置哈希复算后与上方一致。
+快照之后的提交只涉及运行卡与证据文件，**被执行代码未变**；批准时仍以**最终 head/tree** 为准，
 由 `--approved` 在发请求前逐项校验，不一致即拒绝。
 
 ## 5. 外发数据范围（真实请求只包含这些）
