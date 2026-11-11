@@ -77,10 +77,11 @@ Native 基准：`promptBudget` 只装得下 `SCOPE`，因此 Native **不含** `
   见 `packages/codex-adapter/tests/pd-hook-adaptive.test.ts`（`frozen 1 s envelope` 两条）。
 - 证据文件：[preflight-result.json](file:///D:/Code/_worktrees/principles/PRI-1182-adaptive-decision-endpoint/docs/implementation-reports/adaptive-activation-pri-1182/preflight-result.json)。
 
-预检快照绑定的版本：`codeHead=a7a09a1caaebab92d41967a302d997d8a07fa505`（代码树 `8c689bbb…`），
-`tree=8c689bbb87f9fe28d03fc19449acc6f2e3d92092`，清单 `sha256=6f0bf1ee…2931b9`，
-隔离配置 `sha256=1782e231…339413`。该快照之后的提交只涉及运行卡/清单/脚本，**被执行代码未变**；
-批准时仍以**最终 head/tree** 为准，由 `--approved` 在发请求前逐项校验，不一致即拒绝。
+预检快照绑定的版本：`codeHead=9eb5ba0c2158a7710ab13830b1ae05cdbf375108`（代码树 `6e692601…`），
+`tree=6e6926014f48e75407c2ff614f5dcad08eee464b`，清单 `sha256=6f0bf1ee…2931b9`，
+隔离配置 `sha256=1782e231…339413`。该快照之后的提交只涉及运行卡/变更集，**被执行代码未变**，
+清单与隔离配置哈希复算后与上方一致；批准时仍以**最终 head/tree** 为准，
+由 `--approved` 在发请求前逐项校验，不一致即拒绝。
 
 ## 5. 外发数据范围（真实请求只包含这些）
 
