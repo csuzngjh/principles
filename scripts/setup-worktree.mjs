@@ -353,7 +353,7 @@ function main() {
 
   // Only git-tracked files belong here — gitignored editor dirs (.trae, .vscode)
   // never exist in fresh worktrees and would fail every bootstrap.
-  const criticalFiles = ['package.json', 'AGENTS.md', 'CLAUDE.md'];
+  const criticalFiles = ['package.json', 'AGENTS.md'];
   for (const f of criticalFiles) {
     const full = path.join(repoRoot, f);
     if (fs.existsSync(full)) logStep('ok', `  - ${f}`);
