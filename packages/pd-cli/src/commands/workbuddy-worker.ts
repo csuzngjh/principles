@@ -2,11 +2,13 @@
  * pd workbuddy worker command implementation (SPEC workbuddy-host-adapter
  * §5 Part 5; ADR-0020 third host).
  *
- * Runs the governance-workspace worker cycle — reconciliation → one
- * Diagnostician execution → one bounded downstream consumer cycle — either
- * once (manual / Companion-supervised restart mode) or continuously. The
- * Codex catch-up step is deliberately absent: the WorkBuddy MVP has no
- * transcript ingestion; the hook is the only evidence producer.
+ * Runs the governance-workspace worker cycle — bounded WorkBuddy transcript
+ * catch-up → reconciliation → one Diagnostician execution → one bounded
+ * downstream consumer cycle — either once (manual / Companion-supervised
+ * restart mode) or continuously. Catch-up drains lag left by a missed or
+ * bounded Stop hook and is gated by the same flag AND v3 consent record the
+ * hook reads; it is NOT the Codex catch-up (no Codex path, flag or transcript
+ * is borrowed).
  *
  * `status` answers the §15 worker-mode question without executing anything:
  * `manual_action_required` means no Companion-registered worker serves this
@@ -132,6 +134,7 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   if (report.mode === 'degraded') process.exitCode = 1;
 }
 
+/** Print one worker-cycle result: exactly one JSON object under `--json`, else a human summary. */
 function printCycleReport(result: WorkbuddyWorkerCycleResult, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(result));
@@ -142,6 +145,8 @@ function printCycleReport(result: WorkbuddyWorkerCycleResult, json: boolean): vo
     `  mode: ${result.mode}${result.reason !== undefined ? ` (${result.reason})` : ''}`,
   ];
   if (result.report !== undefined) {
+    const {catchUp} = result.report;
+    lines.push(`  catch-up:    ${catchUp.status} examined=${catchUp.examined} ingested=${catchUp.ingested}${catchUp.reason !== undefined ? ` reason=${catchUp.reason}` : ''}`);
     lines.push(`  reconcile:   ok=${result.report.reconcile.ok} ensured=${result.report.reconcile.tasksEnsured} linksRepaired=${result.report.reconcile.linksRepaired}`);
     if (result.report.diagnostician !== null) {
       lines.push(`  diagnostician: ${result.report.diagnostician.status} (${result.report.diagnostician.taskId})`);

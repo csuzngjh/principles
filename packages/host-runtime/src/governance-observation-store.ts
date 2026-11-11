@@ -47,7 +47,14 @@ const MAX_JSON_COLUMN = 8_000;
 
 /** Host taxonomy for governance observations (schema v4; PRI-1171 unification). */
 export type GovernanceObservationHostKind = 'codex' | 'workbuddy' | 'openclaw';
-export type GovernanceObservationKind = 'user_turn' | 'assistant_turn' | 'tool_call';
+/**
+ * PRI-1171 P2: `reasoning` joins the kind union with the WorkBuddy decoder
+ * (tech design §5.2) — the first producer. The Codex decoder keeps its
+ * explicit reasoning discard until P3 ticket ⑧ wires the new disclosure +
+ * consent records for the Codex full tier (tech design §11.8), so no
+ * existing Codex path starts emitting it.
+ */
+export type GovernanceObservationKind = 'user_turn' | 'assistant_turn' | 'tool_call' | 'reasoning';
 export type GovernanceObservationSource = 'live_hook' | 'transcript';
 export type GovernanceObservationCompleteness = 'complete' | 'partial';
 /** `quarantined` (Slice D §15): audited, permanently-invalid row; bodies dropped, metadata kept. */
@@ -209,6 +216,34 @@ function safeJson(value: unknown): string | null {
   }
 }
 
+/**
+ * Merge a LATER window's tool facts onto an already-committed PARTIAL tool_call
+ * row. A host may split one execution across windows (WorkBuddy keys call and
+ * result by callId, each decode window is byte-bounded), so the result arrives
+ * as a second observation with the same logical key. `fill` alone would drop
+ * the result preview because the call's facts column is already non-null.
+ * Only two well-formed `facts` envelopes are merged; anything else returns
+ * null so the caller can keep the existing `fill` behaviour.
+ */
+function mergeToolFactsJson(existingJson: unknown, incomingJson: string | null): string | null {
+  if (typeof existingJson !== 'string' || incomingJson === null) return null;
+  try {
+    const existing: unknown = JSON.parse(existingJson);
+    const incoming: unknown = JSON.parse(incomingJson);
+    if (!isRecord(existing) || !isRecord(incoming)) return null;
+    const existingFacts = existing.facts;
+    const incomingFacts = incoming.facts;
+    if (!isRecord(existingFacts) || !isRecord(incomingFacts)) return null;
+    const merged: Record<string, unknown> = { ...existingFacts };
+    for (const [key, value] of Object.entries(incomingFacts)) {
+      if (value !== null && value !== undefined) merged[key] = value;
+    }
+    return safeJson({ facts: merged });
+  } catch {
+    return null;
+  }
+}
+
 const CREATE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS governance_observation_schema_version (version INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS governance_rollouts (
@@ -337,21 +372,52 @@ export function ensureGovernanceSchema(db: Database.Database): void {
 interface OpenStoreResult {
   db: Database.Database;
   close(): void;
+  /** rc-9: observable, non-fatal degradations discovered while opening. */
+  warnings: string[];
 }
 
 type Degradation = { ok: false; reason: string; nextAction: string };
 
+/**
+ * Open the workspace trajectory database for governance observations.
+ *
+ * Returns a {@link Degradation} when the database file is absent or cannot be
+ * opened. Non-fatal degradations (journal_mode switch losing a race) are
+ * reported through `warnings` instead of failing the write (rc-9).
+ */
 function openStore(workspaceDir: string, factory?: ObservationDatabaseFactory): OpenStoreResult | Degradation {
   const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
   if (!fs.existsSync(dbPath)) {
     return { ok: false, reason: 'trajectory_db_not_found', nextAction: 'initialize the selected PD workspace (pd runtime init) before enabling conversation ingestion' };
   }
+  const warnings: string[] = [];
   try {
     const db = factory ? factory(dbPath) : new Database(dbPath);
     db.pragma('busy_timeout = 5000');
-    db.pragma('journal_mode = WAL');
+    // Switching journal_mode takes an exclusive lock, and SQLITE_BUSY on this
+    // pragma is NOT covered by busy_timeout. Two hooks that start at the same
+    // moment can collide here; neither the mode nor the data is corrupted, and
+    // whoever wins performs the switch. Read the mode first (lock-free) and
+    // never fail ingestion just because this optimization lost the race.
+    //
+    // Deliberate choice: NO retry. The losing opener keeps the previous
+    // rollback-journal mode for THIS connection only. WAL is a concurrency
+    // optimization, not a correctness requirement — writes already run under
+    // BEGIN IMMEDIATE with busy_timeout, so isolation and durability are
+    // unchanged; the winner's switch is persisted for every later open. The
+    // fallback is reported (rc-9: never silent) through `warnings`.
+    try {
+      const journalMode = db.pragma('journal_mode', { simple: true });
+      if (typeof journalMode !== 'string' || journalMode.toLowerCase() !== 'wal') {
+        db.pragma('journal_mode = WAL');
+      }
+    } catch {
+      warnings.push('journal_mode_switch_deferred');
+    }
     ensureGovernanceObservationSchema(db);
-    return { db, close: () => { try { db.close(); } catch { /* write result already determined */ } } };
+    /** Close the connection; a close failure must not mask the already-determined write result. */
+    const close = (): void => { try { db.close(); } catch { /* write result already determined */ } };
+    return { db, close, warnings };
   } catch (error) {
     const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
     return { ok: false, reason: `trajectory_database_unavailable:${detail}`, nextAction: 'inspect or repair the selected PD trajectory database' };
@@ -384,8 +450,36 @@ interface ApplyObservationArgs {
   workspaceDir: string;
 }
 
+/**
+ * Apply one observation against its logical key and report what happened.
+ *
+ * - `inserted`: new key (a duplicate physical record is reported separately);
+ * - `enriched`: the existing row gained identity/ordering/completion facts;
+ * - `duplicate`: replay produced nothing new;
+ * - `conflict`: a user utterance disagrees for the same key — keep the first
+ *   committed content, mark partial, and report where the checkpoint must stop.
+ * Never overwrites committed content silently (source precedence, SPEC §10).
+ */
 function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObservationArgs): ObservationOutcome {
-  const existing = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(input.logicalObservationKey);
+  const byKey = db.prepare('SELECT * FROM governance_observations WHERE logical_key = ?').get(input.logicalObservationKey);
+  let existing: unknown = byKey;
+  // Cross-window tool completion by STABLE identity (P2 review): the call row
+  // is keyed by its transcript record, so a later window's result cannot derive
+  // the same logical key. Reconnect it to the single still-partial call row
+  // that carries the same `tool_use_id`. `LIMIT 2` makes ambiguity explicit:
+  // duplicate callIds across windows yield two candidates and are NOT merged.
+  if (!isRecord(byKey)
+    && input.kind === 'tool_call'
+    && input.completeness === 'complete'
+    && typeof input.toolUseId === 'string'
+    && input.toolUseId.length > 0) {
+    const partials = db.prepare(
+      `SELECT * FROM governance_observations
+        WHERE rollout_row_id = ? AND kind = 'tool_call' AND completeness = 'partial' AND tool_use_id = ?
+        LIMIT 2`,
+    ).all(rolloutRowId, input.toolUseId);
+    if (partials.length === 1) [existing] = partials;
+  }
   if (!isRecord(existing)) {
     // Physical replay guard: the same transcript record decoded twice (crash
     // before checkpoint, or a re-invoked hook) must not contribute twice.
@@ -423,8 +517,26 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
     return { disposition: 'conflict', stopByteStart: input.recordByteStart };
   }
 
+  // Two DISTINCT executions reusing one callId in DIFFERENT decode windows
+  // share the `call:<callId>` logical key. Without this guard the second
+  // call's partial observation is silently absorbed into the first (fill and
+  // fact-merge never overwrite committed fields), so an execution disappears.
+  // A different transcript record is a lineage conflict: keep the first, mark
+  // it partial, and stop at the offending record (P2 review).
+  const existingRecordKey = rowField(existing, 'transcript_record_key');
+  if (input.kind === 'tool_call'
+    && input.completeness === 'partial'
+    && typeof existingRecordKey === 'string'
+    && existingRecordKey.length > 0
+    && input.transcriptRecordKey !== undefined
+    && existingRecordKey !== input.transcriptRecordKey) {
+    db.prepare("UPDATE governance_observations SET completeness = 'partial' WHERE id = ?").run(existingId);
+    return { disposition: 'conflict', stopByteStart: input.recordByteStart };
+  }
+
   const updates: string[] = [];
   const values: unknown[] = [];
+  /** Queue a column only when the stored value is still absent (never overwrite committed content). */
   const fill = (column: string, value: unknown) => {
     const current = rowField(existing, column);
     if ((current === null || current === undefined) && value !== null && value !== undefined) {
@@ -443,7 +555,32 @@ function applyObservation({ db, rolloutRowId, input, workspaceDir }: ApplyObserv
   fill('tool_use_id', boundedString(input.toolUseId, MAX_TEXT_BOUND));
   fill('transcript_tool_call_id', boundedString(input.transcriptToolCallId, MAX_TEXT_BOUND));
   fill('visible_text', input.visibleText !== undefined ? sanitizeString(input.visibleText, workspaceDir) : null);
-  fill('sanitized_tool_facts_json', input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null);
+  const incomingFacts = input.toolFacts !== undefined ? safeJson({ facts: sanitizeValue(input.toolFacts, 0, workspaceDir) }) : null;
+  // Cross-window tool completion (P1): the call row is partial and the result
+  // arrives under the same logical key from a later decode window. Merge the
+  // result facts instead of dropping them through `fill`'s null-only rule.
+  const crossWindowToolCompletion = input.kind === 'tool_call'
+    && input.completeness === 'complete'
+    && rowField(existing, 'completeness') === 'partial';
+  if (crossWindowToolCompletion) {
+    const existingFactsJson = rowField(existing, 'sanitized_tool_facts_json');
+    const mergedFacts = mergeToolFactsJson(existingFactsJson, incomingFacts);
+    // Fall back to the incoming facts ONLY when the row has none AND is still
+    // active. An existing but unmergeable value is a bounded truncation
+    // preview that is still committed evidence; replacing it would destroy
+    // what the advanced checkpoint can no longer recover. A terminal retention
+    // class (expired / quarantined) must not regain a body either (P2 review).
+    const hasExistingFacts = typeof existingFactsJson === 'string' && existingFactsJson.length > 0;
+    const retentionClass = rowField(existing, 'retention_class');
+    const activeRow = retentionClass === 'operational' || retentionClass === 'promoted';
+    const nextFacts = mergedFacts ?? (hasExistingFacts || !activeRow ? null : incomingFacts);
+    if (nextFacts !== null && nextFacts !== rowField(existing, 'sanitized_tool_facts_json')) {
+      updates.push('sanitized_tool_facts_json = ?');
+      values.push(nextFacts);
+    }
+  } else {
+    fill('sanitized_tool_facts_json', incomingFacts);
+  }
   const existingCompleteness = rowField(existing, 'completeness');
   if (existingCompleteness === 'partial' && input.completeness === 'complete') {
     updates.push('completeness = ?');
@@ -573,12 +710,21 @@ export interface IngestGovernanceObservationsInput {
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
+/**
+ * Persist one decoded delta (observations + rollout lineage + checkpoint) in a
+ * single IMMEDIATE transaction.
+ *
+ * The up-front write lock is required: with a deferred BEGIN two concurrent
+ * hooks both read and then race the upgrade, and SQLite fails that upgrade
+ * with SQLITE_BUSY. A failure rolls everything back (checkpoint not advanced)
+ * and returns a structured reason/nextAction; warnings stay observable.
+ */
 export function ingestGovernanceObservations(input: IngestGovernanceObservationsInput): IngestGovernanceObservationsResult {
   const opened = openStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) return { ok: false, reason: opened.reason, nextAction: opened.nextAction, inserted: 0, enriched: 0, duplicates: 0, checkpointCommitted: false, warnings: [] };
   const { db, close } = opened;
   const now = (input.now ?? new Date()).toISOString();
-  const warnings: string[] = [];
+  const warnings: string[] = [...opened.warnings];
 
   try {
     let inserted = 0;
@@ -587,6 +733,11 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
     let conflictStop: number | undefined;
     let conflictKey = '';
 
+    // `.immediate()` takes the write lock up front. With the default deferred
+    // BEGIN, two concurrent Stop hooks for the same session both read first
+    // and then try to upgrade; SQLite fails that upgrade with SQLITE_BUSY
+    // immediately (busy_timeout does not cover upgrade deadlocks), which the
+    // hook surfaces as `governance_write_failed:database is locked`.
     const result = db.transaction(() => {
       let rolloutRowId: number | null = null;
       if (input.rollout !== undefined) {
@@ -672,7 +823,7 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
       expireStalePendingTails(db, new Date(now));
       pruneRetention(db, rolloutRowId, new Date(now));
       return 'committed';
-    })();
+    }).immediate();
 
     if (result === 'conflict') {
       return {
@@ -716,6 +867,46 @@ export function readGovernanceCheckpoint(args: ReadGovernanceCheckpointArgs): Go
       lastDegradationOrdinal: typeof rowField(row, 'last_degradation_ordinal') === 'number' ? (rowField(row, 'last_degradation_ordinal') as number) : null,
       updatedAt: String(rowField(row, 'updated_at')),
     };
+  } finally {
+    close();
+  }
+}
+
+export interface DeferGovernanceCheckpointArgs {
+  readonly workspaceDir: string;
+  readonly hostKind: GovernanceObservationHostKind;
+  readonly rolloutIdentity: string;
+  readonly reason: string;
+  readonly now: string;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+/**
+ * Move a checkpoint to the BACK of the oldest-first retry queue without
+ * touching its water mark (P2 review).
+ *
+ * `listGovernanceCheckpoints` returns the oldest-updated rows first and the
+ * catch-up worker processes a bounded prefix. A rollout whose transcript is
+ * missing/unreadable never advances its checkpoint, so it would occupy the
+ * prefix forever and starve every rollout behind it. Bumping ONLY
+ * `updated_at` + the degradation reason lets the failed session yield its slot
+ * on the next cycle while keeping its byte offset, ordinal and retryability
+ * exactly as they were.
+ */
+export function deferGovernanceCheckpoint(args: DeferGovernanceCheckpointArgs): { ok: true } | Degradation {
+  const { workspaceDir, hostKind, rolloutIdentity, reason, now, databaseFactory } = args;
+  const opened = openStore(workspaceDir, databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    db.prepare(`UPDATE governance_transcript_checkpoints
+        SET updated_at = ?, last_degradation_reason = ?
+        WHERE host_kind = ? AND rollout_identity = ?`)
+      .run(now, reason.slice(0, 200), hostKind, rolloutIdentity);
+    return { ok: true };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `governance_write_failed:${detail}`, nextAction: 'inspect the workspace trajectory database and retry; nothing was partially committed' };
   } finally {
     close();
   }

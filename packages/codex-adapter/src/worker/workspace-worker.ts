@@ -276,6 +276,8 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   // Step 3 — Slice B idempotent reconciliation (always runs; creates no LLM work).
   const reconcile = await reconcileGovernanceContinuation({
     workspaceDir,
+    codexConversationIngestionEnabled: flags.codex_conversation_ingestion?.enabled === true,
+    // Legacy alias for an older installed host-runtime (P2 review).
     conversationIngestionEnabled: flags.codex_conversation_ingestion?.enabled === true,
   });
 

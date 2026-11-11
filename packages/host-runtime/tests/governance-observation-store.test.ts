@@ -76,6 +76,37 @@ describe('governance observation store — schema and idempotency', () => {
     expect(result.reason).toBe('trajectory_db_not_found');
   });
 
+  it('reports journal_mode_switch_deferred instead of failing when the WAL switch loses a concurrent race (rc-9)', () => {
+    const result = ingest({
+      observations: [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: 'hello' })],
+      /**
+       * Open the real SQLite file but make `journal_mode = WAL` fail, which is
+       * how the losing opener of two concurrent hooks behaves (SQLITE_BUSY is
+       * not covered by busy_timeout).
+       */
+      databaseFactory: (databasePath: string) => {
+        const opened = new Database(databasePath);
+        const originalPragma = opened.pragma.bind(opened);
+        // SQLITE_BUSY on `journal_mode = WAL` is not covered by busy_timeout:
+        // this simulates the losing opener of two concurrent hooks.
+        (opened as unknown as { pragma: (source: string, options?: unknown) => unknown }).pragma = (source: string, options?: unknown) => {
+          if (source.replace(/\s+/g, ' ').trim().toLowerCase() === 'journal_mode = wal') {
+            throw new Error('SQLITE_BUSY: database is locked');
+          }
+          return (originalPragma as unknown as (s: string, o?: unknown) => unknown)(source, options);
+        };
+        return opened;
+      },
+    });
+
+    // The rollback-journal fallback is observable (never silent) and leaves
+    // correctness untouched: the row is durably written and readable.
+    expect(result).toMatchObject({ ok: true, inserted: 1 });
+    expect(result.warnings).toContain('journal_mode_switch_deferred');
+    const listed = listGovernanceObservations({ workspaceDir });
+    expect(listed.ok && listed.observations).toHaveLength(1);
+  });
+
   it('exact replay is idempotent through both the logical and the physical key', () => {
     const obs = [observation({ kind: 'user_turn', hostTurnId: 't1', logicalObservationKey: 'codex|rollout-uuid-1|t1|user', visibleText: 'hello', transcriptRecordKey: 'codex|rollout-uuid-1|8' })];
     expect(ingest({ observations: obs })).toMatchObject({ ok: true, inserted: 1 });
@@ -650,5 +681,48 @@ describe('schema v4 (PRI-1171): host widening + MAX-monotonic checkpoint', () =>
     expect(ingest({ observations: [], checkpoint: { ...base, byteOffset: 1000, lastOrdinal: 11, incompleteTail: true }, degradations: [{ reason: 'fresh_reason' }] })).toMatchObject({ ok: true });
     const refreshed = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: 'rollout-uuid-1' });
     expect(refreshed && 'byteOffset' in refreshed ? refreshed : null).toMatchObject({ byteOffset: 1000, incompleteTail: true, lastDegradationReason: 'fresh_reason' });
+  });
+});
+
+describe('PRI-1171 P2: reasoning kind (first producer = WorkBuddy decoder)', () => {
+  it('round-trips a reasoning observation with text, attribution and facts', () => {
+    const input = observation({
+      hostKind: 'workbuddy',
+      rolloutIdentity: 'wb-session-1',
+      rootSessionId: 'wb-session-1',
+      hostTurnId: 'msg-container-1',
+      kind: 'reasoning',
+      logicalObservationKey: 'wb|wb-session-1|reasoning-record-1',
+      assistantItemId: 'assistant-record-1',
+      visibleText: 'synthetic reasoning body',
+      completeness: 'complete',
+    });
+    expect(ingest({ observations: [input] })).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'wb-session-1' });
+    expect(listed.ok && listed.observations).toHaveLength(1);
+    expect(listed.ok ? listed.observations[0] : null).toMatchObject({
+      kind: 'reasoning',
+      hostTurnId: 'msg-container-1',
+      assistantItemId: 'assistant-record-1',
+      completeness: 'complete',
+    });
+  });
+
+  it('round-trips an unattributed reasoning observation (partial + phase)', () => {
+    const input = observation({
+      hostKind: 'workbuddy',
+      rolloutIdentity: 'wb-session-2',
+      rootSessionId: 'wb-session-2',
+      hostTurnId: 'msg-container-2',
+      kind: 'reasoning',
+      logicalObservationKey: 'wb|wb-session-2|reasoning-record-2',
+      phase: 'unattributed',
+      visibleText: 'synthetic orphan reasoning',
+      completeness: 'partial',
+    });
+    expect(ingest({ observations: [input] })).toMatchObject({ ok: true, inserted: 1 });
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: 'wb-session-2' });
+    expect(listed.ok && listed.observations).toHaveLength(1);
+    expect(listed.ok ? listed.observations[0] : null).toMatchObject({ kind: 'reasoning', phase: 'unattributed', completeness: 'partial' });
   });
 });

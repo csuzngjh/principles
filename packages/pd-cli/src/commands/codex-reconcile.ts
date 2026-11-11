@@ -39,6 +39,13 @@ export interface CodexReconcileReport {
   degradations: string[];
 }
 
+/**
+ * `pd codex-reconcile` entry point: repair Codex governance task/link state.
+ *
+ * Resolves the workspace and consent config first; an invalid config degrades
+ * with a structured reason/nextAction and performs no mutation (cli-5). Emits
+ * exactly one JSON object under `--json` (cli-1).
+ */
 export async function handleCodexReconcile(options: CodexReconcileOptions): Promise<void> {
   const generatedAt = new Date().toISOString();
   const workspace = resolveWorkspaceDir(options.workspace);
@@ -66,11 +73,13 @@ export async function handleCodexReconcile(options: CodexReconcileOptions): Prom
     process.exitCode = 1;
     return;
   }
-  const conversationIngestionEnabled = computeFeatureFlagsFromConfig(config.effective).flags.codex_conversation_ingestion?.enabled === true;
+  const codexConversationIngestionEnabled = computeFeatureFlagsFromConfig(config.effective).flags.codex_conversation_ingestion?.enabled === true;
 
   const result = await reconcileGovernanceContinuation({
     workspaceDir: workspace,
-    conversationIngestionEnabled,
+    codexConversationIngestionEnabled,
+    // Legacy alias for an older installed host-runtime (P2 review).
+    conversationIngestionEnabled: codexConversationIngestionEnabled,
     ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
   });
 

@@ -57,6 +57,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs\" Stop",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

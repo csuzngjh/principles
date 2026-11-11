@@ -798,17 +798,37 @@ codexCmd
   });
 
 // ── pd workbuddy — WorkBuddy host governance operations ──────────────────────
-// SPEC workbuddy-host-adapter §5 Part 5 (ADR-0020 third host): the worker is
-// the only operator command the WorkBuddy MVP needs — reconciliation,
-// diagnostician and downstream reuse the shared authorities; there is no
-// ingestion consent flow because the WorkBuddy MVP reads no transcript.
+// SPEC workbuddy-host-adapter §5 Part 5 (ADR-0020 third host): reconciliation,
+// transcript catch-up, diagnostician and downstream reuse the shared
+// authorities. PRI-1171 P2 tickets ⑤/⑥ add transcript ingestion, so the setup
+// command below is the SUPPORTED entry point for its consent record and
+// feature flag (default off) — a convention, not an enforced boundary.
 const workbuddyCmd = program
   .command('workbuddy')
   .description('WorkBuddy host governance operations');
 
 workbuddyCmd
+  .command('setup')
+  .description('Present the WorkBuddy ingestion disclosure and record the explicit Owner decision (accept enables workbuddy_conversation_ingestion; decline keeps everything off)')
+  .option('-w, --workspace <path>', 'Governance workspace directory')
+  .option('--accept', 'Explicitly accept after the disclosure has been presented')
+  .option('--decline', 'Explicitly decline; the ingestion flag stays off and no transcript is ever read')
+  .option('--show-disclosure', 'Print the disclosure text and exit without mutating anything')
+  .option('--json', 'Output raw JSON (decision must be explicit: --accept or --decline)')
+  .action(async (opts) => {
+    const { handleWorkbuddySetup } = await import('./commands/workbuddy-setup.js');
+    await handleWorkbuddySetup({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      accept: opts.accept === true,
+      decline: opts.decline === true,
+      showDisclosure: opts.showDisclosure === true,
+    });
+  });
+
+workbuddyCmd
   .command('worker')
-  .description('Run the WorkBuddy governance worker (reconciliation, diagnostician, downstream — no transcript ingestion)')
+  .description('Run the WorkBuddy governance worker (transcript catch-up, reconciliation, diagnostician, downstream)')
   .option('-w, --workspace <path>', 'Governance workspace directory (default: the WorkBuddy governance workspace)')
   .option('--once', 'Run exactly one bounded cycle and exit')
   .option('--interval <ms>', 'Cycle interval for continuous mode (default 120000, minimum 1000)')

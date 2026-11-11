@@ -270,6 +270,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Slices A–D complete + R1 consent UX verified on installed path + opt-in dogfood release with no privacy/lineage P1 + explicit Owner default-on decision (SPEC §17)',
     retirementCriteria: 'Codex conversation ingestion descoped, or graduated and observability confirms stable default-on (flag collapses into host.codex contract)',
   },
+  workbuddy_conversation_ingestion: {
+    decision: 'KEEP_QUIET',
+    consumers: ['workbuddy-adapter/src/pd-hook.ts', 'workbuddy-adapter/src/ingestion/ingestion.ts', 'workbuddy-adapter/src/worker/workspace-worker.ts'],
+    evidence: 'PRI-1171 P2 unified trajectory ingestion (decoder in PR #2534, wiring in tickets ⑤/⑥); default-off opt-in; three gates = host.workbuddy + this flag + granted v3 consent record; flag-off means zero transcript filesystem reads (port-spy invariant)',
+    decided: '2026-11-11',
+    graduationCriteria: 'End-to-end evidence that WorkBuddy observations reach governance_observations with real Owner utterances, consent UX verified on installed path, no privacy/lineage P1, and an explicit Owner default-on decision',
+    retirementCriteria: 'WorkBuddy conversation ingestion descoped, or graduated and observability confirms stable default-on (flag collapses into host.workbuddy contract)',
+  },
   workbuddy_live_keyword_pain: {
     decision: 'KEEP_QUIET',
     consumers: ['workbuddy-adapter/src/pd-hook.ts', 'host-runtime/src/governance-signal-admission.ts'],

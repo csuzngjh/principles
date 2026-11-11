@@ -46,6 +46,7 @@ import { resolveWorkbuddyWorkspace } from './workspace-resolution.js';
 import { WorkBuddyDecoderError, WorkBuddyEncoderError, isWorkBuddyHookOutput, WORKBUDDY_EVENT_PRE_TOOL_USE, type WorkBuddyHookOutput } from './codec/index.js';
 import { recordWorkbuddyOwnerStatement } from './explicit-owner-statement.js';
 import { recordWorkbuddyPromptDeliveryEvidence, recordWorkbuddyDenyEvidence } from './workbuddy-evidence-recorder.js';
+import { ingestWorkbuddyConversation } from './ingestion/ingestion.js';
 
 type EnvMap = Record<string, string | undefined>;
 export interface WorkBuddyPdHookResult { stdout: WorkBuddyHookOutput | null; exitCode: number; stderr: string[] }
@@ -212,6 +213,14 @@ function channelFailure(channelEventName: string | undefined, reason: string, ne
   return neutralWithDiagnostics([line]);
 }
 
+/**
+ * Handle one WorkBuddy hook invocation end-to-end: parse stdin, decode the
+ * host event, run the PD host adapter, and shape the channel-specific result.
+ *
+ * Pre-decode failures route through {@link channelFailure} so a blocking
+ * channel exits 2 while UserPromptSubmit never clears the user's prompt.
+ * A rejected Owner statement never grants authority or bypasses decoding.
+ */
 export async function processWorkbuddyHookInvocation(rawStdin: string, channelEventName: string | undefined, _env: EnvMap = process.env): Promise<WorkBuddyPdHookResult> {
   let parsed: unknown;
   try { parsed = JSON.parse(rawStdin); }
@@ -393,6 +402,40 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       const health = await createProductionHostRuntime({ hostKind: 'workbuddy' }).health(resolution.workspaceDir);
       if (!health.ok) return neutralWithDiagnostics([diagnostic('degraded', health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the governance workspace runtime.')]);
       return neutralWithDiagnostics([]);
+    }
+
+    if (event.kind === 'turn_complete') {
+      // PRI-1171 P2 ticket ⑤: the authenticated Stop hook is the ingestion
+      // trigger. Neutral output is MANDATORY — WorkBuddy injects any stdout
+      // into model-visible context (P04). Flag-off stays completely silent so
+      // the pre-wiring behavior is unchanged; the consent gate and the
+      // transcript port are both inside ingestWorkbuddyConversation.
+      if (flags.workbuddy_conversation_ingestion?.enabled !== true) {
+        return neutralWithDiagnostics([]);
+      }
+      const ingestion = ingestWorkbuddyConversation({
+        workspaceDir: resolution.workspaceDir,
+        rawPayload: event.rawPayload,
+        sessionId: event.context.sessionId,
+        ...(projectDir !== undefined ? { cwd: projectDir } : {}),
+        ingestionEnabled: true,
+        now: hookEpoch,
+      });
+      if (ingestion.status === 'ingested') {
+        // A successful ingestion that skipped routine records is NOT degraded:
+        // `wb_skipped:*` is the decoder's normal "this record is not Owner
+        // evidence" channel. Only the remaining warnings describe something
+        // that needs investigation, so they keep the degraded status (rc-9:
+        // every skip stays observable, but the severity must be honest).
+        return neutralWithDiagnostics(ingestion.warnings.slice(0, 2).map((warning) =>
+          diagnostic(
+            warning.startsWith('wb_skipped') ? 'skipped' : 'degraded',
+            warning,
+            'Inspect the WorkBuddy transcript and the governance trajectory checkpoint; ingestion warnings are bounded and non-blocking.',
+          )));
+      }
+      if (ingestion.status === 'skipped') return neutralWithDiagnostics([]);
+      return neutralWithDiagnostics([diagnostic('degraded', ingestion.reason, ingestion.nextAction)]);
     }
 
     const evidenceDiagnostics: string[] = [];
