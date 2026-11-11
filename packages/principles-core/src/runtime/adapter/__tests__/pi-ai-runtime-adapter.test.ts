@@ -167,6 +167,9 @@ function isToolContext(
 describe('PiAiRuntimeAdapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // S6: reset the once-queue too. A test that expects fewer calls than it
+    // queued would otherwise leak the leftovers into the next test.
+    mockComplete.mockReset();
     process.env.TEST_API_KEY = 'test-key-123';
     // Default mock: getModel returns a model object, complete returns valid diagnosis
     mockGetModel.mockReturnValue({ id: 'anthropic/claude-sonnet-4' });
@@ -658,8 +661,9 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeStartRunInput({
         outputSchemaRef: 'diagnostician-output',
       }))).rejects.toThrow(PDRuntimeError);
-      // 1 original + 3 repair attempts = 4 calls (not infinite retries)
-      expect(mockComplete).toHaveBeenCalledTimes(4);
+      // S6: 1 original + 2 repair attempts = 3 calls — the run's shared
+      // request budget caps the total at 3, not at 1 + maxRepairAttempts.
+      expect(mockComplete).toHaveBeenCalledTimes(3);
     });
 
     it('does not retry on PDRuntimeError (runtime_unavailable)', async () => {
@@ -1087,8 +1091,8 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
         category: 'output_invalid',
       });
-      // 1 original + 3 repair attempts = 4 calls
-      expect(mockComplete).toHaveBeenCalledTimes(4);
+      // S6: 1 original + 2 repair attempts = 3 calls (run budget cap)
+      expect(mockComplete).toHaveBeenCalledTimes(3);
     });
 
     it('unknown outputSchemaRef fails loud before repair is attempted (rc-3)', async () => {
@@ -1205,8 +1209,9 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
         category: 'output_invalid',
       });
-      // 1 original + 3 repair attempts = 4 calls total (not infinite)
-      expect(mockComplete).toHaveBeenCalledTimes(4);
+      // S6: 1 original + 2 repair attempts = 3 calls — the shared run budget
+      // is the binding limit here, not maxRepairAttempts alone.
+      expect(mockComplete).toHaveBeenCalledTimes(3);
     });
 
     it('repairs evaluator-output-v1 with prose-wrapped JSON', async () => {
@@ -1549,8 +1554,8 @@ describe('PiAiRuntimeAdapter', () => {
         category: 'output_invalid',
       });
 
-      // 1 original + 3 repair (default maxRepairAttempts=3) = 4 calls total
-      expect(mockComplete).toHaveBeenCalledTimes(4);
+      // S6: 1 original + 2 repair attempts = 3 calls total
+      expect(mockComplete).toHaveBeenCalledTimes(3);
     });
 
     it('7. repair prompt includes schemaRef and error paths', async () => {
@@ -1596,9 +1601,9 @@ describe('PiAiRuntimeAdapter', () => {
       }))).rejects.toMatchObject({ category: 'output_invalid' });
 
       // The smuggled lineage never produced a stored payload: every repair
-      // attempt (default budget 3) carried the re-injected taskId and was
-      // rejected by the closed root — 1 original + 3 repair calls.
-      expect(mockComplete).toHaveBeenCalledTimes(4);
+      // attempt carried the re-injected taskId and was rejected by the closed
+      // root — 1 original + 2 repair calls (S6 run budget cap).
+      expect(mockComplete).toHaveBeenCalledTimes(3);
       const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
       expect(exhaustedEvent).toBeDefined();
     });
