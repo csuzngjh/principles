@@ -252,13 +252,47 @@ describe('decoder fail-loud matrix (rc-1/rc-2/rc-3)', () => {
   });
 });
 
+describe('Stop transcript-path union (two documented spellings, no on-device capture)', () => {
+  // Contract evidence: the official WorkBuddy hooks reference documents
+  // transcript_path; the capability matrix cited by transcript-path.ts names
+  // agent_transcript_path. Phase 0 never captured a Stop payload (NOT_RUN), so
+  // the decoder accepts at least one of the two instead of betting on either.
+  const stopBase = { hook_event_name: 'Stop', session_id: 'sess-stop' };
+
+  it('decodes with ONLY agent_transcript_path', () => {
+    const event = decodeWorkbuddyInput({ ...stopBase, agent_transcript_path: 'C:\\x\\.workbuddy\\projects\\p\\sess-stop.jsonl' });
+    expect(event.kind).toBe('turn_complete');
+    expect(event.context.workspaceDir).toBe('');
+    expect(event.context.toolCallId).toBeUndefined();
+  });
+
+  it('decodes with ONLY transcript_path (official reference shape)', () => {
+    const event = decodeWorkbuddyInput({ ...stopBase, transcript_path: 'C:\\x\\sess-stop.jsonl', stop_hook_active: false });
+    expect(event.kind).toBe('turn_complete');
+  });
+
+  it('accepts null for either or both present spellings', () => {
+    expect(decodeWorkbuddyInput({ ...stopBase, transcript_path: null }).kind).toBe('turn_complete');
+    expect(decodeWorkbuddyInput({ ...stopBase, agent_transcript_path: null }).kind).toBe('turn_complete');
+    expect(decodeWorkbuddyInput({ ...stopBase, transcript_path: null, agent_transcript_path: null }).kind).toBe('turn_complete');
+  });
+
+  it('fails loud when NEITHER spelling is present', () => {
+    expect(decodeError(stopBase).reason).toContain('"transcript_path"');
+  });
+
+  it('fails loud on a malformed agent_transcript_path', () => {
+    expect(decodeError({ ...stopBase, agent_transcript_path: 42 }).reason).toContain('"agent_transcript_path"');
+  });
+});
+
 describe('WorkBuddyHooksHostAdapter (HostAdapter implementation)', () => {
   const adapter = new WorkBuddyHooksHostAdapter();
 
-  it('declares hostId workbuddy, subprocess model, and the four-event v1 subscription', () => {
+  it('declares hostId workbuddy, subprocess model, and the five-kind subscription (PRI-1171 P2 adds Stop/turn_complete)', () => {
     expect(adapter.hostId).toBe('workbuddy');
     expect(adapter.hostKind).toBe('subprocess');
-    expect(adapter.subscribedEvents()).toEqual(['before_tool_call', 'after_tool_call', 'before_prompt_build', 'session_start']);
+    expect(adapter.subscribedEvents()).toEqual(['before_tool_call', 'after_tool_call', 'before_prompt_build', 'session_start', 'turn_complete']);
   });
 
   it('decodeEvent/encodeOutput delegate to the codec', () => {

@@ -331,7 +331,7 @@ describe('CR-07 promotion ordering, recovery, and version honesty', () => {
 
     // Case C recovery through the EXISTING reconciliation mechanism — no new
     // retry system: the marker lacks promotion evidence, so reconcile retries.
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir: ws.root, conversationIngestionEnabled: true });
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir: ws.root, codexConversationIngestionEnabled: true });
     expect(reconciled.degradations.some((entry) => entry.includes(`codex|${ROOT_ROLLOUT}|${TURN_1}|user`))).toBe(false);
     const db = trajectoryOf(ws.root);
     const trigger = db.prepare('SELECT retention_class, promotion_ref FROM governance_observations WHERE logical_key = ?').get(`codex|${ROOT_ROLLOUT}|${TURN_1}|user`) as { retention_class: string; promotion_ref: string };
@@ -339,7 +339,7 @@ describe('CR-07 promotion ordering, recovery, and version honesty', () => {
     expect(trigger.promotion_ref).toBe(painId);
     expect((db.prepare("SELECT COUNT(*) AS n FROM governance_pending_promotion_tails WHERE state = 'pending'").get() as { n: number }).n).toBe(1);
     // Idempotent recovery: a second pass finds a healthy marker and re-promotes nothing.
-    const again = await reconcileGovernanceContinuation({ workspaceDir: ws.root, conversationIngestionEnabled: true });
+    const again = await reconcileGovernanceContinuation({ workspaceDir: ws.root, codexConversationIngestionEnabled: true });
     expect(again.pendingTails).toBe(0);
     expect(again.completedTails).toBe(0);
     expect((db.prepare('SELECT COUNT(*) AS n FROM governance_pending_promotion_tails').get() as { n: number }).n).toBe(1);

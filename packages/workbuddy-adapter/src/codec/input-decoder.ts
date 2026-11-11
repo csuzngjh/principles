@@ -22,8 +22,12 @@
  * - generation_id → context.turnId (present on all observed events, stable
  *   within one turn); call_id (= tool_use_id) → context.toolCallId; both
  *   OPTIONAL per the frozen contract — undefined stays undefined;
- * - transcript_path is validated for TYPE only and never opened (MVP privacy
- *   boundary: PD does not read the transcript);
+ * - transcript_path is validated for TYPE only and never opened HERE; reading
+ *   it is the `ingestion/` TranscriptSourceAdapter's job, reached ONLY through
+ *   the shared pipeline's flag + consent gates (PRI-1171 P2 ticket ④ supplies
+ *   the decoder, ticket ⑤ wires the hooks/worker, ticket ⑥ adds flag + consent).
+ *   This codec must not open the transcript itself — the privacy boundary is
+ *   the gated ingestion entry, not this type validation;
  * - permission_mode is type-validated and retained WITHOUT granting any extra
  *   authority — bypassPermissions never bypasses the governance gate;
  * - PostToolUseFailure (thrown tool errors) maps onto the SAME after_tool_call
@@ -48,6 +52,8 @@ export const WORKBUDDY_EVENT_POST_TOOL_USE = 'PostToolUse';
 export const WORKBUDDY_EVENT_POST_TOOL_USE_FAILURE = 'PostToolUseFailure';
 export const WORKBUDDY_EVENT_USER_PROMPT_SUBMIT = 'UserPromptSubmit';
 export const WORKBUDDY_EVENT_SESSION_START = 'SessionStart';
+/** PRI-1171 P2 ticket ⑤: turn-complete trigger for conversation ingestion. */
+export const WORKBUDDY_EVENT_STOP = 'Stop';
 
 const EVENT_KINDS = new Map<string, HostEventKind>([
   [WORKBUDDY_EVENT_PRE_TOOL_USE, 'before_tool_call'],
@@ -55,6 +61,7 @@ const EVENT_KINDS = new Map<string, HostEventKind>([
   [WORKBUDDY_EVENT_POST_TOOL_USE_FAILURE, 'after_tool_call'],
   [WORKBUDDY_EVENT_USER_PROMPT_SUBMIT, 'before_prompt_build'],
   [WORKBUDDY_EVENT_SESSION_START, 'session_start'],
+  [WORKBUDDY_EVENT_STOP, 'turn_complete'],
 ]);
 
 export class WorkBuddyDecoderError extends Error {
@@ -88,6 +95,32 @@ function requiredNullableString(value: Record<string, unknown>, key: string): st
     throw new WorkBuddyDecoderError(`malformed required field "${key}"`, `${key} must be a string or null.`);
   }
   return candidate;
+}
+
+/**
+ * Transcript-path presence for Stop — TWO documented spellings, no capture.
+ *
+ * The official WorkBuddy hooks reference (§"Stop & SubagentStop Input") shows
+ * `transcript_path`; the capability-matrix Table A cited by
+ * ingestion/transcript-path.ts names `agent_transcript_path`. Neither Stop
+ * payload has been captured from a real host run (NOT_RUN), so requiring
+ * either spelling ALONE would fail-closed on the other and drop the whole
+ * turn (the ingestion orchestrator already accepts both hints). The union is
+ * therefore the only contract this codec can honestly enforce: at least one
+ * key must be PRESENT, and every present key must be string|null. Absence of
+ * both still fails loud (rc-3).
+ */
+function requireStopTranscriptPath(value: Record<string, unknown>): void {
+  const hasTranscriptPath = Object.hasOwn(value, 'transcript_path');
+  const hasAgentTranscriptPath = Object.hasOwn(value, 'agent_transcript_path');
+  if (!hasTranscriptPath && !hasAgentTranscriptPath) {
+    throw new WorkBuddyDecoderError(
+      'missing required field "transcript_path"',
+      'A WorkBuddy Stop payload must carry transcript_path or agent_transcript_path (both spellings are documented; the union is accepted until a real Stop payload is captured).',
+    );
+  }
+  if (hasTranscriptPath) requiredNullableString(value, 'transcript_path');
+  if (hasAgentTranscriptPath) requiredNullableString(value, 'agent_transcript_path');
 }
 
 function requiredRecord(value: Record<string, unknown>, key: string): Record<string, unknown> {
@@ -186,15 +219,24 @@ export function normalizeWorkbuddyToolResponse(toolResponse: unknown, eventForDi
   return { result: toolResponse, error: explicitError };
 }
 
+/**
+ * Decode one raw WorkBuddy stdin payload into the host-neutral HostEvent.
+ *
+ * Validates the event name against the frozen capability matrix, requires the
+ * fields that event really carries (Stop: transcript path variants), and
+ * throws {@link WorkBuddyDecoderError} with a reason + nextAction on any
+ * contract violation. Absent optional identity is never fabricated (rc-6).
+ */
 export function decodeWorkbuddyInput(raw: unknown): HostEvent {
   if (!isRecord(raw)) throw new WorkBuddyDecoderError('stdin payload is not a JSON object', 'Run this executable only as a WorkBuddy command hook.');
   const eventName = requiredString(raw, 'hook_event_name');
   const kind = EVENT_KINDS.get(eventName);
   if (!kind) {
-    throw new WorkBuddyDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, or SessionStart.');
+    throw new WorkBuddyDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, PostToolUseFailure, UserPromptSubmit, SessionStart, or Stop.');
   }
   const sessionId = requiredString(raw, 'session_id');
-  requiredNullableString(raw, 'transcript_path');
+  if (eventName === WORKBUDDY_EVENT_STOP) requireStopTranscriptPath(raw);
+  else requiredNullableString(raw, 'transcript_path');
   // ID mapping (frozen contract §ids): generation_id → turnId on every event
   // where the host provides it; call_id (= tool_use_id) → toolCallId. Neither
   // is ever fabricated when missing (rc-6).
@@ -218,7 +260,21 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
 
   let context: HostEventContext;
   let rawPayload: unknown = raw;
-  if (kind === 'session_start') {
+  if (kind === 'turn_complete') {
+    // WorkBuddy Stop carries NO cwd and NO tool tuple (official hooks
+    // reference §Stop). The ingestion orchestrator locates the transcript
+    // from the payload's transcript_path / agent_transcript_path hints; a
+    // fabricated cwd here would silently point at the wrong project.
+    // rawPayload stays the ORIGINAL payload so those hints survive.
+    const stopActive = own(raw, 'stop_hook_active');
+    if (stopActive !== undefined && typeof stopActive !== 'boolean') {
+      throw new WorkBuddyDecoderError('invalid field "stop_hook_active"', 'The WorkBuddy Stop hook must supply stop_hook_active as a boolean.');
+    }
+    validateOptionalStringType(raw, 'permission_mode');
+    // agent_transcript_path is type-validated by requireStopTranscriptPath,
+    // which (unlike validateOptionalStringType) also accepts an explicit null.
+    context = { ...baseWithContext, workspaceDir: '' };
+  } else if (kind === 'session_start') {
     // SessionStart has NO cwd (probe P00): source/permission_mode/client/version
     // are the frozen required set. workspaceDir stays empty here — the process
     // entry replaces it with the resolved governance workspace before dispatch.

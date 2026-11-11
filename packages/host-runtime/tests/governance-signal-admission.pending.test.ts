@@ -219,7 +219,7 @@ describe('pending candidate persistence (SPEC v0.3 §4.4.3/§4.4.8)', () => {
 
   it('pending rows are invisible to reconcile and admission counts (historical consumers)', async () => {
     admit(correction());
-    const reconcile = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
+    const reconcile = await reconcileGovernanceContinuation({ workspaceDir, codexConversationIngestionEnabled: false });
     expect(reconcile.ok).toBe(true);
     expect(reconcile.tasksEnsured).toBe(0);
     const counts = readGovernanceAdmissionCounts({ workspaceDir });

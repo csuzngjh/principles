@@ -88,6 +88,20 @@
       "amendment20261013": "Independent re-verification (engine 2.161.0, sha256 1b1a01bc…, scripts/dev/workbuddy-probe/probe-post-tool-use-failure.mjs, lab D:\\Code\\wb-ptuf-lab\\ptuf-1791905652552) FALSIFIED the first sentence's implied completeness for the thrown class: a Write to an existing-but-never-read file emits ONLY PostToolUseFailure (error='File has not been read yet…', tool_error_code='2009', NO tool_response) and PostToolUse never fires for it. hooks.json now registers PostToolUseFailure (matcher '*', wrapper event arg PostToolUseFailure) mapped onto the SAME after_tool_call HostEvent kind — still no new core event kind. The od02Conclusion above is preserved verbatim as the historical P03 reading it superseded."
     }
   },
+  "Stop": {
+    "fires": "when the model finishes a turn (registered by PRI-1171 P2 as the transcript-ingestion trigger).",
+    "payloadFields": {
+      "required": ["session_id", "hook_event_name"],
+      "requiredAnyOf": [["transcript_path", "agent_transcript_path"]],
+      "observedOptional": ["generation_id", "permission_mode", "stop_hook_active", "model"],
+      "note": "NO cwd and NO tool tuple on Stop. TWO documented transcript-path spellings exist and conflict: the official WorkBuddy hooks reference (§Stop & SubagentStop Input) shows transcript_path, while the capability matrix (Table A) cited by ingestion/transcript-path.ts names agent_transcript_path. At least one must be present; both are accepted as string|null."
+    },
+    "provenance": "NOT captured on-device. Phase 0 probes P01-P06 did not cover Stop; this entry is transcribed from the official hooks reference plus the capability matrix, so it is NOT probe-frozen evidence. The decoder enforces the UNION of both spellings instead of picking one until a real Stop payload is captured (NOT_RUN).",
+    "exitCodeEffects": {
+      "exit0-neutral": "turn ends; stdout would be injected as hook context (PD emits nothing)",
+      "stop_hook_active": "true when the host re-entered the Stop hook after a prior stop result; PD skips ingestion in that case to avoid a recursive read loop"
+    }
+  },
   "ids": {
     "session_id": "present on all events (uuid)",
     "generation_id": "present on all observed events incl. SessionStart; stable within one turn - maps to turnId",

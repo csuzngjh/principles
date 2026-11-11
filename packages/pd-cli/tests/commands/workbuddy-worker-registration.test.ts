@@ -89,14 +89,19 @@ describe('workbuddy worker handler (functional)', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('--once without --json prints the human-readable cycle report (no Codex catch-up line)', { timeout: 20_000 }, async () => {
+  it('--once without --json prints the WorkBuddy transcript catch-up line (not the absent Codex one)', { timeout: 20_000 }, async () => {
     const { handleWorkbuddyWorker } = await import('../../src/commands/workbuddy-worker.js');
     await handleWorkbuddyWorker({ workspace: workspaceDir, once: true, json: false });
     const output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
     expect(output).toContain('WorkBuddy governance worker');
     expect(output).toContain('mode: paused');
     expect(output).toContain('reconcile:');
-    expect(output).not.toContain('catch-up:');
+    // The worker DOES run a bounded WorkBuddy transcript catch-up; with the
+    // ingestion flag off (beforeEach default) it is skipped with a reason. The
+    // old `not.toContain('catch-up:')` assertion was written before catch-up
+    // existed and would pass even if the step silently disappeared.
+    expect(output).toContain('catch-up:    skipped');
+    expect(output).toContain('reason=feature_disabled');
     expect(output).toContain('next action:');
     expect(process.exitCode ?? 0).toBe(0);
   });

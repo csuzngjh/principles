@@ -425,6 +425,12 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // unchanged. Broader Codex kill switch remains host.codex.
   { id: 'workbuddy_live_keyword_pain', category: 'quiet', enabled: false, since: '2026-10-19', description: 'UNSUPPORTED in WorkBuddy (2026-11-05 audit): the ingress evidence gate has no persisted observation writer, so automatic candidates are always observation_only and never become Pain rows. Keep off; the only intake is the explicit "PD记录痛苦：" prefix.' },
   { id: 'codex_conversation_ingestion', category: 'quiet', enabled: false, since: '2026-08-29', description: 'Codex Governance Closure Slice A — bounded governance-observation ingestion from the authenticated Codex Stop-hook transcript (visible user/assistant/tool facts only, ≤32 turns/≤7 days operational window, promotion substrate). Default off; flag-off = zero transcript reads, no observation writes, existing Codex behavior unchanged.' },
+  // PRI-1171 P2 (ticket ⑥): the third host joins the unified trajectory
+  // ingestion seam. Three gates: host.workbuddy AND this flag AND a granted
+  // v3 consent record for hostKind=workbuddy. Unlike Codex, the WorkBuddy
+  // runtime READS the real consent ledger instead of hard-coding 'granted'.
+  // Default off; flag-off = zero transcript reads at hook/worker boundary.
+  { id: 'workbuddy_conversation_ingestion', category: 'quiet', enabled: false, since: '2026-11-11', description: 'PRI-1171 unified trajectory ingestion — bounded WorkBuddy transcript ingestion through the shared seam (visible Owner utterances, assistant turns, reasoning, tool facts) into governance_observations in trajectory.db. Default off; flag-off = zero transcript reads, no observation writes, and existing WorkBuddy hook/worker behavior is unchanged. Requires a granted conversation-ingestion consent record for hostKind=workbuddy.' },
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
   { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
