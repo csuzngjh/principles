@@ -48,12 +48,16 @@ function writeDualSlotHome(home: string): void {
  * self-describing release id and NO ~/.pd/releases/<id>/metadata.json (that
  * file is only produced by the signed-channel update path).
  */
-function writeBundledHome(home: string, digest = '3'.repeat(64)): void {
+function writeBundledHome(
+  home: string,
+  options: { readonly digest?: string; readonly releaseId?: string } = {},
+): void {
+  const digest = options.digest ?? '3'.repeat(64);
   const pdHome = path.join(home, '.pd');
   fs.mkdirSync(path.join(pdHome, 'bootstrap'), { recursive: true });
   fs.mkdirSync(path.join(pdHome, 'runtime', 'plugin'), { recursive: true });
   fs.writeFileSync(path.join(pdHome, 'runtime', 'plugin', 'package.json'), JSON.stringify({ version: '3.2.1' }));
-  const releaseId = `bundled-2.8.6-${digest.slice(0, 12)}`;
+  const releaseId = options.releaseId ?? `bundled-2.8.6-${digest.slice(0, 12)}`;
   fs.writeFileSync(path.join(pdHome, 'active.json'), JSON.stringify({
     schemaVersion: 1,
     generation: 78,
@@ -159,22 +163,13 @@ describe('canonical version report (SPEC 12 / 18-1, 18-10)', () => {
 
   it('reports corrupt health when a bundled release id does not embed the active version and digest', () => {
     const home = tempHome();
-    writeBundledHome(home);
-    const activePath = path.join(home, '.pd', 'active.json');
-    const active = JSON.parse(fs.readFileSync(activePath, 'utf8')) as Record<string, unknown>;
-    active.releaseId = `bundled-2.8.6-${'4'.repeat(12)}`;
-    fs.writeFileSync(activePath, JSON.stringify(active));
+    writeBundledHome(home, { releaseId: `bundled-2.8.6-${'4'.repeat(12)}` });
     expect(buildVersionReport(home).health).toBe('corrupt');
   });
 
   it('reports corrupt health when a bundled release digest is not a 64-hex sha256', () => {
     const home = tempHome();
-    writeBundledHome(home);
-    const activePath = path.join(home, '.pd', 'active.json');
-    const active = JSON.parse(fs.readFileSync(activePath, 'utf8')) as Record<string, unknown>;
-    active.releaseMetadataDigest = 'nope';
-    active.releaseId = 'bundled-2.8.6-nope';
-    fs.writeFileSync(activePath, JSON.stringify(active));
+    writeBundledHome(home, { digest: 'nope', releaseId: 'bundled-2.8.6-nope' });
     expect(buildVersionReport(home).health).toBe('corrupt');
   });
 
