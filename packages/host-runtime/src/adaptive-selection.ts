@@ -113,6 +113,8 @@ export type AdaptiveSelectionStage =
 export interface AdaptiveSelectionDiagnostics {
   stage: AdaptiveSelectionStage;
   readonly admissionDeadlineAt: number;
+  /** Epoch ms at which the single POST was actually issued (null = never sent). */
+  requestSentAt: number | null;
   completionDeadlineAt: number | null;
   firstByteAt: number | null;
   generationEndedAt: number | null;
@@ -204,6 +206,8 @@ function outerDeadlineReached(
 interface EmptyDiagnostics {
   stage: AdaptiveSelectionStage;
   admissionDeadlineAt: number;
+  /** Epoch ms at which the single POST was actually issued (null = never sent). */
+  requestSentAt: number | null;
   completionDeadlineAt: number | null;
   firstByteAt: number | null;
   generationEndedAt: number | null;
@@ -220,6 +224,7 @@ function emptyDiagnostics(admissionDeadlineAt: number): EmptyDiagnostics {
   return {
     stage: 'idle',
     admissionDeadlineAt,
+    requestSentAt: null,
     completionDeadlineAt: null,
     firstByteAt: null,
     generationEndedAt: null,
@@ -355,6 +360,7 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
           admissionController.signal,
           completionController.signal,
         ]);
+        diagnostics.requestSentAt = now();
         return await (options.fetchImpl ?? fetch)(options.model.endpoint, {
           method: 'POST',
           headers: {
