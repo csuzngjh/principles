@@ -459,6 +459,28 @@ describe('impact resolver — skill delivery surface (AC-8)', () => {
     expect(out.scopes.repo).toBe(false);
   }, 60_000);
 
+  it('pd-skills single-source edit → installer runs the render contract', async () => {
+    const head = await commit(
+      { 'packages/pd-skills/skills/pd-control/zh.md': '# 单一源\n' },
+      'skill-source'
+    );
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(false);
+    expect(out.scopes.installer).toBe(true);
+    expect(out.reasons.installer).toContain('skill delivery surface');
+  }, 60_000);
+
+  it('pd-skills host capability config edit → installer runs the render contract', async () => {
+    const head = await commit(
+      { 'packages/pd-skills/hosts/openclaw.json': '{}\n' },
+      'skill-host-config'
+    );
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(false);
+    expect(out.scopes.installer).toBe(true);
+    expect(out.reasons.installer).toContain('skill delivery surface');
+  }, 60_000);
+
   it('non-skill .md inside a host package still classifies as package change', async () => {
     const head = await commit(
       { 'packages/workbuddy-adapter/plugin/README.md': '# readme\n' },
