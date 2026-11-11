@@ -58,7 +58,7 @@
 | 取消 | L1 实际不可取消 | `cancelRun` 是空实现（第 1143–1150 行），注释写明"一次性调用已阻塞，取消永远是 no-op" |
 | 用量统计 | 用了，但只见 token | `usageSummaryOf` 只取 `input`/`output`（第 86–92 行）；Artificer L2 汇总 token（[artificer-l2-adapter.ts](../../packages/principles-core/src/runtime/adapter/artificer-l2-adapter.ts) 第 156–184 行） |
 | 成本统计 | **完全没用** | 全仓没有读取 `usage.cost` / `model.cost` 的消费点（pi-ai 侧字段见 `packages/ai/src/types.ts` 第 467–493 行） |
-| 错误分类 | 用了，靠正则 | 限流：`/rate.?limit|429|quota|too many requests/i`（第 1577、1695 行）；输出预算被拒：`MAX_TOKENS_REJECTED_PATTERN`（第 77–78 行） |
+| 错误分类 | 用了，靠正则 | 限流：`/rate.?limit\|429\|quota\|too many requests/i`（第 1577、1695 行）；输出预算被拒：`MAX_TOKENS_REJECTED_PATTERN`（第 77–78 行） |
 | 降级 | L2 有，L1 没有 | L2 失败可回退到 L1（默认开，`l2FallbackToL1`）；L1 失败直接抛错，没有备用模型 |
 | 并发/限流 | **没有** | 自动消费者每 120 秒串行跑一轮（[internalization-auto-consumer-service.ts](../../packages/openclaw-plugin/src/service/internalization-auto-consumer-service.ts) 第 21、209 行）；L2 能力声明 `supportsConcurrentRuns: false`（第 318 行） |
 | 上下文管理 | **没有** | 没有 token 估算、没有 `contextWindow` 前置检查、没有历史压缩。唯一一处截断是把 Artificer 的输入砍到 5 万字符（[artificer-l2-adapter.ts](../../packages/principles-core/src/runtime/adapter/artificer-l2-adapter.ts) 第 428 行） |
@@ -133,8 +133,8 @@
 
 - **现状**：只记录输入/输出 token（第 86–92 行），仅出现在 `runtime_invocation_succeeded` 这一个事件里；修复调用、重试调用、L2 的每一轮各自不单独记账。
 - **风险**：无法回答"哪个阶段最贵""一次诊断平均多少钱""本月成本趋势"；无法给预算告警。
-- **建议**：读取 pi-ai 已算好的 `usage.cost.total`（`packages/ai/src/types.ts` 第 481–493 行，含"供应商实收 / 目录估算"标记），补上 `totalTokens`、模型名、阶段名，落到现有遥测里。
-- **预期收益**：成本（可归因、可设预算）。这是**投入产出比最高的一项**：pi-ai 已经算好了，PD 只是没读。
+- **建议**：读取 pi-ai 已算好的 `usage.cost.total`（`packages/ai/src/types.ts` 第 481–493 行）。注意 1.2.0 **没有**"供应商实收 / 目录估算"标记（1.5.1 才加 `totalFromProvider`），因此只能当作**估算值**使用。补上 `totalTokens`、模型名、阶段名，落到现有遥测里；该数值只代表**最终成功响应**，不含修复/回退/重试的中间调用。
+- **预期收益**：成本（可归因、可设预算）。这是**投入产出比最高的一项**：pi-ai 已经算好了，PD 只是没读。收益边界是"最终成功响应的成本"，不是"一次诊断的真实总成本"。
 
 ### 4.8 错误分类与降级
 
