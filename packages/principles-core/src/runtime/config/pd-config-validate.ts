@@ -43,6 +43,7 @@ import {
   DANGEROUS_KEYS,
   PROMPT_BUDGET_HOST_KINDS,
   type PromptBudgetConfig,
+  type TrajectoryRetentionConfig,
 } from './pd-config-types.js';
 import { MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS, MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS } from '../activation/prompt-budget-policy.js';
 import { validateProfileConfig } from './pd-validate-profile.js';
@@ -62,6 +63,18 @@ const REUSE_EVALUATION_KEYS: ReadonlySet<string> = new Set(['enabled', 'runtimeP
  * configuration.
  */
 const PROMPT_BUDGET_KEYS: ReadonlySet<string> = new Set(['declaredContextWindowTokens', 'hosts']);
+
+/**
+ * SPEC-PD-TR-001 — `trajectoryRetention` closed key set. Ghost configuration
+ * fails loud, same posture as every other section.
+ */
+const TRAJECTORY_RETENTION_KEYS: ReadonlySet<string> = new Set([
+  'enabled',
+  'retentionDays',
+  'intervalHours',
+  'batchSize',
+  'runBudgetMs',
+]);
 
 /**
  * Closed-world key set for the Adaptive Activation decision endpoint
@@ -1002,6 +1015,48 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     }
   }
 
+  // trajectoryRetention (optional — SPEC-PD-TR-001). Shape only: types and the
+  // closed key set. Range policy (e.g. retentionDays 1..6 ⇒ delete nothing) is
+  // resolved by `resolveTrajectoryRetentionPolicy`, because a well-typed but
+  // dangerous value must degrade the sweep, not invalidate the whole config.
+  const trajectoryRetentionRaw = readOwn(raw, 'trajectoryRetention');
+  let trajectoryRetention: TrajectoryRetentionConfig | undefined;
+  if (trajectoryRetentionRaw !== undefined) {
+    if (!isRecord(trajectoryRetentionRaw)) {
+      errors.push(err('trajectoryRetention', `trajectoryRetention must be an object, got ${safePreview(trajectoryRetentionRaw)}`, 'Set trajectoryRetention to a mapping (e.g. trajectoryRetention: { retentionDays: 90 })'));
+    } else {
+      for (const key of Object.keys(trajectoryRetentionRaw)) {
+        if (!TRAJECTORY_RETENTION_KEYS.has(key)) {
+          errors.push(err(`trajectoryRetention.${key}`, `unknown key '${key}' in trajectoryRetention`, `Remove '${key}'; only ${[...TRAJECTORY_RETENTION_KEYS].join(', ')} are supported`));
+        }
+      }
+      const enabledRaw = readOwn(trajectoryRetentionRaw, 'enabled');
+      if (enabledRaw !== undefined && typeof enabledRaw !== 'boolean') {
+        errors.push(err('trajectoryRetention.enabled', `enabled must be a boolean, got ${safePreview(enabledRaw)}`, 'Set trajectoryRetention.enabled to true or false'));
+      }
+      const integerFields = ['retentionDays', 'intervalHours', 'batchSize', 'runBudgetMs'] as const;
+      const integers: Partial<Record<(typeof integerFields)[number], number>> = {};
+      for (const field of integerFields) {
+        const value = readOwn(trajectoryRetentionRaw, field);
+        if (value === undefined) continue;
+        if (typeof value !== 'number' || !Number.isInteger(value)) {
+          errors.push(err(`trajectoryRetention.${field}`, `${field} must be an integer, got ${safePreview(value)}`, `Set trajectoryRetention.${field} to a whole number, or remove the key`));
+          continue;
+        }
+        integers[field] = value;
+      }
+      if (errors.every((error) => !error.path.startsWith('trajectoryRetention'))) {
+        trajectoryRetention = {
+          ...(typeof enabledRaw === 'boolean' ? { enabled: enabledRaw } : {}),
+          ...(integers.retentionDays === undefined ? {} : { retentionDays: integers.retentionDays }),
+          ...(integers.intervalHours === undefined ? {} : { intervalHours: integers.intervalHours }),
+          ...(integers.batchSize === undefined ? {} : { batchSize: integers.batchSize }),
+          ...(integers.runBudgetMs === undefined ? {} : { runBudgetMs: integers.runBudgetMs }),
+        };
+      }
+    }
+  }
+
   // principles (optional — PRI-336). Must survive validation into the returned
   // PdConfig: `principles.outputLanguage` is the canonical language SSOT that
   // loadPdConfigForPlugin consumers (prompt injection, principle generation)
@@ -1113,6 +1168,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     ...(reuseEvaluation ? { reuseEvaluation } : {}),
     ...(adaptiveActivation ? { adaptiveActivation } : {}),
     ...(promptBudget ? { promptBudget } : {}),
+    ...(trajectoryRetention ? { trajectoryRetention } : {}),
     ...(profile ? { profile } : {}),
     ...(contextInjection ? { contextInjection } : {}),
   };

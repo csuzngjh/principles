@@ -20,6 +20,7 @@ import * as os from 'os';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
 import { ensureMcpBinding, invalidateMcpBinding } from './core/mcp-binding.js';
 import { scheduleTelemetryExportForWorkspace } from './core/product-telemetry-trigger.js';
+import { scheduleTrajectoryRetentionForWorkspace } from './core/trajectory-retention-trigger.js';
 import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
 export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
 export type { ConversationAccessCheckResult } from './core/config-health.js';
@@ -589,6 +590,11 @@ const plugin = {
             // failures contained inside the service). Gating (flag + consent +
             // environment eligibility) happens inside maybeExportDaily.
             scheduleTelemetryExportForWorkspace(workspaceDir, api.logger);
+
+            // ── Schedule bounded trajectory retention (SPEC-PD-TR-001) ──
+            // One unref'd interval per workspace; the first attempt is a
+            // minute later, so `before_prompt_build` never pays for a sweep.
+            scheduleTrajectoryRetentionForWorkspace(workspaceDir, api.logger);
           }
 
           const hookContext = { ...ctx, workspaceDir };

@@ -232,6 +232,26 @@ export interface PromptBudgetConfig {
   hosts?: Partial<Record<PromptBudgetHostKind, number>>;
 }
 
+// ── Trajectory Retention Config (SPEC-PD-TR-001) ────────────────────────────
+
+/**
+ * `trajectoryRetention` section — partial user input.
+ *
+ * Shape validation (types, closed key set) happens here in `validatePdConfig`;
+ * RANGE policy lives in `resolveTrajectoryRetentionPolicy`, because a
+ * dangerous-but-well-typed value (e.g. `retentionDays: 3`) must degrade the
+ * sweep to "delete nothing", NOT invalidate the whole PD config.
+ */
+export interface TrajectoryRetentionConfig {
+  /** `false` stops sweeping; existing rows are left untouched. */
+  enabled?: boolean;
+  /** `0` disables retention; accepted range is 7..3650 days. */
+  retentionDays?: number;
+  intervalHours?: number;
+  batchSize?: number;
+  runBudgetMs?: number;
+}
+
 // ── Principles Config (PRI-336) ──────────────────────────────────────────────
 
 import type { OutputLanguage } from '../language-directive.js';
@@ -408,6 +428,11 @@ export interface PdConfig {
    * budget policy's plausibility bounds.
    */
   promptBudget?: PromptBudgetConfig;
+  /**
+   * Trajectory retention (SPEC-PD-TR-001) — partial user input; the effective
+   * policy resolves defaults and every fail-closed rule. Absent ⇒ 90 days.
+   */
+  trajectoryRetention?: TrajectoryRetentionConfig;
   /** Agent behavioral profile — partial user input; defaults resolved in effective config (PRI-304). */
   profile?: Partial<ProfileConfig>;
   /** Context injection configuration — partial user input; defaults resolved in effective config. */
