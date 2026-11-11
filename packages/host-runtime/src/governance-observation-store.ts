@@ -682,7 +682,7 @@ export function ingestGovernanceObservations(input: IngestGovernanceObservations
 
 export interface ReadGovernanceCheckpointArgs {
   readonly workspaceDir: string;
-  readonly hostKind: 'codex';
+  readonly hostKind: GovernanceObservationHostKind;
   readonly rolloutIdentity: string;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
@@ -714,7 +714,7 @@ export function readGovernanceCheckpoint(args: ReadGovernanceCheckpointArgs): Go
 
 export interface ListGovernanceCheckpointsArgs {
   readonly workspaceDir: string;
-  readonly hostKind: 'codex';
+  readonly hostKind: GovernanceObservationHostKind;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
@@ -918,7 +918,7 @@ export function promoteGovernanceEvidence(input: PromoteGovernanceEvidenceInput)
 
 export interface QuarantineGovernanceObservationArgs {
   readonly workspaceDir: string;
-  readonly hostKind: 'codex';
+  readonly hostKind: GovernanceObservationHostKind;
   readonly rolloutIdentity: string;
   /** governance_observations.id — `pd codex ingest quarantine --record <id>`. */
   readonly recordId: number;
