@@ -23,7 +23,11 @@ import { buildToolSemanticRegistry, type ToolSemanticMappingV1, type ToolSemanti
 
 export const CODEX_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] = Object.freeze([
   { rawToolName: 'Bash', canonicalKind: 'execute' },
-  { rawToolName: 'apply_patch', canonicalKind: 'write' },
+  // ADR-0030: apply_patch writes a `*** Begin Patch` envelope. The design gate
+  // must parse those file headers to know the target paths, and that encoding
+  // is not expressible via canonicalKind — declare it instead of matching the
+  // raw name downstream.
+  { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
 ]);
 
 const built = buildToolSemanticRegistry(CODEX_TOOL_SEMANTIC_MAPPINGS);

@@ -116,7 +116,10 @@ export function createCodexRuleContextProvider(options: CodexRuleContextProvider
       projectWorkspacePath: projectDir,
       hostSessionId: request.sessionId,
       targetPath: targetKind === 'execute' ? projectDir : request.targetPath,
-      ...(targetKind === 'write' && request.toolName === 'apply_patch'
+      // ADR-0030: the payload parser is selected by the DECLARED encoding, not
+      // by a raw tool-name literal — an alias declared with the same format
+      // parses identically with no code change.
+      ...(targetKind === 'write' && options.toolSemantics.resolveWritePayloadFormat(request.toolName) === 'file-header-patch'
         ? { targetPaths: patchTargets(rawParams, projectDir) ?? [] }
         : {}),
       ...(targetKind === 'execute' ? { projectScopedExecution: true } : {}),

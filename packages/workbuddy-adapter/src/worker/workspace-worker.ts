@@ -46,6 +46,7 @@ import {
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
   saveHostToolDeclaration,
+  HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
   type ConsumerCycleLogger,
   type ReconcileGovernanceContinuationResult,
@@ -236,7 +237,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   // with the WorkBuddy host declaration (probe-verified tool names: Read /
   // Write / Edit / Bash are capitalized) persisted for host-neutral consumers.
   const declared = saveHostToolDeclaration(workspaceDir, {
-    version: 1,
+    version: HOST_TOOL_DECLARATION_VERSION,
     hostKind: 'workbuddy',
     mappings: WORKBUDDY_TOOL_SEMANTIC_MAPPINGS,
     declaredAt: new Date().toISOString(),

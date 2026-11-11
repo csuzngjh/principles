@@ -23,13 +23,14 @@
  * merge into it, never overwrite. The marker file is our own bookkeeping
  * for precise uninstall.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'module';
 import { pathToFileURL } from 'url';
 import { isNpmDependencyResolutionEnabled } from '../installer.js';
+import { isSameMcpBindingPath, validateMcpBindingShape } from './mcp-binding-shape-mirror.js';
 import { getPdRuntimeDir } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -540,6 +541,68 @@ export function resolvePluginDataRoot(codexHome: string, marketplace: string): s
   return /^[A-Za-z0-9._-]+$/.test(marketplace) ? path.join(dataRoot, `principles-disciple-${marketplace}`) : undefined;
 }
 
+const MCP_BINDING_FILE = 'mcp-binding.json';
+
+function isDirectoryOnDisk(target: string): boolean {
+  try {
+    return statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFileOnDisk(target: string): boolean {
+  try {
+    return statSync(target).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The Codex MCP launcher fails closed unless `<pluginRoot>/mcp-binding.json`
+ * binds THIS payload's runtime and pin (`binding_missing`). pd-setup.cjs — the
+ * only writer — puts that file inside the VERSIONED payload directory, so a
+ * payload refresh (`codex plugin add`, marketplace update) destroys it while
+ * PLUGIN_DATA's runtime survives. A runtime-cohort comparison alone can never
+ * detect that loss: the pin is unchanged, so the payload reports "matched" and
+ * the launcher stays dead until a human re-runs setup.
+ */
+function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexRuntimeCohort): boolean {
+  let binding: unknown;
+  try {
+    binding = JSON.parse(readFileSync(path.join(pluginRoot, MCP_BINDING_FILE), 'utf8'));
+  } catch {
+    return false;
+  }
+  // Use the SAME shape gate as the launcher. The declaration lives in
+  // @principles/install-layout, but the packaged installer must keep loading
+  // against the PUBLISHED install-layout (registry-parity smoke, PRI-669/RF-02)
+  // and a normal PR cannot raise the version floor — so this is the pinned
+  // mirror, kept identical to the shared validator by
+  // mcp-binding-shape-mirror-parity.test.ts. A binding the launcher would
+  // refuse ON SHAPE — workspaceDir/serverEntry missing, a relative path, or a
+  // non-canonical serverEntry — must never count as healthy, or setup is
+  // skipped and the launcher stays dead on binding_workspace_invalid /
+  // binding_server_entry_invalid / server_entry_not_canonical.
+  const verdict = validateMcpBindingShape(binding, 'codex', process.platform);
+  if (!verdict.ok) return false;
+  // Installer-only context the shape contract cannot know: the binding must
+  // describe THIS payload's runtime at THIS payload's pin. The comparison uses
+  // the launcher's own rule (Windows paths are case-insensitive), so a binding
+  // the launcher accepts is never rewritten only because the case differs.
+  if (!isSameMcpBindingPath(verdict.binding.runtimeDir, runtimeDir, process.platform)) return false;
+  if (verdict.binding.versions.mcpServer !== pin.mcpServer || verdict.binding.versions.core !== pin.core) return false;
+  // Shape is NOT existence. The launcher re-checks the filesystem before it
+  // starts and refuses a binding whose recorded workspace, runtime or entry is
+  // gone (binding_workspace_missing / binding_workspace_not_directory /
+  // server_entry_missing). Counting that as healthy would skip pd-setup and
+  // report success+preserved while the launcher stays fail-closed.
+  return isDirectoryOnDisk(verdict.binding.workspaceDir)
+    && isDirectoryOnDisk(verdict.binding.runtimeDir)
+    && isFileOnDisk(verdict.binding.serverEntry);
+}
+
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────
 export class CodexHostInstaller implements HostInstaller {
   readonly hostId = 'codex';
@@ -699,9 +762,15 @@ export class CodexHostInstaller implements HostInstaller {
     }
     const runtimeDir = path.join(pluginDataRoot, 'runtime');
     const installed = readInstalledRuntimeCohort(runtimeDir);
+    // The binding is written into the versioned payload directory, so a payload
+    // refresh deletes it even when PLUGIN_DATA's runtime still matches the pin.
+    // Treat a missing/stale binding as repair-needed: without it the Codex
+    // launcher exits `binding_missing` and pd-recall never appears in tools/list.
+    const bindingHealthy = isMcpBindingHealthy(current.versionDir, runtimeDir, pin);
     let runtimeReconciled = false;
+    let bindingRepaired = false;
 
-    if (installed !== undefined && cohortsEqual(installed, pin)) {
+    if (installed !== undefined && cohortsEqual(installed, pin) && bindingHealthy) {
       notes.push(`runtime matches the payload pin (${describeRuntimeCohort(pin)})`);
     } else {
       const setup = this.runRuntimeSetup(current.versionDir, pluginDataRoot, ctx.workspaceDir);
@@ -716,11 +785,26 @@ export class CodexHostInstaller implements HostInstaller {
           nextAction: 'Run: $pd-control setup — it installs the pinned runtime and verifies the exact bytes. If it also fails, check that npm is on PATH.',
         };
       }
-      runtimeReconciled = true;
-      notes.push(`runtime installed at the payload pin (${describeRuntimeCohort(pin)})`);
+      if (!isMcpBindingHealthy(current.versionDir, runtimeDir, pin)) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configAction: 'skipped',
+          manualActionRequired: true,
+          reason: `pd-setup completed but ${path.join(current.versionDir, MCP_BINDING_FILE)} is missing, does not bind this payload's runtime, or records paths that no longer exist, so the Codex MCP launcher refuses to start (binding_missing / binding_workspace_missing / server_entry_missing).`,
+          nextAction: `Run: $pd-control setup --plugin-root "${current.versionDir}" — it rewrites the binding beside the payload. If it still does not appear, read the setup output for worker_registration_failed.`,
+        };
+      }
+      const runtimeWasMatched = installed !== undefined && cohortsEqual(installed, pin);
+      runtimeReconciled = !runtimeWasMatched;
+      bindingRepaired = !bindingHealthy;
+      notes.push(runtimeWasMatched
+        ? `runtime matches the payload pin (${describeRuntimeCohort(pin)})`
+        : `runtime installed at the payload pin (${describeRuntimeCohort(pin)})`);
+      if (bindingRepaired) notes.push(`mcp binding written beside the payload (${MCP_BINDING_FILE})`);
     }
 
-    const updated = payloadRefreshed || runtimeReconciled;
+    const updated = payloadRefreshed || runtimeReconciled || bindingRepaired;
     return {
       success: true,
       hostId: this.hostId,

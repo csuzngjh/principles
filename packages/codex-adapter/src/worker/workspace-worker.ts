@@ -46,6 +46,7 @@ import {
   runStage2CorrectionCycle,
   createSignalClassifierForWorkspace,
   saveHostToolDeclaration,
+  HOST_TOOL_DECLARATION_VERSION,
   type InternalizationConsumerCycleOutcome,
   type ConsumerCycleLogger,
   type ReconcileGovernanceContinuationResult,
@@ -445,7 +446,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   // for host-neutral consumers) and thread the registry into the cycle so
   // activation-gate replay resolves Codex tool semantics (Bash, not bash).
   const declared = saveHostToolDeclaration(workspaceDir, {
-    version: 1,
+    version: HOST_TOOL_DECLARATION_VERSION,
     hostKind: 'codex',
     mappings: CODEX_TOOL_SEMANTIC_MAPPINGS,
     declaredAt: new Date().toISOString(),

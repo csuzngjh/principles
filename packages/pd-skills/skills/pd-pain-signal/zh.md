@@ -1,0 +1,125 @@
+---
+name: pd-pain-signal
+description: {{host.optional.description}}
+---
+
+# PD Pain Signal{{host.optional.titleSuffix}}
+
+Pain = 相对某个明确锚点的、具体的行为背离。三要素必须同时成立：
+
+1. **锚点** —— Owner 的明示要求、既有原则，或生效中的 Agent 指令 / Skill 要求。
+2. **具体行为** —— 你实际做了什么、漏了什么。
+3. **显著背离** —— 相对该锚点可以说清楚的差距。
+
+没有证明影响、没有重复发生、Owner 之前没纠正过，都**不是**不提交的理由，只影响 Owner 的注意力排序。
+
+{{capability pain.nativeEntry}}
+
+{{capability pain.anchorSubmit}}
+
+## 锚点
+
+只能选一类。`anchorRef` 必须能让别人找到这条要求。
+
+### `owner_expectation`（Owner 明示要求）
+
+Owner 说过 —— 本次对话、Owner 文档或已批准的决定。`anchorRef` 写明出处，例如 `本次对话 14:02 Owner: "..."` 或 `docs/xxx.md §2`。
+
+- 只凭记忆的 Owner 要求不得提交。没有可引用的位置就先向 Owner 确认，或者不提交。
+
+### `established_principle`（既有原则）
+
+`anchorRef` 必须是 `<principleId>@<version>`（例如 `P-42@1`）。两者都从 `pd principle list` 取，禁止猜测或推断版本号。
+
+服务端会校验存在性、版本与状态：
+
+- `active` 或 `probation` → 可作为背离依据。
+  `probation` 会返回 `anchor_probation` 警告：背离成立，但该原则仍在验证期。
+- `candidate`、`archived`、`deprecated` → 不能作为违规依据，只能作背景。
+
+服务端只校验存在性 / 版本 / 状态。**适用范围与优先级冲突无法在此机器判定。** 如果你无法确认该原则适用于当前场景，在 `reason` 里写"适用性待确认"，不要写成已定论。
+
+### `agent_instruction`（生效中的 Agent 指令）
+
+`anchorRef` 必须是 `<path>#<section>` 且**不含空格**，例如 `AGENTS.md#verification`。它必须指向当前宿主生效的要求（AGENTS.md、PRINCIPLES.md、SKILL.md、工具说明）。
+
+### 没有锚点
+
+如果你无法把锚点归入以上三类，不要提交。先向 Owner 澄清。
+
+## `reason` —— 六部分，按顺序
+
+1. **锚点** —— 引用或指明（原则 id@version、指令 path#section、Owner 原话 + 出处）。
+2. **锚点来源与引用等级** —— `verbatim` / `paraphrase` / `recollection` / `inference`。不得抬高等级。仅有 `recollection` 或 `inference` 时不够：先与 Owner 确认原话。
+3. **观察到的行为** —— 具体动作、顺序、跳过的步骤、越界之处。不要写"质量不好"。
+4. **背离** —— 相对锚点的差距：没做 / 做反了 / 做了但绕过了。
+5. **为何值得记录**（辅助）—— 帮 Owner 排优先级。它**不是**受理条件，绝不能用它否决一条本来有效的 Pain。
+6. **上下文** —— 何时、何地发生，范围要克制。
+
+不得隐瞒冲突的锚点。不得为了让提交更容易被接受而夸大背离。不得把第 5 部分变成门槛。
+
+## 授权 —— 仅本次
+
+调用工具前，先向 Owner 说明：
+
+1. 锚点是什么、出自哪里；
+2. 你观察到的具体行为；
+3. 两者之间的背离；
+4. 可选：为什么可能重要。
+
+然后在**当前对话**取得 Owner 的明确同意。
+
+- 没有回复、回答含糊、或一句"随便"都**不是**授权。
+- Owner 修改了内容，就按最终版本重新确认后再提交。
+- 授权只覆盖这一次提交。不得复用于另一条 Pain、另一个会话，或内容已变化的"重试"。
+- 后台、定时、hook 驱动、无人值守的运行**不得**自行提交。
+
+## 严重度与 `painType`
+
+- 不要传分数或严重度。工具没有这个参数，系统会把省略的严重度记为**中等**。你不能自提；如果你认为很严重，就写进 `reason` 让 Owner 判断。
+- 除非你确有把握，否则省略 `painType`。默认是 `principle_deviation`。
+- 默认值只对 `established_principle` 锚点成立：没有原则引用的 `principle_deviation` 会被拒绝（`anchor_invalid`，"principle_deviation requires deviationAnchor{...}"）。锚点是 `owner_expectation` / `agent_instruction` 时必须显式给出如实匹配的类型（如 `tool_failure`）；没有合适的类型就向 Owner 说明，不要硬填。
+- 不得为了看起来更紧急而回填 `user_frustration`（或任何其它类型）。
+
+## 阅读回执
+
+工具返回一份 JSON 回执（`pd.pain-submit-receipt.v1`）：
+
+```
+status, painId, taskId, workspaceDir, diagnosis, anchor, provenance, warnings, error, nextAction
+```
+
+| status | 含义 | 你该做什么 |
+|---|---|---|
+| `submitted` | Pain 与诊断任务已写入 | 报告 `painId` / `taskId`。`diagnosis.status` 是 `pending`：诊断**尚未**运行 |
+| `refused` | 没有写入（`task_duplicate` 时表示已存在等价任务） | 报告 `error.code` + `nextAction`；不要盲目重试 |
+| `failed` | 写入失败，唯一带 `isError: true` 的状态 | 报告 `error.code` / `error.message` / `nextAction`；任务可能存在也可能不存在 |
+| `submit_unconfirmed` | 写入已开始但结果未知（超时或异常） | 不要重提；先 `pd task show <taskId>` 对账 |
+
+可能见到的 `refused` 代码：`invalid_input`、`anchor_invalid`、`anchor_unverifiable`（账本不可读）、`anchor_not_found`（未知 id/版本或空账本）、`anchor_not_currently_valid`、`task_duplicate`、`ingress_*`。
+
+降级传输：
+
+- `minimal` —— 回执缩减为 `status / painId / taskId / workspaceDir / diagnosis`。
+- `untransportable` —— 纯文本陈述，或 `isError: true` 信封。结果未知时一律报告 UNKNOWN，绝不说成"没有写入"。
+
+只报告回执实际返回的标识与状态。登记不等于诊断，不等于候选受理，不等于批准，不等于激活。
+
+## 操作员补救路径（事后，绝不是 Agent 的默认动作）
+
+{{capability pain.operatorRecovery}}
+
+## 核验下游状态
+
+用 `pd-cli-operator` 查看实际任务与证据链。若诊断产出了候选，必须用真实的 `admissionResults` / `admitted` 决策与对应非空 `ledgerEntryIds` 核验；仅有非空 `candidateIds` 不算成功。`needs_evidence` 或拒绝都要如实报告。用 `pd-review` 打开 Owner Console。{{host.optional.downstreamNote}}
+
+## 禁止
+
+- 未经当前消息里 Owner 的明确要求与同意就提交。
+- 后台、定时、hook 或无人值守运行中提交。
+- 编造锚点、原则 id@version、指令路径或 Owner 原话。
+- 传分数、严重度、优先级、session id 或批准令牌。
+- 在 `pd_submit_pain` 不可用时，用猜出来的 lineage、本地开关或宿主匹配器绕过写 CLI。
+- `submit_unconfirmed` 之后不经 `pd task show <taskId>` 对账就重提。
+- 写 `.state/.pain_flag` 或调用旧的 `write_pain_flag`。
+- 批准、激活或修改原则。

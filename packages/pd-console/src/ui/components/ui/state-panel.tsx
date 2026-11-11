@@ -51,8 +51,8 @@ const PRESENTATION: Record<StateKind, { icon: typeof Inbox; className: string; i
 
 function ActionButton({ action, primary }: { action: StateAction; primary: boolean }) {
   const className = primary
-    ? 'inline-flex min-h-8 items-center rounded-[4px] border border-gov bg-gov px-3 py-1.5 text-[13px] text-paper hover:bg-gov-2'
-    : 'inline-flex min-h-8 items-center text-[13px] text-gov underline underline-offset-4';
+    ? 'inline-flex min-h-8 items-center rounded-[4px] border border-gov bg-gov px-3 py-1.5 text-body text-paper hover:bg-gov-2'
+    : 'inline-flex min-h-8 items-center text-body text-gov underline underline-offset-4';
   if (action.to) {
     return <Link to={action.to} className={className}>{action.label}</Link>;
   }
@@ -72,7 +72,7 @@ export function StatePanel({ kind, title, body, action, secondaryAction, technic
       <Icon aria-hidden="true" strokeWidth={1.75} className={`mt-0.5 h-4 w-4 shrink-0 ${iconClassName} ${kind === 'slow' ? 'animate-spin' : ''}`} />
       <div className="min-w-0 flex-1">
         <p className="text-[14px] font-medium leading-relaxed text-ink">{title}</p>
-        {body !== undefined && <div className="mt-1 text-[13px] leading-relaxed text-ink-3">{body}</div>}
+        {body !== undefined && <div className="mt-1 text-body leading-relaxed text-ink-3">{body}</div>}
         {(action || secondaryAction) && (
           <div className="mt-3 flex flex-wrap items-center gap-4">
             {action && <ActionButton action={action} primary />}

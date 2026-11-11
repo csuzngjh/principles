@@ -181,10 +181,10 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
             <circle cx="14" cy="14" r="2.5" fill="currentColor" stroke="none" />
           </svg>
           <div className="font-mono text-[14px] tracking-[0.16em] font-bold text-ink">PD</div>
-          <div className="font-mono text-[11px] tracking-[0.14em] text-ink-3 mt-1">
+          <div className="font-mono text-caption tracking-[0.14em] text-ink-3 mt-1">
             GOVERNANCE WORKSPACE
           </div>
-          <div className="text-[13px] text-ink-3 mt-3">{t("pages.login.connectWorkspace")}</div>
+          <div className="text-body text-ink-3 mt-3">{t("pages.login.connectWorkspace")}</div>
         </div>
         <div className="border-t border-line my-5" />
         {children}
@@ -196,7 +196,7 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     return showCard(
       <div className="flex flex-col items-center gap-4 py-6" data-testid="login-connecting">
         <div className="w-8 h-8 border-2 border-gov border-t-transparent rounded-full animate-spin" />
-        <span className="text-[13px] text-ink-3">
+        <span className="text-body text-ink-3">
           {phase.kind === "checking" ? t("pages.login.detecting") : t("pages.login.connecting")}
         </span>
       </div>,
@@ -206,15 +206,15 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   if (phase.kind === "recovery") {
     return showCard(
       <div className="flex flex-col gap-4" data-testid="login-recovery">
-        <p className="text-[13px] text-amber">{t("pages.login.recoveryTitle")}</p>
-        <p className="text-[13px] text-ink-3 leading-relaxed">
+        <p className="text-body text-amber">{t("pages.login.recoveryTitle")}</p>
+        <p className="text-body text-ink-3 leading-relaxed">
           {t("pages.login.recoveryReason")}
         </p>
         <div className="flex flex-col gap-2">
           <button
             type="button"
             onClick={retryCompanionConnect}
-            className="w-full py-2 px-4 bg-gov text-paper rounded-[var(--radius-sm)] text-[12.5px] font-medium hover:bg-gov-2 transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-gov"
+            className="w-full py-2 px-4 bg-gov text-paper rounded-[var(--radius-sm)] text-caption font-medium hover:bg-gov-2 transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-gov"
           >
             {t("pages.login.reconnect")}
           </button>
@@ -226,7 +226,7 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
               setError(null);
               setPhase({ kind: "form" });
             }}
-            className="w-full py-2 px-4 border border-line text-ink rounded-[var(--radius-sm)] text-[12.5px] font-medium hover:border-gov transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-gov"
+            className="w-full py-2 px-4 border border-line text-ink rounded-[var(--radius-sm)] text-caption font-medium hover:border-gov transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-gov"
           >
             {t("pages.login.manualEntry")}
           </button>
@@ -243,13 +243,13 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     <form onSubmit={handleSubmit}>
       {showReadError && (
         <div className="mb-4 border border-amber rounded-[var(--radius-sm)] px-3 py-2" data-testid="login-read-error">
-          <p className="text-[12.5px] font-medium text-amber">{t("pages.login.readFailedTitle")}</p>
+          <p className="text-caption font-medium text-amber">{t("pages.login.readFailedTitle")}</p>
           <p className="text-[12px] text-ink-3 mt-1 leading-relaxed">{t("pages.login.readFailedHint")}</p>
         </div>
       )}
       <label
         htmlFor="access-token"
-        className="font-mono text-[11px] tracking-[0.08em] text-ink-3 uppercase mb-2 block"
+        className="font-mono text-eyebrow tracking-[0.08em] text-ink-3 uppercase mb-2 block"
       >
         {t("pages.login.accessToken")}
       </label>
@@ -258,15 +258,15 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         type="password"
         value={token}
         onChange={(e) => setTokenInput(e.target.value)}
-        className="w-full px-3 py-2 bg-panel border border-line rounded-[var(--radius-sm)] font-mono text-[13px] text-ink focus:border-gov focus:outline-2 focus:outline-offset-2 focus:outline-gov transition-colors"
+        className="w-full px-3 py-2 bg-panel border border-line rounded-[var(--radius-sm)] font-mono text-body text-ink focus:border-gov focus:outline-2 focus:outline-offset-2 focus:outline-gov transition-colors"
         placeholder={t("pages.login.enterAccessToken")}
         autoFocus
       />
-      {error && <p className="mt-2 text-[13px] text-amber">{error}</p>}
+      {error && <p className="mt-2 text-body text-amber">{error}</p>}
       <button
         type="submit"
         disabled={!token.trim()}
-        className="mt-4 w-full py-2 px-4 bg-gov text-paper rounded-[var(--radius-sm)] text-[12.5px] font-medium hover:bg-gov-2 disabled:opacity-50 transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-gov"
+        className="mt-4 w-full py-2 px-4 bg-gov text-paper rounded-[var(--radius-sm)] text-caption font-medium hover:bg-gov-2 disabled:opacity-50 transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-gov"
       >
         {t("pages.login.connect")}
       </button>

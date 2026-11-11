@@ -1,9 +1,14 @@
 {
-  "$comment": "PD 内置技能的全局清单（唯一事实源）。禁止按宿主维护第二份名单。status=active 的技能必须在每个宿主各交付一份；status=retired 的技能不得出现在任何宿主。retirable=false 的技能永远不得改为 retired。",
+  "$comment": "PD 内置技能的全局清单（唯一事实源）。禁止按宿主维护第二份名单。status=active 的技能必须在每个宿主各交付一份；status=retired 的技能不得出现在任何宿主。retirable=false 的技能永远不得改为 retired。retirementCondition 是书面的条件退场闸门：条件未满足前不得改为 retired；为什么设这道闸门见 docs/plans/2026-11-11-pd-builtin-skills-unified-layer-plan.md §2.5。",
   "skills": [
     { "name": "pd-cli-operator", "status": "active", "retirable": false },
     { "name": "pd-control", "status": "active", "retirable": true },
-    { "name": "pd-pain-signal", "status": "active", "retirable": true },
+    {
+      "name": "pd-pain-signal",
+      "status": "active",
+      "retirable": true,
+      "retirementCondition": "只有当 OpenClaw、Codex、WorkBuddy 三个宿主各自在真实宿主里通过 MCP 完成一次痛苦入账，并能用 recall 读回同一条记录后，才允许退场；在此之前保持 active 并继续装机。任一宿主未通过即不得退场。"
+    },
     { "name": "pd-review", "status": "active", "retirable": true }
   ]
 }

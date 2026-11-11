@@ -31,11 +31,19 @@
  * static declaration is a programming error, not a runtime condition (rc-3).
  */
 
-import { buildToolSemanticRegistry, type CanonicalKind, type ToolSemanticMappingV1, type ToolSemanticRegistry } from '@principles/core/runtime/internalization/tool-semantic-registry';
-import { BASH_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, AGENT_TOOL_NAMES } from './tools.js';
+import { buildToolSemanticRegistry, type CanonicalKind, type ToolSemanticMappingV1, type ToolSemanticRegistry, type WritePayloadFormat } from '@principles/core/runtime/internalization/tool-semantic-registry';
+import { BASH_TOOL_NAMES, AGENT_TOOL_NAMES, PATCH_WRITE_TOOL_NAMES, PLAIN_CONTENT_WRITE_TOOL_NAMES } from './tools.js';
 
-function toMappings(names: readonly string[], canonicalKind: CanonicalKind): ToolSemanticMappingV1[] {
-  return names.map((rawToolName) => ({ rawToolName, canonicalKind }));
+function toMappings(
+  names: readonly string[],
+  canonicalKind: CanonicalKind,
+  writePayloadFormat?: WritePayloadFormat,
+): ToolSemanticMappingV1[] {
+  return names.map((rawToolName) => ({
+    rawToolName,
+    canonicalKind,
+    ...(writePayloadFormat !== undefined ? { writePayloadFormat } : {}),
+  }));
 }
 
 // PRI-741: every entry below must be a name the OpenClaw hook really
@@ -43,10 +51,16 @@ function toMappings(names: readonly string[], canonicalKind: CanonicalKind): Too
 // Generic LLM vocabulary names (write_file, bash, delete_file, ...) were
 // removed from constants/tools.ts — declaring them here let rules reference
 // tools that can never fire.
+//
+// ADR-0030: `apply_patch` writes the `*** Begin Patch` envelope. The host
+// declaration states that encoding even though this package has no consumer
+// for it yet: an unset format is a plain-content claim, so a co-installed
+// Codex declaration would otherwise make `mergeDeclarations()` fail.
 export const OPENCLAW_TOOL_SEMANTIC_MAPPINGS: readonly ToolSemanticMappingV1[] = Object.freeze([
-  ...toMappings(BASH_TOOL_NAMES, 'execute'),          // exec
-  ...toMappings(LOW_RISK_WRITE_TOOL_NAMES, 'write'),  // write, edit, apply_patch
-  ...toMappings(AGENT_TOOL_NAMES, 'agent'),           // sessions_spawn
+  ...toMappings(BASH_TOOL_NAMES, 'execute'),                         // exec
+  ...toMappings(PLAIN_CONTENT_WRITE_TOOL_NAMES, 'write'),            // write, edit
+  ...toMappings(PATCH_WRITE_TOOL_NAMES, 'write', 'file-header-patch'), // apply_patch
+  ...toMappings(AGENT_TOOL_NAMES, 'agent'),                          // sessions_spawn
 ]);
 
 const builtRegistry = buildToolSemanticRegistry(OPENCLAW_TOOL_SEMANTIC_MAPPINGS);

@@ -67,16 +67,16 @@ export function ReceiptCoverageDisclosure({ coverage }: { coverage: ReceiptEvide
   return (
     <div data-testid="receipt-coverage">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+        <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
           {t("pages.principles.detail.receipts.coverage.label")}
         </span>
         <span
-          className={`inline-flex items-center border rounded-[2px] px-[7px] py-0.5 font-mono text-[11px] uppercase ${SOURCE_STATUS_PILL_CLASS[coverage.sourceStatus]}`}
+          className={`inline-flex items-center border rounded-[2px] px-[7px] py-0.5 font-mono text-eyebrow uppercase ${SOURCE_STATUS_PILL_CLASS[coverage.sourceStatus]}`}
         >
           {t(SOURCE_STATUS_LABEL_KEYS[coverage.sourceStatus])}
         </span>
       </div>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-4">
+      <p className="mt-1.5 text-caption leading-relaxed text-ink-4">
         {coverage.observedFrom !== null
           ? t("pages.principles.detail.receipts.coverage.observedSince", {
               date: formatDate(coverage.observedFrom, i18n.language),
@@ -87,11 +87,11 @@ export function ReceiptCoverageDisclosure({ coverage }: { coverage: ReceiptEvide
         {" · "}
         {t("pages.principles.detail.receipts.coverage.retention", { days: coverage.retentionPolicyDays })}
       </p>
-      <p className="mt-1 text-[11px] leading-relaxed text-ink-4">
+      <p className="mt-1 text-caption leading-relaxed text-ink-4">
         {t("pages.principles.detail.receipts.coverage.limitation")}
       </p>
       {validationNoteKey !== null && (
-        <p data-testid="receipt-coverage-validation" className="mt-1 text-[11px] leading-relaxed text-amber">
+        <p data-testid="receipt-coverage-validation" className="mt-1 text-caption leading-relaxed text-amber">
           {t(validationNoteKey)}
           {reasonSuffix}
         </p>

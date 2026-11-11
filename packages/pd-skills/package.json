@@ -1,0 +1,42 @@
+{
+  "name": "@principles/pd-skills",
+  "description": "PD 内置技能单一源与宿主渲染器",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "pd-skills": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "hosts",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
+    "clean": "node ../../scripts/build/clean-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && vitest run",
+    "render": "npm run build && node dist/cli.js render",
+    "render:check": "npm run build && node dist/cli.js render --check"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
