@@ -11,7 +11,7 @@
 > - **B2 已实施并合入**：PR #2508 → `389477ad1`（merged 2026-11-11T00:24:51Z，head `39d5eba54`）。§3.2.2 的缺口经真实输出证实并修复——`canonicalKind` 成为提取提示唯一权威；§3.2.1（声明覆盖守卫）与 §3.2.3（双常量同源）**验证后取消**。§8 问题 3 由行动回答：**保留缩窄后的 B2，两个子项取消**。
 > - **B3 已合入**：PR #2518 → `746e55d47`（head `2dd2b73f4`，tree 与合并后完全一致）。新增 `resolveHostToolSemanticsForHook()`（workspace 声明 → 宿主静态声明 → baseline），OpenClaw gate / Codex pd-hook / WorkBuddy pd-hook 三处接入。反例已用真实输出证实：workspace 声明 `exec -> write` 时，改前 hook 判 `execute`（提取 `out.txt`）、replay 判 `write`（`<tool:exec>`）；改后两端一致。
 > - **B4 盘点完成，收敛为"记录调用方清单"**：legacy `core/rule-host.ts` 仍有生产调用（`workspace-context.ts:160-167` → `gate.ts:109` ← `index.ts:507`），本批**不删除**（结论见 §8 第 2 条）。
-> - **B5 已实施，待合入**：`scripts/check-tool-semantics-authority.mjs`（结构守卫 + 契约守卫，两向白名单）+ `scripts/__tests__/check-tool-semantics-authority.test.ts`（18 例）+ `check:tool-semantics-authority` 接入 `verify:merge` + `CONTEXT-MAP.md` / `principles-core/CONTEXT.md` 文档。反例真实输出见 §6.2 落地修正。
+> - **B5 已实施，待合入**：PR #2522（base `746e55d47`）。`scripts/check-tool-semantics-authority.mjs`（结构守卫 + 契约守卫，两向白名单）+ `scripts/__tests__/check-tool-semantics-authority.test.ts`（18 例）+ `check:tool-semantics-authority` 接入 `verify:merge` + `CONTEXT-MAP.md` / `principles-core/CONTEXT.md` 文档。反例真实输出见 §6.2 落地修正。
 > - 执行顺序已按实际落地重排，见 §7。
 
 ---
