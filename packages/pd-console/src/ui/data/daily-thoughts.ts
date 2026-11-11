@@ -125,7 +125,7 @@ export const DAILY_THOUGHTS: DailyThought[] = [
   },
   {
     id: "dt-023",
-    zh: { quote: "你的生活由你的思想塑造", author: "马可·奥勒留", note: "先调整看待问题的方式，再调整行动。" },
+    zh: { quote: "您的生活由您的思想塑造", author: "马可·奥勒留", note: "先调整看待问题的方式，再调整行动。" },
     en: { quote: "Your life is shaped by your thoughts", author: "Marcus Aurelius", note: "Adjust how you see the problem before adjusting your action." },
   },
   {

@@ -79,8 +79,12 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
       setToken(status.token);
       const valid = await checkAuth();
       if (cancelled) return;
-      if (valid) {
+      if (valid === true) {
         onAuthSuccess();
+      } else if (valid === null) {
+        // The server did not answer — nothing is wrong with the stored key.
+        setError(t("pages.login.errorUnreachable"));
+        setPhase({ kind: "form-with-read-error" });
       } else {
         // checkAuth's 401 path only cleared the session when it was still
         // this token (api.ts staleness guard).
@@ -133,9 +137,12 @@ export function LoginForm({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     setPhase({ kind: "connecting" });
     setToken(trimmed);
     const valid = await checkAuth();
-    if (valid) {
+    if (valid === true) {
       await persistToCompanion(trimmed);
       onAuthSuccess();
+    } else if (valid === null) {
+      setError(t("pages.login.errorUnreachable"));
+      setPhase({ kind: "form" });
     } else {
       setError(t("pages.login.errorInvalid"));
       setPhase({ kind: "form" });

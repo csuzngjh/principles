@@ -13,7 +13,7 @@ test('authenticated Owner promotes and rejects exact shadow activations without 
 
   const promotionReview = page.getByTestId('owner-review-act-rule-shadow-e2e');
   await expect(promotionReview).toBeVisible();
-  await expect(promotionReview).toContainText('ready');
+  await expect(promotionReview).toContainText('可以推进');
   await expect(promotionReview).toContainText(/Owner Identity Configuration|拥有者身份配置/);
   await expect(promotionReview).toContainText(/Passed|已通过/);
   const promoteResponse = page.waitForResponse(response => response.url().endsWith('/act-rule-shadow-e2e/promote'));

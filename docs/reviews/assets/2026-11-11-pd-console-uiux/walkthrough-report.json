@@ -1,0 +1,967 @@
+{
+  "generatedAt": "2026-11-11T06:57:10.609Z",
+  "pages": [
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "focus",
+      "screenshot": "light-1440-focus.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "principles",
+      "screenshot": "light-1440-principles.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "principles/p-001",
+      "screenshot": "light-1440-principles_p-001.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "debt",
+      "screenshot": "light-1440-debt.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "pain",
+      "screenshot": "light-1440-pain.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "activation",
+      "screenshot": "light-1440-activation.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "update",
+      "screenshot": "light-1440-update.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "settings",
+      "screenshot": "light-1440-settings.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "route": "control-center",
+      "screenshot": "light-1440-control-center.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "focus",
+      "screenshot": "light-1024-focus.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "principles",
+      "screenshot": "light-1024-principles.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "principles/p-001",
+      "screenshot": "light-1024-principles_p-001.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "debt",
+      "screenshot": "light-1024-debt.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "pain",
+      "screenshot": "light-1024-pain.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "activation",
+      "screenshot": "light-1024-activation.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "update",
+      "screenshot": "light-1024-update.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "settings",
+      "screenshot": "light-1024-settings.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "route": "control-center",
+      "screenshot": "light-1024-control-center.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "focus",
+      "screenshot": "light-768-focus.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "principles",
+      "screenshot": "light-768-principles.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "principles/p-001",
+      "screenshot": "light-768-principles_p-001.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "debt",
+      "screenshot": "light-768-debt.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "pain",
+      "screenshot": "light-768-pain.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "activation",
+      "screenshot": "light-768-activation.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "update",
+      "screenshot": "light-768-update.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "settings",
+      "screenshot": "light-768-settings.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "route": "control-center",
+      "screenshot": "light-768-control-center.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "focus",
+      "screenshot": "light-390-focus.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "principles",
+      "screenshot": "light-390-principles.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "principles/p-001",
+      "screenshot": "light-390-principles_p-001.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "debt",
+      "screenshot": "light-390-debt.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "pain",
+      "screenshot": "light-390-pain.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "activation",
+      "screenshot": "light-390-activation.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "update",
+      "screenshot": "light-390-update.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "settings",
+      "screenshot": "light-390-settings.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "route": "control-center",
+      "screenshot": "light-390-control-center.png",
+      "theme": {
+        "attr": "light",
+        "bg": "rgb(247, 243, 234)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "focus",
+      "screenshot": "dark-1440-focus.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "principles",
+      "screenshot": "dark-1440-principles.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "principles/p-001",
+      "screenshot": "dark-1440-principles_p-001.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "debt",
+      "screenshot": "dark-1440-debt.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "pain",
+      "screenshot": "dark-1440-pain.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "activation",
+      "screenshot": "dark-1440-activation.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "update",
+      "screenshot": "dark-1440-update.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "settings",
+      "screenshot": "dark-1440-settings.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "route": "control-center",
+      "screenshot": "dark-1440-control-center.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "focus",
+      "screenshot": "dark-1024-focus.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "principles",
+      "screenshot": "dark-1024-principles.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "principles/p-001",
+      "screenshot": "dark-1024-principles_p-001.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "debt",
+      "screenshot": "dark-1024-debt.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "pain",
+      "screenshot": "dark-1024-pain.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "activation",
+      "screenshot": "dark-1024-activation.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "update",
+      "screenshot": "dark-1024-update.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "settings",
+      "screenshot": "dark-1024-settings.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "route": "control-center",
+      "screenshot": "dark-1024-control-center.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "focus",
+      "screenshot": "dark-768-focus.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "principles",
+      "screenshot": "dark-768-principles.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "principles/p-001",
+      "screenshot": "dark-768-principles_p-001.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "debt",
+      "screenshot": "dark-768-debt.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "pain",
+      "screenshot": "dark-768-pain.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "activation",
+      "screenshot": "dark-768-activation.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "update",
+      "screenshot": "dark-768-update.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "settings",
+      "screenshot": "dark-768-settings.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "route": "control-center",
+      "screenshot": "dark-768-control-center.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "focus",
+      "screenshot": "dark-390-focus.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "principles",
+      "screenshot": "dark-390-principles.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "principles/p-001",
+      "screenshot": "dark-390-principles_p-001.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "debt",
+      "screenshot": "dark-390-debt.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "pain",
+      "screenshot": "dark-390-pain.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "activation",
+      "screenshot": "dark-390-activation.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "update",
+      "screenshot": "dark-390-update.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "settings",
+      "screenshot": "dark-390-settings.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "route": "control-center",
+      "screenshot": "dark-390-control-center.png",
+      "theme": {
+        "attr": "dark",
+        "bg": "rgb(21, 26, 32)"
+      },
+      "findingCount": 0,
+      "findings": []
+    }
+  ],
+  "focusMetrics": [
+    {
+      "scheme": "light",
+      "viewport": "1440",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 144
+      },
+      "firstTodoTop": 319,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "light",
+      "viewport": "1024",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 164
+      },
+      "firstTodoTop": 339,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "light",
+      "viewport": "768",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 164
+      },
+      "firstTodoTop": 395,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "light",
+      "viewport": "390",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 229
+      },
+      "firstTodoTop": 460,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1440",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 144
+      },
+      "firstTodoTop": 319,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "1024",
+      "banners": 1,
+      "bannerRect": {
+        "top": 132,
+        "height": 164
+      },
+      "firstTodoTop": 339,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "768",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 164
+      },
+      "firstTodoTop": 395,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    },
+    {
+      "scheme": "dark",
+      "viewport": "390",
+      "banners": 1,
+      "bannerRect": {
+        "top": 188,
+        "height": 229
+      },
+      "firstTodoTop": 460,
+      "hScroll": false,
+      "mainText": "治理焦点\n需要您处理\n\n选一件事，看清建议和决定后果，再继续下一件。\n\n资料待确认\n15 项\n\n部分资料暂未读取，当前列表可能不完整。\n· 决策动作已锁定：当前"
+    }
+  ]
+}
