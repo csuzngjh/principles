@@ -65,17 +65,19 @@
 | layout/page-shell | 18 | — | 全站页面外框与 H1 |
 | layout/section-title | 16 | 11px ×1（66 渲染点） | 16 个页面的区块标题 |
 | layout/page-loading | 15 | 13px ×1 | 全站加载态 |
-| ui/button | 12 | 11px ×1（`sm` 变体） | 全站小按钮 |
-| auth/login-form | — | 14 处（11:2 / 12:2 / 13:6 / 12.5:4） | 登录页 |
+| ui/button | 15 | 11px ×1（`sm` 变体） | 全站小按钮 |
+| auth/login-form | 1 | 14 处（11:2 / 12:2 / 13:6 / 12.5:4） | 登录页 |
 | layout/app-sidebar | 2 | 11 处（10:4 / 12:6 / 13:1） | 全站导航 |
-| ui/charts | — | 9 处（10:1 / 12:8） | 图表页 |
-| ui/markdown | — | 8 处（10:3 / 12:5） | 原则详情/长文 |
 | receipts/ReceiptCoverageDisclosure | 2 | 5 处全 11px | 焦点/审批回执 |
 | ui/state-panel | 3 | 4 处（12:1 / 13:3） | 空/错/慢三态 |
+| focus/daily-thought-card | 1 | 4 处（11:1 / 12:3） | 焦点页每日思考 |
 | ui/badge | 3 | 11px ×1 | 全站徽章 |
-| ui/progress-bar | — | 3 处 12px | 进度条 |
+| ui/progress-bar | 0 | 3 处 12px | 未被 `src/ui` 引用 |
+| ui/tooltip | 1 | 1 处 12px | 提示气泡 |
+| ui/markdown / ui/charts | 0 | 8 + 9 处 | 未被 `src/ui` 引用（疑死代码，第二段先确认再处理） |
+| auth/splash-screen | 1 | 1 处 11px | 登录前启动屏 |
 
-**先改顺序（性价比）**：`SectionTitle` → `button.sm` / `badge` / `app-sidebar` → `state-panel` / `page-loading` / `markdown` / `charts` → 页面内联值。
+**先改顺序（性价比）**：`SectionTitle` → `button.sm` / `badge` / `app-sidebar` → `state-panel` / `page-loading` / `daily-thought-card` → 页面内联值。`markdown` / `charts` 先确认是否死代码（当前无任何 `src/ui` 引用），确认后再决定删除还是纳入替换。
 
 ## 3. 映射表（旧 → 新）
 
@@ -213,3 +215,4 @@
 3. 失败任务在 390 下出现真实横向溢出（按钮超出 90px）与 3 个 0 宽列——评审的“无横向滚动”只在主路由成立。
 4. 13px（263 处）是最大的单一字号桶，超过 11px；评审只标注 11px，导致“正文多小”被漏计。
 5. `SectionTitle` 的影响面比评审描述更大：66 个渲染点 / 16 个文件，是唯一能“一处改动影响 16 页”的源头。
+6. `components/ui/markdown.tsx`（8 处小字号）与 `components/ui/charts.tsx`（9 处）当前没有任何 `src/ui` 引用，`progress-bar.tsx` 同样零引用——这三个文件贡献 20 处小字号但不影响任何页面。第二段先确认是否死代码，避免把工时花在不可达文件上。
