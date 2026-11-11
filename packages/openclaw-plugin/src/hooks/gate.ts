@@ -16,7 +16,7 @@ import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBo
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
-import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
+import { resolveOpenClawHookToolSemantics } from './hook-tool-semantics.js';
 import { trackReceiptAutoCorrect } from '../core/session-tracker.js';
 import { EventLogService } from '../core/event-log.js';
 import { estimateLineChanges } from '@principles/core/runtime';
@@ -91,12 +91,13 @@ export function handleBeforeToolCall(
   // (which uses WorkspaceContext.fromHookContext's normalized root). Mixing
   // the raw value here produced paths that disagreed with the normalized root
   // used downstream by the rule host / rule-context assembler.
-  // PRI-634-F: canonicalKind resolves from the OpenClaw registry (derived
-  // from constants/tools.ts) and is the SOLE hint authority inside the
-  // builder — replay resolves the identical kind/hints through the same
-  // registry. The Sets above stay a coarse "enter the gate" filter only (B2).
+  // PRI-634-F + B3: canonicalKind resolves through the workspace's durable
+  // host declarations (the SAME source replay/evidence/Console read), with
+  // the compiled-in OpenClaw declaration as the fallback. It is the SOLE
+  // hint authority inside the builder. The Sets above stay a coarse "enter
+  // the gate" filter only (B2).
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
-    canonicalKind: OPENCLAW_TOOL_SEMANTICS.resolve(event.toolName),
+    canonicalKind: resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger).resolve(event.toolName),
   });
   const relPath = action.normalizedPath;
   // buildRuleHostAction returns null when no path can be extracted (e.g. bash
@@ -652,7 +653,7 @@ export function handleSharedRuleHostResult(
   }
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
-    canonicalKind: OPENCLAW_TOOL_SEMANTICS.resolve(event.toolName),
+    canonicalKind: resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger).resolve(event.toolName),
   });
   const ruleId = typeof metadata?.['ruleId'] === 'string' ? metadata['ruleId'] : undefined;
   const principleId = typeof metadata?.['principleId'] === 'string' ? metadata['principleId'] : undefined;
