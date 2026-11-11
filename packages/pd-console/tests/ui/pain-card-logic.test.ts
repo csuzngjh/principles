@@ -6,10 +6,15 @@ import {
   shouldRenderFollowUpActions,
   buildIntentDecisionPayload,
   isAgentReportedOwnerApproved,
+  resolveProvenanceBadge,
   AGENT_REPORTED_PROVENANCE_LABEL_KEY,
+  AGENT_REPORTED_AUTHORIZATION_UNVERIFIED_KEY,
+  MCP_AGENT_ASSISTED_SOURCE_KIND,
+  MCP_AGENT_ASSISTED_SOURCE_LABEL_KEY,
   type IntentDecisionContext,
   type RecordData,
 } from '../../src/ui/pages/pain/pain-card-helpers.js';
+import { enumLabel } from '../../src/ui/utils/enum-labels.js';
 import type { IntentTensionData, IntentDecisionRecordData } from '../../src/ui/utils/validators.js';
 import zhCN from '../../src/ui/i18n/zh-CN.json';
 import en from '../../src/ui/i18n/en.json';
@@ -450,46 +455,154 @@ describe('PRI-470: buildIntentDecisionPayload', () => {
   });
 });
 
-// ── SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: provenance badge ──────────────
+// ── SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: three-tier source display ────
 
-describe('pain card — agent-reported provenance badge', () => {
+/**
+ * Minimal i18next-compatible `t` for tests: walks the dot path and returns the
+ * key itself when it is missing (i18next's default `returnNull` behavior), so
+ * `enumLabel`'s i18n-first fallback chain is exercised for real.
+ */
+function makeT(dict: unknown): (key: string) => string {
+  return (key: string): string => {
+    let node: unknown = dict;
+    for (const part of key.split('.')) {
+      if (typeof node !== 'object' || node === null) return key;
+      const next: unknown = Object.getOwnPropertyDescriptor(node, part)?.value;
+      if (next === undefined) return key;
+      node = next;
+    }
+    return typeof node === 'string' ? node : key;
+  };
+}
+
+/** Mirrors the label resolution done by EvidenceChainCard. */
+function resolveDisplayedSourceLabel(record: RecordData, t: (key: string) => string): string {
+  const badge = resolveProvenanceBadge(record);
+  return badge.labelKey ? t(badge.labelKey) : enumLabel('sourceKind', record.sourceKind, t);
+}
+
+describe('pain card — three-tier provenance/source display', () => {
+  const zhT = makeT(zhCN);
+  const enT = makeT(en);
   const zhPain = zhCN.pages.pain;
   const enPain = en.pages.pain;
 
-  it('selects the neutral badge for agent_reported_owner_approved', () => {
-    expect(isAgentReportedOwnerApproved({
-      ...FULL_RECORD,
-      provenance: 'agent_reported_owner_approved',
-    })).toBe(true);
+  // A record that reached PD through the MCP agent-assisted channel.
+  const mcpUnverified: RecordData = { ...MINIMAL_RECORD, sourceKind: MCP_AGENT_ASSISTED_SOURCE_KIND };
+
+  it('tier 1: agent_reported_owner_approved uses the authorized wording', () => {
+    const record: RecordData = { ...mcpUnverified, provenance: 'agent_reported_owner_approved' };
+    expect(resolveProvenanceBadge(record)).toEqual({
+      kind: 'authorized_agent_report',
+      labelKey: AGENT_REPORTED_PROVENANCE_LABEL_KEY,
+    });
+    expect(isAgentReportedOwnerApproved(record)).toBe(true);
+    expect(resolveDisplayedSourceLabel(record, zhT)).toBe('智能体报告，拥有者已授权');
+    expect(resolveDisplayedSourceLabel(record, enT)).toBe('Reported by an agent, authorized by the Owner');
   });
 
-  it('leaves the three legacy provenance values on the unchanged source-kind path', () => {
+  it('tier 2: MCP record without provenance says the authorization cannot be verified', () => {
+    expect(resolveProvenanceBadge(mcpUnverified)).toEqual({
+      kind: 'unverified_agent_report',
+      labelKey: AGENT_REPORTED_AUTHORIZATION_UNVERIFIED_KEY,
+    });
+    const zhLabel = resolveDisplayedSourceLabel(mcpUnverified, zhT);
+    const enLabel = resolveDisplayedSourceLabel(mcpUnverified, enT);
+    expect(zhLabel).toBe('智能体报告（授权信息不可验证）');
+    expect(enLabel).toBe('Agent-reported (authorization unverified)');
+
+    // Missing provenance must NEVER be presented as Owner authorization.
+    expect(zhLabel).not.toContain('已授权');
+    expect(enLabel.toLowerCase()).not.toContain('authorized by the owner');
+    expect(isAgentReportedOwnerApproved(mcpUnverified)).toBe(false);
+  });
+
+  it('tier 2: an unknown provenance normalized to undefined degrades the same way', () => {
+    // normalizePainProvenance() drops unknown values → the read model has no
+    // provenance at all. This is the exact shape that reaches the card.
+    const normalized: RecordData = { ...mcpUnverified };
+    expect(normalized.provenance).toBeUndefined();
+    expect(resolveProvenanceBadge(normalized).kind).toBe('unverified_agent_report');
+    expect(resolveDisplayedSourceLabel(normalized, zhT)).toBe('智能体报告（授权信息不可验证）');
+  });
+
+  it('tier 2: unparseable diagnostic_json still degrades to the unverified label', () => {
+    // Core marks the record `diagnosticJsonDegraded` and leaves provenance
+    // undefined (see evidence-chain-provenance.test.ts). The card must still
+    // degrade instead of exposing the raw source kind.
+    const degraded: RecordData = {
+      ...mcpUnverified,
+      degradedReason: 'Diagnostic data for this record could not be parsed',
+    };
+    expect(resolveProvenanceBadge(degraded).kind).toBe('unverified_agent_report');
+    expect(resolveDisplayedSourceLabel(degraded, enT)).toBe('Agent-reported (authorization unverified)');
+  });
+
+  it('tier 3: mcp_agent_assisted has a generic neutral source label', () => {
+    // e.g. a legacy provenance that is NOT Owner authorization: the source
+    // falls back to its neutral label instead of the raw enum.
+    const record: RecordData = { ...mcpUnverified, provenance: 'host_context_bound' };
+    expect(resolveProvenanceBadge(record).kind).toBe('source_kind');
+    expect(resolveDisplayedSourceLabel(record, zhT)).toBe('智能体辅助提交');
+    expect(resolveDisplayedSourceLabel(record, enT)).toBe('Agent-assisted submission');
+  });
+
+  it('legacy provenance values keep the unchanged source-kind path', () => {
     for (const provenance of ['host_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const) {
-      expect(isAgentReportedOwnerApproved({ ...FULL_RECORD, provenance })).toBe(false);
-    }
-    expect(isAgentReportedOwnerApproved(FULL_RECORD)).toBe(false);
-  });
-
-  it('uses neutral wording in both locales', () => {
-    expect(zhPain.provenanceAgentReportedOwnerApproved).toBe('智能体报告，拥有者已授权');
-    expect(enPain.provenanceAgentReportedOwnerApproved).toBe('Reported by an agent, authorized by the Owner');
-  });
-
-  it('never exposes the internal enum literal or reads as the Owner\'s own observation', () => {
-    for (const label of [zhPain.provenanceAgentReportedOwnerApproved, enPain.provenanceAgentReportedOwnerApproved]) {
-      expect(label).not.toContain('agent_reported_owner_approved');
-      expect(label).not.toContain('owner_reported');
-      expect(label).not.toContain('host_context_bound');
-      // Must not present agent-reported pain as something the Owner observed.
-      expect(label).not.toContain('拥有者观察');
-      expect(label).not.toContain('拥有者报告');
-      expect(label.toLowerCase()).not.toContain('owner observed');
-      expect(label.toLowerCase()).not.toContain('owner-reported');
+      const record: RecordData = { ...FULL_RECORD, provenance };
+      expect(resolveProvenanceBadge(record).kind).toBe('source_kind');
+      expect(isAgentReportedOwnerApproved(record)).toBe(false);
+      // Same label as the pre-existing behavior (i18n has no common.enums entry
+      // for `manual`, so the local map is authoritative in both locales).
+      expect(resolveDisplayedSourceLabel(record, zhT)).toBe(enumLabel('sourceKind', 'manual'));
+      expect(resolveDisplayedSourceLabel(record, enT)).toBe(enumLabel('sourceKind', 'manual'));
     }
   });
 
-  it('resolves the badge label through the i18n key, not a raw value', () => {
-    expect(AGENT_REPORTED_PROVENANCE_LABEL_KEY).toBe('pages.pain.provenanceAgentReportedOwnerApproved');
-    expect(zhPain.provenanceAgentReportedOwnerApproved).toBeTruthy();
+  it('manual / tool_call / rulehost keep their existing labels', () => {
+    const expected: Record<string, string> = {
+      manual: '手动触发',
+      tool_call: '工具调用',
+      rulehost: '规则守卫',
+    };
+    for (const sourceKind of ['manual', 'tool_call', 'rulehost'] as const) {
+      const record: RecordData = { ...MINIMAL_RECORD, sourceKind };
+      expect(resolveProvenanceBadge(record).kind).toBe('source_kind');
+      expect(resolveDisplayedSourceLabel(record, zhT)).toBe(expected[sourceKind]);
+    }
+  });
+
+  it('never renders the internal enum literals in either locale', () => {
+    const records: RecordData[] = [
+      { ...mcpUnverified, provenance: 'agent_reported_owner_approved' },
+      mcpUnverified,
+      { ...mcpUnverified, provenance: 'host_context_bound' },
+      { ...mcpUnverified, provenance: 'owner_reported_no_host_trace' },
+      { ...mcpUnverified, provenance: 'automatic_hook' },
+      MINIMAL_RECORD,
+    ];
+    for (const t of [zhT, enT]) {
+      for (const record of records) {
+        const label = resolveDisplayedSourceLabel(record, t);
+        expect(label).not.toContain('mcp_agent_assisted');
+        expect(label).not.toContain('agent_reported_owner_approved');
+        expect(label).not.toContain('host_context_bound');
+        expect(label).not.toContain('owner_reported_no_host_trace');
+        expect(label).not.toContain('automatic_hook');
+        // Never read as the Owner's own observation.
+        expect(label).not.toContain('拥有者观察');
+        expect(label.toLowerCase()).not.toContain('owner observed');
+      }
+    }
+  });
+
+  it('keeps zh-CN / en wording and i18n keys in sync', () => {
+    expect(AGENT_REPORTED_AUTHORIZATION_UNVERIFIED_KEY).toBe('pages.pain.provenanceAgentReportedAuthorizationUnverified');
+    expect(MCP_AGENT_ASSISTED_SOURCE_LABEL_KEY).toBe('common.enums.sourceKind.mcp_agent_assisted');
+    expect(zhPain.provenanceAgentReportedAuthorizationUnverified).toBe('智能体报告（授权信息不可验证）');
+    expect(enPain.provenanceAgentReportedAuthorizationUnverified).toBe('Agent-reported (authorization unverified)');
+    expect(zhCN.common.enums.sourceKind.mcp_agent_assisted).toBe('智能体辅助提交');
+    expect(en.common.enums.sourceKind.mcp_agent_assisted).toBe('Agent-assisted submission');
   });
 });
+

@@ -23,7 +23,7 @@ import type { EvidenceChainRecordData, EvidenceChainStateData, EvidenceChainData
 import type { IntentTensionData } from '../../utils/validators.js';
 import { formatDate } from '../../utils/format-date.js';
 import i18n from '../../i18n/index.js';
-import { mapConfidenceLabel, buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, isAgentReportedOwnerApproved, AGENT_REPORTED_PROVENANCE_LABEL_KEY, type IntentDecisionContext } from './pain-card-helpers.js';
+import { buildCardLayers, buildDebugIdSummary, isLayer2EffectivelyEmpty, shouldRenderIntentTensionPanel, shouldRenderFollowUpActions, buildIntentDecisionPayload, resolveProvenanceBadge, type IntentDecisionContext } from './pain-card-helpers.js';
 import { enumLabel } from '../../utils/enum-labels.js';
 
 // utils/format.js was retired into the defensive single-owner formatter
@@ -347,11 +347,16 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
   const layer2Empty = isLayer2EffectivelyEmpty(record);
   const stateVariant = stateToVariant(record.state);
   const stateLabel = enumLabel('evidenceState', record.state, t);
-  const sourceLabel = enumLabel('sourceKind', record.sourceKind, t);
-  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: agent-observed pain authorized
-  // by the Owner gets neutral wording instead of the raw source-kind badge.
-  // It must never read as the Owner's own observation.
-  const agentReported = isAgentReportedOwnerApproved(record);
+  // SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §6.6.4: three display tiers.
+  // - verified Owner authorization → neutral "agent reported" wording;
+  // - MCP agent-assisted record WITHOUT provenance → "authorization unverified";
+  // - everything else → the existing (now neutral) source-kind label.
+  // Missing provenance is never read as Owner authorization, and the raw enum
+  // literal must never reach the Owner.
+  const provenanceBadge = resolveProvenanceBadge(record);
+  const sourceLabel = provenanceBadge.labelKey
+    ? t(provenanceBadge.labelKey)
+    : enumLabel('sourceKind', record.sourceKind, t);
 
   const layers = buildCardLayers(record);
 
@@ -367,13 +372,13 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={stateVariant}>{stateLabel}</Badge>
-            {agentReported ? (
-              <Badge variant="outline" data-testid={`pain-provenance-${record.id}`}>
-                {t(AGENT_REPORTED_PROVENANCE_LABEL_KEY)}
-              </Badge>
-            ) : (
-              <Badge variant="outline">{sourceLabel}</Badge>
-            )}
+            <Badge
+              variant="outline"
+              data-testid={`pain-provenance-${record.id}`}
+              data-provenance-kind={provenanceBadge.kind}
+            >
+              {sourceLabel}
+            </Badge>
             {/* PRI-625 Slice D: evidence host attribution (SPEC §15). */}
             {record.hostKind && record.hostKind !== 'unknown' && (
               <Badge variant="secondary">{t(`pages.pain.hostKind.${record.hostKind}`)}</Badge>
@@ -520,6 +525,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             </Button>
             <button
               type="button"
+              data-testid={`pain-expand-${record.id}`}
               onClick={onToggle}
               className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
             >
@@ -527,7 +533,10 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             </button>
           </div>
           {expanded && (
-            <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
+            <div
+              className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]"
+              data-testid={`pain-tech-details-${record.id}`}
+            >
               <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
                 <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
                 <span className="font-mono text-ink-2">{layers.layer3.id}</span>

@@ -44,7 +44,12 @@
     "time": "时间",
     "actions": "操作",
     "copied": "已复制",
-    "skipToMain": "跳到正文"
+    "skipToMain": "跳到正文",
+    "enums": {
+      "sourceKind": {
+        "mcp_agent_assisted": "智能体辅助提交"
+      }
+    }
   },
   "pages": {
     "focus": {
@@ -694,6 +699,7 @@
         "openclaw": "OpenClaw"
       },
       "provenanceAgentReportedOwnerApproved": "智能体报告，拥有者已授权",
+      "provenanceAgentReportedAuthorizationUnverified": "智能体报告（授权信息不可验证）",
       "fieldConclusion": "PD 的结论",
       "fieldApplicability": "适用/说明",
       "fieldConfidence": "置信度",
