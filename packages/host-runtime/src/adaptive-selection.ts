@@ -91,9 +91,6 @@ export type BuildBoundedInputResult =
 export type AdaptiveFailureCode =
   | 'SELECTION_OUTPUT_INVALID'
   | DecisionProtocolError
-  /** The selector's schema ref is not in the adapter registry (configuration fault). */
-  | 'SELECTION_SCHEMA_UNAVAILABLE'
-  | 'SELECTION_AMBIGUOUS'
   /** The host's outer hook window ended Adaptive; distinct from the model's own timeout. */
   | 'TURN_DEADLINE_EXCEEDED'
   /** The request's own short admission/completion window ended. */
