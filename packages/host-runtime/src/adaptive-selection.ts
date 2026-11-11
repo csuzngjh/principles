@@ -88,6 +88,8 @@ export type AdaptiveFailureCode =
   | 'SELECTION_OUTPUT_INVALID'
   | 'SELECTION_AMBIGUOUS'
   | 'SELECTION_EXPIRED'
+  /** The host's outer hook window ended Adaptive; distinct from the model's own timeout. */
+  | 'TURN_DEADLINE_EXCEEDED'
   | 'TRANSPORT_NOT_SENT'
   | 'TRANSPORT_FAILED'
   | 'INPUT_REFUSED';
@@ -266,6 +268,8 @@ export interface SingleModelSelectorOptions {
   readonly model: AdaptiveSelectionModel;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;
+  /** Absolute host deadline. Reaching it is NOT the model's generation timeout. */
+  readonly outerDeadlineAt?: number;
 }
 
 export interface SingleModelSelector {
@@ -281,6 +285,16 @@ export interface SingleModelSelector {
 interface FinishMetadata {
   finishReason: string;
   usage: {inputTokens: number | null; outputTokens: number | null} | null;
+}
+
+function outerDeadlineReached(
+  now: () => number,
+  outerDeadlineAt: number | undefined,
+  signal: AbortSignal | undefined,
+): boolean {
+  // Without an outer deadline this is an ordinary caller signal; keep the
+  // previous SELECTION_EXPIRED / TRANSPORT_FAILED classification for it.
+  return outerDeadlineAt !== undefined && (signal?.aborted === true || now() >= outerDeadlineAt);
 }
 
 function emptyDiagnostics(admissionDeadlineAt: number): AdaptiveSelectionDiagnostics {
@@ -362,7 +376,11 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
 
   const selector = async (input: BoundedSelectionInput): Promise<unknown> => {
     if (sends > 0) fail('TRANSPORT_NOT_SENT');
-    if (options.signal?.aborted || now() >= options.admissionDeadlineAt) {
+    if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
+      diagnostics.cancelledAt = now();
+      fail('TURN_DEADLINE_EXCEEDED');
+    }
+    if (now() >= options.admissionDeadlineAt) {
       diagnostics.cancelledAt = now();
       fail('SELECTION_EXPIRED');
     }
@@ -409,7 +427,11 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
       } catch (error) {
         diagnostics.cancelledAt = now();
         diagnostics.stage = 'admission';
-        fail(ttfbController.signal.aborted ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED');
+        fail(
+          outerDeadlineReached(now, options.outerDeadlineAt, options.signal)
+            ? 'TURN_DEADLINE_EXCEEDED'
+            : ttfbController.signal.aborted ? 'SELECTION_EXPIRED' : 'TRANSPORT_FAILED',
+        );
         throw error;
       }
       // First byte is here: stop the admission clock, start the completion window.
@@ -417,11 +439,19 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
       diagnostics.firstByteAt = firstByteAt;
       diagnostics.httpStatus = response.status;
       clearTimeout(ttfbTimer);
+      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
+        diagnostics.cancelledAt = firstByteAt;
+        fail('TURN_DEADLINE_EXCEEDED');
+      }
       if (firstByteAt >= options.admissionDeadlineAt) {
         diagnostics.cancelledAt = firstByteAt;
         fail('SELECTION_EXPIRED');
       }
-      completionDeadlineAt = firstByteAt + generationTimeoutMs;
+      // Headers arriving is not completion: the generation window may never
+      // extend past the host deadline.
+      completionDeadlineAt = options.outerDeadlineAt === undefined
+        ? firstByteAt + generationTimeoutMs
+        : Math.min(firstByteAt + generationTimeoutMs, options.outerDeadlineAt);
       diagnostics.completionDeadlineAt = completionDeadlineAt;
       diagnostics.stage = 'generation';
       try {
@@ -462,8 +492,12 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
       const output = await adapter.fetchOutput(run.runId);
       const endedAt = now();
       diagnostics.generationEndedAt = endedAt;
+      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
+        diagnostics.cancelledAt = endedAt;
+        fail('TURN_DEADLINE_EXCEEDED');
+      }
       if (!output) fail('SELECTION_OUTPUT_INVALID');
-      if (options.signal?.aborted || (completionDeadlineAt !== null && endedAt > completionDeadlineAt)) {
+      if (completionDeadlineAt !== null && endedAt > completionDeadlineAt) {
         diagnostics.cancelledAt = endedAt;
         fail('SELECTION_EXPIRED');
       }
@@ -472,6 +506,14 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
       diagnostics.usage = metadata.usage;
       diagnostics.stage = 'validate';
       return output.payload;
+    } catch (error) {
+      // An abort can surface while the adapter reads the body (the fetch call
+      // itself already resolved), so classify it here, at the transport edge.
+      if (outerDeadlineReached(now, options.outerDeadlineAt, options.signal)) {
+        diagnostics.cancelledAt = now();
+        fail('TURN_DEADLINE_EXCEEDED');
+      }
+      throw error;
     } finally {
       clearTimeout(ttfbTimer);
     }
@@ -492,6 +534,8 @@ export interface RunAdaptiveSelectionOptions {
   readonly generationTimeoutMs?: number;
   readonly maxTokens?: number;
   readonly signal?: AbortSignal;
+  /** Absolute host deadline shared by selection, revalidation and packing. */
+  readonly outerDeadlineAt?: number;
   readonly now?: () => number;
   readonly fetchImpl?: typeof fetch;
   readonly PiAiRuntimeAdapterImpl?: typeof PiAiRuntimeAdapter;
@@ -539,6 +583,7 @@ export async function runAdaptiveSelection(
     ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
     ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
     ...(options.signal ? {signal: options.signal} : {}),
+    ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
     ...(options.PiAiRuntimeAdapterImpl
@@ -576,13 +621,28 @@ export async function runAdaptiveSelection(
 
   const target = validated.selected.principle;
   diagnostics.stage = 'revalidate';
+  const now = options.now ?? Date.now;
+  const revalidationBudgetMs = options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs;
   const signal = options.signal ?? AbortSignal.timeout(
-    options.generationTimeoutMs ?? ADAPTIVE_SELECTION_LIMITS.generationTimeoutMs,
+    options.outerDeadlineAt === undefined
+      ? revalidationBudgetMs
+      : Math.max(1, Math.min(revalidationBudgetMs, options.outerDeadlineAt - now())),
   );
   const stillValid = await revalidateAdaptivePrinciple(options.workspaceDir, target, signal);
-  if (!stillValid) {
+  const stale = outerDeadlineReached(now, options.outerDeadlineAt, options.signal);
+  if (!stillValid || stale) {
     diagnostics.stage = 'done';
-    return {status: 'none', target: null, reason: 'revalidation_failed', sends, diagnostics};
+    if (stale && !diagnostics.failures.includes('TURN_DEADLINE_EXCEEDED')) {
+      diagnostics.failures.push('TURN_DEADLINE_EXCEEDED');
+    }
+    if (stale) diagnostics.cancelledAt = diagnostics.cancelledAt ?? now();
+    return {
+      status: 'none',
+      target: null,
+      reason: stale ? 'TURN_DEADLINE_EXCEEDED' : 'revalidation_failed',
+      sends,
+      diagnostics,
+    };
   }
   diagnostics.stage = 'done';
   return {status: 'selected', target, reason: 'selected', sends, diagnostics};
