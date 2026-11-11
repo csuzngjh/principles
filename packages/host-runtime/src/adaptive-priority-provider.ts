@@ -16,6 +16,7 @@ import {
   runAdaptiveSelection,
   type AdaptiveSelectionModel,
 } from './adaptive-selection.js';
+import {decideAdaptiveSkip} from './adaptive-skip-decision.js';
 
 /** Independent switch. `features.host.codex.enabled` remains the whole-hook gate. */
 export const ADAPTIVE_ACTIVATION_FLAG = 'host.codex.adaptive_activation';
@@ -120,6 +121,13 @@ export interface CreateAdaptivePriorityProviderOptions {
    * that cannot finish inside the window is cancelled and never applied.
    */
   readonly outerDeadlineAt?: number;
+  /**
+   * PRI-1181: below this remaining budget the turn is skipped before the
+   * candidate read — no model request is sent at all. Defaults to the measured
+   * minimum (`ADAPTIVE_SKIP_LIMITS.minRemainingBudgetMs`); 0 disables the gate
+   * for scenarios that isolate transport cancellation.
+   */
+  readonly minRemainingBudgetMs?: number;
   readonly maxTokens?: number;
   readonly now?: () => number;
   /** Test seam: production uses the global transport. */
@@ -141,7 +149,38 @@ export function createAdaptivePriorityProvider(
   return async (event) => {
     if (event.kind !== 'before_prompt_build') return undefined;
     const {sessionId, turnId, promptContent, workspaceDir} = event.context;
-    if (!sessionId || !turnId || !promptContent?.trim()) return undefined;
+    // PRI-1181: deterministic gate BEFORE the candidate read. A skipped turn
+    // costs zero reads and zero sends; the Native body is untouched.
+    const skip = decideAdaptiveSkip({
+      kind: event.kind,
+      sessionId,
+      turnId,
+      prompt: promptContent ?? '',
+      ...(options.outerDeadlineAt === undefined
+        ? {}
+        : {remainingBudgetMs: options.outerDeadlineAt - now()}),
+      ...(options.minRemainingBudgetMs !== undefined
+        ? {minRemainingBudgetMs: options.minRemainingBudgetMs}
+        : {}),
+    });
+    if (skip.skip) {
+      options.onDiagnostic?.({
+        status: 'skipped',
+        reason: skip.reason,
+        stage: 'gate',
+        sends: 0,
+        firstByteAt: null,
+        generationEndedAt: null,
+        cancelledAt: null,
+        httpStatus: null,
+        finishReason: 'skipped',
+        failures: [],
+      });
+      return undefined;
+    }
+    // The gate already proved identity and a non-blank prompt (rc-3); the
+    // selector only needs the prompt body from here on.
+    const prompt = promptContent ?? '';
 
     const admissionDeadlineAt = options.outerDeadlineAt === undefined
       ? now() + firstByteTimeoutMs
@@ -157,7 +196,7 @@ export function createAdaptivePriorityProvider(
     const signal = options.outerDeadlineAt === undefined ? undefined : AbortSignal.timeout(remainingBudgetMs);
     const outcome = await runAdaptiveSelection({
       workspaceDir: workspaceDir || options.workspaceDir,
-      currentPrompt: promptContent,
+      currentPrompt: prompt,
       admissionDeadlineAt,
       model: options.model,
       generationTimeoutMs: effectiveGenerationTimeoutMs,
@@ -228,6 +267,7 @@ export function createAdaptivePriorityProviderForConfig(
     ...(options.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: options.firstByteTimeoutMs} : {}),
     ...(options.generationTimeoutMs !== undefined ? {generationTimeoutMs: options.generationTimeoutMs} : {}),
     ...(options.outerDeadlineAt !== undefined ? {outerDeadlineAt: options.outerDeadlineAt} : {}),
+    ...(options.minRemainingBudgetMs !== undefined ? {minRemainingBudgetMs: options.minRemainingBudgetMs} : {}),
     ...(options.maxTokens !== undefined ? {maxTokens: options.maxTokens} : {}),
     ...(options.now ? {now: options.now} : {}),
     ...(options.fetchImpl ? {fetchImpl: options.fetchImpl} : {}),
