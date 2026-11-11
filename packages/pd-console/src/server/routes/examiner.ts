@@ -62,7 +62,7 @@ import {
   listSuiteCatalog, isSuiteKey,
   readProductionSnapshot,
 } from './examiner-study-inputs.js';
-import { evaluateStudyEligibility } from './examiner-eligibility.js';
+import { evaluateStudyEligibility, toOperatorVerdict } from './examiner-eligibility.js';
 import {
   appendConsoleRunEventLocked, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
   acceptConsoleRun, hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
@@ -307,7 +307,7 @@ export async function handleExaminerRoute(
       suiteKey,
     });
     sendSuccess(res, {
-      ...eligibility.verdict,
+      ...toOperatorVerdict(eligibility),
       experimentMode,
       suiteKey,
       productionSnapshotMarkers: eligibility.inputs?.snapshot.experimentVsProduction.markers ?? [],
@@ -387,6 +387,7 @@ export async function handleExaminerRoute(
         suiteKey,
       });
       if (eligibility.verdict.status === 'BLOCKED' || eligibility.inputs === null) {
+        const operatorVerdict = toOperatorVerdict(eligibility);
         sendError(
           res,
           422,
@@ -395,10 +396,10 @@ export async function handleExaminerRoute(
           {
             // `error` stays the stable family code; `reason` carries the
             // specific refusal so a client never has to parse prose.
-            reason: eligibility.verdict.reasonCode,
-            nextAction: eligibility.verdict.nextAction,
-            blockingReasonCode: eligibility.verdict.blockingReasonCode,
-            eligibility: eligibility.verdict,
+            reason: operatorVerdict.reasonCode,
+            nextAction: operatorVerdict.nextAction,
+            blockingReasonCode: operatorVerdict.blockingReasonCode,
+            eligibility: operatorVerdict,
           },
         );
         return;

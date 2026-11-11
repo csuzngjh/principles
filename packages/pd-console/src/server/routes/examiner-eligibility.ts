@@ -125,6 +125,40 @@ function summarize(principleId: string, checks: EligibilityCheck[]): StudyEligib
   };
 }
 
+/**
+ * An operator payload must never carry a server-side absolute path: it says
+ * nothing useful to the Owner, leaks the machine layout, and differs per
+ * environment (CI vs local workstation). The rule is enforced at the response
+ * boundary so every present and future field is covered — not only the fields
+ * that happen to be known today.
+ */
+const ABSOLUTE_PATH =
+  /(?:[A-Za-z]:[\\/]|\\\\[^\s\\/]+[\\/]|\/(?:home|Users|root|tmp|var|private|opt|mnt|srv|workspace|github|\.pd-tmp|pd-tmp)\/)[^\s'",;:)\]]*/g;
+
+function redactAbsolutePaths(value: string): string {
+  return value.replace(ABSOLUTE_PATH, '<path>');
+}
+
+/**
+ * Project a verdict into its operator-facing shape. Every HTTP response must
+ * use this; the raw verdict stays internal because it also carries the
+ * creation inputs (`snapshot` / `ruleCodeFacts`).
+ */
+export function toOperatorVerdict(result: StudyEligibilityResult): StudyEligibilityVerdict {
+  const { verdict } = result;
+  return {
+    ...verdict,
+    summary: redactAbsolutePaths(verdict.summary),
+    nextAction: verdict.nextAction === null ? null : redactAbsolutePaths(verdict.nextAction),
+    checks: verdict.checks.map((check) => ({
+      ...check,
+      detail: check.detail === null ? null : redactAbsolutePaths(check.detail),
+      evidence: check.evidence.map(redactAbsolutePaths),
+      nextAction: check.nextAction === null ? null : redactAbsolutePaths(check.nextAction),
+    })),
+  };
+}
+
 /** Compile one suite case set with a throwaway id. Returns null when usable. */
 async function probeSuite(labRoot: string, suiteKey: string): Promise<string | null> {
   if (!isSuiteKey(suiteKey)) return `unknown suite key '${suiteKey}'`;
@@ -376,7 +410,7 @@ export async function evaluateStudyEligibility(args: {
       status: 'PASS',
       reasonCode: 'study_root_writable',
       detail: null,
-      evidence: [args.roots.writable],
+      evidence: ['root:isolated'],
       nextAction: null,
     }
     : {
@@ -384,7 +418,7 @@ export async function evaluateStudyEligibility(args: {
       status: 'BLOCKED',
       reasonCode: 'study_root_not_writable',
       detail: rootProblem,
-      evidence: [args.roots.writable],
+      evidence: ['root:not_isolated'],
       nextAction: 'Fix the workspace examiner root isolation before creating a study.',
     });
 

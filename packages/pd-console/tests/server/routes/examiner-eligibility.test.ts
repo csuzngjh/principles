@@ -18,6 +18,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { handleExaminerRoute } from '../../../src/server/routes/examiner.js';
+import {
+  toOperatorVerdict,
+  type StudyEligibilityVerdict,
+} from '../../../src/server/routes/examiner-eligibility.js';
 
 function createMockRequest(method: string, url: string, body?: unknown): IncomingMessage {
   const listeners: Record<string, Array<(chunk?: unknown) => void>> = {};
@@ -93,6 +97,39 @@ function ledgerPrinciple(id: string, status: string, ruleIds: string[]): Record<
   };
 }
 
+/**
+ * An operator payload must be environment-independent. Walking EVERY string
+ * (instead of a fixed field list) means a field added later is covered by
+ * default, which is the failure mode this assertion exists for: the first
+ * version only checked a few known fields and missed `check.evidence`.
+ */
+function expectNoAbsolutePaths(value: unknown, label: string): void {
+  const shapes: RegExp[] = [
+    /(^|[\s'"([])\/(?:home|Users|root|tmp|var|private|opt|mnt|srv|workspace|github)\//,
+    /(^|[\s'"([])\.pd-tmp\//,
+    /[A-Za-z]:[\\/]/,
+    /\\\\[^\s\\/]+[\\/]/,
+  ];
+  const leaked: string[] = [];
+  const walk = (node: unknown, trail: string): void => {
+    if (typeof node === 'string') {
+      if (shapes.some((shape) => shape.test(node))) leaked.push(`${trail}: ${node}`);
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => walk(item, `${trail}[${index}]`));
+      return;
+    }
+    if (typeof node === 'object' && node !== null) {
+      for (const [key, item] of Object.entries(node)) {
+        walk(item, trail === '' ? key : `${trail}.${key}`);
+      }
+    }
+  };
+  walk(value, '');
+  expect(leaked, `${label} leaked a server-side absolute path:\n${leaked.join('\n')}`).toEqual([]);
+}
+
 let tempDir: string;
 let workspaceDir: string;
 let studiesRoot: string;
@@ -138,7 +175,11 @@ async function call(method: string, subPath: string, body?: unknown) {
   const queryIndex = subPath.indexOf('?');
   const pathOnly = queryIndex === -1 ? subPath : subPath.slice(0, queryIndex);
   await handleExaminerRoute(createMockRequest(method, subPath, body), res, workspaceDir, pathOnly);
-  return parseBody(res);
+  const result = parseBody(res);
+  // Every response (success, refusal, error) is checked, so the contract is
+  // enforced for future endpoints of this route too.
+  expectNoAbsolutePaths(result.body, `${method} ${pathOnly}`);
+  return result;
 }
 
 function listStudiesRoot(): string[] {
@@ -298,5 +339,42 @@ describe('POST /studies re-runs the same eligibility authority (Phase C2)', () =
     const frozen = JSON.parse(fs.readFileSync(path.join(studiesRoot, studyId, 'production-snapshot.json'), 'utf8'));
     expect(frozen.targetPrincipleId).toBe('pri-target');
     expect(frozen.schema).toBe('examiner-production-snapshot.v1');
+  });
+});
+
+describe('toOperatorVerdict — the operator payload never carries a server-side path', () => {
+  it('redacts absolute paths in every free-text field before the response is built', () => {
+    // Regression for the CI failure on head 80e41825c: `study_root_writable`
+    // put `args.roots.writable` straight into `evidence`, so the response was
+    // environment-dependent and leaked `/home/runner/work/principles/.pd-tmp`.
+    const verdict: StudyEligibilityVerdict = {
+      status: 'BLOCKED',
+      principleId: 'pri-fixture',
+      summary: 'Study root /home/runner/work/principles/.pd-tmp/lab is not isolated.',
+      reasonCode: 'study_root_not_writable',
+      blockingReasonCode: 'study_root_not_writable',
+      nextAction: 'Fix C:\\Users\\Administrator\\.pd-tmp\\lab before retrying.',
+      checks: [
+        {
+          id: 'study_root_writable',
+          status: 'BLOCKED',
+          reasonCode: 'study_root_not_writable',
+          detail: 'writable root resolves under /home/runner/work/principles/.pd-tmp/lab',
+          evidence: ['/home/runner/work/principles/.pd-tmp/lab', 'C:\\Users\\Administrator\\.pd-tmp\\lab'],
+          nextAction: 'Provide an isolated root; /home/runner/work/principles/.pd-tmp is shared.',
+        },
+      ],
+    };
+
+    const projected = toOperatorVerdict({ verdict, inputs: null });
+
+    expect(projected.summary).not.toContain('.pd-tmp');
+    expect(projected.nextAction).not.toContain('.pd-tmp');
+    expect(projected.checks[0].detail).not.toContain('.pd-tmp');
+    expect(projected.checks[0].nextAction).not.toContain('.pd-tmp');
+    expect(projected.checks[0].evidence).toEqual(['<path>', '<path>']);
+    // The same walker the route tests use, so a redaction gap in a field added
+    // later fails here too rather than only in the HTTP-level assertion.
+    expectNoAbsolutePaths(projected, 'toOperatorVerdict');
   });
 });
