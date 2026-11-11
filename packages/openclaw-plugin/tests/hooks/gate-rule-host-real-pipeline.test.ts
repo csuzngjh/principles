@@ -1,18 +1,19 @@
 /**
- * PRI-437 Slice 2: Valid decisions work through public before-tool-call hook
+ * PRI-437 Slice 2: Valid decisions work through the production rule-host path
  *
  * PURPOSE: Verify that valid RuleHost decisions (block/allow) flow correctly
- * through the real handleBeforeToolCall public hook with real SQLite activations.
+ * through the two production stages:
+ *   createProductionRuleHostGate (real SQLite activations + real RuleCode
+ *   runtime) → handleSharedRuleHostResult (deny accounting / allow pass-through)
  *
- * This test exercises the FULL public path:
- *   real SQLite activation → real RuleHost.evaluate() → validateRuleHostResult()
- *   → real handleBeforeToolCall() → block/allow result
+ * `handleBeforeToolCall` has no production wiring anymore; the shared path is
+ * the only decision owner, so the assertions moved with it.
  *
- * No mocking of RuleHost, SQLite, or gate internals.
+ * No mocking of SQLite, the rule runtime, or gate internals.
  *
  * ERR risk mitigation:
  *   - ERR-024: validator is wired into the production path (verified end-to-end)
- *   - ERR-048: activation write (SQLite) connects to read (RuleHost) connects to enforcement (gate)
+ *   - ERR-048: activation write (SQLite) connects to read (gate) connects to enforcement
  *   - ERR-002: valid decisions must NOT be silently degraded
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -20,7 +21,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { createProductionRuleHostGate } from '@principles/host-runtime';
+import type { HostEvent } from '@principles/core/host';
+import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
@@ -30,6 +33,7 @@ import { EventLogService } from '../../src/core/event-log.js';
 const RULE_ID = 'R_TEST_GATE_002';
 const ARTIFACT_ID = 'art-gate-002';
 const ACTIVATION_ID = `act_code_${RULE_ID}`;
+const SESSION_ID = 'test-session-gate-002';
 
 const BLOCK_CODE = `
 function evaluate(input, helpers) {
@@ -43,14 +47,11 @@ var meta = { name: 'gate-test-rule', version: '1', ruleId: '${RULE_ID}', coversC
 `;
 
 let tempWorkspaceDir: string;
-let tempStateDir: string;
 let sqliteConn: SqliteConnection;
 
 function setupTempDirs(): void {
   const baseTmp = os.tmpdir();
   tempWorkspaceDir = fs.mkdtempSync(path.join(baseTmp, 'pd-gate-real-'));
-  tempStateDir = path.join(tempWorkspaceDir, '.principles');
-  fs.mkdirSync(tempStateDir, { recursive: true });
 }
 
 function insertRuleArtifact(): void {
@@ -103,6 +104,42 @@ async function insertActivation(action = 'code_tool_hook_live_activate'): Promis
   });
 }
 
+function makeHostEvent(filePath: string, extra: { sessionId?: string; toolCallId?: string } = {}): HostEvent {
+  return {
+    kind: 'before_tool_call',
+    context: {
+      workspaceDir: tempWorkspaceDir,
+      sessionId: extra.sessionId ?? SESSION_ID,
+      toolName: 'write',
+      ...(extra.toolCallId !== undefined ? { toolCallId: extra.toolCallId } : {}),
+    },
+    rawPayload: { toolInput: { toolName: 'write', params: { file_path: filePath, content: 'payload' } } },
+    source: 'openclaw:before_tool_call',
+  };
+}
+
+function makePluginEvent(filePath: string, extra: Record<string, unknown> = {}): PluginHookBeforeToolCallEvent {
+  return {
+    toolName: 'write',
+    params: { file_path: filePath, content: 'payload' },
+    ...extra,
+  } as PluginHookBeforeToolCallEvent;
+}
+
+function makeCtx(sessionId = SESSION_ID): PluginHookToolContext {
+  return {
+    workspaceDir: tempWorkspaceDir,
+    sessionId,
+    logger: { warn: () => {}, error: () => {}, info: () => {} },
+  };
+}
+
+/** The EventLog instance the workspace context itself writes through. */
+function workspaceEvents() {
+  const stateDir = WorkspaceContext.fromHookContext({ workspaceDir: tempWorkspaceDir }).stateDir;
+  return EventLogService.get(stateDir).getBufferedEvents();
+}
+
 // ── Setup / Teardown ───────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -118,49 +155,60 @@ afterEach(() => {
   try { fs.rmSync(tempWorkspaceDir, { recursive: true, force: true }); } catch { /* Windows */ }
 });
 
-// ── Slice 2: Valid decisions through public hook ───────────────────────────
+// ── Slice 2: Valid decisions through the production path ───────────────────
 
-describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call hook', () => {
-  it('valid block decision from SQLite activation → handleBeforeToolCall returns block result', async () => {
+describe('PRI-437 Slice 2: Valid decisions work through the production rule-host path', () => {
+  it('valid block decision from SQLite activation → shared gate denies and the deny is accounted', async () => {
     // Setup: real SQLite activation with valid blocking code
     insertRuleArtifact();
     await insertActivation();
 
-    // Exercise the PUBLIC hook with a real event targeting /etc/passwd
-    const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write',
-      params: { file_path: '/etc/passwd', content: 'malicious' },
-    };
+    const gate = createProductionRuleHostGate();
+    const gateResult = await gate(makeHostEvent('/etc/passwd', { toolCallId: 'toolu-real-1' }));
 
-    const ctx: PluginHookToolContext = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: 'test-session-gate-002',
-      logger: { warn: () => {}, error: () => {}, info: () => {} },
-    };
+    // Verify: the shared gate produced the block decision from the real rule
+    expect(gateResult.decision).toBe('deny');
+    expect(gateResult.reason).toContain('GATE_BLOCK_002: system directory');
 
-    const result = handleBeforeToolCall(event, ctx);
+    const handled = handleSharedRuleHostResult(
+      makePluginEvent('/etc/passwd', { toolUseId: 'toolu-real-1' }),
+      makeCtx(),
+      gateResult,
+    );
 
-    // Verify: block decision is enforced through the public hook
-    expect(result).toBeDefined();
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('GATE_BLOCK_002: system directory');
+    // The host blocks on the deny decision; the adapter does not return a
+    // second block object — it accounts for the block instead.
+    expect(handled).toBeUndefined();
+    expect(workspaceEvents()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'gate_block',
+        data: expect.objectContaining({
+          toolName: 'write',
+          // DIFF: the shared path tags the block source 'rule-host-shared'
+          // (the legacy hook wrote 'rule-host').
+          blockSource: 'rule-host-shared',
+        }),
+      }),
+    ]));
   });
 
   it('shadow block is observed but does not block the tool call', async () => {
     insertRuleArtifact();
     await insertActivation('code_tool_hook_shadow_activate');
-    const result = handleBeforeToolCall({
-      toolName: 'write',
-      params: { file_path: '/etc/passwd', content: 'shadow probe' },
-    }, {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: 'test-session-shadow',
-      logger: { warn: () => {}, error: () => {}, info: () => {} },
-    });
 
-    expect(result).toBeUndefined();
-    const events = EventLogService.get(path.join(tempWorkspaceDir, '.state')).getBufferedEvents();
-    expect(events).toEqual(expect.arrayContaining([
+    const gate = createProductionRuleHostGate();
+    const gateResult = await gate(makeHostEvent('/etc/passwd', { sessionId: 'test-session-shadow' }));
+
+    expect(gateResult.decision).toBe('allow');
+
+    const handled = handleSharedRuleHostResult(
+      makePluginEvent('/etc/passwd'),
+      makeCtx('test-session-shadow'),
+      gateResult,
+    );
+
+    expect(handled).toBeUndefined();
+    expect(workspaceEvents()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'rulehost_evaluated',
         data: expect.objectContaining({
@@ -173,46 +221,41 @@ describe('PRI-437 Slice 2: Valid decisions work through public before-tool-call 
     ]));
   });
 
-  it('valid allow (no match) from SQLite activation → handleBeforeToolCall returns undefined', async () => {
+  it('valid allow (no match) from SQLite activation → the tool call passes', async () => {
     insertRuleArtifact();
     await insertActivation();
 
-    // Exercise the PUBLIC hook with a safe path that does NOT match the block rule
-    const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write',
-      params: { file_path: '/safe/project/file.txt', content: 'safe content' },
-    };
+    const gate = createProductionRuleHostGate();
+    const gateResult = await gate(makeHostEvent('/safe/project/file.txt'));
 
-    const ctx: PluginHookToolContext = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: 'test-session-gate-002',
-      logger: { warn: () => {}, error: () => {}, info: () => {} },
-    };
+    expect(gateResult.decision).toBe('allow');
 
-    const result = handleBeforeToolCall(event, ctx);
+    const handled = handleSharedRuleHostResult(
+      makePluginEvent('/safe/project/file.txt'),
+      makeCtx(),
+      gateResult,
+    );
 
     // Verify: no block (allow passes through)
-    expect(result).toBeUndefined();
+    expect(handled).toBeUndefined();
   });
 
-  it('no SQLite activation → handleBeforeToolCall returns undefined (no opinion)', async () => {
+  it('no SQLite activation → the gate has no opinion and the tool call passes', async () => {
     // Artifact exists but no activation
     insertRuleArtifact();
 
-    const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write',
-      params: { file_path: '/etc/passwd', content: 'malicious' },
-    };
+    const gate = createProductionRuleHostGate();
+    const gateResult = await gate(makeHostEvent('/etc/passwd'));
 
-    const ctx: PluginHookToolContext = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: 'test-session-gate-002',
-      logger: { warn: () => {}, error: () => {}, info: () => {} },
-    };
+    expect(gateResult.decision).toBe('allow');
 
-    const result = handleBeforeToolCall(event, ctx);
+    const handled = handleSharedRuleHostResult(
+      makePluginEvent('/etc/passwd'),
+      makeCtx(),
+      gateResult,
+    );
 
-    // No activation → RuleHost returns undefined → gate allows
-    expect(result).toBeUndefined();
+    // No activation → the gate reports no_rules_armed → gate allows
+    expect(handled).toBeUndefined();
   });
 });

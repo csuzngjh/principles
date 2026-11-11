@@ -1,177 +1,188 @@
 /**
- * Regression test: write tools without file_path must still go through RuleHost.
+ * Regression test: write tools without file_path must still be EVALUATED.
  *
  * PRI-286 P1: After removing confirm-first gate, write tools (apply_patch, patch, etc.)
  * that have no file_path/path/file/target param must NOT be silently allowed.
- * They must use a synthetic path `<tool:${toolName}>` and still evaluate via RuleHost.
+ * They must use a synthetic path `<tool:${toolName}>` and still reach the engine.
  *
- * Uses vi.hoisted + mock of WorkspaceContext to avoid isolation issues in full suite.
- * WorkspaceContext is the key — in full suite, other test files initialize the real
- * context which caches a real EventLogService that doesn't have our mock methods.
+ * PR-1 (legacy RuleHost retirement): migrated off the legacy
+ * `handleBeforeToolCall` (no production wiring) onto the shared gate
+ * `createProductionRuleHostGate` (host-runtime). The shared gate is the input
+ * builder the live OpenClaw path uses, so the SAME path-derivation facts are
+ * asserted through the input actually handed to the RuleCode engine:
+ * `evaluateBatch(rules, input)` receives `input.action.normalizedPath`.
+ *
+ * Difference annotation: a block is now a `decision: 'deny'` result (the host
+ * blocks) instead of a legacy `{ block: true, blockReason }` object.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { SqliteActivationStateStore, SqliteConnection } from '@principles/core/runtime';
+import { createProductionRuleHostGate, type RuleBatchEvaluation, type RuleImplementationRuntime } from '@principles/host-runtime';
+import type { HostEvent } from '@principles/core/host';
 
-// vi.hoisted ensures these are available to vi.mock factories at hoist time
-const { mockEvaluate, mockEventLog } = vi.hoisted(() => {
-  const mockEvaluate = vi.fn().mockReturnValue(undefined);
-  const mockEventLog = {
-    recordRuleHostEvaluated: vi.fn(),
-    recordRuleEnforced: vi.fn(),
-    recordRuleHostBlocked: vi.fn(),
-    recordRuleHostRequireApproval: vi.fn(),
-    recordRuleHostAutoCorrectProposed: vi.fn(),
-    recordRuleHostAutoCorrectApplied: vi.fn(),
-    recordGateBlock: vi.fn(),
-    recordSession: vi.fn(),
-  };
-  return { mockEvaluate, mockEventLog };
+const RULE_ID = 'R_no_path_fixture';
+const PRINCIPLE_ID = 'P_no_path_fixture';
+const ARTIFACT_ID = 'art-no-path-fixture';
+const ACTIVATION_ID = 'act_code_no-path-fixture';
+
+const RULE_CONTENT_JSON = JSON.stringify({
+  ruleId: RULE_ID,
+  principleId: PRINCIPLE_ID,
+  implementationCode: "function evaluate() { return { decision: 'allow', matched: false, reason: 'stub' }; }\nvar meta = { name: 'no-path-fixture', version: '1', ruleId: 'R_no_path_fixture', coversCondition: 'all' };",
+  ruleHostGateDecision: 'accepted_shadow',
+  affectedTools: ['write'],
 });
 
-vi.mock('../../src/core/session-tracker.js', () => ({
-  getSession: vi.fn(() => ({ currentGfi: 0 })),
-  trackBlock: vi.fn(),
-  trackReceiptAutoCorrect: vi.fn(),
-  setInjectedPrincipleIds: vi.fn(),
-}));
+/** The slice of the engine input these tests assert on. */
+interface CapturedEvaluationInput {
+  action: { toolName: string; normalizedPath: string };
+}
 
-vi.mock('../../src/core/event-log.js', () => ({
-  EventLogService: { get: vi.fn(() => mockEventLog) },
-}));
+let tempDirs: string[] = [];
+let connections: SqliteConnection[] = [];
+let capturedInputs: CapturedEvaluationInput[] = [];
 
-vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function(this: any, _stateDir: string, _logger: any) {
-    this.evaluate = mockEvaluate;
-  }),
-  // P1 (2026-08-20): gate.ts routes compatibility-guard blocks through this type
-  // guard; the mocked rule-host must export it so mocked evaluate() results are
-  // not misrouted.
-  isCompatibilityGuardBlock: vi.fn(() => false),
-}));
+async function seedLiveRuleWorkspace(): Promise<string> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-no-path-'));
+  const connection = new SqliteConnection(dir);
+  connection.getDb();
+  tempDirs.push(dir);
+  connections.push(connection);
+  const now = new Date().toISOString();
+  connection.getDb().prepare(`
+    INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+    VALUES (?, 'rule', ?, ?, ?, '[]', 'validated', ?, ?, ?)
+  `).run(ARTIFACT_ID, 'task-no-path', PRINCIPLE_ID, RULE_ID, RULE_CONTENT_JSON, now, now);
+  await new SqliteActivationStateStore(connection).recordActivation({
+    activationId: ACTIVATION_ID,
+    idempotencyKey: `${ARTIFACT_ID}::code_tool_hook`,
+    artifactId: ARTIFACT_ID,
+    channel: 'code_tool_hook',
+    action: 'code_tool_hook_live_activate',
+    targetRef: `impl://${RULE_ID}`,
+    activatedAt: now,
+    deactivatedAt: null,
+  });
+  return dir;
+}
 
-vi.mock('../../src/core/principle-tree-ledger.js', () => ({
-  loadLedger: vi.fn(),
-}));
-
-// Mock WorkspaceContext to return a controlled instance with our mockEventLog.
-// This prevents full-suite caching of real WorkspaceContext instances.
-vi.mock('../../src/core/workspace-context.js', () => {
+/** Runtime stub that records the exact `input` the gate hands the engine. */
+function makeCapturingRuntime(result: Record<string, unknown>): RuleImplementationRuntime {
   return {
-    WorkspaceContext: {
-      fromHookContext: vi.fn((ctx: any) => ({
-        workspaceDir: ctx.workspaceDir,
-        stateDir: ctx.workspaceDir + '/.state',
-        eventLog: mockEventLog,
-        trajectory: {
-          recordGateBlock: vi.fn(),
-          recordPainEvent: vi.fn(),
-          recordSession: vi.fn(),
-        },
-        config: {
-          get: vi.fn().mockReturnValue(undefined),
-        },
-        // PRI-454: real WorkspaceContext exposes resolve(fileKey) for PD file paths.
-        // Gate B path (now default-on) calls wctx.resolve('PROFILE') to read PROFILE.json
-        // for risk-path classification. Return a non-existent path so fs.existsSync fails
-        // and the profile falls back to non-risky defaults — keeping this test focused on
-        // the RuleHost block behavior without depending on Gate B internals.
-        resolve: vi.fn((fileKey: string) => `${ctx.workspaceDir}/.pd/${fileKey}.json`),
-        // PR1: gate.ts uses wctx.getRuleHost(logger) instead of `new RuleHost()`.
-        // Return a fresh object each call so mockEvaluate reassignments take effect.
-        getRuleHost: vi.fn(() => ({ evaluate: mockEvaluate })),
-      })),
+    evaluateBatch(_rules, input): RuleBatchEvaluation {
+      capturedInputs.push(input as CapturedEvaluationInput);
+      return { ok: true, results: [{ ok: true, result }] };
     },
   };
-});
+}
 
-// Dynamic import AFTER mocks are set up
-const { handleBeforeToolCall } = await import('../../src/hooks/gate.js');
-
-const workspaceDir = '/mock/workspace';
-const sessionId = 'test-no-path';
+function makeHostEvent(dir: string, toolName: string, params: Record<string, unknown>): HostEvent {
+  return {
+    kind: 'before_tool_call',
+    context: { workspaceDir: dir, sessionId: 'test-no-path', toolName },
+    rawPayload: { toolInput: { toolName, params } },
+    source: 'test',
+  };
+}
 
 describe('Write tools without file_path must go through RuleHost', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockEvaluate.mockReturnValue(undefined);
+  let dir: string;
+
+  beforeEach(async () => {
+    capturedInputs = [];
+    dir = await seedLiveRuleWorkspace();
   });
 
-  it('apply_patch with no path triggers RuleHost evaluate', () => {
-    mockEvaluate.mockReturnValue(undefined); // allow
-
-    const result = handleBeforeToolCall(
-      { toolName: 'apply_patch', params: { patch: 'some diff content' } } as any,
-      { workspaceDir, sessionId } as any,
-    );
-
-    // Should not be blocked (RuleHost returned undefined = allow)
-    expect(result).toBeUndefined();
-    // But RuleHost MUST have been called
-    expect(mockEvaluate).toHaveBeenCalledTimes(1);
-    // Verify synthetic path was used
-    const input = mockEvaluate.mock.calls[0][0];
-    expect(input.action.normalizedPath).toBe('<tool:apply_patch>');
+  afterEach(() => {
+    for (const connection of connections) {
+      try { connection.close(); } catch { /* Windows may retain native handles */ }
+    }
+    connections = [];
+    for (const tempDir of tempDirs) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* Windows */ }
+    }
+    tempDirs = [];
   });
 
-  it('apply_patch with no path: RuleHost block must return block', () => {
-    mockEvaluate.mockReturnValue({
-      decision: 'block',
-      matched: true,
-      reason: 'Test block: write tool without path',
-      ruleId: 'R_TEST',
-      principleId: 'P_TEST',
+  it('apply_patch with no path triggers RuleHost evaluate', async () => {
+    const gate = createProductionRuleHostGate({
+      implementationRuntime: makeCapturingRuntime({ decision: 'allow', matched: false, reason: 'ok' }),
     });
 
-    const result = handleBeforeToolCall(
-      { toolName: 'apply_patch', params: { patch: 'dangerous content' } } as any,
-      { workspaceDir, sessionId } as any,
-    );
+    const result = await gate(makeHostEvent(dir, 'apply_patch', { patch: 'some diff content' }));
 
-    expect(result).toBeDefined();
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('Test block: write tool without path');
-    expect(mockEvaluate).toHaveBeenCalledTimes(1);
-    expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('<tool:apply_patch>');
+    // Should not be blocked (engine returned allow)
+    expect(result.decision).toBe('allow');
+    // But the engine MUST have been called
+    expect(capturedInputs).toHaveLength(1);
+    // Verify synthetic path was used
+    expect(capturedInputs[0].action.normalizedPath).toBe('<tool:apply_patch>');
+    expect(capturedInputs[0].action.toolName).toBe('apply_patch');
   });
 
-  it('write tool with no path still triggers RuleHost evaluate via the synthetic path', () => {
-    mockEvaluate.mockReturnValue(undefined); // allow
+  it('apply_patch with no path: RuleHost block must return block', async () => {
+    const gate = createProductionRuleHostGate({
+      implementationRuntime: makeCapturingRuntime({
+        decision: 'block',
+        matched: true,
+        reason: 'Test block: write tool without path',
+        ruleId: 'R_TEST',
+        principleId: 'P_TEST',
+      }),
+    });
 
-    const result = handleBeforeToolCall(
-      { toolName: 'write', params: {} } as any,
-      { workspaceDir, sessionId } as any,
-    );
+    const result = await gate(makeHostEvent(dir, 'apply_patch', { patch: 'dangerous content' }));
 
-    expect(result).toBeUndefined();
-    expect(mockEvaluate).toHaveBeenCalledTimes(1);
-    expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('<tool:write>');
+    // Difference: the shared gate blocks via `decision: 'deny'` (no legacy
+    // `{ block, blockReason }` object — the host encodes the block).
+    expect(result.decision).toBe('deny');
+    expect(result.reason).toContain('Test block: write tool without path');
+    expect(capturedInputs).toHaveLength(1);
+    expect(capturedInputs[0].action.normalizedPath).toBe('<tool:apply_patch>');
+    expect(capturedInputs[0].action.toolName).toBe('apply_patch');
   });
 
-  it('Write tool with valid file_path still uses real path', () => {
-    mockEvaluate.mockReturnValue(undefined); // allow
+  it('write tool with no path still triggers RuleHost evaluate via the synthetic path', async () => {
+    const gate = createProductionRuleHostGate({
+      implementationRuntime: makeCapturingRuntime({ decision: 'allow', matched: false, reason: 'ok' }),
+    });
 
-    const result = handleBeforeToolCall(
-      { toolName: 'write', params: { file_path: '/mock/workspace/src/app.ts', content: 'x' } } as any,
-      { workspaceDir, sessionId } as any,
-    );
+    const result = await gate(makeHostEvent(dir, 'write', {}));
 
-    expect(result).toBeUndefined();
-    expect(mockEvaluate).toHaveBeenCalledTimes(1);
-    expect(mockEvaluate.mock.calls[0][0].action.normalizedPath).toBe('src/app.ts');
+    expect(result.decision).toBe('allow');
+    expect(capturedInputs).toHaveLength(1);
+    expect(capturedInputs[0].action.normalizedPath).toBe('<tool:write>');
+    expect(capturedInputs[0].action.toolName).toBe('write');
   });
 
-  it('exec with no file target still goes through RuleHost (existing behavior)', () => {
-    mockEvaluate.mockReturnValue(undefined); // allow
+  it('Write tool with valid file_path still uses real path', async () => {
+    const gate = createProductionRuleHostGate({
+      implementationRuntime: makeCapturingRuntime({ decision: 'allow', matched: false, reason: 'ok' }),
+    });
 
-    const result = handleBeforeToolCall(
-      { toolName: 'exec', params: { command: 'echo hello' } } as any,
-      { workspaceDir, sessionId } as any,
-    );
+    const result = await gate(makeHostEvent(dir, 'write', { file_path: `${dir}/src/app.ts`, content: 'x' }));
 
-    expect(result).toBeUndefined();
-    expect(mockEvaluate).toHaveBeenCalledTimes(1);
+    expect(result.decision).toBe('allow');
+    expect(capturedInputs).toHaveLength(1);
+    expect(capturedInputs[0].action.normalizedPath).toBe('src/app.ts');
+    expect(capturedInputs[0].action.toolName).toBe('write');
+  });
+
+  it('exec with no file target still goes through RuleHost (existing behavior)', async () => {
+    const gate = createProductionRuleHostGate({
+      implementationRuntime: makeCapturingRuntime({ decision: 'allow', matched: false, reason: 'ok' }),
+    });
+
+    const result = await gate(makeHostEvent(dir, 'exec', { command: 'echo hello' }));
+
+    expect(result.decision).toBe('allow');
+    expect(capturedInputs).toHaveLength(1);
     // Shell without file target uses the full command as path (existing heuristic)
-    const input = mockEvaluate.mock.calls[0][0];
-    expect(input.action.normalizedPath).toContain('echo hello');
+    expect(capturedInputs[0].action.normalizedPath).toContain('echo hello');
+    expect(capturedInputs[0].action.toolName).toBe('exec');
   });
 });
