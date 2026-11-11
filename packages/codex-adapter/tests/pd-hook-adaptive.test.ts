@@ -437,6 +437,9 @@ describe('PRI-1170 Codex exec Adaptive wiring', () => {
     const result = await processHookInvocation(input(root), envFor(root), root, {
       fetchImpl,
       hookBudgetMs: 600,
+      // This scenario isolates transport cancellation; the PRI-1181 budget
+      // gate is exercised separately below.
+      minRemainingBudgetMs: 0,
       firstByteTimeoutMs: 1000,
       generationTimeoutMs: 5000,
     });
@@ -494,6 +497,7 @@ describe('PRI-1170 Codex exec Adaptive wiring', () => {
     const result = await processHookInvocation(input(root), envFor(root), root, {
       fetchImpl,
       hookBudgetMs: 600,
+      minRemainingBudgetMs: 0,
       firstByteTimeoutMs: 1000,
       generationTimeoutMs: 5000,
     });
@@ -532,5 +536,121 @@ describe('PRI-1170 Codex exec Adaptive wiring', () => {
     const context = additionalContext(result);
     expect(context).toContain(TEXT.BIG);
     expect(context).not.toContain(TEXT.DELIVERY);
+  });
+
+  // ── PRI-1181: deterministic zero-call gate before the candidate read ──────
+
+  it('a simple acknowledgement costs zero requests and leaves Native byte-identical', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const prompt = '好的，谢谢！';
+    const nativeRoot = await fixture({ label: 'ack-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot, { prompt }), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'ack', adaptive: true, budgetChars });
+    const transport = echoingTransport(TEXT.DELIVERY);
+    const result = await processHookInvocation(input(root, { prompt }), envFor(root), root, { fetchImpl: transport.fetchImpl });
+
+    expect(transport.calls()).toBe(0);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    expect(result.stderr.join('')).toContain('status=skipped');
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_skipped:trivial_confirmation');
+    expect(result.stderr.join('')).toContain('sends=0');
+  });
+
+  it('an exhausted hook budget costs zero requests and leaves Native byte-identical', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const nativeRoot = await fixture({ label: 'budget-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'budget-skip', adaptive: true, budgetChars });
+    const transport = echoingTransport(TEXT.DELIVERY);
+    const result = await processHookInvocation(input(root), envFor(root), root, {
+      fetchImpl: transport.fetchImpl,
+      hookBudgetMs: 1000,
+    });
+
+    expect(transport.calls()).toBe(0);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_skipped:budget_insufficient');
+  });
+
+  it('a short continuation is NOT mistaken for a social acknowledgement', async () => {
+    const root = await fixture({ label: 'continuation', adaptive: true, budgetChars: await nativeMissesDelivery() });
+    const transport = answeringTransport({ status: 'none_applicable', id: null, digest: null });
+    const result = await processHookInvocation(input(root, { prompt: '继续' }), envFor(root), root, {
+      fetchImpl: transport.fetchImpl,
+    });
+    expect(transport.calls(), result.stderr.join('')).toBe(1);
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:no_increment');
+    expect(result.stderr.join('')).not.toContain('trivial_confirmation');
+  });
+
+  it('a close call answered as uncertain is treated as abstention with one request', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const nativeRoot = await fixture({ label: 'uncertain-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'uncertain', adaptive: true, budgetChars });
+    const transport = answeringTransport({ status: 'uncertain', id: null, digest: null });
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:uncertain');
+  });
+
+  it('a prompt that only QUOTES a past delivery statement does not activate it', async () => {
+    const budgetChars = await nativeMissesDelivery();
+    const prompt = `你刚才说「${TEXT.DELIVERY}」，这句话具体什么意思？`;
+    const nativeRoot = await fixture({ label: 'quote-native', adaptive: false, budgetChars });
+    const native = await processHookInvocation(input(nativeRoot, { prompt }), envFor(nativeRoot), nativeRoot);
+
+    const root = await fixture({ label: 'quote', adaptive: true, budgetChars });
+    const transport = answeringTransport({ status: 'none_applicable', id: null, digest: null });
+    const result = await processHookInvocation(input(root, { prompt }), envFor(root), root, { fetchImpl: transport.fetchImpl });
+
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).toBe(additionalContext(native));
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:no_increment');
+  });
+
+  it('a candidate revised between request and revalidation cannot be applied', async () => {
+    const root = await fixture({ label: 'revised', adaptive: true, budgetChars: await nativeMissesDelivery() });
+    const transport = echoingTransport(TEXT.DELIVERY);
+    const fetchImpl: typeof fetch = async (resource, init) => {
+      const connection = new SqliteConnection(root);
+      try {
+        connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(
+          JSON.stringify({ principleId: 'DELIVERY', text: `${TEXT.DELIVERY}（修订版）` }),
+          'art-DELIVERY',
+        );
+      } finally {
+        connection.close();
+      }
+      return transport.fetchImpl(resource, init);
+    };
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl });
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).not.toContain(`${TEXT.DELIVERY}（修订版）`);
+    expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:revalidation_failed');
+  });
+
+  it('a candidate revoked between request and revalidation cannot be applied', async () => {
+    const root = await fixture({ label: 'revoked', adaptive: true, budgetChars: await nativeMissesDelivery() });
+    const transport = echoingTransport(TEXT.DELIVERY);
+    const fetchImpl: typeof fetch = async (resource, init) => {
+      const connection = new SqliteConnection(root);
+      try {
+        await new SqliteActivationStateStore(connection).deactivateActivation('act-DELIVERY', new Date().toISOString());
+      } finally {
+        connection.close();
+      }
+      return transport.fetchImpl(resource, init);
+    };
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl });
+    expect(transport.calls()).toBe(1);
+    expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
+    expect(result.stderr.join('')).toContain('reason=adaptive_selection_none:revalidation_failed');
   });
 });

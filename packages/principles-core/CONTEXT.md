@@ -67,3 +67,8 @@ _Avoid_: Safe, approved, promotion permission
 **Global Emergency Pause**:
 An immediate control-plane suspension of every Live Enforcement activation that does not require a host restart or pass through RuleHost.
 _Avoid_: Feature flag reload, automatic bulk resume
+
+**Tool Semantic Declaration**:
+The single authority for what a raw host tool name means. Each host declares its own raw names in a declaration file; core owns the host-neutral baseline; `buildToolSemanticRegistry` layers them into a `ToolSemanticRegistry`. A consumer never decides tool meaning from a literal, and a host never redefines `CanonicalKind`.
+_Avoid_: Tool alias table, hardcoded tool names, per-feature tool list
+

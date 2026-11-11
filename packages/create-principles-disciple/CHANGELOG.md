@@ -1,5 +1,41 @@
 # create-principles-disciple
 
+## 1.150.1
+
+### Patch Changes
+
+- 62f5e4d: 修复 #2505 引入的 Windows 路径空格回归：安装器不再把所有命令都交给 cmd.exe，只有 `codex` 这类裸 shim 才走 shell，`process.execPath`（如 `D:\Program Files\nodejs\node.exe`）改为直接 spawn，Codex 的 PLUGIN_DATA 运行时可正常按载荷 pin 落地。
+  
+  - `codex-host-installer.ts`：新增 shell 判定——裸命令名走 shell（`.cmd`/`.ps1` shim 需要），绝对路径或含分隔符的可执行路径直接 `spawnSync(file, args)`，避免命令字符串被空格截断。
+  - `installer.ts`：`Install summary:` 的非 Codex 宿主改用规范运行时的布局（`<runtimeDir>/<component>/package.json`），不再把 OpenClaw / WorkBuddy 误读成 `runtime not verified`。
+  - 新增回归测试：真实 spawn 含空格的 node 路径并断言子进程收到的完整 argv；同时断言裸 `codex` shim 仍能被 shell 解析。
+- f086288: 修复 Install summary 中 Codex 恒显示 `runtime not verified` 的路径拼接缺陷（#2505 回归）。
+  
+  `summarizeTouchedHosts` 用 `resolvePluginDataRoot()` 拿到的是 PLUGIN DATA 根目录，却直接交给
+  `readInstalledRuntimeCohort()` —— 该读取器会在传入目录下追加 `node_modules`，而 Codex 的运行时
+  实际位于 `<plugin-data>/runtime/node_modules`。因此即使本次安装已把 Codex 刷新到载荷 pin，
+  安装摘要仍打印 `runtime not verified`，误导 Owner 以为运行时没有装好。
+  
+  修复方式：先按 `resolvePluginDataRoot()` 解析根目录，再追加 `runtime` 后读取；显式注入的
+  `codexRuntimeDir` 语义保持不变。新增回归测试走生产默认路径（仅设置 `CODEX_HOME`），修前失败、
+  修后通过。
+- 030e0cf: Console 证据链以中性措辞展示「智能体报告，拥有者已授权」来源。
+  
+  - `EvidenceChainRecord` 增加可选只读 `provenance`，来自既有 `tasks.diagnostic_json`（不新增列、不做迁移、不新建真值）。
+  - `pd-console` 对 `agent_reported_owner_approved` 使用中性 i18n 文案；旧三值展示不变，内部枚举不出现在界面。
+- 2efe4a0: Pain Ingress v0.8 收尾（T22 / T03 / T17）：
+  
+  - 锚点结构化补齐：`diagnostic_json.anchor = {type, ref}` 现在对 `owner_expectation` / `established_principle` / `agent_instruction` 三类锚点都会写入；写侧与读侧共用同一份 `PainAnchorSchema` / `parsePainAnchor`，避免两份手写结构漂移。`deviationAnchor` 语义未变。
+  - 诊断器消费：`DiagnosisTargetSchema` 与 `DiagnosticianTaskRecord` 均带 `anchor`；`SqliteContextAssembler` 把 `diagnostic_json.anchor` 当不可信输入解析（非法则丢弃并在 `ambiguityNotes` 说明，不猜测）；根因提示词在锚点存在时输出 ANCHOR 块，指明"行为是相对哪个要求被衡量"，并修复了包装层转发遗漏（与 PRI-844 同型）。
+  - 两份 `pd-pain-signal` Skill（Codex/OpenClaw 共用插件与 WorkBuddy 插件）按实际实现改写：MCP `pd_submit_pain` 参数与三种锚点格式、`painType` 可省略但 `principle_deviation` 只适用于原则锚点、严重度不可自提、仅本次授权、后台禁止、失败回执（`refused` / `failed` / `submit_unconfirmed`）的阅读方式；原生入口（`PD记录痛苦：` 前缀、`/pd-pain`、Codex 实时回合的 `pd pain explicit`）与锚点式提交明确区分。
+  - SPEC / TD 中"只落文档、代码未改"的过期状态描述已更正为已实现，并保留真实环境验收项为待执行。
+- 389477a: B2：工具语义的 `canonicalKind` 成为提取提示的唯一权威。`buildRuleHostAction()` 此前在同时收到显式 `isBashTool`/`isWriteTool`（宿主粗筛 Set）与 registry 解析出的 `canonicalKind` 时，显式提示优先——一旦两者对同一原始工具名给出不同分类，生产侧提取的 `normalizedPath` 会与 replay（只读 registry）不同，路径规则因此在回放中命中、在生产中不命中。现在只要提供 `canonicalKind`，提取提示一律由它派生；宿主 Set 只保留“是否进入 gate”的粗筛作用。OpenClaw hook 两处调用同步移除重复的提示参数。默认行为不变：现有三宿主声明与 `constants/tools.ts` 同源，当前工具名下新旧结论一致。
+- 746e55d: B3：hook 与 replay 共用同一个工具语义解析入口。`resolveHostToolSemanticsForHook()` 以“workspace 持久化声明 → 宿主静态声明 → baseline”为优先级解析 `canonicalKind`：声明中出现的原始工具名以声明为准（与 replay/证据/Console 读取的是同一份 `.pd/host-tool-semantics/*.json`），声明未覆盖的静态名继续补齐，避免陈旧声明截断宿主当前工具面。声明损坏或跨宿主冲突时返回带 reason/nextAction 的类型化失败，绝不静默回退成空 registry；消费方（OpenClaw gate、Codex/WorkBuddy pd-hook）保留可用性——退回宿主静态声明并在 stderr / logger 留下可观察诊断（rc-9）。
+  
+  修复前：同一 workspace 中若持久化声明把 `exec` 记为 `write`（或声明了静态表没有的工具名），OpenClaw gate 仍按静态表判为 `execute`，生产侧提取出 `out.txt`，而 replay 得到 `<tool:exec>`，同一条路径规则在回放命中、在生产不命中。现在两端一致。
+  
+  OpenClaw 的接入模块刻意放在 `hooks/hook-tool-semantics.ts` 而非 `constants/tool-semantics.ts`：后者位于 `rulehost-evidence` 卫星包路径上，引入 host-runtime barrel 会把整条 LLM 依赖图拉进卫星包（satellite-purity / OPT-002）。
+
 ## 1.150.0
 
 ### Minor Changes
