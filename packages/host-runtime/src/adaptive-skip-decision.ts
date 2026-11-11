@@ -32,9 +32,14 @@ export const ADAPTIVE_SKIP_LIMITS = {
    * the Decisions endpoint answers a small answer table well inside a
    * sub-second window, and a skip is permanent for the turn.
    *
-   * The gate is now the request's own floor — the output reserve plus one
-   * bounded round trip — not the slow path's observed maximum. The deadline
-   * machinery still cancels an answer that does not arrive.
+   * This is an ADMISSION line, not a wait allowance: it answers "may a fast
+   * request start at all with this much host budget left?" A request that is
+   * admitted is still bounded by the earlier of its own deadline and the host
+   * deadline minus the assembly/output reserve; both cancel the underlying
+   * request. So the number below must stay far below any selection wait.
+   *
+   * The gate is the request's own floor — the output reserve plus one
+   * bounded round trip — not the slow path's observed maximum.
    */
   minExecutableBudgetMs: 300,
   /** Longest acknowledgement (after normalization) still treated as pure social. */
