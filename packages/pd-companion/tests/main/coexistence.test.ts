@@ -136,6 +136,17 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(source).toContain('install_manifest_warning');
   });
 
+  it('Workspace workers (PRI-993): 清单列表原样透传，路径存在性由 registry 按 tick 确认窗口判定', () => {
+    const source = src();
+    // 旧缺陷形状不得回归：清单读取处不得再用 statSync 过滤工作区——
+    // 瞬时 stat 失败（网络盘抖动/杀软锁定/ACL 抖动）≠ 已删除。
+    expect(source).not.toContain('.filter((workspace) => {');
+    // 路径判定在 registry 侧执行（确认窗口 + 误停区分 reason），
+    // codex 与 workbuddy 两个宿主 registry 构造点都必须接线（ERR-024）。
+    expect(source).toContain('classifyWorkspacePath');
+    expect((source.match(/statWorkspace: classifyWorkspacePath/g) ?? []).length).toBe(2);
+  });
+
   it('Workspace workers (2026-10-16): 安装面解析失败按原因分流，不再一律 console_runtime_not_installed', () => {
     const source = src();
     expect(source).toContain('outcome?.missing');
