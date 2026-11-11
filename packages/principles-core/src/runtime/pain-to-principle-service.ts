@@ -93,6 +93,8 @@ export interface PainToPrincipleInput {
   painIngress?: PainIngressV1Payload;
   /** SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8 §5.6: principle reference for principle_deviation. */
   deviationAnchor?: PainDetectedData['deviationAnchor'];
+  /** SPEC §11 / TD §6.2: structured anchor for every anchor source. */
+  anchor?: PainDetectedData['anchor'];
 }
 
 export interface PainToPrincipleOutput {
@@ -186,6 +188,7 @@ export class PainToPrincipleService {
       ...(input.correctionEvidence ? { correctionEvidence: input.correctionEvidence } : {}),
       painIngress: input.painIngress,
       ...(input.deviationAnchor ? { deviationAnchor: input.deviationAnchor } : {}),
+      ...(input.anchor ? { anchor: input.anchor } : {}),
     };
 
     try {

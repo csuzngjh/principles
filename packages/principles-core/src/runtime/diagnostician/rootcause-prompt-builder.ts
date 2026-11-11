@@ -23,8 +23,7 @@ import type { TSchema } from '@sinclair/typebox';
 import type { SchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DefaultSchemaPromptAdapter } from '../adapter/schema-prompt-adapter.js';
 import { DiagRootCauseOutputV1Schema } from './diag-rootcause-output.js';
-import type { DiagnosticianContextPayload } from '../context-payload.js';
-import type { PainCorrectionEvidence } from '../context-payload.js';
+import type { DiagnosticianContextPayload, PainAnchor, PainCorrectionEvidence } from '../context-payload.js';
 import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 import { buildCoreAxiomBlock } from '../core-principles/core-axiom-block.js';
@@ -167,6 +166,13 @@ export interface RootCausePromptBuilderOptions {
    * fallback) — no correction, no block, no fabrication.
    */
   correctionEvidence?: PainCorrectionEvidence;
+  /**
+   * SPEC §11 / TD §6.2: the structured anchor from the diagnosis target.
+   * When present, inserts an ANCHOR block naming the requirement the behaviour
+   * is measured against. When absent, the prompt is byte-identical to the
+   * pre-anchor prompt (EP-03: no silent fallback).
+   */
+  anchor?: PainAnchor;
 }
 
 // ── Instruction builder ──────────────────────────────────────────────────────
@@ -208,6 +214,23 @@ do not copy it blindly and do not generalize beyond what the Owner said.
 }
 
 /**
+ * SPEC §11 / TD §6.2: the structured anchor the Agent submitted is the
+ * requirement the reported behaviour is measured against. When absent,
+ * returns '' so the prompt stays byte-identical to the pre-anchor prompt
+ * (EP-03: no silent fallback) — and nothing can be fabricated (rc-9).
+ */
+function buildAnchorBlock(anchor?: PainAnchor): string {
+  if (!anchor) return '';
+  return `
+ANCHOR — the requirement this behaviour is measured against:
+type=${anchor.type}; ref=${anchor.ref}
+Use diagnosisTarget.anchor as the reference for the deviation.
+- Do not substitute a different requirement, and do not re-derive the anchor from prose.
+- If the evidence does not establish a deviation from this anchor, say so in ambiguityNotes.
+`;
+}
+
+/**
  * Build the Stage A diagnostic protocol instruction (PHASE 1–3 + optional PHASE 3.5).
  *
  * Per DPB-02 (LOCKED): Output is ONLY JSON — no markdown, no file ops, no tool calls.
@@ -225,10 +248,12 @@ export function buildRootCauseProtocolInstruction(
 ): string {
   const adapter = opts.adapter ?? new DefaultSchemaPromptAdapter();
   const schema = opts.schema ?? DiagRootCauseOutputV1Schema;
-  const { outputLanguage, coreGrounding, intentGrounding, evidenceFirstAttribution, correctionEvidence } = opts;
+  const { outputLanguage, coreGrounding, intentGrounding, evidenceFirstAttribution, correctionEvidence, anchor } = opts;
 
   // PRI-844: Owner correction block — '' (byte-identical) when absent.
   const ownerCorrectionBlock = buildOwnerCorrectionBlock(correctionEvidence);
+  // SPEC §11: structured anchor block — '' (byte-identical) when absent.
+  const anchorBlock = buildAnchorBlock(anchor);
 
   const example = adapter.generateExample(schema);
   const constraints = adapter.generateConstraints(schema);
@@ -269,7 +294,7 @@ entries already present in the context. Each evidence item must cite its source.
 Pay special attention to diagnosisTarget.evidence — these are the primary behavioral
 evidence (owner messages and agent actions) that the root cause analysis must address.
 
-${ownerCorrectionBlock}
+${ownerCorrectionBlock}${anchorBlock}
 PHASE 2 — Causal Chain (5 Whys):
 Build a Why-1 through Why-5 causal chain. Each Why MUST have at least one evidenceRefs entry referencing a sourceRef from Phase 1.
 - If no evidence is available for a Why level, reference the closest available evidence and note the gap in ambiguityNotes.
@@ -350,6 +375,10 @@ export class RootCausePromptBuilder {
       // dropping it here silently disabled PHASE 1.5 on the production
       // buildPrompt() path while the standalone-function tests stayed green.
       correctionEvidence: opts.correctionEvidence,
+      // SPEC §11: the wrapper must forward the anchor too — dropping it here
+      // silently removed the ANCHOR block on the production buildPrompt() path
+      // while standalone-function tests stayed green (same class as PRI-844).
+      anchor: opts.anchor,
     });
   }
 
@@ -410,6 +439,9 @@ export class RootCausePromptBuilder {
       // PRI-844: the Owner's verbatim correction rides in the diagnosis
       // target; when present the instruction gains the PHASE 1.5 block.
       correctionEvidence: payload.diagnosisTarget?.correctionEvidence,
+      // SPEC §11: the submitted anchor is the deviation reference; absent on
+      // pre-anchor records (no block, no invention).
+      anchor: payload.diagnosisTarget?.anchor,
     });
 
     // DPB-04: Explicit top-level fields at the prompt level
