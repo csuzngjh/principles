@@ -59,9 +59,10 @@ import {
   ExaminerPreflightBlockedError, type LabModules, type StudyRoots,
 } from './examiner-executor.js';
 import {
-  listSuiteCatalog, isSuiteKey, gatherProductionSnapshot, deriveStudyRuleCodeFacts,
+  listSuiteCatalog, isSuiteKey,
   readProductionSnapshot,
 } from './examiner-study-inputs.js';
+import { evaluateStudyEligibility } from './examiner-eligibility.js';
 import {
   appendConsoleRunEventLocked, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
   acceptConsoleRun, hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
@@ -281,6 +282,40 @@ export async function handleExaminerRoute(
     return;
   }
 
+  // ── Phase C: Study eligibility PRE-CHECK (read-only; creates nothing).
+  // Answers "would a study for this principle be creatable right now, and with
+  // which caveats" using the SAME functions POST /studies re-runs before it
+  // materializes anything. /principles/<id>/eligibility
+  const eligibilityPrincipleId = subPath.startsWith(evidencePrefix) && subPath.endsWith('/eligibility')
+    ? subPath.slice(evidencePrefix.length, subPath.length - '/eligibility'.length)
+    : null;
+  if (eligibilityPrincipleId !== null && PRINCIPLE_ID_PATTERN.test(eligibilityPrincipleId) && method === 'GET') {
+    const requestUrl = new URL(req.url ?? '', 'http://localhost');
+    const requestedEligibilityMode = requestUrl.searchParams.get('mode');
+    const experimentMode = requestedEligibilityMode === 'isolated_principle' ? 'isolated_principle' : 'full_library_incremental';
+    const requestedSuite = requestUrl.searchParams.get('suite');
+    // Mirror the creation fallback: an unrecognized/absent suite becomes the
+    // v0.9 default, so the pre-check never disagrees with what creation uses.
+    const suiteKey = requestedSuite !== null && isSuiteKey(requestedSuite) ? requestedSuite : 'didactic-pair';
+    const eligibility = await evaluateStudyEligibility({
+      workspaceDir,
+      labRoot,
+      labModules,
+      roots,
+      principleId: eligibilityPrincipleId,
+      experimentMode,
+      suiteKey,
+    });
+    sendSuccess(res, {
+      ...eligibility.verdict,
+      experimentMode,
+      suiteKey,
+      productionSnapshotMarkers: eligibility.inputs?.snapshot.experimentVsProduction.markers ?? [],
+      note: 'read-only pre-check: nothing was created; the same checks run again before any study is materialized',
+    });
+    return;
+  }
+
   // ── v0.10.1 §9: challenge-suite catalog (server-fixed keys, read-only).
   if (subPath === '/suites' && method === 'GET') {
     const suites = await listSuiteCatalog(labRoot);
@@ -336,14 +371,43 @@ export async function handleExaminerRoute(
       return;
     }
     const isolatedMode = requestedMode === 'isolated_principle';
+    const experimentMode = isolatedMode ? 'isolated_principle' : 'full_library_incremental';
     try {
+      // Phase C2: creation runs the SAME eligibility implementation the
+      // pre-check endpoint exposes, BEFORE any file is written. A study the
+      // pre-check calls BLOCKED is never created; a created study was ELIGIBLE
+      // or DEGRADED under exactly those rules.
+      const eligibility = await evaluateStudyEligibility({
+        workspaceDir,
+        labRoot,
+        labModules,
+        roots,
+        principleId: requestedTarget,
+        experimentMode,
+        suiteKey,
+      });
+      if (eligibility.verdict.status === 'BLOCKED' || eligibility.inputs === null) {
+        sendError(
+          res,
+          422,
+          'study_creation_refused',
+          'the eligibility pre-check refused creation (no file was written)',
+          {
+            // `error` stays the stable family code; `reason` carries the
+            // specific refusal so a client never has to parse prose.
+            reason: eligibility.verdict.reasonCode,
+            nextAction: eligibility.verdict.nextAction,
+            blockingReasonCode: eligibility.verdict.blockingReasonCode,
+            eligibility: eligibility.verdict,
+          },
+        );
+        return;
+      }
       // v0.10.1 host-backed inputs (SPEC §4/§6/§7): freeze the production
-      // snapshot, derive RuleCode facts from RUNTIME activation truth,
-      // carry the real pain lineage and compile the selected suite's cases.
-      // The study handle is minted inside materializeConsoleStudy, so the
-      // suite cases are compiled with per-study ids there via a second pass
-      // (suiteCaseDefs is deterministic; the ids are re-minted below).
-      const snapshot = await gatherProductionSnapshot(workspaceDir, requestedTarget, 2000);
+      // snapshot and the RuleCode facts the pre-check already derived from
+      // RUNTIME activation truth, carry the real pain lineage and compile the
+      // selected suite's cases.
+      const { snapshot, ruleCodeFacts } = eligibility.inputs;
       const detailOutput = await model.getPrincipleDetail(requestedTarget);
       const painRefs = detailOutput?.principle.derivedFromPainIds ?? [];
       const created = await materializeConsoleStudy(labModules, labRoot, roots, {
@@ -354,7 +418,7 @@ export async function handleExaminerRoute(
         suiteKey,
         hostBacked: {
           productionSnapshot: { ...snapshot },
-          ruleCodeFacts: deriveStudyRuleCodeFacts(snapshot),
+          ruleCodeFacts,
           painRefs,
         },
       });
