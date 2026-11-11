@@ -39,10 +39,11 @@ describe('cli-7: pd health --host flag wiring (production registration)', () => 
     expect(mockHandleHealth).not.toHaveBeenCalled();
   });
 
-  it('dispatches to handleHealth when --host is omitted (defaults to openclaw)', async () => {
+  it('dispatches to handleHealth with no host when --host is omitted (PRI-1186: selection sinks into handleHealth)', async () => {
     const program = buildHealthCommand();
     await program.parseAsync(['node', 'pd', 'health']);
     expect(mockHandleHealth).toHaveBeenCalledTimes(1);
+    expect(mockHandleHealth).toHaveBeenCalledWith(expect.objectContaining({ host: undefined }));
     expect(mockHandleHealthCodex).not.toHaveBeenCalled();
   });
 
@@ -50,6 +51,7 @@ describe('cli-7: pd health --host flag wiring (production registration)', () => 
     const program = buildHealthCommand();
     await program.parseAsync(['node', 'pd', 'health', '--host', 'openclaw']);
     expect(mockHandleHealth).toHaveBeenCalledTimes(1);
+    expect(mockHandleHealth).toHaveBeenCalledWith(expect.objectContaining({ host: 'openclaw' }));
     expect(mockHandleHealthCodex).not.toHaveBeenCalled();
   });
 

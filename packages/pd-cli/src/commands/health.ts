@@ -22,8 +22,13 @@ import {
   resolveWorkspaceHostToolSemantics,
 } from '@principles/host-runtime';
 import { handleHealthCodex } from './health-codex.js';
-import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
-import type { McpHealthSection } from './health-mcp.js';
+import {
+  assessMcpHealth,
+  formatMcpHealthLines,
+  selectMcpHostForWorkspace,
+  formatMcpHostSelectionLine,
+} from './health-mcp.js';
+import type { McpHealthSection, McpHostSelection } from './health-mcp.js';
 import { assessWorkbuddyHostFacts, formatWorkbuddyHostFactLines } from './health-workbuddy.js';
 import type { WorkbuddyHostFacts } from './health-workbuddy.js';
 
@@ -118,6 +123,13 @@ interface WorkspaceHealth {
    */
   mcp: McpHealthSection;
   /**
+   * PRI-1186: how the MCP host was chosen. Without --host the serving
+   * binding (mcp-binding.json workspaceDir) selects the host; an unresolvable
+   * or ambiguous workspace keeps the openclaw default and says so here, so
+   * the MCP section is never silently about the wrong host.
+   */
+  mcpHostSelection: McpHostSelection;
+  /**
    * PRI-939 Option A: last semantic reuse evaluation degradation read from the
    * workspace's own critical-events.jsonl (same durable sink the gate writes).
    * Read-only summary — the authority stays the event file itself.
@@ -190,7 +202,7 @@ function assessReuseEvaluationTelemetry(workspaceDir: string): ReuseEvaluationHe
 interface HealthOptions {
   workspace?: string;
   json?: boolean;
-  /** MCP diagnostics host. Defaults to openclaw (the historical `pd health` host). */
+  /** MCP diagnostics host. When omitted, the workspace's serving binding selects it (PRI-1186). */
   host?: 'openclaw' | 'workbuddy';
 }
 
@@ -228,7 +240,10 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
 
   const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
   const reliability = assessReliability(workspaceDir);
-  const mcp = assessMcpHealth({ host: opts.host === 'workbuddy' ? 'workbuddy' : 'openclaw' });
+  const mcpHostSelection: McpHostSelection = opts.host !== undefined
+    ? { host: opts.host, selectedBy: 'explicit-flag', matchedHosts: [] }
+    : selectMcpHostForWorkspace(workspaceDir);
+  const mcp = assessMcpHealth({ host: mcpHostSelection.host });
   // 2026-11-07: the four host facts ride along ONLY for the workbuddy host —
   // they are WorkBuddy-specific truths, never an openclaw/codex section.
   const workbuddyHostFacts = opts.host === 'workbuddy' ? assessWorkbuddyHostFacts() : undefined;
@@ -260,6 +275,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       },
       reliability,
       mcp,
+      mcpHostSelection,
       reuseEvaluation: assessReuseEvaluationTelemetry(workspaceDir),
       lastSuccessfulChain,
       ...(workbuddyHostFacts !== undefined ? { workbuddyHostFacts } : {}),
@@ -300,6 +316,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       console.log(`reliability.reason: ${health.reliability.reason}`);
       console.log(`reliability.nextAction: ${health.reliability.nextAction}`);
     }
+    console.log(formatMcpHostSelectionLine(health.mcpHostSelection));
     for (const line of formatMcpHealthLines(health.mcp)) console.log(line);
     // 2026-11-07: the four independent WorkBuddy facts — printed AFTER the
     // MCP block so a full MCP section visibly does NOT imply a registered or
@@ -408,10 +425,10 @@ export function registerHealthCommand(program: Command, handlers: HealthCommandH
     .description('Show health diagnostics for all workspaces')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
-    .option('--host <host>', 'Host to inspect (openclaw|codex|workbuddy). Defaults to openclaw workspace health.')
+    .option('--host <host>', 'Host to inspect (openclaw|codex|workbuddy). Defaults to the host whose mcp-binding.json serves the workspace.')
     .action(async (opts) => {
-      const host = opts.host ?? 'openclaw';
-      if (host !== 'codex' && host !== 'openclaw' && host !== 'workbuddy') {
+      const {host} = opts;
+      if (host !== undefined && host !== 'codex' && host !== 'openclaw' && host !== 'workbuddy') {
         // cli-2: exit-stops — return after setting exitCode.
         if (opts.json) {
           console.log(JSON.stringify({
@@ -432,6 +449,8 @@ export function registerHealthCommand(program: Command, handlers: HealthCommandH
         await codexHandler(opts);
         return;
       }
+      // PRI-1186: without --host, handleHealth selects the serving host from
+      // the workspace's bindings; undefined keeps that choice downstream.
       await healthHandler({ ...opts, host });
     });
 }

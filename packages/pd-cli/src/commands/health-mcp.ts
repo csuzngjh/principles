@@ -1067,3 +1067,75 @@ export function formatMcpHealthLines(section: McpHealthSection): string[] {
   }
   return lines;
 }
+
+/** How `pd health` chose the MCP host when `--host` was not given (PRI-1186). */
+export type McpHostSelectionBy =
+  | 'explicit-flag'
+  | 'binding-workspace-match'
+  | 'default-no-match'
+  | 'default-ambiguous';
+
+export interface McpHostSelection {
+  host: McpHealthHost;
+  selectedBy: McpHostSelectionBy;
+  /** Every host whose binding serves the workspace (candidate order). */
+  matchedHosts: McpHealthHost[];
+}
+
+const MCP_HOST_CANDIDATES: readonly McpHealthHost[] = ['openclaw', 'codex', 'workbuddy'];
+
+function normalizeWorkspaceForCompare(target: string): string {
+  const resolved = path.resolve(target).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * The serving binding is the host authority (PRI-1186): each host's
+ * installer-written mcp-binding.json records the workspace it serves, so a
+ * unique workspaceDir match selects that host. Zero or multiple matches keep
+ * the historical openclaw default and are disclosed via selectedBy — never a
+ * silent guess (rc-9). Feature flags are deliberately NOT consulted: they
+ * default on machine-wide and say nothing about which host serves a workspace.
+ */
+export function selectMcpHostForWorkspace(
+  workspaceDir: string,
+  options: { homeDir?: string; env?: { CODEX_HOME?: string } } = {},
+): McpHostSelection {
+  const homeDir = path.resolve(options.homeDir ?? os.homedir());
+  const env = options.env ?? {};
+  const target = normalizeWorkspaceForCompare(workspaceDir);
+  const matchedHosts: McpHealthHost[] = [];
+  for (const host of MCP_HOST_CANDIDATES) {
+    const layout = resolveLayout(host, homeDir, env);
+    const boundWorkspace = readString(readJsonRecord(layout.bindingPath), 'workspaceDir');
+    if (
+      boundWorkspace !== null
+      && path.isAbsolute(boundWorkspace)
+      && normalizeWorkspaceForCompare(boundWorkspace) === target
+    ) {
+      matchedHosts.push(host);
+    }
+  }
+  const only = matchedHosts.length === 1 ? matchedHosts[0] : undefined;
+  if (only !== undefined) {
+    return { host: only, selectedBy: 'binding-workspace-match', matchedHosts };
+  }
+  return {
+    host: 'openclaw',
+    selectedBy: matchedHosts.length === 0 ? 'default-no-match' : 'default-ambiguous',
+    matchedHosts,
+  };
+}
+
+export function formatMcpHostSelectionLine(selection: McpHostSelection): string {
+  switch (selection.selectedBy) {
+    case 'explicit-flag':
+      return `mcp.hostSelection: ${selection.host} (explicit --host)`;
+    case 'binding-workspace-match':
+      return `mcp.hostSelection: ${selection.host} (its mcp-binding.json serves this workspace)`;
+    case 'default-no-match':
+      return 'mcp.hostSelection: openclaw (default; no host binding serves this workspace — the MCP view below may not describe it)';
+    case 'default-ambiguous':
+      return `mcp.hostSelection: openclaw (default; multiple host bindings serve this workspace: ${selection.matchedHosts.join(', ')} — pass --host to choose)`;
+  }
+}

@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { assessMcpHealth } from '../../src/commands/health-mcp.js';
+import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine } from '../../src/commands/health-mcp.js';
 
 const SCHEMA = 'pd.mcp-binding.v1';
 const WORKSPACE_NAME = 'ws';
@@ -637,5 +637,153 @@ describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3
       expect(section.reason).toBe('mcp_registration_unverifiable');
       expect(section.registrationConflict.verdict).toBe('unverifiable');
     });
+  });
+});
+
+describe('selectMcpHostForWorkspace — PRI-1186: the serving binding is the host authority', () => {
+  const query = (home: string, ws?: string) => path.join(home, ws ?? WORKSPACE_NAME);
+
+  it('selects codex when the codex binding serves the queried workspace', () => {
+    withHome((home) => {
+      makeCodexFixture(home);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'codex',
+        selectedBy: 'binding-workspace-match',
+        matchedHosts: ['codex'],
+      });
+    });
+  });
+
+  it('selects openclaw when the openclaw binding serves the queried workspace', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'openclaw');
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'binding-workspace-match',
+        matchedHosts: ['openclaw'],
+      });
+    });
+  });
+
+  it('selects workbuddy when the workbuddy binding serves the queried workspace', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'workbuddy');
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'workbuddy',
+        selectedBy: 'binding-workspace-match',
+        matchedHosts: ['workbuddy'],
+      });
+    });
+  });
+
+  it('keeps the openclaw default and discloses when no binding serves the workspace', () => {
+    withHome((home) => {
+      makeCodexFixture(home); // binds home/ws, NOT home/other-ws
+      expect(selectMcpHostForWorkspace(query(home, 'other-ws'), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'default-no-match',
+        matchedHosts: [],
+      });
+    });
+  });
+
+  it('keeps the openclaw default when no host binding exists at all', () => {
+    withHome((home) => {
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'default-no-match',
+        matchedHosts: [],
+      });
+    });
+  });
+
+  it('discloses ambiguity instead of guessing when two hosts bind the same workspace', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'openclaw');
+      makeCodexFixture(home);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'default-ambiguous',
+        matchedHosts: ['openclaw', 'codex'],
+      });
+    });
+  });
+
+  it('ignores a binding whose workspaceDir is relative (unusable as authority)', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const record = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8'));
+      record.workspaceDir = 'relative/ws';
+      writeJson(fixture.bindingPath, record);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} }).selectedBy).toBe('default-no-match');
+    });
+  });
+
+  it('ignores a binding without a workspaceDir', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const record = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8'));
+      delete record.workspaceDir;
+      writeJson(fixture.bindingPath, record);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} }).selectedBy).toBe('default-no-match');
+    });
+  });
+
+  it('matches a trailing-separator variant of the same workspace', () => {
+    withHome((home) => {
+      makeCodexFixture(home);
+      const selection = selectMcpHostForWorkspace(query(home) + path.sep, { homeDir: home, env: {} });
+      expect(selection.host).toBe('codex');
+      expect(selection.selectedBy).toBe('binding-workspace-match');
+    });
+  });
+
+  it.skipIf(process.platform !== 'win32')('matches case-insensitively on Windows', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const record = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8'));
+      record.workspaceDir = String(record.workspaceDir).toUpperCase();
+      writeJson(fixture.bindingPath, record);
+      const selection = selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} });
+      expect(selection.host).toBe('codex');
+      expect(selection.selectedBy).toBe('binding-workspace-match');
+    });
+  });
+
+  it('honors CODEX_HOME when locating the codex binding', () => {
+    withHome((home) => {
+      makeCodexFixture(home);
+      const selection = selectMcpHostForWorkspace(query(home), {
+        homeDir: home,
+        env: { CODEX_HOME: path.join(home, '.codex') },
+      });
+      expect(selection.host).toBe('codex');
+      expect(selection.selectedBy).toBe('binding-workspace-match');
+    });
+  });
+});
+
+describe('formatMcpHostSelectionLine — every selection reason is disclosed', () => {
+  it('names the host and the explicit flag', () => {
+    expect(formatMcpHostSelectionLine({ host: 'workbuddy', selectedBy: 'explicit-flag', matchedHosts: [] }))
+      .toBe('mcp.hostSelection: workbuddy (explicit --host)');
+  });
+
+  it('names the serving binding for a workspace match', () => {
+    const line = formatMcpHostSelectionLine({ host: 'codex', selectedBy: 'binding-workspace-match', matchedHosts: ['codex'] });
+    expect(line).toContain('mcp.hostSelection: codex');
+    expect(line).toContain('serves this workspace');
+  });
+
+  it('discloses that no host binding serves the workspace', () => {
+    const line = formatMcpHostSelectionLine({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
+    expect(line).toContain('mcp.hostSelection: openclaw');
+    expect(line).toContain('no host binding serves this workspace');
+  });
+
+  it('discloses every matching host on ambiguity and asks for --host', () => {
+    const line = formatMcpHostSelectionLine({ host: 'openclaw', selectedBy: 'default-ambiguous', matchedHosts: ['openclaw', 'codex'] });
+    expect(line).toContain('openclaw, codex');
+    expect(line).toContain('--host');
   });
 });
