@@ -161,6 +161,7 @@
 **MVP 四问**：
 - `mvp-q-1-what-if-skip`：WorkBuddy 零对话采集持续，诊断证据三宿主不等；每新宿主继续各起一套方案，架构负债累积。
 - `mvp-q-2-how-observed`：见上表"验收"列（健康页/工作区数据/补读测试）。
+- `mvp-q-3-how-disabled`：`workbuddy_conversation_ingestion`（默认 on，可 off）；Codex 沿用现有 flag；OpenClaw 兜底源独立 flag；均不新增开关类别。
 - `mvp-q-3-how-disabled`：`workbuddy_conversation_ingestion`（默认 on，可 off）；Codex 沿用现有 flag；OpenClaw live 统一观察写入使用独立 flag `openclaw_unified_observation`（默认 on，可 off，见 §4.4）；均不新增开关类别。
 - `mvp-q-4-emotional-value`：降低"宿主越多系统越不可理解"的不确定感；Owner 在一个健康页看到全部采集状态，消除"到底采没采"的反复排查成本。
 
@@ -190,6 +191,7 @@ New durable source of truth: NO（trajectory.db 既有库）
 New persisted schema/state: 小（governance_observations v4 additive + consent 台账复用）
 New subsystem/service: NO（泛化提取既有 Codex 管线）
 New public abstraction: 1（conversation-ingestion seam —— 即消灭 N 套方案的那个接口，包内公开非跨包）
+New runtime feature flag: 1（workbuddy_conversation_ingestion，Owner 指示默认 on）
 New runtime feature flag: 2（workbuddy_conversation_ingestion、openclaw_unified_observation，均 Owner 指示默认 on）
 New cross-package dependency: NO（seam 在 host-runtime；适配器既有依赖方向不变）
 New host/platform-specific behavior: 预期内（每宿主一个解码器，这是统一模型的既定形态）
