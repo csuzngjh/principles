@@ -1,5 +1,18 @@
 # @principles/host-runtime
 
+## 3.4.0
+
+### Minor Changes
+
+- ce31128: PRI-1171 P1（工单①+②，行为零变化提取）：host-runtime 新增 `conversation-ingestion` seam——统一宿主轨迹摄取的唯一中立入口（`TranscriptSourceAdapter` 契约 + `runConversationIngestion` 五段管线 + 同意台账 v3 + 同意分层文本策略）；Codex 摄取管线平移接入（解码器/版本守卫/路径授权留 codex-adapter，旧导出名兼容 re-export 一个版本周期）。同意台账权威迁至 `<workspace>/.state/conversation-ingestion-consent.json`（按宿主分键），旧 `.pd/codex-ingestion-consent.json` 首读单向迁移并改名 `.superseded`（保留审计）；新增 `owner_directive` 决定通道（须带 evidenceRef）。行为锁定：codex-adapter 全量 379/379 通过（真实 fixtures 走迁移后生产路径）；seam 新增 37 测试（flag-off 零读/consent 门/守卫拒绝不落库/preIngest 失败保水位/malformed 提交后降级/incomplete-tail/TOCTOU/水位回缩/consent 迁移矩阵）。
+
+### Patch Changes
+
+- ecd68fa: Adaptive activation now skips selection deterministically before the candidate read: missing host-bound turn identity, a blank prompt, an exhausted hook budget, and pure social acknowledgements return the Native body with zero model requests. Substantive prompts and task continuations keep the existing single-send fast path; the default-off switch and Native fallback are unchanged.
+- ce31128: PRI-1171 P1 工单③：governance observation store 升 schema v4（additive）——`host_kind` 契约放宽为 `codex | workbuddy | openclaw`（应用层联合类型，DDL 不变），checkpoint upsert 改为 MAX 单调（`byte_offset`/`last_ordinal` 取最大值），防止 Stop 钩子与 worker catch-up 并发时后提交者把水位拉回导致重复解码与健康页抖动。v3 旧库下次打开自动升版本号，存量行零改写；新增测试覆盖版本迁移幂等、workbuddy 行写入读取、MAX 单调（低水位后到不回退）。
+- Updated dependencies [8de5b0a]
+  - @principles/core@7.3.2
+
 ## 3.3.1
 
 ### Patch Changes
