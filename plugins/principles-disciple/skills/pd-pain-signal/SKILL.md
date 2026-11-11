@@ -27,7 +27,7 @@ These are handled by the host itself. Report the real receipt if you can see one
 Check your tool list first.
 
 - If `pd_submit_pain` is available, call it with the four possible arguments below.
-- If it is not in your tool list, the anchored write capability is NOT enabled in this deployment. Stop: do not call a look-alike tool, do not compose a CLI write with guessed lineage, do not claim a submission happened. Tell the Owner the capability is unavailable.
+- If it is not in your tool list, the anchored write capability is NOT enabled in this deployment. Stop: do not call a look-alike tool, do not compose a CLI write with guessed lineage, do not claim a submission happened. Tell the Owner the capability is unavailable, and point them at the native entry for this host (Entry 1) if they still want the signal recorded.
 
 | argument | required | contract |
 |---|---|---|
