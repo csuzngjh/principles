@@ -691,6 +691,57 @@ describe('scheduleTrajectoryRetention — hook path cost', () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * F3: the worker/gateway loop is the only place a broken config becomes
+   * visible. Before the fix `retentionWarning` returned null for
+   * `config_invalid`, so retention stopped forever with no signal while the
+   * database kept growing.
+   */
+  it('F3: a worker tick surfaces config_invalid once, not every cycle', async () => {
+    vi.useFakeTimers();
+    try {
+      const dir = makeWorkspace({ config: configWithTrajectoryRetention({ retentionDays: 'ninety' }) });
+      const warnings: string[] = [];
+      scheduleTrajectoryRetention(dir, { warn: (message: string) => warnings.push(message) });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain('config_invalid');
+
+      // Same failure on the next interval: deduped, no log spam.
+      await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000 + 10 * 60 * 1000);
+      expect(warnings.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports a successful worker cycle through info', async () => {
+    vi.useFakeTimers();
+    try {
+      const dir = makeWorkspace();
+      seedExpiredToolCalls(dir, 1, 200);
+      // Create the retention indexes first: a missing index is itself a
+      // deduped warning (F2), which would mask the success log path.
+      vacuumTrajectoryDatabase({ workspaceDir: dir, apply: true, now: () => NOW });
+      const infos: string[] = [];
+      const warnings: string[] = [];
+      scheduleTrajectoryRetention(dir, {
+        info: (message: string) => infos.push(message),
+        warn: (message: string) => warnings.push(message),
+      });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(warnings).toEqual([]);
+      expect(infos.length).toBe(1);
+      expect(infos[0]).toContain('completed');
+      expect(infos[0]).toContain('deleted=1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('runTrajectoryRetention — hook blocking envelope', () => {

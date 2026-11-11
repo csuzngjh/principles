@@ -192,6 +192,74 @@ describe('retention command contract (cli-1 / cli-6)', () => {
   });
 });
 
+describe('retention human output (cli-6)', () => {
+  function captureLines(): () => string {
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map((a) => String(a)).join(' '));
+    });
+    return () => lines.join('\n');
+  }
+
+  it('maintain without --json prints the operator summary', async () => {
+    const dir = makeWorkspace();
+    const readLines = captureLines();
+
+    await handleTrajectoryMaintain({ workspace: dir });
+
+    const output = readLines();
+    expect(output).toContain('Retention completed');
+    expect(output).toContain('tool_calls=1');
+  });
+
+  it('maintain without --json prints reason + next action on a skip', async () => {
+    const base: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(getDefaultPdConfig())) base[key] = value;
+    base.trajectoryRetention = { retentionDays: 0 };
+    const dir = makeWorkspace({ config: base });
+    const readLines = captureLines();
+
+    await handleTrajectoryMaintain({ workspace: dir });
+
+    const output = readLines();
+    expect(output).toContain('Retention skipped: retention_days_zero');
+    expect(output).toContain('Next:');
+  });
+
+  it('retention status without --json prints the next cutoff and the deletion projection', async () => {
+    const dir = makeWorkspace();
+    const readLines = captureLines();
+
+    await handleTrajectoryRetentionStatus({ workspace: dir });
+
+    const output = readLines();
+    // F4: the projection must be labelled as the NEXT run's cutoff, not as
+    // "expired now" under a different definition.
+    expect(output).toContain('Next run:  cutoff');
+    expect(output).toContain('Next delete: tool_calls=1');
+    // F2: missing indexes are surfaced with the repair command.
+    expect(output).toContain('Indexes:   missing');
+    expect(output).toContain('pd trajectory vacuum --yes');
+  });
+
+  it('vacuum without --json prints the dry-run and applied reports', async () => {
+    const dir = makeWorkspace();
+    const readLines = captureLines();
+
+    await handleTrajectoryVacuum({ workspace: dir, yes: false });
+    const dryRun = readLines();
+    expect(dryRun).toContain('VACUUM dry run:');
+    expect(dryRun).toContain('Next:');
+
+    vi.restoreAllMocks();
+    const readApplied = captureLines();
+    await handleTrajectoryVacuum({ workspace: dir, yes: true });
+    const applied = readApplied();
+    expect(applied).toContain('VACUUM done in');
+    expect(applied).toContain('Indexes:');
+  });
+});
+
 describe('maintain exit code classification', () => {
   function makeReport(overrides: Partial<TrajectoryRetentionReport>): TrajectoryRetentionReport {
     return {
