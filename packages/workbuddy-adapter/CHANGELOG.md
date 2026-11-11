@@ -1,5 +1,29 @@
 # @principles/workbuddy-adapter
 
+## 0.5.11
+
+### Patch Changes
+
+- 2efe4a0: Pain Ingress v0.8 收尾（T22 / T03 / T17）：
+  
+  - 锚点结构化补齐：`diagnostic_json.anchor = {type, ref}` 现在对 `owner_expectation` / `established_principle` / `agent_instruction` 三类锚点都会写入；写侧与读侧共用同一份 `PainAnchorSchema` / `parsePainAnchor`，避免两份手写结构漂移。`deviationAnchor` 语义未变。
+  - 诊断器消费：`DiagnosisTargetSchema` 与 `DiagnosticianTaskRecord` 均带 `anchor`；`SqliteContextAssembler` 把 `diagnostic_json.anchor` 当不可信输入解析（非法则丢弃并在 `ambiguityNotes` 说明，不猜测）；根因提示词在锚点存在时输出 ANCHOR 块，指明"行为是相对哪个要求被衡量"，并修复了包装层转发遗漏（与 PRI-844 同型）。
+  - 两份 `pd-pain-signal` Skill（Codex/OpenClaw 共用插件与 WorkBuddy 插件）按实际实现改写：MCP `pd_submit_pain` 参数与三种锚点格式、`painType` 可省略但 `principle_deviation` 只适用于原则锚点、严重度不可自提、仅本次授权、后台禁止、失败回执（`refused` / `failed` / `submit_unconfirmed`）的阅读方式；原生入口（`PD记录痛苦：` 前缀、`/pd-pain`、Codex 实时回合的 `pd pain explicit`）与锚点式提交明确区分。
+  - SPEC / TD 中"只落文档、代码未改"的过期状态描述已更正为已实现，并保留真实环境验收项为待执行。
+- 746e55d: B3：hook 与 replay 共用同一个工具语义解析入口。`resolveHostToolSemanticsForHook()` 以“workspace 持久化声明 → 宿主静态声明 → baseline”为优先级解析 `canonicalKind`：声明中出现的原始工具名以声明为准（与 replay/证据/Console 读取的是同一份 `.pd/host-tool-semantics/*.json`），声明未覆盖的静态名继续补齐，避免陈旧声明截断宿主当前工具面。声明损坏或跨宿主冲突时返回带 reason/nextAction 的类型化失败，绝不静默回退成空 registry；消费方（OpenClaw gate、Codex/WorkBuddy pd-hook）保留可用性——退回宿主静态声明并在 stderr / logger 留下可观察诊断（rc-9）。
+  
+  修复前：同一 workspace 中若持久化声明把 `exec` 记为 `write`（或声明了静态表没有的工具名），OpenClaw gate 仍按静态表判为 `execute`，生产侧提取出 `out.txt`，而 replay 得到 `<tool:exec>`，同一条路径规则在回放命中、在生产不命中。现在两端一致。
+  
+  OpenClaw 的接入模块刻意放在 `hooks/hook-tool-semantics.ts` 而非 `constants/tool-semantics.ts`：后者位于 `rulehost-evidence` 卫星包路径上，引入 host-runtime barrel 会把整条 LLM 依赖图拉进卫星包（satellite-purity / OPT-002）。
+- Updated dependencies [c8b984f]
+- Updated dependencies [030e0cf]
+- Updated dependencies [2efe4a0]
+- Updated dependencies [030d003]
+- Updated dependencies [389477a]
+- Updated dependencies [746e55d]
+  - @principles/core@7.3.1
+  - @principles/host-runtime@3.3.1
+
 ## 0.5.10
 
 ### Patch Changes

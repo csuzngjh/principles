@@ -1,16 +1,18 @@
 # B 系列拆分方案：工具语义与执行结果契约单一化
 
-> 状态：**执行中**。方案分析保持 v2 原样；本块只记录真实落地状态。
-> 版本：v3（2026-11-11）。v3 只更新执行状态、基线与顺序，不重写架构分析。
-> 基线：`origin/main` @ `9352a2500`（2026-11-11 拉取；#2500 计划文档合并后的主干）。
-> 关联：评审报告 §4.2（B1–B5）、PR #2498（5B）、PR #2501（B1）、PR #2508（B2）、PR #2518（B3）、AGENTS.md P2.1 / P7 / P8。
+> 状态：**已完成**（B1–B5 与 5B 全部收口）。方案分析保持 v2 原样；本块只记录真实落地状态。
+> 版本：v5（2026-11-11）。v5 只更新 B5 合入与收官状态，不重写架构分析。
+> 基线：`origin/main` @ `3858c6639`（2026-11-11 拉取；#2522 B5 合并后的主干）。
+> 关联：评审报告 §4.2（B1–B5）、PR #2498（5B）、PR #2501（B1）、PR #2508（B2）、PR #2518（B3）、PR #2522（B5）、AGENTS.md P2.1 / P7 / P8。
 >
 > **状态更新（2026-11-11，以 GitHub 实际合并状态为准）**：
 > - **5B 已合入**：PR #2498 → `f1cf77b13`（merged 2026-11-10T23:31:23Z）。B3 的文件级前置条件已满足。
 > - **B1 已按方案 B 实施并合入**：PR #2501 → `09a12057f`（merged 2026-11-10T17:15:35Z）。新增可选 `degraded` + `normalizeRuleHostResult()`，非法结果统一 fail-closed 归一化；生产门 `production-rulehost-gate.ts` 不再 `warning + continue`。§8 问题 1 由行动回答：**采方案 B**。
 > - **B2 已实施并合入**：PR #2508 → `389477ad1`（merged 2026-11-11T00:24:51Z，head `39d5eba54`）。§3.2.2 的缺口经真实输出证实并修复——`canonicalKind` 成为提取提示唯一权威；§3.2.1（声明覆盖守卫）与 §3.2.3（双常量同源）**验证后取消**。§8 问题 3 由行动回答：**保留缩窄后的 B2，两个子项取消**。
-> - **B3 已实施，待合入**：PR #2518（head `0301f0f89`，base `9352a2500`）。新增 `resolveHostToolSemanticsForHook()`（workspace 声明 → 宿主静态声明 → baseline），OpenClaw gate / Codex pd-hook / WorkBuddy pd-hook 三处接入。反例已用真实输出证实：workspace 声明 `exec -> write` 时，改前 hook 判 `execute`（提取 `out.txt`）、replay 判 `write`（`<tool:exec>`）；改后两端一致。
-> - **B4 / B5 未开工**。B4 的调用方盘点已完成（结论见 §8 第 2 条）：仍有生产调用，本批不得删除 legacy `core/rule-host.ts`。
+> - **B3 已合入**：PR #2518 → `746e55d47`（head `2dd2b73f4`，tree 与合并后完全一致）。新增 `resolveHostToolSemanticsForHook()`（workspace 声明 → 宿主静态声明 → baseline），OpenClaw gate / Codex pd-hook / WorkBuddy pd-hook 三处接入。反例已用真实输出证实：workspace 声明 `exec -> write` 时，改前 hook 判 `execute`（提取 `out.txt`）、replay 判 `write`（`<tool:exec>`）；改后两端一致。
+> - **B4 盘点完成，收敛为"记录调用方清单"**：legacy `core/rule-host.ts` 仍有生产调用（`workspace-context.ts:160-162` 构造 → `hooks/gate.ts:110` 消费），本批**不删除**（结论见 §8 第 2 条）。
+> - **B5 已合入**：PR #2522 → `3858c6639`（head `8840e807c`，tree 与合并后完全一致）。`scripts/check-tool-semantics-authority.mjs`（结构守卫 + 契约守卫，两向站点级白名单）+ `scripts/__tests__/check-tool-semantics-authority.test.ts`（18 例）+ `check:tool-semantics-authority` 接入 `verify:merge` + `CONTEXT-MAP.md` / `principles-core/CONTEXT.md` 文档。反例真实输出见 §6.2 落地修正。
+> - **B 系列收官**：5B / B1（方案 B）/ B2（缩窄后）/ B3 / B4（仅盘点）/ B5 全部完成，无剩余项；留下的两项是 follow-up 候选（`risk-calculator-policy.ts` 词表改由 registry 推导、Codex `apply_patch` 载荷解析标识进声明），不属于本系列范围。
 > - 执行顺序已按实际落地重排，见 §7。
 
 ---
@@ -191,6 +193,16 @@
 2. 契约守卫：`RuleHostResult` 构造点必须经过 `normalizeRuleHostResult`（允许 core 内部与测试）。
 3. 文档：把"工具语义唯一权威 = 声明文件 + registry"写进 `CONTEXT-MAP.md` 对应包的 `CONTEXT.md`。
 
+**落地修正（2026-11-11，按仓库现实审计）**：
+
+- 实现为单一入口 `scripts/check-tool-semantics-authority.mjs`，`npm run check:tool-semantics-authority`，接在 `verify:merge` 末尾（合并门，不是本地每次推送都跑）。
+- 白名单不是文件级而是**站点级**（file + literal）：给 `index.ts` 整文件豁免会让该文件里新增的任何比较继续通过；站点级条目才能在"已豁免文件里再加一个字面量"时继续报红。两向校验沿用 `check-runtime-writers.mjs` 的 ERR-146 模式：未登记命中报红，登记项不再命中同样报红。
+- 现实审计发现 15 个存量站点（`constants/tools.ts` 之外）：`codex-rule-context-provider.ts`（registry 已判 `write` 后只用于选 payload 解析器）、`risk-calculator-policy.ts`（7 个泛化词表，仅估算行数，不决定语义）、`observation-resolver.ts` / `openclaw index.ts` / `pain.ts`（`pain` 路由哨兵）、`after-tool-call-helpers.ts`（`memory_store` 记账）。全部按"不是语义权威"逐条记入白名单并写明依据；三条宿主声明文件与 core baseline 为**豁免**（它们是权威本身）。
+- 手写 Set 的判定不硬编码工具名：先从三份声明文件解析 `rawToolName` 与 `canonicalKind`，只有当同一个 `new Set([...])` 里出现 ≥2 个"已声明 raw 名且不是 canonical kind"时才报红——`new Set(['read','write'])` 属于 kind 词表，不误报。
+- `typeof x.toolName === 'string'` 属类型守卫，按 JS 原始类型名排除，避免整类误报。
+- 契约守卫的判定为：`packages/*/src` 中同时出现 `RuleHostResult` 与 `.evaluate(`，但文件未引用 `normalizeRuleHostResult` / `evaluateRuleHostImplementations`，且不在 core 内部；存量仅 `openclaw-plugin/src/hooks/gate.ts`（调用 legacy `RuleHost` 类，返回值已在类内归一化）一条，已记入白名单。
+- 测试：`scripts/__tests__/check-tool-semantics-authority.test.ts` 18 例（仓库基线两向校验 + 合成仓库负控制），随 `npm run test:scripts` 在 CI 执行。
+
 ### 6.2 反例证明设计
 
 **缺陷输入**：在一个新消费者里写 `if (toolName === 'apply_patch')`。
@@ -198,6 +210,44 @@
 - **旧实现**：CI 通过。
 - **新实现**：`npm run check:*` 失败并指向声明文件。
 - **真实路径**：这是本次 B 系列要防的复发模式（历史事故 #5 就是两份 `apply_patch` 解析）。
+
+**落地后的真实输出（2026-11-11）**：
+
+```text
+# 新增 packages/principles-core/src/runtime/_b5-red-probe.ts:
+#   return toolName === 'apply_patch';
+=== NEW GUARD (must FAIL) ===
+Tool semantics authority FAIL
+  988 first-party production files
+packages/principles-core/src/runtime/_b5-red-probe.ts
+  literal: apply_patch
+exit=1
+=== PRE-EXISTING GUARD check:runtime-writers (must PASS) ===
+Runtime writer authority PASS
+  1331 first-party production files
+exit=0
+```
+
+第二类反例（契约守卫）：
+
+```text
+# 新增 packages/host-runtime/src/_b5-red-result-probe.ts（RuleHostResult + .evaluate，未归一化）
+Rule result authority FAIL
+packages/host-runtime/src/_b5-red-result-probe.ts
+  reads raw RuleHostResult output without normalizeRuleHostResult
+exit=1
+```
+
+删除两个探针文件后：
+
+```text
+Tool semantics authority PASS
+  987 first-party production files
+allowlisted competing sites: 15
+Rule result authority PASS
+raw-result consumers (all allowlisted with reason): 1
+exit=0
+```
 
 ### 6.3 回滚
 
@@ -220,8 +270,10 @@
 1. 5B（#2498）已合入 `f1cf77b13`。
 2. B1（#2501）已合入 `09a12057f`。
 3. B2（#2508，缩窄为 §3.2.2 单项）已合入 `389477ad1`。
-4. B3（#2518，head `0301f0f89`）已实施、待合入：`resolveHostToolSemanticsForHook()` + 三宿主接入。下一步：**B4 → B5**。B4 的盘点已完成，结论为"仍有生产调用，不删除"，因此 B4 收敛为"记录调用方清单"，不再有删除动作；B5 在 B3/B4 之后收口（其结构守卫需要 B3 的入口先落地）。
-5. 原"5B 未合入时 B1 可先开工"的分支建议已失效，保留仅作历史推理。
+4. B3（#2518）已合入 `746e55d47`：`resolveHostToolSemanticsForHook()` + 三宿主接入。
+5. B4 盘点完成（无删除动作）：调用方清单见 §8 第 2 条。
+6. B5（#2522 → `3858c6639`）已合入：结构守卫 + 契约守卫 + 文档，接入 `verify:merge`。B 系列至此收口。
+7. 原"5B 未合入时 B1 可先开工"的分支建议已失效，保留仅作历史推理。
 
 ---
 
@@ -230,7 +282,7 @@
 1. **B1 采用方案 A 还是方案 B**？我推荐 B（不新增 `verdict/reasons/evidence`，只补 `degraded` 并统一 fail-closed）。理由是方案 A 会制造与 `decision/reason/diagnostics` 同义的第二套词汇。
    【已裁定（由行动，2026-11-10）：采方案 B，PR #2501 已合入 `09a12057f`。】
 2. **B4 是否允许删除 legacy `core/rule-host.ts`**？需要先做调用方盘点；若仍有生产调用，本批只做显式契约，不删除。
-   【已盘点（2026-11-11）：**仍有生产调用，本批不删除**。调用链：`openclaw-plugin/src/core/workspace-context.ts:160-167`（`getRuleHost()` 构造 `RuleHost`）→ `openclaw-plugin/src/hooks/gate.ts:109`（`handleBeforeToolCall`）← `openclaw-plugin/src/index.ts:507`（`onBeforeToolResult` 在共享结果 `auto_correct` / `requireApproval` 时回退 legacy 路径）。因此 B4 的交付物是这份调用方清单，不是删除提交。】
+   【已盘点（2026-11-11，B5 合并后复核行号）：**仍有生产调用，本批不删除**。调用链：`openclaw-plugin/src/core/workspace-context.ts:160-162`（`getRuleHost()` 构造 `RuleHost`）→ `openclaw-plugin/src/hooks/gate.ts:110`（`handleBeforeToolCall`）← `openclaw-plugin/src/index.ts:507`（`onBeforeToolResult` 在共享结果 `auto_correct` / `requireApproval` 时回退 legacy 路径）。因此 B4 的交付物是这份调用方清单，不是删除提交。】
 3. **B2 是否允许"验证后取消"**？如果 `withDerivedHints` 已让 `canonicalKind` 胜出，我建议直接取消该批，不为了计划完整性写代码。
    【已裁定（由行动，2026-11-11）：`withDerivedHints` 实测是显式提示胜出（`options.isBashTool ?? derived`），缺口真实存在，故 B2 保留但缩窄为 §3.2.2 单项（PR #2508）；§3.2.1 / §3.2.3 验证后取消。】
 
