@@ -26,6 +26,13 @@ import {
   adjudicateDecision,
 } from '../../../packages/host-runtime/dist/adaptive-decision-protocol.js';
 import {decideAdaptiveSkip} from '../../../packages/host-runtime/dist/adaptive-skip-decision.js';
+import {
+  assertFreshResults,
+  claimApproval,
+  claimRecord,
+  reserveRequest,
+  verifyApproval,
+} from './approval-gate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..');
@@ -34,6 +41,8 @@ const CASES_FILE = path.join(REPORT_DIR, 'cases.json');
 const OVERRIDES_FILE = path.join(REPORT_DIR, 'isolated-config.yaml');
 const HOOK = path.join(ROOT, 'packages', 'codex-adapter', 'dist', 'pd-hook.js');
 const PRELOAD = path.join(HERE, 'fake-decisions.mjs');
+const RESULTS_FILE = path.join(REPORT_DIR, 'results.json');
+const CLAIM_FILE = path.join(REPORT_DIR, 'approval-claim.json');
 const CHARS_PER_TOKEN = 32;
 
 const approvalIndex = process.argv.indexOf('--approved');
@@ -149,34 +158,55 @@ for (const entry of skipCases) {
     String(skip.reason));
 }
 
-// ── 3. Approved mode: verify the binding BEFORE any real request ────────────
+// ── 3. Approved mode: bind the approval, claim it, THEN send ────────────────
 const head = git(['rev-parse', 'HEAD']);
 const tree = git(['rev-parse', 'HEAD^{tree}']);
+const isolatedConfigSha256 = sha256(OVERRIDES_FILE);
 const binding = {
   codeHead: head,
   treeHash: tree,
   manifestSha256,
-  isolatedConfigSha256: sha256(OVERRIDES_FILE),
+  isolatedConfigSha256,
   route,
-  envelope: cases.envelope,
-  criteria: cases.criteria,
-  requestBudget: cases.requestBudget,
-  expiresAt: cases.expiresAt,
+  envelopeTotalMs: cases.envelope.totalMs,
+  criteriaVersion: cases.criteria.version,
+  cardExpiresAt: cases.expiresAt,
+  maxRequests: cases.requestBudget.total,
 };
 let approval = null;
+let approvalSha256 = null;
+let claim = null;
 if (MODE === 'approved') {
+  approvalSha256 = sha256(path.resolve(APPROVAL_FILE));
   approval = JSON.parse(fs.readFileSync(path.resolve(APPROVAL_FILE), 'utf8'));
-  check('approval is not expired', Date.parse(approval.expiresAt) > Date.now(), approval.expiresAt);
-  check('approval binds this head', approval.codeHead === head, `${approval.codeHead} != ${head}`);
-  check('approval binds this tree', approval.treeHash === tree, `${approval.treeHash} != ${tree}`);
-  check('approval binds this manifest', approval.manifestSha256 === manifestSha256, approval.manifestSha256);
-  check('approval binds the request cap', approval.maxRequests === cases.requestBudget.total, String(approval.maxRequests));
+  const verdict = verifyApproval({approval, binding});
+  for (const problem of verdict.problems) {
+    problems.push(`${problem.code}${problem.field ? `:${problem.field}` : ''}`
+      + `${problem.approved === undefined ? '' : ` approved=${String(problem.approved)}`}`
+      + `${problem.actual === undefined ? '' : ` actual=${String(problem.actual)}`}`);
+  }
   check('API key is present', Boolean(process.env[route.apiKeyEnv]), route.apiKeyEnv);
+  const fresh = assertFreshResults(RESULTS_FILE);
+  check('no earlier results artifact', fresh.ok, fresh.resultsPath);
   if (problems.length > 0) {
     console.error('REFUSING to send real requests:');
     for (const problem of problems) console.error(` - ${problem}`);
     process.exit(2);
   }
+  claim = claimRecord({
+    approvalSha256,
+    approvalFile: path.basename(APPROVAL_FILE),
+    binding,
+    caseIds: cases.cases.map((entry) => entry.id),
+    maxRequests: cases.requestBudget.total,
+  });
+  const claimed = claimApproval({claimPath: CLAIM_FILE, record: claim});
+  if (!claimed.ok) {
+    console.error(`REFUSING to send real requests: ${claimed.reason} at ${claimed.claimPath}`);
+    console.error('One approval authorises one batch. A new batch needs a new approval and a new card.');
+    process.exit(2);
+  }
+  console.log(`approval claimed: ${CLAIM_FILE}`);
 }
 
 // ── 4. Drive the built subprocess ────────────────────────────────────────────
@@ -189,6 +219,7 @@ const counts = () => fs.readFileSync(countFile, 'utf8').split('\n').filter(Boole
 function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores}) {
   const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
   fs.writeFileSync(configPath, yaml.dump(configFor(budgetChars, adaptive)), 'utf8');
+  const configSha256 = sha256(configPath);
   const env = {...process.env, CODEX_HOME: path.join(workspaceDir, 'codex-home')};
   env[route.apiKeyEnv] = MODE === 'preflight' ? 'preflight-no-network' : process.env[route.apiKeyEnv];
   if (MODE === 'preflight') {
@@ -239,6 +270,7 @@ function runHook({workspaceDir, prompt, adaptive, budgetChars, fakeScores}) {
     diagnostic,
     scores,
     wallClockMs,
+    configSha256,
     stderr,
     requestLatencyMs: end && diagnostic.requestSentAt
       ? Number(end) - Number(diagnostic.requestSentAt)
@@ -262,10 +294,27 @@ async function prepareCase(entry) {
 }
 
 const deliveryText = candidateText(cases.candidates.DELIVERY);
+const cap = cases.requestBudget.total;
+let sentSoFar = 0;
 for (const entry of cases.cases) {
   const {dir, budgetChars} = await prepareCase(entry);
+  const nativeBefore = counts();
   const native = runHook({workspaceDir: dir, prompt: entry.prompt, adaptive: false, budgetChars});
+  if (MODE === 'preflight') {
+    check(`${entry.id} Native arm sends nothing`, counts() === nativeBefore);
+  } else {
+    check(`${entry.id} Native arm reports zero sends`, (native.diagnostic.sends ?? '0') === '0',
+      native.diagnostic.sends);
+  }
   const before = counts();
+  if (entry.kind === 'decision') {
+    // Pre-send reservation: fail closed BEFORE the subprocess can open a socket.
+    const reserved = reserveRequest({sentSoFar, cap, caseId: entry.id});
+    if (!reserved.ok) {
+      fail(`REFUSING to send real requests: ${reserved.reason} at ${entry.id} `
+        + `(already sent=${sentSoFar}, cap=${cap})`);
+    }
+  }
   const adaptive = runHook({
     workspaceDir: dir,
     prompt: entry.prompt,
@@ -276,6 +325,14 @@ for (const entry of cases.cases) {
   const sends = MODE === 'preflight'
     ? counts() - before
     : Number(adaptive.diagnostic.sends ?? Number.NaN);
+  if (!Number.isInteger(sends)) {
+    fail(`REFUSING to continue: ${entry.id} did not report a request count `
+      + `(${adaptive.diagnostic.sends ?? 'absent'})`);
+  }
+  if (sends > 1) {
+    fail(`REFUSING to continue: ${entry.id} sent ${sends} requests in one attempt (per-case cap is 1)`);
+  }
+  sentSoFar += sends;
 
   check(`${entry.id} sends`, sends === entry.expected.sends, `${sends} != ${entry.expected.sends}`);
   check(`${entry.id} exit status`, adaptive.status === 0, String(adaptive.status));
@@ -330,6 +387,7 @@ for (const entry of cases.cases) {
     cancelledAt: adaptive.diagnostic.cancelledAt ?? null,
     requestLatencyMs: adaptive.requestLatencyMs,
     wallClockMs: adaptive.wallClockMs,
+    configSha256: adaptive.configSha256,
     finalBody: entry.expected.finalBody,
     nativeIdentical: adaptive.additionalContext === native.additionalContext,
     additionalContext: adaptive.additionalContext,
@@ -344,11 +402,21 @@ if (MODE === 'preflight') {
     `${JSON.stringify({mode: MODE, ranAt: new Date().toISOString(), ...binding, fakeRequests: counts(), cases: results}, null, 2)}\n`,
     'utf8');
 } else {
-  check('no case exceeded one real request', results.every((entry) => entry.sends <= 1));
-  check('batch stayed inside the cap',
-    results.reduce((sum, entry) => sum + entry.sends, 0) <= approval.maxRequests);
-  fs.writeFileSync(path.join(REPORT_DIR, 'results.json'),
-    `${JSON.stringify({mode: MODE, ranAt: new Date().toISOString(), ...binding, approval, cases: results}, null, 2)}\n`,
+  check('batch stayed inside the approval cap', sentSoFar <= cap, `${sentSoFar} > ${cap}`);
+  check('the approval was claimed', claim !== null && fs.existsSync(CLAIM_FILE));
+  fs.writeFileSync(RESULTS_FILE,
+    `${JSON.stringify({
+      mode: MODE,
+      ranAt: new Date().toISOString(),
+      ...binding,
+      approvalFile: claim?.approvalFile ?? null,
+      approvalSha256,
+      claimFile: path.basename(CLAIM_FILE),
+      claim,
+      approval,
+      sends: sentSoFar,
+      cases: results,
+    }, null, 2)}\n`,
     'utf8');
 }
 
