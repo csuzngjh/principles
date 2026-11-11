@@ -208,12 +208,13 @@ export interface ExtractFilePathOptions {
   /** The tool name (used for synthetic path generation). */
   toolName?: string;
   /**
-   * PRI-634-F: canonical kind from the ToolSemanticRegistry. When provided,
-   * unspecified isBashTool/isWriteTool hints are DERIVED from it
-   * (execute→isBashTool, write→isWriteTool) so extraction behavior is a pure
-   * function of (toolName, params, projectDir, registry) — identical in
-   * replay and production. Explicit hints keep precedence for callers that
-   * classify with their own host dispatch surface.
+   * PRI-634-F: canonical kind from the ToolSemanticRegistry. When provided it
+   * is the SOLE authority for extraction hints (execute→isBashTool,
+   * write→isWriteTool) so extraction behavior is a pure function of
+   * (toolName, params, projectDir, registry) — identical in replay and
+   * production. Explicit isBashTool/isWriteTool hints are only consulted when
+   * no canonicalKind is supplied (callers with no registry): letting a coarse
+   * host Set override the registry made production disagree with replay (B2).
    */
   canonicalKind?: CanonicalKind;
 }
@@ -295,11 +296,15 @@ export function deriveToolHintsFromCanonicalKind(
 
 function withDerivedHints(options: ExtractFilePathOptions): ExtractFilePathOptions {
   if (options.canonicalKind === undefined) return options;
+  // B2: the registry kind is the single authority. An explicit hint is the
+  // coarse host-Set classification ("does this enter the gate at all"); when
+  // both are present the registry wins, otherwise production would extract a
+  // different path than replay resolves from the same event.
   const derived = deriveToolHintsFromCanonicalKind(options.canonicalKind);
   return {
     ...options,
-    isBashTool: options.isBashTool ?? derived.isBashTool,
-    isWriteTool: options.isWriteTool ?? derived.isWriteTool,
+    isBashTool: derived.isBashTool,
+    isWriteTool: derived.isWriteTool,
   };
 }
 

@@ -1,5 +1,45 @@
 # create-principles-disciple
 
+## 1.150.0
+
+### Minor Changes
+
+- f1cf77b: `pd runtime activation promote` and the Console activation page now show why a
+  promotion is not ready, check by check (5B).
+  
+  - CLI text output prints a `Criteria:` block: `[PASS]` / `[FAIL]` / `[----]`
+    per check id with its reason code, plus evidence rows such as
+    `shadow_observed: 19 / 20 (shortfall 1)`. `[----]` is used for
+    `not_evaluated`, so an unrun check is never displayed as a pass.
+  - CLI `--json` output includes the same `criteria[]` array on both the
+    `would_promote` and refusal payloads.
+  - Console renders the hard checks and an "evidence shortfall" block from the
+    same read-only projection; the UI does not compute thresholds itself and no
+    new write path is introduced. Missing `criteria` remains valid for older
+    payloads, and malformed entries are rejected rather than rendered.
+  - zh-CN and en-US strings are added for `not_evaluated` and the evidence rows.
+  
+  Minor: the CLI machine-readable payload grows a field and the command's text
+  output changes. No exit code or readiness threshold changes.
+
+### Patch Changes
+
+- 59a2370: 修复三宿主更新一致性：升级与首装都会覆盖本机已安装的宿主，Codex 插件载荷与 PLUGIN_DATA 运行时原地对齐（无需卸载重装），并让 `pd-status` 如实报出载荷、运行时与市场源 checkout 的漂移。
+  
+  - 安装器新增 `detectInstalledHosts` / `planUpgradeHosts`：按已有安装清单与宿主注册事实（OpenClaw 扩展目录、Codex marketplace 注册与缓存、WorkBuddy 插件注册表）判定已安装宿主，升级与首装都纳入刷新范围；新发现的宿主显式打印一行提示，不静默多改。
+  - 安装结束输出逐宿主摘要 `Install summary:`，并写入 `InstallResult.hostSummary`：这次实际动过的宿主、落到的运行时版本与配置动作；未触碰的宿主不出现。
+  - Codex：当插件载荷 pin 落后于规范运行时，用 `codex plugin add` 原地刷新载荷（Codex 缓存据此发现新版本），再由 `pd-setup.cjs` 把 PLUGIN_DATA 运行时对齐到自身 pin；失败时给出 `manualActionRequired` 与 `codex plugin add` 下一步，不再建议卸载。
+  - `pd-status` 快照检查：载荷 pin 落后已安装发布、或本地 marketplace 源 checkout 落后 `origin/main` 时报 degraded 并给出可执行的下一步，不再在源已落后时谎报「与市场源一致」。
+- 0afc6b3: SPEC-PD-AGENT-PAIN-INGRESS-001 v0.8：Agent 痛点入口四阶段落地。
+  
+  - 阶段 1：Core Pain Submit Capability、anchor 校验、统一 Origin/Provenance；`evaluatePainIngress()` 增加 MCP 专用分支并排在通用 Unbound 分支之前。
+  - 阶段 2：MCP `pd_submit_pain` 契约面；超时返回 `submit_unconfirmed`，并以 `taskId = diagnosis_<painId>` 做限时只读回查（found/not_found/read_error），不取消写入、不自动重投。
+  - 阶段 3：四类写入点统一 `DEFAULT_PAIN_SCORE = 40`（`moderate`）；MCP 路径恢复 Observability，`pain_events` 可见。
+  - 阶段 4：Console L2/L2b；OpenClaw tick 增加 L3 自动诊断（每轮最多 1 个，失败保留 pending，flag `openclaw_diagnostician_consumer` 可关）；安装器废弃旧 `pd-record-pain` skill（仅重命名字节命中已发布载荷的副本，用户修改副本保留并告警）。
+  
+  MCP 写能力仍受 OG-4 门禁约束：生产入口不开启，`tools/list` 不含 `pd_submit_pain`。
+- 09a1205: B1：非法的 RuleHostResult 统一 fail-closed 归一化。新增可选 `degraded` 标记与 `normalizeRuleHostResult()`：无法读取的规则输出不再被静默丢弃（此前 production gate 记 warning 后 continue，可能被其它规则的 allow 覆盖），而是归一化为带 `degraded.reasonCode='invalid_result'` 的 `requireApproval`，继续保持脱敏可见（warning / unhealthy 证据）。`matched=false` 仍表示“无意见”，由归一化函数单点应用既有 PRI-439 语义。合法结果原样透传，默认行为与阈值不变。注意：本次只到共享门 / legacy 评估器的裁决契约层；宿主是否会因此拦截调用仍取决于宿主能力（OpenClaw 目前只记录 `requireApproval` 事件，Codex 只读取 `metadata.ruleDecision`），本变更不新增宿主拦截。
+
 ## 1.149.0
 
 ### Minor Changes
