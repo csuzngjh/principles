@@ -53,7 +53,15 @@ function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): str
       ? 'skipped'
       : 'degraded';
   const failures = line.failures.length > 0 ? line.failures.join('|') : 'none';
-  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} failures=${failures}`
+  // rc-8: bounded score projection — ids are `c1..cN` / `insufficient_context`,
+  // never prompt text, and at most 16 entries reach the line.
+  const scores = line.decision === null
+    ? 'none'
+    : Object.entries(line.decision.scores).slice(0, 16).map(([id, value]) => `${id}=${value}`).join(',');
+  const decision = line.decision === null
+    ? 'unknown'
+    : `${line.decision.status}:${line.decision.reason}:${line.decision.ref ?? 'none'}`;
+  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} decision=${decision} scores=${scores} failures=${failures}`
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_DIAGNOSTIC * 2);

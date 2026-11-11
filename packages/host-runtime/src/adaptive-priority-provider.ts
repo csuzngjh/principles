@@ -125,6 +125,13 @@ export interface AdaptiveSelectionDiagnosticLine {
   readonly modelObserved: string | null;
   /** Observed response provider; null when absent or no body was parsed. */
   readonly providerObserved: string | null;
+  /** Bounded local adjudication evidence (ids only, never prompt text). */
+  readonly decision: {
+    readonly status: string;
+    readonly ref: string | null;
+    readonly reason: string;
+    readonly scores: Readonly<Record<string, number>>;
+  } | null;
   readonly failures: readonly string[];
 }
 
@@ -213,6 +220,7 @@ export function createAdaptivePriorityProvider(
         finishReason: 'skipped',
         modelObserved: null,
         providerObserved: null,
+        decision: null,
         failures: [],
       });
       return undefined;
@@ -252,6 +260,7 @@ export function createAdaptivePriorityProvider(
       finishReason: outcome.diagnostics.finishReason,
       modelObserved: outcome.diagnostics.modelObserved,
       providerObserved: outcome.diagnostics.providerObserved,
+      decision: outcome.diagnostics.decision,
       failures: [...outcome.diagnostics.failures],
     });
     if (outcome.status !== 'selected' || !outcome.target) return undefined;

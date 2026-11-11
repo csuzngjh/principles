@@ -129,6 +129,16 @@ export interface AdaptiveSelectionDiagnostics {
   /** Response provider label observed; null both before parsing and when absent. */
   providerObserved: string | null;
   usage: {inputTokens: number | null; outputTokens: number | null} | null;
+  /**
+   * Local adjudication of the independent condition scores. Bounded: question
+   * ids are `c1..cN` plus `insufficient_context`, never prompt text.
+   */
+  decision: {
+    status: string;
+    ref: string | null;
+    reason: string;
+    scores: Readonly<Record<string, number>>;
+  } | null;
   failures: AdaptiveFailureCode[];
 }
 
@@ -221,6 +231,16 @@ interface EmptyDiagnostics {
   modelObserved: string | null;
   providerObserved: string | null;
   usage: {inputTokens: number | null; outputTokens: number | null} | null;
+  /**
+   * Local adjudication of the independent condition scores. Bounded: question
+   * ids are `c1..cN` plus `insufficient_context`, never prompt text.
+   */
+  decision: {
+    status: string;
+    ref: string | null;
+    reason: string;
+    scores: Readonly<Record<string, number>>;
+  } | null;
   failures: AdaptiveFailureCode[];
 }
 
@@ -239,6 +259,7 @@ function emptyDiagnostics(admissionDeadlineAt: number): EmptyDiagnostics {
     modelObserved: null,
     providerObserved: null,
     usage: null,
+    decision: null,
     failures: [],
   };
 }
@@ -474,7 +495,14 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
         return fail('SELECTION_EXPIRED');
       }
       diagnostics.finishReason = 'decisions';
-      return adjudicateDecision(validated.scores, input.candidates);
+      const outcome = adjudicateDecision(validated.scores, input.candidates);
+      diagnostics.decision = {
+        status: outcome.status,
+        ref: outcome.ref,
+        reason: outcome.reason,
+        scores: validated.scores,
+      };
+      return outcome;
     } finally {
       if (completionTimer) clearTimeout(completionTimer);
     }
