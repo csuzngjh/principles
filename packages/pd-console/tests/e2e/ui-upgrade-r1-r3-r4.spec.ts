@@ -282,10 +282,13 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     expect(text).toContain('部分资料暂未读取，当前列表可能不完整。');
     const listed = await page.getByTestId('owner-work-item').count();
     expect(text).toContain(`${listed} 项`);
-    // The server's own reason + nextAction are shown as the recovery entry.
+    // The server's own reason is localized to Owner language (SPEC §5.1 /
+    // 1A language pass: no raw English sentence reaches the page); nextAction
+    // stays as the recovery entry.
     const degraded = page.locator('[data-testid="focus-conclusion-degraded"]');
     await expect(degraded).toBeVisible();
-    expect(await degraded.innerText()).toContain('principle ledger unavailable');
+    expect(await degraded.innerText()).toContain('原则账本暂时不可用');
+    expect(await degraded.innerText()).not.toContain('principle ledger unavailable');
     expect(await degraded.innerText()).toContain('检查原则账本文件。');
   });
 

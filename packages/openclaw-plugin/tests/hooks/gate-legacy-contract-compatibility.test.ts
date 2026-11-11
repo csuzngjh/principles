@@ -2,11 +2,19 @@
  * P1 (2026-08-20): Compatibility Guard semantic isolation through the REAL
  * gate hook path.
  *
- * RuleHost → gate.ts → final OpenClaw result, using REAL SQLite (legacy LIVE
- * activation) and the REAL WorkspaceContext / EventLogService / session-tracker
- * — no RuleHost / event / context / session mocks. This closes the wiring gap
- * between the already-correct RuleHost.evaluateDetailed() unit coverage and the
- * actual OpenClaw hook behavior.
+ * PR-1 (legacy RuleHost retirement): `handleBeforeToolCall` has no production
+ * wiring anymore. The guard now runs exactly where it runs live —
+ * createProductionRuleHostGate (real SQLite activation → real RuleCode loader →
+ * compatibility scan) → handleSharedRuleHostResult (adapter accounting) — so
+ * the assertions moved one layer up with the decision owner. A skip is observed
+ * as the gate result's structured `legacy_rule_contract_dependency` warning
+ * instead of a persisted `rulehost_skipped` event; a deny is observed as
+ * `decision: 'deny'` instead of a `{ block, blockReason }` hook result.
+ *
+ * REAL SQLite (legacy LIVE activation) and the REAL WorkspaceContext /
+ * EventLogService / session-tracker — no RuleHost / event / context / session
+ * mocks. This closes the wiring gap between the already-correct
+ * RuleHost.evaluateDetailed() unit coverage and the actual hook behavior.
  *
  * The fail-closed block caused by an incompatible persisted RuleCode (the
  * RuleCode was NEVER executed) is a RUNTIME compatibility guard, not Principle
@@ -32,7 +40,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, SqliteActivationStateStore, getDefaultPdConfig } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { createProductionRuleHostGate } from '@principles/host-runtime';
+import type { HostEvent, HostEventResult } from '@principles/core/host';
+import { handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallResult } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
@@ -120,15 +130,28 @@ function writeConfig(flags: { ledger: boolean }): void {
   fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'config.yaml'), yaml.dump(cfg));
 }
 
-function runGate(toolName: string, params: Record<string, unknown>, sessionId: string): PluginHookBeforeToolCallResult | void {
-  return handleBeforeToolCall(
+async function runSharedGate(
+  toolName: string,
+  params: Record<string, unknown>,
+  sessionId: string,
+): Promise<{ gateResult: HostEventResult; handled: PluginHookBeforeToolCallResult | void }> {
+  const event: HostEvent = {
+    kind: 'before_tool_call',
+    context: { workspaceDir: tempWorkspaceDir, sessionId, toolName },
+    rawPayload: { toolInput: { toolName, params } },
+    source: 'openclaw:before_tool_call',
+  };
+  const gateResult = await createProductionRuleHostGate()(event);
+  const handled = handleSharedRuleHostResult(
     { toolName, params },
     {
       workspaceDir: tempWorkspaceDir,
       sessionId,
       logger: { warn: () => undefined, error: () => undefined, info: () => undefined },
     },
+    gateResult,
   );
+  return { gateResult, handled };
 }
 
 function bufferedEvents() {
@@ -172,7 +195,13 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-a')).toBeUndefined();
+    const { gateResult } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-a');
+
+    // Fail open: the incompatible activation is skipped, so the tool call passes.
+    expect(gateResult.decision).toBe('allow');
+    expect(gateResult.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining('legacy_rule_contract_dependency')]),
+    );
   });
 
   it('Test A2: the RuleHost report carries a structured skipped activation', async () => {
@@ -211,8 +240,9 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     const before = getSession('sess-b-block');
     expect(before?.blockedAttempts).toBe(0);
 
-    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-b-block')).toBeUndefined();
+    const { handled } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-b-block');
 
+    expect(handled).toBeUndefined();
     const after = getSession('sess-b-block');
     expect(after?.blockedAttempts).toBe(0);
 
@@ -224,7 +254,9 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-c')).toBeUndefined();
+    const { handled } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-c');
+
+    expect(handled).toBeUndefined();
 
     // The pain pipeline is only reachable through recordGateBlockAndReturn,
     // which is never called: no gate_block event, and no pain_detected ever
@@ -245,14 +277,21 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-d')).toBeUndefined();
+    const { gateResult, handled } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-d');
 
-    // No rule_enforced event (the Principle never ran) — the audit trail is
-    // preserved via rulehost_evaluated + rulehost_skipped instead.
+    expect(handled).toBeUndefined();
+
+    // No rule_enforced event (the Principle never ran). The skip stays
+    // observable on the shared path: the structured warning on the gate result
+    // plus the no_rules_armed evaluation row. (The legacy route persisted a
+    // dedicated rulehost_skipped event; the shared gate has none — retirement
+    // marker, the skip fact itself is not lost.)
     const types = bufferedEvents().map((e) => e.type);
     expect(types).toContain('rulehost_evaluated');
-    expect(types).toContain('rulehost_skipped');
     expect(types).not.toContain('rule_enforced');
+    expect(gateResult.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining('legacy_rule_contract_dependency')]),
+    );
 
     // No principle application row of any kind (ledger is ON, so this is real).
     const count = (sqliteConn.getDb()
@@ -265,11 +304,11 @@ describe('compatibility guard: RuleHost → gate → OpenClaw result (real SQLit
     insertRuleArtifact(LEGACY_ARTIFACT_ID, LEGACY_RULE_ID, LEGACY_RECENT_THINKING_CODE);
     await insertLiveActivation(LEGACY_ACTIVATION_ID, LEGACY_ARTIFACT_ID, LEGACY_RULE_ID);
 
-    expect(runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-e')).toBeUndefined();
-    const skipped = bufferedEvents().find((event) => event.type === 'rulehost_skipped');
-    expect(skipped).toBeDefined();
-    expect(JSON.stringify(skipped)).toContain('legacy_rule_contract_dependency');
-    expect(JSON.stringify(skipped).toLowerCase()).toContain('deactivate');
+    const { gateResult } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-e');
+    const warning = (gateResult.warnings ?? []).find((entry) => entry.includes('legacy_rule_contract_dependency'));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('legacy_rule_contract_dependency');
+    expect(warning?.toLowerCase()).toContain('deactivate');
   });
 });
 
@@ -282,10 +321,13 @@ describe('non-regression: normal RuleHost block behavior is unchanged', () => {
     insertRuleArtifact(NORMAL_ARTIFACT_ID, NORMAL_RULE_ID, NORMAL_BLOCK_CODE);
     await insertLiveActivation(NORMAL_ACTIVATION_ID, NORMAL_ARTIFACT_ID, NORMAL_RULE_ID);
 
-    const result = runGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-normal') as PluginHookBeforeToolCallResult;
+    const { gateResult, handled } = await runSharedGate('write', { path: '/etc/passwd', content: 'x' }, 'sess-normal');
 
-    expect(result.block).toBe(true);
-    expect(result.blockReason).toContain('NORMAL_PRINCIPLE_BLOCK');
+    // The deny is returned as a block result carrying the owner-facing copy
+    // (PRI-1184 / F4); accounting is unchanged.
+    expect(gateResult.decision).toBe('deny');
+    expect(gateResult.reason).toContain('NORMAL_PRINCIPLE_BLOCK');
+    expect(handled?.block).toBe(true);
 
     // Behavioral path entered: rule_enforced + gate_block events.
     const types = bufferedEvents().map((e) => e.type);

@@ -25,7 +25,6 @@ import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
 import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
-import { IS_DEV } from "../../utils/runtime-mode.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime';
 import type {
   PrincipleDetail,
@@ -536,18 +535,29 @@ export function PrincipleDetailPage() {
         <Button variant="ghost" onClick={() => navigate(returnTo)} className="-ml-2">
           ← {t("principles.detail.backToList")}
         </Button>
-        {/* SPEC-PD-EXAMINER-001 v0.9 §8.1: verification entry FROM the principle.
+        {/* SPEC-PD-EXAMINER-001 §8.1: verification entry FROM the principle.
             The Examiner page reads the ?principle= prefill (offline-stub only).
-            P2-1: DEV-only — a production bundle must not advertise a surface
-            whose API the server refuses. */}
-        {IS_DEV && (
+            Phase A1: available in production builds, but only for the status
+            the evaluation API actually accepts (active). Other statuses get a
+            reason instead of an entry that would be refused server-side. */}
+        {principle.status === 'active' ? (
           <Link
             to={`/examiner?principle=${encodeURIComponent(String(id ?? ''))}`}
             className="text-[13px] text-ink-3 underline decoration-dotted underline-offset-4 hover:text-ink"
             data-testid="principle-detail-examiner-link"
           >
-            {t("principles.detail.examinerEntry", { defaultValue: "验证此原则的行为效果 (Examiner)" })}
+            {t("principles.detail.examinerEntry", { defaultValue: "Evaluate this principle's behavioral effect" })}
           </Link>
+        ) : (
+          <span
+            className="text-[13px] text-ink-3"
+            data-testid="principle-detail-examiner-blocked"
+          >
+            {t("principles.detail.examinerEntryBlocked", {
+              defaultValue: "Only active principles can be evaluated (current status: {{status}}).",
+              status: principle.status,
+            })}
+          </span>
         )}
       </div>
 
@@ -631,7 +641,7 @@ export function PrincipleDetailPage() {
                   </p>
                   {learnedTruncated && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
                   <p className="mt-1 text-ink-4 text-[12px]">
-                    {t("principles.detail.ownerDecision.sourceTierLabel", {
+                    {t("principles.detail.ownerDecision.sourceTier", {
                       defaultValue: "来源：{{tier}}（未经改写）",
                       tier: t(`principles.detail.ownerDecision.tier.${ownerDecision.learnedPrinciple.value.sourceTier}`, { defaultValue: ownerDecision.learnedPrinciple.value.sourceTier }),
                     })}
@@ -669,7 +679,7 @@ export function PrincipleDetailPage() {
               )}
               <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
               <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.decision", { defaultValue: "你的决定" })}
+                {t("principles.detail.ownerDecision.decision", { defaultValue: "您的决定" })}
               </p>
               {ownerDecision.availableActions.length === 0 && (
                 <p className="mt-1 text-ink-3 text-[13px]">
@@ -1464,7 +1474,7 @@ export function PrincipleDetailPage() {
           {hasRules && !lifecycle && (
             <div className="mt-6 pt-4 border-t border-line">
               <p className="text-ink-3 text-[13px]">
-                {t("principles.detail.lifecycleLoadFailed", { defaultValue: "无法加载生命周期指标。你可以稍后重试。" })}
+                {t("principles.detail.lifecycleLoadFailed", { defaultValue: "无法加载生命周期指标。您可以稍后重试。" })}
               </p>
             </div>
           )}

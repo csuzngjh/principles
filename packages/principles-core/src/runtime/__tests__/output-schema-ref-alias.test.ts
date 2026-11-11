@@ -32,8 +32,11 @@ const CONTRACTS: readonly (readonly [string, string])[] = [
 ];
 
 describe('PRI-1104 output schema ref aliases', () => {
-  it('PRI-1139/PRI-1146: registry owns exactly the 13 version-neutral canonical keys', () => {
-    expect(OUTPUT_SCHEMA_REGISTRY.size).toBe(CONTRACTS.length + 1);
+  it('PRI-1139/PRI-1146/S5: registry owns exactly the 14 version-neutral canonical keys', () => {
+    // 12 aliased contracts + `diagnostician-output` (pair removed by PRI-1146)
+    // + `adaptive-selection-output` (Phase-1 S5; no versioned spelling ever
+    // existed, so it deliberately has no alias pair).
+    expect(OUTPUT_SCHEMA_REGISTRY.size).toBe(CONTRACTS.length + 2);
     for (const [neutral, versioned] of CONTRACTS) {
       expect(OUTPUT_SCHEMA_REGISTRY.has(neutral), neutral).toBe(true);
       // The versioned spelling is compat-read-only: it resolves through the
@@ -41,6 +44,7 @@ describe('PRI-1104 output schema ref aliases', () => {
       expect(OUTPUT_SCHEMA_REGISTRY.has(versioned), versioned).toBe(false);
     }
     expect(OUTPUT_SCHEMA_REGISTRY.has('diagnostician-output')).toBe(true);
+    expect(OUTPUT_SCHEMA_REGISTRY.has('adaptive-selection-output')).toBe(true);
   });
 
   it('the alias table has exactly one forward and one reverse entry per contract — no stray refs', () => {

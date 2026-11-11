@@ -645,6 +645,26 @@ export class CodexHostInstaller implements HostInstaller {
       }
       payloadRefreshed = true;
       notes.push(`payload refreshed ${marketplace.version} → ${current.version}`);
+      // The refresh can only serve what the Marketplace SOURCE carries. When
+      // the source checkout itself trails the installed release, `codex plugin
+      // add` succeeds without moving the payload forward — reporting success
+      // there would be the false comfort this reconcile exists to remove
+      // (rc-9; update-chain promise: one upgrade brings every host forward).
+      const pinAfterRefresh = readPinnedRuntimeCohort(current.versionDir);
+      if (pinAfterRefresh === undefined || isRuntimeCohortBehind(pinAfterRefresh, canonical)) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configAction: 'skipped',
+          manualActionRequired: true,
+          reason: `The in-place payload refresh completed, but the Marketplace payload is still behind the PD release being installed`
+            + `${pinAfterRefresh === undefined
+              ? ` (runtime pin unreadable at ${current.versionDir} after the refresh)`
+              : ` (pinned ${describeRuntimeCohort(pinAfterRefresh)} < ${describeRuntimeCohort(canonical)})`}`
+            + `. The Marketplace source it serves is itself behind and must be updated first.`,
+          nextAction: `Update the Marketplace source checkout (git pull), then re-run the installer — the payload refresh and the pinned-runtime alignment run again in place (no uninstall needed).`,
+        };
+      }
     } else {
       notes.push(`payload ${current.version} is current for the installed PD release`);
     }

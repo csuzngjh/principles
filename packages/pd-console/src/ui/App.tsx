@@ -71,7 +71,7 @@ function AuthenticatedShell({ children, featureFlags }: { children: React.ReactN
         id="main-content"
         tabIndex={-1}
         data-testid="main-content"
-        className="min-h-screen overflow-y-auto pt-14 lg:pt-0 lg:ml-[256px] focus:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gov"
+        className="min-h-screen overflow-y-auto pt-14 lg:pt-0 lg:ml-[256px] [scroll-padding-bottom:13rem] focus:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gov"
       >
         {children}
       </main>
@@ -94,7 +94,10 @@ function AuthRoutes() {
 
   const verifyAuth = useCallback(async () => {
     const valid = await checkAuth();
-    setAuthed(valid);
+    // `null` = the server did not answer at all. That is not evidence of a
+    // missing token: enter the shell and let each page render its own
+    // unreachable state (with retry) instead of a token form that cannot work.
+    setAuthed(valid ?? true);
   }, []);
 
   useEffect(() => {

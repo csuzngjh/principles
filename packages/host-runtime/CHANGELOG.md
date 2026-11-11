@@ -1,5 +1,40 @@
 # @principles/host-runtime
 
+## 3.4.1
+
+### Patch Changes
+
+- c75aaf3: 内置代理 pi-ai 调用层第一阶段稳定性修复。
+  
+  - 取消真正中止在途请求：run 级 `AbortController`，超时与取消共用同一 signal，`cancelRun()` 不再只改状态。
+  - 统一时间预算：修复调用继承 run 剩余预算，剩余不足 1s 直接跳过并留痕，不再各自拿新的 60s。
+  - 传输重试交给 pi-ai 内建重试（`maxRetries` + `maxRetryDelayMs = 30s`），PD 仅保留输出预算下调阶梯，4xx 不再被重试。
+  - provider 错误按 HTTP 状态码分类（401/403、400/422、408、429、5xx），遥测保留 `httpStatus` 与分类来源。
+  - 上下文先估算后调用、溢出可识别；删除 Artificer 的 5 万字符静默截断，改为按模型窗口推导裁剪并发出 `context_budget_trimmed` 留痕。
+  - 原则选择补上 `adaptive-selection-output` schema，缺 `id`/`digest` 的 `selected` 答案由适配器拒绝，失败码映射为 `SELECTION_OUTPUT_INVALID`。
+- 96d8a69: 收敛 OpenClaw 对同一 tool call 的二次评估，行为对齐共享门。
+  
+  - `@principles/host-runtime`（patch）：共享门对非阻断判决（`auto_correct` / `requireApproval` / 普通放行）在 `metadata` 中补齐 `matched` / `ruleId` / `principleId` / `ruleReason` / `correctionProposal`。适配器据此可直接记录并应用共享门已经得出的判决，无需为同一 tool call 再评估一次。全部为新增可选字段，未消费这些键的适配器行为不变；`allow` / `deny` 的最终判定口径未改。
+  - `principles-disciple`（patch）：OpenClaw 适配层在共享门给出 `auto_correct` / `requireApproval` 后不再回落到 legacy `handleBeforeToolCall` 重新评估同一 tool call，非阻断判决的记录与应用改由共享 handler 使用上述元数据完成。这是同一输入的内部一致性修正（消除重复评估及其潜在的观测差异），不新增对外接口，也不改变阻断/放行的判定语义。
+  - `create-principles-disciple`（patch）：安装器打包 OpenClaw 插件载荷（C4 装配边），插件行为修正需要随安装器一起发布；无安装器侧逻辑改动，仅随载荷刷新版本。
+  
+  级别判定理由：三处改动都不新增宿主可见能力、不改变 `HostEventResult.decision` 的语义、不新增配置或开关；只消除同一 tool call 的第二次评估并把既有判决事实透出给适配器。`create-principles-disciple` 的 patch 由仓库 C4 装配规则要求（`principles-disciple` release 必须同时 release 安装器），不是额外功能。按仓库 changeset 约定均属内部行为修正，故为 patch。若评审认为 `host-runtime` 的 metadata 增量应被视为对外契约扩展，可上调为 minor——本次按 patch 记录，理由如上。
+- Updated dependencies [c75aaf3]
+  - @principles/core@7.3.3
+
+## 3.4.0
+
+### Minor Changes
+
+- ce31128: PRI-1171 P1（工单①+②，行为零变化提取）：host-runtime 新增 `conversation-ingestion` seam——统一宿主轨迹摄取的唯一中立入口（`TranscriptSourceAdapter` 契约 + `runConversationIngestion` 五段管线 + 同意台账 v3 + 同意分层文本策略）；Codex 摄取管线平移接入（解码器/版本守卫/路径授权留 codex-adapter，旧导出名兼容 re-export 一个版本周期）。同意台账权威迁至 `<workspace>/.state/conversation-ingestion-consent.json`（按宿主分键），旧 `.pd/codex-ingestion-consent.json` 首读单向迁移并改名 `.superseded`（保留审计）；新增 `owner_directive` 决定通道（须带 evidenceRef）。行为锁定：codex-adapter 全量 379/379 通过（真实 fixtures 走迁移后生产路径）；seam 新增 37 测试（flag-off 零读/consent 门/守卫拒绝不落库/preIngest 失败保水位/malformed 提交后降级/incomplete-tail/TOCTOU/水位回缩/consent 迁移矩阵）。
+
+### Patch Changes
+
+- ecd68fa: Adaptive activation now skips selection deterministically before the candidate read: missing host-bound turn identity, a blank prompt, an exhausted hook budget, and pure social acknowledgements return the Native body with zero model requests. Substantive prompts and task continuations keep the existing single-send fast path; the default-off switch and Native fallback are unchanged.
+- ce31128: PRI-1171 P1 工单③：governance observation store 升 schema v4（additive）——`host_kind` 契约放宽为 `codex | workbuddy | openclaw`（应用层联合类型，DDL 不变），checkpoint upsert 改为 MAX 单调（`byte_offset`/`last_ordinal` 取最大值），防止 Stop 钩子与 worker catch-up 并发时后提交者把水位拉回导致重复解码与健康页抖动。v3 旧库下次打开自动升版本号，存量行零改写；新增测试覆盖版本迁移幂等、workbuddy 行写入读取、MAX 单调（低水位后到不回退）。
+- Updated dependencies [8de5b0a]
+  - @principles/core@7.3.2
+
 ## 3.3.1
 
 ### Patch Changes

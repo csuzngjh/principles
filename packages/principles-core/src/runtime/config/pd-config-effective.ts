@@ -249,8 +249,11 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     ...(userReuseEvaluation.timeoutMs !== undefined ? { timeoutMs: userReuseEvaluation.timeoutMs } : {}),
   };
 
-  // UI: use user config or default
-  const ui = userConfig.ui ?? { ...DEFAULT_UI };
+  // UI: use user config or default. The default fallback copies the nested
+  // `diagnostics` object too — a shallow spread would share it with DEFAULT_UI
+  // and let one caller's mode write leak into every later config in the
+  // process (same contamination class as P-ERR-124).
+  const ui = userConfig.ui ?? { diagnostics: { mode: DEFAULT_UI.diagnostics.mode } };
 
   // Principles: use user config or default (PRI-336)
   const principles = userConfig.principles ?? { outputLanguage: undefined };

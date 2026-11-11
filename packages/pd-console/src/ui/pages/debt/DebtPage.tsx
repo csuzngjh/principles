@@ -122,7 +122,7 @@ function DebtCard({
                   : "bg-danger/10 text-danger"
               }`}
             >
-              {isStagnant ? t("pages.focus.summaryStagnation") : t("pages.sidebar.debt")}
+              {isStagnant ? t("pages.focus.summaryStagnation") : t("components.sidebar.debt")}
             </span>
           </div>
 
@@ -132,8 +132,8 @@ function DebtCard({
               {item.text}
             </p>
             {item.triggerPattern && (
-              <p className="text-ink-3 text-[13px] font-mono leading-relaxed">
-                {t("principles.detail.triggerLabel", { defaultValue: "Trigger:" })} {item.triggerPattern}
+              <p className="text-ink-3 text-[13px] leading-relaxed">
+                {t("pages.debt.triggerLabel", { defaultValue: "触发条件：" })} {item.triggerPattern}
               </p>
             )}
           </div>
@@ -460,7 +460,7 @@ export function DebtPage() {
           {debtItems.length > 0 ? (
             <>
               <SectionTitle id="section-debt-list">
-                {t("pages.sidebar.debt")} ({debtItems.length})
+                {t("components.sidebar.debt")} ({debtItems.length})
               </SectionTitle>
               <div className="space-y-[14px]">
                 {debtItems.map((item) => (

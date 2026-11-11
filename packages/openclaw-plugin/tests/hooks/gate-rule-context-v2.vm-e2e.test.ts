@@ -2,15 +2,21 @@
  * PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 layer-3)
  *
  * PURPOSE: Verify the production hook runtime with REAL VM execution:
- *   validated fixture activation → recordToolCall → handleBeforeToolCall
- *   → buildProductionRuleContext → RuleHost.evaluate (real VM) → block/allow
+ *   validated fixture activation → recordToolCall
+ *   → OpenClaw production runtime (createOpenClawHostRuntime, the object
+ *     src/index.ts assembles) → buildProductionRuleContext → real VM → block/allow
+ *
+ * PR-1 (RuleHost retirement): the entry point was `handleBeforeToolCall`, which
+ * has no production wiring. The test now drives `dispatchBeforeToolCall` on the
+ * SAME runtime object index.ts registers, so the block/allow contract asserted
+ * here is the one the host actually receives.
  *
  * This is a runtime component test, not the generation/approval E2E. It uses
  * fixture artifacts deliberately and does not claim to validate that upstream chain.
  *   - Real TrajectoryDatabase (production schema)
  *   - Real loadPdConfigForPlugin (reads .pd/config.yaml)
  *   - Real buildProductionRuleContext
- *   - Real SqliteConnection + real RuleHost.evaluate (real VM subprocess)
+ *   - Real SqliteConnection + real evaluateBatch (real VM subprocess)
  *   - Real v2 rule code (read-before-write)
  *
  * ERR-025: E2E covers recordToolCall → before_tool_call → block
@@ -24,11 +30,12 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime';
-import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { buildRuleContextIfEnabled, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { createOpenClawHostRuntime } from '../../src/host-runtime/openclaw-host-runtime.js';
 
-// ── Mocks (non-RuleHost only; RuleHost runs real VM) ───────────────────────
+// ── Mocks (non-RuleHost only; the rule engine runs real VM) ────────────────
 
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn(() => ({ currentGfi: 0 })),
@@ -70,8 +77,8 @@ const SESSION_ID = 'vm-e2e-ctx-v2-session';
  *   - write_file + priorReadOfTarget === 'no' → block (spec §10.1 scenario 1)
  *   - otherwise → allow
  *
- * This rule reads input.context (v2 feature). When flag is OFF, gate.ts sets
- * context = undefined, and the rule falls through to allow (v1 zero-change).
+ * When the flag is OFF the shared gate suspends this v2 rule BEFORE the VM
+ * runs (it requires an available v2 context), so the write is allowed.
  */
 const V2_RULE_CODE = `
 function evaluate(input, helpers) {
@@ -197,6 +204,55 @@ afterEach(() => {
   teardownTempWorkspace();
 });
 
+/**
+ * The SAME runtime object src/index.ts assembles: production context provider,
+ * production shared-result handler, real node VM evaluator.
+ */
+function makeRuntime() {
+  return createOpenClawHostRuntime({
+    ruleContextProvider: (event, context, request) => buildRuleContextIfEnabled(
+      WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }),
+      request.targetPath,
+      context.sessionId,
+      context.logger,
+    ),
+    onBeforeToolResult: (event, context, result) => handleSharedRuleHostResult(
+      event,
+      { ...context, workspaceDir: context.workspaceDir, logger: context.logger },
+      result,
+    ),
+  });
+}
+
+function makeEvent(): PluginHookBeforeToolCallEvent {
+  return {
+    toolName: 'write',
+    params: { file_path: 'src/auth.ts', content: 'modified' },
+  } as PluginHookBeforeToolCallEvent;
+}
+
+function makeCtx(warn: (message: string) => void): PluginHookToolContext {
+  return {
+    workspaceDir: tempWorkspaceDir,
+    sessionId: SESSION_ID,
+    logger: { warn, info: () => {}, error: () => {} },
+  } as unknown as PluginHookToolContext;
+}
+
+function recordNonReadToolCall(): void {
+  const wctx = WorkspaceContext.fromHookContext({
+    workspaceDir: tempWorkspaceDir,
+    logger: { warn: () => {}, info: () => {}, error: () => {} },
+  } as unknown as Parameters<typeof WorkspaceContext.fromHookContext>[0]);
+  // History is non-empty, but the target path was never read.
+  wctx.trajectory.recordToolCall({
+    sessionId: SESSION_ID,
+    toolName: 'write',
+    outcome: 'success',
+    paramsJson: { file_path: 'src/other.ts', content: 'other' },
+  });
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 layer-3)', () => {
@@ -210,41 +266,24 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
     insertV2RuleArtifact();
     await insertActivation();
 
-    // 3. Get real WorkspaceContext (initializes TrajectoryDatabase)
-    const wctx = WorkspaceContext.fromHookContext({
-      workspaceDir: tempWorkspaceDir,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as unknown as Parameters<typeof WorkspaceContext.fromHookContext>[0]);
+    // 3. Record a NON-read tool call (history non-empty, target not read)
+    recordNonReadToolCall();
 
-    // 4. Record some NON-read tool call (so history is non-empty but target not read)
-    wctx.trajectory.recordToolCall({
-      sessionId: SESSION_ID,
-      toolName: 'write',
-      outcome: 'success',
-      paramsJson: { file_path: 'src/other.ts', content: 'other' },
-    });
-
-    // 5. Call handleBeforeToolCall with write_file to a DIFFERENT unread path
-    const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write',
-      params: { file_path: 'src/auth.ts', content: 'modified' },
-    };
+    // 4. Production runtime entry point + host context
+    const runtime = makeRuntime();
     const warn = vi.fn();
-    const ctx: PluginHookToolContext = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: SESSION_ID,
-      logger: { warn, info: () => {}, error: () => {} },
-    };
+    const event = makeEvent();
+    const ctx = makeCtx(warn);
 
-    // 6. Shadow executes and is observable but cannot block.
-    expect(handleBeforeToolCall(event, ctx)).toBeUndefined();
+    // 5. Shadow executes and is observable but cannot block.
+    expect(await runtime.dispatchBeforeToolCall(event, ctx)).toBeUndefined();
     expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
       expect.objectContaining({ activationId: ACTIVATION_ID, activationMode: 'shadow', decision: 'block' }),
     );
 
-    // 7. Atomic promotion makes the same activation live; only now may it block.
+    // 6. Atomic promotion makes the same activation live; only now may it block.
     await promoteActivation();
-    const result = handleBeforeToolCall(event, ctx);
+    const result = await runtime.dispatchBeforeToolCall(event, ctx);
 
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
@@ -273,23 +312,18 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
       paramsJson: { file_path: 'src/auth.ts' },
     });
 
-    // 2. Call handleBeforeToolCall with write_file to the SAME path
-    const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write',
-      params: { file_path: 'src/auth.ts', content: 'modified' },
-    };
+    // 2. Dispatch the production before_tool_call with a write to the SAME path
+    const runtime = makeRuntime();
     const warn = vi.fn();
-    const ctx: PluginHookToolContext = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: SESSION_ID,
-      logger: { warn, info: () => {}, error: () => {} },
-    };
+    const ctx = makeCtx(warn);
 
-    // 3. Assert: real VM execution returns allow (priorReadOfTarget === 'yes')
-    const result = handleBeforeToolCall(event, ctx);
-
-    // allow = result is undefined (gate passes through)
-    expect(result).toBeUndefined();
+    // 3. Real VM execution returns allow (priorReadOfTarget === 'yes')
+    expect(await runtime.dispatchBeforeToolCall(makeEvent(), ctx)).toBeUndefined();
+    // The live aggregate row proves the rule actually ran (and allowed); an
+    // allow has no winning activation id, so only the decision is attributable.
+    expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+      expect.objectContaining({ activationMode: 'live', decision: 'allow' }),
+    );
   });
 
   it('Test K3: flag OFF suspends v2 activation without executing it', async () => {
@@ -302,35 +336,25 @@ describe('PRI-486 Phase 7 — RuleContext v2 production VM E2E (spec §10.2 laye
     insertV2RuleArtifact();
     await insertActivation();
 
-    // 3. Get real WorkspaceContext
-    const wctx = WorkspaceContext.fromHookContext({
-      workspaceDir: tempWorkspaceDir,
-      logger: { warn: () => {}, info: () => {}, error: () => {} },
-    } as unknown as Parameters<typeof WorkspaceContext.fromHookContext>[0]);
+    // 3. Record a non-read tool call
+    recordNonReadToolCall();
 
-    // 4. Record a non-read tool call
-    wctx.trajectory.recordToolCall({
-      sessionId: SESSION_ID,
-      toolName: 'write',
-      outcome: 'success',
-      paramsJson: { file_path: 'src/other.ts', content: 'other' },
-    });
-
-    // 5. Call handleBeforeToolCall with write_file to unread path
-    const event: PluginHookBeforeToolCallEvent = {
-      toolName: 'write',
-      params: { file_path: 'src/auth.ts', content: 'modified' },
-    };
+    // 4. Dispatch a write to the unread path. If the rule executed, the VM
+    // would block; the allow below therefore proves suspension-before-VM.
+    const runtime = makeRuntime();
     const warn = vi.fn();
-    const ctx: PluginHookToolContext = {
-      workspaceDir: tempWorkspaceDir,
-      sessionId: SESSION_ID,
-      logger: { warn, info: () => {}, error: () => {} },
-    };
+    const result = await runtime.dispatchBeforeToolCall(makeEvent(), makeCtx(warn));
 
-    const result = handleBeforeToolCall(event, ctx);
     expect(result).toBeUndefined();
-    expect(warn.mock.calls.flat().join(' ')).toContain('suspended_by_flag: rulecode_context_v2 is disabled or unavailable');
+    // rc-9: the suspension reason is surfaced by the shared gate's warnings,
+    // which the production handler logs.
+    const logged = warn.mock.calls.flat().join(' ');
+    expect(logged).toContain('rule_context_v2_unavailable: provider_returned_undefined');
+    expect(logged).toContain(`(activation=${ACTIVATION_ID})`);
+    // No live rule evaluated → the aggregate evaluation row says so.
+    expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledWith(
+      expect.objectContaining({ activationMode: 'live', decision: 'no_rules_armed' }),
+    );
     expect(mockEventLogInstance.recordRuleHostRequireApproval).not.toHaveBeenCalled();
   });
 });

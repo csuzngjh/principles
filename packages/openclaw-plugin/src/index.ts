@@ -28,7 +28,7 @@ import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild, beginAdaptivePromptInvocation, prepareOpenClawPromptRound } from './hooks/prompt.js';
 import { resolveCurrentAuthorizedActivationByPrincipleId } from '@principles/host-runtime';
 import { createAdaptiveHookRegistrationRecorder, setAdaptiveHookSet } from './core/adaptive-config-identity.js';
-import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
+import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
@@ -501,16 +501,10 @@ const plugin = {
           api.logger.warn('[PD_GATE:RULE_HOST] shared result mapping skipped: workspaceDir missing; nextAction=inspect OpenClaw hook context');
           return;
         }
-        handleSharedRuleHostResult(event, { ...context, workspaceDir: context.workspaceDir, logger: api.logger }, result);
-        const ruleDecision = result.metadata?.['ruleDecision'];
-        if (ruleDecision === 'auto_correct' || ruleDecision === 'requireApproval') {
-          return handleBeforeToolCall(event, {
-            ...context,
-            workspaceDir: context.workspaceDir,
-            pluginConfig: api.pluginConfig ?? {},
-            logger: api.logger,
-          });
-        }
+        // Task 1: the shared handler is the ONLY decision owner. auto_correct
+        // and requireApproval are applied/recorded there from the result
+        // metadata; there is no second (legacy) evaluation of the activations.
+        return handleSharedRuleHostResult(event, { ...context, workspaceDir: context.workspaceDir, logger: api.logger }, result);
       },
       painEnrichmentProvider: (event, context) => prepareOrdinaryAfterToolCallForSharedRuntime(event, {
         ...context,

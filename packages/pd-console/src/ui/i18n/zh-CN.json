@@ -1,6 +1,7 @@
 {
   "common": {
     "loading": "加载中",
+    "retry": "重试",
     "refresh": "刷新",
     "settings": "设置",
     "login": "登录",
@@ -53,6 +54,7 @@
   },
   "pages": {
     "focus": {
+      "loadingHint": "正在读取需要您处理的事项、证据与治理状态，通常几秒内完成。",
       "workbench": {
         "textPreview": "正文预览",
         "codePreview": "规则实现预览",
@@ -78,8 +80,34 @@
         "approvedRuntimeUnknown": "审批已记录，激活尚未完成或暂不可确认。请查看生效情况。",
         "replaced": "已替换待审版本。请重新核对当前正文后决定。",
 
+        "whyNow": "为什么现在要处理",
+        "impact": "影响谁，不处理会怎样",
+        "recommendationTitle": "推荐动作",
+        "recommendation": {
+          "approve": "建议批准",
+          "reject": "建议拒绝",
+          "none": "暂时不建议做出决定",
+          "approveReason": "材料齐全、影响范围已写明，且与当前版本一致。",
+          "rejectReason": "这份材料与当前版本不一致或来源未关联，批准可能让没核对过的版本生效。",
+          "noneReason": "还有材料没备齐，先补齐再决定更稳妥。"
+        },
+        "missingTitle": "还缺这些材料",
+        "missingHint": "补齐后本页会重新判断能否批准。",
+        "viewMissing": "查看缺什么",
+        "approveBlocked": "材料未齐全，暂时不能批准。",
+        "gap": {
+          "subject": "还没有确认这份材料对应哪一条决定",
+          "artifact": "待审的版本不存在或已变化",
+          "body": "还没有读到与这次审批一致的完整正文",
+          "material": "材料只能读取一部分",
+          "revision": "审批记录与当前版本不一致",
+          "revisionReview": "前后版本对照暂不可用",
+          "sourceUnlinked": "这份材料没有关联到可核对的来源",
+          "gate": "还有未满足的审批条件"
+        },
+
         "versionNeedsReview": "待核对版本 {{index}}",
-        "title": "需要你处理",
+        "title": "需要您处理",
         "subtitle": "选一件事，看清建议和决定后果，再继续下一件。",
         "list": "待处理事项",
         "count": "{{count}} 项",
@@ -87,7 +115,8 @@
         "empty": "当前没有可确认的待处理事项。",
         "back": "返回事项列表",
         "next": "查看下一件",
-        "readingEnd": "本件材料到这里结束。你可以返回列表，或查看下一件。",
+        "readingEnd": "本件材料到这里结束。您可以返回列表，或查看下一件。",
+        "shortcutHint": "按 J 看下一件，按 K 看上一件。",
         "completed": "处理结果",
         "notCurrent": "这件事已不在当前列表",
         "startTitle": "从一件事开始",
@@ -122,7 +151,7 @@
         "reasonAndScope": "为什么这样建议，以及决定后果",
         "materialUnavailable": "这次事项的材料暂不可用。",
         "exactMaterialMissing": "尚未找到与这个审批对象和版本一致的正文，请先核对材料。",
-        "versionLock": "材料可以阅读。当前审批服务尚未保证提交的就是你看过的版本，因此这里暂不提供批准、拒绝或替换操作。",
+        "versionLock": "材料可以阅读。当前审批服务尚未保证提交的就是您看过的版本，因此这里暂不提供批准、拒绝或替换操作。",
         "openPrinciple": "查看原则详情与现有记录",
         "subjectDetails": "查看审批对象与版本标识",
         "permissionsUnknown": "暂时无法确认审批权限。可以阅读材料，决定操作暂不可用。",
@@ -243,7 +272,7 @@
         "hideRemaining": "收起其余反馈组"
       },
       "eyebrow": "治理焦点",
-      "title": "现在，值得你判断的事",
+      "title": "现在，值得您判断的事",
       "subtitle": "这一页只回答一个问题：现在该做什么判断。",
       "summaryLabel": "当前：",
       "summaryPending": "条待审",
@@ -252,17 +281,17 @@
       "summaryEvidence": "条行为证据进行中",
       "stratLabel": "今日反馈分层",
       "stratGateBlocks": "秒级拦截",
-      "stratGateBlocksHint": "RuleHost 已自动处理，无需你介入",
+      "stratGateBlocksHint": "RuleHost 已自动处理，无需您介入",
       "stratInProgress": "系统处理中",
       "stratInProgressHint": "取证/内化管线正在运行",
-      "stratPendingReview": "需你判断",
-      "stratPendingReviewHint": "等待你的审查决策",
-      "stratYouAreHere": "你在这里",
-      "sectionPending": "待你审查",
+      "stratPendingReview": "需您判断",
+      "stratPendingReviewHint": "等待您的审查决策",
+      "stratYouAreHere": "您在这里",
+      "sectionPending": "待您审查",
       "sectionDeviation": "值得关注的行为偏差",
       "sectionEvidenceInProgress": "行为证据进行中",
       "sectionSignals": "系统信号",
-      "emptyPending": "还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。",
+      "emptyPending": "还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待您审查。",
       "emptyDeviation": "尚未捕获行为偏差。当智能体的行为偏离拥有者期望时，PD 会检测到偏差信号。",
       "emptySignals": "没有停滞信号。所有已批准的原则似乎都已激活。",
       "stagnationNeverActivated": "已批准但从未激活",
@@ -281,7 +310,7 @@
       "reviewAction": "审查并决定",
       "parkAction": "暂存",
       "viewFullChain": "查看完整链路",
-      "loadError": "无法加载治理数据。你可以尝试刷新页面。",
+      "loadError": "无法加载治理数据。您可以尝试刷新页面。",
       "channelPrompt": "提示词 / 可撤销",
       "channelDeferArchive": "延迟归档",
       "channelCodeToolHook": "Code Tool Hook",
@@ -424,8 +453,8 @@
           "ownerIdentityMissing": "尚未配置拥有者身份。RuleCode 治理决策入口被阻塞，需要设置 PD_OWNER_ID 与 PD_OWNER_CREDENTIAL_ID 并启用控制台令牌认证。",
           "ownerIdentityInvalid": "拥有者身份配置无效，治理动作已安全阻止。",
           "ownerAuthenticationMissing": "身份已登记，但控制台尚未启用令牌认证。",
-          "approvalPending": "有原则审批正在等待你的决策。",
-          "rulecodeOwnerDecision": "有 RuleCode 影子激活正在等待你的晋升决策。",
+          "approvalPending": "有原则审批正在等待您的决策。",
+          "rulecodeOwnerDecision": "有 RuleCode 影子激活正在等待您的晋升决策。",
           "noPendingDecision": "当前没有等待决策的原则审批。",
           "ownerDecisionAvailable": "治理决策入口由已配置的拥有者持有。",
           "breakGlassEntry": "由于未配置拥有者身份，紧急暂停当前通过本地破窗路径生效。",
@@ -433,7 +462,7 @@
           "sourceUnavailable": "必需的治理数据源不可用，进行中的工作无法推进。",
           "configInvalid": "工作区配置文件无效，环境分类未知。",
           "processing": "治理工作正在后台运行，当前无需决策。",
-          "workspaceClear": "所有治理工作已就绪，没有需要你关注的事项。",
+          "workspaceClear": "所有治理工作已就绪，没有需要您关注的事项。",
           "workspaceEmpty": "暂无治理记录。管线运行后 PD 会填充此视图。"
         },
         "next": {
@@ -448,7 +477,7 @@
         },
         "ownerGuide": {
           "title": "设置拥有者身份",
-          "intro": "复制以下命令，在启动 OpenClaw 与 PD 控制台的 shell 中执行（把 <owner-id> 与 <credential-id> 换成你自己的 ID），然后重启两者。",
+          "intro": "复制以下命令，在启动 OpenClaw 与 PD 控制台的 shell 中执行（把 <owner-id> 与 <credential-id> 换成您自己的 ID），然后重启两者。",
           "tokenAuthHint": "还需要启用控制台令牌认证（--token 或 PD_CONSOLE_TOKEN）——这是拥有者身份成立的必要条件；若尚未启用，请按配置文档完成该步骤。",
           "cmdPowerShell": "PowerShell（Windows）",
           "cmdBash": "bash（macOS / Linux）",
@@ -517,8 +546,8 @@
       "stateReason": {
         "state_db_missing": "状态数据库未初始化。PD 尚未在此工作空间中运行。",
         "no_pipeline_activity": "尚未记录到任何治理链路活动。",
-        "pending_approvals": "有 {{count}} 条原则需要你审查并决定是否批准。",
-        "tasks_need_human_review": "有 {{count}} 个内化任务正在等待你的审查决定。",
+        "pending_approvals": "有 {{count}} 条原则需要您审查并决定是否批准。",
+        "tasks_need_human_review": "有 {{count}} 个内化任务正在等待您的审查决定。",
         "pipeline_active": "管线中有活动，但候选原则尚未准备好审查。",
         "consumed_candidates": "已存在候选人记录，但尚未进入审查阶段。",
         "degraded_state": "部分治理链路或数据源处于降级状态。"
@@ -527,7 +556,7 @@
         "run_config_doctor": "确保 OpenClaw 插件已启用，或运行 pd config doctor 检查配置。",
         "wait_for_pipeline": "PD 会在捕获到行为偏差并生成可审查候选后，将其放到这里。",
         "review_approvals": "审查待审批的原则，做出批准、拒绝或暂存的决定。",
-        "review_failed_tasks": "打开「失败任务」页面，查看并恢复等待你决定的任务。",
+        "review_failed_tasks": "打开「失败任务」页面，查看并恢复等待您决定的任务。",
         "check_degraded_signals": "检查降级信号详情，按建议操作修复。",
         "check_pipeline_status": "等待内化任务完成。如果长期无变化，检查内化管线状态。"
       },
@@ -543,7 +572,7 @@
         "run_integrity_check": "运行 pd runtime internalization integrity 检查并修复表结构。",
         "check_trajectory_db": "检查 .state 目录中 trajectory.db 文件完整性。"
       },
-      "zeroStateHealthy": "当前没有需要你判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
+      "zeroStateHealthy": "当前没有需要您判断的事项。PD 已检查行为证据、原则审查队列和系统信号。",
       "zeroStateDbMissing": "PD 尚未在此工作空间中运行。状态数据库初始化后，治理数据将在这里呈现。",
       "evidenceInProgress": "{{count}} 条行为证据已记录，正在诊断和处理中。",
       "ownerInbox": {
@@ -559,10 +588,10 @@
         "viewLibrary": "查看原则库 →"
       },
       "ownerDecision": {
-        "evidenceUnavailable": "这项裁决仍在等待你，但证据链目前不完整。PD 已暂停所有裁决动作，避免你在看不到正确版本时做决定。",
+        "evidenceUnavailable": "这项裁决仍在等待您，但证据链目前不完整。PD 已暂停所有裁决动作，避免您在看不到正确版本时做决定。",
         "goRecoverCta": "查看恢复详情",
-        "sectionTitle": "需要你决定",
-        "empty": "现在没有需要你决定的事项。机器能自己解决的问题不会打扰你。",
+        "sectionTitle": "需要您决定",
+        "empty": "现在没有需要您决定的事项。机器能自己解决的问题不会打扰您。",
         "unavailable": "（暂不可用）",
         "loadError": "决策列表暂时不可用——治理摘要仍可查看。",
         "readIssuesTitle": "部分决策无法读取，以下列表可能不完整：",
@@ -597,7 +626,7 @@
         "acceptBlockedGeneric": "「接受」暂不可用：当前证据未满足放行条件，请修订或拒绝。",
         "advanced": "高级诊断",
         "resolved": "裁决已记录。",
-        "staleError": "该事项的事实已变化（可能有新的评估结果）。未执行你的决定，请刷新后重新裁决。",
+        "staleError": "该事项的事实已变化（可能有新的评估结果）。未执行您的决定，请刷新后重新裁决。",
         "alreadyResolved": "该决策已被处理过，无需重复操作。",
         "actionFailed": "操作失败，请稍后重试。",
         "approvalHint": "该原则的部署审批仍在审批队列中等待处理。",
@@ -621,7 +650,7 @@
         "formationDiagnosisLabel": "诊断",
         "formationRootCauseLabel": "根因",
         "formationEvidenceLabel": "支撑证据",
-        "formationUnavailableNote": "来源诊断当前不可读；这条原则仍按现有证据供你裁决。",
+        "formationUnavailableNote": "来源诊断当前不可读；这条原则仍按现有证据供您裁决。",
         "checksDisclosure": "确定性检查（技术详情）"
       },
       "revisionReviewUnavailable": "修订对照信息不完整或同时存在多个待审版本，请先核对工件与旧版本；仍可拒绝本次修订。",
@@ -646,6 +675,8 @@
         "empty": "没有需要逐条关注的被阻塞或需要恢复的对象。",
         "unmatchedTitle": "以下对象有决定动态，但当前没有可用的操作面（关联缺失或数据不完整，不作合并）：",
         "blockedAggregate": "另有 {{count}} 项被阻塞对象无需逐条关注，不计入上方待处理数。",
+        "repeatedTitle": "{{count}} 条因同一原因暂时无法处理",
+        "repeatedOpen": "第 {{index}} 条：去修复",
         "unmatchedItemNote": "此条目暂无可用操作面；打开原则页查看其最新状态。"
       }
     },
@@ -657,7 +688,8 @@
       "loadError": "无法加载行为证据",
       "validationError": "数据格式验证失败，请刷新重试",
       "emptyTitle": "尚未捕获行为证据",
-      "emptyDescription": "当 PD 检测到值得治理的行为偏差时，证据将在这里呈现。你可以通过 /pd-pain 命令或 pd pain record 手动创建反馈信号。",
+      "emptyAction": "查看需要您处理的改变",
+      "emptyDescription": "当 PD 检测到值得治理的行为偏差时，证据会在这里呈现。您也可以直接告诉我哪里让您不舒服，我会把它记录成一条证据。",
       "generatedAt": "生成时间",
       "group_active_chain": "活跃链路",
       "group_evidence_only": "仅观察（未进入诊断）",
@@ -890,8 +922,8 @@
       "statusParked": "已暂存",
       "statusCandidate": "内化中",
       "emptyTitle": "还没有可审查原则",
-      "emptyDescription": "当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。",
-      "emptyActionable": "当前没有待决策的原则。当 PD 捕获到行为偏差信号时，原则候选会出现在这里。你可以前往行为证据页查看 PD 是否正在收集信号。",
+      "emptyDescription": "当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待您审查。",
+      "emptyActionable": "当前没有待决策的原则。当 PD 捕获到行为偏差信号时，原则候选会出现在这里。您可以前往行为证据页查看 PD 是否正在收集信号。",
       "noActionableTitle": "暂时没有可操作的原则",
       "noActionableDescription": "当前所有原则被分类为演示、冒烟测试、历史或内置公理。切换到\"显示全部\"可查看它们。",
       "filterActionable": "待决策",
@@ -903,13 +935,14 @@
       "evaluabilityLabel": "可评价性",
       "ownerDecision": {
         "state": {
-          "needs_owner_decision": "待你决定",
+          "needs_owner_decision": "待您决定",
           "processing": "处理中",
           "blocked": "判断暂不可建立",
           "recovery_needed": "需要恢复",
           "decided": "已有决定",
           "no_action": "无需决定"
-        }
+        },
+        "dominantNotice": "本页 {{count}} 条原则都是「{{state}}」，已在各卡片上省去重复标注。"
       },
       "languageHintEn": "以英文生成",
       "languageHintZh": "以中文生成",
@@ -927,6 +960,12 @@
         "backToList": "← 返回列表",
         "formationDisclosure": "这条原则如何形成",
         "fullRule": "展开完整原则正文",
+        "applicable": "适用场景（原始触发配置）",
+        "notSpecified": "未指定",
+        "adherenceRate": "遵守率",
+        "lifecycleLoadFailed": "无法加载生命周期指标。您可以稍后重试。",
+        "editNewArtifactLabel": "新的已验证工件 ID",
+        "rejectReasonLabel": "拒绝原因",
         "extraContext": "其他来源说明与回顾问题",
         "conclusion": "结论",
         "policyNote": "这是面向未来相似场景的行为政策，可批准、修改、拒绝或暂存。",
@@ -934,6 +973,8 @@
         "modifyWordingNote": "原则修改将在后续版本开放",
         "channel": "生效通道",
         "channelPromptReversible": "将通过提示词通道激活 · 可回滚",
+        "examinerEntry": "评估此原则的行为效果",
+        "examinerEntryBlocked": "仅 active 原则可进入评估（当前状态：{{status}}）。请先在下方完成治理决策。",
         "whyExists": "为什么存在",
         "applicableScenarios": "适用场景",
         "expectedBehavior": "预期行为",
@@ -1081,7 +1122,7 @@
             "stalled": "已停滞"
           },
           "headline": {
-            "owner_decision": "需要你的决策",
+            "owner_decision": "需要您的决策",
             "recovery": "存在待恢复的处理",
             "revision": "PD 正在修订这条原则",
             "processing": "PD 正在处理这条原则",
@@ -1090,7 +1131,7 @@
             "recorded": "原则已记录"
           },
           "reason": {
-            "approval_pending": "一项有来源支撑的审批正在等待你审查。",
+            "approval_pending": "一项有来源支撑的审批正在等待您审查。",
             "recovery_required": "当前处理前沿无法自动继续。",
             "automatic_revision": "修订或重试已经在进行中。",
             "processing": "当前有来源支撑的任务仍在运行或排队。",
@@ -1143,12 +1184,12 @@
           "title": "这条原则的决策视图",
           "technicalOriginalNote": "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
           "state": {
-            "needs_owner_decision": "有一项决定需要你审阅",
+            "needs_owner_decision": "有一项决定需要您审阅",
             "processing": "系统正在处理这项提案",
             "blocked": "系统暂时无法建立完整的治理判断",
             "recovery_needed": "这项处理需要恢复",
             "decided": "此提案已有完成的决定",
-            "no_action": "目前没有需要你决定的事项"
+            "no_action": "目前没有需要您决定的事项"
           },
           "readsComplete": "本次所需数据已读取",
           "readsPartial": "部分数据源读取失败",
@@ -1177,7 +1218,7 @@
           "uncertainty": "风险与不确定性",
           "riskNotAssessed": "尚未做过风险评估；这不代表没有风险。",
           "rollback": "如何停止影响",
-          "decision": "你的决定",
+          "decision": "您的决定",
           "history": "决定历史",
           "historyState": {
             "approved": "已批准",
@@ -1197,16 +1238,16 @@
             "disable": "停止此执行方式今后的影响"
           },
           "next": {
-            "review": "有一项决定需要你审阅：请阅读上方说明后选择批准或拒绝。",
+            "review": "有一项决定需要您审阅：请阅读上方说明后选择批准或拒绝。",
             "wait": "系统正在处理这项提案，请等待处理完成。",
             "inspect_data": "系统暂时无法建立完整的治理判断。",
             "inspect_recovery": "这项处理存在历史遗留问题；可查看恢复信息。",
             "monitor": "此提案已有完成的决定。可查看执行状态与行为记录。",
-            "none": "目前没有需要你决定的事项。"
+            "none": "目前没有需要您决定的事项。"
           },
           "blocker": {
-            "decision_material_missing": "这个对象缺少足够的信息让你安全地批准；拒绝仍可单独评估。",
-            "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要你决定。",
+            "decision_material_missing": "这个对象缺少足够的信息让您安全地批准；拒绝仍可单独评估。",
+            "lineage_not_available": "治理身份尚未建立，系统暂时无法判断是否需要您决定。",
             "historical_processing_issue": "存在 {{n}} 个历史处理问题（如失败或等待重试的任务），其与当前操作的关系尚未确认。"
           },
           "noActions": "当前没有可以执行的操作。",
@@ -1250,7 +1291,7 @@
     "activation": {
       "eyebrow": "生效情况",
       "title": "生效情况",
-      "subtitle": "你批准的原则，哪些真的在生效？本页展示激活事实——不展示行为改善声明。",
+      "subtitle": "您批准的原则，哪些真的在生效？本页展示激活事实——不展示行为改善声明。",
       "summaryActive": "条已激活",
       "summaryInactive": "条未激活",
       "summaryNeverActivated": "条从未激活",
@@ -1259,7 +1300,7 @@
       "sectionActive": "已激活原则",
       "sectionInactive": "未激活原则",
       "sectionNeverActivated": "已批准但从未激活",
-      "emptyActive": "当前没有已激活原则。当你批准一条原则后，它会在这里显示激活详情。",
+      "emptyActive": "当前没有已激活原则。当您批准一条原则后，它会在这里显示激活详情。",
       "statusActive": "已激活",
       "statusInactive": "未激活",
       "channelPrompt": "提示词 / 可撤销",
@@ -1277,6 +1318,8 @@
       "injectionWindowRotationUnknown": "本轮未入窗口：单条可装入（{{cost}}/{{budget}} 字符）；工作区绑定多个宿主，无法归属单一轮转事实——OpenClaw 会按轮次轮到，Codex/WorkBuddy 需腾出容量",
       "injectionOversized": "超长不可注入：单条已 {{cost}} 字符 > 上限 {{budget}} 字符，轮转也救不了——需精简正文",
       "injectionResolutionFailed": "无法判定：{{reason}}",
+      "fitModelDependent": "视模型而定",
+      "injectionModelDependent": "取决于模型上下文：单条 {{cost}} 字符在最小预算内装不下、但在支持上限内——较小上下文模型会排除它，较大模型可注入",
       "injectionRouteUnconfirmed": "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}} / WorkBuddy {{wb}}",
       "revisionOpen": "修改为可注入版本",
       "revisionPlaceholder": "输入新的原则正文（保留触发条件、必须动作和必要例外，尽量精简）",
@@ -1308,7 +1351,7 @@
       "disableFailed": "停用原则失败",
       "undoDisable": "停用操作已撤销",
       "viewDebt": "在原则债务中查看",
-      "loadError": "无法加载生效数据。你可以尝试刷新页面。",
+      "loadError": "无法加载生效数据。您可以尝试刷新页面。",
       "receiptsLabel": "生效履历",
       "receiptsValue": "行为生效 {{effect}} 次 · 参与上下文 {{presence}} 次",
       "receiptsUnavailable": "生效履历暂不可用：{{reason}}",
@@ -1452,10 +1495,10 @@
     "reportProblem": {
       "eyebrow": "产品反馈",
       "title": "报告问题",
-      "subtitle": "生成本地隐私可控的反馈草稿。控制台不会自动上传——你决定分享什么、如何分享、何时分享。",
+      "subtitle": "生成本地隐私可控的反馈草稿。控制台不会自动上传——您决定分享什么、如何分享、何时分享。",
       "noAutoUpload": "本控制台不会自动上传反馈。草稿仅保存在本地。",
-      "loadError": "无法加载反馈数据。你可以尝试刷新页面。",
-      "description": "生成本地隐私可控的反馈草稿。控制台不会自动上传——你决定分享什么、如何分享、何时分享。",
+      "loadError": "无法加载反馈数据。您可以尝试刷新页面。",
+      "description": "生成本地隐私可控的反馈草稿。控制台不会自动上传——您决定分享什么、如何分享、何时分享。",
       "deepLinked": "从 {{source}} 跳转而来。",
       "entryFeedback": "反馈",
       "form": {
@@ -1478,11 +1521,11 @@
         "frequencyOften": "经常",
         "frequencySometimes": "偶尔",
         "frequencyOnce": "仅一次",
-        "goalLabel": "你当时想做什么",
+        "goalLabel": "您当时想做什么",
         "stuckAtLabel": "卡在哪一步",
-        "jobLabel": "你想达成什么目标",
+        "jobLabel": "您想达成什么目标",
         "currentWorkaroundLabel": "现在是怎么凑合的",
-        "sawWhatLabel": "你看到了什么",
+        "sawWhatLabel": "您看到了什么",
         "whereSeenLabel": "在哪里看到的",
         "detailsToggle": "补充细节",
         "detailsHide": "收起细节",
@@ -1510,7 +1553,7 @@
         "excluded": "默认排除",
         "notes": "脱敏说明",
         "submitFirst": "保存一份草稿后可看到具体包含哪些部分。",
-        "guarantee": "不会自动上传。草稿保存在 <workspace>/.pd/feedback/drafts/。你可以自行决定如何使用。"
+        "guarantee": "不会自动上传。草稿保存在工作区内的反馈草稿目录中。您可以自行决定如何使用。"
       },
       "draft": {
         "title": "草稿已本地保存",
@@ -1526,14 +1569,14 @@
       },
       "channel": {
         "title": "发送反馈",
-        "description": "反馈已脱敏,只发送你在上方填写的内容。控制台不会自动上传——点击按钮即是你主动提交。",
+        "description": "反馈已脱敏,只发送您在上方填写的内容。控制台不会自动上传——点击按钮即是您主动提交。",
         "ingest": "一键提交（推荐）",
         "github": "提交到 GitHub issue",
         "email": "打开邮件",
         "file": "导出文件",
         "disablingReason": "不可用：{{reason}}",
         "confirmTitle": "确认提交反馈",
-        "confirmDescription": "提交后，下面这条脱敏反馈将被发送到维护者反馈服务。你无法撤销，但可稍后删除本地草稿。",
+        "confirmDescription": "提交后，下面这条脱敏反馈将被发送到维护者反馈服务。您无法撤销，但可稍后删除本地草稿。",
         "confirmBodyLabel": "将发送的内容",
         "confirmSubmit": "确认提交",
         "confirmCancel": "取消",
@@ -1625,7 +1668,7 @@
       "name": "名称",
       "path": "路径",
       "lastSync": "上次同步",
-      "loadError": "无法加载设置。你可以尝试刷新页面。",
+      "loadError": "无法加载设置。您可以尝试刷新页面。",
       "addNamePlaceholder": "工作空间名称",
       "addPathPlaceholder": "工作空间路径",
       "principleLanguage": "原则语言",
@@ -1677,7 +1720,7 @@
         "owner": "记录拥有者：",
         "decidedAt": "记录时间：",
         "revoked": "已撤回",
-        "revokedLatest": "最新声明已撤回（修订 {{revision}}）。你可以为此会话记录新声明。",
+        "revokedLatest": "最新声明已撤回（修订 {{revision}}）。您可以为此会话记录新声明。",
         "semanticLimit": "此拥有者声明绑定所示 SPEC 快照、项目、会话及路径/操作范围。选择“执行”并填写 .，覆盖从此原生项目/会话发起的命令；这不会沙箱化进程副作用，也不能证明文件系统影响仅限于项目内。无法可靠分类到路径/操作范围的宿主操作仍属未知。此声明不能证明代码符合 SPEC 的自然语言含义。",
         "requiredFields": "请填写 SPEC 路径、至少一个覆盖路径和至少一种操作。",
         "invalidMutationResponse": "服务器在变更成功后未返回声明。请刷新后再继续。",
@@ -1690,7 +1733,7 @@
       "configReady": "配置完成，所有已启用智能体就绪。",
       "configNeedsSetup": "部分智能体需要配置后才能运行。",
       "configNotReady": "部分智能体无法运行，请检查下方配置错误。",
-      "configUnknown": "配置状态未知，请检查你的设置。",
+      "configUnknown": "配置状态未知，请检查您的设置。",
       "configDisabled": "所有智能体已停用。",
       "configErrors": "配置错误",
       "internalAgents": "内部智能体",
@@ -1707,7 +1750,7 @@
       "off": "关",
       "saving": "保存中…",
       "saveFailed": "保存失败",
-      "loadError": "无法加载配置数据。你可以尝试刷新页面。",
+      "loadError": "无法加载配置数据。您可以尝试刷新页面。",
       "agentEnabled": "已启用",
       "agentDisabled": "已停用",
       "profileLabel": "配置",
@@ -1720,7 +1763,7 @@
         "phase02": "形成原则",
         "phase02Desc": "把经验提炼成\n可遵循的原则",
         "phase03": "拥有者审批",
-        "phase03Desc": "你决定哪些原则\n可以生效",
+        "phase03Desc": "您决定哪些原则\n可以生效",
         "phase04": "改变行为",
         "phase04Desc": "原则作用于\n智能体下次行为",
         "loopHint": "行为改变后，PD 继续观察 —— 形成闭环。9 个代理分布在这条回路上，各司其职。"
@@ -1819,6 +1862,7 @@
       "enterAccessToken": "输入访问令牌完成连接",
       "connect": "连接",
       "errorInvalid": "访问凭证无效或服务未就绪，请检查后重试。",
+      "errorUnreachable": "无法连接工作台：服务没有响应。请确认控制台已启动后重试。",
       "errorExpired": "会话已过期或令牌失效，请重新输入。",
       "recoveryTitle": "无法连接 PD 工作台",
       "recoveryReason": "原因：拥有者凭证已失效或与本机控制台不匹配。",
@@ -1835,8 +1879,9 @@
     },
     "update": {
       "eyebrow": "更新",
+      "slowHint": "正在检查当前安装版本、可用更新与运行时状态，通常最多一分钟。",
       "title": "更新",
-      "subtitle": "检查 PD 更新并查看更新历史。更新保持你的治理工作台处于最新状态。",
+      "subtitle": "检查 PD 更新并查看更新历史。更新保持您的治理工作台处于最新状态。",
       "currentVersion": "当前版本",
       "latestVersion": "最新版本",
       "upToDate": "已是最新",
@@ -1859,7 +1904,7 @@
       },
       "checkError": "检查出错",
       "syncPending": "最新版 {{pluginVersion}} 已发布，安装器同步中（当前可更新至上方列出的版本）。请稍后再试。",
-      "loadError": "无法加载更新数据。你可以尝试刷新页面。",
+      "loadError": "无法加载更新数据。您可以尝试刷新页面。",
       "checkFailed": "更新检查失败，请稍后重试。",
       "blockedBadge": "需先解决",
       "reasonLabel": "原因：",
@@ -1900,7 +1945,7 @@
       "applyFullUpdate": "全量更新",
       "fullUpdateSuccess": "全量更新完成。",
       "confirmFullUpdateTitle": "确认更新",
-      "confirmFullUpdateDesc": "将下载并更新全部 PD 代码包（插件、控制台、核心、CLI）。通常只需几秒钟。你自定义的文件（AGENTS.md 等）不受影响。更新完成后需要重启控制台。",
+      "confirmFullUpdateDesc": "将下载并更新全部 PD 代码包（插件、控制台、核心、CLI）。通常只需几秒钟。您自定义的文件（AGENTS.md 等）不受影响。更新完成后需要重启控制台。",
       "fullUpdateRestartPrompt": "更新已完成。请重启控制台以加载新版本：按 Ctrl+C 停止，然后重新运行 pd console。"
     },
     "intent": {
@@ -1918,7 +1963,7 @@
       "editEntry": {
         "heading": "编辑 INTENT.md",
         "title": "拥有者自有文档",
-        "description": "PD 不会修改此文件。请在自己的编辑器中编辑，以声明或修订你的意图。",
+        "description": "PD 不会修改此文件。请在自己的编辑器中编辑，以声明或修订您的意图。",
         "copy": "复制路径",
         "copyAriaLabel": "复制 INTENT.md 文件路径到剪贴板"
       },
@@ -1933,27 +1978,27 @@
         "createButton": "创建 INTENT.md",
         "creating": "创建中…",
         "createFailed": "创建失败，请稍后重试",
-        "createSuccess": "INTENT.md 已创建，你可以开始填写意图"
+        "createSuccess": "INTENT.md 已创建，您可以开始填写意图"
       },
       "onboarding": {
         "title": "欢迎使用意图工程",
         "subtitle": "在开始之前，让我们先了解一下意图工程",
         "whatIsIt": {
           "title": "什么是意图工程？",
-          "description": "INTENT.md 是你的长期意图锚点 — 记录你的目标、不可违背的边界、以及何时应当停止并升级。它帮助 PD 在关键决策点对齐你的真实意图。"
+          "description": "INTENT.md 是您的长期意图锚点 — 记录您的目标、不可违背的边界、以及何时应当停止并升级。它帮助 PD 在关键决策点对齐您的真实意图。"
         },
         "whyYouFill": {
-          "title": "为什么需要你填写？",
-          "description": "意图是拥有者自有的。PD 不会自动生成意图，因为只有你知道项目的真实目标和边界。这是你的决策权，PD 只负责帮助你执行和对齐。"
+          "title": "为什么需要您填写？",
+          "description": "意图是拥有者自有的。PD 不会自动生成意图，因为只有您知道项目的真实目标和边界。这是您的决策权，PD 只负责帮助您执行和对齐。"
         },
         "sectionGuide": {
           "title": "5 个章节填写引导",
           "description": "INTENT.md 包含 5 个章节，每个章节有明确的用途：",
           "sections": {
             "why": "为什么 — 这个项目的根本动机",
-            "desiredOutcome": "期望结果 — 你希望达成的具体结果",
+            "desiredOutcome": "期望结果 — 您希望达成的具体结果",
             "nonNegotiables": "不可妥协项 — 绝对不能违反的边界",
-            "stopEscalation": "停止 / 升级 — 何时应当停止当前操作并升级给你",
+            "stopEscalation": "停止 / 升级 — 何时应当停止当前操作并升级给您",
             "currentStrategicFocus": "当前战略焦点 — 阶段性重点"
           }
         },
@@ -1965,7 +2010,7 @@
       },
       "editor": {
         "title": "编辑 INTENT.md",
-        "description": "直接在浏览器中编辑你的意图文档。保存后会立即生效。",
+        "description": "直接在浏览器中编辑您的意图文档。保存后会立即生效。",
         "placeholder": "在此输入 INTENT.md 内容（Markdown 格式）…",
         "save": "保存",
         "saving": "保存中…",
@@ -1975,7 +2020,7 @@
         "saveFailed": "保存失败，请稍后重试",
         "emptyContent": "内容不能为空",
         "oversized": "内容超过 32KB 上限，请精简后重试",
-        "confirmDiscard": "你有未保存的修改，确定要放弃吗？",
+        "confirmDiscard": "您有未保存的修改，确定要放弃吗？",
         "yes": "是，放弃修改",
         "no": "继续编辑"
       },
@@ -2006,7 +2051,7 @@
         "contentHash": "内容哈希",
         "path": "路径",
         "templateTitle": "INTENT.md 模板",
-        "templateDescription": "将其复制到 .principles/INTENT.md，替换占位符为你的意图。"
+        "templateDescription": "将其复制到 .principles/INTENT.md，替换占位符为您的意图。"
       },
       "loadError": "加载意图文档失败",
       "validationError": "数据格式校验失败，请刷新后重试",
@@ -2056,7 +2101,7 @@
           "currentStrategicFocus": "当前阶段最优先的事是什么？（会随阶段更新）"
         },
         "discardConfirmTitle": "放弃填写？",
-        "discardConfirmBody": "你已填写的内容将丢失，无法恢复。",
+        "discardConfirmBody": "您已填写的内容将丢失，无法恢复。",
         "discardConfirmCancel": "继续填写",
         "discardConfirmConfirm": "放弃"
       },
@@ -2111,6 +2156,10 @@
         "openReport": "打开报告",
         "runDry": "宿主演练",
         "requestF2": "请求 F2 真实宿主运行",
+        "f2ClosedTitle": "未开放",
+        "f2ClosedBody": "控制台不会自动批准或自动执行真实运行。真实运行要求 Study 内存在由拥有者签发的 APPROVED Stage R 授权（绑定冻结的套件哈希），并且 Gate 1 独立人工 Gold 审核目前仍未通过。",
+        "f2ClosedNext": "下一步：先完成 Gate 1 独立人工 Gold 审核与 Stage R 授权。在此之前请使用 Host Dry-run 或离线对照。",
+        "actionErrorNext": "可以先重试；若持续失败，请查看下方的运行记录与预检结果，必要时返回上一页重新创建 Study。",
         "modesNote": "离线 Stub 同步执行并验证契约管线；宿主演练异步执行且零模型调用；F2 真实宿主运行需要本 Study 内存在已批准（APPROVED）的 Stage R 授权。",
         "accepted": {
           "dryRun": "宿主演练已受理——正在轮询检查清单。",
@@ -2134,8 +2183,47 @@
       "preflight": {
         "status": "预检状态"
       },
+      "ownerSummary": {
+        "title": "结论与下一步",
+        "rationale": "依据",
+        "next": "下一步",
+        "conclusionUnverified": "这份报告没有通过重放校验，结论不能作为治理决策依据。",
+        "conclusionNoControlled": "这份报告没有受控对照结果，无法判断该原则是否有效。",
+        "conclusionInsufficient": "证据不足：计划 {{planned}} 个配对，只有 {{determined}} 个能确定结果，目前无法判断该原则是否有效。",
+        "conclusionNoDifference": "在离线对照中，启用该原则后没有观察到可见差异。",
+        "conclusionPositive": "在离线对照中，启用该原则后指标提升约 {{value}}。",
+        "conclusionNegative": "在离线对照中，启用该原则后指标下降约 {{value}}，需要警惕副作用。",
+        "rationaleMode": "执行方式：{{mode}}",
+        "rationalePairs": "配对：计划 {{planned}}，可判定 {{determined}}，不可判定 {{unknown}}，不适用 {{na}}",
+        "rationaleFidelity": "处理保真：上下文注入 {{present}}/{{planned}}，对照污染 {{contamination}}，容量驱逐 {{evictions}}",
+        "rationaleReplay": "重放校验：{{status}}",
+        "rationaleLimitations": "报告记录了 {{count}} 条限制，见下方「适用范围与限制」",
+        "cannotProveTitle": "尚不能证明什么",
+        "cannotProveOffline": "离线对照不能证明真实宿主环境中的行为改变。",
+        "cannotProveCausal": "在独立 Gold 审核与配对隔离证据齐备之前，观察到的差异不能作为因果结论。",
+        "cannotProveVerdict": "当前证据不足以形成正式效果裁定。",
+        "nextFixEvidence": "先补齐证据：修复未确定配对或重放校验失败，再重新运行。证据不足时不要修改原则状态。",
+        "nextGovernance": "带着这份报告进入原则治理，在保留、调整、归档之间做决策。"
+      },
+      "executionMode": {
+        "title": "这份报告来自哪种执行方式",
+        "current": "当前报告来源：{{mode}}",
+        "modeOffline": "离线对照（offline-stub）",
+        "modeReal": "真实宿主运行",
+        "modeUnknown": "未知执行方式",
+        "offlineNote": "离线对照只验证控制流与统计管线，不代表真实宿主行为。",
+        "realNote": "真实宿主运行反映真实宿主行为，但仍需结合限制条件解读。",
+        "unknownNote": "报告没有记录执行方式，请不要据此推断真实宿主行为。",
+        "offlineLine": "离线对照：{{state}}",
+        "dryRunLine": "Host Dry-run：{{count}} 次（零模型调用，不产生行为结论）",
+        "f2Line": "F2 真实宿主：{{count}} 次（当前未开放，需拥有者批准 Stage R 授权）",
+        "ran": "已运行",
+        "notRun": "未运行"
+      },
       "report": {
         "title": "Report V2",
+        "limitationsSection": "适用范围与限制",
+        "technicalTitle": "技术明细",
         "target": "目标",
         "endpoint": "主要终点",
         "fidelity": "Treatment Fidelity（注入忠实度）",
@@ -2166,8 +2254,12 @@
       "evaluation": {
         "title": "原则评估",
         "configureCta": "配置 Study",
-        "noActive": "此工作区没有 active 原则——请先激活一条原则再评估。",
+        "noActive": "当前没有可评估的原则",
+        "noActiveHint": "只有处于 active 状态的原则才能进入评估。请先在原则治理中激活一条原则，再回到这里。",
         "loadingEvidence": "正在加载生产证据…",
+        "loadingEvidenceFor": "正在加载 {{principleId}} 的生产证据…",
+        "evidenceError": "生产证据加载失败（目标：{{principleId}}）。",
+        "evidenceRetry": "重新加载证据",
         "refresh": "刷新证据",
         "openGovernance": "打开原则治理",
         "selectPrinciple": "选择一条原则查看其生产证据。",
@@ -2223,7 +2315,10 @@
           "title": "Challenge 套件"
         },
         "readiness": {
-          "title": "宿主执行就绪"
+          "title": "宿主执行就绪",
+          "loading": "正在检查宿主执行条件…",
+          "unavailable": "宿主执行条件暂不可用（不影响离线 Study 的创建与执行）。",
+          "f2Note": "F2 真实运行未开放：需要拥有者批准 Stage R 授权。当前可用的执行方式是离线对照与 Host Dry-run。"
         },
         "difference": {
           "title": "实验与生产配置差异",
@@ -2238,7 +2333,69 @@
         "run": "离线执行失败。",
         "report": "报告生成失败。",
         "evidence": "加载生产证据失败。",
-        "status": "加载 Study 状态失败。"
+        "status": "加载 Study 状态失败。",
+        "principles": "加载原则列表失败。",
+        "retry": "重试"
+      },
+      "eligibility": {
+        "title": "资格预检",
+        "checking": "正在检查…",
+        "error": "资格预检失败，暂时无法确认这条原则能否评估。",
+        "status": {
+          "ELIGIBLE": "可以评估",
+          "DEGRADED": "可以评估（有注意事项）",
+          "BLOCKED": "无法评估"
+        },
+        "summaryEligible": "预检通过：这条原则当前可以被评估。",
+        "summaryDegraded": "可以创建评估，但下面的注意事项会影响结论如何解读。",
+        "summaryBlocked": "无法创建评估：{{reason}}",
+        "nextStep": "下一步",
+        "createBlocked": "预检未通过，创建按钮已停用",
+        "check": {
+          "principle_exists": "目标原则",
+          "principle_status": "原则状态",
+          "production_snapshot": "生产证据快照",
+          "activation_evidence": "运行激活证据",
+          "rulecode_identifiability": "干预可识别性",
+          "experiment_configuration": "实验与生产配置差异",
+          "suite_available": "研究套件",
+          "study_root_writable": "研究存储位置",
+          "experiment_mode": "评估模式"
+        },
+        "reason": {
+          "principle_not_found": "工作区里找不到这条原则。",
+          "principle_not_active": "这条原则当前不是 active 状态，评估接口不接受它。",
+          "snapshot_unreadable": "无法读取生产证据快照，评估会缺少真实基线。",
+          "activation_data_degraded": "运行时激活数据不完整（ACTIVATION_DATA_DEGRADED），部分结论可能偏弱。",
+          "runtime_prompt_inactive": "原则在账本中是 active，但运行时没有生效的注入记录。",
+          "experiment_config_differs": "实验配置与生产注入路径存在差异。",
+          "intervention_not_identifiable": "目标原则的 RuleCode 与其它原则耦合，无法单独归因。",
+          "suite_unavailable": "研究套件不可用或编译失败。",
+          "study_root_not_writable": "研究存储位置不可写。",
+          "experiment_mode_unsupported": "评估模式不受支持。",
+          "unknown": "未知原因"
+        }
+      },
+      "guide": {
+        "title": "Examiner 能帮你判断什么",
+        "what": "在原则已经生效的前提下，做一次受控的小规模对照实验，看它是否真的改变了行为。",
+        "target": "评估对象：一条原则，以及它在当前工作区里的真实证据（触发记录、注入状态、运行时激活）。",
+        "difference": "原则详情页说明「这条原则是什么」；Examiner 回答「它到底有没有起作用、有没有副作用」。",
+        "flowLabel": "使用流程",
+        "flowEvidence": "查看生产证据",
+        "flowSelect": "选择原则",
+        "flowCreate": "创建评估",
+        "flowReport": "阅读报告",
+        "flowDecide": "治理决策",
+        "canTitle": "现在可以验证",
+        "canBody": "离线对照下启用与停用该原则时的行为差异，以及可复现的报告。",
+        "cannotTitle": "现在还不能证明",
+        "cannotBody": "它不代表真实宿主行为，也不做自动裁决；Gate 1 未通过前，结论只作决策参考。",
+        "whenTitle": "适合什么时候用",
+        "when1": "新原则需要评估",
+        "when2": "已激活原则没有产生预期效果",
+        "when3": "怀疑原则引入了副作用",
+        "when4": "修改原则后需要重新评估"
       }
     },
     "debt": {
@@ -2246,10 +2403,11 @@
       "title": "原则债务管理",
       "subtitle": "审查那些未激活、长期停滞或可能成为技术/行为负债的原则。",
       "emptyTitle": "暂无原则债务",
-      "emptyDescription": "太棒了！你的所有活跃原则均运行正常，没有发现长期未激活或被晾在审批队列里的情况。",
+      "emptyDescription": "太棒了！您的所有活跃原则均运行正常，没有发现长期未激活或被晾在审批队列里的情况。",
       "reasonNeverActivated": "该原则已被批准，但从未真正部署到任何运行通道（如提示词、RuleHost）。",
       "reasonStagnant": "该原则的审批请求已在队列中滞留超过 7 天，可能已被遗忘。",
       "suggestedAction": "建议操作",
+      "triggerLabel": "触发条件：",
       "actionArchive": "归档",
       "actionDeactivate": "停用通道",
       "actionKeep": "保留观察",
@@ -2270,7 +2428,7 @@
     },
     "welcome": {
       "title": "欢迎使用 Principles Disciple",
-      "subtitle": "把你对智能体的反复纠正，沉淀为可审查、可撤回的行为原则。",
+      "subtitle": "把您对智能体的反复纠正，沉淀为可审查、可撤回的行为原则。",
       "stateSaveError": "无法保存引导进度，请检查浏览器存储权限后重试。",
       "stepIndicator": "第 {{current}} 步 / 共 {{total}} 步",
       "step1": {
@@ -2288,7 +2446,7 @@
       },
       "step2": {
         "title": "看一次完整治理回路演示",
-        "description": "这是用模拟证据做的受控演示。真实使用时，由你的智能体通过 pd-pain-signal 技能产生证据。",
+        "description": "这是用模拟证据做的受控演示。真实使用时，由您的智能体通过 pd-pain-signal 技能产生证据。",
         "runDemoButton": "运行演示",
         "demoRunning": "演示运行中...",
         "demoComplete": "演示完成",
@@ -2326,17 +2484,17 @@
       },
       "step4": {
         "title": "准备好记录真实证据",
-        "description": "当你下次使用智能体时，如果智能体犯错或你重复纠正了它，告诉智能体：'用 pd-pain-signal 记录一下'。",
+        "description": "当您下次使用智能体时，如果智能体犯错或您重复纠正了它，告诉智能体：'用 pd-pain-signal 记录一下'。",
         "examplePrompt": "给智能体的示例提示：",
-        "examplePromptText": "我刚纠正了你关于 X 的问题。用 pd-pain-signal 把这个记录为 pain signal。",
+        "examplePromptText": "我刚纠正了您关于 X 的问题。用 pd-pain-signal 把这个记录为 pain signal。",
         "tryNowButton": "我现在就试试（2 小时窗口）",
         "goToFocusButton": "知道了，先看 Focus",
         "skipButton": "暂时跳过",
-        "windowHint": "我们会在 2 小时后查看。不强制——你随时可以稍后记录证据。",
+        "windowHint": "我们会在 2 小时后查看。不强制——您随时可以稍后记录证据。",
         "pollingActive": "正在监听证据... 我们会每 30 秒检查一次，持续 2 小时。",
         "stopPollingButton": "停止并继续",
-        "evidenceFound": "检测到证据！你现在可以在 Focus 页面查看。",
-        "timeoutHint": "2 小时内未检测到证据。没关系——你随时可以用 pd-pain-signal 记录证据。",
+        "evidenceFound": "检测到证据！您现在可以在 Focus 页面查看。",
+        "timeoutHint": "2 小时内未检测到证据。没关系——您随时可以用 pd-pain-signal 记录证据。",
         "pollingError": "无法检查证据。证据服务可能不可用。",
         "retryButton": "重试"
       },
@@ -2402,6 +2560,11 @@
     }
   },
   "components": {
+    "statePanel": {
+      "technical": "技术详情",
+      "unreachableTitle": "无法连接工作台",
+      "unreachableBody": "服务未响应。可能是控制台没有启动。"
+    },
     "errorBoundary": {
       "title": "发生错误",
       "description": "页面加载时发生错误",
@@ -2448,6 +2611,8 @@
     "sidebar": {
       "collapse": "折叠侧边栏",
       "expand": "展开侧边栏",
+      "tools": "工具",
+      "technical": "技术",
       "focus": "治理焦点",
       "pain": "行为证据",
       "principles": "原则审查",
@@ -2535,12 +2700,12 @@
       "loadFailed": "加载引导开关状态失败"
     },
     "fullPipelineFlag": {
-      "title": "管道模式（PRI-720）",
-      "label": "强制 prompt 原则走完整管道",
-      "description": "默认关：prompt/defer 原则走短语义路径（不生成代码、不跑沙箱）。开启后：新种子的 prompt 链走完整旧管道，包括 Artificer 代码生成、Evaluator 评审与对抗重放——用于测试场景或您明确需要跑完整管道时。不影响已在进行中的链。",
-      "toggleAriaLabel": "切换 prompt 内化强制完整管道模式",
-      "enabled": "新 prompt 链已强制走完整管道",
-      "disabled": "prompt 链使用短语义路径",
+      "title": "管道模式",
+      "label": "强制提示词类原则走完整管道",
+      "description": "默认关：提示词与延迟归档原则走短语义路径（不生成代码、不跑沙箱）。开启后：新种子的提示词链走完整旧管道，包括 Artificer 代码生成、Evaluator 评审与对抗重放——用于测试场景或您明确需要跑完整管道时。不影响已在进行中的链。",
+      "toggleAriaLabel": "切换提示词内化强制完整管道模式",
+      "enabled": "新的提示词链已强制走完整管道",
+      "disabled": "提示词链使用短语义路径",
       "toggleFailed": "切换管道模式失败",
       "loadFailed": "加载管道模式状态失败"
     }

@@ -298,7 +298,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
       call += 1;
       return call === 1 ? budgetRejectionResponse(8192) : sseTextResponse('{"policyText":"after downshift"}');
     };
-    const { adapter, events } = makeAdapter({ outputPathStrategy: 'free_form_only', maxRetries: 1, _testBackoffDelayMs: 0 });
+    const { adapter, events } = makeAdapter({ outputPathStrategy: 'free_form_only', maxRetries: 1 });
     const handle = await adapter.startRun(makeInput({ maxTokens: 8192 }));
     const output = await adapter.fetchOutput(handle.runId);
 

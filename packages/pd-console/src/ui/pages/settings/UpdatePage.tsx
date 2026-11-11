@@ -221,7 +221,11 @@ export function UpdatePage() {
   if (loadingState === "loading") {
     return (
       <PageShell>
-        <PageLoading cardCount={2} label={t("common.loading")} />
+        <PageLoading
+          cardCount={2}
+          label={t("common.loading")}
+          slowLabel={t("pages.update.slowHint")}
+        />
       </PageShell>
     );
   }

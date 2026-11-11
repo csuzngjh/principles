@@ -343,6 +343,24 @@ export function PrinciplesPage() {
       return new Date(b[key]).getTime() - new Date(a[key]).getTime();
     });
 
+  // 1B 注意力减法 (F-17): the same decision-state badge on every card becomes
+  // background noise (11 × 「判断暂不可建立」). When one state dominates the
+  // visible list, say it once above the list and only badge the exceptions.
+  const decisionStateCounts = new Map<string, number>();
+  for (const card of filtered) {
+    if (card.decisionState !== undefined) {
+      decisionStateCounts.set(card.decisionState, (decisionStateCounts.get(card.decisionState) ?? 0) + 1);
+    }
+  }
+  let dominantState: string | null = null;
+  let dominantCount = 0;
+  for (const [state, count] of decisionStateCounts) {
+    if (count > dominantCount) { dominantState = state; dominantCount = count; }
+  }
+  const suppressedDecisionState = dominantState !== null && dominantCount >= 3 && filtered.length > 1
+    ? { state: dominantState, count: dominantCount }
+    : null;
+
   const statusFilters: Array<{ value: ReviewStatus | "all"; label: string }> = [
     { value: "all", label: t("principles.allStatuses") },
     { value: "pending", label: t("principles.statusPending") },
@@ -529,6 +547,15 @@ export function PrinciplesPage() {
         <p className="text-ink-3 text-sm">{t("principles.noResults")}</p>
       )}
 
+      {!loading && !error && filtered.length > 0 && suppressedDecisionState && (
+        <p className="text-[12.5px] leading-relaxed text-ink-3" data-testid="principles-dominant-state">
+          {t("principles.ownerDecision.dominantNotice", {
+            count: suppressedDecisionState.count,
+            state: t(`principles.ownerDecision.state.${suppressedDecisionState.state}`, { defaultValue: suppressedDecisionState.state }),
+          })}
+        </p>
+      )}
+
       {!loading && !error && filtered.length > 0 && (
         <div className="relative pl-6 grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
           {/* timeline rail — centered under the status dots (dot centers sit at x≈13px) */}
@@ -561,7 +588,9 @@ export function PrinciplesPage() {
                 />
                 <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
                   <h3 className="min-w-0 flex-1 text-[15px] font-semibold leading-relaxed text-ink"><Link className="rounded-sm hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link></h3>
-                  <span className={`rounded-[2px] border px-2 py-1 text-[11px] ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>
+                  {card.decisionState === suppressedDecisionState?.state
+                    ? null
+                    : <span className={`rounded-[3px] border px-2 py-1 text-[11px] ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>}
                 </div>
                 {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
                 {card.readabilityWarningCode && (

@@ -144,6 +144,31 @@ function readLastTransaction(historyPath: string): VersionReport['lastTransactio
 }
 
 /**
+ * A bundled install (`releaseId = bundled-<productVersion>-<digest[:12]>`) is
+ * produced by the official installer from a self-describing payload. There is
+ * no published release metadata for it: `~/.pd/releases/<id>/metadata.json` is
+ * written only by the signed-channel update path. Requiring that file made
+ * every fresh installer install permanently degraded, no matter how many times
+ * the installer was re-run.
+ *
+ * The bundled identity is therefore verified against itself: the release id
+ * must embed the active product version and the first 12 hex chars of the
+ * active digest, and the digest must be a full sha256.
+ *
+ * Returns null for non-bundled (signed-channel) releases so the caller keeps
+ * the metadata-backed check — and its degraded/corrupt semantics — unchanged.
+ */
+function judgeBundledReleaseIdentity(
+  releaseId: string,
+  productVersion: string,
+  digest: unknown,
+): 'healthy' | 'corrupt' | null {
+  if (!releaseId.startsWith('bundled-')) return null;
+  if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) return 'corrupt';
+  return releaseId === `bundled-${productVersion}-${digest.slice(0, 12)}` ? 'healthy' : 'corrupt';
+}
+
+/**
  * Builds the canonical version report from the installation state. Throws
  * VersionReportError with an installer next-action when no installation
  * exists at all.
@@ -186,14 +211,18 @@ export function buildVersionReport(homeDir: string = os.homedir()): VersionRepor
   }
 
   const releaseDir = path.join(pdHome, 'releases', releaseId);
-  const releaseManifest = readJsonIfPresent(path.join(releaseDir, 'metadata.json'));
+  const bundledHealth = judgeBundledReleaseIdentity(releaseId, productVersion, active.releaseMetadataDigest);
+  const releaseManifest = bundledHealth === null
+    ? readJsonIfPresent(path.join(releaseDir, 'metadata.json'))
+    : null;
   const releaseMetadataMatchesActive = releaseManifest !== null
     && releaseManifest.productVersion === productVersion
     && releaseManifest.releaseId === releaseId
     && releaseManifest.metadataDigest === active.releaseMetadataDigest;
-  const health: VersionReport['health'] = releaseManifest === null
-    ? 'degraded'
-    : releaseMetadataMatchesActive ? 'healthy' : 'corrupt';
+  const health: VersionReport['health'] = bundledHealth
+    ?? (releaseManifest === null
+      ? 'degraded'
+      : releaseMetadataMatchesActive ? 'healthy' : 'corrupt');
 
   // The live canonical runtime is the primary component-version source; the
   // release cache stays as the fallback for layouts without a runtime

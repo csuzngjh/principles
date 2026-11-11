@@ -1,6 +1,6 @@
 /**
  * Codex conversation ingestion orchestrator (Codex Governance Closure
- * Slice A; SPEC rev 2 §7/§9/§17).
+ * Slice A; SPEC rev 2 §7/§9/§17; PRI-1171 P1 seam migration).
  *
  * Called by pd-hook ONLY after both `host.codex` and
  * `codex_conversation_ingestion` are enabled — the flag check happens
@@ -9,10 +9,13 @@
  * hard privacy invariant, proven by a port spy test).
  *
  * Responsibilities: extract validated ingestion fields from the raw hook
- * payload (Codex protocol facts live in the adapter, not host-runtime),
- * authorize the transcript path, run bounded incremental decoding from the
- * durable checkpoint, apply the supported-version guard, and hand the
- * projected observations to the host-neutral host-runtime seam.
+ * payload (Codex protocol facts live in the adapter, not host-runtime), and
+ * run the transcript delta through the host-neutral
+ * `runConversationIngestion` pipeline with the Codex source adapter
+ * (locate/decode/version guard live in transcript-source.ts; the pipeline
+ * owns checkpoint, TOCTOU mapping, stop classification, and the store
+ * commit). Verified tool outcomes ride the pipeline's pre-ingest hook so a
+ * write failure still holds the checkpoint (CR-01 ordering).
  *
  * Stop (`turn_complete`) is the turn-complete ingestion trigger (G1 §2);
  * live `UserPromptSubmit`/`PostToolUse` contribute live observations that
@@ -21,17 +24,19 @@
 import type { HostEventKind } from '@principles/core/host';
 import {
   ingestGovernanceObservations,
-  readGovernanceCheckpoint,
   recordVerifiedToolOutcomes,
-  type GovernanceIngestDegradation,
+  runConversationIngestion,
+  type ConversationIngestionOutcome,
   type GovernanceObservationInput,
   type GovernanceSignalCandidate,
   type VerifiedToolOutcomeInput,
+  type TranscriptDelta,
+  type TranscriptPort,
 } from '@principles/host-runtime';
+import { createNodeTranscriptPort } from './transcript-decoder.js';
+import { createCodexTranscriptSource } from './transcript-source.js';
 import { resolveCodexHome } from './codex-home.js';
 import { validateCodexTranscriptPath } from './transcript-path.js';
-import { classifyCodexVersion, CODEX_VERSION_NEXT_ACTION } from './codex-version.js';
-import { decodeTranscriptWindow, createNodeTranscriptPort, CODEX_INGESTION_MAX_BATCH_BYTES, TranscriptReplacedError, type TranscriptExpectedIdentity, type TranscriptPort } from './transcript-decoder.js';
 import { extractFields, type PayloadFields } from './ingestion-fields.js';
 import { buildLiveCorrectionCandidate, buildTranscriptCandidates } from './admission.js';
 
@@ -129,14 +134,21 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
 
 interface TranscriptDeltaArgs {
   readonly fallbackRootSessionId: string;
-  readonly canonicalPath: string;
-  readonly identity: TranscriptExpectedIdentity;
-  readonly rolloutIdentity: string;
+  /** Raw transcript path from the hook payload / checkpoint resolution — the source adapter revalidates it. */
+  readonly transcriptPath: string;
   readonly workspaceDir: string;
   readonly env: { CODEX_HOME?: string | undefined };
   readonly now: Date;
   readonly port: TranscriptPort;
 }
+
+/** Exact Operator-facing degradation texts the Codex CLI vocabulary owns (quarantine commands etc.). */
+const CODEX_PIPELINE_DEGRADE_TEXTS = {
+  readFailedNextAction: 'verify the transcript file still exists and is a regular file inside the Codex sessions root.',
+  checkpointInconsistentNextAction: 'the transcript is shorter than the committed checkpoint; quarantine the stale rollout records via `pd codex ingest quarantine` or re-ingest from a fresh rollout.',
+  malformedNextAction: 'the record is stable-invalid; quarantine this record via `pd codex ingest quarantine` (dry-run default). Later records remain as lag.',
+  oversizedNextAction: 'a single transcript record exceeds the bounded-read window; inspect the rollout file.',
+} as const;
 
 /**
  * SPEC-CODEX-PAIN-CLOSURE-001 CR-01: project decoded CommandExecution facts
@@ -171,142 +183,62 @@ function collectVerifiedToolOutcomes(observations: readonly GovernanceObservatio
   return outcomes;
 }
 
-function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity, rolloutIdentity, workspaceDir, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
-  const checkpoint = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity });
-  if (checkpoint !== null && !('byteOffset' in checkpoint) && 'ok' in checkpoint && checkpoint.ok === false) {
-    return { status: 'degraded', reason: checkpoint.reason, nextAction: checkpoint.nextAction, warnings: [] };
+/**
+ * CR-01 rides the pipeline's pre-ingest hook: upgrade text-only live
+ * observations with the host-verified exit codes BEFORE the checkpoint
+ * advances, so a write failure holds the delta and the next Stop retries
+ * instead of silently losing the verified facts.
+ */
+function codexVerifiedOutcomesPreIngest({ workspaceDir, delta, now: _now }: { workspaceDir: string; delta: TranscriptDelta; now: Date }): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  const verifiedOutcomes = collectVerifiedToolOutcomes(delta.observations);
+  if (verifiedOutcomes.length === 0) return { ok: true };
+  // SPEC-RULECODE-HOST-PROMOTION-001 R2: stamp the producing host on the
+  // inserted rows so attribution-aware readers can prove provenance.
+  const rootSessionId = delta.rollout.rootSessionId ?? '';
+  const verified = recordVerifiedToolOutcomes({ workspaceDir, sessionId: rootSessionId, outcomes: verifiedOutcomes, hostKind: 'codex' });
+  const failed = verified.find((result) => result.status === 'unavailable');
+  if (failed !== undefined) {
+    const reason = failed.reason === 'trajectory_db_not_found' ? 'verified_outcome_db_unavailable' : `verified_outcome_write_failed:${failed.reason.split(':', 2)[1] ?? ''}`;
+    return { ok: false, reason, nextAction: 'inspect the workspace trajectory database; the transcript checkpoint was NOT advanced, the next Stop retries this delta.' };
   }
-  const existing = checkpoint !== null && 'byteOffset' in checkpoint ? checkpoint : null;
-  const offset = existing !== null ? existing.byteOffset : 0;
+  return { ok: true };
+}
 
-  let window;
-  try {
-    // Post-open revalidation (SPEC §9): the port must prove the opened
-    // object still carries the identity the validator approved.
-    window = port.read({ canonicalPath, offset, maxBytes: CODEX_INGESTION_MAX_BATCH_BYTES, expectedIdentity: identity });
-  } catch (error) {
-    if (error instanceof TranscriptReplacedError) {
-      return { status: 'degraded', reason: 'transcript_replaced', nextAction: 'the transcript changed identity after validation (replacement or symlink swap); refusing to read — the next Stop revalidates the current file.', warnings: [] };
-    }
-    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
-    return { status: 'degraded', reason: `transcript_read_failed:${detail}`, nextAction: 'verify the transcript file still exists and is a regular file inside the Codex sessions root.', warnings: [] };
-  }
-  if (offset > window.fileSize) {
-    // The file shrank below the committed cursor: replaced or truncated —
-    // never guess; hold the checkpoint and degrade explicitly.
-    return { status: 'degraded', reason: 'checkpoint_inconsistent', nextAction: 'the transcript is shorter than the committed checkpoint; quarantine the stale rollout records via `pd codex ingest quarantine` or re-ingest from a fresh rollout.', warnings: [] };
-  }
-
-  const byteBoundReached = offset + window.bytes.length < window.fileSize;
-  const decoded = decodeTranscriptWindow({
-    bytes: window.bytes,
-    fileOffset: offset,
-    byteBoundReached,
-    rolloutIdentity,
-    fallbackRootSessionId: existing !== null ? existing.rootSessionId : fallbackRootSessionId,
-    nowIso: now.toISOString(),
-  });
-
-  // Supported-version guard (SPEC §9): the version signal lives in the
-  // transcript session_meta (or the committed checkpoint after the first
-  // batch). Anything below the verified floor or above the verified ceiling
-  // degrades explicitly — never guess record fields of an unknown contract.
-  const cliVersion = decoded.rolloutMeta.cliVersion ?? existing?.cliVersion ?? null;
-  const version = classifyCodexVersion(cliVersion);
-  if (version.status !== 'supported') {
-    return {
-      status: 'degraded',
-      reason: `${version.reason}:${cliVersion ?? 'unknown'}`,
-      nextAction: CODEX_VERSION_NEXT_ACTION,
-      warnings: decoded.warnings,
-    };
-  }
-
-  const degradations: GovernanceIngestDegradation[] = [];
-  if (decoded.stop.kind === 'malformed') {
-    degradations.push({ reason: 'transcript_record_malformed', ...(decoded.stop.ordinal !== null ? { ordinal: decoded.stop.ordinal } : {}), nextAction: 'the record is stable-invalid; quarantine this record via `pd codex ingest quarantine` (dry-run default). Later records remain as lag.' });
-  } else if (decoded.stop.kind === 'oversized_record') {
-    degradations.push({ reason: 'transcript_record_too_large', nextAction: 'a single transcript record exceeds the bounded-read window; inspect the rollout file.' });
-  }
-
-  const rootSessionId = decoded.rolloutMeta.rootSessionId ?? existing?.rootSessionId ?? fallbackRootSessionId;
-  // CR-01: upgrade text-only live observations with the host-verified exit
-  // codes BEFORE the checkpoint advances, so a write failure holds the delta
-  // and the next Stop retries instead of silently losing the verified facts.
-  const verifiedOutcomes = collectVerifiedToolOutcomes(decoded.observations);
-  if (verifiedOutcomes.length > 0) {
-    // SPEC-RULECODE-HOST-PROMOTION-001 R2: stamp the producing host on the
-    // inserted rows so attribution-aware readers can prove provenance.
-    const verified = recordVerifiedToolOutcomes({ workspaceDir, sessionId: rootSessionId, outcomes: verifiedOutcomes, hostKind: 'codex' });
-    const failed = verified.find((result) => result.status === 'unavailable');
-    if (failed !== undefined) {
-      const reason = failed.reason === 'trajectory_db_not_found' ? 'verified_outcome_db_unavailable' : `verified_outcome_write_failed:${failed.reason.split(':', 2)[1] ?? ''}`;
-      return { status: 'degraded', reason, nextAction: 'inspect the workspace trajectory database; the transcript checkpoint was NOT advanced, the next Stop retries this delta.', warnings: decoded.warnings };
-    }
-  }
-  const result = ingestGovernanceObservations({
+function ingestTranscriptDelta({ fallbackRootSessionId, transcriptPath, workspaceDir, env, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
+  const outcome: ConversationIngestionOutcome = runConversationIngestion({
     workspaceDir,
-    rollout: {
-      hostKind: 'codex',
-      rolloutIdentity,
-      rootSessionId,
-      ...(decoded.rolloutMeta.parentRolloutIdentity !== null ? { parentRolloutIdentity: decoded.rolloutMeta.parentRolloutIdentity } : {}),
-      ...(decoded.rolloutMeta.agentIdentity !== null ? { agentIdentity: decoded.rolloutMeta.agentIdentity } : {}),
-      ...(decoded.rolloutMeta.agentDepth !== null ? { agentDepth: decoded.rolloutMeta.agentDepth } : {}),
-    },
-    observations: decoded.observations,
-    checkpoint: {
-      hostKind: 'codex',
-      rolloutIdentity,
-      byteOffset: decoded.nextByteOffset,
-      lastOrdinal: decoded.lastOrdinal >= 0 ? decoded.lastOrdinal : existing?.lastOrdinal ?? 0,
-      cliVersion: cliVersion ?? undefined,
-      rootSessionId,
-      incompleteTail: decoded.stop.kind === 'incomplete_tail',
-    },
-    ...(degradations.length > 0 ? { degradations } : {}),
-    ...(decoded.compactionTimestamp !== null ? { compactionTimestamp: decoded.compactionTimestamp } : {}),
-    ...(decoded.rollbackTurns.length > 0 ? { rollbackTurns: decoded.rollbackTurns } : {}),
+    source: createCodexTranscriptSource({ env, fallbackRootSessionId, now }),
+    session: { sessionId: fallbackRootSessionId },
+    hints: { transcriptPath },
+    // PRI-1171 P1 phasing: the double FLAG gate (host.codex ∧
+    // codex_conversation_ingestion) is checked by pd-hook / catch-up BEFORE
+    // this module is entered, and the consent LEDGER remains the governance
+    // record the setup flow enforces (v2 authority model — the runtime gate
+    // reads only the flags). The pipeline's consent gate therefore receives
+    // the setup-flow invariant 'granted' until the P3 full-text batch wires
+    // the real v3 record + disclosureVersion tier.
+    flags: { ingestionEnabled: true },
+    consent: { decision: 'granted' },
     now,
+    port,
+    degradeTexts: CODEX_PIPELINE_DEGRADE_TEXTS,
+    preIngest: codexVerifiedOutcomesPreIngest,
   });
-
-  const warnings = [...decoded.warnings, ...result.warnings];
-  if (!result.ok) {
-    return { status: 'degraded', reason: result.reason ?? 'governance_write_failed', nextAction: result.nextAction ?? 'inspect the workspace trajectory database.', warnings };
-  }
-  if (decoded.stop.kind === 'incomplete_tail') {
-    warnings.push('transcript_incomplete_tail');
-  }
-  if (decoded.stop.kind === 'malformed') {
-    // The store already committed the records before the malformed line and
-    // held the checkpoint at it; surface the stable failure loudly (SPEC §14.2).
-    return {
-      status: 'degraded',
-      reason: 'transcript_record_malformed',
-      nextAction: 'the record is stable-invalid; quarantine this record via `pd codex ingest quarantine` (dry-run default). Later records remain as lag.',
-      warnings,
-    };
-  }
-  if (decoded.stop.kind === 'oversized_record') {
-    return {
-      status: 'degraded',
-      reason: 'transcript_record_too_large',
-      nextAction: 'a single transcript record exceeds the bounded-read window; inspect the rollout file.',
-      warnings,
-    };
+  if (outcome.status === 'degraded') {
+    return outcome;
   }
   return {
     status: 'ok',
-    inserted: result.inserted,
-    enriched: result.enriched,
-    duplicates: result.duplicates,
-    warnings,
-    lagBytes: Math.max(0, window.fileSize - decoded.nextByteOffset),
+    inserted: outcome.inserted,
+    enriched: outcome.enriched,
+    duplicates: outcome.duplicates,
+    warnings: outcome.warnings,
+    lagBytes: outcome.lagBytes,
     // Slice B: transcript-only user turns / tool calls that were never seen
     // live get their admission evaluation here (SPEC §10/§12) — already
     // admitted logical keys no-op on the marker.
-    admissionCandidates: buildTranscriptCandidates(decoded.observations),
-    rolloutIdentity,
+    admissionCandidates: buildTranscriptCandidates(outcome.observations),
+    rolloutIdentity: outcome.sessionIdentity,
   };
 }
 
@@ -319,20 +251,21 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
     // SPEC §9: never scan for another file; keep a neutral degraded result.
     return { status: 'degraded', reason: 'transcript_unavailable', nextAction: 'Codex supplied no transcript for this event; nothing is read or fabricated.', warnings: [] };
   }
-  const home = resolveCodexHome(options.env);
-  if (!home.ok) return { status: 'degraded', reason: home.reason, nextAction: home.nextAction, warnings: [] };
-  const validated = validateCodexTranscriptPath(fields.transcriptPath, home.home);
-  if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction, warnings: [] };
   const now = options.now ?? new Date();
 
   if (kind === 'before_prompt_build' || kind === 'after_tool_call') {
+    // Live observations key on the rollout identity derived from the SAME
+    // validated transcript reference the Stop replay later converges with
+    // (SPEC §10) — validate here exactly as before the seam migration.
+    const home = resolveCodexHome(options.env);
+    if (!home.ok) return { status: 'degraded', reason: home.reason, nextAction: home.nextAction, warnings: [] };
+    const validated = validateCodexTranscriptPath(fields.transcriptPath, home.home);
+    if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction, warnings: [] };
     return ingestLiveObservation({ fields, rolloutIdentity: validated.rolloutIdentity, workspaceDir: options.workspaceDir, now });
   }
   return ingestTranscriptDelta({
     fallbackRootSessionId: fields.sessionId,
-    canonicalPath: validated.canonicalPath,
-    identity: validated.identity,
-    rolloutIdentity: validated.rolloutIdentity,
+    transcriptPath: fields.transcriptPath,
     workspaceDir: options.workspaceDir,
     env: options.env ?? {},
     now,
@@ -360,15 +293,9 @@ export interface CodexTranscriptFromPathArgs {
  * previously-authenticated rollouts (checkpoints), never discovered sessions.
  */
 export function ingestCodexTranscriptFromPath(args: CodexTranscriptFromPathArgs): CodexIngestionOutcome {
-  const home = resolveCodexHome(args.env);
-  if (!home.ok) return { status: 'degraded', reason: home.reason, nextAction: home.nextAction, warnings: [] };
-  const validated = validateCodexTranscriptPath(args.transcriptPath, home.home);
-  if (!validated.ok) return { status: 'degraded', reason: validated.reason, nextAction: validated.nextAction, warnings: [] };
   return ingestTranscriptDelta({
     fallbackRootSessionId: args.fallbackRootSessionId,
-    canonicalPath: validated.canonicalPath,
-    identity: validated.identity,
-    rolloutIdentity: validated.rolloutIdentity,
+    transcriptPath: args.transcriptPath,
     workspaceDir: args.workspaceDir,
     env: args.env ?? {},
     now: args.now ?? new Date(),

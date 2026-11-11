@@ -8,16 +8,20 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { visibleMainNavItems } from '../../components/layout/app-sidebar.js';
+import { visibleMainNavItems, visibleTechnicalNavItems } from '../../components/layout/app-sidebar.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appSource = fs.readFileSync(path.resolve(here, '..', '..', 'App.tsx'), 'utf8');
 
 describe('Examiner product surface', () => {
   it('navigation always exposes the examiner entry', () => {
-    const ids = visibleMainNavItems().map((item) => item.id);
-    expect(ids).toContain('examiner');
-    expect(ids).toContain('focus');
+    // Owner decision 2026-11-11 (SPEC-PD-UIUX-002): the Examiner stays reachable,
+    // but it moved into the engineering-facing 技术 group so the daily nav is quiet.
+    const technicalIds = visibleTechnicalNavItems().map((item) => item.id);
+    expect(technicalIds).toContain('examiner');
+    const mainIds = visibleMainNavItems().map((item) => item.id);
+    expect(mainIds).not.toContain('examiner');
+    expect(mainIds).toContain('focus');
   });
 
   it('the /examiner route is mounted without a build-mode branch', () => {

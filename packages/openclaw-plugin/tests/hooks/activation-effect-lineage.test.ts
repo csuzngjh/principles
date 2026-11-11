@@ -30,7 +30,8 @@ import os from 'node:os';
 import path from 'node:path';
 import * as yaml from 'js-yaml';
 import { SqliteConnection, getDefaultPdConfig } from '@principles/core/runtime';
-import { handleBeforeToolCall, accountSharedDeny, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
+import type { HostEventResult } from '@principles/core/host';
+import { accountSharedDeny, handleSharedRuleHostResult } from '../../src/hooks/gate.js';
 import type { PluginHookBeforeToolCallResult } from '../../src/openclaw-sdk.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import {
@@ -147,8 +148,61 @@ function insertActivation(activationId: string, principleId: string, channel: 'c
 
 let gateWarnings: string[] = [];
 
-function runGate(params: Record<string, unknown>, sessionId: string): PluginHookBeforeToolCallResult | void {
-  return handleBeforeToolCall(
+/**
+ * PR-1 (legacy RuleHost retirement): `handleBeforeToolCall` has no production
+ * wiring. The mocked live decision is expressed as the `HostEventResult` the
+ * shared production gate emits for the same decision, and handed to the
+ * adapter that owns recording/application — the same seam production uses.
+ */
+function sharedResultFromReport(
+  report: ReturnType<typeof blockReport> | ReturnType<typeof autoCorrectReport>,
+): HostEventResult {
+  const decision = report.liveDecision;
+  const activationId = report.liveDecisionActivationId;
+  const evaluation = {
+    toolName: 'write',
+    filePath: 'src/target.ts',
+    matched: decision.matched,
+    decision: decision.decision,
+    ruleId: decision.ruleId,
+    ...(activationId !== undefined ? { activationId } : {}),
+    activationMode: 'live' as const,
+  };
+  if (decision.decision === 'block') {
+    return {
+      decision: 'deny',
+      source: 'openclaw:before_tool_call',
+      reason: decision.reason,
+      metadata: {
+        evaluatedLiveRules: 1,
+        ruleId: decision.ruleId,
+        principleId: decision.principleId,
+        evaluations: [evaluation],
+      },
+    };
+  }
+  return {
+    decision: 'allow',
+    source: 'openclaw:before_tool_call',
+    metadata: {
+      evaluatedLiveRules: 1,
+      ruleDecision: decision.decision,
+      matched: decision.matched,
+      ruleId: decision.ruleId,
+      principleId: decision.principleId,
+      ruleReason: decision.reason,
+      correctionProposal: decision.correctionProposal,
+      evaluations: [evaluation],
+    },
+  };
+}
+
+function runSharedGate(
+  report: ReturnType<typeof blockReport> | ReturnType<typeof autoCorrectReport>,
+  params: Record<string, unknown>,
+  sessionId: string,
+): PluginHookBeforeToolCallResult | void {
+  return handleSharedRuleHostResult(
     { toolName: 'write', params },
     {
       workspaceDir,
@@ -158,7 +212,8 @@ function runGate(params: Record<string, unknown>, sessionId: string): PluginHook
         error: vi.fn(),
         info: vi.fn(),
       },
-    },
+    } as never,
+    sharedResultFromReport(report) as never,
   );
 }
 
@@ -257,11 +312,15 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
   it('rule_blocked receipt links to the activation that produced the block', () => {
     seedSession('sess-pri899-block');
     insertActivation(BLOCK_ACTIVATION_ID, BLOCK_PRINCIPLE_ID, 'code_tool_hook');
-    mockEvaluateDetailed = vi.fn().mockReturnValue(blockReport(BLOCK_ACTIVATION_ID));
 
-    const result = runGate({ path: 'src/target.ts', content: 'x' }, 'sess-pri899-block') as PluginHookBeforeToolCallResult;
+    const handled = runSharedGate(blockReport(BLOCK_ACTIVATION_ID), { path: 'src/target.ts', content: 'x' }, 'sess-pri899-block');
 
-    expect(result.block).toBe(true);
+    // The host blocks on the shared gate's deny; the adapter returns the
+    // owner-facing block copy for it (PRI-1184 / F4).
+    expect(handled?.block).toBe(true);
+    expect(mockEventLog.recordRuleHostBlocked).toHaveBeenCalledWith(
+      expect.objectContaining({ ruleId: BLOCK_RULE_ID }),
+    );
     const row = effectRow('rule_blocked');
     expect(row).toBeDefined();
     expect(row?.activation_id).toBe(BLOCK_ACTIVATION_ID);
@@ -273,10 +332,18 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
   it('auto_correct_applied receipt links to the activation that produced the correction', () => {
     seedSession('sess-pri899-ac');
     insertActivation(AUTOCORRECT_ACTIVATION_ID, AUTOCORRECT_PRINCIPLE_ID, 'code_tool_hook');
-    mockEvaluateDetailed = vi.fn().mockReturnValue(autoCorrectReport(AUTOCORRECT_ACTIVATION_ID));
 
-    runGate({ path: path.join(workspaceDir, 'src', 'target.ts'), content: 'original' }, 'sess-pri899-ac');
+    const handled = runSharedGate(
+      autoCorrectReport(AUTOCORRECT_ACTIVATION_ID),
+      { path: path.join(workspaceDir, 'src', 'target.ts'), content: 'original' },
+      'sess-pri899-ac',
+    );
 
+    // Same observable as the legacy return: the corrected params go back to
+    // the host.
+    expect(handled).toEqual({
+      params: { path: path.join(workspaceDir, 'src', 'target.ts'), content: 'corrected' },
+    });
     const row = effectRow('auto_correct_applied');
     expect(row, gateWarnings.join(' | ')).toBeDefined();
     expect(row?.activation_id).toBe(AUTOCORRECT_ACTIVATION_ID);
@@ -287,12 +354,13 @@ describe('PRI-899 — code_tool_hook effect receipts carry the winning activatio
     seedSession('sess-pri899-noact');
     insertActivation(BLOCK_ACTIVATION_ID, BLOCK_PRINCIPLE_ID, 'code_tool_hook');
     // A decision with no winner activation — RuleHost leaves the id undefined.
-    mockEvaluateDetailed = vi.fn().mockReturnValue(blockReport(undefined));
 
-    const result = runGate({ path: 'src/target.ts', content: 'x' }, 'sess-pri899-noact') as PluginHookBeforeToolCallResult;
+    const handled = runSharedGate(blockReport(undefined), { path: 'src/target.ts', content: 'x' }, 'sess-pri899-noact');
 
-    // Enforcement is unaffected by lineage…
-    expect(result.block).toBe(true);
+    // Enforcement is unaffected by lineage — the deny is still returned as a
+    // block result (PRI-1184 / F4)…
+    expect(handled?.block).toBe(true);
+    expect(mockEventLog.recordRuleHostBlocked).toHaveBeenCalled();
     // …and the receipt is NOT fabricated a lineage it cannot prove (rc-9).
     const row = effectRow('rule_blocked');
     expect(row).toBeDefined();
