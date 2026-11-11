@@ -25,7 +25,6 @@ import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
 import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
-import { IS_DEV } from "../../utils/runtime-mode.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime';
 import type {
   PrincipleDetail,
@@ -536,18 +535,29 @@ export function PrincipleDetailPage() {
         <Button variant="ghost" onClick={() => navigate(returnTo)} className="-ml-2">
           ← {t("principles.detail.backToList")}
         </Button>
-        {/* SPEC-PD-EXAMINER-001 v0.9 §8.1: verification entry FROM the principle.
+        {/* SPEC-PD-EXAMINER-001 §8.1: verification entry FROM the principle.
             The Examiner page reads the ?principle= prefill (offline-stub only).
-            P2-1: DEV-only — a production bundle must not advertise a surface
-            whose API the server refuses. */}
-        {IS_DEV && (
+            Phase A1: available in production builds, but only for the status
+            the evaluation API actually accepts (active). Other statuses get a
+            reason instead of an entry that would be refused server-side. */}
+        {principle.status === 'active' ? (
           <Link
             to={`/examiner?principle=${encodeURIComponent(String(id ?? ''))}`}
             className="text-[13px] text-ink-3 underline decoration-dotted underline-offset-4 hover:text-ink"
             data-testid="principle-detail-examiner-link"
           >
-            {t("principles.detail.examinerEntry", { defaultValue: "验证此原则的行为效果 (Examiner)" })}
+            {t("principles.detail.examinerEntry", { defaultValue: "Evaluate this principle's behavioral effect" })}
           </Link>
+        ) : (
+          <span
+            className="text-[13px] text-ink-3"
+            data-testid="principle-detail-examiner-blocked"
+          >
+            {t("principles.detail.examinerEntryBlocked", {
+              defaultValue: "Only active principles can be evaluated (current status: {{status}}).",
+              status: principle.status,
+            })}
+          </span>
         )}
       </div>
 

@@ -2028,6 +2028,51 @@ export async function fetchExaminerPrincipleEvidence(principleId: string): Promi
   });
 }
 
+export interface ExaminerEligibilityCheck {
+  id: string;
+  status: 'PASS' | 'WARNING' | 'BLOCKED';
+  reasonCode: string;
+  detail: string | null;
+  evidence: string[];
+  nextAction: string | null;
+}
+
+export interface ExaminerEligibilityData {
+  status: 'ELIGIBLE' | 'DEGRADED' | 'BLOCKED';
+  principleId: string;
+  /** Stable machine code of the first blocker (null when creatable). */
+  reasonCode: string | null;
+  blockingReasonCode: string | null;
+  /** First actionable next step in English; the UI renders localized copy. */
+  nextAction: string | null;
+  summary: string;
+  checks: ExaminerEligibilityCheck[];
+  experimentMode: string;
+  suiteKey: string;
+  productionSnapshotMarkers: string[];
+  note: string;
+}
+
+export async function fetchExaminerEligibility(
+  principleId: string,
+  options: { mode?: string; suiteKey?: string } = {},
+): Promise<ApiResponse<ExaminerEligibilityData>> {
+  const params = new URLSearchParams();
+  if (options.mode !== undefined) params.set('mode', options.mode);
+  if (options.suiteKey !== undefined) params.set('suite', options.suiteKey);
+  const query = params.size > 0 ? `?${params.toString()}` : '';
+  return request<ExaminerEligibilityData>(
+    `/api/examiner/principles/${encodeURIComponent(principleId)}/eligibility${query}`,
+    undefined,
+    (v) => {
+      if (!v || typeof v !== 'object') return null;
+      const candidate = v as { status?: unknown; checks?: unknown };
+      if (typeof candidate.status !== 'string' || !Array.isArray(candidate.checks)) return null;
+      return v as ExaminerEligibilityData;
+    },
+  );
+}
+
 export interface ExaminerSuiteItem {
   key: string;
   title: string;

@@ -33,6 +33,7 @@ export function ExaminerStudyPage(): React.ReactElement {
   const [preflight, setPreflight] = useState<ExaminerPreflightData | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -41,6 +42,7 @@ export function ExaminerStudyPage(): React.ReactElement {
       setError(response.error ?? t('pages.examiner.errors.status'));
       return;
     }
+    setError(null);
     setStatus(response.data);
   }, [studyId, t]);
 
@@ -70,10 +72,11 @@ export function ExaminerStudyPage(): React.ReactElement {
 
   const handlePreflight = async (): Promise<void> => {
     setBusy('preflight');
+    setActionError(null);
     const response = await runExaminerPreflight(studyId);
     setBusy(null);
     if (!response.success) {
-      toast.error(response.error ?? t('pages.examiner.errors.preflight'));
+      setActionError(response.error ?? t('pages.examiner.errors.preflight'));
       return;
     }
     setPreflight(response.data);
@@ -81,34 +84,40 @@ export function ExaminerStudyPage(): React.ReactElement {
 
   const handleOfflineRun = async (): Promise<void> => {
     setBusy('offline');
+    setActionError(null);
     const response = await runExaminerStudy(studyId);
     setBusy(null);
     if (!response.success) {
-      toast.error(response.error ?? t('pages.examiner.errors.run'));
+      setActionError(response.error ?? t('pages.examiner.errors.run'));
       return;
     }
     toast.success(t('pages.examiner.runDone', { count: response.data.units.filter((u) => u.state === 'SUCCEEDED').length }));
     await refresh();
   };
 
-  const handleAsyncRun = async (mode: 'host-dry-run' | 'f2-real-host'): Promise<void> => {
-    setBusy(mode);
-    const response = await startExaminerAsyncRun(studyId, mode);
+  // Phase D1: only the offline comparison and the host dry-run are executable
+  // from the console. F2 real-host runs are NOT wired to a click path — they
+  // need an APPROVED Stage R authorization and the server would refuse anyway.
+  const handleAsyncRun = async (): Promise<void> => {
+    setBusy('host-dry-run');
+    setActionError(null);
+    const response = await startExaminerAsyncRun(studyId, 'host-dry-run');
     setBusy(null);
     if (!response.success) {
-      toast.error(response.error ?? t('pages.examiner.errors.run'));
+      setActionError(response.error ?? t('pages.examiner.errors.run'));
       return;
     }
-    toast.success(mode === 'host-dry-run' ? t('pages.examiner.study.accepted.dryRun') : t('pages.examiner.study.accepted.f2'));
+    toast.success(t('pages.examiner.study.accepted.dryRun'));
     await refresh();
   };
 
   const handleReport = async (): Promise<void> => {
     setBusy('report');
+    setActionError(null);
     const response = await generateExaminerReport(studyId);
     setBusy(null);
     if (!response.success) {
-      toast.error(response.error ?? t('pages.examiner.errors.report'));
+      setActionError(response.error ?? t('pages.examiner.errors.report'));
       return;
     }
     toast.success(t('pages.examiner.reportGenerated', { status: response.data.status }));
@@ -170,14 +179,24 @@ export function ExaminerStudyPage(): React.ReactElement {
                 {busy === 'offline' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                 {t('pages.examiner.study.runOffline')}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleAsyncRun('host-dry-run')} disabled={busy !== null || readOnly} data-testid="examiner-dryrun-button">
+              <Button variant="outline" size="sm" onClick={() => void handleAsyncRun()} disabled={busy !== null || readOnly} data-testid="examiner-dryrun-button">
                 {busy === 'host-dry-run' ? <Loader2 className="size-4 animate-spin" /> : <ServerCog className="size-4" />}
                 {t('pages.examiner.study.runDry')}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleAsyncRun('f2-real-host')} disabled={busy !== null || readOnly} data-testid="examiner-f2-button">
-                {busy === 'f2-real-host' ? <Loader2 className="size-4 animate-spin" /> : <Radio className="size-4" />}
-                {t('pages.examiner.study.requestF2')}
-              </Button>
+              {/* Phase D1/D2: F2 is NOT an executable action. It is shown as a
+                  stated, non-clickable limitation with the reason and next step,
+                  so nobody can mistake it for an available run mode. */}
+              <div className="w-full rounded-md border border-dashed p-2 text-[11px] text-muted-foreground" data-testid="examiner-f2-unavailable">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" size="sm" disabled data-testid="examiner-f2-button">
+                    <Radio className="size-4" />
+                    {t('pages.examiner.study.requestF2')}
+                  </Button>
+                  <span className="font-medium text-ink-3">{t('pages.examiner.study.f2ClosedTitle')}</span>
+                </div>
+                <p className="mt-1">{t('pages.examiner.study.f2ClosedBody')}</p>
+                <p className="mt-1">{t('pages.examiner.study.f2ClosedNext')}</p>
+              </div>
               <Button size="sm" onClick={() => void handleReport()} disabled={busy !== null || readOnly} data-testid="examiner-report-button">
                 {busy === 'report' ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
                 {t('pages.examiner.study.report')}
@@ -192,6 +211,13 @@ export function ExaminerStudyPage(): React.ReactElement {
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">{t('pages.examiner.study.modesNote')}</p>
+
+            {actionError !== null && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive" data-testid="examiner-action-error">
+                <div>{actionError}</div>
+                <div className="mt-1 text-muted-foreground">{t('pages.examiner.study.actionErrorNext')}</div>
+              </div>
+            )}
 
             {preflight && (
               <div className="rounded-md border p-3 text-xs" data-testid="examiner-preflight-result">
