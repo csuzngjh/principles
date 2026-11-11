@@ -79,13 +79,15 @@ describe('planUpgradeHosts (update chain 2026-11-11)', () => {
 });
 
 describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
-  function writeCohort(runtimeDir: string, core: string): void {
-    const packages: Record<string, string> = {
-      '@principles/core': core,
-      '@principles/host-runtime': '3.2.2',
-      '@principles/codex-adapter': '0.8.8',
-      '@principles/pd-mcp-server': '0.3.3',
-    };
+  const VERSIONS = {
+    '@principles/host-runtime': '3.2.2',
+    '@principles/codex-adapter': '0.8.8',
+    '@principles/pd-mcp-server': '0.3.3',
+  };
+
+  /** PLUGIN_DATA layout: `<runtimeDir>/node_modules/<pkg>/package.json`. */
+  function writePluginDataCohort(runtimeDir: string, core: string): void {
+    const packages: Record<string, string> = { '@principles/core': core, ...VERSIONS };
     for (const [name, version] of Object.entries(packages)) {
       const dir = path.join(runtimeDir, 'node_modules', name);
       fs.mkdirSync(dir, { recursive: true });
@@ -93,10 +95,30 @@ describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
     }
   }
 
+  /**
+   * Canonical shared runtime layout: `<runtimeDir>/<component>/package.json`.
+   * This is what `~/.pd/runtime` actually contains — reading it with the
+   * PLUGIN_DATA helper reported every OpenClaw/WorkBuddy host as
+   * "runtime not verified".
+   */
+  function writeCanonicalCohort(runtimeDir: string, core: string): void {
+    const components: Record<string, string> = {
+      core,
+      'host-runtime': VERSIONS['@principles/host-runtime'],
+      'codex-adapter': VERSIONS['@principles/codex-adapter'],
+      'pd-mcp-server': VERSIONS['@principles/pd-mcp-server'],
+    };
+    for (const [component, version] of Object.entries(components)) {
+      const dir = path.join(runtimeDir, component);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version }), 'utf8');
+    }
+  }
+
   it('names every host this run touched with the runtime it now resolves', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-summary-'));
-    writeCohort(path.join(root, 'canonical'), '7.2.0');
-    writeCohort(path.join(root, 'codex'), '7.0.0');
+    writeCanonicalCohort(path.join(root, 'canonical'), '7.2.0');
+    writePluginDataCohort(path.join(root, 'codex'), '7.0.0');
 
     const summary = summarizeTouchedHosts(
       [
@@ -115,7 +137,7 @@ describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
 
   it('never invents a host that this run did not touch', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-summary-'));
-    writeCohort(path.join(root, 'canonical'), '7.2.0');
+    writeCanonicalCohort(path.join(root, 'canonical'), '7.2.0');
 
     const summary = summarizeTouchedHosts(
       [{ success: true, hostId: 'openclaw', configAction: 'updated', nextAction: '' }],
@@ -125,5 +147,24 @@ describe('summarizeTouchedHosts (first-install coverage, 2026-11-11)', () => {
     expect(summary).toContain('Host "openclaw"');
     expect(summary).not.toContain('Host "codex"');
     expect(summary).not.toContain('Host "workbuddy"');
+  });
+
+  it('reads the shared canonical runtime for WorkBuddy as well, never "runtime not verified"', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-host-summary-'));
+    writeCanonicalCohort(path.join(root, 'canonical'), '7.2.0');
+
+    const summary = summarizeTouchedHosts(
+      [
+        { success: true, hostId: 'openclaw', configAction: 'preserved', nextAction: '' },
+        { success: true, hostId: 'workbuddy', configAction: 'updated', nextAction: '' },
+      ],
+      { canonicalRuntimeDir: path.join(root, 'canonical'), codexRuntimeReadable: false },
+    );
+
+    expect(summary).toHaveLength(2);
+    for (const line of summary) {
+      expect(line).toContain('core@7.2.0');
+      expect(line).not.toContain('runtime not verified');
+    }
   });
 });
