@@ -5,23 +5,37 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # Docs-only PRs cannot alter the JS/TS analysis result — skip the
-    # 4-8 min analysis for them (a PR mixing code with docs still runs).
-    # Code-PR security feedback and main/weekly analyses are unchanged.
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '**.mdx'
+    # CodeQL only analyzes JS/TS-family sources. A PR that touches none of the
+    # analyzed extensions cannot change the analysis result, so it is skipped
+    # (this covers docs, changeset/release and lockfile-only PRs alike).
+    # A PR that mixes code with anything else still runs the full analysis.
+    paths:
+      - '**.ts'
+      - '**.tsx'
+      - '**.mts'
+      - '**.cts'
+      - '**.js'
+      - '**.jsx'
+      - '**.mjs'
+      - '**.cjs'
+      - '**.html'
+      - '**.vue'
+      - '**.svelte'
+      # A change to the scanning configuration itself must always be analyzed.
+      - '.github/workflows/codeql.yml'
+      - '.github/codeql/**'
   # Manual re-trigger for platform-incident recovery (PR-event lossy days).
   workflow_dispatch:
   schedule:
     - cron: '23 4 * * 1'  # Weekly Monday 04:23 UTC
 
-# Supersede older analysis runs on the same PR; scheduled and main analyses
-# never cancel.
+# PR: one group per PR, so a new push supersedes the in-flight analysis.
+# Non-PR (main push / schedule / dispatch): keyed by commit, so a literal
+# duplicate of the same (ref, sha) collapses while a newer main commit always
+# runs — main analysis is never skipped.
 concurrency:
-  group: codeql-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.event_name == 'pull_request' && format('codeql-pr-{0}', github.event.pull_request.number) || format('codeql-{0}-{1}', github.ref, github.sha) }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -42,7 +56,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Initialize CodeQL
+      # PR fast path: security-extended only, with the AngularJS query pack
+      # excluded (no AngularJS code in this repo: 9 queries, 23.3% of query
+      # time, zero findings). See .github/codeql/codeql-config-pr.yml.
+      - name: Initialize CodeQL (PR fast path)
+        if: github.event_name == 'pull_request'
+        uses: github/codeql-action/init@v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config-pr.yml
+
+      # main / weekly schedule / manual dispatch keep the full suite. Nothing is
+      # removed from these paths.
+      - name: Initialize CodeQL (full suite)
+        if: github.event_name != 'pull_request'
         uses: github/codeql-action/init@v4.38.2
         with:
           languages: ${{ matrix.language }}
