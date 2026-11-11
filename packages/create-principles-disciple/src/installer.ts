@@ -4454,9 +4454,16 @@ export function summarizeTouchedHosts(
 ): string[] {
   const canonical = readCanonicalRuntimeCohort(deps.canonicalRuntimeDir ?? getPdRuntimeDir());
   const codexHome = process.env.CODEX_HOME ?? path.join(getHomeDir(), '.codex');
-  const codex = deps.codexRuntimeReadable === false ? undefined : readInstalledRuntimeCohort(
-    deps.codexRuntimeDir ?? resolvePluginDataRoot(codexHome, 'principles') ?? '',
-  );
+  // `resolvePluginDataRoot` returns the PLUGIN DATA ROOT; the installed cohort
+  // lives one level below it in `runtime/`. Appending `node_modules` to the
+  // root read a directory that never exists, so an install that had just
+  // refreshed Codex to the payload pin still printed "runtime not verified".
+  const pluginDataRoot = resolvePluginDataRoot(codexHome, 'principles');
+  const codexRuntimeDir = deps.codexRuntimeDir
+    ?? (pluginDataRoot === undefined ? undefined : path.join(pluginDataRoot, 'runtime'));
+  const codex = deps.codexRuntimeReadable === false || codexRuntimeDir === undefined
+    ? undefined
+    : readInstalledRuntimeCohort(codexRuntimeDir);
   return results.map((host) => {
     if (!host.success) {
       return `Host "${host.hostId}" — not updated: ${host.reason ?? 'unknown failure'}`;
