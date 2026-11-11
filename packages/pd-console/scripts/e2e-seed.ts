@@ -10,7 +10,7 @@
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
 import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV2 } from '@principles/core/runtime';
-import { saveHostToolDeclaration } from '@principles/host-runtime';
+import { saveHostToolDeclaration, HOST_TOOL_DECLARATION_VERSION } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -982,7 +982,7 @@ console.log('[e2e-seed] .pd/config.yaml written: intent_engineering=false (flag-
 // route), so persist the host declaration exactly like a real host startup —
 // the seeded prompt approvals are short statements and stay deliverable.
 const declared = saveHostToolDeclaration(workspaceDir, {
-  version: 1,
+  version: HOST_TOOL_DECLARATION_VERSION,
   hostKind: 'openclaw',
   // Match the llm-dogfood host surface: the seeded RuleCode rules dispatch
   // bash/write_file/edit_file through the RuleHost gate, and the promotion

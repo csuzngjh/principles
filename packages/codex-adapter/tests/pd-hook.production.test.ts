@@ -98,6 +98,32 @@ describe('pd-hook executable shared MVP paths', () => {
     expect(fs.existsSync(path.join(root, '.state'))).toBe(false);
   });
 
+  it('ADR-0030: a persisted v1 tool declaration never interrupts the hook and its degrade is visible on stderr', () => {
+    const root = workspace();
+    const declarationDir = path.join(root, '.pd', 'host-tool-semantics');
+    fs.mkdirSync(declarationDir, { recursive: true });
+    fs.writeFileSync(path.join(declarationDir, 'codex.json'), JSON.stringify({
+      version: 1,
+      hostKind: 'codex',
+      mappings: [
+        { rawToolName: 'Bash', canonicalKind: 'execute' },
+        { rawToolName: 'apply_patch', canonicalKind: 'write' },
+      ],
+      declaredAt: '2026-09-04T00:00:00.000Z',
+    }));
+
+    const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** Update File: safe-523.txt\n@@\n-a\n+b\n*** End Patch' }, tool_use_id: 'call-legacy-decl' });
+
+    // Host loading is NOT interrupted: exit 0 and a well-formed hook decision.
+    expect(result.status).toBe(0);
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+    expect(JSON.parse(result.stdout)).toMatchObject({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    // …and the version mismatch is locatable, with what was defaulted.
+    expect(result.stderr).toContain('host_tool_declaration_version_legacy');
+    expect(result.stderr).toContain('declared version 1');
+    expect(result.stderr).toContain('writePayloadFormat is treated as unset');
+  });
+
   it('T7 (PRI-904 Phase-1): Codex prompt injection still works and never claims an unearned fair rotation', async () => {
     // Codex never writes trajectory.db::user_turns (its ingestion writes
     // governance_* rows), so the shared production route holds NO advancing

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   getInstallLayoutPaths,
@@ -10,6 +11,14 @@ import {
   resolveInstallLayout,
   mergeInstallManifestWorkspaces,
 } from './index.js';
+
+// Workspace fixtures MUST be absolute for the platform running the suite:
+// `path.isAbsolute('D:/Code/ws-a')` is false on Linux, so a hardcoded drive
+// letter makes these tests pass only on Windows and hides the real contract.
+// Derive every fixture from os.tmpdir(); win32-specific rules are covered by
+// the injected-platform test at the bottom of this file.
+const WS_ROOT = path.resolve(os.tmpdir(), 'pd-install-layout-test');
+const ws = (name: string): string => path.join(WS_ROOT, name);
 
 describe('install layout', () => {
   it('resolves a canonical Codex-only install without OpenClaw', () => {
@@ -71,7 +80,7 @@ describe('install layout', () => {
       layoutVersion: 1,
       mode: 'canonical',
       hosts: ['openclaw', 'codex', 'workbuddy'],
-      workspaces: ['C:/Users/alice/.codex/pd-workspace', 'C:/Users/alice/.workbuddy/pd-workspace'],
+      workspaces: [ws('codex-pd-workspace'), ws('workbuddy-pd-workspace')],
     });
     expect(error).toBeUndefined();
     expect(warnings).toBeUndefined();
@@ -84,7 +93,7 @@ describe('install layout', () => {
       layoutVersion: 1,
       mode: 'canonical',
       hosts: ['codex', 'openclaw', 'workbuddy', 'gamma'],
-      workspaces: ['C:/ws'],
+      workspaces: [ws('gamma-workspace')],
     });
     expect(error).toBeUndefined();
     expect(manifest?.hosts).toEqual(['codex', 'openclaw', 'workbuddy']);
@@ -221,16 +230,18 @@ describe('install layout', () => {
   });
 
   it('parses workspaces as canonical absolute paths, deduped in insertion order', () => {
+    const first = ws('ws-a');
+    const second = ws('ws b');
     const { manifest, error } = parseInstallManifest({
       layoutVersion: 1,
       mode: 'canonical',
       hosts: ['codex'],
-      workspaces: ['D:/Code/ws-a', 'D:\\Code\\ws-a', 'C:/work/ws b'],
+      workspaces: [first, `${first}${path.sep}`, second],
     });
     expect(error).toBeUndefined();
     expect(manifest?.workspaces?.length).toBe(2);
-    expect(manifest?.workspaces?.[0]).toBe(path.resolve('D:/Code/ws-a'));
-    expect(manifest?.workspaces).toContain(path.resolve('C:/work/ws b'));
+    expect(manifest?.workspaces?.[0]).toBe(path.resolve(first));
+    expect(manifest?.workspaces).toContain(path.resolve(second));
   });
 
   it('rejects malformed workspace entries loudly', () => {
@@ -243,16 +254,56 @@ describe('install layout', () => {
   });
 
   it('merges a workspace into an existing manifest without duplicates', () => {
+    const first = ws('ws-a');
     const merged = mergeInstallManifestWorkspaces(
-      { layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: ['D:/Code/ws-a'] },
-      'D:\\Code\\ws-a',
+      { layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: [first] },
+      `${first}${path.sep}`,
     );
     expect(merged.length).toBe(1);
-    expect(merged[0]).toBe(path.resolve('D:/Code/ws-a'));
+    expect(merged[0]).toBe(path.resolve(first));
   });
 
   it('merge accepts unknown current manifests and starts a fresh list', () => {
-    const merged = mergeInstallManifestWorkspaces(undefined, 'D:/Code/ws-b');
-    expect(merged).toEqual([path.resolve('D:/Code/ws-b')]);
+    const fresh = ws('ws-b');
+    const merged = mergeInstallManifestWorkspaces(undefined, fresh);
+    expect(merged).toEqual([path.resolve(fresh)]);
+  });
+
+  // Injected platform keeps the win32 rule executable on ubuntu CI, where the
+  // ambient path module is posix. This is the same seam used by
+  // isSameMcpBindingPath in the MCP binding contract.
+  it('applies win32 absolute-path rules on every host platform', () => {
+    const winA = 'D:/Code/ws-a';
+    const winB = 'C:/work/ws b';
+    const win = parseInstallManifest(
+      {
+        layoutVersion: 1,
+        mode: 'canonical',
+        hosts: ['codex'],
+        workspaces: [winA, 'D:\\Code\\ws-a', winB],
+      },
+      'win32',
+    );
+    expect(win.error).toBeUndefined();
+    expect(win.manifest?.workspaces?.length).toBe(2);
+    expect(win.manifest?.workspaces?.[0]).toBe(path.win32.resolve(winA));
+    expect(win.manifest?.workspaces).toContain(path.win32.resolve(winB));
+
+    // The same drive-letter path is relative under POSIX rules — the exact
+    // divergence that used to hide because the suite only ran on Windows.
+    expect(
+      parseInstallManifest(
+        { layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: [winA] },
+        'posix',
+      ).error,
+    ).toBe('install_manifest_malformed: workspaces must be non-empty absolute paths');
+
+    expect(
+      mergeInstallManifestWorkspaces(
+        { layoutVersion: 1, mode: 'canonical', hosts: ['codex'], workspaces: ['D:/Code/ws-a'] },
+        'D:\\Code\\ws-a',
+        'win32',
+      ),
+    ).toEqual([path.win32.resolve('D:/Code/ws-a')]);
   });
 });

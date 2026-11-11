@@ -146,6 +146,58 @@ describe('validateToolSemanticMappings — untrusted declaration validation', ()
   });
 });
 
+describe('ToolSemanticRegistry.resolveWritePayloadFormat — ADR-0030', () => {
+  it('exposes the declared encoding of a write tool and nothing else', () => {
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
+      { rawToolName: 'content_writer', canonicalKind: 'write' },
+    ]);
+    if (!built.ok) throw new Error(`registry failed to build: ${built.errors.join('; ')}`);
+    expect(built.registry.resolveWritePayloadFormat('apply_patch')).toBe('file-header-patch');
+    // Declared write WITHOUT a format is explicitly plain — not "unknown".
+    expect(built.registry.resolveWritePayloadFormat('content_writer')).toBeUndefined();
+    // Baseline names never carry a host-declared format…
+    expect(built.registry.resolveWritePayloadFormat('write_file')).toBeUndefined();
+    // …and an undeclared name is never guessed from its literal.
+    expect(built.registry.resolveWritePayloadFormat('apply_patch_alias')).toBeUndefined();
+  });
+
+  it('keeps the format in the host mapping projection (deep-frozen)', () => {
+    const built = buildToolSemanticRegistry([
+      { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
+    ]);
+    if (!built.ok) throw new Error('registry failed to build');
+    const [projected] = built.registry.hostMappings();
+    expect(projected?.writePayloadFormat).toBe('file-header-patch');
+    expect(Object.isFrozen(projected)).toBe(true);
+  });
+
+  it('rejects a format on a non-write mapping (fail loud, not ignored)', () => {
+    const result = validateToolSemanticMappings([
+      { rawToolName: 'shell', canonicalKind: 'execute', writePayloadFormat: 'file-header-patch' },
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain("only valid for canonicalKind 'write'");
+  });
+
+  it('rejects an unknown format value', () => {
+    const result = validateToolSemanticMappings([
+      { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'xml-wrapper' },
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('writePayloadFormat must be one of file-header-patch');
+  });
+
+  it('rejects the same raw name declared with two different formats', () => {
+    const result = validateToolSemanticMappings([
+      { rawToolName: 'apply_patch', canonicalKind: 'write', writePayloadFormat: 'file-header-patch' },
+      { rawToolName: 'apply_patch', canonicalKind: 'write' },
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('conflicting writePayloadFormat');
+  });
+});
+
 describe('ToolSemanticRegistry.hostMappings — PRI-741 read-only host projection', () => {
   it('projects exactly the host layer declarations (baseline names excluded)', () => {
     const built = buildToolSemanticRegistry([

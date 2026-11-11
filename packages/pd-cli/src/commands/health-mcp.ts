@@ -22,7 +22,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { getInstallLayoutPaths } from '@principles/install-layout';
+import {
+  getCanonicalMcpServerEntry,
+  getInstallLayoutPaths,
+  validateMcpBinding,
+  type McpBindingShapeCode,
+} from '@principles/install-layout';
 import {
   findNewestRolloutFile,
   resolveCodexHome,
@@ -113,12 +118,31 @@ export interface McpHealthSection {
   nextAction?: string;
 }
 
-export const MCP_BINDING_SCHEMA = 'pd.mcp-binding.v1';
-
-const SERVER_ENTRY_SEGMENTS: Record<McpHealthHost, string[]> = {
-  codex: ['node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'],
-  openclaw: ['pd-mcp-server', 'dist', 'index.js'],
-  workbuddy: ['pd-mcp-server', 'dist', 'index.js'],
+/**
+ * The shared shape gate (`validateMcpBinding`) decides WHAT is wrong; this table
+ * decides what `pd health` PRINTS. Every target is an existing outward code, so
+ * converging on the shared declaration cannot rename, remove or blur a
+ * diagnostic the Owner already relies on. Intentional mappings that look
+ * lossy:
+ *   - `binding_host_invalid` (unknown host name) keeps the historical
+ *     `binding_host_mismatch`;
+ *   - `binding_runtime_dir_invalid` / `binding_server_entry_invalid` keep the
+ *     historical `binding_paths_not_absolute` (missing counts as unusable);
+ *   - `binding_versions_invalid` keeps `installed_mcp_server_version_mismatch`,
+ *     which is what the version layer already reported for a broken record.
+ */
+const MCP_BINDING_SHAPE_DEGRADES: Readonly<
+  Record<McpBindingShapeCode, { status: McpHealthStatus; code: string }>
+> = {
+  binding_invalid: { status: 'CONFIG_DRIFT', code: 'mcp_binding_unreadable' },
+  binding_schema_unsupported: { status: 'CONFIG_DRIFT', code: 'binding_schema_unsupported' },
+  binding_host_invalid: { status: 'CONFIG_DRIFT', code: 'binding_host_mismatch' },
+  binding_host_mismatch: { status: 'CONFIG_DRIFT', code: 'binding_host_mismatch' },
+  binding_workspace_invalid: { status: 'CONFIG_DRIFT', code: 'binding_workspace_invalid' },
+  binding_runtime_dir_invalid: { status: 'CONFIG_DRIFT', code: 'binding_paths_not_absolute' },
+  binding_server_entry_invalid: { status: 'CONFIG_DRIFT', code: 'binding_paths_not_absolute' },
+  binding_versions_invalid: { status: 'VERSION_MISMATCH', code: 'installed_mcp_server_version_mismatch' },
+  server_entry_not_canonical: { status: 'CONFIG_DRIFT', code: 'server_entry_not_canonical' },
 };
 
 const SETUP_NEXT_ACTION =
@@ -767,7 +791,7 @@ interface BaseSectionInput {
 }
 
 function baseSection({ host, layout, homeDir, env, status, reason, nextAction }: BaseSectionInput): McpHealthSection {
-  const entry = path.join(layout.defaultRuntimeDir, ...SERVER_ENTRY_SEGMENTS[host]);
+  const entry = getCanonicalMcpServerEntry(host, layout.defaultRuntimeDir);
   return {
     host,
     status,
@@ -832,7 +856,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   const bindingExists = exists(layout.bindingPath);
   const bindingRuntimeDir = readString(bindingRecord, 'runtimeDir');
   const runtimeDir = isAbsoluteString(bindingRuntimeDir) ? bindingRuntimeDir : layout.defaultRuntimeDir;
-  const entry = path.join(runtimeDir, ...SERVER_ENTRY_SEGMENTS[host]);
+  const entry = getCanonicalMcpServerEntry(host, runtimeDir);
   const entryExists = exists(entry);
   const packageRoot = path.dirname(path.dirname(entry));
   const installedVersion = readString(readJsonRecord(path.join(packageRoot, 'package.json')), 'version');
@@ -976,20 +1000,12 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   } else if (bindingRecord === null) {
     degrade('CONFIG_DRIFT', 'mcp_binding_unreadable', SETUP_NEXT_ACTION);
   } else {
-    if (binding.schemaVersion !== MCP_BINDING_SCHEMA) {
-      degrade('CONFIG_DRIFT', 'binding_schema_unsupported', SETUP_NEXT_ACTION);
-    }
-    if (binding.host !== host) {
-      degrade('CONFIG_DRIFT', 'binding_host_mismatch', 'Re-run the PD host setup for THIS host; a binding written by another host payload is refused by the launcher.');
-    }
-    if (!isAbsoluteString(binding.runtimeDir) || !isAbsoluteString(binding.serverEntry)) {
-      degrade('CONFIG_DRIFT', 'binding_paths_not_absolute', SETUP_NEXT_ACTION);
-    }
-    if (bindingWorkspaceDir !== null && !path.isAbsolute(bindingWorkspaceDir)) {
-      degrade('CONFIG_DRIFT', 'binding_workspace_invalid', SETUP_NEXT_ACTION);
-    }
-    if (canonical === false) {
-      degrade('CONFIG_DRIFT', 'server_entry_not_canonical', SETUP_NEXT_ACTION);
+    // Shape is decided by the SAME declaration the Codex installer and the
+    // fail-closed launcher use; only the printed code is pd-cli's own.
+    const shape = validateMcpBinding(bindingRecord, host, process.platform);
+    if (!shape.ok) {
+      const mapped = MCP_BINDING_SHAPE_DEGRADES[shape.code];
+      degrade(mapped.status, mapped.code, SETUP_NEXT_ACTION);
     }
     if (!entryExists) {
       degrade('HOST_RUNTIME_NOT_VERIFIED', 'server_entry_missing', 'Re-run the PD host setup so the pinned MCP server package is installed.');
