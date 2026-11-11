@@ -406,9 +406,14 @@ describe('Gate Rule Host Only Pipeline', () => {
 
   describe('Tool-specific entry filtering (collapsed into the shared gate)', () => {
     it('should allow a read tool through the shared path without blocking', () => {
-      // DIFF: the shared gate evaluates every tool with a resolvable target
-      // path (the legacy read-tool early return is gone). The surviving
-      // contract is that a read call is never blocked by an allow verdict.
+      // DIFF-WEAKENED (PR-A checklist F3'): the shared gate evaluates every tool
+      // with a resolvable target path, so the legacy read-tool early return no
+      // longer exists and "the engine was never called" is not observable here.
+      // Strength asserted today: a read call is never blocked by an allow verdict.
+      // PR-A restores the original strength by expressing the entry filter
+      // through the existing tool-semantics authority (ToolSemanticRegistry /
+      // canonicalKind) and asserting that read/agent tools never reach the
+      // production gate at all.
       const event = {
         toolName: 'read',
         params: { file_path: 'src/readonly.ts' },
@@ -438,10 +443,13 @@ describe('Gate Rule Host Only Pipeline', () => {
     });
 
     it('should allow an agent tool that carries no resolvable target path', () => {
-      // DIFF: the missing-workspace guard now lives in the OpenClaw adapter
-      // wiring (index.ts skips the result mapping). The shared gate still
-      // evaluates this call with an empty target path, so the surviving
-      // contract here is that no block is produced.
+      // DIFF-WEAKENED (PR-A checklist F3'): the missing-workspace guard now
+      // lives in the OpenClaw adapter wiring (index.ts skips the result
+      // mapping). The shared gate still evaluates this call with an empty
+      // target path, so the strength asserted here is only "no block".
+      // PR-A restores the original strength: assert on the adapter/gate entry
+      // filter that agent tools are skipped entirely (no engine call), using the
+      // same ToolSemanticRegistry authority as the read-tool case.
       const event = {
         toolName: 'agent',
         params: { task: 'do something' },
