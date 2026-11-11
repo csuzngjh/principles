@@ -1,0 +1,23 @@
+# PRI-1182 acceptance — the ACTUAL isolated Adaptive Activation configuration.
+#
+# This file is the contract the real run uses. Only these values differ from a
+# workspace default; the runner materializes the full effective config
+# (defaults + this file + the per-case prompt budget) into a throwaway
+# workspace and records its SHA-256 beside the run output.
+#
+# `responseModels` is the FROZEN EXACT allowlist: an answer whose `model` is not
+# one of these two strings is rejected, so a same-prefix slug with an
+# unregistered date cannot pass.
+features:
+  host.codex:
+    enabled: true
+  host.codex.adaptive_activation:
+    enabled: true
+adaptiveActivation:
+  endpoint: https://openrouter.ai/api/alpha/decisions
+  model: respan/span-01-lite:free
+  apiKeyEnv: OPENROUTER_API_KEY
+  provider: Respan
+  responseModels:
+    - respan/span-01-lite:free
+    - respan/span-01-lite-20260925

@@ -1,0 +1,37 @@
+# CodeQL configuration used by pull_request runs only.
+#
+# Suite layering (Phase 1 of docs/reviews/2026-11-11-codeql-ci-performance-audit.md):
+#   * pull_request  -> security-extended (this file)
+#   * main / weekly -> security-extended,security-and-quality (workflow input)
+#
+# Extraction is identical on both paths; only the query suite differs.
+#
+# The AngularJS queries are excluded on PR runs because this repository has no
+# AngularJS code (zero `@angular/` or `angularjs` references in any package
+# manifest). They were 9 of 203 queries and 23.3% of query evaluation time with
+# zero findings. The full pack still runs on main and on the weekly schedule —
+# this exclusion is scoped to PR runs.
+name: 'PD PR fast path (javascript-typescript)'
+
+queries:
+  - uses: security-extended
+
+query-filters:
+  - exclude:
+      id: js/angular/double-compilation
+  - exclude:
+      id: js/angular/disabling-sce
+  - exclude:
+      id: js/angular/insecure-url-whitelist
+  - exclude:
+      id: js/angular/repeated-dependency-injection
+  - exclude:
+      id: js/angular/expression-in-url-attribute
+  - exclude:
+      id: js/angular/missing-explicit-injection
+  - exclude:
+      id: js/angular/dependency-injection-mismatch
+  - exclude:
+      id: js/angular/incompatible-service
+  - exclude:
+      id: js/angular/duplicate-dependency

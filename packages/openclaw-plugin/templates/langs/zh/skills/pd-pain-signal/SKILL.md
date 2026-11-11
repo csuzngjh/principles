@@ -1,45 +1,156 @@
 ---
 name: pd-pain-signal
-description: 当 Owner 明确要求记录智能体行为问题、登记痛苦信号，或追踪某次反馈是否进入诊断管线时使用。自动痛苦检测仍由现有 Hook、宿主入口和 Runtime 负责。
+description: 在当前 OpenClaw 对话中登记一次带锚点的行为背离（Pain）。仅当 Owner 明确要求记录某个具体行为问题、且你能指明锚点时使用。锚点式写入走 PD MCP 工具 pd_submit_pain；禁止后台提交，禁止编造锚点。
 disable-model-invocation: false
 ---
 
-# PD Pain Signal
+# PD Pain Signal（OpenClaw）
 
-## 目标
+Pain = 相对某个明确锚点的、具体的行为背离。三要素必须同时成立：
 
-把 Owner 的真实行为反馈交给现有 PD 痛苦登记与诊断管线，并保留原始陈述、来源和可用的会话证据。本技能不重写检测、去重、准入或诊断逻辑。
+1. **锚点** —— Owner 的明示要求、既有原则，或生效中的 Agent 指令 / Skill 要求。
+2. **具体行为** —— 你实际做了什么、漏了什么。
+3. **显著背离** —— 相对该锚点可以说清楚的差距。
 
-## 执行步骤
+没有证明影响、没有重复发生、Owner 之前没纠正过，都**不是**不提交的理由，只影响 Owner 的注意力排序。
 
-1. **先检查是否已登记。** 当前消息可能已经由 Hook 或宿主入口处理。若有真实回执，复用 pain/task 标识，不要重复提交。无法观测是否登记时，不得声称成功，也不要盲目重复写入。
-2. **保留 Owner 原话。** 只记录 Owner 明确提供的陈述；不要补写技术根因、评分或工具失败事实。引用、工具输出和模型转述不能伪装成新的 Owner 提交。
-3. **使用可信的宿主入口。**
-   - 在发生问题的 OpenClaw 会话中，若 Owner 明确要求登记，使用宿主命令 `/pd-pain <问题描述>`。该命令由 OpenClaw 绑定真实当前会话。
-   - 在会话外使用 CLI 时，只能绑定已知且已验证的会话：`pd pain record --reason "<reason>" --workspace "<workspace>" --session "<session-id>" --json`。
-4. **禁止猜测 session ID。** 不得猜测身份、扫描数据库、选择“最新”会话或用其他宿主的 ID 冒充当前会话。缺少必要会话标识时停止该 CLI 路径并说明原因。
-5. **核验回执。** 只有实际回执证明登记成功，才能报告已登记；没有回执只能说尚未确认。
+## 入口 1 —— 原生宿主入口：`/pd-pain`（Owner 发起，不是你的入口）
 
-## 证据与成功标准
+Owner 在出问题的 OpenClaw 会话里直接发：
 
-- 有真实 pain ID 只代表登记有回执，不代表诊断完成。
-- 诊断产生候选，不代表候选通过准入。
-- 必须查看 `admissionResults` / `candidateOutcomes` 中的实际 `admitted` 决策及对应的非空 `ledgerEntryIds`；不能只凭 `candidateIds` 非空宣布成功。
-- `needs_evidence`、`deferred` 或明确的准入拒绝必须如实报告。不要绕过准入门，也不要为提高置信度而伪造轨迹。
-- 原始 Owner 陈述、宿主轨迹、模型诊断、准入结果、Owner 审批和激活状态是不同类型的证据，不能混为一谈。
+    /pd-pain <描述>
 
-## 失败处理
+OpenClaw 会把插件命令派发到当前已认证的会话，由插件自己完成写入。规则：
 
-- 登记失败：保留真实错误和宿主提供的下一步操作。
-- 重复登记风险：先核对已有回执与幂等结果。
-- 会话不存在或身份不可信：停止，不得猜测。
-- CLI/Hook 不可用：转交 `pd-cli-operator` 检查状态；需要修复安装时转交 `pd-control`。
-- Owner 要求查看后续候选：使用 `pd-review` 打开 Console；不要重新登记同一反馈。
+- 不要模拟该命令，不要替 Owner 调用，也不要把同一条消息再登记一次。
+- 如果你能看到真实回执，只报告它实际返回的标识与状态。
+- 如果 Owner 让你登记但并没有发这个命令，用入口 2（工具可用时），或者说明你为什么做不到。
+
+## 入口 2 —— 锚点式提交：MCP 工具 `pd_submit_pain`
+
+先看你的工具列表。
+
+- 如果 `pd_submit_pain` 可用，用下表的四个参数调用。
+- 如果工具列表里没有它，说明这套部署**没有开启**锚点式写入能力。此时停下：不要调用相似工具、不要用猜出来的 lineage 拼一条 CLI 写入、不要声称已经提交。如实告诉 Owner 该能力不可用；若仍要登记，指向入口 1。
+
+| 参数 | 必填 | 合同 |
+|---|---|---|
+| `reason` | 是 | 1–2000 字符，按下面的六部分组织 |
+| `anchorType` | 是 | `owner_expectation` / `established_principle` / `agent_instruction` |
+| `anchorRef` | 是 | 1–300 字符，格式取决于锚点类型 |
+| `painType` | 否 | `principle_deviation` / `tool_failure` / `subagent_error` / `user_frustration` |
+
+schema 是严格的。`score`、`severity`、`priority`、`sessionId`、`approved`、文件路径与元数据都会在写入前被拒绝。
+
+## 锚点
+
+只能选一类。`anchorRef` 必须能让别人找到这条要求。
+
+### `owner_expectation`（Owner 明示要求）
+
+Owner 说过 —— 本次对话、Owner 文档或已批准的决定。`anchorRef` 写明出处，例如 `本次对话 14:02 Owner: "..."` 或 `docs/xxx.md §2`。
+
+- 只凭记忆的 Owner 要求不得提交。没有可引用的位置就先向 Owner 确认，或者不提交。
+
+### `established_principle`（既有原则）
+
+`anchorRef` 必须是 `<principleId>@<version>`（例如 `P-42@1`）。两者都从 `pd principle list` 取，禁止猜测或推断版本号。
+
+服务端会校验存在性、版本与状态：
+
+- `active` 或 `probation` → 可作为背离依据。
+  `probation` 会返回 `anchor_probation` 警告：背离成立，但该原则仍在验证期。
+- `candidate`、`archived`、`deprecated` → 不能作为违规依据，只能作背景。
+
+服务端只校验存在性 / 版本 / 状态。**适用范围与优先级冲突无法在此机器判定。** 如果你无法确认该原则适用于当前场景，在 `reason` 里写"适用性待确认"，不要写成已定论。
+
+### `agent_instruction`（生效中的 Agent 指令）
+
+`anchorRef` 必须是 `<path>#<section>` 且**不含空格**，例如 `AGENTS.md#verification`。它必须指向当前宿主生效的要求（AGENTS.md、PRINCIPLES.md、SKILL.md、工具说明）。
+
+### 没有锚点
+
+如果你无法把锚点归入以上三类，不要提交。先向 Owner 澄清。
+
+## `reason` —— 六部分，按顺序
+
+1. **锚点** —— 引用或指明（原则 id@version、指令 path#section、Owner 原话 + 出处）。
+2. **锚点来源与引用等级** —— `verbatim` / `paraphrase` / `recollection` / `inference`。不得抬高等级。仅有 `recollection` 或 `inference` 时不够：先与 Owner 确认原话。
+3. **观察到的行为** —— 具体动作、顺序、跳过的步骤、越界之处。不要写"质量不好"。
+4. **背离** —— 相对锚点的差距：没做 / 做反了 / 做了但绕过了。
+5. **为何值得记录**（辅助）—— 帮 Owner 排优先级。它**不是**受理条件，绝不能用它否决一条本来有效的 Pain。
+6. **上下文** —— 何时、何地发生，范围要克制。
+
+不得隐瞒冲突的锚点。不得为了让提交更容易被接受而夸大背离。不得把第 5 部分变成门槛。
+
+## 授权 —— 仅本次
+
+调用工具前，先向 Owner 说明：
+
+1. 锚点是什么、出自哪里；
+2. 你观察到的具体行为；
+3. 两者之间的背离；
+4. 可选：为什么可能重要。
+
+然后在**当前对话**取得 Owner 的明确同意。
+
+- 没有回复、回答含糊、或一句"随便"都**不是**授权。
+- Owner 修改了内容，就按最终版本重新确认后再提交。
+- 授权只覆盖这一次提交。不得复用于另一条 Pain、另一个会话，或内容已变化的"重试"。
+- 后台、定时、hook 驱动、无人值守的运行**不得**自行提交。
+
+## 严重度与 `painType`
+
+- 不要传分数或严重度。工具没有这个参数，系统会把省略的严重度记为**中等**。你不能自提；如果你认为很严重，就写进 `reason` 让 Owner 判断。
+- 除非你确有把握，否则省略 `painType`。默认是 `principle_deviation`。
+- 默认值只对 `established_principle` 锚点成立：没有原则引用的 `principle_deviation` 会被拒绝（`anchor_invalid`，"principle_deviation requires deviationAnchor{...}"）。锚点是 `owner_expectation` / `agent_instruction` 时必须显式给出如实匹配的类型（如 `tool_failure`）；没有合适的类型就向 Owner 说明，不要硬填。
+- 不得为了看起来更紧急而回填 `user_frustration`（或任何其它类型）。
+
+## 阅读回执
+
+工具返回一份 JSON 回执（`pd.pain-submit-receipt.v1`）：
+
+```
+status, painId, taskId, workspaceDir, diagnosis, anchor, provenance, warnings, error, nextAction
+```
+
+| status | 含义 | 你该做什么 |
+|---|---|---|
+| `submitted` | Pain 与诊断任务已写入 | 报告 `painId` / `taskId`。`diagnosis.status` 是 `pending`：诊断**尚未**运行 |
+| `refused` | 没有写入（`task_duplicate` 时表示已存在等价任务） | 报告 `error.code` + `nextAction`；不要盲目重试 |
+| `failed` | 写入失败，唯一带 `isError: true` 的状态 | 报告 `error.code` / `error.message` / `nextAction`；任务可能存在也可能不存在 |
+| `submit_unconfirmed` | 写入已开始但结果未知（超时或异常） | 不要重提；先 `pd task show <taskId>` 对账 |
+
+可能见到的 `refused` 代码：`invalid_input`、`anchor_invalid`、`anchor_unverifiable`（账本不可读）、`anchor_not_found`（未知 id/版本或空账本）、`anchor_not_currently_valid`、`task_duplicate`、`ingress_*`。
+
+降级传输：
+
+- `minimal` —— 回执缩减为 `status / painId / taskId / workspaceDir / diagnosis`。
+- `untransportable` —— 纯文本陈述，或 `isError: true` 信封。结果未知时一律报告 UNKNOWN，绝不说成"没有写入"。
+
+只报告回执实际返回的标识与状态。登记不等于诊断，不等于候选受理，不等于批准，不等于激活。
+
+## 操作员补救路径（事后，绝不是 Agent 的默认动作）
+
+当 Owner 那一轮已经结束、且存在可信的 OpenClaw 会话身份时，操作员可以运行：
+
+    pd pain record --reason "<摘要>" --host openclaw --session "<已核实的 session-id>" --workspace "<工作区>" --json
+
+- 每一次 CLI 记录调用都必须绑定 `--session`。不带 `--session` 的记录没有轨迹证据，会被准入拦截（`needs_evidence`）。
+- 禁止猜测、扫描或替换 session id，禁止取"最新"的会话。身份未核实就停下来说明。
+- 不要把这条路径说成锚点合同：它没有 `anchorType` / `anchorRef`。
+
+## 核验下游状态
+
+用 `pd-cli-operator` 查看实际任务与证据链。若诊断产出了候选，必须用真实的 `admissionResults` / `admitted` 决策与对应非空 `ledgerEntryIds` 核验；仅有非空 `candidateIds` 不算成功。`needs_evidence` 或拒绝都要如实报告。用 `pd-review` 打开 Owner Console。
 
 ## 禁止
 
-- 不写 `.state/.pain_flag`，不调用 legacy `write_pain_flag`。
-- 不伪造 Owner 原话、session ID、turn ID 或工具失败。
-- 不重复提交已确认登记的事件。
-- 不直接修改痛苦数据库、候选账本或准入状态。
-- 不批准、激活或修改原则。
+- 未经当前消息里 Owner 的明确要求与同意就提交。
+- 后台、定时、hook 或无人值守运行中提交。
+- 编造锚点、原则 id@version、指令路径或 Owner 原话。
+- 传分数、严重度、优先级、session id 或批准令牌。
+- 在 `pd_submit_pain` 不可用时，用猜出来的 lineage、本地开关或宿主匹配器绕过写 CLI。
+- `submit_unconfirmed` 之后不经 `pd task show <taskId>` 对账就重提。
+- 写 `.state/.pain_flag` 或调用旧的 `write_pain_flag`。
+- 批准、激活或修改原则。

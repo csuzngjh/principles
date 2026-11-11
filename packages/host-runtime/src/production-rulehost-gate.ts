@@ -593,7 +593,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 workspace: { isRiskPath: isSensitiveSystemPath(action.normalizedPath) },
         session: { sessionId: event.context.sessionId },
         evolution: { epTier: enrichment.epTier },
-        derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }), bashRisk: enrichment.bashRisk },
+        derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }, toolSemantics), bashRisk: enrichment.bashRisk },
         ...(context ? { context } : {}),
       };
       // CodeRabbit CR-3: live and shadow evaluate in SEPARATE batches so a

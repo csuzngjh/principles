@@ -22,6 +22,7 @@
     "clean": "node ../../scripts/build/clean-dist.mjs",
     "build": "npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
     "test": "npm run build && vitest run",
+    "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint \"src/**/*.ts\""
   },

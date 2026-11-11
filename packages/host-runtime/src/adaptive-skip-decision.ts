@@ -11,25 +11,37 @@
  *   second check would be a second source of truth for the same switch);
  * - the host did not bind the current turn (`sessionId`/`turnId`) or the
  *   prompt body is blank;
- * - the remaining hook budget cannot cover even the slowest first byte ever
- *   observed on this path (see `minRemainingBudgetMs`);
- * - the prompt is a pure social acknowledgement ("好的", "谢谢", "ok").
+ * - the remaining hook budget cannot cover the request's own MINIMUM executable
+ *   envelope (see `minExecutableBudgetMs`) — a fast Decisions request that can
+ *   still finish is never skipped just because it is under an old slow-path
+ *   line;
+ * - the prompt is a pure social acknowledgement ("谢谢", "收到", "ok").
  *
- * Everything else — including short instructions and task continuations —
- * keeps the existing fast single-send selection. "Simple" is decided by the
- * acknowledgement vocabulary below, never by length alone: "继续" and
- * "执行一下" look short but can carry a stage change.
+ * Everything else — including short instructions, approvals and task
+ * continuations — keeps the fast single-send selection. "Simple" is decided by
+ * the acknowledgement vocabulary below, never by length alone: "继续", "执行一下"
+ * and "确认" look short but can approve or advance a stage.
  */
 
 export const ADAPTIVE_SKIP_LIMITS = {
   /**
-   * Measured on this path (PRI-1170 v0.3, Codex exec, 2026-11): time-to-first-
-   * byte was 789 / 868 / 1426 ms. Below 1500 ms remaining, no answer has ever
-   * started; spending the send would only collide with the Native reserve.
-   * This is a gate, not a tuning knob for failing cases — the default runtime
-   * budget is 4200 ms, so the normal path is unaffected.
+   * Smallest remaining budget worth one Decisions send.
+   *
+   * PRI-1181 used the measured slow-path time-to-first-byte (789–1426 ms) as a
+   * 1500 ms admission line. That line skipped requests that were executable:
+   * the Decisions endpoint answers a small answer table well inside a
+   * sub-second window, and a skip is permanent for the turn.
+   *
+   * This is an ADMISSION line, not a wait allowance: it answers "may a fast
+   * request start at all with this much host budget left?" A request that is
+   * admitted is still bounded by the earlier of its own deadline and the host
+   * deadline minus the assembly/output reserve; both cancel the underlying
+   * request. So the number below must stay far below any selection wait.
+   *
+   * The gate is the request's own floor — the output reserve plus one
+   * bounded round trip — not the slow path's observed maximum.
    */
-  minRemainingBudgetMs: 1500,
+  minExecutableBudgetMs: 300,
   /** Longest acknowledgement (after normalization) still treated as pure social. */
   maxConfirmationChars: 12,
 } as const;
@@ -37,38 +49,30 @@ export const ADAPTIVE_SKIP_LIMITS = {
 /**
  * Acknowledgements, longest first so the greedy removal below never leaves a
  * fragment behind ("明白了" must be consumed before "明白").
- * Deliberately excludes continuations such as 继续 / 开始 / 执行 / 再来.
+ *
+ * Scope is deliberately PURE SOCIAL: gratitude and receipt-of-message only.
+ * Approval words that can answer a pending question are excluded — "确认",
+ * "可以", "好的", "行", "ok", "yes" must all reach the decision endpoint,
+ * because "要不要提交最终版？→ 确认" is a real stage change, not social noise.
  */
 const ACKNOWLEDGEMENTS = [
   'thankyouverymuch',
   'thanksalot',
-  'soundsgood',
   'thankyou',
-  'gotit',
-  '好的好的',
   '明白了',
   '收到啦',
   '辛苦了',
-  '没问题',
-  '好的',
-  '好嘞',
   '谢谢',
   '多谢',
+  '感谢',
   '收到',
   '明白',
-  '可以',
-  '确认',
   '了解',
   '嗯嗯',
-  'okay',
   'thanks',
   'thank',
-  'yep',
-  'yes',
-  'ok',
+  'gotit',
   '嗯',
-  '好',
-  '行',
 ] as const;
 
 /** Strip whitespace, punctuation and emoji-ish separators before matching. */
@@ -107,7 +111,7 @@ export interface AdaptiveSkipInput {
   readonly prompt: string;
   /** Undefined = no outer host deadline (direct/lab calls): never budget-skip. */
   readonly remainingBudgetMs?: number | undefined;
-  readonly minRemainingBudgetMs?: number | undefined;
+  readonly minExecutableBudgetMs?: number | undefined;
 }
 
 export type AdaptiveSkipDecision =
@@ -122,7 +126,7 @@ export function decideAdaptiveSkip(input: AdaptiveSkipInput): AdaptiveSkipDecisi
   if (input.kind !== 'before_prompt_build') return {skip: true, reason: 'missing_identity'};
   if (!input.sessionId || !input.turnId) return {skip: true, reason: 'missing_identity'};
   if (!input.prompt.trim()) return {skip: true, reason: 'empty_prompt'};
-  const minimum = input.minRemainingBudgetMs ?? ADAPTIVE_SKIP_LIMITS.minRemainingBudgetMs;
+  const minimum = input.minExecutableBudgetMs ?? ADAPTIVE_SKIP_LIMITS.minExecutableBudgetMs;
   if (input.remainingBudgetMs !== undefined && input.remainingBudgetMs < minimum) {
     return {skip: true, reason: 'budget_insufficient'};
   }

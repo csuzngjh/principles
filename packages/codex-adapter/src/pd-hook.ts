@@ -53,7 +53,15 @@ function adaptiveSelectionDiagnostic(line: AdaptiveSelectionDiagnosticLine): str
       ? 'skipped'
       : 'degraded';
   const failures = line.failures.length > 0 ? line.failures.join('|') : 'none';
-  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} failures=${failures}`
+  // rc-8: bounded score projection — ids are `c1..cN` / `insufficient_context`,
+  // never prompt text, and at most 16 entries reach the line.
+  const scores = line.decision === null
+    ? 'none'
+    : Object.entries(line.decision.scores).slice(0, 16).map(([id, value]) => `${id}=${value}`).join(',');
+  const decision = line.decision === null
+    ? 'unknown'
+    : `${line.decision.status}:${line.decision.reason}:${line.decision.ref ?? 'none'}`;
+  return `[PD] status=${status} reason=adaptive_selection_${line.status}:${line.reason} stage=${line.stage} sends=${line.sends} requestSentAt=${line.requestSentAt ?? 'unknown'} firstByteAt=${line.firstByteAt ?? 'unknown'} generationEndedAt=${line.generationEndedAt ?? 'unknown'} validatedAt=${line.validatedAt ?? 'unknown'} cancelledAt=${line.cancelledAt ?? 'unknown'} httpStatus=${line.httpStatus ?? 'unknown'} finishReason=${line.finishReason} modelObserved=${line.modelObserved ?? 'unknown'} providerObserved=${line.providerObserved ?? 'absent'} decision=${decision} scores=${scores} failures=${failures}`
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, MAX_DIAGNOSTIC * 2);
@@ -237,6 +245,17 @@ export const CODEX_HOOK_TIMEOUT_MS = 5_000;
 /** Reserved for Native packing, encoding and stdout after Adaptive is cut off. */
 export const CODEX_NATIVE_RESERVE_MS = 800;
 export const CODEX_ADAPTIVE_BUDGET_MS = CODEX_HOOK_TIMEOUT_MS - CODEX_NATIVE_RESERVE_MS;
+/**
+ * PRI-1182 acceptance card: the frozen fast-decision envelope, measured from
+ * the actual send to the moment the whole answer table passed validation. The
+ * transport enforces both windows, so the request is cancelled at
+ * `send + CODEX_ADAPTIVE_DECISION_MS` even when the host window is larger; the
+ * effective deadline is the earlier of that envelope and the host window minus
+ * the assembly/output reserve.
+ */
+export const CODEX_ADAPTIVE_FIRST_BYTE_MS = 500;
+export const CODEX_ADAPTIVE_GENERATION_MS = 500;
+export const CODEX_ADAPTIVE_DECISION_MS = CODEX_ADAPTIVE_FIRST_BYTE_MS + CODEX_ADAPTIVE_GENERATION_MS;
 
 export interface PdHookDeps {
   /** Test seam: replace the outbound transport without bypassing the hook entry. */
@@ -247,10 +266,11 @@ export interface PdHookDeps {
   /** Test seam: effective adaptive budget inside the host hook window. */
   readonly hookBudgetMs?: number;
   /**
-   * PRI-1181: remaining-budget floor for the pre-selection skip gate. Defaults
-   * to the measured minimum; 0 keeps a cancellation scenario sending.
+   * PRI-1182: remaining-budget floor for the pre-selection skip gate. Defaults
+   * to the request's minimum executable envelope; 0 keeps a cancellation
+   * scenario sending.
    */
-  readonly minRemainingBudgetMs?: number;
+  readonly minExecutableBudgetMs?: number;
 }
 
 // stdin, env and cwd are the host CLI contract; `deps` is the optional transport
@@ -468,9 +488,9 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           env: _env,
           ...(deps.fetchImpl ? {fetchImpl: deps.fetchImpl} : {}),
           ...(deps.now ? {now: deps.now} : {}),
-          ...(deps.firstByteTimeoutMs !== undefined ? {firstByteTimeoutMs: deps.firstByteTimeoutMs} : {}),
-          ...(deps.generationTimeoutMs !== undefined ? {generationTimeoutMs: deps.generationTimeoutMs} : {}),
-          ...(deps.minRemainingBudgetMs !== undefined ? {minRemainingBudgetMs: deps.minRemainingBudgetMs} : {}),
+          firstByteTimeoutMs: deps.firstByteTimeoutMs ?? CODEX_ADAPTIVE_FIRST_BYTE_MS,
+          generationTimeoutMs: deps.generationTimeoutMs ?? CODEX_ADAPTIVE_GENERATION_MS,
+          ...(deps.minExecutableBudgetMs !== undefined ? {minExecutableBudgetMs: deps.minExecutableBudgetMs} : {}),
           outerDeadlineAt: adaptiveDeadlineAt,
           onDiagnostic: (line) => { adaptiveDiagnostics.push(adaptiveSelectionDiagnostic(line)); },
         },
