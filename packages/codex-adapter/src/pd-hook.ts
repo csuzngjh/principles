@@ -641,7 +641,12 @@ async function main(): Promise<void> {
   }
   let result: PdHookResult;
   try {
-    result = await processHookInvocation(raw);
+    // The host's 5 s window starts at process spawn, not at this call: node
+    // boot and module loading already consumed part of it. Anchor the deadline
+    // at process start so the measured reserve really reaches Native.
+    const elapsedSinceProcessStartMs = Math.round(process.uptime() * 1000);
+    const remainingBudgetMs = Math.max(1, CODEX_ADAPTIVE_BUDGET_MS - elapsedSinceProcessStartMs);
+    result = await processHookInvocation(raw, process.env, process.cwd(), { hookBudgetMs: remainingBudgetMs });
   } catch (error) {
     // Fail-open belt for an unexpected pre-dispatch throw (e.g. a workspace
     // resolution race): Codex must still receive exactly one JSON object on
