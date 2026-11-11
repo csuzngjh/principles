@@ -66,13 +66,14 @@ jobs:
             echo "armed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Materialize version plan (changeset version + mirror + lockfile)
+      - name: Materialize version plan (changeset version + mirrors + pins + lockfile)
         id: changesets
         if: steps.token-check.outputs.armed == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           # PD's materialization pipeline: changeset version, the approved
-          # component mirror, and lockfile materialization (SPEC §13).
+          # component mirrors, the Codex runtime pin (+ its plugin cache
+          # version), and lockfile materialization (SPEC §13).
           # npm ci above already installed the workspace the CLI needs.
           version-script: node scripts/release/materialize-version-plan.mjs
           commit-message: 'chore: version packages [version-packages]'
