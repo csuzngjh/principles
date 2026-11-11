@@ -37,7 +37,7 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { detectInstalledHosts, getHostInstallers, type DetectedHost, type HostTarget } from './installers/index.js';
-import { readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
+import { readCanonicalRuntimeCohort, readInstalledRuntimeCohort, resolvePluginDataRoot } from './installers/codex-host-installer.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
@@ -4439,6 +4439,12 @@ export function partitionHostInstallResults(
  * this run actually touched gets one line naming the runtime it now resolves,
  * so covering an already-installed host can never happen silently.
  *
+ * The two runtime layouts are different authorities, not interchangeable
+ * views: the shared canonical runtime is `<dir>/<component>/package.json`,
+ * while Codex's PLUGIN_DATA copy is `<dir>/node_modules/<pkg>/package.json`.
+ * Reading the canonical dir with the PLUGIN_DATA reader made every
+ * OpenClaw/WorkBuddy line print "runtime not verified".
+ *
  * Derived from the existing host results plus the installed runtime dirs —
  * never persisted, never a second install-state authority.
  */
@@ -4446,7 +4452,7 @@ export function summarizeTouchedHosts(
   results: readonly HostInstallResult[],
   deps: { canonicalRuntimeDir?: string; codexRuntimeDir?: string; codexRuntimeReadable?: boolean } = {},
 ): string[] {
-  const canonical = readInstalledRuntimeCohort(deps.canonicalRuntimeDir ?? getPdRuntimeDir());
+  const canonical = readCanonicalRuntimeCohort(deps.canonicalRuntimeDir ?? getPdRuntimeDir());
   const codexHome = process.env.CODEX_HOME ?? path.join(getHomeDir(), '.codex');
   const codex = deps.codexRuntimeReadable === false ? undefined : readInstalledRuntimeCohort(
     deps.codexRuntimeDir ?? resolvePluginDataRoot(codexHome, 'principles') ?? '',
