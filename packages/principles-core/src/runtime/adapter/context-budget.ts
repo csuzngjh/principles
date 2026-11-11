@@ -33,7 +33,12 @@ import { estimateTextTokens } from '@earendil-works/pi-ai/utils/estimate';
  */
 export const CONTEXT_BUDGET_SOFT_RATIO = 0.9;
 
-/** Never hand a caller a zero-token budget: let the provider reject a tiny one. */
+/**
+ * Floor for a non-empty input budget. A budget of 0 is meaningful and is NOT
+ * raised to this value: it means the window has no input space left after the
+ * output reservation, and callers must fail loud instead of sending a request
+ * the provider can only reject.
+ */
 export const MIN_CONTEXT_BUDGET_TOKENS = 1_024;
 
 export interface ContextBudget {
@@ -62,11 +67,15 @@ export function resolveContextBudget(
     };
   }
   const reserve = Number.isFinite(reserveOutputTokens) && reserveOutputTokens > 0 ? reserveOutputTokens : 0;
-  const usable = Math.floor(contextWindowTokens * CONTEXT_BUDGET_SOFT_RATIO) - reserve;
+  // Subtract the reservation from the window FIRST, then apply the soft ratio.
+  // The reverse order (`0.9 * window - reserve`) drives the budget to 0 as soon
+  // as the reservation approaches 90% of the window and then hides that
+  // collapse behind the minimum floor, rejecting requests the window can hold.
+  const usable = Math.floor((contextWindowTokens - reserve) * CONTEXT_BUDGET_SOFT_RATIO);
   return {
     contextWindowTokens,
     reserveOutputTokens: reserve,
-    budgetTokens: Math.max(MIN_CONTEXT_BUDGET_TOKENS, usable),
+    budgetTokens: usable <= 0 ? 0 : Math.max(MIN_CONTEXT_BUDGET_TOKENS, usable),
   };
 }
 
@@ -108,7 +117,25 @@ export function fitTextToTokenBudget(text: string, maxTokens: number): TextBudge
     estimatedTokensBefore,
     estimatedTokensAfter: estimatedTokensBefore,
   };
-  if (!Number.isFinite(maxTokens) || maxTokens <= 0 || estimatedTokensBefore <= maxTokens) {
+  if (!Number.isFinite(maxTokens)) {
+    return base;
+  }
+  if (maxTokens <= 0) {
+    // 0 means "no room left", not "unbounded". Returning the whole text here
+    // would let a zero-budget request through and report `truncated: false`,
+    // i.e. a silent cut that never happened. Dropping everything keeps the
+    // result honest so the caller can fail loud or record the trim.
+    return {
+      text: '',
+      truncated: text.length > 0,
+      originalChars: text.length,
+      keptChars: 0,
+      droppedChars: text.length,
+      estimatedTokensBefore,
+      estimatedTokensAfter: 0,
+    };
+  }
+  if (estimatedTokensBefore <= maxTokens) {
     return base;
   }
 

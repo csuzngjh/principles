@@ -36,6 +36,7 @@ vi.mock('../pi-ai-http-transport.js', async (importActual) => {
 });
 
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
+import { resolveContextBudget } from '../context-budget.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 
@@ -141,6 +142,41 @@ describe('PiAiRuntimeAdapter — S4 context budget', () => {
     expect(caught.category).toBe('input_invalid');
     expect(caught.details?.contextOverflow).toBeUndefined();
     expect(caught.details?.nextAction).toBeUndefined();
+    expect(wire.requests.length).toBe(1);
+  }, 20_000);
+
+  it('subtracts the output reservation from the window before applying the soft ratio', () => {
+    // 128k window with 115.2k reserved for output leaves 12.8k input tokens,
+    // 90% of which is 11_520. Taking 90% of the window first (115_200) and
+    // subtracting the reservation collapses to 0 and then gets clamped to the
+    // 1_024 floor — a budget that rejects requests the window can hold.
+    expect(resolveContextBudget(128_000, 115_200)).toEqual({
+      contextWindowTokens: 128_000,
+      reserveOutputTokens: 115_200,
+      budgetTokens: 11_520,
+    });
+
+    // A reservation that consumes the whole window leaves no input budget. It
+    // must be reported as 0, not disguised as 1_024.
+    expect(resolveContextBudget(128_000, 128_000).budgetTokens).toBe(0);
+  });
+
+  it('does not reject a 4k-char request when the window still has input tokens', async () => {
+    // Guard for the adapter-level consequence of the budget arithmetic: with
+    // a 115.2k output reservation the model ceiling (32k for an unknown model)
+    // caps the reservation, so this request must reach the wire.
+    const input = makeInput({ inputPayload: 'x'.repeat(4_000), maxTokens: 115_200 });
+    wire.plan = [{ status: 500, body: JSON.stringify({ error: { message: 'planned stop' } }) }];
+
+    const adapter = makeAdapter({ maxRetries: 0 });
+    let caught: PDRuntimeError | undefined;
+    try {
+      await adapter.startRun(input);
+    } catch (err) {
+      caught = err instanceof PDRuntimeError ? err : undefined;
+    }
+
+    expect(caught?.details?.contextOverflow).toBeUndefined();
     expect(wire.requests.length).toBe(1);
   }, 20_000);
 });
