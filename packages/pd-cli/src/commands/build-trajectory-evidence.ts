@@ -121,16 +121,19 @@ function collectEvidenceFromDb(
   const evidence: PainEvidenceEntry[] = [];
   let readFailed = false;
 
-  // Try to read user turns with correction detection
+  // Try to read the most recent correction turn.
+  // SPEC-PD-TR-001 §5.1: bounded in SQL. The previous version materialised
+  // every user turn of the session and reversed the array in memory, so cost
+  // grew with conversation length.
   try {
-    const userTurns = db.prepare(`
+    const lastCorrectionTurn = db.prepare(`
         SELECT id, raw_excerpt, correction_detected, correction_cue, created_at
         FROM user_turns
-        WHERE session_id = ?
-        ORDER BY id ASC
-      `).all(sessionId) as Record<string, unknown>[];
+        WHERE session_id = ? AND correction_detected = 1
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(sessionId) as Record<string, unknown> | undefined;
 
-    const lastCorrectionTurn = [...userTurns].reverse().find(t => Boolean(t.correction_detected));
     if (lastCorrectionTurn) {
       const rawExcerpt = typeof lastCorrectionTurn.raw_excerpt === 'string'
         ? lastCorrectionTurn.raw_excerpt
@@ -155,17 +158,20 @@ function collectEvidenceFromDb(
     }
   }
 
-  // Try to read assistant turns (last 3)
+  // Try to read the last 3 assistant turns.
+  // SPEC-PD-TR-001 §5.1: `ORDER BY id DESC LIMIT 3` + reverse gives the same
+  // chronological window as `slice(-3)` without materialising the session.
   try {
-    const assistantTurns = db.prepare(`
+    const assistantTurnsDesc = db.prepare(`
         SELECT id, sanitized_text, stop_reason, created_at
         FROM assistant_turns
         WHERE session_id = ?
-        ORDER BY id ASC
+        ORDER BY id DESC
+        LIMIT 3
       `).all(sessionId) as Record<string, unknown>[];
 
-    const recentAssistant = assistantTurns.slice(-3);
-    for (const turn of recentAssistant) {
+    const assistantTurns = [...assistantTurnsDesc].reverse();
+    for (const turn of assistantTurns) {
       if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;
       const sanitizedText = typeof turn.sanitized_text === 'string'
         ? turn.sanitized_text

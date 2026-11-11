@@ -38,6 +38,10 @@ export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
+// SPEC-PD-TR-001: trajectory retention I/O boundary (lock + marker + export
+// list + explicit VACUUM). The policy/batch engine is pure and lives in
+// `@principles/core/runtime`.
+export * from './trajectory-retention.js';
 // PRI-1171: unified conversation-ingestion seam — the ONE host-neutral entry
 // for transcript trajectory ingestion (source contract + shared pipeline +
 // consent ledger v3 + text policy). Host decoders stay in their adapter

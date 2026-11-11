@@ -7,6 +7,8 @@
  */
 
 import { Command, Option } from 'commander';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 import { handlePainRecord } from './commands/pain-record.js';
 import { handlePainExplicit } from './commands/pain-explicit.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
@@ -23,6 +25,11 @@ import { buildVersionReport, formatShortVersion, VersionReportError } from './se
 import { handleTaskShow, registerTaskListCommand } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
 import { handleTrajectoryLocate } from './commands/trajectory.js';
+import {
+  handleTrajectoryMaintain,
+  handleTrajectoryRetentionStatus,
+  handleTrajectoryVacuum,
+} from './commands/trajectory-retention.js';
 import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
@@ -313,6 +320,39 @@ trajectoryCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleTrajectoryLocate(opts);
+  });
+
+// SPEC-PD-TR-001 — bounded trajectory retention (never scheduled from a hook).
+trajectoryCmd
+  .command('maintain')
+  .description('Run one trajectory retention sweep now (fallback for workspaces without a running worker)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTrajectoryMaintain(opts);
+  });
+
+const retentionCmd = trajectoryCmd
+  .command('retention')
+  .description('Trajectory retention status');
+
+retentionCmd
+  .command('status')
+  .description('Show the retention policy, marker and currently expired row counts (read-only)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTrajectoryRetentionStatus(opts);
+  });
+
+trajectoryCmd
+  .command('vacuum')
+  .description('Reclaim disk space (explicit only; dry run unless --yes)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--yes', 'Actually run VACUUM (requires 2 x file size + 10% free space)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTrajectoryVacuum(opts);
   });
 
 const historyCmd = program
@@ -1382,6 +1422,19 @@ mcpLogsCmd
     }
   });
 
-if (!handleVersionFlag(process.argv.slice(2))) {
+/**
+ * The real command tree, exported for registration tests (cli-7).
+ *
+ * Tests must parse THIS object: a hand-copied command tree in a test can stay
+ * green after the real command name or a flag is renamed (review finding 12).
+ */
+export function buildPdProgram(): Command {
+  return program;
+}
+
+const invokedDirectly = process.argv[1] !== undefined
+  && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+
+if (invokedDirectly && !handleVersionFlag(process.argv.slice(2))) {
   program.parse();
 }

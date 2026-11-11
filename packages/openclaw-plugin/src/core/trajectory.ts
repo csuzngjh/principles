@@ -84,6 +84,19 @@ const DEFAULT_INLINE_THRESHOLD = 16 * 1024;
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
 
+/** SPEC-PD-TR-001 §5.1(b): orphan-blob pruning is throttled to once per 24 h. */
+const ORPHAN_BLOB_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const ORPHAN_BLOB_PRUNE_MARKER = 'trajectory-blob-prune.json';
+
+/**
+ * Process-wide: did THIS process ever externalize a turn body into a blob?
+ *
+ * Pruning is only meaningful after this process produced blob files, and the
+ * constructor is the only cheap scheduling point. A per-instance flag would
+ * always be false at construction time, making the prune unreachable.
+ */
+let blobWrittenInProcess = false;
+
 /**
  * Type guard: narrows a raw better-sqlite3 row to a typed pain_event row
  * without `as` casts (rc-2-no-as-bypass, ERR-001).
@@ -305,7 +318,7 @@ export class TrajectoryDatabase {
     this.db.pragma(`busy_timeout = ${Math.max(0, opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS)}`);
     this.initSchema();
     this.importLegacyArtifacts();
-    this.pruneUnreferencedBlobs();
+    this.maybePruneUnreferencedBlobs();
   }
 
   dispose(): void {
@@ -1362,17 +1375,28 @@ export class TrajectoryDatabase {
   /**
    * Export correction samples to JSONL file.
    *
+   * Retention contract (SPEC-PD-TR-001 §1/§5): `correction_samples` is never
+   * deleted, but `assistant_turns`/`user_turns` older than the retention window
+   * are. Such a sample is still exported — with empty text and
+   * `metadata.source_turns_purged = true` — so the sample is never silently
+   * dropped from the export (review finding 11).
+   *
    * Returns: Analytics data aggregated from trajectory database.
    * Not: Runtime truth or real-time queue state.
    */
   exportCorrections(opts: { mode: CorrectionExportMode; approvedOnly: boolean }): TrajectoryExportResult {
     const rows = this.db.prepare(`
       SELECT cs.sample_id, cs.session_id, cs.recovery_tool_span_json, cs.diff_excerpt, cs.quality_score,
+             at.id AS assistant_turn_id,
              at.raw_text AS assistant_raw_text, at.blob_ref AS assistant_blob_ref, at.sanitized_text,
+             ut.id AS user_turn_id,
              ut.raw_text AS user_raw_text, ut.blob_ref AS user_blob_ref, ut.correction_cue
       FROM correction_samples cs
-      JOIN assistant_turns at ON at.id = cs.bad_assistant_turn_id
-      JOIN user_turns ut ON ut.id = cs.user_correction_turn_id
+      -- LEFT JOIN on purpose: trajectory retention deletes turns older than the
+      -- window while correction_samples is never deleted. An INNER JOIN would
+      -- silently drop those samples from the export (SPEC-PD-TR-001 review 11).
+      LEFT JOIN assistant_turns at ON at.id = cs.bad_assistant_turn_id
+      LEFT JOIN user_turns ut ON ut.id = cs.user_correction_turn_id
       WHERE (? = 0 OR cs.review_status = 'approved')
       ORDER BY cs.created_at ASC
     `).all(opts.approvedOnly ? 1 : 0) as Record<string, unknown>[];
@@ -1383,6 +1407,9 @@ export class TrajectoryDatabase {
       const userRaw = this.restoreRawText(row.user_raw_text as string | null, row.user_blob_ref as string | null);
       const assistantText = opts.mode === 'redacted' ? redactText(assistantRaw) : assistantRaw;
       const userText = opts.mode === 'redacted' ? redactText(userRaw) : userRaw;
+      // Explicit signal: the sample survived but its source turns were purged,
+      // so instruction/input_context are empty by design, not by corruption.
+      const sourceTurnsPurged = row.assistant_turn_id === null || row.user_turn_id === null;
       return JSON.stringify({
         sample_id: row.sample_id,
         session_id: row.session_id,
@@ -1397,6 +1424,7 @@ export class TrajectoryDatabase {
         metadata: {
           mode: opts.mode,
           recovery_tool_span_json: row.recovery_tool_span_json,
+          source_turns_purged: sourceTurnsPurged,
         },
       });
     });
@@ -1752,6 +1780,9 @@ export class TrajectoryDatabase {
     if (!fs.existsSync(fullPath)) {
       atomicWriteFileSync(fullPath, text);
     }
+    // SPEC-PD-TR-001 §5.1: the open path only schedules orphan-blob pruning
+    // when this process has actually produced a blob.
+    blobWrittenInProcess = true;
     return { inlineText: null, blobRef: relativePath, excerpt };
   }
 
@@ -1765,6 +1796,40 @@ export class TrajectoryDatabase {
   private computeBlobBytes(): number {
     if (!fs.existsSync(this.blobDir)) return 0;
     return fs.readdirSync(this.blobDir).reduce((sum, file) => sum + fileSizeIfExists(path.join(this.blobDir, file)), 0);
+  }
+
+  /**
+   * SPEC-PD-TR-001 §5.1(b): the open path used to run a two-table blob_ref
+   * scan on EVERY construction. Now:
+   * - no blob produced by this process ⇒ nothing can be orphaned ⇒ return
+   *   without touching the filesystem;
+   * - at most once per 24 h, tracked by a marker file next to the database.
+   */
+  private maybePruneUnreferencedBlobs(): void {
+    if (!blobWrittenInProcess) return;
+    const markerPath = path.join(this.stateDir, ORPHAN_BLOB_PRUNE_MARKER);
+    let lastPruneMs = 0;
+    try {
+      const raw = fs.readFileSync(markerPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (isStringRecord(parsed) && Object.hasOwn(parsed, 'lastPruneAt')) {
+        const value = parsed.lastPruneAt;
+        if (typeof value === 'string') {
+          const parsedMs = Date.parse(value);
+          if (Number.isFinite(parsedMs)) lastPruneMs = parsedMs;
+        }
+      }
+    } catch {
+      // Missing/corrupt marker: treat as "never pruned" (one extra sweep).
+    }
+    const now = Date.now();
+    if (lastPruneMs > 0 && now - lastPruneMs < ORPHAN_BLOB_PRUNE_INTERVAL_MS) return;
+    try {
+      this.pruneUnreferencedBlobs();
+      atomicWriteFileSync(markerPath, `${JSON.stringify({ lastPruneAt: new Date(now).toISOString() }, null, 2)}\n`);
+    } catch {
+      // Pruning is best-effort; it must never fail a database open.
+    }
   }
 
   private pruneUnreferencedBlobs(): { removedFiles: number; reclaimedBytes: number } {

@@ -25,8 +25,40 @@ import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { runCodexWorkspaceWorkerCycle, type CodexWorkerCycleResult } from '@principles/codex-adapter';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
+import { retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
 
 const DEFAULT_INTERVAL_MS = 120_000;
+
+/**
+ * SPEC-PD-TR-001 §4.1: the worker cycle is the retention scheduler. It runs
+ * OUTSIDE any hook, after the cycle, never blocks the cycle's own deadline
+ * (the sweep is bounded to `runBudgetMs`), and never writes stdout — the
+ * `--json --once` contract must stay one JSON document.
+ */
+function runRetentionAfterCycle(workspaceDir: string): void {
+  try {
+    const report = runTrajectoryRetention({ workspaceDir, trigger: 'worker' });
+    // Long-lived failures (wrong journal mode, index DDL, clock anomalies) are
+    // logged once per distinct reason instead of every cycle.
+    const warning = retentionWarning(report);
+    if (warning !== null) {
+      console.error(`[PD:CodexWorker] ${warning}`);
+      return;
+    }
+    if (report.outcome === 'deferred:busy') return;
+    const deleted = Object.values(report.deletedByTable).reduce((sum, count) => sum + count, 0);
+    if (report.outcome === 'skipped' && deleted === 0) return;
+    console.error(
+      `[PD:CodexWorker] trajectory retention ${report.outcome}`
+      + ` deleted=${deleted} batches=${report.batches} durationMs=${report.totalDurationMs}`
+      + (report.reason === null ? '' : ` reason=${report.reason}`),
+    );
+    if (report.nextAction !== undefined) console.error(`  next action: ${report.nextAction}`);
+  } catch (error) {
+    // A maintenance failure must never take down the governance worker.
+    console.error(`[PD:CodexWorker] trajectory retention failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 interface CodexWorkerOptions {
   workspace?: string;
@@ -174,6 +206,7 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
 
   if (options.once === true) {
     const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
+    runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
     return;
@@ -190,6 +223,7 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
       // crash the process. Log with a next action and keep the loop alive.
       try {
         const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: workspace, env: { CODEX_HOME: process.env.CODEX_HOME } });
+        runRetentionAfterCycle(workspace);
         printCycleReport(result, false);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

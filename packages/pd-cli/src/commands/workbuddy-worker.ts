@@ -28,11 +28,39 @@ import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
-import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin } from '@principles/host-runtime';
+import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin, retentionWarning, runTrajectoryRetention } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 
 const DEFAULT_INTERVAL_MS = 120_000;
+
+/**
+ * SPEC-PD-TR-001 §4.1: same rule as the Codex worker — retention runs after
+ * the cycle, outside hooks, bounded, and never on stdout.
+ */
+function runRetentionAfterCycle(workspaceDir: string): void {
+  try {
+    const report = runTrajectoryRetention({ workspaceDir, trigger: 'worker' });
+    // Long-lived failures (wrong journal mode, index DDL, clock anomalies) are
+    // logged once per distinct reason instead of every cycle.
+    const warning = retentionWarning(report);
+    if (warning !== null) {
+      console.error(`[PD:WorkbuddyWorker] ${warning}`);
+      return;
+    }
+    if (report.outcome === 'deferred:busy') return;
+    const deleted = Object.values(report.deletedByTable).reduce((sum, count) => sum + count, 0);
+    if (report.outcome === 'skipped' && deleted === 0) return;
+    console.error(
+      `[PD:WorkbuddyWorker] trajectory retention ${report.outcome}`
+      + ` deleted=${deleted} batches=${report.batches} durationMs=${report.totalDurationMs}`
+      + (report.reason === null ? '' : ` reason=${report.reason}`),
+    );
+    if (report.nextAction !== undefined) console.error(`  next action: ${report.nextAction}`);
+  } catch (error) {
+    console.error(`[PD:WorkbuddyWorker] trajectory retention failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 interface WorkbuddyWorkerOptions {
   workspace?: string;
@@ -165,6 +193,7 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
 
   if (options.once === true) {
     const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace });
+    runRetentionAfterCycle(workspace);
     printCycleReport(result, options.json === true);
     if (result.mode === 'degraded') process.exitCode = 1;
     return;
@@ -178,6 +207,7 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
       // PRI-655 discipline as the Codex worker): report, keep looping.
       try {
         const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: workspace });
+        runRetentionAfterCycle(workspace);
         printCycleReport(result, false);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

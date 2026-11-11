@@ -1434,3 +1434,77 @@ describe('initTrajectorySchema (PRI-1135: the module-level entry point delegates
     expect(readVersion()).toBe(TRAJECTORY_SCHEMA_VERSION);
   });
 });
+
+describe('correction export after trajectory retention (review finding 11)', () => {
+  let workspaceDir: string | null = null;
+
+  afterEach(() => {
+    if (workspaceDir) {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      workspaceDir = null;
+    }
+  });
+
+  it('keeps a sample whose source turns were purged, flagged instead of dropped', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-export-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+    const dbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+    try {
+      db.recordAssistantTurn({
+        sessionId: 's-export',
+        runId: 'run-export',
+        provider: 'test',
+        model: 'model',
+        rawText: 'assistant answer',
+        sanitizedText: 'assistant answer',
+      });
+      db.recordUserTurn({
+        sessionId: 's-export',
+        turnIndex: 1,
+        rawText: 'correction text',
+        correctionDetected: true,
+      });
+
+      const raw = new Database(dbPath);
+      const assistant = raw.prepare('SELECT id FROM assistant_turns WHERE session_id = ?').get('s-export');
+      const user = raw.prepare('SELECT id FROM user_turns WHERE session_id = ?').get('s-export');
+      const assistantId = (assistant as { id: number }).id;
+      const userId = (user as { id: number }).id;
+      const insert = raw.prepare(`
+        INSERT INTO correction_samples (
+          sample_id, session_id, bad_assistant_turn_id, user_correction_turn_id,
+          recovery_tool_span_json, diff_excerpt, principle_ids_json, quality_score,
+          review_status, export_mode, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, '[]', 'diff', '[]', 0.9, 'approved', 'raw', ?, ?)
+      `);
+      const at = new Date().toISOString();
+      insert.run('sample-live', 's-export', assistantId, userId, at, at);
+      insert.run('sample-purged', 's-export', assistantId, userId, at, at);
+      raw.close();
+
+      // Retention deleted the source turns, exactly as the 90-day sweep does.
+      const purge = new Database(dbPath);
+      purge.prepare('DELETE FROM assistant_turns WHERE id = ?').run(assistantId);
+      purge.prepare('DELETE FROM user_turns WHERE id = ?').run(userId);
+      purge.close();
+
+      const result = db.exportCorrections({ mode: 'raw', approvedOnly: true });
+      expect(result.count).toBe(2);
+      const lines = fs.readFileSync(result.filePath, 'utf8').trim().split('\n');
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        const entry = JSON.parse(line) as {
+          instruction: string;
+          input_context: string;
+          metadata: { source_turns_purged: boolean };
+        };
+        // The sample survives, but its text is empty BY DESIGN and flagged.
+        expect(entry.instruction).toBe('');
+        expect(entry.input_context).toBe('');
+        expect(entry.metadata.source_turns_purged).toBe(true);
+      }
+    } finally {
+      db.dispose();
+    }
+  });
+});

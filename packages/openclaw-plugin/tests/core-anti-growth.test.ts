@@ -144,6 +144,12 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // the plugin knows which artifact is executing. Also holds the bounded
     // in-memory invocation snapshot keyed by hookInvocationId.
     'adaptive-config-identity.ts',
+    // SPEC-PD-TR-001 §4.1: plugin trigger shell — one unref'd interval per
+    // workspace, scheduled from the existing per-workspace one-time init. All
+    // engine logic lives in @principles/host-runtime; this file only wires the
+    // host's logger into `scheduleTrajectoryRetention` (mirrors
+    // product-telemetry-trigger.ts). Nothing runs at scheduling time.
+    'trajectory-retention-trigger.ts',
   ] as const;
 
   // Category 6: Test files

@@ -330,6 +330,11 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // @principles/host-runtime product-telemetry) into the OpenClaw plugin
   // lifecycle. Plugin-specific because the trigger point is plugin-owned.
   'product-telemetry-trigger.ts',
+  // SPEC-PD-TR-001 §4.1: one-time-init trigger shell wiring the host-neutral
+  // retention scheduler (@principles/host-runtime trajectory-retention) into
+  // the OpenClaw plugin lifecycle. Plugin-specific because the trigger point
+  // is plugin-owned; all scheduling/DB/marker logic lives in host-runtime.
+  'trajectory-retention-trigger.ts',
   // Gate 4 (PRI-1071): plugin I/O boundary — reads/writes the PD-owned
   // mcp-binding.json beside the plugin payload (host-specific filesystem
   // path + component presence checks). Pure resolution/validation logic is
@@ -442,7 +447,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (94 files)', async () => {
+  it('known baseline count is self-consistent (95 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -519,7 +524,9 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // PRI-1110: Added adaptive-config-identity.ts (93 → 94) — OpenClaw-only
     // plugin I/O boundary reading the executing manifest from disk to bind the
     // running plugin version for AA invocation evidence.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    // SPEC-PD-TR-001: Added trajectory-retention-trigger.ts (94 → 95) — plugin
+    // lifecycle trigger shell; scheduling/DB/marker logic stays in host-runtime.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
   });
 });
 

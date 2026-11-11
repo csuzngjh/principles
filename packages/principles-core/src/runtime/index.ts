@@ -1797,6 +1797,49 @@ export type {
   TrajectorySchemaApplyOptions,
   TrajectorySchemaApplyResult,
 } from './trajectory-schema.js';
+
+// ── Trajectory Retention (SPEC-PD-TR-001) ──────────────────────────────────
+
+export {
+  TRAJECTORY_RETENTION_DEFAULTS,
+  TRAJECTORY_RETENTION_TABLES,
+  TRAJECTORY_RETENTION_INDEXES,
+  RETENTION_MIN_ACCEPTED_DAYS,
+  RETENTION_MAX_ACCEPTED_DAYS,
+  RETENTION_BATCH_SIZE_MIN,
+  RETENTION_BATCH_SIZE_MAX,
+  RETENTION_RUN_BUDGET_MIN_MS,
+  RETENTION_RUN_BUDGET_MAX_MS,
+  RETENTION_INTERVAL_HOURS_MIN,
+  RETENTION_INTERVAL_HOURS_MAX,
+  RETENTION_BATCH_BUDGET_MS,
+  RETENTION_MAX_CUTOFF_ADVANCE_MS,
+  RETENTION_CLOCK_BACKWARDS_TOLERANCE_MS,
+  RETENTION_BUSY_BACKOFF_MS,
+  EMPTY_RETENTION_MARKER,
+  resolveTrajectoryRetentionPolicy,
+  isRetentionMarker,
+  normalizeRetentionMarker,
+  computeRetentionCutoff,
+  isRetentionCutoffInWindow,
+  nextBackoffUntil,
+  ensureTrajectoryRetentionIndexes,
+  missingTrajectoryRetentionIndexes,
+  runTrajectoryRetentionBatches,
+} from './trajectory-retention.js';
+
+export type {
+  TrajectoryRetentionPolicy,
+  TrajectoryRetentionMarker,
+  RetentionCutoffDecision,
+  TrajectoryRetentionTablePlan,
+  RetentionBatchRow,
+  TrajectoryRetentionHooks,
+  TrajectoryRetentionBatchRequest,
+  TrajectoryRetentionOutcome,
+  TrajectoryRetentionRunResult,
+  RetentionIndexReport,
+} from './trajectory-retention.js';
 // ── GoldenTrace Replay Validator (PRI-115) ────────────────────────────────
 
 export {
