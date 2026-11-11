@@ -13,10 +13,12 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   buildMcpBindingFixture,
   getCanonicalMcpServerEntry,
+  isSameMcpBindingPath,
   MCP_BINDING_FIXTURES,
   MCP_BINDING_HOSTS,
   MCP_BINDING_LAUNCHER_ONLY_REASONS,
@@ -277,5 +279,51 @@ describe('MCP binding reason vocabulary', () => {
   it('no code is declared as both shared shape and launcher-only', () => {
     const shape = new Set<string>(MCP_BINDING_SHAPE_CODES);
     expect(MCP_BINDING_LAUNCHER_ONLY_REASONS.filter((r) => shape.has(r.code))).toEqual([]);
+  });
+});
+
+describe('MCP binding path rule — launcher vs shared declaration', () => {
+  const launcherSource = fs.readFileSync(LAUNCHER, 'utf8');
+
+  /**
+   * Load the shipped `samePath` function with an injected platform. The
+   * launcher cannot be imported, and CI runs only on ubuntu — where the real
+   * `process.platform` never reaches the win32 branch. Running the extracted
+   * function with a stubbed platform pins BOTH sides of the rule on Linux.
+   */
+  function launcherSamePathFor(platform: string): (left: string, right: string) => boolean {
+    const match = /function samePath\([\s\S]*?\n\}/.exec(launcherSource);
+    expect(match, 'launcher.cjs no longer declares function samePath(left, right)').not.toBeNull();
+    const harness = path.join(tempDir('pd-binding-samepath-'), 'same-path.cjs');
+    fs.writeFileSync(
+      harness,
+      [
+        "'use strict';",
+        'module.exports = function (process, path) {',
+        (match as RegExpMatchArray)[0],
+        '  return samePath;',
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const factory = createRequire(import.meta.url)(harness) as (
+      processStub: {platform: string},
+      pathModule: typeof path,
+    ) => (left: string, right: string) => boolean;
+    return factory({platform}, path);
+  }
+
+  it('agrees with the shared declaration on the win32 case rule', () => {
+    const upper = path.join(path.sep, 'Runtime', 'CaseSensitive', 'index.js');
+    const lower = upper.toLowerCase();
+    expect(upper).not.toBe(lower);
+
+    expect(launcherSamePathFor('win32')(upper, lower)).toBe(true);
+    expect(launcherSamePathFor('linux')(upper, lower)).toBe(false);
+    // The shared declaration (and the installer mirror using it) must agree
+    // with the shipped launcher, not merely with itself.
+    expect(isSameMcpBindingPath(upper, lower, 'win32')).toBe(true);
+    expect(isSameMcpBindingPath(upper, lower, 'posix')).toBe(false);
   });
 });

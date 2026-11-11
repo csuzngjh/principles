@@ -296,8 +296,9 @@ jobs:
   # installer package (the only product that pins engines) requires
   # node >=22, so the Node 20 leg covered nothing. Removed 2026-08-27.
 
-  # Per-package test jobs: verify:merge does NOT run package tests. These
-  # jobs are the real coverage for every package.
+  # Per-package test jobs: verify:merge runs only the install-layout and
+  # pd-mcp-server binding-contract suites. These jobs are the real coverage for
+  # every package.
 
   test-principles-core:
     name: Test principles-core
