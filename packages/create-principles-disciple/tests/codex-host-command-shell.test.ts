@@ -111,6 +111,17 @@ function writePayload(dir: string, version: string, cohort: Cohort): string {
     '  fs.mkdirSync(dir, { recursive: true });',
     "  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: packages[key], version: pin[key] }));",
     '}',
+    // The real setup script also writes the launcher binding beside the payload
+    // root; the installer now verifies it, so the stand-in must mirror that.
+    "const runtimeDir = path.join(pluginData, 'runtime');",
+    "fs.writeFileSync(path.join(pluginRoot, 'mcp-binding.json'), JSON.stringify({",
+    "  schemaVersion: 'pd.mcp-binding.v1',",
+    "  host: 'codex',",
+    "  workspaceDir: value('--workspace'),",
+    '  runtimeDir,',
+    "  serverEntry: path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'),",
+    '  versions: { mcpServer: pin.mcpServer, core: pin.core },',
+    '}));',
     '',
   ].join('\n'), 'utf8');
   return dir;
