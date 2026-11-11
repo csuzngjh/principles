@@ -56,7 +56,16 @@ export interface ToolSemanticMappingV1 {
 
 - 命名用 `file-header-patch` 而不是 `codex-apply-patch`：语义是**信封格式**（`*** ... File:` 文件头），不是宿主身份；core 不应认识宿主名。
 - 首版只允许一个非默认值。不预留 `plain-content` / `unified-diff` 等未出现的变体（P7：没有第二个真实实现就不造取值的缝）。
-- Registry 增加 `resolveWritePayloadFormat(rawToolName): WritePayloadFormat | undefined`；未声明 = `undefined`（普通载荷），**不猜测**。
+- Registry 增加 `resolveWritePayloadFormat(rawToolName): WritePayloadFormat | undefined`；返回 `undefined` 的**含义是普通 content 载荷**（缺省即断言，见下一条），调用方不得自行猜测。
+- **缺省的语义（2026-11-11 P1 评审裁决）：缺省 = 主动声明"普通 content 载荷"，不是"没有意见/不参与判定"。** 三种组合因此定死为：
+
+  | 组合 | 结果 |
+  | --- | --- |
+  | 两方声明相同 | 合并 |
+  | 一方缺省、另一方声明 patch 信封 | **冲突**（fail loud，不按启动顺序取胜） |
+  | 两方声明不同 | 结构上不可达：枚举只有一个非默认值 |
+
+  理由：枚举只有一个非默认值时，"缺省不参与判定"会让冲突守卫永远无法触发（两方声明不同不可达），守卫退化成死代码；只有把缺省读成"普通 content 的断言"，"A 缺省 / B 声明 patch"才是一个真实的语义分歧。修复方向永远是**改正宿主声明**或升级其声明文件，而不是放宽合并规则。测试见 `packages/host-runtime/tests/host-tool-semantic-resolver.test.ts` 的 `writePayloadFormat merge (ADR-0030)`。
 
 ### 2.2 校验与合并
 
@@ -89,6 +98,7 @@ Owner 裁决的安全前提（2026-11-11）：**旧声明被新版本读到，�
 
 - warning 经 `loadHostToolDeclarations → resolveWorkspaceHostToolSemantics / resolveHostToolSemanticsForHook` 透传；Codex/WorkBuddy 写入 hook stderr 诊断，OpenClaw 走 `logger.warn`（rc-9：降级必须可观察）。
 - 不采用“用静态声明补齐缺失的可选字段”的软化方案：它改变合并语义，并让陈旧文件看起来是新的。降级只在**读取 v1 文件**时发生，且明确告知该文件应被宿主重写。
+- **残留交互（2026-11-11 P1 评审后明确）**：v1 文件剥离后等于“普通 content 断言”。若同一工作区里另有 v2 宿主声明了 `apply_patch: file-header-patch`，两者合并会 fail loud（`conflicting writePayloadFormat`）。这不违反 Owner 安全前提——hook 侧仍走 `resolveHostToolSemanticsForHook` 的类型化拒绝 + 静态声明回退（`codex-adapter/src/hook.ts`），宿主加载不中断；受影响的是 workspace 解析（replay / evidence / CLI），会看到结构化原因。恢复动作是让旧宿主重写 v2 声明，或删除陈旧文件。
 - Owner 要求的三条证据（见 §5）已落地为测试；“降级”与“损坏仍 fail loud”在实现上可同时成立，无需二选一。
 
 ---
@@ -98,7 +108,7 @@ Owner 裁决的安全前提（2026-11-11）：**旧声明被新版本读到，�
 | 宿主 | 现状 | 本 ADR 后 | 行为变化 |
 | --- | --- | --- | --- |
 | Codex | `apply_patch` 是 `write`，provider 用 raw name 触发 patch 目标解析 | 声明 `{ apply_patch, write, writePayloadFormat: 'file-header-patch' }`；provider 查 registry | 无（同一输入同一结果），但别名自动跟随、字面量与 allowlist 例外消失 |
-| OpenClaw | `apply_patch` 是 `write`，载荷同为 `*** Begin Patch` 信封，但无 design-gate 目标解析消费方 | 建议本轮**不声明**该格式（没有消费方，声明了也无行为收益）；等 OpenClaw 接入 design gate 时再按证据声明 | 无 |
+| OpenClaw | `apply_patch` 是 `write`，载荷同为 `*** Begin Patch` 信封，但无 design-gate 目标解析消费方 | **声明** `{ apply_patch, write, writePayloadFormat: 'file-header-patch' }`（2026-11-11 评审修订：原“本轮不声明”在多宿主合并下会产生 `conflicting writePayloadFormat`，见 §2.1 缺省语义） | 无（本包无消费方）；与 Codex 共装时不再冲突 |
 | WorkBuddy | `Write`/`Edit` 为普通载荷，无 patch 工具证据 | 不声明（`undefined`） | 无 |
 
 宿主声明持久化：Codex 升级后首次启动重写 v2 文件；OpenClaw/WorkBuddy 的 mappings 结构不变，但版本号升级同样触发重写。

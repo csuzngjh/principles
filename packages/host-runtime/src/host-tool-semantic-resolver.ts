@@ -76,6 +76,12 @@ function mergeDeclarations(declarations: readonly HostToolDeclaration[]): Merged
       // ADR-0030: the payload encoding is part of the same identity. Two hosts
       // claiming the same write tool with different encodings cannot both be
       // right, and picking by startup order would make parsing order-dependent.
+      //
+      // An ABSENT format is a claim of plain content, not "no opinion": with a
+      // single-value enum this is the only reading under which the guard can
+      // fire, so "host A omits / host B declares the patch envelope" is a real
+      // disagreement (fail loud) rather than silently resolved drift. The fix
+      // belongs in the host declaration, never here.
       if (existing && existing.writePayloadFormat !== mapping.writePayloadFormat) {
         return {
           ok: false,
