@@ -339,9 +339,9 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     const event = makeWriteEvent();
     const result = handleSharedRuleHostResult(event, makeCtx() as never, gateResult);
 
-    // DIFF: the shared handler does not return a block object — the host has
-    // already blocked on `gateResult`. The deny accounting is the observable.
-    expect(result).toBeUndefined();
+    // The deny wins over auto_correct and is returned as a block result
+    // (PRI-1184 / F4); the host still blocks on the same decision.
+    expect(result?.block).toBe(true);
     expect(mockEventLogInstance.recordRuleHostBlocked).toHaveBeenCalled();
     expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).not.toHaveBeenCalled();
     // DIFF: blockSource is 'rule-host-shared' on the shared path (the legacy

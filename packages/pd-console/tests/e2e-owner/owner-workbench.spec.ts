@@ -16,7 +16,7 @@ async function login(page: Page) {
 test('Owner chooses one exact item, reads it, returns and keeps runtime records secondary', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
-  await expect(page.getByRole('heading', { name: '需要你处理', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '需要您处理', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '开始处理', exact: true })).toBeVisible();
   const records = page.getByTestId('focus-runtime-records');
   await expect(records).not.toHaveAttribute('open');

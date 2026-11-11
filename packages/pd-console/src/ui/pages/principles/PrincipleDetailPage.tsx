@@ -641,7 +641,7 @@ export function PrincipleDetailPage() {
                   </p>
                   {learnedTruncated && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
                   <p className="mt-1 text-ink-4 text-[12px]">
-                    {t("principles.detail.ownerDecision.sourceTierLabel", {
+                    {t("principles.detail.ownerDecision.sourceTier", {
                       defaultValue: "来源：{{tier}}（未经改写）",
                       tier: t(`principles.detail.ownerDecision.tier.${ownerDecision.learnedPrinciple.value.sourceTier}`, { defaultValue: ownerDecision.learnedPrinciple.value.sourceTier }),
                     })}
@@ -679,7 +679,7 @@ export function PrincipleDetailPage() {
               )}
               <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
               <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.decision", { defaultValue: "你的决定" })}
+                {t("principles.detail.ownerDecision.decision", { defaultValue: "您的决定" })}
               </p>
               {ownerDecision.availableActions.length === 0 && (
                 <p className="mt-1 text-ink-3 text-[13px]">
@@ -1474,7 +1474,7 @@ export function PrincipleDetailPage() {
           {hasRules && !lifecycle && (
             <div className="mt-6 pt-4 border-t border-line">
               <p className="text-ink-3 text-[13px]">
-                {t("principles.detail.lifecycleLoadFailed", { defaultValue: "无法加载生命周期指标。你可以稍后重试。" })}
+                {t("principles.detail.lifecycleLoadFailed", { defaultValue: "无法加载生命周期指标。您可以稍后重试。" })}
               </p>
             </div>
           )}

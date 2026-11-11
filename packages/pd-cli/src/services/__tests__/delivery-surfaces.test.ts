@@ -14,6 +14,7 @@ import {
 const RELEASE_ID = 'b'.repeat(64);
 const RELEASE_DIGEST = '2'.repeat(64);
 const PRODUCT_VERSION = '2.3.14';
+const BUNDLED_PRODUCT_VERSION = '2.8.6';
 
 const CANONICAL_VERSIONS: Readonly<Record<string, string>> = {
   plugin: '2.2.4',
@@ -115,6 +116,34 @@ function writeCodexFixture(
       }
     }
   }
+}
+
+/**
+ * A bundled install (the official installer's output): self-describing release
+ * id, NO ~/.pd/releases/<id>/metadata.json, live runtime present.
+ */
+function writeBundledFixtureHome(home: string): void {
+  const pdHome = path.join(home, '.pd');
+  const digest = '3'.repeat(64);
+  const releaseId = `bundled-${BUNDLED_PRODUCT_VERSION}-${digest.slice(0, 12)}`;
+  writeJson(path.join(pdHome, 'active.json'), {
+    schemaVersion: 1,
+    generation: 78,
+    releaseId,
+    releaseMetadataDigest: digest,
+    previousReleaseId: releaseId,
+    transactionId: 'install-fixture',
+    productVersion: BUNDLED_PRODUCT_VERSION,
+  });
+  writeJson(path.join(pdHome, 'install.json'), { channel: 'stable', autoCheck: true });
+  for (const [component, version] of Object.entries(CANONICAL_VERSIONS)) {
+    writePackageVersion(path.join(pdHome, 'runtime', component, 'package.json'), version);
+  }
+  fs.mkdirSync(path.join(home, '.openclaw'), { recursive: true });
+  writePackageVersion(
+    path.join(home, '.openclaw', 'extensions', 'principles-disciple', 'package.json'),
+    CANONICAL_VERSIONS.plugin ?? '2.2.4',
+  );
 }
 
 function writeFixtureHome(home: string, options: FixtureOptions = {}): void {
@@ -231,6 +260,20 @@ describe('delivery surfaces (PRI-1051)', () => {
     expect(codex.reason).toBe('host_not_started_since_install');
     expect(codex.nextAction).toMatch(/Launch Codex/);
     expect(codex.detail).toContain('no Codex session transcript');
+  });
+
+  it('reports a self-consistent bundled install as ok instead of a degraded canonical runtime', () => {
+    const home = tempHome();
+    writeBundledFixtureHome(home);
+    const report = buildDeliveryReport(home, {});
+    const canonical = surfaceOf(report, 'canonical-runtime');
+    // Bundled installs have no releases/<id>/metadata.json by design; requiring
+    // it made every fresh installer install permanently "incomplete".
+    expect(canonical.actual.health).toBe('healthy');
+    expect(canonical.status).toBe('ok');
+    expect(canonical.reason).toBeUndefined();
+    expect(report.ok).toBe(true);
+    expect(formatDeliveryReport(report)).toContain('Delivery: complete');
   });
 
   it('reports a degraded canonical install as unknown instead of a complete delivery', () => {
