@@ -273,6 +273,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     ui,
     principles,
     reuseEvaluation,
+    ...(userConfig.adaptiveActivation ? { adaptiveActivation: userConfig.adaptiveActivation } : {}),
     ...(userConfig.promptBudget ? { promptBudget: userConfig.promptBudget } : {}),
     ...(userConfig.profile ? { profile: userConfig.profile } : {}),
     ...(userConfig.contextInjection ? { contextInjection: userConfig.contextInjection } : {}),

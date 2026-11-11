@@ -34,18 +34,35 @@ describe('decideAdaptiveSkip', () => {
     expect(decideAdaptiveSkip({ ...base, prompt: '   \n\t ' })).toEqual({ skip: true, reason: 'empty_prompt' });
   });
 
-  it('skips when the remaining host budget cannot cover the observed first byte', () => {
-    expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: ADAPTIVE_SKIP_LIMITS.minRemainingBudgetMs - 1 }))
+  it('skips only when the remaining budget is below the request\'s executable floor', () => {
+    expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: ADAPTIVE_SKIP_LIMITS.minExecutableBudgetMs - 1 }))
       .toEqual({ skip: true, reason: 'budget_insufficient' });
-    expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: ADAPTIVE_SKIP_LIMITS.minRemainingBudgetMs }))
+    expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: ADAPTIVE_SKIP_LIMITS.minExecutableBudgetMs }))
       .toEqual({ skip: false });
     // No outer deadline (direct/lab call) never budget-skips.
     expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: undefined })).toEqual({ skip: false });
   });
 
+  it('does not use the old 1500 ms slow-path line: an executable fast request is not skipped', () => {
+    // PRI-1181 measured 789–1426 ms time-to-first-byte on the slow path and
+    // skipped anything under 1500 ms. A Decisions request that answers in a
+    // few hundred ms is executable in a 1400 ms window and must be sent.
+    expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: 1400 })).toEqual({ skip: false });
+    expect(decideAdaptiveSkip({ ...base, remainingBudgetMs: 1200 })).toEqual({ skip: false });
+    expect(ADAPTIVE_SKIP_LIMITS.minExecutableBudgetMs).toBeLessThan(1500);
+  });
+
   it('skips pure social acknowledgements', () => {
-    for (const prompt of ['好的', '好的，谢谢！', '收到', '嗯嗯', 'ok', 'OK!', 'Thanks', '辛苦了', '明白了。', '没问题']) {
+    for (const prompt of ['收到', '嗯嗯', 'Thanks', '辛苦了', '明白了。', '收到啦', '谢谢！', '了解', 'got it']) {
       expect(decideAdaptiveSkip({ ...base, prompt }), prompt).toEqual({ skip: true, reason: 'trivial_confirmation' });
+    }
+  });
+
+  it('never treats an approval as pure social: it can answer a pending question', () => {
+    // The counterexample: "要不要提交最终版？" → "确认". A bare approval is a
+    // stage change, not social noise, so it must reach the decision endpoint.
+    for (const prompt of ['确认', '好的', '可以', 'ok', 'OK', 'yes', '行', '没问题', '好嘞', 'yep']) {
+      expect(decideAdaptiveSkip({ ...base, prompt }), prompt).toEqual({ skip: false });
     }
   });
 
