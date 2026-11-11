@@ -21,7 +21,7 @@ import {
   type ToolSemanticRegistry,
   type GovernanceHostKind,
 } from '@principles/core/runtime';
-import { isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
+import { isRuleHostEvaluableKind, isSensitiveSystemPath } from '@principles/core/runtime/internalization/rule-host-input-builder';
 import { classifyBashRisk } from '@principles/core/runtime/internalization/bash-risk';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
@@ -162,9 +162,21 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     }
 
     const canonicalKind = toolSemantics.resolve(input.toolName);
+    // PRI-1184 / F3': restore the RuleHost routing contract. Only the write,
+    // execute and agent families enter rule evaluation; read/search and every
+    // other canonical kind are allowed without touching the RuleCode engine.
+    // The kind comes from the same ToolSemanticRegistry that supplies the
+    // extraction hints below — never a tool-name allowlist.
+    if (!isRuleHostEvaluableKind(canonicalKind)) {
+      return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
+    }
     const { isBashTool: isBash, isWriteTool: isWrite } = deriveToolHintsFromCanonicalKind(canonicalKind);
     const action = buildRuleHostAction(input.toolName, input.params, options.projectDir ?? event.context.workspaceDir, { isBashTool: isBash, isWriteTool: isWrite, canonicalKind });
-    if (action.normalizedPath === null) return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
+    // F3': normalizePathPure returns '' when no path could be extracted, so the
+    // old `=== null` guard never fired. Both null and '' mean "no action
+    // target": a pathless tool is not evaluated rather than treating an empty
+    // string as a path.
+    if (action.normalizedPath === null || action.normalizedPath === '') return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
 
     let context: RuleContextV2 | undefined;
     /**

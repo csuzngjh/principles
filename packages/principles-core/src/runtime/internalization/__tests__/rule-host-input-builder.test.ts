@@ -14,6 +14,7 @@
  *   6. Empty/null       (null / '' / undefined, /project)
  */
 import { describe, it, expect } from 'vitest';
+import type { CanonicalKind } from '../rule-context-v2.js';
 
 // ── normalizePathPure: 6 path types ──────────────────────────────────────────
 
@@ -354,6 +355,38 @@ describe('PRI-439 Phase 3: buildRuleHostAction — unified action snapshot', () 
     const action = buildRuleHostAction('edit', { file_path: '/project/src/test.ts' }, '/project');
     const direct = normalizePathPure('/project/src/test.ts', '/project');
     expect(action.normalizedPath).toBe(direct);
+  });
+});
+
+// ── RuleHost entry contract ──────────────────────────────────────────────────
+
+describe("PRI-1184 F3': isRuleHostEvaluableKind — RuleHost entry contract", () => {
+  async function getModule() {
+    return import('../rule-host-input-builder.js');
+  }
+
+  // One row per CanonicalKind, so a new kind cannot be added without an
+  // explicit routing decision here.
+  const CASES: readonly (readonly [CanonicalKind, boolean])[] = [
+    ['read', false],
+    ['search', false],
+    ['write', true],
+    ['execute', true],
+    ['agent', true],
+    ['other', false],
+  ];
+
+  it.each(CASES)('canonicalKind %s is evaluable: %s', async (kind, expected) => {
+    const { isRuleHostEvaluableKind } = await getModule();
+    expect(isRuleHostEvaluableKind(kind)).toBe(expected);
+  });
+
+  it('admits exactly the write, execute and agent families', async () => {
+    const { isRuleHostEvaluableKind } = await getModule();
+    const admitted = CASES
+      .filter(([kind]) => isRuleHostEvaluableKind(kind))
+      .map(([kind]) => kind);
+    expect(admitted).toEqual(['write', 'execute', 'agent']);
   });
 });
 

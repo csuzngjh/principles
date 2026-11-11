@@ -296,8 +296,9 @@ jobs:
   # installer package (the only product that pins engines) requires
   # node >=22, so the Node 20 leg covered nothing. Removed 2026-08-27.
 
-  # Per-package test jobs: verify:merge does NOT run package tests. These
-  # jobs are the real coverage for every package.
+  # Per-package test jobs: verify:merge runs only the install-layout and
+  # pd-mcp-server binding-contract suites. These jobs are the real coverage for
+  # every package.
 
   test-principles-core:
     name: Test principles-core
@@ -365,6 +366,11 @@ jobs:
       # capability it imports comes from the workspace-linked core dist.
       - name: Build dependency (principles-core)
         run: npm run build --workspace=@principles/core
+
+      # The binding-contract parity test imports the shared declaration from
+      # @principles/install-layout's built entry point.
+      - name: Build dependency (@principles/install-layout)
+        run: npm run build --workspace=@principles/install-layout
 
       - name: Test (unit + real-process stdio contract)
         run: npm test --workspace=@principles/pd-mcp-server
