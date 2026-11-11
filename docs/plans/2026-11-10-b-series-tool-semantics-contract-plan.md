@@ -141,6 +141,7 @@
 ### 4.2 方案
 
 1. 在 host-runtime 暴露一个 `resolveHostToolSemanticsForHook(hostKind, workspaceDir)`：优先 workspace 声明，其次宿主静态声明，最后 baseline；解析失败 fail loud（不返回空 registry）。
+   【落地修正（2026-11-11，B3）：实际签名为 `resolveHostToolSemanticsForHook({workspaceDir, hostKind, staticMappings})`。宿主静态声明必须由调用方注入——host-runtime 不能反向依赖 openclaw-plugin / codex-adapter / workbuddy-adapter；优先级与失败语义不变。】
 2. OpenClaw hook 从 `OPENCLAW_TOOL_SEMANTICS` 改为调用该入口（注入 workspaceDir）；Codex/WorkBuddy 的 hook 侧同样接入。
 3. 旧路径退场：`gate.ts` 不再直接 import `OPENCLAW_TOOL_SEMANTICS`（声明仍保留，作为 fallback 数据源）。
 
