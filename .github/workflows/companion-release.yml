@@ -9,6 +9,12 @@ on:
     tags:
       - 'companion-v*'
 
+# Release runs must never cancel each other: a half-uploaded installer tag is
+# worse than a queued one. Same group = serialized; cancel-in-progress stays off.
+concurrency:
+  group: companion-release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 

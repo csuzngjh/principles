@@ -52,26 +52,51 @@ function hasGnuArchiveTools(): boolean {
 
 const describeWithGnuTools = hasGnuArchiveTools() ? describe : describe.skip;
 
-const COHORT = 'a'.repeat(40);
-const OTHER_COHORT = 'b'.repeat(40);
 const PACKAGE_VERSION = '1.2.3';
 const PRODUCT_VERSION = '2.3.4';
 const INSTALLER_NAME = 'create-principles-disciple';
 const CORE_NAME = '@principles/core';
 
+// The installer payload components and the versions committed at the fixture
+// cohort. The pack leg reads the EXPECTED versions with `git show
+// <cohort>:<sourcePath>`, so the fixture must be a real git repository whose
+// cohort commit contains these manifests.
+const COMPONENTS = [
+  { label: 'pd-cli', payloadPath: 'pd-cli/package.json', sourcePath: 'packages/pd-cli/package.json', version: '2.2.0' },
+  { label: 'core', payloadPath: 'core/package.json', sourcePath: 'packages/principles-core/package.json', version: '7.3.1' },
+  { label: 'host-runtime', payloadPath: 'host-runtime/package.json', sourcePath: 'packages/host-runtime/package.json', version: '3.3.1' },
+  { label: 'codex-adapter', payloadPath: 'codex-adapter/package.json', sourcePath: 'packages/codex-adapter/package.json', version: '0.8.10' },
+  { label: 'install-layout', payloadPath: 'install-layout/package.json', sourcePath: 'packages/install-layout/package.json', version: '0.7.0' },
+  { label: 'workbuddy-adapter', payloadPath: 'workbuddy-adapter/package.json', sourcePath: 'packages/workbuddy-adapter/package.json', version: '0.5.11' },
+  { label: 'plugin', payloadPath: 'plugin/package.json', sourcePath: 'packages/openclaw-plugin/package.json', version: '3.2.1' },
+] as const;
+
 type FixtureOptions = {
   packageName?: string;
   version?: string;
-  gitHead?: string;
   includeStamp?: boolean;
-  stampSourceCommit?: string;
-  prepack?: boolean;
+  payloadComponentVersions?: Record<string, string>;
 };
 
 type Fixture = ReturnType<typeof createFixture>;
 
+function gitIn(cwd: string, args: string[]): string {
+  return execFileSync(
+    'git',
+    ['-C', cwd, '-c', 'user.name=PD Fixture', '-c', 'user.email=pd-fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args],
+    { encoding: 'utf8' },
+  );
+}
+
+/** Rewrite one JSON fixture file in place (the payload is NOT git-tracked). */
+function patchJson(file: string, patch: Record<string, unknown>): void {
+  const current = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+  fs.writeFileSync(file, JSON.stringify({ ...current, ...patch }, null, 2) + '\n');
+}
+
 function createFixture(root: string, options: FixtureOptions = {}) {
-  const packageDir = path.join(root, 'package');
+  const workspace = path.join(root, 'workspace');
+  const packageDir = path.join(workspace, 'packages', 'fixture-pkg');
   const releaseDir = path.join(packageDir, '_release');
   const packageJsonPath = path.join(packageDir, 'package.json');
   const packCounter = path.join(root, 'prepack-count.txt');
@@ -79,6 +104,25 @@ function createFixture(root: string, options: FixtureOptions = {}) {
   const packageName = options.packageName ?? INSTALLER_NAME;
   const version = options.version ?? PACKAGE_VERSION;
   const includeStamp = options.includeStamp ?? packageName === INSTALLER_NAME;
+
+  // Real cohort authority. `prepare-npm-candidate` derives the repository root
+  // as `packageDir/../..`, so the payload sits at packages/fixture-pkg and the
+  // two commits below are readable exactly like the production workspace.
+  fs.mkdirSync(workspace, { recursive: true });
+  execFileSync('git', ['init', '-q', workspace], { encoding: 'utf8' });
+  fs.writeFileSync(path.join(workspace, 'baseline.txt'), 'baseline\n');
+  gitIn(workspace, ['add', '-A']);
+  gitIn(workspace, ['commit', '-q', '-m', 'baseline']);
+  // A second, distinct commit stands in for "another cohort" in gitHead tests.
+  const otherCohort = gitIn(workspace, ['rev-parse', 'HEAD']).trim();
+  for (const component of COMPONENTS) {
+    const sourceFile = path.join(workspace, component.sourcePath);
+    fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
+    fs.writeFileSync(sourceFile, JSON.stringify({ name: component.label, version: component.version }, null, 2) + '\n');
+  }
+  gitIn(workspace, ['add', '-A']);
+  gitIn(workspace, ['commit', '-q', '-m', 'cohort']);
+  const cohort = gitIn(workspace, ['rev-parse', 'HEAD']).trim();
 
   fs.mkdirSync(releaseDir, { recursive: true });
   const files = ['README.md'];
@@ -89,23 +133,31 @@ function createFixture(root: string, options: FixtureOptions = {}) {
   scripts.prepublishOnly = "node -e \"require('node:fs').appendFileSync(process.env.PUBLISH_COUNTER, 'x')\"";
   if (includeStamp) files.push('_release/product-identity.json');
 
-  const packageJson: Record<string, unknown> = { name: packageName, version, files, scripts };
-  if (options.gitHead !== undefined) packageJson.gitHead = options.gitHead;
+  const payloadVersions: Record<string, string> = {
+    ...Object.fromEntries(COMPONENTS.map((component) => [component.payloadPath, component.version])),
+    ...(options.payloadComponentVersions ?? {}),
+  };
+  for (const component of COMPONENTS) {
+    const payloadFile = path.join(packageDir, component.payloadPath);
+    fs.mkdirSync(path.dirname(payloadFile), { recursive: true });
+    fs.writeFileSync(
+      payloadFile,
+      JSON.stringify({ name: component.label, version: payloadVersions[component.payloadPath] }, null, 2) + '\n',
+    );
+    files.push(path.dirname(component.payloadPath));
+  }
 
+  const packageJson: Record<string, unknown> = { name: packageName, version, files, scripts };
   fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
   fs.writeFileSync(path.join(packageDir, 'README.md'), 'candidate fixture payload\n');
   if (includeStamp) {
     fs.writeFileSync(
       path.join(releaseDir, 'product-identity.json'),
-      JSON.stringify({
-        schemaVersion: 1,
-        productVersion: PRODUCT_VERSION,
-        sourceCommit: options.stampSourceCommit ?? COHORT,
-      }, null, 2) + '\n',
+      JSON.stringify({ schemaVersion: 1, productVersion: PRODUCT_VERSION, sourceCommit: cohort }, null, 2) + '\n',
     );
   }
 
-  return { packageDir, packageJsonPath, packCounter, publishCounter, packageName, version };
+  return { packageDir, packageJsonPath, packCounter, publishCounter, packageName, version, cohort, otherCohort };
 }
 
 type CandidateOptions = {
@@ -113,6 +165,7 @@ type CandidateOptions = {
   packageName?: string;
   productVersion?: string;
   version?: string;
+  cohort?: string;
 };
 
 function runCandidateStep(root: string, fixture: Fixture, suffix: string, options: CandidateOptions = {}) {
@@ -133,7 +186,7 @@ function runCandidateStep(root: string, fixture: Fixture, suffix: string, option
       PACKAGE_DIR: fixture.packageDir,
       PKG_DIR: options.pkgDir ?? 'create-principles-disciple',
       PACKAGE_NAME: options.packageName ?? fixture.packageName,
-      COHORT,
+      COHORT: options.cohort ?? fixture.cohort,
       PACKAGE_VERSION: options.version ?? PACKAGE_VERSION,
       PRODUCT_VERSION: options.productVersion ?? '',
       RUNNER_TEMP: runnerTemp,
@@ -167,7 +220,7 @@ function runPublishStep(
   tarball: string,
   sha512Hex: string,
   fake: ReturnType<typeof createFakeNpm>,
-  options: { dryRun: boolean; pkgDir: string; name: string; cohort?: string },
+  options: { dryRun: boolean; pkgDir: string; name: string; cohort: string },
 ) {
   return spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-c', publishStep!.run!], {
     cwd: REPO_ROOT,
@@ -177,7 +230,7 @@ function runPublishStep(
       ...process.env,
       PATH: fake.fakeNpmBin + path.delimiter + (process.env.PATH ?? ''),
       TOOLS_DIR: REPO_ROOT,
-      COHORT: options.cohort ?? COHORT,
+      COHORT: options.cohort,
       NAME: options.name,
       VERSION: PACKAGE_VERSION,
       DRY_RUN: options.dryRun ? 'true' : 'false',
@@ -223,8 +276,8 @@ describeWithGnuTools('immutable candidate production path', () => {
       const stamp = readTarJson(first.tarball!, 'package/_release/product-identity.json');
       expect(manifest.name).toBe(INSTALLER_NAME);
       expect(manifest.version).toBe(PACKAGE_VERSION);
-      expect(manifest.gitHead).toBe(COHORT);
-      expect(stamp).toEqual({ schemaVersion: 1, productVersion: PRODUCT_VERSION, sourceCommit: COHORT });
+      expect(manifest.gitHead).toBe(fixture.cohort);
+      expect(stamp).toEqual({ schemaVersion: 1, productVersion: PRODUCT_VERSION, sourceCommit: fixture.cohort });
       expect(createHash('sha512').update(fs.readFileSync(first.tarball!)).digest('hex')).toBe(first.sha512Hex);
 
       const fake = createFakeNpm(root);
@@ -232,6 +285,7 @@ describeWithGnuTools('immutable candidate production path', () => {
         dryRun: true,
         pkgDir: 'create-principles-disciple',
         name: INSTALLER_NAME,
+        cohort: fixture.cohort,
       });
       expect(publishDryRun.status, String(publishDryRun.stderr)).toBe(0);
       expect(String(publishDryRun.stdout)).toContain('the real npm upload is SKIPPED');
@@ -245,6 +299,7 @@ describeWithGnuTools('immutable candidate production path', () => {
         dryRun: true,
         pkgDir: 'create-principles-disciple',
         name: INSTALLER_NAME,
+        cohort: fixture.cohort,
       });
       expect(tamperedPublish.status).not.toBe(0);
       expect(String(tamperedPublish.stderr) + String(tamperedPublish.stdout)).toContain('changed after verification');
@@ -277,7 +332,7 @@ describeWithGnuTools('immutable candidate production path', () => {
       const manifest = readTarJson(candidate.tarball!, 'package/package.json');
       expect(manifest.name).toBe(CORE_NAME);
       expect(manifest.version).toBe(PACKAGE_VERSION);
-      expect(manifest.gitHead).toBe(COHORT);
+      expect(manifest.gitHead).toBe(fixture.cohort);
       expect(createHash('sha512').update(fs.readFileSync(candidate.tarball!)).digest('hex')).toBe(candidate.sha512Hex);
 
       // Rehearsal must never call npm publish.
@@ -286,6 +341,7 @@ describeWithGnuTools('immutable candidate production path', () => {
         dryRun: true,
         pkgDir: 'principles-core',
         name: CORE_NAME,
+        cohort: fixture.cohort,
       });
       expect(dry.status, String(dry.stderr)).toBe(0);
       expect(fs.existsSync(fake.fakeNpmMarker)).toBe(false);
@@ -295,6 +351,7 @@ describeWithGnuTools('immutable candidate production path', () => {
         dryRun: false,
         pkgDir: 'principles-core',
         name: CORE_NAME,
+        cohort: fixture.cohort,
       });
       expect(real.status, String(real.stderr)).toBe(0);
       const publishedArgs = fs.readFileSync(fake.fakeNpmArgs, 'utf8').trim().split(/\r?\n/);
@@ -322,7 +379,7 @@ describeWithGnuTools('immutable candidate production path', () => {
       });
       expect(candidate.result.status, String(candidate.result.stderr)).toBe(0);
       expect(fs.readFileSync(fixture.packCounter, 'utf8')).toBe('');
-      expect(readTarJson(candidate.tarball!, 'package/package.json').gitHead).toBe(COHORT);
+      expect(readTarJson(candidate.tarball!, 'package/package.json').gitHead).toBe(fixture.cohort);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -347,12 +404,13 @@ describeWithGnuTools('immutable candidate production path', () => {
   it('accepts a pre-existing gitHead only when it already equals the cohort', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g31a-candidate-matching-'));
     try {
-      const fixture = createFixture(root, { gitHead: COHORT });
+      const fixture = createFixture(root);
+      patchJson(fixture.packageJsonPath, { gitHead: fixture.cohort });
       const sourceManifestBefore = fs.readFileSync(fixture.packageJsonPath);
       const result = runCandidateStep(root, fixture, 'matching', { productVersion: PRODUCT_VERSION });
 
       expect(result.result.status, String(result.result.stderr)).toBe(0);
-      expect(readTarJson(result.tarball!, 'package/package.json').gitHead).toBe(COHORT);
+      expect(readTarJson(result.tarball!, 'package/package.json').gitHead).toBe(fixture.cohort);
       expect(fs.readFileSync(fixture.packageJsonPath)).toEqual(sourceManifestBefore);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -362,7 +420,8 @@ describeWithGnuTools('immutable candidate production path', () => {
   it('fails closed on a conflicting pre-existing gitHead before emitting a publishable candidate', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g31a-candidate-conflict-'));
     try {
-      const fixture = createFixture(root, { gitHead: OTHER_COHORT });
+      const fixture = createFixture(root);
+      patchJson(fixture.packageJsonPath, { gitHead: fixture.otherCohort });
       const result = runCandidateStep(root, fixture, 'conflict', { productVersion: PRODUCT_VERSION });
 
       expect(result.result.status).not.toBe(0);
@@ -384,15 +443,40 @@ describeWithGnuTools('immutable candidate production path', () => {
       expect(missing.result.status).not.toBe(0);
       expect(String(missing.result.stderr)).toContain('product-identity.json');
 
-      const wrong = runCandidateStep(wrongRoot, createFixture(wrongRoot, { stampSourceCommit: OTHER_COHORT }), 'wrong', {
+      const wrong = createFixture(wrongRoot);
+      patchJson(path.join(wrong.packageDir, '_release', 'product-identity.json'), { sourceCommit: wrong.otherCohort });
+      const wrongResult = runCandidateStep(wrongRoot, wrong, 'wrong', {
         productVersion: PRODUCT_VERSION,
       });
-      expect(wrong.result.status).not.toBe(0);
-      expect(String(wrong.result.stderr)).toContain('product identity stamp does not match');
-      expect(wrong.output).not.toContain('tarball=');
+      expect(wrongResult.result.status).not.toBe(0);
+      expect(String(wrongResult.result.stderr)).toContain('product identity stamp does not match');
+      expect(wrongResult.output).not.toContain('tarball=');
     } finally {
       fs.rmSync(missingRoot, { recursive: true, force: true });
       fs.rmSync(wrongRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it.each(COMPONENTS)('fails closed when the $label payload drifts from the cohort', ({ label, payloadPath, version }) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-g31a-candidate-version-drift-'));
+    try {
+      // The payload ships a foreign version while the cohort commit keeps the
+      // committed one — the exact 1.150.1 defect, for EVERY version-synced
+      // component (P1-3: install-layout / workbuddy-adapter included). The pack
+      // leg must refuse before emitting a publishable candidate.
+      const [major, minor, patch] = version.split('.').map(Number);
+      const drifted = minor > 0 ? `${major}.${minor - 1}.${patch}` : `${major}.${minor}.${patch + 1}`;
+      const fixture = createFixture(root, { payloadComponentVersions: { [payloadPath]: drifted } });
+      const result = runCandidateStep(root, fixture, 'drift', { productVersion: PRODUCT_VERSION });
+
+      expect(result.result.status).not.toBe(0);
+      const output = String(result.result.stderr) + String(result.result.stdout);
+      expect(output).toContain('bundled component(s) do not match the release cohort commit');
+      expect(output).toContain(`${label} (${payloadPath}): expected ${version}, got ${drifted}`);
+      expect(result.output).not.toContain('tarball=');
+      expect(listFilesRecursively(result.runnerTemp).filter((file) => file.endsWith('.tgz'))).toHaveLength(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   }, 120_000);
 
@@ -437,6 +521,7 @@ describeWithGnuTools('immutable candidate production path', () => {
         dryRun: false,
         pkgDir: 'principles-core',
         name: CORE_NAME,
+        cohort: fixture.cohort,
       });
       expect(result.status).not.toBe(0);
       expect(String(result.stderr) + String(result.stdout)).toContain('changed after verification');

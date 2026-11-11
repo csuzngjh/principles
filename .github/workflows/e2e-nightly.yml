@@ -6,6 +6,12 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+# A manual dispatch while the nightly is mid-flight supersedes it — only the
+# newest run's pass/fail is worth reporting.
+concurrency:
+  group: e2e-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   issues: write

@@ -93,6 +93,49 @@ describe('pd-pain-signal published skill contract (PRI-642 Scope A)', () => {
         expect(content).toMatch(/never guess|Do not guess|禁止猜测/);
       });
 
+      // Pain Ingress v0.8 (SPEC-PD-AGENT-PAIN-INGRESS-001 §10/§11): the anchored
+      // write path is the MCP tool `pd_submit_pain`. The assertions above stay
+      // untouched — they protect still-valid invariants (trusted session
+      // transport, admission-aware verification). These are additive.
+      it('teaches the anchored submission tool and its arguments (v0.8)', () => {
+        const content = readSkill(lang);
+        expect(content).toContain('pd_submit_pain');
+        expect(content).toContain('anchorType');
+        expect(content).toContain('anchorRef');
+        expect(content).toContain('painType');
+        expect(content).toMatch(/owner_expectation/);
+        expect(content).toMatch(/established_principle/);
+        expect(content).toMatch(/agent_instruction/);
+        expect(content).toMatch(/<principleId>@<version>/);
+        expect(content).toMatch(/<path>#<section>/);
+      });
+
+      it('documents every receipt status and marks only failure as an error (v0.8)', () => {
+        const content = readSkill(lang);
+        for (const status of ['submitted', 'refused', 'failed', 'submit_unconfirmed']) {
+          expect(content).toContain(status);
+        }
+        expect(content).toMatch(/isError/);
+      });
+
+      it('forbids background submission and requires a per-submission authorization (v0.8)', () => {
+        const content = readSkill(lang);
+        expect(content).toMatch(/background|后台/i);
+        expect(content).toMatch(/authoriz|授权|同意/i);
+      });
+
+      it('tells the agent to stop when the anchored tool is unavailable (v0.8)', () => {
+        const content = readSkill(lang);
+        expect(content).toMatch(/not in your tool list|工具列表里没有/);
+        expect(content).toMatch(/do not call a look-alike|不要调用相似工具/);
+      });
+
+      it('states that severity cannot be self-asserted and defaults to moderate (v0.8)', () => {
+        const content = readSkill(lang);
+        expect(content).toMatch(/severity|严重度/);
+        expect(content).toMatch(/moderate|中等/);
+      });
+
       it('dist copy matches the source template (no stale published artifact)', () => {
         const dist = readDistSkill(lang);
         if (dist === null) {

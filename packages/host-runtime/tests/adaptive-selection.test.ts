@@ -1,103 +1,243 @@
 /**
- * Phase-1 stability (S5): the adaptive principle selector is the last caller
- * that reached the runtime adapter without an `outputSchemaRef`, so its model
- * answer bypassed the schema-gated validation every other runner gets.
+ * The adaptive selector's transport contract after PRI-1182.
  *
- * Red-before-green: before S5 the captured `startRun` input carried no
- * `outputSchemaRef`, and a `{status:'selected'}` answer (missing id/digest)
- * came back as a plain payload instead of failing schema validation.
+ * History: before this PR the selector was `createSingleModelSelector`, which
+ * sent an agent run through `PiAiRuntimeAdapter` and required the registered
+ * `adaptive-selection-output` schema (S5). PRI-1182 replaces that transport with
+ * one Decisions POST, so the adapter-specific assertions have no subject here.
+ * The guarantees they protected are re-asserted against the new transport:
  *
- * Conflict note (PRI-1170 / PR #2513): this file only covers the schema-ref
- * handoff. The admission/completion deadline semantics exercised by
- * `createSingleModelSelector` are owned by PR #2513 and are deliberately not
- * re-asserted here, so the two changes cannot drift into two timing systems.
+ *   - an unparseable answer is labelled SELECTION_OUTPUT_INVALID, not the
+ *     generic TRANSPORT_FAILED;
+ *   - a structurally incomplete answer is labelled by the protocol
+ *     (DECISION_QUESTION_MISMATCH), not by the transport;
+ *   - exactly one POST is made, so the turn cannot pay twice.
+ *
+ * `SELECTION_SCHEMA_UNAVAILABLE` / `SELECTION_AMBIGUOUS` had no remaining
+ * producer on this path and were removed from the failure union instead of
+ * being kept as types only. The deadline accepted/expired split is covered by
+ * the hook-level frozen-envelope tests.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PDRuntimeError, PiAiRuntimeAdapter, type StartRunInput } from '@principles/core/runtime';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
-  createSingleModelSelector,
-  type BoundedSelectionInput,
+  ADAPTIVE_ACTIVATION_FLAG,
+  resolveAdaptiveSelectionModel,
+} from '../src/adaptive-priority-provider.js';
+import type {PdConfig} from '@principles/core/runtime';
+import {
+  createDecisionSelector,
+  type AdaptiveCandidate,
+  type DecisionSelectorOptions,
 } from '../src/adaptive-selection.js';
+import {
+  validateDecisionResponse,
+  type DecisionRequestEnvelope,
+} from '../src/adaptive-decision-protocol.js';
 
-const boundedInput: BoundedSelectionInput = {
-  payload: {
-    currentInstruction: 'select at most one principle for this turn',
-    priorMessages: [],
-    candidates: [],
+const endpoint = 'https://openrouter.ai/api/alpha/decisions';
+const model = 'respan/span-01-lite:free';
+const apiKeyEnv = 'PRI_1182_TEST_KEY';
+
+const candidates: readonly AdaptiveCandidate[] = [
+  {
+    ref: 'c1',
+    text: 'Prefer additive delivery over rewrites.',
+    digest: 'digest-c1',
+    principle: {} as AdaptiveCandidate['principle'],
   },
-  entries: [],
-  priorDropped: 0,
+];
+
+const body: DecisionRequestEnvelope = {
+  model,
+  state: 'select at most one principle for this turn',
+  questions: {
+    candidate_c1: {type: 'noul', instructions: 'does candidate c1 apply now?'},
+    insufficient_context: {type: 'noul', instructions: 'is context insufficient?'},
+  },
+  provider: {only: ['Respan'], allow_fallbacks: false},
 };
 
-function spyAdapter(): StartRunInput[] {
-  const captured: StartRunInput[] = [];
-  vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockImplementation(
-    async function (this: unknown, input: StartRunInput) {
-      captured.push(input);
-      return {runId: 'run-s5', runtimeKind: 'pi-ai', startedAt: new Date().toISOString()};
-    },
-  );
-  vi.spyOn(PiAiRuntimeAdapter.prototype, 'fetchOutput').mockResolvedValue({
-    runId: 'run-s5',
-    payload: {status: 'none_applicable'},
-  });
-  return captured;
+const questionIds = ['candidate_c1', 'insufficient_context'];
+
+function selector(fetchImpl: typeof fetch, now: () => number = Date.now): ReturnType<typeof createDecisionSelector> {
+  const options: DecisionSelectorOptions = {
+    endpoint,
+    model: {endpoint, model, provider: 'Respan', apiKeyEnv},
+    admissionDeadlineAt: now() + 5_000,
+    generationTimeoutMs: 500,
+    fetchImpl,
+    now,
+  };
+  return createDecisionSelector(options);
 }
 
-function selector() {
-  return createSingleModelSelector({
-    admissionDeadlineAt: Date.now() + 10_000,
-    model: {provider: 'sensenova', model: 'deepseek-v4-flash', apiKeyEnv: 'UNUSED_IN_SPYED_TEST'},
-  });
+function respondWith(payload: unknown): typeof fetch {
+  return (async () => new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {'Content-Type': 'application/json'},
+  })) as typeof fetch;
 }
 
 afterEach(() => {
+  delete process.env[apiKeyEnv];
   vi.restoreAllMocks();
 });
 
-describe('createSingleModelSelector — S5 output schema handoff', () => {
-  it('passes the registered adaptive selection schema to startRun', async () => {
-    const captured = spyAdapter();
+describe('createDecisionSelector — one Decisions request per turn', () => {
+  it('sends exactly one POST and applies an in-time complete answer', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const fetchImpl = vi.fn(respondWith({
+      model,
+      provider: 'Respan',
+      answers: {
+        candidate_c1: {type: 'noul', noul: 0.95},
+        insufficient_context: {type: 'noul', noul: 0.1},
+      },
+    }));
+    const s = selector(fetchImpl as unknown as typeof fetch);
 
-    await selector().select(boundedInput);
+    const outcome = await s.select({body, questionIds, candidates});
 
-    // RED (before S5): outputSchemaRef was undefined, so Path 3 ran without
-    // schema validation or repair.
-    expect(captured).toHaveLength(1);
-    expect(captured[0].outputSchemaRef).toBe('adaptive-selection-output');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(endpoint);
+    expect(JSON.parse(String(init.body)).model).toBe(model);
+    expect(outcome).toEqual({
+      status: 'selected',
+      ref: 'c1',
+      reason: 'selected',
+      scores: {candidate_c1: 0.95, insufficient_context: 0.1},
+    });
+    expect(s.report().sends).toBe(1);
   });
 
-  it('labels an adapter schema rejection as SELECTION_OUTPUT_INVALID, not TRANSPORT_FAILED', async () => {
-    // With the schema registered, an incomplete answer (e.g. `selected`
-    // without digest) is rejected by the adapter before the host guard runs.
-    // The failure code must stay diagnosable instead of degrading to the
-    // generic transport code.
-    vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockRejectedValue(
-      new PDRuntimeError('output_invalid', 'LLM output does not match adaptive-selection-output schema'),
-    );
+  it('labels an unparseable decision body as SELECTION_OUTPUT_INVALID, not TRANSPORT_FAILED', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const fetchImpl = (async () => new Response('not-json', {status: 200})) as typeof fetch;
+    const s = selector(fetchImpl);
 
-    const s = selector();
-    await expect(s.select(boundedInput)).rejects.toThrow('SELECTION_OUTPUT_INVALID');
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('SELECTION_OUTPUT_INVALID');
     expect(s.report().failure).toBe('SELECTION_OUTPUT_INVALID');
     expect(s.report().status).toBe('failed');
   });
 
-  it('separates an unregistered selector schema from an invalid model answer', async () => {
-    // A missing registry entry is a deployment/configuration fault, not a
-    // malformed model answer. Reporting it as SELECTION_OUTPUT_INVALID points
-    // operators at the wrong subsystem.
-    vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockRejectedValue(
-      new PDRuntimeError('output_invalid', 'Unknown outputSchemaRef: adaptive-selection-output', {
-        parseFailureReason: 'unknown_output_schema_ref',
-        outputSchemaRef: 'adaptive-selection-output',
-        nextAction: 'Register the schema in OUTPUT_SCHEMA_REGISTRY',
-      }),
-    );
+  it('labels a structurally incomplete answer by protocol code, not transport', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const fetchImpl = respondWith({
+      model,
+      provider: 'Respan',
+      // `candidate_c1` is missing: a complete table is required before any
+      // selection is applied.
+      answers: {insufficient_context: {type: 'noul', noul: 0.1}},
+    });
+    const s = selector(fetchImpl);
 
-    const s = selector();
-    // RED (before the split): reported SELECTION_OUTPUT_INVALID.
-    await expect(s.select(boundedInput)).rejects.toThrow('SELECTION_SCHEMA_UNAVAILABLE');
-    expect(s.report().failure).toBe('SELECTION_SCHEMA_UNAVAILABLE');
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('DECISION_QUESTION_MISMATCH');
+    expect(s.report().failure).toBe('DECISION_QUESTION_MISMATCH');
     expect(s.report().status).toBe('failed');
+  });
+});
+
+/**
+ * PRI-1182 merge condition: removing `SELECTION_SCHEMA_UNAVAILABLE` is only
+ * valid if the new path still separates a CONFIGURATION fault from a TRANSPORT
+ * fault. The assertions below pin that separation: every configuration fault
+ * reports `needs_setup` with its own reason, every malformed answer reports a
+ * protocol code, and only a real fetch rejection reports `TRANSPORT_FAILED`.
+ */
+describe('configuration faults stay distinguishable from transport failure', () => {
+  const features = {[ADAPTIVE_ACTIVATION_FLAG]: {enabled: true}};
+  const configWith = (adaptiveActivation?: Record<string, unknown>): PdConfig => ({
+    features,
+    ...(adaptiveActivation ? {adaptiveActivation} : {}),
+  }) as unknown as PdConfig;
+
+  it('reports needs_setup with a specific reason for each configuration gap', () => {
+    const missingSection = resolveAdaptiveSelectionModel(configWith(), {});
+    expect(missingSection.ok).toBe(false);
+    if (missingSection.ok) throw new Error('expected needs_setup');
+    expect(missingSection.readiness).toBe('needs_setup');
+    expect(missingSection.reason).toContain('adaptiveActivation is not configured');
+
+    const missingFields = resolveAdaptiveSelectionModel(
+      configWith({endpoint: '', model: '', apiKeyEnv: ''}),
+      {},
+    );
+    expect(missingFields.ok).toBe(false);
+    if (missingFields.ok) throw new Error('expected needs_setup');
+    expect(missingFields.reason).toContain('missing endpoint/model/apiKeyEnv');
+
+    const missingKey = resolveAdaptiveSelectionModel(
+      configWith({endpoint, model, apiKeyEnv}),
+      {},
+    );
+    expect(missingKey.ok).toBe(false);
+    if (missingKey.ok) throw new Error('expected needs_setup');
+    expect(missingKey.reason).toContain(`Environment variable '${apiKeyEnv}' is not set`);
+
+    // None of the configuration faults is reported as a transport failure.
+    for (const reason of [missingSection.reason, missingFields.reason, missingKey.reason]) {
+      expect(reason).not.toContain('TRANSPORT_FAILED');
+    }
+  });
+
+  it('labels mismatched identity and malformed answers by protocol code, and only a broken fetch as TRANSPORT_FAILED', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const expected = {model, questionIds, provider: 'Respan'};
+    const complete = {
+      candidate_c1: {type: 'noul', noul: 0.9},
+      insufficient_context: {type: 'noul', noul: 0.1},
+    };
+
+    expect(validateDecisionResponse({model: 'respan/other', answers: complete}, expected))
+      .toEqual({ok: false, reason: 'DECISION_MODEL_MISMATCH'});
+    expect(validateDecisionResponse({model, answers: {candidate_c1: {type: 'text'}, insufficient_context: complete.insufficient_context}}, expected))
+      .toEqual({ok: false, reason: 'DECISION_OUTPUT_INVALID'});
+    expect(validateDecisionResponse({model, answers: {candidate_c1: {type: 'noul', noul: 1.4}, insufficient_context: complete.insufficient_context}}, expected))
+      .toEqual({ok: false, reason: 'DECISION_SCORE_INVALID'});
+
+    const offline = selector(async () => {
+      throw new TypeError('network down');
+    });
+    await expect(offline.select({body, questionIds, candidates})).rejects.toThrow('TRANSPORT_FAILED');
+    expect(offline.report().failure).toBe('TRANSPORT_FAILED');
+    expect(offline.report().sends).toBe(1);
+  });
+
+  it('reports a credential that vanished before send as a configuration code, with zero requests', async () => {
+    // The provider factory normally refuses earlier with `needs_setup`. This
+    // guards the narrower race: the key disappears between resolution and send.
+    // A missing credential is a configuration fault, so it must NOT be filed
+    // under the TRANSPORT_* family.
+    const send = vi.fn(respondWith({model, provider: 'Respan', answers: {}}));
+    const s = selector(send as unknown as typeof fetch);
+
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('DECISION_CREDENTIAL_MISSING');
+    const report = s.report();
+    expect(report.failure).toBe('DECISION_CREDENTIAL_MISSING');
+    expect(report.status).toBe('failed');
+    expect(report.sends).toBe(0);
+    expect(report.diagnostics.failures).toEqual(['DECISION_CREDENTIAL_MISSING']);
+    expect(send).not.toHaveBeenCalled();
+    expect(report.failure).not.toBe('TRANSPORT_FAILED');
+    expect(report.failure).not.toBe('TRANSPORT_NOT_SENT');
+  });
+
+  it('keeps TRANSPORT_NOT_SENT for the repeat-call guard, so neither code can absorb the other', async () => {
+    process.env[apiKeyEnv] = 'test-key';
+    const s = selector(respondWith({
+      model,
+      provider: 'Respan',
+      answers: {
+        candidate_c1: {type: 'noul', noul: 0.95},
+        insufficient_context: {type: 'noul', noul: 0.1},
+      },
+    }));
+
+    await s.select({body, questionIds, candidates});
+    await expect(s.select({body, questionIds, candidates})).rejects.toThrow('TRANSPORT_NOT_SENT');
+    expect(s.report().failure).toBe('TRANSPORT_NOT_SENT');
+    expect(s.report().sends).toBe(1);
+    expect(s.report().failure).not.toBe('DECISION_CREDENTIAL_MISSING');
   });
 });
