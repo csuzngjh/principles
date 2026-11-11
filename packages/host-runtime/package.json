@@ -1,6 +1,6 @@
 {
   "name": "@principles/host-runtime",
-  "version": "3.3.1",
+  "version": "3.4.0",
   "description": "Shared host-neutral orchestration for Principles Disciple MVP-Core hook paths.",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,7 +31,7 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
-    "@principles/core": "^7.3.1",
+    "@principles/core": "^7.3.2",
     "@principles/install-layout": "^0.7.0",
     "better-sqlite3": "^13.0.3",
     "js-yaml": "^5.4.3"
