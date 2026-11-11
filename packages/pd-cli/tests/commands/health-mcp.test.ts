@@ -12,7 +12,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { assessMcpHealth } from '../../src/commands/health-mcp.js';
+import { buildMcpBindingFixture, MCP_BINDING_FIXTURES } from '@principles/install-layout';
+import { assessMcpHealth, selectMcpHostForWorkspace, formatMcpHostSelectionLine } from '../../src/commands/health-mcp.js';
 
 const SCHEMA = 'pd.mcp-binding.v1';
 const WORKSPACE_NAME = 'ws';
@@ -638,4 +639,202 @@ describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3
       expect(section.registrationConflict.verdict).toBe('unverifiable');
     });
   });
+});
+
+describe('selectMcpHostForWorkspace — PRI-1186: the serving binding is the host authority', () => {
+  const query = (home: string, ws?: string) => path.join(home, ws ?? WORKSPACE_NAME);
+
+  it('selects codex when the codex binding serves the queried workspace', () => {
+    withHome((home) => {
+      makeCodexFixture(home);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'codex',
+        selectedBy: 'binding-workspace-match',
+        matchedHosts: ['codex'],
+      });
+    });
+  });
+
+  it('selects openclaw when the openclaw binding serves the queried workspace', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'openclaw');
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'binding-workspace-match',
+        matchedHosts: ['openclaw'],
+      });
+    });
+  });
+
+  it('selects workbuddy when the workbuddy binding serves the queried workspace', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'workbuddy');
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'workbuddy',
+        selectedBy: 'binding-workspace-match',
+        matchedHosts: ['workbuddy'],
+      });
+    });
+  });
+
+  it('keeps the openclaw default and discloses when no binding serves the workspace', () => {
+    withHome((home) => {
+      makeCodexFixture(home); // binds home/ws, NOT home/other-ws
+      expect(selectMcpHostForWorkspace(query(home, 'other-ws'), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'default-no-match',
+        matchedHosts: [],
+      });
+    });
+  });
+
+  it('keeps the openclaw default when no host binding exists at all', () => {
+    withHome((home) => {
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'default-no-match',
+        matchedHosts: [],
+      });
+    });
+  });
+
+  it('discloses ambiguity instead of guessing when two hosts bind the same workspace', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'openclaw');
+      makeCodexFixture(home);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} })).toEqual({
+        host: 'openclaw',
+        selectedBy: 'default-ambiguous',
+        matchedHosts: ['openclaw', 'codex'],
+      });
+    });
+  });
+
+  it('ignores a binding whose workspaceDir is relative (unusable as authority)', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const record = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8'));
+      record.workspaceDir = 'relative/ws';
+      writeJson(fixture.bindingPath, record);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} }).selectedBy).toBe('default-no-match');
+    });
+  });
+
+  it('ignores a binding without a workspaceDir', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const record = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8'));
+      delete record.workspaceDir;
+      writeJson(fixture.bindingPath, record);
+      expect(selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} }).selectedBy).toBe('default-no-match');
+    });
+  });
+
+  it('matches a trailing-separator variant of the same workspace', () => {
+    withHome((home) => {
+      makeCodexFixture(home);
+      const selection = selectMcpHostForWorkspace(query(home) + path.sep, { homeDir: home, env: {} });
+      expect(selection.host).toBe('codex');
+      expect(selection.selectedBy).toBe('binding-workspace-match');
+    });
+  });
+
+  it.skipIf(process.platform !== 'win32')('matches case-insensitively on Windows', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const record = JSON.parse(fs.readFileSync(fixture.bindingPath, 'utf8'));
+      record.workspaceDir = String(record.workspaceDir).toUpperCase();
+      writeJson(fixture.bindingPath, record);
+      const selection = selectMcpHostForWorkspace(query(home), { homeDir: home, env: {} });
+      expect(selection.host).toBe('codex');
+      expect(selection.selectedBy).toBe('binding-workspace-match');
+    });
+  });
+
+  it('honors CODEX_HOME when locating the codex binding', () => {
+    withHome((home) => {
+      makeCodexFixture(home);
+      const selection = selectMcpHostForWorkspace(query(home), {
+        homeDir: home,
+        env: { CODEX_HOME: path.join(home, '.codex') },
+      });
+      expect(selection.host).toBe('codex');
+      expect(selection.selectedBy).toBe('binding-workspace-match');
+    });
+  });
+});
+
+describe('formatMcpHostSelectionLine — every selection reason is disclosed', () => {
+  it('names the host and the explicit flag', () => {
+    expect(formatMcpHostSelectionLine({ host: 'workbuddy', selectedBy: 'explicit-flag', matchedHosts: [] }))
+      .toBe('mcp.hostSelection: workbuddy (explicit --host)');
+  });
+
+  it('names the serving binding for a workspace match', () => {
+    const line = formatMcpHostSelectionLine({ host: 'codex', selectedBy: 'binding-workspace-match', matchedHosts: ['codex'] });
+    expect(line).toContain('mcp.hostSelection: codex');
+    expect(line).toContain('serves this workspace');
+  });
+
+  it('discloses that no host binding serves the workspace', () => {
+    const line = formatMcpHostSelectionLine({ host: 'openclaw', selectedBy: 'default-no-match', matchedHosts: [] });
+    expect(line).toContain('mcp.hostSelection: openclaw');
+    expect(line).toContain('no host binding serves this workspace');
+  });
+
+  it('discloses every matching host on ambiguity and asks for --host', () => {
+    const line = formatMcpHostSelectionLine({ host: 'openclaw', selectedBy: 'default-ambiguous', matchedHosts: ['openclaw', 'codex'] });
+    expect(line).toContain('openclaw, codex');
+    expect(line).toContain('--host');
+  });
+});
+
+describe('assessMcpHealth — shared binding shape gate', () => {
+  /**
+   * pd-cli's OUTWARD vocabulary (characterization): these literals are the
+   * contract the Owner reads in `pd health`. The internal determination moved to
+   * @principles/install-layout's `validateMcpBinding`; only this mapping is
+   * pd-cli's. A changed/renamed code — or a new shared fixture without a
+   * decision here — makes this table red.
+   */
+  const BINDING_DEGRADE_CASES: readonly {
+    readonly id: (typeof MCP_BINDING_FIXTURES)[number]['id'];
+    readonly status: string;
+    readonly reason: string | undefined;
+  }[] = [
+    { id: 'valid', status: 'HEALTHY', reason: undefined },
+    { id: 'missing-workspace', status: 'CONFIG_DRIFT', reason: 'binding_workspace_invalid' },
+    { id: 'missing-server-entry', status: 'CONFIG_DRIFT', reason: 'binding_paths_not_absolute' },
+    { id: 'relative-workspace', status: 'CONFIG_DRIFT', reason: 'binding_workspace_invalid' },
+    { id: 'foreign-server-entry', status: 'CONFIG_DRIFT', reason: 'server_entry_not_canonical' },
+    { id: 'relative-runtime', status: 'CONFIG_DRIFT', reason: 'binding_paths_not_absolute' },
+    { id: 'foreign-host', status: 'CONFIG_DRIFT', reason: 'binding_host_mismatch' },
+    { id: 'unknown-host', status: 'CONFIG_DRIFT', reason: 'binding_host_mismatch' },
+    { id: 'unsupported-schema', status: 'CONFIG_DRIFT', reason: 'binding_schema_unsupported' },
+    { id: 'invalid-versions', status: 'VERSION_MISMATCH', reason: 'installed_mcp_server_version_mismatch' },
+    { id: 'not-an-object', status: 'CONFIG_DRIFT', reason: 'mcp_binding_unreadable' },
+  ];
+
+  it('decides every fixture the shared contract declares', () => {
+    expect(BINDING_DEGRADE_CASES.map((entry) => entry.id).sort())
+      .toEqual(MCP_BINDING_FIXTURES.map((fixture) => fixture.id).sort());
+  });
+
+  for (const expected of BINDING_DEGRADE_CASES) {
+    it(`classifies ${expected.id} as ${expected.reason ?? 'HEALTHY'}`, () => {
+      withHome((home) => {
+        const fixture = makeCodexFixture(home);
+        writeJson(fixture.bindingPath, buildMcpBindingFixture(expected.id, {
+          host: 'codex',
+          runtimeDir: fixture.runtimeDir,
+          workspaceDir: path.join(home, WORKSPACE_NAME),
+          foreignServerEntry: path.join(fixture.runtimeDir, 'other.js'),
+          versions: { mcpServer: '0.1.0', core: '1.0.0' },
+        }));
+        const section = assessCodex(fixture);
+        expect(section.status).toBe(expected.status);
+        expect(section.reason).toBe(expected.reason);
+      });
+    });
+  }
 });

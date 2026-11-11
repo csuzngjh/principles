@@ -53,7 +53,7 @@ export function CorePrinciplesPage() {
   return (
     <PageShell>
       <SectionTitle>{t("principles.coreSectionTitle")}</SectionTitle>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         {t("principles.coreTitle")}
       </h1>
       <p className="text-ink-3 text-[14px] leading-relaxed mb-1">
@@ -117,7 +117,7 @@ function CoreLayerGroup({
   const { t } = useTranslation("pages");
   return (
     <section className="mb-8" aria-label={label}>
-      <h2 className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-3 border-b border-line pb-2 mb-4">
+      <h2 className="font-mono text-eyebrow uppercase tracking-[0.02em] text-ink-3 border-b border-line pb-2 mb-4">
         {label} · {principles.length}
       </h2>
       <div className="grid gap-3 animate-[pdFadeIn_400ms_ease-out]">
@@ -131,15 +131,15 @@ function CoreLayerGroup({
               className="bg-panel border border-line rounded-[var(--radius-md)] p-4"
             >
               <div className="flex items-center gap-2 mb-2">
-                <span className="font-mono text-[11px] tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3">
+                <span className="font-mono text-caption tracking-[0.02em] border border-line rounded-[2px] px-2 py-0.5 text-ink-3">
                   {p.id}
                 </span>
-                <span className="font-mono text-[11px] tracking-[0.02em] text-ink-4">
+                <span className="font-mono text-caption tracking-[0.02em] text-ink-4">
                   {t("principles.coreLayer" + (p.layer === "foundational" ? "Foundational" : "Operating"))}
                 </span>
               </div>
               <h3 className="font-semibold text-ink mb-1">{name}</h3>
-              <p className="text-ink-3 text-[13px] leading-relaxed">{statement}</p>
+              <p className="text-ink-3 text-body leading-relaxed">{statement}</p>
             </article>
           );
         })}

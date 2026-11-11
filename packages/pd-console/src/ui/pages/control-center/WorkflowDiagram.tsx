@@ -51,17 +51,17 @@ export function WorkflowDiagram() {
     <div className="mt-8 bg-surface border border-line-2 rounded-[8px] px-[22px] py-[18px]">
       {/* 标题行：mono eyebrow + 分隔线 */}
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-[11px] font-mono uppercase tracking-[0.1em] text-ink-4 font-medium">
+        <span className="text-eyebrow font-mono uppercase tracking-[0.1em] text-ink-4 font-medium">
           {t("pages.controlCenter.workflow.title")}
         </span>
-        <span className="text-[11px] font-mono uppercase tracking-[0.1em] text-ink-4">
+        <span className="text-eyebrow font-mono uppercase tracking-[0.1em] text-ink-4">
           {t("pages.controlCenter.workflow.subtitle")}
         </span>
         <span className="flex-1 h-px bg-line-2" aria-hidden="true" />
       </div>
 
       {/* 4 phase + 3 箭头 grid */}
-      <div className="grid grid-cols-[1fr_24px_1fr_24px_1fr_24px_1fr] items-stretch">
+      <div className="grid grid-cols-1 gap-[6px] items-stretch md:grid-cols-[1fr_24px_1fr_24px_1fr_24px_1fr]">
         {phases.map((phase, idx) => (
           <div key={phase.num} className="contents">
             <div
@@ -71,7 +71,7 @@ export function WorkflowDiagram() {
                   : "px-[10px] py-[12px] text-center flex flex-col gap-[5px] justify-center bg-paper-2 border border-line-2 rounded-[4px]"
               }
             >
-              <div className="text-[10px] font-mono text-ink-4 tracking-[0.06em]">
+              <div className="text-caption font-mono text-ink-4 tracking-[0.06em]">
                 {phase.num}
               </div>
               <div
@@ -86,8 +86,8 @@ export function WorkflowDiagram() {
               <div
                 className={
                   phase.isHuman
-                    ? "text-[11.5px] text-gov-2 italic leading-[1.45] whitespace-pre-line"
-                    : "text-[11.5px] text-ink-3 leading-[1.45] whitespace-pre-line"
+                    ? "text-caption text-gov-2 italic leading-[1.45] whitespace-pre-line"
+                    : "text-caption text-ink-3 leading-[1.45] whitespace-pre-line"
                 }
               >
                 {t(phase.descKey)}
@@ -95,7 +95,7 @@ export function WorkflowDiagram() {
             </div>
             {/* 箭头（最后一个 phase 后无箭头） */}
             {idx < phases.length - 1 && (
-              <div className="flex items-center justify-center text-ink-4 font-mono">
+              <div className="flex items-center justify-center text-ink-4 font-mono rotate-90 md:rotate-0">
                 <ChevronRight className="w-[18px] h-[18px]" aria-hidden="true" />
               </div>
             )}
@@ -104,7 +104,7 @@ export function WorkflowDiagram() {
       </div>
 
       {/* loop hint */}
-      <div className="mt-[14px] pt-[12px] border-t border-line-2 flex items-center gap-[10px] text-[11.5px] text-ink-4 font-mono leading-[1.5]">
+      <div className="mt-[14px] pt-[12px] border-t border-line-2 flex items-center gap-[10px] text-caption text-ink-4 font-mono leading-[1.5]">
         <RefreshCw
           className="w-[14px] h-[14px] text-gov shrink-0"
           aria-hidden="true"

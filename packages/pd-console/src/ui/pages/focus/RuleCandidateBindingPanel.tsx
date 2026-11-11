@@ -271,22 +271,22 @@ export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidat
   return <section className="mb-7 rounded border border-line p-4" data-testid="rule-binding-panel" aria-label={t('pages.focus.ruleBinding.title')}>
     <h2 className="text-sm font-medium">{t('pages.focus.ruleBinding.title')}</h2>
     <p className="mt-2 text-sm text-ink-3">{t('pages.focus.ruleBinding.separate')}</p>
-    {queue && <p className="mt-2 text-[13px] text-ink-3" role="status" data-testid="rule-binding-counts">
+    {queue && <p className="mt-2 text-body text-ink-3" role="status" data-testid="rule-binding-counts">
       {t('pages.focus.ruleBinding.countsLine', { candidates: queue.summary.candidates, painGroups: queue.summary.painGroups, bound: queue.summary.bound, unlinked: queue.summary.unlinked, blocked: queue.summary.blocked })}
     </p>}
-    {queue?.truncated && <p className="mt-1 text-[12.5px] text-amber">{t('pages.focus.ruleBinding.truncatedNote', { count: queue.items.length })}</p>}
+    {queue?.truncated && <p className="mt-1 text-caption text-amber">{t('pages.focus.ruleBinding.truncatedNote', { count: queue.items.length })}</p>}
     {error && <p role="alert" className="my-2 text-amber">{error}</p>}
     {message && <p role="status" className="my-2">{message}</p>}
     {visibleGroups.map(group => <div key={group.key} className="mt-4" data-testid="rule-binding-pain-group">
       <div className="border-l-2 border-line pl-3">
-        <div className="text-[13px] text-ink-2 leading-relaxed">
+        <div className="text-body text-ink-2 leading-relaxed">
           <span className="font-medium text-ink">{t('pages.focus.ruleBinding.groupPrefix')}</span>
           {' '}
           {group.pain.text
             ? splitReadingTitleBody(group.pain.text).title
             : t('pages.focus.ruleBinding.painUnrecorded')}
         </div>
-        <div className="mt-0.5 text-[11.5px] text-ink-4">
+        <div className="mt-0.5 text-caption text-ink-4">
           {painSourceLabel(t, group.pain.source)}
           {group.pain.createdAt ? ` · ${group.pain.createdAt.slice(0, 10)}` : ''}
           {' · '}
@@ -300,16 +300,16 @@ export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidat
         return <article key={item.candidateId} className="relative mt-3 pl-[22px] py-[14px] pr-[18px] bg-panel border border-line rounded-[6px]" data-testid={`rule-binding-card-${item.candidateId}`}>
           <div className={`absolute left-0 top-0 bottom-0 w-[3px] rounded-l-[6px] ${RULE_BINDING_CARD_STATE_BAR[cardState]}`} />
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`inline-flex items-center border rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${RULE_BINDING_CARD_STATE_CLASS[cardState]}`}>
+            <span className={`inline-flex items-center border rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${RULE_BINDING_CARD_STATE_CLASS[cardState]}`}>
               {t(RULE_BINDING_CARD_STATE_KEY[cardState])}
             </span>
             {(() => { const stageLabel = stageKindLabel(t, item.generation?.stageKind ?? null); return stageLabel
-              ? <span className="text-[11.5px] text-ink-4">{t('pages.focus.ruleBinding.currentStage')}{stageLabel}</span>
+              ? <span className="text-caption text-ink-4">{t('pages.focus.ruleBinding.currentStage')}{stageLabel}</span>
               : null; })()}
           </div>
           <div className="mt-[10px] mb-1 font-semibold text-ink leading-snug" data-testid={`rule-binding-title-${item.candidateId}`}>{layout.title}</div>
           {layout.body !== null && <div className="mb-2 text-[14px] leading-relaxed text-ink-2 whitespace-pre-wrap break-words">{layout.body}</div>}
-          {item.binding.status === 'bound' && <div className="mt-2 px-3 py-2 bg-surface/60 border-l-2 border-gov text-[13px] leading-relaxed">
+          {item.binding.status === 'bound' && <div className="mt-2 px-3 py-2 bg-surface/60 border-l-2 border-gov text-body leading-relaxed">
             <span className="text-ink-3">{t('pages.focus.ruleBinding.boundTo')}</span>{' '}
             <span className="text-ink">{splitReadingTitleBody(item.binding.principle.text).title}</span>
             {' · '}
@@ -317,47 +317,47 @@ export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidat
             {' · '}
             <Link to={`/principles/${item.binding.principle.principleId}`} className="text-gov underline">{t('pages.focus.ruleBinding.viewPrinciple')}</Link>
           </div>}
-          {cardState === 'bound_blocked' && item.generation && <div className="mt-2 text-[12.5px] leading-relaxed text-amber" data-testid={`rule-binding-blocked-${item.candidateId}`}>
+          {cardState === 'bound_blocked' && item.generation && <div className="mt-2 text-caption leading-relaxed text-amber" data-testid={`rule-binding-blocked-${item.candidateId}`}>
             {t('pages.focus.ruleBinding.blockedLine', {
               stage: stageKindLabel(t, item.generation.stageKind) ?? '',
               reason: codeText(t, 'pages.focus.ruleBinding.blockReason', item.generation.reasonCode) || t('pages.focus.ruleBinding.blockReasonUnknown'),
             })}
             <div className="mt-0.5 text-ink-3">{t('pages.focus.ruleBinding.blockedNoOwnerApproval')}</div>
-            {item.generation.detail && <details className="mt-1 text-[11.5px]">
+            {item.generation.detail && <details className="mt-1 text-caption">
               <summary className="cursor-pointer select-none">{t('pages.focus.ruleBinding.blockedDetail')}</summary>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">{item.generation.detail}</pre>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-caption">{item.generation.detail}</pre>
             </details>}
           </div>}
-          {cardState === 'attention' && <div className="mt-2 text-[12.5px] leading-relaxed text-amber" data-testid={`rule-binding-attention-${item.candidateId}`}>
+          {cardState === 'attention' && <div className="mt-2 text-caption leading-relaxed text-amber" data-testid={`rule-binding-attention-${item.candidateId}`}>
             {t('pages.focus.ruleBinding.attentionLine', { reason: item.binding.status === 'attention' ? item.binding.reason : '' })}
           </div>}
-          <div className="mt-2 text-[12.5px] text-ink-3 leading-relaxed" data-testid={`rule-binding-next-${item.candidateId}`}>
+          <div className="mt-2 text-caption text-ink-3 leading-relaxed" data-testid={`rule-binding-next-${item.candidateId}`}>
             <span className="font-medium">{t('pages.focus.ruleBinding.nextLabel')}</span>{' '}
             {cardState === 'bound_blocked' && item.resume?.status === 'refused'
               ? t('pages.focus.ruleBinding.nextBoundBlockedNoResume', { reason: codeText(t, 'pages.focus.ruleBinding.resumeReason', item.resume.reason) })
               : t(RULE_BINDING_NEXT_STEP_KEY[cardState])}
           </div>
-          <details className="mt-2 text-[11.5px] text-ink-4">
+          <details className="mt-2 text-caption text-ink-4">
             <summary className="cursor-pointer select-none">{t('pages.focus.ruleBinding.techDetails')}</summary>
-            <dl className="mt-1 font-mono text-[11px] break-all">
+            <dl className="mt-1 font-mono text-caption break-all">
               <div>candidateId: {item.candidateId}</div>
               <div>painId: {item.pain.painId || '—'}</div>
               {item.binding.status === 'bound' && <div>bindingRevision: {item.binding.principle.revision} · decidedAt: {item.binding.principle.decidedAt || '—'}</div>}
               {item.resume && <div>resume: {item.resume.status}{item.resume.reason ? ` (${item.resume.reason})` : ''}{item.resume.scribeTaskId ? ` · ${item.resume.scribeTaskId}` : ''}</div>}
             </dl>
           </details>
-          <button type="button" className="mt-3 inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          <button type="button" className="mt-3 inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={busy} aria-expanded={open}
             onClick={() => { if (open) closeReview(); else { setSearch(''); setReason(''); void load(item.candidateId); } }}>
             {open ? t('pages.focus.ruleBinding.closeReview') : t('pages.focus.ruleBinding.openReview')}
           </button>
           {open && review && review.candidateId === item.candidateId && <div className="mt-4 border-t border-line pt-3">
-            <h3 className="font-medium text-[13px]">{t('pages.focus.ruleBinding.candidate')}</h3>
+            <h3 className="font-medium text-body">{t('pages.focus.ruleBinding.candidate')}</h3>
             <p className="mt-1 whitespace-pre-wrap text-sm">{review.candidateText}</p>
             <p className="mt-2 text-sm">{t('pages.focus.ruleBinding.pain')}：{review.sourcePain.text ?? t('pages.focus.ruleBinding.painUnrecorded')}</p>
             <details className="mt-2 text-sm"><summary>{t('pages.focus.ruleBinding.evidence')}</summary><pre className="whitespace-pre-wrap break-words">{review.evidence}</pre></details>
             {bound && review.boundPrinciple && <>
-              <div className="mt-3 px-3 py-2 bg-surface/60 border-l-2 border-gov text-[13px] leading-relaxed">
+              <div className="mt-3 px-3 py-2 bg-surface/60 border-l-2 border-gov text-body leading-relaxed">
                 <div className="whitespace-pre-wrap">{review.boundPrinciple.text}</div>
                 <div className="mt-1 text-ink-4">{t('pages.focus.ruleBinding.boundSince', { revision: review.boundPrinciple.revision, date: review.boundPrinciple.decidedAt.slice(0, 10) || '—' })} · <Link to={`/principles/${review.boundPrinciple.principleId}`} className="text-gov underline">{t('pages.focus.ruleBinding.viewPrinciple')}</Link></div>
               </div>
@@ -367,13 +367,13 @@ export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidat
               {canOfferSourceCorrection({ ...item, sourceCorrection: review.sourceCorrection }) && <button type="button" className="mt-3 ml-2 rounded border border-gov bg-gov text-paper px-3 py-2 text-sm disabled:opacity-50" disabled={busy || !reason.trim()} data-testid="rule-binding-source-correct-cta" onClick={() => void correctSource()}>
                 {t('pages.focus.ruleBinding.sourceCorrectionCta')}
               </button>}
-              {review.resume?.status === 'refused' && <p className="mt-3 text-[12.5px] text-ink-3 leading-relaxed">
+              {review.resume?.status === 'refused' && <p className="mt-3 text-caption text-ink-3 leading-relaxed">
                 {t('pages.focus.ruleBinding.resumeUnavailable', { reason: codeText(t, 'pages.focus.ruleBinding.resumeReason', review.resume.reason) })}
               </p>}
-              {review.generation?.stage === 'blocked' && review.sourceCorrection?.status === 'unavailable' && <p className="mt-2 text-[12.5px] text-ink-4 leading-relaxed">
+              {review.generation?.stage === 'blocked' && review.sourceCorrection?.status === 'unavailable' && <p className="mt-2 text-caption text-ink-4 leading-relaxed">
                 {t('pages.focus.ruleBinding.sourceCorrectionUnavailable', { reason: review.sourceCorrection.reason ?? '' })}
               </p>}
-              {review.generation?.stage === 'in_progress' && <p className="mt-3 text-[12.5px] text-ink-3">{t('pages.focus.ruleBinding.nextBoundGenerating')}</p>}
+              {review.generation?.stage === 'in_progress' && <p className="mt-3 text-caption text-ink-3">{t('pages.focus.ruleBinding.nextBoundGenerating')}</p>}
             </>}
             {!bound && <>
               <p className="mt-3 text-sm text-ink-3">{t('pages.focus.ruleBinding.chooseTarget')}</p>
@@ -404,7 +404,7 @@ export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidat
         </article>;
       })}
     </div>)}
-    {groups.length > COLLAPSED_GROUP_LIMIT && <button type="button" className="mt-3 text-[12.5px] text-gov underline" onClick={() => setShowAllGroups(value => !value)}
+    {groups.length > COLLAPSED_GROUP_LIMIT && <button type="button" className="mt-3 text-caption text-gov underline" onClick={() => setShowAllGroups(value => !value)}
       aria-expanded={showAllGroups} data-testid="rule-binding-groups-toggle">
       {showAllGroups
         ? t('pages.focus.ruleBinding.hideRemaining')

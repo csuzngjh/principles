@@ -383,8 +383,11 @@ export function handleBeforeToolCall(
   // the compiled-in OpenClaw declaration as the fallback. It is the SOLE
   // hint authority inside the builder. The Sets above stay a coarse "enter
   // the gate" filter only (B2).
+  // Task 2: the same resolved registry also decides the write family for the
+  // risk estimate, so a declared tool family cannot drift from evaluation.
+  const toolSemantics = resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger);
   const action = buildRuleHostAction(event.toolName, event.params ?? {}, wctx.workspaceDir, {
-    canonicalKind: resolveOpenClawHookToolSemantics(wctx.workspaceDir, logger).resolve(event.toolName),
+    canonicalKind: toolSemantics.resolve(event.toolName),
   });
   const relPath = action.normalizedPath;
   // buildRuleHostAction returns null when no path can be extracted (e.g. bash
@@ -411,7 +414,7 @@ export function handleBeforeToolCall(
         epTier: _getEpTier(),
       },
       derived: {
-        estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params ?? {} }),
+        estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params ?? {} }, toolSemantics),
         bashRisk: _getBashRisk(event),
       },
       context: ruleContext,

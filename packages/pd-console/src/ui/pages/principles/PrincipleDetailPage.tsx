@@ -543,14 +543,14 @@ export function PrincipleDetailPage() {
         {principle.status === 'active' ? (
           <Link
             to={`/examiner?principle=${encodeURIComponent(String(id ?? ''))}`}
-            className="text-[13px] text-ink-3 underline decoration-dotted underline-offset-4 hover:text-ink"
+            className="text-body text-ink-3 underline decoration-dotted underline-offset-4 hover:text-ink"
             data-testid="principle-detail-examiner-link"
           >
             {t("principles.detail.examinerEntry", { defaultValue: "Evaluate this principle's behavioral effect" })}
           </Link>
         ) : (
           <span
-            className="text-[13px] text-ink-3"
+            className="text-body text-ink-3"
             data-testid="principle-detail-examiner-blocked"
           >
             {t("principles.detail.examinerEntryBlocked", {
@@ -565,21 +565,21 @@ export function PrincipleDetailPage() {
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.conclusion")}</SectionTitle>
         <h1
-          className="text-[22px] font-semibold text-ink leading-snug mb-3"
+          className="text-title font-semibold text-ink leading-snug mb-3"
           data-testid="principle-detail-title"
         >
           {headlineLayout.title}
         </h1>
         {headlineLayout.body !== null && !learnedKnown && (
           <div
-            className="mb-3 text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words"
+            className="mb-3 text-reading leading-relaxed text-ink whitespace-pre-wrap break-words"
             data-testid="principle-detail-body"
           >
             {headlineLayout.body}
           </div>
         )}
         {ownerDecision !== null && ownerDecision.learnedPrinciple.status !== 'known' && (
-          <p className="text-amber text-[13px] leading-relaxed mb-3" data-testid="owner-decision-technical-note">
+          <p className="text-amber text-body leading-relaxed mb-3" data-testid="owner-decision-technical-note">
             {t("principles.detail.ownerDecision.technicalOriginalNote", {
               defaultValue: "以上为原始技术建议文本；可读的行为准则暂缺（保留原文以保证可追溯）。",
             })}
@@ -590,7 +590,7 @@ export function PrincipleDetailPage() {
         </p>
         {/* Modify wording — DISABLED (MVP3, F.5 honest constraint) */}
         <div className="flex items-center gap-3">
-          <span className="text-ink-4 text-[13px]">
+          <span className="text-ink-4 text-body">
             {t("principles.detail.modifyWordingNote")}
           </span>
           <Button
@@ -615,14 +615,14 @@ export function PrincipleDetailPage() {
           <div className="rounded-[var(--radius-md)] border border-gov/25 bg-gov/5 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 id="owner-decision-title" className="text-[18px] font-semibold text-ink">
+                <h2 id="owner-decision-title" className="text-subtitle font-semibold text-ink">
                   {t(DECISION_STATE_LABEL_KEY[ownerDecision.decisionState])}
                 </h2>
-                <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+                <p className="mt-1 text-body leading-relaxed text-ink-2">
                   {localizeNextAction(ownerDecision.nextAction.code, ownerDecision.nextAction.ownerText, t)}
                 </p>
               </div>
-              <span data-testid="owner-decision-state" className="w-fit rounded-full border border-line px-2 py-1 font-mono text-[11px] text-ink-3">
+              <span data-testid="owner-decision-state" className="w-fit rounded-full border border-line px-2 py-1 font-mono text-caption text-ink-3">
                 {ownerDecision.sourceReadStatus === 'complete'
                   ? t("principles.detail.ownerDecision.readsComplete", { defaultValue: "本次所需数据已读取" })
                   : t("principles.detail.ownerDecision.readsPartial", { defaultValue: "部分数据源读取失败" })}
@@ -631,12 +631,12 @@ export function PrincipleDetailPage() {
 
             {/* 2. 学到了什么 */}
             <div className="mt-4" data-testid="owner-decision-learned">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+              <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                 {t("principles.detail.ownerDecision.learned", { defaultValue: "Agent 学到的行为准则" })}
               </p>
               {ownerDecision.learnedPrinciple.status === 'known' ? (
                 <>
-                  <p className="mt-1 text-ink-2 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+                  <p className="mt-1 text-ink-2 text-reading leading-relaxed whitespace-pre-wrap break-words">
                     {learnedPreview}
                   </p>
                   {learnedTruncated && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
@@ -648,7 +648,7 @@ export function PrincipleDetailPage() {
                   </p>
                 </>
               ) : (
-                <p className="mt-1 text-amber text-[13px] leading-relaxed">
+                <p className="mt-1 text-amber text-body leading-relaxed">
                   {ownerDecision.learnedPrinciple.reason.ownerText}
                 </p>
               )}
@@ -659,10 +659,10 @@ export function PrincipleDetailPage() {
                   was approved. Render completed decisions as history. */}
               {ownerDecision.decisionSubjects.some((subject) => subject.state !== 'pending') && (
                 <div className="mt-3" data-testid="owner-decision-history">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                     {t("principles.detail.ownerDecision.history", { defaultValue: "决定历史" })}
                   </p>
-                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                  <ul className="mt-1 space-y-1 text-body text-ink-2">
                     {ownerDecision.decisionSubjects.filter((subject) => subject.state !== 'pending').map((subject) => {
                       const decidedAt = subject.targetRefs.find((target) => target.kind === 'approval')?.recordedAt;
                       const stateKey = `principles.detail.ownerDecision.historyState.${subject.state}`;
@@ -678,16 +678,16 @@ export function PrincipleDetailPage() {
                 </div>
               )}
               <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+              <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                 {t("principles.detail.ownerDecision.decision", { defaultValue: "您的决定" })}
               </p>
               {ownerDecision.availableActions.length === 0 && (
-                <p className="mt-1 text-ink-3 text-[13px]">
+                <p className="mt-1 text-ink-3 text-body">
                   {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
                 </p>
               )}
               {approvalGroupUnavailable && ownerDecision.availableActions.length > 0 && (
-                <div role="alert" className="mt-2 text-[13px] leading-relaxed text-amber" data-testid="detail-approvals-unavailable">
+                <div role="alert" className="mt-2 text-body leading-relaxed text-amber" data-testid="detail-approvals-unavailable">
                   <p>{t('focus.workbench.approvalsUnavailable')}</p>
                   <button type="button" onClick={() => { void loadData(); }} className="mt-1 text-gov underline">{t('focus.workbench.retry')}</button>
                 </div>
@@ -752,14 +752,14 @@ export function PrincipleDetailPage() {
                     {pendingAction.expectedConsequence.status === 'known' && (
                       <div className="mb-3">
                         {pendingAction.expectedConsequence.value.map((item, index) => (
-                          <p key={`exp-${index}`} className="text-ink-2 text-[13px] leading-relaxed mb-1">{item.text}</p>
+                          <p key={`exp-${index}`} className="text-ink-2 text-body leading-relaxed mb-1">{item.text}</p>
                         ))}
                       </div>
                     )}
-                    <p className="text-ink-2 text-[13px] mb-3">{pendingAction.confirmation.text}</p>
+                    <p className="text-ink-2 text-body mb-3">{pendingAction.confirmation.text}</p>
                     {pendingAction.requirements.some((req) => req.name === 'newArtifactId') && (
                       <>
-                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                        <label className="block font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
                           {t("principles.detail.editNewArtifactLabel", { defaultValue: "新的已验证工件 ID" })}
                         </label>
                         <input
@@ -767,28 +767,28 @@ export function PrincipleDetailPage() {
                           value={newArtifactId}
                           onChange={(e) => setNewArtifactId(e.target.value)}
                           placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-body mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
                           aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
                         />
                       </>
                     )}
                     {pendingAction.requirements.some((req) => req.name === 'reason') && (
                       <>
-                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                        <label className="block font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
                           {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
                         </label>
                         <textarea
                           value={rejectReason}
                           onChange={(e) => setRejectReason(e.target.value)}
                           placeholder={t("principles.detail.rejectReasonPlaceholder")}
-                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-body min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
                           aria-label={t("principles.detail.rejectReasonPlaceholder")}
                         />
                       </>
                     )}
                     {pendingAction.requirements.some((req) => req.name === 'note') && (
                       <>
-                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                        <label className="block font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
                           {t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
                         </label>
                         <textarea
@@ -797,7 +797,7 @@ export function PrincipleDetailPage() {
                           onChange={(e) => setApproveNote(e.target.value)}
                           placeholder={pendingAction.requirements.find((req) => req.name === 'note')?.ownerText
                             ?? t("principles.detail.approveNotePlaceholder", { defaultValue: "写下批准的理由（可留空）" })}
-                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-body min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
                           aria-label={t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
                         />
                       </>
@@ -853,7 +853,7 @@ export function PrincipleDetailPage() {
             {/* 5b. 当前实际执行 */}
             {ownerDecision.currentEnforcement.status === 'known' && (
               <div className="mt-4" data-testid="owner-decision-enforcement">
-                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                   {t("principles.detail.ownerDecision.enforcementLabel", { defaultValue: "当前实际执行" })}
                 </p>
                 <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
@@ -877,40 +877,40 @@ export function PrincipleDetailPage() {
               </div>
             )}
             {ownerDecision.currentEnforcement.status === 'unknown' && (
-              <p className="mt-4 text-amber text-[13px]" data-testid="owner-decision-enforcement-unknown">
+              <p className="mt-4 text-amber text-body" data-testid="owner-decision-enforcement-unknown">
                 {ownerDecision.currentEnforcement.reason?.ownerText}
               </p>
             )}
             {/* 5c. 证据概览（§12 五维度独立） */}
             {ownerDecision.evidenceSummary.status === 'known' && (
               <div className="mt-4" data-testid="owner-decision-evidence">
-                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                   {t("principles.detail.ownerDecision.evidence", { defaultValue: "行为证据" })}
                 </p>
-                <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">
+                <p className="mt-1 text-ink-2 text-body leading-relaxed">
                   {ownerDecision.evidenceSummary.value?.ownerExplanation}
                 </p>
               </div>
             )}
             {/* 6. 风险与不确定性 */}
             <div className="mt-4" data-testid="owner-decision-uncertainty">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+              <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                 {t("principles.detail.ownerDecision.uncertainty", { defaultValue: "风险与不确定性" })}
               </p>
               {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) > 0 && (
-                <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                <ul className="mt-1 space-y-1 text-body text-ink-2">
                   {ownerDecision.risk.value?.items.map((item, index) => (
                     <li key={`risk-${index}`}>{item.text}</li>
                   ))}
                 </ul>
               )}
               {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) === 0 && (
-                <p className="mt-1 text-ink-3 text-[13px]">
+                <p className="mt-1 text-ink-3 text-body">
                   {t("principles.detail.ownerDecision.riskNotAssessed", { defaultValue: "尚未做过风险评估；这不代表没有风险。" })}
                 </p>
               )}
               {ownerDecision.risk.status === 'unknown' && (
-                <p className="mt-1 text-ink-3 text-[13px]">{ownerDecision.risk.reason?.ownerText}</p>
+                <p className="mt-1 text-ink-3 text-body">{ownerDecision.risk.reason?.ownerText}</p>
               )}
               {ownerDecision.uncertainty.status === 'known' && ownerDecision.uncertainty.value.length > 0 && (
                 <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
@@ -922,12 +922,12 @@ export function PrincipleDetailPage() {
             </div>
             {/* 7. 如何撤销 */}
             <div className="mt-4" data-testid="owner-decision-rollback">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+              <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                 {t("principles.detail.ownerDecision.rollback", { defaultValue: "如何停止影响" })}
               </p>
               {ownerDecision.rollback.status === 'known' && (
                 <>
-                  <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
+                  <p className="mt-1 text-ink-2 text-body leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
                   {ownerDecision.rollback.value?.stopFuture.status === 'known' && (
                     <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
                       {ownerDecision.rollback.value.stopFuture.value.map((item, index) => (
@@ -941,7 +941,7 @@ export function PrincipleDetailPage() {
                 </>
               )}
               {ownerDecision.rollback.status === 'unknown' && (
-                <p className="mt-1 text-amber text-[13px]">{ownerDecision.rollback.reason?.ownerText}</p>
+                <p className="mt-1 text-amber text-body">{ownerDecision.rollback.reason?.ownerText}</p>
               )}
             </div>
 
@@ -952,7 +952,7 @@ export function PrincipleDetailPage() {
         <section className="mb-8" data-testid="owner-decision-unavailable">
           <SectionTitle>{t("principles.detail.ownerDecision.title", { defaultValue: "这条原则的决策视图" })}</SectionTitle>
           <div className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
-            <p className="text-ink-2 text-[13px]">
+            <p className="text-ink-2 text-body">
               {t("principles.detail.ownerDecision.unavailable", { defaultValue: "决策视图暂时不可用，无法据此做决定。" })}
             </p>
             <p className="mt-1 text-ink-4 text-[12px] font-mono">{ownerDecisionUnavailable.reason}</p>
@@ -970,33 +970,33 @@ export function PrincipleDetailPage() {
             >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 id="governance-summary-title" className="text-[18px] font-semibold text-ink">
+                  <h2 id="governance-summary-title" className="text-subtitle font-semibold text-ink">
                     {t(`principles.detail.${governance.summary.headlineCode}`, { defaultValue: governance.summary.headlineCode })}
                   </h2>
-                  <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
+                  <p className="mt-1 text-body leading-relaxed text-ink-2">
                     {t(`principles.detail.${governance.summary.reasonCode}`, { defaultValue: governance.summary.reasonCode })}
                   </p>
                 </div>
-                <span className="w-fit rounded-full border border-line px-2 py-1 font-mono text-[11px] text-ink-3">
+                <span className="w-fit rounded-full border border-line px-2 py-1 font-mono text-caption text-ink-3">
                   {t(`principles.detail.governance.confidence.${governance.dataQuality.degraded ? 'degraded' : 'strong'}`)}
                 </span>
               </div>
 
               <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div><dt className="font-mono text-[11px] text-ink-4">{t('principles.detail.governance.principleState')}</dt><dd className="text-[13px] text-ink-2">{t(`principles.detail.governance.state.${governance.principleState.value}`)}</dd></div>
-                <div><dt className="font-mono text-[11px] text-ink-4">{t('principles.detail.governance.process')}</dt><dd className="text-[13px] text-ink-2">{governance.process.stage === undefined ? t('principles.detail.governance.none') : t(`principles.detail.governance.stage.${governance.process.stage}`)}</dd></div>
-                <div><dt className="font-mono text-[11px] text-ink-4">{t('principles.detail.governance.automation')}</dt><dd className="text-[13px] text-ink-2">{t(`principles.detail.governance.automationState.${governance.automation.state}`)}</dd></div>
+                <div><dt className="font-mono text-caption text-ink-4">{t('principles.detail.governance.principleState')}</dt><dd className="text-body text-ink-2">{t(`principles.detail.governance.state.${governance.principleState.value}`)}</dd></div>
+                <div><dt className="font-mono text-caption text-ink-4">{t('principles.detail.governance.process')}</dt><dd className="text-body text-ink-2">{governance.process.stage === undefined ? t('principles.detail.governance.none') : t(`principles.detail.governance.stage.${governance.process.stage}`)}</dd></div>
+                <div><dt className="font-mono text-caption text-ink-4">{t('principles.detail.governance.automation')}</dt><dd className="text-body text-ink-2">{t(`principles.detail.governance.automationState.${governance.automation.state}`)}</dd></div>
               </dl>
 
               <div data-testid="governance-next-action" className="mt-4 border-l-2 border-l-gov pl-3">
-                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.nextAction')}</p>
-                <p className="text-[13px] text-ink-2">{t(`principles.detail.${governance.summary.nextActionCode}`, { defaultValue: governance.summary.nextActionCode })}</p>
+                <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.nextAction')}</p>
+                <p className="text-body text-ink-2">{t(`principles.detail.${governance.summary.nextActionCode}`, { defaultValue: governance.summary.nextActionCode })}</p>
               </div>
 
               {governance.attention.items.length > 0 && (
                 <div className="mt-4">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.blockers')}</p>
-                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                  <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">{t('principles.detail.governance.blockers')}</p>
+                  <ul className="mt-1 space-y-1 text-body text-ink-2">
                     {groupByReasonCode(governance.attention.items).map(group => <li key={group.reasonCode}>{formatGroupedReasonLine(t, 'principles.detail.governance.attention', group)}</li>)}
                   </ul>
                 </div>
@@ -1004,7 +1004,7 @@ export function PrincipleDetailPage() {
 
               {governance.dataQuality.degraded && (
                 <div data-testid="governance-data-quality" className="mt-4 rounded-[var(--radius-sm)] border border-amber/20 p-3">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-amber">{t('principles.detail.governance.uncertainty')}</p>
+                  <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-amber">{t('principles.detail.governance.uncertainty')}</p>
                   <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
                     {groupByReasonCode(governance.dataQuality.issues).map(group => <li key={group.reasonCode}>{formatGroupedReasonLine(t, 'principles.detail.governance.issue', group)}</li>)}
                   </ul>
@@ -1014,8 +1014,8 @@ export function PrincipleDetailPage() {
             </div>
           ) : (
             <div data-testid="governance-data-quality" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
-              <h2 id="governance-summary-title" className="text-[16px] font-semibold text-ink">{t('principles.detail.governance.unavailable')}</h2>
-              <p className="mt-1 text-[13px] text-ink-2">{t('principles.detail.governance.unavailableReason')}</p>
+              <h2 id="governance-summary-title" className="text-subtitle font-semibold text-ink">{t('principles.detail.governance.unavailable')}</h2>
+              <p className="mt-1 text-body text-ink-2">{t('principles.detail.governance.unavailableReason')}</p>
               <p className="mt-2 text-[12px] text-ink-3">{t('principles.detail.governance.unavailableNextAction')}</p>
             </div>
           )}
@@ -1033,7 +1033,7 @@ export function PrincipleDetailPage() {
                     ≠ never-happened. The headline is chosen from BOTH verified
                     counts (getReceiptPresentation) — an unverified "already in
                     context" claim is never derived from approval/activation. */}
-                <h2 id="receipt-history-title" className="text-[15px] font-semibold text-ink">
+                <h2 id="receipt-history-title" className="text-reading font-semibold text-ink">
                   {receiptPresentation?.headlineKey === 'principles.detail.receipts.headline'
                     ? t(receiptPresentation.headlineKey, {
                         defaultValue: '',
@@ -1042,7 +1042,7 @@ export function PrincipleDetailPage() {
                       })
                     : t(receiptPresentation?.headlineKey ?? 'principles.detail.receipts.headlinePresence')}
                 </h2>
-                <span data-testid="receipt-history-counts" className="font-mono text-[11px] text-ink-3">
+                <span data-testid="receipt-history-counts" className="font-mono text-caption text-ink-3">
                   {t('principles.detail.receipts.counts', { effectCount: receipts.effectCount, presenceCount: receipts.presenceCount })}
                 </span>
               </div>
@@ -1061,17 +1061,17 @@ export function PrincipleDetailPage() {
               {receipts.events.length > 0 ? (
                 <ul className="mt-3 space-y-1.5">
                   {receipts.events.map((event, index) => (
-                    <li key={`${event.createdAt}-${index}`} className={`flex flex-wrap items-baseline gap-2 text-[13px] ${event.level === 'presence' ? 'text-ink-4' : 'text-ink-2'}`}>
-                      <span className="font-mono text-[11px] text-ink-4">{event.createdAt.slice(0, 16).replace('T', ' ')}</span>
-                      <span className="font-mono text-[11px]">{t(`principles.detail.receipts.kind.${event.kind}`, { defaultValue: event.kind })}</span>
+                    <li key={`${event.createdAt}-${index}`} className={`flex flex-wrap items-baseline gap-2 text-body ${event.level === 'presence' ? 'text-ink-4' : 'text-ink-2'}`}>
+                      <span className="font-mono text-caption text-ink-4">{event.createdAt.slice(0, 16).replace('T', ' ')}</span>
+                      <span className="font-mono text-caption">{t(`principles.detail.receipts.kind.${event.kind}`, { defaultValue: event.kind })}</span>
                       {event.digest && <span className="min-w-0 flex-1 truncate" title={event.digest}>{event.digest}</span>}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="mt-2 text-[13px] text-ink-3">{t('principles.detail.receipts.empty')}</p>
+                <p className="mt-2 text-body text-ink-3">{t('principles.detail.receipts.empty')}</p>
               )}
-              <p className="mt-3 text-[11px] leading-relaxed text-ink-4">{t('principles.detail.receipts.note')}</p>
+              <p className="mt-3 text-caption leading-relaxed text-ink-4">{t('principles.detail.receipts.note')}</p>
               {/* PRI-590: evidence coverage disclosure — observed evidence, not full history */}
               <div className="mt-3 border-t border-line pt-3">
                 <ReceiptCoverageDisclosure coverage={receipts.coverage} />
@@ -1081,8 +1081,8 @@ export function PrincipleDetailPage() {
             <div data-testid="receipt-history-degraded" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
               {/* PRI-590: localized zero-state headline (disabled vs unavailable), then the technical reason.
                   i18n.t (common ns) because the label key is a full path shared with the Activation page. */}
-              <h3 className="text-[13px] font-semibold text-ink">{i18n.t(getReceiptSourceStatusLabelKey(receipts.coverage.sourceStatus))}</h3>
-              <p className="mt-1 text-[13px] text-ink-2">{receipts.reason ?? t('principles.detail.receipts.unavailableReason')}</p>
+              <h3 className="text-body font-semibold text-ink">{i18n.t(getReceiptSourceStatusLabelKey(receipts.coverage.sourceStatus))}</h3>
+              <p className="mt-1 text-body text-ink-2">{receipts.reason ?? t('principles.detail.receipts.unavailableReason')}</p>
               {receipts.nextAction && <p className="mt-1 text-[12px] text-ink-3">{receipts.nextAction}</p>}
             </div>
           )}
@@ -1095,7 +1095,7 @@ export function PrincipleDetailPage() {
           <SectionTitle>{t('principles.detail.evidenceAudit.title')}</SectionTitle>
           {evidenceAudit.status === 'ok' ? (
             <div data-testid="evidence-audit" className="rounded-[var(--radius-md)] border border-line p-4">
-              <h2 id="evidence-audit-title" className="text-[15px] font-semibold text-ink">
+              <h2 id="evidence-audit-title" className="text-reading font-semibold text-ink">
                 {t('principles.detail.evidenceAudit.headline', {
                   d: evidenceAudit.deliveries.length,
                   a: evidenceAudit.applications.length,
@@ -1111,7 +1111,7 @@ export function PrincipleDetailPage() {
                   })}
                 </p>
               )}
-              <dl className="mt-3 space-y-2 text-[13px]">
+              <dl className="mt-3 space-y-2 text-body">
                 {([
                   ['delivery', 'principles.detail.evidenceAudit.sectionDelivery', evidenceAudit.deliveries, 'delivery'],
                   ['application', 'principles.detail.evidenceAudit.sectionApplication', evidenceAudit.applications, 'application'],
@@ -1120,21 +1120,21 @@ export function PrincipleDetailPage() {
                   ['outcome', 'principles.detail.evidenceAudit.sectionOutcome', evidenceAudit.outcomes, 'outcome'],
                 ] as const).map(([key, labelKey, list, recordKind]) => (
                   <div key={key} className="border-t border-line pt-2">
-                    <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{t(labelKey)}</dt>
+                    <dt className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">{t(labelKey)}</dt>
                     <dd className="mt-1">
                       {list.length === 0 ? (
-                        <span className="text-[13px] text-ink-3">
+                        <span className="text-body text-ink-3">
                           {t('principles.detail.evidenceAudit.emptySection')}
                         </span>
                       ) : (
                         <ul className="space-y-1">
                           {list.map((record) => (
-                            <li key={record.evidenceId} className="flex flex-wrap items-baseline gap-2 text-[13px] text-ink-2">
-                              <span className="font-mono text-[11px] text-ink-4">{record.recordedAt.slice(0, 16).replace('T', ' ')}</span>
-                              <span className="font-mono text-[11px]">{record.summary}</span>
+                            <li key={record.evidenceId} className="flex flex-wrap items-baseline gap-2 text-body text-ink-2">
+                              <span className="font-mono text-caption text-ink-4">{record.recordedAt.slice(0, 16).replace('T', ' ')}</span>
+                              <span className="font-mono text-caption">{record.summary}</span>
                               <span className="min-w-0 flex-1 break-words" title={`${record.observationKey}\n${record.detail}`}>{record.detail}</span>
                               {record.associationStatus === 'pending_association' && (
-                                <span className="font-mono text-[10px] rounded bg-amber/15 px-1.5 py-0.5 text-amber">
+                                <span className="font-mono text-caption rounded bg-amber/15 px-1.5 py-0.5 text-amber">
                                   {t('principles.detail.evidenceAudit.pending')}
                                 </span>
                               )}
@@ -1153,7 +1153,7 @@ export function PrincipleDetailPage() {
               </dl>
               {evidenceAudit.capabilityDeclarations.length > 0 && (
                 <details className="mt-3 border-t border-line pt-3">
-                  <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  <summary className="cursor-pointer font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                     {t('principles.detail.evidenceAudit.capabilities')}
                   </summary>
                   <ul className="mt-2 space-y-1">
@@ -1171,10 +1171,10 @@ export function PrincipleDetailPage() {
                   verbatim for traceability but moved out of the default Owner
                   view — the default view shows the records and the gaps. */}
               <details className="mt-3 border-t border-line pt-3" data-testid="evidence-audit-technical">
-                <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                <summary className="cursor-pointer font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                   {t('principles.detail.evidenceAudit.technicalSummary')}
                 </summary>
-                <p className="mt-2 text-[11px] leading-relaxed text-ink-4">
+                <p className="mt-2 text-caption leading-relaxed text-ink-4">
                   {t('principles.detail.evidenceAudit.technicalNote')}
                 </p>
                 <ul className="mt-2 space-y-1">
@@ -1186,7 +1186,7 @@ export function PrincipleDetailPage() {
                     ['principles.detail.evidenceAudit.sectionOutcome', evidenceAudit.outcomes],
                   ] as const).flatMap(([labelKey, list]) =>
                     list.map((record) => (
-                      <li key={record.evidenceId} className="text-[11px] leading-relaxed text-ink-4">
+                      <li key={record.evidenceId} className="text-caption leading-relaxed text-ink-4">
                         <span className="font-mono">{record.evidenceId}</span>
                         {record.sourceStatus === 'unknown' && <> · {t('principles.detail.evidenceAudit.sourceUnknown')}</>}
                         {record.contentRedactedAt && <> · {t('principles.detail.evidenceAudit.contentRedacted', { date: record.contentRedactedAt.slice(0, 10) })}</>}
@@ -1213,16 +1213,16 @@ export function PrincipleDetailPage() {
                   )}
                 </ul>
               </details>
-              <p className="mt-3 text-[11px] leading-relaxed text-ink-4">
+              <p className="mt-3 text-caption leading-relaxed text-ink-4">
                 {t('principles.detail.evidenceAudit.note')}
               </p>
             </div>
           ) : (
             <div data-testid="evidence-audit-degraded" className="rounded-[var(--radius-md)] border border-amber/30 bg-amber/5 p-4" role="status">
-              <h3 className="text-[13px] font-semibold text-ink">
+              <h3 className="text-body font-semibold text-ink">
                 {t('principles.detail.evidenceAudit.unavailable')}
               </h3>
-              <p className="mt-1 text-[13px] text-ink-2">{evidenceAudit.reason ?? '—'}</p>
+              <p className="mt-1 text-body text-ink-2">{evidenceAudit.reason ?? '—'}</p>
               {evidenceAudit.nextAction && <p className="mt-1 text-[12px] text-ink-3">{evidenceAudit.nextAction}</p>}
             </div>
           )}
@@ -1236,7 +1236,7 @@ export function PrincipleDetailPage() {
 
         <div className="space-y-3 mb-6">
           <div>
-            <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+            <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
               {t("principles.detail.applicable", { defaultValue: "适用场景（原始触发配置）" })}
             </span>
             <p className="text-ink-2 text-[14px] leading-relaxed font-mono break-all">
@@ -1244,7 +1244,7 @@ export function PrincipleDetailPage() {
             </p>
           </div>
           <div>
-            <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+            <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
               {t("principles.detail.expectedBehavior", { defaultValue: "预期行为（原始建议）" })}
             </span>
             <p className="text-ink-2 text-[14px] leading-relaxed">
@@ -1260,7 +1260,7 @@ export function PrincipleDetailPage() {
             the main review flow. */}
         {principle.derivedFromPainIds.length > 0 && (
           <div>
-            <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+            <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
               {t("principles.detail.evidence")}
             </span>
             <div className="mt-2 flex items-center gap-3 flex-wrap">
@@ -1287,7 +1287,7 @@ export function PrincipleDetailPage() {
                     if (!evidenceExpanded) setEvidenceExpanded(true);
                   }
                 }}
-                className="font-mono text-[11px] h-7"
+                className="font-mono text-caption h-7"
               >
                 {evidenceCopied
                   ? t("principles.detail.evidenceCopied", { defaultValue: "已复制" })
@@ -1296,7 +1296,7 @@ export function PrincipleDetailPage() {
               <button
                 type="button"
                 onClick={() => setEvidenceExpanded((v) => !v)}
-                className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
+                className="font-mono text-caption text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
               >
                 {t("principles.detail.expandTechDetails", { defaultValue: "展开技术细节" })}
               </button>
@@ -1304,14 +1304,14 @@ export function PrincipleDetailPage() {
                   PRI-942: that page is /pain — /evidence was never a route. */}
               <Link
                 to="/pain"
-                className="font-mono text-[11px] text-gov hover:underline transition-colors"
+                className="font-mono text-caption text-gov hover:underline transition-colors"
               >
                 {t("principles.detail.viewEvidenceChain", { defaultValue: "在证据链页查看 →" })}
               </Link>
             </div>
             {evidenceExpanded && (
               <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
-                <div className="grid grid-cols-[auto 1fr] gap-x-4 gap-y-2 text-[13px]">
+                <div className="grid grid-cols-[auto 1fr] gap-x-4 gap-y-2 text-body">
                   {principle.derivedFromPainIds.map((painId, idx) => (
                     <div key={`${painId}-${idx}`} className="contents">
                       <span className="font-mono text-ink-4">
@@ -1334,13 +1334,13 @@ export function PrincipleDetailPage() {
       <section className="mb-8 border-t border-line pt-6">
         <SectionTitle>{t("principles.detail.ownerReflection")}</SectionTitle>
         <div className="space-y-3">
-          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-[13px] leading-relaxed">
+          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-body leading-relaxed">
             {t("principles.detail.reflectionQ1")}
           </div>
-          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-[13px] leading-relaxed">
+          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-body leading-relaxed">
             {t("principles.detail.reflectionQ2")}
           </div>
-          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-[13px] leading-relaxed">
+          <div className="border-l-2 border-l-gov pl-3 text-ink-2 text-body leading-relaxed">
             {t("principles.detail.reflectionQ3")}
           </div>
         </div>
@@ -1349,23 +1349,23 @@ export function PrincipleDetailPage() {
       </div></details>
       {/* ── Layer 3: Full trajectory (collapsed by default, D section) ──── */}
       <details className="mb-8 border border-line rounded-[var(--radius-md)]">
-        <summary className="px-4 py-3 cursor-pointer font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov">
+        <summary className="px-4 py-3 cursor-pointer font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov">
           {t("principles.detail.trajectory")}
         </summary>
         <div className="px-4 pb-4 border-t border-line pt-4">
           {governance !== null && (
             <section className="mb-6" data-testid="governance-timeline">
               <SectionTitle>{t('principles.detail.governance.timeline')}</SectionTitle>
-              {governance.timeline.length === 0 ? <p className="text-[13px] text-ink-4">{t('principles.detail.governance.timelineEmpty')}</p> : (
+              {governance.timeline.length === 0 ? <p className="text-body text-ink-4">{t('principles.detail.governance.timelineEmpty')}</p> : (
                 <ol className="space-y-3 border-l border-line pl-4">
                   {governance.timeline.map((event, index) => {
                     const derived = event.code === 'revision_requested' || event.code === 'revision_reopened';
                     return <li key={`${event.sourceRef.type}-${event.sourceRef.id}-${event.code}-${index}`}>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[13px] text-ink-2">{t(`principles.detail.governance.timelineCode.${event.code}`, { defaultValue: event.code })}</span>
-                        <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-ink-4">{t(`principles.detail.governance.${derived ? 'derived' : 'fact'}`)}</span>
+                        <span className="text-body text-ink-2">{t(`principles.detail.governance.timelineCode.${event.code}`, { defaultValue: event.code })}</span>
+                        <span className="rounded border border-line px-1.5 py-0.5 font-mono text-caption text-ink-4">{t(`principles.detail.governance.${derived ? 'derived' : 'fact'}`)}</span>
                       </div>
-                      <p className="mt-0.5 font-mono text-[11px] text-ink-4">{event.occurredAt ?? event.recordedAt}</p>
+                      <p className="mt-0.5 font-mono text-caption text-ink-4">{event.occurredAt ?? event.recordedAt}</p>
                     </li>;
                   })}
                 </ol>
@@ -1378,7 +1378,7 @@ export function PrincipleDetailPage() {
               <p className="text-amber text-[12px] font-mono">
                 {trajectory.degraded.reason}
               </p>
-              <p className="text-ink-4 text-[11px] mt-1">
+              <p className="text-ink-4 text-caption mt-1">
                 {trajectory.degraded.nextAction}
               </p>
             </div>
@@ -1394,19 +1394,19 @@ export function PrincipleDetailPage() {
                   <div className="flex-1">
                     {stage.status === 'available' ? (
                       <>
-                        <p className="text-ink-2 text-[13px]">{stage.summary}</p>
+                        <p className="text-ink-2 text-body">{stage.summary}</p>
                         {stage.detail && (
                           <p className="text-ink-3 text-[12px] mt-0.5">{stage.detail}</p>
                         )}
                         {stage.timestamp && (
-                          <p className="text-ink-4 text-[11px] mt-0.5 font-mono">{stage.timestamp}</p>
+                          <p className="text-ink-4 text-caption mt-0.5 font-mono">{stage.timestamp}</p>
                         )}
                       </>
                     ) : (
-                      <p className="text-ink-4 text-[13px]">
+                      <p className="text-ink-4 text-body">
                         {stage.unavailableReason ?? '—'}
                         {stage.nextAction && (
-                          <span className="block text-ink-4 text-[11px] mt-0.5">
+                          <span className="block text-ink-4 text-caption mt-0.5">
                             {stage.nextAction}
                           </span>
                         )}
@@ -1423,7 +1423,7 @@ export function PrincipleDetailPage() {
                     {t(STAGE_LABEL_KEYS[key] ?? `principles.detail.stage${key}`, { defaultValue: key })}
                   </span>
                   <div className="flex-1">
-                    <p className="text-ink-4 text-[13px]">
+                    <p className="text-ink-4 text-body">
                       {trajectory === null
                         ? t("principles.detail.trajectoryLoadFailed", { defaultValue: "无法加载轨迹数据" })
                         : "—"}
@@ -1437,7 +1437,7 @@ export function PrincipleDetailPage() {
           {/* Lifecycle metrics — only when principle has rules (F.1) */}
           {hasRules && lifecycle && (
             <div className="mt-6 pt-4 border-t border-line">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+              <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
                 {t("principles.detail.lifecycleMetrics", { defaultValue: "生命周期指标" })}
               </span>
               {/* F.1 honest label */}
@@ -1446,7 +1446,7 @@ export function PrincipleDetailPage() {
               </p>
 
               {lifecycle.adherence.insufficientData ? (
-                <p className="text-ink-3 text-[13px] leading-relaxed">
+                <p className="text-ink-3 text-body leading-relaxed">
                   {t("principles.detail.insufficientData")}
                 </p>
               ) : (
@@ -1473,7 +1473,7 @@ export function PrincipleDetailPage() {
 
           {hasRules && !lifecycle && (
             <div className="mt-6 pt-4 border-t border-line">
-              <p className="text-ink-3 text-[13px]">
+              <p className="text-ink-3 text-body">
                 {t("principles.detail.lifecycleLoadFailed", { defaultValue: "无法加载生命周期指标。您可以稍后重试。" })}
               </p>
             </div>
@@ -1494,17 +1494,17 @@ function OwnerNarrativeBlock({ label, field, testId }: {
   const rendered = narrativeTexts(field);
   return (
     <div className="mt-4" data-testid={testId}>
-      <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">{label}</p>
+      <p className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">{label}</p>
       {rendered.status === 'known' ? (
         rendered.texts.length > 0 ? (
           rendered.texts.map((text, index) => (
             <p key={`${testId}-${index}`} className="mt-1 text-ink-2 text-[14px] leading-relaxed">{text}</p>
           ))
         ) : (
-          <p className="mt-1 text-ink-4 text-[13px]">—</p>
+          <p className="mt-1 text-ink-4 text-body">—</p>
         )
       ) : (
-        <p className="mt-1 text-ink-3 text-[13px] leading-relaxed">{rendered.reason}</p>
+        <p className="mt-1 text-ink-3 text-body leading-relaxed">{rendered.reason}</p>
       )}
     </div>
   );

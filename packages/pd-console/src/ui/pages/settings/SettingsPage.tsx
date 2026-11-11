@@ -537,13 +537,13 @@ export function SettingsPage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.settings.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.settings.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
           <p>{t("pages.settings.loadError")}</p>
           {errorMessage && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">
+            <p className="mt-2 text-ink-4 text-body font-mono">
               {errorMessage}
             </p>
           )}
@@ -561,12 +561,16 @@ export function SettingsPage() {
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.settings.eyebrow")}
       </div>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         {t("pages.settings.title")}
       </h1>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
         {t("pages.settings.subtitle")}
       </p>
+
+      <h2 className="mt-2 mb-4 text-subtitle font-semibold tracking-tight text-ink">
+        {t("pages.settings.groupIdentity")}
+      </h2>
 
       {/* Section 1: Authentication */}
       <section className="mb-8" aria-labelledby="section-auth">
@@ -594,7 +598,7 @@ export function SettingsPage() {
               <button
                 onClick={handleSaveToken}
                 disabled={tokenInput.trim().length === 0}
-                className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("common.save")}
               </button>
@@ -602,13 +606,13 @@ export function SettingsPage() {
                 <>
                   <button
                     onClick={handleClearToken}
-                    className="border border-amber bg-amber text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:opacity-90 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                    className="border border-amber bg-amber text-ink rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:opacity-90 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                   >
                     {t("pages.settings.clearTokenConfirm")}
                   </button>
                   <button
                     onClick={() => setConfirmClearToken(false)}
-                    className="border border-line text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-gov transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                    className="border border-line text-ink rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-gov transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                   >
                     {t("common.cancel")}
                   </button>
@@ -616,7 +620,7 @@ export function SettingsPage() {
               ) : (
                 <button
                   onClick={() => setConfirmClearToken(true)}
-                  className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-gov hover:text-ink transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-gov hover:text-ink transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 >
                   {t("pages.settings.clearToken")}
                 </button>
@@ -637,7 +641,7 @@ export function SettingsPage() {
           {t("pages.settings.ownerIdentity.title")}
         </SectionTitle>
         <div className="bg-panel border border-line rounded-[6px] p-5">
-          <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+          <p className="text-ink-3 text-body leading-relaxed mb-3">
             {t("pages.settings.ownerIdentity.intro")}
           </p>
           {ownerIdentity === null ? (
@@ -646,9 +650,9 @@ export function SettingsPage() {
             <>
               {/* Registration = where the identity comes from. Never conflated
                   with governance readiness below (ADR-0022 review). */}
-              <div className="flex items-center gap-2 text-[13px] mb-2" data-testid="owner-identity-status">
+              <div className="flex items-center gap-2 text-body mb-2" data-testid="owner-identity-status">
                 <span
-                  className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+                  className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${
                     ownerIdentity.resolved.source === "none"
                       ? "bg-amber text-ink"
                       : ownerIdentity.resolved.source === "invalid_env"
@@ -673,12 +677,12 @@ export function SettingsPage() {
               {/* Governance readiness — derived ONLY from the canonical
                   resolveOwnerConfigSnapshot fields delivered by the API. */}
               <div
-                className="flex items-center gap-2 text-[13px] mb-2"
+                className="flex items-center gap-2 text-body mb-2"
                 data-testid="owner-governance-readiness"
                 data-ready={ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated" ? "true" : "false"}
               >
                 <span
-                  className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+                  className={`inline-flex items-center rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${
                     ownerIdentity.governance.ownerIdentityConfiguration === "configured" && ownerIdentity.governance.authenticationMode === "authenticated" ? "bg-green text-ink" : "bg-amber text-ink"
                   }`}
                   role="status"
@@ -758,7 +762,7 @@ export function SettingsPage() {
                       type="button"
                       onClick={handleRegisterOwner}
                       disabled={ownerActionPending}
-                      className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                      className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                     >
                       {t("pages.settings.ownerIdentity.register")}
                     </button>
@@ -767,7 +771,7 @@ export function SettingsPage() {
                         type="button"
                         onClick={handleUnregisterOwner}
                         disabled={ownerActionPending}
-                        className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="border border-line text-ink-3 rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-surface transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {t("pages.settings.ownerIdentity.unregister")}
                       </button>
@@ -781,13 +785,17 @@ export function SettingsPage() {
       </section>
 
       {/* Section 2: PRI-332 Principle Language */}
+      <h2 className="mt-10 mb-4 text-subtitle font-semibold tracking-tight text-ink">
+        {t("pages.settings.groupPreferences")}
+      </h2>
+
       <section className="mb-8" aria-labelledby="section-principle-language">
         <SectionTitle id="section-principle-language">
           {t("pages.settings.principleLanguage")}
         </SectionTitle>
 
         <div className="bg-panel border border-line rounded-[6px] p-5">
-          <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+          <p className="text-ink-3 text-body leading-relaxed mb-3">
             {t("pages.settings.principleLanguageDescription")}
           </p>
           <div className="flex items-center gap-3">
@@ -822,7 +830,7 @@ export function SettingsPage() {
               >
                 {t("pages.settings.soundAlerts")}
               </label>
-              <p className="text-ink-3 text-[13px] leading-relaxed mt-1">
+              <p className="text-ink-3 text-body leading-relaxed mt-1">
                 {t("pages.settings.soundAlertsDescription")}
               </p>
             </div>
@@ -849,6 +857,10 @@ export function SettingsPage() {
       </section>
 
       {/* Section 3: Workspaces */}
+      <h2 className="mt-10 mb-4 text-subtitle font-semibold tracking-tight text-ink">
+        {t("pages.settings.groupWorkspace")}
+      </h2>
+
       <section className="mb-8" aria-labelledby="section-workspaces">
         <SectionTitle id="section-workspaces">
           {t("pages.settings.workspace")}
@@ -867,7 +879,7 @@ export function SettingsPage() {
                     <div className="font-medium text-ink text-sm">
                       {ws.name}
                     </div>
-                    <div className="text-ink-3 text-[13px] mt-1 font-mono break-all">
+                    <div className="text-ink-3 text-body mt-1 font-mono break-all">
                       {ws.path}
                     </div>
                     <div className="text-ink-4 text-[12px] mt-1">
@@ -886,13 +898,13 @@ export function SettingsPage() {
                         </span>
                         <button
                           onClick={() => handleRemoveWorkspace(ws.name)}
-                          className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                          className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                         >
                           {t("common.confirm")}
                         </button>
                         <button
                           onClick={() => setConfirmRemove(null)}
-                          className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                          className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                         >
                           {t("common.cancel")}
                         </button>
@@ -901,7 +913,7 @@ export function SettingsPage() {
                       <>
                         <button
                           onClick={() => handleSyncWorkspace(ws.name)}
-                          className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                          className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                         >
                           {t("pages.settings.syncWorkspace")}
                         </button>
@@ -909,7 +921,7 @@ export function SettingsPage() {
                           onClick={() =>
                             setConfirmRemove({ workspaceName: ws.name })
                           }
-                          className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                          className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                         >
                           {t("pages.settings.removeWorkspace")}
                         </button>
@@ -921,7 +933,7 @@ export function SettingsPage() {
             ))}
           </div>
         ) : (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3 mb-5">
+          <div className="text-ink-3 text-body leading-relaxed py-3 mb-5">
             —
           </div>
         )}
@@ -964,7 +976,7 @@ export function SettingsPage() {
             <button
               onClick={handleAddWorkspace}
               disabled={addName.trim().length === 0 || addPath.trim().length === 0}
-              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {t("pages.settings.addWorkspace")}
             </button>
@@ -973,7 +985,16 @@ export function SettingsPage() {
       </section>
 
       {/* Section: Onboarding feature flag toggle (spec 2026-06-30 §12.5) */}
-      <section className="mb-8" aria-labelledby="section-onboarding-flag">
+      {/* Technical group — collapsed by default (owner-facing settings stay simple). */}
+      <details className="mt-10 mb-8">
+        <summary className="mb-4 cursor-pointer select-none text-subtitle font-semibold tracking-tight text-ink hover:text-ink-2">
+          {t("pages.settings.groupAdvanced")}
+          <span className="ml-3 text-caption font-normal text-ink-4">
+            {t("pages.settings.groupAdvancedHint")}
+          </span>
+        </summary>
+
+        <section className="mb-8" aria-labelledby="section-onboarding-flag">
         <SectionTitle id="section-onboarding-flag">
           {t("components.onboardingFlag.title")}
         </SectionTitle>
@@ -987,7 +1008,7 @@ export function SettingsPage() {
               >
                 {t("components.onboardingFlag.label")}
               </label>
-              <p className="text-ink-3 text-[13px] leading-relaxed mt-1">
+              <p className="text-ink-3 text-body leading-relaxed mt-1">
                 {t("components.onboardingFlag.description")}
               </p>
             </div>
@@ -1030,7 +1051,7 @@ export function SettingsPage() {
               >
                 {t("components.fullPipelineFlag.label")}
               </label>
-              <p className="text-ink-3 text-[13px] leading-relaxed mt-1">
+              <p className="text-ink-3 text-body leading-relaxed mt-1">
                 {t("components.fullPipelineFlag.description")}
               </p>
             </div>
@@ -1057,8 +1078,14 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+      </details>
 
-      {/* Section 4: Onboarding reset */}
+      {/* Section 4: Onboarding reset — danger zone */}
+      <h2 className="mt-10 mb-1 text-subtitle font-semibold tracking-tight text-danger">
+        {t("pages.settings.groupDanger")}
+      </h2>
+      <p className="mb-4 text-body text-ink-4">{t("pages.settings.dangerHint")}</p>
+
       <section aria-labelledby="section-onboarding-reset">
         <SectionTitle id="section-onboarding-reset">
           {t("components.onboardingReset.title")}
@@ -1067,7 +1094,7 @@ export function SettingsPage() {
         <div className="bg-panel border border-line rounded-[6px] p-5">
           <button
             onClick={handleResetOnboarding}
-            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           >
             {t("components.onboardingReset.resetButton")}
           </button>

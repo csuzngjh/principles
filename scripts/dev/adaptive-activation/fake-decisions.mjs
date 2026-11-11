@@ -33,7 +33,7 @@ globalThis.fetch = async (resource, init) => {
     const key = id.startsWith('candidate_') ? id.slice('candidate_'.length) : id;
     answers[id] = {type: 'noul', noul: scores[key] ?? 0.02};
   }
-  const payload = JSON.stringify({model, provider, answers});
+  const payload = JSON.stringify({model, ...(provider ? {provider} : {}), answers});
   if (bodyDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, bodyDelayMs));
   return new Response(payload, {status: 200, headers: {'Content-Type': 'application/json'}});
 };

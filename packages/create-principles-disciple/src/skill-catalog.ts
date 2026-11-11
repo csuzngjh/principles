@@ -15,6 +15,11 @@ export interface SkillCatalogEntry {
   readonly name: string;
   readonly status: SkillStatus;
   readonly retirable: boolean;
+  /**
+   * 条件退场闸门（设计 §2.5）。非空字符串表示：条件未满足前该技能不得改为 retired。
+   * 这是 Owner 要求的书面约束，不是口头约定；解析时保留，禁止静默丢弃。
+   */
+  readonly retirementCondition?: string;
 }
 
 export interface SkillCatalog {
@@ -60,7 +65,7 @@ export function parseSkillCatalog(value: unknown): SkillCatalog {
       problems.push(`${at} must be an object`);
       return;
     }
-    const { name, status, retirable } = raw;
+    const { name, status, retirable, retirementCondition } = raw;
     if (typeof name !== 'string' || !SKILL_NAME.test(name)) {
       problems.push(`${at}.name must be a kebab-case skill name`);
       return;
@@ -71,6 +76,12 @@ export function parseSkillCatalog(value: unknown): SkillCatalog {
     if (typeof retirable !== 'boolean') {
       problems.push(`${at}.retirable must be a boolean`);
     }
+    if (
+      retirementCondition !== undefined &&
+      (typeof retirementCondition !== 'string' || retirementCondition.trim() === '')
+    ) {
+      problems.push(`${at}.retirementCondition must be a non-empty string when present`);
+    }
     if (seen.has(name)) {
       problems.push(`${at}.name duplicates "${name}"`);
     }
@@ -80,7 +91,12 @@ export function parseSkillCatalog(value: unknown): SkillCatalog {
       problems.push(`${name} is marked retirable=false but status=retired`);
       return;
     }
-    entries.push({ name, status, retirable });
+    entries.push({
+      name,
+      status,
+      retirable,
+      ...(typeof retirementCondition === 'string' ? { retirementCondition } : {}),
+    });
   });
 
   if (problems.length > 0) throw new SkillCatalogError(problems);

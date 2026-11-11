@@ -478,6 +478,22 @@ Skill 是文档型内化，风险中等：
 #### 用途
 **最强的内化形式**之一。在 `before_tool_call` 阶段拦截或修正工具调用参数。属于 L2 硬内化。
 
+#### 当前治理范围（现状声明）
+
+> 本段是**现状**，不是设计意图的推测。改动以下任何一条都必须同步修改三处：
+> `packages/principles-core/src/runtime/internalization/rule-host-input-builder.ts`
+> （`isRuleHostEvaluableKind`）、
+> `packages/openclaw-plugin/src/constants/tool-semantics.ts`
+> （`OPENCLAW_TOOL_SEMANTIC_MAPPINGS`）、
+> `packages/host-runtime/src/production-rulehost-gate.ts`（入口短路）。
+> 三处不一致即视为设计漂移（PRI-1184 / F3'）。
+
+- **进入评估**：`canonicalKind` 为 `write`、`execute`、`agent` 的工具调用，且能从参数中提取出非空目标路径。
+- **不进入评估**：`read`、`search` 及其它所有 `canonicalKind`；以及任何没有可提取目标路径的调用（`normalizedPath` 为 `null` 或 `""`）。这些调用直接 allow，RuleCode 引擎零调用。
+- 工具类型判定一律使用既有 `ToolSemanticRegistry` / `canonicalKind`，不得新增工具名白名单。
+- `read` 类工具名在授权阶段会被 `validateRuleReliability` 判为 `tool_not_host_dispatchable`：声明要治理 read 的规则无法激活。
+- **已知独立缺陷（不在本声明范围内）**：`affectedTools` 目前不参与评估过滤，声明只治理某个家族的规则仍可能被用于其它家族的调用。见 PRI-1187。
+
 #### 触发
 - 无论 RolloutReviewer 输出什么，**都强制走审批队列**
 - ActivationDispatcher 自动设 `riskLevel = 'high'`

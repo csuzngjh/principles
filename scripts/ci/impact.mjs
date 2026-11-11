@@ -88,7 +88,13 @@ const RELEASE_PATHS = [
 // jobs run, and the cross-host parity assertion in the installer never fires.
 // They MUST activate `installer` (the current owner of that assertion), in
 // addition to whatever package scope their directory already implies.
+//
+// `packages/pd-skills/` is the single source those four deliveries are
+// rendered from. A change there is the most likely cause of cross-host drift
+// (and of an out-of-date generated artifact), so it must trigger the same
+// gate — the parity assertion plus `render --check`.
 const SKILL_DELIVERY_PATHS = [
+  /^packages\/pd-skills\//,
   /^packages\/openclaw-plugin\/templates\/langs\/[^/]+\/skills\//,
   /^packages\/workbuddy-adapter\/plugin\/skills\//,
   /^plugins\/principles-disciple\/skills\//,

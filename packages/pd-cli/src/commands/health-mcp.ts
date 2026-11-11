@@ -22,7 +22,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { getInstallLayoutPaths } from '@principles/install-layout';
+import {
+  getCanonicalMcpServerEntry,
+  getInstallLayoutPaths,
+  validateMcpBinding,
+  type McpBindingShapeCode,
+} from '@principles/install-layout';
 import {
   findNewestRolloutFile,
   resolveCodexHome,
@@ -113,12 +118,31 @@ export interface McpHealthSection {
   nextAction?: string;
 }
 
-export const MCP_BINDING_SCHEMA = 'pd.mcp-binding.v1';
-
-const SERVER_ENTRY_SEGMENTS: Record<McpHealthHost, string[]> = {
-  codex: ['node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'],
-  openclaw: ['pd-mcp-server', 'dist', 'index.js'],
-  workbuddy: ['pd-mcp-server', 'dist', 'index.js'],
+/**
+ * The shared shape gate (`validateMcpBinding`) decides WHAT is wrong; this table
+ * decides what `pd health` PRINTS. Every target is an existing outward code, so
+ * converging on the shared declaration cannot rename, remove or blur a
+ * diagnostic the Owner already relies on. Intentional mappings that look
+ * lossy:
+ *   - `binding_host_invalid` (unknown host name) keeps the historical
+ *     `binding_host_mismatch`;
+ *   - `binding_runtime_dir_invalid` / `binding_server_entry_invalid` keep the
+ *     historical `binding_paths_not_absolute` (missing counts as unusable);
+ *   - `binding_versions_invalid` keeps `installed_mcp_server_version_mismatch`,
+ *     which is what the version layer already reported for a broken record.
+ */
+const MCP_BINDING_SHAPE_DEGRADES: Readonly<
+  Record<McpBindingShapeCode, { status: McpHealthStatus; code: string }>
+> = {
+  binding_invalid: { status: 'CONFIG_DRIFT', code: 'mcp_binding_unreadable' },
+  binding_schema_unsupported: { status: 'CONFIG_DRIFT', code: 'binding_schema_unsupported' },
+  binding_host_invalid: { status: 'CONFIG_DRIFT', code: 'binding_host_mismatch' },
+  binding_host_mismatch: { status: 'CONFIG_DRIFT', code: 'binding_host_mismatch' },
+  binding_workspace_invalid: { status: 'CONFIG_DRIFT', code: 'binding_workspace_invalid' },
+  binding_runtime_dir_invalid: { status: 'CONFIG_DRIFT', code: 'binding_paths_not_absolute' },
+  binding_server_entry_invalid: { status: 'CONFIG_DRIFT', code: 'binding_paths_not_absolute' },
+  binding_versions_invalid: { status: 'VERSION_MISMATCH', code: 'installed_mcp_server_version_mismatch' },
+  server_entry_not_canonical: { status: 'CONFIG_DRIFT', code: 'server_entry_not_canonical' },
 };
 
 const SETUP_NEXT_ACTION =
@@ -767,7 +791,7 @@ interface BaseSectionInput {
 }
 
 function baseSection({ host, layout, homeDir, env, status, reason, nextAction }: BaseSectionInput): McpHealthSection {
-  const entry = path.join(layout.defaultRuntimeDir, ...SERVER_ENTRY_SEGMENTS[host]);
+  const entry = getCanonicalMcpServerEntry(host, layout.defaultRuntimeDir);
   return {
     host,
     status,
@@ -832,7 +856,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   const bindingExists = exists(layout.bindingPath);
   const bindingRuntimeDir = readString(bindingRecord, 'runtimeDir');
   const runtimeDir = isAbsoluteString(bindingRuntimeDir) ? bindingRuntimeDir : layout.defaultRuntimeDir;
-  const entry = path.join(runtimeDir, ...SERVER_ENTRY_SEGMENTS[host]);
+  const entry = getCanonicalMcpServerEntry(host, runtimeDir);
   const entryExists = exists(entry);
   const packageRoot = path.dirname(path.dirname(entry));
   const installedVersion = readString(readJsonRecord(path.join(packageRoot, 'package.json')), 'version');
@@ -976,20 +1000,12 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   } else if (bindingRecord === null) {
     degrade('CONFIG_DRIFT', 'mcp_binding_unreadable', SETUP_NEXT_ACTION);
   } else {
-    if (binding.schemaVersion !== MCP_BINDING_SCHEMA) {
-      degrade('CONFIG_DRIFT', 'binding_schema_unsupported', SETUP_NEXT_ACTION);
-    }
-    if (binding.host !== host) {
-      degrade('CONFIG_DRIFT', 'binding_host_mismatch', 'Re-run the PD host setup for THIS host; a binding written by another host payload is refused by the launcher.');
-    }
-    if (!isAbsoluteString(binding.runtimeDir) || !isAbsoluteString(binding.serverEntry)) {
-      degrade('CONFIG_DRIFT', 'binding_paths_not_absolute', SETUP_NEXT_ACTION);
-    }
-    if (bindingWorkspaceDir !== null && !path.isAbsolute(bindingWorkspaceDir)) {
-      degrade('CONFIG_DRIFT', 'binding_workspace_invalid', SETUP_NEXT_ACTION);
-    }
-    if (canonical === false) {
-      degrade('CONFIG_DRIFT', 'server_entry_not_canonical', SETUP_NEXT_ACTION);
+    // Shape is decided by the SAME declaration the Codex installer and the
+    // fail-closed launcher use; only the printed code is pd-cli's own.
+    const shape = validateMcpBinding(bindingRecord, host, process.platform);
+    if (!shape.ok) {
+      const mapped = MCP_BINDING_SHAPE_DEGRADES[shape.code];
+      degrade(mapped.status, mapped.code, SETUP_NEXT_ACTION);
     }
     if (!entryExists) {
       degrade('HOST_RUNTIME_NOT_VERIFIED', 'server_entry_missing', 'Re-run the PD host setup so the pinned MCP server package is installed.');
@@ -1066,4 +1082,76 @@ export function formatMcpHealthLines(section: McpHealthSection): string[] {
     lines.push(`mcp.nextAction: ${section.nextAction ?? ''}`);
   }
   return lines;
+}
+
+/** How `pd health` chose the MCP host when `--host` was not given (PRI-1186). */
+export type McpHostSelectionBy =
+  | 'explicit-flag'
+  | 'binding-workspace-match'
+  | 'default-no-match'
+  | 'default-ambiguous';
+
+export interface McpHostSelection {
+  host: McpHealthHost;
+  selectedBy: McpHostSelectionBy;
+  /** Every host whose binding serves the workspace (candidate order). */
+  matchedHosts: McpHealthHost[];
+}
+
+const MCP_HOST_CANDIDATES: readonly McpHealthHost[] = ['openclaw', 'codex', 'workbuddy'];
+
+function normalizeWorkspaceForCompare(target: string): string {
+  const resolved = path.resolve(target).replace(/\\/g, '/').replace(/\/+$/, '');
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * The serving binding is the host authority (PRI-1186): each host's
+ * installer-written mcp-binding.json records the workspace it serves, so a
+ * unique workspaceDir match selects that host. Zero or multiple matches keep
+ * the historical openclaw default and are disclosed via selectedBy — never a
+ * silent guess (rc-9). Feature flags are deliberately NOT consulted: they
+ * default on machine-wide and say nothing about which host serves a workspace.
+ */
+export function selectMcpHostForWorkspace(
+  workspaceDir: string,
+  options: { homeDir?: string; env?: { CODEX_HOME?: string } } = {},
+): McpHostSelection {
+  const homeDir = path.resolve(options.homeDir ?? os.homedir());
+  const env = options.env ?? {};
+  const target = normalizeWorkspaceForCompare(workspaceDir);
+  const matchedHosts: McpHealthHost[] = [];
+  for (const host of MCP_HOST_CANDIDATES) {
+    const layout = resolveLayout(host, homeDir, env);
+    const boundWorkspace = readString(readJsonRecord(layout.bindingPath), 'workspaceDir');
+    if (
+      boundWorkspace !== null
+      && path.isAbsolute(boundWorkspace)
+      && normalizeWorkspaceForCompare(boundWorkspace) === target
+    ) {
+      matchedHosts.push(host);
+    }
+  }
+  const only = matchedHosts.length === 1 ? matchedHosts[0] : undefined;
+  if (only !== undefined) {
+    return { host: only, selectedBy: 'binding-workspace-match', matchedHosts };
+  }
+  return {
+    host: 'openclaw',
+    selectedBy: matchedHosts.length === 0 ? 'default-no-match' : 'default-ambiguous',
+    matchedHosts,
+  };
+}
+
+export function formatMcpHostSelectionLine(selection: McpHostSelection): string {
+  switch (selection.selectedBy) {
+    case 'explicit-flag':
+      return `mcp.hostSelection: ${selection.host} (explicit --host)`;
+    case 'binding-workspace-match':
+      return `mcp.hostSelection: ${selection.host} (its mcp-binding.json serves this workspace)`;
+    case 'default-no-match':
+      return 'mcp.hostSelection: openclaw (default; no host binding serves this workspace — the MCP view below may not describe it)';
+    case 'default-ambiguous':
+      return `mcp.hostSelection: openclaw (default; multiple host bindings serve this workspace: ${selection.matchedHosts.join(', ')} — pass --host to choose)`;
+  }
 }
