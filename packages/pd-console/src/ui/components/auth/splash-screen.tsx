@@ -34,7 +34,7 @@ export function SplashScreen({ onComplete }: { onComplete: () => void }) {
       <div className="mt-6 font-mono text-[14px] tracking-[0.16em] font-bold text-ink animate-[fadeIn_500ms_ease-out_200ms_both]">
         PD
       </div>
-      <div className="mt-2 font-mono text-[11px] tracking-[0.14em] text-ink-3 animate-[fadeIn_500ms_ease-out_400ms_both]">
+      <div className="mt-2 font-mono text-caption tracking-[0.14em] text-ink-3 animate-[fadeIn_500ms_ease-out_400ms_both]">
         GOVERNANCE WORKSPACE
       </div>
       <div className="mt-8 w-48 h-1 bg-line rounded-full overflow-hidden animate-[fadeIn_500ms_ease-out_600ms_both]">

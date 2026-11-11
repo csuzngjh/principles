@@ -357,7 +357,7 @@ function validateConfigCatalogData(
 
 function readinessTagClasses(readiness: ReadinessStatus): string {
   const base =
-    "inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase";
+    "inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-eyebrow text-ink-3 bg-surface/80 uppercase";
   switch (readiness) {
     case "ready":
       return base;
@@ -450,9 +450,9 @@ function CompactStatusBar({
   }
 
   return (
-    <div className="mt-5 px-[16px] py-[11px] bg-surface border border-line-2 rounded-[4px] flex items-center gap-[16px] text-[12.5px] text-ink-3 flex-wrap">
+    <div className="mt-5 px-[16px] py-[11px] bg-surface border border-line-2 rounded-[4px] flex items-center gap-[16px] text-caption text-ink-3 flex-wrap">
       <div className="flex items-center gap-[6px]">
-        <span className="text-ink-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+        <span className="text-ink-4 font-mono text-eyebrow uppercase tracking-[0.04em]">
           {t("pages.controlCenter.status.enabled")}
         </span>
         <span className="text-ink font-semibold">
@@ -461,7 +461,7 @@ function CompactStatusBar({
         </span>
       </div>
       <div className="flex items-center gap-[6px]">
-        <span className="text-ink-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+        <span className="text-ink-4 font-mono text-eyebrow uppercase tracking-[0.04em]">
           {t("pages.controlCenter.status.notReady")}
         </span>
         <span className="text-ink font-semibold">
@@ -469,13 +469,13 @@ function CompactStatusBar({
         </span>
       </div>
       <div className="flex items-center gap-[6px]">
-        <span className="text-ink-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+        <span className="text-ink-4 font-mono text-eyebrow uppercase tracking-[0.04em]">
           {t("pages.controlCenter.status.corePipeline")}
         </span>
         <span className="text-ink font-semibold">{t(corePipelineKey)}</span>
       </div>
       {needsConfig && (
-        <span className="ml-auto px-[9px] py-[3px] rounded-[2px] text-[10.5px] font-mono tracking-[0.02em] font-medium border border-amber text-amber bg-amber/10">
+        <span className="ml-auto px-[9px] py-[3px] rounded-[2px] text-caption font-mono tracking-[0.02em] font-medium border border-amber text-amber bg-amber/10">
           {t("pages.controlCenter.status.needsConfig")}
         </span>
       )}
@@ -498,7 +498,7 @@ function DefaultRuntimeSelector({
 
   return (
     <div className="bg-panel border border-line rounded-[6px] px-[18px] py-[14px]">
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+      <p className="text-ink-3 text-body leading-relaxed mb-3">
         {t("pages.controlCenter.defaultRuntimeDescription")}
       </p>
       <select
@@ -507,7 +507,7 @@ function DefaultRuntimeSelector({
           onDefaultChange(e.target.value);
         }}
         disabled={saving}
-        className="bg-surface border border-line rounded-[3px] px-3 py-[6px] text-[12.5px] text-ink focus:outline-none focus:border-gov disabled:opacity-50 min-w-[200px]"
+        className="bg-surface border border-line rounded-[3px] px-3 py-[6px] text-caption text-ink focus:outline-none focus:border-gov disabled:opacity-50 min-w-[200px]"
         aria-label={t("pages.controlCenter.defaultRuntime")}
       >
         {profiles.map((p) => (
@@ -563,25 +563,25 @@ function AdvancedDiagnostics({
 
   return (
     <details className="group">
-      <summary className="text-ink-3 text-[13px] cursor-pointer hover:text-ink-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
+      <summary className="text-ink-3 text-body cursor-pointer hover:text-ink-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
         {t("pages.controlCenter.advancedDiagnostics")}
       </summary>
 
       <div className="mt-4 space-y-5">
         {/* Features */}
         <div>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+          <h3 className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
             {t("pages.controlCenter.features")}
           </h3>
           <div className="bg-surface/60 border border-line rounded-[6px] px-3 py-2">
             {config.features.length === 0 ? (
-              <span className="text-ink-4 text-[13px]">—</span>
+              <span className="text-ink-4 text-body">—</span>
             ) : (
               <div className="space-y-1">
                 {config.features.map((f) => (
                   <div
                     key={f.id}
-                    className="flex items-center gap-2 text-[13px]"
+                    className="flex items-center gap-2 text-body"
                   >
                     <span className="text-ink-2">{enumLabel('featureId', f.id, t)}</span>
                     <span className="text-ink-4">·</span>
@@ -605,18 +605,18 @@ function AdvancedDiagnostics({
 
         {/* Runtime Profiles */}
         <div>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+          <h3 className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
             {t("pages.controlCenter.runtimeProfiles")}
           </h3>
           <div className="bg-surface/60 border border-line rounded-[6px] px-3 py-2">
             {config.runtimeProfiles.length === 0 ? (
-              <span className="text-ink-4 text-[13px]">—</span>
+              <span className="text-ink-4 text-body">—</span>
             ) : (
               <div className="space-y-1">
                 {config.runtimeProfiles.map((p) => (
                   <div
                     key={p.id}
-                    className="flex items-center gap-2 text-[13px]"
+                    className="flex items-center gap-2 text-body"
                   >
                     <span className="text-ink-2">{p.label}</span>
                     <span className="text-ink-4">·</span>
@@ -634,13 +634,13 @@ function AdvancedDiagnostics({
         {/* Warnings */}
         {config.warnings.length > 0 && (
           <div>
-            <h3 className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+            <h3 className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
               {t("pages.controlCenter.warnings")}
             </h3>
             <div className="bg-surface/60 border border-amber/20 border-l-2 border-l-amber rounded-[6px] px-3 py-2">
               <ul className="space-y-1">
                 {config.warnings.map((w, i) => (
-                  <li key={i} className="text-ink-2 text-[13px]">
+                  <li key={i} className="text-ink-2 text-body">
                     {w}
                   </li>
                 ))}
@@ -652,13 +652,13 @@ function AdvancedDiagnostics({
         {/* Config Errors */}
         {config.errors && config.errors.length > 0 && (
           <div>
-            <h3 className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+            <h3 className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
               {t("pages.controlCenter.configErrors")}
             </h3>
             <div className="bg-surface/60 border border-danger/20 border-l-2 border-l-danger rounded-[6px] px-3 py-2">
               <ul className="space-y-2">
                 {config.errors.map((e, i) => (
-                  <li key={i} className="text-[13px]">
+                  <li key={i} className="text-body">
                     <span className="text-ink font-medium">{e.path}</span>
                     <span className="text-ink-4"> — </span>
                     <span className="text-ink-2">{e.reason}</span>
@@ -674,7 +674,7 @@ function AdvancedDiagnostics({
 
         {/* Agent readiness breakdown */}
         <div>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+          <h3 className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
             {t("pages.controlCenter.readinessLabel")}
           </h3>
           <div className="bg-surface/60 border border-line rounded-[6px] px-3 py-2 space-y-2">
@@ -688,7 +688,7 @@ function AdvancedDiagnostics({
                   <span className={readinessTagClasses(validatedStatus)}>
                     {enumLabel('readiness', validatedStatus, t)}
                   </span>
-                  <span className="text-ink-3 text-[13px]">
+                  <span className="text-ink-3 text-body">
                     {agentsInGroup.map((a) => a.name).join(", ")}
                   </span>
                 </div>
@@ -702,7 +702,7 @@ function AdvancedDiagnostics({
           <button
             type="button"
             onClick={handleCopy}
-            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           >
             {copied ? "✓" : t("pages.controlCenter.copyDiagnostics")}
           </button>
@@ -819,7 +819,7 @@ export function ControlCenterPage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.controlCenter.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.controlCenter.title")}
         </h1>
         <div className="mt-6">
@@ -843,7 +843,7 @@ export function ControlCenterPage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.controlCenter.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.controlCenter.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
@@ -876,7 +876,7 @@ export function ControlCenterPage() {
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.controlCenter.eyebrow")}
       </div>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         {t("pages.controlCenter.title")}
       </h1>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
@@ -897,14 +897,14 @@ export function ControlCenterPage() {
         <SectionTitle id="section-agents">
           {t("pages.controlCenter.internalAgents")}
         </SectionTitle>
-        <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
+        <p className="text-ink-3 text-body leading-relaxed mb-3">
           {t("pages.controlCenter.internalAgentsDescription")}
         </p>
         <p
           className={
             overallReadiness === "ready"
-              ? "text-ink-4 text-[13px] leading-relaxed mb-3"
-              : "text-amber text-[13px] leading-relaxed mb-3"
+              ? "text-ink-4 text-body leading-relaxed mb-3"
+              : "text-amber text-body leading-relaxed mb-3"
           }
         >
           {t(CONFIG_READINESS_KEY[overallReadiness])}
@@ -933,7 +933,7 @@ export function ControlCenterPage() {
               ))}
               {/* rc-9: 未知代理不静默 */}
               {unknown.length > 0 && (
-                <div className="mt-3 px-3 py-2 border border-amber/30 border-l-2 border-l-amber rounded-[4px] bg-amber/10 text-[12.5px] text-ink-3">
+                <div className="mt-3 px-3 py-2 border border-amber/30 border-l-2 border-l-amber rounded-[4px] bg-amber/10 text-caption text-ink-3">
                   {t("pages.controlCenter.unknownAgentsWarning", {
                     count: unknown.length,
                     names: unknown.map((a) => a.name).join(", "),

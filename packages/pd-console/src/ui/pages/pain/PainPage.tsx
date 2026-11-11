@@ -122,12 +122,12 @@ export function PainPage() {
     <PageShell>
       {/* Page header */}
       <div className="mb-8">
-        <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.14em] text-ink-3">
           {t('pages.pain.eyebrow')}
         </div>
         <ShinyText
           as="h1"
-          className="text-[29px] font-semibold tracking-tight text-ink mt-3 mb-2"
+          className="text-display font-semibold tracking-tight text-ink mt-3 mb-2"
           duration={4.5}
           brightness={0.5}
           disabled={state.status !== 'loaded' || state.data.records.length === 0}
@@ -140,7 +140,7 @@ export function PainPage() {
       </div>
 
       {/* Honest boundary statement (F.5) */}
-      <div className="mb-6 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-[13px] leading-relaxed">
+      <div className="mb-6 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-body leading-relaxed">
         {t('pages.pain.honestyNote')}
       </div>
 
@@ -223,7 +223,7 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
 
       {/* Note when no records but sources are available */}
       {!hasRecords && data.note && (
-        <div className="mb-4 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-[13px]">
+        <div className="mb-4 p-3 bg-panel border border-line rounded-[var(--radius-md)] text-ink-3 text-body">
           {data.note}
         </div>
       )}
@@ -250,7 +250,7 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
 
               return (
                 <div key={group}>
-                  <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-4 mb-3">
+                  <div className="font-mono text-eyebrow uppercase tracking-[0.12em] text-ink-4 mb-3">
                     {t(`pages.pain.group_${group}`)} ({records.length})
                   </div>
                   <div className="space-y-4">
@@ -285,7 +285,7 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
                       <button
                         type="button"
                         onClick={() => setReviewQueueExpanded(false)}
-                        className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors"
+                        className="font-mono text-caption text-ink-4 hover:text-ink-3 transition-colors"
                       >
                         {reviewQueueLabel} ▲
                       </button>
@@ -297,7 +297,7 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
 
             return (
               <div key={group}>
-                <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-4 mb-3">
+                <div className="font-mono text-eyebrow uppercase tracking-[0.12em] text-ink-4 mb-3">
                   {t(`pages.pain.group_${group}`)} ({records.length})
                 </div>
                 <div className="space-y-4">
@@ -318,7 +318,7 @@ function LoadedContent({ data, expandedIds, onToggle, onRefresh, t }: LoadedCont
       )}
 
       {/* Generated-at timestamp */}
-      <div className="mt-8 font-mono text-[11px] text-ink-4">
+      <div className="mt-8 font-mono text-caption text-ink-4">
         {t('pages.pain.generatedAt')}: {formatDateTime(data.generatedAt)}
       </div>
     </>
@@ -410,7 +410,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
             >
               {t('pages.reportProblem.entryFeedback')}
             </Button>
-            <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
+            <span className="font-mono text-caption text-ink-4 whitespace-nowrap">
               {formatDateTime(record.observedAt)}
             </span>
           </div>
@@ -422,7 +422,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
         <div className="space-y-3 mb-4">
           {/* Trigger behavior */}
           <div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+            <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
               {t('pages.pain.fieldTrigger')}
             </div>
             {layer2Empty ? (
@@ -430,14 +430,14 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
                 {t('pages.pain.noHumanSummary')}
               </p>
             ) : (
-              <CardTitle className="text-[15px] leading-relaxed">{layers.layer2.triggerSummary}</CardTitle>
+              <CardTitle className="text-reading leading-relaxed">{layers.layer2.triggerSummary}</CardTitle>
             )}
           </div>
 
           {/* PD's conclusion (conditional: candidateTitle exists) */}
           {layers.layer2.conclusion && (
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldConclusion')}
               </div>
               <p className="text-ink text-sm leading-relaxed font-medium">{layers.layer2.conclusion}</p>
@@ -447,7 +447,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           {/* Applicability (conditional: candidateSummary or rootCauseSummary) */}
           {layers.layer2.applicability && (
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldApplicability')}
               </div>
               <p className="text-ink-2 text-sm leading-relaxed">{layers.layer2.applicability}</p>
@@ -457,7 +457,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           {/* Confidence (conditional: confidence exists) */}
           {confidenceDisplay && (
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldConfidence')}
               </div>
               <p className="text-ink-2 text-sm">{confidenceDisplay}</p>
@@ -467,7 +467,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           {/* Failure reason for failed/retry states */}
           {layers.layer2.failureReason && (
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldFailureReason')}
               </div>
               <p className="text-danger text-sm leading-relaxed">{layers.layer2.failureReason}</p>
@@ -477,7 +477,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           {/* Degraded reason at record level */}
           {layers.layer2.degradedReason && (
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldDegradedReason')}
               </div>
               <p className="text-amber text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.degradedReason).text}</p>
@@ -487,7 +487,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
           {/* Next action guidance */}
           {layers.layer2.nextAction && (
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.fieldNextAction')}
               </div>
               <p className="text-ink-2 text-sm leading-relaxed">{humanizeRuntimeText(layers.layer2.nextAction).text}</p>
@@ -528,7 +528,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
                   if (!expanded) onToggle();
                 }
               }}
-              className="font-mono text-[11px] h-7"
+              className="font-mono text-caption h-7"
             >
               {copied ? t('pages.pain.copied') : t('pages.pain.copyDebugId')}
             </Button>
@@ -536,7 +536,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               type="button"
               data-testid={`pain-expand-${record.id}`}
               onClick={onToggle}
-              className="font-mono text-[11px] text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
+              className="font-mono text-caption text-ink-4 hover:text-ink-3 transition-colors underline-offset-2 hover:underline"
             >
               {t('pages.pain.expandTechDetails')}
             </button>
@@ -546,7 +546,7 @@ function EvidenceChainCard({ record, expanded, onToggle, t }: EvidenceChainCardP
               className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]"
               data-testid={`pain-tech-details-${record.id}`}
             >
-              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-body">
                 <span className="font-mono text-ink-4">{t('pages.pain.chainId')}</span>
                 <span className="font-mono text-ink-2">{layers.layer3.id}</span>
 
@@ -704,13 +704,13 @@ function IntentTensionPanel({ tension, recordId, painId, taskId, linkedCandidate
       aria-label={t('pages.pain.intentTensionTitle')}
     >
       {/* Panel title */}
-      <h4 className="text-[13px] font-semibold text-ink mb-3 flex items-center gap-2">
+      <h4 className="text-body font-semibold text-ink mb-3 flex items-center gap-2">
         <span aria-hidden="true" className="inline-block w-1.5 h-1.5 rounded-full bg-amber" />
         {t('pages.pain.intentTensionTitle')}
       </h4>
 
       {/* Label-value pairs */}
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-body">
         <dt className="font-mono text-ink-4">{t('pages.pain.intentTensionSourceLabel')}</dt>
         <dd className="text-ink-2">{sourceLabel}</dd>
 
@@ -724,7 +724,7 @@ function IntentTensionPanel({ tension, recordId, painId, taskId, linkedCandidate
       {/* Related INTENT fields */}
       {tension.relatedIntentFields.length > 0 && (
         <div className="mt-3">
-          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+          <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
             {t('pages.pain.intentTensionRelatedIntentFieldsLabel')}
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -740,7 +740,7 @@ function IntentTensionPanel({ tension, recordId, painId, taskId, linkedCandidate
       {/* Evidence list */}
       {tension.evidence.length > 0 && (
         <div className="mt-3">
-          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+          <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
             {t('pages.pain.intentTensionEvidenceLabel')}
           </div>
           <ul className="text-ink-2 text-sm leading-relaxed space-y-1">
@@ -755,7 +755,7 @@ function IntentTensionPanel({ tension, recordId, painId, taskId, linkedCandidate
 
       {/* Explanation */}
       <div className="mt-3">
-        <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
           {t('pages.pain.intentTensionExplanationLabel')}
         </div>
         <p className="text-ink-2 text-sm leading-relaxed">{tension.explanation}</p>
@@ -764,10 +764,10 @@ function IntentTensionPanel({ tension, recordId, painId, taskId, linkedCandidate
       {/* Optional INTENT doc hash */}
       {tension.intentDocHash && (
         <div className="mt-3">
-          <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+          <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
             {t('pages.pain.intentTensionIntentDocHashLabel')}
           </div>
-          <p className="font-mono text-[11px] text-ink-3 break-all">{tension.intentDocHash}</p>
+          <p className="font-mono text-caption text-ink-3 break-all">{tension.intentDocHash}</p>
         </div>
       )}
 
@@ -912,7 +912,7 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, linkedCandidate
 
   return (
     <div className="mt-4 pt-3 border-t border-line">
-      <h5 className="text-[13px] font-semibold text-ink mb-1">
+      <h5 className="text-body font-semibold text-ink mb-1">
         {t('pages.pain.ownerDecisionPanelTitle')}
       </h5>
       <p className="text-ink-3 text-[12px] leading-relaxed mb-3">
@@ -958,7 +958,7 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, linkedCandidate
       {panelState !== 'recorded' && loadState === 'loaded' && (
         <>
           <div className="mb-3">
-            <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+            <label className="block font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
               {t('pages.pain.ownerDecisionNoteLabel')}
             </label>
             <input
@@ -967,7 +967,7 @@ function OwnerDecisionPanel({ tension, recordId, painId, taskId, linkedCandidate
               onChange={(e) => setNote(e.target.value)}
               placeholder={t('pages.pain.ownerDecisionNotePlaceholder')}
               disabled={panelState === 'submitting'}
-              className="w-full px-3 py-1.5 text-[13px] bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50"
+              className="w-full px-3 py-1.5 text-body bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50"
             />
           </div>
 
@@ -1091,14 +1091,14 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
 
   return (
     <div className="mt-4 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
-      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-2">
+      <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-2">
         {t('pages.pain.followUpActionsTitle')}
       </div>
 
       {/* confirm_drift → link candidate */}
       {ownerAction === 'confirm_drift' && (
         <div className="space-y-2">
-          <p className="text-ink-2 text-[13px] leading-relaxed">
+          <p className="text-ink-2 text-body leading-relaxed">
             {t('pages.pain.followUpLinkCandidateDescription')}
           </p>
           {/* If the evidence chain already has a linked candidate, prefill and
@@ -1111,7 +1111,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
               placeholder={t('pages.pain.followUpCandidateIdPlaceholder')}
               aria-label={t('pages.pain.followUpCandidateIdAriaLabel')}
               disabled={isDispatching}
-              className="flex-1 px-3 py-1.5 text-[13px] bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
+              className="flex-1 px-3 py-1.5 text-body bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
             />
             <Button
               variant="outline"
@@ -1125,7 +1125,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
             </Button>
           </div>
           {linkedCandidateId && (
-            <p className="text-ink-4 text-[11px] italic">
+            <p className="text-ink-4 text-caption italic">
               {t('pages.pain.followUpPrefilledFromEvidenceChain')}
             </p>
           )}
@@ -1141,7 +1141,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
       {/* promote_to_rulehost → view CLI guidance */}
       {ownerAction === 'promote_to_rulehost' && (
         <div className="space-y-2">
-          <p className="text-ink-2 text-[13px] leading-relaxed">
+          <p className="text-ink-2 text-body leading-relaxed">
             {t('pages.pain.followUpGuideRulehostDescription')}
           </p>
           <Button
@@ -1156,7 +1156,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
           </Button>
           {busyState === 'dispatched' && response?.type === 'guide_rulehost' && (
             <div role="status" className="mt-2 p-2 bg-surface border border-line rounded-[var(--radius-sm)]">
-              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+              <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4 mb-1">
                 {t('pages.pain.followUpCliCommandLabel')}
               </div>
               <pre className="font-mono text-[12px] text-ink-2 whitespace-pre-wrap break-all">{response.cliCommand}</pre>
@@ -1169,7 +1169,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
       {/* revise_intent → view patch proposal */}
       {ownerAction === 'revise_intent' && (
         <div className="space-y-2">
-          <p className="text-ink-2 text-[13px] leading-relaxed">
+          <p className="text-ink-2 text-body leading-relaxed">
             {t('pages.pain.followUpPatchProposalDescription')}
           </p>
           <Button
@@ -1185,17 +1185,17 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
           {busyState === 'dispatched' && response?.type === 'generate_patch_proposal' && (
             <div role="status" className="mt-2 p-2 bg-surface border border-line rounded-[var(--radius-sm)]">
               <div className="flex items-center gap-2 mb-2">
-                <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                <div className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
                   {t('pages.pain.followUpPatchProposalLabel')}
                 </div>
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-caption">
                   {t('pages.pain.followUpPatchProposalReadOnlyBadge')}
                 </Badge>
               </div>
-              <pre className="font-mono text-[11px] text-ink-2 whitespace-pre-wrap break-all bg-paper-2 p-2 rounded-[var(--radius-sm)] border border-line max-h-80 overflow-y-auto">
+              <pre className="font-mono text-caption text-ink-2 whitespace-pre-wrap break-all bg-paper-2 p-2 rounded-[var(--radius-sm)] border border-line max-h-80 overflow-y-auto">
                 {response.patchProposal.markdown}
               </pre>
-              <p className="text-amber text-[11px] mt-2 italic">
+              <p className="text-amber text-caption mt-2 italic">
                 {t('pages.pain.followUpPatchProposalWarning')}
               </p>
             </div>
@@ -1208,7 +1208,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
           chain as confirm_drift. We render the same link-candidate UI. */}
       {ownerAction === 'promote_to_principle' && (
         <div className="space-y-2">
-          <p className="text-ink-2 text-[13px] leading-relaxed">
+          <p className="text-ink-2 text-body leading-relaxed">
             {t('pages.pain.followUpPromoteToPrincipleDescription')}
           </p>
           <div className="flex gap-2 items-start">
@@ -1219,7 +1219,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
               placeholder={t('pages.pain.followUpCandidateIdPlaceholder')}
               aria-label={t('pages.pain.followUpCandidateIdAriaLabel')}
               disabled={isDispatching}
-              className="flex-1 px-3 py-1.5 text-[13px] bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
+              className="flex-1 px-3 py-1.5 text-body bg-surface border border-line rounded-[var(--radius-sm)] text-ink-2 focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 font-mono"
             />
             <Button
               variant="outline"
@@ -1233,7 +1233,7 @@ function FollowUpActions({ decision, linkedCandidateId, onDecisionUpdated, t }: 
             </Button>
           </div>
           {linkedCandidateId && (
-            <p className="text-ink-4 text-[11px] italic">
+            <p className="text-ink-4 text-caption italic">
               {t('pages.pain.followUpPrefilledFromEvidenceChain')}
             </p>
           )}

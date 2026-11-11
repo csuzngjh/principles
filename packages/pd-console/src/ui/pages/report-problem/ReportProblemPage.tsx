@@ -180,7 +180,7 @@ function PrivacySection({ draft }: { draft: DraftRecord | null }) {
     return (
       <section className="mt-8" aria-labelledby="section-privacy">
         <SectionTitle id="section-privacy">{t("pages.reportProblem.privacy.title")}</SectionTitle>
-        <p className="text-ink-3 text-[13px] leading-relaxed">
+        <p className="text-ink-3 text-body leading-relaxed">
           {t("pages.reportProblem.privacy.submitFirst")}
         </p>
         <NoAutoUploadBanner />
@@ -191,58 +191,58 @@ function PrivacySection({ draft }: { draft: DraftRecord | null }) {
   return (
     <section className="mt-8" aria-labelledby="section-privacy">
       <SectionTitle id="section-privacy">{t("pages.reportProblem.privacy.title")}</SectionTitle>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-4">
+      <p className="text-ink-3 text-body leading-relaxed mb-4">
         {t("pages.reportProblem.privacy.description")}
       </p>
 
       <div className="bg-panel border border-line rounded-[6px] p-4 space-y-4">
         {/* Included */}
         <div>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+          <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
             {t("pages.reportProblem.privacy.included")}
           </h3>
           {draft.privacy.includedSections.length > 0 ? (
             <ul className="space-y-1">
               {draft.privacy.includedSections.map((section, i) => (
-                <li key={i} className="flex items-center gap-2 text-ink-2 text-[13px]">
+                <li key={i} className="flex items-center gap-2 text-ink-2 text-body">
                   <span className="text-green-600" aria-hidden="true">✓</span>
                   {section}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-ink-4 text-[13px]">—</p>
+            <p className="text-ink-4 text-body">—</p>
           )}
         </div>
 
         {/* Excluded */}
         <div>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+          <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
             {t("pages.reportProblem.privacy.excluded")}
           </h3>
           {draft.privacy.excludedByDefault.length > 0 ? (
             <ul className="space-y-1">
               {draft.privacy.excludedByDefault.map((section, i) => (
-                <li key={i} className="flex items-center gap-2 text-ink-2 text-[13px]">
+                <li key={i} className="flex items-center gap-2 text-ink-2 text-body">
                   <span className="text-red-500" aria-hidden="true">✗</span>
                   {section}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-ink-4 text-[13px]">—</p>
+            <p className="text-ink-4 text-body">—</p>
           )}
         </div>
 
         {/* Redaction notes */}
         {draft.privacy.redactionNotes.length > 0 && (
           <div>
-            <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+            <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-2">
               {t("pages.reportProblem.privacy.notes")}
             </h3>
             <ul className="space-y-1">
               {draft.privacy.redactionNotes.map((note, i) => (
-                <li key={i} className="text-ink-2 text-[13px]">• {note}</li>
+                <li key={i} className="text-ink-2 text-body">• {note}</li>
               ))}
             </ul>
           </div>
@@ -261,8 +261,8 @@ function StatusBadge({ draft }: { draft: DraftRecord }) {
     <span
       className={
         submitted
-          ? "inline-flex items-center gap-1 px-2 py-[2px] rounded-[3px] text-[11px] font-medium border border-green-200 bg-green-50 text-green-700"
-          : "inline-flex items-center gap-1 px-2 py-[2px] rounded-[3px] text-[11px] font-medium border border-line bg-surface text-ink-3"
+          ? "inline-flex items-center gap-1 px-2 py-[2px] rounded-[3px] text-caption font-medium border border-green-200 bg-green-50 text-green-700"
+          : "inline-flex items-center gap-1 px-2 py-[2px] rounded-[3px] text-caption font-medium border border-line bg-surface text-ink-3"
       }
     >
       <span className={submitted ? "w-1.5 h-1.5 rounded-full bg-green-500" : "w-1.5 h-1.5 rounded-full bg-ink-3"} aria-hidden="true" />
@@ -285,7 +285,7 @@ function DraftCard({ draft, onCopyMarkdown, onCopyEmail, onOpenGithub, onOpenEma
   return (
     <article className="bg-panel border border-line rounded-[6px] p-4">
       <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="font-mono text-[11px] text-ink-3">
+        <div className="font-mono text-caption text-ink-3">
           {t("pages.reportProblem.draft.savedAt", { id: draft.id, at: draft.createdAt })}
         </div>
         <StatusBadge draft={draft} />
@@ -386,7 +386,7 @@ function SavedDraftsSection({ drafts, onLoad, onDelete }: {
     <section className="mt-8" aria-labelledby="section-saved">
       <SectionTitle id="section-saved">{t("pages.reportProblem.saved.title")}</SectionTitle>
       {drafts.length === 0 ? (
-        <p className="text-ink-3 text-[13px] leading-relaxed py-2">
+        <p className="text-ink-3 text-body leading-relaxed py-2">
           —
         </p>
       ) : (
@@ -395,11 +395,11 @@ function SavedDraftsSection({ drafts, onLoad, onDelete }: {
             <article key={draft.id} className="bg-panel border border-line rounded-[6px] px-4 py-3 flex items-center justify-between gap-4">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="font-mono text-[11px] text-ink-3">
+                  <div className="font-mono text-caption text-ink-3">
                     {enumLabel('feedbackType', draft.type, t)} · {draft.createdAt}
                   </div>
                   {draft.status === "submitted" && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-[2px] text-[10px] font-medium border border-green-200 bg-green-50 text-green-700">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-[2px] text-caption font-medium border border-green-200 bg-green-50 text-green-700">
                       {t("pages.reportProblem.draft.sentBadge")}
                     </span>
                   )}
@@ -410,7 +410,7 @@ function SavedDraftsSection({ drafts, onLoad, onDelete }: {
                 <button
                   type="button"
                   onClick={() => onLoad(draft.id)}
-                  className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                  className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 >
                   {t("pages.reportProblem.saved.load")}
                 </button>
@@ -464,14 +464,14 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
             onClick={onOpenEmail}
             className={
               available
-                ? "w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-[13px] cursor-not-allowed"
+                ? "w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-body cursor-not-allowed"
             }
           >
             {t("pages.reportProblem.channel.email")}
           </button>
           {!available && (status?.reason || status?.nextAction) && (
-            <p className="text-[11px] text-ink-3 leading-snug">
+            <p className="text-caption text-ink-3 leading-snug">
               {t("pages.reportProblem.channel.disablingReason", { reason: status?.reason ?? "" })}
               {status?.nextAction ? ` · ${status.nextAction}` : ""}
             </p>
@@ -480,7 +480,7 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
             <button
               type="button"
               onClick={() => onMarkSent("email")}
-              className="text-[11px] text-ink-3 hover:text-gov underline underline-offset-2 text-left"
+              className="text-caption text-ink-3 hover:text-gov underline underline-offset-2 text-left"
             >
               {t("pages.reportProblem.draft.markAsSent")}
             </button>
@@ -495,7 +495,7 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
           <button
             type="button"
             onClick={onExportFile}
-            className="w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-[13px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+            className="w-full border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[8px] text-body hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           >
             {t("pages.reportProblem.channel.file")}
           </button>
@@ -503,7 +503,7 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
             <button
               type="button"
               onClick={() => onMarkSent("file")}
-              className="text-[11px] text-ink-3 hover:text-gov underline underline-offset-2 text-left"
+              className="text-caption text-ink-3 hover:text-gov underline underline-offset-2 text-left"
             >
               {t("pages.reportProblem.draft.markAsSent")}
             </button>
@@ -524,14 +524,14 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
           onClick={onClick}
           className={
             available
-              ? "w-full border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[8px] text-[13px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-              : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-[13px] cursor-not-allowed"
+              ? "w-full border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[8px] text-body font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              : "w-full border border-line bg-surface text-ink-4 rounded-[3px] px-[14px] py-[8px] text-body cursor-not-allowed"
           }
         >
           {label}
         </button>
         {!available && (status?.reason || status?.nextAction) && (
-          <p className="text-[11px] text-ink-3 leading-snug">
+          <p className="text-caption text-ink-3 leading-snug">
             {t("pages.reportProblem.channel.disablingReason", { reason: status?.reason ?? "" })}
             {status?.nextAction ? ` · ${status.nextAction}` : ""}
           </p>
@@ -543,7 +543,7 @@ function ChannelSubmitArea({ draft, channels, onSubmitIngest, onSubmitGithub, on
   return (
     <section className="mt-8" aria-labelledby="section-channel">
       <SectionTitle id="section-channel">{t("pages.reportProblem.channel.title")}</SectionTitle>
-      <p className="text-ink-3 text-[13px] leading-relaxed mb-4">
+      <p className="text-ink-3 text-body leading-relaxed mb-4">
         {t("pages.reportProblem.channel.description")}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -575,10 +575,10 @@ function ConfirmSubmitDialog({ draft, channel, open, busy, onConfirm, onCancel }
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-auto space-y-2">
           <div className="font-mono text-[12px] text-ink-3">{draft.title}</div>
-          <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+          <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3">
             {t("pages.reportProblem.channel.confirmBodyLabel")}
           </h3>
-          <pre className="whitespace-pre-wrap text-ink-2 text-[13px] leading-relaxed bg-surface border border-line rounded-[3px] p-3 max-h-[320px] overflow-auto">
+          <pre className="whitespace-pre-wrap text-ink-2 text-body leading-relaxed bg-surface border border-line rounded-[3px] p-3 max-h-[320px] overflow-auto">
             {draft.outputs.markdown}
           </pre>
         </div>
@@ -587,7 +587,7 @@ function ConfirmSubmitDialog({ draft, channel, open, busy, onConfirm, onCancel }
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 disabled:opacity-50"
+            className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 disabled:opacity-50"
           >
             {t("pages.reportProblem.channel.confirmCancel")}
           </button>
@@ -595,7 +595,7 @@ function ConfirmSubmitDialog({ draft, channel, open, busy, onConfirm, onCancel }
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? t("pages.reportProblem.form.submitting") : t("pages.reportProblem.channel.confirmSubmit")}
           </button>
@@ -916,13 +916,13 @@ export function ReportProblemPage() {
         <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
           {t("pages.reportProblem.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.reportProblem.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
           <p>{t("pages.reportProblem.loadError")}</p>
           {loadError && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">{loadError}</p>
+            <p className="mt-2 text-ink-4 text-body font-mono">{loadError}</p>
           )}
         </div>
       </PageShell>
@@ -936,7 +936,7 @@ export function ReportProblemPage() {
       const label = t("pages.reportProblem.form.frequencyLabel");
       return (
         <div key="frequency">
-          <label htmlFor="feedback-frequency" className="block text-ink-2 text-[13px] mb-1.5">{label}</label>
+          <label htmlFor="feedback-frequency" className="block text-ink-2 text-body mb-1.5">{label}</label>
           <select
             id="feedback-frequency"
             value={form.frequency ?? ""}
@@ -961,7 +961,7 @@ export function ReportProblemPage() {
       const label = t("pages.reportProblem.form.blockingLevelLabel");
       return (
         <div key="blockingLevel">
-          <label htmlFor="feedback-blocking" className="block text-ink-2 text-[13px] mb-1.5">{label}</label>
+          <label htmlFor="feedback-blocking" className="block text-ink-2 text-body mb-1.5">{label}</label>
           <select
             id="feedback-blocking"
             value={form.blockingLevel ?? ""}
@@ -986,7 +986,7 @@ export function ReportProblemPage() {
     const label = t(DETAIL_FIELD_LABEL[key] ?? "pages.reportProblem.form.descriptionLabel");
     return (
       <div key={key}>
-        <label htmlFor={`feedback-${key}`} className="block text-ink-2 text-[13px] mb-1.5">{label}</label>
+        <label htmlFor={`feedback-${key}`} className="block text-ink-2 text-body mb-1.5">{label}</label>
         <textarea
           id={`feedback-${key}`}
           value={typeof value === "string" ? value : ""}
@@ -1006,7 +1006,7 @@ export function ReportProblemPage() {
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.reportProblem.eyebrow")}
       </div>
-      <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+      <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
         {t("pages.reportProblem.title")}
       </h1>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
@@ -1018,14 +1018,14 @@ export function ReportProblemPage() {
       {/* Section 1: Feedback Form */}
       <section aria-labelledby="section-form">
         <SectionTitle id="section-form">{t("pages.reportProblem.form.title")}</SectionTitle>
-        <p className="text-ink-3 text-[13px] leading-relaxed mb-4">
+        <p className="text-ink-3 text-body leading-relaxed mb-4">
           {t("pages.reportProblem.form.description")}
         </p>
 
         <form onSubmit={handleSubmit} className="bg-panel border border-line rounded-[6px] p-5 space-y-4">
           {/* Type selector */}
           <div>
-            <label htmlFor="feedback-type" className="block text-ink-2 text-[13px] mb-1.5">
+            <label htmlFor="feedback-type" className="block text-ink-2 text-body mb-1.5">
               {t("pages.reportProblem.form.type")}
             </label>
             <select
@@ -1049,7 +1049,7 @@ export function ReportProblemPage() {
 
           {/* Title */}
           <div>
-            <label htmlFor="feedback-title" className="block text-ink-2 text-[13px] mb-1.5">
+            <label htmlFor="feedback-title" className="block text-ink-2 text-body mb-1.5">
               {t("pages.reportProblem.form.titleLabel")}
             </label>
             <input
@@ -1063,7 +1063,7 @@ export function ReportProblemPage() {
 
           {/* Description (恒显必填) */}
           <div>
-            <label htmlFor="feedback-description" className="block text-ink-2 text-[13px] mb-1.5">
+            <label htmlFor="feedback-description" className="block text-ink-2 text-body mb-1.5">
               {t("pages.reportProblem.form.descriptionLabel")}
             </label>
             <textarea
@@ -1081,7 +1081,7 @@ export function ReportProblemPage() {
               <button
                 type="button"
                 onClick={() => setShowDetails((prev) => !prev)}
-                className="text-gov text-[13px] font-medium underline underline-offset-2 hover:text-gov-2 transition-colors"
+                className="text-gov text-body font-medium underline underline-offset-2 hover:text-gov-2 transition-colors"
               >
                 {showDetails ? t("pages.reportProblem.form.detailsHide") : t("pages.reportProblem.form.detailsToggle")}
               </button>
@@ -1097,7 +1097,7 @@ export function ReportProblemPage() {
             <button
               type="submit"
               disabled={form.submitting}
-              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              className="border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-caption font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
             >
               {form.submitting ? t("pages.reportProblem.form.submitting") : t("pages.reportProblem.form.submit")}
             </button>
@@ -1105,7 +1105,7 @@ export function ReportProblemPage() {
               <button
                 type="button"
                 onClick={() => setShowPreview((prev) => !prev)}
-                className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {showPreview
                   ? t("pages.reportProblem.form.hidePreview")
@@ -1118,10 +1118,10 @@ export function ReportProblemPage() {
         {/* Markdown preview */}
         {showPreview && currentDraft && (
           <div className="mt-4 bg-panel border border-line rounded-[6px] p-4">
-            <h3 className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-3">
+            <h3 className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-3 mb-3">
               Markdown
             </h3>
-            <pre className="whitespace-pre-wrap text-ink-2 text-[13px] leading-relaxed bg-surface border border-line rounded-[3px] p-3 max-h-[400px] overflow-auto">
+            <pre className="whitespace-pre-wrap text-ink-2 text-body leading-relaxed bg-surface border border-line rounded-[3px] p-3 max-h-[400px] overflow-auto">
               {currentDraft.outputs.markdown}
             </pre>
           </div>
@@ -1161,7 +1161,7 @@ export function ReportProblemPage() {
 
       {/* Section 3: Saved Drafts */}
       {loadError && (
-        <div className="mt-4 p-3 bg-panel border border-amber/20 rounded-[6px] text-ink-2 text-[13px]">
+        <div className="mt-4 p-3 bg-panel border border-amber/20 rounded-[6px] text-ink-2 text-body">
           <p>{t("pages.reportProblem.loadError")}</p>
           <p className="mt-1 text-ink-4 text-[12px] font-mono">{loadError}</p>
         </div>
@@ -1173,7 +1173,7 @@ export function ReportProblemPage() {
       />
 
       {/* Footer */}
-      <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">
+      <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-body">
         {t("pages.reportProblem.privacy.guarantee")}
       </footer>
 

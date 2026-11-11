@@ -153,7 +153,7 @@ export function ExaminerReportPage(): React.ReactElement {
             {t('pages.examiner.report.back')}
           </Link>
         </div>
-        <h1 className="mt-1 text-[20px] font-semibold text-ink" data-testid="examiner-report-title">
+        <h1 className="mt-1 text-title font-semibold text-ink" data-testid="examiner-report-title">
           {t('pages.examiner.report.title')}
         </h1>
         <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{studyId}</p>
@@ -176,7 +176,7 @@ export function ExaminerReportPage(): React.ReactElement {
           <div className="mb-4 grid gap-3 rounded-lg border bg-card p-4 text-sm" data-testid="examiner-owner-summary">
               <div>
                 <div className="text-xs font-medium text-ink-3">{t('pages.examiner.ownerSummary.title')}</div>
-                <p className="mt-1 text-[15px] font-medium text-ink" data-testid="examiner-owner-summary-conclusion">{conclusion}</p>
+                <p className="mt-1 text-reading font-medium text-ink" data-testid="examiner-owner-summary-conclusion">{conclusion}</p>
               </div>
               <div data-testid="examiner-owner-summary-rationale">
                 <div className="text-xs font-medium text-ink-3">{t('pages.examiner.ownerSummary.rationale')}</div>

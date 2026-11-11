@@ -6,14 +6,14 @@ interface SectionTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
 }
 
 /**
- * 11px uppercase monospace section title with bottom border (B.4.6).
+ * Page-level 11px uppercase monospace eyebrow (B.4.6, §3.1 `text-eyebrow`).
  * Used for governance page section headings.
  */
 export function SectionTitle({ children, className, ...props }: SectionTitleProps) {
   return (
     <h2
       className={cn(
-        "font-mono text-[11px] uppercase tracking-[var(--tracking-wide)] text-ink-3",
+        "font-mono text-eyebrow uppercase tracking-[var(--tracking-wide)] text-ink-3",
         "border-b border-line pb-2 mb-4",
         className
       )}

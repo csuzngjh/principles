@@ -83,7 +83,7 @@ function CapabilityBoundaryDeclaration() {
   const { t } = useTranslation();
   return (
     <div
-      className="px-[18px] py-[14px] bg-panel border border-line rounded-[6px] text-ink-3 text-[13px] leading-relaxed"
+      className="px-[18px] py-[14px] bg-panel border border-line rounded-[6px] text-ink-3 text-body leading-relaxed"
       role="note"
       aria-label={t("pages.activation.boundaryLabel")}
     >
@@ -192,7 +192,7 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
   const criterionStatusClass = (status: string) => status === 'passed' ? 'text-green' : status === 'failed' ? 'text-danger' : 'text-ink-4';
   const renderWindow = (title: string, window: RuleCodeOwnerReviewData['liveMetrics']['last24Hours']) => <div className="rounded border border-line p-2"><div className="font-medium text-ink">{title}</div><div className="mt-1 grid grid-cols-2 gap-1 md:grid-cols-5"><span>{t('pages.activation.eligibleEvaluations')}: {value(window.eligible)}</span><span>{t('pages.activation.matched')}: {value(window.matched)}</span><span>{t('pages.activation.blocked')}: {value(window.blocked)}</span><span>{t('pages.activation.unhealthy')}: {value(window.unhealthy)}</span><span>{t('pages.activation.circuitTrips')}: {window.circuitTrips}</span></div><div className="mt-1 text-ink-4">{t('pages.activation.toolDistribution')}: {window.toolDistribution === null ? t('pages.activation.notCollected') : Object.entries(window.toolDistribution).map(([tool, count]) => `${tool} ${count}`).join(', ') || '—'}</div></div>;
   return <div className="mt-4 rounded-[5px] border border-gov/25 bg-surface/70 p-4" data-testid={`owner-review-${record.activationId}`}>
-    <div className="flex flex-wrap items-center gap-2"><strong className="text-[13px] text-ink">{t('pages.activation.ownerDecisionTitle')}</strong><span className="font-mono text-[11px] text-gov">{enumLabel('approvalReadiness', review.readiness.status, t)}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-[11px]">{t('pages.activation.safetyIsolation')}</span>}</div>
+    <div className="flex flex-wrap items-center gap-2"><strong className="text-body text-ink">{t('pages.activation.ownerDecisionTitle')}</strong><span className="font-mono text-caption text-gov">{enumLabel('approvalReadiness', review.readiness.status, t)}</span>{review.controlState?.enforcement === 'safety_isolated' && <span className="text-danger text-caption">{t('pages.activation.safetyIsolation')}</span>}</div>
     <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] text-ink-3 md:grid-cols-4">
       <span>{t('pages.activation.eligibleEvaluations')}: {value(summary.observed)}</span>
       <span>{t('pages.activation.matched')}: {value(summary.matched)}</span>
@@ -203,18 +203,18 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
       <span>{t('pages.activation.neutralControl')}: {value(summary.neutralControl)}</span>
       <span>{t('pages.activation.evaluationErrors')}: {value(summary.errors)}</span>
     </div>
-    <div className="mt-2 text-[11px] text-ink-4">{t('pages.activation.shadowWindow', { first: summary.firstObservedAt ?? t('pages.activation.notCollected'), last: summary.lastObservedAt ?? t('pages.activation.notCollected') })}</div>
+    <div className="mt-2 text-caption text-ink-4">{t('pages.activation.shadowWindow', { first: summary.firstObservedAt ?? t('pages.activation.notCollected'), last: summary.lastObservedAt ?? t('pages.activation.notCollected') })}</div>
     <div className="mt-2 text-[12px] text-ink-3">{t('pages.activation.runtimeCapability', { version: review.runtimeCapability.hostRuntimeVersion, supported: t(review.runtimeCapability.shadowEvidence ? 'pages.activation.supported' : 'pages.activation.unsupported') })}</div>
     <div className="mt-2 text-[12px] text-amber">{t('pages.activation.worstImpact', { tools: affectedTools.join(', ') || t('pages.activation.notCollected') })}</div>
     <div className="mt-3 text-[12px] text-ink-3"><div className="mb-1 font-medium text-ink">{t('pages.activation.hardSafetyChecks')}</div>{checkRows.map(check => <div key={check.id} className={criterionStatusClass(check.status)}>{t(`pages.activation.checks.${check.id}`, { defaultValue: check.id })}: {t(`pages.activation.checkStatus.${check.status}`, { defaultValue: check.status })}{check.reasonCode ? ` · ${t(`pages.activation.reasonCodes.${check.reasonCode}`, { defaultValue: check.reasonCode })}` : ''}</div>)}
       {evidenceCriteria.length > 0 && <><div className="mb-1 mt-2 font-medium text-ink">{t('pages.activation.evidenceCriteriaTitle')}</div>{evidenceCriteria.map(item => <div key={item.criterionId} className={criterionStatusClass(item.status)}>{t(`pages.activation.evidenceCriteria.${item.criterionId}`, { defaultValue: item.criterionId })}: {item.current === null || item.current === undefined ? t('pages.activation.notCollected') : item.current} / {item.threshold}{item.shortfall === undefined ? '' : ` · ${t('pages.activation.evidenceCriteriaShortfall', { shortfall: item.shortfall })}`}</div>)}</>}</div>
     {review.readiness.failedChecks.length > 0 && <ul className="mt-2 text-[12px] text-danger">{review.readiness.failedChecks.map(check => <li key={check.checkId}>{t(`pages.activation.checks.${check.checkId}`, { defaultValue: check.checkId })}: {t(`pages.activation.reasonCodes.${check.reasonCode}`, { defaultValue: check.reasonCode })}</li>)}</ul>}
     <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.scopeArtifactCode')}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-ink-3">{JSON.stringify(review.artifact.content, null, 2)}</pre></details>
-    <div className="mt-3 grid gap-2 text-[11px] text-ink-3 md:grid-cols-2">{renderWindow(t('pages.activation.live24Hours'), review.liveMetrics.last24Hours)}{renderWindow(t('pages.activation.live7Days'), review.liveMetrics.last7Days)}</div>
-    <div className="mt-2 text-[11px] text-ink-3">{t('pages.activation.behaviorDrift', { approved: value(review.behaviorDrift.approvedBlockRate), live: value(review.behaviorDrift.liveBlockRate), delta: value(review.behaviorDrift.delta) })}</div>
+    <div className="mt-3 grid gap-2 text-caption text-ink-3 md:grid-cols-2">{renderWindow(t('pages.activation.live24Hours'), review.liveMetrics.last24Hours)}{renderWindow(t('pages.activation.live7Days'), review.liveMetrics.last7Days)}</div>
+    <div className="mt-2 text-caption text-ink-3">{t('pages.activation.behaviorDrift', { approved: value(review.behaviorDrift.approvedBlockRate), live: value(review.behaviorDrift.liveBlockRate), delta: value(review.behaviorDrift.delta) })}</div>
     {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
     {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
-    <div className="mt-2 text-[11px] text-ink-4">{t('pages.activation.circuitConditions')}</div>
+    <div className="mt-2 text-caption text-ink-4">{t('pages.activation.circuitConditions')}</div>
     {record.action === 'code_tool_hook_shadow_activate' && <ApprovedRuleRevisionPanel activationId={record.activationId} onChanged={onChanged} />}
     {review.readiness.status === 'evidence_insufficient' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
     <input value={note} onChange={event => setNote(event.target.value)} placeholder={t('pages.activation.ownerReviewNote')} className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
@@ -224,7 +224,7 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
       {(record.action === 'code_tool_hook_live_activate' || review.controlState?.enforcement === 'safety_isolated') && <Button disabled={busy} variant="destructive" onClick={() => void decide('emergency-deactivate')}>{t('pages.activation.emergencyDeactivate')}</Button>}
       {review.controlState?.enforcement === 'safety_isolated' && <Button disabled={busy || !review.ownerDecisionEnabled} variant="outline" onClick={() => void decide('recover-to-shadow')}>{t('pages.activation.recoverToShadow')}</Button>}
     </div>
-    {!review.ownerDecisionEnabled && <div className="mt-2 text-[11px] text-amber">{t('pages.activation.rolloutDisabled')}</div>}
+    {!review.ownerDecisionEnabled && <div className="mt-2 text-caption text-amber">{t('pages.activation.rolloutDisabled')}</div>}
   </div>;
 }
 
@@ -314,7 +314,7 @@ export function ActivationFactCard({
       <div className="flex items-center gap-2 flex-wrap pr-24">
         {/* Status label */}
         <span
-          className={`inline-flex items-center border rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase ${
+          className={`inline-flex items-center border rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase ${
             record.status === "active"
               ? "border-green/35 text-green bg-green/5"
               : "border-line text-ink-4 bg-surface/80"
@@ -324,23 +324,23 @@ export function ActivationFactCard({
           {record.status === "active" ? t("pages.activation.statusActive") : t("pages.activation.statusInactive")}
         </span>
         {/* Channel badge */}
-        <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
+        <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-eyebrow text-ink-3 bg-surface/80 uppercase">
           {channelLabel}
         </span>
         {/* Reversibility indicator */}
         {reversible && (
-          <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+          <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
             {t("pages.activation.tagReversible")}
           </span>
         )}
         {!reversible && record.channel === "code_tool_hook" && (
-          <span className="inline-flex items-center border border-danger/35 text-danger rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+          <span className="inline-flex items-center border border-danger/35 text-danger rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
             {t("pages.activation.tagHighRisk")}
           </span>
         )}
         {/* Never activated warning */}
         {neverActivated && (
-          <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
+          <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-eyebrow uppercase">
             {t("pages.activation.tagNeverActivated")}
           </span>
         )}
@@ -369,16 +369,16 @@ export function ActivationFactCard({
       {/* Principle info — action is the human-readable anchor; principleId
           is demoted to a secondary mono identifier (also available via hover) */}
       <div className="mt-[14px] mb-2">
-        <span className="text-ink-2 text-[13px]">{t("pages.activation.principleLabel")}</span>{" "}
+        <span className="text-ink-2 text-body">{t("pages.activation.principleLabel")}</span>{" "}
         <Link
           to={`/principles/${record.principleId}`}
-          className="text-gov text-[13px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+          className="text-gov text-body hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
           data-testid={`principle-link-${record.principleId}`}
           title={record.principleId}
         >
           {record.action}
         </Link>
-        <span className="ml-2 font-mono text-[11px] text-ink-4">{record.principleId}</span>
+        <span className="ml-2 font-mono text-caption text-ink-4">{record.principleId}</span>
       </div>
 
       {/* Action / target / time */}
@@ -395,17 +395,17 @@ export function ActivationFactCard({
           {record.warning}
         </div>
       )}
-      <div className="text-ink-3 text-[13px] leading-relaxed space-y-1">
+      <div className="text-ink-3 text-body leading-relaxed space-y-1">
         <div>
-          <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.actionLabel")}</span>{" "}
+          <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.actionLabel")}</span>{" "}
           <span className="text-ink-2">{record.action}</span>
         </div>
         <div>
-          <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.targetLabel")}</span>{" "}
+          <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.targetLabel")}</span>{" "}
           <span className="text-ink-2 font-mono text-[12px]">{record.targetRef}</span>
         </div>
         <div>
-          <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.activatedAtLabel")}</span>{" "}
+          <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.activatedAtLabel")}</span>{" "}
           {neverActivated ? (
             <span className="text-amber">{t("pages.activation.neverActivated")}</span>
           ) : (
@@ -422,11 +422,11 @@ export function ActivationFactCard({
             className="flex items-start gap-2"
             data-testid={`activation-injection-${record.activationId}`}
           >
-            <span className="text-ink-4 font-mono text-[11px] uppercase">
+            <span className="text-ink-4 font-mono text-eyebrow uppercase">
               {t("pages.activation.injectionLabel", { defaultValue: "注入状态" })}
             </span>
             <span
-              className={`text-[12.5px] leading-relaxed ${
+              className={`text-caption leading-relaxed ${
                 record.promptInjection.status === "injectable"
                   ? "text-ink-2"
                   : record.promptInjection.status === "window_excluded" || record.promptInjection.status === "model_dependent"
@@ -486,7 +486,7 @@ export function ActivationFactCard({
                     wb: tierFitLabel(t, record.promptInjection.perHostFits?.find((f) => f.hostKind === "workbuddy")?.tierFit),
                   })}
                   {record.promptInjection.reason !== undefined && (
-                    <span className="block text-ink-4 text-[11.5px]">{record.promptInjection.reason}</span>
+                    <span className="block text-ink-4 text-caption">{record.promptInjection.reason}</span>
                   )}
                 </>
               )}
@@ -514,7 +514,7 @@ export function ActivationFactCard({
                   value={revisionText}
                   onChange={(e) => setRevisionText(e.target.value)}
                   rows={3}
-                  className="w-full rounded-[2px] border border-line bg-panel px-2 py-1 text-[12.5px]"
+                  className="w-full rounded-[2px] border border-line bg-panel px-2 py-1 text-caption"
                   placeholder={t("pages.activation.revisionPlaceholder", { defaultValue: "输入新的原则正文（保留触发条件、必须动作和必要例外，尽量精简）" })}
                   data-testid={`activation-revision-input-${record.activationId}`}
                 />
@@ -556,7 +556,7 @@ export function ActivationFactCard({
             reachable (undefined = unavailable → page-level degraded note). */}
         {receiptCount !== undefined && (
           <div data-testid={`activation-receipts-${record.activationId}`}>
-            <span className="text-ink-4 font-mono text-[11px] uppercase">{t("pages.activation.receiptsLabel")}</span>{" "}
+            <span className="text-ink-4 font-mono text-eyebrow uppercase">{t("pages.activation.receiptsLabel")}</span>{" "}
             <span className="text-ink-2 font-mono text-[12px] tabular-nums">
               {t("pages.activation.receiptsValue", {
                 effect: receiptCount?.effectCount ?? 0,
@@ -570,29 +570,29 @@ export function ActivationFactCard({
       {/* Layer 3: Lifecycle metrics (expandable, only when principle has rules) */}
       {lifecycleData !== undefined && (
         <details className="mt-4 group">
-          <summary className="text-gov text-[13px] cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
+          <summary className="text-gov text-body cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2">
             {t("pages.activation.lifecycleToggle")}
           </summary>
           <div className="mt-2 pl-4 border-l-2 border-line">
             {lifecycleData === null ? (
-              <div className="text-ink-4 text-[13px] py-2">
+              <div className="text-ink-4 text-body py-2">
                 {t("pages.activation.lifecycleUnavailable")}
               </div>
             ) : lifecycleData.adherence.insufficientData ? (
-              <div className="text-ink-4 text-[13px] py-2">
+              <div className="text-ink-4 text-body py-2">
                 {t("pages.activation.insufficientData")}
               </div>
             ) : (
               <div className="py-2 space-y-2">
                 {/* Adherence rate with honest label */}
-                <div className="text-ink-2 text-[13px]">
+                <div className="text-ink-2 text-body">
                   <span className="font-mono font-semibold text-ink tabular-nums">
                     {lifecycleData.adherence.rate !== null
                       ? `${(lifecycleData.adherence.rate * 100).toFixed(0)}%`
                       : "—"}
                   </span>{" "}
                   <span className="text-ink-3">{t("pages.activation.adherenceLabel")}</span>
-                  <div className="text-ink-4 text-[11px] mt-1 font-mono">
+                  <div className="text-ink-4 text-caption mt-1 font-mono">
                     {t("pages.activation.lifecycleNote")}
                   </div>
                 </div>
@@ -625,7 +625,7 @@ export function ActivationFactCard({
             <button
               onClick={() => setShowConfirm(true)}
               disabled={disabling}
-              className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+              className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               data-testid={`disable-btn-${record.activationId}`}
             >
               {t("pages.activation.disableAction")}
@@ -636,7 +636,7 @@ export function ActivationFactCard({
               role="alert"
               data-testid={`confirm-bar-${record.activationId}`}
             >
-              <span className="text-ink-2 text-[13px] flex-1">
+              <span className="text-ink-2 text-body flex-1">
                 {t("pages.activation.confirmDisable")}
               </span>
               <button
@@ -645,14 +645,14 @@ export function ActivationFactCard({
                   setShowConfirm(false);
                 }}
                 disabled={disabling}
-                className="inline-flex items-center border border-danger/40 text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="inline-flex items-center border border-danger/40 text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-caption hover:bg-danger/5 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                 data-testid={`confirm-disable-${record.activationId}`}
               >
                 {disabling ? t("pages.activation.disabling") : t("common.confirm")}
               </button>
               <button
                 onClick={() => setShowConfirm(false)}
-                className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-caption hover:border-line-2 transition-colors focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
               >
                 {t("common.cancel")}
               </button>
@@ -884,16 +884,16 @@ export function ActivationPage() {
   if (loadingState === "error") {
     return (
       <PageShell>
-        <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 mb-2">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.1em] text-ink-3 mb-2">
           {t("pages.activation.eyebrow")}
         </div>
-        <h1 className="text-[29px] font-semibold tracking-tight text-ink mb-2">
+        <h1 className="text-display font-semibold tracking-tight text-ink mb-2">
           {t("pages.activation.title")}
         </h1>
         <div className="mt-6 p-4 bg-panel border border-line rounded-[6px] text-ink-2 text-sm">
           <p>{t("pages.activation.loadError")}</p>
           {errorMessage && (
-            <p className="mt-2 text-ink-4 text-[13px] font-mono">{errorMessage}</p>
+            <p className="mt-2 text-ink-4 text-body font-mono">{errorMessage}</p>
           )}
         </div>
       </PageShell>
@@ -918,7 +918,7 @@ export function ActivationPage() {
       </div>
       <ShinyText
         as="h1"
-        className="text-[29px] font-semibold tracking-tight text-ink mb-2"
+        className="text-display font-semibold tracking-tight text-ink mb-2"
         duration={4.5}
         brightness={0.5}
         disabled={activeActivations.length === 0}
@@ -955,7 +955,7 @@ export function ActivationPage() {
 
       {/* Degraded note (ERR-002) */}
       {degradedNote && (
-        <div className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2">
+        <div className="mt-4 text-ink-4 text-body bg-surface/60 border-l-2 border-amber px-3 py-2">
           {degradedNote}
         </div>
       )}
@@ -963,7 +963,7 @@ export function ActivationPage() {
       {/* PRI-533: receipt counts degraded note (ERR-002 — reason, never silent) */}
       {receiptDegraded && (
         <div
-          className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2"
+          className="mt-4 text-ink-4 text-body bg-surface/60 border-l-2 border-amber px-3 py-2"
           data-testid="receipt-counts-degraded"
         >
           {/* PRI-590: localized zero-state headline (disabled vs unavailable) when coverage is known.
@@ -994,7 +994,7 @@ export function ActivationPage() {
           counts + bounded activation-id samples, never a per-row dump. */}
       {compatScanError !== null && (
         <div
-          className="mt-4 text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2"
+          className="mt-4 text-ink-4 text-body bg-surface/60 border-l-2 border-amber px-3 py-2"
           data-testid="compatibility-scan-degraded"
         >
           {t("pages.activation.compatibilityScanUnavailable", { reason: compatScanError })}
@@ -1002,7 +1002,7 @@ export function ActivationPage() {
       )}
       {compatScan !== null && (
         <div
-          className="mt-4 bg-surface/60 border-l-2 border-line px-3 py-2 text-[13px] text-ink-4"
+          className="mt-4 bg-surface/60 border-l-2 border-line px-3 py-2 text-body text-ink-4"
           data-testid="compatibility-scan"
         >
           <p className="font-medium text-ink-3">{t("pages.activation.compatibilityScanTitle")}</p>
@@ -1114,7 +1114,7 @@ export function ActivationPage() {
             ))}
           </div>
         ) : (
-          <div className="text-ink-3 text-[13px] leading-relaxed py-3">
+          <div className="text-ink-3 text-body leading-relaxed py-3">
             {t("pages.activation.emptyActive")}
           </div>
         )}
@@ -1160,11 +1160,11 @@ export function ActivationPage() {
                   <div className="text-ink-2 text-sm leading-relaxed">
                     <span className="font-medium text-ink">{t("pages.activation.neverActivatedCard")}</span>{" "}
                     — {record.action} · {getChannelLabel(record.channel, t)}
-                    <span className="ml-2 font-mono text-[11px] text-ink-4">{record.principleId}</span>
+                    <span className="ml-2 font-mono text-caption text-ink-4">{record.principleId}</span>
                   </div>
                   <Link
                     to="/debt"
-                    className="inline-flex items-center mt-2 text-gov text-[13px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
+                    className="inline-flex items-center mt-2 text-gov text-body hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
                   >
                     {t("pages.activation.viewDebt")} →
                   </Link>
@@ -1175,7 +1175,7 @@ export function ActivationPage() {
       )}
 
       {/* Footer */}
-      <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">
+      <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-body">
         {t("pages.activation.footer")}
       </footer>
       </div>

@@ -54,7 +54,7 @@ export function DailyThoughtCard() {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="breathing-dot" aria-hidden="true" />
-          <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+          <span className="font-mono text-eyebrow uppercase tracking-[0.08em] text-ink-4">
             {t("pages.focus.dailyThought.eyebrow")}
           </span>
         </div>
@@ -74,14 +74,14 @@ export function DailyThoughtCard() {
           isChanging ? "opacity-0" : "opacity-100"
         }`}
       >
-        <p className="font-semibold text-ink text-[15px] leading-snug">
+        <p className="font-semibold text-ink text-reading leading-snug">
           {content.quote}
         </p>
-        <p className="mt-1 text-ink-3 text-[13px]">
+        <p className="mt-1 text-ink-3 text-body">
           {t("pages.focus.dailyThought.authorPrefix", { defaultValue: "——" })}
           {content.author}
         </p>
-        <p className="mt-3 text-ink-3 text-[13px] leading-relaxed">
+        <p className="mt-3 text-ink-3 text-body leading-relaxed">
           {content.note}
         </p>
       </div>
