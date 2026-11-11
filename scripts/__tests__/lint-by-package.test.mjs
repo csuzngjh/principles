@@ -24,6 +24,7 @@ import {
   buildEslintArgs,
   discoverPackageRelDirs,
   repoRootFromModuleUrl,
+  resolveConcurrency,
   runLintByPackage,
 } from '../lint-by-package.mjs';
 
@@ -269,6 +270,77 @@ describe('lint-by-package', () => {
       assert.equal(interrupted, true);
       assert.equal(ok, false);
       assert.ok(logs.some((line) => line.includes('interrupted')));
+    });
+  });
+
+  describe('bounded concurrency (PD_LINT_CONCURRENCY)', () => {
+    function recorder() {
+      return { calls: [], pending: 0, overlaps: 0 };
+    }
+
+    it('runs a bounded pool when concurrency > 1 and keeps result order', async () => {
+      const root = fixture({ packages: ['alpha', 'beta', 'gamma'] });
+      const rec = recorder();
+      const { ok, results } = await runLintByPackage({
+        root,
+        concurrency: 2,
+        spawnChild: makeFakeSpawn({ recorder: rec }),
+        log: () => {},
+      });
+      assert.equal(ok, true);
+      assert.deepEqual(
+        results.map((r) => r.package),
+        ['packages/alpha', 'packages/beta', 'packages/gamma'],
+      );
+      assert.ok(rec.overlaps >= 1, 'expected overlapping children under concurrency 2');
+    });
+
+    it('retries a pool failure once serially and can turn it green', async () => {
+      const root = fixture({ packages: ['alpha', 'beta'] });
+      const rec = recorder();
+      const logs = [];
+      const { ok, results } = await runLintByPackage({
+        root,
+        concurrency: 2,
+        // alpha fails in the pool, beta passes, alpha passes on the serial retry.
+        spawnChild: makeFakeSpawn({ recorder: rec, outcomes: [{ code: 1 }, { code: 0 }, { code: 0 }] }),
+        log: (message) => logs.push(message),
+      });
+      assert.equal(ok, true);
+      assert.equal(rec.calls.length, 3, 'expected one serial retry for the failed package');
+      assert.equal(rec.calls[2].rel, 'packages/alpha');
+      assert.deepEqual(
+        results.map((r) => [r.package, r.ok, r.retriedSerially ?? false]),
+        [['packages/alpha', true, true], ['packages/beta', true, false]],
+      );
+      assert.ok(logs.some((line) => line.includes('retrying packages/alpha serially')));
+    });
+
+    it('still fails when the serial retry fails too (no retry loop)', async () => {
+      const root = fixture({ packages: ['alpha', 'beta'] });
+      const rec = recorder();
+      const { ok, results } = await runLintByPackage({
+        root,
+        concurrency: 2,
+        spawnChild: makeFakeSpawn({ recorder: rec, outcomes: [{ code: 1 }, { code: 0 }, { code: 1 }] }),
+        log: () => {},
+      });
+      assert.equal(ok, false);
+      assert.equal(rec.calls.length, 3, 'exactly one retry, never a loop');
+      assert.deepEqual(
+        results.map((r) => [r.package, r.ok, r.retriedSerially ?? false]),
+        [['packages/alpha', false, true], ['packages/beta', true, false]],
+      );
+    });
+
+    it('resolves the pool size from the environment, clamped and fail-safe', () => {
+      assert.equal(resolveConcurrency(undefined), 1);
+      assert.equal(resolveConcurrency(''), 1);
+      assert.equal(resolveConcurrency('0'), 1);
+      assert.equal(resolveConcurrency('-3'), 1);
+      assert.equal(resolveConcurrency('abc'), 1);
+      assert.equal(resolveConcurrency('2'), 2);
+      assert.equal(resolveConcurrency('99'), 8);
     });
   });
 
