@@ -1,0 +1,41 @@
+{
+  "$comment": "WorkBuddy 宿主声明。WorkBuddy 只交付中文技能；未实现的控制能力必须显式声明在 unsupported 中，渲染器会生成声明段。",
+  "id": "workbuddy",
+  "displayName": "WorkBuddy",
+  "destinations": {
+    "zh": "packages/workbuddy-adapter/plugin/skills"
+  },
+  "optional": {
+    "zh": {
+      "titleSuffix": "（WorkBuddy）",
+      "description": "记录一条\"相对锚点的显著行为背离\"（Pain）。Owner 用 `PD记录痛苦：` 前缀发消息时由 WorkBuddy Hook 处理；Owner 明确要求你登记且能指出锚点时，通过 PD MCP 工具 pd_submit_pain 提交本次记录。禁止后台提交，禁止编造锚点。",
+      "downstreamNote": " WorkBuddy 的治理工作区固定为 `~/.workbuddy/pd-workspace`；需要查下游用 `pd task show <taskId>`，不得猜测或扫描 session/turn 标识。",
+      "workspaceArg": " --workspace \"<用户主目录>/.workbuddy/pd-workspace\""
+    }
+  },
+  "capabilities": {
+    "zh": {
+      "workspace.resolve": "始终使用 WorkBuddy 固定治理工作区 `~/.workbuddy/pd-workspace`，先将 `~` 解析为当前用户主目录的绝对路径。不得切换到当前项目目录、Codex 工作区或 OpenClaw 工作区。",
+      "cli.hostProbe": "1. 先运行以下只读命令，确认 Runtime 功能和 worker 状态：\n\n       pd runtime features --workspace \"<用户主目录>/.workbuddy/pd-workspace\" --json\n       pd workbuddy worker --status --workspace \"<用户主目录>/.workbuddy/pd-workspace\" --json\n\n2. 按需使用 CLI 帮助确认其他只读命令的可用性，再查询痛苦、任务、运行记录、候选或证据链；其中 `<workspace>` 必须替换为上面的 WorkBuddy 固定治理工作区，不能换成当前项目目录。\n3. 报告真实输出中的 `host.workbuddy` 开关、worker 模式和错误原因。",
+      "control.install": "安装/注册必须使用正式 WorkBuddy 插件安装器/宿主管理流程。本技能不提供安装命令，也不复制安装器逻辑。安装/注册插件不等于启用治理，插件默认状态为关闭。完成后用 `pd-cli-operator` 对固定治理工作区 `~/.workbuddy/pd-workspace` 做只读检查，并报告真实回执。",
+      "control.disable": "根据当前技能文件所在位置定位同一插件根目录，运行随插件交付的控制脚本：\n\n    node \"<plugin-root>/scripts/pd-control.cjs\" disable\n\n不要搜索任意 npm 缓存，也不要使用其他宿主的脚本。\n\n只有退出码为 0 且 JSON 回执确认 `ok=true`、`enabled=false`、`host=workbuddy` 时，才能报告停用成功。报告真实回执中的工作区与状态。新 Hook 调用读取该开关；已运行中的任务是否停止必须另行核验。",
+      "pain.nativeEntry": "## 入口 1 —— Owner 原生前缀（由 Hook 处理，不要代劳）\n\nOwner 在自己的消息开头输入：\n\n    PD记录痛苦：<Owner 原文>\n\n- 前缀必须位于消息开头并使用全角冒号；正文 1–500 字符。\n- 超长输入会被拒绝并要求精简，不会静默截断。\n- 只记录 Owner 原文；引用、工具输出和模型转述不构成新的 Owner 提交。\n- 登记写入 WorkBuddy 固定治理工作区 `~/.workbuddy/pd-workspace`（由 Hook 解析，不需要 Agent 传入）。\n- 这条路径由 UserPromptSubmit Hook 处理。不要模拟宿主事件，也不要把同一条消息再提交一次。\n- 如果当前消息没有此前缀，不要要求 Owner 重发；按入口 2 处理（若 Owner 明确要求登记）。",
+      "pain.anchorSubmit": "## 入口 2 —— 锚点式提交：MCP 工具 `pd_submit_pain`\n\n先看当前工具列表。\n\n- 有 `pd_submit_pain` → 按下表参数调用。\n- 没有 `pd_submit_pain` → 本部署未启用锚点写入能力。停止：不要调用近似工具，不要用猜测的 lineage 拼一条 CLI 写入，不要声称已提交；如实告诉 Owner 该能力不可用，并在 Owner 仍希望登记时请其改用入口 1 的前缀发送。\n\n| 参数 | 必填 | 约束 |\n|---|---|---|\n| `reason` | 是 | 1–2000 字符，按下面六项组织 |\n| `anchorType` | 是 | `owner_expectation` / `established_principle` / `agent_instruction` |\n| `anchorRef` | 是 | 1–300 字符，格式随锚点类型 |\n| `painType` | 否 | `principle_deviation` / `tool_failure` / `subagent_error` / `user_frustration` |\n\nschema 是严格的：`score`、`severity`、`priority`、`sessionId`、`approved`、文件路径、metadata 都会在写入前被协议层拒绝。",
+      "review.console": "运行正式 CLI：\n\n    pd console open --workspace \"<用户主目录>/.workbuddy/pd-workspace\"\n\n只报告命令真实返回的 Console 地址和状态。失败时保留错误原因，不声称已打开。"
+    }
+  },
+  "unsupported": {
+    "zh": [
+      {
+        "capability": "control.enable",
+        "reason": "随插件交付的控制脚本只实现停用，没有可验证的启用入口。",
+        "alternative": "正式 WorkBuddy 插件安装器/宿主管理流程。若该流程未提供可验证的启用操作，明确报告不支持；不得猜测命令、手工修改配置或调用私有安装器函数。"
+      },
+      {
+        "capability": "pain.operatorRecovery",
+        "reason": "现有 WorkBuddy 交付内容没有事后 CLI 补录路径，Agent 也无法核实可信会话标识。",
+        "alternative": "由 Owner 通过入口 1 的前缀重新登记；确需事后补录时，由操作员按当前 `pd pain record --help` 的合同执行，Agent 不得自行拼写。"
+      }
+    ]
+  }
+}

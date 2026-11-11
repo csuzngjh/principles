@@ -502,6 +502,26 @@ jobs:
         working-directory: packages/create-principles-disciple
         run: npm run build && npm run test:fast
 
+  skill-render-contract:
+    name: Test skill render contract
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.installer) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build pd-skills
+        run: npm run build --workspace=@principles/pd-skills
+      - name: Test pd-skills
+        run: npm test --workspace=@principles/pd-skills
+      - name: Verify every host artifact matches the single source
+        run: node packages/pd-skills/dist/cli.js render --check
+
   smoke-packaged-install:
     name: Test packaged install smoke
     needs: impact

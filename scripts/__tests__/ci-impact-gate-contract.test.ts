@@ -45,11 +45,13 @@ describe('ci.yml impact scope-gate contract', () => {
 
   it('every job gated on impact keeps the fail-open condition shape', () => {
     const gated = Object.entries(jobs).filter(([, j]) => [].concat(j.needs ?? []).includes('impact'));
-    // The design currently gates 15 jobs; a shrinking gate set is a design
+    // The design currently gates 16 jobs; a shrinking gate set is a design
     // change that should show up in this test's diff. (PRI-1071 added
     // test-pd-mcp-server; PRI-1066 added test-workbuddy-adapter after its
-    // impact scope had no consumer.)
-    expect(gated.length).toBe(15);
+    // impact scope had no consumer; the pd-skills single-source renderer
+    // added skill-render-contract, whose installer-scope gate is the same
+    // fail-open shape verified below.)
+    expect(gated.length).toBe(16);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare
