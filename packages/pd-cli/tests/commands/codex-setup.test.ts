@@ -78,9 +78,10 @@ async function run(options: Record<string, unknown>): Promise<{ reports: string[
 }
 
 function readConsent(ws: string): Record<string, unknown> | null {
-  const p = path.join(ws, '.pd', 'codex-ingestion-consent.json');
+  const p = path.join(ws, '.state', 'conversation-ingestion-consent.json');
   if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
+  const ledger = JSON.parse(fs.readFileSync(p, 'utf8')) as { hosts?: Record<string, Record<string, unknown>> };
+  return ledger.hosts?.codex ?? null;
 }
 
 function readConfig(ws: string): string {
@@ -254,6 +255,7 @@ describe('pd codex setup — consent transition state machine (review round 2)',
     fs.writeFileSync(path.join(ws, '.pd', 'codex-ingestion-consent.json'), JSON.stringify({
       decision: 'failed', disclosureVersion: 'g2a-2026-08-28', decidedAt: new Date().toISOString(),
       decidedVia: 'pd_codex_setup', failureReason: 'flag activation failed: prior run', schemaVersion: '2',
+    // PRI-1171: legacy v2 file at .pd — setup reads it via the migration and supersedes it.
     }), 'utf8');
     const { json } = await run({ workspace: ws, accept: true, json: true });
     const report = json[0] as Record<string, unknown>;

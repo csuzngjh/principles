@@ -21,103 +21,36 @@
  * malformed record — decoding stops at it without advancing, with a
  * structured reason. Unknown-but-well-formed record types are skipped with
  * a bounded warning and DO advance.
+ *
+ * PRI-1171 P1: the host-neutral skeleton (TranscriptPort with post-open
+ * identity revalidation, batch bounds, stop taxonomy, and the
+ * newline-window/incomplete-tail plan) moved to
+ * host-runtime/conversation-ingestion/source.ts; this module keeps ONLY the
+ * Codex-specific record projection and re-exports the moved names for one
+ * version cycle. Behavior is byte-identical (locked by the existing
+ * ingestion fixtures).
  */
-import fs from 'node:fs';
-import type { GovernanceObservationInput } from '@principles/host-runtime';
+import {
+  CONVERSATION_INGESTION_MAX_BATCH_RECORDS,
+  planJsonlWindow,
+  type GovernanceObservationInput,
+  type TranscriptDecodeStop,
+} from '@principles/host-runtime';
 
-export const CODEX_INGESTION_MAX_BATCH_BYTES = 1024 * 1024;
-export const CODEX_INGESTION_MAX_BATCH_RECORDS = 256;
-
-export interface TranscriptReadResult {
-  /** Raw bytes read from [offset, offset+maxBytes) — never a decoded string, so multi-byte UTF-8 never corrupts offset math. */
-  readonly bytes: Buffer;
-  readonly fileSize: number;
-}
-
-/** Identity the validator captured pre-open; the port must re-prove it post-open (SPEC §9 TOCTOU). */
-export interface TranscriptExpectedIdentity {
-  readonly dev: number;
-  readonly ino: number;
-  readonly size: number;
-  readonly mtimeMs: number;
-}
-
-/** Arguments for one bounded transcript window read. */
-export interface TranscriptReadRequest {
-  readonly canonicalPath: string;
-  readonly offset: number;
-  readonly maxBytes: number;
-  /** Pre-open identity from the validator; the port re-proves it post-open. */
-  readonly expectedIdentity?: TranscriptExpectedIdentity;
-}
-
-/** Filesystem boundary for the transcript read — injectable so tests can spy. */
-export interface TranscriptPort {
-  read(request: TranscriptReadRequest): TranscriptReadResult;
-}
-
-/** Thrown by the port when the opened object is not the validated one (replacement/TOCTOU). */
-export class TranscriptReplacedError extends Error {
-  constructor() {
-    super('transcript_replaced_after_validation');
-    this.name = 'TranscriptReplacedError';
-  }
-}
-
-function identityMatches(opened: fs.Stats, expected: TranscriptExpectedIdentity): boolean {
-  // Size+mtime fingerprint must ALWAYS hold. When the platform reports a
-  // Number-safe inode on both sides, the inode must match too (it is what
-  // catches delete+recreate replacements whose inode got reused on Linux CI
-  // with a same-ms write; a same-size same-ms recreate remains outside the
-  // threat model for an append-only host-owned file). On platforms whose
-  // ino exceeds Number.MAX_SAFE_INTEGER (Windows file IDs), the inode is not
-  // reliably comparable and the fingerprint alone decides. A false refusal
-  // is the safe direction: the hook degrades observably and the next Stop
-  // revalidates and retries.
-  if (opened.size !== expected.size || opened.mtimeMs !== expected.mtimeMs) return false;
-  const comparableIno = expected.ino !== 0 && expected.dev !== 0
-    && opened.ino !== 0 && Number.isSafeInteger(expected.ino) && Number.isSafeInteger(opened.ino);
-  if (comparableIno) return opened.ino === expected.ino && opened.dev === expected.dev;
-  return true;
-}
-
-export function createNodeTranscriptPort(): TranscriptPort {
-  return {
-    read({ canonicalPath, offset, maxBytes, expectedIdentity }: TranscriptReadRequest): TranscriptReadResult {
-      const fd = fs.openSync(canonicalPath, 'r');
-      try {
-        // Post-open revalidation (G1 §7 / SPEC §9): fstat the OPEN OBJECT —
-        // not the path — and re-prove it is the regular file the validator
-        // approved, still at the expected identity. A path swapped between
-        // validation and open (replacement/symlink TOCTOU) is refused before
-        // a single byte is read.
-        const stats = fs.fstatSync(fd);
-        if (!stats.isFile()) throw new Error('transcript_is_not_regular_file');
-        if (expectedIdentity !== undefined && !identityMatches(stats, expectedIdentity)) {
-          throw new TranscriptReplacedError();
-        }
-        const length = Math.max(0, Math.min(maxBytes, stats.size - offset));
-        if (length === 0) return { bytes: Buffer.alloc(0), fileSize: stats.size };
-        const buffer = Buffer.alloc(length);
-        const bytesRead = fs.readSync(fd, buffer, 0, length, offset);
-        // Post-read byte bound re-verification (EP-08): never trust the
-        // pre-read stat for the enforced cap.
-        const actual = bytesRead < 0 ? 0 : bytesRead;
-        if (actual > maxBytes) throw new Error('transcript_read_exceeded_bound');
-        return { bytes: buffer.subarray(0, actual), fileSize: stats.size };
-      } finally {
-        fs.closeSync(fd);
-      }
-    },
-  };
-}
-
-export type TranscriptDecodeStop =
-  | { kind: 'eof' }
-  | { kind: 'incomplete_tail' }
-  | { kind: 'malformed'; ordinal: number | null }
-  | { kind: 'byte_bound' }
-  | { kind: 'oversized_record' };
+// Compat re-exports (one version cycle): the seam owns the skeleton now.
+export {
+  CONVERSATION_INGESTION_MAX_BATCH_BYTES as CODEX_INGESTION_MAX_BATCH_BYTES,
+  CONVERSATION_INGESTION_MAX_BATCH_RECORDS as CODEX_INGESTION_MAX_BATCH_RECORDS,
+  TranscriptReplacedError,
+  createNodeTranscriptPort,
+} from '@principles/host-runtime';
+export type {
+  TranscriptReadResult,
+  TranscriptExpectedIdentity,
+  TranscriptReadRequest,
+  TranscriptPort,
+  TranscriptDecodeStop,
+} from '@principles/host-runtime';
 
 export interface DecodedDelta {
   readonly observations: readonly GovernanceObservationInput[];
@@ -517,26 +450,17 @@ export function decodeTranscriptWindow(input: DecodeTranscriptWindowInput): Deco
     return { ...finish(context, input.fileOffset, -1), stop: { kind: 'eof' } };
   }
 
-  // UTF-8 multi-byte sequences never contain 0x0A, so splitting the byte
-  // window at newline bytes is safe and keeps the checkpoint byte-exact.
-  const lastNewline = bytes.lastIndexOf(0x0a);
-  const completeEnd = lastNewline + 1; // exclusive byte end of the newline-terminated region
-  const tailBytes = bytes.subarray(completeEnd); // bytes after the final newline (no terminator)
+  // PRI-1171: the newline-window split (complete lines + unterminated tail)
+  // comes from the seam's planJsonlWindow — the same byte-exact
+  // incomplete-tail semantics every host inherits.
+  const plan = planJsonlWindow(bytes, input.fileOffset);
 
-  let cursor = input.fileOffset;
   let lastOrdinal = -1;
   let recordsConsumed = 0;
 
-  let lineStart = 0;
-  while (lineStart < completeEnd) {
-    const lineEnd = bytes.indexOf(0x0a, lineStart);
-    if (lineEnd === -1 || lineEnd >= completeEnd) break;
-    const lineBytes = bytes.subarray(lineStart, lineEnd);
-    const recordByteStart = cursor;
-    cursor = input.fileOffset + lineEnd + 1;
-    lineStart = lineEnd + 1;
+  for (const { bytes: lineBytes, recordByteStart } of plan.lines) {
     if (lineBytes.length === 0 || lineBytes.toString('utf8').trim().length === 0) continue;
-    if (recordsConsumed >= CODEX_INGESTION_MAX_BATCH_RECORDS) {
+    if (recordsConsumed >= CONVERSATION_INGESTION_MAX_BATCH_RECORDS) {
       return { ...finish(context, recordByteStart, lastOrdinal), stop: { kind: 'byte_bound' } };
     }
     const line = decodeLine(lineBytes);
@@ -551,28 +475,28 @@ export function decodeTranscriptWindow(input: DecodeTranscriptWindowInput): Deco
     projectRecord(context, { type: line.type, payload: line.payload ?? {}, ordinal: line.ordinal as number, recordByteStart, timestamp: line.timestamp });
   }
 
-  if (tailBytes.length > 0) {
-    const tailStart = cursor; // byte offset where the unterminated tail begins
+  if (plan.tail !== null) {
+    const tailStart = plan.tail.startOffset; // byte offset where the unterminated tail begins
     if (input.byteBoundReached) {
       // The window ended mid-line because of the byte bound — the line is not
       // known-incomplete; leave it wholly unread and report bounded lag.
-      if (lastNewline === -1) {
+      if (plan.lines.length === 0) {
         return { ...finish(context, input.fileOffset, lastOrdinal), stop: { kind: 'oversized_record' } };
       }
       return { ...finish(context, tailStart, lastOrdinal), stop: { kind: 'byte_bound' } };
     }
-    const line = decodeLine(tailBytes);
+    const line = decodeLine(plan.tail.bytes);
     if (line.record !== null && line.type !== null) {
       // A parseable final line without a trailing newline is a complete
       // record; consume it and advance the checkpoint to EOF.
       lastOrdinal = line.ordinal as number;
       projectRecord(context, { type: line.type, payload: line.payload ?? {}, ordinal: line.ordinal as number, recordByteStart: tailStart, timestamp: line.timestamp });
-      return { ...finish(context, tailStart + tailBytes.length, lastOrdinal), stop: { kind: 'eof' } };
+      return { ...finish(context, tailStart + plan.tail.bytes.length, lastOrdinal), stop: { kind: 'eof' } };
     }
     // Incomplete final line: transient append/flush boundary — do not
     // advance past the previous record; the next ingestion retries (SPEC §14.1).
     return { ...finish(context, tailStart, lastOrdinal), stop: { kind: 'incomplete_tail' } };
   }
 
-  return { ...finish(context, cursor, lastOrdinal), stop: input.byteBoundReached ? { kind: 'byte_bound' } : { kind: 'eof' } };
+  return { ...finish(context, plan.completeEndOffset, lastOrdinal), stop: input.byteBoundReached ? { kind: 'byte_bound' } : { kind: 'eof' } };
 }

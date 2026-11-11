@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
 import { PageShell } from '../../components/layout/page-shell.js';
 import { PageLoading } from '../../components/layout/page-loading.js';
 import { SectionTitle } from '../../components/layout/section-title.js';
 import { Button } from '../../components/ui/button.js';
 import { truncateByCodePoints } from '../../utils/reading-layout.js';
-import { ShieldCheck, FlaskConical, ArrowRight, RefreshCw, Loader2, FileText } from 'lucide-react';
+import { ShieldCheck, FlaskConical, ArrowRight, RefreshCw, Loader2, FileText, AlertTriangle } from 'lucide-react';
 import {
   fetchExaminerOverview,
   fetchExaminerPrinciples,
@@ -33,11 +32,15 @@ export function ExaminerPage(): React.ReactElement {
   const prefillPrinciple = searchParams.get('principle');
   const [overview, setOverview] = useState<ExaminerOverviewData | null>(null);
   const [principles, setPrinciples] = useState<ExaminerPrincipleItem[]>([]);
+  const [principlesStatus, setPrinciplesStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [principlesError, setPrinciplesError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>('');
   const [evidence, setEvidence] = useState<ExaminerEvidenceData | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   // Monotonic request sequence: a slower earlier response must never overwrite
   // the panel for the principle the Owner selected last (including A→B→A,
@@ -48,11 +51,12 @@ export function ExaminerPage(): React.ReactElement {
     evidenceRequestSeq.current = seq;
     setEvidenceLoading(true);
     setEvidence(null);
+    setEvidenceError(null);
     const response = await fetchExaminerPrincipleEvidence(principleId);
     if (evidenceRequestSeq.current !== seq) return;
     setEvidenceLoading(false);
     if (!response.success) {
-      toast.error(response.error ?? t('pages.examiner.errors.evidence'));
+      setEvidenceError(response.error ?? t('pages.examiner.errors.evidence'));
       return;
     }
     setEvidence(response.data);
@@ -61,17 +65,30 @@ export function ExaminerPage(): React.ReactElement {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setPrinciplesStatus('loading');
+      setPrinciplesError(null);
+      setError(null);
+
       const overviewResponse = await fetchExaminerOverview();
       if (cancelled) return;
-      if (!overviewResponse.success) {
-        setError(overviewResponse.error ?? t('pages.examiner.errors.unavailable'));
+      if (overviewResponse.success) setOverview(overviewResponse.data);
+      else setError(overviewResponse.error ?? t('pages.examiner.errors.unavailable'));
+
+      const principlesResponse = await fetchExaminerPrinciples();
+      if (cancelled) return;
+      if (!principlesResponse.success) {
+        // A failed request is NOT "no evaluable principle": keep the two
+        // states visually and semantically separate (Phase B1).
+        setPrinciples([]);
+        setPrinciplesStatus('error');
+        setPrinciplesError(principlesResponse.error ?? t('pages.examiner.errors.principles'));
+        setSelected('');
+        setEvidence(null);
         return;
       }
-      setOverview(overviewResponse.data);
-      const principlesResponse = await fetchExaminerPrinciples();
-      if (cancelled || !principlesResponse.success) return;
       const active = principlesResponse.data.principles.filter((p) => p.status === 'active');
       setPrinciples(active);
+      setPrinciplesStatus('ready');
       const initial = prefillPrinciple !== null && active.some((p) => p.id === prefillPrinciple)
         ? prefillPrinciple
         : active[0]?.id ?? '';
@@ -81,11 +98,15 @@ export function ExaminerPage(): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [t, prefillPrinciple, loadEvidence]);
+  }, [t, prefillPrinciple, loadEvidence, reloadToken]);
 
   const handleSelect = async (principleId: string): Promise<void> => {
     setSelected(principleId);
     await loadEvidence(principleId);
+  };
+
+  const handleRetryAll = (): void => {
+    setReloadToken((token) => token + 1);
   };
 
   const handleRefresh = async (): Promise<void> => {
@@ -97,7 +118,9 @@ export function ExaminerPage(): React.ReactElement {
     setBusy(null);
   };
 
-  if (!overview && !error) return <PageLoading label={t('pages.examiner.loading')} />;
+  if (principlesStatus === 'loading' && overview === null && error === null) {
+    return <PageLoading label={t('pages.examiner.loading')} />;
+  }
 
   return (
     <PageShell>
@@ -118,9 +141,63 @@ export function ExaminerPage(): React.ReactElement {
           </Button>
         )}
       </header>
+
+      <section className="mb-5 rounded-lg border bg-card p-4" data-testid="examiner-guide">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <FlaskConical className="size-4" />
+          {t('pages.examiner.guide.title')}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{t('pages.examiner.guide.what')}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t('pages.examiner.guide.target')}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t('pages.examiner.guide.difference')}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-testid="examiner-guide-flow">
+          <span className="font-medium text-ink-3">{t('pages.examiner.guide.flowLabel')}</span>
+          {([
+            'pages.examiner.guide.flowEvidence',
+            'pages.examiner.guide.flowSelect',
+            'pages.examiner.guide.flowCreate',
+            'pages.examiner.guide.flowReport',
+            'pages.examiner.guide.flowDecide',
+          ] as const).map((key, index) => (
+            <React.Fragment key={key}>
+              {index > 0 && <ArrowRight className="size-3" />}
+              <span className="rounded border bg-muted/40 px-1.5 py-0.5">{t(key)}</span>
+            </React.Fragment>
+          ))}
+        </div>
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+          <div>
+            <span className="font-medium">{t('pages.examiner.guide.canTitle')}</span>
+            <p className="text-muted-foreground">{t('pages.examiner.guide.canBody')}</p>
+          </div>
+          <div>
+            <span className="font-medium">{t('pages.examiner.guide.cannotTitle')}</span>
+            <p className="text-muted-foreground">{t('pages.examiner.guide.cannotBody')}</p>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          <span className="font-medium text-ink-3">{t('pages.examiner.guide.whenTitle')}</span>
+          <span className="ml-2">
+            {[
+              t('pages.examiner.guide.when1'),
+              t('pages.examiner.guide.when2'),
+              t('pages.examiner.guide.when3'),
+              t('pages.examiner.guide.when4'),
+            ].join(' · ')}
+          </span>
+        </p>
+      </section>
+
       {error && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive" data-testid="examiner-error">
-          {error}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive" data-testid="examiner-error">
+          <span className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            {error}
+          </span>
+          <Button variant="outline" size="sm" onClick={handleRetryAll} data-testid="examiner-overview-retry">
+            <RefreshCw className="size-4" />
+            {t('pages.examiner.errors.retry')}
+          </Button>
         </div>
       )}
       {overview && (
@@ -143,8 +220,34 @@ export function ExaminerPage(): React.ReactElement {
           <SectionTitle>{t('pages.examiner.evaluation.title')}</SectionTitle>
           <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
             <div className="grid content-start gap-2" data-testid="examiner-principle-list">
-              {principles.length === 0 && (
-                <p className="text-sm text-muted-foreground">{t('pages.examiner.evaluation.noActive')}</p>
+              {principlesStatus === 'error' && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive" data-testid="examiner-principles-error">
+                  <span className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                    <span>
+                      {t('pages.examiner.errors.principles')}
+                      {principlesError !== null && (
+                        <span className="mt-1 block font-mono text-[11px] opacity-80">{principlesError}</span>
+                      )}
+                    </span>
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={handleRetryAll}
+                    data-testid="examiner-principles-retry"
+                  >
+                    <RefreshCw className="size-3.5" />
+                    {t('pages.examiner.errors.retry')}
+                  </Button>
+                </div>
+              )}
+              {principlesStatus === 'ready' && principles.length === 0 && (
+                <div className="rounded-md border bg-card p-3 text-xs" data-testid="examiner-no-active-principles">
+                  <p className="font-medium">{t('pages.examiner.evaluation.noActive')}</p>
+                  <p className="mt-1 text-muted-foreground">{t('pages.examiner.evaluation.noActiveHint')}</p>
+                </div>
               )}
               {principles.map((p) => (
                 <button
@@ -163,7 +266,28 @@ export function ExaminerPage(): React.ReactElement {
               {evidenceLoading && (
                 <div className="flex items-center gap-2 rounded-lg border bg-card p-4 text-sm text-muted-foreground" data-testid="examiner-evidence-loading">
                   <Loader2 className="size-4 animate-spin" />
-                  {t('pages.examiner.evaluation.loadingEvidence')}
+                  {t('pages.examiner.evaluation.loadingEvidenceFor', { principleId: selected })}
+                </div>
+              )}
+              {!evidenceLoading && evidenceError !== null && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive" data-testid="examiner-evidence-error">
+                  <span className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>
+                      {t('pages.examiner.evaluation.evidenceError', { principleId: selected })}
+                      <span className="mt-1 block font-mono text-[11px] opacity-80">{evidenceError}</span>
+                    </span>
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => void loadEvidence(selected)}
+                    data-testid="examiner-evidence-retry"
+                  >
+                    <RefreshCw className="size-3.5" />
+                    {t('pages.examiner.evaluation.evidenceRetry')}
+                  </Button>
                 </div>
               )}
               {!evidenceLoading && evidence && (
@@ -180,7 +304,7 @@ export function ExaminerPage(): React.ReactElement {
                   </div>
                 </>
               )}
-              {!evidenceLoading && !evidence && principles.length > 0 && (
+              {!evidenceLoading && !evidence && evidenceError === null && principles.length > 0 && (
                 <p className="text-sm text-muted-foreground">{t('pages.examiner.evaluation.selectPrinciple')}</p>
               )}
             </div>
