@@ -81,4 +81,23 @@ describe('createSingleModelSelector — S5 output schema handoff', () => {
     expect(s.report().failure).toBe('SELECTION_OUTPUT_INVALID');
     expect(s.report().status).toBe('failed');
   });
+
+  it('separates an unregistered selector schema from an invalid model answer', async () => {
+    // A missing registry entry is a deployment/configuration fault, not a
+    // malformed model answer. Reporting it as SELECTION_OUTPUT_INVALID points
+    // operators at the wrong subsystem.
+    vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockRejectedValue(
+      new PDRuntimeError('output_invalid', 'Unknown outputSchemaRef: adaptive-selection-output', {
+        parseFailureReason: 'unknown_output_schema_ref',
+        outputSchemaRef: 'adaptive-selection-output',
+        nextAction: 'Register the schema in OUTPUT_SCHEMA_REGISTRY',
+      }),
+    );
+
+    const s = selector();
+    // RED (before the split): reported SELECTION_OUTPUT_INVALID.
+    await expect(s.select(boundedInput)).rejects.toThrow('SELECTION_SCHEMA_UNAVAILABLE');
+    expect(s.report().failure).toBe('SELECTION_SCHEMA_UNAVAILABLE');
+    expect(s.report().status).toBe('failed');
+  });
 });

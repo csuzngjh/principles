@@ -87,6 +87,8 @@ export type AdaptiveFailureCode =
   | 'SELECTION_REFERENCE_INVALID'
   | 'SELECTION_DIGEST_INVALID'
   | 'SELECTION_OUTPUT_INVALID'
+  /** The selector's schema ref is not in the adapter registry (configuration fault). */
+  | 'SELECTION_SCHEMA_UNAVAILABLE'
   | 'SELECTION_AMBIGUOUS'
   | 'SELECTION_EXPIRED'
   /** The host's outer hook window ended Adaptive; distinct from the model's own timeout. */
@@ -509,7 +511,14 @@ export function createSingleModelSelector(options: SingleModelSelectorOptions): 
         // the host contract code so the reason stays diagnosable instead of
         // degrading to TRANSPORT_FAILED in runAdaptiveSelection (rc-9).
         if (error instanceof PDRuntimeError && error.category === 'output_invalid') {
-          fail('SELECTION_OUTPUT_INVALID');
+          // An unregistered schema ref is a deployment fault, not a malformed
+          // answer. Keeping the codes distinct stops operators from debugging
+          // the model when the registry is the actual problem.
+          fail(
+            error.details?.parseFailureReason === 'unknown_output_schema_ref'
+              ? 'SELECTION_SCHEMA_UNAVAILABLE'
+              : 'SELECTION_OUTPUT_INVALID',
+          );
         }
         throw error;
       }
