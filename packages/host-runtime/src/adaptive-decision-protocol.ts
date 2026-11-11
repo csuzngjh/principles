@@ -19,23 +19,19 @@
 export const ADAPTIVE_DECISION_INSUFFICIENT_QUESTION = 'insufficient_context';
 
 /**
- * FROZEN evaluation criteria (PRI-1182 §1: thresholds are set from the
- * development samples, then frozen).
+ * PRESET evaluation criteria for this acceptance batch (v1-20261111).
  *
- * Basis — the only real Decisions samples recorded on this path
- * (results.json, OpenRouter `respan/span-01-lite:free`, 2026-11-05):
- *   dev-02  new_task .9594  goal_shift .9565  phase_shift .0708  insufficient .1962
- *   dev-03  new_task .0496  goal_shift .9958  phase_shift .2068  insufficient .1375
- *   dev-04  new_task .0624  goal_shift .0340  phase_shift .9888  insufficient .2668
+ * These numbers are a deliberate preset, NOT a value derived from the old
+ * GLM task-level samples: the old batch scored four task-level questions and
+ * is not the same question set. Those samples are used ONLY to replay the
+ * adjudicator against already-recorded numbers:
+ *   replay-02  .9594 .9565 .0708  insufficient .1962  → uncertain (lead below margin)
+ *   replay-03  .0496 .9958 .2068  insufficient .1375  → selected
+ *   replay-04  .0624 .0340 .9888  insufficient .2668  → selected
  *
- * Applicable conditions are >= .9565, non-applicable <= .2068, and
- * "insufficient" never exceeded .2668. `selectThreshold` sits between those
- * bands; `leadMargin` rejects the dev-02 shape (a near-tie between two
- * conditions, .9565 vs .9594); `insufficientThreshold` keeps >2x headroom above
- * every observed "sufficient" answer.
- *
- * Do NOT tune these per failing turn: changing them is a product decision that
- * requires a new version string and fresh dev samples.
+ * Do NOT tune these per failing turn, and do not tune them while a real
+ * batch is running: changing them is a product decision that requires a new
+ * version string and a new frozen batch.
  */
 export const ADAPTIVE_DECISION_CRITERIA = {
   version: 'v1-20261111',
@@ -158,11 +154,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Model identity is exact, plus one bounded alias class: a `:free` tag may be
- * absent, and a dated canonical slug (`<base>-YYYYMMDD`) is accepted — the two
- * aliases the lab verified against the provider catalog. Nothing else.
+ * Model identity is exact against an explicit allowlist when one is frozen
+ * (the acceptance batch does this). Otherwise one bounded alias class is
+ * accepted: a `:free` tag may be absent, and a dated canonical slug
+ * (`<base>-YYYYMMDD`) is accepted — the two aliases the lab verified.
+ *
+ * An unregistered DATE is never accepted through the allowlist path: the
+ * observed id must be one of the frozen strings, so a same-prefix slug with a
+ * different date is a mismatch.
  */
-export function isDecisionModelIdentity(configured: string, observed: string): boolean {
+export function isDecisionModelIdentity(
+  configured: string,
+  observed: string,
+  allowedResponseModels?: readonly string[],
+): boolean {
+  if (allowedResponseModels !== undefined && allowedResponseModels.length > 0) {
+    return allowedResponseModels.includes(observed);
+  }
   if (configured === observed) return true;
   const base = configured.endsWith(':free') ? configured.slice(0, -':free'.length) : configured;
   if (base === observed) return true;
@@ -184,11 +192,14 @@ export function validateDecisionResponse(
     readonly model: string;
     readonly questionIds: readonly string[];
     readonly provider?: string;
+    /** Frozen exact response-model allowlist. Present = exact membership only. */
+    readonly allowedResponseModels?: readonly string[];
   },
 ): DecisionValidationResult {
   if (!isRecord(value)) return {ok: false, reason: 'DECISION_OUTPUT_INVALID'};
   const {model} = value;
-  if (typeof model !== 'string' || !isDecisionModelIdentity(expected.model, model)) {
+  if (typeof model !== 'string'
+    || !isDecisionModelIdentity(expected.model, model, expected.allowedResponseModels)) {
     return {ok: false, reason: 'DECISION_MODEL_MISMATCH'};
   }
   if (expected.provider !== undefined) {

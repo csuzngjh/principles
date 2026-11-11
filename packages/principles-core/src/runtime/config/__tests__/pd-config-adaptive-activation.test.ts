@@ -43,6 +43,7 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
         model: 'respan/span-01-lite:free',
         apiKeyEnv: 'OPENROUTER_API_KEY',
         provider: 'Respan',
+        responseModels: ['respan/span-01-lite:free', 'respan/span-01-lite-20260925'],
       },
     }));
     expect(validated.ok).toBe(true);
@@ -52,7 +53,24 @@ describe('adaptiveActivation — dedicated Adaptive decision endpoint', () => {
       model: 'respan/span-01-lite:free',
       apiKeyEnv: 'OPENROUTER_API_KEY',
       provider: 'Respan',
+      responseModels: ['respan/span-01-lite:free', 'respan/span-01-lite-20260925'],
     });
+  });
+
+  it('rejects an empty or non-string responseModels allowlist', () => {
+    for (const responseModels of [[], ['ok', ''], 'model-id', [42]]) {
+      const validated = validatePdConfig(raw({
+        adaptiveActivation: {
+          endpoint: 'https://decisions.example.test/v1/score',
+          model: 'decision-model',
+          apiKeyEnv: 'DECISION_KEY',
+          responseModels,
+        },
+      }));
+      expect(validated.ok).toBe(false);
+      if (validated.ok) continue;
+      expect(validated.errors.some((error) => error.path === 'adaptiveActivation.responseModels')).toBe(true);
+    }
   });
 
   it('accepts a section without provider', () => {

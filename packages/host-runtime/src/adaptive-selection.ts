@@ -57,6 +57,12 @@ export type AdaptiveSelectionModel = {
   readonly apiKeyEnv: string;
   /** Optional provider allowlist label (for example Respan). */
   readonly provider?: string;
+  /**
+   * Frozen exact response-model allowlist for the acceptance batch. When set,
+   * a response whose `model` is not one of these strings is rejected — a
+   * same-prefix slug with an unregistered date does not pass.
+   */
+  readonly allowedResponseModels?: readonly string[];
 };
 
 export type AdaptiveCandidateSource = ActivatedPrinciple;
@@ -114,6 +120,10 @@ export interface AdaptiveSelectionDiagnostics {
   httpStatus: number | null;
   /** `decisions` once a valid answer table was read; `unknown` otherwise. */
   finishReason: string;
+  /** Exact response model observed (null until a body was parsed). */
+  modelObserved: string | null;
+  /** Response provider label observed; null both before parsing and when absent. */
+  providerObserved: string | null;
   usage: {inputTokens: number | null; outputTokens: number | null} | null;
   failures: AdaptiveFailureCode[];
 }
@@ -200,6 +210,8 @@ interface EmptyDiagnostics {
   cancelledAt: number | null;
   httpStatus: number | null;
   finishReason: string;
+  modelObserved: string | null;
+  providerObserved: string | null;
   usage: {inputTokens: number | null; outputTokens: number | null} | null;
   failures: AdaptiveFailureCode[];
 }
@@ -214,6 +226,8 @@ function emptyDiagnostics(admissionDeadlineAt: number): EmptyDiagnostics {
     cancelledAt: null,
     httpStatus: null,
     finishReason: 'unknown',
+    modelObserved: null,
+    providerObserved: null,
     usage: null,
     failures: [],
   };
@@ -423,11 +437,21 @@ export function createDecisionSelector(options: DecisionSelectorOptions): Decisi
         return fail('SELECTION_EXPIRED');
       }
       diagnostics.usage = projectUsage(isRecord(parsed) ? parsed.usage : undefined);
+      // Record what the endpoint actually claimed BEFORE validating it, so the
+      // acceptance report can state observed model/provider instead of
+      // inferring a route from the request.
+      if (isRecord(parsed)) {
+        diagnostics.modelObserved = typeof parsed.model === 'string' ? parsed.model : null;
+        diagnostics.providerObserved = typeof parsed.provider === 'string' ? parsed.provider : null;
+      }
       diagnostics.stage = 'validate';
       const validated = validateDecisionResponse(parsed, {
         model: options.model.model,
         questionIds: input.questionIds,
         ...(options.model.provider !== undefined ? {provider: options.model.provider} : {}),
+        ...(options.model.allowedResponseModels !== undefined
+          ? {allowedResponseModels: options.model.allowedResponseModels}
+          : {}),
       });
       if (!validated.ok) return fail(validated.reason);
       diagnostics.finishReason = 'decisions';

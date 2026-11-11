@@ -67,7 +67,7 @@ const PROMPT_BUDGET_KEYS: ReadonlySet<string> = new Set(['declaredContextWindowT
  * Closed-world key set for the Adaptive Activation decision endpoint
  * (PRI-1182). Ghost configuration fails loud, like every other section.
  */
-const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider']);
+const ADAPTIVE_ACTIVATION_KEYS: ReadonlySet<string> = new Set(['endpoint', 'model', 'apiKeyEnv', 'provider', 'responseModels']);
 
 /**
  * Closed-world key set for `runtimeProfiles.*` pi-ai profiles.
@@ -1066,13 +1066,29 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
       if (!providerValid) {
         errors.push(err('adaptiveActivation.provider', `provider must be a non-empty string when present, got ${safePreview(providerRaw)}`, 'Remove adaptiveActivation.provider or set it to the provider label (e.g. Respan)'));
       }
-      if (endpointValid && modelValid && apiKeyEnvValid && providerValid
+      // Exact response-model allowlist. Present = an answer whose `model` is not
+      // one of these exact strings is rejected, so a same-prefix slug with an
+      // unregistered date never passes.
+      const responseModelsRaw = readOwn(adaptiveRaw, 'responseModels');
+      let responseModelsValid = true;
+      if (responseModelsRaw !== undefined) {
+        responseModelsValid = Array.isArray(responseModelsRaw)
+          && responseModelsRaw.length > 0
+          && responseModelsRaw.every((item) => typeof item === 'string' && item.trim() !== '');
+        if (!responseModelsValid) {
+          errors.push(err('adaptiveActivation.responseModels', `responseModels must be a non-empty array of non-empty strings, got ${safePreview(responseModelsRaw)}`, 'Set adaptiveActivation.responseModels to the exact response model ids the endpoint may return'));
+        }
+      }
+      if (endpointValid && modelValid && apiKeyEnvValid && providerValid && responseModelsValid
         && errors.every((e) => !e.path.startsWith('adaptiveActivation'))) {
         adaptiveActivation = {
           endpoint: endpointRaw.trim(),
           model: modelRaw.trim(),
           apiKeyEnv: apiKeyEnvRaw.trim(),
           ...(typeof providerRaw === 'string' ? { provider: providerRaw.trim() } : {}),
+          ...(Array.isArray(responseModelsRaw)
+            ? { responseModels: responseModelsRaw.map((item) => (item as string).trim()) }
+            : {}),
         };
       }
     }

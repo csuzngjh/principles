@@ -1,9 +1,9 @@
 /**
  * PRI-1182 — Decisions scoring protocol and local adjudication.
  *
- * These are the offline development samples for the frozen criteria
- * (`ADAPTIVE_DECISION_CRITERIA`): the scores below are the recorded ones from
- * the 2026-11-05 dev-02/03/04 runs, reshaped into per-candidate conditions.
+ * The criteria are a PRESET for this acceptance batch. The recorded 2026-11-05
+ * numbers below are used only to replay the adjudicator; they did not derive
+ * the thresholds.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -100,6 +100,23 @@ describe('validateDecisionResponse', () => {
     expect(isDecisionModelIdentity('respan/span-01-lite:free', 'respan/span-01-lite-evil')).toBe(false);
   });
 
+  it('rejects a same-prefix model id whose date is not registered in the frozen allowlist', () => {
+    const allowedResponseModels = ['respan/span-01-lite:free', 'respan/span-01-lite-20260925'];
+    // The registered canonical slug passes.
+    expect(validateDecisionResponse({ ...valid, model: 'respan/span-01-lite-20260925' }, {
+      model: 'respan/span-01-lite:free', questionIds, allowedResponseModels,
+    }).ok).toBe(true);
+    // Same prefix, unregistered date: the alias rule must NOT rescue it.
+    expect(validateDecisionResponse({ ...valid, model: 'respan/span-01-lite-20260101' }, {
+      model: 'respan/span-01-lite:free', questionIds, allowedResponseModels,
+    })).toEqual({ ok: false, reason: 'DECISION_MODEL_MISMATCH' });
+    expect(isDecisionModelIdentity(
+      'respan/span-01-lite:free',
+      'respan/span-01-lite-20260101',
+      allowedResponseModels,
+    )).toBe(false);
+  });
+
   it('rejects a missing question id', () => {
     const { answers, ...rest } = valid;
     const { [candidateQuestionId('c2')]: _missing, ...partial } = answers;
@@ -156,7 +173,7 @@ describe('adjudicateDecision', () => {
   });
 
   it('selects the highest score when it clears the threshold and the lead margin', () => {
-    // dev-04 shape: one condition dominates.
+    // Replay of a recorded score table (2026-11-05): one condition dominates.
     expect(adjudicateDecision(scores(0.9888, 0.0624, 0.2668), candidates)).toMatchObject({
       status: 'selected', ref: 'c1', reason: 'selected',
     });
@@ -171,7 +188,7 @@ describe('adjudicateDecision', () => {
   });
 
   it('returns uncertain when the top two are within the lead margin', () => {
-    // dev-02 shape: .9565 vs .9594 is a near-tie.
+    // Replay of a recorded near-tie: .9565 vs .9594.
     expect(adjudicateDecision(scores(0.9565, 0.9594, 0.1962), candidates)).toMatchObject({
       status: 'uncertain', ref: null, reason: 'lead_below_margin',
     });

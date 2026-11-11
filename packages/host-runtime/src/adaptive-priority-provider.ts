@@ -102,6 +102,9 @@ export function resolveAdaptiveSelectionModel(
       model: section.model,
       apiKeyEnv: section.apiKeyEnv,
       ...(section.provider ? {provider: section.provider} : {}),
+      ...(section.responseModels && section.responseModels.length > 0
+        ? {allowedResponseModels: section.responseModels}
+        : {}),
     },
   };
 }
@@ -116,6 +119,10 @@ export interface AdaptiveSelectionDiagnosticLine {
   readonly cancelledAt: number | null;
   readonly httpStatus: number | null;
   readonly finishReason: string;
+  /** Observed response model; null when no body was parsed. */
+  readonly modelObserved: string | null;
+  /** Observed response provider; null when absent or no body was parsed. */
+  readonly providerObserved: string | null;
   readonly failures: readonly string[];
 }
 
@@ -200,6 +207,8 @@ export function createAdaptivePriorityProvider(
         cancelledAt: null,
         httpStatus: null,
         finishReason: 'skipped',
+        modelObserved: null,
+        providerObserved: null,
         failures: [],
       });
       return undefined;
@@ -235,6 +244,8 @@ export function createAdaptivePriorityProvider(
       cancelledAt: outcome.diagnostics.cancelledAt,
       httpStatus: outcome.diagnostics.httpStatus,
       finishReason: outcome.diagnostics.finishReason,
+      modelObserved: outcome.diagnostics.modelObserved,
+      providerObserved: outcome.diagnostics.providerObserved,
       failures: [...outcome.diagnostics.failures],
     });
     if (outcome.status !== 'selected' || !outcome.target) return undefined;

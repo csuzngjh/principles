@@ -372,6 +372,13 @@ export interface AdaptiveActivationConfig {
   apiKeyEnv: string;
   /** Optional provider allowlist label; when set, fallbacks are forbidden. */
   provider?: string;
+  /**
+   * Frozen EXACT response-model allowlist. When present, an answer whose
+   * `model` is not one of these strings is rejected — the alias rule (which
+   * accepts any `<base>-YYYYMMDD`) is bypassed, so an unregistered date is a
+   * mismatch.
+   */
+  responseModels?: string[];
 }
 
 export interface PdConfig {

@@ -63,6 +63,8 @@ interface FixtureOptions {
   readonly adaptive: boolean;
   /** Budget expressed in chars; converted to the operator-declared token window. */
   readonly budgetChars: number;
+  /** Frozen exact response-model allowlist written into the manifest. */
+  readonly responseModels?: readonly string[];
 }
 
 async function fixture(options: FixtureOptions): Promise<string> {
@@ -114,6 +116,7 @@ async function fixture(options: FixtureOptions): Promise<string> {
     model: DECISION_MODEL,
     apiKeyEnv: API_KEY_ENV,
     provider: DECISION_PROVIDER,
+    ...(options.responseModels ? {responseModels: [...options.responseModels]} : {}),
   };
   config.promptBudget = { hosts: { codex: Math.max(1024, Math.round(options.budgetChars * CHARS_PER_TOKEN)) } };
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
@@ -390,6 +393,59 @@ describe('PRI-1170/PRI-1182 Codex exec Adaptive wiring', () => {
     expect(transport.calls(), result.stderr.join('')).toBe(1);
     expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
     expect(result.stderr.join('')).toContain('DECISION_MODEL_MISMATCH');
+  });
+
+  it('rejects a same-prefix response model whose date is not in the frozen allowlist', async () => {
+    const root = await fixture({
+      label: 'unregistered-date',
+      adaptive: true,
+      budgetChars: await nativeMissesDelivery(),
+      responseModels: [DECISION_MODEL, 'respan/span-01-lite-20260925'],
+    });
+    const transport = rawDecisionTransport((request) => {
+      const answers: Record<string, { type: 'noul'; noul: number }> = {};
+      for (const id of request.questionIds) answers[id] = { type: 'noul', noul: 0.02 };
+      answers[candidateQuestion(refOf(request, TEXT.DELIVERY))] = { type: 'noul', noul: 0.99 };
+      // Same prefix as the request model, but this date was never registered.
+      return { model: 'respan/span-01-lite-20260101', provider: DECISION_PROVIDER, answers };
+    });
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+    expect(transport.calls(), result.stderr.join('')).toBe(1);
+    expect(additionalContext(result)).not.toContain(TEXT.DELIVERY);
+    expect(result.stderr.join('')).toContain('DECISION_MODEL_MISMATCH');
+    expect(result.stderr.join('')).toContain('modelObserved=respan/span-01-lite-20260101');
+  });
+
+  it('accepts the registered canonical slug and reports the observed model and provider', async () => {
+    const root = await fixture({
+      label: 'registered-date',
+      adaptive: true,
+      budgetChars: await nativeMissesDelivery(),
+      responseModels: [DECISION_MODEL, 'respan/span-01-lite-20260925'],
+    });
+    const transport = rawDecisionTransport((request) => {
+      const answers: Record<string, { type: 'noul'; noul: number }> = {};
+      for (const id of request.questionIds) answers[id] = { type: 'noul', noul: 0.02 };
+      answers[candidateQuestion(refOf(request, TEXT.DELIVERY))] = { type: 'noul', noul: 0.99 };
+      return { model: 'respan/span-01-lite-20260925', provider: DECISION_PROVIDER, answers };
+    });
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+    expect(additionalContext(result)).toContain(TEXT.DELIVERY);
+    expect(result.stderr.join('')).toContain('modelObserved=respan/span-01-lite-20260925');
+    expect(result.stderr.join('')).toContain('providerObserved=Respan');
+  });
+
+  it('an absent provider field is reported as absent, never as a provider claim', async () => {
+    const root = await fixture({ label: 'no-provider', adaptive: true, budgetChars: await nativeMissesDelivery() });
+    const transport = rawDecisionTransport((request) => {
+      const answers: Record<string, { type: 'noul'; noul: number }> = {};
+      for (const id of request.questionIds) answers[id] = { type: 'noul', noul: 0.02 };
+      answers[candidateQuestion(refOf(request, TEXT.DELIVERY))] = { type: 'noul', noul: 0.99 };
+      return { model: DECISION_MODEL, answers };
+    });
+    const result = await processHookInvocation(input(root), envFor(root), root, { fetchImpl: transport.fetchImpl });
+    expect(additionalContext(result)).toContain(TEXT.DELIVERY);
+    expect(result.stderr.join('')).toContain('providerObserved=absent');
   });
 
   it('first-byte admission expiry cancels the underlying request and keeps Native', async () => {
