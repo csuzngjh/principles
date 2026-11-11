@@ -21,6 +21,7 @@ import { cleanupTempDirs, makeHome } from '../helpers/workbench.js';
 import {
   runConversationIngestion,
   readGovernanceCheckpoint,
+  listGovernanceObservations,
   type GovernanceCheckpointRecord,
   type TranscriptPort,
 } from '@principles/host-runtime';
@@ -156,5 +157,41 @@ describe('pipeline × WorkBuddy source (production boundary)', () => {
     expect(first.lagBytes).toBeGreaterThan(0);
     const second = run(fixture, { maxBatchBytes: Buffer.byteLength(BODY_HEAD, 'utf8') - 10 });
     expect(second).toMatchObject({ status: 'ok', inserted: 2, lagBytes: 0 }); // orphan result + the big record
+  });
+
+  it('persists the real Owner utterance — never the host system-reminder context', () => {
+    // Real-payload regression (PR #2534 review, P0): a WorkBuddy user record
+    // is ~15KB of host `<system-reminder>` context with the Owner's words in a
+    // trailing `<user_query>`. The old projection stored that blob, and the
+    // store's 200-char head-only sanitizer discarded 24/24 sampled utterances.
+    const hostContext = [
+      '<system-reminder data-role="user-context">',
+      '<user_info>OS Version: win32',
+      `AGENTS.md constitution ${'z'.repeat(400)}`,
+      '</user_info></system-reminder>',
+      '<system-reminder data-role="additional-data"><current_time>2026-11-11</current_time></system-reminder>',
+    ].join('\n');
+    const ownerText = '请评审 PR 2534，确认 WorkBuddy 对话真正落库';
+    fixture.writeBody(record('cccccccc-0000-4000-8000-0000000000b1', 'message', {
+      // Keep observed_at inside the retention window: pruneRetention drops
+      // visible_text for rows older than GOVERNANCE_RETENTION_MAX_AGE_MS, and
+      // the shared NOW clock is otherwise far ahead of the default timestamp.
+      timestamp: NOW.getTime(),
+      role: 'user',
+      content: [{ type: 'input_text', text: `${hostContext}\n<user_query>${ownerText}</user_query>` }],
+    }));
+
+    const outcome = run(fixture);
+    expect(outcome).toMatchObject({ status: 'ok', inserted: 1 });
+
+    const listed = listGovernanceObservations({ workspaceDir: fixture.workspaceDir, rolloutIdentity: SESSION_ID });
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.observations).toHaveLength(1);
+    const stored = listed.observations[0];
+    expect(stored?.visibleText).toBe(ownerText);
+    expect(stored?.visibleText).not.toContain('system-reminder');
+    expect(stored?.visibleText).not.toContain('___TRUNCATED___');
+    expect(stored).toMatchObject({ rolloutIdentity: SESSION_ID, kind: 'user_turn', completeness: 'complete' });
   });
 });

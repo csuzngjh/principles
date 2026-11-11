@@ -3,9 +3,12 @@
  * ADR-0020 §11.1 shape, third host instance).
  *
  * ONE Workspace-scoped worker cycle with exactly two background
- * responsibilities — the Codex catch-up step is DELIBERATELY ABSENT because
- * the WorkBuddy MVP excludes transcript ingestion (SPEC §1 Excluded; the
- * hook itself is the only evidence producer):
+ * responsibilities — the Codex catch-up step is DELIBERATELY ABSENT as of
+ * PRI-1171 P2 ticket ④: the WorkBuddy transcript decoder exists but is NOT
+ * wired, so `conversationIngestionEnabled` stays false and the hook is still
+ * the only evidence producer. Ticket ⑤ adds the Stop hook / worker catch-up
+ * and ticket ⑥ adds the flag + consent record. Do not infer from the decoder's
+ * presence that transcript ingestion is live at runtime.
  *
  *   1. run the idempotent reconciliation pass (shared host-runtime authority)
  *   2. lease + run one Diagnostician execution, then ONE bounded downstream

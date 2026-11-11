@@ -290,3 +290,84 @@ describe('tolerance guardrails (rc-1..rc-9)', () => {
     expect(delta.warnings).toHaveLength(16);
   });
 });
+
+/**
+ * Real-payload regression (PR #2534 review, P0). The variant baseline freezes
+ * record STRUCTURE with short synthetic strings; these cases freeze the real
+ * PAYLOAD shape — a large host context wrapper around the Owner's utterance.
+ */
+describe('real user payload: host context never becomes Owner evidence', () => {
+  const HOST_CONTEXT = [
+    '<system-reminder data-role="user-context">',
+    '<user_info>',
+    'OS Version: win32',
+    'Workspace Folder: D:/Code/principles',
+    'P1 — Evidence Over Assumption. Never implement from remembered architecture.',
+    'x'.repeat(400),
+    '</user_info>',
+    '</system-reminder>',
+    '<system-reminder data-role="additional-data">',
+    '<current_time>Wednesday, November 11, 2026 at 14:25:44 GMT+8</current_time>',
+    '</system-reminder>',
+  ].join('\n');
+  const OWNER_UTTERANCE = '请对 PR 2534 做评审，确保 WorkBuddy 对话被正确采集并落库';
+
+  function decodeUserText(contentText: string) {
+    return decodeWorkbuddyTranscriptWindow({
+      bytes: line({
+        id: 'aaaaaaaa-0000-4000-8000-0000000000a1',
+        timestamp: 1780000100000,
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: contentText }],
+      }),
+      fileOffset: 0,
+      byteBoundReached: false,
+      sessionIdentity: SESSION,
+      startOrdinal: 0,
+      nowIso: NOW_ISO,
+    });
+  }
+
+  it('projects only the <user_query> text and drops every host context block', () => {
+    const delta = decodeUserText(`${HOST_CONTEXT}\n<user_query>${OWNER_UTTERANCE}</user_query>`);
+    expect(delta.observations).toHaveLength(1);
+    expect(delta.observations[0]).toMatchObject({ kind: 'user_turn', completeness: 'complete' });
+    expect(delta.observations[0]?.visibleText).toBe(OWNER_UTTERANCE);
+    expect(delta.observations[0]?.visibleText).not.toContain('system-reminder');
+    // The store keeps a 200-char head-only preview: the projected text must fit.
+    expect((delta.observations[0]?.visibleText ?? '').length).toBeLessThanOrEqual(200);
+    expect(delta.warnings).toEqual([]);
+  });
+
+  it('keeps an Owner-pasted <system-reminder> literal inside the query verbatim', () => {
+    const literal = '请解释 <system-reminder> 标签';
+    const delta = decodeUserText(`${HOST_CONTEXT}\n<user_query>${literal}</user_query>`);
+    expect(delta.observations[0]?.visibleText).toBe(literal);
+  });
+
+  it('strips context when a host variant omits <user_query> and keeps the remainder', () => {
+    const delta = decodeUserText(`${HOST_CONTEXT}\n请继续`);
+    expect(delta.observations[0]?.visibleText).toBe('请继续');
+    expect(delta.warnings).toEqual(['wb_user_context_stripped:1']);
+  });
+
+  it('stores no host context when a record is context-only', () => {
+    const delta = decodeUserText(HOST_CONTEXT);
+    expect(delta.observations[0]).toMatchObject({ kind: 'user_turn', completeness: 'partial' });
+    expect(delta.observations[0]?.visibleText).toBeUndefined();
+    expect(delta.warnings).toEqual(['wb_user_context_only:1']);
+  });
+
+  it('refuses an unclosed context marker instead of persisting a half-parsed prompt', () => {
+    const delta = decodeUserText(`<system-reminder data-role="user-context">\nNOT CLOSED ${'y'.repeat(300)}`);
+    expect(delta.observations[0]?.visibleText).toBeUndefined();
+    expect(delta.warnings).toEqual(['wb_user_context_unparsed:1']);
+  });
+
+  it('preserves plain legacy user text unchanged with no warnings', () => {
+    const delta = decodeUserText('plain owner turn without any wrapper');
+    expect(delta.observations[0]?.visibleText).toBe('plain owner turn without any wrapper');
+    expect(delta.warnings).toEqual([]);
+  });
+});

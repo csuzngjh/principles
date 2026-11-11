@@ -32,6 +32,12 @@
  *     seeds `startOrdinal` from the committed checkpoint so replays are
  *     stable; the durable replay identity is byte-based
  *     (`wb|<sessionId>|<byteOffset>`, tech design §5.3).
+ *   - Host context is NOT Owner conversation: a user record wraps the real
+ *     utterance in `<system-reminder>...</system-reminder>` blocks followed by
+ *     `<user_query>...</user_query>` (forensic samples, 2026-11-11). Only the
+ *     Owner utterance may become `visibleText`. Projecting the whole blob
+ *     would persist host prompts as Owner behavior evidence, and the store's
+ *     200-char head-only bound would truncate the actual utterance away.
  */
 import {
   CONVERSATION_INGESTION_MAX_BATCH_RECORDS,
@@ -52,6 +58,9 @@ export interface DecodedWorkbuddyDelta {
 const MAX_WARNING_TOKENS = 16;
 /** Max hops when resolving a reasoning parentId chain to its assistant record. */
 const MAX_PARENT_CHAIN_HOPS = 8;
+/** WorkBuddy user records: host context blocks + the Owner's utterance block. */
+const USER_QUERY_BLOCK = /<user_query>([\s\S]*?)<\/user_query>/g;
+const SYSTEM_REMINDER_BLOCK = /<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/g;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -102,6 +111,48 @@ function warnAggregated(context: DecodeContext, token: string): void {
 
 function warningList(context: DecodeContext): string[] {
   return [...context.warningCounts.entries()].map(([token, count]) => `${token}:${count}`);
+}
+
+/**
+ * Project ONLY the Owner utterance from a WorkBuddy user record.
+ *
+ * A real user record is ~15KB of `<system-reminder>` host context (AGENTS,
+ * identity files, tool declarations, connector state) with the Owner's words
+ * in a trailing `<user_query>` block. Projecting that whole blob would persist
+ * host prompts as Owner behavior evidence AND lose the utterance: the store's
+ * `sanitizeString` keeps a 200-char head-only preview, which in 24/24 sampled
+ * real records contained none of the Owner's words.
+ *
+ * `null` means "no Owner text to store": the observation still lands as
+ * `partial`, but host context never reaches the governance store. Every such
+ * degradation carries an aggregated warning (rc-9).
+ */
+function projectUserText(context: DecodeContext, text: string | null): string | null {
+  if (text === null) return null;
+
+  // Preferred contract: the host marks the Owner's own words explicitly. An
+  // Owner who literally pasted `<system-reminder>` inside their query keeps
+  // it verbatim — we never strip inside the query block.
+  const queries = [...text.matchAll(USER_QUERY_BLOCK)]
+    .map((match) => match[1]?.trim() ?? '')
+    .filter((part) => part.length > 0);
+  if (queries.length > 0) return queries.join('\n');
+
+  // Legacy/plain records carry no wrapper at all — preserve them unchanged.
+  if (!text.includes('<system-reminder')) return text;
+
+  const remainder = text.replace(SYSTEM_REMINDER_BLOCK, '').trim();
+  if (remainder.includes('<system-reminder')) {
+    // Unclosed or nested marker: never persist a half-parsed host prompt.
+    warnAggregated(context, 'wb_user_context_unparsed');
+    return null;
+  }
+  if (remainder.length === 0) {
+    warnAggregated(context, 'wb_user_context_only');
+    return null;
+  }
+  warnAggregated(context, 'wb_user_context_stripped');
+  return remainder;
 }
 
 function epochMsToIso(value: unknown, fallbackIso: string): string {
@@ -211,7 +262,10 @@ function projectRecord(context: DecodeContext, record: ProjectedRecord): void {
       warnAggregated(context, 'wb_skipped_message_role');
       return;
     }
-    const text = joinContentText(own(raw, 'content'));
+    const joined = joinContentText(own(raw, 'content'));
+    // Only user turns carry the host-context wrapper; assistant turns keep the
+    // existing verbatim projection (no wrapper observed in forensic samples).
+    const text = role === 'user' ? projectUserText(context, joined) : joined;
     context.observations.push({
       ...observationBase(context, record),
       kind: role === 'user' ? 'user_turn' : 'assistant_turn',

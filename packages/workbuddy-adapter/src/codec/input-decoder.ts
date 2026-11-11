@@ -22,8 +22,12 @@
  * - generation_id → context.turnId (present on all observed events, stable
  *   within one turn); call_id (= tool_use_id) → context.toolCallId; both
  *   OPTIONAL per the frozen contract — undefined stays undefined;
- * - transcript_path is validated for TYPE only and never opened (MVP privacy
- *   boundary: PD does not read the transcript);
+ * - transcript_path is validated for TYPE only and never opened HERE; reading
+ *   it is the `ingestion/` TranscriptSourceAdapter's job, reached ONLY through
+ *   the shared pipeline's flag + consent gates (PRI-1171 P2 ticket ④ supplies
+ *   the decoder, ticket ⑤ wires the hooks/worker, ticket ⑥ adds flag + consent).
+ *   This codec must not open the transcript itself — the privacy boundary is
+ *   the gated ingestion entry, not this type validation;
  * - permission_mode is type-validated and retained WITHOUT granting any extra
  *   authority — bypassPermissions never bypasses the governance gate;
  * - PostToolUseFailure (thrown tool errors) maps onto the SAME after_tool_call
