@@ -540,6 +540,33 @@ export function resolvePluginDataRoot(codexHome: string, marketplace: string): s
   return /^[A-Za-z0-9._-]+$/.test(marketplace) ? path.join(dataRoot, `principles-disciple-${marketplace}`) : undefined;
 }
 
+const MCP_BINDING_FILE = 'mcp-binding.json';
+const MCP_BINDING_SCHEMA_VERSION = 'pd.mcp-binding.v1';
+
+/**
+ * The Codex MCP launcher fails closed unless `<pluginRoot>/mcp-binding.json`
+ * binds THIS payload's runtime and pin (`binding_missing`). pd-setup.cjs — the
+ * only writer — puts that file inside the VERSIONED payload directory, so a
+ * payload refresh (`codex plugin add`, marketplace update) destroys it while
+ * PLUGIN_DATA's runtime survives. A runtime-cohort comparison alone can never
+ * detect that loss: the pin is unchanged, so the payload reports "matched" and
+ * the launcher stays dead until a human re-runs setup.
+ */
+function isMcpBindingHealthy(pluginRoot: string, runtimeDir: string, pin: CodexRuntimeCohort): boolean {
+  let binding: unknown;
+  try {
+    binding = JSON.parse(readFileSync(path.join(pluginRoot, MCP_BINDING_FILE), 'utf8'));
+  } catch {
+    return false;
+  }
+  if (!isRecord(binding)) return false;
+  if (binding.schemaVersion !== MCP_BINDING_SCHEMA_VERSION || binding.host !== 'codex') return false;
+  if (typeof binding.runtimeDir !== 'string' || path.resolve(binding.runtimeDir) !== path.resolve(runtimeDir)) return false;
+  const {versions} = binding;
+  if (!isRecord(versions)) return false;
+  return versions.mcpServer === pin.mcpServer && versions.core === pin.core;
+}
+
 // ─── CodexHostInstaller ─────────────────────────────────────────────────────
 export class CodexHostInstaller implements HostInstaller {
   readonly hostId = 'codex';
@@ -699,9 +726,15 @@ export class CodexHostInstaller implements HostInstaller {
     }
     const runtimeDir = path.join(pluginDataRoot, 'runtime');
     const installed = readInstalledRuntimeCohort(runtimeDir);
+    // The binding is written into the versioned payload directory, so a payload
+    // refresh deletes it even when PLUGIN_DATA's runtime still matches the pin.
+    // Treat a missing/stale binding as repair-needed: without it the Codex
+    // launcher exits `binding_missing` and pd-recall never appears in tools/list.
+    const bindingHealthy = isMcpBindingHealthy(current.versionDir, runtimeDir, pin);
     let runtimeReconciled = false;
+    let bindingRepaired = false;
 
-    if (installed !== undefined && cohortsEqual(installed, pin)) {
+    if (installed !== undefined && cohortsEqual(installed, pin) && bindingHealthy) {
       notes.push(`runtime matches the payload pin (${describeRuntimeCohort(pin)})`);
     } else {
       const setup = this.runRuntimeSetup(current.versionDir, pluginDataRoot, ctx.workspaceDir);
@@ -716,11 +749,26 @@ export class CodexHostInstaller implements HostInstaller {
           nextAction: 'Run: $pd-control setup — it installs the pinned runtime and verifies the exact bytes. If it also fails, check that npm is on PATH.',
         };
       }
-      runtimeReconciled = true;
-      notes.push(`runtime installed at the payload pin (${describeRuntimeCohort(pin)})`);
+      if (!isMcpBindingHealthy(current.versionDir, runtimeDir, pin)) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configAction: 'skipped',
+          manualActionRequired: true,
+          reason: `pd-setup completed but ${path.join(current.versionDir, MCP_BINDING_FILE)} is missing or does not bind this payload's runtime, so the Codex MCP launcher refuses to start (binding_missing).`,
+          nextAction: `Run: $pd-control setup --plugin-root "${current.versionDir}" — it rewrites the binding beside the payload. If it still does not appear, read the setup output for worker_registration_failed.`,
+        };
+      }
+      const runtimeWasMatched = installed !== undefined && cohortsEqual(installed, pin);
+      runtimeReconciled = !runtimeWasMatched;
+      bindingRepaired = !bindingHealthy;
+      notes.push(runtimeWasMatched
+        ? `runtime matches the payload pin (${describeRuntimeCohort(pin)})`
+        : `runtime installed at the payload pin (${describeRuntimeCohort(pin)})`);
+      if (bindingRepaired) notes.push(`mcp binding written beside the payload (${MCP_BINDING_FILE})`);
     }
 
-    const updated = payloadRefreshed || runtimeReconciled;
+    const updated = payloadRefreshed || runtimeReconciled || bindingRepaired;
     return {
       success: true,
       hostId: this.hostId,

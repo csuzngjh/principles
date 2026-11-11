@@ -124,10 +124,33 @@ const PD_SETUP_STANDIN = [
   "}",
   "fs.mkdirSync(dataRoot, { recursive: true });",
   "fs.writeFileSync(path.join(dataRoot, 'argv-received.json'), JSON.stringify(process.argv.slice(2)));",
+  // pd-setup.cjs also writes the launcher binding beside the payload; the
+  // installer now verifies it, so a stand-in that skips it would fail the run.
+  "const runtimeDir = path.join(dataRoot, 'runtime');",
+  "fs.writeFileSync(path.join(pluginRoot, 'mcp-binding.json'), JSON.stringify({",
+  "  schemaVersion: 'pd.mcp-binding.v1',",
+  "  host: 'codex',",
+  "  workspaceDir: val('--workspace'),",
+  "  runtimeDir,",
+  "  serverEntry: path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'),",
+  "  versions: { mcpServer: pin.mcpServer, core: pin.core },",
+  "}));",
 ].join('\n');
 
 function pluginDataRoot(): string {
   return path.join(codexHome, 'plugins', 'data', `principles-disciple-${CACHE_MARKETPLACE}`);
+}
+
+/** The binding shape pd-setup.cjs writes beside the payload (Gate 4). */
+function writeBinding(pluginRoot: string, runtimeDir: string, cohort: CodexRuntimeCohort): void {
+  writeJson(path.join(pluginRoot, 'mcp-binding.json'), {
+    schemaVersion: 'pd.mcp-binding.v1',
+    host: 'codex',
+    workspaceDir: ctx.workspaceDir,
+    runtimeDir,
+    serverEntry: path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'),
+    versions: { mcpServer: cohort.mcpServer, core: cohort.core },
+  });
 }
 
 function seedSourcePayload(version: string, cohort: CodexRuntimeCohort): string {
@@ -162,7 +185,13 @@ function fakeHost(overrides: {
     }
     const version = path.basename(path.dirname(path.dirname(args[0] ?? '')));
     const pin = JSON.parse(fs.readFileSync(path.join(cacheRoot(version), 'runtime-version.json'), 'utf8')) as CodexRuntimeCohort;
-    writeRuntime(path.join(dataDir, 'runtime'), pin);
+    const rootIndex = args.indexOf('--plugin-root');
+    const pluginRoot = rootIndex === -1 ? cacheRoot(version) : (args[rootIndex + 1] ?? cacheRoot(version));
+    const runtimeDir = path.join(dataDir, 'runtime');
+    writeRuntime(runtimeDir, pin);
+    // pd-setup.cjs writes the launcher binding beside the payload; without it
+    // the Codex launcher exits `binding_missing` and pd-recall is unavailable.
+    writeBinding(pluginRoot, runtimeDir, pin);
     return { ok: true };
   };
   return { runCommand, calls };
@@ -341,6 +370,93 @@ describe('Codex marketplace update chain', () => {
       fs.rmSync(spacedHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 120_000);
+
+  it('repairs the MCP binding when a payload refresh deleted it but the runtime pin is unchanged', async () => {
+    // Exactly the 2026-11-11 state: the cache moved to a new payload version
+    // with the SAME cohort (runtime already at the pin), so "runtime trails the
+    // pin" is false and the binding was never rewritten. The Codex launcher
+    // then exits `binding_missing` and pd-recall never reaches tools/list.
+    writePin(cacheRoot('0.3.22'), NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    expect(fs.existsSync(path.join(cacheRoot('0.3.22'), 'mcp-binding.json'))).toBe(false);
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install(ctx);
+
+    // BEFORE: configAction 'preserved' + "runtime matches the payload pin",
+    // no setup call, no binding file.
+    expect(result.success, result.reason).toBe(true);
+    expect(result.configAction).toBe('updated');
+    expect(host.calls.some((call) => call[0] !== 'codex')).toBe(true);
+    expect(result.reason).toContain('runtime matches the payload pin');
+    expect(result.reason).toContain('mcp binding written beside the payload');
+    const binding = JSON.parse(fs.readFileSync(path.join(cacheRoot('0.3.22'), 'mcp-binding.json'), 'utf8')) as {
+      host: string; runtimeDir: string; versions: { mcpServer: string; core: string };
+    };
+    expect(binding.host).toBe('codex');
+    expect(binding.runtimeDir).toBe(runtimeDir);
+    expect(binding.versions).toEqual({ mcpServer: NEW_COHORT.mcpServer, core: NEW_COHORT.core });
+  });
+
+  it('does not run pd-setup for a payload whose binding already binds its runtime', async () => {
+    writePin(cacheRoot('0.3.22'), NEW_COHORT, '0.3.22');
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    writeBinding(cacheRoot('0.3.22'), runtimeDir, NEW_COHORT);
+
+    const host = fakeHost();
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: host.runCommand });
+    const result = await installer.install(ctx);
+
+    expect(result.success, result.reason).toBe(true);
+    expect(result.configAction).toBe('preserved');
+    expect(result.reason).toContain('runtime matches the payload pin');
+    // Neither a host refresh nor pd-setup is warranted.
+    expect(host.calls).toEqual([]);
+  });
+
+  it('runs the REAL pd-setup and writes the binding the launcher requires', async () => {
+    const payload = cacheRoot('0.3.22');
+    writePin(payload, NEW_COHORT, '0.3.22');
+    const repoPlugin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'plugins', 'principles-disciple');
+    fs.mkdirSync(path.join(payload, 'scripts'), { recursive: true });
+    for (const file of ['pd-setup.cjs', 'pd-locate.cjs']) {
+      fs.copyFileSync(path.join(repoPlugin, 'scripts', file), path.join(payload, 'scripts', file));
+    }
+    const runtimeDir = path.join(pluginDataRoot(), 'runtime');
+    writeRuntime(runtimeDir, NEW_COHORT);
+    // A marker that agrees with the bytes keeps pd-setup off the network: it
+    // only has to write the binding.
+    writeJson(path.join(runtimeDir, '.pd-runtime.json'), { ...NEW_COHORT, installedAt: '2026-11-11T00:00:00.000Z' });
+    fs.mkdirSync(path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'), '', 'utf8');
+
+    const realSetup = (file: string, args: readonly string[]): CodexCommandResult => {
+      const result = spawnSync(file, [...args], {
+        encoding: 'utf8',
+        timeout: 120_000,
+        windowsHide: true,
+        // Isolate the setup's home so worker registration cannot touch the
+        // developer's real install manifest.
+        env: { ...process.env, USERPROFILE: home, HOME: home, PLUGIN_ROOT: '', PLUGIN_DATA: '', CODEX_HOME: codexHome },
+      });
+      return result.status === 0
+        ? { ok: true }
+        : { ok: false, detail: String(result.stderr || result.error?.message || 'setup failed').slice(-400) };
+    };
+    const installer = new CodexHostInstaller({ codexHome, canonicalRuntimeDir, runCommand: realSetup });
+    const result = await installer.install({ ...ctx, workspaceDir: path.join(home, 'ws') });
+
+    expect(result.success, result.reason).toBe(true);
+    const binding = JSON.parse(fs.readFileSync(path.join(payload, 'mcp-binding.json'), 'utf8')) as {
+      schemaVersion: string; host: string; runtimeDir: string;
+    };
+    expect(binding.schemaVersion).toBe('pd.mcp-binding.v1');
+    expect(binding.host).toBe('codex');
+    expect(binding.runtimeDir).toBe(runtimeDir);
+  });
 });
 
 describe('installed-host detection (upgrade coverage)', () => {
