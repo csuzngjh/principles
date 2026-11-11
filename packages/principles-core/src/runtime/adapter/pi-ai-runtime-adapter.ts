@@ -98,6 +98,14 @@ const REPAIR_TIMEOUT_MS_CEILING = 60_000;
  */
 const MIN_REPAIR_BUDGET_MS = 1_000;
 
+/**
+ * S2: cap on the wait pi-ai may take between its own transport retries.
+ * pi-ai defaults to 60s per wait; 30s keeps the worst-case wait no worse than
+ * PD's previous capped backoff. A provider that asks for longer fails fast
+ * with its original message instead of parking the run.
+ */
+const PI_AI_MAX_RETRY_DELAY_MS = 30_000;
+
 /** PRI-966 G2 P1-03: bounded usage summary from an AssistantMessage. Fields
  * stay null when the provider did not surface a count — never guessed. An
  * all-zero usage object is pi-ai's "provider surfaced nothing" placeholder
@@ -184,8 +192,6 @@ export interface PiAiRuntimeAdapterConfig {
    * append-only configuration surface.
    */
   systemPrompt?: string;
-  /** Internal override for the retry delay backoff, primarily for fast unit testing. */
-  _testBackoffDelayMs?: number;
   /**
    * Optional outbound HTTP fetch override applied at EVERY completeSimple
    * boundary (PRI-966 G2 P1-01): callers that must enforce a request budget at
@@ -1569,8 +1575,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   /**
-   * Call pi-ai complete() with retry and exponential backoff.
-   * Disables pi-ai built-in retry (maxRetries: 0) to avoid double-retry.
+   * Call pi-ai complete().
+   *
+   * S2: transport retries belong to pi-ai. It already knows which failures are
+   * retryable (408/409/429/5xx, `x-should-retry`, `retry-after`) and how long
+   * to wait, and its wait is abortable. PD therefore passes `maxRetries` /
+   * `maxRetryDelayMs` instead of running its own loop, so one logical failure
+   * can no longer cost both layers' retries.
+   *
+   * The only PD-side retry left is the PRI-1011 output-budget downshift: that
+   * is a parameter fix pi-ai cannot infer, and each step strictly shrinks the
+   * budget, so the ladder terminates by construction.
    */
   private async completeWithRetry(
     model: ReturnType<typeof resolveModel>,
@@ -1584,14 +1599,15 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       runId?: string;
     },
   ): Promise<AssistantMessage> {
-    const maxRetries = this.config.maxRetries ?? 2;
     const {
       effectiveTimeoutMs = this.config.timeoutMs ?? 300_000,
       timeoutSource = 'default',
       input,
       runId = crypto.randomUUID(),
     } = options;
-    let lastError: unknown = undefined;
+    // S2: the retry budget handed to pi-ai. It is recorded on every failure so
+    // the final reason is auditable ("who retried, how many times").
+    const transportMaxRetries = this.config.maxRetries ?? 2;
     const overallStartTime = Date.now();
     // PRI-1011: the output budget actually sent for THIS invocation. It starts at
     // the per-run effective value (min of the per-request StartRunInput.maxTokens,
@@ -1601,13 +1617,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     let maxTokensBudget = input !== undefined
       ? this.resolveEffectiveMaxTokens(input, model)
       : this.resolveMaxTokens();
-    const getDelay = (attemptIndex: number) => {
-      return this.config._testBackoffDelayMs !== undefined
-        ? this.config._testBackoffDelayMs
-        : Math.min(1000 * Math.pow(2, attemptIndex), 30_000);
-    };
+    // Number of requests PD itself sent for this logical call. Transport
+    // retries inside pi-ai are invisible here by design (they are pi-ai's).
+    let attemptsSent = 0;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    while (true) {
+      attemptsSent += 1;
+      const attempt = attemptsSent - 1;
       const elapsedMs = Date.now() - overallStartTime;
       const remainingMs = effectiveTimeoutMs - elapsedMs;
 
@@ -1619,7 +1635,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           timeoutSource,
           elapsedMs,
           retryAttempt: attempt,
-          maxRetries,
+          transportMaxRetries,
+          retryOwnership: 'pi-ai',
           providerEvidence: options.signal?.aborted
             ? 'Client budget signal aborted'
             : `Overall timeout budget exhausted (elapsed ${elapsedMs}ms of ${effectiveTimeoutMs}ms)`,
@@ -1639,7 +1656,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           signal: options.signal,
           apiKey: options.apiKey,
           timeoutMs: currentTimeoutMs,
-          maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
+          // S2: pi-ai owns transport retry/backoff (it knows retryable status
+          // codes, honors retry-after, and its sleep is abortable). Keeping this
+          // at 0 would silently disable every transient retry.
+          maxRetries: transportMaxRetries,
+          // Locked at 30s so the worst-case single wait never grows past what
+          // PD's own capped backoff allowed; a provider asking for longer fails
+          // immediately and PD records the original message.
+          maxRetryDelayMs: PI_AI_MAX_RETRY_DELAY_MS,
           maxTokens: maxTokensBudget, // PRI-621: undefined = pi-ai native model ceiling; PRI-1011: shrinks on rejection
           fetch: this.config.fetch ?? getPiAiFetchForApi(model.api),
         };
@@ -1648,7 +1672,9 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         }
         const response = await completeSimple(model, context, completeOptions);
 
-        // If provider resolved with an error response, classify and potentially retry.
+        // If provider resolved with an error response, classify and decide.
+        // S2: no transport retry happens here — pi-ai already retried every
+        // failure it considers retryable before handing this back.
         if (response.stopReason === 'error' || response.stopReason === 'aborted') {
           const rawMessage = response.errorMessage ?? 'unknown provider error';
           const elapsedMsAfter = Date.now() - overallStartTime;
@@ -1665,97 +1691,72 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               : 'not_applicable';
 
           if (isTimeout) {
-            const errorDetails = {
-              timeoutClassification: classification,
-              effectiveTimeoutMs,
-              timeoutSource,
-              elapsedMs: elapsedMsAfter,
-              retryAttempt: attempt,
-              maxRetries,
-              providerEvidence: safeStringifyPreview(rawMessage, 300),
-            };
-
-            const pdErr = new PDRuntimeError(
+            throw new PDRuntimeError(
               'timeout',
               `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=provider_request)`,
-              errorDetails,
+              {
+                timeoutClassification: classification,
+                effectiveTimeoutMs,
+                timeoutSource,
+                elapsedMs: elapsedMsAfter,
+                retryAttempt: attempt,
+                transportMaxRetries,
+                retryOwnership: 'pi-ai',
+                providerEvidence: safeStringifyPreview(rawMessage, 300),
+              },
             );
-            lastError = pdErr;
-
-            if (classification === 'provider_transient_timeout' && attempt < maxRetries) {
-              if (input) {
-                this.emitAttemptTelemetry({
-                  input,
-                  runId,
-                  attempt,
-                  maxRetries,
-                  err: pdErr,
-                  elapsedMs: elapsedMsAfter,
-                  timeoutSource,
-                  effectiveTimeoutMs,
-                });
-              }
-              const delay = getDelay(attempt);
-              await new Promise(r => setTimeout(r, delay));
-              continue;
-            }
-
-            throw pdErr;
           }
 
-          // execution_failed — retryable if attempts remain
-          // ADR-0019: detect rate-limit signatures first and classify as rate_limit
-          // (distinct from execution_failed) so downstream retryOrFail can degrade.
+          // ADR-0019: rate-limit signatures stay a distinct category so
+          // downstream degradation can recognise them.
           const isRateLimit = /rate.?limit|429|quota|too many requests/i.test(rawMessage);
           // PRI-1011: a rejected output budget is a parameter problem, not a
           // transport one — resending the identical rejected value can only fail
           // the same way, so the next attempt goes out with a smaller budget.
           const isBudgetRejection = !isRateLimit && MAX_TOKENS_REJECTED_PATTERN.test(rawMessage);
+
+          if (isBudgetRejection) {
+            const next = this.downshiftMaxTokensBudget({
+              model,
+              currentMaxTokens: maxTokensBudget,
+              providerEvidence: rawMessage,
+              input,
+              runId,
+              attempt,
+            });
+            if (next !== undefined) {
+              if (input) {
+                this.emitAttemptTelemetry({
+                  input,
+                  runId,
+                  attempt,
+                  maxRetries: transportMaxRetries,
+                  err: new PDRuntimeError('output_invalid', 'output budget rejected by provider', {
+                    providerEvidence: safeStringifyPreview(rawMessage, 300),
+                  }),
+                  elapsedMs: elapsedMsAfter,
+                  timeoutSource,
+                  effectiveTimeoutMs,
+                });
+              }
+              maxTokensBudget = next;
+              continue;
+            }
+          }
+
           const errorCategory = isRateLimit ? 'rate_limit' : 'execution_failed';
-          const pdErr = new PDRuntimeError(
+          throw new PDRuntimeError(
             errorCategory,
             `${isRateLimit ? 'LLM rate limit hit' : 'LLM execution failed'}: ${rawMessage.substring(0, 300)}`,
             {
               retryAttempt: attempt,
-              maxRetries,
+              transportMaxRetries,
+              retryOwnership: 'pi-ai',
               elapsedMs: elapsedMsAfter,
               providerEvidence: safeStringifyPreview(rawMessage, 300),
+              finalFailureReason: 'pi_ai_retries_exhausted',
             },
           );
-          lastError = pdErr;
-
-          if (attempt < maxRetries) {
-            if (input) {
-              this.emitAttemptTelemetry({
-                input,
-                runId,
-                attempt,
-                maxRetries,
-                err: pdErr,
-                elapsedMs: elapsedMsAfter,
-                timeoutSource,
-                effectiveTimeoutMs,
-              });
-            }
-            // PRI-1011: downshift BEFORE the next request goes out, so a rejected
-            // budget is never resent unchanged.
-            if (isBudgetRejection) {
-              const next = this.downshiftMaxTokensBudget({
-                model,
-                currentMaxTokens: maxTokensBudget,
-                providerEvidence: rawMessage,
-                input,
-                runId,
-                attempt,
-              });
-              if (next !== undefined) maxTokensBudget = next;
-            }
-            // ADR-0019: rate-limit uses 2× backoff since limits need more time to clear
-            const delay = isRateLimit ? getDelay(attempt) * 2 : getDelay(attempt);
-            await new Promise(r => setTimeout(r, delay));
-            continue;
-          }
-          throw pdErr;
         }
 
         return response;
@@ -1770,118 +1771,90 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           };
         }
 
-        // If it's a client budget exhaustion, throw immediately (no retry)
+        // The run's own deadline is authoritative: stop immediately.
         if (classificationResult.classification === 'client_timeout_budget_exhausted') {
-          const errorDetails = {
+          throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`, {
             timeoutClassification: 'client_timeout_budget_exhausted',
             effectiveTimeoutMs,
             timeoutSource,
             elapsedMs: elapsedMsAfter,
             retryAttempt: attempt,
-            maxRetries,
+            transportMaxRetries,
+            retryOwnership: 'pi-ai',
             providerEvidence: safeStringifyPreview(err, 300),
-          };
-          throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`, errorDetails);
+          });
         }
 
         if (classificationResult.category === 'timeout') {
-          const errorDetails = {
+          // S2: a transient provider timeout is no longer retried here — pi-ai
+          // already spent its retry budget before surfacing it.
+          throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`, {
             timeoutClassification: 'provider_transient_timeout',
             effectiveTimeoutMs,
             timeoutSource,
             elapsedMs: elapsedMsAfter,
             retryAttempt: attempt,
-            maxRetries,
+            transportMaxRetries,
+            retryOwnership: 'pi-ai',
             providerEvidence: safeStringifyPreview(err, 300),
-          };
-          const pdErr = new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`, errorDetails);
-          lastError = pdErr;
+            finalFailureReason: 'pi_ai_retries_exhausted',
+          });
+        }
 
-          if (attempt < maxRetries) {
+        if (err instanceof PDRuntimeError) {
+          throw err; // already classified by a lower layer
+        }
+
+        const errMsg = err instanceof Error ? err.message : String(err);
+        // ADR-0019: keep rate-limit signatures a distinct category.
+        const isRateLimitCatch = /rate.?limit|429|quota|too many requests/i.test(errMsg);
+        // PRI-1011: SDKs may throw the budget rejection instead of resolving it.
+        const isBudgetRejectionCatch = !isRateLimitCatch && MAX_TOKENS_REJECTED_PATTERN.test(errMsg);
+
+        if (isBudgetRejectionCatch) {
+          const next = this.downshiftMaxTokensBudget({
+            model,
+            currentMaxTokens: maxTokensBudget,
+            providerEvidence: errMsg,
+            input,
+            runId,
+            attempt,
+          });
+          if (next !== undefined) {
             if (input) {
               this.emitAttemptTelemetry({
                 input,
                 runId,
                 attempt,
-                maxRetries,
-                err: pdErr,
+                maxRetries: transportMaxRetries,
+                err: new PDRuntimeError('output_invalid', 'output budget rejected by provider', {
+                  providerEvidence: safeStringifyPreview(errMsg, 300),
+                }),
                 elapsedMs: elapsedMsAfter,
                 timeoutSource,
                 effectiveTimeoutMs,
               });
             }
-            const delay = getDelay(attempt);
-            await new Promise(r => setTimeout(r, delay));
+            maxTokensBudget = next;
             continue;
           }
-          throw pdErr;
         }
 
-        if (err instanceof PDRuntimeError) {
-          throw err; // don't retry standard PDRuntimeError if it is permanent or already handled
-        }
-
-        // It is an execution_failed (network, etc.)
-        // ADR-0019: detect rate-limit signatures in thrown errors too (SDK may throw 429)
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const isRateLimitCatch = /rate.?limit|429|quota|too many requests/i.test(errMsg);
-        // PRI-1011: SDKs may throw the budget rejection instead of resolving it.
-        const isBudgetRejectionCatch = !isRateLimitCatch && MAX_TOKENS_REJECTED_PATTERN.test(errMsg);
         const catchCategory = isRateLimitCatch ? 'rate_limit' : 'execution_failed';
-        const errorDetails = {
-          retryAttempt: attempt,
-          maxRetries,
-          elapsedMs: elapsedMsAfter,
-          providerEvidence: safeStringifyPreview(err, 300),
-        };
-        const pdErr = new PDRuntimeError(
+        throw new PDRuntimeError(
           catchCategory,
           `${isRateLimitCatch ? 'LLM rate limit hit' : 'LLM completion failed'}: ${errMsg.substring(0, 300)}`,
-          errorDetails,
+          {
+            retryAttempt: attempt,
+            transportMaxRetries,
+            retryOwnership: 'pi-ai',
+            elapsedMs: elapsedMsAfter,
+            providerEvidence: safeStringifyPreview(err, 300),
+            finalFailureReason: 'pi_ai_retries_exhausted',
+          },
         );
-        lastError = pdErr;
-
-        if (attempt < maxRetries) {
-          if (input) {
-            this.emitAttemptTelemetry({
-              input,
-              runId,
-              attempt,
-              maxRetries,
-              err: pdErr,
-              elapsedMs: elapsedMsAfter,
-              timeoutSource,
-              effectiveTimeoutMs,
-            });
-          }
-          // PRI-1011: downshift BEFORE the next request goes out, so a rejected
-          // budget is never resent unchanged.
-          if (isBudgetRejectionCatch) {
-            const next = this.downshiftMaxTokensBudget({
-              model,
-              currentMaxTokens: maxTokensBudget,
-              providerEvidence: errMsg,
-              input,
-              runId,
-              attempt,
-            });
-            if (next !== undefined) maxTokensBudget = next;
-          }
-          // ADR-0019: rate-limit uses 2× backoff
-          const delay = isRateLimitCatch ? getDelay(attempt) * 2 : getDelay(attempt);
-          await new Promise(r => setTimeout(r, delay));
-        }
       }
     }
-
-    // If lastError is already a PDRuntimeError, re-throw it; otherwise wrap it
-    if (lastError instanceof PDRuntimeError) {
-      throw lastError;
-    }
-    throw new PDRuntimeError(
-      'execution_failed',
-      `LLM completion failed after ${maxRetries + 1} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
-    );
   }
 
   /**
